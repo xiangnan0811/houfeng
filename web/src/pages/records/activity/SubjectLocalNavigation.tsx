@@ -26,7 +26,7 @@ export function SubjectLocalNavigation({
   search = '',
 }: Props) {
   const { state } = useLocation()
-  const navigationState = subject.kind === 'vps' ? state : undefined
+  const navigationState = subject.kind === 'target' ? undefined : state
   const query = search && search !== '?' ? search : ''
   return (
     <nav className="subject-local-nav" aria-label="主体局部导航">

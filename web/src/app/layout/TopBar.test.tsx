@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, type InitialEntry } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ThemeProvider } from '../../lib/theme-context'
@@ -200,6 +200,46 @@ describe('TopBar VPS breadcrumb', () => {
       expect(screen.getByRole('link', { name: '返回 VPS 列表' })).toHaveAttribute('href', '/vps')
     },
   )
+  it('carries location state through the VPS return link on click', () => {
+    const navState = {
+      vpsInventoryHref: '/vps?workspace=workbench&view=unlinked&q=Tokyo&selected=vps_001',
+      monitoringListHref: '/monitoring?view=all',
+    }
+
+    function LocationProbe() {
+      const loc = useLocation()
+      return (
+        <div data-testid="vps-probe" data-state={JSON.stringify(loc.state)}>
+          {loc.pathname}{loc.search}
+        </div>
+      )
+    }
+
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/vps/vps_001',
+          state: navState,
+        }]}
+      >
+        <ThemeProvider>
+          <Routes>
+            <Route path="/vps/:vpsId" element={<TopBar sync={sync} user={user} />} />
+            <Route path="/vps" element={<LocationProbe />} />
+          </Routes>
+        </ThemeProvider>
+      </MemoryRouter>,
+    )
+
+    const returnLink = screen.getByRole('link', { name: '返回 VPS 列表' })
+    expect(returnLink).toHaveAttribute('href', '/vps?workspace=workbench&view=unlinked&q=Tokyo&selected=vps_001')
+    fireEvent.click(returnLink)
+
+    expect(screen.getByTestId('vps-probe')).toHaveTextContent(
+      '/vps?workspace=workbench&view=unlinked&q=Tokyo&selected=vps_001',
+    )
+    expect(JSON.parse(screen.getByTestId('vps-probe').getAttribute('data-state')!)).toEqual(navState)
+  })
 })
 
 describe('TopBar monitoring breadcrumb', () => {
@@ -241,5 +281,87 @@ describe('TopBar monitoring breadcrumb', () => {
       expect(screen.getByRole('link', { name: '返回监控实例列表' })).toHaveAttribute('href', '/monitoring')
     },
   )
+  it('carries location state through the monitoring return link on click', () => {
+    const navState = {
+      monitoringListHref: '/monitoring?view=abnormal&selected=mi_001&q=Tokyo&sort=name_asc',
+      vpsInventoryHref: '/vps?workspace=workbench&selected=vps_001',
+      return_vps: 'vps_001',
+    }
+
+    function LocationProbe() {
+      const loc = useLocation()
+      return (
+        <div data-testid="probe" data-state={JSON.stringify(loc.state)}>
+          {loc.pathname}{loc.search}
+        </div>
+      )
+    }
+
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/monitoring/mi_001',
+          state: navState,
+        }]}
+      >
+        <ThemeProvider>
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId" element={<TopBar sync={sync} user={user} />} />
+            <Route path="/monitoring" element={<LocationProbe />} />
+          </Routes>
+        </ThemeProvider>
+      </MemoryRouter>,
+    )
+
+    const returnLink = screen.getByRole('link', { name: '返回监控实例列表' })
+    expect(returnLink).toHaveAttribute('href', '/monitoring?view=abnormal&selected=mi_001&q=Tokyo&sort=name_asc')
+    fireEvent.click(returnLink)
+
+    expect(screen.getByTestId('probe')).toHaveTextContent(
+      '/monitoring?view=abnormal&selected=mi_001&q=Tokyo&sort=name_asc',
+    )
+    expect(JSON.parse(screen.getByTestId('probe').getAttribute('data-state')!)).toEqual(navState)
+  })
+
+  it('preserves return link and location state from monitoring compare', () => {
+    const navState = {
+      monitoringListHref: '/monitoring?view=abnormal&selected=mi_001&selected=mi_002',
+      vpsInventoryHref: '/vps?workspace=ledger',
+    }
+
+    function LocationProbe() {
+      const loc = useLocation()
+      return (
+        <div data-testid="probe" data-state={JSON.stringify(loc.state)}>
+          {loc.pathname}{loc.search}
+        </div>
+      )
+    }
+
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/monitoring/compare',
+          search: '?id=mi_001&id=mi_002',
+          state: navState,
+        }]}
+      >
+        <ThemeProvider>
+          <Routes>
+            <Route path="/monitoring/compare" element={<TopBar sync={sync} user={user} />} />
+            <Route path="/monitoring" element={<LocationProbe />} />
+          </Routes>
+        </ThemeProvider>
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('监控实例对比')).toBeInTheDocument()
+    const returnLink = screen.getByRole('link', { name: '返回监控实例列表' })
+    expect(returnLink).toHaveAttribute('href', '/monitoring?view=abnormal&selected=mi_001&selected=mi_002')
+    fireEvent.click(returnLink)
+
+    expect(screen.getByTestId('probe')).toHaveTextContent('/monitoring?view=abnormal&selected=mi_001&selected=mi_002')
+    expect(JSON.parse(screen.getByTestId('probe').getAttribute('data-state')!)).toEqual(navState)
+  })
 
 })

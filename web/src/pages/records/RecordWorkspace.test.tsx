@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { RecordWorkspace } from './RecordWorkspace'
-import { recordDetailFixture, recordRevisionFixture } from './testFixtures'
+import { emptyRecordDraftPayload, recordDetailFixture, recordRevisionFixture } from './testFixtures'
 
 const api = vi.hoisted(() => ({
   getRecord: vi.fn(),
@@ -42,6 +42,33 @@ vi.mock('../../lib/auth-context', () => ({
 
 vi.mock('../../lib/recordsApi', () => api)
 vi.mock('../../lib/recordCollaborationApi', () => collab)
+
+function draftFixture() {
+  return {
+    draft_id: 'dft_001',
+    payload: emptyRecordDraftPayload('usr_1'),
+    version: 1,
+    etag: 'etag-1',
+    warning_at: '2026-08-18T00:00:00Z',
+    created_at: '2026-08-18T00:00:00Z',
+    updated_at: '2026-08-18T00:00:00Z',
+    expires_at: '2026-08-19T00:00:00Z',
+  }
+}
+
+function WorkspaceByRecordId({ mode }: { mode: 'read' | 'edit' }) {
+  const { recordId } = useParams()
+  return <RecordWorkspace mode={mode} {...(recordId ? { recordId } : {})} />
+}
+
+function LocationProbe({ testId }: { testId: string }) {
+  const loc = useLocation()
+  return (
+    <pre data-testid={testId} data-state={JSON.stringify(loc.state)}>
+      {loc.pathname}{loc.search}
+    </pre>
+  )
+}
 
 describe('RecordWorkspace', () => {
   beforeEach(() => {
@@ -172,5 +199,215 @@ describe('RecordWorkspace', () => {
     expect(await screen.findByText(/vpsInventoryHref/)).toHaveTextContent(
       '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
     )
+  })
+
+  it('restores validated return_vps onto monitoring subject return and keeps list state', () => {
+    function Probe() {
+      const loc = useLocation()
+      return (
+        <pre data-testid="subject-probe" data-state={JSON.stringify(loc.state)}>
+          {loc.pathname}{loc.search}
+        </pre>
+      )
+    }
+    const navState = {
+      monitoringListHref: '/monitoring?view=abnormal&selected=mi_001',
+      return_vps: 'vps_tokyo_origin',
+    }
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/records/new',
+          search: '?subject=monitoring_instance%3Ami_001%3Aaffected%3Aprimary&return_to=%2Fmonitoring%2Fmi_001%2Frecords',
+          state: navState,
+        }]}
+      >
+        <Routes>
+          <Route path="/records/new" element={<RecordWorkspace mode="new" />} />
+          <Route path="/monitoring/:monitoringInstanceId/records" element={<Probe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    const back = screen.getByRole('link', { name: '返回主体' })
+    expect(back).toHaveAttribute('href', '/monitoring/mi_001/records?return_vps=vps_tokyo_origin')
+    fireEvent.click(back)
+    expect(screen.getByTestId('subject-probe')).toHaveTextContent('/monitoring/mi_001/records?return_vps=vps_tokyo_origin')
+    expect(JSON.parse(screen.getByTestId('subject-probe').getAttribute('data-state')!)).toEqual(navState)
+  })
+
+  it('refuses invalid return_vps provenance from history state', () => {
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/records/new',
+          search: '?subject=monitoring_instance%3Ami_001%3Aaffected%3Aprimary&return_to=%2Fmonitoring%2Fmi_001%2Frecords',
+          state: {
+            monitoringListHref: '/monitoring?selected=mi_001',
+            return_vps: 'javascript:alert(1)',
+          },
+        }]}
+      >
+        <Routes>
+          <Route path="/records/new" element={<RecordWorkspace mode="new" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    const back = screen.getByRole('link', { name: '返回主体' })
+    expect(back).toHaveAttribute('href', '/monitoring/mi_001/records')
+    expect(back.getAttribute('href')).not.toContain('return_vps=')
+    expect(back.getAttribute('href')).not.toContain('javascript')
+  })
+
+  it('preserves canonical subject return across publish and related read/edit hops', async () => {
+    api.createRecordDraft.mockResolvedValue(draftFixture())
+    api.createRecord.mockResolvedValue({ record_id: 'rec_001' })
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    const navState = {
+      monitoringListHref: '/monitoring?view=abnormal&selected=mi_001',
+      return_vps: 'vps_tokyo_origin',
+    }
+    const subjectReturnQuery = 'return_to=%2Fmonitoring%2Fmi_001%2Frecords'
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/records/new',
+          search: `?subject=monitoring_instance%3Ami_001%3Aaffected%3Aprimary&${subjectReturnQuery}&foo=1`,
+          state: navState,
+        }]}
+      >
+        <Routes>
+          <Route path="/records/new" element={<RecordWorkspace mode="new" />} />
+          <Route path="/records/:recordId" element={<><LocationProbe testId="record-probe" /><WorkspaceByRecordId mode="read" /></>} />
+          <Route path="/records/:recordId/edit" element={<><LocationProbe testId="record-probe" /><WorkspaceByRecordId mode="edit" /></>} />
+          <Route path="/monitoring/:monitoringInstanceId/records" element={<LocationProbe testId="subject-probe" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '发布修订' }))
+    await waitFor(() => expect(api.createRecord).toHaveBeenCalledWith({
+      draft_id: 'dft_001',
+      draft_etag: 'etag-1',
+    }, expect.any(String)))
+
+    const published = await screen.findByTestId('record-probe')
+    expect(published).toHaveTextContent(`/records/rec_001?${subjectReturnQuery}`)
+    expect(published).not.toHaveTextContent('subject=')
+    expect(published).not.toHaveTextContent('foo=')
+    expect(JSON.parse(published.getAttribute('data-state')!)).toEqual(navState)
+    expect(await screen.findByRole('link', { name: '返回主体' })).toHaveAttribute(
+      'href',
+      '/monitoring/mi_001/records?return_vps=vps_tokyo_origin',
+    )
+    expect(screen.getByRole('link', { name: '编辑' })).toHaveAttribute(
+      'href',
+      `/records/rec_001/edit?${subjectReturnQuery}`,
+    )
+
+    fireEvent.click(screen.getByRole('link', { name: '编辑' }))
+    expect(await screen.findByLabelText('标题')).toHaveValue('Database outage')
+    expect(screen.getByTestId('record-probe')).toHaveTextContent(`/records/rec_001/edit?${subjectReturnQuery}`)
+    expect(screen.getByRole('link', { name: '返回主体' })).toHaveAttribute(
+      'href',
+      '/monitoring/mi_001/records?return_vps=vps_tokyo_origin',
+    )
+    expect(screen.getByRole('link', { name: '阅读' })).toHaveAttribute(
+      'href',
+      `/records/rec_001?${subjectReturnQuery}`,
+    )
+
+    fireEvent.click(screen.getByRole('link', { name: '阅读' }))
+    expect(await screen.findByRole('link', { name: '编辑' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: '返回主体' }))
+    expect(screen.getByTestId('subject-probe')).toHaveTextContent('/monitoring/mi_001/records?return_vps=vps_tokyo_origin')
+    expect(JSON.parse(screen.getByTestId('subject-probe').getAttribute('data-state')!)).toEqual(navState)
+  })
+
+  it.each([
+    'https://evil.example/phish',
+    '/records/new',
+    '/monitoring/mi_001/records?leak=1',
+  ])('does not forward invalid return_to %s across publish', async (raw) => {
+    api.createRecordDraft.mockResolvedValue(draftFixture())
+    api.createRecord.mockResolvedValue({ record_id: 'rec_001' })
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/records/new',
+          search: `?subject=monitoring_instance%3Ami_001%3Aaffected%3Aprimary&return_to=${encodeURIComponent(raw)}&foo=1`,
+          state: {
+            monitoringListHref: '/monitoring?view=abnormal&selected=mi_001',
+            return_vps: 'vps_tokyo_origin',
+          },
+        }]}
+      >
+        <Routes>
+          <Route path="/records/new" element={<RecordWorkspace mode="new" />} />
+          <Route path="/records/:recordId" element={<><LocationProbe testId="record-probe" /><WorkspaceByRecordId mode="read" /></>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(screen.queryByRole('link', { name: '返回主体' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '发布修订' }))
+    await waitFor(() => expect(api.createRecord).toHaveBeenCalled())
+
+    const published = await screen.findByTestId('record-probe')
+    expect(published).toHaveTextContent('/records/rec_001')
+    expect(published).not.toHaveTextContent('return_to=')
+    expect(published).not.toHaveTextContent('foo=')
+    expect(published).not.toHaveTextContent('subject=')
+    expect(published.textContent).not.toContain(raw)
+    expect(await screen.findByRole('heading', { name: 'Database outage' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '返回主体' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '编辑' })).toHaveAttribute('href', '/records/rec_001/edit')
+  })
+
+  it('keeps canonical subject return after restoring a historical revision', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture({
+      current_revision_id: 'rrv_002',
+      current: recordRevisionFixture({ revision_id: 'rrv_002', title: 'current' }),
+    }))
+    api.getRecordRevision.mockResolvedValue(recordRevisionFixture())
+    api.restoreRecordRevision.mockResolvedValue(recordDetailFixture())
+    const navState = {
+      monitoringListHref: '/monitoring?view=abnormal&selected=mi_001',
+      return_vps: 'vps_tokyo_origin',
+    }
+    const subjectReturnQuery = 'return_to=%2Fmonitoring%2Fmi_001%2Frecords'
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/records/rec_001/revisions/rrv_001',
+          search: `?${subjectReturnQuery}`,
+          state: navState,
+        }]}
+      >
+        <Routes>
+          <Route path="/records/:recordId/revisions/:revisionId" element={<RecordWorkspace mode="revision" recordId="rec_001" revisionId="rrv_001" />} />
+          <Route path="/records/:recordId" element={<><LocationProbe testId="record-probe" /><WorkspaceByRecordId mode="read" /></>} />
+          <Route path="/monitoring/:monitoringInstanceId/records" element={<LocationProbe testId="subject-probe" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('link', { name: '阅读' })).toHaveAttribute(
+      'href',
+      `/records/rec_001?${subjectReturnQuery}`,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '恢复为新修订' }))
+    await waitFor(() => expect(api.restoreRecordRevision).toHaveBeenCalled())
+
+    const published = await screen.findByTestId('record-probe')
+    expect(published).toHaveTextContent(`/records/rec_001?${subjectReturnQuery}`)
+    expect(JSON.parse(published.getAttribute('data-state')!)).toEqual(navState)
+    expect(await screen.findByRole('link', { name: '返回主体' })).toHaveAttribute(
+      'href',
+      '/monitoring/mi_001/records?return_vps=vps_tokyo_origin',
+    )
+    fireEvent.click(screen.getByRole('link', { name: '返回主体' }))
+    expect(screen.getByTestId('subject-probe')).toHaveTextContent('/monitoring/mi_001/records?return_vps=vps_tokyo_origin')
+    expect(JSON.parse(screen.getByTestId('subject-probe').getAttribute('data-state')!)).toEqual(navState)
   })
 })

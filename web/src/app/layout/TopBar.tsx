@@ -46,6 +46,7 @@ export function TopBar({ sync, user }: TopBarProps) {
           <Link
             className="tp-vps-crumb__link"
             to={resolveVpsInventoryHref(location.state)}
+            state={location.state}
             aria-label="返回 VPS 列表"
           >
             VPS 资产
@@ -58,6 +59,7 @@ export function TopBar({ sync, user }: TopBarProps) {
           <Link
             className="tp-vps-crumb__link"
             to={resolveMonitoringListHref(location.state)}
+            state={location.state}
             aria-label="返回监控实例列表"
           >
             监控

@@ -225,9 +225,8 @@ for (const contract of ROUTE_ACTIONS) {
     if (contract.owner === 'monitoring') {
       await expect(page.getByRole('heading', { name: 'Tokyo Monitor' })).toBeVisible()
       expect(api.requestCount('GET', '/api/monitoring-instances/mi_001')).toBeGreaterThan(0)
-      expect(api.requestCount('GET', '/api/monitoring-instances/mi_001/runtime-facts?window=realtime')).toBeGreaterThan(0)
-      await expect(page.getByText('已连接')).toBeVisible()
-      await api.assertRuntimeStreamConnected('mi_001')
+      expect(api.requestCount('GET', '/api/monitoring-instances/mi_001/runtime-facts?window=24h')).toBeGreaterThan(0)
+      await expect(page.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true')
     }
     if (contract.owner === 'events') {
       await expect(page.getByRole('heading', { name: '事件流' })).toBeVisible()

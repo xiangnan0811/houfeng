@@ -45,7 +45,7 @@ export function SubjectIdentityBar({
         </p>
         {returnHref ? (
           <p className="page-sub">
-            <Link className="text-link" to={returnHref} state={subject.kind === 'vps' ? state : undefined}>{returnLabel}</Link>
+            <Link className="text-link" to={returnHref} state={subject.kind === 'target' ? undefined : state}>{returnLabel}</Link>
           </p>
         ) : null}
       </div>

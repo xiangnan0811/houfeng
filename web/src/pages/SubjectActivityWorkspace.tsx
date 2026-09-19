@@ -19,6 +19,7 @@ import {
   type SubjectActivityFilters as ActivityFilters,
 } from './records/activity/activityQueryState'
 import { useSubjectActivity } from './records/activity/useSubjectActivity'
+import { validateReturnVPSId, withReturnVPSNavigationState, withReturnVPSQuery } from './monitoring-detail/monitoringDetailHelpers'
 
 type Props = {
   view: SubjectActivityView
@@ -105,15 +106,21 @@ export function SubjectActivityWorkspace({ view }: Props) {
     )
   }
 
-  const navigationState = route.kind === 'vps' ? location.state : undefined
+  const navigationState = route.kind === 'target' ? undefined : location.state
+  const returnVPSId = validateReturnVPSId(searchParams.get('return_vps'))
+  const activitySearch = (next: ActivityFilters) => {
+    const params = subjectActivityParamsFromState(next)
+    if (returnVPSId) params.set('return_vps', returnVPSId)
+    return params
+  }
   const writeFilters = (next: ActivityFilters) => {
     // Filter changes clear the cursor so a watermark from another query is never reused.
-    setSearchParams(subjectActivityParamsFromState(next), { replace: true, state: navigationState })
+    setSearchParams(activitySearch(next), { replace: true, state: navigationState })
   }
 
   const overviewHref = route.kind === 'vps' ? route.basePath : undefined
   const newRecordHref = subjectNewRecordHref(route)
-  const filterSearch = subjectActivityParamsFromState(filters).toString()
+  const filterSearch = activitySearch(filters).toString()
   const navSearch = filterSearch ? `?${filterSearch}` : ''
   const copy = workspaceCopy(view, Object.keys(filters).length > 0)
 
@@ -122,14 +129,20 @@ export function SubjectActivityWorkspace({ view }: Props) {
       {state.subject ? (
         <SubjectIdentityBar
           subject={state.subject}
-          returnHref={route.basePath}
+          returnHref={withReturnVPSQuery(route.basePath, returnVPSId)}
           returnLabel="返回详情"
           actions={(
             <>
               {view === 'evidence' ? (
                 <Link className="btn sm secondary" to="/records/compare" state={navigationState}>横向比较</Link>
               ) : null}
-              <Link className="btn sm primary" to={newRecordHref} state={navigationState}>新建记录</Link>
+              <Link
+                className="btn sm primary"
+                to={newRecordHref}
+                state={route.kind === 'target' ? undefined : withReturnVPSNavigationState(location.state, returnVPSId)}
+              >
+                新建记录
+              </Link>
               {state.freshness?.new_items_available ? (
                 <Button
                   type="button"
@@ -201,7 +214,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
                 type="button"
                 size="sm"
                 onClick={() => {
-                  setSearchParams(subjectActivityParamsFromState(filters), { replace: true, state: navigationState })
+                  setSearchParams(activitySearch(filters), { replace: true, state: navigationState })
                   commands.refresh()
                 }}
               >

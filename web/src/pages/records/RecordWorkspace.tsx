@@ -44,7 +44,8 @@ import { RecordSaveImpact } from './editor/RecordSaveImpact'
 import { RevisionDiff } from './editor/RevisionDiff'
 import { useRecordDraft, type RecordWorkspaceMode } from './hooks/useRecordDraft'
 import { comparisonEntryHref, comparisonSubjectsFromSources } from './compare/comparisonQueryState'
-import { parseSubjectActivityRoute } from './activity/activityQueryState'
+import { parseSubjectActivityRoute, type SubjectRouteRef } from './activity/activityQueryState'
+import { returnVPSIdFromNavigationState, withReturnVPSQuery } from '../monitoring-detail/monitoringDetailHelpers'
 import { labelOptions, RECORD_SUBJECT_KIND_LABELS, RECORD_TYPE_LABELS } from './recordLabels'
 import {
   applyRecordTypeChange,
@@ -63,6 +64,13 @@ type RecordWorkspaceProps = {
   mode: RecordWorkspaceMode
   recordId?: string
   revisionId?: string
+}
+
+function withSubjectReturnQuery(path: string, subjectReturn: SubjectRouteRef | null): string {
+  if (!subjectReturn) return path
+  const params = new URLSearchParams()
+  params.set('return_to', `${subjectReturn.basePath}/${subjectReturn.view}`)
+  return `${path}?${params.toString()}`
 }
 
 export function RecordWorkspace(props: RecordWorkspaceProps) {
@@ -185,15 +193,21 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
 
   useEffect(() => {
     if (mode === 'new' && state.publishedRecordId) {
-      navigate(`/records/${state.publishedRecordId}`, { replace: true, state: location.state })
+      navigate(withSubjectReturnQuery(`/records/${state.publishedRecordId}`, subjectReturn), {
+        replace: true,
+        state: location.state,
+      })
     }
-  }, [location.state, mode, navigate, state.publishedRecordId])
+  }, [location.state, mode, navigate, state.publishedRecordId, subjectReturn])
 
   useEffect(() => {
     if (mode === 'revision' && state.restoredToRecordId) {
-      navigate(`/records/${state.restoredToRecordId}`, { replace: true, state: location.state })
+      navigate(withSubjectReturnQuery(`/records/${state.restoredToRecordId}`, subjectReturn), {
+        replace: true,
+        state: location.state,
+      })
     }
-  }, [location.state, mode, navigate, state.restoredToRecordId])
+  }, [location.state, mode, navigate, state.restoredToRecordId, subjectReturn])
 
   if (state.status === 'loading') return <PageState kind="loading" title="正在读取运维记录" />
   if (state.status === 'empty') return <PageState kind="empty" title="记录不存在" description="没有可打开的记录。" />
@@ -225,8 +239,11 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
             <p className="page-sub">
               <Link
                 className="text-link"
-                to={`${subjectReturn.basePath}/${subjectReturn.view}`}
-                state={subjectReturn.kind === 'vps' ? location.state : undefined}
+                to={withReturnVPSQuery(
+                  `${subjectReturn.basePath}/${subjectReturn.view}`,
+                  returnVPSIdFromNavigationState(location.state),
+                )}
+                state={subjectReturn.kind === 'target' ? undefined : location.state}
               >
                 返回主体
               </Link>
@@ -234,9 +251,9 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
           ) : null}
         </div>
         <div className="page__actions">
-          {recordId ? <Link className="btn sm secondary" to={`/records/${recordId}`} state={location.state}>阅读</Link> : null}
+          {recordId ? <Link className="btn sm secondary" to={withSubjectReturnQuery(`/records/${recordId}`, subjectReturn)} state={location.state}>阅读</Link> : null}
           {recordId && mode === 'read' && state.record?.capabilities.update ? (
-            <Link className="btn sm secondary" to={`/records/${recordId}/edit`} state={location.state}>编辑</Link>
+            <Link className="btn sm secondary" to={withSubjectReturnQuery(`/records/${recordId}/edit`, subjectReturn)} state={location.state}>编辑</Link>
           ) : null}
           {editable ? (
             <>

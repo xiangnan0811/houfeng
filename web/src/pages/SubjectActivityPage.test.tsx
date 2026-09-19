@@ -104,6 +104,31 @@ describe('SubjectActivityPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '有新活动，刷新' })).toBeInTheDocument())
   })
 
+  it('carries validated return_vps on nested return and local nav without copying other query', async () => {
+    vi.spyOn(recordsApi, 'listSubjectActivity').mockResolvedValue(mockPage({
+      subject: {
+        kind: 'monitoring_instance',
+        source_id: 'mi_001',
+        identity: { display_name: 'Tokyo Edge' },
+        live_route: '/monitoring/mi_001',
+        status: 'live',
+      },
+    }))
+
+    renderPage('/monitoring/mi_001/activity?return_vps=vps_tokyo_origin&window=7d')
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: '返回详情' })).toHaveAttribute(
+      'href',
+      '/monitoring/mi_001?return_vps=vps_tokyo_origin',
+    )
+    expect(screen.getByRole('link', { name: '记录' })).toHaveAttribute(
+      'href',
+      '/monitoring/mi_001/records?return_vps=vps_tokyo_origin',
+    )
+    expect(screen.getByRole('link', { name: '记录' }).getAttribute('href')).not.toContain('window=')
+  })
+
   it('renders tombstoned identity', async () => {
     vi.spyOn(recordsApi, 'listSubjectActivity').mockResolvedValue(mockPage({
       subject: {
