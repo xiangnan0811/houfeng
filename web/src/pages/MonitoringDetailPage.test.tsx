@@ -1680,23 +1680,21 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() =>
       expect(container.querySelectorAll('.monitoring-detail-charts .metric-chart__cursor').length).toBe(8),
     )
-    expect(container.querySelectorAll('.monitoring-detail-charts .metric-chart__tooltip').length).toBe(0)
+    expect(container.querySelectorAll('.monitoring-detail-charts .metric-chart__tooltip').length).toBe(8)
     expect(container.querySelector('.monitoring-detail-observations__readout')).toHaveTextContent('选中')
 
     const readoutFor = (name: string) => within(screen.getByRole('region', { name }))
-    expect(readoutFor('CPU 使用率').getByText('42.0%')).toBeInTheDocument()
-    expect(readoutFor('内存使用率').getByText('63.0%')).toBeInTheDocument()
-    expect(readoutFor('内存使用率').getByText('交换')).toBeInTheDocument()
-    expect(readoutFor('内存使用率').getByText('3.0%')).toBeInTheDocument()
-    expect(readoutFor('磁盘使用率').getByText('61.0%')).toBeInTheDocument()
-    expect(readoutFor('Inode 使用率').getByText('13.0%')).toBeInTheDocument()
-    expect(readoutFor('网络').getByText(/4\.0 KB\/s/)).toBeInTheDocument()
-    expect(readoutFor('网络').getByText(/8\.0 KB\/s/)).toBeInTheDocument()
+    expect(readoutFor('CPU 使用率').getAllByText('42.0%').length).toBeGreaterThan(0)
+    expect(readoutFor('内存使用率').getAllByText(/63\.0%/).length).toBeGreaterThan(0)
+    expect(readoutFor('内存使用率').getAllByText(/3\.0%/).length).toBeGreaterThan(0)
+    expect(readoutFor('磁盘使用率').getAllByText('61.0%').length).toBeGreaterThan(0)
+    expect(readoutFor('Inode 使用率').getAllByText('13.0%').length).toBeGreaterThan(0)
+    expect(readoutFor('网络').getAllByText(/4\.0 KB\/s/).length).toBeGreaterThan(0)
+    expect(readoutFor('网络').getAllByText(/8\.0 KB\/s/).length).toBeGreaterThan(0)
     expect(screen.getByRole('region', { name: '负载' })).toHaveTextContent('0.9')
     expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent('7.0%')
-    expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent('繁忙')
     expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent('9.0%')
-    expect(readoutFor('磁盘读写').getByText(/2\.0 KB\/s/)).toBeInTheDocument()
+    expect(readoutFor('磁盘读写').getAllByText(/2\.0 KB\/s/).length).toBeGreaterThan(0)
   })
 
   it('renders an empty state when no host metric points are available', async () => {

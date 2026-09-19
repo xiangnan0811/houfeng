@@ -14,7 +14,7 @@ import type { HostSample, MonitoringRuntimeWindow } from '../../lib/types'
 import { formatSampledUptime } from '../monitoring/monitoringHelpers'
 import {
   formatCapacityBytes,
-  formatNetworkAxis,
+  formatCompactRateAxis,
   seriesMax,
   seriesValueAt,
   thresholdLevelsText,
@@ -37,8 +37,9 @@ const NARROW_CONTAINER_PX = 640 // 40rem
 const WIDE_CONTAINER_PX = 1100
 const NARROW_VIEWPORT_QUERY = '(max-width: 760px)'
 const CHART_HEIGHT = observationChartHeight()
-/** Same left gutter on every tile so plot origins line up in the 4×2. */
-const PLOT_GUTTER = 64
+/** Same left gutter on every tile so plot origins line up. Keep it tight:
+ *  axis ticks use compact labels (100%, 2.0, 3.2M), not "3.2 MB/s". */
+const PLOT_GUTTER = 34
 
 type ObservationsProps = {
   /** Page-level window control, rendered in this section's head so it never owns an empty row. */
@@ -85,13 +86,11 @@ function Plot({
         <h3 className="monitoring-detail-chart__title" title={hint} aria-label={`${title}。${hint}`}>
           {title}
         </h3>
+        {legend ? <span className="monitoring-detail-chart__legend">{legend}</span> : null}
         <span className="monitoring-detail-chart__current">{current}</span>
-        <span className="monitoring-detail-chart__legend">
-          {legend ? <span className="monitoring-detail-chart__legend-series">{legend}</span> : null}
-          {notes ? <span className="monitoring-detail-chart__notes" title={notesTitle}>{notes}</span> : null}
-        </span>
       </header>
       {children}
+      <dl className="monitoring-detail-chart__notes" title={notesTitle}>{notes}</dl>
     </section>
   )
 }
@@ -239,7 +238,6 @@ export function MonitoringDetailObservations({
   const shared = {
     hoveredAt,
     onHoverAtChange: setHoveredAt,
-    showTooltip: false as const,
     allowSinglePoint: true,
   }
 
@@ -277,9 +275,7 @@ export function MonitoringDetailObservations({
   const swapReadout = seriesValueAt(swapSeries, hoveredAt)
   const diskReadout = seriesValueAt(diskSeries, hoveredAt)
   const inodeReadout = seriesValueAt(inodeSeries, hoveredAt)
-  const load1Readout = seriesValueAt(load1Series, hoveredAt)
   const loadReadout = seriesValueAt(loadSeries, hoveredAt)
-  const load15Readout = seriesValueAt(load15Series, hoveredAt)
   const iowaitReadout = seriesValueAt(iowaitSeries, hoveredAt)
   const diskBusyReadout = seriesValueAt(diskBusySeries, hoveredAt)
   const netInReadout = seriesValueAt(netInSeries, hoveredAt)
@@ -298,7 +294,7 @@ export function MonitoringDetailObservations({
     <p className="monitoring-detail-chart__waiting" role="status">等待实时样本</p>
   ) : null
 
-  const seriesLegend = (...items: Array<{ label: string; swatch: 'down' | 'up' | 'tertiary'; value?: ReactNode }>) => (
+  const seriesLegend = (...items: Array<{ label: string; swatch: 'down' | 'up' | 'tertiary' }>) => (
     <>
       {items.map((item) => (
         <span key={item.label} className="monitoring-detail-chart__legend-item">
@@ -311,11 +307,6 @@ export function MonitoringDetailObservations({
             aria-hidden
           />
           {item.label}
-          {item.value != null ? (
-            <span className="monitoring-detail-chart__legend-value">
-              <MonoDigits>{item.value}</MonoDigits>
-            </span>
-          ) : null}
         </span>
       ))}
     </>
@@ -392,13 +383,10 @@ export function MonitoringDetailObservations({
           title="内存使用率"
           hint={memHint}
           tone={toneFor(memReadout, thresholds?.mem)}
-          legend={seriesLegend(
-            { label: '使用率', swatch: 'down' },
-            { label: '交换', swatch: 'up', value: formatPercent(swapReadout) },
-          )}
+          legend={seriesLegend({ label: '使用率', swatch: 'down' }, { label: '交换', swatch: 'up' })}
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(memReadout, thresholds?.mem)}`}>
-              <MonoDigits>{formatPercent(memReadout)}</MonoDigits>
+              <MonoDigits>{formatPercent(memReadout)} · {formatPercent(swapReadout)}</MonoDigits>
             </span>
           }
           notes={
@@ -463,8 +451,8 @@ export function MonitoringDetailObservations({
           tone={toneFor(loadReadout, thresholds?.load5)}
           legend={seriesLegend(
             { label: '5 分钟', swatch: 'down' },
-            { label: '1 分钟', swatch: 'up', value: formatNumber(load1Readout) },
-            { label: '15 分钟', swatch: 'tertiary', value: formatNumber(load15Readout) },
+            { label: '1 分钟', swatch: 'up' },
+            { label: '15 分钟', swatch: 'tertiary' },
           )}
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(loadReadout, thresholds?.load5)}`}>
@@ -500,13 +488,10 @@ export function MonitoringDetailObservations({
           title="I/O 等待"
           hint={iowaitHint}
           tone={toneFor(iowaitReadout, thresholds?.iowait)}
-          legend={seriesLegend(
-            { label: '等待', swatch: 'down' },
-            { label: '繁忙', swatch: 'up', value: formatPercent(diskBusyReadout) },
-          )}
+          legend={seriesLegend({ label: '等待', swatch: 'down' }, { label: '繁忙', swatch: 'up' })}
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(iowaitReadout, thresholds?.iowait)}`}>
-              <MonoDigits>{formatPercent(iowaitReadout)}</MonoDigits>
+              <MonoDigits>{formatPercent(iowaitReadout)} · {formatPercent(diskBusyReadout)}</MonoDigits>
             </span>
           }
         >
@@ -535,13 +520,10 @@ export function MonitoringDetailObservations({
           variant="network"
           title="网络"
           hint={netHint}
-          legend={seriesLegend(
-            { label: '下行', swatch: 'down' },
-            { label: '上行', swatch: 'up', value: formatBytesPerSecond(netOutReadout) },
-          )}
+          legend={seriesLegend({ label: '下行', swatch: 'down' }, { label: '上行', swatch: 'up' })}
           current={
             <span className="monitoring-detail-chart__value monitoring-detail-chart__value--primary">
-              <MonoDigits>↓ {formatBytesPerSecond(netInReadout)}</MonoDigits>
+              <MonoDigits>↓ {formatBytesPerSecond(netInReadout)} ↑ {formatBytesPerSecond(netOutReadout)}</MonoDigits>
             </span>
           }
         >
@@ -557,7 +539,7 @@ export function MonitoringDetailObservations({
               yMin={0}
               yMax={netYMax}
               formatValue={(v) => formatBytesPerSecond(v)}
-              formatAxisValue={formatNetworkAxis}
+              formatAxisValue={formatCompactRateAxis}
               ariaLabel={`网络下行与上行${availabilityLine(timeWindow, runtimeWindow)}趋势`}
             />
           )}
@@ -567,13 +549,10 @@ export function MonitoringDetailObservations({
           variant="disk-io"
           title="磁盘读写"
           hint={diskIOHint}
-          legend={seriesLegend(
-            { label: '读', swatch: 'down' },
-            { label: '写', swatch: 'up', value: formatBytesPerSecond(diskWriteReadout) },
-          )}
+          legend={seriesLegend({ label: '读', swatch: 'down' }, { label: '写', swatch: 'up' })}
           current={
             <span className="monitoring-detail-chart__value monitoring-detail-chart__value--primary">
-              <MonoDigits>↓ {formatBytesPerSecond(diskReadReadout)}</MonoDigits>
+              <MonoDigits>↓ {formatBytesPerSecond(diskReadReadout)} ↑ {formatBytesPerSecond(diskWriteReadout)}</MonoDigits>
             </span>
           }
         >
@@ -589,7 +568,7 @@ export function MonitoringDetailObservations({
               yMin={0}
               yMax={diskIOYMax}
               formatValue={(v) => formatBytesPerSecond(v)}
-              formatAxisValue={formatNetworkAxis}
+              formatAxisValue={formatCompactRateAxis}
               ariaLabel={`磁盘读与写${availabilityLine(timeWindow, runtimeWindow)}趋势`}
             />
           )}

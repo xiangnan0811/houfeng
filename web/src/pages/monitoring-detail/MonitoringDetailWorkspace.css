@@ -363,16 +363,15 @@
 }
 
 .monitoring-detail-chart__head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
   align-items: baseline;
-  column-gap: 8px;
-  row-gap: 2px;
+  gap: 8px;
   min-width: 0;
 }
 
 .monitoring-detail-chart__title {
-  grid-column: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   margin: 0;
   color: var(--text-primary);
   font-size: var(--monitoring-detail-helper-size);
@@ -381,41 +380,27 @@
   white-space: nowrap;
 }
 
-.monitoring-detail-chart__current {
-  grid-column: 2;
-  grid-row: 1;
-  min-width: 0;
-  text-align: right;
-}
-
 .monitoring-detail-chart__legend {
-  grid-column: 1 / -1;
-  display: flex;
+  display: inline-flex;
+  flex: 0 0 auto;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px 10px;
-  min-height: 14px;
+  align-items: center;
+  gap: 6px 8px;
   color: var(--text-secondary);
   font-size: 11px;
   line-height: 1.2;
 }
 
-.monitoring-detail-chart__legend-series {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
+.monitoring-detail-chart__current {
+  flex: 0 0 auto;
+  min-width: 0;
+  text-align: right;
 }
 
 .monitoring-detail-chart__legend-item {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-}
-
-.monitoring-detail-chart__legend-value {
-  color: var(--text-primary);
-  font-variant-numeric: tabular-nums;
 }
 
 .monitoring-detail-chart__legend-swatch {
@@ -474,13 +459,13 @@
 }
 
 .monitoring-detail-chart__notes {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 2px 6px;
-  margin: 0 0 0 auto;
+  min-height: 16px;
+  margin: 0;
   min-width: 0;
-  min-height: 0;
 }
 
 .monitoring-detail-chart__note {

@@ -428,9 +428,17 @@ export function MetricChart({
     const x = projectX(effectiveHoverIndex)
     const sample = sampleAt(effectiveHoverIndex)
     const y = isPresentValue(sample.value) ? projectY(sample.value) : PADDING.top + innerH / 2
+    const extraValues = [
+      secondary && isPresentValue(secondary[effectiveHoverIndex]?.value)
+        ? formatValue(secondary[effectiveHoverIndex]!.value as number)
+        : null,
+      tertiary && isPresentValue(tertiary[effectiveHoverIndex]?.value)
+        ? formatValue(tertiary[effectiveHoverIndex]!.value as number)
+        : null,
+    ].filter((value): value is string => value != null)
     const tooltipInset = 6
-    const tooltipWidth = Math.min(176, width - tooltipInset * 2)
-    const tooltipHeight = 38
+    const tooltipWidth = Math.min(196, width - tooltipInset * 2)
+    const tooltipHeight = extraValues.length > 1 ? 48 : 38
     const tooltipX = Math.max(
       tooltipInset,
       Math.min(width - tooltipInset - tooltipWidth, x - tooltipWidth / 2),
@@ -449,7 +457,10 @@ export function MetricChart({
       >
         <div className="metric-chart__tooltip">
           <span className="metric-chart__tooltip-value">
-            {isPresentValue(sample.value) ? formatValue(sample.value) : '—'}
+            {[
+              isPresentValue(sample.value) ? formatValue(sample.value) : '—',
+              ...extraValues,
+            ].join(' · ')}
           </span>
           <span className="metric-chart__tooltip-time">{formatTooltipLabel(sample.observedAt)}</span>
         </div>
