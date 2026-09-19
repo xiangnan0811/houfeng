@@ -38,9 +38,18 @@ export function MonitoringDetailRecentEvents({
     </nav>
   )
 
-  if (!eventsLoaded || eventsError || events.length === 0) {
-    return (
-      <div className="monitoring-detail-recent monitoring-detail-recent--quiet">
+  const empty = !eventsLoaded || eventsError || events.length === 0
+
+  return (
+    <section
+      className={['monitoring-detail-recent', empty && 'monitoring-detail-recent--quiet'].filter(Boolean).join(' ')}
+      aria-label="近期事件"
+    >
+      <header className="monitoring-detail-recent__head">
+        <h2>近期事件</h2>
+        {links}
+      </header>
+      {empty ? (
         <p className="monitoring-detail-recent__quiet" role="status">
           {!eventsLoaded ? (
             '正在加载相关事件…'
@@ -55,36 +64,27 @@ export function MonitoringDetailRecentEvents({
             '暂无新的状态变更'
           )}
         </p>
-        {links}
-      </div>
-    )
-  }
-
-  return (
-    <section className="monitoring-detail-section monitoring-detail-recent" aria-label="近期事件">
-      <header className="monitoring-detail-section__head">
-        <h2>近期事件</h2>
-        {links}
-      </header>
-      <ul className="monitoring-detail-recent__list">
-        {events.slice(0, RECENT_EVENT_LIMIT).map((event, index) => (
-          <li
-            key={event.event_id ?? `${event.created_at}-${index}`}
-            className="monitoring-detail-recent__item"
-          >
-            <span className="monitoring-detail-recent__marker" aria-hidden />
-            <div className="monitoring-detail-recent__body">
-              <p className="monitoring-detail-recent__type">
-                {STATE_CHANGE_EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}
-              </p>
-              <p className="monitoring-detail-recent__summary">{event.summary || '暂无摘要'}</p>
-              <p className="monitoring-detail-recent__time">
-                <Timestamp value={event.created_at} mode="absolute" />
-              </p>
-            </div>
-          </li>
-        ))}
-      </ul>
+      ) : (
+        <ul className="monitoring-detail-recent__list">
+          {events.slice(0, RECENT_EVENT_LIMIT).map((event, index) => (
+            <li
+              key={event.event_id ?? `${event.created_at}-${index}`}
+              className="monitoring-detail-recent__item"
+            >
+              <span className="monitoring-detail-recent__marker" aria-hidden />
+              <div className="monitoring-detail-recent__body">
+                <p className="monitoring-detail-recent__type">
+                  {STATE_CHANGE_EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}
+                </p>
+                <p className="monitoring-detail-recent__summary">{event.summary || '暂无摘要'}</p>
+                <p className="monitoring-detail-recent__time">
+                  <Timestamp value={event.created_at} mode="absolute" />
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   )
 }

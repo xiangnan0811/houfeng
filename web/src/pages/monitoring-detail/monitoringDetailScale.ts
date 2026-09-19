@@ -7,15 +7,14 @@
 
 export type ObservationLayout = 'wide' | 'medium' | 'narrow'
 
-/** Compact 4×2 tile plot height. Do not scale with the viewport. */
-export const OBSERVATION_CHART_HEIGHT = 168
+/** Equal 4×2 tile plot height. Do not scale with the viewport. */
+export const OBSERVATION_CHART_HEIGHT = 200
 
 /**
  * Plot SVG height for one equal cell.
  *
- * Eight tiles in 4×2 need a short, stable plot — about the old 160px band,
- * not a poster that grows with the monitor. Layout still changes column count;
- * height does not.
+ * Eight tiles share one plot height so the two rows match. 200px is a step
+ * up from the old 160/168 band without turning plates into posters.
  */
 export function observationChartHeight(_args?: {
   layout?: ObservationLayout

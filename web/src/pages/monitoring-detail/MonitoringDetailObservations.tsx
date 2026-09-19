@@ -87,7 +87,7 @@ function Plot({
         <span className="monitoring-detail-chart__legend">{legend}</span>
       </header>
       {children}
-      {notes ? <dl className="monitoring-detail-chart__notes" title={notesTitle}>{notes}</dl> : null}
+      <dl className="monitoring-detail-chart__notes" title={notesTitle}>{notes}</dl>
     </section>
   )
 }
@@ -263,7 +263,7 @@ export function MonitoringDetailObservations({
     : '三条线是 1 / 5 / 15 分钟负载。阈值策略不可用。无核数，不能按核归一。'
   const iowaitHint = chartHint(
     thresholds ? thresholdLevelsText(thresholds.iowait, '%') : '',
-    'I/O 等待是 CPU 在等 I/O；磁盘繁忙是盘本身的利用率。两者共用按数据缩放的纵轴。',
+    'I/O 等待是 CPU 在等 I/O；磁盘繁忙是盘本身的利用率。共用按数据缩放的纵轴：繁忙远大于等待时，等待线会贴近底轴，读右上角和图例。',
   )
   const netHint = '下行与上行速率（B/s），两条都为正、共用纵轴。无效速率显示为缺口，不画成 0。'
   const diskIOHint = '磁盘读与写速率（B/s），两条都为正、共用纵轴。'
@@ -273,7 +273,9 @@ export function MonitoringDetailObservations({
   const swapReadout = seriesValueAt(swapSeries, hoveredAt)
   const diskReadout = seriesValueAt(diskSeries, hoveredAt)
   const inodeReadout = seriesValueAt(inodeSeries, hoveredAt)
+  const load1Readout = seriesValueAt(load1Series, hoveredAt)
   const loadReadout = seriesValueAt(loadSeries, hoveredAt)
+  const load15Readout = seriesValueAt(load15Series, hoveredAt)
   const iowaitReadout = seriesValueAt(iowaitSeries, hoveredAt)
   const diskBusyReadout = seriesValueAt(diskBusySeries, hoveredAt)
   const netInReadout = seriesValueAt(netInSeries, hoveredAt)
@@ -292,7 +294,7 @@ export function MonitoringDetailObservations({
     <p className="monitoring-detail-chart__waiting" role="status">等待实时样本</p>
   ) : null
 
-  const seriesLegend = (...items: Array<{ label: string; swatch: 'down' | 'up' | 'tertiary' }>) => (
+  const seriesLegend = (...items: Array<{ label: string; swatch: 'down' | 'up' | 'tertiary'; value?: ReactNode }>) => (
     <>
       {items.map((item) => (
         <span key={item.label} className="monitoring-detail-chart__legend-item">
@@ -305,6 +307,11 @@ export function MonitoringDetailObservations({
             aria-hidden
           />
           {item.label}
+          {item.value != null ? (
+            <span className="monitoring-detail-chart__legend-value">
+              <MonoDigits>{item.value}</MonoDigits>
+            </span>
+          ) : null}
         </span>
       ))}
     </>
@@ -382,10 +389,13 @@ export function MonitoringDetailObservations({
           title="内存使用率"
           hint={memHint}
           tone={toneFor(memReadout, thresholds?.mem)}
-          legend={seriesLegend({ label: '使用率', swatch: 'down' }, { label: '交换', swatch: 'up' })}
+          legend={seriesLegend(
+            { label: '使用率', swatch: 'down' },
+            { label: '交换', swatch: 'up', value: formatPercent(swapReadout) },
+          )}
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(memReadout, thresholds?.mem)}`}>
-              <MonoDigits>{formatPercent(memReadout)} · 交换 {formatPercent(swapReadout)}</MonoDigits>
+              <MonoDigits>{formatPercent(memReadout)}</MonoDigits>
             </span>
           }
           notes={
@@ -450,8 +460,8 @@ export function MonitoringDetailObservations({
           tone={toneFor(loadReadout, thresholds?.load5)}
           legend={seriesLegend(
             { label: '5 分钟', swatch: 'down' },
-            { label: '1 分钟', swatch: 'up' },
-            { label: '15 分钟', swatch: 'tertiary' },
+            { label: '1 分钟', swatch: 'up', value: formatNumber(load1Readout) },
+            { label: '15 分钟', swatch: 'tertiary', value: formatNumber(load15Readout) },
           )}
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(loadReadout, thresholds?.load5)}`}>
@@ -487,10 +497,13 @@ export function MonitoringDetailObservations({
           title="I/O 等待"
           hint={iowaitHint}
           tone={toneFor(iowaitReadout, thresholds?.iowait)}
-          legend={seriesLegend({ label: '等待', swatch: 'down' }, { label: '繁忙', swatch: 'up' })}
+          legend={seriesLegend(
+            { label: '等待', swatch: 'down' },
+            { label: '繁忙', swatch: 'up', value: formatPercent(diskBusyReadout) },
+          )}
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(iowaitReadout, thresholds?.iowait)}`}>
-              <MonoDigits>{formatPercent(iowaitReadout)} · 繁忙 {formatPercent(diskBusyReadout)}</MonoDigits>
+              <MonoDigits>{formatPercent(iowaitReadout)}</MonoDigits>
             </span>
           }
         >
@@ -519,10 +532,13 @@ export function MonitoringDetailObservations({
           variant="network"
           title="网络"
           hint={netHint}
-          legend={seriesLegend({ label: '下行', swatch: 'down' }, { label: '上行', swatch: 'up' })}
+          legend={seriesLegend(
+            { label: '下行', swatch: 'down' },
+            { label: '上行', swatch: 'up', value: formatBytesPerSecond(netOutReadout) },
+          )}
           current={
             <span className="monitoring-detail-chart__value monitoring-detail-chart__value--primary">
-              <MonoDigits>↓ {formatBytesPerSecond(netInReadout)} ↑ {formatBytesPerSecond(netOutReadout)}</MonoDigits>
+              <MonoDigits>↓ {formatBytesPerSecond(netInReadout)}</MonoDigits>
             </span>
           }
         >
@@ -548,10 +564,13 @@ export function MonitoringDetailObservations({
           variant="disk-io"
           title="磁盘读写"
           hint={diskIOHint}
-          legend={seriesLegend({ label: '读', swatch: 'down' }, { label: '写', swatch: 'up' })}
+          legend={seriesLegend(
+            { label: '读', swatch: 'down' },
+            { label: '写', swatch: 'up', value: formatBytesPerSecond(diskWriteReadout) },
+          )}
           current={
             <span className="monitoring-detail-chart__value monitoring-detail-chart__value--primary">
-              <MonoDigits>↓ {formatBytesPerSecond(diskReadReadout)} ↑ {formatBytesPerSecond(diskWriteReadout)}</MonoDigits>
+              <MonoDigits>↓ {formatBytesPerSecond(diskReadReadout)}</MonoDigits>
             </span>
           }
         >

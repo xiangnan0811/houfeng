@@ -42,9 +42,9 @@ describe('niceMax', () => {
 
 describe('observationChartHeight', () => {
   it('is a compact 4×2 tile height and does not grow with the monitor', () => {
-    expect(OBSERVATION_CHART_HEIGHT).toBe(168)
-    expect(observationChartHeight()).toBe(168)
-    expect(observationChartHeight({ layout: 'wide', gridWidth: 3516, viewportHeight: 1923 })).toBe(168)
-    expect(observationChartHeight({ layout: 'narrow', gridWidth: 269 })).toBe(168)
+    expect(OBSERVATION_CHART_HEIGHT).toBe(200)
+    expect(observationChartHeight()).toBe(200)
+    expect(observationChartHeight({ layout: 'wide', gridWidth: 3516, viewportHeight: 1923 })).toBe(200)
+    expect(observationChartHeight({ layout: 'narrow', gridWidth: 269 })).toBe(200)
   })
 })

@@ -1685,15 +1685,17 @@ describe('MonitoringDetailPage', () => {
 
     const readoutFor = (name: string) => within(screen.getByRole('region', { name }))
     expect(readoutFor('CPU 使用率').getByText('42.0%')).toBeInTheDocument()
-    expect(readoutFor('内存使用率').getByText(/63\.0%/)).toBeInTheDocument()
-    expect(readoutFor('内存使用率').getByText(/交换 3\.0%/)).toBeInTheDocument()
+    expect(readoutFor('内存使用率').getByText('63.0%')).toBeInTheDocument()
+    expect(readoutFor('内存使用率').getByText('交换')).toBeInTheDocument()
+    expect(readoutFor('内存使用率').getByText('3.0%')).toBeInTheDocument()
     expect(readoutFor('磁盘使用率').getByText('61.0%')).toBeInTheDocument()
     expect(readoutFor('Inode 使用率').getByText('13.0%')).toBeInTheDocument()
     expect(readoutFor('网络').getByText(/4\.0 KB\/s/)).toBeInTheDocument()
     expect(readoutFor('网络').getByText(/8\.0 KB\/s/)).toBeInTheDocument()
     expect(screen.getByRole('region', { name: '负载' })).toHaveTextContent('0.9')
     expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent('7.0%')
-    expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent(/繁忙 9\.0%/)
+    expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent('繁忙')
+    expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent('9.0%')
     expect(readoutFor('磁盘读写').getByText(/2\.0 KB\/s/)).toBeInTheDocument()
   })
 
@@ -3251,7 +3253,7 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: new RegExp(`^${name}。`) })).toBeInTheDocument()
     }
     const heights = Array.from(grid.querySelectorAll('svg')).map((svg) => svg.getAttribute('height'))
-    expect(heights.filter((height) => height === '168')).toHaveLength(8)
+    expect(heights.filter((height) => height === '200')).toHaveLength(8)
     for (const variant of ['cpu', 'mem', 'disk', 'inode', 'load', 'iowait', 'network', 'disk-io']) {
       expect(container.querySelector(`.monitoring-detail-chart--${variant}`)).not.toBeNull()
     }
