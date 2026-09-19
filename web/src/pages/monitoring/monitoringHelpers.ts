@@ -114,6 +114,33 @@ export function monitoringInstanceHealthTone(
   return HEALTH_TONE[monitoringInstanceEffectiveHealth(monitoringInstance, hasHeartbeat)] ?? 'offline'
 }
 
+export type MonitoringAttentionBadge = { label: string; tone: BadgeTone }
+
+/** List attention cell: never 正常, never 未知 stacked on 未绑定. */
+export function monitoringInstanceAttentionBadges(
+  monitoringInstance: MonitoringInstanceRecord,
+  hasHeartbeat = monitoringInstanceHasHeartbeatEvidence(monitoringInstance),
+): MonitoringAttentionBadge[] {
+  const badges: MonitoringAttentionBadge[] = []
+  if (monitoringInstance.monitoring_status === '维护中') {
+    badges.push({ label: '维护中', tone: 'maintenance' })
+  } else if (monitoringInstance.monitoring_status === '暂停') {
+    badges.push({ label: '暂停', tone: 'offline' })
+  }
+  if (monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_UNBOUND_STATUS) {
+    badges.push({ label: '未绑定', tone: 'offline' })
+  } else if (isBindingConflictMonitoringInstance(monitoringInstance)) {
+    badges.push({ label: MONITORING_INSTANCE_BINDING_CONFLICT_SUMMARY, tone: 'notice' })
+  }
+  const health = monitoringInstanceEffectiveHealth(monitoringInstance, hasHeartbeat)
+  if (isKnownAbnormalHealth(health)) {
+    badges.push({ label: health, tone: HEALTH_TONE[health] ?? 'offline' })
+  } else if (health === '未知' && monitoringInstance.binding_status !== MONITORING_INSTANCE_BINDING_UNBOUND_STATUS) {
+    badges.push({ label: '未知', tone: 'offline' })
+  }
+  return badges
+}
+
 export function isBindingConflictMonitoringInstance(monitoringInstance: MonitoringInstanceRecord) {
   return monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
 }

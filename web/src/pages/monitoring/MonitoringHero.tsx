@@ -14,7 +14,7 @@ export function MonitoringHero({ snapshotReadAt, refreshing, refreshLocked = fal
     <header className="page__head monitoring-page__head">
       <h1 className="page__title">监控</h1>
       <div className="page__actions monitoring-page__head-actions">
-        <Link className="btn sm primary" to="/vps?view=unlinked">
+        <Link className="btn sm primary" to="/vps?view=unlinked" title="从尚未关联监控的 VPS 创建实例并接入 agent">
           从未关联 VPS 接入
         </Link>
         <p className="monitoring-page__snapshot">

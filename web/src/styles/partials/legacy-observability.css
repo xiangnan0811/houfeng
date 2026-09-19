@@ -86,7 +86,9 @@
 
 .monitoring-table .monitoring-table__health{display:flex;flex-direction:column;gap:2px;min-width:0}
 
-.monitoring-table .monitoring-table__health-head{display:flex;align-items:center;gap:var(--space-2);min-width:0}
+.monitoring-table .monitoring-table__health-head{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-2);min-width:0}
+
+.monitoring-table .monitoring-table__health-quiet{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.35}
 
 .monitoring-table .monitoring-table__health .badge{width:fit-content;max-width:100%}
 

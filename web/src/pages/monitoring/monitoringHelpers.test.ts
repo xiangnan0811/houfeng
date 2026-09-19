@@ -8,6 +8,7 @@ import {
   formatSampledUptime,
   matchesMonitoringFilters,
   matchesMonitoringQuickView,
+  monitoringInstanceAttentionBadges,
   monitoringInstanceEffectiveHealth,
   monitoringInstanceGlyphState,
   monitoringInstanceHealthLabel,
@@ -80,6 +81,37 @@ describe('monitoring list health helpers', () => {
     const healthyWithoutHeartbeat = record({ current_health_status: '正常' })
     expect(monitoringInstanceGlyphState(healthyWithoutHeartbeat, false)).toBe('offline')
     expect(monitoringInstanceHealthLabel(healthyWithoutHeartbeat, false)).toBe('未知')
+  })
+
+  it('keeps list attention badges silent on 正常 and unstacked on control states', () => {
+    expect(monitoringInstanceAttentionBadges(record({
+      current_health_status: '正常',
+      last_heartbeat_at: '2026-04-26T09:00:00Z',
+    }), true)).toEqual([])
+    expect(monitoringInstanceAttentionBadges(record({
+      current_health_status: '正常',
+      monitoring_status: '维护中',
+      last_heartbeat_at: '2026-04-26T09:00:00Z',
+    }), true)).toEqual([{ label: '维护中', tone: 'maintenance' }])
+    expect(monitoringInstanceAttentionBadges(record({
+      current_health_status: '告警',
+      monitoring_status: '暂停',
+      last_heartbeat_at: '2026-04-26T09:00:00Z',
+    }), true)).toEqual([
+      { label: '暂停', tone: 'offline' },
+      { label: '告警', tone: 'alert' },
+    ])
+    expect(monitoringInstanceAttentionBadges(record({
+      current_health_status: '正常',
+      binding_status: '未绑定',
+    }), false)).toEqual([{ label: '未绑定', tone: 'offline' }])
+    expect(monitoringInstanceAttentionBadges(record({
+      current_health_status: '正常',
+      monitoring_status: '暂停',
+    }), false)).toEqual([
+      { label: '暂停', tone: 'offline' },
+      { label: '未知', tone: 'offline' },
+    ])
   })
 
   it('does not invent empty issue copy for healthy heartbeat rows', () => {

@@ -15,10 +15,7 @@ import type {
 } from '../../lib/types'
 import { heartbeatFreshnessLabel } from './heartbeatFreshness'
 import {
-  isBindingConflictMonitoringInstance,
-  MONITORING_INSTANCE_BINDING_CONFLICT_SUMMARY,
-  monitoringInstanceHealthLabel,
-  monitoringInstanceHealthTone,
+  monitoringInstanceAttentionBadges,
   formatNetworkRate,
   formatSampledUptime,
   monitoringIssueSummary,
@@ -121,20 +118,28 @@ export function buildMonitoringInstancesTableColumns({
       render: (monitoringInstance) => {
         const freshness = freshnessById.get(monitoringInstance.monitoring_instance_id)
         const hasHeartbeat = freshness != null && freshness.kind !== 'missing' && freshness.kind !== 'invalid'
-        const healthLabel = monitoringInstanceHealthLabel(monitoringInstance, hasHeartbeat)
+        const badges = monitoringInstanceAttentionBadges(monitoringInstance, hasHeartbeat)
         const summary = monitoringIssueSummary(monitoringInstance)
         const incidentCount = monitoringInstance.current_active_incident_count
         return (
           <div className="monitoring-table__health">
-            <span className="monitoring-table__health-head">
-              <Badge variant="state" tone={monitoringInstanceHealthTone(monitoringInstance, hasHeartbeat)}>
-                {healthLabel}
-              </Badge>
-              {incidentCount > 0 ? (
-                <MonoDigits className="monitoring-table__issue-count">{incidentCount}</MonoDigits>
-              ) : null}
-            </span>
-            {summary ? <span className="monitoring-table__issue-summary" title={summary}>{summary}</span> : null}
+            {badges.length > 0 ? (
+              <span className="monitoring-table__health-head">
+                {badges.map((badge) => (
+                  <Badge key={badge.label} variant="state" tone={badge.tone}>
+                    {badge.label}
+                  </Badge>
+                ))}
+                {incidentCount > 0 ? (
+                  <MonoDigits className="monitoring-table__issue-count">{incidentCount}</MonoDigits>
+                ) : null}
+              </span>
+            ) : (
+              <span className="monitoring-table__health-quiet">—</span>
+            )}
+            {summary && !badges.some((badge) => badge.label === summary) ? (
+              <span className="monitoring-table__issue-summary" title={summary}>{summary}</span>
+            ) : null}
           </div>
         )
       },
@@ -155,18 +160,6 @@ export function buildMonitoringInstancesTableColumns({
               ) : null}
               {freshness.kind === 'policy-unavailable' ? (
                 <Badge variant="state" tone="notice">{heartbeatFreshnessLabel(freshness)}</Badge>
-              ) : null}
-              {monitoringInstance.monitoring_status === '暂停' ? (
-                <Badge variant="state" tone="offline">暂停</Badge>
-              ) : null}
-              {monitoringInstance.monitoring_status === '维护中' ? (
-                <Badge variant="state" tone="maintenance">维护中</Badge>
-              ) : null}
-              {monitoringInstance.binding_status === '未绑定' ? (
-                <Badge variant="state" tone="offline">未绑定</Badge>
-              ) : null}
-              {isBindingConflictMonitoringInstance(monitoringInstance) ? (
-                <Badge variant="state" tone="notice">{MONITORING_INSTANCE_BINDING_CONFLICT_SUMMARY}</Badge>
               ) : null}
             </span>
           </div>

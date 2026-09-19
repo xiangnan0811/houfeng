@@ -224,6 +224,32 @@ describe('MonitoringPage', () => {
     expect(within(row!).getByText('暂停')).toHaveClass('badge', 'badge--state', 'tone--offline')
   })
 
+  it('does not stack 正常 onto a paused or maintaining row', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      monitoringInstanceRecord({
+        display_name: 'Paused Edge',
+        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        current_health_status: '正常',
+        monitoring_status: '暂停',
+      }),
+      monitoringInstanceRecord({
+        monitoring_instance_id: 'mi_maint',
+        display_name: 'Maint Edge',
+        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        current_health_status: '正常',
+        monitoring_status: '维护中',
+      }),
+    ]))
+    renderMonitoring()
+    await waitFor(() => expect(screen.getByText('Paused Edge')).toBeInTheDocument())
+    const paused = screen.getByText('Paused Edge').closest('tr')!
+    const maintaining = screen.getByText('Maint Edge').closest('tr')!
+    expect(within(paused).getByText('暂停')).toHaveClass('badge', 'badge--state', 'tone--offline')
+    expect(within(paused).queryByText('正常')).not.toBeInTheDocument()
+    expect(within(maintaining).getByText('维护中')).toHaveClass('badge', 'badge--state', 'tone--maintenance')
+    expect(within(maintaining).queryByText('正常')).not.toBeInTheDocument()
+  })
+
   it('hides zero incident counts and empty explanations on healthy rows', async () => {
     vi.stubGlobal('fetch', listFetch([
       monitoringInstanceRecord({
@@ -236,7 +262,8 @@ describe('MonitoringPage', () => {
     renderMonitoring()
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     const row = screen.getByText('Tokyo Edge').closest('tr')
-    expect(within(row!).getByText('正常')).toHaveClass('badge', 'badge--state', 'tone--normal')
+    expect(within(row!).queryByText('正常')).not.toBeInTheDocument()
+    expect(row!.querySelector('.monitoring-table__health-quiet')).toHaveTextContent('—')
     expect(row!.querySelector('.monitoring-table__issue-count')).toBeNull()
     expect(within(row!).queryByText('无活跃问题摘要')).not.toBeInTheDocument()
   })
