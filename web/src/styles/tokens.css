@@ -28,7 +28,7 @@
   --badge-warn-bg:rgba(212,181,106,0.12);--badge-warn-c:#D4B56A;
   --badge-err-bg:rgba(212,120,106,0.12);--badge-err-c:#D4786A;
   --badge-muted-bg:rgba(232,230,223,0.06);--badge-muted-c:#8A8B82;
-  --chart-fill:rgba(143,179,159,0.14);--chart-stroke:#8FB39F;
+  --chart-fill:rgba(143,179,159,0.14);--chart-stroke:#8FB39F;--chart-warn-fill:rgba(212,181,106,0.10);
   --chart-fill-2:rgba(212,181,106,0.12);--chart-stroke-2:#D4B56A;
   --tooltip-bg:#1A1B18;--tooltip-c:#E8E6DF;--tooltip-bd:rgba(232,230,223,0.10);
   --input-bg:#141613;--input-bg-h:#1A1B18;
@@ -78,7 +78,7 @@
   --badge-warn-bg:#F4EEDC;--badge-warn-c:var(--warn);
   --badge-err-bg:#F7EBE9;--badge-err-c:var(--err);
   --badge-muted-bg:#EBEEEA;--badge-muted-c:#5B605C;
-  --chart-fill:rgba(47,90,70,0.10);--chart-stroke:#2F5A46;
+  --chart-fill:rgba(47,90,70,0.10);--chart-stroke:#2F5A46;--chart-warn-fill:rgba(138,90,18,0.08);
   --chart-fill-2:rgba(138,90,18,0.10);--chart-stroke-2:#8A5A12;
   --tooltip-bg:#FFFFFF;--tooltip-c:#1A1C1A;--tooltip-bd:#D4D9D6;
   --input-bg:#FFFFFF;--input-bg-h:#FFFFFF;

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import type { MonitoringInstanceRuntimeAction } from '../components/monitoring-detail'
 import {
-  ApiError,
   archiveMonitoringInstance,
   confirmMonitoringInstanceRebind,
   enterMonitoringInstanceMaintenance,
@@ -11,9 +11,6 @@ import {
   getMonitoringInstance,
   getMonitoringInstanceManagementReview,
   getMonitoringInstanceOnboarding,
-  getMonitoringInstanceRuntimeFacts,
-  getSettings,
-  monitoringInstanceRuntimeStreamURL,
   listVPSForMonitoringInstance,
   pauseMonitoringInstanceMonitoring,
   permanentCleanupMonitoringInstance,
@@ -26,16 +23,15 @@ import {
   retireMonitoringInstance,
   updateMonitoringInstanceMetadata,
 } from '../lib/api'
-import { listEvents, listHistoricalIncidents, listIncidents } from '../lib/observabilityApi'
-import { DEFAULT_THRESHOLDS, resolveThresholds, type MetricThresholds } from '../config/thresholds'
+import { listHistoricalIncidents } from '../lib/observabilityApi'
 import type {
   ActiveIncidentRecord,
-  HostSample,
-  HostSampleStreamMessage,
   MonitoringInstanceManagementReview,
   MonitoringInstanceOnboardingState,
   MonitoringInstanceRecord,
 } from '../lib/types'
+import { classifyHeartbeatFreshness } from './monitoring/heartbeatFreshness'
+import { useMonitoringDetailSources } from './monitoring-detail/useMonitoringDetailSources'
 import { MonitoringDetailPageBody } from './monitoring-detail/MonitoringDetailPageBody'
 import { MonitoringDetailLoading } from './monitoring-detail/MonitoringDetailLoading'
 import { MonitoringDetailUnavailable } from './monitoring-detail/MonitoringDetailUnavailable'
@@ -44,64 +40,28 @@ import {
   MONITORING_INSTANCE_BINDING_CONFLICT_LOAD_ERROR,
   MONITORING_INSTANCE_BINDING_CONFLICT_STATUS,
 } from './monitoring-detail/monitoringDetailConstants'
+import { resolveMonitoringListHref } from './monitoring/monitoringListUrl'
 import {
-  INITIAL_MONITORING_DETAIL_STATE,
   applyOnboardingRecordToMonitoringInstance,
   describeError,
   mergeNonMetadataMonitoringInstanceRecord,
   parseLabels,
   validateReturnVPSId,
 } from './monitoring-detail/monitoringDetailHelpers'
+import './monitoring-detail/MonitoringDetailWorkspace.css'
 import type {
   BindingConflictAction,
   BindingConflictState,
   HistoryTab,
   LinkedVPSState,
   MetadataFormState,
-  MonitoringDetailPageState,
   PendingBindingConfirmation,
   PendingRuntimeConfirmation,
-  RuntimeStreamStatus,
   TimeWindow,
 } from './monitoring-detail/types'
 
-const REALTIME_WINDOW_MS = 60 * 60 * 1000
-const RUNTIME_STREAM_RECONNECT_MS = 2000
 const LINKED_VPS_SUMMARY_FETCH_DELAY_MS = 300
-const MONITORING_INSTANCE_LIFECYCLE_PENDING = '待接入'
-const MONITORING_INSTANCE_LIFECYCLE_IN_USE = '在用'
 type MonitoringManagementAction = 'retire' | 'restore-lifecycle' | 'archive' | 'restore-archive' | 'permanent-cleanup'
-
-function sampleKey(sample: HostSample): string {
-  return `${sample.observed_at}::${sample.sync_batch_id}`
-}
-
-function realtimeSeedSamples(runtimeFacts: { recent_host_samples?: HostSample[]; latest_host_sample?: HostSample | null }): HostSample[] {
-  if (runtimeFacts.recent_host_samples?.length) return runtimeFacts.recent_host_samples
-  return runtimeFacts.latest_host_sample ? [runtimeFacts.latest_host_sample] : []
-}
-
-function mergeRealtimeSamples(current: HostSample[], incoming: HostSample[]): HostSample[] {
-  if (incoming.length === 0) return current
-  const byKey = new Map<string, HostSample>()
-  for (const sample of current) byKey.set(sampleKey(sample), sample)
-  for (const sample of incoming) byKey.set(sampleKey(sample), sample)
-  const sorted = [...byKey.values()].sort((a, b) => {
-    const timeDiff = new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime()
-    if (timeDiff !== 0) return timeDiff
-    return a.sync_batch_id.localeCompare(b.sync_batch_id)
-  })
-  const newestTime = sorted.reduce((max, sample) => {
-    const ms = new Date(sample.observed_at).getTime()
-    return Number.isNaN(ms) ? max : Math.max(max, ms)
-  }, 0)
-  if (newestTime <= 0) return sorted
-  const cutoff = newestTime - REALTIME_WINDOW_MS
-  return sorted.filter((sample) => {
-    const ms = new Date(sample.observed_at).getTime()
-    return Number.isNaN(ms) || ms >= cutoff
-  })
-}
 
 export function MonitoringDetailPage() {
   const { monitoringInstanceId } = useParams()
@@ -118,7 +78,38 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const returnVPSId = validateReturnVPSId(searchParams.get('return_vps'))
-  const [state, setState] = useState<MonitoringDetailPageState>(INITIAL_MONITORING_DETAIL_STATE)
+  const {
+    timeWindow,
+    setTimeWindow,
+    state,
+    setState,
+    latestSample,
+    snapshotReadAt,
+    loadedTimeWindow,
+    runtimeFactsError,
+    runtimeFactsLoading,
+    realtimeSamples,
+    runtimeStreamStatus,
+    runtimeStreamError,
+    thresholds,
+    heartbeatPolicy,
+    settingsResolved,
+    incidentsRetrying,
+    eventsRetrying,
+    retryRecord,
+    retryRuntime,
+    retrySettings,
+    retryIncidents,
+    retryEvents,
+    resetObservationEpoch,
+    isMountedRef,
+    currentRouteMonitoringInstanceIdRef,
+  } = useMonitoringDetailSources({
+    ...(monitoringInstanceId === undefined ? {} : { monitoringInstanceId }),
+    searchParams,
+    setSearchParams,
+    locationState: location.state,
+  })
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
   const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] =
@@ -148,19 +139,13 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [historyIncidents, setHistoryIncidents] = useState<ActiveIncidentRecord[] | null>(null)
   const [historyIncidentsLoading, setHistoryIncidentsLoading] = useState(false)
   const [historyIncidentsError, setHistoryIncidentsError] = useState<string | null>(null)
-  const [incidentsRetrying, setIncidentsRetrying] = useState(false)
-  const [eventsRetrying, setEventsRetrying] = useState(false)
-  const incidentsRetryRef = useRef(0)
-  const eventsRetryRef = useRef(0)
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandSubmitting, setCommandSubmitting] = useState(false)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
-  const [timeWindow, setTimeWindow] = useState<TimeWindow>('realtime')
-  const [realtimeSamples, setRealtimeSamples] = useState<HostSample[]>([])
-  const [runtimeStreamStatus, setRuntimeStreamStatus] = useState<RuntimeStreamStatus>('idle')
-  const [runtimeStreamError, setRuntimeStreamError] = useState<string | null>(null)
-  const [thresholds, setThresholds] = useState<MetricThresholds>(DEFAULT_THRESHOLDS)
+  const [commandPollError, setCommandPollError] = useState<string | null>(null)
+  const [linkedVPSRetryKey, setLinkedVPSRetryKey] = useState(0)
+  const [bindingReloadKey, setBindingReloadKey] = useState(0)
   const [linkedVPSState, setLinkedVPSState] = useState<LinkedVPSState>({
     requestedMonitoringInstanceId: null,
     records: [],
@@ -177,10 +162,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     requestId: 0,
   })
   const linkedVPSInteractionBusyRef = useRef(false)
-  const currentRouteMonitoringInstanceIdRef = useRef<string | null>(monitoringInstanceId ?? null)
   const currentRequestedMonitoringInstanceIdRef = useRef<string | null>(null)
   const metadataRequestRef = useRef(0)
-  const isMountedRef = useRef(true)
+  const managementReviewRequestRef = useRef(0)
   const actionButtonRefs = useRef<Record<MonitoringInstanceRuntimeAction, HTMLButtonElement | null>>({
     'enter-maintenance': null,
     'exit-maintenance': null,
@@ -190,11 +174,23 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const pendingFocusRestoreRef = useRef<MonitoringInstanceRuntimeAction | null>(null)
 
   useEffect(() => {
-    currentRouteMonitoringInstanceIdRef.current = monitoringInstanceId ?? null
     metadataRequestRef.current += 1
   }, [monitoringInstanceId])
 
   useEffect(() => {
+    if (!state.monitoringInstance) return
+    setMetadataEditing(false)
+    setMetadataSubmitting(false)
+    setMetadataError(null)
+    setMetadataForm({
+      group: state.monitoringInstance.group || '',
+      labels: state.monitoringInstance.labels.join(', '),
+      note: state.monitoringInstance.note,
+    })
+  }, [state.monitoringInstance?.monitoring_instance_id])
+
+  useEffect(() => {
+    managementReviewRequestRef.current += 1
     setManagementReview(null)
     setManagementRequestedMonitoringInstanceId(null)
     setManagementLoading(false)
@@ -248,197 +244,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }, [pendingRuntimeConfirmation, state.monitoringInstance])
 
   useEffect(() => {
-    isMountedRef.current = true
-    return () => {
-      isMountedRef.current = false
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-
-    getSettings()
-      .then((settings) => {
-        if (!cancelled) setThresholds(resolveThresholds(settings.incident_defaults))
-      })
-      .catch(() => {}) // keep default thresholds when settings cannot be loaded.
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  // Refetch runtime facts when time window changes (keep old data visible).
-  // The mounted ref skips the initial invocation so the main load effect handles
-  // the first fetch. It resets on monitoringInstanceId change for the same reason.
-  const timeWindowMountedRef = useRef(false)
-  useEffect(() => {
-    timeWindowMountedRef.current = false
-  }, [monitoringInstanceId])
-
-  useEffect(() => {
-    if (!timeWindowMountedRef.current) {
-      timeWindowMountedRef.current = true
-      return
-    }
-
-    let cancelled = false
-    if (!monitoringInstanceId) return
-
-    getMonitoringInstanceRuntimeFacts(monitoringInstanceId, timeWindow)
-      .then((runtimeFacts) => {
-        if (cancelled) return
-        setState((current) => {
-          if (current.requestedMonitoringInstanceId !== monitoringInstanceId) return current
-          return { ...current, runtimeFacts }
-        })
-        if (timeWindow === 'realtime') {
-          setRealtimeSamples((current) => mergeRealtimeSamples(current, realtimeSeedSamples(runtimeFacts)))
-        }
-      })
-      .catch(() => {
-        // On window-switch fetch error, keep old data visible — no-op.
-      })
-
-    return () => { cancelled = true }
-  }, [monitoringInstanceId, timeWindow])
-
-  useEffect(() => {
-    setRealtimeSamples([])
-    setRuntimeStreamStatus('idle')
-    setRuntimeStreamError(null)
-  }, [monitoringInstanceId])
-
-  const realtimeRuntimeFactsReady =
-    state.requestedMonitoringInstanceId === monitoringInstanceId &&
-    Boolean(state.runtimeFacts) &&
-    (!state.runtimeFacts?.window || state.runtimeFacts.window.key === 'realtime')
-
-  useEffect(() => {
-    if (!monitoringInstanceId || timeWindow !== 'realtime' || !realtimeRuntimeFactsReady) {
-      setRuntimeStreamStatus('idle')
-      setRuntimeStreamError(null)
-      return
-    }
-    if (typeof WebSocket === 'undefined') {
-      setRuntimeStreamStatus('disconnected')
-      setRuntimeStreamError('当前浏览器不支持 WebSocket')
-      return
-    }
-
-    let closed = false
-    let socket: WebSocket | null = null
-    let reconnectTimer: number | undefined
-
-    const connect = (reconnect: boolean) => {
-      if (closed) return
-      setRuntimeStreamStatus(reconnect ? 'reconnecting' : 'connecting')
-      setRuntimeStreamError(null)
-      socket = new WebSocket(monitoringInstanceRuntimeStreamURL(monitoringInstanceId))
-
-      socket.onopen = () => {
-        if (closed) return
-        setRuntimeStreamStatus('connected')
-        setRuntimeStreamError(null)
-      }
-      socket.onmessage = (event) => {
-        if (closed) return
-        try {
-          const message = JSON.parse(String(event.data)) as HostSampleStreamMessage
-          if (message.type !== 'host_sample' || message.monitoring_instance_id !== monitoringInstanceId) return
-          const sample = message.sample
-          setRealtimeSamples((current) => mergeRealtimeSamples(current, [sample]))
-          setState((current) => {
-            if (current.requestedMonitoringInstanceId !== monitoringInstanceId || !current.runtimeFacts) return current
-            return {
-              ...current,
-              monitoringInstance: current.monitoringInstance
-                ? {
-                    ...current.monitoringInstance,
-                    lifecycle_status:
-                      current.monitoringInstance.lifecycle_status === MONITORING_INSTANCE_LIFECYCLE_PENDING
-                        ? MONITORING_INSTANCE_LIFECYCLE_IN_USE
-                        : current.monitoringInstance.lifecycle_status,
-                    last_heartbeat_at: sample.observed_at,
-                  }
-                : current.monitoringInstance,
-              runtimeFacts: {
-                ...current.runtimeFacts,
-                latest_host_sample: sample,
-                recent_host_samples: mergeRealtimeSamples(current.runtimeFacts.recent_host_samples ?? [], [sample]),
-              },
-            }
-          })
-        } catch {
-          setRuntimeStreamError('实时数据解析失败')
-        }
-      }
-      socket.onerror = () => {
-        if (closed) return
-        setRuntimeStreamError('实时连接异常')
-      }
-      socket.onclose = () => {
-        if (closed) return
-        setRuntimeStreamStatus('disconnected')
-        reconnectTimer = window.setTimeout(() => connect(true), RUNTIME_STREAM_RECONNECT_MS)
-      }
-    }
-
-    connect(false)
-
-    return () => {
-      closed = true
-      if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
-      socket?.close()
-      setRuntimeStreamStatus('idle')
-      setRuntimeStreamError(null)
-    }
-  }, [monitoringInstanceId, realtimeRuntimeFactsReady, timeWindow])
-
-  useEffect(() => {
-    let cancelled = false
-    if (!monitoringInstanceId) return
-
-    Promise.all([getMonitoringInstance(monitoringInstanceId), getMonitoringInstanceRuntimeFacts(monitoringInstanceId, 'realtime')])
-      .then(([monitoringInstance, runtimeFacts]) => {
-        if (cancelled) return
-        setRealtimeSamples((current) => mergeRealtimeSamples(current, realtimeSeedSamples(runtimeFacts)))
-        setState((current) => ({
-          ...current,
-          requestedMonitoringInstanceId: monitoringInstanceId,
-          error: null,
-          monitoringInstance,
-          runtimeFacts,
-        }))
-        setMetadataEditing(false)
-        setMetadataSubmitting(false)
-        setMetadataError(null)
-        setMetadataForm({
-          group: monitoringInstance.group || '',
-          labels: monitoringInstance.labels.join(', '),
-          note: monitoringInstance.note,
-        })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        const message =
-          error instanceof ApiError && error.status === 404
-            ? '监控实例不存在'
-            : describeError(error, '加载监控实例详情失败')
-        setState((current) => ({
-          ...current,
-          requestedMonitoringInstanceId: monitoringInstanceId,
-          error: message,
-          monitoringInstance: null,
-          runtimeFacts: null,
-        }))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [monitoringInstanceId])
-
-  useEffect(() => {
     const pendingTimerId = linkedVPSFetchRef.current.timerId
     if (pendingTimerId !== null) window.clearTimeout(pendingTimerId)
     linkedVPSFetchRef.current = {
@@ -472,7 +277,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       return
     }
     if (state.requestedMonitoringInstanceId !== monitoringInstanceId || !state.monitoringInstance) return
-    if (state.requestedActivityMonitoringInstanceId !== monitoringInstanceId) return
     if (
       state.monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS &&
       (
@@ -630,7 +434,8 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     linkedVPSInteractionBusy,
     monitoringInstanceId,
     state.monitoringInstance,
-    state.requestedActivityMonitoringInstanceId,
+    linkedVPSRetryKey,
+    bindingReloadKey,
     state.requestedMonitoringInstanceId,
   ])
 
@@ -692,38 +497,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     return () => {
       cancelled = true
     }
-  }, [monitoringInstanceId, state.monitoringInstance, state.requestedMonitoringInstanceId])
-
-  useEffect(() => {
-    let cancelled = false
-    if (!monitoringInstanceId) return
-
-    Promise.allSettled([
-      listIncidents({ object_type: 'monitoring_instance', object_id: monitoringInstanceId }),
-      listEvents({ object_type: 'monitoring_instance', object_id: monitoringInstanceId }),
-    ]).then(([incidentsResult, eventsResult]) => {
-      if (cancelled) return
-      setState((current) => ({
-        ...current,
-        requestedActivityMonitoringInstanceId: monitoringInstanceId,
-        incidents:
-          incidentsResult.status === 'fulfilled' ? incidentsResult.value : [],
-        incidentsError:
-          incidentsResult.status === 'fulfilled'
-            ? null
-            : describeError(incidentsResult.reason, '加载活跃异常失败'),
-        events: eventsResult.status === 'fulfilled' ? eventsResult.value : [],
-        eventsError:
-          eventsResult.status === 'fulfilled'
-            ? null
-            : describeError(eventsResult.reason, '加载相关事件失败'),
-      }))
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [monitoringInstanceId])
+  }, [monitoringInstanceId, state.monitoringInstance, state.requestedMonitoringInstanceId, bindingReloadKey])
 
   // Reset historical incidents when navigating between monitoring so the drawer never
   // shows stale data from the previous monitoringInstance when reopened.
@@ -802,8 +576,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
               : prev,
           )
         })
-        .catch(() => {
-          // Silent — polling failures should not surface to the user.
+        .catch((error: unknown) => {
+          if (cancelled) return
+          setCommandPollError(describeError(error, '刷新命令执行状态失败'))
         })
     }, 3000)
 
@@ -815,14 +590,16 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
 
   const missingMonitoringInstanceId = !monitoringInstanceId
   const isCurrentMonitoringInstance = state.requestedMonitoringInstanceId === monitoringInstanceId
-  const hasCurrentMonitoringActivity = state.requestedActivityMonitoringInstanceId === monitoringInstanceId
   const error = isCurrentMonitoringInstance ? state.error : null
   const monitoringInstance = isCurrentMonitoringInstance ? state.monitoringInstance : null
-  const runtimeFacts = isCurrentMonitoringInstance ? state.runtimeFacts : null
-  const incidents = hasCurrentMonitoringActivity ? state.incidents : []
-  const incidentsError = hasCurrentMonitoringActivity ? state.incidentsError : null
-  const events = hasCurrentMonitoringActivity ? state.events : []
-  const eventsError = hasCurrentMonitoringActivity ? state.eventsError : null
+  const windowReady = loadedTimeWindow === timeWindow
+  const runtimeFacts = windowReady ? state.runtimeFacts : null
+  const incidents = state.requestedIncidentsMonitoringInstanceId === monitoringInstanceId ? state.incidents : []
+  const incidentsError = state.requestedIncidentsMonitoringInstanceId === monitoringInstanceId ? state.incidentsError : null
+  const incidentsLoaded = state.requestedIncidentsMonitoringInstanceId === monitoringInstanceId
+  const events = state.requestedEventsMonitoringInstanceId === monitoringInstanceId ? state.events : []
+  const eventsError = state.requestedEventsMonitoringInstanceId === monitoringInstanceId ? state.eventsError : null
+  const eventsLoaded = state.requestedEventsMonitoringInstanceId === monitoringInstanceId
   const linkedVPS =
     linkedVPSState.requestedMonitoringInstanceId === monitoringInstanceId ? linkedVPSState.records : []
   const linkedVPSLoading =
@@ -835,7 +612,25 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   async function handleRuntimeAction(action: MonitoringInstanceRuntimeAction, confirmed = false) {
     if (!monitoringInstance) return
     if (action === 'pause' && !confirmed) {
-      setPendingRuntimeConfirmation({ action })
+      setPendingRuntimeConfirmation({
+        action,
+        monitoringInstanceId: monitoringInstance.monitoring_instance_id,
+        displayName: monitoringInstance.display_name,
+        updatedAt: monitoringInstance.updated_at,
+        monitoringStatus: monitoringInstance.monitoring_status,
+      })
+      return
+    }
+    if (
+      action === 'pause' &&
+      confirmed &&
+      pendingRuntimeConfirmation &&
+      (
+        pendingRuntimeConfirmation.monitoringInstanceId !== monitoringInstance.monitoring_instance_id ||
+        pendingRuntimeConfirmation.updatedAt !== monitoringInstance.updated_at
+      )
+    ) {
+      setRuntimeError('实例已更新，请重新确认')
       return
     }
 
@@ -1012,6 +807,19 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     request: (targetMonitoringInstanceId: string) => Promise<MonitoringInstanceOnboardingState>,
   ) {
     if (!monitoringInstance || !bindingConflict || bindingConflictLoading) return
+    if (
+      pendingBindingConfirmation &&
+      (
+        pendingBindingConfirmation.monitoringInstanceId !== monitoringInstance.monitoring_instance_id ||
+        pendingBindingConfirmation.updatedAt !== monitoringInstance.updated_at
+      )
+    ) {
+      setBindingConflictState((current) => ({
+        ...current,
+        error: '实例已更新，请重新确认',
+      }))
+      return
+    }
     const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
     setBindingAction(action)
     setBindingConflictState((current) => ({
@@ -1030,6 +838,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
         return
       }
       applyOnboardingToMonitoringInstance(actionMonitoringInstanceId, nextOnboarding)
+      resetObservationEpoch()
       setPendingBindingConfirmation((current) => (current?.action === action ? null : current))
     } catch (error: unknown) {
       if (
@@ -1062,7 +871,12 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       requestedMonitoringInstanceId: monitoringInstance.monitoring_instance_id,
       error: null,
     }))
-    setPendingBindingConfirmation({ action })
+    setPendingBindingConfirmation({
+      action,
+      monitoringInstanceId: monitoringInstance.monitoring_instance_id,
+      displayName: monitoringInstance.display_name,
+      updatedAt: monitoringInstance.updated_at,
+    })
   }
 
   function cancelBindingConfirmation() {
@@ -1078,6 +892,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       <MonitoringDetailUnavailable
         message={error ?? '未找到监控实例'}
         returnVPSId={returnVPSId}
+        onRetry={retryRecord}
       />
     )
   }
@@ -1098,96 +913,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     setHistoryIncidentsError(null)
   }
 
-  function retryIncidents() {
-    if (!monitoringInstanceId) return
-    const actionId = monitoringInstanceId
-    const requestId = ++incidentsRetryRef.current
-    setIncidentsRetrying(true)
-    listIncidents({ object_type: 'monitoring_instance', object_id: actionId })
-      .then((records) => {
-        if (
-          !isMountedRef.current ||
-          currentRouteMonitoringInstanceIdRef.current !== actionId ||
-          incidentsRetryRef.current !== requestId
-        ) {
-          return
-        }
-        setState((current) => ({
-          ...current,
-          incidents: records,
-          incidentsError: null,
-        }))
-      })
-      .catch((error: unknown) => {
-        if (
-          !isMountedRef.current ||
-          currentRouteMonitoringInstanceIdRef.current !== actionId ||
-          incidentsRetryRef.current !== requestId
-        ) {
-          return
-        }
-        setState((current) => ({
-          ...current,
-          incidents: [],
-          incidentsError: describeError(error, '加载活跃异常失败'),
-        }))
-      })
-      .finally(() => {
-        if (
-          isMountedRef.current &&
-          currentRouteMonitoringInstanceIdRef.current === actionId &&
-          incidentsRetryRef.current === requestId
-        ) {
-          setIncidentsRetrying(false)
-        }
-      })
-  }
-
-  function retryEvents() {
-    if (!monitoringInstanceId) return
-    const actionId = monitoringInstanceId
-    const requestId = ++eventsRetryRef.current
-    setEventsRetrying(true)
-    listEvents({ object_type: 'monitoring_instance', object_id: actionId })
-      .then((records) => {
-        if (
-          !isMountedRef.current ||
-          currentRouteMonitoringInstanceIdRef.current !== actionId ||
-          eventsRetryRef.current !== requestId
-        ) {
-          return
-        }
-        setState((current) => ({
-          ...current,
-          events: records,
-          eventsError: null,
-        }))
-      })
-      .catch((error: unknown) => {
-        if (
-          !isMountedRef.current ||
-          currentRouteMonitoringInstanceIdRef.current !== actionId ||
-          eventsRetryRef.current !== requestId
-        ) {
-          return
-        }
-        setState((current) => ({
-          ...current,
-          events: [],
-          eventsError: describeError(error, '加载相关事件失败'),
-        }))
-      })
-      .finally(() => {
-        if (
-          isMountedRef.current &&
-          currentRouteMonitoringInstanceIdRef.current === actionId &&
-          eventsRetryRef.current === requestId
-        ) {
-          setEventsRetrying(false)
-        }
-      })
-  }
-
   function openHistory(tab: 'events' | 'incidents' = 'events') {
     setHistoryTab(tab)
     setHistoryOpen(true)
@@ -1198,9 +923,6 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }
 
   function handleTimeWindowChange(nextTimeWindow: TimeWindow) {
-    if (nextTimeWindow === 'realtime' && timeWindow !== 'realtime') {
-      setRealtimeSamples([])
-    }
     setTimeWindow(nextTimeWindow)
   }
 
@@ -1278,6 +1000,9 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }
 
   function applyManagementRecord(actionMonitoringInstanceId: string, updated: MonitoringInstanceRecord) {
+    // A review payload is authoritative only for the route it was requested for;
+    // anything else must never overwrite the identity rendered on this page.
+    if (updated?.monitoring_instance_id !== actionMonitoringInstanceId) return
     setState((current) => ({
       ...current,
       monitoringInstance:
@@ -1298,16 +1023,19 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       return
     }
 
+    const requestId = ++managementReviewRequestRef.current
     setManagementRequestedMonitoringInstanceId(actionMonitoringInstanceId)
     setManagementLoading(true)
     setManagementError(null)
+    if (force) setManagementReview(null)
 
     try {
       const review = await getMonitoringInstanceManagementReview(actionMonitoringInstanceId)
       if (
         !isMountedRef.current ||
         currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        managementReviewRequestRef.current !== requestId
       ) {
         return
       }
@@ -1317,7 +1045,8 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       if (
         !isMountedRef.current ||
         currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
+        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
+        managementReviewRequestRef.current !== requestId
       ) {
         return
       }
@@ -1326,7 +1055,8 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       if (
         isMountedRef.current &&
         currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
-        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId
+        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
+        managementReviewRequestRef.current === requestId
       ) {
         setManagementLoading(false)
       }
@@ -1418,7 +1148,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       ) {
         return
       }
-      navigate('/monitoring')
+      navigate(resolveMonitoringListHref(location.state), { state: location.state })
     } catch (error: unknown) {
       if (
         !isMountedRef.current ||
@@ -1443,6 +1173,18 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     <MonitoringDetailPageBody
       monitoringInstance={monitoringInstance}
       runtimeFacts={runtimeFacts}
+      latestSample={latestSample}
+      snapshotReadAt={snapshotReadAt}
+      heartbeatFreshness={classifyHeartbeatFreshness(
+        monitoringInstance.last_heartbeat_at,
+        heartbeatPolicy,
+        snapshotReadAt ?? new Date(0),
+        Boolean(settingsResolved && snapshotReadAt),
+      )}
+      runtimeFactsError={runtimeFactsError}
+      runtimeFactsLoading={runtimeFactsLoading}
+      onRetryRuntimeFacts={retryRuntime}
+      onRetrySettings={retrySettings}
       runtimeSubmitting={runtimeSubmitting}
       runtimeError={runtimeError}
       pendingRuntimeConfirmation={pendingRuntimeConfirmation}
@@ -1469,7 +1211,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onMetadataStartEdit={startMetadataEdit}
       onMetadataCancelEdit={cancelMetadataEdit}
       onMetadataSubmit={(event) => void handleMetadataSave(event)}
-      onManagementLoadReview={() => void loadManagementReview()}
+      onManagementLoadReview={(force) => void loadManagementReview(force)}
       onManagementRetire={handleManagementRetire}
       onManagementRestoreLifecycle={handleManagementRestoreLifecycle}
       onManagementArchive={handleManagementArchive}
@@ -1479,11 +1221,36 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       incidentsError={incidentsError}
       events={events}
       eventsError={eventsError}
-      activityLoaded={hasCurrentMonitoringActivity}
+      incidentsLoaded={incidentsLoaded}
+      eventsLoaded={eventsLoaded}
       incidentsRetrying={incidentsRetrying}
       eventsRetrying={eventsRetrying}
       onRetryIncidents={retryIncidents}
       onRetryEvents={retryEvents}
+      onRetryBindingConflict={() => setBindingReloadKey((key) => key + 1)}
+      onRetryLinkedVPS={() => {
+        linkedVPSFetchRef.current = {
+          ...linkedVPSFetchRef.current,
+          fetched: false,
+          inFlight: false,
+          scheduled: false,
+        }
+        setLinkedVPSRetryKey((key) => key + 1)
+      }}
+      commandPollError={commandPollError}
+      onRetryCommandPoll={() => {
+        setCommandPollError(null)
+        if (!monitoringInstanceId) return
+        getMonitoringInstance(monitoringInstanceId)
+          .then((updated) => {
+            setState((prev) =>
+              prev.requestedMonitoringInstanceId === monitoringInstanceId && prev.monitoringInstance
+                ? { ...prev, monitoringInstance: mergeNonMetadataMonitoringInstanceRecord(prev.monitoringInstance, updated) }
+                : prev,
+            )
+          })
+          .catch((error: unknown) => setCommandPollError(describeError(error, '刷新命令执行状态失败')))
+      }}
       linkedVPS={linkedVPS}
       linkedVPSLoading={linkedVPSLoading}
       linkedVPSLoaded={linkedVPSLoaded}
@@ -1523,6 +1290,12 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onboardingReturnVPSId={returnVPSId}
       onOpenOnboarding={openOnboardingDrawer}
       onCloseOnboarding={closeOnboardingDrawer}
+      onRefresh={() => {
+        retryRecord()
+        retryRuntime()
+        retryIncidents()
+        retryEvents()
+      }}
     />
   )
 }

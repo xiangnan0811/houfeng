@@ -22,12 +22,13 @@
       "src/styles/partials/vps-overview-freshness.css"
     ],
     "observability": [
+      "src/pages/monitoring-detail/MonitoringDetailWorkspace.css",
       "src/styles/partials/legacy-batch.css",
       "src/styles/partials/legacy-compare.css",
       "src/styles/partials/legacy-events.css",
       "src/styles/partials/legacy-monitoring.css",
-      "src/styles/partials/legacy-onboarding.css",
       "src/styles/partials/legacy-observability.css",
+      "src/styles/partials/legacy-onboarding.css",
       "src/styles/partials/legacy-targets.css"
     ],
     "settings-subscriptions": [

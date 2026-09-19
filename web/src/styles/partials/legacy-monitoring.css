@@ -62,3 +62,40 @@
 .probe-observations-scroller:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .probe-observations-scroller .data-table{width:max-content;min-width:100%}
 .probe-observations-scroller .data-table__head th,.probe-observations-scroller .data-table__cell{white-space:nowrap}
+
+
+/* monitoring detail workbench */
+.watchtower-identity .page__actions{align-items:flex-start}
+.watchtower-identity .watchtower-actions-menu__panel{max-width:min(18rem,calc(100vw - 24px));max-height:min(45vh,20rem);overflow:auto;overscroll-behavior:contain}
+.watchtower-actions-menu__panel button:focus-visible,.watchtower-actions-menu__item:focus-visible,.watchtower-actions-menu>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.watchtower-metric-group{display:flex;flex-direction:column;gap:var(--space-2);min-width:0;padding:var(--space-3);background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2)}
+.watchtower-metric-group__title{margin:0;font-family:var(--font-sans);font-size:15px;font-weight:600;line-height:1.3;color:var(--text-primary)}
+.watchtower-metric-group__head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2);min-width:0}
+  .watchtower-metric-group__network{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
+  .watchtower-metric-facts__source dt{font-weight:500;color:var(--text-secondary)}
+.watchtower-metric-plot{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
+.watchtower-metric-plot__head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2)}
+.watchtower-metric-plot__head h3{margin:0;font-family:var(--font-sans);font-size:13px;font-weight:600;color:var(--text-secondary)}
+.watchtower-metric-plot__current{display:inline-flex;align-items:baseline;gap:6px;flex-wrap:wrap;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:13px;color:var(--text-primary)}
+.watchtower-metric-plot__current-label{font-family:var(--font-sans);font-size:12px;font-weight:500;color:var(--text-secondary)}
+.watchtower-metric-facts{margin:0;display:flex;flex-wrap:wrap;gap:var(--space-2) var(--space-3);font-size:13px;color:var(--text-secondary)}
+.watchtower-metric-facts div{display:inline}
+.watchtower-metric-facts dt{display:inline}
+.watchtower-metric-facts dd{display:inline;margin:0 0 0 4px;color:var(--text-primary)}
+.watchtower-metrics > .watchtower-metric-aux{grid-column:1/-1}
+.watchtower-metric-aux{margin:0;min-width:0}
+.watchtower-metric-aux > summary{cursor:pointer;list-style:none;font-size:13px;font-weight:500;line-height:1.4;color:var(--text-primary);min-height:var(--control-min-height);display:flex;align-items:center;padding:0;user-select:none}
+.watchtower-metric-aux > summary::-webkit-details-marker{display:none}
+.watchtower-metric-aux > summary::before{content:'▸';display:inline-block;margin-right:var(--space-2);color:var(--text-muted)}
+.watchtower-metric-aux[open] > summary::before{transform:rotate(90deg)}
+.watchtower-metric-aux > summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.watchtower-metric-aux[open]{display:flex;flex-direction:column;gap:var(--space-2)}
+.watchtower-metrics .metric-chart__axis-text{font-size:12px;fill:var(--text-secondary)}
+.watchtower-metrics .metric-chart__threshold-label{font-size:11px}
+@media (max-width:1024px){
+  .watchtower-identity .page__actions{max-width:100%}
+}
+@media (max-width:390px){
+  .watchtower-identity .page__actions{justify-content:flex-start}
+  .watchtower-identity .watchtower-actions-menu__panel{left:0;right:auto}
+}

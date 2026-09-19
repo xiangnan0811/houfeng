@@ -9,11 +9,6 @@ type MonitoringInstancesTrendCellProps = {
   thresholds: MetricThresholds | null
 }
 
-type TrendSegment = {
-  start: number
-  values: number[]
-}
-
 const METRICS = [
   { key: 'cpu_usage_pct', label: 'CPU' },
   { key: 'mem_used_pct', label: '内存' },
@@ -27,24 +22,6 @@ function lastNonNull(values: Array<number | null | undefined> | undefined): numb
     if (value != null && !Number.isNaN(value)) return value
   }
   return null
-}
-
-function trendSegments(values: Array<number | null | undefined>): TrendSegment[] {
-  const segments: TrendSegment[] = []
-  let current: TrendSegment | null = null
-  values.forEach((value, index) => {
-    if (value == null || Number.isNaN(value)) {
-      current = null
-      return
-    }
-    if (!current) {
-      current = { start: index, values: [value] }
-      segments.push(current)
-      return
-    }
-    current.values.push(value)
-  })
-  return segments
 }
 
 function seriesDomain(values: Array<number | null | undefined>): { min: number; max: number } | undefined {
@@ -92,8 +69,6 @@ export function MonitoringInstancesTrendCell({
         const latest = lastNonNull(values)
         const threshold = thresholdForKey(thresholds, metric.key)
         const tone = toneFromThreshold(latest, threshold)
-        const segments = trendSegments(values)
-        const bucketCount = Math.max(values.length, 1)
         const domain = seriesDomain(values)
         return (
           <span
@@ -105,22 +80,14 @@ export function MonitoringInstancesTrendCell({
             <span className="monitoring-table__trend-value">
               {latest != null ? <MonoDigits>{formatPercent(latest)}</MonoDigits> : '—'}
             </span>
-            {segments.length === 0 ? (
+            {latest == null ? (
               <span className="monitoring-table__trends-empty">—</span>
             ) : (
               <span className="monitoring-table__trend-track">
-                {segments.map((segment) => (
-                  <span
-                    key={`${metric.key}-${segment.start}`}
-                    className="monitoring-table__trend-segment"
-                    style={{
-                      left: `${(segment.start / bucketCount) * 100}%`,
-                      width: `${(segment.values.length / bucketCount) * 100}%`,
-                    }}
-                  >
-                    <Sparkline values={segment.values} tone={tone} width={120} height={16} expand {...(domain ? { domain } : {})} />
-                  </span>
-                ))}
+                {/* One sparkline over the full bucket series: a null bucket keeps its
+                    position and breaks the line, so no per-segment positioning is
+                    needed (and none of it depends on an inline style attribute). */}
+                <Sparkline values={values} tone={tone} width={120} height={16} expand {...(domain ? { domain } : {})} />
               </span>
             )}
           </span>

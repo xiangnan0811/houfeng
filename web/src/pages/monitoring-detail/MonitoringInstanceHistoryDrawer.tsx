@@ -13,6 +13,7 @@ type MonitoringInstanceHistoryDrawerProps = {
   tab: HistoryTab
   events: StateChangeEventRecord[]
   eventsError: string | null
+  onRetryEvents?: () => void
   historyIncidents: ActiveIncidentRecord[] | null
   historyIncidentsLoading: boolean
   historyIncidentsError: string | null
@@ -27,6 +28,7 @@ export function MonitoringInstanceHistoryDrawer({
   tab,
   events,
   eventsError,
+  onRetryEvents,
   historyIncidents,
   historyIncidentsLoading,
   historyIncidentsError,
@@ -55,6 +57,9 @@ export function MonitoringInstanceHistoryDrawer({
             <div className="empty-state">
               <h3>事件时间线暂不可用</h3>
               <p>{eventsError}</p>
+              {onRetryEvents ? (
+                <Button variant="secondary" size="sm" onClick={onRetryEvents}>重试</Button>
+              ) : null}
             </div>
           ) : events.length === 0 ? (
             <div className="empty-state">

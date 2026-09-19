@@ -23,48 +23,57 @@ const runtimeFactsMonitoringInstanceExistsSQL = `
 
 const runtimeFactsLatestHostSampleSQL = `
 		select
-			monitoring_instance_id,
-			observed_at,
-			received_at,
-			agent_version,
-			fingerprint,
-			cpu_usage_pct,
-			load_1,
-			load_5,
-			load_15,
-			mem_used_pct,
-			mem_available_bytes,
-			mem_total_bytes,
-			swap_used_pct,
-			disk_used_pct,
-			disk_total_bytes,
-			inode_used_pct,
-			net_in_bytes_per_sec,
-			net_out_bytes_per_sec,
-			cpu_iowait_pct,
-			cpu_steal_pct,
-			disk_read_bytes_per_sec,
-			disk_write_bytes_per_sec,
-			disk_busy_pct,
-			uptime_seconds,
-			maintenance_context,
-			is_backfilled,
-			sync_batch_id,
-			containers
-		from host_samples
-		where monitoring_instance_id = $1
-		order by observed_at desc, is_backfilled asc, received_at desc, id desc
+			hs.monitoring_instance_id,
+			hs.observed_at,
+			hs.received_at,
+			hs.agent_version,
+			hs.fingerprint,
+			hs.cpu_usage_pct,
+			hs.load_1,
+			hs.load_5,
+			hs.load_15,
+			hs.mem_used_pct,
+			hs.mem_available_bytes,
+			hs.mem_total_bytes,
+			hs.swap_used_pct,
+			hs.disk_used_pct,
+			hs.disk_total_bytes,
+			hs.inode_used_pct,
+			hs.net_in_bytes_per_sec,
+			hs.net_out_bytes_per_sec,
+			hs.network_rates_valid,
+			hs.cpu_iowait_pct,
+			hs.cpu_steal_pct,
+			hs.disk_read_bytes_per_sec,
+			hs.disk_write_bytes_per_sec,
+			hs.disk_busy_pct,
+			hs.uptime_seconds,
+			hs.maintenance_context,
+			hs.is_backfilled,
+			hs.sync_batch_id,
+			hs.containers
+		from host_samples hs
+		join monitoring_instances mi on mi.monitoring_instance_id = hs.monitoring_instance_id
+		where hs.monitoring_instance_id = $1
+			and coalesce(mi.binding_fingerprint, '') <> ''
+			and mi.binding_epoch_started_at is not null
+			and hs.fingerprint = mi.binding_fingerprint
+			and hs.received_at >= mi.binding_epoch_started_at
+			and hs.observed_at <= $2
+			and hs.received_at <= $2
+		order by hs.observed_at desc, hs.is_backfilled asc, hs.received_at desc, hs.id desc
 		limit 1`
 
 const runtimeFactsHostSampleWindowSummarySQL = `
 			select
 				min(observed_at),
-			max(observed_at),
-			count(*)::integer
-		from host_samples
-		where monitoring_instance_id = $1
-			and observed_at >= $2
-			and observed_at <= $3`
+				max(observed_at),
+				count(*)::integer
+			from host_samples
+			where monitoring_instance_id = $1
+				and observed_at >= $2
+				and observed_at <= $3
+				and received_at <= $4`
 
 const runtimeFactsHostMetricPointsSQL = `
 		with bucketed as (
@@ -80,28 +89,41 @@ const runtimeFactsHostMetricPointsSQL = `
 				load_5,
 				cpu_iowait_pct,
 				net_in_bytes_per_sec,
-				net_out_bytes_per_sec
+				net_out_bytes_per_sec,
+				network_rates_valid,
+				load_1,
+				load_15,
+				swap_used_pct,
+				disk_busy_pct,
+				disk_read_bytes_per_sec,
+				disk_write_bytes_per_sec
 			from host_samples
 			where monitoring_instance_id = $1
 				and observed_at >= $2
 				and observed_at <= $3
+				and received_at <= $6
 		)
 		select
-			to_timestamp(extract(epoch from $2::timestamptz) + (bucket::double precision * $5::double precision))::timestamptz as observed_at,
-			count(*)::integer as sample_count,
-			avg(cpu_usage_pct)::double precision,
-			avg(mem_used_pct)::double precision,
-			avg(disk_used_pct)::double precision,
-			avg(inode_used_pct)::double precision,
-			avg(load_5)::double precision,
-			avg(cpu_iowait_pct)::double precision,
-			avg(net_in_bytes_per_sec)::double precision,
-			avg(net_out_bytes_per_sec)::double precision
-		from bucketed
-		where bucket >= 0
-			and bucket < $4
-		group by bucket
-		order by bucket asc`
+			to_timestamp(extract(epoch from $2::timestamptz) + (buckets.bucket::double precision * $5::double precision))::timestamptz as observed_at,
+			count(bucketed.bucket)::integer as sample_count,
+			avg(bucketed.cpu_usage_pct)::double precision,
+			avg(bucketed.mem_used_pct)::double precision,
+			avg(bucketed.disk_used_pct)::double precision,
+			avg(bucketed.inode_used_pct)::double precision,
+			avg(bucketed.load_5)::double precision,
+			avg(bucketed.cpu_iowait_pct)::double precision,
+			avg(bucketed.net_in_bytes_per_sec) filter (where bucketed.network_rates_valid is true)::double precision,
+			avg(bucketed.net_out_bytes_per_sec) filter (where bucketed.network_rates_valid is true)::double precision,
+			avg(bucketed.load_1)::double precision,
+			avg(bucketed.load_15)::double precision,
+			avg(bucketed.swap_used_pct)::double precision,
+			avg(bucketed.disk_busy_pct)::double precision,
+			avg(bucketed.disk_read_bytes_per_sec)::double precision,
+			avg(bucketed.disk_write_bytes_per_sec)::double precision
+		from generate_series(0, $4 - 1) as buckets(bucket)
+		left join bucketed on bucketed.bucket = buckets.bucket
+		group by buckets.bucket
+		order by buckets.bucket asc`
 
 const runtimeFactsRecentHostSamplesSQL = `
 		select
@@ -123,6 +145,7 @@ const runtimeFactsRecentHostSamplesSQL = `
 			inode_used_pct,
 			net_in_bytes_per_sec,
 			net_out_bytes_per_sec,
+			network_rates_valid,
 			cpu_iowait_pct,
 			cpu_steal_pct,
 			disk_read_bytes_per_sec,
@@ -137,7 +160,8 @@ const runtimeFactsRecentHostSamplesSQL = `
 		where monitoring_instance_id = $1
 			and observed_at >= $2
 			and observed_at <= $3
-		order by observed_at asc, id asc`
+			and received_at <= $4
+		order by observed_at asc, is_backfilled asc, received_at asc, id asc`
 
 const runtimeFactsTargetExistsSQL = `
 		select 1
@@ -235,6 +259,7 @@ func (r *PostgresRuntimeFactsRepository) GetMonitoringInstanceRuntimeFacts(ctx c
 	if window.BucketCount <= 0 || !window.EndedAt.After(window.StartedAt) {
 		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("invalid monitoring runtime window %q", window.Key)
 	}
+	readAt := time.Now().UTC()
 
 	var exists int
 	if err := r.db.QueryRow(ctx, runtimeFactsMonitoringInstanceExistsSQL, monitoringInstanceID).Scan(&exists); errors.Is(err, pgx.ErrNoRows) {
@@ -245,29 +270,30 @@ func (r *PostgresRuntimeFactsRepository) GetMonitoringInstanceRuntimeFacts(ctx c
 
 	facts := runtimefacts.MonitoringInstanceRuntimeFacts{
 		MonitoringInstanceID: monitoringInstanceID,
+		ReadAt:               readAt,
 		Window: runtimefacts.RuntimeWindowSummary{
 			Key:         window.Key,
 			StartedAt:   window.StartedAt,
 			EndedAt:     window.EndedAt,
 			BucketCount: window.BucketCount,
 		},
-		HostMetricPoints:  make([]runtimefacts.HostMetricPoint, 0),
+		HostMetricPoints:  make([]runtimefacts.HostMetricPoint, 0, window.BucketCount),
 		RecentHostSamples: make([]runtimefacts.HostSample, 0),
 	}
 	var latest runtimefacts.HostSample
-	if err := scanHostSample(r.db.QueryRow(ctx, runtimeFactsLatestHostSampleSQL, monitoringInstanceID), &latest); errors.Is(err, pgx.ErrNoRows) {
+	if err := scanHostSample(r.db.QueryRow(ctx, runtimeFactsLatestHostSampleSQL, monitoringInstanceID, readAt), &latest); errors.Is(err, pgx.ErrNoRows) {
 	} else if err != nil {
 		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("query latest host sample for monitoring instance %q: %w", monitoringInstanceID, err)
 	} else {
 		facts.LatestHostSample = &latest
 	}
 
-	if err := scanRuntimeWindowSummary(r.db.QueryRow(ctx, runtimeFactsHostSampleWindowSummarySQL, monitoringInstanceID, window.StartedAt, window.EndedAt), &facts.Window); err != nil {
+	if err := scanRuntimeWindowSummary(r.db.QueryRow(ctx, runtimeFactsHostSampleWindowSummarySQL, monitoringInstanceID, window.StartedAt, window.EndedAt, readAt), &facts.Window); err != nil {
 		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("query host sample window summary for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	bucketSeconds := window.EndedAt.Sub(window.StartedAt).Seconds() / float64(window.BucketCount)
-	rows, err := r.db.Query(ctx, runtimeFactsHostMetricPointsSQL, monitoringInstanceID, window.StartedAt, window.EndedAt, window.BucketCount, bucketSeconds)
+	rows, err := r.db.Query(ctx, runtimeFactsHostMetricPointsSQL, monitoringInstanceID, window.StartedAt, window.EndedAt, window.BucketCount, bucketSeconds, readAt)
 	if err != nil {
 		return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("query host metric points for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
@@ -284,7 +310,7 @@ func (r *PostgresRuntimeFactsRepository) GetMonitoringInstanceRuntimeFacts(ctx c
 	}
 
 	if window.Key == "realtime" {
-		recentRows, err := r.db.Query(ctx, runtimeFactsRecentHostSamplesSQL, monitoringInstanceID, window.StartedAt, window.EndedAt)
+		recentRows, err := r.db.Query(ctx, runtimeFactsRecentHostSamplesSQL, monitoringInstanceID, window.StartedAt, window.EndedAt, readAt)
 		if err != nil {
 			return runtimefacts.MonitoringInstanceRuntimeFacts{}, fmt.Errorf("query recent host samples for monitoring instance %q: %w", monitoringInstanceID, err)
 		}
@@ -377,22 +403,72 @@ func scanRuntimeWindowSummary(scanner runtimeFactsScanner, summary *runtimefacts
 }
 
 func scanHostMetricPoint(scanner runtimeFactsScanner, point *runtimefacts.HostMetricPoint) error {
-	return scanner.Scan(
+	var (
+		cpuUsagePct       sql.NullFloat64
+		memUsedPct        sql.NullFloat64
+		diskUsedPct       sql.NullFloat64
+		inodeUsedPct      sql.NullFloat64
+		load5             sql.NullFloat64
+		cpuIOWaitPct         sql.NullFloat64
+		netInBytesPerSec     sql.NullFloat64
+		netOutBytesPerSec    sql.NullFloat64
+		load1                sql.NullFloat64
+		load15               sql.NullFloat64
+		swapUsedPct          sql.NullFloat64
+		diskBusyPct          sql.NullFloat64
+		diskReadBytesPerSec  sql.NullFloat64
+		diskWriteBytesPerSec sql.NullFloat64
+	)
+	if err := scanner.Scan(
 		&point.ObservedAt,
 		&point.SampleCount,
-		&point.CPUUsagePct,
-		&point.MemUsedPct,
-		&point.DiskUsedPct,
-		&point.InodeUsedPct,
-		&point.Load5,
-		&point.CPUIOWaitPct,
-		&point.NetInBytesPerSec,
-		&point.NetOutBytesPerSec,
-	)
+		&cpuUsagePct,
+		&memUsedPct,
+		&diskUsedPct,
+		&inodeUsedPct,
+		&load5,
+		&cpuIOWaitPct,
+		&netInBytesPerSec,
+		&netOutBytesPerSec,
+		&load1,
+		&load15,
+		&swapUsedPct,
+		&diskBusyPct,
+		&diskReadBytesPerSec,
+		&diskWriteBytesPerSec,
+	); err != nil {
+		return err
+	}
+	point.CPUUsagePct = nullableFloat64Ptr(cpuUsagePct)
+	point.MemUsedPct = nullableFloat64Ptr(memUsedPct)
+	point.DiskUsedPct = nullableFloat64Ptr(diskUsedPct)
+	point.InodeUsedPct = nullableFloat64Ptr(inodeUsedPct)
+	point.Load5 = nullableFloat64Ptr(load5)
+	point.CPUIOWaitPct = nullableFloat64Ptr(cpuIOWaitPct)
+	point.NetInBytesPerSec = nullableFloat64Ptr(netInBytesPerSec)
+	point.NetOutBytesPerSec = nullableFloat64Ptr(netOutBytesPerSec)
+	point.Load1 = nullableFloat64Ptr(load1)
+	point.Load15 = nullableFloat64Ptr(load15)
+	point.SwapUsedPct = nullableFloat64Ptr(swapUsedPct)
+	point.DiskBusyPct = nullableFloat64Ptr(diskBusyPct)
+	point.DiskReadBytesPerSec = nullableFloat64Ptr(diskReadBytesPerSec)
+	point.DiskWriteBytesPerSec = nullableFloat64Ptr(diskWriteBytesPerSec)
+	return nil
+}
+
+func nullableFloat64Ptr(value sql.NullFloat64) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	result := value.Float64
+	return &result
 }
 
 func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample) error {
-	var containersJSON []byte
+	var (
+		networkRatesValid sql.NullBool
+		containersJSON    []byte
+	)
 	if err := scanner.Scan(
 		&sample.MonitoringInstanceID,
 		&sample.ObservedAt,
@@ -412,6 +488,7 @@ func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample
 		&sample.InodeUsedPct,
 		&sample.NetInBytesPerSec,
 		&sample.NetOutBytesPerSec,
+		&networkRatesValid,
 		&sample.CPUIOWaitPct,
 		&sample.CPUStealPct,
 		&sample.DiskReadBytesPerSec,
@@ -424,6 +501,10 @@ func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample
 		&containersJSON,
 	); err != nil {
 		return err
+	}
+	if networkRatesValid.Valid {
+		value := networkRatesValid.Bool
+		sample.NetworkRatesValid = &value
 	}
 	if len(containersJSON) > 0 {
 		_ = json.Unmarshal(containersJSON, &sample.Containers)

@@ -77,7 +77,18 @@ describe('MonitoringInstancesTrendCell', () => {
         thresholds={null}
       />,
     )
-    expect(container.querySelectorAll('.monitoring-table__trend-segment')).toHaveLength(3)
+    // One sparkline per metric, no positioned segment wrappers, no inline styles.
+    const tracks = [...container.querySelectorAll('.monitoring-table__trend-track')]
+    expect(tracks).toHaveLength(2)
+    expect(container.querySelectorAll('.monitoring-table__trend-segment')).toHaveLength(0)
+    expect(container.querySelectorAll('.monitoring-table__trend-track [style]')).toHaveLength(0)
+
+    // [10, null, 20] keeps the gap: two separate polylines, never one joined line.
+    const cpuPolylines = [...tracks[0]!.querySelectorAll('polyline')]
+    expect(cpuPolylines).toHaveLength(2)
+    // [40] is a single bucket: no line, just the point marker.
+    expect(tracks[1]!.querySelectorAll('polyline')).toHaveLength(0)
+    expect(tracks[1]!.querySelectorAll('circle')).toHaveLength(1)
     expect(container.querySelectorAll('svg.sparkline--alert')).toHaveLength(0)
   })
 
@@ -98,23 +109,26 @@ describe('MonitoringInstancesTrendCell', () => {
         thresholds={null}
       />,
     )
-    const tracks = [...container.querySelectorAll('.monitoring-table__trend-item')]
-    expect(tracks.length).toBeGreaterThanOrEqual(2)
-    const cpuTrack = tracks[0] as HTMLElement
-    const cpuSegments = [...cpuTrack.querySelectorAll('.monitoring-table__trend-segment')]
-    expect(cpuSegments).toHaveLength(2)
-    expect(cpuSegments[0]?.getAttribute('style')).toContain('left: 0%')
-    expect(cpuSegments[1]?.getAttribute('style')).toMatch(/left: 66\.6/)
-    const yLow = Number(cpuSegments[0]?.querySelector('circle')?.getAttribute('cy'))
-    const yHigh = Number(cpuSegments[1]?.querySelector('circle')?.getAttribute('cy'))
-    expect(yHigh).toBeLessThan(yLow - 4)
+    const items = [...container.querySelectorAll('.monitoring-table__trend-item')]
+    expect(items.length).toBeGreaterThanOrEqual(2)
 
-    const memTrack = tracks[1] as HTMLElement
-    const memSegments = [...memTrack.querySelectorAll('.monitoring-table__trend-segment')]
-    expect(memSegments).toHaveLength(2)
-    const yZero = Number(memSegments[0]?.querySelector('circle')?.getAttribute('cy'))
-    const yPeak = Number(memSegments[1]?.querySelector('circle')?.getAttribute('cy'))
-    expect(yPeak).toBeLessThan(yZero - 4)
+    // Gapped buckets keep their own x position: bucket 0 at 0, bucket 2 at the far edge.
+    const cpuTrack = items[0]!.querySelector('.monitoring-table__trend-track') as HTMLElement
+    const cpuPolylines = [...cpuTrack.querySelectorAll('polyline')]
+    expect(cpuPolylines).toHaveLength(2)
+    const cpuXs = cpuPolylines.map((line) => Number((line.getAttribute('points') ?? '').split(' ')[0]?.split(',')[0]))
+    expect(cpuXs[0]).toBe(0)
+    expect(cpuXs[1]).toBeCloseTo(120, 0)
+    const cpuYs = cpuPolylines.map((line) => Number((line.getAttribute('points') ?? '').split(' ')[0]?.split(',')[1]))
+    // Both metrics share the full-series domain, so the higher value sits higher.
+    expect(cpuYs[1]).toBeLessThan(cpuYs[0]! - 4)
+
+    const memTrack = items[1]!.querySelector('.monitoring-table__trend-track') as HTMLElement
+    const memYs = [...memTrack.querySelectorAll('polyline')].map(
+      (line) => Number((line.getAttribute('points') ?? '').split(' ')[0]?.split(',')[1]),
+    )
+    expect(memYs).toHaveLength(2)
+    expect(memYs[1]).toBeLessThan(memYs[0]! - 4)
 
     expect(screen.getByLabelText('磁盘 24小时历史 48.0%')).toBeInTheDocument()
   })

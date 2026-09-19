@@ -234,6 +234,7 @@ export type HostSample = {
   inode_used_pct: number
   net_in_bytes_per_sec: number
   net_out_bytes_per_sec: number
+  network_rates_valid?: boolean | null
   cpu_iowait_pct: number
   cpu_steal_pct: number
   disk_read_bytes_per_sec: number
@@ -259,14 +260,20 @@ export type MonitoringRuntimeWindow = {
 export type HostMetricPoint = {
   observed_at: string
   sample_count: number
-  cpu_usage_pct: number
-  mem_used_pct: number
-  disk_used_pct: number
-  inode_used_pct: number
-  load_5: number
-  cpu_iowait_pct: number
-  net_in_bytes_per_sec: number
-  net_out_bytes_per_sec: number
+  cpu_usage_pct: number | null
+  mem_used_pct: number | null
+  disk_used_pct: number | null
+  inode_used_pct: number | null
+  load_5: number | null
+  cpu_iowait_pct: number | null
+  net_in_bytes_per_sec: number | null
+  net_out_bytes_per_sec: number | null
+  load_1?: number | null
+  load_15?: number | null
+  swap_used_pct?: number | null
+  disk_busy_pct?: number | null
+  disk_read_bytes_per_sec?: number | null
+  disk_write_bytes_per_sec?: number | null
 }
 
 export type HostSampleStreamMessage = {
@@ -278,6 +285,7 @@ export type HostSampleStreamMessage = {
 
 export type MonitoringInstanceRuntimeFacts = {
   monitoring_instance_id: string
+  read_at?: string
   window?: MonitoringRuntimeWindow
   latest_host_sample: HostSample | null
   host_metric_points?: HostMetricPoint[]

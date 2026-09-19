@@ -6,9 +6,10 @@ import { resolveMonitoringListHref } from '../monitoring/monitoringListUrl'
 type MonitoringDetailUnavailableProps = {
   message: string
   returnVPSId?: string | null
+  onRetry?: () => void
 }
 
-export function MonitoringDetailUnavailable({ message, returnVPSId = null }: MonitoringDetailUnavailableProps) {
+export function MonitoringDetailUnavailable({ message, returnVPSId = null, onRetry }: MonitoringDetailUnavailableProps) {
   const location = useLocation()
   const listHref = resolveMonitoringListHref(location.state)
 
@@ -20,24 +21,29 @@ export function MonitoringDetailUnavailable({ message, returnVPSId = null }: Mon
       description={message}
       technicalSummary={message}
       action={
-        returnVPSId ? (
-          <>
-            <Link
-              className="text-link"
-              to={`/vps/${encodeURIComponent(returnVPSId)}`}
-              state={location.state}
-            >
-              返回来源 VPS
-            </Link>
+        <>
+          {onRetry ? (
+            <button type="button" className="btn md ghost" onClick={onRetry}>重试</button>
+          ) : null}
+          {returnVPSId ? (
+            <>
+              <Link
+                className="text-link"
+                to={`/vps/${encodeURIComponent(returnVPSId)}`}
+                state={location.state}
+              >
+                返回来源 VPS
+              </Link>
+              <Link className="text-link" to={listHref} state={location.state}>
+                返回监控实例列表
+              </Link>
+            </>
+          ) : (
             <Link className="text-link" to={listHref} state={location.state}>
               返回监控实例列表
             </Link>
-          </>
-        ) : (
-          <Link className="text-link" to={listHref} state={location.state}>
-            返回监控实例列表
-          </Link>
-        )
+          )}
+        </>
       }
     />
   )

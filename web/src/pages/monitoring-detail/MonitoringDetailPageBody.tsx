@@ -1,18 +1,16 @@
-import type { FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   MonitoringInstanceWatchtowerHeader,
-  MonitoringInstanceWatchtowerMetrics,
   type MonitoringInstanceRuntimeAction,
 } from '../../components/monitoring-detail'
-import {
-  TargetActiveIncidents,
-  TargetRecentEvents,
-} from '../../components/target-detail'
+import { Button } from '../../components/atoms/Button'
 import { COMMAND_LABELS, COMMAND_LIST } from '../../config/commands'
 import type { MetricThresholds } from '../../config/thresholds'
+import type { HeartbeatFreshness } from '../monitoring/types'
+import { hostSampleToMetricPoint } from './runtimeObservation'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
-import { MonoDigits } from '../../components/atoms/Mono'
 import type {
   ActiveIncidentRecord,
   HostSample,
@@ -23,15 +21,18 @@ import type {
   StateChangeEventRecord,
   VPSSummary,
 } from '../../lib/types'
-import { MonitoringInstanceBindingConflictSection } from './MonitoringInstanceBindingConflictSection'
+import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
+import { MonitoringDetailManagementMenu } from './MonitoringDetailManagementMenu'
+import { MonitoringDetailMetadataDialog } from './MonitoringDetailMetadataDialog'
+import { MonitoringDetailNotices } from './MonitoringDetailNotices'
+import { MonitoringDetailObservations } from './MonitoringDetailObservations'
+import { MonitoringDetailRecentEvents } from './MonitoringDetailRecentEvents'
+import { MonitoringDetailStatusBand } from './MonitoringDetailStatusBand'
+import { MonitoringInstanceBindingConflictDialog } from './MonitoringInstanceBindingConflictDialog'
 import { MonitoringInstanceCommandDrawer } from './MonitoringInstanceCommandDrawer'
-import { MonitoringInstanceDangerCard } from './MonitoringInstanceDangerCard'
 import { MonitoringInstanceHistoryDrawer } from './MonitoringInstanceHistoryDrawer'
-import { MonitoringInstanceManagementSection } from './MonitoringInstanceManagementSection'
-import { MonitoringInstanceMetadataSection } from './MonitoringInstanceMetadataSection'
 import { MonitoringInstanceOnboardingDrawer } from './MonitoringInstanceOnboardingDrawer'
 import { MonitoringInstanceRuntimePauseConfirmation } from './MonitoringInstanceRuntimePauseConfirmation'
-import { MonitoringInstanceSnapshotMeta } from './MonitoringInstanceSnapshotMeta'
 import { MonitoringInstanceTimeWindowTabs } from './MonitoringInstanceTimeWindowTabs'
 import {
   MONITORING_INSTANCE_BINDING_CONFIRM_REBIND_LABEL,
@@ -39,7 +40,7 @@ import {
   MONITORING_INSTANCE_BINDING_REJECT_PENDING_LABEL,
   MONITORING_INSTANCE_BINDING_RESET_LABEL,
 } from './monitoringDetailConstants'
-import { monitoringInstanceRuntimeActions } from './monitoringDetailHelpers'
+import { monitoringInstanceRuntimeActions, validateReturnVPSId } from './monitoringDetailHelpers'
 import type {
   BindingConflictAction,
   HistoryTab,
@@ -93,6 +94,13 @@ const bindingConfirmationCopy: Record<
 type MonitoringDetailPageBodyProps = {
   monitoringInstance: MonitoringInstanceRecord
   runtimeFacts: MonitoringInstanceRuntimeFacts | null
+  latestSample: HostSample | null
+  snapshotReadAt: Date | null
+  heartbeatFreshness: HeartbeatFreshness
+  runtimeFactsError: string | null
+  runtimeFactsLoading: boolean
+  onRetryRuntimeFacts: () => void
+  onRetrySettings: () => void
   runtimeSubmitting: boolean
   runtimeError: string | null
   pendingRuntimeConfirmation: PendingRuntimeConfirmation | null
@@ -116,7 +124,7 @@ type MonitoringDetailPageBodyProps = {
   onMetadataStartEdit: () => void
   onMetadataCancelEdit: () => void
   onMetadataSubmit: (event: FormEvent<HTMLFormElement>) => void
-  onManagementLoadReview: () => void
+  onManagementLoadReview: (force?: boolean) => void
   onManagementRetire: (reason: string) => void
   onManagementRestoreLifecycle: (reason: string) => void
   onManagementArchive: (reason: string, confirmationName: string) => void
@@ -126,11 +134,16 @@ type MonitoringDetailPageBodyProps = {
   incidentsError: string | null
   events: StateChangeEventRecord[]
   eventsError: string | null
-  activityLoaded: boolean
+  incidentsLoaded: boolean
+  eventsLoaded: boolean
   incidentsRetrying: boolean
   eventsRetrying: boolean
   onRetryIncidents: () => void
   onRetryEvents: () => void
+  onRetryBindingConflict: () => void
+  onRetryLinkedVPS: () => void
+  commandPollError: string | null
+  onRetryCommandPoll: () => void
   linkedVPS: VPSSummary[]
   linkedVPSLoading: boolean
   linkedVPSLoaded: boolean
@@ -150,7 +163,7 @@ type MonitoringDetailPageBodyProps = {
   realtimeSamples: HostSample[]
   runtimeStreamStatus: RuntimeStreamStatus
   runtimeStreamError: string | null
-  thresholds: MetricThresholds
+  thresholds: MetricThresholds | null
   historyOpen: boolean
   historyTab: HistoryTab
   historyIncidents: ActiveIncidentRecord[] | null
@@ -170,11 +183,19 @@ type MonitoringDetailPageBodyProps = {
   onboardingReturnVPSId: string | null
   onOpenOnboarding: () => void
   onCloseOnboarding: () => void
+  onRefresh: () => void
 }
 
 export function MonitoringDetailPageBody({
   monitoringInstance,
   runtimeFacts,
+  latestSample,
+  snapshotReadAt,
+  heartbeatFreshness,
+  runtimeFactsError,
+  runtimeFactsLoading,
+  onRetryRuntimeFacts,
+  onRetrySettings,
   runtimeSubmitting,
   runtimeError,
   pendingRuntimeConfirmation,
@@ -208,11 +229,16 @@ export function MonitoringDetailPageBody({
   incidentsError,
   events,
   eventsError,
-  activityLoaded,
+  incidentsLoaded,
+  eventsLoaded,
   incidentsRetrying,
   eventsRetrying,
   onRetryIncidents,
   onRetryEvents,
+  onRetryBindingConflict,
+  onRetryLinkedVPS,
+  commandPollError,
+  onRetryCommandPoll,
   linkedVPS,
   linkedVPSLoading,
   linkedVPSLoaded,
@@ -252,73 +278,187 @@ export function MonitoringDetailPageBody({
   onboardingReturnVPSId,
   onOpenOnboarding,
   onCloseOnboarding,
+  onRefresh,
 }: MonitoringDetailPageBodyProps) {
-  const realtimeLatestSample = timeWindow === 'realtime'
-    ? realtimeSamples[realtimeSamples.length - 1] ?? null
-    : null
-  const sample = realtimeLatestSample ?? runtimeFacts?.latest_host_sample ?? null
+  const [searchParams] = useSearchParams()
+  const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
+  const returnVPSId = validateReturnVPSId(searchParams.get('return_vps'))
+  const sample = latestSample
   const metricPoints =
     timeWindow === 'realtime'
-      ? realtimeSamples
+      ? realtimeSamples.map(hostSampleToMetricPoint)
       : runtimeFacts?.host_metric_points ?? []
   const isMaintenance = monitoringInstance.monitoring_status === '维护中'
   const archived = Boolean(monitoringInstance.archived_at)
   const showBindingConflict = monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
-  const bindingActionsDisabled =
-    bindingAction !== null || bindingConflictLoading || !bindingConflict
-  const showDangerZone = monitoringInstance.current_active_incident_count > 0
+  const bindingActionsDisabled = bindingAction !== null || bindingConflictLoading || !bindingConflict
   const isUpgradeOnboarding =
     monitoringInstance.binding_status !== '未绑定' ||
     Boolean(monitoringInstance.last_heartbeat_at || monitoringInstance.last_sync_at || sample)
-  const firstIncident =
-    incidents.length > 0
-      ? [...incidents].sort(
-          (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        )[0] ?? null
-      : null
+  const readOnly = READ_ONLY_PREVIEW
+  // An unbound, unarchived instance gets "接入 agent…" as the header primary action.
+  const showOnboardingPrimary =
+    !readOnly && !archived && monitoringInstance.binding_status === '未绑定'
+  const subjectBase = `/monitoring/${encodeURIComponent(monitoringInstance.monitoring_instance_id)}`
+  const bindingDialogVisible =
+    bindingDialogOpen && showBindingConflict && !pendingBindingConfirmation
 
   return (
-    <div className="page">
+    <div className="monitoring-detail-route">
       <MonitoringInstanceWatchtowerHeader
         monitoringInstance={monitoringInstance}
-        latestSample={sample}
-        runtimeActions={monitoringInstanceRuntimeActions(monitoringInstance)}
-        runtimeSubmitting={runtimeSubmitting}
-        onRuntimeAction={(action) => onRuntimeAction(action)}
-        registerActionRef={registerActionRef}
-        onOpenHistory={() => onOpenHistory('events')}
-        onOpenCommands={onOpenCommands}
-        onOpenOnboarding={onOpenOnboarding}
-        onboardingActionLabel={isUpgradeOnboarding ? '升级/重新接入 agent…' : '接入 agent…'}
-        managementOnly={archived}
+        readOnly={readOnly}
         linkedVPS={linkedVPS}
         linkedVPSLoading={linkedVPSLoading}
         linkedVPSLoaded={linkedVPSLoaded}
         linkedVPSError={linkedVPSError}
+        onRetryLinkedVPS={onRetryLinkedVPS}
+        actions={
+          <>
+            {onRefresh ? (
+              <Button variant="ghost" size="sm" onClick={onRefresh}>
+                刷新
+              </Button>
+            ) : null}
+            {readOnly ? null : (
+              <MonitoringDetailManagementMenu
+                monitoringInstance={monitoringInstance}
+                runtimeActions={monitoringInstanceRuntimeActions(monitoringInstance)}
+                runtimeSubmitting={runtimeSubmitting}
+                onRuntimeAction={(action) => onRuntimeAction(action)}
+                registerActionRef={registerActionRef}
+                onOpenOnboarding={onOpenOnboarding}
+                onboardingActionLabel={isUpgradeOnboarding ? '升级/重新接入 agent…' : '接入 agent…'}
+                onOpenCommands={onOpenCommands}
+                onOpenMetadata={onMetadataStartEdit}
+                triggerVariant={showOnboardingPrimary ? 'ghost' : 'primary'}
+                triggerSize={showOnboardingPrimary ? 'sm' : 'md'}
+                review={managementReview}
+                loading={managementLoading}
+                error={managementError}
+                submittingAction={managementSubmittingAction}
+                actionError={managementActionError}
+                onLoadReview={onManagementLoadReview}
+                onRetire={onManagementRetire}
+                onRestoreLifecycle={onManagementRestoreLifecycle}
+                onArchive={onManagementArchive}
+                onRestoreArchive={onManagementRestoreArchive}
+                onPermanentCleanup={onManagementPermanentCleanup}
+              />
+            )}
+            {showOnboardingPrimary ? (
+              <Button variant="primary" onClick={onOpenOnboarding}>
+                {isUpgradeOnboarding ? '升级/重新接入 agent…' : '接入 agent…'}
+              </Button>
+            ) : null}
+          </>
+        }
+      />
+
+      <MonitoringDetailStatusBand
+        monitoringInstance={monitoringInstance}
+        heartbeatFreshness={heartbeatFreshness}
+        snapshotReadAt={snapshotReadAt}
+      />
+
+      <MonitoringDetailNotices
+        monitoringInstance={monitoringInstance}
+        incidents={incidents}
+        incidentsError={incidentsError}
+        incidentsLoaded={incidentsLoaded}
+        incidentsRetrying={incidentsRetrying}
+        onRetryIncidents={onRetryIncidents}
+        runtimeError={runtimeError}
+        runtimeFactsError={runtimeFactsError}
+        runtimeFactsLoading={runtimeFactsLoading}
+        hasRetainedRuntimeFacts={Boolean(runtimeFacts)}
+        onRetryRuntimeFacts={onRetryRuntimeFacts}
+        bindingConflictLoading={bindingConflictLoading}
+        bindingConflictError={bindingConflictError}
+        onRetryBindingConflict={onRetryBindingConflict}
+        onOpenBindingConflict={() => setBindingDialogOpen(true)}
+        onOpenIncidentHistory={() => onOpenHistory('incidents')}
+      />
+
+      <MonitoringDetailObservations
+        timeRangeControl={
+          <MonitoringInstanceTimeWindowTabs
+            value={timeWindow}
+            onChange={onTimeWindowChange}
+            streamStatus={runtimeStreamStatus}
+            streamError={runtimeStreamError}
+          />
+        }
+        sample={sample}
+        metricPoints={metricPoints}
+        timeWindow={timeWindow}
+        {...(runtimeFacts?.window === undefined ? {} : { window: runtimeFacts.window })}
+        isMaintenance={isMaintenance}
+        thresholds={thresholds}
+        loading={runtimeFactsLoading}
+        error={runtimeFactsError}
+        snapshotReadAt={snapshotReadAt}
+        onRetryThresholds={onRetrySettings}
+      />
+
+      <MonitoringDetailRecentEvents
+        subjectBase={subjectBase}
+        returnVPSId={returnVPSId}
+        events={events}
+        eventsError={eventsError}
+        eventsLoaded={eventsLoaded}
+        eventsRetrying={eventsRetrying}
+        onRetryEvents={onRetryEvents}
+        onOpenHistory={() => onOpenHistory('events')}
       />
 
       {pendingRuntimeConfirmation?.action === 'pause' ? (
         <MonitoringInstanceRuntimePauseConfirmation
-          monitoringInstance={monitoringInstance}
+          monitoringStatus={pendingRuntimeConfirmation.monitoringStatus}
           disabled={runtimeSubmitting}
           onConfirm={() => onRuntimeAction('pause', true)}
           onCancel={onCancelRuntimeConfirmation}
         />
       ) : null}
-      {runtimeError ? <p className="watchtower-runtime-error" role="alert">{runtimeError}</p> : null}
 
-      {showBindingConflict ? (
-        <MonitoringInstanceBindingConflictSection
-          bindingConflict={bindingConflict}
-          loading={bindingConflictLoading}
-          error={bindingConflictError}
-          bindingAction={bindingAction}
-          actionsDisabled={bindingActionsDisabled}
-          onConfirm={() => onRequestBindingAction('confirm')}
-          onReject={() => onRequestBindingAction('reject')}
-          onReset={() => onRequestBindingAction('reset')}
-        />
-      ) : null}
+      <MonitoringDetailMetadataDialog
+        open={metadataEditing}
+        monitoringInstance={monitoringInstance}
+        groupDraft={metadataGroupDraft}
+        labelDraft={metadataLabelDraft}
+        noteDraft={metadataNoteDraft}
+        submitting={metadataSubmitting}
+        error={metadataError}
+        onGroupDraftChange={onMetadataGroupDraftChange}
+        onLabelDraftChange={onMetadataLabelDraftChange}
+        onNoteDraftChange={onMetadataNoteDraftChange}
+        onSubmit={onMetadataSubmit}
+        onClose={onMetadataCancelEdit}
+      />
+
+      <MonitoringInstanceBindingConflictDialog
+        open={bindingDialogVisible}
+        readOnly={readOnly}
+        bindingConflict={bindingConflict}
+        loading={bindingConflictLoading}
+        error={bindingConflictError}
+        bindingAction={bindingAction}
+        actionsDisabled={bindingActionsDisabled}
+        onConfirm={() => {
+          setBindingDialogOpen(false)
+          onRequestBindingAction('confirm')
+        }}
+        onReject={() => {
+          setBindingDialogOpen(false)
+          onRequestBindingAction('reject')
+        }}
+        onReset={() => {
+          setBindingDialogOpen(false)
+          onRequestBindingAction('reset')
+        }}
+        onRetry={onRetryBindingConflict}
+        onClose={() => setBindingDialogOpen(false)}
+      />
 
       {pendingBindingConfirmation && bindingConflict ? (
         <ActionConfirmationModal
@@ -348,101 +488,13 @@ export function MonitoringDetailPageBody({
         />
       ) : null}
 
-      {showDangerZone ? (
-        <MonitoringInstanceDangerCard
-          monitoringInstance={monitoringInstance}
-          firstIncident={firstIncident}
-          onOpenEvents={() => onOpenHistory('events')}
-        />
-      ) : null}
-
-      <div className="watchtower-observation">
-        <MonitoringInstanceTimeWindowTabs
-          value={timeWindow}
-          onChange={onTimeWindowChange}
-          streamStatus={runtimeStreamStatus}
-          streamError={runtimeStreamError}
-        />
-
-        <MonitoringInstanceWatchtowerMetrics
-          sample={sample}
-          metricPoints={metricPoints}
-          timeWindow={timeWindow}
-          {...(runtimeFacts?.window === undefined ? {} : { window: runtimeFacts.window })}
-          isMaintenance={isMaintenance}
-          thresholds={thresholds}
-        />
-      </div>
-
-      <div className="watchtower-activity-grid" aria-label="当前异常与事件证据">
-        <TargetActiveIncidents
-          loaded={activityLoaded}
-          incidents={incidents}
-          error={incidentsError}
-          retrying={incidentsRetrying}
-          onRetry={onRetryIncidents}
-          aside={
-            <span className="detail-section__aside-meta">
-              活跃 <MonoDigits>{incidents.length}</MonoDigits>
-            </span>
-          }
-        />
-        <TargetRecentEvents
-          loaded={activityLoaded}
-          events={events}
-          error={eventsError}
-          retrying={eventsRetrying}
-          onRetry={onRetryEvents}
-          aside={
-            <span className="detail-section__aside-meta">
-              事件 <MonoDigits>{events.length}</MonoDigits>
-            </span>
-          }
-        />
-      </div>
-
-      <MonitoringInstanceSnapshotMeta sample={sample} />
-
-      <div className="watchtower-management" aria-label="资料与生命周期">
-        <MonitoringInstanceMetadataSection
-          monitoringInstance={monitoringInstance}
-          editing={metadataEditing}
-          groupDraft={metadataGroupDraft}
-          labelDraft={metadataLabelDraft}
-          noteDraft={metadataNoteDraft}
-          submitting={metadataSubmitting}
-          error={metadataError}
-          readOnlyReason={archived ? '已归档实例资料只读' : null}
-          onGroupDraftChange={onMetadataGroupDraftChange}
-          onLabelDraftChange={onMetadataLabelDraftChange}
-          onNoteDraftChange={onMetadataNoteDraftChange}
-          onStartEdit={onMetadataStartEdit}
-          onCancelEdit={onMetadataCancelEdit}
-          onSubmit={onMetadataSubmit}
-        />
-
-        <MonitoringInstanceManagementSection
-          monitoringInstance={monitoringInstance}
-          review={managementReview}
-          loading={managementLoading}
-          error={managementError}
-          submittingAction={managementSubmittingAction}
-          actionError={managementActionError}
-          onLoadReview={onManagementLoadReview}
-          onRetire={onManagementRetire}
-          onRestoreLifecycle={onManagementRestoreLifecycle}
-          onArchive={onManagementArchive}
-          onRestoreArchive={onManagementRestoreArchive}
-          onPermanentCleanup={onManagementPermanentCleanup}
-        />
-      </div>
-
       <MonitoringInstanceHistoryDrawer
         monitoringInstance={monitoringInstance}
         open={historyOpen}
         tab={historyTab}
         events={events}
         eventsError={eventsError}
+        onRetryEvents={onRetryEvents}
         historyIncidents={historyIncidents}
         historyIncidentsLoading={historyIncidentsLoading}
         historyIncidentsError={historyIncidentsError}
@@ -458,6 +510,8 @@ export function MonitoringDetailPageBody({
         commandLabels={COMMAND_LABELS}
         submitting={commandSubmitting}
         error={commandError}
+        pollError={commandPollError}
+        onRetryPoll={onRetryCommandPoll}
         onClose={onCloseCommand}
         onExecute={onExecuteCommand}
       />

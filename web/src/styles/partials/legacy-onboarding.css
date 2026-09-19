@@ -1,6 +1,6 @@
 /* partial: legacy-onboarding.css (extracted from legacy-misc.css by domain) */
 
-.onboarding-drawer{display:flex;flex-direction:column;gap:var(--space-5)}
+.onboarding-drawer{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
 
 
 .onboarding-drawer__subject{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:0;color:var(--text-muted);font-size:var(--type-small-size);line-height:1.4;overflow-wrap:anywhere}
@@ -31,14 +31,12 @@
 
 .onboarding-steps__hint{font-size:11px;color:var(--text-muted);font-style:italic}
 
-.onboarding-snippet{display:flex;align-items:flex-start;gap:var(--space-2);padding:var(--space-3);background:var(--bg-sidebar);border:1px solid var(--border);border-radius:var(--radius-2);font-family:var(--font-mono);font-size:12px}
+.onboarding-snippet{display:flex;align-items:flex-start;gap:var(--space-2);padding:var(--space-3);background:var(--bg-sidebar);border:1px solid var(--border);border-radius:var(--radius-2);font-family:var(--font-mono);font-size:12px;min-width:0}
 
 .onboarding-snippet pre{flex:1;min-width:0;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-primary);font-family:var(--font-mono)}
 
 .onboarding-snippet code{background:transparent;padding:0;font-family:var(--font-mono);color:var(--text-primary)}
 
-.onboarding-drawer{min-width:0}
-.onboarding-snippet{min-width:0}
 .watchtower-form-footer .onboarding-token__error-summary{margin:0 auto 0 0;max-width:100%}
 @media (max-width:640px){
 .onboarding-snippet{flex-direction:column}

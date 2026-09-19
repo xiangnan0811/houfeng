@@ -102,11 +102,7 @@
 .page-stack textarea{font-family:var(--font-mono);font-size:var(--type-code-size)}
 
 /* ===== PAGE COMPAT: Watchtower header ===== */
-.watchtower-status-badge{display:inline-flex;align-items:center;gap:4px;min-height:24px}
-.watchtower-status-badge__dimension{font-size:10px;color:var(--text-muted);line-height:1;text-transform:uppercase}
-.watchtower-status-badge .badge{white-space:nowrap}
 .watchtower-header__freshness{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:var(--type-small-size);color:var(--text-muted);white-space:nowrap}
-.watchtower-header__meta-item{display:inline-flex;align-items:center;gap:4px}
 .watchtower-actions-menu{position:relative}
 .watchtower-actions-menu>summary{list-style:none;cursor:pointer;padding:4px 11px;border:1px solid var(--border);border-radius:var(--radius-1);background:var(--surface);font-family:var(--font-sans);font-size:14px;color:var(--text-primary);user-select:none;line-height:1}
 .watchtower-actions-menu>summary::-webkit-details-marker{display:none}
@@ -118,15 +114,11 @@
 
 /* ===== PAGE COMPAT: Watchtower metric card ===== */
 .watchtower-metric-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-2);padding:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2);min-width:0;position:relative;box-shadow:0 var(--border-w) 0 color-mix(in srgb,var(--text-primary) 5%,transparent) inset}
-.watchtower-metric-card--notice{border-left:2px solid var(--color-state-notice);padding-left:calc(var(--space-3) - 1px)}
-.watchtower-metric-card--alert{border-left:2px solid var(--color-state-alert);padding-left:calc(var(--space-3) - 1px);background:color-mix(in srgb,var(--color-state-alert) 4%,var(--surface))}
-.watchtower-metric-card--critical{border-left:2px solid var(--color-state-critical);padding-left:calc(var(--space-3) - 1px);background:color-mix(in srgb,var(--color-state-critical) 5%,var(--surface))}
 .watchtower-metric-card__head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2)}
 .watchtower-metric-card__head h3{font-family:var(--font-sans);font-size:12px;letter-spacing:0.04em;text-transform:uppercase;color:var(--text-muted);margin:0}
 .watchtower-metric-card__current{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:14px;font-weight:600;color:var(--text-primary)}
 .watchtower-metric-card__sub{margin:0;display:flex;flex-wrap:wrap;gap:var(--space-3);font-family:var(--font-sans);font-size:11px;color:var(--text-muted)}
 .watchtower-metric-card__sub div{display:inline}
-.watchtower-metric-card__sub-item--end{margin-left:auto;text-align:right}
 .watchtower-metric-card__sub dt{display:inline}
 .watchtower-metric-card__sub dd{display:inline;margin:0 0 0 4px}
 .watchtower-runtime-error{background:color-mix(in srgb,var(--color-state-critical) 6%,var(--surface));border:1px solid color-mix(in srgb,var(--color-state-critical) 20%,var(--border));border-radius:var(--radius-2);padding:var(--space-3);color:var(--text-primary);font-size:var(--type-small-size)}
@@ -189,7 +181,6 @@
 /* ===== FILTER COMPAT: Filter bar + select + chip ===== */
 .page-filters,.filter-bar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);min-width:0;margin:0;padding:0 0 var(--space-3);background:transparent;border:0;border-bottom:var(--border-w) solid var(--border);border-radius:0;box-shadow:none;overflow:visible}
 .filter-bar.filter-bar--stacked{flex-direction:column;align-items:stretch;flex-wrap:nowrap}
-.page-filters__grow{flex:1 1 auto;min-width:0}
 .page-filters select,.filter-bar>select{appearance:none;-webkit-appearance:none;-moz-appearance:none;min-width:0;max-width:100%;padding:4px 22px 4px 0;border:0;border-bottom:var(--border-w) solid var(--border);border-radius:0;background-color:transparent;background-image:var(--select-caret);background-repeat:no-repeat;background-position:right 0 center;color:var(--text-primary);font:inherit;font-size:var(--type-small-size);cursor:pointer}
 .page-filters select:hover,.filter-bar>select:hover{border-bottom-color:var(--border-strong)}
 .page-filters select:focus,.filter-bar>select:focus{outline:none;border-bottom-color:var(--accent)}
@@ -315,7 +306,6 @@
 @media (max-width:640px){.section-heading__actions{align-items:stretch;width:100%}.section-heading__actions .btn,
 .section-heading__actions a{width:100%;justify-content:center}.section-heading--inline{flex-direction:column}}
 
-.list-filter-panel::before{display:block;margin-bottom:var(--space-2);color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase;content:'FILTER EDITING'}
 
 .visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 

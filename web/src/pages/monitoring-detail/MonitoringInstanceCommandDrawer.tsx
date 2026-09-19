@@ -13,6 +13,8 @@ type MonitoringInstanceCommandDrawerProps = {
   commandLabels: Record<string, string>
   submitting: boolean
   error: string | null
+  pollError?: string | null
+  onRetryPoll?: () => void
   onClose: () => void
   onExecute: (commandId: string, options?: { confirmedSensitive?: boolean }) => void
 }
@@ -24,6 +26,8 @@ export function MonitoringInstanceCommandDrawer({
   commandLabels,
   submitting,
   error,
+  pollError = null,
+  onRetryPoll,
   onClose,
   onExecute,
 }: MonitoringInstanceCommandDrawerProps) {
@@ -77,6 +81,14 @@ export function MonitoringInstanceCommandDrawer({
         {error ? (
           <p className="watchtower-runtime-error" role="alert">
             {error}
+          </p>
+        ) : null}
+        {pollError ? (
+          <p className="watchtower-runtime-error" role="status">
+            {pollError}
+            {onRetryPoll ? (
+              <button type="button" className="btn sm ghost" onClick={onRetryPoll}>重试</button>
+            ) : null}
           </p>
         ) : null}
 

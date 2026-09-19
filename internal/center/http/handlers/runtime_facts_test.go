@@ -361,12 +361,18 @@ func TestMonitoringInstanceRuntimeFactsRejectsInvalidWindow(t *testing.T) {
 }
 
 func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
+	epoch := time.Date(2026, time.April, 24, 8, 0, 0, 0, time.UTC)
 	hub := &notifyingHostSampleHub{
 		StreamHub:  runtimefacts.NewStreamHub(),
 		subscribed: make(chan string, 1),
 	}
 	repo := &fakeMonitoringInstanceRepository{
-		getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001"},
+		getMonitoringInstanceResult: monitoringinstances.Record{
+			MonitoringInstanceID:  "mi_001",
+			BindingStatus:         monitoringinstances.BindingBound,
+			BindingFingerprint:    "fp-001",
+			BindingEpochStartedAt: &epoch,
+		},
 	}
 	server := httptest.NewServer(handlers.MonitoringInstanceRuntimeStream(repo, hub))
 	defer server.Close()
@@ -404,6 +410,101 @@ func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
 	}
 	if message.Sample.CPUUsagePct != 42 {
 		t.Fatalf("CPUUsagePct = %v, want 42", message.Sample.CPUUsagePct)
+	}
+}
+
+func TestMonitoringInstanceRuntimeStreamDropsStaleAndFutureSamplesBeforeWriting(t *testing.T) {
+	now := time.Now().UTC()
+	epoch := now.Add(-time.Hour)
+	hub := &notifyingHostSampleHub{
+		StreamHub:  runtimefacts.NewStreamHub(),
+		subscribed: make(chan string, 1),
+	}
+	repo := &fakeMonitoringInstanceRepository{
+		getMonitoringInstanceResult: monitoringinstances.Record{
+			MonitoringInstanceID:  "mi_001",
+			BindingStatus:         monitoringinstances.BindingBound,
+			BindingFingerprint:    "fp-current",
+			BindingEpochStartedAt: &epoch,
+		},
+	}
+	server := httptest.NewServer(handlers.MonitoringInstanceRuntimeStream(repo, hub))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/monitoring-instances/mi_001/runtime-stream"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{server.URL}},
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-hub.subscribed:
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for runtime stream subscription: %v", ctx.Err())
+	}
+
+	networkRatesValid := false
+	base := now.Add(-5 * time.Minute)
+	batch := syncing.Batch{
+		MonitoringInstanceID: "mi_001",
+		Observations: observations.BatchWrite{HostSamples: []observations.HostSampleWrite{
+			{
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           base,
+				ReceivedAt:           base.Add(time.Second),
+				AgentVersion:         "agent/v0.1.0",
+				Fingerprint:          "fp-old",
+				SyncBatchID:          "wrong-fingerprint",
+			},
+			{
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           now.Add(time.Hour),
+				ReceivedAt:           now.Add(time.Hour),
+				AgentVersion:         "agent/v0.1.0",
+				Fingerprint:          "fp-current",
+				SyncBatchID:          "future",
+			},
+			{
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           epoch.Add(-time.Minute),
+				ReceivedAt:           epoch.Add(-time.Second),
+				AgentVersion:         "agent/v0.1.0",
+				Fingerprint:          "fp-current",
+				SyncBatchID:          "pre-epoch",
+			},
+			{
+				MonitoringInstanceID: "mi_001",
+				ObservedAt:           base,
+				ReceivedAt:           base.Add(time.Second),
+				AgentVersion:         "agent/v0.1.0",
+				Fingerprint:          "fp-current",
+				SyncBatchID:          "current-backfill",
+				IsBackfilled:         true,
+				NetworkRatesValid:    &networkRatesValid,
+			},
+		}},
+	}
+	if err := hub.AfterSuccessfulSync(ctx, batch, syncing.Result{}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+
+	var message runtimefacts.HostSampleStreamMessage
+	if err := wsjson.Read(ctx, conn, &message); err != nil {
+		t.Fatalf("wsjson.Read() error = %v", err)
+	}
+	if message.Sample.SyncBatchID != "current-backfill" || !message.Sample.IsBackfilled {
+		t.Fatalf("message = %#v, want only eligible current-binding backfill", message)
+	}
+	if !message.Sample.ObservedAt.Equal(base) || !message.Sample.ReceivedAt.Equal(base.Add(time.Second)) ||
+		!message.ReceivedAt.Equal(base.Add(time.Second)) {
+		t.Fatalf("message timestamps = %#v, want source observed/received timestamps", message)
+	}
+	if message.Sample.NetworkRatesValid == nil || *message.Sample.NetworkRatesValid {
+		t.Fatalf("NetworkRatesValid = %v, want explicit false", message.Sample.NetworkRatesValid)
 	}
 }
 
@@ -458,6 +559,8 @@ func syncingBatchWithHostSample(monitoringInstanceID string, cpuUsagePct float64
 				ObservedAt:           observedAt,
 				ReceivedAt:           observedAt.Add(time.Second),
 				AgentVersion:         "agent/v0.1.0",
+				Fingerprint:          "fp-001",
+				SyncBatchID:          "sync-001",
 				CPUUsagePct:          cpuUsagePct,
 			}},
 		},

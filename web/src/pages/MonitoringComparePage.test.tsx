@@ -1,8 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MonitoringComparePage } from './MonitoringComparePage'
+import { MonitoringDetailPage } from './MonitoringDetailPage'
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -97,7 +98,7 @@ function runtimeFacts(monitoringInstanceId: string) {
   }
 }
 
-function renderMonitoringCompare(initialEntry: string) {
+function renderMonitoringCompare(initialEntry: InitialEntry = '/monitoring/compare') {
   render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
@@ -214,5 +215,175 @@ describe('MonitoringComparePage', () => {
     expect(screen.getByRole('heading', { name: 'B 摘要不可用' })).toBeInTheDocument()
     expect(screen.getAllByText('监控实例不存在').length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: '返回监控实例列表重新选择' })).toHaveAttribute('href', '/monitoring')
+  })
+  it('preserves listHref and location.state through compare return link', async () => {
+    const navState = {
+      monitoringListHref: '/monitoring?view=abnormal&selected=mi_a&selected=mi_b&q=Tokyo&sort=name_asc',
+      vpsInventoryHref: '/vps?workspace=workbench&selected=vps_001',
+      return_vps: 'vps_001',
+    }
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord('mi_a', 'Tokyo Edge')))
+      .mockResolvedValueOnce(mockJSONResponse(runtimeFacts('mi_a')))
+      .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord('mi_b', 'Osaka Core')))
+      .mockResolvedValueOnce(mockJSONResponse(runtimeFacts('mi_b')))
+    vi.stubGlobal('fetch', fetchMock)
+
+    function ListProbe() {
+      const loc = useLocation()
+      return (
+        <div data-testid="list-probe" data-state={JSON.stringify(loc.state)}>
+          {loc.pathname}{loc.search}
+        </div>
+      )
+    }
+
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/monitoring/compare',
+          search: '?id=mi_a&id=mi_b',
+          state: navState,
+        }]}
+      >
+        <Routes>
+          <Route path="/monitoring/compare" element={<MonitoringComparePage />} />
+          <Route path="/monitoring" element={<ListProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    const returnLink = screen.getByRole('link', { name: '返回监控实例列表' })
+    expect(returnLink).toHaveAttribute(
+      'href',
+      '/monitoring?view=abnormal&selected=mi_a&selected=mi_b&q=Tokyo&sort=name_asc',
+    )
+    fireEvent.click(returnLink)
+
+    expect(screen.getByTestId('list-probe')).toHaveTextContent(
+      '/monitoring?view=abnormal&selected=mi_a&selected=mi_b&q=Tokyo&sort=name_asc',
+    )
+    expect(JSON.parse(screen.getByTestId('list-probe').getAttribute('data-state')!)).toEqual(navState)
+  })
+
+  it('carries validated return_vps from compare query onto detail links and restores header source VPS', async () => {
+    const navState = {
+      monitoringListHref: '/monitoring?view=abnormal&selected=mi_a&selected=mi_b&q=Tokyo&sort=name_asc',
+      vpsInventoryHref: '/vps?workspace=workbench&selected=vps_001',
+      return_vps: 'vps_SHOULD_NOT_USE',
+    }
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_a') return mockJSONResponse(monitoringInstanceRecord('mi_a', 'Tokyo Edge'))
+      if (path === '/api/monitoring-instances/mi_b') return mockJSONResponse(monitoringInstanceRecord('mi_b', 'Osaka Core'))
+      if (path === '/api/monitoring-instances/mi_a/runtime-facts?window=24h') return mockJSONResponse(runtimeFacts('mi_a'))
+      if (path === '/api/monitoring-instances/mi_b/runtime-facts?window=24h') return mockJSONResponse(runtimeFacts('mi_b'))
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_a') return mockJSONResponse([])
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_a') return mockJSONResponse([])
+      if (path === '/api/monitoring-instances/mi_a/vps') return mockJSONResponse([])
+      if (path === '/api/settings') {
+        return mockJSONResponse({
+          incident_defaults: {
+            heartbeat_interval_seconds: 30,
+            stale_threshold_intervals: 3,
+          },
+        })
+      }
+      return mockJSONResponse({ error: `unexpected ${path}` }, 500)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    function LocationProbe() {
+      const loc = useLocation()
+      return (
+        <div data-testid="detail-probe" data-state={JSON.stringify(loc.state)}>
+          {loc.pathname}{loc.search}
+        </div>
+      )
+    }
+
+    render(
+      <MemoryRouter
+        initialEntries={[{
+          pathname: '/monitoring/compare',
+          search: '?id=mi_a&id=mi_b&return_vps=vps_tokyo_origin',
+          state: navState,
+        }]}
+      >
+        <Routes>
+          <Route path="/monitoring/compare" element={<MonitoringComparePage />} />
+          <Route
+            path="/monitoring/:monitoringInstanceId"
+            element={(
+              <>
+                <LocationProbe />
+                <MonitoringDetailPage />
+              </>
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('link', { name: 'Tokyo Edge' })).toBeInTheDocument())
+
+    const detailLinks = screen.getAllByRole('link', { name: '监控实例详情' })
+    expect(detailLinks[0]).toHaveAttribute('href', '/monitoring/mi_a?return_vps=vps_tokyo_origin')
+    expect(screen.getByRole('link', { name: 'Tokyo Edge' })).toHaveAttribute(
+      'href',
+      '/monitoring/mi_a?return_vps=vps_tokyo_origin',
+    )
+    expect(detailLinks[0]?.getAttribute('href')).not.toContain('id=')
+    expect(detailLinks[0]?.getAttribute('href')).not.toContain('window=')
+
+    fireEvent.click(screen.getByRole('link', { name: 'Tokyo Edge' }))
+
+    await waitFor(() => expect(screen.getByRole('link', { name: '返回来源 VPS' })).toBeInTheDocument())
+    expect(screen.getByRole('link', { name: '返回来源 VPS' })).toHaveAttribute('href', '/vps/vps_tokyo_origin')
+    expect(screen.getByTestId('detail-probe')).toHaveTextContent('/monitoring/mi_a?return_vps=vps_tokyo_origin')
+    expect(screen.getByTestId('detail-probe')).not.toHaveTextContent('id=')
+    expect(JSON.parse(screen.getByTestId('detail-probe').getAttribute('data-state')!)).toEqual(navState)
+    expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_a/runtime-facts?window=24h', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('keeps local chart tooltips on compare hover', async () => {
+    const factsA = runtimeFacts('mi_a')
+    const first = factsA.host_metric_points[0]!
+    factsA.host_metric_points = [
+      { ...first, observed_at: '2026-05-15T08:00:00Z', cpu_usage_pct: 20 },
+      { ...first, observed_at: '2026-05-15T08:05:00Z', cpu_usage_pct: 22 },
+    ]
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord('mi_a', 'Tokyo Edge')))
+        .mockResolvedValueOnce(mockJSONResponse(factsA))
+        .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord('mi_b', 'Osaka Core')))
+        .mockResolvedValueOnce(mockJSONResponse(runtimeFacts('mi_b'))),
+    )
+    const { container } = render(
+      <MemoryRouter initialEntries={['/monitoring/compare?id=mi_a&id=mi_b']}>
+        <Routes>
+          <Route path="/monitoring/compare" element={<MonitoringComparePage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getAllByRole('heading', { name: 'CPU 使用率' }).length).toBeGreaterThan(0))
+    const svg = container.querySelector('.compare-metrics svg')
+    expect(svg).toBeTruthy()
+    svg!.getBoundingClientRect = () => ({
+      x: 0, y: 0, top: 0, left: 0, right: 360, bottom: 160, width: 360, height: 160, toJSON: () => ({}),
+    })
+    fireEvent.mouseMove(svg!, { clientX: 180 })
+    expect(container.querySelector('.compare-metrics .metric-chart__tooltip')).not.toBeNull()
   })
 })

@@ -4,6 +4,9 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-rou
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { MonitoringDetailPage } from './MonitoringDetailPage'
+import { SubjectActivityPage } from './SubjectActivityPage'
+import { SubjectRecordsPage } from './SubjectRecordsPage'
+import { RecordNewPage } from './records/RecordNewPage'
 import { VPSServicesSection } from './vps-detail/VPSServicesSection'
 import { formatDateTime } from '../lib/format'
 
@@ -14,6 +17,8 @@ vi.mock('../lib/api', async (importOriginal) => {
     ...actual,
     getSettings: vi.fn().mockResolvedValue({
       incident_defaults: {
+        heartbeat_interval_seconds: 30,
+        stale_threshold_intervals: 3,
         cpu_warning_pct: 80,
         cpu_alert_pct: 90,
         cpu_critical_pct: 95,
@@ -34,6 +39,16 @@ vi.mock('../lib/api', async (importOriginal) => {
     }),
   }
 })
+
+vi.mock('../lib/auth-context', () => ({
+  useAuth: () => ({
+    user: { user_id: 'usr_1', username: 'admin', role: 'admin', display_name: '管理员' },
+    loading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: vi.fn(),
+  }),
+}))
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -149,6 +164,7 @@ function hostSampleRecord(monitoringInstanceId: string, overrides: Partial<Recor
     maintenance_context: false,
     is_backfilled: false,
     sync_batch_id: `sync-${monitoringInstanceId}`,
+    network_rates_valid: true,
     ...overrides,
   }
 }
@@ -197,19 +213,31 @@ function onboardingConflictState(overrides: Partial<Record<string, unknown>> = {
   }
 }
 
-async function waitForEnabledButton(name: string) {
-  await waitFor(() => expect(screen.getByRole('button', { name })).toBeEnabled())
-  return screen.getByRole('button', { name })
+/** The binding-conflict notice row owns the entry point into the disposition dialog. */
+async function openBindingConflictDialog() {
+  const trigger = await screen.findByRole('button', { name: '处置绑定冲突' })
+  await waitFor(() => expect(trigger).toBeEnabled())
+  fireEvent.click(trigger)
+  return screen.getByRole('dialog', { name: '处置绑定冲突' })
 }
 
 /**
- * Watchtower header puts runtime controls (维护 / 暂停 / 恢复) inside a
- * <details><summary aria-label="运行控制操作">…</summary>...</details>
- * popover. Opening the popover is required before tests can click those buttons.
+ * Runtime controls (维护 / 暂停 / 恢复), agent onboarding, commands and the
+ * destructive lifecycle actions all live in the header 管理 menu now.
  */
 function openRuntimeMenu() {
-  const summary = screen.getByLabelText('运行控制操作')
-  fireEvent.click(summary)
+  fireEvent.click(screen.getByRole('button', { name: '管理' }))
+}
+
+function openMetadataDialog() {
+  openRuntimeMenu()
+  fireEvent.click(screen.getByRole('menuitem', { name: '编辑分组、标签与备注' }))
+}
+
+/** Read a value out of the header identity list. */
+function identityValue(label: string): string {
+  const dt = screen.getByText(label, { selector: 'dt' })
+  return dt.parentElement?.querySelector('dd')?.textContent ?? ''
 }
 
 function MonitoringDetailTestHarness() {
@@ -333,7 +361,7 @@ describe('MonitoringDetailPage', () => {
           current_primary_issue_summary: '',
         })))
       }
-      if (path === '/api/monitoring-instances/mi_slow/runtime-facts?window=realtime') {
+      if (path === '/api/monitoring-instances/mi_slow/runtime-facts?window=24h') {
         return Promise.resolve(mockJSONResponse({
           monitoring_instance_id: 'mi_slow',
           latest_host_sample: null,
@@ -363,7 +391,7 @@ describe('MonitoringDetailPage', () => {
       </StrictMode>,
     )
 
-    await waitFor(() => expect(screen.getByText('VPS 关联加载中')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('加载中')).toBeInTheDocument())
 
     linkedVPSResponse.resolve(mockJSONResponse([
       {
@@ -388,7 +416,7 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() => expect(screen.getByText('Slow Response VPS')).toBeInTheDocument())
     expect(screen.getByRole('link', { name: 'Slow Response VPS' })).toHaveAttribute('href', '/vps/vps_slow')
     expect(screen.queryByText('delayed response')).not.toBeInTheDocument()
-    expect(screen.queryByText('VPS 关联加载中')).not.toBeInTheDocument()
+    expect(screen.queryByText('加载中')).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_slow/vps', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -425,7 +453,7 @@ describe('MonitoringDetailPage', () => {
       if (path === '/api/monitoring-instances/mi_metadata') {
         return Promise.resolve(mockJSONResponse(initialRecord))
       }
-      if (path === '/api/monitoring-instances/mi_metadata/runtime-facts?window=realtime') {
+      if (path === '/api/monitoring-instances/mi_metadata/runtime-facts?window=24h') {
         return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_metadata')))
       }
       if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_metadata') {
@@ -451,25 +479,24 @@ describe('MonitoringDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Metadata Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByText('标签与备注', { selector: 'summary' }))
-    expect(screen.getByText('Group：prod')).toBeInTheDocument()
-    expect(screen.getByText('标签：edge')).toBeInTheDocument()
-    expect(screen.getByText('备注：keep visible')).toBeInTheDocument()
+    expect(identityValue('分组')).toBe('prod')
+    expect(identityValue('标签')).toBe('edge')
+    expect(identityValue('备注')).toBe('keep visible')
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'draft' } })
+    openMetadataDialog()
+    fireEvent.change(screen.getByLabelText('分组'), { target: { value: 'draft' } })
     fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'draft' } })
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'discarded' } })
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
 
-    fireEvent.click(screen.getByRole('button', { name: '编辑标签与备注' }))
-    expect(screen.getByLabelText('Group')).toHaveValue('prod')
+    openMetadataDialog()
+    expect(screen.getByLabelText('分组')).toHaveValue('prod')
     expect(screen.getByLabelText('标签')).toHaveValue('edge')
     expect(screen.getByLabelText('备注')).toHaveValue('keep visible')
-    fireEvent.change(screen.getByLabelText('Group'), { target: { value: 'core' } })
+    fireEvent.change(screen.getByLabelText('分组'), { target: { value: 'core' } })
     fireEvent.change(screen.getByLabelText('标签'), { target: { value: 'edge, db, edge' } })
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'new note' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存标签与备注' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_metadata', {
@@ -484,10 +511,10 @@ describe('MonitoringDetailPage', () => {
         body: JSON.stringify({ group: 'core', labels: ['edge', 'db'], note: 'new note' }),
       }),
     )
-    expect(screen.queryByRole('button', { name: '保存标签与备注' })).not.toBeInTheDocument()
-    expect(screen.getByText('Group：core')).toBeInTheDocument()
-    expect(screen.getByText('标签：edge · db')).toBeInTheDocument()
-    expect(screen.getByText('备注：new note')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存' })).not.toBeInTheDocument()
+    expect(identityValue('分组')).toBe('core')
+    expect(identityValue('标签')).toBe('edge · db')
+    expect(identityValue('备注')).toBe('new note')
   })
 
   it('keeps detail metadata when runtime updates return stale metadata fields', async () => {
@@ -519,7 +546,7 @@ describe('MonitoringDetailPage', () => {
       if (path === '/api/monitoring-instances/mi_metadata_runtime') {
         return Promise.resolve(mockJSONResponse(currentRecord))
       }
-      if (path === '/api/monitoring-instances/mi_metadata_runtime/runtime-facts?window=realtime') {
+      if (path === '/api/monitoring-instances/mi_metadata_runtime/runtime-facts?window=24h') {
         return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_metadata_runtime')))
       }
       if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_metadata_runtime') {
@@ -545,11 +572,10 @@ describe('MonitoringDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Metadata Runtime' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByText('标签与备注', { selector: 'summary' }))
-    expect(screen.getByText('Group：core')).toBeInTheDocument()
+    expect(identityValue('分组')).toBe('core')
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '进入维护' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_metadata_runtime/runtime/enter-maintenance', {
@@ -559,10 +585,10 @@ describe('MonitoringDetailPage', () => {
         credentials: 'include',
       }),
     )
-    expect(screen.getByText('Group：core')).toBeInTheDocument()
-    expect(screen.getByText('标签：edge')).toBeInTheDocument()
-    expect(screen.getByText('备注：fresh note')).toBeInTheDocument()
-    expect(screen.queryByText('Group：stale')).not.toBeInTheDocument()
+    expect(identityValue('分组')).toBe('core')
+    expect(identityValue('标签')).toBe('edge')
+    expect(identityValue('备注')).toBe('fresh note')
+    expect(screen.queryByText('stale')).not.toBeInTheDocument()
   })
 
   it('loads monitoring instance management review from the unified detail entry', async () => {
@@ -610,7 +636,7 @@ describe('MonitoringDetailPage', () => {
       if (path === '/api/monitoring-instances/mi_manage') {
         return Promise.resolve(mockJSONResponse(record))
       }
-      if (path === '/api/monitoring-instances/mi_manage/runtime-facts?window=realtime') {
+      if (path === '/api/monitoring-instances/mi_manage/runtime-facts?window=24h') {
         return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_manage')))
       }
       if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_manage') {
@@ -636,7 +662,7 @@ describe('MonitoringDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Managed Edge' })).toBeInTheDocument())
 
-    fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
+    openRuntimeMenu()
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_manage/management-review', {
@@ -645,16 +671,24 @@ describe('MonitoringDetailPage', () => {
         credentials: 'include',
       }),
     )
-    expect(screen.getByText('主机样本')).toBeInTheDocument()
-    expect(screen.getByText('3')).toBeInTheDocument()
-    const counts = screen.getByLabelText('管理审查计数')
+    // The menu shows only the permitted lifecycle actions...
+    expect(screen.getByText('当前：在用')).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '退役' })).toBeEnabled()
+    expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '永久清理' })).not.toBeInTheDocument()
+
+    // ...and the review detail lives in the confirmation, above the reason field.
+    fireEvent.click(screen.getByRole('menuitem', { name: '退役' }))
+    const reviewDialog = await screen.findByRole('alertdialog', { name: '退役监控实例' })
+    const counts = within(reviewDialog).getByLabelText('管理审查计数')
+    expect(within(counts).getByText('主机样本')).toBeInTheDocument()
+    expect(within(counts).getByText('3')).toBeInTheDocument()
     expect(within(counts).getByText('命令审计')).toBeInTheDocument()
     expect(within(counts).getByText('4')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Tokyo VPS' })).toHaveAttribute('href', '/vps/vps_001')
-    expect(screen.getByText('存在历史观测数据')).toBeInTheDocument()
-    expect(screen.getByText('归档前需要先退役实例')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '退役实例' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '归档实例' })).toBeDisabled()
+    expect(within(reviewDialog).getByText(/Tokyo VPS/)).toBeInTheDocument()
+    expect(within(reviewDialog).getByText('存在历史观测数据')).toBeInTheDocument()
+    expect(within(reviewDialog).getByText('归档前需要先退役实例')).toBeInTheDocument()
+    expect(within(reviewDialog).getByLabelText('原因')).toBeInTheDocument()
   })
 
   it('retires a monitoring instance from the management panel and refreshes review', async () => {
@@ -693,7 +727,7 @@ describe('MonitoringDetailPage', () => {
       if (path === '/api/monitoring-instances/mi_retire') {
         return Promise.resolve(mockJSONResponse(initialRecord))
       }
-      if (path === '/api/monitoring-instances/mi_retire/runtime-facts?window=realtime') {
+      if (path === '/api/monitoring-instances/mi_retire/runtime-facts?window=24h') {
         return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_retire')))
       }
       if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_retire') {
@@ -718,8 +752,8 @@ describe('MonitoringDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Retire Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
-    fireEvent.click(await screen.findByRole('button', { name: '退役实例' }))
+    openRuntimeMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: '退役' }))
 
     const dialog = await screen.findByRole('alertdialog', { name: '退役监控实例' })
     fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '已不再需要观测' } })
@@ -737,7 +771,8 @@ describe('MonitoringDetailPage', () => {
         body: JSON.stringify({ reason: '已不再需要观测' }),
       }),
     )
-    expect(screen.getAllByText('已退役').length).toBeGreaterThan(0)
+    openRuntimeMenu()
+    expect(screen.getByText('当前：已退役')).toBeInTheDocument()
     expect(screen.getAllByText('暂停').length).toBeGreaterThan(0)
   })
 
@@ -780,7 +815,7 @@ describe('MonitoringDetailPage', () => {
       if (path === '/api/monitoring-instances/mi_archive') {
         return Promise.resolve(mockJSONResponse(retiredRecord))
       }
-      if (path === '/api/monitoring-instances/mi_archive/runtime-facts?window=realtime') {
+      if (path === '/api/monitoring-instances/mi_archive/runtime-facts?window=24h') {
         return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_archive')))
       }
       if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_archive') {
@@ -805,8 +840,8 @@ describe('MonitoringDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Archive Edge' })).toBeInTheDocument())
-    fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
-    fireEvent.click(await screen.findByRole('button', { name: '归档实例' }))
+    openRuntimeMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: '归档' }))
 
     const dialog = await screen.findByRole('alertdialog', { name: '归档监控实例' })
     expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
@@ -869,7 +904,7 @@ describe('MonitoringDetailPage', () => {
       if (path === '/api/monitoring-instances/mi_cleanup') {
         return Promise.resolve(mockJSONResponse(archivedRecord))
       }
-      if (path === '/api/monitoring-instances/mi_cleanup/runtime-facts?window=realtime') {
+      if (path === '/api/monitoring-instances/mi_cleanup/runtime-facts?window=24h') {
         return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_cleanup')))
       }
       if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_cleanup') {
@@ -897,16 +932,14 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Cleanup Edge' })).toBeInTheDocument())
 
     openRuntimeMenu()
-    expect(screen.queryByRole('button', { name: '升级/重新接入 agent…' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '执行命令…' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '恢复监控' })).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getByText('标签与备注', { selector: 'summary' }))
-    expect(screen.queryByRole('button', { name: '编辑标签与备注' })).not.toBeInTheDocument()
+    // Archived instances hide the whole runtime group and keep profile edits read-only.
+    expect(screen.queryByRole('menuitem', { name: '升级/重新接入 agent…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '执行诊断命令…' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '恢复监控' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '编辑分组、标签与备注' })).toBeDisabled()
     expect(screen.getByText('已归档实例资料只读')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByText('管理实例', { selector: 'summary' }))
-    fireEvent.click(await screen.findByRole('button', { name: '永久清理' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: '永久清理' }))
     const dialog = await screen.findByRole('alertdialog', { name: '永久清理监控实例' })
     expect(within(dialog).getByText(/命令审计元数据将永久保留/)).toBeInTheDocument()
     fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '误创建空实例' } })
@@ -926,6 +959,109 @@ describe('MonitoringDetailPage', () => {
       }),
     )
     await waitFor(() => expect(screen.getByText('monitoring list')).toBeInTheDocument())
+  })
+
+  it('forces a second management review GET on frozen version conflict and shows updated permissions without writing', async () => {
+    const initial = monitoringInstanceRecord({
+      monitoring_instance_id: 'mi_stale',
+      display_name: 'Tokyo Stale Edge',
+      binding_status: '已绑定',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      updated_at: '2026-04-27T09:05:00Z',
+    })
+    const refreshed = {
+      ...initial,
+      updated_at: '2026-04-27T10:00:00Z',
+    }
+    let currentRecord = initial
+    let reviewGets = 0
+    const secondReview = deferredResponse()
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (init?.method && init.method !== 'GET') {
+        return Promise.resolve(mockJSONResponse({ error: `unexpected write ${init.method} ${path}` }, 500))
+      }
+      if (path === '/api/monitoring-instances/mi_stale/management-review') {
+        reviewGets += 1
+        if (reviewGets === 1) {
+          return Promise.resolve(mockJSONResponse(managementReview(currentRecord, {
+            actions: {
+              can_retire: true,
+              can_restore_lifecycle: false,
+              can_archive: false,
+              can_restore_archive: false,
+              can_permanent_cleanup: false,
+            },
+          })))
+        }
+        return secondReview.promise
+      }
+      if (path === '/api/monitoring-instances/mi_stale') {
+        return Promise.resolve(mockJSONResponse(currentRecord))
+      }
+      if (path === '/api/monitoring-instances/mi_stale/runtime-facts?window=24h') {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_stale')))
+      }
+      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_stale') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_stale') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === '/api/monitoring-instances/mi_stale/vps') {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_stale']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Stale Edge' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: '退役' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '退役监控实例' })
+    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '已不再需要观测' } })
+
+    currentRecord = refreshed
+    fireEvent.click(screen.getByRole('button', { name: '刷新' }))
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/monitoring-instances/mi_stale').length).toBeGreaterThanOrEqual(2)
+    })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认退役' }))
+
+    expect(screen.getByText('实例已更新，请关闭后重新确认。')).toBeInTheDocument()
+    // Re-open 管理 to observe the forced reload; the pending request must be reused.
+    openRuntimeMenu()
+    await waitFor(() => expect(screen.getByText('正在加载…')).toBeInTheDocument())
+    expect(screen.queryByRole('menuitem', { name: '退役' })).not.toBeInTheDocument()
+    expect(reviewGets).toBe(2)
+
+    await act(async () => {
+      secondReview.resolve(mockJSONResponse(managementReview(refreshed, {
+        actions: {
+          can_retire: false,
+          can_restore_lifecycle: false,
+          can_archive: true,
+          can_restore_archive: false,
+          can_permanent_cleanup: false,
+        },
+      })))
+    })
+
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: '归档' })).toBeEnabled())
+    expect(screen.queryByRole('menuitem', { name: '退役' })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toEqual([])
+    expect(reviewGets).toBe(2)
   })
 
   it('renders monitoringInstance header and latest host sample cards', async () => {
@@ -1030,14 +1166,15 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    // Watchtower header surfaces uptime in mono "数据新鲜度" and monitoring_instance_id in mono row 2
-    expect(screen.getByText('2小时 0分钟')).toBeInTheDocument()
-    // Each metric card head renders the current value via MonoDigits
-    expect(screen.getAllByText('12.5%').length).toBeGreaterThanOrEqual(1)
+    // Identity reads name first; the sample itself only annotates the chart section.
+    expect(screen.getByText(/2小时 0分钟/)).toBeInTheDocument()
+    expect(screen.getByText('Tokyo')).toBeInTheDocument()
+    expect(screen.getByText('Vultr')).toBeInTheDocument()
+    expect(screen.queryByText(/ap-northeast-1/)).not.toBeInTheDocument()
+    expect(screen.getByText('0.1%')).toBeInTheDocument()
     expect(screen.getByText(/2.0 GB/i)).toBeInTheDocument()
-    expect(screen.getByText('总内存')).toBeInTheDocument()
+    expect(screen.getAllByText('容量').length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText(/8.0 GB/i)).toBeInTheDocument()
-    expect(screen.getByText('总磁盘')).toBeInTheDocument()
     expect(screen.getByText(/100.0 GB/i)).toBeInTheDocument()
     expect(screen.queryByText('将在 incidents / events 切片接入后替换为真实内容。')).not.toBeInTheDocument()
 
@@ -1046,7 +1183,7 @@ describe('MonitoringDetailPage', () => {
       cache: 'no-store',
         credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/runtime-facts?window=realtime', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/runtime-facts?window=24h', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
         credentials: 'include',
@@ -1139,8 +1276,7 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('总内存')).toBeInTheDocument()
-    expect(screen.getByText('总磁盘')).toBeInTheDocument()
+    expect(screen.getAllByText('容量').length).toBeGreaterThanOrEqual(2)
     expect(screen.queryByText('0 B')).not.toBeInTheDocument()
     expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2)
   })
@@ -1172,6 +1308,7 @@ describe('MonitoringDetailPage', () => {
         .mockResolvedValueOnce(
           mockJSONResponse({
             monitoring_instance_id: 'mi_trend',
+            read_at: '2026-04-24T10:05:02Z',
             latest_host_sample: {
               monitoring_instance_id: 'mi_trend',
               observed_at: '2026-04-24T10:05:00Z',
@@ -1202,7 +1339,7 @@ describe('MonitoringDetailPage', () => {
               sync_batch_id: 'sync-trend-latest',
             },
             window: {
-              key: 'realtime',
+              key: '24h',
               started_at: '2026-04-24T09:05:00Z',
               ended_at: '2026-04-24T10:05:00Z',
               bucket_count: 720,
@@ -1279,9 +1416,15 @@ describe('MonitoringDetailPage', () => {
                 disk_used_pct: 40,
                 inode_used_pct: 8,
                 load_5: 1.2,
+                load_1: 0.9,
+                load_15: 1.4,
+                swap_used_pct: 3,
                 cpu_iowait_pct: 4,
+                disk_busy_pct: 8,
                 net_in_bytes_per_sec: 900,
                 net_out_bytes_per_sec: 1800,
+                disk_read_bytes_per_sec: 4096,
+                disk_write_bytes_per_sec: 1024,
               },
               {
                 observed_at: '2026-04-24T10:05:00Z',
@@ -1291,9 +1434,15 @@ describe('MonitoringDetailPage', () => {
                 disk_used_pct: 41,
                 inode_used_pct: 9,
                 load_5: 1.6,
+                load_1: 1.1,
+                load_15: 1.7,
+                swap_used_pct: 4,
                 cpu_iowait_pct: 6,
+                disk_busy_pct: 11,
                 net_in_bytes_per_sec: 1024,
                 net_out_bytes_per_sec: 2048,
+                disk_read_bytes_per_sec: 5120,
+                disk_write_bytes_per_sec: 1536,
               },
             ],
           }),
@@ -1314,11 +1463,17 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Trend Monitoring Instance' })).toBeInTheDocument(),
     )
 
-    // Watchtower main view: 8 metric cards in 4×2 grid; each renders a MetricChart svg
-    const cards = container.querySelectorAll('.watchtower-metrics .watchtower-metric-card')
-    expect(cards.length).toBe(8)
-    // With 2 ascending metric points, each card's MetricChart draws a polyline
-    expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
+    expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(8)
+    expect(container.querySelectorAll('.monitoring-detail-charts polyline').length).toBeGreaterThanOrEqual(8)
+    expect(container.querySelector('.monitoring-detail-chart--network')).not.toBeNull()
+    expect(container.querySelectorAll('.monitoring-detail-chart--network .metric-chart__line--secondary').length).toBe(1)
+    expect(container.querySelectorAll('.monitoring-detail-chart--mem .metric-chart__line--secondary').length).toBe(1)
+    expect(container.querySelectorAll('.monitoring-detail-chart--load .metric-chart__line--tertiary').length).toBe(1)
+    expect(container.querySelectorAll('.monitoring-detail-chart--iowait .metric-chart__line--secondary').length).toBe(1)
+    expect(container.querySelectorAll('.monitoring-detail-chart--disk-io .metric-chart__line--secondary').length).toBe(1)
+    expect(container.querySelector('.monitoring-detail-chart--inode')).not.toBeNull()
+    expect(container.querySelector('.monitoring-detail-chart--net-in')).toBeNull()
+    expect(container.querySelectorAll('.monitoring-detail-charts details').length).toBe(0)
   })
 
   it('renders realtime trends from recent host samples before websocket messages arrive', async () => {
@@ -1372,7 +1527,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     const { container } = render(
-      <MemoryRouter initialEntries={['/monitoring/mi_seed']}>
+      <MemoryRouter initialEntries={['/monitoring/mi_seed?window=realtime']}>
         <Routes>
           <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
         </Routes>
@@ -1383,8 +1538,8 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Seeded Realtime Monitoring Instance' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('实时滚动 2 点 · 已按阈值优先级排序')).toBeInTheDocument()
-    expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
+    expect(screen.getByText(/实时点/)).toBeInTheDocument()
+    expect(container.querySelectorAll('.monitoring-detail-charts polyline').length).toBeGreaterThanOrEqual(4)
   })
 
   it('shows inline metric values on each chart at the shared hover time', async () => {
@@ -1418,7 +1573,7 @@ describe('MonitoringDetailPage', () => {
               sync_batch_id: 'sync-hover-2',
             }),
             window: {
-              key: 'realtime',
+              key: '24h',
               started_at: '2026-04-24T09:00:05Z',
               ended_at: '2026-04-24T10:00:05Z',
               bucket_count: 720,
@@ -1452,6 +1607,44 @@ describe('MonitoringDetailPage', () => {
                 sync_batch_id: 'sync-hover-2',
               }),
             ],
+            host_metric_points: [
+              {
+                observed_at: '2026-04-24T10:00:00Z',
+                sample_count: 1,
+                cpu_usage_pct: 40,
+                mem_used_pct: 62,
+                disk_used_pct: 60,
+                inode_used_pct: 12,
+                load_5: 0.8,
+                load_1: 0.6,
+                load_15: 1.0,
+                swap_used_pct: 2,
+                cpu_iowait_pct: 6,
+                disk_busy_pct: 8,
+                net_in_bytes_per_sec: 2048,
+                net_out_bytes_per_sec: 4096,
+                disk_read_bytes_per_sec: 1024,
+                disk_write_bytes_per_sec: 512,
+              },
+              {
+                observed_at: '2026-04-24T10:00:05Z',
+                sample_count: 1,
+                cpu_usage_pct: 42,
+                mem_used_pct: 63,
+                disk_used_pct: 61,
+                inode_used_pct: 13,
+                load_5: 0.9,
+                load_1: 0.7,
+                load_15: 1.1,
+                swap_used_pct: 3,
+                cpu_iowait_pct: 7,
+                disk_busy_pct: 9,
+                net_in_bytes_per_sec: 4096,
+                net_out_bytes_per_sec: 8192,
+                disk_read_bytes_per_sec: 2048,
+                disk_write_bytes_per_sec: 1024,
+              },
+            ],
           }),
         )
         .mockResolvedValueOnce(mockJSONResponse([]))
@@ -1470,7 +1663,7 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Hover Monitoring Instance' })).toBeInTheDocument(),
     )
 
-    const svg = container.querySelector('.watchtower-metrics svg')!
+    const svg = container.querySelector('.monitoring-detail-charts svg')!
     svg.getBoundingClientRect = () => ({
       x: 0,
       y: 0,
@@ -1485,31 +1678,23 @@ describe('MonitoringDetailPage', () => {
     fireEvent.mouseMove(svg, { clientX: 360 })
 
     await waitFor(() =>
-      expect(container.querySelectorAll('.watchtower-metrics .metric-chart__tooltip').length).toBe(8),
+      expect(container.querySelectorAll('.monitoring-detail-charts .metric-chart__cursor').length).toBe(8),
     )
-    expect(container.querySelector('.watchtower-metrics-hover')).toBeNull()
-    expect(container.querySelectorAll('.watchtower-metrics .metric-chart__cursor').length).toBe(8)
+    expect(container.querySelectorAll('.monitoring-detail-charts .metric-chart__tooltip').length).toBe(0)
+    expect(container.querySelector('.monitoring-detail-observations__readout')).toHaveTextContent('选中')
 
-    const tooltipFor = (heading: string) => {
-      const card = screen.getByRole('heading', { name: heading }).closest('.watchtower-metric-card')
-      expect(card).toBeTruthy()
-      const tooltip = card!.querySelector('.metric-chart__tooltip')
-      expect(tooltip).toBeTruthy()
-      const tooltipFrame = card!.querySelector('.metric-chart__tooltip-frame')
-      expect(tooltipFrame).toHaveAttribute('x')
-      expect(tooltipFrame).toHaveAttribute('y')
-      expect(tooltip).not.toHaveAttribute('style')
-      return tooltip!
-    }
-
-    expect(tooltipFor('CPU 使用率')).toHaveTextContent('42.0%')
-    expect(tooltipFor('内存使用率')).toHaveTextContent('63.0%')
-    expect(tooltipFor('磁盘使用率')).toHaveTextContent('61.0%')
-    expect(tooltipFor('Inode 使用率')).toHaveTextContent('13.0%')
-    expect(tooltipFor('Load5')).toHaveTextContent('0.9')
-    expect(tooltipFor('CPU IOWait')).toHaveTextContent('7.0%')
-    expect(tooltipFor('网络入')).toHaveTextContent('4.0 KB/s')
-    expect(tooltipFor('网络出')).toHaveTextContent('8.0 KB/s')
+    const readoutFor = (name: string) => within(screen.getByRole('region', { name }))
+    expect(readoutFor('CPU 使用率').getByText('42.0%')).toBeInTheDocument()
+    expect(readoutFor('内存使用率').getByText(/63\.0%/)).toBeInTheDocument()
+    expect(readoutFor('内存使用率').getByText(/交换 3\.0%/)).toBeInTheDocument()
+    expect(readoutFor('磁盘使用率').getByText('61.0%')).toBeInTheDocument()
+    expect(readoutFor('Inode 使用率').getByText('13.0%')).toBeInTheDocument()
+    expect(readoutFor('网络').getByText(/4\.0 KB\/s/)).toBeInTheDocument()
+    expect(readoutFor('网络').getByText(/8\.0 KB\/s/)).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '负载' })).toHaveTextContent('0.9')
+    expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent('7.0%')
+    expect(screen.getByRole('region', { name: 'I/O 等待' })).toHaveTextContent(/繁忙 9\.0%/)
+    expect(readoutFor('磁盘读写').getByText(/2\.0 KB\/s/)).toBeInTheDocument()
   })
 
   it('renders an empty state when no host metric points are available', async () => {
@@ -1541,9 +1726,81 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Empty Trend Monitoring Instance' })).toBeInTheDocument(),
     )
 
-    // Sample is null → watchtower metrics renders the no-sample empty state.
-    expect(screen.getByRole('heading', { name: '尚未收到主机样本' })).toBeInTheDocument()
-    expect(container.querySelectorAll('.watchtower-metric-card').length).toBe(0)
+    // No samples in the window: the section says so, and every plot keeps its slot.
+    expect(screen.getByText('该窗口没有样本')).toBeInTheDocument()
+    expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(8)
+    expect(container.querySelectorAll('.monitoring-detail-chart .metric-chart--empty').length).toBe(8)
+    expect(screen.getByText('当前样本 尚无')).toBeInTheDocument()
+  })
+
+  it('says the window has no samples when every bucket is a gap', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          mockJSONResponse(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_gaps',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        )
+        .mockResolvedValueOnce(
+          mockJSONResponse({
+            monitoring_instance_id: 'mi_gaps',
+            latest_host_sample: null,
+            window: {
+              key: '24h',
+              started_at: '2026-04-23T10:00:00Z',
+              ended_at: '2026-04-24T10:00:00Z',
+              bucket_count: 2,
+              available_started_at: null,
+              available_ended_at: null,
+              sample_count: 0,
+            },
+            host_metric_points: [
+              {
+                observed_at: '2026-04-24T09:00:00Z',
+                sample_count: 0,
+                cpu_usage_pct: null,
+                mem_used_pct: null,
+                disk_used_pct: null,
+                inode_used_pct: null,
+                load_5: null,
+                cpu_iowait_pct: null,
+                net_in_bytes_per_sec: null,
+                net_out_bytes_per_sec: null,
+              },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(mockJSONResponse([]))
+        .mockResolvedValueOnce(mockJSONResponse([])),
+    )
+
+    const { container } = render(
+      <MemoryRouter initialEntries={['/monitoring/mi_gaps']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
+    )
+
+    // Buckets exist but hold no samples, so the window is still reported as empty
+    // while every plot keeps its slot with its own placeholder.
+    expect(await screen.findByText('该窗口没有样本')).toBeInTheDocument()
+    expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(8)
+    expect(container.querySelectorAll('.monitoring-detail-chart .metric-chart--empty').length).toBe(8)
+    expect(container.querySelectorAll('.monitoring-detail-charts polyline').length).toBe(0)
+    expect(screen.queryByText('0.0')).not.toBeInTheDocument()
   })
 
   it('renders first-sync, incident, and event empty states when no related records exist yet', async () => {
@@ -1589,11 +1846,14 @@ describe('MonitoringDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('尚未收到主机样本')).toBeInTheDocument(),
+      expect(screen.getByText('该窗口没有样本')).toBeInTheDocument(),
     )
-    expect(
-      screen.getByText('该监控实例已存在，但首批主机采样（HostSample）还未到达。请等待下一次 agent 同步。'),
-    ).toBeInTheDocument()
+    // No incidents and no events: one quiet line, and 历史 stays reachable.
+    expect(screen.getByText('暂无新的状态变更')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '历史' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '活动' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '记录' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '证据' })).toBeInTheDocument()
   })
 
   it('keeps monitoring details visible when incidents and events fail to load', async () => {
@@ -1675,11 +1935,10 @@ describe('MonitoringDetailPage', () => {
         screen.getByRole('heading', { name: 'Singapore Edge' }),
       ).toBeInTheDocument(),
     )
-    // Watchtower main view still renders metric cards even when incidents/events fail
-    expect(screen.getAllByText('18.0%').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
+    // The page keeps rendering its own evidence while incidents/events fail.
+    expect(screen.getByRole('heading', { name: /CPU 使用率/ })).toBeInTheDocument()
     expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
+    expect(screen.getByText('events unavailable')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试加载活跃异常' })).toBeEnabled()
     expect(screen.getByRole('button', { name: '重试加载相关事件' })).toBeEnabled()
     expect(
@@ -1711,7 +1970,7 @@ describe('MonitoringDetailPage', () => {
           updated_at: '2026-04-24T09:05:00Z',
         }))
       }
-      if (path === '/api/monitoring-instances/mi_003/runtime-facts?window=realtime') {
+      if (path === '/api/monitoring-instances/mi_003/runtime-facts?window=24h') {
         return Promise.resolve(mockJSONResponse({
           monitoring_instance_id: 'mi_003',
           latest_host_sample: hostSampleRecord('mi_003', {
@@ -1757,13 +2016,15 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('button', { name: '重试加载活跃异常' })).toBeEnabled(),
     )
     fireEvent.click(screen.getByRole('button', { name: '重试加载活跃异常' }))
-    await waitFor(() =>
-      expect(screen.getByText('磁盘使用率持续超过阈值')).toBeInTheDocument(),
-    )
+    await waitFor(() => {
+      expect(document.querySelector('.monitoring-detail-notice')?.textContent).toContain('活跃 1')
+    })
+    // The explicit primary issue summary wins over the incident summary.
+    expect(screen.getByText('磁盘使用率偏高')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Singapore Edge' })).toBeInTheDocument()
   })
 
-  it('renders a high-priority binding conflict card on monitoring instance detail', async () => {
+  it('renders the binding conflict as a notice row with a disposition dialog', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord()))
@@ -1781,23 +2042,25 @@ describe('MonitoringDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument(),
-    )
-
-    expect(screen.getAllByText('绑定冲突')[0]).toBeInTheDocument()
-    expect(screen.getByText('高优先级：绑定冲突待处理')).toBeInTheDocument()
-    await waitFor(() => expect(screen.getByText('fp-current-1234567890')).toBeInTheDocument())
-    expect(screen.getByText('fp-pendi…uvwxyz')).toBeInTheDocument()
-    expect(screen.getByText(formatDateTime('2026-04-27T08:55:00Z'))).toBeInTheDocument()
-    expect(screen.getByText(formatDateTime('2026-04-27T09:04:00Z'))).toBeInTheDocument()
-    expect(screen.getByText('4')).toBeInTheDocument()
-    expect(screen.getByText(/同一台机器重装或合法替换/)).toBeInTheDocument()
-    expect(screen.getByText('标签与备注', { selector: 'summary' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '生命周期' })).not.toBeInTheDocument()
-    expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('绑定冲突待确认')).toBeInTheDocument())
+    // The notice row is a plain line, not a card, and no longer duplicates the dialog.
+    expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument()
+    expect(document.querySelectorAll('.metric-card').length).toBe(0)
+    // The conflict is still controllable from the management menu.
     openRuntimeMenu()
-    expect(screen.getByRole('button', { name: '升级/重新接入 agent…' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '升级/重新接入 agent…' })).toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    const dialog = await openBindingConflictDialog()
+    await waitFor(() => expect(within(dialog).getByText('fp-current-1234567890')).toBeInTheDocument())
+    expect(within(dialog).getByText('fp-pendi…uvwxyz')).toBeInTheDocument()
+    expect(within(dialog).getByText(formatDateTime('2026-04-27T08:55:00Z'))).toBeInTheDocument()
+    expect(within(dialog).getByText(formatDateTime('2026-04-27T09:04:00Z'))).toBeInTheDocument()
+    expect(within(dialog).getByText('4')).toBeInTheDocument()
+    expect(within(dialog).getByText(/同一台机器重装或合法替换/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '确认重绑定' })).toBeEnabled()
+    expect(within(dialog).getByRole('button', { name: '拒绝新指纹' })).toBeEnabled()
+    expect(within(dialog).getByRole('button', { name: '重置绑定' })).toBeEnabled()
     expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_conflict/onboarding', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -1829,11 +2092,13 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
     await waitFor(() => expect(screen.getByText('onboarding unavailable')).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument()
+    expect(screen.getByText('绑定冲突待确认')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试加载绑定冲突' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '处置绑定冲突' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '监控实例详情不可用' })).not.toBeInTheDocument()
   })
 
-  it('keeps binding actions disabled until conflict metadata is loaded', async () => {
+  it('keeps conflict disposition unavailable until conflict metadata is loaded', async () => {
     const onboarding = deferredResponse()
     const fetchMock = vi
       .fn()
@@ -1852,24 +2117,22 @@ describe('MonitoringDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument(),
-    )
-    expect(screen.getByRole('button', { name: '确认重绑定' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '拒绝新指纹' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '重置绑定' })).toBeDisabled()
+    await waitFor(() => expect(screen.getByText('绑定冲突待确认')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('正在加载…')).toBeInTheDocument())
+    const trigger = screen.getByRole('button', { name: '处置绑定冲突' })
+    expect(trigger).toBeDisabled()
 
     onboarding.resolve(mockJSONResponse(onboardingConflictState()))
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '确认重绑定' })).toBeEnabled(),
-    )
-    expect(screen.getByRole('button', { name: '拒绝新指纹' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: '重置绑定' })).toBeEnabled()
+    await waitFor(() => expect(trigger).toBeEnabled())
+    const dialog = await openBindingConflictDialog()
+    expect(within(dialog).getByRole('button', { name: '确认重绑定' })).toBeEnabled()
+    expect(within(dialog).getByRole('button', { name: '拒绝新指纹' })).toBeEnabled()
+    expect(within(dialog).getByRole('button', { name: '重置绑定' })).toBeEnabled()
   })
 
 
-  it('confirms a pending monitoring instance rebind from monitoring instance detail and hides the conflict card', async () => {
+  it('confirms a pending monitoring instance rebind from monitoring instance detail and clears the notice', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord()))
@@ -1897,16 +2160,16 @@ describe('MonitoringDetailPage', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(await waitForEnabledButton('确认重绑定'))
-    const rebindDialog = screen.getByRole('alertdialog', { name: '确认重绑定' })
+    const disposition = await openBindingConflictDialog()
+    fireEvent.click(within(disposition).getByRole('button', { name: '确认重绑定' }))
+    const rebindDialog = await screen.findByRole('alertdialog', { name: '确认重绑定' })
     expect(fetchMock).toHaveBeenCalledTimes(5)
     fireEvent.click(within(rebindDialog).getByRole('button', { name: '确认重绑定' }))
 
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: '处置绑定冲突' })).not.toBeInTheDocument(),
     )
-    // "已绑定" StatusBadge remains visible in the header badge row
-    expect(screen.getAllByText('已绑定').length).toBeGreaterThanOrEqual(1)
+    await waitFor(() => expect(screen.queryByText('绑定冲突待确认')).not.toBeInTheDocument())
     expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_conflict/binding/confirm-rebind', {
       method: 'POST',
       headers: { Accept: 'application/json' },
@@ -1938,11 +2201,11 @@ describe('MonitoringDetailPage', () => {
       </MemoryRouter>,
     )
 
-    const rejectButton = await waitForEnabledButton('拒绝新指纹')
-    expect(screen.getByRole('button', { name: '重置绑定' })).toBeEnabled()
+    const disposition = await openBindingConflictDialog()
+    expect(within(disposition).getByRole('button', { name: '重置绑定' })).toBeEnabled()
 
-    fireEvent.click(rejectButton)
-    const rejectDialog = screen.getByRole('alertdialog', { name: '拒绝新指纹' })
+    fireEvent.click(within(disposition).getByRole('button', { name: '拒绝新指纹' }))
+    const rejectDialog = await screen.findByRole('alertdialog', { name: '拒绝新指纹' })
     expect(fetchMock).toHaveBeenCalledTimes(5)
     fireEvent.click(within(rejectDialog).getByRole('button', { name: '拒绝新指纹' }))
     await waitFor(() =>
@@ -1954,8 +2217,9 @@ describe('MonitoringDetailPage', () => {
       }),
     )
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: '处置绑定冲突' })).not.toBeInTheDocument(),
     )
+    await waitFor(() => expect(screen.queryByText('绑定冲突待确认')).not.toBeInTheDocument())
   })
 
   it('resets monitoring instance binding from monitoring instance detail and returns to the unbound state', async () => {
@@ -1986,8 +2250,9 @@ describe('MonitoringDetailPage', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(await waitForEnabledButton('重置绑定'))
-    const resetDialog = screen.getByRole('alertdialog', { name: '重置绑定' })
+    const disposition = await openBindingConflictDialog()
+    fireEvent.click(within(disposition).getByRole('button', { name: '重置绑定' }))
+    const resetDialog = await screen.findByRole('alertdialog', { name: '重置绑定' })
     expect(fetchMock).toHaveBeenCalledTimes(5)
     fireEvent.click(within(resetDialog).getByRole('button', { name: '重置绑定' }))
 
@@ -2000,13 +2265,13 @@ describe('MonitoringDetailPage', () => {
       }),
     )
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: '处置绑定冲突' })).not.toBeInTheDocument(),
     )
-    // "未绑定" StatusBadge remains visible in the header badge row
+    // The unbound state is announced by the status band.
     expect(screen.getAllByText('未绑定').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('keeps binding action errors inside the confirmation modal and preserves the conflict card', async () => {
+  it('keeps binding action errors inside the confirmation modal and preserves the notice row', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord()))
@@ -2025,8 +2290,9 @@ describe('MonitoringDetailPage', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(await waitForEnabledButton('重置绑定'))
-    const resetDialog = screen.getByRole('alertdialog', { name: '重置绑定' })
+    const disposition = await openBindingConflictDialog()
+    fireEvent.click(within(disposition).getByRole('button', { name: '重置绑定' }))
+    const resetDialog = await screen.findByRole('alertdialog', { name: '重置绑定' })
     expect(fetchMock).toHaveBeenCalledTimes(5)
     fireEvent.click(within(resetDialog).getByRole('button', { name: '重置绑定' }))
 
@@ -2034,7 +2300,7 @@ describe('MonitoringDetailPage', () => {
       expect(within(screen.getByRole('alertdialog', { name: '重置绑定' })).getByRole('alert')).toHaveTextContent('invalid binding transition'),
     )
     expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '绑定冲突处置' })).toBeInTheDocument()
+    expect(screen.getByText('绑定冲突待确认')).toBeInTheDocument()
   })
 
   it('shows the new route core data without stale activity while route-specific requests are still in flight', async () => {
@@ -2259,6 +2525,24 @@ describe('MonitoringDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_maintenance',
+              display_name: 'Tokyo Edge',
+              monitoring_status: '维护中',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              last_heartbeat_at: '2026-04-24T09:00:00Z',
+              last_sync_at: '2026-04-24T09:05:00Z',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+              updated_at: '2026-04-24T09:05:00Z',
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
         mockJSONResponse({
           monitoring_instance_id: 'mi_maintenance',
           display_name: 'Tokyo Edge',
@@ -2294,12 +2578,12 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '退出维护' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '退出维护' }))
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '进入维护' })).toBeInTheDocument(),
+      expect(screen.getByRole('menuitem', { name: '进入维护' })).toBeInTheDocument(),
     )
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_maintenance/runtime/exit-maintenance', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_maintenance/runtime/exit-maintenance', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -2341,6 +2625,24 @@ describe('MonitoringDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_001',
+              display_name: 'Tokyo Edge',
+              monitoring_status: '启用',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              last_heartbeat_at: '2026-04-24T09:00:00Z',
+              last_sync_at: '2026-04-24T09:05:00Z',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+              updated_at: '2026-04-24T09:05:00Z',
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
         mockJSONResponse({
           monitoring_instance_id: 'mi_001',
           display_name: 'Tokyo Edge',
@@ -2376,7 +2678,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    const pauseButton = screen.getByRole('button', { name: '暂停监控' })
+    const pauseButton = screen.getByRole('menuitem', { name: '暂停监控' })
     fireEvent.click(pauseButton)
 
     expect(screen.getByRole('alertdialog', { name: '确认暂停监控实例监控' })).toBeInTheDocument()
@@ -2388,22 +2690,22 @@ describe('MonitoringDetailPage', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByText('不会删除历史事件、观测记录或 agent 绑定关系。')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
 
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('heading', { name: '确认暂停监控实例监控' })).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(4)
-    await waitFor(() => expect(screen.getByRole('button', { name: '暂停监控' })).toHaveFocus())
+    expect(fetchMock).toHaveBeenCalledTimes(5)
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: '暂停监控' })).toHaveFocus())
 
-    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
     fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
 
     expect(confirmMock).not.toHaveBeenCalled()
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
+      expect(screen.getByRole('menuitem', { name: '恢复监控' })).toBeInTheDocument(),
     )
-    await waitFor(() => expect(screen.getByRole('button', { name: '恢复监控' })).toHaveFocus())
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_001/runtime/pause', {
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: '恢复监控' })).toHaveFocus())
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_001/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -2445,7 +2747,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
 
     expect(screen.getByRole('alertdialog', { name: '确认暂停监控实例监控' })).toBeInTheDocument()
     expect(screen.getByText('当前：监控运行状态为维护中。')).toBeInTheDocument()
@@ -2468,6 +2770,19 @@ describe('MonitoringDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts('mi_pause_error')))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_pause_error',
+              binding_status: '已绑定',
+              monitoring_status: '启用',
+              current_health_status: '正常',
+              current_primary_issue_summary: '',
+            }),
+          ),
+        ),
+      )
       .mockResolvedValueOnce(mockJSONResponse({ error: 'pause failed' }, 500))
       .mockResolvedValueOnce(
         mockJSONResponse(
@@ -2496,7 +2811,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '暂停监控' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
     fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
 
     await waitFor(() => expect(screen.getByText('pause failed')).toBeInTheDocument())
@@ -2506,9 +2821,9 @@ describe('MonitoringDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '恢复监控' })).toBeInTheDocument(),
+      expect(screen.getByRole('menuitem', { name: '恢复监控' })).toBeInTheDocument(),
     )
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_pause_error/runtime/pause', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_pause_error/runtime/pause', {
       method: 'POST',
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -2595,6 +2910,22 @@ describe('MonitoringDetailPage', () => {
         )
         .mockResolvedValueOnce(mockJSONResponse([]))
         .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_001',
+              display_name: 'Tokyo Edge',
+              monitoring_status: '维护中',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+              updated_at: '2026-04-24T09:05:00Z',
+            }),
+          ),
+        ),
+      )
         .mockImplementationOnce(() => runtimeAction.promise)
         .mockResolvedValueOnce(
           mockJSONResponse({
@@ -2636,14 +2967,14 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '退出维护' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '退出维护' }))
     fireEvent.click(screen.getByRole('button', { name: 'switch monitoring instance' }))
 
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
     )
     openRuntimeMenu()
-    expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
+    expect(screen.getByRole('menuitem', { name: '进入维护' })).toBeEnabled()
 
     runtimeAction.resolve(
       mockJSONResponse({
@@ -2669,7 +3000,7 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
     )
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '进入维护' })).toBeEnabled()
+    expect(screen.getByRole('menuitem', { name: '进入维护' })).toBeEnabled()
   })
 
   it('ignores a stale binding-action success after switching to a different monitoringInstance route', async () => {
@@ -2726,8 +3057,9 @@ describe('MonitoringDetailPage', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(await waitForEnabledButton('确认重绑定'))
-    const rebindDialog = screen.getByRole('alertdialog', { name: '确认重绑定' })
+    const disposition = await openBindingConflictDialog()
+    fireEvent.click(within(disposition).getByRole('button', { name: '确认重绑定' }))
+    const rebindDialog = await screen.findByRole('alertdialog', { name: '确认重绑定' })
     fireEvent.click(within(rebindDialog).getByRole('button', { name: '确认重绑定' }))
     fireEvent.click(screen.getByRole('button', { name: 'switch monitoring instance' }))
 
@@ -2752,7 +3084,7 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Seoul Edge' })).toBeInTheDocument(),
     )
     expect(screen.queryByText('Tokyo Edge')).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument()
+    expect(screen.queryByText('绑定冲突待确认')).not.toBeInTheDocument()
   })
 
 
@@ -2800,7 +3132,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.queryByText('当前主问题')).not.toBeInTheDocument()
   })
 
-  it('renders the watchtower danger zone with primary issue summary when incidents are active', async () => {
+  it('renders active incidents as one notice line that opens the history drawer', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -2833,18 +3165,17 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    const danger = container.querySelector('.watchtower-danger')
-    expect(danger).not.toBeNull()
-    expect(screen.getByText('当前主问题')).toBeInTheDocument()
-    expect(
-      screen.getByRole('heading', { name: '磁盘使用率持续超过阈值' }),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /查看完整时间线/ })).toBeInTheDocument()
-    // Active incident count surfaces inside the danger meta line
-    expect(danger?.textContent ?? '').toContain('3')
+    // One notice line replaces the danger card plus the duplicated incident list.
+    expect(container.querySelector('.watchtower-danger')).toBeNull()
+    expect(screen.queryByText('当前主问题')).not.toBeInTheDocument()
+    const notice = container.querySelector('.monitoring-detail-notice')!
+    expect(notice.textContent).toContain('磁盘使用率持续超过阈值')
+    expect(notice.textContent).toContain('活跃 3')
+    fireEvent.click(within(notice as HTMLElement).getByRole('button', { name: '事件' }))
+    expect(await screen.findByRole('dialog', { name: '监控实例历史抽屉' })).toBeInTheDocument()
   })
 
-  it('renders 8 watchtower metric cards in the main 4×2 grid when a host sample is present', async () => {
+  it('lays out seven observation charts in one responsive grid without nested cards', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -2911,23 +3242,34 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    const cards = container.querySelectorAll('.watchtower-metrics .watchtower-metric-card')
-    expect(cards.length).toBe(8)
-    // Each metric card head renders the canonical 8 labels.
-    const headings = Array.from(container.querySelectorAll('.watchtower-metric-card__head h3')).map(
-      (n) => (n.textContent ?? '').trim(),
-    )
-    expect(headings).toHaveLength(8)
-    expect(headings).toEqual(expect.arrayContaining([
-      'CPU 使用率',
-      'Load5',
-      '内存使用率',
-      '磁盘使用率',
-      'Inode 使用率',
-      '网络入',
-      '网络出',
-      'CPU IOWait',
-    ]))
+    expect(container.querySelectorAll('.watchtower-metric-group').length).toBe(0)
+    expect(container.querySelectorAll('.watchtower-metric-card').length).toBe(0)
+    const grid = container.querySelector('.monitoring-detail-charts')!
+    expect(grid).toHaveAttribute('data-layout', 'wide')
+    expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(8)
+    for (const name of ['CPU 使用率', '内存使用率', '磁盘使用率', 'Inode 使用率', '负载', 'I/O 等待', '网络', '磁盘读写']) {
+      expect(screen.getByRole('heading', { name: new RegExp(`^${name}。`) })).toBeInTheDocument()
+    }
+    const heights = Array.from(grid.querySelectorAll('svg')).map((svg) => svg.getAttribute('height'))
+    expect(heights.filter((height) => height === '168')).toHaveLength(8)
+    for (const variant of ['cpu', 'mem', 'disk', 'inode', 'load', 'iowait', 'network', 'disk-io']) {
+      expect(container.querySelector(`.monitoring-detail-chart--${variant}`)).not.toBeNull()
+    }
+    expect(container.querySelector('.monitoring-detail-chart--net-in')).toBeNull()
+    expect(container.querySelectorAll('details').length).toBe(0)
+    expect(screen.getByRole('region', { name: 'Inode 使用率' })).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '磁盘读写' })).toBeInTheDocument()
+    const mem = container.querySelector('.monitoring-detail-chart--mem')!
+    expect(mem.textContent).toContain('交换')
+    expect(mem.querySelector('.monitoring-detail-chart__notes')?.textContent).not.toContain('交换')
+    expect(mem.querySelector('.monitoring-detail-chart__notes')?.textContent).toContain('可用')
+
+    // The window control shares the chart section head; nothing owns a bare row.
+    expect(container.querySelector('.monitoring-detail-time-window')).toBeNull()
+    const head = container.querySelector('.monitoring-detail-observations__head')!
+    expect(head.querySelector('.monitoring-detail-observations__toolbar')).not.toBeNull()
+    expect(within(head as HTMLElement).getByRole('group', { name: '观测时间窗口' })).toBeInTheDocument()
+    expect(within(head as HTMLElement).getByText(/窗口末值/)).toBeInTheDocument()
   })
 
   it('removes the old folded property sections while keeping standalone data sections', async () => {
@@ -2963,14 +3305,17 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    expect(container.querySelectorAll('.collapsible-section.watchtower-secondary').length).toBe(0)
-    expect(screen.getByText('标签与备注', { selector: 'summary' })).toBeInTheDocument()
+    expect(container.querySelectorAll('.watchtower-secondary').length).toBe(0)
+    expect(container.querySelectorAll('details').length).toBe(0)
     expect(screen.queryByRole('heading', { name: '生命周期' })).not.toBeInTheDocument()
     expect(screen.queryByText('接入凭证状态')).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '关联 VPS' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '容器列表' })).not.toBeInTheDocument()
-    // Page footer surfaces the snapshot meta line
-    expect(container.querySelector('.watchtower-snapshot-meta')).not.toBeNull()
+    // Metadata and lifecycle moved into the header 管理 menu; the sample survives only
+    // as the chart-section footer.
+    expect(screen.getByRole('button', { name: '管理' })).toBeInTheDocument()
+    expect(screen.getByText('当前样本 尚无')).toBeInTheDocument()
+    expect(container.querySelector('.watchtower-snapshot-meta')).toBeNull()
   })
 
   it('keeps container inventory out of the monitoring detail body', async () => {
@@ -3152,6 +3497,20 @@ describe('MonitoringDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
         mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_ops',
+              binding_status: '已绑定',
+              monitoring_status: '启用',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
           monitoringInstanceRecord({
             monitoring_instance_id: 'mi_ops',
             binding_status: '已绑定',
@@ -3179,10 +3538,10 @@ describe('MonitoringDetailPage', () => {
 
     // Opening the operations <summary> reveals the maintenance/pause buttons
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '进入维护' }))
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_ops/runtime/enter-maintenance', {
+      expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_ops/runtime/enter-maintenance', {
         method: 'POST',
         headers: { Accept: 'application/json' },
         cache: 'no-store',
@@ -3266,7 +3625,7 @@ describe('MonitoringDetailPage', () => {
       fetchMock.mock.calls.some((call) => String(call[0]).includes('include_resolved=true')),
     ).toBe(false)
 
-    fireEvent.click(screen.getByRole('button', { name: '查看历史' }))
+    fireEvent.click(screen.getByRole('button', { name: '历史' }))
 
     // Drawer opens; "事件时间线" tab is the default selection.
     const dialog = await screen.findByRole('dialog')
@@ -3303,7 +3662,7 @@ describe('MonitoringDetailPage', () => {
 
   // ── Time window Tabs ──
 
-  it('renders time window Tabs with realtime selected by default', async () => {
+  it('renders time window Tabs with 24h selected by default', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -3341,10 +3700,10 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    const windowGroup = screen.getByRole('group', { name: '监控实例观测时间窗口' })
+    const windowGroup = screen.getByRole('group', { name: '观测时间窗口' })
     expect(windowGroup).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '实时' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '实时' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: '7d' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: '30d' })).toHaveAttribute('aria-pressed', 'false')
   })
@@ -3385,8 +3744,8 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument(),
     )
 
-    // Initial load fetches runtime facts with the default realtime window.
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_calm/runtime-facts?window=realtime', {
+    // Initial load fetches runtime facts with the default 24h window.
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_calm/runtime-facts?window=24h', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -3457,7 +3816,7 @@ describe('MonitoringDetailPage', () => {
     vi.stubGlobal('WebSocket', MockRuntimeWebSocket)
 
     const { container } = render(
-      <MemoryRouter initialEntries={['/monitoring/mi_realtime']}>
+      <MemoryRouter initialEntries={['/monitoring/mi_realtime?window=realtime']}>
         <Routes>
           <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
         </Routes>
@@ -3518,9 +3877,9 @@ describe('MonitoringDetailPage', () => {
       })
     })
 
-    await waitFor(() => expect(screen.getByText('实时滚动 2 点 · 已按阈值优先级排序')).toBeInTheDocument())
-    expect(screen.getByText('42.0%')).toBeInTheDocument()
-    expect(container.querySelectorAll('.watchtower-metrics polyline').length).toBe(8)
+    await waitFor(() => expect(screen.getByText(/实时点/)).toBeInTheDocument())
+    expect(screen.getAllByText('42.0%').length).toBeGreaterThan(0)
+    expect(container.querySelectorAll('.monitoring-detail-charts polyline').length).toBeGreaterThanOrEqual(4)
 
     fireEvent.click(screen.getByRole('button', { name: '24h' }))
     await waitFor(() => expect(socket.close).toHaveBeenCalledTimes(1))
@@ -3565,9 +3924,9 @@ describe('MonitoringDetailPage', () => {
 
     openRuntimeMenu()
 
-    expect(screen.getByRole('button', { name: '升级/重新接入 agent…' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '执行命令…' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看命令审计' })).toHaveAttribute(
+    expect(screen.getByRole('menuitem', { name: '升级/重新接入 agent…' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '执行诊断命令…' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '查看命令审计' })).toHaveAttribute(
       'href',
       '/command-audit?monitoring_instance=mi_cmd',
     )
@@ -3607,7 +3966,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '升级/重新接入 agent…' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '升级/重新接入 agent…' }))
 
     const drawer = await screen.findByRole('dialog', { name: '监控实例接入抽屉' })
     expect(within(drawer).getByRole('heading', { name: 'Tokyo Edge · 升级/重新接入 agent' })).toBeInTheDocument()
@@ -3653,7 +4012,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.queryByRole('dialog', { name: '执行命令抽屉' })).not.toBeInTheDocument()
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '执行诊断命令…' }))
 
     // Drawer opens.
     const drawer = await screen.findByRole('dialog', { name: '执行命令抽屉' })
@@ -3689,6 +4048,20 @@ describe('MonitoringDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_cmd3',
+              binding_status: '已绑定',
+              monitoring_status: '启用',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
         mockJSONResponse({
           action_id: 'act_001',
           command_id: 'uptime',
@@ -3710,7 +4083,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '执行诊断命令…' }))
     const uptimeButton = await screen.findByRole('button', { name: /uptime/ })
     fireEvent.click(uptimeButton)
 
@@ -3718,7 +4091,7 @@ describe('MonitoringDetailPage', () => {
       expect(screen.getByText('uptime · 等待 agent 执行…')).toBeInTheDocument(),
     )
     expect(screen.getByText(/已下发，等待 agent 执行/)).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_cmd3/actions', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_cmd3/actions', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -3749,6 +4122,20 @@ describe('MonitoringDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_cmd_sensitive',
+              binding_status: '已绑定',
+              monitoring_status: '启用',
+              current_health_status: '正常',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
         mockJSONResponse({
           action_id: 'act_sensitive',
           command_id: 'systemctl_status',
@@ -3770,19 +4157,19 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '执行诊断命令…' }))
     fireEvent.click(await screen.findByRole('button', { name: /systemctl status/ }))
 
     const dialog = await screen.findByRole('alertdialog', { name: '确认执行敏感命令' })
     expect(within(dialog).getByText(/systemctl status/)).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
 
     fireEvent.click(within(dialog).getByRole('button', { name: '确认执行' }))
 
     await waitFor(() =>
       expect(screen.getByText('systemctl status · 等待 agent 执行…')).toBeInTheDocument(),
     )
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_cmd_sensitive/actions', {
+    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_cmd_sensitive/actions', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -3827,7 +4214,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '执行诊断命令…' }))
     fireEvent.click(await screen.findByRole('button', { name: /systemctl status/ }))
 
     const dialog = await screen.findByRole('alertdialog', { name: '确认执行敏感命令' })
@@ -3836,7 +4223,7 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() =>
       expect(screen.queryByRole('alertdialog', { name: '确认执行敏感命令' })).not.toBeInTheDocument(),
     )
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('renders expired command output without stale stdout or stderr', async () => {
@@ -3881,7 +4268,7 @@ describe('MonitoringDetailPage', () => {
     )
 
     openRuntimeMenu()
-    fireEvent.click(screen.getByRole('button', { name: '执行命令…' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '执行诊断命令…' }))
     const drawer = await screen.findByRole('dialog', { name: '执行命令抽屉' })
 
     expect(within(drawer).getByText(/命令输出已过期/)).toBeInTheDocument()
@@ -4100,7 +4487,7 @@ describe('MonitoringDetailPage', () => {
         </MemoryRouter>,
       )
 
-      await waitFor(() => expect(screen.getByText('VPS 关联未同步')).toBeInTheDocument())
+      await waitFor(() => expect(screen.getByText('未同步')).toBeInTheDocument())
       const returnLink = screen.getByRole('link', { name: '返回来源 VPS' })
       expect(returnLink).toHaveAttribute('href', '/vps/vps_tokyo_origin')
     })
@@ -4280,6 +4667,241 @@ describe('MonitoringDetailPage', () => {
       await waitFor(() => expect(screen.getByRole('link', { name: '未关联' })).toBeInTheDocument())
       expect(screen.queryByRole('link', { name: '返回来源 VPS' })).not.toBeInTheDocument()
       expect(screen.getByRole('link', { name: '未关联' })).toBeInTheDocument()
+    })
+
+    it('carries validated return_vps through activity and restores header source VPS on return', async () => {
+      const navState = {
+        monitoringListHref: '/monitoring?view=abnormal&selected=mi_001',
+        return_vps: 'vps_SHOULD_NOT_USE',
+      }
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts?window=24h') {
+          return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        }
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts?window=7d') {
+          return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        }
+        if (path.startsWith('/api/incidents')) return mockJSONResponse([])
+        if (path.startsWith('/api/events')) return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') return mockJSONResponse([])
+        if (path.startsWith('/api/subjects/monitoring_instance/mi_001/activity')) {
+          return mockJSONResponse({
+            subject: {
+              kind: 'monitoring_instance',
+              source_id: 'mi_001',
+              identity: { display_name: 'Tokyo Edge' },
+              live_route: '/monitoring/mi_001',
+              status: 'live',
+            },
+            view: 'activity',
+            snapshot_cursor: 'snap',
+            freshness: { state: 'ready', visible_observed_at: null, new_items_available: false, reason_code: '' },
+            items: [],
+            source_statuses: [],
+          })
+        }
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_001',
+            search: '?return_vps=vps_tokyo_origin&window=7d',
+            state: navState,
+          }]}
+        >
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId/activity" element={<SubjectActivityPage />} />
+            <Route
+              path="/monitoring/:monitoringInstanceId"
+              element={(
+                <>
+                  <LocationStateProbe />
+                  <MonitoringDetailPage />
+                </>
+              )}
+            />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '未关联' })).toBeInTheDocument())
+      const activityLink = screen.getByRole('link', { name: '活动' })
+      expect(activityLink).toHaveAttribute('href', '/monitoring/mi_001/activity?return_vps=vps_tokyo_origin')
+      expect(activityLink.getAttribute('href')).not.toContain('window=')
+      fireEvent.click(activityLink)
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '返回详情' })).toBeInTheDocument())
+      expect(screen.getByRole('link', { name: '返回详情' })).toHaveAttribute(
+        'href',
+        '/monitoring/mi_001?return_vps=vps_tokyo_origin',
+      )
+      fireEvent.click(screen.getByRole('link', { name: '返回详情' }))
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '返回来源 VPS' })).toBeInTheDocument())
+      expect(screen.getByRole('link', { name: '返回来源 VPS' })).toHaveAttribute('href', '/vps/vps_tokyo_origin')
+      expect(screen.getByTestId('location-probe')).toHaveTextContent('return_vps=vps_tokyo_origin')
+      expect(screen.getByTestId('location-probe')).not.toHaveTextContent('window=')
+      expect(screen.getByTestId('location-probe')).toHaveAttribute('data-state', JSON.stringify(navState))
+      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_001/runtime-facts?window=24h', {
+        headers: { Accept: 'application/json' },
+        cache: 'no-store',
+        credentials: 'include',
+      })
+    })
+
+    it('carries validated return_vps and list selection through new-record nested return', async () => {
+      const navState = {
+        monitoringListHref: '/monitoring?view=abnormal&selected=mi_001',
+        return_vps: 'vps_SHOULD_NOT_USE',
+      }
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts?window=24h') {
+          return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        }
+        if (path.startsWith('/api/incidents')) return mockJSONResponse([])
+        if (path.startsWith('/api/events')) return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') return mockJSONResponse([])
+        if (path.startsWith('/api/subjects/monitoring_instance/mi_001/activity')) {
+          return mockJSONResponse({
+            subject: {
+              kind: 'monitoring_instance',
+              source_id: 'mi_001',
+              identity: { display_name: 'Tokyo Edge' },
+              live_route: '/monitoring/mi_001',
+              status: 'live',
+            },
+            view: 'records',
+            snapshot_cursor: 'snap',
+            freshness: { state: 'ready', visible_observed_at: null, new_items_available: false, reason_code: '' },
+            items: [],
+            source_statuses: [],
+          })
+        }
+        if (path.startsWith('/api/record-drafts')) return mockJSONResponse({ items: [] })
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_001',
+            search: '?return_vps=vps_tokyo_origin',
+            state: navState,
+          }]}
+        >
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId/records" element={<SubjectRecordsPage />} />
+            <Route path="/records/new" element={<RecordNewPage />} />
+            <Route
+              path="/monitoring/:monitoringInstanceId"
+              element={(
+                <>
+                  <LocationStateProbe />
+                  <MonitoringDetailPage />
+                </>
+              )}
+            />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '记录' })).toBeInTheDocument())
+      fireEvent.click(screen.getByRole('link', { name: '记录' }))
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '新建记录' })).toBeInTheDocument())
+      const newRecord = screen.getByRole('link', { name: '新建记录' })
+      expect(newRecord.getAttribute('href')).toContain('return_to=%2Fmonitoring%2Fmi_001%2Frecords')
+      expect(newRecord.getAttribute('href')).not.toContain('return_vps=')
+      fireEvent.click(newRecord)
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '返回主体' })).toBeInTheDocument())
+      expect(screen.getByRole('link', { name: '返回主体' })).toHaveAttribute(
+        'href',
+        '/monitoring/mi_001/records?return_vps=vps_tokyo_origin',
+      )
+      fireEvent.click(screen.getByRole('link', { name: '返回主体' }))
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '返回详情' })).toBeInTheDocument())
+      fireEvent.click(screen.getByRole('link', { name: '返回详情' }))
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '返回来源 VPS' })).toBeInTheDocument())
+      expect(screen.getByRole('link', { name: '返回来源 VPS' })).toHaveAttribute('href', '/vps/vps_tokyo_origin')
+      expect(screen.getByTestId('location-probe')).toHaveTextContent('/monitoring/mi_001?return_vps=vps_tokyo_origin')
+      expect(JSON.parse(screen.getByTestId('location-probe').getAttribute('data-state')!)).toEqual({
+        monitoringListHref: '/monitoring?view=abnormal&selected=mi_001',
+        return_vps: 'vps_tokyo_origin',
+      })
+    })
+
+    it('refuses invalid return_vps provenance through the new-record nested return', async () => {
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input)
+        if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(sampleDetail)
+        if (path === '/api/monitoring-instances/mi_001/runtime-facts?window=24h') {
+          return mockJSONResponse({ monitoring_instance_id: 'mi_001', latest_host_sample: null, recent_host_samples: [] })
+        }
+        if (path.startsWith('/api/incidents') || path.startsWith('/api/events')) return mockJSONResponse([])
+        if (path === '/api/monitoring-instances/mi_001/vps') return mockJSONResponse([])
+        if (path.startsWith('/api/subjects/monitoring_instance/mi_001/activity')) {
+          return mockJSONResponse({
+            subject: {
+              kind: 'monitoring_instance',
+              source_id: 'mi_001',
+              identity: { display_name: 'Tokyo Edge' },
+              live_route: '/monitoring/mi_001',
+              status: 'live',
+            },
+            view: 'records',
+            snapshot_cursor: 'snap',
+            freshness: { state: 'ready', visible_observed_at: null, new_items_available: false, reason_code: '' },
+            items: [],
+            source_statuses: [],
+          })
+        }
+        if (path.startsWith('/api/record-drafts')) return mockJSONResponse({ items: [] })
+        return mockJSONResponse([])
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(
+        <MemoryRouter
+          initialEntries={[{
+            pathname: '/monitoring/mi_001',
+            search: '?return_vps=javascript:alert(1)',
+            state: { monitoringListHref: '/monitoring?selected=mi_001' },
+          }]}
+        >
+          <Routes>
+            <Route path="/monitoring/:monitoringInstanceId/records" element={<SubjectRecordsPage />} />
+            <Route path="/records/new" element={<RecordNewPage />} />
+            <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+          </Routes>
+        </MemoryRouter>,
+      )
+
+      await waitFor(() => expect(screen.getByRole('link', { name: '记录' })).toBeInTheDocument())
+      expect(screen.queryByRole('link', { name: '返回来源 VPS' })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('link', { name: '记录' }))
+      await waitFor(() => expect(screen.getByRole('link', { name: '新建记录' })).toBeInTheDocument())
+      fireEvent.click(screen.getByRole('link', { name: '新建记录' }))
+      await waitFor(() => expect(screen.getByRole('link', { name: '返回主体' })).toBeInTheDocument())
+      expect(screen.getByRole('link', { name: '返回主体' })).toHaveAttribute('href', '/monitoring/mi_001/records')
+      expect(screen.getByRole('link', { name: '返回主体' }).getAttribute('href')).not.toContain('javascript')
+      fireEvent.click(screen.getByRole('link', { name: '返回主体' }))
+      await waitFor(() => expect(screen.getByRole('link', { name: '返回详情' })).toBeInTheDocument())
+      expect(screen.getByRole('link', { name: '返回详情' })).toHaveAttribute('href', '/monitoring/mi_001')
+      fireEvent.click(screen.getByRole('link', { name: '返回详情' }))
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+      expect(screen.queryByRole('link', { name: '返回来源 VPS' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: /javascript/ })).not.toBeInTheDocument()
     })
   })
 

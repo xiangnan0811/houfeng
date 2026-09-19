@@ -1,15 +1,27 @@
-import type { ReactNode } from 'react'
-import { Fragment, useState } from 'react'
-import { MetricChart, type MetricChartSample } from '../atoms/MetricChart'
-import { MonoDigits } from '../atoms/Mono'
+import { useState, type ReactNode } from 'react'
+import { MetricChart } from '../atoms/MetricChart'
+import { MonoDigits, Timestamp } from '../atoms/Mono'
 import {
   formatBytes,
   formatBytesPerSecond,
   formatNumber,
   formatPercent,
 } from '../../lib/format'
-import type { HostMetricPoint, HostSample, MonitoringRuntimeWindow } from '../../lib/types'
-import { DEFAULT_THRESHOLDS, type MetricThreshold, type MetricThresholds } from '../../config/thresholds'
+import type { HostSample, MonitoringRuntimeWindow } from '../../lib/types'
+import type { MetricThresholds } from '../../config/thresholds'
+import {
+  formatCapacityBytes,
+  formatNetworkAxis,
+  seriesMax,
+  seriesValueAt,
+  thresholdLines,
+  thresholdTitle,
+  timeWindowLabel,
+  toAscending,
+  toSeries,
+  type HostMetricSeriesPoint,
+  type MetricTimeWindow,
+} from './metricSeries'
 
 type Props = {
   sample: HostSample | null
@@ -17,96 +29,49 @@ type Props = {
   timeWindow: MetricTimeWindow
   window?: MonitoringRuntimeWindow
   isMaintenance?: boolean
-  thresholds?: MetricThresholds
+  thresholds?: MetricThresholds | null
+  detailPresentation?: boolean
 }
 
-type MetricTimeWindow = 'realtime' | '24h' | '7d' | '30d'
-
-export type HostMetricSeriesPoint = Pick<
-  HostMetricPoint,
-  | 'observed_at'
-  | 'cpu_usage_pct'
-  | 'mem_used_pct'
-  | 'disk_used_pct'
-  | 'inode_used_pct'
-  | 'load_5'
-  | 'cpu_iowait_pct'
-  | 'net_in_bytes_per_sec'
-  | 'net_out_bytes_per_sec'
->
-
-type MetricPriority = 0 | 1 | 2 | 3 // 0=normal, 1=warning, 2=alert, 3=critical
-type MetricTone = 'normal' | 'notice' | 'alert' | 'critical'
-
-interface MetricCardDef {
-  id: string
-  label: string
-  priority: MetricPriority
-  tone: MetricTone
-  render: () => ReactNode
-}
-
-function priorityFromThresholds(value: number, thresholds: MetricThreshold): MetricPriority {
-  if (value >= thresholds.critical) return 3
-  if (value >= thresholds.alert) return 2
-  if (value >= thresholds.warning) return 1
-  return 0
-}
-
-function priorityTone(p: MetricPriority): MetricTone {
-  if (p === 3) return 'critical'
-  if (p === 2) return 'alert'
-  if (p === 1) return 'notice'
-  return 'normal'
-}
-
-function toAscending(samples: HostMetricSeriesPoint[]): HostMetricSeriesPoint[] {
-  return [...samples].sort(
-    (a, b) => new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime(),
-  )
-}
-
-function toSeries(
-  samples: HostMetricSeriesPoint[],
-  pick: (s: HostMetricSeriesPoint) => number,
-): MetricChartSample[] {
-  return samples.map((s) => ({ value: pick(s), observedAt: s.observed_at }))
-}
-
-function cardRibbonClass(priority: MetricPriority): string {
-  if (priority === 3) return 'watchtower-metric-card--critical'
-  if (priority === 2) return 'watchtower-metric-card--alert'
-  if (priority === 1) return 'watchtower-metric-card--notice'
-  return ''
-}
-
-function thresholdLines(thresholds: MetricThreshold, suffix = '') {
-  return [
-    { value: thresholds.warning, tone: 'notice' as const, label: `${thresholds.warning}${suffix}` },
-    { value: thresholds.alert, tone: 'alert' as const, label: `${thresholds.alert}${suffix}` },
-    { value: thresholds.critical, tone: 'critical' as const, label: `${thresholds.critical}${suffix}` },
-  ]
-}
-
-function thresholdTitle(metric: string, thresholds: MetricThreshold, suffix: string, extra: string) {
-  return `${metric}。正常：< ${thresholds.warning}${suffix}，关注：≥ ${thresholds.warning}${suffix}，告警：≥ ${thresholds.alert}${suffix}，严重：≥ ${thresholds.critical}${suffix}。${extra}`
-}
-
-function formatCapacityBytes(value?: number | null): string {
-  if (value == null || !Number.isFinite(value) || value <= 0) return '—'
-  return formatBytes(value)
-}
-
-function timeWindowLabel(timeWindow: MetricTimeWindow): string {
-  if (timeWindow === 'realtime') return '实时'
-  if (timeWindow === '24h') return '近 24h'
-  if (timeWindow === '7d') return '近 7d'
-  return '近 30d'
-}
+export type { HostMetricSeriesPoint }
 
 function availableWindowLabel(window?: MonitoringRuntimeWindow): string {
   if (!window?.available_started_at || !window.available_ended_at) return '暂无可用历史跨度'
   return `${new Date(window.available_started_at).toLocaleString()} - ${new Date(window.available_ended_at).toLocaleString()}`
+}
+
+function readoutKind(timeWindow: MetricTimeWindow, hovering: boolean): string {
+  if (timeWindow === 'realtime') return hovering ? '选中点' : '实时点'
+  return hovering ? '选中桶' : '窗口末值'
+}
+
+function Plot({
+  title,
+  titleHint,
+  current,
+  currentLabel,
+  children,
+}: {
+  title: string
+  titleHint: string
+  current?: ReactNode
+  currentLabel?: string
+  children: ReactNode
+}) {
+  return (
+    <div className="watchtower-metric-plot">
+      <header className="watchtower-metric-plot__head">
+        <h3 title={titleHint}>{title}</h3>
+        {current ? (
+          <span className="watchtower-metric-plot__current">
+            {currentLabel ? <span className="watchtower-metric-plot__current-label">{currentLabel}</span> : null}
+            {current}
+          </span>
+        ) : null}
+      </header>
+      {children}
+    </div>
+  )
 }
 
 export function MonitoringInstanceWatchtowerMetrics({
@@ -115,339 +80,335 @@ export function MonitoringInstanceWatchtowerMetrics({
   timeWindow,
   window,
   isMaintenance = false,
-  thresholds = DEFAULT_THRESHOLDS,
+  thresholds = null,
+  detailPresentation = false,
 }: Props) {
   const [hoveredAt, setHoveredAt] = useState<string | null>(null)
-
-  if (!sample) {
-    return (
-      <div className="empty-state">
-        <h3>尚未收到主机样本</h3>
-        <p>该监控实例已存在，但首批主机采样（HostSample）还未到达。请等待下一次 agent 同步。</p>
-      </div>
-    )
-  }
-
-  const ascending = toAscending(metricPoints)
+  const empty = !sample && metricPoints.length === 0
+  const ascending = empty ? [] : toAscending(metricPoints)
   const labelPrefix = timeWindowLabel(timeWindow)
   const baseTone = isMaintenance ? 'maintenance' : 'accent'
   const altTone = isMaintenance ? 'maintenance' : 'accent-2'
+  const hovering = hoveredAt != null
+  const kind = readoutKind(timeWindow, hovering)
   const sharedChartProps = {
     hoveredAt,
     onHoverAtChange: setHoveredAt,
+    ...(detailPresentation ? { showTooltip: false as const } : {}),
   }
+  const thresholdPresentation = detailPresentation
+    ? { includeThresholdsInScale: true as const, thresholdLabelPlacement: 'gutter' as const }
+    : {}
 
-  const t = thresholds
-  const cpuPriority = priorityFromThresholds(sample.cpu_usage_pct, t.cpu)
-  const memPriority = priorityFromThresholds(sample.mem_used_pct, t.mem)
-  const diskPriority = priorityFromThresholds(sample.disk_used_pct, t.disk)
-  const inodePriority = priorityFromThresholds(sample.inode_used_pct, t.inode)
-  const iowaitPriority = priorityFromThresholds(sample.cpu_iowait_pct, t.iowait)
-  const load5Priority = priorityFromThresholds(sample.load_5, t.load5)
-  // Network metrics have no thresholds — always normal priority
-  const netInPriority: MetricPriority = 0
-  const netOutPriority: MetricPriority = 0
+  const cpuSeries = toSeries(ascending, (s) => s.cpu_usage_pct)
+  const memSeries = toSeries(ascending, (s) => s.mem_used_pct)
+  const diskSeries = toSeries(ascending, (s) => s.disk_used_pct)
+  const loadSeries = toSeries(ascending, (s) => s.load_5)
+  const iowaitSeries = toSeries(ascending, (s) => s.cpu_iowait_pct)
+  const inodeSeries = toSeries(ascending, (s) => s.inode_used_pct)
+  const netInSeries = toSeries(ascending, (s) => s.net_in_bytes_per_sec)
+  const netOutSeries = toSeries(ascending, (s) => s.net_out_bytes_per_sec)
+  const netYMax = seriesMax([...netInSeries, ...netOutSeries])
+  const netAxisMax = netYMax === undefined ? undefined : Math.max(netYMax, 1)
 
-  const cards: MetricCardDef[] = [
-    {
-      id: 'cpu',
-      label: 'CPU',
-      priority: cpuPriority,
-      tone: priorityTone(cpuPriority),
-      render: () => (
-        <article className={`watchtower-metric-card ${cardRibbonClass(cpuPriority)}`.trim()}>
-          <header className="watchtower-metric-card__head">
-            <h3 title={thresholdTitle('CPU 总体使用率', t.cpu, '%', '含 steal 时间占比。')}>CPU 使用率</h3>
-            <span className="watchtower-metric-card__current">
-              <MonoDigits>{formatPercent(sample.cpu_usage_pct)}</MonoDigits>
+  const pointCount = ascending.length
+  const cpuReadout = seriesValueAt(cpuSeries, hoveredAt)
+  const memReadout = seriesValueAt(memSeries, hoveredAt)
+  const diskReadout = seriesValueAt(diskSeries, hoveredAt)
+  const netInReadout = seriesValueAt(netInSeries, hoveredAt)
+  const netOutReadout = seriesValueAt(netOutSeries, hoveredAt)
+
+  return (
+    <section className="watchtower-metrics-panel" aria-label="主机指标趋势">
+      <p className="watchtower-metrics-meta">
+          {timeWindow === 'realtime'
+            ? `实时滚动 ${pointCount} 点`
+            : window
+              ? `${labelPrefix} · ${window.sample_count} 个原始样本 · ${availableWindowLabel(window)}`
+              : `${labelPrefix} · 窗口样本数未知`}
+          {thresholds ? null : ' · 阈值策略不可用'}
+          {hoveredAt ? (
+            <>
+              {' · '}
+              {kind}{' '}
+              <Timestamp value={hoveredAt} mode="absolute" />
+            </>
+          ) : null}
+      </p>
+
+      {empty ? (
+        <div className="empty-state">
+          <h3>尚未收到主机样本</h3>
+          <p>该监控实例已存在，但首批主机采样（HostSample）还未到达。请等待下一次 agent 同步。</p>
+        </div>
+      ) : (
+      <div className="watchtower-metrics" role="group" aria-label="主机指标趋势">
+        <section className="watchtower-metric-group" aria-label="CPU 与负载">
+          <header className="watchtower-metric-group__head">
+            <h3 className="watchtower-metric-group__title">CPU 与负载</h3>
+            <span className="watchtower-metric-group__current">
+              <span className="watchtower-metric-plot__current-label">{kind}</span>
+              <MonoDigits>{formatPercent(cpuReadout)}</MonoDigits>
             </span>
           </header>
-          <MetricChart
-            samples={toSeries(ascending, (s) => s.cpu_usage_pct)}
-            {...sharedChartProps}
-            tone={cpuPriority > 0 ? priorityTone(cpuPriority) : baseTone}
-            height={160}
-            yMin={0}
-            yMax={100}
-            thresholds={thresholdLines(t.cpu, '%')}
-            formatValue={(v) => formatPercent(v)}
-            ariaLabel={`CPU 使用率${labelPrefix}趋势`}
-          />
-          <dl className="watchtower-metric-card__sub">
+          <Plot
+            title="CPU 使用率"
+            titleHint={thresholdTitle('CPU 总体使用率', thresholds?.cpu, '%', '含 CPU 被窃取时间占比。')}
+          >
+            <MetricChart
+              samples={cpuSeries}
+              {...sharedChartProps}
+              tone={baseTone}
+              height={160}
+              yMin={0}
+              yMax={100}
+              {...(thresholds ? { thresholds: thresholdLines(thresholds.cpu, '%'), ...thresholdPresentation } : {})}
+              formatValue={(v) => formatPercent(v)}
+              formatAxisValue={(v) => formatPercent(v, 0)}
+              ariaLabel={`CPU 使用率${labelPrefix}趋势`}
+            />
+          </Plot>
+          <dl className="watchtower-metric-facts" aria-label="最近样本">
+            <div className="watchtower-metric-facts__source">
+              <dt>最近样本</dt>
+            </div>
             <div>
-              <dt>steal</dt>
-              <dd>
-                <MonoDigits>{formatPercent(sample.cpu_steal_pct)}</MonoDigits>
-              </dd>
+              <dt>CPU 被窃取</dt>
+              <dd><MonoDigits>{formatPercent(sample?.cpu_steal_pct)}</MonoDigits></dd>
+            </div>
+            <div>
+              <dt>5 分钟负载</dt>
+              <dd><MonoDigits>{formatNumber(sample?.load_5)}</MonoDigits></dd>
+            </div>
+            <div>
+              <dt>1 分钟</dt>
+              <dd><MonoDigits>{formatNumber(sample?.load_1)}</MonoDigits></dd>
+            </div>
+            <div>
+              <dt>15 分钟</dt>
+              <dd><MonoDigits>{formatNumber(sample?.load_15)}</MonoDigits></dd>
+            </div>
+            <div>
+              <dt>CPU I/O 等待</dt>
+              <dd><MonoDigits>{formatPercent(sample?.cpu_iowait_pct)}</MonoDigits></dd>
             </div>
           </dl>
-        </article>
-      ),
-    },
-    {
-      id: 'mem',
-      label: '内存',
-      priority: memPriority,
-      tone: priorityTone(memPriority),
-      render: () => (
-        <article className={`watchtower-metric-card ${cardRibbonClass(memPriority)}`.trim()}>
-          <header className="watchtower-metric-card__head">
-            <h3 title={thresholdTitle('内存总体使用率', t.mem, '%', '含 swap 和可用内存。')}>内存使用率</h3>
-            <span className="watchtower-metric-card__current">
-              <MonoDigits>{formatPercent(sample.mem_used_pct)}</MonoDigits>
+        </section>
+
+        <section className="watchtower-metric-group" aria-label="内存">
+          <header className="watchtower-metric-group__head">
+            <h3 className="watchtower-metric-group__title">内存</h3>
+            <span className="watchtower-metric-group__current">
+              <span className="watchtower-metric-plot__current-label">{kind}</span>
+              <MonoDigits>{formatPercent(memReadout)}</MonoDigits>
             </span>
           </header>
-          <MetricChart
-            samples={toSeries(ascending, (s) => s.mem_used_pct)}
-            {...sharedChartProps}
-            tone={memPriority > 0 ? priorityTone(memPriority) : baseTone}
-            height={160}
-            yMin={0}
-            yMax={100}
-            thresholds={thresholdLines(t.mem, '%')}
-            formatValue={(v) => formatPercent(v)}
-            ariaLabel={`内存使用率${labelPrefix}趋势`}
-          />
-          <dl className="watchtower-metric-card__sub">
+          <Plot
+            title="内存使用率"
+            titleHint={thresholdTitle('内存总体使用率', thresholds?.mem, '%', '含交换空间和可用内存。')}
+          >
+            <MetricChart
+              samples={memSeries}
+              {...sharedChartProps}
+              tone={baseTone}
+              height={160}
+              yMin={0}
+              yMax={100}
+              {...(thresholds ? { thresholds: thresholdLines(thresholds.mem, '%'), ...thresholdPresentation } : {})}
+              formatValue={(v) => formatPercent(v)}
+              formatAxisValue={(v) => formatPercent(v, 0)}
+              ariaLabel={`内存使用率${labelPrefix}趋势`}
+            />
+          </Plot>
+          <dl className="watchtower-metric-facts" aria-label="最近样本">
+            <div className="watchtower-metric-facts__source">
+              <dt>最近样本</dt>
+            </div>
             <div>
-              <dt>swap</dt>
-              <dd>
-                <MonoDigits>{formatPercent(sample.swap_used_pct)}</MonoDigits>
-              </dd>
+              <dt>交换使用率</dt>
+              <dd><MonoDigits>{formatPercent(sample?.swap_used_pct)}</MonoDigits></dd>
             </div>
             <div>
               <dt>可用</dt>
-              <dd>
-                <MonoDigits>{formatBytes(sample.mem_available_bytes)}</MonoDigits>
-              </dd>
+              <dd><MonoDigits>{formatBytes(sample?.mem_available_bytes)}</MonoDigits></dd>
             </div>
-            <div className="watchtower-metric-card__sub-item--end">
-              <dt>总内存</dt>
-              <dd>
-                <MonoDigits>{formatCapacityBytes(sample.mem_total_bytes)}</MonoDigits>
-              </dd>
+            <div>
+              <dt>容量</dt>
+              <dd><MonoDigits>{formatCapacityBytes(sample?.mem_total_bytes)}</MonoDigits></dd>
             </div>
           </dl>
-        </article>
-      ),
-    },
-    {
-      id: 'disk',
-      label: '磁盘',
-      priority: diskPriority,
-      tone: priorityTone(diskPriority),
-      render: () => (
-        <article className={`watchtower-metric-card ${cardRibbonClass(diskPriority)}`.trim()}>
-          <header className="watchtower-metric-card__head">
-            <h3 title={thresholdTitle('磁盘空间使用率', t.disk, '%', '含 IO busy 和读写速率。')}>磁盘使用率</h3>
-            <span className="watchtower-metric-card__current">
-              <MonoDigits>{formatPercent(sample.disk_used_pct)}</MonoDigits>
+        </section>
+
+        <section className="watchtower-metric-group" aria-label="磁盘与 I/O">
+          <header className="watchtower-metric-group__head">
+            <h3 className="watchtower-metric-group__title">磁盘与 I/O</h3>
+            <span className="watchtower-metric-group__current">
+              <span className="watchtower-metric-plot__current-label">{kind}</span>
+              <MonoDigits>{formatPercent(diskReadout)}</MonoDigits>
             </span>
           </header>
-          <MetricChart
-            samples={toSeries(ascending, (s) => s.disk_used_pct)}
-            {...sharedChartProps}
-            tone={diskPriority > 0 ? priorityTone(diskPriority) : baseTone}
-            height={160}
-            yMin={0}
-            yMax={100}
-            thresholds={thresholdLines(t.disk, '%')}
-            formatValue={(v) => formatPercent(v)}
-            ariaLabel={`磁盘使用率${labelPrefix}趋势`}
-          />
-          <dl className="watchtower-metric-card__sub">
+          <Plot
+            title="磁盘使用率"
+            titleHint={thresholdTitle('磁盘空间使用率', thresholds?.disk, '%', '磁盘繁忙是磁盘自身忙碌占比，不是 CPU I/O 等待。')}
+          >
+            <MetricChart
+              samples={diskSeries}
+              {...sharedChartProps}
+              tone={baseTone}
+              height={160}
+              yMin={0}
+              yMax={100}
+              {...(thresholds ? { thresholds: thresholdLines(thresholds.disk, '%'), ...thresholdPresentation } : {})}
+              formatValue={(v) => formatPercent(v)}
+              formatAxisValue={(v) => formatPercent(v, 0)}
+              ariaLabel={`磁盘使用率${labelPrefix}趋势`}
+            />
+          </Plot>
+          <dl className="watchtower-metric-facts" aria-label="最近样本">
+            <div className="watchtower-metric-facts__source">
+              <dt>最近样本</dt>
+            </div>
             <div>
-              <dt>busy</dt>
-              <dd>
-                <MonoDigits>{formatPercent(sample.disk_busy_pct)}</MonoDigits>
-              </dd>
+              <dt>磁盘繁忙</dt>
+              <dd><MonoDigits>{formatPercent(sample?.disk_busy_pct)}</MonoDigits></dd>
             </div>
             <div>
               <dt>读 / 写</dt>
               <dd>
                 <MonoDigits>
-                  {formatBytesPerSecond(sample.disk_read_bytes_per_sec)} /{' '}
-                  {formatBytesPerSecond(sample.disk_write_bytes_per_sec)}
+                  {formatBytesPerSecond(sample?.disk_read_bytes_per_sec)} /{' '}
+                  {formatBytesPerSecond(sample?.disk_write_bytes_per_sec)}
                 </MonoDigits>
               </dd>
             </div>
-            <div className="watchtower-metric-card__sub-item--end">
-              <dt>总磁盘</dt>
-              <dd>
-                <MonoDigits>{formatCapacityBytes(sample.disk_total_bytes)}</MonoDigits>
-              </dd>
-            </div>
-          </dl>
-        </article>
-      ),
-    },
-    {
-      id: 'inode',
-      label: 'Inode',
-      priority: inodePriority,
-      tone: priorityTone(inodePriority),
-      render: () => (
-        <article className={`watchtower-metric-card ${cardRibbonClass(inodePriority)}`.trim()}>
-          <header className="watchtower-metric-card__head">
-            <h3 title={thresholdTitle('Inode 使用率', t.inode, '%', 'Inode 耗尽会导致无法创建新文件。')}>Inode 使用率</h3>
-            <span className="watchtower-metric-card__current">
-              <MonoDigits>{formatPercent(sample.inode_used_pct)}</MonoDigits>
-            </span>
-          </header>
-          <MetricChart
-            samples={toSeries(ascending, (s) => s.inode_used_pct)}
-            {...sharedChartProps}
-            tone={inodePriority > 0 ? priorityTone(inodePriority) : baseTone}
-            height={160}
-            yMin={0}
-            yMax={100}
-            thresholds={thresholdLines(t.inode, '%')}
-            formatValue={(v) => formatPercent(v)}
-            ariaLabel={`Inode 使用率${labelPrefix}趋势`}
-          />
-        </article>
-      ),
-    },
-    {
-      id: 'load5',
-      label: 'Load5',
-      priority: load5Priority,
-      tone: priorityTone(load5Priority),
-      render: () => (
-        <article className={`watchtower-metric-card ${cardRibbonClass(load5Priority)}`.trim()}>
-          <header className="watchtower-metric-card__head">
-            <h3 title={thresholdTitle('系统 5 分钟负载均值', t.load5, '', '需结合 CPU 核数判断。')}>Load5</h3>
-            <span className="watchtower-metric-card__current">
-              <MonoDigits>{formatNumber(sample.load_5)}</MonoDigits>
-            </span>
-          </header>
-          <MetricChart
-            samples={toSeries(ascending, (s) => s.load_5)}
-            {...sharedChartProps}
-            tone={load5Priority > 0 ? priorityTone(load5Priority) : baseTone}
-            height={160}
-            yMin={0}
-            thresholds={thresholdLines(t.load5)}
-            formatValue={(v) => formatNumber(v)}
-            ariaLabel={`Load5 ${labelPrefix}趋势`}
-          />
-          <dl className="watchtower-metric-card__sub">
             <div>
-              <dt>load 1 / 15</dt>
-              <dd>
-                <MonoDigits>
-                  {formatNumber(sample.load_1)} / {formatNumber(sample.load_15)}
-                </MonoDigits>
-              </dd>
+              <dt>容量</dt>
+              <dd><MonoDigits>{formatCapacityBytes(sample?.disk_total_bytes)}</MonoDigits></dd>
+            </div>
+            <div>
+              <dt>Inode</dt>
+              <dd><MonoDigits>{formatPercent(sample?.inode_used_pct)}</MonoDigits></dd>
             </div>
           </dl>
-        </article>
-      ),
-    },
-    {
-      id: 'iowait',
-      label: 'IOWait',
-      priority: iowaitPriority,
-      tone: priorityTone(iowaitPriority),
-      render: () => (
-        <article className={`watchtower-metric-card ${cardRibbonClass(iowaitPriority)}`.trim()}>
-          <header className="watchtower-metric-card__head">
-            <h3 title={thresholdTitle('CPU 等待 I/O 的时间占比', t.iowait, '%', '偏高通常意味着磁盘瓶颈。')}>CPU IOWait</h3>
-            <span className="watchtower-metric-card__current">
-              <MonoDigits>{formatPercent(sample.cpu_iowait_pct)}</MonoDigits>
-            </span>
-          </header>
-          <MetricChart
-            samples={toSeries(ascending, (s) => s.cpu_iowait_pct)}
-            {...sharedChartProps}
-            tone={iowaitPriority > 0 ? priorityTone(iowaitPriority) : baseTone}
-            height={160}
-            yMin={0}
-            thresholds={thresholdLines(t.iowait, '%')}
-            formatValue={(v) => formatPercent(v)}
-            ariaLabel={`CPU IOWait ${labelPrefix}趋势`}
-          />
-        </article>
-      ),
-    },
-    {
-      id: 'net-in',
-      label: '网络入',
-      priority: netInPriority,
-      tone: 'normal',
-      render: () => (
-        <article className="watchtower-metric-card">
-          <header className="watchtower-metric-card__head">
-            <h3 title="网络入站速率（B/s）。无固定阈值，关注异常波动。">网络入</h3>
-            <span className="watchtower-metric-card__current">
-              <MonoDigits>{formatBytesPerSecond(sample.net_in_bytes_per_sec)}</MonoDigits>
-            </span>
-          </header>
-          <MetricChart
-            samples={toSeries(ascending, (s) => s.net_in_bytes_per_sec)}
-            {...sharedChartProps}
-            tone={altTone}
-            height={160}
-            yMin={0}
-            formatValue={(v) => formatBytesPerSecond(v)}
-            ariaLabel={`网络入站${labelPrefix}趋势`}
-          />
-        </article>
-      ),
-    },
-    {
-      id: 'net-out',
-      label: '网络出',
-      priority: netOutPriority,
-      tone: 'normal',
-      render: () => (
-        <article className="watchtower-metric-card">
-          <header className="watchtower-metric-card__head">
-            <h3 title="网络出站速率（B/s）。无固定阈值，关注异常波动。">网络出</h3>
-            <span className="watchtower-metric-card__current">
-              <MonoDigits>{formatBytesPerSecond(sample.net_out_bytes_per_sec)}</MonoDigits>
-            </span>
-          </header>
-          <MetricChart
-            samples={toSeries(ascending, (s) => s.net_out_bytes_per_sec)}
-            {...sharedChartProps}
-            tone={baseTone}
-            height={160}
-            yMin={0}
-            formatValue={(v) => formatBytesPerSecond(v)}
-            ariaLabel={`网络出站${labelPrefix}趋势`}
-          />
-        </article>
-      ),
-    },
-  ]
+        </section>
 
-  // Sort: highest priority first, then by id for stable order within same priority
-  const sorted = [...cards].sort((a, b) => {
-    if (b.priority !== a.priority) return b.priority - a.priority
-    return a.id.localeCompare(b.id)
-  })
-  const topCard = sorted[0]
+        <section className="watchtower-metric-group" aria-label="网络">
+          <header className="watchtower-metric-group__head">
+            <h3 className="watchtower-metric-group__title">网络</h3>
+            <span className="watchtower-metric-group__current">
+              <span className="watchtower-metric-plot__current-label">{kind}</span>
+              <MonoDigits>↓ {formatBytesPerSecond(netInReadout)}</MonoDigits>
+              <span className="watchtower-metric-plot__current-label">·</span>
+              <MonoDigits>↑ {formatBytesPerSecond(netOutReadout)}</MonoDigits>
+            </span>
+          </header>
+          <p className="watchtower-metric-facts">下行 / 上行共用纵轴 · B/s</p>
+          <div className="watchtower-metric-group__network">
+            <Plot
+              title="下行"
+              titleHint="网络下行速率（B/s）。与上行共用纵轴以便比较；无固定阈值。无效或历史未知速率显示为 —。"
+            >
+              <MetricChart
+                samples={netInSeries}
+                {...sharedChartProps}
+                tone={altTone}
+                height={90}
+                yMin={0}
+                yTickCount={2}
+                {...(netAxisMax === undefined ? {} : { yMax: netAxisMax })}
+                formatValue={(v) => formatBytesPerSecond(v)}
+                formatAxisValue={formatNetworkAxis}
+                ariaLabel={`下行${labelPrefix}趋势`}
+              />
+            </Plot>
+            <Plot
+              title="上行"
+              titleHint="网络上行速率（B/s）。与下行共用纵轴以便比较；无固定阈值。无效或历史未知速率显示为 —。"
+            >
+              <MetricChart
+                samples={netOutSeries}
+                {...sharedChartProps}
+                tone={baseTone}
+                height={90}
+                yMin={0}
+                yTickCount={2}
+                {...(netAxisMax === undefined ? {} : { yMax: netAxisMax })}
+                formatValue={(v) => formatBytesPerSecond(v)}
+                formatAxisValue={formatNetworkAxis}
+                ariaLabel={`上行${labelPrefix}趋势`}
+              />
+            </Plot>
+          </div>
+        </section>
 
-  return (
-    <section className="watchtower-metrics-panel" aria-label="主机指标趋势">
-      <div className="watchtower-metrics-panel__header">
-        <div>
-          <h2>关键资源趋势</h2>
-        </div>
-        <p>
-          {timeWindow === 'realtime'
-            ? `实时滚动 ${ascending.length} 点`
-            : `${labelPrefix} · ${window?.sample_count ?? 0} 个原始样本 · ${availableWindowLabel(window)}`}
-          {' · 已按阈值优先级排序'}
-          {topCard && topCard.priority > 0 ? <> · 首要关注 {topCard.label}</> : null}
-        </p>
+        <details className="watchtower-metric-aux">
+          <summary>5 分钟负载</summary>
+          <Plot
+            title="5 分钟负载"
+            titleHint={thresholdTitle('系统 5 分钟负载均值', thresholds?.load5, '', '需结合 CPU 核数判断。')}
+            current={<MonoDigits>{formatNumber(seriesValueAt(loadSeries, hoveredAt))}</MonoDigits>}
+            currentLabel={kind}
+          >
+            <MetricChart
+              samples={loadSeries}
+              {...sharedChartProps}
+              tone={baseTone}
+              height={120}
+              yMin={0}
+              {...(thresholds ? { thresholds: thresholdLines(thresholds.load5), ...thresholdPresentation } : {})}
+              formatValue={(v) => formatNumber(v)}
+              formatAxisValue={(v) => formatNumber(v)}
+              ariaLabel={`5 分钟负载${labelPrefix}趋势`}
+            />
+          </Plot>
+        </details>
+
+        <details className="watchtower-metric-aux">
+          <summary>CPU I/O 等待</summary>
+          <Plot
+            title="CPU I/O 等待"
+            titleHint={thresholdTitle('CPU 等待 I/O 的时间占比', thresholds?.iowait, '%', '这是 CPU 时间，不是磁盘空间使用率或磁盘繁忙。')}
+            current={<MonoDigits>{formatPercent(seriesValueAt(iowaitSeries, hoveredAt))}</MonoDigits>}
+            currentLabel={kind}
+          >
+            <MetricChart
+              samples={iowaitSeries}
+              {...sharedChartProps}
+              tone={baseTone}
+              height={120}
+              yMin={0}
+              {...(thresholds ? { thresholds: thresholdLines(thresholds.iowait, '%'), ...thresholdPresentation } : {})}
+              formatValue={(v) => formatPercent(v)}
+              formatAxisValue={(v) => formatPercent(v, 0)}
+              ariaLabel={`CPU I/O 等待${labelPrefix}趋势`}
+            />
+          </Plot>
+        </details>
+
+        <details className="watchtower-metric-aux">
+          <summary>Inode 使用率</summary>
+          <Plot
+            title="Inode 使用率"
+            titleHint={thresholdTitle('Inode 使用率', thresholds?.inode, '%', 'Inode 耗尽会导致无法创建新文件。')}
+            current={<MonoDigits>{formatPercent(seriesValueAt(inodeSeries, hoveredAt))}</MonoDigits>}
+            currentLabel={kind}
+          >
+            <MetricChart
+              samples={inodeSeries}
+              {...sharedChartProps}
+              tone={baseTone}
+              height={120}
+              yMin={0}
+              yMax={100}
+              {...(thresholds ? { thresholds: thresholdLines(thresholds.inode, '%'), ...thresholdPresentation } : {})}
+              formatValue={(v) => formatPercent(v)}
+              formatAxisValue={(v) => formatPercent(v, 0)}
+              ariaLabel={`Inode 使用率${labelPrefix}趋势`}
+            />
+          </Plot>
+        </details>
       </div>
-      <div className="watchtower-metrics" role="group" aria-label="主机指标趋势">
-        {sorted.map((card) => (
-          <Fragment key={card.id}>{card.render()}</Fragment>
-        ))}
-      </div>
+      )}
     </section>
   )
 }

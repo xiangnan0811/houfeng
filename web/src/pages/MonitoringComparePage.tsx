@@ -9,6 +9,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { ApiError, getMonitoringInstance, getMonitoringInstanceRuntimeFacts } from '../lib/api'
 import type { MonitoringInstanceRecord, MonitoringInstanceRuntimeFacts } from '../lib/types'
 import { resolveMonitoringListHref } from './monitoring/monitoringListUrl'
+import { withReturnVPSQuery } from './monitoring-detail/monitoringDetailHelpers'
 
 type MonitoringInstanceState = {
   loading: boolean
@@ -330,6 +331,8 @@ function CompareSummaryCard({ state, side }: { state: MonitoringInstanceState; s
 }
 
 function CompareMonitoringInstanceIdentity({ state, side }: { state: MonitoringInstanceState; side: CompareSide }) {
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
   const label = sideLabel(side)
   if (state.loading) {
     return (
@@ -357,6 +360,10 @@ function CompareMonitoringInstanceIdentity({ state, side }: { state: MonitoringI
     )
   }
   const monitoringInstance = state.monitoringInstance
+  const detailTo = withReturnVPSQuery(
+    `/monitoring/${monitoringInstance.monitoring_instance_id}`,
+    searchParams.get('return_vps'),
+  )
   return (
     <div className="compare-identity__card">
       <div className="compare-identity__header">
@@ -368,11 +375,19 @@ function CompareMonitoringInstanceIdentity({ state, side }: { state: MonitoringI
         />
         <div className="compare-identity__title">
           <span>对比对象 {label}</span>
-          <Link className="text-link" to={`/monitoring/${monitoringInstance.monitoring_instance_id}`}>
+          <Link
+            className="text-link"
+            to={detailTo}
+            state={location.state}
+          >
             {monitoringInstance.display_name}
           </Link>
         </div>
-        <Link className="compare-identity__detail" to={`/monitoring/${monitoringInstance.monitoring_instance_id}`}>
+        <Link
+          className="compare-identity__detail"
+          to={detailTo}
+          state={location.state}
+        >
           监控实例详情
         </Link>
       </div>
