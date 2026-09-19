@@ -131,7 +131,7 @@
 .subscription-trend-chart-container{display:flex;flex:1 1 0%;flex-direction:column;gap:8px;min-width:0;min-height:0}
 .subscription-trend-readout,.subscription-trend-legend{flex-shrink:0}
 .subscription-trend-chart-plot{position:relative;flex:1 1 0%;min-width:0;min-height:var(--subscription-insights-plot-min);height:0}
-.subscription-trend-chart{position:absolute;inset:0;display:block;width:100%;height:100%;overflow:visible}
+.subscription-trend-chart{position:absolute;inset:0;display:block;width:100%;height:100%;overflow:visible;touch-action:pan-y}
 .subscription-trend-chart:focus{outline:none}
 .subscription-trend-chart:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
 .subscription-trend-chart__grid{stroke:color-mix(in srgb,var(--border) 58%,transparent);stroke-dasharray:3 4}

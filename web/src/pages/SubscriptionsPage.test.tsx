@@ -1027,6 +1027,8 @@ describe('SubscriptionsPage', () => {
     expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument()
   })
 
+  // Renders 240 rows and walks two view switches plus Back: ~2.2s under coverage in
+  // isolation, so the default 5s budget has no headroom under full-suite contention.
   it('restores details main and list scroll after insights, including Back', async () => {
     const rows = Array.from({ length: 120 }, (_, index) => ({
       ...subscription,
@@ -1070,7 +1072,7 @@ describe('SubscriptionsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument())
     expect(main.scrollTop).toBe(2000)
     expect(list.scrollLeft).toBe(200)
-  })
+  }, 15_000)
 
   it('defaults naked /subscriptions to insights and supports tab navigation', async () => {
     setupSubscriptionFetch({ subscriptions: [subscription] })

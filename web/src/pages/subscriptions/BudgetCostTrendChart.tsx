@@ -156,7 +156,6 @@ export function BudgetCostTrendChart({
             handlePointer(event)
           }
         }}
-        style={{ touchAction: 'pan-y' }}
       >
         {/* Y-axis grid and tick labels */}
         {ticks.map((tick) => {
