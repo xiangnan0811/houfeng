@@ -27,6 +27,7 @@ function monitoringInstanceRecord(monitoringInstanceId: string, displayName: str
     labels: ['edge'],
     note: '',
     current_health_status: '正常',
+    last_heartbeat_at: '2026-05-15T08:05:00Z',
     current_active_incident_count: 0,
     current_primary_issue_summary: '',
     created_at: '2026-05-15T08:00:00Z',
@@ -116,20 +117,25 @@ describe('MonitoringComparePage', () => {
   })
 
   it('uses a PageState empty state when two monitoring instance IDs are not selected', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
     renderMonitoringCompare('/monitoring/compare?id=mi_a')
 
     expect(screen.getByRole('heading', { name: '需要选择 2 个监控实例' })).toBeInTheDocument()
     expect(screen.getByText('请先在监控实例列表勾选两个监控实例，再进入 A / B 指标对比。')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '返回监控实例列表' })).toHaveAttribute('href', '/monitoring')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('renders command context, A/B summary, and metric placeholders from monitoring instance/runtime facts', async () => {
+  it('renders named panes, notice wells, and compact tiles from monitoring instance/runtime facts', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord('mi_a', 'Tokyo Edge')))
       .mockResolvedValueOnce(mockJSONResponse(runtimeFacts('mi_a')))
       .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord('mi_b', 'Osaka Core', {
         current_health_status: '告警',
+        current_primary_issue_summary: '心跳超时',
         group: 'core',
         region: 'ap-northeast-3',
         city: 'Osaka',
@@ -154,29 +160,27 @@ describe('MonitoringComparePage', () => {
     renderMonitoringCompare('/monitoring/compare?id=mi_a&id=mi_b')
 
     await waitFor(() => expect(screen.getByRole('link', { name: 'Tokyo Edge' })).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: '判断两个监控实例是否需要深入排查' })).toBeInTheDocument()
-    expect(screen.getByText('监控实例对比 · 24 小时运行事实')).toBeInTheDocument()
-    expect(screen.getByText('先对齐 A/B 的身份、健康、运行态、绑定态、位置与样本可用性；只有差异明显时再下钻详细主机指标。')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'A/B 摘要判断' })).toBeInTheDocument()
-    expect(screen.getByText('默认先看状态与样本是否可比；详细图表保留在下方。')).toBeInTheDocument()
-    expect(screen.getByText('对比对象 A')).toBeInTheDocument()
-    expect(screen.getByText('对比对象 B')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Tokyo Edge · Osaka Core' })).toBeInTheDocument()
+    expect(screen.getByText('近 24h')).toBeInTheDocument()
+    expect(screen.queryByText('判断两个监控实例是否需要深入排查')).not.toBeInTheDocument()
+    expect(screen.queryByText('详细趋势仍使用 MonitoringInstanceWatchtowerMetrics')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'A/B 摘要判断' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Osaka Core' })).toHaveAttribute('href', '/monitoring/mi_b')
     expect(screen.getAllByRole('link', { name: '监控实例详情' })).toHaveLength(2)
-    expect(screen.getAllByText('健康状态')).toHaveLength(2)
-    expect(screen.getAllByText('接入阶段')).toHaveLength(2)
-    expect(screen.getAllByText('运行 / 绑定')).toHaveLength(2)
-    expect(screen.getAllByText('位置上下文')).toHaveLength(2)
-    expect(screen.getAllByText('样本可用性')).toHaveLength(2)
-    expect(screen.getAllByText('edge · Vultr · ap-northeast-1 · Tokyo')).toHaveLength(2)
-    expect(screen.getAllByText('core · AWS · ap-northeast-3 · Osaka')).toHaveLength(2)
-    expect(screen.getByText('有样本')).toBeInTheDocument()
-    expect(screen.getByText('无样本')).toBeInTheDocument()
-    expect(screen.getByText(/窗口样本/)).toBeInTheDocument()
-    expect(screen.getByText('24 小时运行事实暂无主机样本')).toBeInTheDocument()
-    expect(screen.getByText('详细趋势仍使用 MonitoringInstanceWatchtowerMetrics')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'CPU 使用率' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '尚未收到主机样本' })).toBeInTheDocument()
+    expect(screen.getByText('Tokyo')).toBeInTheDocument()
+    expect(screen.getByText('Osaka')).toBeInTheDocument()
+    expect(screen.queryByText(/ap-northeast-1/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/ap-northeast-3/)).not.toBeInTheDocument()
+    expect(screen.queryByText('健康状态')).not.toBeInTheDocument()
+    expect(screen.getByText('心跳超时')).toBeInTheDocument()
+    expect(document.querySelectorAll('.monitoring-detail-notice')).toHaveLength(1)
+    expect(document.querySelector('.monitoring-detail-notice__mark')).toHaveTextContent('告警')
+    expect(screen.getAllByRole('link', { name: '打开详情' })).toHaveLength(1)
+    expect(screen.getByText('该窗口没有样本')).toBeInTheDocument()
+    expect(screen.getAllByRole('heading', { name: 'CPU 使用率' })).toHaveLength(2)
+    expect(document.querySelectorAll('.monitoring-detail-chart')).toHaveLength(8)
+    expect(document.querySelector('.watchtower-metrics')).toBeNull()
+    expect(screen.queryByRole('heading', { name: '尚未收到主机样本' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances/mi_a', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -211,8 +215,9 @@ describe('MonitoringComparePage', () => {
     renderMonitoringCompare('/monitoring/compare?id=mi_a&id=mi_missing')
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'B 监控实例不可用' })).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: '判断两个监控实例是否需要深入排查' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'B 摘要不可用' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '监控实例对比' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '判断两个监控实例是否需要深入排查' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'B 摘要不可用' })).not.toBeInTheDocument()
     expect(screen.getAllByText('监控实例不存在').length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: '返回监控实例列表重新选择' })).toHaveAttribute('href', '/monitoring')
   })
@@ -378,12 +383,12 @@ describe('MonitoringComparePage', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getAllByRole('heading', { name: 'CPU 使用率' }).length).toBeGreaterThan(0))
-    const svg = container.querySelector('.compare-metrics svg')
+    const svg = container.querySelector('.monitoring-compare-metrics svg')
     expect(svg).toBeTruthy()
     svg!.getBoundingClientRect = () => ({
       x: 0, y: 0, top: 0, left: 0, right: 360, bottom: 160, width: 360, height: 160, toJSON: () => ({}),
     })
     fireEvent.mouseMove(svg!, { clientX: 180 })
-    expect(container.querySelector('.compare-metrics .metric-chart__tooltip')).not.toBeNull()
+    expect(container.querySelector('.monitoring-compare-metrics .metric-chart__tooltip')).not.toBeNull()
   })
 })

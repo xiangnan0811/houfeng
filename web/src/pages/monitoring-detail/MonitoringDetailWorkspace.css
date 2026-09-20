@@ -1,7 +1,7 @@
-/* Monitoring instance detail workspace. Imported by the `/monitoring/:id` route
- * only (lazy route code-split); it does not change theme preference and must not
- * be imported from child views. Numbers mirror the VPS detail quality bar, but
- * every token is declared here — `--vps-detail-*` does not exist on this route. */
+/* Monitoring instance observation workspace. Imported by `/monitoring/:id` and
+ * `/monitoring/compare` (lazy route code-split). It does not change theme
+ * preference. Numbers mirror the VPS detail quality bar, but every token is
+ * declared here — `--vps-detail-*` does not exist on these routes. */
 
 .monitoring-detail-route {
   --monitoring-detail-title-size: 22px;

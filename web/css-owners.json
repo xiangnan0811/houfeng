@@ -22,6 +22,7 @@
       "src/styles/partials/vps-overview-freshness.css"
     ],
     "observability": [
+      "src/pages/MonitoringComparePage.css",
       "src/pages/monitoring-detail/MonitoringDetailWorkspace.css",
       "src/styles/partials/legacy-batch.css",
       "src/styles/partials/legacy-compare.css",

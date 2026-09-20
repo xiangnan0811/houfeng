@@ -38,7 +38,7 @@ export interface MetricChartProps {
   secondaryTone?: MetricChartTone
   /**
    * Optional third series, same alignment rules as `secondarySamples`.
-   * Ignored when omitted. Used by the load 1/5/15 overlay; Compare does not pass it.
+   * Ignored when omitted. Used by the load 1/5/15 overlay on detail and compare.
    */
   tertiarySamples?: MetricChartSample[]
   /** Stroke tone for `tertiarySamples`. Default `muted`. */
