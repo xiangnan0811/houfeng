@@ -188,3 +188,22 @@
 .events-stream__meta a:hover {
   color: var(--accent-strong);
 }
+
+@media (max-width: 760px) {
+  .observability-notice,
+  .monitoring-detail-notice {
+    align-items: flex-start;
+  }
+
+  .observability-notice__copy,
+  .monitoring-detail-notice__copy {
+    max-width: 100%;
+    flex: 1 1 100%;
+  }
+
+  .observability-notice__actions,
+  .monitoring-detail-notice__actions {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+}

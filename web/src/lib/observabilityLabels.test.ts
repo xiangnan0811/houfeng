@@ -7,6 +7,8 @@ describe('observabilityLabels', () => {
     expect(incidentClassLabel('resource_threshold')).toBe('资源阈值')
     expect(incidentClassLabel('heartbeat_stale')).toBe('心跳超时')
     expect(incidentClassLabel('monitoring_instance_disk_pressure')).toBe('监控实例磁盘压力')
+    expect(incidentClassLabel('target_probe_failure')).toBe('目标探测失败')
+    expect(incidentClassLabel('target_tls_expiry')).toBe('目标 TLS 即将过期')
     expect(incidentClassLabel('connectivity')).toBe('连通性')
     expect(incidentClassLabel('certificate')).toBe('证书')
     expect(incidentClassLabel('unknown_class')).toBe('异常')
