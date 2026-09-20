@@ -24,6 +24,7 @@
     "observability": [
       "src/pages/MonitoringComparePage.css",
       "src/pages/monitoring-detail/MonitoringDetailWorkspace.css",
+      "src/pages/target-detail/TargetDetailWorkspace.css",
       "src/styles/partials/legacy-batch.css",
       "src/styles/partials/legacy-compare.css",
       "src/styles/partials/legacy-events.css",

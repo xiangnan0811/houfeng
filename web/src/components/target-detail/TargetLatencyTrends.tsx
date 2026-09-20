@@ -1,5 +1,6 @@
-import { DetailSection } from '../DetailSection'
-import { Sparkline, type SparklineSample } from '../atoms/Sparkline'
+import { useMemo, useState } from 'react'
+
+import { MetricChart } from '../atoms/MetricChart'
 import { MonoDigits } from '../atoms/Mono'
 import {
   formatConfigSummary,
@@ -12,8 +13,6 @@ import type {
   ProbeObservation,
 } from '../../lib/types'
 import { describeProbeLatencyGap } from './probeObservationGap'
-
-const MAINTENANCE_RIBBON = 'maintenance'
 
 export type TargetLatencyTrend = {
   probeItemId: string
@@ -38,13 +37,16 @@ type TargetLatencyTrendsProps = {
 type LatencyTrendCard = {
   probeItemId: string
   kindLabel: string
-  samples: SparklineSample[]
+  samples: Array<{ value: number | null; observedAt: string }>
   latestLatency: number | null
   averageLatency: number | null
   maxLatency: number | null
   sampleCount: number
   distinctMonitoringInstanceCount: number
 }
+
+const CHART_HEIGHT = 140
+const PLOT_GUTTER = 34
 
 function deriveLatencyTrends(
   probeItems: ProbeItemRecord[],
@@ -54,35 +56,29 @@ function deriveLatencyTrends(
     .filter((item) => item.enabled)
     .map((item) => {
       const obs = observations
-        .filter(
-          (o) => o.probe_item_id === item.probe_item_id && o.latency_ms != null,
-        )
+        .filter((o) => o.probe_item_id === item.probe_item_id)
         .sort(
           (a, b) =>
             new Date(a.observed_at).getTime() - new Date(b.observed_at).getTime(),
         )
-
-      const latencies = obs.map((o) => o.latency_ms as number)
-      const samples: SparklineSample[] = obs.map((o) => ({
-        value: o.latency_ms as number,
+      const latencies = obs
+        .map((o) => o.latency_ms)
+        .filter((value): value is number => value != null)
+      const samples = obs.map((o) => ({
+        value: o.latency_ms,
         observedAt: o.observed_at,
       }))
       const distinctMonitoringInstances = new Set(obs.map((o) => o.monitoring_instance_id))
-
-      const latestLatency = latencies.at(-1) ?? null
-      const averageLatency =
-        latencies.length > 0
-          ? latencies.reduce((acc, value) => acc + value, 0) / latencies.length
-          : null
-      const maxLatency = latencies.length > 0 ? Math.max(...latencies) : null
-
       return {
         probeItemId: item.probe_item_id,
         kindLabel: `${item.probe_kind.toUpperCase()} · ${formatConfigSummary(item.config)}`,
         samples,
-        latestLatency,
-        averageLatency,
-        maxLatency,
+        latestLatency: samples.at(-1)?.value ?? null,
+        averageLatency:
+          latencies.length > 0
+            ? latencies.reduce((acc, value) => acc + value, 0) / latencies.length
+            : null,
+        maxLatency: latencies.length > 0 ? Math.max(...latencies) : null,
         sampleCount: latencies.length,
         distinctMonitoringInstanceCount: distinctMonitoringInstances.size,
       }
@@ -136,13 +132,14 @@ export function TargetLatencyTrends({
   recentObservations,
   timeWindow = '24h',
   isMaintenance = false,
-  watchtower = false,
 }: TargetLatencyTrendsProps) {
-  const trends = deriveLatencyTrends(probeItems, recentObservations).filter(
-    (trend) => trend.sampleCount > 0,
+  const [hoveredAt, setHoveredAt] = useState<string | null>(null)
+  const trends = useMemo(
+    () => deriveLatencyTrends(probeItems, recentObservations),
+    [probeItems, recentObservations],
   )
   const meta = describeMeta(recentObservations, timeWindow)
-  const tone = isMaintenance ? 'maintenance' : 'accent'
+  const hasAnySamples = trends.some((trend) => trend.sampleCount > 0)
   const gapState = (
     <LatencyGapState
       probeItems={probeItems}
@@ -151,153 +148,80 @@ export function TargetLatencyTrends({
     />
   )
 
-  if (watchtower) {
-    return (
-      <section aria-label="近期延迟趋势">
-        {trends.length === 0 ? (
-          gapState
-        ) : (
-          <>
-            <p className="watchtower-metrics-meta">{meta}</p>
-            <div className="watchtower-metrics">
-              {trends.map((trend) => (
-                <article key={trend.probeItemId} className="watchtower-metric-card">
-                  <header className="watchtower-metric-card__head">
-                    <h3>{trend.kindLabel}</h3>
-                    <span className="watchtower-metric-card__current">
-                      {trend.latestLatency != null ? (
-                        <MonoDigits>{formatLatency(trend.latestLatency)}</MonoDigits>
-                      ) : (
-                        '—'
-                      )}
-                    </span>
-                  </header>
-                  <Sparkline
-                    samples={trend.samples}
-                    tone={tone}
-                    height={60}
-                    expand
-                    interactive
-                    ariaLabel={`${trend.kindLabel} 延迟${formatTimeWindowLabel(timeWindow)} 趋势`}
-                    formatValue={(v) => formatLatency(v)}
-                  />
-                  <dl className="watchtower-metric-card__sub">
-                    <div>
-                      <dt>平均</dt>
-                      <dd>
-                        {trend.averageLatency != null ? (
-                          <MonoDigits>
-                            {formatLatency(Math.round(trend.averageLatency))}
-                          </MonoDigits>
-                        ) : (
-                          '—'
-                        )}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>最大</dt>
-                      <dd>
-                        {trend.maxLatency != null ? (
-                          <MonoDigits>{formatLatency(trend.maxLatency)}</MonoDigits>
-                        ) : (
-                          '—'
-                        )}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>样本数</dt>
-                      <dd>
-                        <MonoDigits>{trend.sampleCount}</MonoDigits>
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>覆盖监控实例</dt>
-                      <dd>
-                        <MonoDigits>{trend.distinctMonitoringInstanceCount}</MonoDigits>
-                      </dd>
-                    </div>
-                  </dl>
-                </article>
-              ))}
-            </div>
-          </>
-        )}
-      </section>
-    )
-  }
-
   return (
-    <DetailSection
-      eyebrow="近期延迟"
-      title="近期延迟趋势"
-      {...(isMaintenance ? { ribbon: MAINTENANCE_RIBBON } : {})}
-      aside={<span className="detail-section__aside-meta">{meta}</span>}
-    >
-      {trends.length === 0 ? (
+    <section aria-label="近期延迟趋势">
+      {hasAnySamples ? (
+        <p className="detail-section__aside-meta target-detail-latency__meta">{meta}</p>
+      ) : null}
+      {!hasAnySamples ? (
         gapState
       ) : (
-        <div className="metric-grid">
-          {trends.map((trend) => (
-            <article key={trend.probeItemId} className="metric-card">
-              <header className="metric-card__head">
-                <h3>{trend.kindLabel}</h3>
-                <span className="metric-card__current">
-                  {trend.latestLatency != null ? (
-                    <MonoDigits>{formatLatency(trend.latestLatency)}</MonoDigits>
-                  ) : (
-                    <span className="metric-card__current-empty">—</span>
-                  )}
-                </span>
-              </header>
-              <Sparkline
-                samples={trend.samples}
-                tone={tone}
-                height={60}
-                expand
-                interactive
-                ariaLabel={`${trend.kindLabel} 延迟${formatTimeWindowLabel(timeWindow)} 趋势`}
-                formatValue={(v) => formatLatency(v)}
-              />
-              <dl>
-                <div>
-                  <dt>平均</dt>
-                  <dd>
-                    {trend.averageLatency != null ? (
+        <div className="monitoring-detail-charts target-detail-latency__grid" data-layout="medium">
+          {trends.map((trend) => {
+            const yMax =
+              trend.maxLatency == null ? 1 : Math.max(trend.maxLatency * 1.15, 10)
+            const tone = isMaintenance ? 'maintenance' : 'accent'
+            return (
+              <article
+                key={trend.probeItemId}
+                className="monitoring-detail-chart"
+                aria-label={trend.kindLabel}
+              >
+                <header className="monitoring-detail-chart__head">
+                  <h3 className="monitoring-detail-chart__title">{trend.kindLabel}</h3>
+                  <span className="monitoring-detail-chart__current">
+                    <span className="monitoring-detail-chart__value">
+                      <MonoDigits>{formatLatency(trend.latestLatency)}</MonoDigits>
+                    </span>
+                  </span>
+                </header>
+                <MetricChart
+                  samples={trend.samples}
+                  hoveredAt={hoveredAt}
+                  onHoverAtChange={setHoveredAt}
+                  allowSinglePoint
+                  height={CHART_HEIGHT}
+                  paddingLeft={PLOT_GUTTER}
+                  yMin={0}
+                  yMax={yMax}
+                  tone={tone}
+                  formatValue={(v) => formatLatency(v)}
+                  formatAxisValue={(v) => formatLatency(Math.round(v))}
+                  ariaLabel={`${trend.kindLabel} 延迟${formatTimeWindowLabel(timeWindow)}趋势`}
+                />
+                <dl className="monitoring-detail-chart__notes">
+                  <div className="monitoring-detail-chart__note">
+                    <dt>平均</dt>
+                    <dd>
                       <MonoDigits>
-                        {formatLatency(Math.round(trend.averageLatency))}
+                        {trend.averageLatency != null
+                          ? formatLatency(Math.round(trend.averageLatency))
+                          : '—'}
                       </MonoDigits>
-                    ) : (
-                      '—'
-                    )}
-                  </dd>
-                </div>
-                <div>
-                  <dt>最大</dt>
-                  <dd>
-                    {trend.maxLatency != null ? (
-                      <MonoDigits>{formatLatency(trend.maxLatency)}</MonoDigits>
-                    ) : (
-                      '—'
-                    )}
-                  </dd>
-                </div>
-                <div>
-                  <dt>样本数</dt>
-                  <dd>
-                    <MonoDigits>{trend.sampleCount}</MonoDigits>
-                  </dd>
-                </div>
-                <div>
-                  <dt>覆盖监控实例</dt>
-                  <dd>
-                    <MonoDigits>{trend.distinctMonitoringInstanceCount}</MonoDigits>
-                  </dd>
-                </div>
-              </dl>
-            </article>
-          ))}
+                    </dd>
+                  </div>
+                  <div className="monitoring-detail-chart__note">
+                    <dt>最大</dt>
+                    <dd>
+                      <MonoDigits>
+                        {trend.maxLatency != null ? formatLatency(trend.maxLatency) : '—'}
+                      </MonoDigits>
+                    </dd>
+                  </div>
+                  <div className="monitoring-detail-chart__note">
+                    <dt>样本数</dt>
+                    <dd><MonoDigits>{trend.sampleCount}</MonoDigits></dd>
+                  </div>
+                  <div className="monitoring-detail-chart__note">
+                    <dt>覆盖监控实例</dt>
+                    <dd><MonoDigits>{trend.distinctMonitoringInstanceCount}</MonoDigits></dd>
+                  </div>
+                </dl>
+              </article>
+            )
+          })}
         </div>
       )}
-    </DetailSection>
+    </section>
   )
 }

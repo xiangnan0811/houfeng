@@ -1,7 +1,7 @@
 import { Fragment, type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Button, ColumnResizeHandle, Input, Modal, Hostname, MonoDigits, StatusGlyph, Timestamp, isInteractiveRowTarget } from '../components/atoms'
+import { Badge, ColumnResizeHandle, Modal, Hostname, MonoDigits, StatusGlyph, Tabs, Timestamp, isInteractiveRowTarget } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { useColumnWidths } from '../lib/useColumnWidths'
 import {
@@ -16,7 +16,6 @@ import {
   pauseTarget,
   restoreTargetToPaused,
   resumeTarget,
-  updateTargetMetadata,
 } from '../lib/api'
 import type { AssetContextForTarget, CreateTargetInput, TargetRecord, TargetSparklinesResponse } from '../lib/types'
 import {
@@ -26,40 +25,37 @@ import {
   subscriptionStateLabel,
   vpsLifecycleLabel,
 } from './assetContextSummary'
+import './target-detail/TargetDetailWorkspace.css'
 import { CreateTargetPanel } from './targets/CreateTargetPanel'
 import { TargetsBatchPanel } from './targets/TargetsBatchPanel'
 import { TargetsFilterPanel } from './targets/TargetsFilterPanel'
-import { TargetsRuntimeOverlays } from './targets/TargetsRuntimeOverlays'
-import { TargetsActionsCell } from './targets/TargetsActionsCell'
 import { TargetsTrendCell } from './targets/TargetsTrendCell'
 import {
-  actionButtonKey,
   buildCreateTargetInput,
   countAbnormalTargets,
   countArchivedTargets,
   countCoverageGapTargets,
   countPausedTargets,
-  dedupeLabels,
   describeError,
   distinctSorted,
-  focusRestoreActionAfterSuccess,
   initialCreateForm,
-  mergeMetadataTargetRecord,
-  mergeRuntimeTargetRecord,
-  parseLabels,
   parseMultiValue,
   isCoverageGapTarget,
+  targetAttentionBadges,
   targetGlyphState,
+  targetIssueSummary,
 } from './targets/targetHelpers'
 import type {
   CreateTargetFormState,
-  FocusRestoreRequest,
-  PendingTargetConfirmation,
   TargetFilterState,
   TargetRuntimeAction,
 } from './targets/types'
 
-const TARGET_LIST_COLUMN_WIDTHS = [36, 180, 72, 168, 108, 120, 100, 120, 220]
+const TARGET_LIST_COLUMN_WIDTHS = [40, 180, 72, 168, 150, 120, 140]
+const TARGET_LIST_HEADERS = ['', '目标', '类型', 'Host', '健康', '资产上下文', '近 24h 延迟'] as const
+const TAB_OWNED_RUN_STATUS = new Set(['暂停', '已归档'])
+
+type TargetQuickView = 'all' | 'abnormal' | 'paused' | 'archived' | 'coverage'
 
 export function TargetsPage() {
   const navigate = useNavigate()
@@ -73,18 +69,9 @@ export function TargetsPage() {
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
   const [createForm, setCreateForm] = useState<CreateTargetFormState>(initialCreateForm)
-  const [runtimeBusyTargetId, setRuntimeBusyTargetId] = useState<string | null>(null)
-  const [runtimeErrors, setRuntimeErrors] = useState<Record<string, string>>({})
-  const [metadataEditingTargetId, setMetadataEditingTargetId] = useState<string | null>(null)
-  const [metadataLabelInput, setMetadataLabelInput] = useState('')
-  const [metadataGroupInput, setMetadataGroupInput] = useState('')
-  const [metadataSavingTargetId, setMetadataSavingTargetId] = useState<string | null>(null)
-  const [metadataErrors, setMetadataErrors] = useState<Record<string, string>>({})
-  const [pendingConfirmation, setPendingConfirmation] = useState<PendingTargetConfirmation | null>(null)
-  const actionButtonRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  const pendingFocusRestoreRef = useRef<FocusRestoreRequest | null>(null)
   const [sparklines, setSparklines] = useState<TargetSparklinesResponse | null>(null)
-  const [selectAll, setSelectAll] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [frozenBatchIds, setFrozenBatchIds] = useState<string[] | null>(null)
   const [batchSubmitting, setBatchSubmitting] = useState(false)
   const [pendingBatchAction, setPendingBatchAction] = useState<string | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
@@ -209,142 +196,6 @@ export function TargetsPage() {
     }
   }
 
-  function queueFocusRestore(targetId: string, preferredAction: TargetRuntimeAction) {
-    pendingFocusRestoreRef.current = { targetId, preferredAction }
-  }
-
-  useEffect(() => {
-    const request = pendingFocusRestoreRef.current
-    if (!request) return
-
-    const preferred = actionButtonRefs.current[actionButtonKey(request.targetId, request.preferredAction)]
-    const fallback =
-      request.preferredAction === 'pause'
-        ? actionButtonRefs.current[actionButtonKey(request.targetId, 'resume')]
-        : request.preferredAction === 'archive'
-          ? actionButtonRefs.current[actionButtonKey(request.targetId, 'restore-to-paused')]
-          : null
-    const target = [preferred, fallback].find((element) => element?.isConnected)
-
-    target?.focus()
-    pendingFocusRestoreRef.current = null
-  }, [targets, pendingConfirmation])
-
-  async function handleRuntimeAction(
-    target: TargetRecord,
-    action: TargetRuntimeAction,
-    confirmed = false,
-  ) {
-    if ((action === 'pause' || action === 'archive') && !confirmed) {
-      setPendingConfirmation({ targetId: target.target_id, action })
-      return
-    }
-
-    setRuntimeBusyTargetId(target.target_id)
-    setRuntimeErrors((current) => {
-      if (!current[target.target_id]) return current
-      const next = { ...current }
-      delete next[target.target_id]
-      return next
-    })
-
-    try {
-      const updated =
-        action === 'enter-maintenance'
-          ? await enterTargetMaintenance(target.target_id)
-          : action === 'exit-maintenance'
-            ? await exitTargetMaintenance(target.target_id)
-            : action === 'pause'
-              ? await pauseTarget(target.target_id)
-              : action === 'resume'
-                ? await resumeTarget(target.target_id)
-                : action === 'archive'
-                  ? await archiveTarget(target.target_id)
-                  : await restoreTargetToPaused(target.target_id)
-      setTargets((current) =>
-        current.map((item) =>
-          item.target_id === updated.target_id ? mergeRuntimeTargetRecord(item, updated) : item,
-        ),
-      )
-      queueFocusRestore(updated.target_id, focusRestoreActionAfterSuccess(action))
-      setPendingConfirmation((current) =>
-        current?.targetId === updated.target_id && current.action === action ? null : current,
-      )
-    } catch (runtimeError) {
-      setRuntimeErrors((current) => ({
-        ...current,
-        [target.target_id]: describeError(runtimeError, '目标运行控制操作失败'),
-      }))
-    } finally {
-      setRuntimeBusyTargetId((current) => (current === target.target_id ? null : current))
-    }
-  }
-
-  function beginMetadataEdit(target: TargetRecord) {
-    if (metadataSavingTargetId) return
-    setMetadataEditingTargetId(target.target_id)
-    setMetadataLabelInput(target.labels.join(', '))
-    setMetadataGroupInput(target.group || '')
-    setMetadataErrors((current) => {
-      if (!current[target.target_id]) return current
-      const next = { ...current }
-      delete next[target.target_id]
-      return next
-    })
-  }
-
-  function cancelMetadataEdit(targetId: string) {
-    setMetadataEditingTargetId((current) => (current === targetId ? null : current))
-    setMetadataLabelInput('')
-    setMetadataGroupInput('')
-    setMetadataSavingTargetId((current) => (current === targetId ? null : current))
-    setMetadataErrors((current) => {
-      if (!current[targetId]) return current
-      const next = { ...current }
-      delete next[targetId]
-      return next
-    })
-  }
-
-  async function saveMetadataLabels(target: TargetRecord) {
-    setMetadataSavingTargetId(target.target_id)
-    setMetadataErrors((current) => {
-      if (!current[target.target_id]) return current
-      const next = { ...current }
-      delete next[target.target_id]
-      return next
-    })
-
-    try {
-      const updated = await updateTargetMetadata(
-        target.target_id,
-        {
-          ...(metadataGroupInput.trim() ? { group: metadataGroupInput.trim() } : {}),
-          labels: dedupeLabels(parseLabels(metadataLabelInput)),
-          note: target.note,
-        },
-        {
-          expectedUpdatedAt: target.updated_at,
-        },
-      )
-      setTargets((current) =>
-        current.map((item) =>
-          item.target_id === updated.target_id ? mergeMetadataTargetRecord(item, updated) : item,
-        ),
-      )
-      setMetadataEditingTargetId((current) => (current === target.target_id ? null : current))
-      setMetadataLabelInput('')
-      setMetadataGroupInput('')
-    } catch (metadataError) {
-      setMetadataErrors((current) => ({
-        ...current,
-        [target.target_id]: describeError(metadataError, '标签更新失败'),
-      }))
-    } finally {
-      setMetadataSavingTargetId((current) => (current === target.target_id ? null : current))
-    }
-  }
-
   const filterState: TargetFilterState = useMemo(
     () => ({
       group: searchParams.get('group'),
@@ -390,76 +241,71 @@ export function TargetsPage() {
     })
   }, [targets, filterState])
 
-  const groupFilterActive = filterState.group !== null
   const abnormalTargetCount = useMemo(() => countAbnormalTargets(targets), [targets])
   const pausedTargetCount = useMemo(() => countPausedTargets(targets), [targets])
   const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
   const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
+  const visibleIds = useMemo(() => filteredTargets.map((target) => target.target_id), [filteredTargets])
+  const batchTargetIds = frozenBatchIds ?? selectedIds.filter((id) => visibleIds.includes(id))
+  const selectedVisibleCount = visibleIds.filter((id) => selectedIds.includes(id)).length
+  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length
+  const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected
+  const hasActiveFilters = Boolean(
+    filterState.type || filterState.health || filterState.runStatus || filterState.group,
+  )
+  const navigationLocked = pendingBatchAction !== null || batchSubmitting
+  const quickView: TargetQuickView = filterState.coverageGap
+    ? 'coverage'
+    : filterState.abnormal
+      ? 'abnormal'
+      : filterState.runStatus === '暂停'
+        ? 'paused'
+        : filterState.runStatus === '已归档'
+          ? 'archived'
+          : 'all'
 
-  async function executeBatchTargetAction(action: TargetRuntimeAction) {
-    if (action === 'pause' || action === 'archive') {
-      setPendingBatchAction(action)
-      return
-    }
+  useEffect(() => {
+    setSelectedIds((current) => current.filter((id) => visibleIds.includes(id)))
+  }, [visibleIds])
+
+  async function runBatchOnIds(action: TargetRuntimeAction, ids: string[]) {
     setBatchSubmitting(true)
     setBatchError(null)
-    const targetIDs = filteredTargets.map((t) => t.target_id)
+    setPendingBatchAction(null)
     let failCount = 0
-    for (const targetID of targetIDs) {
+    for (const targetID of ids) {
       try {
-        switch (action) {
-          case 'enter-maintenance':
-            await enterTargetMaintenance(targetID)
-            break
-          case 'exit-maintenance':
-            await exitTargetMaintenance(targetID)
-            break
-          case 'resume':
-            await resumeTarget(targetID)
-            break
-        }
+        if (action === 'enter-maintenance') await enterTargetMaintenance(targetID)
+        else if (action === 'exit-maintenance') await exitTargetMaintenance(targetID)
+        else if (action === 'pause') await pauseTarget(targetID)
+        else if (action === 'resume') await resumeTarget(targetID)
+        else if (action === 'archive') await archiveTarget(targetID)
+        else await restoreTargetToPaused(targetID)
       } catch {
         failCount++
       }
     }
-    if (failCount > 0) {
-      setBatchError(`${failCount}/${targetIDs.length} 个目标失败`)
-    }
+    if (failCount > 0) setBatchError(`${failCount}/${ids.length} 个目标失败`)
     setBatchSubmitting(false)
-    setSelectAll(false)
-    // Refresh the targets list
+    setFrozenBatchIds(null)
+    setSelectedIds([])
     try {
       const updated = await listTargets()
       setTargets(updated)
     } catch {
-      // silent
+      /* keep current rows */
     }
   }
 
-  async function executeBatchTargetPauseConfirmed() {
-    setPendingBatchAction(null)
-    setBatchSubmitting(true)
-    setBatchError(null)
-    const targetIDs = filteredTargets.map((t) => t.target_id)
-    let failCount = 0
-    for (const targetID of targetIDs) {
-      try {
-        await pauseTarget(targetID)
-      } catch {
-        failCount++
-      }
+  async function executeBatchTargetAction(action: TargetRuntimeAction) {
+    const ids = batchTargetIds
+    if (ids.length === 0) return
+    if (action === 'pause' || action === 'archive') {
+      setFrozenBatchIds(ids)
+      setPendingBatchAction(action)
+      return
     }
-    if (failCount > 0) {
-      setBatchError(`${failCount}/${targetIDs.length} 个目标失败`)
-    }
-    setBatchSubmitting(false)
-    setSelectAll(false)
-    try {
-      const updated = await listTargets()
-      setTargets(updated)
-    } catch {
-      // silent
-    }
+    await runBatchOnIds(action, ids)
   }
 
   function updateSearchParam(key: string, value: string | null) {
@@ -481,12 +327,54 @@ export function TargetsPage() {
     updateSearchParam(key, value)
   }
 
-  function setBooleanFilter(key: 'abnormal' | 'coverage_gap', enabled: boolean) {
-    updateSearchParam(key, enabled ? '1' : null)
+  function setQuickView(view: TargetQuickView) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        const tabOwnedRunStatus = TAB_OWNED_RUN_STATUS.has(next.get('run_status') ?? '')
+        if (view === 'all') {
+          next.delete('abnormal')
+          next.delete('coverage_gap')
+          if (tabOwnedRunStatus) next.delete('run_status')
+        } else if (view === 'abnormal') {
+          next.set('abnormal', '1')
+          next.delete('coverage_gap')
+          if (tabOwnedRunStatus) next.delete('run_status')
+        } else if (view === 'paused') {
+          next.set('run_status', '暂停')
+          next.delete('abnormal')
+          next.delete('coverage_gap')
+        } else if (view === 'archived') {
+          next.set('run_status', '已归档')
+          next.delete('abnormal')
+          next.delete('coverage_gap')
+        } else {
+          next.set('coverage_gap', '1')
+          next.delete('abnormal')
+          if (tabOwnedRunStatus) next.delete('run_status')
+        }
+        return next
+      },
+      { replace: true },
+    )
   }
 
   function clearAllFilters() {
     setSearchParams(new URLSearchParams(), { replace: true })
+  }
+
+  function toggleSelected(targetId: string) {
+    setSelectedIds((current) =>
+      current.includes(targetId) ? current.filter((id) => id !== targetId) : [...current, targetId],
+    )
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelectedIds(checked ? [...visibleIds] : [])
+  }
+
+  function shouldNavigateOnRowClick() {
+    return !navigationLocked
   }
 
   if (loading) {
@@ -504,53 +392,11 @@ export function TargetsPage() {
     )
   }
 
-  function shouldNavigateOnRowClick(target: TargetRecord): boolean {
-    if (metadataEditingTargetId === target.target_id) return false
-    if (pendingConfirmation?.targetId === target.target_id) return false
-    return true
-  }
-
-  const editingTarget = metadataEditingTargetId
-    ? targets.find((target) => target.target_id === metadataEditingTargetId) ?? null
-    : null
-
   return (
     <div className="page targets-page">
       <header className="page__head">
         <h1 className="page__title">入口探测</h1>
         <div className="page__actions">
-          <button
-            type="button"
-            className="btn sm ghost"
-            onClick={() => setBooleanFilter('abnormal', true)}
-            disabled={abnormalTargetCount === 0}
-          >
-            异常 <MonoDigits>{abnormalTargetCount}</MonoDigits>
-          </button>
-          <button
-            type="button"
-            className="btn sm ghost"
-            onClick={() => setSingleFilter('run_status', '暂停')}
-            disabled={pausedTargetCount === 0}
-          >
-            暂停 <MonoDigits>{pausedTargetCount}</MonoDigits>
-          </button>
-          <button
-            type="button"
-            className="btn sm ghost"
-            onClick={() => setSingleFilter('run_status', '已归档')}
-            disabled={archivedTargetCount === 0}
-          >
-            归档 <MonoDigits>{archivedTargetCount}</MonoDigits>
-          </button>
-          <button
-            type="button"
-            className="btn sm ghost"
-            onClick={() => setBooleanFilter('coverage_gap', true)}
-            disabled={coverageGapTargetCount === 0}
-          >
-            覆盖缺口 <MonoDigits>{coverageGapTargetCount}</MonoDigits>
-          </button>
           <button
             type="button"
             className="btn sm primary"
@@ -578,58 +424,6 @@ export function TargetsPage() {
         />
       </Modal>
 
-      <Modal
-        open={editingTarget !== null}
-        onClose={() => {
-          if (editingTarget) cancelMetadataEdit(editingTarget.target_id)
-        }}
-        title={editingTarget ? `${editingTarget.name} · 快速编辑标签` : '快速编辑标签'}
-        size="md"
-      >
-        {editingTarget ? (
-          <div className="page-stack">
-            <p className="page-panel__description">
-              更新列表扫描使用的 group 与标签，不会修改备注或运行状态。
-            </p>
-            <Input
-              label="Group"
-              name={`target-group-${editingTarget.target_id}`}
-              value={metadataGroupInput}
-              onChange={(event) => setMetadataGroupInput(event.target.value)}
-              placeholder="Group"
-            />
-            <Input
-              label="标签"
-              name={`target-labels-${editingTarget.target_id}`}
-              value={metadataLabelInput}
-              onChange={(event) => setMetadataLabelInput(event.target.value)}
-              hint="用逗号分隔多个标签。"
-            />
-            {metadataErrors[editingTarget.target_id] ? (
-              <p className="targets-table__inline-error" role="alert">
-                {metadataErrors[editingTarget.target_id]}
-              </p>
-            ) : null}
-            <div className="action-confirm__actions">
-              <Button
-                variant="secondary"
-                disabled={metadataSavingTargetId === editingTarget.target_id}
-                onClick={() => cancelMetadataEdit(editingTarget.target_id)}
-              >
-                取消
-              </Button>
-              <Button
-                variant="primary"
-                disabled={metadataSavingTargetId === editingTarget.target_id}
-                onClick={() => void saveMetadataLabels(editingTarget)}
-              >
-                {metadataSavingTargetId === editingTarget.target_id ? '正在保存…' : '保存标签'}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </Modal>
-
       {targets.length === 0 ? (
         <PageState
           kind="empty"
@@ -644,42 +438,69 @@ export function TargetsPage() {
         />
       ) : (
         <>
-          <TargetsFilterPanel
-            filterState={filterState}
-            groupOptions={groupOptions}
-            onSingleFilterChange={setSingleFilter}
-          />
-            <TargetsBatchPanel
-              show={groupFilterActive && filteredTargets.length > 0}
-              filteredTargetCount={filteredTargets.length}
-              selectAll={selectAll}
-              batchSubmitting={batchSubmitting}
-              batchError={batchError}
-              pendingBatchAction={pendingBatchAction}
-              onSelectAllChange={setSelectAll}
-              onBatchAction={(action) => void executeBatchTargetAction(action as TargetRuntimeAction)}
-              onConfirmBatchPause={() => void executeBatchTargetPauseConfirmed()}
-              onCancelBatchPause={() => setPendingBatchAction(null)}
-            />
-            {targetAssetContextError ? (
-              <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
-                {targetAssetContextError}
-              </p>
-            ) : null}
-            {filteredTargets.length === 0 ? (
-              <PageState
-                kind="empty"
-                surface="empty"
-                title="没有匹配当前筛选的目标"
-                description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
-                action={
-                  <button type="button" className="btn sm secondary" onClick={clearAllFilters}>
-                    清空筛选
-                  </button>
-                }
+          <div className="monitoring-page__tools">
+            <div className="monitoring-page__views">
+              <Tabs
+                label="关注视图"
+                idBase="target-quick-view"
+                activation="manual"
+                value={quickView}
+                onChange={(view) => {
+                  if (!navigationLocked) setQuickView(view)
+                }}
+                items={[
+                  { value: 'all', label: '全部', count: targets.length },
+                  { value: 'abnormal', label: '异常', count: abnormalTargetCount },
+                  { value: 'paused', label: '暂停', count: pausedTargetCount },
+                  { value: 'archived', label: '归档', count: archivedTargetCount },
+                  { value: 'coverage', label: '覆盖缺口', count: coverageGapTargetCount },
+                ]}
               />
-            ) : (
-              <div className="page__work" role="region" aria-label="入口清单" tabIndex={0}>
+            </div>
+            <div className="monitoring-page__controls">
+              <TargetsFilterPanel
+                filterState={filterState}
+                groupOptions={groupOptions}
+                hasActiveFilters={hasActiveFilters}
+                onClearAll={clearAllFilters}
+                onSingleFilterChange={setSingleFilter}
+                batch={(
+                  <TargetsBatchPanel
+                    selectedCount={batchTargetIds.length}
+                    batchSubmitting={batchSubmitting}
+                    batchError={batchError}
+                    pendingBatchAction={pendingBatchAction}
+                    onBatchAction={(action) => void executeBatchTargetAction(action as TargetRuntimeAction)}
+                    onConfirmBatchPause={() => void runBatchOnIds('pause', batchTargetIds)}
+                    onConfirmBatchArchive={() => void runBatchOnIds('archive', batchTargetIds)}
+                    onCancelBatchConfirm={() => {
+                      setPendingBatchAction(null)
+                      setFrozenBatchIds(null)
+                    }}
+                  />
+                )}
+              />
+            </div>
+          </div>
+          {targetAssetContextError ? (
+            <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+              {targetAssetContextError}
+            </p>
+          ) : null}
+          {filteredTargets.length === 0 ? (
+            <PageState
+              kind="empty"
+              surface="empty"
+              title="没有匹配当前筛选的目标"
+              description="请尝试调整筛选条件，或清空筛选恢复完整列表。"
+              action={
+                <button type="button" className="btn sm secondary" onClick={clearAllFilters}>
+                  清空筛选
+                </button>
+              }
+            />
+          ) : (
+            <div className="page__work" role="region" aria-label="入口清单" tabIndex={0}>
               <table className="table table--resizable targets-table">
                 <colgroup>
                   {targetColumnWidths.map((width, index) => (
@@ -688,10 +509,26 @@ export function TargetsPage() {
                 </colgroup>
                 <thead>
                   <tr>
-                    {['', '目标', '类型', 'Host', '状态', '资产上下文', '近 24h 延迟', '当前主问题', '操作'].map((label, index) => (
+                    {TARGET_LIST_HEADERS.map((label, index) => (
                       <th key={`${label}-${index}`} scope="col">
-                        {label}
-                        <ColumnResizeHandle onDragStart={(clientX) => startTargetColumnResize(index, clientX)} />
+                        {index === 0 ? (
+                          <input
+                            type="checkbox"
+                            className="monitoring-table__select-check"
+                            checked={allVisibleSelected}
+                            disabled={navigationLocked}
+                            ref={(node) => {
+                              if (node) node.indeterminate = someVisibleSelected
+                            }}
+                            onChange={(event) => toggleSelectAll(event.target.checked)}
+                            aria-label="全选可见目标"
+                          />
+                        ) : (
+                          label
+                        )}
+                        {index > 0 ? (
+                          <ColumnResizeHandle onDragStart={(clientX) => startTargetColumnResize(index, clientX)} />
+                        ) : null}
                       </th>
                     ))}
                   </tr>
@@ -703,6 +540,8 @@ export function TargetsPage() {
                       : target.host
                     const assetContext = targetAssetContexts.get(target.target_id)
                     const primaryContext = assetContextPrimarySummary(assetContext)
+                    const badges = targetAttentionBadges(target)
+                    const summary = targetIssueSummary(target)
                     return (
                       <Fragment key={target.target_id}>
                         {/* a11y-allow-nonsemantic-click: keyboard-complete-row */}
@@ -710,112 +549,100 @@ export function TargetsPage() {
                           tabIndex={0}
                           onClick={(e) => {
                             if (isInteractiveRowTarget(e.target)) return
-                            if (!shouldNavigateOnRowClick(target)) return
+                            if (!shouldNavigateOnRowClick()) return
                             navigate(`/targets/${target.target_id}`)
                           }}
                           onKeyDown={(e) => {
                             if (isInteractiveRowTarget(e.target)) return
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault()
-                              if (shouldNavigateOnRowClick(target)) {
+                              if (shouldNavigateOnRowClick()) {
                                 navigate(`/targets/${target.target_id}`)
                               }
                             }
                           }}
                         >
-                          <td>
-                            <StatusGlyph
-                              state={targetGlyphState(target)}
-                              size="md"
-                              ariaLabel={`${target.name} 健康 ${target.current_health_status}`}
-                            />
-                          </td>
-                          <td>
-                            <div className="name">{target.name}</div>
+                        <td className="monitoring-table__select">
+                          <input
+                            type="checkbox"
+                            className="monitoring-table__select-check"
+                            checked={selectedIds.includes(target.target_id)}
+                            disabled={navigationLocked}
+                            onChange={() => toggleSelected(target.target_id)}
+                            onClick={(event) => event.stopPropagation()}
+                            aria-label={`选择 ${target.name}`}
+                          />
+                        </td>
+                        <td>
+                          <div className="targets-table__identity">
+                            <div className="targets-table__identity-head">
+                              <StatusGlyph
+                                state={targetGlyphState(target)}
+                                size="md"
+                                ariaLabel={`${target.name} ${badges[0]?.label ?? '运行正常'}`}
+                              />
+                              <div className="name">{target.name}</div>
+                            </div>
                             <div className="sub">
                               成功 <Timestamp value={target.last_success_at ?? null} mode="relative" />
                               {' '}· 失败 <Timestamp value={target.last_failure_at ?? null} mode="relative" />
                             </div>
-                          </td>
-                          <td><span className="probe-kind">{target.target_type}</span></td>
-                          <td className="mono">
-                            {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
-                            <Hostname>{hostDisplay}</Hostname>
-                          </td>
-                          <td>
-                            <span className="targets-table__status">
-                              <span>{target.run_status}</span>
-                              <span> · {target.current_health_status}</span>
-                            </span>
-                            {target.execution_monitoring_instance_labels.length > 0 && (
-                              <div className="sub">执行: {target.execution_monitoring_instance_labels.join(', ')}</div>
-                            )}
-                          </td>
-                          <td>
-                            {primaryContext ? (
-                              <div className="asset-context-cell">
-                                <span className={assetContextHasAttention(assetContext) ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
-                                  {assetContextMessage(assetContext)}
-                                </span>
-                                <small>
-                                  {vpsLifecycleLabel(primaryContext.lifecycle_status)} · {subscriptionStateLabel(primaryContext.subscription_state)}
-                                </small>
-                              </div>
-                            ) : (
-                              <span className="asset-context-pill">未关联 VPS</span>
-                            )}
-                          </td>
-                          <td className="targets-table__trends">
-                            <TargetsTrendCell target={target} sparklines={sparklines} />
-                          </td>
-                          <td>
-                            <div className="targets-table__issue">
-                              <MonoDigits className="targets-table__issue-count">
-                                {target.current_active_incident_count}
-                              </MonoDigits>
-                              <span className="targets-table__issue-summary">
-                                {target.current_primary_issue_summary || '暂无明显异常'}
+                          </div>
+                        </td>
+                        <td><span className="probe-kind">{target.target_type}</span></td>
+                        <td className="mono">
+                          {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
+                          <Hostname>{hostDisplay}</Hostname>
+                        </td>
+                        <td>
+                          <div className="targets-table__health">
+                            {badges.length > 0 ? (
+                              <span className="targets-table__health-head">
+                                {badges.map((badge) => (
+                                  <Badge key={badge.label} variant="state" tone={badge.tone}>
+                                    {badge.label}
+                                  </Badge>
+                                ))}
+                                {target.current_active_incident_count > 0 ? (
+                                  <MonoDigits className="targets-table__issue-count">
+                                    {target.current_active_incident_count}
+                                  </MonoDigits>
+                                ) : null}
                               </span>
+                            ) : (
+                              <span className="targets-table__health-quiet">—</span>
+                            )}
+                            {summary && !badges.some((badge) => badge.label === summary) ? (
+                              <span className="targets-table__issue-summary" title={summary}>{summary}</span>
+                            ) : null}
+                          </div>
+                        </td>
+                        <td>
+                          {primaryContext ? (
+                            <div className="asset-context-cell">
+                              <span className={assetContextHasAttention(assetContext) ? 'asset-context-pill asset-context-pill--attention' : 'asset-context-pill'}>
+                                {assetContextMessage(assetContext)}
+                              </span>
+                              <small>
+                                {vpsLifecycleLabel(primaryContext.lifecycle_status)} · {subscriptionStateLabel(primaryContext.subscription_state)}
+                              </small>
                             </div>
-                          </td>
-                          <td className="targets-table__actions-cell">
-                            <TargetsActionsCell
-                              target={target}
-                              metadataEditingTargetId={metadataEditingTargetId}
-                              metadataSavingTargetId={metadataSavingTargetId}
-                              runtimeBusyTargetId={runtimeBusyTargetId}
-                              actionButtonRefs={actionButtonRefs}
-                              onStartMetadataEdit={beginMetadataEdit}
-                              onRuntimeAction={(t, action) => void handleRuntimeAction(t, action)}
-                            />
-                          </td>
+                          ) : (
+                            <span className="asset-context-pill">未关联 VPS</span>
+                          )}
+                        </td>
+                        <td className="targets-table__trends">
+                          <TargetsTrendCell target={target} sparklines={sparklines} />
+                        </td>
                         </tr>
                       </Fragment>
                     )
                   })}
                 </tbody>
               </table>
-              </div>
-            )}
-
-            <TargetsRuntimeOverlays
-              targets={filteredTargets}
-              pendingConfirmation={pendingConfirmation}
-              runtimeErrors={runtimeErrors}
-              runtimeBusyTargetId={runtimeBusyTargetId}
-              onConfirmRuntimeAction={(target, action) => {
-                void handleRuntimeAction(target, action, true)
-              }}
-              onCancelConfirmation={(targetId, action) => {
-                queueFocusRestore(targetId, action)
-                setPendingConfirmation((current) =>
-                  current?.targetId === targetId && current.action === action
-                    ? null
-                    : current,
-                )
-              }}
-            />
-          </>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

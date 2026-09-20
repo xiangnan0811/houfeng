@@ -1,4 +1,4 @@
-import type { HealthState } from '../../components/atoms'
+import type { BadgeTone, HealthState } from '../../components/atoms'
 import { ApiError } from '../../lib/api'
 import { formatDateTime } from '../../lib/format'
 import type { CreateTargetInput, TargetRecord } from '../../lib/types'
@@ -96,6 +96,42 @@ export function targetEvidenceGlyphState(target: TargetRecord): HealthState {
 
 export function isCoverageGapTarget(target: TargetRecord) {
   return target.execution_monitoring_instance_labels.length === 0
+}
+
+const ABNORMAL_HEALTH: Record<string, BadgeTone> = {
+  关注: 'notice',
+  告警: 'alert',
+  严重: 'critical',
+}
+
+export type TargetAttentionBadge = { label: string; tone: BadgeTone }
+
+/** List attention cell: never 正常; control states occupy the cell. */
+export function targetAttentionBadges(target: TargetRecord): TargetAttentionBadge[] {
+  const badges: TargetAttentionBadge[] = []
+  if (target.run_status === '维护中') {
+    badges.push({ label: '维护中', tone: 'maintenance' })
+  } else if (target.run_status === '暂停') {
+    badges.push({ label: '暂停', tone: 'offline' })
+  } else if (target.run_status === '已归档') {
+    badges.push({ label: '已归档', tone: 'offline' })
+  }
+  const healthTone = ABNORMAL_HEALTH[target.current_health_status]
+  if (healthTone) {
+    badges.push({ label: target.current_health_status, tone: healthTone })
+  } else if (badges.length === 0 && isCoverageGapTarget(target)) {
+    badges.push({ label: '覆盖缺口', tone: 'notice' })
+  }
+  return badges
+}
+
+export function targetIssueSummary(target: TargetRecord): string {
+  const summary = target.current_primary_issue_summary.trim()
+  if (summary) return summary
+  if (isCoverageGapTarget(target) && !ABNORMAL_HEALTH[target.current_health_status]) {
+    return '缺少执行监控实例标签'
+  }
+  return ''
 }
 
 export function countAbnormalTargets(targets: TargetRecord[]) {

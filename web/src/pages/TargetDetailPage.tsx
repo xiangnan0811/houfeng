@@ -396,11 +396,13 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
 
   const observationsByProbe = useMemo(() => {
     const map = new Map<string, ProbeObservation[]>()
-    for (const observation of state.runtimeFacts?.latest_probe_observations ?? []) {
+    const add = (observation: ProbeObservation) => {
       const existing = map.get(observation.probe_item_id) ?? []
       existing.push(observation)
       map.set(observation.probe_item_id, existing)
     }
+    for (const observation of state.runtimeFacts?.latest_probe_observations ?? []) add(observation)
+    for (const observation of state.runtimeFacts?.recent_probe_observations ?? []) add(observation)
     return map
   }, [state.runtimeFacts])
   const recentObservations = state.runtimeFacts?.recent_probe_observations ?? []

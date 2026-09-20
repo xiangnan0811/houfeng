@@ -2,7 +2,6 @@ import type { ReactNode, RefObject } from 'react'
 
 import { DetailSection } from '../../components/DetailSection'
 import { Button } from '../../components/atoms/Button'
-import { MonoDigits } from '../../components/atoms/Mono'
 import {
   TargetProbeList,
   type PendingProbeConfirmation,
@@ -50,17 +49,8 @@ export function TargetProbeListSection({
   addDisabled,
   onOpenCreate,
 }: TargetProbeListSectionProps) {
-  const enabledProbeCount = probeItems.filter((item) => item.enabled).length
-  const latestObservationCount = Array.from(observationsByProbe.values()).reduce(
-    (total, observations) => total + observations.length,
-    0,
-  )
   const defaultAside = (
     <div className="target-probe-section__tools">
-      <span className="target-probe-section__meta">
-        启用 <MonoDigits>{enabledProbeCount}</MonoDigits> / <MonoDigits>{probeItems.length}</MonoDigits> · 最新观测{' '}
-        <MonoDigits>{latestObservationCount}</MonoDigits>
-      </span>
       <Button
         ref={addProbeButtonRef}
         variant="secondary"
@@ -76,7 +66,7 @@ export function TargetProbeListSection({
   return (
     <div className="target-probe-section">
       <DetailSection
-        title="ProbeItem 列表"
+        title="探测方式"
         ribbon="accent"
         aside={aside ?? defaultAside}
       >

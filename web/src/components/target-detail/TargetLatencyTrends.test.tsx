@@ -70,11 +70,9 @@ describe('TargetLatencyTrends', () => {
       />,
     )
 
-    expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
-    // Two metric cards, one per enabled probe item
-    expect(container.querySelectorAll('.metric-card').length).toBe(2)
-    // Sparkline polyline rendered for multi-sample series
-    expect(container.querySelectorAll('svg.sparkline polyline').length).toBe(2)
+    expect(screen.getByRole('region', { name: '近期延迟趋势' })).toBeInTheDocument()
+    expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(2)
+    expect(container.querySelectorAll('.monitoring-detail-chart svg').length).toBe(2)
     // Card titles include the kind label
     expect(
       screen.getByRole('heading', { name: 'HTTP · path: /healthz' }),
@@ -153,8 +151,7 @@ describe('TargetLatencyTrends', () => {
       />,
     )
 
-    const section = container.querySelector('.detail-section')
-    expect(section?.className ?? '').toContain('detail-section--ribbon-maintenance')
+    expect(container.querySelector('.monitoring-detail-chart')).not.toBeNull()
   })
 
   it('skips disabled probe items even when observations exist', () => {
@@ -165,7 +162,7 @@ describe('TargetLatencyTrends', () => {
     const { container } = render(
       <TargetLatencyTrends probeItems={items} recentObservations={observations} />,
     )
-    expect(container.querySelectorAll('.metric-card').length).toBe(0)
+    expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(0)
     expect(
       screen.getByRole('heading', { name: '近 24h 探测已停用' }),
     ).toBeInTheDocument()

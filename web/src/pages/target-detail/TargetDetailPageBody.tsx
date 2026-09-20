@@ -1,9 +1,7 @@
 import type { FormEvent, RefObject } from 'react'
 
 import {
-  TargetActiveIncidents,
   TargetLatencyTrends,
-  TargetRecentEvents,
   TargetWatchtowerHeader,
   type PendingProbeConfirmation,
   type ProbeCreateFormState,
@@ -23,15 +21,17 @@ import type {
   StateChangeEventRecord,
   TargetRecord,
 } from '../../lib/types'
-import { TargetDecisionBoard } from './TargetDecisionBoard'
-import { TargetDangerCard } from './TargetDangerCard'
+import { TargetDetailNotices } from './TargetDetailNotices'
+import { TargetDetailRecentEvents } from './TargetDetailRecentEvents'
+import { TargetDetailStatusBand } from './TargetDetailStatusBand'
+import '../monitoring-detail/MonitoringDetailWorkspace.css'
+import './TargetDetailWorkspace.css'
 import { TargetHistoryDrawer } from './TargetHistoryDrawer'
 import { TargetLifecycleSection } from './TargetLifecycleSection'
 import { TargetMetadataSection } from './TargetMetadataSection'
 import { TargetProbeFormDrawer } from './TargetProbeFormDrawer'
 import { TargetProbeListSection } from './TargetProbeListSection'
 import { TargetRuntimePauseConfirmation } from './TargetRuntimePauseConfirmation'
-import { TargetSnapshotMeta } from './TargetSnapshotMeta'
 import { TargetTimeWindowTabs } from './TargetTimeWindowTabs'
 import type { HistoryTab, MetadataFormState, PendingRuntimeConfirmation, TimeWindow } from './types'
 
@@ -43,18 +43,6 @@ function latestObservationAt(observations: ProbeObservation[]) {
       ? observation.observed_at
       : latest,
   firstObservation.observed_at)
-}
-
-function countLatencySamples(observations: ProbeObservation[]) {
-  return observations.filter((observation) => observation.latency_ms != null).length
-}
-
-function activityAside(label: string, count: number) {
-  return (
-    <span className="detail-section__aside-meta">
-      {label} <MonoDigits>{count}</MonoDigits>
-    </span>
-  )
 }
 
 type TargetDetailPageBodyProps = {
@@ -206,32 +194,18 @@ export function TargetDetailPageBody({
   onOpenMaintenance,
   onCloseMaintenance,
 }: TargetDetailPageBodyProps) {
-  const showDangerZone = target.current_active_incident_count > 0
-  const firstIncident =
-    incidents.length > 0
-      ? [...incidents].sort(
-          (a, b) =>
-            new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        )[0] ?? null
-      : null
   const probeRowMutationBusy = probeMutationBusyId !== null
   const probeActionsDisabled =
     probeCreateSubmitting || probeRowMutationBusy || runtimeConfirmationActive || probeConfirmationActive
   const isArchived = target.run_status === '已归档'
   const archiveRuntimeError =
     pendingRuntimeConfirmation?.action === 'archive' ? runtimeError : null
-  const enabledProbeCount = probeItems.filter((item) => item.enabled).length
-  const latencySampleCount = countLatencySamples(recentObservations)
   const latestRuntimeObservationAt = latestObservationAt([
     ...recentObservations,
     ...Array.from(observationsByProbe.values()).flat(),
   ])
   const observationWorkspaceAside = (
     <div className="target-activity-actions">
-      <span className="detail-section__aside-meta">
-        {timeWindow} · latency 样本 <MonoDigits>{latencySampleCount}</MonoDigits> · ProbeItem{' '}
-        <MonoDigits>{enabledProbeCount}</MonoDigits>/<MonoDigits>{probeItems.length}</MonoDigits>
-      </span>
       <TargetTimeWindowTabs value={timeWindow} onChange={onTimeWindowChange} />
     </div>
   )
@@ -247,16 +221,24 @@ export function TargetDetailPageBody({
   )
 
   return (
-    <div className="page">
-      <TargetWatchtowerHeader
-        target={target}
-        runtimeSubmitting={runtimeSubmitting}
-        disabled={probeConfirmationActive}
-        onRuntimeAction={(action) => onRuntimeAction(action)}
-        registerActionRef={registerActionRef}
-        onOpenHistory={() => onOpenHistory('events')}
-        onOpenMaintenance={onOpenMaintenance}
-      />
+    <div className="page target-detail-route">
+      <div className="target-detail-masthead">
+        <TargetWatchtowerHeader
+          target={target}
+          runtimeSubmitting={runtimeSubmitting}
+          disabled={probeConfirmationActive}
+          onRuntimeAction={(action) => onRuntimeAction(action)}
+          registerActionRef={registerActionRef}
+          onOpenHistory={() => onOpenHistory('events')}
+          onOpenMaintenance={onOpenMaintenance}
+        />
+        <TargetDetailStatusBand
+          probeItems={probeItems}
+          latestObservationAt={latestRuntimeObservationAt}
+          assetContext={assetContext}
+          assetContextError={assetContextError}
+        />
+      </div>
 
       {pendingRuntimeConfirmation?.action === 'pause' ? (
         <TargetRuntimePauseConfirmation
@@ -266,30 +248,28 @@ export function TargetDetailPageBody({
           onCancel={onCancelPauseConfirmation}
         />
       ) : null}
-      {runtimeError && pendingRuntimeConfirmation?.action !== 'archive' ? (
-        <p className="watchtower-runtime-error" role="alert">
-          {runtimeError}
-        </p>
-      ) : null}
-
-      <TargetDecisionBoard
+      <TargetDetailNotices
         target={target}
-        probeItems={probeItems}
-        recentObservations={recentObservations}
-        latestObservationAt={latestRuntimeObservationAt}
-        latencySampleCount={latencySampleCount}
-        assetContext={assetContext}
-        assetContextError={assetContextError}
-        onOpenHistory={() => onOpenHistory('events')}
+        incidents={incidents}
+        incidentsError={incidentsError}
+        incidentsRetrying={incidentsRetrying}
+        onRetryIncidents={onRetryIncidents}
+        runtimeError={runtimeError && pendingRuntimeConfirmation?.action !== 'archive' ? runtimeError : null}
+        onOpenEvents={() => onOpenHistory('events')}
       />
 
-      {showDangerZone ? (
-        <TargetDangerCard
-          target={target}
-          firstIncident={firstIncident}
-          onOpenEvents={() => onOpenHistory('events')}
+      <DetailSection
+        title="近期延迟"
+        ribbon={target.run_status === '维护中' ? 'maintenance' : 'accent'}
+        aside={observationWorkspaceAside}
+      >
+        <TargetLatencyTrends
+          probeItems={probeItems}
+          recentObservations={recentObservations}
+          timeWindow={timeWindow}
+          isMaintenance={target.run_status === '维护中'}
         />
-      ) : null}
+      </DetailSection>
 
       <TargetProbeListSection
         probeItems={probeItems}
@@ -311,41 +291,14 @@ export function TargetDetailPageBody({
         onOpenCreate={onOpenProbeCreate}
       />
 
-      <DetailSection
-        eyebrow="近期延迟"
-        title="近期延迟"
-        ribbon={target.run_status === '维护中' ? 'maintenance' : 'accent'}
-        aside={observationWorkspaceAside}
-      >
-        <TargetLatencyTrends
-          probeItems={probeItems}
-          recentObservations={recentObservations}
-          timeWindow={timeWindow}
-          isMaintenance={target.run_status === '维护中'}
-          watchtower
-        />
-      </DetailSection>
-
-      <div className="watchtower-activity-grid" aria-label="当前异常与事件证据">
-        <TargetActiveIncidents
-          loaded={activityLoaded}
-          incidents={incidents}
-          error={incidentsError}
-          retrying={incidentsRetrying}
-          onRetry={onRetryIncidents}
-          aside={activityAside('活跃', incidents.length)}
-        />
-        <TargetRecentEvents
-          loaded={activityLoaded}
-          events={events}
-          error={eventsError}
-          retrying={eventsRetrying}
-          onRetry={onRetryEvents}
-          aside={eventAside}
-        />
-      </div>
-
-      <TargetSnapshotMeta />
+      <TargetDetailRecentEvents
+        loaded={activityLoaded}
+        events={events}
+        error={eventsError}
+        retrying={eventsRetrying}
+        onRetry={onRetryEvents}
+        aside={eventAside}
+      />
 
       <Modal
         open={maintenanceOpen}

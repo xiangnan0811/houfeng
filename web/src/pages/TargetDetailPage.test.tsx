@@ -154,19 +154,22 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument(),
     )
-    expect(screen.getByRole('region', { name: '目标判断摘要' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '保持观察' })).toBeInTheDocument()
+    const header = screen.getByRole('banner', { name: '目标身份与操作' })
+    expect(header).not.toHaveTextContent('正常')
+    expect(screen.queryByText('最近成功')).not.toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: '目标判断摘要' })).not.toBeInTheDocument()
+    expect(screen.queryByText('保持观察')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '近期延迟' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument()
-    expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '当前异常' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '探测方式' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '当前异常' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '近期事件' })).toBeInTheDocument()
     expect(screen.getByText('HTTP')).toBeInTheDocument()
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
-    expect(screen.getByText('mi_001')).toBeInTheDocument()
     expect(screen.queryByText('目标尚未配置 ProbeItem')).not.toBeInTheDocument()
     expect(screen.queryByText('事件与 incident 仍由后续切片接入，这里先保留版位。')).not.toBeInTheDocument()
+    expect(document.querySelector('.watchtower-danger')).toBeNull()
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/targets/tg_001', {
       headers: { Accept: 'application/json' },
@@ -432,9 +435,9 @@ describe('TargetDetailPage', () => {
       expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
     )
     expect(screen.getByText('请为该入口添加至少一种观测方式。')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '当前异常' })).toBeInTheDocument()
-    expect(screen.getByText('未发现活跃异常')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '事件' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '当前异常' })).not.toBeInTheDocument()
+    expect(screen.queryByText('未发现活跃异常')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '近期事件' })).toBeInTheDocument()
     expect(screen.getByText('未发现新的状态变更事件')).toBeInTheDocument()
   })
 
@@ -1652,7 +1655,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('delete failed')).toBeInTheDocument())
     expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
-    expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '探测方式' })).toBeInTheDocument()
   })
 
   it('prevents opening a ProbeItem delete confirmation while a runtime confirmation is active', async () => {
@@ -2028,16 +2031,16 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Payments' })).toBeInTheDocument(),
     )
 
-    expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '探测方式' })).toBeInTheDocument()
     expect(screen.getByText('origin timeout')).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '活跃异常暂不可用' })).toBeInTheDocument()
+    expect(screen.getByText('活跃异常暂不可用')).toBeInTheDocument()
     expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '相关事件暂不可用' })).toBeInTheDocument()
     expect(screen.getAllByText('events unavailable')[0]).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '重试加载活跃异常' })).toBeEnabled()
     expect(screen.getByRole('button', { name: '重试加载相关事件' })).toBeEnabled()
-    // Danger zone is rendered because current_active_incident_count > 0
     expect(screen.getAllByText('HTTP 探测失败')[0]).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '活跃异常暂不可用' })).not.toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: '目标详情不可用' }),
     ).not.toBeInTheDocument()
@@ -2143,7 +2146,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
     )
-    expect(screen.getAllByText('ProbeItem 列表')[0]).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '探测方式' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Blog' })).not.toBeInTheDocument()
 
     tg001Target.resolve(
@@ -3434,7 +3437,7 @@ describe('TargetDetailPage', () => {
       }),
     )
 
-    await waitFor(() => expect(screen.getByText('维护中')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('维护中').length).toBeGreaterThan(0))
 
     metadataAction.resolve(
       mockJSONResponse({
@@ -3459,7 +3462,7 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByText('alpha · beta')).toBeInTheDocument())
     expect(screen.getByText('备注：新的备注')).toBeInTheDocument()
-    expect(screen.getByText('维护中')).toBeInTheDocument()
+    expect(screen.getAllByText('维护中').length).toBeGreaterThan(0)
     expect(screen.queryByText('备注：现网入口')).not.toBeInTheDocument()
   })
 
@@ -3573,7 +3576,7 @@ describe('TargetDetailPage', () => {
       }),
     )
 
-    await waitFor(() => expect(screen.getByText('维护中')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('维护中').length).toBeGreaterThan(0))
     expect(screen.getByText('alpha · beta')).toBeInTheDocument()
     expect(screen.queryByText('备注：现网入口')).not.toBeInTheDocument()
   })
@@ -3620,8 +3623,10 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'No Issues' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByText('未发现活跃异常')).toBeInTheDocument()
+    expect(screen.getByRole('banner', { name: '目标身份与操作' })).not.toHaveTextContent('正常')
+    expect(screen.queryByText('未发现活跃异常')).not.toBeInTheDocument()
     expect(document.querySelector('.watchtower-danger')).not.toBeInTheDocument()
+    expect(document.querySelector('.monitoring-detail-notice')).toHaveTextContent('覆盖缺口')
   })
 
   it('renders the danger zone with summary and status badge when active incidents exist', async () => {
@@ -3679,16 +3684,13 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Has Issues' })).toBeInTheDocument(),
     )
 
-    const dangerZone = document.querySelector('.watchtower-danger')
-    expect(dangerZone).toBeInTheDocument()
-    expect(
-      within(dangerZone as HTMLElement).getByText('当前主问题'),
-    ).toBeInTheDocument()
-    expect(
-      within(dangerZone as HTMLElement).getByText('HTTP 探测持续失败'),
-    ).toBeInTheDocument()
-    expect(within(dangerZone as HTMLElement).getByText('3')).toBeInTheDocument()
-    expect(within(dangerZone as HTMLElement).getByText('告警')).toBeInTheDocument()
+    const notice = document.querySelector('.monitoring-detail-notice')
+    expect(notice).toBeInTheDocument()
+    expect(notice).toHaveTextContent('HTTP 探测持续失败')
+    expect(notice).toHaveTextContent('活跃')
+    expect(notice).toHaveTextContent('3')
+    expect(notice).toHaveTextContent('告警')
+    expect(document.querySelector('.watchtower-danger')).toBeNull()
   })
 
   it('keeps ProbeItem evidence default-visible while secondary details stay collapsed', async () => {
@@ -3768,12 +3770,12 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Collapsed Target' })).toBeInTheDocument(),
     )
 
-    const probeSection = screen.getByRole('heading', { name: 'ProbeItem 列表' }).closest('section')
+    const probeSection = screen.getByRole('heading', { name: '探测方式' }).closest('section')
     expect(probeSection).toHaveClass('detail-section')
     expect(probeSection).not.toHaveClass('watchtower-secondary')
     expect(within(probeSection as HTMLElement).getByText('TCP')).toBeInTheDocument()
     expect(within(probeSection as HTMLElement).getByText('10 ms')).toBeInTheDocument()
-    expect(within(probeSection as HTMLElement).getByText('mi_col')).toBeInTheDocument()
+    expect(within(probeSection as HTMLElement).getByText('成功')).toBeInTheDocument()
 
     expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '标签、备注与生命周期' })).not.toBeInTheDocument()
