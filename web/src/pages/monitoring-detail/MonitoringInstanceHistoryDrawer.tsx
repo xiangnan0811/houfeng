@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { Button } from '../../components/atoms/Button'
 import { Modal, TabPanel, Tabs, Timestamp } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
@@ -123,6 +125,14 @@ export function MonitoringInstanceHistoryDrawer({
             />
           )}
         </TabPanel>
+        <p className="monitoring-detail-history__footer">
+          <Link
+            className="text-link"
+            to={`/events?object_type=monitoring_instance&object_id=${encodeURIComponent(monitoringInstance.monitoring_instance_id)}`}
+          >
+            在事件流中查看
+          </Link>
+        </p>
       </div>
     </Modal>
   )

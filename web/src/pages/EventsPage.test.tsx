@@ -100,17 +100,20 @@ describe('EventsPage', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows loading state then renders table with events', async () => {
+  it('shows loading state then renders notice rows with events', async () => {
     vi.stubGlobal('fetch', setupFetchMock({}))
     renderEventsPage()
 
+    expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument()
     expect(screen.getByText('正在加载事件…')).toBeInTheDocument()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
+      expect(screen.getByText('监控实例连接超时')).toBeInTheDocument(),
     )
-    expect(screen.getByText('监控实例连接超时')).toBeInTheDocument()
     expect(screen.getByText('证书即将过期')).toBeInTheDocument()
+    expect(screen.getAllByText('异常开始').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('异常升级').length).toBeGreaterThan(0)
+    expect(screen.queryByText('新增异常 (24h)')).not.toBeInTheDocument()
   })
 
   it('forwards object_id from the URL into the events query', async () => {
@@ -155,6 +158,8 @@ describe('EventsPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '事件不可用' })).toBeInTheDocument(),
     )
+    expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
   })
 
   it('renders empty state when no events', async () => {
@@ -166,16 +171,15 @@ describe('EventsPage', () => {
     )
   })
 
-  it('displays hero stats from dashboard API', async () => {
+  it('does not stack dashboard stats above the event stream', async () => {
     vi.stubGlobal('fetch', setupFetchMock({}))
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByText('新增异常 (24h)')).toBeInTheDocument(),
+      expect(screen.getByText('监控实例连接超时')).toBeInTheDocument(),
     )
-    expect(screen.getByText('3')).toBeInTheDocument()
-    expect(screen.getByText('已恢复 (24h)')).toBeInTheDocument()
-    expect(screen.getByText('1')).toBeInTheDocument()
+    expect(screen.queryByText('新增异常 (24h)')).not.toBeInTheDocument()
+    expect(screen.queryByText('已恢复 (24h)')).not.toBeInTheDocument()
   })
 
   it('resolves object names from monitoring and targets', async () => {
@@ -188,18 +192,17 @@ describe('EventsPage', () => {
     expect(screen.getByText(/api\.example\.com/)).toBeInTheDocument()
   })
 
-  it('renders table columns', async () => {
+  it('renders Chinese incident classes instead of snake_case', async () => {
     vi.stubGlobal('fetch', setupFetchMock({}))
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('columnheader', { name: '时间' })).toBeInTheDocument(),
+      expect(screen.getByText('监控实例连接超时')).toBeInTheDocument(),
     )
-    expect(screen.getByRole('columnheader', { name: '严重度' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '事件类型' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '异常类别' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '摘要' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '对象' })).toBeInTheDocument()
+    expect(screen.getAllByText('连通性').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('证书').length).toBeGreaterThan(0)
+    expect(screen.queryByText('connectivity')).not.toBeInTheDocument()
+    expect(screen.queryByText('certificate')).not.toBeInTheDocument()
   })
 
   it('filters locally by incident_class', async () => {

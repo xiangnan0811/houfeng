@@ -8,6 +8,10 @@ export const INCIDENT_CLASS_LABELS: Record<string, string> = {
   heartbeat_stale: '心跳超时',
   target_probe_failure: '目标探测失败',
   target_tls_expiry: '目标 TLS 即将过期',
+  connectivity: '连通性',
+  certificate: '证书',
+  performance: '性能',
+  availability: '可用性',
 }
 
 export function incidentClassLabel(value: string): string {

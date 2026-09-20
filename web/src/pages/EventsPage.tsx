@@ -1,18 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
-import { Sparkline, StatCard } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import {
   ApiError,
-  getDashboard,
   listMonitoringInstances,
   listTargets,
 } from '../lib/api'
 import { listEvents } from '../lib/observabilityApi'
 import {
   STATE_CHANGE_EVENT_TYPE_LABELS,
-  type DashboardOverview,
   type EventListFilter,
   type StateChangeEventType,
 } from '../lib/types'
@@ -274,13 +271,16 @@ export function EventsPage() {
     exhausted: false,
   })
   const [loadingMore, setLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
+  const fetchModeRef = useRef<'initial' | 'more'>('initial')
+  const loadedCountRef = useRef(0)
   const [filtersDrawerOpen, setFiltersDrawerOpen] = useState(false)
   const [page, setPage] = useState(() => {
     const p = Number(searchParams.get('page'))
     return p > 0 ? p : 1
   })
   const [nameMap, setNameMap] = useState<Map<string, string>>(new Map())
-  const [dashboard, setDashboard] = useState<DashboardOverview | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   const activeFilters = hasActiveFilters(appliedFilters)
 
@@ -292,7 +292,6 @@ export function EventsPage() {
   const totalPages = Math.max(1, Math.ceil(filteredEvents.length / PAGE_SIZE))
   const currentPage = Math.min(page, totalPages)
 
-  // Load name map and dashboard on mount
   useEffect(() => {
     Promise.all([listMonitoringInstances(), listTargets()]).then(([monitoring, targets]) => {
       const map = new Map<string, string>()
@@ -300,8 +299,6 @@ export function EventsPage() {
       for (const t of targets) map.set(t.target_id, t.name)
       setNameMap(map)
     }).catch(() => {})
-
-    getDashboard().then(setDashboard).catch(() => {})
   }, [])
 
   // Sync URL params
@@ -318,11 +315,14 @@ export function EventsPage() {
     const nextKey = filterKey(normalized)
     const nextParams = searchParamsFromFilters(normalized)
     if (nextKey !== appliedFilterKey) {
+      fetchModeRef.current = 'initial'
+      loadedCountRef.current = 0
       setState((current) => ({ ...current, loading: true, error: null }))
       setEffectiveLimit(DEFAULT_LIMIT)
     }
     setDraftState({ filterKey: nextKey, filters: normalized })
     setLoadingMore(false)
+    setLoadMoreError(null)
     setPage(1)
     if (searchParams.toString() !== nextParams.toString()) {
       setSearchParams(nextParams, { replace: true })
@@ -335,6 +335,10 @@ export function EventsPage() {
     listEvents(buildFilterQuery(appliedFilters, effectiveLimit))
       .then((events) => {
         if (cancelled) return
+        const wasMore = fetchModeRef.current === 'more'
+        const previousCount = loadedCountRef.current
+        fetchModeRef.current = 'initial'
+        loadedCountRef.current = events.length
         setState({
           loading: false,
           error: null,
@@ -342,18 +346,32 @@ export function EventsPage() {
           exhausted: events.length < effectiveLimit,
         })
         setLoadingMore(false)
+        setLoadMoreError(null)
+        if (wasMore && events.length > previousCount) {
+          setPage((current) => current + 1)
+        }
       })
       .catch((error: unknown) => {
         if (cancelled) return
         const message = error instanceof ApiError ? error.message : '加载事件失败'
+        const wasMore = fetchModeRef.current === 'more'
+        fetchModeRef.current = 'initial'
+        if (wasMore) {
+          setLoadingMore(false)
+          setLoadMoreError(message)
+          return
+        }
+        loadedCountRef.current = 0
         setState({ loading: false, error: message, events: [], exhausted: true })
         setLoadingMore(false)
       })
     return () => { cancelled = true }
-  }, [appliedFilterKey, appliedFilters, effectiveLimit])
+  }, [appliedFilterKey, appliedFilters, effectiveLimit, reloadKey])
 
   function handleLoadMore() {
     if (state.exhausted || loadingMore) return
+    fetchModeRef.current = 'more'
+    setLoadMoreError(null)
     setLoadingMore(true)
     setEffectiveLimit((prev) => prev + DEFAULT_LIMIT)
   }
@@ -422,24 +440,8 @@ export function EventsPage() {
     setFiltersDrawerOpen(false)
   }
 
-  if (state.loading) {
-    return <PageState kind="loading" title="正在加载事件…" />
-  }
-
-  if (state.error) {
-    return (
-      <PageState
-        kind="error"
-        eyebrow="事件"
-        title="事件不可用"
-        description={state.error}
-        technicalSummary={state.error}
-      />
-    )
-  }
-
   return (
-    <div className="page">
+    <div className="page events-page">
       <header className="page__head">
         <h1 id="events-page-title" className="page__title">事件流</h1>
         <div className="page__actions">
@@ -447,7 +449,7 @@ export function EventsPage() {
             type="button"
             className="btn sm secondary"
             onClick={() => exportCsv(filteredEvents, nameMap)}
-            disabled={filteredEvents.length === 0}
+            disabled={filteredEvents.length === 0 || state.loading}
           >
             导出 CSV
           </button>
@@ -457,26 +459,17 @@ export function EventsPage() {
         </div>
       </header>
 
-      {dashboard && (
-        <div className="stat-grid">
-          <StatCard
-            value={dashboard.recent_new_incident_count}
-            label="新增异常 (24h)"
-            sub={dashboard.new_incident_trend_24h ? <Sparkline values={dashboard.new_incident_trend_24h} tone="alert" /> : undefined}
-          />
-          <StatCard
-            value={dashboard.recent_recovery_count}
-            label="已恢复 (24h)"
-            sub={dashboard.recovery_trend_24h ? <Sparkline values={dashboard.recovery_trend_24h} tone="normal" /> : undefined}
+      <div className="monitoring-page__tools">
+        <div className="monitoring-page__controls">
+          <EventsFilterPanel
+            filters={appliedFilters}
+            hasActiveFilters={activeFilters}
+            onClearAll={() => commitFilters(DEFAULT_FILTERS)}
+            onFilterChange={commitInlineFilter}
+            onTimeRangeChange={commitInlineTimeRange}
           />
         </div>
-      )}
-
-      <EventsFilterPanel
-        filters={appliedFilters}
-        onFilterChange={commitInlineFilter}
-        onTimeRangeChange={commitInlineTimeRange}
-      />
+      </div>
 
       <EventsFilterDrawer
         open={filtersDrawerOpen}
@@ -488,17 +481,42 @@ export function EventsPage() {
         onFilterChange={updateDraftFilter}
       />
 
-      <EventsStreamSection
-        events={filteredEvents}
-        exhausted={state.exhausted}
-        loadingMore={loadingMore}
-        hasActiveFilters={activeFilters}
-        page={currentPage}
-        nameMap={nameMap}
-        onPageChange={handlePageChange}
-        onLoadMore={handleLoadMore}
-        onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
-      />
+      {state.loading ? (
+        <PageState kind="loading" title="正在加载事件…" />
+      ) : state.error ? (
+        <PageState
+          kind="error"
+          eyebrow="事件"
+          title="事件不可用"
+          description={state.error}
+          technicalSummary={state.error}
+          action={
+            <button
+              type="button"
+              className="btn sm secondary"
+              onClick={() => {
+                setState((current) => ({ ...current, loading: true, error: null }))
+                setReloadKey((value) => value + 1)
+              }}
+            >
+              重试
+            </button>
+          }
+        />
+      ) : (
+        <EventsStreamSection
+          events={filteredEvents}
+          exhausted={state.exhausted}
+          loadingMore={loadingMore}
+          loadMoreError={loadMoreError}
+          hasActiveFilters={activeFilters}
+          page={currentPage}
+          nameMap={nameMap}
+          onPageChange={handlePageChange}
+          onLoadMore={handleLoadMore}
+          onClearFilters={() => commitFilters(DEFAULT_FILTERS)}
+        />
+      )}
     </div>
   )
 }

@@ -903,6 +903,12 @@
   line-height: 1.4;
 }
 
+.monitoring-detail-history__footer {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--monitoring-detail-helper-size);
+}
+
 .monitoring-detail-onboarding {
   display: flex;
   flex-direction: column;

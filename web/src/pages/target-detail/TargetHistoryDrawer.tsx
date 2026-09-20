@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { EventList } from '../../components/EventList'
 import { IncidentList } from '../../components/IncidentList'
 import { Card } from '../../components/atoms/Card'
@@ -88,6 +90,14 @@ export function TargetHistoryDrawer({
           </div>
         )}
       </TabPanel>
+      <p className="monitoring-detail-history__footer">
+        <Link
+          className="text-link"
+          to={`/events?object_type=target&object_id=${encodeURIComponent(target.target_id)}`}
+        >
+          在事件流中查看
+        </Link>
+      </p>
     </Modal>
   )
 }
