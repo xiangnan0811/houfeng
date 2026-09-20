@@ -24,9 +24,9 @@ export function MonitoringInstanceTimeWindowTabs({
   streamError,
 }: MonitoringInstanceTimeWindowTabsProps) {
   return (
-    <div className="watchtower-window-tabs">
+    <div className="monitoring-detail-window-tabs">
       {value === 'realtime' ? (
-        <span className={`watchtower-stream-status watchtower-stream-status--${streamStatus}`}>
+        <span className={`monitoring-detail-stream-status monitoring-detail-stream-status--${streamStatus}`}>
           {STREAM_STATUS_LABELS[streamStatus]}
           {streamError ? ` · ${streamError}` : ''}
         </span>

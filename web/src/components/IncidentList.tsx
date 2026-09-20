@@ -1,16 +1,8 @@
 import { Hostname, StatusGlyph, Timestamp, type HealthState } from './atoms'
+import { incidentClassLabel } from '../lib/observabilityLabels'
 import type { ActiveIncidentRecord } from '../lib/types'
 
 import { StatusBadge } from './StatusBadge'
-
-const INCIDENT_CLASS_LABELS: Record<string, string> = {
-  monitoring_instance_heartbeat_missing: '监控实例心跳缺失',
-  monitoring_instance_disk_pressure: '监控实例磁盘压力',
-  monitoring_instance_inode_pressure: '监控实例 inode 压力',
-  monitoring_instance_resource_pressure: '监控实例资源压力',
-  target_probe_failure: '目标探测失败',
-  target_tls_expiry: '目标 TLS 即将过期',
-}
 
 const OBJECT_TYPE_LABELS = {
   monitoring_instance: '监控实例',
@@ -23,10 +15,6 @@ type IncidentListProps = {
   incidents: ActiveIncidentRecord[]
   emptyTitle?: string
   emptyDescription?: string
-}
-
-function incidentClassLabel(value: string) {
-  return INCIDENT_CLASS_LABELS[value] ?? value
 }
 
 function objectTypeLabel(value: ActiveIncidentRecord['object_type']) {

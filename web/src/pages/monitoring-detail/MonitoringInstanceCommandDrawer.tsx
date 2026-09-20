@@ -57,44 +57,48 @@ export function MonitoringInstanceCommandDrawer({
         title="执行命令"
         ariaLabel="执行命令抽屉"
         size="md"
-        contentClassName="watchtower-form-modal"
       >
-        <div className="command-picker">
-          {commands.map((command) => (
-            <button
-              key={command.id}
-              className="btn md secondary command-picker__item"
-              disabled={commandPending}
-              onClick={() => handleCommandClick(command)}
-            >
-              <span className="command-picker__name">
-                {command.name}
-                {command.sensitivity === 'sensitive' ? (
-                  <span className="command-picker__sensitivity">敏感</span>
-                ) : null}
-              </span>
-              <span className="command-picker__desc">{command.description}</span>
-            </button>
-          ))}
+        <div className="monitoring-detail-commands">
+          <p className="monitoring-detail-dialog__subject">
+            命令由 agent 编译期白名单执行，不接受自定义参数。
+          </p>
+          <div className="monitoring-detail-commands__list">
+            {commands.map((command) => (
+              <button
+                key={command.id}
+                className="monitoring-detail-commands__item"
+                disabled={commandPending}
+                onClick={() => handleCommandClick(command)}
+              >
+                <span className="monitoring-detail-commands__name">
+                  {command.name}
+                  {command.sensitivity === 'sensitive' ? (
+                    <span className="monitoring-detail-commands__sensitive">敏感</span>
+                  ) : null}
+                </span>
+                <span className="monitoring-detail-commands__desc">{command.description}</span>
+              </button>
+            ))}
+          </div>
+
+          {error ? (
+            <p className="monitoring-detail-commands__error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          {pollError ? (
+            <p className="monitoring-detail-commands__error" role="status">
+              {pollError}
+              {onRetryPoll ? (
+                <button type="button" className="btn sm ghost" onClick={onRetryPoll}>重试</button>
+              ) : null}
+            </p>
+          ) : null}
+
+          {monitoringInstance.last_action ? (
+            <MonitoringInstanceCommandResult action={monitoringInstance.last_action} labels={commandLabels} />
+          ) : null}
         </div>
-
-        {error ? (
-          <p className="watchtower-runtime-error" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {pollError ? (
-          <p className="watchtower-runtime-error" role="status">
-            {pollError}
-            {onRetryPoll ? (
-              <button type="button" className="btn sm ghost" onClick={onRetryPoll}>重试</button>
-            ) : null}
-          </p>
-        ) : null}
-
-        {monitoringInstance.last_action ? (
-          <MonitoringInstanceCommandResult action={monitoringInstance.last_action} labels={commandLabels} />
-        ) : null}
       </Modal>
 
       <ActionConfirmationModal

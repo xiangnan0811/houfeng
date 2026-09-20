@@ -2,6 +2,7 @@ import { Link, useLocation } from 'react-router-dom'
 
 import { Button } from '../../components/atoms/Button'
 import { Timestamp } from '../../components/atoms/Mono'
+import { severityTone } from '../../lib/observabilityLabels'
 import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../../lib/types'
 import { withReturnVPSQuery } from './monitoringDetailHelpers'
 
@@ -71,7 +72,7 @@ export function MonitoringDetailRecentEvents({
               key={event.event_id ?? `${event.created_at}-${index}`}
               className="monitoring-detail-recent__item"
             >
-              <span className="monitoring-detail-recent__marker" aria-hidden />
+              <span className={`monitoring-detail-recent__marker monitoring-detail-recent__marker--${severityTone(event.severity)}`} aria-hidden />
               <div className="monitoring-detail-recent__body">
                 <p className="monitoring-detail-recent__type">
                   {STATE_CHANGE_EVENT_TYPE_LABELS[event.event_type] ?? event.event_type}

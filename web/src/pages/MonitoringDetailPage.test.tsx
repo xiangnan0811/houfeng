@@ -3648,8 +3648,10 @@ describe('MonitoringDetailPage', () => {
     // Drawer opens; "事件时间线" tab is the default selection.
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveAttribute('aria-modal', 'true')
-    // The event text surfaces inside the drawer EventList.
     expect(dialog).toHaveTextContent('事件抽屉里的事件文案')
+    expect(dialog).toHaveTextContent('异常开始')
+    expect(dialog).not.toHaveTextContent('monitoring_instance_disk_pressure')
+    expect(dialog).not.toHaveTextContent('resource_threshold')
 
     // Switching to 历史异常 triggers the incidents?include_resolved=true fetch.
     const historyDrawer = screen.getByRole('dialog', { name: '监控实例历史抽屉' })
@@ -3672,6 +3674,8 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByText('历史已恢复异常摘要')).toBeInTheDocument(),
     )
+    expect(screen.getByText('监控实例磁盘压力')).toBeInTheDocument()
+    expect(screen.queryByText('monitoring_instance_disk_pressure')).not.toBeInTheDocument()
 
     // Closing the drawer removes the dialog from the DOM.
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))
