@@ -21,6 +21,7 @@ import type {
   StateChangeEventRecord,
   TargetRecord,
 } from '../../lib/types'
+import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import { TargetDetailNotices } from './TargetDetailNotices'
 import { TargetDetailRecentEvents } from './TargetDetailRecentEvents'
 import { TargetDetailStatusBand } from './TargetDetailStatusBand'
@@ -197,6 +198,7 @@ export function TargetDetailPageBody({
   const probeRowMutationBusy = probeMutationBusyId !== null
   const probeActionsDisabled =
     probeCreateSubmitting || probeRowMutationBusy || runtimeConfirmationActive || probeConfirmationActive
+  const readOnly = READ_ONLY_PREVIEW
   const isArchived = target.run_status === '已归档'
   const archiveRuntimeError =
     pendingRuntimeConfirmation?.action === 'archive' ? runtimeError : null
@@ -227,6 +229,7 @@ export function TargetDetailPageBody({
           target={target}
           runtimeSubmitting={runtimeSubmitting}
           disabled={probeConfirmationActive}
+          readOnly={readOnly}
           onRuntimeAction={(action) => onRuntimeAction(action)}
           registerActionRef={registerActionRef}
           onOpenHistory={() => onOpenHistory('events')}
@@ -289,6 +292,7 @@ export function TargetDetailPageBody({
         probeMutationError={probeMutationError}
         addDisabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
         onOpenCreate={onOpenProbeCreate}
+        readOnly={readOnly}
       />
 
       <TargetDetailRecentEvents
@@ -364,6 +368,7 @@ export function TargetDetailPageBody({
         historyIncidentsError={historyIncidentsError}
         onClose={onCloseHistory}
         onTabChange={onHistoryTabChange}
+        onRetryEvents={onRetryEvents}
         onRetryHistoryIncidents={onRetryHistoryIncidents}
       />
     </div>

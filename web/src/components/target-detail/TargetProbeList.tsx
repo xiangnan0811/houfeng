@@ -99,6 +99,7 @@ type TargetProbeListProps = {
   onConfirmDelete: (probeItem: ProbeItemRecord) => void
   onCancelDeleteConfirmation: (probeItem: ProbeItemRecord) => void
   onAddProbe?: () => void
+  hideActions?: boolean
 }
 
 export function TargetProbeList({
@@ -114,6 +115,7 @@ export function TargetProbeList({
   onConfirmDelete,
   onCancelDeleteConfirmation,
   onAddProbe,
+  hideActions = false,
 }: TargetProbeListProps) {
   if (probeItems.length === 0) {
     return (
@@ -123,7 +125,7 @@ export function TargetProbeList({
         title="目标尚未配置 ProbeItem"
         description="请为该入口添加至少一种观测方式。"
         action={
-          onAddProbe ? (
+          onAddProbe && !hideActions ? (
             <button type="button" className="btn md primary" onClick={() => onAddProbe()}>
               添加 Probe
             </button>
@@ -228,7 +230,7 @@ export function TargetProbeList({
         <DataTable<ProbeItemRecord>
           className="target-probe-table"
           density="compact"
-          columns={columns}
+          columns={hideActions ? columns.filter((column) => column.key !== 'actions') : columns}
           rows={probeItems}
           rowKey={(item) => item.probe_item_id}
         />

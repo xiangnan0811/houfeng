@@ -1,7 +1,7 @@
 import { useRef } from 'react'
 import { Link } from 'react-router-dom'
 
-import { Timestamp } from '../../components/atoms'
+import { ObservabilityNoticeRow } from '../../components/observability'
 import { PageState } from '../../components/PageState'
 import { incidentClassLabel, severityTone } from '../../lib/observabilityLabels'
 import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../../lib/types'
@@ -96,22 +96,20 @@ export function EventsStreamSection({
           const tone = severityTone(evt.severity)
           const classLabel = incidentClassLabel(evt.incident_class)
           return (
-            <li
+            <ObservabilityNoticeRow
               key={evt.event_id ?? `${evt.created_at}-${evt.incident_id}-${evt.event_type}`}
-              className={`events-stream__row events-stream__row--${tone}`}
-            >
-              <div className="events-stream__copy">
-                <span className="events-stream__mark">{evt.severity || '事件'}</span>
-                <span className="events-stream__title">{eventTypeLabel(evt.event_type)}</span>
-                <span className="events-stream__detail">{evt.summary || '暂无摘要'}</span>
-              </div>
-              <p className="events-stream__meta">
-                {classLabel ? <>{classLabel} · </> : null}
-                <Link to={link.to}>{link.label}</Link>
-                {' · '}
-                <Timestamp value={evt.created_at} mode="absolute" />
-              </p>
-            </li>
+              tone={tone}
+              mark={evt.severity || '事件'}
+              title={eventTypeLabel(evt.event_type)}
+              detail={evt.summary || '暂无摘要'}
+              meta={(
+                <>
+                  {classLabel ? <>{classLabel} · </> : null}
+                  <Link to={link.to}>{link.label}</Link>
+                </>
+              )}
+              time={evt.created_at}
+            />
           )
         })}
       </ul>

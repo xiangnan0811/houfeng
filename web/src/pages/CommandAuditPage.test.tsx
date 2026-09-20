@@ -138,7 +138,7 @@ describe('CommandAuditPage', () => {
     drawer = screen.getByRole('dialog', { name: '命令审计高级筛选' })
     expect(within(drawer).getByLabelText('操作者')).toHaveValue('existing')
     fireEvent.click(within(drawer).getByRole('button', { name: '重置高级筛选' }))
-    fireEvent.change(within(drawer).getByLabelText('Action ID'), { target: { value: ' act_001 ' } })
+    fireEvent.change(within(drawer).getByLabelText('动作 ID'), { target: { value: ' act_001 ' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '应用高级筛选' }))
 
     await screen.findByText('Tokyo Edge')

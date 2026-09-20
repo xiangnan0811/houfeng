@@ -30,6 +30,7 @@ type Props = {
   target: TargetRecord
   runtimeSubmitting: boolean
   disabled?: boolean
+  readOnly?: boolean
   onRuntimeAction: (action: TargetRuntimeAction) => void
   registerActionRef: (
     action: TargetRuntimeAction,
@@ -43,6 +44,7 @@ export function TargetWatchtowerHeader({
   target,
   runtimeSubmitting,
   disabled = false,
+  readOnly = false,
   onRuntimeAction,
   registerActionRef,
   onOpenHistory,
@@ -71,6 +73,7 @@ export function TargetWatchtowerHeader({
           {controlBadge ? (
             <Badge variant="state" tone={controlBadge.tone}>{controlBadge.label}</Badge>
           ) : null}
+          {readOnly ? <span className="monitoring-detail-readonly">只读预览</span> : null}
         </div>
         <dl className="target-detail-identity">
           <div className="target-detail-identity__item">
@@ -110,7 +113,7 @@ export function TargetWatchtowerHeader({
           <Button variant="ghost" size="sm" onClick={onOpenHistory}>
             查看历史
           </Button>
-          {runtimeActions.length > 0 ? (
+          {readOnly ? null : runtimeActions.length > 0 ? (
             <details className="watchtower-actions-menu">
               <summary aria-label="运行控制操作">…</summary>
               <div className="watchtower-actions-menu__panel">
@@ -128,9 +131,11 @@ export function TargetWatchtowerHeader({
               </div>
             </details>
           ) : null}
-          <Button variant="ghost" size="sm" onClick={onOpenMaintenance}>
-            资料维护
-          </Button>
+          {readOnly ? null : (
+            <Button variant="ghost" size="sm" onClick={onOpenMaintenance}>
+              资料维护
+            </Button>
+          )}
         </div>
       </div>
     </header>

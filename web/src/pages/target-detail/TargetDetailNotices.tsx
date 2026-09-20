@@ -1,12 +1,13 @@
 import type { ReactNode } from 'react'
 
+import { ObservabilityNotice, type ObservabilityTone } from '../../components/observability'
 import { Button } from '../../components/atoms/Button'
 import { MonoDigits } from '../../components/atoms/Mono'
 import { formatElapsedSince } from '../../lib/format'
 import type { ActiveIncidentRecord, TargetRecord } from '../../lib/types'
 import { isCoverageGapTarget } from '../targets/targetHelpers'
 
-type NoticeTone = 'critical' | 'alert' | 'notice' | 'maintenance' | 'offline'
+type NoticeTone = ObservabilityTone
 
 function NoticeRow({
   tone,
@@ -24,14 +25,14 @@ function NoticeRow({
   role?: 'status' | 'alert'
 }) {
   return (
-    <div className={`monitoring-detail-notice monitoring-detail-notice--${tone}`} role={role}>
-      <div className="monitoring-detail-notice__copy">
-        <span className="monitoring-detail-notice__mark">{mark}</span>
-        <span className="monitoring-detail-notice__text">{title}</span>
-        {detail ? <span className="monitoring-detail-notice__detail">{detail}</span> : null}
-      </div>
-      {action ? <div className="monitoring-detail-notice__actions">{action}</div> : null}
-    </div>
+    <ObservabilityNotice
+      tone={tone}
+      mark={mark}
+      title={title}
+      detail={detail}
+      action={action}
+      role={role}
+    />
   )
 }
 

@@ -27,6 +27,7 @@ type TargetProbeListSectionProps = {
   probeMutationError: string | null
   addDisabled: boolean
   onOpenCreate: () => void
+  readOnly?: boolean
 }
 
 export function TargetProbeListSection({
@@ -48,8 +49,9 @@ export function TargetProbeListSection({
   probeMutationError,
   addDisabled,
   onOpenCreate,
+  readOnly = false,
 }: TargetProbeListSectionProps) {
-  const defaultAside = (
+  const defaultAside = readOnly ? null : (
     <div className="target-probe-section__tools">
       <Button
         ref={addProbeButtonRef}
@@ -82,6 +84,7 @@ export function TargetProbeListSection({
           pendingProbeConfirmation={pendingProbeConfirmation}
           confirmationCardDisabled={confirmationCardDisabled}
           registerDeleteButtonRef={registerDeleteButtonRef}
+          hideActions={readOnly}
           onAddProbe={onAddProbe}
           onEdit={onEdit}
           onToggle={onToggle}

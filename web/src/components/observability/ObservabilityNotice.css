@@ -1,0 +1,190 @@
+/* Shared observation notice well and compact notice row.
+ * Alias selectors keep existing tests and route CSS hooks stable. */
+
+.observability-notices,
+.monitoring-detail-notices {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.observability-notice,
+.monitoring-detail-notice {
+  --observability-notice-accent: var(--color-state-alert);
+  --monitoring-detail-notice-accent: var(--observability-notice-accent);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 14px;
+  border: var(--border-w) solid color-mix(in srgb, var(--observability-notice-accent) 38%, var(--border));
+  border-left-width: 4px;
+  border-left-color: var(--observability-notice-accent);
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--observability-notice-accent) 16%, var(--surface));
+}
+
+.observability-notice--critical,
+.monitoring-detail-notice--critical {
+  --observability-notice-accent: var(--color-state-critical);
+}
+
+.observability-notice--alert,
+.monitoring-detail-notice--alert {
+  --observability-notice-accent: var(--color-state-alert);
+}
+
+.observability-notice--notice,
+.monitoring-detail-notice--notice {
+  --observability-notice-accent: var(--color-state-notice);
+}
+
+.observability-notice--maintenance,
+.monitoring-detail-notice--maintenance {
+  --observability-notice-accent: var(--color-state-maintenance);
+}
+
+.observability-notice--offline,
+.monitoring-detail-notice--offline {
+  --observability-notice-accent: var(--color-state-offline);
+}
+
+.observability-notice__copy,
+.monitoring-detail-notice__copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100% - 9rem);
+}
+
+.observability-notice__mark,
+.monitoring-detail-notice__mark {
+  flex: 0 0 auto;
+  color: var(--observability-notice-accent);
+  font-size: var(--monitoring-detail-helper-size, var(--type-small-size));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.3;
+}
+
+.observability-notice__text,
+.monitoring-detail-notice__text {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: var(--monitoring-detail-module-size, 15px);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.observability-notice__detail,
+.monitoring-detail-notice__detail {
+  color: var(--text-secondary);
+  font-size: var(--monitoring-detail-helper-size, var(--type-small-size));
+  line-height: 1.4;
+}
+
+.observability-notice__actions,
+.monitoring-detail-notice__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.observability-notice-row,
+.monitoring-detail-history__row,
+.events-stream__row {
+  --observability-notice-accent: var(--color-state-alert);
+  --monitoring-detail-history-accent: var(--observability-notice-accent);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 12px;
+  border: var(--border-w) solid color-mix(in srgb, var(--observability-notice-accent) 28%, var(--border));
+  border-left-width: 4px;
+  border-left-color: var(--observability-notice-accent);
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--observability-notice-accent) 10%, var(--surface));
+}
+
+.observability-notice-row--critical,
+.monitoring-detail-history__row--critical,
+.events-stream__row--critical {
+  --observability-notice-accent: var(--color-state-critical);
+}
+
+.observability-notice-row--alert,
+.monitoring-detail-history__row--alert,
+.events-stream__row--alert {
+  --observability-notice-accent: var(--color-state-alert);
+}
+
+.observability-notice-row--notice,
+.monitoring-detail-history__row--notice,
+.events-stream__row--notice {
+  --observability-notice-accent: var(--color-state-notice);
+}
+
+.observability-notice-row--offline,
+.monitoring-detail-history__row--offline,
+.events-stream__row--offline {
+  --observability-notice-accent: var(--color-state-offline);
+}
+
+.observability-notice-row__copy,
+.monitoring-detail-history__copy,
+.events-stream__copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
+.observability-notice-row__mark,
+.monitoring-detail-history__mark,
+.events-stream__mark {
+  color: var(--observability-notice-accent);
+  font-size: var(--monitoring-detail-helper-size, var(--type-small-size));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.observability-notice-row__title,
+.monitoring-detail-history__title,
+.events-stream__title {
+  color: var(--text-primary);
+  font-size: var(--monitoring-detail-module-size, 15px);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.observability-notice-row__detail,
+.observability-notice-row__meta,
+.monitoring-detail-history__detail,
+.monitoring-detail-history__meta,
+.events-stream__detail,
+.events-stream__meta {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--monitoring-detail-helper-size, var(--type-small-size));
+  line-height: 1.4;
+}
+
+.observability-notice-row__meta a,
+.events-stream__meta a {
+  color: var(--text-secondary);
+}
+
+.observability-notice-row__meta a:hover,
+.events-stream__meta a:hover {
+  color: var(--accent-strong);
+}

@@ -1,7 +1,8 @@
 import { Link } from 'react-router-dom'
 
+import { ObservabilityNoticeRow, type ObservabilityTone } from '../../components/observability'
 import { Button } from '../../components/atoms/Button'
-import { Modal, TabPanel, Tabs, Timestamp } from '../../components/atoms'
+import { Modal, TabPanel, Tabs } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
 import { formatElapsedSince } from '../../lib/format'
 import { incidentClassLabel, severityTone } from '../../lib/observabilityLabels'
@@ -148,7 +149,7 @@ function HistoryRow({
   timeLabel,
 }: {
   mark: string
-  tone: string
+  tone: ObservabilityTone
   title: string
   detail?: string
   meta?: string
@@ -158,17 +159,14 @@ function HistoryRow({
   const shownDetail = detail && detail !== title ? detail : ''
   const shownMeta = meta && meta !== shownDetail && meta !== title ? meta : ''
   return (
-    <li className={`monitoring-detail-history__row monitoring-detail-history__row--${tone}`}>
-      <div className="monitoring-detail-history__copy">
-        <span className="monitoring-detail-history__mark">{mark}</span>
-        <span className="monitoring-detail-history__title">{title}</span>
-        {shownDetail ? <span className="monitoring-detail-history__detail">{shownDetail}</span> : null}
-      </div>
-      <p className="monitoring-detail-history__meta">
-        {shownMeta ? `${shownMeta} · ` : null}
-        {timeLabel ? `${timeLabel} ` : null}
-        {time ? <Timestamp value={time} mode="absolute" /> : null}
-      </p>
-    </li>
+    <ObservabilityNoticeRow
+      tone={tone}
+      mark={mark}
+      title={title}
+      detail={shownDetail || undefined}
+      meta={shownMeta || undefined}
+      time={time}
+      timeLabel={timeLabel}
+    />
   )
 }

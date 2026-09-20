@@ -93,7 +93,7 @@ export function CommandAuditTable({ rows, expandedIDs, onToggle }: CommandAuditT
     },
     {
       key: 'action_id',
-      label: 'Action ID',
+      label: '动作 ID',
       width: 170,
       render: (row) => <MonoDigits>{row.action_id || '—'}</MonoDigits>,
     },

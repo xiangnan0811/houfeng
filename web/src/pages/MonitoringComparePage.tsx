@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 
+import { ObservabilityNotice } from '../components/observability'
 import { Hostname } from '../components/atoms'
 import { PageState } from '../components/PageState'
+import { READ_ONLY_PREVIEW } from '../lib/readOnlyPreview'
 import { ApiError, getMonitoringInstance, getMonitoringInstanceRuntimeFacts } from '../lib/api'
 import type { MonitoringInstanceRecord, MonitoringInstanceRuntimeFacts } from '../lib/types'
 import { MonitoringCompareMetrics } from './monitoring-compare/MonitoringCompareMetrics'
@@ -107,7 +109,10 @@ export function MonitoringComparePage() {
       <header className="monitoring-compare__head">
         <div>
           <h1>{title}</h1>
-          <p className="monitoring-compare__sub">近 24h</p>
+          <p className="monitoring-compare__sub">
+            近 24h
+            {READ_ONLY_PREVIEW ? ' · 只读预览' : ''}
+          </p>
         </div>
         <Link className="btn sm ghost" to={listHref} state={location.state}>返回监控实例列表</Link>
       </header>
@@ -206,15 +211,15 @@ function ComparePane({ state, side }: { state: MonitoringInstanceState; side: Co
       </header>
       <div className="monitoring-compare-pane__notice">
         {notice ? (
-          <div className={`monitoring-detail-notice monitoring-detail-notice--${notice.tone}`} role={notice.tone === 'maintenance' || notice.tone === 'offline' ? 'status' : 'alert'}>
-            <div className="monitoring-detail-notice__copy">
-              <span className="monitoring-detail-notice__mark">{notice.mark}</span>
-              <span className="monitoring-detail-notice__text">{notice.title}</span>
-            </div>
-            <div className="monitoring-detail-notice__actions">
+          <ObservabilityNotice
+            tone={notice.tone}
+            mark={notice.mark}
+            title={notice.title}
+            role={notice.tone === 'maintenance' || notice.tone === 'offline' ? 'status' : 'alert'}
+            action={(
               <Link className="btn sm secondary" to={detailTo} state={location.state}>打开详情</Link>
-            </div>
-          </div>
+            )}
+          />
         ) : null}
       </div>
       {facts ? (

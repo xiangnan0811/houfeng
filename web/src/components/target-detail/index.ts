@@ -1,8 +1,6 @@
 export * from './TargetLabelsAndNote'
 export * from './TargetRuntimeControls'
 export * from './TargetLatencyTrends'
-export * from './TargetActiveIncidents'
-export * from './TargetRecentEvents'
 export * from './TargetProbeForm'
 export * from './TargetProbeList'
 export { TargetWatchtowerHeader } from './TargetWatchtowerHeader'
