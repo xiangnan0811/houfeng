@@ -24,9 +24,9 @@
     "observability": [
       "src/components/observability/ObservabilityNotice.css",
       "src/pages/MonitoringComparePage.css",
+      "src/pages/monitoring/MonitoringCommands.css",
       "src/pages/monitoring-detail/MonitoringDetailWorkspace.css",
       "src/pages/target-detail/TargetDetailWorkspace.css",
-      "src/styles/partials/legacy-batch.css",
       "src/styles/partials/legacy-events.css",
       "src/styles/partials/legacy-observability.css",
       "src/styles/partials/legacy-onboarding.css",

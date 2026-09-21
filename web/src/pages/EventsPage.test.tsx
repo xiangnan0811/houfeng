@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { EventsPage } from './EventsPage'
@@ -247,5 +247,59 @@ describe('EventsPage', () => {
     expect(timeRange).toBeInTheDocument()
     expect(within(timeRange).getByRole('button', { name: '全部时间' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(timeRange).queryByRole('tab')).not.toBeInTheDocument()
+  })
+
+  it('folds a dateless custom range back to all time and omits time_range from the URL', async () => {
+    const fetchMock = setupFetchMock({})
+    vi.stubGlobal('fetch', fetchMock)
+    function SearchProbe() {
+      const location = useLocation()
+      return <output aria-label="当前查询参数">{location.search}</output>
+    }
+    render(
+      <MemoryRouter initialEntries={['/events']}>
+        <Routes>
+          <Route
+            path="/events"
+            element={(
+              <>
+                <EventsPage />
+                <SearchProbe />
+              </>
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    const drawer = await screen.findByRole('dialog', { name: '事件高级筛选' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '自定义' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '事件高级筛选' })).not.toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('全部时间')
+    expect(screen.getByLabelText('当前查询参数')).toHaveTextContent('')
+    expect(fetchMock.mock.calls.some((call) => {
+      const url = String(call[0])
+      return url.startsWith('/api/events') && !url.includes('created_from') && !url.includes('created_to') && !url.includes('time_range')
+    })).toBe(true)
+  })
+
+  it('returns the events time filter to all time when the placeholder option is chosen', async () => {
+    vi.stubGlobal('fetch', setupFetchMock({}))
+    renderEventsPage()
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
+    )
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '24h' } })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('近 24 小时')
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '' } })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('全部时间')
   })
 })

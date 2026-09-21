@@ -49,6 +49,7 @@ import {
   parseLabels,
   validateReturnVPSId,
 } from './monitoring-detail/monitoringDetailHelpers'
+import './monitoring/MonitoringCommands.css'
 import './monitoring-detail/MonitoringDetailWorkspace.css'
 import type {
   BindingConflictAction,

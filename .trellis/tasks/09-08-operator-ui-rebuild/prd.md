@@ -10,7 +10,7 @@
 
 已核实：
 
-- 领域对象与 API（VPS / MonitoringInstance / Target / ProbeItem / 订阅）不改。硬约束仍在：React 19 SPA、纯 CSS + BEM + `tokens.css`、禁止 JSX `style=`、严格 CSP、CSS owner/budget ratchet、现有 Vitest + Playwright。不引入 Tailwind、CSS-in-JS、新字体文件、新图表库。
+- 领域对象身份（VPS / MonitoringInstance / Target / ProbeItem / 订阅）不改。观测运行时合同允许为重建后的工作台做加性扩展（HostMetricPoint 增列、`network_rates_valid`、runtime-summaries、runtime-stream 收据时间），与前端同分支落地。硬约束仍在：React 19 SPA、纯 CSS + BEM + `tokens.css`、禁止 JSX `style=`、严格 CSP、CSS owner/budget ratchet、现有 Vitest + Playwright。不引入 Tailwind、CSS-in-JS、新字体文件、新图表库。
 - `docs/design/current/interface-language.md` 允许改视觉默认。不可推翻的是证据诚实、密钥、生命周期确认、拓扑。
 - 现有三层 IA（一问 / 一表 / 一模态）仍然适用，改的是材料和页面语法，不是工作流发明。
 - 侧栏现状：四组十二项。e2e `core-routes.spec.ts` 对 11 条路由 × 3 视口断言标题与主操作，改文案或主 CTA 必须同步改测试。
@@ -31,11 +31,12 @@
 
 ## Out of scope
 
-- 后端领域模型、agent 合同、通知渠道语义、安装器、多用户 SaaS。
+- 重做后端领域模型、通知渠道语义、安装器、多用户 SaaS。观测工作台所需的 agent/center **加字段**与对应迁移不在此列，允许与 UI 同分支。
 - Tailwind、CSS-in-JS、新字体 CDN/文件、Playwright 之外的视觉回归框架。
 - 营销站、霓虹 SOC、廉价中国风装饰（浮动「候」印、祥云、渐变书法标题）。
-- 第一刀重做归档/服务商/订阅/资产决策/记录/事件/命令审计/对比/IP 质量的内部 IA。
+- 对比引擎、事件流完整产品方案（视觉对齐可以做；不另开 IA）。
 - 把浅色主题设计成第二套完整身份。
+- 把本次重建拆成 Go-only / UI-only PR（2026-09-21 已否决）。
 
 ## Acceptance Criteria
 
@@ -54,3 +55,4 @@
 - 节奏：不赶工；每一刀浏览器验收后再进入下一刀。测试环境数据可以打乱。
 - 主题：暗色为身份；浅色为映射；classic 回退到新暗色。
 - 基线：从 `origin/main` 干净工作区重建，不基于 Gemini 分支打补丁。
+- 落地：单分支混装（2026-09-21）。前端重建与其所需的 Go / agent / 迁移在 `feat/operator-ui-observatory` 一次合入、一次部署到第一次生产环境。F34 关闭为已接受过程决策，不再拆 PR。

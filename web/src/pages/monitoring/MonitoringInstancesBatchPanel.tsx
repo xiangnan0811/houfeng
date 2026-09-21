@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { Button, Modal } from '../../components/atoms'
 import { COMMAND_LIST, type MonitoringInstanceCommand } from '../../config/commands'
+import './MonitoringCommands.css'
 
 type BatchMenuItem = {
   key: string

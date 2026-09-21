@@ -28,7 +28,6 @@
 
 /* owner: observability */
 @import './styles/partials/legacy-events.css';
-@import './styles/partials/legacy-batch.css';
 @import './styles/partials/legacy-targets.css';
 @import './styles/partials/legacy-observability.css';
 @import './styles/partials/legacy-onboarding.css';

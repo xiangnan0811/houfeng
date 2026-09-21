@@ -21,7 +21,7 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-09-21 medium follow-ups implemented on feat/operator-ui-observatory (uncommitted): F1 overview new-record/subscription links pass location.state; F7 batch commands use COMMAND_LIST; F10 deleted unused targetHelpers evidence/runtime exports; F14/F15 FilterSelect defaults; F16 events default 全部时间 + neutral empty copy; F17 TopBar records/evidence titles; F18 narrow crumb 50%; F19 FilterSelect cap scoped to .monitoring-page. High fixes committed as e8d531c4. F34 split still deferred. Do not push/PR without consent. 2026-09-20 high fixes: F32 receipt stamp, F0/F41/F40 readonly leaks, F22 dead CSS. 2026-09-11 local checkpoint: continue on feat/operator-ui-observatory in .worktree/operator-ui-rebuild; do not start another main-checkout edit stream.",
+  "notes": "2026-09-21 N0–N12 implemented uncommitted on feat/operator-ui-observatory: shared MonitoringCommands.css for list+detail command picks; TopBar titles for targets records/evidence and /evidence/:id; events dateless custom folds to all; deleted legacy-batch.css; readonly preview clicks stay on VPSDetailPage; FilterSelect placeholder fallback tests. F34 accepted as single-branch mixed landing; do not split PRs. Design.md/prd.md already updated. Do not push/PR without consent. Do not commit .tmp. Continue in .worktree/operator-ui-rebuild.",
   "meta": {
     "description": "Rebuild the operator SPA as a night observatory: lampblack, celadon, iron-red, table-first daily path."
   }

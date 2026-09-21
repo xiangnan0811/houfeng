@@ -1,3 +1,0 @@
-/* partial: legacy-batch.css (semantic split of the legacy index.css block) */
-
-.batch-bar__error{font-size:var(--type-small-size);color:color-mix(in srgb,var(--color-state-critical) 78%,var(--text-primary))}

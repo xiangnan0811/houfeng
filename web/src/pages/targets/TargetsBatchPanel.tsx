@@ -116,7 +116,7 @@ export function TargetsBatchPanel({
             ))}
           </div>
         ) : null}
-        {batchError ? <span className="batch-bar__error">{batchError}</span> : null}
+        {batchError ? <span className="monitoring-batch__error">{batchError}</span> : null}
       </div>
       {pendingBatchAction === 'pause' ? (
         <ActionConfirmationModal

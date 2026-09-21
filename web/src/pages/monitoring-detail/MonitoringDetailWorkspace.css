@@ -686,12 +686,6 @@
 
 /* ===== Dialogs ===== */
 
-.monitoring-detail-dialog__subject {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: var(--monitoring-detail-helper-size);
-}
-
 .monitoring-detail-binding-dialog {
   display: flex;
   flex-direction: column;
@@ -856,82 +850,6 @@
 
 .monitoring-detail-onboarding__facts dd {
   margin: 0;
-}
-
-.monitoring-detail-commands {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.monitoring-detail-commands__list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.monitoring-detail-commands__item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  width: 100%;
-  padding: 10px 12px;
-  border: var(--border-w) solid var(--border);
-  border-radius: var(--radius-2);
-  background: var(--surface);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.monitoring-detail-commands__item:hover:not(:disabled) {
-  border-color: var(--accent);
-}
-
-.monitoring-detail-commands__item:focus-visible {
-  outline: var(--border-w-strong) solid var(--accent);
-  outline-offset: 2px;
-}
-
-.monitoring-detail-commands__item:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
-}
-
-.monitoring-detail-commands__name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 13px;
-}
-
-.monitoring-detail-commands__sensitive {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 6px;
-  border: var(--border-w) solid color-mix(in srgb, var(--color-state-alert) 32%, var(--border));
-  border-radius: var(--radius-pill);
-  background: color-mix(in srgb, var(--color-state-alert) 12%, transparent);
-  color: var(--color-state-alert);
-  font-family: var(--font-sans);
-  font-size: 10px;
-  font-weight: 600;
-}
-
-.monitoring-detail-commands__desc {
-  color: var(--text-muted);
-  font-size: var(--monitoring-detail-helper-size);
-  line-height: 1.4;
-}
-
-.monitoring-detail-commands__error {
-  margin: 0;
-  color: var(--color-state-alert);
-  font-size: var(--monitoring-detail-helper-size);
 }
 
 /* ===== Narrow viewport ===== */

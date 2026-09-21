@@ -1,5 +1,11 @@
 # Implement — operator UI night observatory
 
+## Landing decision — 2026-09-21
+
+- Operator accepted **single-branch mixed landing** on `feat/operator-ui-observatory`. Do not split Go vs UI PRs (F34 closed as process, not a merge blocker).
+- Observation-supporting center/agent/migrations (HostMetricPoint extras, `network_rates_valid` / 0064, runtime-summaries, runtime-stream `AcceptedAt` stamp) ship with the UI rebuild. First production deploy is the whole unit; rollback is the whole unit. Test env may be rebuilt.
+- Remaining second-pass review work for a later session (do not treat F34 as open): **N0** list batch COMMAND_LIST buttons missing CSS; **N1/N7** TopBar `/targets/:id/records|evidence` and `/evidence/:id` titles; **N6** events dateless `custom` codec; **N5** leftover `legacy-batch.css`; **N10/N11/N12** test gaps. Do not commit `.tmp`. Do not push without consent.
+
 ## Current checkpoint — 2026-09-11
 
 - Continue only in the existing `.worktree/operator-ui-rebuild` on `feat/operator-ui-observatory`; the setup instructions below describe the original start, not a request to create another worktree or edit main.

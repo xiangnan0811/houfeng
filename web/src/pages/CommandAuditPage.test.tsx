@@ -261,4 +261,14 @@ describe('CommandAuditPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await screen.findByText('没有匹配的命令审计')
   })
+
+  it('returns the window filter to the default 30 days when the placeholder option is chosen', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse({ items: [] })))
+    renderPage()
+    await screen.findByText('没有匹配的命令审计')
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '24h' } })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('最近 24 小时')
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '' } })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('最近 30 天')
+  })
 })

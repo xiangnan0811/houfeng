@@ -90,10 +90,12 @@ function parseEventSearchParams(searchParams: URLSearchParams): FilterState {
 }
 
 function normalizeFilters(filters: FilterState): FilterState {
-  const timeRange = ALLOWED_TIME_RANGES.has(filters.time_range)
+  const requestedRange = ALLOWED_TIME_RANGES.has(filters.time_range)
     ? filters.time_range
     : DEFAULT_FILTERS.time_range
-  const customRange = timeRange === 'custom'
+  const createdFrom = requestedRange === 'custom' ? normalizeDateInput(filters.created_from) : ''
+  const createdTo = requestedRange === 'custom' ? normalizeDateInput(filters.created_to) : ''
+  const timeRange = requestedRange === 'custom' && !createdFrom && !createdTo ? 'all' : requestedRange
 
   return {
     object_type: isObjectType(filters.object_type) ? filters.object_type : '',
@@ -101,8 +103,8 @@ function normalizeFilters(filters: FilterState): FilterState {
     severity: isSeverity(filters.severity) ? filters.severity : '',
     event_type: isEventType(filters.event_type) ? filters.event_type : '',
     limit: String(DEFAULT_LIMIT),
-    created_from: customRange ? normalizeDateInput(filters.created_from) : '',
-    created_to: customRange ? normalizeDateInput(filters.created_to) : '',
+    created_from: timeRange === 'custom' ? createdFrom : '',
+    created_to: timeRange === 'custom' ? createdTo : '',
     label: filters.label.trim(),
     notification_only: filters.notification_only,
     recovery_only: filters.recovery_only,

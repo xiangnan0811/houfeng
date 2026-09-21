@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -107,6 +108,9 @@ function listFetch(records: unknown[] | ((path: string) => unknown[])) {
     const path = String(input)
     if (init?.method === 'POST' && path === '/api/monitoring-instances/batch') {
       return Promise.resolve(mockJSONResponse({ results: [{ monitoring_instance_id: 'mi_001', ok: true }] }))
+    }
+    if (init?.method === 'POST' && /\/api\/monitoring-instances\/[^/]+\/actions$/.test(path)) {
+      return Promise.resolve(mockJSONResponse({ action_id: 'act_001', command_id: 'uptime', status: 'pending' }))
     }
     if (typeof records === 'function') {
       return Promise.resolve(mockJSONResponse(records(path)))
@@ -431,6 +435,37 @@ describe('MonitoringPage', () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(([url, init]) => String(url) === '/api/monitoring-instances/batch' && init?.method === 'POST')).toBe(true)
       expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/monitoring-instances').length).toBeGreaterThan(1)
+    })
+  })
+
+  it('styles COMMAND_LIST picks on the list batch command dialog and posts uptime', async () => {
+    const fetchMock = listFetch([monitoringInstanceRecord()])
+    vi.stubGlobal('fetch', fetchMock)
+    renderMonitoring()
+    await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
+    fireEvent.click(screen.getByLabelText('选择 Tokyo Edge'))
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '执行命令…' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '批量执行命令' })
+    expect(screen.queryByLabelText('命令 ID')).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/whoami/i)).not.toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: /df -h/ })).toBeInTheDocument()
+    const uptime = within(dialog).getByRole('button', { name: /uptime/ })
+    expect(uptime).toHaveClass('monitoring-detail-commands__item')
+    const panelSource = readFileSync('src/pages/monitoring/MonitoringInstancesBatchPanel.tsx', 'utf8')
+    const commandCss = readFileSync('src/pages/monitoring/MonitoringCommands.css', 'utf8')
+    expect(panelSource).toContain("import './MonitoringCommands.css'")
+    expect(commandCss).toMatch(/padding:\s*10px 12px/)
+    expect(commandCss).toMatch(/border:\s*var\(--border-w\)/)
+
+    fireEvent.click(uptime)
+    await waitFor(() => {
+      const actionCall = fetchMock.mock.calls.find(([url, init]) =>
+        String(url) === '/api/monitoring-instances/mi_001/actions' && init?.method === 'POST',
+      )
+      expect(actionCall).toBeTruthy()
+      expect(String(actionCall?.[1]?.body)).toContain('"command_id":"uptime"')
     })
   })
 

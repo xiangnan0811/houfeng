@@ -2,9 +2,10 @@
 
 ## Boundaries
 
-- **改**：`web/src/styles/**`、`web/src/app/layout/**`、`web/src/pages/LoginPage.*`、日常路径页面与其测试、`docs/design/current/interface-language.md`、`component-patterns.md`、必要的 e2e 文案断言。
-- **不改**：Go API、agent 合同、迁移、领域字段、CSP 政策文本（除非 dev 已有的 Fast Refresh 例外）、VPS write-owner 语义。
-- **基线**：`origin/main` 的新 git worktree。当前 checkout 上的 `feat/ui-ux-craftsmanship-redesign` 与 21 个未提交文件保持不动，避免和心跳策略 worktree 缠在一起。
+- **改**：`web/src/styles/**`、`web/src/app/layout/**`、`web/src/pages/LoginPage.*`、日常路径与后续观测页及其测试、`docs/design/current/interface-language.md`、`component-patterns.md`、必要的 e2e 文案断言。观测工作台需要时，允许同分支改 center 聚合/runtime-stream、agent 采样载荷、以及对应迁移。
+- **不改**：VPS write-owner 语义、通知渠道语义、安装器拓扑、多用户 SaaS、CSP 政策文本（除非 dev 已有的 Fast Refresh 例外）。VPS / MonitoringInstance / Target / ProbeItem 的身份边界不变：VPS 仍是业务对象，MonitoringInstance 仍是运行时证据，不是第二套资产生命周期。
+- **落地（2026-09-21）**：单 worktree / 单分支 `feat/operator-ui-observatory`。前端各页重建与其所需的 Go API 加字段、agent 合同加字段、迁移 `0064`（`network_rates_valid`）、`GET /runtime-summaries`、HostMetricPoint 增列、runtime-stream 收据时间允许混装合入。**不拆 PR。F34 已接受，不再当合并阻塞。** 本项目尚未长期生产使用；本次完成后会作为第一次生产部署。
+- **基线**：`origin/main` 的 git worktree `.worktree/operator-ui-rebuild`。不要在 `main` 上改，也不要另开 Go-only / UI-only 分支来「补」这次重建。
 
 ## Visual system
 
@@ -95,7 +96,8 @@ Slice 2 路由只换令牌/壳/去 eyebrow，不重做 IA。
 
 ## Data flow
 
-- 页面仍走现有 `lib/api` 与 fixture e2e。不改 JSON 形状。
+- 页面仍走现有 `lib/api` 与 fixture e2e。
+- 观测 JSON **允许加字段**，不改名、不删现有字段、不另起资源模型。已接受的加性扩展包括：HostMetricPoint 的 `load_1` / `load_15` / `swap_used_pct` / `disk_busy_pct` / 磁盘读写速率、`network_rates_valid`、runtime-summaries、runtime-stream 用 `AcceptedAt` 回填零 `ReceivedAt`。八图工作台可以依赖这些字段。
 - 工作台继续用现有 dashboard model 的判断/CTA；删掉空话建议段，CTA 用模型里的具体标题。
 - VPS 详情写入仍走 AppShell 级 write registry。视觉重建不得放宽 generation/owner。
 
@@ -113,5 +115,6 @@ Slice 2 路由只换令牌/壳/去 eyebrow，不重做 IA。
 
 ## Rollback
 
-- 工作区是独立 worktree + 独立分支。回滚 = 不合并该分支。不改数据库，无需数据回滚。
+- 工作区是独立 worktree + 独立分支。本任务按**单分支混装**落地：前端重建与其所需的 center / agent / 迁移作为同一次生产部署。
+- 回滚 = 不合并该分支，或整次部署回退（`houfeng-center` + `houfeng-agent` + `web/dist` + 迁移 `0064` 同一单元）。测试环境可以重建。**不是**「不改数据库、无需数据回滚」。
 - 不在实现中途把 Gemini 分支合进来。

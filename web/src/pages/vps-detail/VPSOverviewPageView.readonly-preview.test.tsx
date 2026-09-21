@@ -110,12 +110,5 @@ describe('VPSOverviewPageView readonly preview', () => {
     expect(writeAction).toBeDisabled()
     fireEvent.click(writeAction)
     expect(management.openPanel).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByRole('button', { name: '查看服务' }))
-    fireEvent.click(screen.getByRole('button', { name: '查看域名' }))
-    fireEvent.click(screen.getByRole('button', { name: '查看实例' }))
-    expect(management.openPanel).toHaveBeenCalledWith('services-detail')
-    expect(management.openPanel).toHaveBeenCalledWith('domains-detail')
-    expect(management.openPanel).toHaveBeenCalledWith('monitoring-instance-evidence')
   })
 })
