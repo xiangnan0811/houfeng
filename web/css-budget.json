@@ -2,13 +2,13 @@
   "version": 1,
   "limits": {
     "sourceFilesMax": 33,
-    "sourceBytesMax": 368096,
-    "rulesMax": 2591,
-    "declarationsMax": 10035,
-    "repeatedSelectorTextsMax": 186,
+    "sourceBytesMax": 368194,
+    "rulesMax": 2592,
+    "declarationsMax": 10038,
+    "repeatedSelectorTextsMax": 187,
     "literalColorDeclarationsMax": 150,
     "importantDeclarationsMax": 11,
-    "productionCssBytesMax": 336135,
-    "productionCssGzipBytesMax": 49184
+    "productionCssBytesMax": 336226,
+    "productionCssGzipBytesMax": 49195
   }
 }

@@ -101,7 +101,8 @@ body.is-col-resizing{cursor:col-resize;user-select:none}
 .sidebar-collapsed .user-chip__menu{left:0;right:auto;min-width:180px}@media (max-width:760px){.topbar{gap:var(--space-2);min-height:52px;padding:4px var(--space-3)}
   .topbar .tp-spacer,.topbar .tp-divider,.topbar .tp-avatar{display:none}
   .topbar .tp-page{max-width:8em}
-  .topbar .tp-vps-crumb{max-width:min(12ch,30%)}
+  .topbar .tp-vps-crumb{max-width:50%;flex:1 1 50%}
+  .topbar .tp-vps-crumb .tp-page{max-width:none;min-width:0}
   .topbar .tp-vps-crumb__link{display:inline-flex;align-items:center;min-height:var(--control-min-height-touch)}
   .topbar .tp-icon-btn{width:var(--control-min-height-touch);height:var(--control-min-height-touch)}
   .theme-menu .tm-item{min-height:var(--control-min-height-touch)}

@@ -114,6 +114,7 @@ describe('EventsPage', () => {
     expect(screen.getAllByText('异常开始').length).toBeGreaterThan(0)
     expect(screen.getAllByText('异常升级').length).toBeGreaterThan(0)
     expect(screen.queryByText('新增异常 (24h)')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('全部时间')
   })
 
   it('forwards object_id from the URL into the events query', async () => {
@@ -167,7 +168,7 @@ describe('EventsPage', () => {
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument(),
+      expect(screen.getByText('没有状态变更事件')).toBeInTheDocument(),
     )
   })
 
@@ -244,7 +245,7 @@ describe('EventsPage', () => {
     const drawer = await screen.findByRole('dialog', { name: '事件高级筛选' })
     const timeRange = within(drawer).getByRole('group', { name: '事件时间范围' })
     expect(timeRange).toBeInTheDocument()
-    expect(within(timeRange).getByRole('button', { name: '自定义' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(timeRange).getByRole('button', { name: '全部时间' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(timeRange).queryByRole('tab')).not.toBeInTheDocument()
   })
 })

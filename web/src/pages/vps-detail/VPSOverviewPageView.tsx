@@ -11,6 +11,7 @@ import {
 } from '../../lib/vpsOverviewPresentation'
 
 
+import { withReturnVPSNavigationState } from '../monitoring-detail/monitoringDetailHelpers'
 import { subjectNewRecordHref } from '../records/activity/activityQueryState'
 import { SubjectLocalNavigation } from '../records/activity/SubjectLocalNavigation'
 import { VPSDetailResourceList } from './VPSDetailResourceList'
@@ -72,6 +73,7 @@ export function VPSOverviewPageView({
     view: 'activity',
     basePath,
   })
+  const newRecordState = withReturnVPSNavigationState(location.state, vpsId)
   const subject = {
     kind: 'vps' as const,
     sourceId: vpsId,
@@ -125,7 +127,7 @@ export function VPSOverviewPageView({
       <div className="vps-overview-page__identity-wrap">
         <VPSOverviewIdentityHeader
           identity={overview.identity}
-          {...(hideCreate ? {} : { newRecordHref })}
+          {...(hideCreate ? {} : { newRecordHref, newRecordState })}
           {...(managementTriggerRef && !hideManage ? { managementTriggerRef } : {})}
           menuOpen={management.menuOpen}
           menuId={managementMenuId}
@@ -184,7 +186,7 @@ export function VPSOverviewPageView({
         >
           <div className="vps-detail-workspace__section-head">
             <h2 id="vps-section-ops-title">订阅与续费</h2>
-            <Link className="text-link" to={subscriptionsHref}>查看订阅列表</Link>
+            <Link className="text-link" to={subscriptionsHref} state={location.state}>查看订阅列表</Link>
           </div>
           <VPSSubscriptionOpsBody
             decisionLabel={overviewSummaryCellLabel('renewal', overview.summary.renewal.status) || '—'}

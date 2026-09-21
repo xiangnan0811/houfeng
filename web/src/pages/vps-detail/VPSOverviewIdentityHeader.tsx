@@ -29,6 +29,7 @@ type Props = {
   identity: VPSOverviewIdentity
   onManage?: () => void
   newRecordHref?: string
+  newRecordState?: unknown
   managementTriggerRef?: Ref<HTMLButtonElement>
   menuOpen?: boolean
   menuId?: string
@@ -38,6 +39,7 @@ export function VPSOverviewIdentityHeader({
   identity,
   onManage,
   newRecordHref,
+  newRecordState,
   managementTriggerRef,
   menuOpen = false,
   menuId,
@@ -78,7 +80,7 @@ export function VPSOverviewIdentityHeader({
       {newRecordHref || onManage ? (
         <div className="page__actions" role="group" aria-label="VPS 首层动作">
           {newRecordHref ? (
-            <Link className="btn secondary" to={newRecordHref}>新建记录</Link>
+            <Link className="btn secondary" to={newRecordHref} state={newRecordState}>新建记录</Link>
           ) : null}
           {onManage ? (
             <Button

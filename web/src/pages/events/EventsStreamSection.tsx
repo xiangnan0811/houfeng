@@ -71,11 +71,11 @@ export function EventsStreamSection({
       <PageState
         kind="empty"
         surface="empty"
-        title={hasActiveFilters ? '当前筛选没有匹配的事件' : '最近没有状态变更事件'}
+        title={hasActiveFilters ? '当前筛选没有匹配的事件' : '没有状态变更事件'}
         description={
           hasActiveFilters
             ? '请尝试调整筛选条件，或清空筛选恢复完整事件流。'
-            : '系统暂时没有新的状态变更事件。'
+            : '系统暂时没有状态变更事件。'
         }
         action={
           hasActiveFilters ? (

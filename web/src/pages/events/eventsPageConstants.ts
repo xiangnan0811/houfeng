@@ -39,7 +39,7 @@ export const DEFAULT_FILTERS: FilterState = {
   recovery_only: false,
   maintenance_only: false,
   include_backfilled: false,
-  time_range: 'custom',
+  time_range: 'all',
   incident_class: '',
   keyword: '',
 }
@@ -55,10 +55,11 @@ export const TIME_RANGE_TABS: SegmentedItem<TimeRange>[] = [
   { value: '24h', label: '近 24 小时' },
   { value: '7d', label: '近 7 天' },
   { value: '30d', label: '近 30 天' },
+  { value: 'all', label: '全部时间' },
   { value: 'custom', label: '自定义' },
 ]
 
-export const TIME_RANGE_DURATIONS_MS: Record<Exclude<TimeRange, 'custom'>, number> = {
+export const TIME_RANGE_DURATIONS_MS: Record<Exclude<TimeRange, 'custom' | 'all'>, number> = {
   '24h': 24 * 60 * 60 * 1000,
   '7d': 7 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
@@ -68,10 +69,11 @@ export const TIME_RANGE_LABELS: Record<TimeRange, string> = {
   '24h': '近 24 小时',
   '7d': '近 7 天',
   '30d': '近 30 天',
+  all: '全部时间',
   custom: '自定义',
 }
 
 export const ALLOWED_EVENT_TYPES = new Set<StateChangeEventType>(
   EVENT_TYPE_OPTIONS.map(([value]) => value),
 )
-export const ALLOWED_TIME_RANGES = new Set<TimeRange>(['24h', '7d', '30d', 'custom'])
+export const ALLOWED_TIME_RANGES = new Set<TimeRange>(['24h', '7d', '30d', 'all', 'custom'])

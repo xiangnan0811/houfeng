@@ -88,8 +88,8 @@
 
 .monitoring-page__filters .filter-bar__controls-row{flex:1 1 100%;gap:var(--space-2)}
 
-.monitoring-page__filters .filter-select:not(.monitoring-page__search-field),
-.monitoring-page__filters .filter-multiselect{flex:0 1 100px;width:100px;min-width:94px;max-width:112px}
+.monitoring-page .monitoring-page__filters .filter-select:not(.monitoring-page__search-field),
+.monitoring-page .monitoring-page__filters .filter-multiselect{flex:0 1 100px;width:100px;min-width:94px;max-width:112px}
 
 .monitoring-page__filters .filter-select__control{padding:6px 22px 6px 8px}
 

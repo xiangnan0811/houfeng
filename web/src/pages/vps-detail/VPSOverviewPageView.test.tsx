@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AssetDomainRecord, AssetServiceRecord, SubscriptionRecord, VPSOverview } from '../../lib/types'
@@ -178,6 +178,66 @@ describe('VPSOverviewPageView', () => {
     expect(screen.getByText('不可变证据')).toBeInTheDocument()
     expect(screen.queryByText('不应显示的第四条')).not.toBeInTheDocument()
     expect(screen.getByText('最近一条')).toBeInTheDocument()
+  })
+
+  it('carries list provenance on overview new-record and subscription links', () => {
+    const inventoryState = { vpsInventoryHref: '/vps?workspace=workbench&selected=vps_001' }
+    function StateProbe() {
+      const location = useLocation()
+      return <div data-testid="nav-state">{JSON.stringify(location.state)}</div>
+    }
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/vps/vps_001', state: inventoryState }]}>
+        <Routes>
+          <Route
+            path="/vps/:vpsId"
+            element={(
+              <VPSOverviewPageView
+                overview={healthyOverview()}
+                management={managementStub()}
+                onRefresh={vi.fn()}
+                retrying={false}
+              />
+            )}
+          />
+          <Route path="/records/new" element={<StateProbe />} />
+          <Route path="/subscriptions" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('link', { name: '新建记录' }))
+    expect(screen.getByTestId('nav-state')).toHaveTextContent('vpsInventoryHref')
+    expect(screen.getByTestId('nav-state')).toHaveTextContent('return_vps')
+  })
+
+  it('carries list provenance on the overview subscription list link', () => {
+    const inventoryState = { vpsInventoryHref: '/vps?workspace=workbench&selected=vps_001' }
+    function StateProbe() {
+      const location = useLocation()
+      return <div data-testid="nav-state">{JSON.stringify(location.state)}</div>
+    }
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/vps/vps_001', state: inventoryState }]}>
+        <Routes>
+          <Route
+            path="/vps/:vpsId"
+            element={(
+              <VPSOverviewPageView
+                overview={healthyOverview()}
+                management={managementStub()}
+                onRefresh={vi.fn()}
+                retrying={false}
+              />
+            )}
+          />
+          <Route path="/subscriptions" element={<StateProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('link', { name: '查看订阅列表' }))
+    expect(screen.getByTestId('nav-state')).toHaveTextContent('vpsInventoryHref')
   })
 
   it('renders named resource rows from read records and does not treat loading as empty', () => {

@@ -465,11 +465,12 @@ export function MonitoringPage() {
     }
   }
 
-  async function executeBatchCommand() {
-    if (!commandID.trim()) return
+  async function executeBatchCommand(commandId: string, options: { confirmedSensitive?: boolean } = {}) {
+    const selectedCommandID = commandId.trim()
+    if (!selectedCommandID) return
     const monitoringInstanceIDs = frozenBatchIds ?? batchTargetIds
-    setCommandOpen(false)
     if (monitoringInstanceIDs.length === 0) {
+      setCommandOpen(false)
       replaceSelectedIds([])
       setFrozenBatchIds(null)
       return
@@ -480,12 +481,13 @@ export function MonitoringPage() {
     let failCount = 0
     for (const monitoringInstanceID of monitoringInstanceIDs) {
       try {
-        await postMonitoringInstanceAction(monitoringInstanceID, commandID.trim())
+        await postMonitoringInstanceAction(monitoringInstanceID, selectedCommandID, options)
       } catch {
         failCount++
       }
     }
     setBatchSubmitting(false)
+    setCommandOpen(false)
     replaceSelectedIds([])
     setFrozenBatchIds(null)
     setCommandID('')
@@ -565,7 +567,7 @@ export function MonitoringPage() {
                   else if (pendingBatchAction === null) setFrozenBatchIds(null)
                 }}
                 onCommandIDChange={setCommandID}
-                onExecuteBatchCommand={() => void executeBatchCommand()}
+                onExecuteBatchCommand={(commandId, options) => void executeBatchCommand(commandId, options)}
                 onConfirmBatchPause={() => void executeBatchPauseConfirmed()}
                 onCancelBatchPause={() => {
                   setPendingBatchAction(null)

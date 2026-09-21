@@ -6,7 +6,6 @@ import type { CommandAuditFilters } from './types'
 const WINDOW_OPTIONS = [
   { value: '24h', label: '最近 24 小时' },
   { value: '7d', label: '最近 7 天' },
-  { value: '30d', label: '最近 30 天' },
   { value: 'all', label: '全部时间' },
   { value: 'custom', label: '自定义时间' },
 ]
@@ -47,14 +46,17 @@ export function CommandAuditFilterPanel({
         <div className="filter-bar__controls-row">
           <FilterSelect
             label="时间范围"
-            value={filters.window}
+            value={filters.window === '30d' ? null : filters.window}
             options={WINDOW_OPTIONS}
             placeholder="最近 30 天"
             onChange={(value) => {
+              if (value === null) {
+                onChange('window', '30d')
+                return
+              }
               if (
                 value === '24h'
                 || value === '7d'
-                || value === '30d'
                 || value === 'all'
                 || value === 'custom'
               ) {

@@ -274,6 +274,18 @@ describe('TopBar monitoring breadcrumb', () => {
     expect(screen.getByText('监控实例详情')).toBeInTheDocument()
   })
 
+  it.each([
+    { pathname: '/monitoring/mi_001/records', title: '记录' },
+    { pathname: '/monitoring/mi_001/evidence', title: '证据' },
+    { pathname: '/vps/vps_001/records', title: '记录' },
+    { pathname: '/vps/vps_001/evidence', title: '证据' },
+  ])('titles nested $pathname as $title', ({ pathname, title }) => {
+    renderTopBar(pathname)
+    expect(screen.getByText(title)).toBeInTheDocument()
+    expect(screen.queryByText('监控实例详情')).not.toBeInTheDocument()
+    expect(screen.queryByText('VPS 详情')).not.toBeInTheDocument()
+  })
+
   it.each(['/monitoring/mi_001', '/settings', '/monitoring#frag'])(
     'falls back to /monitoring when location state is not a list href: %s',
     (monitoringListHref) => {

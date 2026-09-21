@@ -30,8 +30,8 @@ export function EventsFilterPanel({
 
   const activeChips = (
     <>
-      {filters.time_range !== 'custom' && timeLabel ? (
-        <FilterChip label={`时间: ${timeLabel}`} onRemove={() => onTimeRangeChange('custom')} />
+      {filters.time_range !== 'all' && timeLabel ? (
+        <FilterChip label={`时间: ${timeLabel}`} onRemove={() => onTimeRangeChange('all')} />
       ) : null}
       {filters.object_type && typeLabel ? (
         <FilterChip label={`对象: ${typeLabel}`} onRemove={() => onFilterChange('object_type', '')} />
@@ -72,10 +72,22 @@ export function EventsFilterPanel({
     >
       <FilterSelect
         label="时间范围"
-        value={filters.time_range}
-        options={TIME_RANGE_TABS.map((tab) => ({ value: tab.value, label: tab.label }))}
-        placeholder="自定义"
+        value={filters.time_range === 'all' ? null : filters.time_range}
+        options={[
+          ...TIME_RANGE_TABS.filter((tab) => tab.value !== 'all' && tab.value !== 'custom').map((tab) => ({
+            value: tab.value,
+            label: tab.label,
+          })),
+          ...(filters.time_range === 'custom' || filters.created_from || filters.created_to
+            ? [{ value: 'custom', label: '自定义' }]
+            : []),
+        ]}
+        placeholder="全部时间"
         onChange={(value) => {
+          if (value === null || value === 'all') {
+            onTimeRangeChange('all')
+            return
+          }
           if (value === '24h' || value === '7d' || value === '30d' || value === 'custom') {
             onTimeRangeChange(value)
           }

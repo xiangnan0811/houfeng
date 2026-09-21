@@ -2,7 +2,8 @@ import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
-import { Button, Input, Modal } from '../../components/atoms'
+import { Button, Modal } from '../../components/atoms'
+import { COMMAND_LIST, type MonitoringInstanceCommand } from '../../config/commands'
 
 type BatchMenuItem = {
   key: string
@@ -25,7 +26,7 @@ type MonitoringInstancesBatchPanelProps = {
   onBatchAction: (action: string) => void
   onCommandOpenChange: (open: boolean) => void
   onCommandIDChange: (commandID: string) => void
-  onExecuteBatchCommand: () => void
+  onExecuteBatchCommand: (commandId: string, options?: { confirmedSensitive?: boolean }) => void
   onConfirmBatchPause: () => void
   onCancelBatchPause: () => void
 }
@@ -48,6 +49,7 @@ export function MonitoringInstancesBatchPanel({
   onConfirmBatchPause,
   onCancelBatchPause,
 }: MonitoringInstancesBatchPanelProps) {
+  const [pendingSensitiveCommand, setPendingSensitiveCommand] = useState<MonitoringInstanceCommand | null>(null)
   const [open, setOpen] = useState(false)
   const baseId = useId()
   const menuId = `${baseId}-menu`
@@ -220,43 +222,85 @@ export function MonitoringInstancesBatchPanel({
         open={commandOpen}
         onClose={() => {
           if (batchSubmitting) return
+          setPendingSensitiveCommand(null)
           onCommandOpenChange(false)
           onCommandIDChange('')
         }}
         title="下发命令到已选监控实例"
+        ariaLabel="批量执行命令"
         size="md"
+        persistent={batchSubmitting}
       >
-        <div className="page-stack">
-          <p className="page-panel__eyebrow">批量命令执行</p>
-          <p className="page-panel__description">
-            将对确认时选中的 {confirmedBatchCount} 个监控实例下发命令。请输入命令 ID。
+        <div className="monitoring-detail-commands">
+          <p className="monitoring-detail-dialog__subject">
+            将对确认时选中的 {confirmedBatchCount} 个监控实例下发命令。命令由 agent 编译期白名单执行，不接受自定义参数。
           </p>
-          <Input
-            label="命令 ID"
-            value={commandID}
-            onChange={(event) => onCommandIDChange(event.target.value)}
-            placeholder="例如：whoami"
-          />
+          <div className="monitoring-detail-commands__list">
+            {COMMAND_LIST.map((command) => (
+              <button
+                key={command.id}
+                type="button"
+                className="monitoring-detail-commands__item"
+                aria-pressed={command.id === commandID}
+                disabled={batchSubmitting}
+                onClick={() => {
+                  onCommandIDChange(command.id)
+                  if (command.sensitivity === 'sensitive') {
+                    setPendingSensitiveCommand(command)
+                    return
+                  }
+                  onExecuteBatchCommand(command.id)
+                }}
+              >
+                <span className="monitoring-detail-commands__name">
+                  {command.name}
+                  {command.sensitivity === 'sensitive' ? (
+                    <span className="monitoring-detail-commands__sensitive">敏感</span>
+                  ) : null}
+                </span>
+                <span className="monitoring-detail-commands__desc">{command.description}</span>
+              </button>
+            ))}
+          </div>
           <div className="action-confirm__actions">
             <Button
               variant="secondary"
+              disabled={batchSubmitting}
               onClick={() => {
+                if (batchSubmitting) return
+                setPendingSensitiveCommand(null)
                 onCommandOpenChange(false)
                 onCommandIDChange('')
               }}
             >
               取消
             </Button>
-            <Button
-              variant="primary"
-              disabled={!commandID.trim() || batchSubmitting}
-              onClick={onExecuteBatchCommand}
-            >
-              下发命令
-            </Button>
           </div>
         </div>
       </Modal>
+
+      {pendingSensitiveCommand ? (
+        <ActionConfirmationModal
+          open
+          title={`确认批量执行 ${pendingSensitiveCommand.name}`}
+          current={`将对确认时选中的 ${confirmedBatchCount} 个监控实例执行 ${pendingSensitiveCommand.name}。`}
+          result="操作后：center 会把该白名单命令下发到已选实例的 agent。"
+          impact={pendingSensitiveCommand.description}
+          unchanged="命令仍由 agent 编译期白名单执行，不接受自定义参数。"
+          confirmLabel="确认下发"
+          disabled={batchSubmitting}
+          cancelDisabled={batchSubmitting}
+          onConfirm={() => {
+            const command = pendingSensitiveCommand
+            setPendingSensitiveCommand(null)
+            onExecuteBatchCommand(command.id, { confirmedSensitive: true })
+          }}
+          onCancel={() => {
+            if (batchSubmitting) return
+            setPendingSensitiveCommand(null)
+          }}
+        />
+      ) : null}
 
       {pendingBatchAction === 'pause' ? (
         <ActionConfirmationModal

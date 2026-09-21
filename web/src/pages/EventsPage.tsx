@@ -121,12 +121,12 @@ function searchParamsFromFilters(filters: FilterState): URLSearchParams {
   if (normalized.object_id) next.set('object_id', normalized.object_id)
   if (normalized.severity) next.set('severity', normalized.severity)
   if (normalized.event_type) next.set('event_type', normalized.event_type)
-  if (normalized.time_range !== 'custom') {
-    next.set('time_range', normalized.time_range)
-  } else if (normalized.created_from || normalized.created_to) {
+  if (normalized.time_range === 'custom' && (normalized.created_from || normalized.created_to)) {
     next.set('time_range', 'custom')
     if (normalized.created_from) next.set('created_from', normalized.created_from)
     if (normalized.created_to) next.set('created_to', normalized.created_to)
+  } else if (normalized.time_range !== 'all') {
+    next.set('time_range', normalized.time_range)
   }
   if (normalized.label) next.set('label', normalized.label)
   if (normalized.notification_only) next.set('notification_only', '1')
@@ -156,7 +156,7 @@ function hasActiveFilters(filters: FilterState): boolean {
     normalized.recovery_only ||
     normalized.maintenance_only ||
     normalized.include_backfilled ||
-    normalized.time_range !== 'custom' ||
+    normalized.time_range !== 'all' ||
     normalized.incident_class !== '' ||
     normalized.keyword !== ''
   )
@@ -176,6 +176,9 @@ function buildFilterQuery(filters: FilterState, effectiveLimit: number): EventLi
     include_backfilled: filters.include_backfilled,
   }
 
+  if (filters.time_range === 'all') {
+    return query
+  }
   if (filters.time_range === 'custom') {
     query.created_from = normalizeDateForApi(filters.created_from)
     query.created_to = normalizeDateForApi(filters.created_to)
