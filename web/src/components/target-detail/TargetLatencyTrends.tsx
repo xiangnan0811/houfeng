@@ -151,7 +151,7 @@ export function TargetLatencyTrends({
   return (
     <section aria-label="近期延迟趋势">
       {hasAnySamples ? (
-        <p className="detail-section__aside-meta target-detail-latency__meta">{meta}</p>
+        <p className="target-detail-latency__meta">{meta}</p>
       ) : null}
       {!hasAnySamples ? (
         gapState

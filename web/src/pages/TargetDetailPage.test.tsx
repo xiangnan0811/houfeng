@@ -159,11 +159,11 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByText('最近成功')).not.toBeInTheDocument()
     expect(screen.queryByRole('region', { name: '目标判断摘要' })).not.toBeInTheDocument()
     expect(screen.queryByText('保持观察')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '近期延迟' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '近期延迟' }).closest('section')).toHaveClass('monitoring-detail-section')
     expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '探测方式' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '探测方式' }).closest('section')).toHaveClass('monitoring-detail-section')
     expect(screen.queryByRole('heading', { name: '当前异常' })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '近期事件' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '近期事件' }).closest('section')).toHaveClass('monitoring-detail-section')
     expect(screen.getByText('HTTP')).toBeInTheDocument()
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
@@ -3669,7 +3669,7 @@ describe('TargetDetailPage', () => {
             },
           ]),
         )
-        .mockResolvedValueOnce(mockJSONResponse([])),
+        .mockResolvedValue(mockJSONResponse([])),
     )
 
     render(
@@ -3691,6 +3691,9 @@ describe('TargetDetailPage', () => {
     expect(notice).toHaveTextContent('3')
     expect(notice).toHaveTextContent('告警')
     expect(document.querySelector('.watchtower-danger')).toBeNull()
+    fireEvent.click(within(notice as HTMLElement).getByRole('button', { name: '查看事件' }))
+    const history = await screen.findByRole('dialog', { name: '目标历史抽屉' })
+    expect(within(history).getByRole('tab', { name: '历史异常' })).toHaveAttribute('aria-selected', 'true')
   })
 
   it('keeps ProbeItem evidence default-visible while secondary details stay collapsed', async () => {
@@ -3771,7 +3774,7 @@ describe('TargetDetailPage', () => {
     )
 
     const probeSection = screen.getByRole('heading', { name: '探测方式' }).closest('section')
-    expect(probeSection).toHaveClass('detail-section')
+    expect(probeSection).toHaveClass('monitoring-detail-section')
     expect(probeSection).not.toHaveClass('watchtower-secondary')
     expect(within(probeSection as HTMLElement).getByText('TCP')).toBeInTheDocument()
     expect(within(probeSection as HTMLElement).getByText('10 ms')).toBeInTheDocument()

@@ -1,4 +1,4 @@
-import type { BadgeTone, HealthState } from '../../components/atoms'
+import type { BadgeTone } from '../../components/atoms'
 import { ApiError } from '../../lib/api'
 import type { CreateTargetInput, TargetRecord } from '../../lib/types'
 import type { CreateTargetFormState } from './types'
@@ -58,26 +58,6 @@ export function distinctSorted(values: string[]): string[] {
     }
   }
   return out.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
-}
-
-/** Map target run_status + health into the StatusGlyph state vocabulary.
- *  v1 baseline: maintenance / 暂停 / 已归档 outrank health for at-a-glance scanning. */
-export function targetGlyphState(target: TargetRecord): HealthState {
-  if (target.run_status === '已归档') return 'offline'
-  if (target.run_status === '维护中') return 'maintenance'
-  if (target.run_status === '暂停') return 'offline'
-  switch (target.current_health_status) {
-    case '正常':
-      return 'normal'
-    case '关注':
-      return 'notice'
-    case '告警':
-      return 'alert'
-    case '严重':
-      return 'critical'
-    default:
-      return 'offline'
-  }
 }
 
 export function isCoverageGapTarget(target: TargetRecord) {

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -131,7 +132,11 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
     const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
-    expect(within(createDrawer).getByText('目标创建')).toBeInTheDocument()
+    expect(within(createDrawer).queryByText('目标创建')).not.toBeInTheDocument()
+    expect(within(createDrawer).queryByText('Group')).not.toBeInTheDocument()
+    expect(createDrawer.querySelector('.target-create-drawer__eyebrow')).toBeNull()
+    expect(within(createDrawer).queryAllByRole('heading', { name: '创建目标' })).toHaveLength(1)
+    expect(within(createDrawer).getByLabelText('分组')).toBeInTheDocument()
     fireEvent.change(within(createDrawer).getByLabelText('目标名称'), { target: { value: 'Blog' } })
     fireEvent.change(within(createDrawer).getByLabelText('目标类型'), { target: { value: 'service' } })
     fireEvent.change(within(createDrawer).getByLabelText('主机地址'), { target: { value: 'blog.example.com' } })
@@ -713,6 +718,12 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(screen.getByText('API A')).toBeInTheDocument())
     await waitFor(() => expect(screen.getByText('API B')).toBeInTheDocument())
 
+    const identity = screen.getByText('API A').closest('.targets-table__identity')
+    expect(identity).not.toBeNull()
+    expect(identity?.querySelector('.status-glyph')).toBeNull()
+    expect(within(identity as HTMLElement).queryByLabelText(/运行正常/)).not.toBeInTheDocument()
+    expect(screen.queryByText('运行正常')).not.toBeInTheDocument()
+
     const polylines = document.querySelectorAll('polyline')
     expect(polylines.length).toBe(2)
 
@@ -899,5 +910,12 @@ describe('TargetsPage', () => {
     expect(screen.getByText('Paused API')).toBeInTheDocument()
     expect(screen.getByText('Archived API')).toBeInTheDocument()
     expect(screen.getByText('Coverage Gap API')).toBeInTheDocument()
+  })
+
+  it('does not import the target detail workspace stylesheet on the list page', () => {
+    const source = readFileSync('src/pages/TargetsPage.tsx', 'utf8')
+    expect(source).not.toContain('TargetDetailWorkspace.css')
+    expect(readFileSync('src/styles/partials/legacy-targets.css', 'utf8')).toContain('.targets-table')
+    expect(readFileSync('src/pages/target-detail/TargetDetailWorkspace.css', 'utf8')).not.toContain('.targets-table')
   })
 })

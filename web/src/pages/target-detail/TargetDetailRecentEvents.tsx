@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
 
 import { ObservabilityNoticeRow } from '../../components/observability'
-import { DetailSection } from '../../components/DetailSection'
 import { Button } from '../../components/atoms/Button'
 import { PageState } from '../../components/PageState'
 import { incidentClassLabel, severityTone } from '../../lib/observabilityLabels'
@@ -27,7 +26,11 @@ export function TargetDetailRecentEvents({
   const visible = events.slice(0, 3)
 
   return (
-    <DetailSection title="近期事件" aside={aside}>
+    <section className="monitoring-detail-section" aria-label="近期事件">
+      <header className="monitoring-detail-section__head">
+        <h2>近期事件</h2>
+        {aside}
+      </header>
       {!loaded ? (
         <PageState
           kind="loading"
@@ -74,6 +77,6 @@ export function TargetDetailRecentEvents({
       ) : (
         <p className="watchtower-activity-quiet">未发现新的状态变更事件</p>
       )}
-    </DetailSection>
+    </section>
   )
 }

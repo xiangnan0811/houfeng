@@ -136,7 +136,7 @@ describe('TargetLatencyTrends', () => {
       />,
     )
 
-    const meta = container.querySelector('.detail-section__aside-meta')
+    const meta = container.querySelector('.target-detail-latency__meta')
     expect(meta).not.toBeNull()
     expect(meta?.textContent ?? '').toContain('24h 2 样本')
     expect(meta?.textContent ?? '').toContain('backfill 1')

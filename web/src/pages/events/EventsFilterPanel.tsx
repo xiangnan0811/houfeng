@@ -60,6 +60,21 @@ export function EventsFilterPanel({
       {filters.keyword ? (
         <FilterChip label={`关键词: ${filters.keyword}`} onRemove={() => onFilterChange('keyword', '')} />
       ) : null}
+      {filters.label ? (
+        <FilterChip label={`标签: ${filters.label}`} onRemove={() => onFilterChange('label', '')} />
+      ) : null}
+      {filters.notification_only ? (
+        <FilterChip label="仅看通知事件" onRemove={() => onFilterChange('notification_only', false)} />
+      ) : null}
+      {filters.recovery_only ? (
+        <FilterChip label="仅看恢复事件" onRemove={() => onFilterChange('recovery_only', false)} />
+      ) : null}
+      {filters.maintenance_only ? (
+        <FilterChip label="仅看维护事件" onRemove={() => onFilterChange('maintenance_only', false)} />
+      ) : null}
+      {filters.include_backfilled ? (
+        <FilterChip label="包含补传事件" onRemove={() => onFilterChange('include_backfilled', false)} />
+      ) : null}
     </>
   )
 

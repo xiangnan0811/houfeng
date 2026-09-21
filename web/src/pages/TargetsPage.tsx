@@ -1,7 +1,7 @@
 import { Fragment, type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
-import { Badge, ColumnResizeHandle, Modal, Hostname, MonoDigits, StatusGlyph, Tabs, Timestamp, isInteractiveRowTarget } from '../components/atoms'
+import { Badge, ColumnResizeHandle, Modal, Hostname, MonoDigits, Tabs, Timestamp, isInteractiveRowTarget } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { useColumnWidths } from '../lib/useColumnWidths'
 import {
@@ -25,7 +25,6 @@ import {
   subscriptionStateLabel,
   vpsLifecycleLabel,
 } from './assetContextSummary'
-import './target-detail/TargetDetailWorkspace.css'
 import { CreateTargetPanel } from './targets/CreateTargetPanel'
 import { TargetsBatchPanel } from './targets/TargetsBatchPanel'
 import { TargetsFilterPanel } from './targets/TargetsFilterPanel'
@@ -42,7 +41,6 @@ import {
   parseMultiValue,
   isCoverageGapTarget,
   targetAttentionBadges,
-  targetGlyphState,
   targetIssueSummary,
 } from './targets/targetHelpers'
 import type {
@@ -576,11 +574,6 @@ export function TargetsPage() {
                         <td>
                           <div className="targets-table__identity">
                             <div className="targets-table__identity-head">
-                              <StatusGlyph
-                                state={targetGlyphState(target)}
-                                size="md"
-                                ariaLabel={`${target.name} ${badges[0]?.label ?? '运行正常'}`}
-                              />
                               <div className="name">{target.name}</div>
                             </div>
                             <div className="sub">

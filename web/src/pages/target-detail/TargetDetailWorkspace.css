@@ -220,50 +220,6 @@
   fill: var(--text-secondary);
 }
 
-.targets-table .monitoring-table__select {
-  width: 40px;
-  min-width: 40px;
-  max-width: 40px;
-  text-align: center;
-  vertical-align: middle;
-}
-
-.targets-table .monitoring-table__select-check {
-  width: 14px;
-  height: 14px;
-  cursor: pointer;
-  accent-color: var(--accent);
-}
-
-.targets-table__identity-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.targets-table__identity-head .name {
-  min-width: 0;
-}
-
-.targets-table__health {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.targets-table__health-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.targets-table__health-quiet {
-  color: var(--text-muted);
-}
-
 @media (max-width: 760px) {
   .target-detail-header {
     flex-direction: column;

@@ -8,7 +8,7 @@ import {
   type ProbeFormMode,
   type TargetRuntimeAction,
 } from '../../components/target-detail'
-import { DetailSection } from '../../components/DetailSection'
+
 import { Button } from '../../components/atoms/Button'
 import { Modal } from '../../components/atoms/Modal'
 import { MonoDigits } from '../../components/atoms/Mono'
@@ -213,7 +213,7 @@ export function TargetDetailPageBody({
   )
   const eventAside = (
     <div className="target-activity-actions">
-      <span className="detail-section__aside-meta">
+      <span className="target-detail-latency__meta">
         事件 <MonoDigits>{events.length}</MonoDigits>
       </span>
       <Button variant="ghost" size="sm" onClick={() => onOpenHistory('events')}>
@@ -258,21 +258,21 @@ export function TargetDetailPageBody({
         incidentsRetrying={incidentsRetrying}
         onRetryIncidents={onRetryIncidents}
         runtimeError={runtimeError && pendingRuntimeConfirmation?.action !== 'archive' ? runtimeError : null}
-        onOpenEvents={() => onOpenHistory('events')}
+        onOpenEvents={() => onOpenHistory('incidents')}
       />
 
-      <DetailSection
-        title="近期延迟"
-        ribbon={target.run_status === '维护中' ? 'maintenance' : 'accent'}
-        aside={observationWorkspaceAside}
-      >
+      <section className="monitoring-detail-section" aria-label="近期延迟">
+        <header className="monitoring-detail-section__head">
+          <h2>近期延迟</h2>
+          {observationWorkspaceAside}
+        </header>
         <TargetLatencyTrends
           probeItems={probeItems}
           recentObservations={recentObservations}
           timeWindow={timeWindow}
           isMaintenance={target.run_status === '维护中'}
         />
-      </DetailSection>
+      </section>
 
       <TargetProbeListSection
         probeItems={probeItems}

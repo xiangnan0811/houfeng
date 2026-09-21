@@ -285,10 +285,23 @@ describe('EventsPage', () => {
     })
     expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('全部时间')
     expect(screen.getByLabelText('当前查询参数')).toHaveTextContent('')
-    expect(fetchMock.mock.calls.some((call) => {
-      const url = String(call[0])
-      return url.startsWith('/api/events') && !url.includes('created_from') && !url.includes('created_to') && !url.includes('time_range')
-    })).toBe(true)
+    await waitFor(() => {
+      const lastEventsCall = [...fetchMock.mock.calls].reverse().find((call) => String(call[0]).startsWith('/api/events'))
+      expect(lastEventsCall).toBeTruthy()
+      const url = String(lastEventsCall?.[0])
+      expect(url).not.toContain('created_from')
+      expect(url).not.toContain('created_to')
+      expect(url).not.toContain('time_range')
+    })
+  })
+
+  it('shows a main-bar chip when opened from a maintenance-only dashboard link', async () => {
+    vi.stubGlobal('fetch', setupFetchMock({}))
+    renderEventsPage('/events?maintenance_only=1')
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: '移除筛选 仅看维护事件' })).toBeInTheDocument()
   })
 
   it('returns the events time filter to all time when the placeholder option is chosen', async () => {

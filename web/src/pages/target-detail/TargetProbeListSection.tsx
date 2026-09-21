@@ -1,6 +1,5 @@
 import type { ReactNode, RefObject } from 'react'
 
-import { DetailSection } from '../../components/DetailSection'
 import { Button } from '../../components/atoms/Button'
 import {
   TargetProbeList,
@@ -66,33 +65,31 @@ export function TargetProbeListSection({
   )
 
   return (
-    <div className="target-probe-section">
-      <DetailSection
-        title="探测方式"
-        ribbon="accent"
-        aside={aside ?? defaultAside}
-      >
-        {probeMutationError ? (
-          <p className="watchtower-runtime-error" role="alert">
-            {probeMutationError}
-          </p>
-        ) : null}
-        <TargetProbeList
-          probeItems={probeItems}
-          observationsByProbe={observationsByProbe}
-          actionsDisabled={actionsDisabled}
-          pendingProbeConfirmation={pendingProbeConfirmation}
-          confirmationCardDisabled={confirmationCardDisabled}
-          registerDeleteButtonRef={registerDeleteButtonRef}
-          hideActions={readOnly}
-          onAddProbe={onAddProbe}
-          onEdit={onEdit}
-          onToggle={onToggle}
-          onDelete={onDelete}
-          onConfirmDelete={onConfirmDelete}
-          onCancelDeleteConfirmation={onCancelDeleteConfirmation}
-        />
-      </DetailSection>
-    </div>
+    <section className="monitoring-detail-section target-probe-section" aria-label="探测方式">
+      <header className="monitoring-detail-section__head">
+        <h2>探测方式</h2>
+        {aside ?? defaultAside}
+      </header>
+      {probeMutationError ? (
+        <p className="watchtower-runtime-error" role="alert">
+          {probeMutationError}
+        </p>
+      ) : null}
+      <TargetProbeList
+        probeItems={probeItems}
+        observationsByProbe={observationsByProbe}
+        actionsDisabled={actionsDisabled}
+        pendingProbeConfirmation={pendingProbeConfirmation}
+        confirmationCardDisabled={confirmationCardDisabled}
+        registerDeleteButtonRef={registerDeleteButtonRef}
+        hideActions={readOnly}
+        onAddProbe={onAddProbe}
+        onEdit={onEdit}
+        onToggle={onToggle}
+        onDelete={onDelete}
+        onConfirmDelete={onConfirmDelete}
+        onCancelDeleteConfirmation={onCancelDeleteConfirmation}
+      />
+    </section>
   )
 }

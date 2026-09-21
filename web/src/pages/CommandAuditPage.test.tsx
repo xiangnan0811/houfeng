@@ -269,6 +269,8 @@ describe('CommandAuditPage', () => {
     fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '24h' } })
     expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('最近 24 小时')
     fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
     expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('最近 30 天')
+    expect(screen.getByLabelText('当前查询参数')).toHaveTextContent('')
   })
 })
