@@ -66,7 +66,7 @@ func (h *StreamHub) SubscribeHostSamples(monitoringInstanceID string) HostSample
 	}
 }
 
-func (h *StreamHub) AfterSuccessfulSync(_ context.Context, batch syncing.Batch, _ syncing.Result) error {
+func (h *StreamHub) AfterSuccessfulSync(_ context.Context, batch syncing.Batch, result syncing.Result) error {
 	if h == nil || batch.MonitoringInstanceID == "" {
 		return nil
 	}
@@ -75,6 +75,12 @@ func (h *StreamHub) AfterSuccessfulSync(_ context.Context, batch syncing.Batch, 
 			sample.MonitoringInstanceID = batch.MonitoringInstanceID
 		}
 		if sample.MonitoringInstanceID != batch.MonitoringInstanceID {
+			continue
+		}
+		if sample.ReceivedAt.IsZero() {
+			sample.ReceivedAt = result.AcceptedAt
+		}
+		if sample.ReceivedAt.IsZero() {
 			continue
 		}
 		h.publishHostSample(hostSampleFromWrite(sample))

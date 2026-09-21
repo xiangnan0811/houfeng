@@ -60,7 +60,12 @@ function overview(): VPSOverview {
       items: [],
     },
     facts: [{ key: 'ipv4', label: 'IPv4', value: '192.0.2.10' }],
-    relations: [],
+    relations: [{
+      kind: 'monitoring_instances',
+      count: 1,
+      label: '监控实例',
+      section: { state: 'ready', observed_at: null, last_success_at: null, reason_code: '' },
+    }],
     capabilities: ['records_v2_read'],
   }
 }
@@ -105,5 +110,12 @@ describe('VPSOverviewPageView readonly preview', () => {
     expect(writeAction).toBeDisabled()
     fireEvent.click(writeAction)
     expect(management.openPanel).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看服务' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看域名' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看实例' }))
+    expect(management.openPanel).toHaveBeenCalledWith('services-detail')
+    expect(management.openPanel).toHaveBeenCalledWith('domains-detail')
+    expect(management.openPanel).toHaveBeenCalledWith('monitoring-instance-evidence')
   })
 })

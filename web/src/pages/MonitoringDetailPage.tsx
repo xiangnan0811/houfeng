@@ -40,6 +40,7 @@ import {
   MONITORING_INSTANCE_BINDING_CONFLICT_LOAD_ERROR,
   MONITORING_INSTANCE_BINDING_CONFLICT_STATUS,
 } from './monitoring-detail/monitoringDetailConstants'
+import { READ_ONLY_PREVIEW } from '../lib/readOnlyPreview'
 import { resolveMonitoringListHref } from './monitoring/monitoringListUrl'
 import {
   applyOnboardingRecordToMonitoringInstance,
@@ -204,7 +205,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   // doesn't reopen it, while retaining navigation origin and state.
   useEffect(() => {
     if (searchParams.get('onboarding') !== '1') return
-    setOnboardingOpen(true)
+    if (!READ_ONLY_PREVIEW) setOnboardingOpen(true)
     const next = new URLSearchParams(searchParams)
     next.delete('onboarding')
     setSearchParams(next, { replace: true, state: location.state })
@@ -937,6 +938,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   }
 
   function openOnboardingDrawer() {
+    if (READ_ONLY_PREVIEW) return
     setOnboardingOpen(true)
   }
 

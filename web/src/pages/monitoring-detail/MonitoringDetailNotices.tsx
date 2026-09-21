@@ -143,7 +143,7 @@ export function MonitoringDetailNotices({
   const heartbeatAt = heartbeatFreshness && 'at' in heartbeatFreshness ? heartbeatFreshness.at : monitoringInstance.last_heartbeat_at
 
   return (
-    <div className="monitoring-detail-notices">
+    <div className="observability-notices monitoring-detail-notices">
       {showBindingConflict ? (
         <NoticeRow
           tone="alert"

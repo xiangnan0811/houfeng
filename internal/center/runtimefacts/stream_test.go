@@ -107,6 +107,73 @@ func TestStreamHubDropsCrossInstanceHostSamples(t *testing.T) {
 	}
 }
 
+func TestStreamHubStampsZeroReceivedAtFromAcceptedAt(t *testing.T) {
+	t.Parallel()
+
+	hub := NewStreamHub()
+	subscription := hub.SubscribeHostSamples("mi_001")
+	defer subscription.Close()
+
+	observedAt := time.Date(2026, time.April, 24, 9, 0, 0, 0, time.UTC)
+	acceptedAt := observedAt.Add(2 * time.Second)
+	if err := hub.AfterSuccessfulSync(context.Background(), syncing.Batch{
+		MonitoringInstanceID: "mi_001",
+		Observations: observations.BatchWrite{HostSamples: []observations.HostSampleWrite{{
+			ObservedAt:   observedAt,
+			AgentVersion: "agent/v0.1.0",
+			Fingerprint:  "fp-001",
+			SyncBatchID:  "sync-agent-shape",
+			CPUUsagePct:  11,
+		}}},
+	}, syncing.Result{AcceptedAt: acceptedAt}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+
+	select {
+	case message := <-subscription.Messages:
+		if message.Type != "host_sample" || message.MonitoringInstanceID != "mi_001" {
+			t.Fatalf("message = %#v, want mi_001 host_sample", message)
+		}
+		if !message.Sample.ReceivedAt.Equal(acceptedAt) || !message.ReceivedAt.Equal(acceptedAt) {
+			t.Fatalf("received timestamps = sample=%v message=%v, want %v", message.Sample.ReceivedAt, message.ReceivedAt, acceptedAt)
+		}
+		if !message.Sample.ObservedAt.Equal(observedAt) {
+			t.Fatalf("ObservedAt = %v, want %v", message.Sample.ObservedAt, observedAt)
+		}
+		if message.Sample.SyncBatchID != "sync-agent-shape" || message.Sample.CPUUsagePct != 11 {
+			t.Fatalf("message sample = %#v, want agent-shaped payload fields", message.Sample)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for stamped host sample")
+	}
+}
+
+func TestStreamHubDoesNotPublishWhenReceivedAtAndAcceptedAtAreZero(t *testing.T) {
+	t.Parallel()
+
+	hub := NewStreamHub()
+	subscription := hub.SubscribeHostSamples("mi_001")
+	defer subscription.Close()
+
+	if err := hub.AfterSuccessfulSync(context.Background(), syncing.Batch{
+		MonitoringInstanceID: "mi_001",
+		Observations: observations.BatchWrite{HostSamples: []observations.HostSampleWrite{{
+			ObservedAt:   time.Date(2026, time.April, 24, 9, 0, 0, 0, time.UTC),
+			AgentVersion: "agent/v0.1.0",
+			Fingerprint:  "fp-001",
+			SyncBatchID:  "sync-zero-receipt",
+		}}},
+	}, syncing.Result{}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+
+	select {
+	case message := <-subscription.Messages:
+		t.Fatalf("unexpected message for zero receipt times: %#v", message)
+	default:
+	}
+}
+
 func TestStreamHubDoesNotBlockWhenSubscriberIsSlow(t *testing.T) {
 	t.Parallel()
 

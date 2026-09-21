@@ -520,13 +520,15 @@ export function MonitoringDetailPageBody({
         onExecute={onExecuteCommand}
       />
 
-      <MonitoringInstanceOnboardingDrawer
-        monitoringInstance={monitoringInstance}
-        open={onboardingOpen}
-        returnVPSId={onboardingReturnVPSId}
-        mode={isUpgradeOnboarding ? 'upgrade' : 'connect'}
-        onClose={onCloseOnboarding}
-      />
+      {readOnly ? null : (
+        <MonitoringInstanceOnboardingDrawer
+          monitoringInstance={monitoringInstance}
+          open={onboardingOpen}
+          returnVPSId={onboardingReturnVPSId}
+          mode={isUpgradeOnboarding ? 'upgrade' : 'connect'}
+          onClose={onCloseOnboarding}
+        />
+      )}
     </div>
   )
 }

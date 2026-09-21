@@ -108,6 +108,7 @@ export function VPSOverviewRelationPanels({
   }
 
   const handleUpgrade = (mi: VPSMonitoringInstanceSummary) => {
+    if (readOnly) return
     if (onUpgradeMonitoringInstance) {
       onUpgradeMonitoringInstance(mi)
     } else {
@@ -318,14 +319,22 @@ export function VPSOverviewRelationPanels({
             pendingUnlink,
             linkFeedback,
             linkFeedbackIsError,
-            onCreateMonitoringInstance: onCreateMonitoringInstance ?? (() => management.openPanel('monitoring-instance-create')),
-            onOpenLink: onOpenLink ?? (() => management.openPanel('monitoring-instance-link')),
+            onCreateMonitoringInstance: readOnly
+              ? () => {}
+              : (onCreateMonitoringInstance ?? (() => management.openPanel('monitoring-instance-create'))),
+            onOpenLink: readOnly
+              ? () => {}
+              : (onOpenLink ?? (() => management.openPanel('monitoring-instance-link'))),
             onUpgrade: handleUpgrade,
-            onRequestUnlink: handleRequestUnlink,
+            onRequestUnlink: readOnly ? () => {} : handleRequestUnlink,
             onCancelUnlink: handleCancelUnlink,
-            onConfirmUnlink: handleConfirmUnlink,
-            onOpenServiceCreate: onOpenServiceCreate ?? (() => management.openPanel('service')),
-            onOpenDomainCreate: onOpenDomainCreate ?? (() => management.openPanel('domain')),
+            onConfirmUnlink: readOnly ? () => {} : handleConfirmUnlink,
+            onOpenServiceCreate: readOnly
+              ? () => {}
+              : (onOpenServiceCreate ?? (() => management.openPanel('service'))),
+            onOpenDomainCreate: readOnly
+              ? () => {}
+              : (onOpenDomainCreate ?? (() => management.openPanel('domain'))),
             onRetryServices: handleRetryServices,
           }}
         />

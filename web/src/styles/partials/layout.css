@@ -21,7 +21,6 @@ body.is-col-resizing{cursor:col-resize;user-select:none}
 .table tbody tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .table .name{color:var(--t1);font-weight:500}
 .table .mono{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--t2)}
-.table .time{color:var(--t4);font-size:11.5px}
 .table .sub{font-size:11px;color:var(--t4);margin-top:2px}
 .drawer.active{transform:translateX(0);pointer-events:auto}
 
@@ -99,10 +98,7 @@ body.is-col-resizing{cursor:col-resize;user-select:none}
 .user-chip__account-meta{font-size:11px;color:var(--t3);line-height:1.3;overflow-wrap:break-word;word-break:break-word}
 .user-chip__account-username{color:var(--t3)}
 .user-chip__account-role{color:var(--t2)}
-.sidebar-collapsed .user-chip__menu{left:0;right:auto;min-width:180px}
-
-@media (max-width:760px){
-  .topbar{gap:var(--space-2);min-height:52px;padding:4px var(--space-3)}
+.sidebar-collapsed .user-chip__menu{left:0;right:auto;min-width:180px}@media (max-width:760px){.topbar{gap:var(--space-2);min-height:52px;padding:4px var(--space-3)}
   .topbar .tp-spacer,.topbar .tp-divider,.topbar .tp-avatar{display:none}
   .topbar .tp-page{max-width:8em}
   .topbar .tp-vps-crumb{max-width:min(12ch,30%)}

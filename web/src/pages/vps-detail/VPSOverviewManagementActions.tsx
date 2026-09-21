@@ -41,6 +41,7 @@ import type {
   VPSAssetDetail,
   VPSMonitoringInstanceSummary,
 } from '../../lib/types'
+import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import { useOptionalVPSWriteRegistry } from '../../lib/vpsWriteRegistry-context'
 import { VPSDetailDialog, VPSDialogActions } from './VPSDetailDialog'
 import { VPSDomainsForm } from './VPSDomainsForm'
@@ -1065,6 +1066,7 @@ export function VPSOverviewManagementActions({
   }
 
   function handleAgentUpgrade(monitoringInstance: VPSMonitoringInstanceSummary) {
+    if (READ_ONLY_PREVIEW) return
     navigate(`/monitoring/${encodeURIComponent(monitoringInstance.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(vpsId)}`, {
       state: location.state,
     })
@@ -1193,21 +1195,23 @@ export function VPSOverviewManagementActions({
         </p>
       ) : null}
 
-      <VPSOverviewMonitoringOnboarding
-        vpsId={vpsId}
-        management={management}
-        managementTriggerRef={managementTriggerRef}
-        onOverviewRefresh={onOverviewRefresh}
-        writeOwnerStore={writeOwnerStore}
-        viewToken={viewToken}
-      />
+      {READ_ONLY_PREVIEW ? null : (
+        <VPSOverviewMonitoringOnboarding
+          vpsId={vpsId}
+          management={management}
+          managementTriggerRef={managementTriggerRef}
+          onOverviewRefresh={onOverviewRefresh}
+          writeOwnerStore={writeOwnerStore}
+          viewToken={viewToken}
+        />
+      )}
 
       {relationPanelOpen ? (
         <VPSOverviewRelationPanels
           key={`${vpsId}:${panel}:${relationRevision}`}
           vpsId={vpsId}
           management={management}
-          readOnly={readonlyBlocked || detailLoading || !detail || isTerminalVPSLifecycle(detail.lifecycle_status)}
+          readOnly={READ_ONLY_PREVIEW || readonlyBlocked || detailLoading || !detail || isTerminalVPSLifecycle(detail.lifecycle_status)}
           writeBlocked={submitting}
           unlinkingMonitoringInstanceId={unlinkingMonitoringInstanceId}
           pendingUnlinkMonitoringInstance={pendingUnlinkMonitoringInstance}
@@ -1229,6 +1233,8 @@ export function VPSOverviewManagementActions({
         />
       ) : null}
 
+      {READ_ONLY_PREVIEW ? null : (
+      <>
       <VPSDetailDialog
         open={factsOpen}
         onClose={closePanel}
@@ -1597,6 +1603,8 @@ export function VPSOverviewManagementActions({
           )}
         </div>
       </ActionConfirmationModal>
+      </>
+      )}
     </>
   )
 }

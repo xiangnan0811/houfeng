@@ -413,6 +413,70 @@ func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
 	}
 }
 
+func TestMonitoringInstanceRuntimeStreamWritesAgentShapedSamplesWithZeroReceivedAt(t *testing.T) {
+	epoch := time.Date(2026, time.April, 24, 8, 0, 0, 0, time.UTC)
+	hub := &notifyingHostSampleHub{
+		StreamHub:  runtimefacts.NewStreamHub(),
+		subscribed: make(chan string, 1),
+	}
+	repo := &fakeMonitoringInstanceRepository{
+		getMonitoringInstanceResult: monitoringinstances.Record{
+			MonitoringInstanceID:  "mi_001",
+			BindingStatus:         monitoringinstances.BindingBound,
+			BindingFingerprint:    "fp-001",
+			BindingEpochStartedAt: &epoch,
+		},
+	}
+	server := httptest.NewServer(handlers.MonitoringInstanceRuntimeStream(repo, hub))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/api/monitoring-instances/mi_001/runtime-stream"
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
+		HTTPHeader: http.Header{"Origin": []string{server.URL}},
+	})
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer conn.Close(websocket.StatusNormalClosure, "")
+
+	select {
+	case monitoringInstanceID := <-hub.subscribed:
+		if monitoringInstanceID != "mi_001" {
+			t.Fatalf("subscription monitoring instance = %q, want mi_001", monitoringInstanceID)
+		}
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for runtime stream subscription: %v", ctx.Err())
+	}
+
+	batch := agentShapedSyncingBatchWithHostSample("mi_001", 17)
+	result := runtimefactsTestResult()
+	if !batch.Observations.HostSamples[0].ReceivedAt.IsZero() {
+		t.Fatal("agent-shaped fixture must leave ReceivedAt zero")
+	}
+	if err := hub.AfterSuccessfulSync(ctx, batch, result); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+
+	var message runtimefacts.HostSampleStreamMessage
+	if err := wsjson.Read(ctx, conn, &message); err != nil {
+		t.Fatalf("wsjson.Read() error = %v", err)
+	}
+	if message.Type != "host_sample" || message.MonitoringInstanceID != "mi_001" {
+		t.Fatalf("message = %#v, want mi_001 host sample", message)
+	}
+	if message.Sample.CPUUsagePct != 17 {
+		t.Fatalf("CPUUsagePct = %v, want 17", message.Sample.CPUUsagePct)
+	}
+	if !message.Sample.ReceivedAt.Equal(result.AcceptedAt) || !message.ReceivedAt.Equal(result.AcceptedAt) {
+		t.Fatalf("received timestamps = sample=%v message=%v, want AcceptedAt %v", message.Sample.ReceivedAt, message.ReceivedAt, result.AcceptedAt)
+	}
+	if !message.Sample.ObservedAt.Equal(batch.Observations.HostSamples[0].ObservedAt) {
+		t.Fatalf("ObservedAt = %v, want agent observed_at", message.Sample.ObservedAt)
+	}
+}
+
 func TestMonitoringInstanceRuntimeStreamDropsStaleAndFutureSamplesBeforeWriting(t *testing.T) {
 	now := time.Now().UTC()
 	epoch := now.Add(-time.Hour)
@@ -550,6 +614,12 @@ func TestMonitoringInstanceRuntimeStreamRejectsUnsupportedMethod(t *testing.T) {
 }
 
 func syncingBatchWithHostSample(monitoringInstanceID string, cpuUsagePct float64) syncing.Batch {
+	batch := agentShapedSyncingBatchWithHostSample(monitoringInstanceID, cpuUsagePct)
+	batch.Observations.HostSamples[0].ReceivedAt = batch.Observations.HostSamples[0].ObservedAt.Add(time.Second)
+	return batch
+}
+
+func agentShapedSyncingBatchWithHostSample(monitoringInstanceID string, cpuUsagePct float64) syncing.Batch {
 	observedAt := time.Date(2026, time.April, 24, 9, 0, 0, 0, time.UTC)
 	return syncing.Batch{
 		MonitoringInstanceID: monitoringInstanceID,
@@ -557,7 +627,6 @@ func syncingBatchWithHostSample(monitoringInstanceID string, cpuUsagePct float64
 			HostSamples: []observations.HostSampleWrite{{
 				MonitoringInstanceID: monitoringInstanceID,
 				ObservedAt:           observedAt,
-				ReceivedAt:           observedAt.Add(time.Second),
 				AgentVersion:         "agent/v0.1.0",
 				Fingerprint:          "fp-001",
 				SyncBatchID:          "sync-001",
