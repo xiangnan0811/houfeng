@@ -901,8 +901,10 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const hasCurrentBindingConflictState = bindingConflictState.requestedMonitoringInstanceId === monitoringInstanceId
   const bindingConflict = hasCurrentBindingConflictState ? bindingConflictState.onboarding : null
   const bindingConflictError = hasCurrentBindingConflictState ? bindingConflictState.error : null
+  const isBindingConflictStatus =
+    monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
   const bindingConflictLoading =
-    hasCurrentBindingConflictState && bindingConflictState.loading && !bindingConflict
+    isBindingConflictStatus && !bindingConflict && !bindingConflictError
 
   function registerActionRef(action: MonitoringInstanceRuntimeAction, element: HTMLButtonElement | null) {
     actionButtonRefs.current[action] = element

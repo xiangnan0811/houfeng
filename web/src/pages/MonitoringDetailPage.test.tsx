@@ -218,7 +218,7 @@ async function openBindingConflictDialog() {
   const trigger = await screen.findByRole('button', { name: '处置绑定冲突' })
   await waitFor(() => expect(trigger).toBeEnabled())
   fireEvent.click(trigger)
-  return screen.getByRole('dialog', { name: '处置绑定冲突' })
+  return await screen.findByRole('dialog', { name: '处置绑定冲突' })
 }
 
 /**
@@ -2142,6 +2142,37 @@ describe('MonitoringDetailPage', () => {
     expect(within(dialog).getByRole('button', { name: '确认重绑定' })).toBeEnabled()
     expect(within(dialog).getByRole('button', { name: '拒绝新指纹' })).toBeEnabled()
     expect(within(dialog).getByRole('button', { name: '重置绑定' })).toBeEnabled()
+  })
+
+  it('does not transiently enable disposition action before conflict metadata finishes loading', async () => {
+    const onboarding = deferredResponse()
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord()))
+      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockImplementationOnce(() => onboarding.promise)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/monitoring/mi_conflict']}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    // The very moment the conflict notice row mounts, the disposition button must
+    // be disabled with the loading indicator, never transiently enabled before metadata arrives.
+    await screen.findByText('绑定冲突待确认')
+    const trigger = screen.getByRole('button', { name: '处置绑定冲突' })
+    expect(trigger).toBeDisabled()
+    expect(screen.getByText('正在加载…')).toBeInTheDocument()
+
+    onboarding.resolve(mockJSONResponse(onboardingConflictState()))
+    await waitFor(() => expect(trigger).toBeEnabled())
+    expect(screen.queryByText('正在加载…')).not.toBeInTheDocument()
   })
 
 
