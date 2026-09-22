@@ -65,3 +65,5 @@ docs/superpowers/
 # build outputs
 /bin/
 /dist/
+
+.dsh-project-memory
