@@ -15,9 +15,10 @@ export const INITIAL_MONITORING_DETAIL_STATE: MonitoringDetailPageState = {
   error: null,
   monitoringInstance: null,
   runtimeFacts: null,
-  requestedActivityMonitoringInstanceId: null,
+  requestedIncidentsMonitoringInstanceId: null,
   incidents: [],
   incidentsError: null,
+  requestedEventsMonitoringInstanceId: null,
   events: [],
   eventsError: null,
 }
@@ -58,6 +59,37 @@ export function currentFingerprintSummary(onboarding: MonitoringInstanceOnboardi
 
 export function pendingBindingMetadata(onboarding: MonitoringInstanceOnboardingState | null): PendingBindingMetadata | null {
   return onboarding?.pending_binding ?? null
+}
+
+const CLOUD_REGION_CODE_PATTERNS = [/^[a-z]{1,3}-[a-z0-9-]+$/, /^[a-z]{3}\d+$/]
+
+/**
+ * Cloud region identifiers (`ap-northeast-1`, `sgp1`, `JP`) are not what an operator
+ * reads as a location; the city is. Matching is case-insensitive after trimming.
+ */
+export function isCloudRegionCode(value: string): boolean {
+  const trimmed = value.trim().toLowerCase()
+  if (!trimmed) return false
+  if (CLOUD_REGION_CODE_PATTERNS.some((pattern) => pattern.test(trimmed))) return true
+  return /^[a-z]{1,3}$/.test(trimmed)
+}
+
+/** Empty and unconfirmed providers render nothing — never a "Provider 未确认" sentence. */
+export function formatMonitoringInstanceProvider(provider: string | null | undefined): string {
+  const trimmed = (provider ?? '').trim()
+  if (!trimmed || trimmed === '未确认' || trimmed.startsWith('Provider')) return ''
+  return trimmed
+}
+
+/** Region and city are filtered independently, then joined. Region codes are omitted. */
+export function formatMonitoringInstanceLocation(
+  region: string | null | undefined,
+  city: string | null | undefined,
+): string {
+  return [region, city]
+    .map((part) => (part ?? '').trim())
+    .filter((part) => Boolean(part) && part !== '未确认' && !isCloudRegionCode(part))
+    .join(' · ')
 }
 
 export function monitoringInstanceRuntimeActions(monitoringInstance: MonitoringInstanceRecord): Array<{ action: MonitoringInstanceRuntimeAction; label: string }> {
@@ -123,4 +155,41 @@ export function formatAssetLocation(vps: VPSSummary): string {
 
 export function isBindingConflictStatus(status: MonitoringInstanceRecord['binding_status']) {
   return status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
+}
+
+export function validateReturnVPSId(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  if (!/^[a-zA-Z0-9._-]+$/.test(trimmed)) return null
+  return trimmed
+}
+
+export function withReturnVPSQuery(path: string, value: string | null | undefined): string {
+  const returnVPSId = validateReturnVPSId(value)
+  if (!returnVPSId) return path
+  const hashIndex = path.indexOf('#')
+  const hash = hashIndex === -1 ? '' : path.slice(hashIndex)
+  const withoutHash = hashIndex === -1 ? path : path.slice(0, hashIndex)
+  const queryIndex = withoutHash.indexOf('?')
+  const pathname = queryIndex === -1 ? withoutHash : withoutHash.slice(0, queryIndex)
+  const params = new URLSearchParams(queryIndex === -1 ? '' : withoutHash.slice(queryIndex + 1))
+  params.set('return_vps', returnVPSId)
+  return `${pathname}?${params.toString()}${hash}`
+}
+
+export function returnVPSIdFromNavigationState(state: unknown): string | null {
+  if (typeof state !== 'object' || state === null || !('return_vps' in state)) return null
+  const value = Reflect.get(state, 'return_vps')
+  return typeof value === 'string' ? validateReturnVPSId(value) : null
+}
+
+export function withReturnVPSNavigationState(locationState: unknown, returnVPSId: string | null): unknown {
+  const base =
+    typeof locationState === 'object' && locationState !== null && !Array.isArray(locationState)
+      ? { ...(locationState as Record<string, unknown>) }
+      : {}
+  if (returnVPSId) base.return_vps = returnVPSId
+  else delete base.return_vps
+  return base
 }

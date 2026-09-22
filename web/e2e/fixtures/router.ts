@@ -229,6 +229,14 @@ export class ApiFixtureController {
     }
   }
 
+  async assertRuntimeStreamNotConnected(monitoringInstanceId: string): Promise<void> {
+    const sockets = await this.snapshotRuntimeStreamSockets()
+    const matches = sockets.filter((socket) => socket.monitoringInstanceId === monitoringInstanceId)
+    if (matches.length > 0) {
+      throw new Error(`expected no runtime stream socket for ${monitoringInstanceId}, got ${JSON.stringify(matches)}`)
+    }
+  }
+
   useProfile(profile: ApiFixtureProfile): void {
     this.profile = profile
   }

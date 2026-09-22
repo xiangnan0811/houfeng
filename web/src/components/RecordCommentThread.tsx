@@ -85,7 +85,7 @@ function ReadyRecordCommentThread({ state, comments, currentUserId, members, bus
   return (
     <section className="record-collaboration-panel record-comment-thread card" aria-labelledby="record-comments-title">
       <header className="record-collaboration-panel__header section-heading">
-        <div><p className="record-collaboration-panel__eyebrow section-heading__eyebrow">COMMENT LOG</p><h2 className="section-heading__title" id="record-comments-title">协作评论</h2></div>
+        <div><h2 className="section-heading__title" id="record-comments-title">协作评论</h2></div>
         <span className="record-collaboration-panel__count badge badge--count">{comments.length}</span>
       </header>
       {state === 'empty' || comments.length === 0

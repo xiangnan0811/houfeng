@@ -26,6 +26,7 @@ type HostSample struct {
 	InodeUsedPct         float64                  `json:"inode_used_pct"`
 	NetInBytesPerSec     int64                    `json:"net_in_bytes_per_sec"`
 	NetOutBytesPerSec    int64                    `json:"net_out_bytes_per_sec"`
+	NetworkRatesValid    *bool                    `json:"network_rates_valid,omitempty"`
 	CPUIOWaitPct         float64                  `json:"cpu_iowait_pct"`
 	CPUStealPct          float64                  `json:"cpu_steal_pct"`
 	DiskReadBytesPerSec  int64                    `json:"disk_read_bytes_per_sec"`
@@ -56,16 +57,22 @@ type RuntimeWindowSummary struct {
 }
 
 type HostMetricPoint struct {
-	ObservedAt        time.Time `json:"observed_at"`
-	SampleCount       int       `json:"sample_count"`
-	CPUUsagePct       float64   `json:"cpu_usage_pct"`
-	MemUsedPct        float64   `json:"mem_used_pct"`
-	DiskUsedPct       float64   `json:"disk_used_pct"`
-	InodeUsedPct      float64   `json:"inode_used_pct"`
-	Load5             float64   `json:"load_5"`
-	CPUIOWaitPct      float64   `json:"cpu_iowait_pct"`
-	NetInBytesPerSec  float64   `json:"net_in_bytes_per_sec"`
-	NetOutBytesPerSec float64   `json:"net_out_bytes_per_sec"`
+	ObservedAt           time.Time `json:"observed_at"`
+	SampleCount          int       `json:"sample_count"`
+	CPUUsagePct          *float64  `json:"cpu_usage_pct"`
+	MemUsedPct           *float64  `json:"mem_used_pct"`
+	DiskUsedPct          *float64  `json:"disk_used_pct"`
+	InodeUsedPct         *float64  `json:"inode_used_pct"`
+	Load5                *float64  `json:"load_5"`
+	CPUIOWaitPct         *float64  `json:"cpu_iowait_pct"`
+	NetInBytesPerSec     *float64  `json:"net_in_bytes_per_sec"`
+	NetOutBytesPerSec    *float64  `json:"net_out_bytes_per_sec"`
+	Load1                *float64  `json:"load_1"`
+	Load15               *float64  `json:"load_15"`
+	SwapUsedPct          *float64  `json:"swap_used_pct"`
+	DiskBusyPct          *float64  `json:"disk_busy_pct"`
+	DiskReadBytesPerSec  *float64  `json:"disk_read_bytes_per_sec"`
+	DiskWriteBytesPerSec *float64  `json:"disk_write_bytes_per_sec"`
 }
 
 type ProbeObservation struct {
@@ -90,6 +97,7 @@ type ProbeObservation struct {
 
 type MonitoringInstanceRuntimeFacts struct {
 	MonitoringInstanceID string               `json:"monitoring_instance_id"`
+	ReadAt               time.Time            `json:"read_at"`
 	Window               RuntimeWindowSummary `json:"window"`
 	LatestHostSample     *HostSample          `json:"latest_host_sample"`
 	HostMetricPoints     []HostMetricPoint    `json:"host_metric_points"`

@@ -84,7 +84,7 @@ function createFixture(options: FixtureOptions = {}) {
   return root
 }
 
-function runAnalyzer(root: string) {
+function runAnalyzer(root: string, ...args: string[]) {
   return spawnSync(
     process.execPath,
     [
@@ -99,6 +99,7 @@ function runAnalyzer(root: string) {
       resolve(root, 'web/dist'),
       '--format',
       'json',
+      ...args,
     ],
     { encoding: 'utf8' },
   )
@@ -116,11 +117,11 @@ describe('CSS analyzer CLI contract', () => {
     temporaryRoots.push(emptyDist)
     const result = spawnSync(
       process.execPath,
-      [analyzerPath, '--dist', emptyDist, '--format', 'json'],
+      [analyzerPath, '--dist', emptyDist, '--format', 'json', '--budget-policy', 'advisory'],
       { encoding: 'utf8' },
     )
 
-    expect(result.stderr).toBe('')
+
     expect(result.status).toBe(0)
 
     const report = JSON.parse(result.stdout) as {
@@ -251,6 +252,9 @@ describe('CSS analyzer CLI contract', () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('src/styles/assets.css')
     expect(result.stderr).toContain('exactly one owner')
+    const advisory = runAnalyzer(root, '--budget-policy', 'advisory')
+    expect(advisory.status).toBe(1)
+    expect(advisory.stderr).toContain('exactly one owner')
   })
 
   it('fails with metric evidence when a checked budget is exceeded', () => {
@@ -267,11 +271,25 @@ describe('CSS analyzer CLI contract', () => {
         productionCssGzipBytesMax: 1_000,
       },
     })
+    const before = readFileSync(resolve(root, 'web/css-budget.json'), 'utf8')
     const result = runAnalyzer(root)
+    const advisory = runAnalyzer(root, '--budget-policy', 'advisory')
+    expect(advisory.status).toBe(0)
+    const strictReport = JSON.parse(result.stdout)
+    expect(strictReport.budgetPolicy).toBe('enforce')
+    expect(strictReport.budget.status).toBe('fail')
+    expect(JSON.parse(advisory.stdout)).toEqual({ ...strictReport, budgetPolicy: 'advisory' })
+    expect(advisory.stderr).toBe('WARNING: ' + result.stderr)
+    expect(readFileSync(resolve(root, 'web/css-budget.json'), 'utf8')).toBe(before)
 
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('sourceBytes')
     expect(result.stderr).toContain('actual=')
     expect(result.stderr).toContain('max=1')
+  })
+  it.each([['invalid'], []])('rejects invalid or missing policy %j', (...values) => {
+    const result = runAnalyzer(createFixture(), '--budget-policy', ...values)
+    expect(result.status).toBe(1)
+    expect(result.stdout).toBe('')
   })
 })

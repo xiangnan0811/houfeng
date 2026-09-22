@@ -589,7 +589,7 @@ listCommandAudits({ cursor: nextCursor })
 - 批量运行控制只作用于未归档实例：`batchEligibleMonitoringInstances = sortedFilteredMonitoringInstances.filter(!archived_at)`。`scope=all` 下用户全选时，也只把 eligible IDs 发给 batch/action API。
 - 如果筛选变化导致 eligible 数量变成 0，批量动作不得发送空请求，也不得让 `batchSubmitting` 停留为 true；应关闭/重置批量面板或保持可恢复状态。
 - 详情页的管理审查必须懒加载：用户打开“管理实例”入口时再请求 review，避免破坏详情页既有轮询 / runtime / onboarding 请求顺序。
-- 管理动作成功后必须刷新当前 record 和 review；永久清理成功后导航回 `/monitoring`。
+- 管理动作成功后必须刷新当前 record 和 review；永久清理成功后通过 `resolveMonitoringListHref` 返回经过校验的列表地址，并保留筛选、选择和来源 VPS 的 location state。
 - 归档实例详情仍可浏览历史和管理入口，但必须隐藏或禁用 onboarding、runtime action、command action 和 metadata edit。metadata section 应显示只读原因。
 - 管理危险操作必须复用 `ActionConfirmationModal` 风格；退役 / 恢复需要 reason，归档 / 永久清理需要 reason + 实例显示名确认。
 
@@ -604,7 +604,7 @@ listCommandAudits({ cursor: nextCursor })
 | all selected rows are archived | No batch/action request; no stuck `批量操作中…` state |
 | archived detail page | Management visible; runtime/onboarding/metadata edit hidden |
 | management review load failure | Show management error in the management section only |
-| permanent cleanup success | Navigate to `/monitoring` |
+| permanent cleanup success | Return to the validated monitoring list URL with navigation provenance preserved |
 
 #### 5. Good/Base/Bad Cases
 
@@ -1623,7 +1623,8 @@ Auth/Theme 在 `web/src/main.tsx` 根链挂载；VPS registry 在 `Authenticated
 ## 数据拉取时机（实读约束）
 
 - 当前 page 数据拉取以 **mount 时拉一次** + **用户操作触发重拉** 为主。`useEffect` 触发条件主要是 page 入参（`useParams` 拿到的 `monitoringInstanceId` / `targetId`）或筛选条件（如 `EventsPage` 的 `appliedFilters`）。AppShell 的 Dashboard 摘要是明确例外：mount 后还会在 document 重新可见 / window focus 时保守刷新，并做 in-flight 去重；仍不启用常驻轮询。
-- **没有 SSE / WebSocket / 轮询**。center 也不主动推；交互式重刷由用户点击 / 提交触发。
+- 监控详情默认使用 URL 中的历史窗口（缺省24h）；显式进入实时窗口后才连接同源 runtime-stream WebSocket，退出窗口或实例时关闭。连接状态、agent 心跳与主机采样是不同事实：样本不得覆盖 record.last_heartbeat_at，uptime 不由浏览器递增。命令抽屉在命令待完成时使用有界生命周期的轮询；不要据此给其他页面增加常驻轮询。
+- 详情 record、runtime-facts、settings、异常、事件与关联各自维护请求代次和局部错误/重试；新窗口未成功读取前不能把旧窗口数据标成新窗口。runtime-facts.read_at 是快照读取时间；最新样本来自服务端当前绑定投影，历史桶可保留旧观测。空桶及 network_rates_valid 非 true 的网络证据保持缺测，有效零值保留。较新的权威空快照可以清除旧绑定样本；迟到的较旧快照不能覆盖其 read_at 之后已收到的新实时证据。
 - **没有跨 page 的请求缓存**：从 `/monitoring` 进 `/monitoring/:id` 会再发一次 `getMonitoringInstance`。当前体量可以接受；如果未来要去抖 / 缓存，再考虑 React Query。
 
 ---

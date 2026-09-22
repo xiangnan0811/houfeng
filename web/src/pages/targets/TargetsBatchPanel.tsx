@@ -1,91 +1,136 @@
+import { useEffect, useId, useRef, useState } from 'react'
+
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 
+type BatchMenuItem = {
+  key: string
+  label: string
+  onSelect: () => void
+}
+
 type TargetsBatchPanelProps = {
-  show: boolean
-  filteredTargetCount: number
-  selectAll: boolean
+  selectedCount: number
   batchSubmitting: boolean
   batchError: string | null
   pendingBatchAction: string | null
-  onSelectAllChange: (checked: boolean) => void
   onBatchAction: (action: string) => void
   onConfirmBatchPause: () => void
-  onCancelBatchPause: () => void
+  onConfirmBatchArchive: () => void
+  onCancelBatchConfirm: () => void
 }
 
 export function TargetsBatchPanel({
-  show,
-  filteredTargetCount,
-  selectAll,
+  selectedCount,
   batchSubmitting,
   batchError,
   pendingBatchAction,
-  onSelectAllChange,
   onBatchAction,
   onConfirmBatchPause,
-  onCancelBatchPause,
+  onConfirmBatchArchive,
+  onCancelBatchConfirm,
 }: TargetsBatchPanelProps) {
+  const [open, setOpen] = useState(false)
+  const baseId = useId()
+  const menuId = `${baseId}-menu`
+  const triggerId = `${baseId}-trigger`
+  const containerRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const triggerDisabled = selectedCount === 0 || batchSubmitting
+
+  const items: BatchMenuItem[] = [
+    { key: 'enter-maintenance', label: '进入维护', onSelect: () => onBatchAction('enter-maintenance') },
+    { key: 'exit-maintenance', label: '退出维护', onSelect: () => onBatchAction('exit-maintenance') },
+    { key: 'pause', label: '暂停', onSelect: () => onBatchAction('pause') },
+    { key: 'resume', label: '恢复', onSelect: () => onBatchAction('resume') },
+    { key: 'archive', label: '归档', onSelect: () => onBatchAction('archive') },
+  ]
+
+  if (selectedCount === 0 && open) setOpen(false)
+  const menuOpen = open && selectedCount > 0
+
+  useEffect(() => {
+    if (!menuOpen) return
+    function handlePointerDown(event: MouseEvent) {
+      if (!(event.target instanceof Node) || !containerRef.current?.contains(event.target)) {
+        setOpen(false)
+      }
+    }
+    function handleKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setOpen(false)
+      triggerRef.current?.focus()
+    }
+    document.addEventListener('mousedown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [menuOpen])
+
   return (
     <>
-      {show ? (
-        <div className={`batch-bar${selectAll ? ' batch-bar--active' : ''}`}>
-          <label className="batch-bar__toggle">
-            <input
-              type="checkbox"
-              checked={selectAll}
-              onChange={(event) => onSelectAllChange(event.target.checked)}
-            />
-            全选 ({filteredTargetCount})
-          </label>
-          <span className="batch-bar__scope">批量范围：当前筛选范围内的 {filteredTargetCount} 个目标</span>
-          {selectAll ? (
-            <div className="batch-bar__actions">
+      <div className="monitoring-batch" ref={containerRef}>
+        <button
+          ref={triggerRef}
+          id={triggerId}
+          type="button"
+          className="btn sm ghost"
+          aria-label="批量操作"
+          aria-expanded={menuOpen}
+          aria-controls={menuId}
+          disabled={triggerDisabled}
+          onClick={() => setOpen((current) => !current)}
+        >
+          {selectedCount > 0 ? `批量操作 (${selectedCount})` : '批量操作'}
+        </button>
+        {menuOpen ? (
+          <div className="monitoring-batch__menu" id={menuId} role="group" aria-labelledby={triggerId}>
+            {items.map((item) => (
               <button
-                className="btn sm secondary"
+                key={item.key}
+                type="button"
+                className="monitoring-batch__item"
                 disabled={batchSubmitting}
-                onClick={() => onBatchAction('enter-maintenance')}
+                onClick={() => {
+                  setOpen(false)
+                  item.onSelect()
+                }}
               >
-                进入维护
+                {item.label}
               </button>
-              <button
-                className="btn sm secondary"
-                disabled={batchSubmitting}
-                onClick={() => onBatchAction('exit-maintenance')}
-              >
-                退出维护
-              </button>
-              <button
-                className="btn sm secondary"
-                disabled={batchSubmitting}
-                onClick={() => onBatchAction('pause')}
-              >
-                暂停
-              </button>
-              <button
-                className="btn sm secondary"
-                disabled={batchSubmitting}
-                onClick={() => onBatchAction('resume')}
-              >
-                恢复
-              </button>
-            </div>
-          ) : null}
-          {batchError ? <span className="batch-bar__error">{batchError}</span> : null}
-          {batchSubmitting ? <span>批量操作中…</span> : null}
-        </div>
-      ) : null}
+            ))}
+          </div>
+        ) : null}
+        {batchError ? <span className="monitoring-batch__error">{batchError}</span> : null}
+      </div>
       {pendingBatchAction === 'pause' ? (
         <ActionConfirmationModal
           open
           title="确认批量暂停目标"
-          current={`将对当前筛选范围内的 ${filteredTargetCount} 个目标执行暂停操作。`}
-          result="操作后：所有已选目标运行状态变为暂停。"
+          current={`将对已选的 ${selectedCount} 个目标执行暂停。`}
+          result="操作后：已选目标运行状态变为暂停。"
           impact="会停止这些目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。"
           unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。"
           confirmLabel="确认批量暂停"
           disabled={batchSubmitting}
           onConfirm={onConfirmBatchPause}
-          onCancel={onCancelBatchPause}
+          onCancel={onCancelBatchConfirm}
+        />
+      ) : null}
+      {pendingBatchAction === 'archive' ? (
+        <ActionConfirmationModal
+          open
+          title="确认批量归档目标"
+          current={`将对已选的 ${selectedCount} 个目标执行归档。`}
+          result="操作后：已选目标退出默认工作集，变为归档对象。"
+          impact="归档后不再作为活跃入口探测，需要恢复后才能继续观测。"
+          unchanged="不会删除历史观测、事件或 ProbeItem 配置。"
+          confirmLabel="确认批量归档"
+          disabled={batchSubmitting}
+          onConfirm={onConfirmBatchArchive}
+          onCancel={onCancelBatchConfirm}
         />
       ) : null}
     </>

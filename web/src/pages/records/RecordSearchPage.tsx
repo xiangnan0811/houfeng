@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
-import { Button } from '../../components/atoms'
+import { Button, Modal } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
 import { ApiError } from '../../lib/apiRequest'
 import { searchRecords } from '../../lib/recordsApi'
@@ -91,6 +91,7 @@ export function RecordSearchPage() {
   const draft = draftState.filterKey === appliedFilterKey ? draftState.filters : appliedFilters
   const [advancedDraft, setAdvancedDraft] = useState<RecordSearchFilters>(appliedFilters)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
 
   const [records, setRecords] = useState<RecordDetail[]>([])
   const [nextCursor, setNextCursor] = useState<string | undefined>()
@@ -230,23 +231,18 @@ export function RecordSearchPage() {
     ?? visibleRecords[0]
 
   return (
-    <div className="page-stack record-search-page">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">运维知识 · RECORDS</div>
-          <h1 className="page-title">运维记录</h1>
-          <p className="page-sub">
-            搜索命中标题与正文，结果始终按当前授权过滤，只显示你有权读取的记录。
-          </p>
-        </div>
-        <div className="header-actions">
+    <div className="page record-search-page">
+      <header className="page__head">
+        <h1 className="page__title">运维记录</h1>
+        <div className="page__actions">
           <Link className="btn sm secondary" to={comparisonEntryHref({
             subjects: comparisonSubjectsFromRecords(visibleRecords),
           })}>横向比较</Link>
           <Link className="btn sm secondary" to="/records/drafts">草稿</Link>
+          <Button type="button" size="sm" variant="secondary" onClick={() => setImportOpen(true)}>导入</Button>
           <Link className="btn sm primary" to="/records/new">新建记录</Link>
         </div>
-      </div>
+      </header>
 
       <RecordSearchFilterPanel
         filters={draft}
@@ -267,19 +263,12 @@ export function RecordSearchPage() {
         onClose={closeAdvanced}
       />
 
-      <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
-        <RecordImportPanel />
-      </Suspense>
-      {exportRecord ? (
-        <Suspense fallback={<section className="card" aria-label="记录导出">正在加载导出</section>}>
-          <RecordExportPanel
-            key={exportRecord.record_id}
-            recordId={exportRecord.record_id}
-            snapshotIds={exportRecord.current.evidence_snapshot_ids ?? EMPTY_SNAPSHOT_IDS}
-            recordLabel={`${exportRecord.current.title}（${exportRecord.record_id}）`}
-          />
+      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="导入记录" size="lg">
+        <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
+          <RecordImportPanel />
         </Suspense>
-      ) : null}
+      </Modal>
+
 
       <section className="page-stack record-search-results" aria-label="记录搜索结果">
         {republished ? (
@@ -324,6 +313,19 @@ export function RecordSearchPage() {
           </>
         ) : null}
       </section>
+      {exportRecord ? (
+        <details className="record-search-tools">
+          <summary>导出选中记录</summary>
+          <Suspense fallback={<section className="card" aria-label="记录导出">正在加载导出</section>}>
+            <RecordExportPanel
+              key={exportRecord.record_id}
+              recordId={exportRecord.record_id}
+              snapshotIds={exportRecord.current.evidence_snapshot_ids ?? EMPTY_SNAPSHOT_IDS}
+              recordLabel={`${exportRecord.current.title}（${exportRecord.record_id}）`}
+            />
+          </Suspense>
+        </details>
+      ) : null}
     </div>
   )
 }

@@ -335,11 +335,10 @@ export function SubscriptionSettingsSection() {
   }
 
   return (
-    <div className="subscription-settings animate-in">
+    <div className="subscription-settings">
       <section className="settings-section subscription-settings__section">
         <div className="section-heading section-heading--inline">
           <div>
-            <p className="section-heading__eyebrow">Cost Settings</p>
             <h2 className="section-heading__title">成本基准与汇率</h2>
           </div>
           <button type="button" className="btn sm secondary" onClick={handleRefreshRates} disabled={refreshingRates}>
@@ -367,7 +366,6 @@ export function SubscriptionSettingsSection() {
 
       <section className="settings-section subscription-settings__section">
         <div className="section-heading">
-          <p className="section-heading__eyebrow">Budgets</p>
           <h2 className="section-heading__title">月预算时间线</h2>
         </div>
         <div className="subscription-budget-list subscription-budget-list--managed">
@@ -444,10 +442,6 @@ export function SubscriptionSettingsSection() {
           {rateNotice ? <p className="settings-save-footer__message settings-save-footer__message--success">{rateNotice}</p> : null}
         </div>
         <button className="btn md primary" type="button" onClick={() => handleSaveAll()} disabled={settingsSubmitting}>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
-            <path d="M17 21v-8H7v8M7 3v5h8" />
-          </svg>
           {settingsSubmitting ? '保存中…' : '保存订阅配置'}
         </button>
       </div>

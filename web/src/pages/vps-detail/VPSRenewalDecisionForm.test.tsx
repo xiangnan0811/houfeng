@@ -36,24 +36,50 @@ function detailFixture(): VPSAssetDetail {
   }
 }
 
+function renderDecision(overrides: {
+  draft?: { renewalDecision: VPSAssetDetail['renewal_decision']; reason: string }
+  submitting?: boolean
+} = {}) {
+  return render(
+    <VPSRenewalDecisionForm
+      formId="vps-decision-form"
+      detail={detailFixture()}
+      draft={overrides.draft ?? { renewalDecision: 'cancel', reason: '准备取消' }}
+      submitting={overrides.submitting ?? false}
+      onDraftChange={vi.fn()}
+      onFeedbackClear={vi.fn()}
+      onSubmit={vi.fn()}
+    />
+  )
+}
+
 describe('VPSRenewalDecisionForm', () => {
   it('disables decision controls while submitting / loading latest', () => {
-    render(
-      <VPSRenewalDecisionForm
-        detail={detailFixture()}
-        draft={{ renewalDecision: 'cancel', reason: '准备取消' }}
-        submitting
-        error={null}
-        notice={null}
-        decisionChanged
-        onCancel={vi.fn()}
-        onDraftChange={vi.fn()}
-        onFeedbackClear={vi.fn()}
-        onSubmit={vi.fn()}
-      />,
-    )
+    renderDecision({ submitting: true })
 
     expect(screen.getByRole('combobox', { name: '续费决策' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: '决策理由' })).toBeDisabled()
+  })
+
+  it('names the saved decision against a different pending selection only', () => {
+    const { rerender } = renderDecision()
+
+    expect(screen.getByText('东京边缘')).toBeInTheDocument()
+    expect(screen.getByText(/将改为/)).toBeInTheDocument()
+
+    rerender(
+      <VPSRenewalDecisionForm
+        formId="vps-decision-form"
+        detail={detailFixture()}
+        draft={{ renewalDecision: 'keep', reason: '' }}
+        submitting={false}
+        onDraftChange={vi.fn()}
+        onFeedbackClear={vi.fn()}
+        onSubmit={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('东京边缘')).toBeInTheDocument()
+    expect(screen.queryByText(/将改为/)).not.toBeInTheDocument()
   })
 })

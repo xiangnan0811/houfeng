@@ -127,6 +127,13 @@ func TestBuildEvidenceCandidateUsesTheCapturedSubjectIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build candidate: %v", err)
 	}
+	if candidate.EvidenceID != row.snapshotID {
+		t.Fatalf("evidence route ref = %q, want %q", candidate.EvidenceID, row.snapshotID)
+	}
+	if candidate.RecordID != "" || candidate.RevisionID != "" {
+		t.Fatalf("evidence candidate unexpectedly carries record refs: record=%q revision=%q",
+			candidate.RecordID, candidate.RevisionID)
+	}
 	subject := candidate.Subjects[0]
 	if subject.Kind != records.SubjectKindVPS || subject.SourceID != testEvidenceVPSSourceID {
 		t.Fatalf("subject = %+v", subject)
@@ -142,6 +149,7 @@ func TestBuildEvidenceCandidateUsesTheCapturedSubjectIdentity(t *testing.T) {
 	if !subject.Primary {
 		t.Fatalf("the observed subject must be primary")
 	}
+
 }
 
 func TestBuildEvidenceCandidateProjectsNoCapturedContent(t *testing.T) {

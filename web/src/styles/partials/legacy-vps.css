@@ -1,26 +1,13 @@
 /* partial: legacy-vps.css (semantic split of the legacy index.css block) */
 
+.vps-lifecycle{display:inline-flex;align-items:center;gap:var(--space-2);color:var(--text-primary);font-size:var(--type-small-size);white-space:nowrap}
+.vps-quiet-fact{color:var(--text-muted);font-size:var(--type-small-size)}
+
+
 .vps-detail-actions-menu .watchtower-actions-menu__danger{color:color-mix(in srgb,var(--color-state-critical) 82%,var(--text-primary))}
 
-.vps-detail-actions-menu .watchtower-actions-menu__panel{z-index:60;max-height:min(calc(var(--space-12) * 6),45vh);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.vps-detail-actions-menu .watchtower-actions-menu__panel{z-index:60;min-width:12rem;max-height:min(calc(var(--space-12) * 6),45vh);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 
-.vps-monitoring-instance-evidence-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:var(--space-2);margin-bottom:var(--space-3)}
-
-.vps-monitoring-instance-evidence-strip__item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-1) var(--space-2);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--color-state-maintenance) 28%,var(--border));border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 74%,transparent)}
-
-.vps-monitoring-instance-evidence-strip__item div{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0}
-
-.vps-monitoring-instance-evidence-strip__item strong{color:var(--text-primary);font-size:var(--type-body-size);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-.vps-monitoring-instance-evidence-strip__item span:last-of-type,.vps-monitoring-instance-evidence-strip__item small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
-
-.vps-monitoring-instance-evidence-strip__item small{grid-column:1 / -1;color:var(--text-muted);overflow-wrap:anywhere}
-
-.vps-monitoring-instance-evidence-strip__location{display:flex;flex-direction:column;gap:2px;grid-column:1 / -1;color:var(--text-secondary);font-size:var(--type-small-size)}
-
-.vps-monitoring-instance-evidence-strip__heartbeat{display:flex;gap:var(--space-2);align-items:center;grid-column:1 / -1;color:var(--text-muted);font-size:var(--type-small-size)}
-
-.vps-monitoring-instance-evidence-strip__actions{grid-column:1 / -1;display:flex;justify-content:flex-end;padding-top:var(--space-1)}
 
 .vps-decision-board{display:flex;flex-direction:column;gap:var(--space-5);border-color:color-mix(in srgb,var(--accent) 22%,var(--border));background:var(--surface);box-shadow:var(--shadow-soft)}
 
@@ -52,7 +39,7 @@
 
 .vps-decision-evidence{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--space-2);min-width:0;align-self:stretch}
 
-.vps-decision-evidence__item{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0;min-height:96px;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:var(--radius-1);background:color-mix(in srgb,var(--surface-elevated) 58%,transparent)}
+.vps-decision-evidence__item{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0;min-height:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:var(--radius-1);background:color-mix(in srgb,var(--surface-elevated) 58%,transparent)}
 
 .vps-decision-evidence__item--normal{border-color:color-mix(in srgb,var(--color-state-normal) 24%,var(--border))}
 
@@ -86,7 +73,7 @@
 
 .vps-decision-board__grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-3)}
 
-.vps-decision-card{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;min-height:176px;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 76%,transparent)}
+.vps-decision-card{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;min-height:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 76%,transparent)}
 
 .vps-decision-card--normal{border-color:color-mix(in srgb,var(--color-state-normal) 24%,var(--border))}
 
@@ -110,74 +97,25 @@
 
 .vps-decision-board__fact-main small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.4;overflow-wrap:anywhere}
 
-.vps-service-table,
-.vps-domain-table{min-width:760px}
 
-.vps-detail-overview{display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-4);overflow:visible;z-index:2}
+.vps-detail-overview{display:flex;flex-direction:column;overflow:visible;z-index:2}
 
-.vps-detail-overview__header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-4);align-items:start;min-width:0;padding-bottom:var(--space-3);border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 64%,transparent)}
 
-.vps-detail-overview__identity{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
 
-.vps-detail-overview__identity h1{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-h1-size);font-weight:var(--type-h1-weight);line-height:var(--type-h1-leading);overflow-wrap:anywhere}
 
 .vps-detail-overview__identity .section-heading__eyebrow{margin:0}
 
 .vps-detail-overview__identity .badge-row{flex-wrap:wrap}
 
-.vps-detail-overview__actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-2);flex-wrap:wrap;min-width:0}
 
-.vps-detail-overview__actions .btn{min-height:28px}
+.vps-detail-overview__actions .btn{min-height:var(--control-min-height)}
 
-.vps-detail-overview__body{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,0.28fr);gap:var(--space-3);align-items:start;min-width:0}
+.vps-detail-overview__facts{min-width:0}
 
-.vps-detail-overview__facts{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:0;margin:0;min-width:0;border:var(--border-w) solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:var(--radius-2);overflow:hidden;background:color-mix(in srgb,var(--surface-elevated) 8%,transparent)}
 
-.vps-detail-overview__fact{position:relative;grid-column:span 3;display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0;min-height:54px;padding:var(--space-2) var(--space-3);border-right:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent);border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent);background:transparent}
 
-.vps-detail-overview__fact:nth-child(2){grid-column:span 5}
-
-.vps-detail-overview__fact:nth-child(3){grid-column:span 4}
-
-.vps-detail-overview__fact:nth-child(4),.vps-detail-overview__fact:nth-child(5),.vps-detail-overview__fact:nth-child(6),.vps-detail-overview__fact:nth-child(7){grid-column:span 4}
-
-.vps-detail-overview__fact:nth-child(8){grid-column:span 8}
-
-.vps-detail-overview__fact::before{content:'';position:absolute;left:0;top:var(--space-2);bottom:var(--space-2);width:var(--border-w);background:transparent}
-
-.vps-detail-overview__fact--normal::before{background:color-mix(in srgb,var(--color-state-normal) 56%,transparent)}
-
-.vps-detail-overview__fact--notice::before{background:color-mix(in srgb,var(--color-state-notice) 64%,transparent)}
-
-.vps-detail-overview__fact--alert::before{background:color-mix(in srgb,var(--color-state-alert) 70%,transparent)}
-
-.vps-detail-overview__fact--critical::before{background:color-mix(in srgb,var(--color-state-critical) 76%,transparent)}
-
-.vps-detail-overview__fact dt,.vps-detail-overview__judgement dt{margin:0;color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);line-height:1.25;text-transform:uppercase}
-
-.vps-detail-overview__fact dd{margin:0;color:var(--text-primary);font-size:var(--type-body-size);font-weight:600;line-height:1.3;overflow-wrap:anywhere}
 
 .vps-detail-overview__fact small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
-
-.vps-detail-overview__judgement{position:relative;display:flex;flex-direction:column;gap:var(--space-2);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 60%,transparent);border-left:var(--border-w-strong) solid color-mix(in srgb,var(--border-strong) 64%,var(--border));border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 8%,transparent)}
-
-.vps-detail-overview__judgement--normal{border-left-color:color-mix(in srgb,var(--color-state-normal) 54%,var(--border))}
-
-.vps-detail-overview__judgement--notice{border-left-color:color-mix(in srgb,var(--color-state-notice) 62%,var(--border));background:color-mix(in srgb,var(--color-state-notice) 3%,transparent)}
-
-.vps-detail-overview__judgement--alert{border-left-color:color-mix(in srgb,var(--color-state-alert) 66%,var(--border));background:color-mix(in srgb,var(--color-state-alert) 4%,transparent)}
-
-.vps-detail-overview__judgement--critical{border-left-color:color-mix(in srgb,var(--color-state-critical) 72%,var(--border));background:color-mix(in srgb,var(--color-state-critical) 5%,transparent)}
-
-.vps-detail-overview__judgement h2{margin:0;color:var(--text-primary);font-size:var(--type-body-size);line-height:1.35}
-
-.vps-detail-overview__judgement dl{display:flex;flex-direction:column;gap:var(--space-2);margin:0}
-
-.vps-detail-overview__judgement dl > div{display:grid;grid-template-columns:minmax(44px,0.24fr) minmax(0,1fr);gap:var(--space-2);align-items:baseline;min-width:0;padding-bottom:var(--space-2);border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 38%,transparent)}
-
-.vps-detail-overview__judgement dl > div:last-child{padding-bottom:0;border-bottom:0}
-
-.vps-detail-overview__judgement dd{margin:0;color:var(--text-primary);font-size:var(--type-small-size);font-weight:600;line-height:1.35;overflow-wrap:anywhere}
 
 .vps-detail-overview__attention-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0;padding-top:var(--space-2);border-top:var(--border-w) solid color-mix(in srgb,var(--border) 42%,transparent)}
 
@@ -207,142 +145,80 @@
 
 .vps-detail-feedback-stack .asset-operation-feedback--error{border-color:color-mix(in srgb,var(--color-state-critical) 24%,transparent);border-left-color:color-mix(in srgb,var(--color-state-critical) 52%,transparent)}
 
-.vps-related-overview,.vps-single-ledger{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-4)}
-
-.vps-related-overview .section-heading,.vps-single-ledger .section-heading{margin-bottom:var(--space-2);padding-bottom:var(--space-2)}
-
-.vps-related-overview__list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr));gap:0;margin:0;padding:0;list-style:none;border:var(--border-w) solid color-mix(in srgb,var(--border) 62%,transparent);border-radius:var(--radius-2);overflow:hidden;background:color-mix(in srgb,var(--surface-elevated) 7%,transparent)}
-
-.vps-related-overview__item{position:relative;display:flex;flex-direction:column;gap:var(--space-2);align-items:stretch;min-width:0;min-height:96px;padding:var(--space-2) var(--space-3);border-right:var(--border-w) solid color-mix(in srgb,var(--border) 46%,transparent);border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 46%,transparent)}
-
-.vps-related-overview__item::before{content:'';position:absolute;left:0;top:var(--space-2);bottom:var(--space-2);width:var(--border-w);background:color-mix(in srgb,var(--border-strong) 58%,transparent)}
-
-.vps-related-overview__item--normal::before{background:color-mix(in srgb,var(--color-state-normal) 46%,transparent)}
-
-.vps-related-overview__item--notice::before{background:color-mix(in srgb,var(--color-state-notice) 60%,transparent)}
-
-.vps-related-overview__item--alert::before{background:color-mix(in srgb,var(--color-state-alert) 66%,transparent)}
-
-.vps-related-overview__item--critical::before{background:color-mix(in srgb,var(--color-state-critical) 74%,transparent)}
-
-.vps-related-overview__main{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0}
-
-.vps-related-overview__title{appearance:none;display:inline-flex;max-width:100%;padding:0;border:0;background:transparent;color:var(--text-primary);font:inherit;font-size:var(--type-body-size);font-weight:700;line-height:1.3;text-align:left;text-decoration:none;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-.vps-related-overview__title:hover{color:var(--accent);text-decoration:underline;text-underline-offset:3px}
-
-.vps-related-overview__title:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1);border-radius:var(--radius-1)}
-
-.vps-related-overview__item strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-body-size);line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-.vps-related-overview__item small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-
-.vps-related-overview__actions{display:flex;align-items:center;gap:var(--space-1);flex-wrap:wrap;min-width:0;margin-top:auto}
-
-.vps-related-overview__actions .btn{min-height:24px;padding-inline:var(--space-2);font-size:var(--type-small-size)}
-
-.vps-single-ledger__body{display:grid;grid-template-columns:minmax(180px,0.24fr) minmax(0,1fr);gap:var(--space-3);align-items:start;min-width:0}
-
-.vps-single-ledger__facts{display:grid;grid-template-columns:1fr;gap:0;margin:0;min-width:0;border:var(--border-w) solid color-mix(in srgb,var(--border) 56%,transparent);border-radius:var(--radius-2);overflow:hidden;background:color-mix(in srgb,var(--surface-elevated) 6%,transparent)}
-
-.vps-single-ledger__facts > div{display:grid;grid-template-columns:minmax(48px,0.34fr) minmax(0,1fr);gap:var(--space-2);align-items:baseline;min-width:0;padding:var(--space-2) var(--space-3);border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 42%,transparent)}
-
-.vps-single-ledger__facts > div:last-child{border-bottom:0}
-
-.vps-single-ledger__facts dt{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.35;white-space:nowrap}
-
-.vps-single-ledger__facts dd{margin:0;color:var(--text-primary);font-size:var(--type-small-size);font-weight:600;line-height:1.35;overflow-wrap:anywhere}
-
-.vps-single-ledger__columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-3);min-width:0}
-
-.vps-ledger-group{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
-
-.vps-ledger-group h3{margin:0;color:var(--text-primary);font-size:var(--type-body-size);line-height:1.35}
-
-.vps-ledger-group__head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-2);min-width:0}
-
-.vps-ledger-group__head > div{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-2);flex-wrap:wrap;min-width:0}
-
-.vps-ledger-list{display:flex;flex-direction:column;gap:var(--space-2);margin:0;padding:0;list-style:none;min-width:0}
-
-.vps-ledger-list li{min-width:0}
-
-.vps-ledger-list button{appearance:none;display:flex;width:100%;min-width:0;flex-direction:column;gap:calc(var(--space-1) / 2);padding:0 0 var(--space-2);border:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 42%,transparent);border-radius:0;background:transparent;color:inherit;text-align:left;cursor:pointer}
-
-.vps-ledger-list li:last-child button{padding-bottom:0;border-bottom:0}
-
-.vps-ledger-list button:hover{color:var(--accent)}
-
-.vps-ledger-list button:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
-
-.vps-ledger-list strong{color:var(--text-primary);font-size:var(--type-small-size);font-weight:600;line-height:1.35;overflow-wrap:anywhere}
-
-.vps-ledger-list span{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.3;overflow-wrap:anywhere}
-
 .vps-detail-modal{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
 
-.vps-detail-modal .asset-operation-form,.vps-detail-modal .asset-facts-edit-form{padding:0;border:0;background:transparent}
+.vps-detail-modal .asset-operation-form{padding:0;border:0;background:transparent}
 
-.vps-cost-card__empty{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) dashed color-mix(in srgb,var(--border-dashed) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 10%,transparent)}
 
-.vps-cost-card__empty strong{color:var(--text-primary);font-size:var(--type-body-size)}
-
-.vps-cost-card__empty span{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45}
-
-.vps-ip-quality-summary{display:flex;flex-direction:column;gap:var(--space-2);padding:var(--space-4)}
+.vps-ip-quality-summary{display:flex;flex-direction:column;gap:var(--space-2)}
 
 .vps-ip-quality-summary .section-heading{margin-bottom:var(--space-2);padding-bottom:var(--space-2)}
 
 .vps-ip-quality-summary__facts span,
 .vps-ip-quality-dashboard__metrics span,
-.vps-ip-quality-dashboard__signal span,
-.vps-ip-quality-dashboard__kv-grid span{color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);line-height:1.25;text-transform:uppercase}
+.vps-ip-quality-dashboard__signal span{color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);line-height:1.25;text-transform:uppercase}
 
 .vps-ip-quality-summary__facts small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
 
-.vps-ip-quality-summary__facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;min-width:0;border:var(--border-w) solid color-mix(in srgb,var(--border) 58%,transparent);border-radius:var(--radius-2);overflow:hidden;background:color-mix(in srgb,var(--surface-elevated) 7%,transparent)}
+.vps-ip-quality-summary__facts{min-width:0;overflow:hidden}
 
-.vps-ip-quality-summary__facts div{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0;min-height:76px;padding:var(--space-2) var(--space-3);border-right:var(--border-w) solid color-mix(in srgb,var(--border) 46%,transparent);border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 46%,transparent);background:transparent}
+.vps-ip-quality-summary__facts div{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0}
 
 .vps-ip-quality-summary__facts strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-h2-size);line-height:1.25;overflow-wrap:anywhere}
 
-.vps-ip-quality-summary__unlock-overview{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);padding:var(--space-2) var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 58%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 7%,transparent)}
+.vps-ip-quality-summary__unlock-overview{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
 
 .vps-ip-quality-summary__unlock-overview span:not(.badge){color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
 
-.vps-ip-quality-dashboard{gap:var(--space-4)}
+.vps-ip-quality-dashboard{--ipq-title-size:22px;--ipq-module-size:15px;--ipq-body-size:14px;--ipq-helper-size:12px;--ipq-amount-size:20px;--ipq-gap:14px;--ipq-pad:16px;gap:var(--ipq-gap);font-size:var(--ipq-body-size);line-height:1.45}
 
-.vps-ip-quality-dashboard__hero{border-top:var(--border-w-strong) solid color-mix(in srgb,var(--accent) 64%,var(--border));background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 8%,var(--panel-bg)),var(--panel-bg) 54%)}
+.vps-ip-quality-dashboard .page__title{font-size:var(--ipq-title-size);line-height:1.25}
 
-.vps-ip-quality-dashboard__lead{display:grid;grid-template-columns:minmax(calc(var(--space-12) * 2.4),0.32fr) minmax(0,1fr) minmax(calc(var(--space-12) * 5),0.72fr);gap:var(--space-4);align-items:stretch}
+.vps-ip-quality-dashboard .page-sub{margin:4px 0 0;color:var(--text-secondary);font-size:var(--ipq-helper-size);line-height:1.35}
 
-.vps-ip-quality-dashboard__score{display:flex;flex-direction:column;justify-content:center;gap:var(--space-2);min-width:0;padding:var(--space-5);border:var(--border-w) solid color-mix(in srgb,var(--accent) 34%,var(--border));border-left:var(--border-w-strong) solid var(--accent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}
+.vps-ip-quality-dashboard .page-panel{padding:var(--ipq-pad)}
 
-.vps-ip-quality-dashboard__score span{color:var(--accent);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase}
+.vps-ip-quality-dashboard .section-heading__title{font-size:var(--ipq-module-size);line-height:1.35}
 
-.vps-ip-quality-dashboard__score strong{color:var(--text-primary);font-family:var(--font-mono);font-size:calc(var(--type-display-size) + 18px);line-height:0.95;font-variant-numeric:tabular-nums}
+.vps-ip-quality-dashboard__hero{display:flex;flex-direction:column;gap:var(--ipq-gap);border-top:var(--border-w) solid var(--border);background:var(--panel-bg)}
 
-.vps-ip-quality-dashboard__score small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45}
+.vps-ip-quality-dashboard__identity{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 14px;margin:0;min-width:0}
 
-.vps-ip-quality-dashboard__score-badges{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-1)}
+.vps-ip-quality-dashboard__identity > div{display:grid;grid-template-columns:6.5em minmax(0,1fr);align-items:baseline;gap:8px;min-width:0;min-height:0;padding:3px 0;border:0;border-radius:0;background:transparent}
 
-.vps-ip-quality-dashboard__reasons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
+.vps-ip-quality-dashboard__identity dt{margin:0;color:var(--text-muted);font-size:var(--ipq-helper-size);font-weight:400;letter-spacing:0;line-height:1.35;text-transform:none}
 
-.vps-ip-quality-dashboard__reason{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 18%,transparent)}
+.vps-ip-quality-dashboard__identity dd{margin:0;color:var(--text-primary);font-family:var(--font-mono);font-size:var(--ipq-body-size);line-height:1.35;overflow-wrap:anywhere}
 
-.vps-ip-quality-dashboard__reason strong{color:var(--text-primary);font-size:var(--type-body-size)}
+.vps-ip-quality-dashboard__lead{display:flex;flex-direction:column;gap:12px;align-items:stretch}
 
-.vps-ip-quality-dashboard__reason span{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45;overflow-wrap:anywhere}
+.vps-ip-quality-dashboard__score{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px;min-width:0;padding:0;border:0;border-radius:0;background:transparent}
 
-.vps-ip-quality-dashboard__reason em{color:var(--accent);font-size:var(--type-eyebrow-size);font-style:normal;font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase}
+.vps-ip-quality-dashboard__score span{color:var(--text-muted);font-size:var(--ipq-helper-size);font-weight:400;letter-spacing:0;text-transform:none}
 
-.vps-ip-quality-dashboard__metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
+.vps-ip-quality-dashboard__score strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--ipq-amount-size);line-height:1.1;font-variant-numeric:tabular-nums}
 
-.vps-ip-quality-dashboard__metrics div{display:flex;flex-direction:column;gap:calc(var(--space-1) / 2);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 78%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface) 76%,transparent)}
+.vps-ip-quality-dashboard__score small{color:var(--text-secondary);font-size:var(--ipq-helper-size);line-height:1.35}
 
-.vps-ip-quality-dashboard__metrics strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-h1-size);line-height:1.15;font-variant-numeric:tabular-nums}
+.vps-ip-quality-dashboard__score-badges{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:0}
 
-.vps-ip-quality-dashboard__metrics small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
+.vps-ip-quality-dashboard__reasons{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+
+.vps-ip-quality-dashboard__reason{display:grid;grid-template-columns:minmax(5.5em,auto) minmax(0,1fr) auto;gap:8px 12px;align-items:baseline;min-width:0;padding:0;border:0;border-radius:0;background:transparent}
+
+.vps-ip-quality-dashboard__reason strong{color:var(--text-primary);font-size:var(--ipq-body-size)}
+
+.vps-ip-quality-dashboard__reason span{color:var(--text-secondary);font-size:var(--ipq-helper-size);line-height:1.4;overflow-wrap:anywhere}
+
+.vps-ip-quality-dashboard__reason em{color:var(--text-muted);font-size:var(--ipq-helper-size);font-style:normal;font-weight:400;letter-spacing:0;text-transform:none}
+
+.vps-ip-quality-dashboard__metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px 14px}
+
+.vps-ip-quality-dashboard__metrics div{display:flex;flex-direction:column;gap:2px;min-width:0;padding:0;border:0;border-radius:0;background:transparent}
+
+.vps-ip-quality-dashboard__metrics strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--ipq-body-size);line-height:1.25;font-variant-numeric:tabular-nums}
+
+.vps-ip-quality-dashboard__metrics small{color:var(--text-secondary);font-size:var(--ipq-helper-size);line-height:1.35;overflow-wrap:anywhere}
 
 .vps-ip-quality-dashboard__signal-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:var(--space-2)}
 
@@ -354,11 +230,11 @@
 
 .vps-ip-quality-dashboard__signal small{color:var(--text-muted);font-size:var(--type-small-size)}
 
-.vps-ip-quality-dashboard__provider-table{min-width:1260px;table-layout:fixed}
+.vps-ip-quality-dashboard__provider-table{min-width:1080px;table-layout:fixed}
 
 .vps-ip-quality-dashboard__provider-table th,.vps-ip-quality-dashboard__provider-table td{white-space:nowrap}
 
-.vps-ip-quality-dashboard__provider-table td:nth-last-child(-n+2){white-space:normal;min-width:220px}
+.vps-ip-quality-dashboard__provider-table td:last-child{white-space:normal;min-width:180px}
 
 .vps-ip-quality-dashboard__provider-table small{display:block;margin-top:var(--space-1);color:var(--text-muted);font-size:var(--type-small-size)}
 
@@ -371,6 +247,12 @@
 .vps-ip-quality-dashboard__source-gaps{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin-top:var(--space-3);padding:var(--space-2) var(--space-3);border:var(--border-w) dashed color-mix(in srgb,var(--border-dashed) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 10%,transparent);color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
 
 .vps-ip-quality-dashboard__source-gaps span{color:var(--text-muted);font-weight:600}
+
+.vps-ip-quality-dashboard__table-hint{margin:0 0 var(--space-2);color:var(--text-muted);font-size:var(--type-small-size);line-height:1.35}
+
+.vps-ip-quality-dashboard__table-scroll{max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-gutter:stable;border-radius:var(--radius-3)}
+
+.vps-ip-quality-dashboard__table-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
 
 .vps-ip-quality-dashboard__service-panel .section-heading__actions{justify-content:flex-end;margin-top:0}
 
@@ -400,35 +282,6 @@
 
 .vps-ip-quality-dashboard__service small{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
 
-.vps-ip-quality-dashboard__json-detail{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;color:var(--text-secondary);font-size:var(--type-small-size)}
-
-.vps-ip-quality-dashboard__json-detail summary{cursor:pointer;color:var(--accent);font-weight:600;white-space:nowrap}
-
-.vps-ip-quality-dashboard__json-detail code{display:block;max-width:360px;max-height:160px;overflow:auto;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-1);background:var(--surface-pressed);color:var(--text-secondary);font-family:var(--font-mono);font-size:var(--type-small-size);line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere}
-
-.vps-ip-quality-dashboard__context-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(calc(var(--space-12) * 5),0.68fr);gap:var(--space-4)}
-
-.vps-ip-quality-dashboard__kv-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-2)}
-
-.vps-ip-quality-dashboard__kv-grid div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 12%,transparent)}
-
-.vps-ip-quality-dashboard__kv-grid strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-body-size);line-height:1.25;overflow-wrap:anywhere}
-
-.vps-ip-quality-dashboard__coverage{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-2);background:var(--surface)}
-
-.vps-ip-quality-dashboard__coverage label{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-2);align-items:center;color:var(--text-secondary);font-size:var(--type-small-size)}
-
-.vps-ip-quality-dashboard__coverage label span{grid-column:1 / -1;color:var(--text-muted);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase}
-
-.vps-ip-quality-dashboard__coverage progress{width:100%;height:8px;appearance:none;border:0;border-radius:var(--radius-pill);background:var(--surface-pressed);overflow:hidden}
-
-.vps-ip-quality-dashboard__coverage progress::-webkit-progress-bar{background:var(--surface-pressed);border-radius:var(--radius-pill)}
-
-.vps-ip-quality-dashboard__coverage progress::-webkit-progress-value{background:var(--accent);border-radius:var(--radius-pill)}
-
-.vps-ip-quality-dashboard__coverage progress::-moz-progress-bar{background:var(--accent);border-radius:var(--radius-pill)}
-
-.vps-ip-quality-dashboard__coverage strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-small-size);white-space:nowrap}
 
 .vps-ip-quality-dashboard__history{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:var(--space-2)}
 
@@ -436,7 +289,7 @@
 
 .vps-ip-quality-dashboard__history span{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size)}
 
-.vps-ip-quality-dashboard__history strong{color:var(--text-primary);font-size:var(--type-body-size)}
+.vps-ip-quality-dashboard__history strong,.vps-ip-quality-dashboard__diagnostics strong{color:var(--text-primary);font-size:var(--type-body-size)}
 
 .vps-ip-quality-dashboard__history small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}
 
@@ -444,15 +297,31 @@
 
 .vps-ip-quality-dashboard__history a:hover{text-decoration:underline}
 
+.vps-ip-quality-dashboard__history article[aria-current="page"]{border-color:color-mix(in srgb,var(--accent) 40%,var(--border));background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
+
 .vps-ip-quality-dashboard__diagnostics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-3)}
 
 .vps-ip-quality-dashboard__diagnostics div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 76%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 12%,transparent)}
 
-.vps-ip-quality-dashboard__diagnostics strong{color:var(--text-primary);font-size:var(--type-body-size)}
+
 
 .vps-ip-quality-dashboard__diagnostics span{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45;overflow-wrap:anywhere}
 
 .vps-ip-quality-dashboard__diagnostics em{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size);font-style:normal}
+
+.vps-ip-quality-dashboard__diagnostics-fold{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
+
+.vps-ip-quality-dashboard__diagnostics-fold > summary{cursor:pointer;display:flex;align-items:center;gap:var(--space-2);min-width:0;list-style:revert;color:var(--text-primary)}
+
+.vps-ip-quality-dashboard__diagnostics-fold > summary .section-heading__title{margin:0}
+
+.vps-ip-quality-dashboard__diagnostic-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0;margin-top:var(--space-3)}
+
+.vps-ip-quality-dashboard__diagnostic-list article{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-3);border:var(--border-w) dashed color-mix(in srgb,var(--border-dashed) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 8%,transparent)}
+
+.vps-ip-quality-dashboard__diagnostic-list strong{color:var(--text-primary);font-size:var(--type-small-size)}
+
+.vps-ip-quality-dashboard__diagnostic-list span,.vps-ip-quality-dashboard__diagnostic-list code{color:var(--text-secondary);font-family:var(--font-mono);font-size:var(--type-small-size);line-height:1.45;overflow-wrap:anywhere;white-space:pre-wrap}
 /* partial: legacy-3.css (extracted from index.css; do not hand-edit large rules here) */
 
 /* vps owner migration from legacy-misc.css */
@@ -461,52 +330,25 @@
 .vps-decision-board__coordination-head{grid-template-columns:minmax(0,1fr)}.vps-decision-evidence,
 .vps-decision-board__coordination-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.vps-decision-board__coordination-actions{justify-content:flex-start}}
 
-@media(max-width:1180px){.vps-ip-quality-dashboard__lead{grid-template-columns:minmax(calc(var(--space-12) * 2),0.36fr) minmax(0,1fr)}.vps-ip-quality-dashboard__metrics{grid-column:1 / -1}.vps-ip-quality-dashboard__signal-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.vps-ip-quality-dashboard__service-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.vps-ip-quality-dashboard__context-grid{grid-template-columns:1fr}}
+@media(max-width:1180px){.vps-ip-quality-dashboard__signal-grid,.vps-ip-quality-dashboard__service-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 
-@media(max-width:900px){.vps-ip-quality-summary__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.vps-ip-quality-dashboard__lead,
-.vps-ip-quality-dashboard__reasons,
-.vps-ip-quality-dashboard__kv-grid,
-.vps-ip-quality-dashboard__diagnostics{grid-template-columns:1fr}.vps-ip-quality-dashboard__metrics,
+@media(max-width:900px){.vps-ip-quality-summary__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.vps-ip-quality-dashboard__diagnostics{grid-template-columns:1fr}.vps-ip-quality-dashboard__metrics,
 .vps-ip-quality-dashboard__service-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 @media(max-width:700px){.vps-ip-quality-summary__facts,
-.vps-ip-quality-dashboard__metrics,
 .vps-ip-quality-dashboard__signal-grid,
 .vps-ip-quality-dashboard__service-grid{grid-template-columns:1fr}.vps-ip-quality-dashboard__service-stats{justify-content:flex-start}}
 
-@media (max-width:920px){.vps-monitoring-instance-evidence-strip{grid-template-columns:minmax(0,1fr)}.vps-detail-overview__header,
-.vps-detail-overview__body,
-.vps-single-ledger__body{grid-template-columns:1fr}.vps-detail-overview__actions{justify-content:flex-start}.vps-detail-overview__facts{grid-template-columns:repeat(6,minmax(0,1fr))}.vps-detail-overview__fact,
-.vps-detail-overview__fact:nth-child(2),
-.vps-detail-overview__fact:nth-child(3),
-.vps-detail-overview__fact:nth-child(4),
-.vps-detail-overview__fact:nth-child(5),
-.vps-detail-overview__fact:nth-child(6),
-.vps-detail-overview__fact:nth-child(7),
-.vps-detail-overview__fact:nth-child(8){grid-column:span 3}.vps-single-ledger__columns{grid-template-columns:repeat(2,minmax(0,1fr))}.vps-ip-quality-summary__facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:390px){.vps-ip-quality-dashboard .page__head{flex-wrap:wrap}.vps-ip-quality-dashboard .page__actions{justify-content:flex-start}.vps-ip-quality-dashboard .page-sub,.vps-ip-quality-dashboard__identity dd,.vps-ip-quality-dashboard__service h3{overflow-wrap:anywhere;white-space:normal}.vps-ip-quality-dashboard__identity,.vps-ip-quality-dashboard__reason{grid-template-columns:minmax(0,1fr)}.vps-ip-quality-dashboard__metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.vps-ip-quality-dashboard__history{grid-template-columns:minmax(0,1fr)}.vps-ip-quality-dashboard__diagnostic-list code{max-width:100%}}
 
-@media (max-width:640px){.vps-detail-overview,
-.vps-related-overview,
-.vps-single-ledger,
-.vps-ip-quality-summary{padding:var(--space-3)}.vps-detail-overview__facts,
-.vps-single-ledger__columns,
-.vps-ip-quality-summary__facts{grid-template-columns:1fr}.vps-detail-overview__fact,
-.vps-detail-overview__fact:nth-child(2),
-.vps-detail-overview__fact:nth-child(3),
-.vps-detail-overview__fact:nth-child(4),
-.vps-detail-overview__fact:nth-child(5),
-.vps-detail-overview__fact:nth-child(6),
-.vps-detail-overview__fact:nth-child(7),
-.vps-detail-overview__fact:nth-child(8){grid-column:auto}.vps-detail-overview__actions,
-.vps-related-overview__actions{align-items:center;justify-content:flex-start;width:100%}.vps-detail-overview__actions .btn,
-.vps-detail-overview__actions a.btn,
-.vps-related-overview__actions .btn,
-.vps-related-overview__actions a{width:auto;max-width:100%;justify-content:center}.vps-detail-overview__actions .watchtower-actions-menu{width:auto}.vps-detail-overview__actions .watchtower-actions-menu>summary{display:flex;align-items:center;justify-content:center;min-width:36px}.vps-detail-overview__judgement dl > div,
-.vps-single-ledger__facts > div{grid-template-columns:1fr}.vps-related-overview__item strong,
-.vps-related-overview__item small{white-space:normal}}
+@media (max-width:920px){.vps-detail-overview__header{grid-template-columns:1fr}.vps-detail-overview__actions{justify-content:flex-start}.vps-ip-quality-summary__facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
-@media (max-width:760px){.vps-create-form__row,
-.vps-create-form__row--3col{grid-template-columns:1fr}.vps-create-form__provider-row{align-items:stretch;flex-direction:column}.vps-create-form__provider-link{align-self:flex-start;padding-bottom:0}.vps-create-form__toggle-row{align-items:flex-start;flex-direction:column}}
+@media (max-width:640px){.vps-detail-overview,.vps-ip-quality-summary{padding:var(--space-3)}.vps-detail-overview__facts,.vps-ip-quality-summary__facts{grid-template-columns:1fr}.vps-detail-overview__actions{align-items:center;justify-content:flex-start;width:100%}.vps-detail-overview__actions .btn,.vps-detail-overview__actions a.btn{width:auto;max-width:100%;justify-content:center}.vps-detail-overview__actions .watchtower-actions-menu{width:auto}.vps-detail-overview__actions .watchtower-actions-menu>summary{display:flex;align-items:center;justify-content:center;min-width:36px}}
 
-/* VPS overview composition (records_v2) */
-.vps-overview-page{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}.vps-overview-page__identity-wrap{position:relative}.vps-overview-identity{display:flex;justify-content:space-between;gap:var(--space-4);align-items:flex-start;min-width:0}.vps-overview-identity__lead{min-width:0;display:flex;flex-direction:column;gap:var(--space-1)}.vps-overview-identity__eyebrow{font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);color:var(--text-muted);text-transform:uppercase}.vps-overview-identity__title{font-family:var(--font-sans);font-size:var(--type-h1-size);font-weight:var(--type-h1-weight);line-height:var(--type-h1-leading);color:var(--text-primary);overflow-wrap:anywhere}.vps-overview-identity__meta{display:flex;flex-wrap:wrap;gap:var(--space-2);color:var(--text-secondary);font-size:var(--type-small-size)}.vps-overview-identity__actions{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center}.vps-overview-management{position:absolute;right:0;top:calc(100% + var(--space-2));z-index:4;min-width:180px;background:var(--surface-elevated);border:var(--border-w) solid var(--border);border-radius:var(--radius-2);box-shadow:var(--shadow-soft)}.vps-overview-management__menu{list-style:none;margin:0;padding:var(--space-2)}.vps-overview-management__item{display:block;width:100%;text-align:left;padding:var(--space-2) var(--space-3);border:0;background:transparent;color:var(--text-primary);font:inherit;cursor:pointer;border-radius:var(--radius-1)}.vps-overview-management__item:hover{background:var(--surface)}.vps-overview-anomalies{display:flex;flex-direction:column;gap:var(--space-3)}.vps-overview-anomalies__title{font-size:var(--type-h2-size);font-weight:var(--type-h2-weight);color:var(--text-primary)}.vps-overview-anomalies__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-3)}.vps-overview-anomalies__item{display:flex;justify-content:space-between;gap:var(--space-3);padding:var(--space-3);border:var(--border-w) solid var(--border);border-radius:var(--radius-2);background:var(--surface)}.vps-overview-anomalies__item--critical{border-color:var(--err-bd)}.vps-overview-anomalies__item--warning{border-color:var(--warn-bd,var(--border))}.vps-overview-anomalies__item-title{font-weight:var(--type-h2-weight);color:var(--text-primary)}.vps-overview-anomalies__detail,.vps-overview-anomalies__source{margin-top:var(--space-1);font-size:var(--type-small-size);color:var(--text-secondary)}.vps-overview-anomalies__actions{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:flex-start}.vps-overview-summary__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3)}.vps-overview-summary__cell{padding:var(--space-3);border:var(--border-w) solid var(--border);border-radius:var(--radius-2);background:var(--surface);min-width:0}.vps-overview-summary__label{font-size:var(--type-eyebrow-size);color:var(--text-muted);text-transform:uppercase;letter-spacing:var(--type-eyebrow-tracking)}.vps-overview-summary__status{font-size:var(--type-h2-size);font-weight:var(--type-h2-weight);color:var(--text-primary);margin-top:var(--space-1)}.vps-overview-summary__detail{margin-top:var(--space-1);font-size:var(--type-small-size);color:var(--text-secondary)}.vps-overview-recent__header,.vps-overview-facts h2,.vps-overview-relations h2{display:flex;justify-content:space-between;align-items:baseline;gap:var(--space-3)}.vps-overview-recent__list,.vps-overview-relations__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-2)}.vps-overview-recent__item,.vps-overview-relations__link,.vps-overview-facts__row{padding:var(--space-3);border:var(--border-w) solid var(--border);border-radius:var(--radius-2);background:var(--surface)}.vps-overview-recent__item-main{display:flex;justify-content:space-between;gap:var(--space-3)}.vps-overview-facts__list{margin:0}.vps-overview-facts__row{display:grid;grid-template-columns:minmax(96px,160px) minmax(0,1fr);gap:var(--space-3);margin-bottom:var(--space-2)}.vps-overview-facts__row dt{color:var(--text-muted)}.vps-overview-relations__link{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;text-decoration:none;color:inherit}.vps-overview-relations__count{color:var(--text-secondary);font-variant-numeric:tabular-nums}@media (max-width:390px){.vps-overview-identity{flex-direction:column}.vps-overview-identity__actions{width:100%}.vps-overview-identity__actions .btn{min-height:44px;flex:1 1 auto}.vps-overview-summary__grid{grid-template-columns:repeat(2,minmax(0,1fr))}.vps-overview-anomalies__item{flex-direction:column}.vps-overview-facts__row{grid-template-columns:1fr}}@media (prefers-reduced-motion:reduce){.vps-overview-page{animation:none}}
+@media (max-width:760px){.vps-create-form__row{grid-template-columns:1fr}}
+
+/* Overview layout/type live in VPSDetailWorkspace.css. Keep only menu fallback. */
+.vps-overview-management{position:absolute;right:0;top:calc(100% + var(--space-2));z-index:4;min-width:180px;background:var(--surface-elevated);border:var(--border-w) solid var(--border);border-radius:var(--radius-3);box-shadow:var(--shadow-overlay)}
+.vps-overview-management__menu{list-style:none;margin:0;padding:var(--space-2)}
+.vps-overview-management__item{display:block;width:100%;text-align:left;padding:var(--space-2) var(--space-3);border:0;background:transparent;color:var(--text-primary);font:inherit;cursor:pointer;border-radius:var(--radius-1);min-height:var(--control-min-height)}
+.vps-overview-management__item:hover{background:var(--row-bg-hover)}

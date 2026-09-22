@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { EventsPage } from './EventsPage'
@@ -100,17 +100,21 @@ describe('EventsPage', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows loading state then renders table with events', async () => {
+  it('shows loading state then renders notice rows with events', async () => {
     vi.stubGlobal('fetch', setupFetchMock({}))
     renderEventsPage()
 
+    expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument()
     expect(screen.getByText('正在加载事件…')).toBeInTheDocument()
 
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
+      expect(screen.getByText('监控实例连接超时')).toBeInTheDocument(),
     )
-    expect(screen.getByText('监控实例连接超时')).toBeInTheDocument()
     expect(screen.getByText('证书即将过期')).toBeInTheDocument()
+    expect(screen.getAllByText('异常开始').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('异常升级').length).toBeGreaterThan(0)
+    expect(screen.queryByText('新增异常 (24h)')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('全部时间')
   })
 
   it('forwards object_id from the URL into the events query', async () => {
@@ -155,6 +159,8 @@ describe('EventsPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: '事件不可用' })).toBeInTheDocument(),
     )
+    expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '重试' })).toBeInTheDocument()
   })
 
   it('renders empty state when no events', async () => {
@@ -162,20 +168,19 @@ describe('EventsPage', () => {
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByText('最近没有状态变更事件')).toBeInTheDocument(),
+      expect(screen.getByText('没有状态变更事件')).toBeInTheDocument(),
     )
   })
 
-  it('displays hero stats from dashboard API', async () => {
+  it('does not stack dashboard stats above the event stream', async () => {
     vi.stubGlobal('fetch', setupFetchMock({}))
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByText('新增异常 (24h)')).toBeInTheDocument(),
+      expect(screen.getByText('监控实例连接超时')).toBeInTheDocument(),
     )
-    expect(screen.getByText('3')).toBeInTheDocument()
-    expect(screen.getByText('已恢复 (24h)')).toBeInTheDocument()
-    expect(screen.getByText('1')).toBeInTheDocument()
+    expect(screen.queryByText('新增异常 (24h)')).not.toBeInTheDocument()
+    expect(screen.queryByText('已恢复 (24h)')).not.toBeInTheDocument()
   })
 
   it('resolves object names from monitoring and targets', async () => {
@@ -188,18 +193,17 @@ describe('EventsPage', () => {
     expect(screen.getByText(/api\.example\.com/)).toBeInTheDocument()
   })
 
-  it('renders table columns', async () => {
+  it('renders Chinese incident classes instead of snake_case', async () => {
     vi.stubGlobal('fetch', setupFetchMock({}))
     renderEventsPage()
 
     await waitFor(() =>
-      expect(screen.getByRole('columnheader', { name: '时间' })).toBeInTheDocument(),
+      expect(screen.getByText('监控实例连接超时')).toBeInTheDocument(),
     )
-    expect(screen.getByRole('columnheader', { name: '严重度' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '事件类型' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '异常类别' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '摘要' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '对象' })).toBeInTheDocument()
+    expect(screen.getAllByText('连通性').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('证书').length).toBeGreaterThan(0)
+    expect(screen.queryByText('connectivity')).not.toBeInTheDocument()
+    expect(screen.queryByText('certificate')).not.toBeInTheDocument()
   })
 
   it('filters locally by incident_class', async () => {
@@ -241,7 +245,74 @@ describe('EventsPage', () => {
     const drawer = await screen.findByRole('dialog', { name: '事件高级筛选' })
     const timeRange = within(drawer).getByRole('group', { name: '事件时间范围' })
     expect(timeRange).toBeInTheDocument()
-    expect(within(timeRange).getByRole('button', { name: '自定义' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(timeRange).getByRole('button', { name: '全部时间' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(timeRange).queryByRole('tab')).not.toBeInTheDocument()
+  })
+
+  it('folds a dateless custom range back to all time and omits time_range from the URL', async () => {
+    const fetchMock = setupFetchMock({})
+    vi.stubGlobal('fetch', fetchMock)
+    function SearchProbe() {
+      const location = useLocation()
+      return <output aria-label="当前查询参数">{location.search}</output>
+    }
+    render(
+      <MemoryRouter initialEntries={['/events']}>
+        <Routes>
+          <Route
+            path="/events"
+            element={(
+              <>
+                <EventsPage />
+                <SearchProbe />
+              </>
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '高级筛选' }))
+    const drawer = await screen.findByRole('dialog', { name: '事件高级筛选' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '自定义' }))
+    fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: '事件高级筛选' })).not.toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('全部时间')
+    expect(screen.getByLabelText('当前查询参数')).toHaveTextContent('')
+    await waitFor(() => {
+      const lastEventsCall = [...fetchMock.mock.calls].reverse().find((call) => String(call[0]).startsWith('/api/events'))
+      expect(lastEventsCall).toBeTruthy()
+      const url = String(lastEventsCall?.[0])
+      expect(url).not.toContain('created_from')
+      expect(url).not.toContain('created_to')
+      expect(url).not.toContain('time_range')
+    })
+  })
+
+  it('shows a main-bar chip when opened from a maintenance-only dashboard link', async () => {
+    vi.stubGlobal('fetch', setupFetchMock({}))
+    renderEventsPage('/events?maintenance_only=1')
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: '移除筛选 仅看维护事件' })).toBeInTheDocument()
+  })
+
+  it('returns the events time filter to all time when the placeholder option is chosen', async () => {
+    vi.stubGlobal('fetch', setupFetchMock({}))
+    renderEventsPage()
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: '事件流' })).toBeInTheDocument(),
+    )
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '24h' } })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('近 24 小时')
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '' } })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('全部时间')
   })
 })

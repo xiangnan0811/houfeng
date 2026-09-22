@@ -77,7 +77,7 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 			})
 		} else {
 			health := strings.TrimSpace(snapshot.MonitoringHealth)
-			if health != "" && health != "正常" {
+			if isAdverseMonitoringHealth(health) {
 				anomalies = append(anomalies, Anomaly{
 					RuleID:   RuleMonitoringHealthAbnormal,
 					Severity: healthSeverity(health),
@@ -261,6 +261,15 @@ func healthSeverity(health string) AnomalySeverity {
 		return SeverityNotice
 	default:
 		return SeverityWarning
+	}
+}
+
+func isAdverseMonitoringHealth(health string) bool {
+	switch health {
+	case "关注", "告警", "严重":
+		return true
+	default:
+		return false
 	}
 }
 

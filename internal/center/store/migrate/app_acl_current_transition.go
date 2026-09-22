@@ -49,7 +49,7 @@ type appACLCurrentTransition struct {
 
 var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{{
 	predecessorLastMigration:        "0062_create_vps_create_idempotency.sql",
-	successorMigrations:             []string{"0063_tune_heartbeat_incident_policy.sql"},
+	successorMigrations:             []string{"0063_tune_heartbeat_incident_policy.sql", "0064_add_network_rates_valid.sql"},
 	privilegesUnchanged:             true,
 	predecessorMigrationGolden:      appACLCurrentV0794MigrationGolden,
 	predecessorPrivilegeGolden:      appACLCurrentV0794PrivilegeGolden,

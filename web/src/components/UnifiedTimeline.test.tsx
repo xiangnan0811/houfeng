@@ -94,14 +94,37 @@ describe('UnifiedTimeline', () => {
       '/evidence/evs_001',
     )
     expect(screen.getByText(/覆盖 full/)).toBeInTheDocument()
-    expect(screen.getByText(/command_audit：stale/)).toBeInTheDocument()
+    expect(screen.getByText(/命令审计：过期（lagging）/)).toBeInTheDocument()
     expect(document.querySelector('.unified-timeline__mark--human')).not.toBeNull()
     expect(document.querySelector('.unified-timeline__mark--system')).not.toBeNull()
     expect(document.querySelector('.unified-timeline__mark--evidence')).not.toBeNull()
   })
 
+  it('labels a human item without revision as 查看记录', () => {
+    render(
+      <MemoryRouter>
+        <UnifiedTimeline
+          items={[item({
+            activity_id: 'act_record_only',
+            event_kind: 'record_created',
+            source_kind: 'record_domain',
+            presentation: { version: 1, title: '首条记录' },
+            record_id: 'rec_001',
+          })]}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('link', { name: '查看记录' })).toHaveAttribute('href', '/records/rec_001')
+    expect(screen.queryByRole('link', { name: '查看修订' })).not.toBeInTheDocument()
+  })
+
   it('renders an explicit empty state', () => {
-    render(<UnifiedTimeline items={[]} emptyTitle="主体尚无活动" />)
+    render(
+      <MemoryRouter>
+        <UnifiedTimeline items={[]} emptyTitle="主体尚无活动" />
+      </MemoryRouter>,
+    )
     expect(screen.getByText('主体尚无活动')).toBeInTheDocument()
   })
 })

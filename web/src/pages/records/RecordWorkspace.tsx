@@ -1,11 +1,12 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { RecordActionPanel } from '../../components/RecordActionPanel'
 import { RecordCommentThread } from '../../components/RecordCommentThread'
 import { RecordRevisionCollaborationControls } from '../../components/RecordRevisionCollaborationControls'
 import { RecordWatchControl } from '../../components/RecordWatchControl'
 import { PageState } from '../../components/PageState'
+import { DetailSection } from '../../components/DetailSection'
 import { Button, Input, Select } from '../../components/atoms'
 import { useAuth } from '../../lib/auth-context'
 import {
@@ -43,7 +44,9 @@ import { RecordSaveImpact } from './editor/RecordSaveImpact'
 import { RevisionDiff } from './editor/RevisionDiff'
 import { useRecordDraft, type RecordWorkspaceMode } from './hooks/useRecordDraft'
 import { comparisonEntryHref, comparisonSubjectsFromSources } from './compare/comparisonQueryState'
-import { labelOptions, RECORD_TYPE_LABELS } from './recordLabels'
+import { parseSubjectActivityRoute, type SubjectRouteRef } from './activity/activityQueryState'
+import { returnVPSIdFromNavigationState, withReturnVPSQuery } from '../monitoring-detail/monitoringDetailHelpers'
+import { labelOptions, RECORD_SUBJECT_KIND_LABELS, RECORD_TYPE_LABELS } from './recordLabels'
 import {
   applyRecordTypeChange,
   BUSINESS_STATUS_LABELS,
@@ -53,6 +56,9 @@ import {
   templateMarkdownForType,
   typeSupportsBusinessStatus,
 } from './recordWorkspaceModel'
+import { recordSubjectPrefillFromSearchParams } from './searchFilterModel'
+import { draftBufferRecordId } from './draftBuffer'
+
 
 type RecordWorkspaceProps = {
   mode: RecordWorkspaceMode
@@ -60,15 +66,60 @@ type RecordWorkspaceProps = {
   revisionId?: string
 }
 
-export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceProps) {
+function withSubjectReturnQuery(path: string, subjectReturn: SubjectRouteRef | null): string {
+  if (!subjectReturn) return path
+  const params = new URLSearchParams()
+  params.set('return_to', `${subjectReturn.basePath}/${subjectReturn.view}`)
+  return `${path}?${params.toString()}`
+}
+
+export function RecordWorkspace(props: RecordWorkspaceProps) {
+  const [searchParams] = useSearchParams()
+  const seedKey = props.mode !== 'new'
+    ? ''
+    : (() => {
+      const prefill = recordSubjectPrefillFromSearchParams(searchParams)
+      return prefill ? `${prefill.kind}:${prefill.role}:${prefill.source_id}` : ''
+    })()
+  return (
+    <RecordWorkspaceSession
+      key={`${props.mode}:${props.recordId ?? ''}:${props.revisionId ?? ''}:${seedKey || draftBufferRecordId(props.recordId)}`}
+      {...props}
+    />
+  )
+}
+
+function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceProps) {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
   const userId = user?.user_id ?? ''
+  const seedSubjects = useMemo(() => {
+    if (mode !== 'new') return undefined
+    const prefill = recordSubjectPrefillFromSearchParams(searchParams)
+    if (!prefill) return undefined
+    return [{
+      registry_version: 1,
+      kind: prefill.kind,
+      role: prefill.role,
+      source_id: prefill.source_id,
+      primary: prefill.primary,
+    }]
+  }, [mode, searchParams])
+  const subjectReturn = useMemo(() => {
+    const raw = searchParams.get('return_to')?.trim() ?? ''
+    if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('?') || raw.includes('#') || raw.includes('\\')) {
+      return null
+    }
+    return parseSubjectActivityRoute(raw)
+  }, [searchParams])
   const { state, commands } = useRecordDraft({
     mode,
     userId,
     ...(recordId ? { recordId } : {}),
     ...(revisionId ? { revisionId } : {}),
+    ...(seedSubjects ? { seedSubjects } : {}),
   })
   const [layout, setLayout] = useState<'edit' | 'split' | 'preview'>('split')
   const [materialsOpen, setMaterialsOpen] = useState(false)
@@ -86,10 +137,14 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
 
   const members = (() => {
     const options = new Map<string, string>()
-    if (user) options.set(user.user_id, user.display_name || user.username)
-    if (state.payload.owner_id) options.set(state.payload.owner_id, state.payload.owner_id)
+    const remember = (id: string, label: string) => {
+      const current = options.get(id)
+      if (!current || current === id) options.set(id, label || id)
+    }
+    if (user) remember(user.user_id, user.display_name || user.username)
+    if (state.payload.owner_id) remember(state.payload.owner_id, state.payload.owner_id)
     for (const participant of state.record?.current.participants ?? state.revision?.participants ?? []) {
-      options.set(participant.participant_id, participant.display_name || participant.participant_id)
+      remember(participant.participant_id, participant.display_name || participant.participant_id)
     }
     return [...options.entries()].map(([id, label]) => ({ id, label }))
   })()
@@ -138,15 +193,21 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
 
   useEffect(() => {
     if (mode === 'new' && state.publishedRecordId) {
-      navigate(`/records/${state.publishedRecordId}`, { replace: true })
+      navigate(withSubjectReturnQuery(`/records/${state.publishedRecordId}`, subjectReturn), {
+        replace: true,
+        state: location.state,
+      })
     }
-  }, [mode, navigate, state.publishedRecordId])
+  }, [location.state, mode, navigate, state.publishedRecordId, subjectReturn])
 
   useEffect(() => {
     if (mode === 'revision' && state.restoredToRecordId) {
-      navigate(`/records/${state.restoredToRecordId}`, { replace: true })
+      navigate(withSubjectReturnQuery(`/records/${state.restoredToRecordId}`, subjectReturn), {
+        replace: true,
+        state: location.state,
+      })
     }
-  }, [mode, navigate, state.restoredToRecordId])
+  }, [location.state, mode, navigate, state.restoredToRecordId, subjectReturn])
 
   if (state.status === 'loading') return <PageState kind="loading" title="正在读取运维记录" />
   if (state.status === 'empty') return <PageState kind="empty" title="记录不存在" description="没有可打开的记录。" />
@@ -163,21 +224,36 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
     : undefined
 
   return (
-    <div className="page-stack record-workspace animate-in">
-      <div className="page-header">
+    <div className="page record-workspace">
+      <header className="page__head">
         <div>
-          <div className="page-eyebrow">RECORDS · MARKDOWN</div>
-          <h1 className="page-title">{state.payload.title || title}</h1>
-          <p className="page-subtitle">人写的运维记录与系统活动分离；正式保存写入新的修订。</p>
-          <p role="status">
-            {state.saving ? '正在保存草稿' : state.dirty ? '本地未同步' : state.draft ? '草稿已同步' : '尚未创建草稿'}
+          {mode === 'revision' ? <p className="page-sub">只读历史修订</p> : null}
+          <h1 className="page__title">{state.payload.title || title}</h1>
+          <p className="page-sub" role="status">
+            {mode === 'revision'
+              ? '历史修订只读，恢复会生成新修订而不是改写原文。'
+              : state.saving ? '正在保存草稿' : state.dirty ? '本地未同步' : state.draft ? '草稿已同步' : '尚未创建草稿'}
             {state.message ? ` · ${state.message}` : ''}
           </p>
+          {subjectReturn ? (
+            <p className="page-sub">
+              <Link
+                className="text-link"
+                to={withReturnVPSQuery(
+                  `${subjectReturn.basePath}/${subjectReturn.view}`,
+                  returnVPSIdFromNavigationState(location.state),
+                )}
+                state={subjectReturn.kind === 'target' ? undefined : location.state}
+              >
+                返回主体
+              </Link>
+            </p>
+          ) : null}
         </div>
-        <div className="page-form-actions">
-          {recordId ? <Link className="btn sm secondary" to={`/records/${recordId}`}>阅读</Link> : null}
+        <div className="page__actions">
+          {recordId ? <Link className="btn sm secondary" to={withSubjectReturnQuery(`/records/${recordId}`, subjectReturn)} state={location.state}>阅读</Link> : null}
           {recordId && mode === 'read' && state.record?.capabilities.update ? (
-            <Link className="btn sm secondary" to={`/records/${recordId}/edit`}>编辑</Link>
+            <Link className="btn sm secondary" to={withSubjectReturnQuery(`/records/${recordId}/edit`, subjectReturn)} state={location.state}>编辑</Link>
           ) : null}
           {editable ? (
             <>
@@ -189,7 +265,7 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
             <Link className="btn lg secondary" to={comparisonEntryHref({
               subjects: comparisonSubjectsFromSources(state.payload.subjects),
               items: [{ record_id: recordId, revision_id: revisionId }],
-            })}>
+            })} state={location.state}>
               横向比较
             </Link>
           ) : null}
@@ -197,7 +273,7 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
             <Button size="lg" disabled={state.publishing} onClick={() => void commands.restore(restoreReason)}>恢复为新修订</Button>
           ) : null}
         </div>
-      </div>
+      </header>
 
       {editable ? (
         <form className="vps-create-form" onSubmit={(event) => event.preventDefault()}>
@@ -265,10 +341,43 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
           />
         </form>
       ) : (
-        <section className="card">
-          <p>类型 {state.payload.record_type} · 影响 {state.payload.impact_level}</p>
-          <p>主体 {subject?.source_id || '未指定'}</p>
-        </section>
+        <DetailSection
+          eyebrow={mode === 'revision' ? '只读历史修订' : '运维记录'}
+          title="记录摘要"
+        >
+          <dl className="metadata-list record-workspace__facts">
+            <div>
+              <dt>类型</dt>
+              <dd>{RECORD_TYPE_LABELS[state.payload.record_type]}</dd>
+            </div>
+            <div>
+              <dt>影响级别</dt>
+              <dd>{state.payload.impact_level || '—'}</dd>
+            </div>
+            <div>
+              <dt>主体</dt>
+              <dd>
+                {subject
+                  ? `${RECORD_SUBJECT_KIND_LABELS[subject.kind]} · ${subject.source_id}`
+                  : '未指定'}
+              </dd>
+            </div>
+          </dl>
+          {evidenceIds.length > 0 ? (
+            <p className="record-workspace__evidence-links">
+              {evidenceIds.map((id) => (
+                <Link
+                  key={id}
+                  className="text-link"
+                  to={`/evidence/${encodeURIComponent(id)}`}
+                  state={location.state}
+                >
+                  查看证据 {id}
+                </Link>
+              ))}
+            </p>
+          ) : null}
+        </DetailSection>
       )}
 
       {editable ? (
@@ -279,7 +388,7 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
         </div>
       ) : null}
 
-      <div className="archive-detail-two-col">
+      <div className="archive-detail-two-col record-workspace__body">
         {editable && layout !== 'preview' ? (
           <MarkdownSourceEditor
             value={state.payload.body_markdown}
@@ -303,7 +412,7 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
         ) : null}
       </div>
 
-      <div className="metadata-list">
+      <div className="page-stack record-workspace__aside">
         <RecordOutline source={state.payload.body_markdown} model={previewModel} />
         {editable ? <RecordSaveImpact baseline={state.record?.current ?? null} payload={state.payload} /> : null}
         {mode === 'revision' && state.revision && state.record ? (
@@ -312,26 +421,32 @@ export function RecordWorkspace({ mode, recordId, revisionId }: RecordWorkspaceP
         {mode === 'revision' ? (
           <Input label="恢复原因" value={restoreReason} onChange={(event) => setRestoreReason(event.target.value)} />
         ) : null}
-        {(mode === 'read' || mode === 'revision') && recordId ? (
-          <Suspense fallback={<section className="card" aria-label="记录导出">正在加载导出</section>}>
-            <RecordExportPanel
-              recordId={recordId}
-              {...(revisionId ? { revisionId } : {})}
-              snapshotIds={evidenceIds}
-            />
-          </Suspense>
-        ) : null}
-        {mode === 'read' || mode === 'revision' || mode === 'new' ? (
-          <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
-            <RecordImportPanel />
-          </Suspense>
-        ) : null}
         <div className="page-form-actions">
           <Button size="lg" variant="secondary" onClick={() => setMaterialsOpen(true)}>材料与引用</Button>
           {editable && recordId && mode !== 'new' ? (
             <Button size="lg" variant="ghost" onClick={() => setPromoteOpen(true)}>提升勾选为行动</Button>
           ) : null}
         </div>
+        {(mode === 'read' || mode === 'revision') && recordId ? (
+          <details className="record-workspace__tool">
+            <summary>导出</summary>
+            <Suspense fallback={<section className="card" aria-label="记录导出">正在加载导出</section>}>
+              <RecordExportPanel
+                recordId={recordId}
+                {...(revisionId ? { revisionId } : {})}
+                snapshotIds={evidenceIds}
+              />
+            </Suspense>
+          </details>
+        ) : null}
+        {mode === 'read' || mode === 'revision' || mode === 'new' ? (
+          <details className="record-workspace__tool">
+            <summary>导入</summary>
+            <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
+              <RecordImportPanel />
+            </Suspense>
+          </details>
+        ) : null}
       </div>
 
       {recordId && mode !== 'new' ? (

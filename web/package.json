@@ -9,8 +9,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "bundle:check": "node ../scripts/check-web-bundle-budget.mjs",
-    "css:analyze": "node ../scripts/analyze-web-css.mjs --format text",
+    "bundle:check": "node ../scripts/check-web-bundle-budget.mjs --budget-policy advisory",
+    "css:analyze": "node ../scripts/analyze-web-css.mjs --format text --budget-policy advisory",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",

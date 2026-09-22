@@ -142,7 +142,9 @@ func verifyCurrentAppACLCurrentTransitionInTx(
 }
 
 func validateHeartbeatAppACLCurrentTransition(transition appACLCurrentTransition) error {
-	if len(transition.successor.names) != 1 || transition.successor.names[0] != "0063_tune_heartbeat_incident_policy.sql" ||
+	if len(transition.successor.names) != 2 ||
+		transition.successor.names[0] != "0063_tune_heartbeat_incident_policy.sql" ||
+		transition.successor.names[1] != "0064_add_network_rates_valid.sql" ||
 		len(transition.predecessor.sources.names) != 63 ||
 		transition.predecessor.sources.names[62] != "0062_create_vps_create_idempotency.sql" ||
 		transition.predecessorManifestDigest != appACLCurrentV0794ManifestDigestGolden {

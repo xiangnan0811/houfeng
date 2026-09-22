@@ -309,10 +309,9 @@ test('VPS 概览 healthy surface omits anomaly chrome', async ({ api, page }) =>
   await page.goto('/vps/vps_001')
   await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
   await expect(page.getByText('需要关注')).toHaveCount(0)
-  await expect(page.getByText('动作：无')).toHaveCount(0)
   await expect(page.getByRole('link', { name: '新建记录' })).toBeVisible()
-  await expect(page.getByRole('link', { name: '时间线' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '管理' })).toBeVisible()
+  await expect(page.getByRole('link', { name: '活动', exact: true })).toHaveAttribute('href', '/vps/vps_001/activity')
+  await expect(page.getByRole('button', { name: '管理', exact: true })).toBeVisible()
 })
 
 test('VPS 概览 anomaly surface inserts attention before summary', async ({ api, page }) => {
@@ -334,22 +333,21 @@ test('VPS 概览 anomaly surface inserts attention before summary', async ({ api
   await expect(page.getByRole('button', { name: '处理续费' })).toBeVisible()
 })
 
-test('VPS 概览 keeps partial freshness local and retries only the full overview', async ({ api, page }) => {
+test('VPS 概览 keeps independently loaded resources available during partial overview failure', async ({ api, page }) => {
   const partial = vpsOverviewPartialFixture()
   api.useProfile(vpsOverviewProfile({ overview: partial }))
   await page.goto('/vps/vps_001')
 
   await expect(page.getByRole('heading', { name: 'Tokyo Edge' })).toBeVisible()
-  await expect(page.getByLabel('IP 质量新鲜度')).toContainText('数据陈旧')
+  await expect(page.getByRole('rowgroup', { name: 'IP 质量', exact: true })).toContainText('数据陈旧')
   await expect(page.getByLabel('续费新鲜度')).toContainText('暂不可用')
-  await expect(page.getByLabel('服务新鲜度')).toContainText('暂不可用')
-  await expect(page.getByText('最近活动暂不可用，无法确认是否为空。')).toBeVisible()
-  const serviceCard = page.locator('.vps-overview-relations__item').filter({ hasText: '服务' })
-  await expect(serviceCard.locator('.vps-overview-relations__count')).toHaveText('—')
+  await expect(page.getByText('Overview Gateway', { exact: true })).toBeVisible()
+  await expect(page.getByText('edge.example.com', { exact: true })).toBeVisible()
 
   const refreshGate = controlledPromise()
   api.useProfile(vpsOverviewProfile({ overview: partial, overviewWaitFor: refreshGate.promise }))
-  const retry = page.getByRole('button', { name: '重试 IP 质量' })
+  const retry = page.getByRole('button', { name: '刷新 概览 IP 质量' })
+
   await retry.focus()
   await page.keyboard.press('Enter')
 

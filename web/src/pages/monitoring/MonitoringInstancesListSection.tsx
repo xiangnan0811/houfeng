@@ -1,105 +1,55 @@
 import { Fragment } from 'react'
-import { isInteractiveRowTarget, type DataTableColumn, type DataTableSortState } from '../../components/atoms'
+import { ColumnResizeHandle, isInteractiveRowTarget, type DataTableColumn, type DataTableSortState } from '../../components/atoms'
+import { useColumnWidths } from '../../lib/useColumnWidths'
 import { PageState } from '../../components/PageState'
 import type { MonitoringInstanceRecord } from '../../lib/types'
-import { MonitoringInstancesBatchPanel } from './MonitoringInstancesBatchPanel'
-import type { MonitoringInstanceListView } from './types'
+import type { MonitoringInstanceQuickView } from './types'
+const CHECKBOX_WIDTH = 40
+const RESIZABLE_DATA_DEFAULTS = [180, 150, 160, 100, 140] as const
+const STORAGE_KEY = 'monitoring-data-cols-v4'
+
 
 type MonitoringInstancesListSectionProps = {
-  monitoringInstanceListView: MonitoringInstanceListView
+  quickView: MonitoringInstanceQuickView
   baseMonitoringInstances: MonitoringInstanceRecord[]
   monitoring: MonitoringInstanceRecord[]
-  batchEligibleMonitoring: MonitoringInstanceRecord[]
   columns: DataTableColumn<MonitoringInstanceRecord>[]
-  showTrends: boolean
   sortState: DataTableSortState | null
   hasActiveFilters: boolean
-  firstRunEligible: boolean
-  batchPanelVisible: boolean
-  selectAll: boolean
-  batchSubmitting: boolean
-  batchError: string | null
-  commandOpen: boolean
-  commandID: string
-  pendingBatchAction: string | null
+  hasSearchQuery: boolean
+  navigationLocked: boolean
+  refreshing: boolean
   onClearAllFilters: () => void
-  onSelectAllChange: (checked: boolean) => void
-  onBatchAction: (action: string) => void
-  onCommandOpenChange: (open: boolean) => void
-  onCommandIDChange: (commandID: string) => void
-  onExecuteBatchCommand: () => void
-  onConfirmBatchPause: () => void
-  onCancelBatchPause: () => void
   onSortChange: (key: string) => void
   onRowClick: (monitoringInstance: MonitoringInstanceRecord) => void
   onOpenVPSInventory: () => void
 }
 
 export function MonitoringInstancesListSection({
-  monitoringInstanceListView,
+  quickView,
   baseMonitoringInstances,
   monitoring,
-  batchEligibleMonitoring,
   columns,
-  showTrends,
   sortState,
   hasActiveFilters,
-  firstRunEligible,
-  batchPanelVisible,
-  selectAll,
-  batchSubmitting,
-  batchError,
-  commandOpen,
-  commandID,
-  pendingBatchAction,
+  hasSearchQuery,
+  navigationLocked,
+  refreshing,
   onClearAllFilters,
-  onSelectAllChange,
-  onBatchAction,
-  onCommandOpenChange,
-  onCommandIDChange,
-  onExecuteBatchCommand,
-  onConfirmBatchPause,
-  onCancelBatchPause,
   onSortChange,
   onRowClick,
   onOpenVPSInventory,
 }: MonitoringInstancesListSectionProps) {
-  const firstRunEmpty =
-    firstRunEligible &&
-    baseMonitoringInstances.length === 0 &&
-    !hasActiveFilters &&
-    monitoringInstanceListView === 'all'
-  const bindingConflictEmpty =
-    baseMonitoringInstances.length === 0 && !hasActiveFilters && monitoringInstanceListView === 'binding-conflict'
-  const runtimeAttentionEmpty =
-    baseMonitoringInstances.length === 0 && !hasActiveFilters && monitoringInstanceListView === 'runtime-attention'
+  const scopedEmpty = !hasActiveFilters && !hasSearchQuery && baseMonitoringInstances.length === 0
+  const firstRunEmpty = scopedEmpty && quickView === 'all'
+  const bindingConflictEmpty = scopedEmpty && quickView === 'binding-conflict'
+  const runtimeAttentionEmpty = scopedEmpty && quickView === 'runtime-attention'
+  const abnormalEmpty = scopedEmpty && quickView === 'abnormal'
+  const onboardingEmpty = scopedEmpty && quickView === 'onboarding'
 
-  const visibleColumns = showTrends
-    ? columns
-    : columns.filter((column) => column.key !== 'trends')
-
+  const { widths: resizableWidths, startResize } = useColumnWidths(STORAGE_KEY, RESIZABLE_DATA_DEFAULTS)
   return (
     <>
-      {firstRunEmpty || !batchPanelVisible ? null : (
-        <MonitoringInstancesBatchPanel
-          hasActiveFilters={hasActiveFilters}
-          filteredMonitoringInstanceCount={batchEligibleMonitoring.length}
-          selectAll={selectAll}
-          batchSubmitting={batchSubmitting}
-          batchError={batchError}
-          commandOpen={commandOpen}
-          commandID={commandID}
-          pendingBatchAction={pendingBatchAction}
-          onSelectAllChange={onSelectAllChange}
-          onBatchAction={onBatchAction}
-          onCommandOpenChange={onCommandOpenChange}
-          onCommandIDChange={onCommandIDChange}
-          onExecuteBatchCommand={onExecuteBatchCommand}
-          onConfirmBatchPause={onConfirmBatchPause}
-          onCancelBatchPause={onCancelBatchPause}
-        />
-      )}
-
       {firstRunEmpty ? (
         <PageState
           kind="empty"
@@ -126,6 +76,20 @@ export function MonitoringInstancesListSection({
           title="没有维护或暂停监控实例"
           description="当前没有维护中或暂停监控的监控实例。"
         />
+      ) : abnormalEmpty ? (
+        <PageState
+          kind="empty"
+          surface="empty"
+          title="没有已知异常监控实例"
+          description="当前没有健康为关注、告警或严重的监控实例。"
+        />
+      ) : onboardingEmpty ? (
+        <PageState
+          kind="empty"
+          surface="empty"
+          title="没有待接入监控实例"
+          description="当前没有待接入或绑定待处理的监控实例。"
+        />
       ) : monitoring.length === 0 ? (
         <PageState
           kind="empty"
@@ -139,19 +103,26 @@ export function MonitoringInstancesListSection({
           }
         />
       ) : (
-        <div className="page-panel page-panel--scroll-x monitoring-table-panel">
-          <table className="table animate-in d2 monitoring-table" role="table">
+        <div
+          className="monitoring-page__table-scroll"
+          role="region"
+          aria-label="监控实例表"
+          tabIndex={0}
+          aria-busy={refreshing || undefined}
+        >
+          <table className="table table--resizable monitoring-table" role="table">
             <colgroup>
-              {visibleColumns.map((col) => (
-                <col
-                  key={col.key}
-                  width={col.width || undefined}
-                />
-              ))}
+              <col width={CHECKBOX_WIDTH} />
+              <col width={resizableWidths[0] ?? RESIZABLE_DATA_DEFAULTS[0]} />
+              <col width={resizableWidths[1] ?? RESIZABLE_DATA_DEFAULTS[1]} />
+              <col width={resizableWidths[2] ?? RESIZABLE_DATA_DEFAULTS[2]} />
+              <col width={resizableWidths[3] ?? RESIZABLE_DATA_DEFAULTS[3]} />
+              <col width={resizableWidths[4] ?? RESIZABLE_DATA_DEFAULTS[4]} />
+              <col />
             </colgroup>
             <thead>
               <tr role="row">
-                {visibleColumns.map((col) => {
+                {columns.map((col, index) => {
                   const isSortable = col.sortable && onSortChange
                   const sortKey = col.sortKey ?? col.key
                   const isActive = sortState?.key === sortKey
@@ -168,6 +139,7 @@ export function MonitoringInstancesListSection({
                           type="button"
                           className="data-table__sort-btn"
                           onClick={() => onSortChange(sortKey)}
+                          disabled={navigationLocked}
                         >
                           {col.label}
                           <span className="data-table__sort-indicator" aria-hidden="true">
@@ -177,6 +149,9 @@ export function MonitoringInstancesListSection({
                       ) : (
                         col.label
                       )}
+                      {index >= 1 && index <= 5 ? (
+                        <ColumnResizeHandle onDragStart={(clientX) => startResize(index - 1, clientX)} />
+                      ) : null}
                     </th>
                   )
                 })}
@@ -201,7 +176,7 @@ export function MonitoringInstancesListSection({
                       }
                     }}
                   >
-                    {visibleColumns.map((col) => (
+                    {columns.map((col) => (
                       <td
                         key={col.key}
                         role="cell"
@@ -217,7 +192,6 @@ export function MonitoringInstancesListSection({
           </table>
         </div>
       )}
-
     </>
   )
 }

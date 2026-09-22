@@ -1,128 +1,164 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
-import { Badge, Button, DataTable, MonoDigits, type DataTableColumn } from '../../components/atoms'
-import { formatOptional } from '../../lib/format'
-import {
-  ASSET_DOMAIN_STATUS_LABELS,
-  type AssetDomainRecord,
-} from '../../lib/types'
-import { AssetLabels } from '../assetPageBadges'
+import { Button, MonoDigits } from '../../components/atoms'
+import { formatDate } from '../../lib/format'
+import type { AssetDomainRecord, AssetServiceRecord } from '../../lib/types'
+import { domainResourceName, domainResourceStatus, serviceResourceName } from './vpsDetailResourcePresentation'
 
 type VPSDomainsSectionProps = {
   domains: AssetDomainRecord[]
+  services: AssetServiceRecord[]
   error: string | null
   notice: string | null
   readOnly?: boolean
   onCreate: () => void
+  onRetryServices?: (() => void) | undefined
 }
 
 export function VPSDomainsSection({
   domains,
+  services,
   error,
   notice,
   readOnly = false,
   onCreate,
+  onRetryServices,
 }: VPSDomainsSectionProps) {
-  const domainColumns: DataTableColumn<AssetDomainRecord>[] = [
-    {
-      key: 'domain',
-      label: '域名',
-      render: (domain) => (
-        <div className="asset-table__identity">
-          <strong>{domain.domain_name}</strong>
-          <span>{domain.domain_id}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'status',
-      label: '状态 / HTTPS',
-      render: (domain) => (
-        <span className="asset-status-stack">
-          <Badge variant="count" tone={domain.status === 'active' ? 'normal' : 'neutral'}>
-            {ASSET_DOMAIN_STATUS_LABELS[domain.status]}
-          </Badge>
-          <Badge variant="info" tone={domain.https_enabled ? 'normal' : 'neutral'}>
-            {domain.https_enabled ? 'HTTPS' : '未记录 HTTPS'}
-          </Badge>
-        </span>
-      ),
-    },
-    {
-      key: 'purpose',
-      label: '用途 / 注册商',
-      render: (domain) => (
-        <div className="asset-table__stack">
-          <strong>{formatOptional(domain.purpose)}</strong>
-          <span>{formatOptional(domain.registrar)}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'expires',
-      label: '过期 / 续费',
-      render: (domain) => (
-        <div className="asset-table__stack">
-          <strong>{formatOptional(domain.expires_at)}</strong>
-          <span>{domain.auto_renew ? '自动续费' : '手工续费'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'links',
-      label: '关联',
-      render: (domain) => (
-        <div className="asset-table__stack">
-          <span>{domain.service_id ? `服务 ${domain.service_id}` : '未关联服务'}</span>
-          {domain.target_id ? (
-            <Link className="text-link" to={`/targets/${domain.target_id}`}>
-              Target {domain.target_id}
-            </Link>
-          ) : (
-            <span className="asset-table__muted">未关联 Target</span>
-          )}
-        </div>
-      ),
-    },
-    {
-      key: 'labels',
-      label: '标签',
-      render: (domain) => <AssetLabels labels={domain.labels} />,
-    },
-    {
-      key: 'note',
-      label: '备注',
-      render: (domain) => formatOptional(domain.note),
-    },
-  ]
-
   return (
-    <section className="page-panel page-panel--scroll-x">
-      <div className="section-heading">
+    <div className="vps-objects">
+      <p className="vps-context">
+        共<MonoDigits>{domains.length}</MonoDigits>项
+      </p>
+      {!readOnly ? (
         <div>
-          <p className="section-heading__eyebrow">DOMAIN CONTEXT</p>
-          <h2>域名资产</h2>
-          <p className="section-heading__description">当前 VPS 的手工域名记录，不扩展为完整 DNS 或 Registrar 管理。</p>
+          <Button variant="secondary" size="sm" onClick={onCreate}>新增域名</Button>
         </div>
-        <span className="section-heading__meta">
-          <MonoDigits>{domains.length}</MonoDigits> 个手工记录域名
-        </span>
-        {!readOnly ? <Button variant="secondary" size="sm" onClick={onCreate}>新增域名</Button> : null}
-      </div>
+      ) : null}
       {error ? (
-        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-          {error}
-        </p>
+        <>
+          <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+            {error}
+          </p>
+          {onRetryServices ? (
+            <div>
+              <Button size="sm" onClick={onRetryServices}>重试加载服务</Button>
+            </div>
+          ) : null}
+        </>
       ) : notice ? (
         <p className="asset-operation-feedback" role="status">{notice}</p>
       ) : null}
-      <DataTable
-        className="asset-table vps-domain-table"
-        columns={domainColumns}
-        rows={domains}
-        rowKey={(domain) => domain.domain_id}
-        emptyContent={<span className="empty-inline">尚未记录域名</span>}
-      />
-    </section>
+      {domains.length > 0 ? (
+        <ul className="vps-object-list vps-relation-dossiers">
+          {domains.map((domain) => (
+            <DomainDossier
+              key={domain.domain_id}
+              domain={domain}
+              services={services}
+            />
+          ))}
+        </ul>
+      ) : (
+        <p className="empty-inline">尚未记录域名</p>
+      )}
+    </div>
+  )
+}
+
+function DomainDossier({
+  domain,
+  services,
+}: {
+  domain: AssetDomainRecord
+  services: AssetServiceRecord[]
+}) {
+  const location = useLocation()
+  const purpose = domain.purpose.trim()
+  const registrar = domain.registrar.trim()
+  const expires = domain.expires_at?.trim() ?? ''
+  const note = domain.note.trim()
+  const serviceId = domain.service_id?.trim() ?? ''
+  const probe = domain.target_id?.trim() ?? ''
+  const linkedService = serviceId
+    ? services.find((service) => service.service_id === serviceId)
+    : undefined
+  const linkedServiceName = linkedService ? serviceResourceName(linkedService) : null
+
+  return (
+    <li className="vps-relation-dossier">
+      <div className="vps-relation-dossier__head">
+        <h4 className="vps-relation-dossier__title mono">{domainResourceName(domain)}</h4>
+        <div className="vps-relation-dossier__mast">
+          <span className="vps-relation-dossier__lead">
+            <span className="vps-relation-badge">{domainResourceStatus(domain)}</span>
+            <span>{purpose || '未记录'}</span>
+          </span>
+        </div>
+      </div>
+      <section className="vps-relation-dossier__body">
+        <div className="vps-relation-fields">
+          <div className="vps-relation-field">
+            {serviceId ? (
+              <>
+                <div className="vps-relation-field__label-row">
+                  <span className="vps-relation-field__label">关联服务</span>
+                  {linkedServiceName ? <span className="vps-relation-id">{serviceId}</span> : null}
+                </div>
+                <p className="vps-relation-field__value">
+                  {linkedServiceName ?? <span className="vps-relation-id">{serviceId}</span>}
+                </p>
+              </>
+            ) : (
+              <>
+                <span className="vps-relation-field__label">关联服务</span>
+                <p className="vps-relation-field__value">未关联</p>
+              </>
+            )}
+          </div>
+          <div className="vps-relation-dossier__target">
+            <p className="vps-relation-dossier__index">
+              <span>关联入口探测</span>
+            </p>
+            {probe ? (
+              <p className="vps-relation-id">
+                <Link to={`/targets/${encodeURIComponent(probe)}`} state={location.state}>{probe}</Link>
+              </p>
+            ) : (
+              <p className="vps-relation-id">未关联</p>
+            )}
+          </div>
+          <div className="vps-relation-fields__row">
+            <div className="vps-relation-field">
+              <span className="vps-relation-field__label">注册商</span>
+              <p className="vps-relation-field__value">{registrar || '未记录'}</p>
+            </div>
+            <div className="vps-relation-field">
+              <span className="vps-relation-field__label">过期日期</span>
+              <p className="vps-relation-field__value">{expires ? formatDate(expires) : '未记录'}</p>
+            </div>
+            <div className="vps-relation-field">
+              <span className="vps-relation-field__label">续费</span>
+              <p className="vps-relation-field__value">{domain.auto_renew ? '自动续费' : '手工续费'}</p>
+            </div>
+            <div className="vps-relation-field">
+              <span className="vps-relation-field__label">HTTPS</span>
+              <p className="vps-relation-field__value">{domain.https_enabled ? '已启用' : '未记录'}</p>
+            </div>
+          </div>
+        </div>
+        {note ? <p className="vps-relation-dossier__note">{note}</p> : null}
+        {domain.labels.length > 0 ? (
+          <div className="vps-relation-chips">
+            {domain.labels.map((label) => (
+              <span key={label} className="vps-relation-chip">{label}</span>
+            ))}
+          </div>
+        ) : null}
+        <div className="vps-relation-dossier__meta">
+          <span className="vps-relation-dossier__meta-label">记录 ID</span>
+          <span className="vps-relation-id">{domain.domain_id}</span>
+        </div>
+      </section>
+    </li>
   )
 }

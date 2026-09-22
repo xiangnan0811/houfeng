@@ -1,4 +1,4 @@
-import type { RecordDraftPayload } from '../../lib/types'
+import type { RecordDraftPayload, RecordSubjectReference } from '../../lib/types'
 
 export const DRAFT_BUFFER_TTL_MS = 24 * 60 * 60 * 1000
 const DB_NAME = 'houfeng-record-drafts'
@@ -41,6 +41,20 @@ export function memoryDraftBufferStore(initial: readonly UnsyncedDraft[] = []): 
 
 export function draftBufferKey(userId: string, recordId = 'new'): string {
   return `${userId}:${recordId}`
+}
+
+/** Scopes unsynced new-record buffers so a subject prefill cannot share `user:new`. */
+export function draftBufferRecordId(
+  recordId?: string,
+  seedSubjects?: readonly Pick<RecordSubjectReference, 'kind' | 'source_id' | 'primary'>[],
+): string {
+  const trimmedRecord = recordId?.trim()
+  if (trimmedRecord) return trimmedRecord
+  const primary = seedSubjects?.find((subject) => subject.primary) ?? seedSubjects?.[0]
+  const kind = primary?.kind?.trim()
+  const sourceId = primary?.source_id?.trim()
+  if (!kind || !sourceId) return 'new'
+  return `new:${kind}:${sourceId}`
 }
 
 export function isExpiredUnsyncedDraft(value: UnsyncedDraft, now = Date.now()): boolean {

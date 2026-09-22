@@ -8,6 +8,7 @@ import {
   getRecordNotificationUnreadCount,
   RECORD_INBOX_UNREAD_INVALIDATED_EVENT,
 } from '../../lib/recordInboxUnreadApi'
+import { resolveMonitoringListHref } from '../../pages/monitoring/monitoringListUrl'
 
 const PAGE_TITLES: Record<string, string> = {
   '/': '工作台',
@@ -24,6 +25,8 @@ const PAGE_TITLES: Record<string, string> = {
   '/records/new': '新建记录',
   '/record-inbox': '记录通知',
   '/settings': '设置',
+  '/archive': '归档',
+  '/command-audit': '命令审计',
 }
 
 interface TopBarProps {
@@ -34,9 +37,39 @@ interface TopBarProps {
 export function TopBar({ sync, user }: TopBarProps) {
   const location = useLocation()
   const pageTitle = derivePageTitle(location.pathname)
+  const showVpsCrumb = location.pathname.startsWith('/vps/')
+  const showMonitoringCrumb = location.pathname.startsWith('/monitoring/')
   return (
     <header className="topbar">
-      <span className="tp-page">{pageTitle}</span>
+      {showVpsCrumb ? (
+        <nav className="tp-vps-crumb" aria-label="VPS">
+          <Link
+            className="tp-vps-crumb__link"
+            to={resolveVpsInventoryHref(location.state)}
+            state={location.state}
+            aria-label="返回 VPS 列表"
+          >
+            VPS 资产
+          </Link>
+          <span className="tp-vps-crumb__sep" aria-hidden="true">/</span>
+          <span className="tp-page">{pageTitle}</span>
+        </nav>
+      ) : showMonitoringCrumb ? (
+        <nav className="tp-vps-crumb" aria-label="监控">
+          <Link
+            className="tp-vps-crumb__link"
+            to={resolveMonitoringListHref(location.state)}
+            state={location.state}
+            aria-label="返回监控实例列表"
+          >
+            监控
+          </Link>
+          <span className="tp-vps-crumb__sep" aria-hidden="true">/</span>
+          <span className="tp-page">{pageTitle}</span>
+        </nav>
+      ) : (
+        <span className="tp-page">{pageTitle}</span>
+      )}
       <div className="tp-spacer" />
       <GlobalSearch />
       <div className="tp-divider" />
@@ -253,12 +286,27 @@ function UserAvatar({ user }: { user: User }) {
   )
 }
 
+const VPS_INVENTORY_HREF = /^\/vps(?:\?[^#]*)?$/
+
+function resolveVpsInventoryHref(state: unknown): string {
+  if (typeof state !== 'object' || state === null || !('vpsInventoryHref' in state)) return '/vps'
+  const candidate = state.vpsInventoryHref
+  return typeof candidate === 'string' && VPS_INVENTORY_HREF.test(candidate) ? candidate : '/vps'
+}
+
 function derivePageTitle(pathname: string): string {
   if (PAGE_TITLES[pathname]) return PAGE_TITLES[pathname]
+  if (pathname.includes('/ip-quality')) return 'IP 质量'
+  if (pathname.endsWith('/activity') || pathname.includes('/activity/')) return '活动'
   if (pathname.startsWith('/monitoring/compare')) return '监控实例对比'
+  if (/^\/(?:monitoring|vps|targets)\/[^/]+\/records(?:\/|$)/.test(pathname)) return '记录'
+  if (/^\/(?:monitoring|vps|targets)\/[^/]+\/evidence(?:\/|$)/.test(pathname)) return '证据'
+  if (pathname.startsWith('/evidence/')) return '证据'
   if (pathname.startsWith('/monitoring/')) return '监控实例详情'
   if (pathname.startsWith('/targets/')) return '目标详情'
   if (pathname.startsWith('/vps/')) return 'VPS 详情'
+  if (pathname.startsWith('/archive/')) return '归档详情'
+  if (pathname.startsWith('/command-audit')) return '命令审计'
   if (pathname.startsWith('/records/compare')) return '横向比较'
   if (pathname.startsWith('/records/')) {
     if (pathname.endsWith('/edit')) return '编辑记录'

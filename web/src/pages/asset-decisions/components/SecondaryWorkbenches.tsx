@@ -210,7 +210,7 @@ export function SecondaryWorkbenches({
 
   return (
     <>
-      <div className="asset-decision-topology animate-in d2">
+      <div className="asset-decision-topology">
         <AssetDecisionSecondaryNav
           items={secondaryNavItems}
           active={secondaryWorkbench}
@@ -219,7 +219,7 @@ export function SecondaryWorkbenches({
       </div>
 
       {secondaryWorkbench === 'scenarios' && (
-        <section className="page-panel asset-decision-scenario-records animate-in d3">
+        <section className="page-panel asset-decision-scenario-records">
           <div className="asset-decision-board__header">
             <div>
               <p className="section-heading__eyebrow">场景工作区</p>
@@ -327,7 +327,7 @@ export function SecondaryWorkbenches({
       )}
 
       {secondaryWorkbench === 'records' && (
-        <section className="page-panel asset-decision-scenario-card asset-decision-records animate-in d3" aria-label="已保存组合决策">
+        <section className="page-panel asset-decision-scenario-card asset-decision-records" aria-label="已保存组合决策">
           <div className="asset-decision-scenario-card__head">
             <div>
               <p className="section-heading__eyebrow">保存记录</p>
@@ -365,7 +365,7 @@ export function SecondaryWorkbenches({
       )}
 
       {secondaryWorkbench === 'renewals' && (
-        <section className="page-panel asset-renewal-evidence animate-in d4">
+        <section className="page-panel asset-renewal-evidence">
           <div className="section-heading section-heading--inline">
             <div>
               <p className="section-heading__eyebrow">续费事实</p>
@@ -396,7 +396,7 @@ export function SecondaryWorkbenches({
       )}
 
       {secondaryWorkbench === 'single_queue' && (
-        <section id="single-vps-queue" className="page-panel asset-decision-single-queue animate-in d5">
+        <section id="single-vps-queue" className="page-panel asset-decision-single-queue">
           <div className="asset-decision-board__header">
             <div>
               <p className="section-heading__eyebrow">单台辅助</p>

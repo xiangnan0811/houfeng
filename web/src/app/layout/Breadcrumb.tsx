@@ -1,6 +1,7 @@
 import { Fragment } from 'react'
 import { Link, useLocation, useParams } from 'react-router-dom'
-
+import { resolveMonitoringListHref } from '../../pages/monitoring/monitoringListUrl'
+import { withReturnVPSQuery } from '../../pages/monitoring-detail/monitoringDetailHelpers'
 interface Crumb {
   label: string
   to?: string
@@ -47,7 +48,7 @@ export function Breadcrumb() {
   if (segments[0] === 'records' && segments[1] === 'compare') {
     return (
       <nav className="breadcrumb" aria-label="面包屑导航">
-        <Link className="breadcrumb__link" to="/records">运维记录</Link>
+        <Link className="breadcrumb__link" to="/records" state={location.state}>运维记录</Link>
         <span className="breadcrumb__sep" aria-hidden>/</span>
         <span className="breadcrumb__current" aria-current="page">横向比较</span>
       </nav>
@@ -60,15 +61,23 @@ export function Breadcrumb() {
   if (!sectionKey) return null
   const sectionLabel = SECTION_LABELS[sectionKey]
   if (!sectionLabel) return null
-  crumbs.push({ label: sectionLabel, to: `/${sectionKey}` })
+  const sectionTo = sectionKey === 'monitoring'
+    ? resolveMonitoringListHref(location.state)
+    : `/${sectionKey}`
+  crumbs.push({ label: sectionLabel, to: sectionTo })
 
   // segments[1] is an ID for /monitoring/:id and /targets/:id
   if (segments[1]) {
     const detailId = segments[1]
     const isCurrent = segments.length === 2
+    const detailPath = `/${sectionKey}/${detailId}`
     crumbs.push({
       label: truncateId(detailId),
-      ...(isCurrent ? {} : { to: `/${sectionKey}/${detailId}` }),
+      ...(isCurrent ? {} : {
+        to: sectionKey === 'monitoring'
+          ? withReturnVPSQuery(detailPath, new URLSearchParams(location.search).get('return_vps'))
+          : detailPath,
+      }),
     })
   }
 
@@ -90,7 +99,7 @@ export function Breadcrumb() {
           <Fragment key={`${crumb.label}-${i}`}>
             {i > 0 && <span className="breadcrumb__sep" aria-hidden>/</span>}
             {crumb.to && !isLast ? (
-              <Link className="breadcrumb__link" to={crumb.to}>
+              <Link className="breadcrumb__link" to={crumb.to} state={location.state}>
                 {crumb.label}
               </Link>
             ) : (

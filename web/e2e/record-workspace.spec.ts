@@ -75,7 +75,7 @@ for (const viewport of VIEWPORTS) {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.goto('/records/rec_e2e001')
 
-    await expect(page.locator('.page-header').getByRole('heading', {
+    await expect(page.locator('.page__head').getByRole('heading', {
       name: '第三晚 TCP 观测',
       level: 1,
     })).toBeVisible()
@@ -164,7 +164,7 @@ test('published record reading surface has no serious or critical accessibility 
   await page.setViewportSize({ width: 390, height: 900 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/records/rec_e2e001')
-  await expect(page.locator('.page-header').getByRole('heading', {
+  await expect(page.locator('.page__head').getByRole('heading', {
     name: '第三晚 TCP 观测',
     level: 1,
   })).toBeVisible()

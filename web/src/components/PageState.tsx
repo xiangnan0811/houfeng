@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { Timestamp } from './atoms'
+import { Timestamp } from './atoms/Mono'
 
 export type PageStateKind = 'loading' | 'error' | 'empty'
 export type PageStateSurface = 'panel' | 'empty'

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLayoutEffect, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 
-import { Card, Modal, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
+import { Modal, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
 import { ApiError, issueMonitoringInstanceInstallCommand } from '../../lib/api'
 import { useCopyToClipboard } from '../../lib/useCopyToClipboard'
@@ -18,20 +18,26 @@ HOUFENG_AGENT_BUFFER_MAX_AGE=72h
 HOUFENG_AGENT_BUFFER_MAX_BYTES=67108864`
 const manualTokenSnippet = `printf '%s' '${MANUAL_TOKEN_PLACEHOLDER}' | sudo tee /etc/houfeng-agent/token >/dev/null`
 
-const installChecklist = [
-  '复制下方 center 生成的一键安装命令。',
-  '在目标 VPS 的 root shell 或具备 sudo 的账号中粘贴执行。',
-  '安装器会校验 linux/amd64 或 linux/arm64、systemd、下载工具和 checksum 工具。',
-  '如果缺少 minisign，生成命令允许安装器先校验并安装固定版本的签名校验工具。',
-  '安装器下载 GitHub Release 中的 houfeng-agent，并先验签 sha256sums.txt 再校验二进制。',
-  '安装完成后 systemd 会启动 agent，回到本页等待首次同步和绑定。',
+const installSteps = [
+  '生成 center 签发的一键命令',
+  '在目标主机的 root 或 sudo shell 粘贴执行',
+  '回到本页等待首次同步',
 ]
 
 function describeInstallCommandError(error: unknown) {
-  if (error instanceof ApiError && error.status === 409) {
-    return `中心一键安装配置不完整：${error.message}。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。`
+  if (error instanceof ApiError) {
+    if (error.code === 'install_command_unconfigured') {
+      const detail = error.message.trim()
+      return detail
+        ? `中心一键安装配置不完整：${detail}。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。`
+        : '中心一键安装配置不完整。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。'
+    }
+    if (error.code === 'monitoring_instance_archived') {
+      return '监控实例已归档，无法生成安装命令。'
+    }
+    return error.message
   }
-  if (error instanceof ApiError || error instanceof Error) return error.message
+  if (error instanceof Error) return error.message
   return '生成一键安装命令失败'
 }
 
@@ -66,29 +72,86 @@ type IssueState = {
   copyStatus: 'idle' | 'copied' | 'failed'
 }
 
+const EMPTY_ISSUE_STATE: IssueState = {
+  issue: null,
+  busy: false,
+  error: null,
+  hidden: false,
+  copyStatus: 'idle',
+}
+
 export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, onClose, returnVPSId, mode = 'connect' }: Props) {
   const navigate = useNavigate()
+  const location = useLocation()
   const { copy } = useCopyToClipboard()
-  const [state, setState] = useState<IssueState>({
-    issue: null,
-    busy: false,
-    error: null,
-    hidden: false,
-    copyStatus: 'idle',
-  })
+  const [state, setState] = useState<IssueState>(EMPTY_ISSUE_STATE)
+  const issueRequestRef = useRef(0)
+  const busyRef = useRef(false)
+  const mountedRef = useRef(true)
+  const openRef = useRef(open)
+  const subjectRef = useRef(monitoringInstance.monitoring_instance_id)
+  const subjectId = monitoringInstance.monitoring_instance_id
+  const [seenIdentity, setSeenIdentity] = useState({ open, subjectId })
 
-  useEffect(() => {
-    if (open) return
-    setState({ issue: null, busy: false, error: null, hidden: false, copyStatus: 'idle' })
-  }, [open])
+  if (openRef.current !== open) {
+    openRef.current = open
+    if (!open) {
+      issueRequestRef.current += 1
+      busyRef.current = false
+    }
+  }
+  if (subjectRef.current !== subjectId) {
+    subjectRef.current = subjectId
+    issueRequestRef.current += 1
+    busyRef.current = false
+  }
+  if (seenIdentity.open !== open || seenIdentity.subjectId !== subjectId) {
+    setSeenIdentity({ open, subjectId })
+    if (!open || seenIdentity.subjectId !== subjectId) {
+      setState(EMPTY_ISSUE_STATE)
+    }
+  }
+
+  useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      issueRequestRef.current += 1
+      busyRef.current = false
+    }
+  }, [])
+
+  function isLiveIssue(requestId: number, subjectId: string) {
+    return (
+      mountedRef.current &&
+      openRef.current &&
+      issueRequestRef.current === requestId &&
+      subjectRef.current === subjectId
+    )
+  }
+
+  function handleRequestClose() {
+    if (busyRef.current) return
+    onClose()
+  }
 
   async function handleIssue() {
+    if (busyRef.current) return
+    const subjectId = monitoringInstance.monitoring_instance_id
+    const requestId = issueRequestRef.current + 1
+    issueRequestRef.current = requestId
+    busyRef.current = true
     setState((current) => ({ ...current, busy: true, error: null }))
     try {
-      const issue = await issueMonitoringInstanceInstallCommand(monitoringInstance.monitoring_instance_id)
+      const issue = await issueMonitoringInstanceInstallCommand(subjectId)
+      if (!isLiveIssue(requestId, subjectId)) return
       const copied = await copy(issue.command)
+      if (!isLiveIssue(requestId, subjectId)) return
+      busyRef.current = false
       setState({ issue, busy: false, error: null, hidden: false, copyStatus: copied ? 'copied' : 'failed' })
     } catch (error: unknown) {
+      if (!isLiveIssue(requestId, subjectId)) return
+      busyRef.current = false
       setState((current) => ({
         ...current,
         busy: false,
@@ -99,8 +162,9 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
   }
 
   function handleComplete() {
+    if (busyRef.current) return
     if (returnVPSId) {
-      navigate(`/vps/${encodeURIComponent(returnVPSId)}`)
+      navigate(`/vps/${encodeURIComponent(returnVPSId)}`, { state: location.state })
       return
     }
     onClose()
@@ -108,7 +172,9 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
 
   const { issue, busy, error, hidden, copyStatus } = state
   const isUpgrade = mode === 'upgrade'
-  const title = isUpgrade ? '升级/重新接入 agent' : '接入 agent'
+  const taskTitle = isUpgrade ? '升级/重新接入 agent' : '接入 agent'
+  const subjectName = monitoringInstance.display_name.trim() || monitoringInstance.monitoring_instance_id
+  const title = `${subjectName} · ${taskTitle}`
   const primaryLabel = issue
     ? isUpgrade ? '重新生成升级/重新接入命令' : '重新生成安装命令'
     : isUpgrade ? '生成升级/重新接入命令' : '生成一键安装命令'
@@ -116,46 +182,71 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
   const completeLabel = returnVPSId ? '完成并返回 VPS' : '完成并查看监控实例'
 
   return (
-    <Modal open={open} onClose={onClose} title={title} ariaLabel="监控实例接入抽屉" size="xl">
-      <div className="onboarding-drawer">
-        <Card cardRole="warning" className="onboarding-drawer__brief">
-          <p className="onboarding-token__hint onboarding-token__hint--critical">
-            安装命令包含 30 分钟有效的一次性 enrollment token。请把它当作敏感信息处理，不要粘贴到工单、聊天、日志或截图里。
-          </p>
-          <p className="onboarding-steps__hint">
-            {issue
-              ? '重新生成会立即使上一条命令里的 enrollment token 失效；如果命令过期、丢失或已隐藏，请重新生成。'
-              : isUpgrade
-                ? '命令由 center 后端生成，用于在已接入或已观测的服务器上升级/重新接入 agent，不会新建监控实例。'
-                : '命令由 center 后端生成，使用 HOUFENG_PUBLIC_BASE_URL，不会从浏览器地址猜测生产 URL。'}
-          </p>
-          <div className="onboarding-token__actions">
-            <button type="button" className="btn md primary" disabled={busy} onClick={() => void handleIssue()}>
-              {busy ? '正在生成…' : primaryLabel}
-            </button>
-            {issue && hidden ? (
-              <button
-                type="button"
-                className="btn md ghost"
-                onClick={() => setState((current) => ({ ...current, hidden: false }))}
-              >
-                重新展开命令
-              </button>
-            ) : null}
-          </div>
+    <Modal
+      open={open}
+      onClose={handleRequestClose}
+      persistent={busy}
+      title={title}
+      ariaLabel="监控实例接入抽屉"
+      size="lg"
+      footer={
+        <div className="monitoring-detail-drawer__footer">
           {error ? (
-            <p role="alert" className="onboarding-token__error-summary">
+            <p role="alert" className="monitoring-detail-drawer__error">
               <MonoDigits>{error}</MonoDigits>
             </p>
           ) : null}
-        </Card>
+          <button type="button" className="btn md primary" disabled={busy} onClick={() => void handleIssue()}>
+            {busy ? '正在生成…' : primaryLabel}
+          </button>
+          {issue ? (
+            <button type="button" className="btn md secondary" disabled={busy} onClick={handleComplete}>
+              {completeLabel}
+            </button>
+          ) : null}
+        </div>
+      }
+    >
+      <div className="monitoring-detail-onboarding">
+        <p className="monitoring-detail-dialog__subject">
+          <Hostname>{monitoringInstance.monitoring_instance_id}</Hostname>
+          {returnVPSId ? (
+            <>
+              {' · 返回 VPS '}
+              <Hostname>{returnVPSId}</Hostname>
+            </>
+          ) : null}
+        </p>
+        <ol className="monitoring-detail-onboarding__steps">
+          {installSteps.map((step, index) => (
+            <li key={step}>
+              <span className="monitoring-detail-onboarding__index">{index + 1}</span>
+              {step}
+            </li>
+          ))}
+        </ol>
+        <p className="monitoring-detail-onboarding__secret">
+          {isUpgrade
+            ? '命令由 center 签发，用于在已接入主机上升级或重新接入，不会新建监控实例。'
+            : '命令由 center 签发，使用公开访问地址，不会从浏览器猜测生产 URL。'}
+          {' '}命令含 30 分钟一次性接入令牌，不要写入工单、聊天、日志或截图。重新生成会使上一条立即失效。
+        </p>
+        {issue && hidden ? (
+          <button
+            type="button"
+            className="btn sm secondary"
+            onClick={() => setState((current) => ({ ...current, hidden: false }))}
+          >
+            重新展开命令
+          </button>
+        ) : null}
 
         {canShowCommand && issue ? (
-          <Card cardRole="accent" aria-label="一键安装命令">
+          <div className="monitoring-detail-onboarding__command" aria-label="一键安装命令">
             {copyStatus === 'copied' ? (
-              <p className="asset-operation-feedback" role="status">安装命令已自动复制到剪贴板。</p>
+              <p className="monitoring-detail-onboarding__status" role="status">安装命令已自动复制到剪贴板。</p>
             ) : copyStatus === 'failed' ? (
-              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+              <p className="monitoring-detail-onboarding__status monitoring-detail-onboarding__status--error" role="alert">
                 自动复制失败，请使用手动复制按钮。
               </p>
             ) : null}
@@ -165,21 +256,21 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               </pre>
               <CopyButton value={issue.command} label="复制安装命令" size="md" />
             </div>
-            <dl className="metadata-list">
+            <dl className="monitoring-detail-onboarding__facts">
               <div>
-                <dt>过期时间</dt>
+                <dt>过期</dt>
                 <dd>
                   <Timestamp value={issue.expires_at} mode="both" />
                 </dd>
               </div>
               <div>
-                <dt>Center URL</dt>
+                <dt>Center</dt>
                 <dd>
                   <Hostname>{issue.public_base_url}</Hostname>
                 </dd>
               </div>
               <div>
-                <dt>Agent Release</dt>
+                <dt>Agent</dt>
                 <dd>
                   <MonoDigits>{issue.agent_version}</MonoDigits>
                   {' · '}
@@ -187,56 +278,37 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
                 </dd>
               </div>
             </dl>
-            <div className="onboarding-token__actions">
-              <button type="button" className="btn sm primary" onClick={handleComplete}>
-                {completeLabel}
-              </button>
-              <button
-                type="button"
-                className="btn sm secondary"
-                onClick={() => setState((current) => ({ ...current, hidden: true }))}
-                aria-label="隐藏安装命令"
-              >
-                已保存，隐藏命令
-              </button>
-            </div>
-          </Card>
+            <button
+              type="button"
+              className="btn sm ghost"
+              onClick={() => setState((current) => ({ ...current, hidden: true }))}
+              aria-label="隐藏安装命令"
+            >
+              已保存，隐藏命令
+            </button>
+          </div>
         ) : issue && hidden ? (
-          <Card cardRole="dim">
-            <p className="onboarding-token__hint onboarding-token__hint--critical">
-              安装命令已隐藏。本抽屉会话内可重新展开；如果已关闭或命令过期，请重新生成。
-            </p>
-          </Card>
+          <p className="monitoring-detail-onboarding__secret">
+            安装命令已隐藏。本抽屉会话内可重新展开；关闭或过期后请重新生成。
+          </p>
         ) : null}
 
-        <CollapsibleSection title="命令执行后会做什么" className="onboarding-drawer__section">
-          <ol className="onboarding-steps">
-            {installChecklist.map((item) => (
-              <li key={item}>
-                <p>{item}</p>
-              </li>
-            ))}
-          </ol>
-        </CollapsibleSection>
-
-        <CollapsibleSection title="手工安装（排障回退）" className="onboarding-drawer__section">
-          <Card cardRole="dim" className="onboarding-manual-fallback">
-            <p className="onboarding-token__hint">
-              优先使用上方一键命令。仅在排查安装器、下载或 systemd 写入问题时，按部署文档手工写入以下配置；不要用浏览器地址推导生产 Center URL。
-            </p>
-            <div className="onboarding-snippet">
-              <pre>
-                <code>{manualEnvSnippet}</code>
-              </pre>
-              <CopyButton value={manualEnvSnippet} label="复制环境模板" />
-            </div>
-            <div className="onboarding-snippet">
-              <pre>
-                <code>{manualTokenSnippet}</code>
-              </pre>
-              <CopyButton value={manualTokenSnippet} label="复制 token 写入模板" />
-            </div>
-          </Card>
+        <CollapsibleSection title="手工安装（排障回退）">
+          <p className="monitoring-detail-onboarding__hint">
+            仅在安装器、下载或 systemd 写入失败时使用。不要用浏览器地址推导生产 Center URL。
+          </p>
+          <div className="onboarding-snippet">
+            <pre>
+              <code>{manualEnvSnippet}</code>
+            </pre>
+            <CopyButton value={manualEnvSnippet} label="复制环境模板" />
+          </div>
+          <div className="onboarding-snippet">
+            <pre>
+              <code>{manualTokenSnippet}</code>
+            </pre>
+            <CopyButton value={manualTokenSnippet} label="复制 token 写入模板" />
+          </div>
         </CollapsibleSection>
       </div>
     </Modal>

@@ -138,7 +138,7 @@ describe('CommandAuditPage', () => {
     drawer = screen.getByRole('dialog', { name: '命令审计高级筛选' })
     expect(within(drawer).getByLabelText('操作者')).toHaveValue('existing')
     fireEvent.click(within(drawer).getByRole('button', { name: '重置高级筛选' }))
-    fireEvent.change(within(drawer).getByLabelText('Action ID'), { target: { value: ' act_001 ' } })
+    fireEvent.change(within(drawer).getByLabelText('动作 ID'), { target: { value: ' act_001 ' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '应用高级筛选' }))
 
     await screen.findByText('Tokyo Edge')
@@ -260,5 +260,17 @@ describe('CommandAuditPage', () => {
     await screen.findByRole('heading', { name: '命令审计不可用' })
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     await screen.findByText('没有匹配的命令审计')
+  })
+
+  it('returns the window filter to the default 30 days when the placeholder option is chosen', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse({ items: [] })))
+    renderPage()
+    await screen.findByText('没有匹配的命令审计')
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '24h' } })
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('最近 24 小时')
+    fireEvent.change(screen.getByLabelText('时间范围'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '应用筛选' }))
+    expect(screen.getByLabelText('时间范围')).toHaveDisplayValue('最近 30 天')
+    expect(screen.getByLabelText('当前查询参数')).toHaveTextContent('')
   })
 })

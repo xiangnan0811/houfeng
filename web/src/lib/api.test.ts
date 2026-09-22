@@ -31,7 +31,6 @@ import {
   getAssetDecisionManualGroup,
   getAssetDecisionOverview,
   getAssetDecisionRecord,
-  getDashboard,
   getMonitoringInstanceOnboarding,
   getMonitoringInstanceManagementReview,
   getProvider,
@@ -94,7 +93,7 @@ import {
 } from './api'
 import { buildSubscriptionInput, INITIAL_SUBSCRIPTION_DRAFT } from '../pages/vps-detail/vpsDetailHelpers'
 import { withQuery as transportWithQuery } from './apiRequest'
-import { listCommandAudits, listEvents, listIncidents } from './observabilityApi'
+import { getDashboard, listCommandAudits, listEvents, listIncidents } from './observabilityApi'
 import type { CommandAuditListFilter } from './types'
 import type {
   AssetDomainListFilter,

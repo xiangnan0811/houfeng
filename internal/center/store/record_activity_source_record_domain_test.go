@@ -115,6 +115,13 @@ func TestBuildRecordDomainCandidateDerivesAStableIdentity(t *testing.T) {
 	if first.ActivityID != second.ActivityID || first.CanonicalHash != second.CanonicalHash {
 		t.Fatalf("the same row produced two identities, so a retry would insert twice")
 	}
+	if first.RecordID != row.recordID || first.RevisionID != row.revisionID {
+		t.Fatalf("route refs = record %q revision %q, want %q/%q",
+			first.RecordID, first.RevisionID, row.recordID, row.revisionID)
+	}
+	if first.EvidenceID != "" {
+		t.Fatalf("record-domain candidate unexpectedly carries evidence ref %q", first.EvidenceID)
+	}
 	// The event's own primary key is the coordinate, not the upstream
 	// source_event_id, whose shape differs across the five writers.
 	if first.Source.EventID != row.activityID {

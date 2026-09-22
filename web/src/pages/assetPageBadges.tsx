@@ -1,4 +1,4 @@
-import { Badge, type BadgeTone } from '../components/atoms'
+import { Badge, StatusGlyph, type BadgeTone, type HealthState } from '../components/atoms'
 import type {
   SubscriptionStatus,
   IPQualitySummary,
@@ -62,9 +62,14 @@ function ipQualityTone(summary?: IPQualitySummary | null): BadgeTone {
   return 'normal'
 }
 
+function lifecycleGlyphState(tone: BadgeTone): HealthState {
+  if (tone === 'neutral') return 'offline'
+  return tone
+}
+
 export function IPQualityBadge({ summary }: { summary?: IPQualitySummary | null }) {
   if (!summary) {
-    return <Badge variant="state" tone="notice">IP 未采集</Badge>
+    return <span className="vps-quiet-fact">未采集</span>
   }
   if (summary.ambiguous) {
     return <Badge variant="state" tone="notice">IP 归属不唯一</Badge>
@@ -81,7 +86,14 @@ export function IPQualityBadge({ summary }: { summary?: IPQualitySummary | null 
 }
 
 export function LifecycleBadge({ value }: { value: VPSLifecycleStatus | string }) {
-  return statusBadge(lifecycleLabel(value))
+  const label = lifecycleLabel(value)
+  const tone = badgeToneForLabel(label)
+  return (
+    <span className="vps-lifecycle">
+      <StatusGlyph state={lifecycleGlyphState(tone)} size="sm" />
+      {label}
+    </span>
+  )
 }
 
 export function UsageBadge({ value }: { value: VPSUsageStatus | string }) {

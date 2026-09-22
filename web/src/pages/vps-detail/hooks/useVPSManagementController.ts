@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 
 export type VPSManagementPanel =
   | null
@@ -6,12 +6,16 @@ export type VPSManagementPanel =
   | 'facts'
   | 'decision'
   | 'subscription'
+  | 'validity-extension'
   | 'cancellation'
   | 'archive'
   | 'monitoring-instance-create'
   | 'monitoring-instance-evidence'
+  | 'monitoring-instance-link'
   | 'services-detail'
+  | 'service'
   | 'domains-detail'
+  | 'domain'
 
 export type VPSManagementController = {
   panel: VPSManagementPanel
@@ -38,12 +42,13 @@ export function useVPSManagementController(): VPSManagementController {
   }, [])
   const closePanel = useCallback(() => setPanel(null), [])
 
-  return {
+  return useMemo(() => ({
     panel,
     menuOpen: panel === 'menu',
     openMenu,
     closeMenu,
     openPanel,
     closePanel,
-  }
+  }), [panel, openMenu, closeMenu, openPanel, closePanel])
+
 }

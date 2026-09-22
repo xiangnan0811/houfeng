@@ -34,14 +34,10 @@ export function LoginPage() {
 
   return (
     <div className="login-page">
-      <div className="login-page__seal" aria-hidden="true">
-        <span>候</span>
-      </div>
       <form className="login-page__card" onSubmit={onSubmit}>
         <div className="login-page__brand">
-          <div className="login-page__brand-zh">候风控制面板</div>
-          <div className="login-page__brand-en">Fleet Control Plane</div>
-          <div className="login-page__motto">观风测候 · 守界安服</div>
+          <div className="login-page__brand-zh">候风</div>
+          <div className="login-page__brand-en">舰队控制面</div>
         </div>
         {error && <p className="login-page__error" role="alert">{error}</p>}
         <div className="login-page__field">
@@ -70,7 +66,7 @@ export function LoginPage() {
           {submitting ? '登录中…' : '登录'}
         </button>
       </form>
-      <div className="login-page__footer">观测入口 · 仅授权人员</div>
+      <div className="login-page__footer">仅授权人员</div>
     </div>
   )
 }

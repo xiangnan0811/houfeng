@@ -13,14 +13,16 @@ import {
   restoreRecordRevision,
 } from '../../../lib/recordsApi'
 import { createRecordSecurityController, type RecordSecurityController } from '../../../lib/recordSecurity'
-import type { RecordDetail, RecordDraft, RecordDraftPayload, RecordRevision } from '../../../lib/types'
+import type { RecordDetail, RecordDraft, RecordDraftPayload, RecordRevision, RecordSubjectReference } from '../../../lib/types'
 import {
   draftBufferKey,
+  draftBufferRecordId,
   memoryDraftBufferStore,
   openIndexedDBDraftBuffer,
   readUnsyncedDraft,
   writeUnsyncedDraft,
   type DraftBufferStore,
+  type UnsyncedDraft,
 } from '../draftBuffer'
 import { emptyRecordDraftPayload, payloadFromRevision } from '../recordPayload'
 
@@ -82,12 +84,18 @@ export function useRecordDraft(options: {
   revisionId?: string
   userId: string
   store?: DraftBufferStore
+  seedSubjects?: readonly RecordSubjectReference[]
 }): { state: RecordWorkspaceState; commands: RecordWorkspaceCommands } {
   const store = useMemo(() => options.store ?? (typeof indexedDB === 'undefined' ? memoryDraftBufferStore() : openIndexedDBDraftBuffer()), [options.store])
+  const bufferRecordId = draftBufferRecordId(options.recordId, options.seedSubjects)
   const [status, setStatus] = useState<RecordWorkspaceStatus>(
     options.mode === 'new' ? 'ready' : options.recordId ? 'loading' : 'empty',
   )
-  const [payload, setPayload] = useState<RecordDraftPayload>(() => emptyRecordDraftPayload(options.userId))
+  const [payload, setPayload] = useState<RecordDraftPayload>(() => {
+    const base = emptyRecordDraftPayload(options.userId)
+    if (options.mode !== 'new' || !options.seedSubjects?.length) return base
+    return { ...base, subjects: [...options.seedSubjects] }
+  })
   const [record, setRecord] = useState<RecordDetail | null>(null)
   const [revision, setRevision] = useState<RecordRevision | null>(null)
   const [draft, setDraft] = useState<RecordDraft | null>(null)
@@ -108,6 +116,7 @@ export function useRecordDraft(options: {
   const recordRef = useRef(record)
   const dirtyRef = useRef(dirty)
   const generationRef = useRef(0)
+  const bufferIdentityRef = useRef(bufferRecordId)
   const securityRef = useRef<RecordSecurityController | null>(null)
 
   useEffect(() => {
@@ -142,8 +151,8 @@ export function useRecordDraft(options: {
   }, [options.userId])
 
   const clearLocalBuffer = useCallback(async () => {
-    await store.delete(draftBufferKey(options.userId, options.recordId))
-  }, [options.recordId, options.userId, store])
+    await store.delete(draftBufferKey(options.userId, bufferRecordId))
+  }, [bufferRecordId, options.userId, store])
 
   const closeAuthorized = useCallback(async (error: unknown) => {
     await clearLocalBuffer()
@@ -184,9 +193,31 @@ export function useRecordDraft(options: {
   }, [options.mode, options.recordId, options.revisionId])
 
   useEffect(() => {
+    const previousId = bufferIdentityRef.current
+    if (previousId === bufferRecordId) return
+    const previousPayload = payloadRef.current
+    const previousDirty = dirtyRef.current
+    const previousDraft = draftRef.current
+    bufferIdentityRef.current = bufferRecordId
+    if (previousDirty && options.mode !== 'read' && options.mode !== 'revision') {
+      void writeUnsyncedDraft(store, {
+        key: draftBufferKey(options.userId, previousId),
+        userId: options.userId,
+        payload: previousPayload,
+        updatedAt: Date.now(),
+        ...(previousId !== 'new' && !previousId.startsWith('new:') ? { recordId: previousId } : {}),
+        ...(previousDraft ? { draftId: previousDraft.draft_id, etag: previousDraft.etag } : {}),
+      })
+    }
+  }, [bufferRecordId, options.mode, options.userId, store])
+
+
+
+  useEffect(() => {
     let active = true
-    const applyBuffered = (buffered: Awaited<ReturnType<typeof readUnsyncedDraft>>) => {
+    const applyBuffered = (buffered: UnsyncedDraft | undefined, overwriteLocal = false) => {
       if (!buffered) return false
+      if (!overwriteLocal && (dirtyRef.current || generationRef.current > 0)) return false
       payloadRef.current = buffered.payload
       setPayload(buffered.payload)
       setDirty(true)
@@ -195,7 +226,7 @@ export function useRecordDraft(options: {
     }
 
     if (options.mode === 'new') {
-      void readUnsyncedDraft(store, draftBufferKey(options.userId)).then((buffered) => {
+      void readUnsyncedDraft(store, draftBufferKey(options.userId, bufferRecordId)).then((buffered) => {
         if (!active || !mountedRef.current) return
         applyBuffered(buffered)
       })
@@ -250,7 +281,7 @@ export function useRecordDraft(options: {
         if (isClosedError(error)) throw error
         return { items: [] }
       })
-      const buffered = await readUnsyncedDraft(store, draftBufferKey(options.userId, recordId))
+      const buffered = await readUnsyncedDraft(store, draftBufferKey(options.userId, bufferRecordId))
       const listedDraft = drafts.items.find((item) => item.record_id === recordId) ?? null
       const fetchedDraft = !listedDraft && buffered?.draftId
         ? await getRecordDraft(buffered.draftId).catch((error: unknown) => {
@@ -268,12 +299,12 @@ export function useRecordDraft(options: {
       const bufferIsNewer = Boolean(
         buffered && (!serverDraft || buffered.updatedAt > Date.parse(serverDraft.updated_at)),
       )
-      if (bufferIsNewer && applyBuffered(buffered)) {
+      if (bufferIsNewer && applyBuffered(buffered, true)) {
         setStatus('ready')
         return
       }
       if (buffered && !bufferIsNewer) {
-        await store.delete(draftBufferKey(options.userId, recordId))
+        await store.delete(draftBufferKey(options.userId, bufferRecordId))
       }
       const nextPayload = serverDraft ? serverDraft.payload : payloadFromRevision(loaded.current)
       payloadRef.current = nextPayload
@@ -294,7 +325,7 @@ export function useRecordDraft(options: {
     return () => {
       active = false
     }
-  }, [closeAuthorized, emptyShell, options.mode, options.recordId, options.revisionId, options.userId, store])
+  }, [bufferRecordId, closeAuthorized, emptyShell, options.mode, options.recordId, options.revisionId, options.userId, store])
 
   const patchPayload = useCallback((patch: Partial<RecordDraftPayload>) => {
     generationRef.current += 1
@@ -310,7 +341,8 @@ export function useRecordDraft(options: {
   }, [])
 
   const persistUnsynced = useCallback(async (next: RecordDraftPayload, generation: number) => {
-    const key = draftBufferKey(options.userId, options.recordId)
+    const persistIdentity = bufferRecordId
+    const key = draftBufferKey(options.userId, persistIdentity)
     const stale = () => closedRef.current || generation !== generationRef.current || !dirtyRef.current
     if (stale()) return
     const run = saveChainRef.current.then(async () => {
@@ -323,11 +355,11 @@ export function useRecordDraft(options: {
         ...(options.recordId ? { recordId: options.recordId } : {}),
         ...(draftRef.current ? { draftId: draftRef.current.draft_id, etag: draftRef.current.etag } : {}),
       })
-      if (stale()) await store.delete(key)
+      if (stale() && persistIdentity === bufferIdentityRef.current) await store.delete(key)
     })
     saveChainRef.current = run.then(() => undefined, () => undefined)
     return run
-  }, [options.recordId, options.userId, store])
+  }, [bufferRecordId, options.recordId, options.userId, store])
 
   const applyDraftConflict = useCallback((error: unknown) => {
     const recovery = error instanceof ApiError && error.recovery && typeof error.recovery === 'object' && 'server_draft' in error.recovery
@@ -361,7 +393,7 @@ export function useRecordDraft(options: {
             : { payload: current })
         draftRef.current = next
         if (generation === generationRef.current) {
-          await store.delete(draftBufferKey(options.userId, options.recordId))
+          await store.delete(draftBufferKey(options.userId, bufferRecordId))
         }
         if (mountedRef.current) {
           setDraft(next)
@@ -381,13 +413,37 @@ export function useRecordDraft(options: {
           return
         }
         reportSaveError(error)
+        await writeUnsyncedDraft(store, {
+          key: draftBufferKey(options.userId, bufferRecordId),
+          userId: options.userId,
+          payload: payloadRef.current,
+          updatedAt: Date.now(),
+          ...(options.recordId ? { recordId: options.recordId } : {}),
+          ...(draftRef.current ? { draftId: draftRef.current.draft_id, etag: draftRef.current.etag } : {}),
+        })
       } finally {
         if (mountedRef.current) setSaving(false)
       }
     })
     saveChainRef.current = run.then(() => undefined, () => undefined)
     return run
-  }, [applyDraftConflict, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, store])
+  }, [applyDraftConflict, bufferRecordId, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, store])
+
+  useEffect(() => {
+    return () => {
+      if (closedRef.current) return
+      if (options.mode === 'read' || options.mode === 'revision') return
+      if (!dirtyRef.current) return
+      void writeUnsyncedDraft(store, {
+        key: draftBufferKey(options.userId, bufferIdentityRef.current),
+        userId: options.userId,
+        payload: payloadRef.current,
+        updatedAt: Date.now(),
+        ...(options.recordId ? { recordId: options.recordId } : {}),
+        ...(draftRef.current ? { draftId: draftRef.current.draft_id, etag: draftRef.current.etag } : {}),
+      })
+    }
+  }, [options.mode, options.recordId, options.userId, store])
 
   useEffect(() => {
     if (!dirty || options.mode === 'read' || options.mode === 'revision') return
@@ -437,7 +493,7 @@ export function useRecordDraft(options: {
           setMessage('')
         }
       }
-      await store.delete(draftBufferKey(options.userId, options.recordId))
+      await store.delete(draftBufferKey(options.userId, bufferRecordId))
     } catch (error) {
       if (isRevisionConflict(error)) {
         if (options.recordId) {
@@ -469,7 +525,7 @@ export function useRecordDraft(options: {
     } finally {
       if (mountedRef.current) setPublishing(false)
     }
-  }, [applyDraftConflict, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, saveDraft, store])
+  }, [applyDraftConflict, bufferRecordId, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, saveDraft, store])
 
   const restore = useCallback(async (saveReason: string) => {
     if (!options.recordId || !options.revisionId) return
@@ -523,7 +579,7 @@ export function useRecordDraft(options: {
           || options.mode === 'read'
           || options.mode === 'revision'
         ) return
-        const buffered = await readUnsyncedDraft(store, draftBufferKey(options.userId, options.recordId))
+        const buffered = await readUnsyncedDraft(store, draftBufferKey(options.userId, bufferRecordId))
         if (!mountedRef.current || closedRef.current || !buffered || dirtyRef.current) return
         payloadRef.current = buffered.payload
         setPayload(buffered.payload)
@@ -550,7 +606,7 @@ export function useRecordDraft(options: {
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('online', onOnline)
     }
-  }, [options.mode, options.recordId, options.userId, revalidateAccess, store])
+  }, [bufferRecordId, options.mode, options.recordId, options.userId, revalidateAccess, store])
 
   useEffect(() => {
     if (!dirty) return

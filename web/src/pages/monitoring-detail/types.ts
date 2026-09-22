@@ -12,9 +12,10 @@ export type MonitoringDetailPageState = {
   error: string | null
   monitoringInstance: MonitoringInstanceRecord | null
   runtimeFacts: MonitoringInstanceRuntimeFacts | null
-  requestedActivityMonitoringInstanceId: string | null
+  requestedIncidentsMonitoringInstanceId: string | null
   incidents: ActiveIncidentRecord[]
   incidentsError: string | null
+  requestedEventsMonitoringInstanceId: string | null
   events: StateChangeEventRecord[]
   eventsError: string | null
 }
@@ -28,12 +29,19 @@ export type BindingConflictState = {
 
 export type BindingConflictAction = 'confirm' | 'reject' | 'reset'
 
-export type PendingBindingConfirmation = {
+export type FrozenDestructiveSubject = {
+  monitoringInstanceId: string
+  displayName: string
+  updatedAt: string
+}
+
+export type PendingBindingConfirmation = FrozenDestructiveSubject & {
   action: BindingConflictAction
 }
 
-export type PendingRuntimeConfirmation = {
+export type PendingRuntimeConfirmation = FrozenDestructiveSubject & {
   action: 'pause'
+  monitoringStatus: MonitoringInstanceRecord['monitoring_status']
 }
 
 export type MetadataFormState = {

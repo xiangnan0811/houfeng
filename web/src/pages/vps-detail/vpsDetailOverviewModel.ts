@@ -1,4 +1,5 @@
-import { formatMoney, formatOptional } from '../../lib/format'
+import { formatDate, formatMoney, formatOptional } from '../../lib/format'
+import { periodLabel, renewalModeLabel } from '../../lib/assetOptions'
 import type {
   AssetDomainRecord,
   AssetServiceRecord,
@@ -18,17 +19,23 @@ import {
   renewalLabel,
   usageLabel,
 } from '../assetPageUtils'
-import { latestDecisionReason, primaryMonitoringInstance } from './vpsDecisionModel'
+import { primaryMonitoringInstance } from './vpsDecisionModel'
+
 import type { VPSDetailModalMode } from './types'
 
 export type VPSOverviewTone = 'normal' | 'notice' | 'alert' | 'critical'
+
+export type VPSOverviewDomain = 'identity' | 'ops' | 'monitoring' | 'relations' | 'activity'
 
 export type VPSOverviewFact = {
   label: string
   value: string
   meta?: string
   tone?: VPSOverviewTone
+  domain: VPSOverviewDomain
+  copyValue?: string
 }
+
 
 export type VPSOverviewAction = {
   kind: 'modal' | 'link'
@@ -41,12 +48,14 @@ export type VPSContextAction = {
   title: string
   reason: string
   tone: VPSOverviewTone
+  domain: VPSOverviewDomain
   primaryAction: VPSOverviewAction
   secondaryActions: VPSOverviewAction[]
 }
 
 export type VPSRelatedOverviewItem = {
-  key: 'subscription' | 'monitoring' | 'ip-quality' | 'services' | 'domains' | 'history'
+  key: 'subscription' | 'monitoring' | 'ip-quality'
+  domain: VPSOverviewDomain
   title: string
   tone: VPSOverviewTone
   primary: string
@@ -55,11 +64,11 @@ export type VPSRelatedOverviewItem = {
   quickActions: VPSOverviewAction[]
 }
 
-export type VPSSingleMachineLedgerModel = {
-  operationFacts: Array<{ label: string; value: string }>
-  records: Array<{ key: string; date: string; kind: string; summary: string }>
-  carriers: Array<{ key: string; kind: 'service' | 'domain'; name: string; meta: string }>
-  changes: Array<{ key: string; summary: string; meta: string }>
+export type VPSRecentActivityItem = {
+  key: string
+  date: string
+  kind: string
+  summary: string
 }
 
 export type VPSIPQualityOverviewModel = {
@@ -75,6 +84,11 @@ export type VPSIPQualityOverviewModel = {
 export type VPSDetailOverviewModel = {
   title: string
   badges: string[]
+  updatedAt: string
+  monitoringFreshness: {
+    lastHeartbeatAt: string | null
+    lastSyncAt: string | null
+  } | null
   facts: VPSOverviewFact[]
   judgement: {
     tone: VPSOverviewTone
@@ -82,8 +96,10 @@ export type VPSDetailOverviewModel = {
     attentionItems: VPSContextAction[]
     primaryAction: VPSOverviewAction | null
   }
+  monitoringAttentionItems: VPSContextAction[]
   relatedItems: VPSRelatedOverviewItem[]
-  ledger: VPSSingleMachineLedgerModel
+  recentActivity: VPSRecentActivityItem[]
+
   ipOverview: VPSIPQualityOverviewModel
 }
 
@@ -125,15 +141,26 @@ function relativeDayMonthLabel(days: number | null): string {
 
 export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput): VPSDetailOverviewModel {
   const monitoringInstance = primaryMonitoringInstance(input.detail)
+  const monitoringFreshness = monitoringInstance
+    ? {
+        lastHeartbeatAt: monitoringInstance.last_heartbeat_at ?? null,
+        lastSyncAt: monitoringInstance.last_sync_at ?? null,
+      }
+    : null
   const subscriptionSummary = buildSubscriptionSummary(input.primarySubscription, input.subscriptionLoadFailed, input.subscriptionError)
   const ipOverview = buildIPQualityOverview(input.detail, input.ipQuality, input.ipQualityError)
+  const recentActivity = buildRecentActivity(input.timeline)
   const relatedItems = buildRelatedItems(input, subscriptionSummary, ipOverview)
+
   const cancellationWork = input.cancellationAttention ?? needsCancellationWork(input.detail)
   const attentionItems = buildAttentionItems(input, subscriptionSummary, ipOverview, cancellationWork)
-  const actionValue = cancellationWork ? '取消/退役' : attentionItems[0]?.primaryAction.label ?? '无'
+  const opsAttention = attentionItems.filter((item) => item.domain === 'ops')
+  const monitoringAttentionItems = attentionItems.filter((item) => item.domain === 'monitoring')
 
   return {
     title: input.detail.display_name,
+    updatedAt: input.detail.updated_at,
+    monitoringFreshness,
     badges: [
       lifecycleLabel(input.detail.lifecycle_status),
       usageLabel(input.detail.usage_status),
@@ -141,29 +168,31 @@ export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput):
       `${input.detail.active_monitoring_instance_link_count} 个监控实例`,
     ],
     facts: [
-      { label: 'Provider', value: formatOptional(input.detail.provider_name) },
-      { label: '地区 / 数据中心', value: locationLabel(input.detail) },
-      { label: '规格', value: formatOptional(input.detail.product_name) },
-      { label: '访问', value: accessLabel(input.detail) },
-      { label: '系统', value: formatOptional(input.detail.os_name) },
-      { label: '订阅', value: subscriptionSummary.factValue, tone: subscriptionSummary.tone },
-      { label: '监控', value: monitoringFactValue(input.detail), tone: monitoringTone(monitoringInstance) },
-      { label: 'IP 质量', value: ipOverview.titleValue, tone: ipOverviewTone(ipOverview) },
+      { domain: 'identity', label: '服务商', value: formatOptional(input.detail.provider_name) },
+      { domain: 'identity', label: '地区 / 数据中心', value: locationLabel(input.detail) },
+      { domain: 'identity', label: '规格', value: formatOptional(input.detail.product_name) },
+      ...copyableAccessFacts(input.detail),
+      { domain: 'identity', label: '系统', value: formatOptional(input.detail.os_name) },
+      { domain: 'identity', label: '重要性', value: formatOptional(input.detail.importance) },
+      { domain: 'identity', label: '标签', value: input.detail.labels.length > 0 ? input.detail.labels.join(' · ') : '无标签' },
+      { domain: 'identity', label: '备注', value: input.detail.note || '未记录' },
+      { domain: 'monitoring', label: '监控', value: monitoringFactValue(input.detail), tone: monitoringTone(monitoringInstance) },
+      { domain: 'monitoring', label: 'IP 质量', value: ipOverview.titleValue, tone: ipOverviewTone(ipOverview) },
     ],
     judgement: {
-      tone: strongestOverviewTone(attentionItems.map((item) => item.tone)),
+      tone: strongestOverviewTone(opsAttention.map((item) => item.tone)),
       rows: [
         { label: '决策', value: renewalLabel(input.detail.renewal_decision) },
         { label: '续费', value: input.primarySubscription ? renewalDueLabel(input.primarySubscription) : subscriptionSummary.shortValue },
-        { label: '动作', value: actionValue },
       ],
-      attentionItems,
+      attentionItems: opsAttention,
       primaryAction: cancellationWork
         ? { kind: 'modal', label: '处理取消/退役', mode: 'cancellation' }
         : null,
     },
+    monitoringAttentionItems,
+    recentActivity,
     relatedItems,
-    ledger: buildLedger(input),
     ipOverview,
   }
 }
@@ -229,24 +258,25 @@ function buildRelatedItems(
   ipOverview: VPSIPQualityOverviewModel,
 ): VPSRelatedOverviewItem[] {
   const monitoringInstance = primaryMonitoringInstance(input.detail)
-  const latestRecord = latestLedgerRecord(input.timeline)
   return [
     {
       key: 'subscription',
+      domain: 'ops',
       title: '订阅',
       tone: subscriptionSummary.tone,
       primary: subscriptionSummary.relatedPrimary,
       secondary: subscriptionSummary.relatedSecondary,
-      titleAction: { kind: 'link', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}` },
+      titleAction: { kind: 'link', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}&view=details` },
       quickActions: input.subscriptionLoadFailed
         ? []
         : [
-            { kind: 'modal', label: '创建/更新订阅', mode: 'subscription' },
+            { kind: 'modal', label: '新增订阅事实', mode: 'subscription' },
             { kind: 'modal', label: '延长', mode: 'validity-extension' },
           ],
     },
     {
       key: 'monitoring',
+      domain: 'monitoring',
       title: '监控观测',
       tone: monitoringTone(monitoringInstance),
       primary: monitoringInstance ? `${input.detail.monitoring_instance_links.length} 个实例 · ${monitoringInstance.current_health_status}` : '未关联监控实例',
@@ -266,39 +296,13 @@ function buildRelatedItems(
     },
     {
       key: 'ip-quality',
+      domain: 'monitoring',
       title: 'IP 质量',
       tone: ipOverviewTone(ipOverview),
       primary: ipOverview.titleValue,
       secondary: ipOverview.riskSummary,
       titleAction: { kind: 'link', to: ipOverview.reportTo },
       quickActions: [],
-    },
-    {
-      key: 'services',
-      title: '服务',
-      tone: 'normal',
-      primary: `${input.services.length} 个服务`,
-      secondary: input.services[0]?.name ?? '未记录服务',
-      titleAction: { kind: 'modal', mode: 'services-detail' },
-      quickActions: [{ kind: 'modal', label: '新增服务', mode: 'service' }],
-    },
-    {
-      key: 'domains',
-      title: '域名',
-      tone: 'normal',
-      primary: `${input.domains.length} 个域名`,
-      secondary: input.domains[0]?.domain_name ?? '未记录域名',
-      titleAction: { kind: 'modal', mode: 'domains-detail' },
-      quickActions: [{ kind: 'modal', label: '新增域名', mode: 'domain' }],
-    },
-    {
-      key: 'history',
-      title: '资产历史',
-      tone: latestRecord ? 'normal' : 'notice',
-      primary: `${ledgerRecordCount(input.timeline)} 条记录`,
-      secondary: latestRecord?.summary ?? '尚无资产历史',
-      titleAction: { kind: 'modal', mode: 'timeline-detail' },
-      quickActions: [{ kind: 'modal', label: '记录', mode: 'experience' }],
     },
   ]
 }
@@ -317,6 +321,7 @@ function buildAttentionItems(
       title: '取消/退役',
       reason: lifecycleLabel(input.detail.lifecycle_status),
       tone: 'critical',
+      domain: 'ops',
       primaryAction: { kind: 'modal', label: '处理取消/退役', mode: 'cancellation' },
       secondaryActions: [],
     })
@@ -327,6 +332,7 @@ function buildAttentionItems(
       title: '运行观测需要核对',
       reason: `${monitoringInstance.display_name} · ${monitoringInstance.current_active_incident_count} 个活跃异常`,
       tone: monitoringTone(monitoringInstance),
+      domain: 'monitoring',
       primaryAction: {
         kind: 'link',
         label: '查看监控实例',
@@ -341,7 +347,8 @@ function buildAttentionItems(
       title: '订阅证据暂不可用',
       reason: input.subscriptionError ?? '读取失败，暂不判断缺订阅',
       tone: 'notice',
-      primaryAction: { kind: 'link', label: '核对订阅', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}` },
+      domain: 'ops',
+      primaryAction: { kind: 'link', label: '核对订阅', to: `/subscriptions?vps_id=${encodeURIComponent(input.detail.vps_id)}&view=details` },
       secondaryActions: [],
     })
   } else if (!input.primarySubscription) {
@@ -349,7 +356,8 @@ function buildAttentionItems(
       title: '缺少当前订阅',
       reason: '需要补齐成本和续费日',
       tone: 'critical',
-      primaryAction: { kind: 'modal', label: '创建/更新订阅', mode: 'subscription' },
+      domain: 'ops',
+      primaryAction: { kind: 'modal', label: '新增订阅事实', mode: 'subscription' },
       secondaryActions: [],
     })
   } else if (subscriptionSummary.tone === 'critical' || subscriptionSummary.tone === 'notice') {
@@ -357,6 +365,7 @@ function buildAttentionItems(
       title: input.primarySubscription.auto_renew_cancelled ? '自动续费已取消' : '续费时间需要关注',
       reason: renewalDueLabel(input.primarySubscription),
       tone: subscriptionSummary.tone,
+      domain: 'ops',
       primaryAction: { kind: 'modal', label: '调整决策', mode: 'decision' },
       secondaryActions: [{ kind: 'modal', label: '延长有效期', mode: 'validity-extension' }],
     })
@@ -367,6 +376,7 @@ function buildAttentionItems(
       title: '缺少运行观测',
       reason: '尚未关联监控实例',
       tone: 'alert',
+      domain: 'monitoring',
       primaryAction: { kind: 'modal', label: '接入/升级 agent', mode: 'monitoring-instance-create' },
       secondaryActions: [{ kind: 'modal', label: '关联已有监控实例', mode: 'monitoring-instance-link' }],
     })
@@ -377,6 +387,7 @@ function buildAttentionItems(
       title: 'IP 质量暂不可用',
       reason: ipOverview.verdict,
       tone: 'notice',
+      domain: 'monitoring',
       primaryAction: { kind: 'link', label: '查看 IP 质量', to: ipOverview.reportTo },
       secondaryActions: [],
     })
@@ -394,61 +405,95 @@ function needsCancellationWork(detail: VPSAssetDetail): boolean {
     detail.lifecycle_status === 'cancelled'
 }
 
-function buildLedger(input: VPSDetailOverviewModelInput): VPSSingleMachineLedgerModel {
-  const records = [
-    ...input.timeline.experience_logs.slice(0, 3).map((log) => ({
-      key: log.experience_log_id,
-      date: log.occurred_at ?? log.created_at,
-      kind: '经验',
-      summary: log.summary,
+
+function changedTimelineValue(
+  from: string | number | null | undefined,
+  to: string | number | null | undefined,
+): string {
+  return `${formatOptional(from)} -> ${formatOptional(to)}`
+}
+
+function buildRecentActivity(timeline: VPSTimeline): VPSRecentActivityItem[] {
+  const items: VPSRecentActivityItem[] = [
+    ...timeline.experience_logs.map((log) => ({
+      key: `experience:${log.experience_log_id}`,
+      date: log.occurred_at,
+      kind: '经验记录',
+      summary: log.summary || '未记录经验',
     })),
-    ...input.timeline.renewal_decisions.slice(0, 3).map((decision) => ({
-      key: decision.decision_id,
+    ...timeline.renewal_decisions.map((decision) => ({
+      key: `renewal:${decision.decision_id}`,
       date: decision.decided_at,
-      kind: '决策',
+      kind: '续费决策',
       summary: decision.reason || renewalLabel(decision.to_decision),
     })),
-  ].slice(0, 3)
-
-  const carriers = [
-    ...input.services.slice(0, 3).map((service) => ({
-      key: service.service_id,
-      kind: 'service' as const,
-      name: service.name,
-      meta: service.url || (service.port ? `端口 ${service.port}` : '未记录入口'),
+    ...timeline.price_histories.map((history) => ({
+      key: `price:${history.price_history_id}`,
+      date: history.changed_at,
+      ...priceHistoryPresentation(history),
     })),
-    ...input.domains.slice(0, 3).map((domain) => ({
-      key: domain.domain_id,
-      kind: 'domain' as const,
-      name: domain.domain_name,
-      meta: domain.purpose || domain.registrar || '未记录用途',
+    ...timeline.ip_histories.map((history) => ({
+      key: `ip:${history.ip_history_id}`,
+      date: history.changed_at,
+      kind: 'IP 变化',
+      summary: `IPv4 ${changedTimelineValue(history.from_ipv4, history.to_ipv4)} · IPv6 ${changedTimelineValue(history.from_ipv6, history.to_ipv6)}`,
     })),
-  ].slice(0, 3)
-
-  const changes = [
-    ...input.timeline.price_histories.slice(0, 1).map((history) => ({
-      key: history.price_history_id,
-      summary: `${formatMoney(history.from_price, history.from_currency)} -> ${formatMoney(history.to_price, history.to_currency)}`,
-      meta: '价格变化',
-    })),
-    ...input.timeline.ip_histories.slice(0, 1).map((history) => ({
-      key: history.ip_history_id,
-      summary: `${formatOptional(history.from_ipv4)} -> ${formatOptional(history.to_ipv4)}`,
-      meta: 'IP 变化',
+    ...timeline.spec_snapshots.map((snapshot) => ({
+      key: `spec:${snapshot.snapshot_id}`,
+      date: snapshot.captured_at,
+      kind: '规格快照',
+      summary: snapshot.product_name || '规格快照',
     })),
   ]
 
-  return {
-    operationFacts: [
-      { label: '用途', value: usageLabel(input.detail.usage_status) },
-      { label: '重要性', value: formatOptional(input.detail.importance) },
-      { label: '标签', value: input.detail.labels.length > 0 ? input.detail.labels.join(' · ') : '无标签' },
-      { label: '备注', value: input.detail.note || '未记录' },
-    ],
-    records,
-    carriers,
-    changes,
+  return items
+    .sort((left, right) => {
+      const dateOrder = recentActivityTimestamp(right.date) - recentActivityTimestamp(left.date)
+      return dateOrder || left.key.localeCompare(right.key)
+    })
+    .slice(0, 3)
+}
+
+function priceHistoryPresentation(history: VPSTimeline['price_histories'][number]): { kind: string; summary: string } {
+  const changes: string[] = []
+  const priceChanged = history.from_price !== history.to_price || history.from_currency !== history.to_currency
+  if (priceChanged) {
+    changes.push(`价格 ${formatMoney(history.from_price, history.from_currency)} -> ${formatMoney(history.to_price, history.to_currency)}`)
   }
+
+  const fromCadence = periodLabel(
+    history.from_billing_period_unit,
+    history.from_billing_period_length,
+    history.from_billing_months,
+  )
+  const toCadence = periodLabel(
+    history.to_billing_period_unit,
+    history.to_billing_period_length,
+    history.to_billing_months,
+  )
+  if (fromCadence !== toCadence) {
+    changes.push(`计费周期 ${fromCadence} -> ${toCadence}`)
+  }
+
+  if (history.from_renew_at !== history.to_renew_at) {
+    changes.push(`续费日 ${formatDate(history.from_renew_at)} -> ${formatDate(history.to_renew_at)}`)
+  }
+
+  const fromRenewalMode = renewalModeLabel(history.from_renewal_mode)
+  const toRenewalMode = renewalModeLabel(history.to_renewal_mode)
+  if (fromRenewalMode !== toRenewalMode) {
+    changes.push(`续费方式 ${fromRenewalMode} -> ${toRenewalMode}`)
+  }
+
+  return {
+    kind: priceChanged ? '价格变化' : '账单更新',
+    summary: changes.length > 0 ? changes.join(' · ') : '账单更新',
+  }
+}
+
+function recentActivityTimestamp(value: string): number {
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? Number.NEGATIVE_INFINITY : timestamp
 }
 
 function buildIPQualityOverview(
@@ -518,10 +563,20 @@ function locationLabel(detail: VPSAssetDetail): string {
   return [detail.country, detail.region, detail.city, detail.datacenter].filter(Boolean).join(' · ') || '位置未确认'
 }
 
-function accessLabel(detail: VPSAssetDetail): string {
-  const host = detail.ssh_host || detail.ipv4 || detail.ipv6 || detail.display_name
-  return detail.ssh_port ? `${host}:${detail.ssh_port}` : host
+function copyableAccessFacts(detail: VPSAssetDetail): VPSOverviewFact[] {
+  const facts: VPSOverviewFact[] = []
+  const ipv4 = detail.ipv4.trim()
+  const ipv6 = detail.ipv6.trim()
+  const host = detail.ssh_host.trim()
+  if (ipv4) facts.push({ domain: 'identity', label: 'IPv4', value: ipv4, copyValue: ipv4 })
+  if (ipv6) facts.push({ domain: 'identity', label: 'IPv6', value: ipv6, copyValue: ipv6 })
+  if (host) {
+    const ssh = `${detail.ssh_user.trim() || 'root'}@${host}:${detail.ssh_port || 22}`
+    facts.push({ domain: 'identity', label: 'SSH', value: ssh, copyValue: ssh })
+  }
+  return facts
 }
+
 
 function monitoringFactValue(detail: VPSAssetDetail): string {
   const monitoringInstance = primaryMonitoringInstance(detail)
@@ -537,20 +592,3 @@ function monitoringTone(monitoringInstance: ReturnType<typeof primaryMonitoringI
   return 'normal'
 }
 
-function ledgerRecordCount(timeline: VPSTimeline): number {
-  return timeline.renewal_decisions.length +
-    timeline.price_histories.length +
-    timeline.ip_histories.length +
-    timeline.spec_snapshots.length +
-    timeline.experience_logs.length
-}
-
-function latestLedgerRecord(timeline: VPSTimeline): { summary: string } | null {
-  const experience = timeline.experience_logs[0]
-  if (experience) return { summary: experience.summary }
-  const decision = timeline.renewal_decisions[0]
-  if (decision) return { summary: decision.reason || latestDecisionReason(timeline) }
-  const price = timeline.price_histories[0]
-  if (price) return { summary: `${formatMoney(price.from_price, price.from_currency)} -> ${formatMoney(price.to_price, price.to_currency)}` }
-  return null
-}

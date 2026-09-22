@@ -170,6 +170,9 @@ describe('bundle budget checker', () => {
     expect(missingResult.stderr).toContain('expected exactly one module entry')
     expect(ambiguousResult.status).toBe(1)
     expect(ambiguousResult.stderr).toContain('expected exactly one module entry')
+    const advisory = runChecker(missing.dist, missing.budgetPath, '--budget-policy', 'advisory')
+    expect(advisory.status).toBe(1)
+    expect(advisory.stderr).toContain('expected exactly one module entry')
   })
 
   it('fails closed when the entry stylesheet is missing or ambiguous', () => {
@@ -221,6 +224,18 @@ describe('bundle budget checker', () => {
     expect(result.stderr).toContain(
       `entryJsGzipBytes: actual ${entryJsGzipBytes} > limit ${entryJsGzipBytes - 1}`,
     )
+    expect(result.stdout).toContain(
+      `entryJsGzipBytes: actual ${entryJsGzipBytes} > limit ${entryJsGzipBytes - 1}`,
+    )
+    const strict = runChecker(fixture.dist, fixture.budgetPath, '--format', 'json')
+    const advisory = runChecker(fixture.dist, fixture.budgetPath, '--format', 'json', '--budget-policy', 'advisory')
+    expect(strict.status).toBe(1)
+    expect(advisory.status).toBe(0)
+    const strictReport = JSON.parse(strict.stdout)
+    expect(strictReport.budgetPolicy).toBe('enforce')
+    expect(strictReport.status).toBe('fail')
+    expect(JSON.parse(advisory.stdout)).toEqual({ ...strictReport, budgetPolicy: 'advisory' })
+    expect(advisory.stderr).toBe('WARNING: ' + strict.stderr)
     expect(readFileSync(fixture.budgetPath, 'utf8')).toBe(before)
   })
 
@@ -256,6 +271,13 @@ describe('bundle budget checker', () => {
     expect(result.status, result.stderr).toBe(0)
     const report = JSON.parse(result.stdout) as { metrics: Record<string, number> }
     expect(JSON.parse(readFileSync(fixture.budgetPath, 'utf8'))).toEqual(report.metrics)
+  })
+
+  it.each([['invalid'], []])('rejects invalid or missing policy %j', (...values) => {
+    const fixture = createFixture()
+    const result = runChecker(fixture.dist, fixture.budgetPath, '--budget-policy', ...values)
+    expect(result.status).toBe(1)
+    expect(result.stdout).toBe('')
   })
 
   it('keeps the Records transport out of the production entry after lazy record routes consume it', async () => {

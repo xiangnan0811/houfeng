@@ -117,12 +117,12 @@ describe('resolveVPSOverviewAnomalyDestination', () => {
 
 describe('resolveVPSOverviewRelationDestination', () => {
   it.each([
-    ['subscriptions', { kind: 'route', to: '/subscriptions?vps_id=vps_001' }],
+    ['subscriptions', { kind: 'route', to: '/subscriptions?vps_id=vps_001&view=details' }],
     ['monitoring_instances', { kind: 'command', command: 'open_monitoring_instances' }],
     ['services', { kind: 'command', command: 'open_services' }],
     ['domains', { kind: 'command', command: 'open_domains' }],
   ] as const)('resolves the %s relation', (kind, expected) => {
-    const route = kind === 'subscriptions' ? '/subscriptions?vps_id=vps_001' : undefined
+    const route = kind === 'subscriptions' ? '/subscriptions?vps_id=vps_001&view=details' : undefined
     expect(resolveVPSOverviewRelationDestination(vpsId, { kind, ...(route ? { route } : {}) })).toEqual(expected)
   })
 
@@ -147,8 +147,8 @@ describe('resolveVPSOverviewRelationDestination', () => {
     })).toEqual({ kind: 'route', to: '/vps/vps%20%2F%E4%B8%9C%E4%BA%AC/ip-quality' })
     expect(resolveVPSOverviewRelationDestination(encodedVpsId, {
       kind: 'subscriptions',
-      route: '/subscriptions?vps_id=vps+%2F%E4%B8%9C%E4%BA%AC',
-    })).toEqual({ kind: 'route', to: '/subscriptions?vps_id=vps+%2F%E4%B8%9C%E4%BA%AC' })
+      route: '/subscriptions?vps_id=vps+%2F%E4%B8%9C%E4%BA%AC&view=details',
+    })).toEqual({ kind: 'route', to: '/subscriptions?vps_id=vps+%2F%E4%B8%9C%E4%BA%AC&view=details' })
   })
 })
 
@@ -157,7 +157,7 @@ describe('VPS overview route ownership', () => {
     ['/monitoring/mi_001', 'monitoring/:monitoringInstanceId'],
     ['/events?object_type=monitoring_instance&object_id=mi_001', 'events'],
     ['/vps/vps_001/ip-quality', 'vps/:vpsId/ip-quality'],
-    ['/subscriptions?vps_id=vps_001', 'subscriptions'],
+    ['/subscriptions?vps_id=vps_001&view=details', 'subscriptions'],
   ])('matches %s to the non-wildcard owner %s', (to, ownerPath) => {
     const matches = matchRoutes(appRoutes, to)
     expect(matches).not.toBeNull()

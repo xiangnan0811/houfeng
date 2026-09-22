@@ -19,7 +19,7 @@ export function FilterBar({
   onClearAll,
   className = '',
 }: FilterBarProps) {
-  const classes = ['filter-bar', className].filter(Boolean).join(' ')
+  const classes = ['filter-bar', 'filter-bar--stacked', className].filter(Boolean).join(' ')
   return (
     <div className={classes}>
       <div className="filter-bar__controls">

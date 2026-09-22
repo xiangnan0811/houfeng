@@ -1,0 +1,28 @@
+{
+  "id": "operator-ui-rebuild",
+  "name": "operator-ui-rebuild",
+  "title": "Rebuild Houfeng operator UI as a night observatory",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "web",
+  "package": null,
+  "priority": "P2",
+  "creator": "xiangnan-arch",
+  "assignee": "xiangnan-arch",
+  "createdAt": "2026-09-08",
+  "completedAt": "2026-09-22",
+  "branch": "feat/operator-ui-observatory",
+  "base_branch": "main",
+  "worktree_path": ".worktree/operator-ui-rebuild",
+  "commit": "0c04c5891d55f53c6e90f1626c66479aa365186d",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "2026-09-22 local engineering acceptance passed; user-authorized source commit and archival. Go1.26.2 full75packages+vet/fmt; Node22 verify-web2088tests; Chromium146; PG16.0/16.6/16.12 catalog and4runtimePG tests; GPT5.6-sol high/Grok4.7 discovery no findings. Image download blocker resolved without source/lock/TLS changes; local image houfeng-local-acceptance:0c04c589 and readonly/no-network packaging smoke passed. Mixed UI/Go landing preserved. No push/merge/deployment. Real deployment/systemd/release/enrollment remains pending. See implement.md for evidence and retained warnings; oldF08 remains NOT PROVEN.",
+  "meta": {
+    "description": "Rebuild the operator SPA as a night observatory: lampblack, celadon, iron-red, table-first daily path."
+  }
+}

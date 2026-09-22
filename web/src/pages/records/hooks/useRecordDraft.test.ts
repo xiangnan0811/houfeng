@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../../../lib/apiRequest'
 import type { RecordDraft } from '../../../lib/types'
-import { draftBufferKey, memoryDraftBufferStore, readUnsyncedDraft, writeUnsyncedDraft } from '../draftBuffer'
+import { draftBufferKey, draftBufferRecordId, memoryDraftBufferStore, readUnsyncedDraft, writeUnsyncedDraft } from '../draftBuffer'
 import { emptyRecordDraftPayload, recordDetailFixture, recordRevisionFixture } from '../testFixtures'
 import { useRecordDraft } from './useRecordDraft'
 
@@ -731,6 +731,236 @@ describe('useRecordDraft', () => {
     expect(add).toHaveBeenCalledWith('beforeunload', expect.any(Function))
     add.mockRestore()
   })
+
+  it('keeps an unscoped new buffer when opening a canonical subject prefill', async () => {
+    const store = memoryDraftBufferStore()
+    const seedB = [{
+      registry_version: 1 as const,
+      kind: 'vps' as const,
+      role: 'affected' as const,
+      source_id: 'vps_001',
+      primary: true,
+    }]
+    await writeUnsyncedDraft(store, {
+      key: draftBufferKey('usr_1'),
+      userId: 'usr_1',
+      payload: {
+        ...emptyRecordDraftPayload('usr_1'),
+        title: 'draft A',
+        subjects: [{
+          registry_version: 1,
+          kind: 'vps',
+          role: 'affected',
+          source_id: 'vps_other',
+          primary: true,
+        }],
+      },
+      updatedAt: Date.now(),
+    })
+    const { result } = renderHook(() => useRecordDraft({
+      mode: 'new',
+      userId: 'usr_1',
+      store,
+      seedSubjects: seedB,
+    }))
+    await waitFor(() => expect(result.current.state.payload.subjects[0]?.source_id).toBe('vps_001'))
+    expect(result.current.state.payload.title).not.toBe('draft A')
+    await expect(readUnsyncedDraft(store, draftBufferKey('usr_1'))).resolves.toMatchObject({
+      payload: { title: 'draft A' },
+    })
+  })
+
+  it('still restores the unscoped new buffer without a subject prefill', async () => {
+    const store = memoryDraftBufferStore()
+    await writeUnsyncedDraft(store, {
+      key: draftBufferKey('usr_1'),
+      userId: 'usr_1',
+      payload: { ...emptyRecordDraftPayload('usr_1'), title: 'draft A' },
+      updatedAt: Date.now(),
+    })
+    const { result } = renderHook(() => useRecordDraft({
+      mode: 'new',
+      userId: 'usr_1',
+      store,
+    }))
+    await waitFor(() => expect(result.current.state.payload.title).toBe('draft A'))
+  })
+
+  it('does not let a late scoped buffer replace edits on a seeded new record', async () => {
+    const inner = memoryDraftBufferStore()
+    const seedB = [{
+      registry_version: 1 as const,
+      kind: 'vps' as const,
+      role: 'affected' as const,
+      source_id: 'vps_001',
+      primary: true,
+    }]
+    await writeUnsyncedDraft(inner, {
+      key: draftBufferKey('usr_1', draftBufferRecordId(undefined, seedB)),
+      userId: 'usr_1',
+      payload: { ...emptyRecordDraftPayload('usr_1'), title: 'old scoped', subjects: seedB },
+      updatedAt: Date.now(),
+    })
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const store = {
+      async get(key: string) {
+        await gate
+        return inner.get(key)
+      },
+      set: (value: Parameters<typeof inner.set>[0]) => inner.set(value),
+      delete: (key: string) => inner.delete(key),
+      list: () => inner.list(),
+    }
+    const { result } = renderHook(() => useRecordDraft({
+      mode: 'new',
+      userId: 'usr_1',
+      store,
+      seedSubjects: seedB,
+    }))
+    act(() => result.current.commands.patchPayload({ title: 'typed B' }))
+    await act(async () => {
+      release?.()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(result.current.state.payload.title).toBe('typed B')
+    expect(result.current.state.payload.subjects[0]?.source_id).toBe('vps_001')
+  })
+
+  it('publishes a seeded record without deleting the unscoped new buffer', async () => {
+    const store = memoryDraftBufferStore()
+    const seedB = [{
+      registry_version: 1 as const,
+      kind: 'vps' as const,
+      role: 'affected' as const,
+      source_id: 'vps_001',
+      primary: true,
+    }]
+    await writeUnsyncedDraft(store, {
+      key: draftBufferKey('usr_1'),
+      userId: 'usr_1',
+      payload: { ...emptyRecordDraftPayload('usr_1'), title: 'draft A' },
+      updatedAt: Date.now(),
+    })
+    api.createRecordDraft.mockResolvedValue(draftFixture())
+    api.createRecord.mockResolvedValue({ record_id: 'rec_new' })
+    const { result } = renderHook(() => useRecordDraft({
+      mode: 'new',
+      userId: 'usr_1',
+      store,
+      seedSubjects: seedB,
+    }))
+    act(() => result.current.commands.patchPayload({ title: 'canonical B' }))
+    await act(async () => {
+      await result.current.commands.publish()
+    })
+    expect(result.current.state.publishedRecordId).toBe('rec_new')
+    await expect(readUnsyncedDraft(store, draftBufferKey('usr_1'))).resolves.toMatchObject({
+      payload: { title: 'draft A' },
+    })
+    await expect(readUnsyncedDraft(store, draftBufferKey('usr_1', draftBufferRecordId(undefined, seedB)))).resolves.toBeUndefined()
+  })
+
+  it('hands off a dirty seeded new draft when the canonical subject changes', async () => {
+    const store = memoryDraftBufferStore()
+    const seedA = [{
+      registry_version: 1 as const,
+      kind: 'vps' as const,
+      role: 'affected' as const,
+      source_id: 'vps_001',
+      primary: true,
+    }]
+    const seedB = [{
+      registry_version: 1 as const,
+      kind: 'vps' as const,
+      role: 'affected' as const,
+      source_id: 'vps_002',
+      primary: true,
+    }]
+    const first = renderHook(() => useRecordDraft({
+      mode: 'new',
+      userId: 'usr_1',
+      store,
+      seedSubjects: seedA,
+    }))
+    act(() => first.result.current.commands.patchPayload({ title: 'draft A' }))
+    first.unmount()
+    const second = renderHook(() => useRecordDraft({
+      mode: 'new',
+      userId: 'usr_1',
+      store,
+      seedSubjects: seedB,
+    }))
+    await waitFor(() => expect(second.result.current.state.payload.subjects[0]?.source_id).toBe('vps_002'))
+    expect(second.result.current.state.payload.title).toBe('')
+    await waitFor(async () => {
+      await expect(readUnsyncedDraft(store, draftBufferKey('usr_1', draftBufferRecordId(undefined, seedA)))).resolves.toMatchObject({
+        payload: { title: 'draft A' },
+      })
+    })
+    await expect(readUnsyncedDraft(store, draftBufferKey('usr_1', draftBufferRecordId(undefined, seedB)))).resolves.toBeUndefined()
+  })
+
+
+  it('restores a scoped new buffer after unmount following a failed save', async () => {
+    const store = memoryDraftBufferStore()
+    const seed = [{
+      registry_version: 1 as const,
+      kind: 'vps' as const,
+      role: 'affected' as const,
+      source_id: 'vps_001',
+      primary: true,
+    }]
+    api.createRecordDraft.mockRejectedValue(new Error('draft unavailable'))
+    const { result, unmount } = renderHook(() => useRecordDraft({
+      mode: 'new',
+      userId: 'usr_1',
+      store,
+      seedSubjects: seed,
+    }))
+    act(() => result.current.commands.patchPayload({ title: 'keep me' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    unmount()
+    const again = renderHook(() => useRecordDraft({
+      mode: 'new',
+      userId: 'usr_1',
+      store,
+      seedSubjects: seed,
+    }))
+    await waitFor(() => expect(again.result.current.state.payload.title).toBe('keep me'))
+  })
+
+  it('applies the next record buffer when editing another record', async () => {
+    const store = memoryDraftBufferStore()
+    api.getRecord.mockImplementation(async (recordId: string) => recordDetailFixture({
+      record_id: recordId,
+      current: recordRevisionFixture({
+        record_id: recordId,
+        title: `server ${recordId}`,
+      }),
+    }))
+    await writeUnsyncedDraft(store, {
+      key: draftBufferKey('usr_1', 'rec_002'),
+      userId: 'usr_1',
+      recordId: 'rec_002',
+      payload: { ...emptyRecordDraftPayload('usr_1'), title: 'buffered 002' },
+      updatedAt: Date.now(),
+    })
+    const { result, rerender } = renderHook(
+      ({ recordId }) => useRecordDraft({ mode: 'edit', recordId, userId: 'usr_1', store }),
+      { initialProps: { recordId: 'rec_001' } },
+    )
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ title: 'local 001' }))
+    rerender({ recordId: 'rec_002' })
+    await waitFor(() => expect(result.current.state.payload.title).toBe('buffered 002'))
+  })
+
 
   it('restores a historical revision as a new formal save', async () => {
     api.getRecord.mockResolvedValue(recordDetailFixture({

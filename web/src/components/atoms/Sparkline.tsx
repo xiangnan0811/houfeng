@@ -16,9 +16,18 @@ export type SparklineSample = {
   observedAt: string
 }
 
+export type SparklineDomain = {
+  min: number
+  max: number
+}
+
+
 export interface SparklineProps {
-  /** Plain values. Ignored when `samples` is provided. */
-  values?: number[]
+  /**
+   * Plain values. Ignored when `samples` is provided. A `null` keeps its bucket
+   * position and breaks the line instead of joining across the gap.
+   */
+  values?: Array<number | null>
   /** Richer form with timestamps. Enables tooltip time display. Takes precedence over `values`. */
   samples?: SparklineSample[]
   tone?: SparklineTone
@@ -32,6 +41,8 @@ export interface SparklineProps {
   expand?: boolean
   /** Custom value formatter for the tooltip body. Defaults to `value.toFixed(2)`. */
   formatValue?: (value: number) => string
+  /** Shared Y domain. When omitted, domain is this series min/max. */
+  domain?: SparklineDomain
 }
 
 const TONE_VAR: Record<SparklineTone, string> = {
@@ -67,8 +78,10 @@ export function Sparkline({
   interactive = false,
   expand = false,
   formatValue = (v) => v.toFixed(2),
+  domain,
 }: SparklineProps) {
-  const series: number[] = samples ? samples.map((s) => s.value) : (values ?? [])
+  const series: Array<number | null> = samples ? samples.map((s) => s.value) : (values ?? [])
+  const finiteValues = series.filter((value): value is number => value != null && !Number.isNaN(value))
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
   const [measuredWidth, setMeasuredWidth] = useState(0)
@@ -93,7 +106,7 @@ export function Sparkline({
 
   const toneClass = `sparkline--${tone}`
   const chartWidth = expand ? measuredWidth || width : width
-  const [firstValue, ...remainingValues] = series
+  const [firstValue] = finiteValues
 
   if (firstValue === undefined) {
     return (
@@ -119,10 +132,12 @@ export function Sparkline({
     )
   }
 
-  const min = Math.min(...series)
-  const max = Math.max(...series)
-  const range = max - min || 1
+  const min = domain?.min ?? Math.min(...finiteValues)
+  const max = domain?.max ?? Math.max(...finiteValues)
+  const range = max > min ? max - min : 1
   const isSingle = series.length === 1
+  // One finite bucket cannot form a line, but it still sits at its own bucket.
+  const canDrawLine = finiteValues.length >= 2
   const stepX = isSingle ? 0 : chartWidth / (series.length - 1)
 
   const projectXY = (i: number, value: number) => {
@@ -131,14 +146,24 @@ export function Sparkline({
     return { x, y }
   }
 
-  const points = series
-    .map((value, i) => {
-      const p = projectXY(i, value)
-      return `${p.x.toFixed(2)},${p.y.toFixed(2)}`
-    })
-    .join(' ')
+  // A gap starts a new polyline. An isolated bucket repeats its own coordinate so
+  // the point stays visible without joining it to its neighbours.
+  const lineSegments: string[] = []
+  series.forEach((value, i) => {
+    if (value == null || Number.isNaN(value)) return
+    const p = projectXY(i, value)
+    const point = `${p.x.toFixed(2)},${p.y.toFixed(2)}`
+    const previous = series[i - 1]
+    const startsSegment = i === 0 || previous == null || Number.isNaN(previous)
+    if (startsSegment) lineSegments.push(point)
+    else lineSegments[lineSegments.length - 1] += ` ${point}`
+  })
 
-  const last = projectXY(series.length - 1, remainingValues.at(-1) ?? firstValue)
+  const lastFiniteIndex = series.reduce<number>(
+    (found, value, i) => (value != null && !Number.isNaN(value) ? i : found),
+    -1,
+  )
+  const last = projectXY(lastFiniteIndex, series[lastFiniteIndex] as number)
   const stroke = TONE_VAR[tone]
 
   const handleMove = (e: MouseEvent<SVGSVGElement>) => {
@@ -158,7 +183,7 @@ export function Sparkline({
   const tooltipNode = (() => {
     if (hoverIndex == null || !interactive) return null
     const hoveredValue = series[hoverIndex]
-    if (hoveredValue === undefined) return null
+    if (hoveredValue == null || Number.isNaN(hoveredValue)) return null
     const p = projectXY(hoverIndex, hoveredValue)
     const tooltipWidth = Math.min(128, chartWidth)
     const tooltipHeight = 36
@@ -198,21 +223,22 @@ export function Sparkline({
       onMouseMove={interactive ? handleMove : undefined}
       onMouseLeave={interactive ? handleLeave : undefined}
     >
-      {!isSingle && (
+      {!isSingle && canDrawLine && lineSegments.map((points) => (
         <polyline
+          key={points}
           fill="none"
           stroke={stroke}
           strokeWidth={1.5}
           strokeLinecap="round"
           strokeLinejoin="round"
-          points={points}
+          points={points.includes(' ') ? points : `${points} ${points}`}
           vectorEffect={expand ? 'non-scaling-stroke' : undefined}
         />
-      )}
+      ))}
       <circle cx={last.x} cy={last.y} r={1.6} fill={stroke} />
       {hoverIndex != null && (() => {
         const hoveredValue = series[hoverIndex]
-        if (hoveredValue === undefined) return null
+        if (hoveredValue == null || Number.isNaN(hoveredValue)) return null
         const p = projectXY(hoverIndex, hoveredValue)
         return (
           <g className="sparkline__cursor">

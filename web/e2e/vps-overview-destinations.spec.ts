@@ -14,10 +14,11 @@ import { apiRouteKey, type ApiFixtureProfile } from './fixtures/contracts'
 import {
   coreRouteProfile,
   monitoringInstanceDetailProfile,
+  subjectActivityFixture,
   vpsOverviewFixture,
   vpsOverviewProfile,
 } from './fixtures/profiles'
-import { expectNoDocumentOverflow } from './support/geometry'
+import { expectMinTouchTarget, expectNoDocumentOverflow } from './support/geometry'
 
 const READY = {
   state: 'ready' as const,
@@ -218,14 +219,14 @@ for (const contract of ROUTE_ACTIONS) {
     }
     await page.goto('/vps/vps_001')
 
-    await page.getByRole('link', { name: contract.action.primary_action!.label }).click()
+    await page.getByRole('link', { name: contract.action.primary_action!.label, exact: true }).click()
+
     await expectLocation(page, contract.expected)
     if (contract.owner === 'monitoring') {
       await expect(page.getByRole('heading', { name: 'Tokyo Monitor' })).toBeVisible()
       expect(api.requestCount('GET', '/api/monitoring-instances/mi_001')).toBeGreaterThan(0)
-      expect(api.requestCount('GET', '/api/monitoring-instances/mi_001/runtime-facts?window=realtime')).toBeGreaterThan(0)
-      await expect(page.getByText('已连接')).toBeVisible()
-      await api.assertRuntimeStreamConnected('mi_001')
+      expect(api.requestCount('GET', '/api/monitoring-instances/mi_001/runtime-facts?window=24h')).toBeGreaterThan(0)
+      await expect(page.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true')
     }
     if (contract.owner === 'events') {
       await expect(page.getByRole('heading', { name: '事件流' })).toBeVisible()
@@ -276,19 +277,7 @@ test('VPS overview creates the first monitoring instance and reaches its onboard
   api,
   page,
 }) => {
-  expect(CREATED_MONITORING_INSTANCE).toMatchObject({
-    lifecycle_status: '待接入',
-    monitoring_status: '启用',
-    binding_status: '未绑定',
-  })
-  const overviewFixture = unlinkedVPSOverview()
-  expect(overviewFixture.summary.monitoring.status).toBe('unlinked')
-  expect(overviewFixture.relations.find((relation) => (
-    relation.kind === 'monitoring_instances'
-  ))?.status).toBe('unlinked')
-
   api.useProfile(firstMonitoringCreateProfile())
-  await api.allowRuntimeStream('mi_created')
   await page.goto('/vps/vps_001')
 
   await page.getByRole('button', { name: '创建并接入 agent' }).click()
@@ -312,8 +301,30 @@ test('VPS overview creates the first monitoring instance and reaches its onboard
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
   )
   await onboardingNavigation
-  await expect(page.getByRole('heading', { name: 'Tokyo Monitor' })).toBeVisible()
-  await expect(page.getByRole('dialog', { name: '监控实例接入抽屉' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Tokyo Monitor', exact: true, level: 1 })).toBeVisible()
+  const onboardingDrawer = page.getByRole('dialog', { name: '监控实例接入抽屉' })
+  await expect(onboardingDrawer).toBeVisible()
+  await expect.poll(() => (
+    api.requestCount('GET', '/api/monitoring-instances/mi_created/runtime-facts?window=24h')
+  )).toBeGreaterThan(0)
+  await expect(page.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true')
+  await api.assertRuntimeStreamNotConnected('mi_created')
+
+  await onboardingDrawer.getByRole('button', { name: '关闭' }).click()
+  await expect(onboardingDrawer).toHaveCount(0)
+  await api.allowRuntimeStream('mi_created')
+  await page.getByRole('button', { name: '实时' }).click()
+  await expect.poll(() => (
+    api.requestCount('GET', '/api/monitoring-instances/mi_created/runtime-facts?window=realtime')
+  )).toBeGreaterThan(0)
+  await expect(page.getByRole('button', { name: '实时' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page).toHaveURL((url) => (
+    url.pathname === '/monitoring/mi_created'
+    && url.searchParams.get('return_vps') === 'vps_001'
+    && url.searchParams.get('window') === 'realtime'
+    && !url.searchParams.has('onboarding')
+  ))
+  await expect(page.getByText('已连接', { exact: true })).toBeVisible()
   await api.assertRuntimeStreamConnected('mi_created')
   expect(api.requestCount('GET', '/api/vps/vps_001/overview')).toBe(2)
   expect(api.requestCount('POST', '/api/vps/vps_001/monitoring-instances')).toBe(1)
@@ -344,14 +355,15 @@ test('Monitoring first-run entry selects an unlinked VPS and consumes the route 
 
   await page.getByRole('button', { name: '选择未关联 VPS' }).click()
   await expectLocation(page, '/vps?view=unlinked')
-  const unlinkedVPS = page.getByRole('link', { name: 'Tokyo Edge' })
+  const unlinkedVPS = page.getByRole('button', { name: '选择 Tokyo Edge', exact: true })
   await expect(unlinkedVPS).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Linked Osaka' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '选择 Linked Osaka', exact: true })).toHaveCount(0)
+  await unlinkedVPS.click()
 
   const workbenchNavigation = page.waitForURL((url) => (
     url.pathname === '/vps/vps_001' && url.search === '?workbench=monitoring'
   ))
-  await unlinkedVPS.click()
+  await page.getByRole('link', { name: '打开 VPS 详情', exact: true }).click()
   await workbenchNavigation
 
   const dialog = page.getByRole('dialog', { name: '接入/升级 agent' })
@@ -402,7 +414,7 @@ test('VPS overview management menu exits on native Tab from a menuitem', async (
   api.useProfile(vpsOverviewProfile())
   await page.goto('/vps/vps_001')
 
-  const trigger = page.getByRole('button', { name: '管理' })
+  const trigger = page.getByRole('button', { name: '管理', exact: true })
   await trigger.click()
   const menu = page.getByRole('menu', { name: '管理' })
   const firstItem = menu.getByRole('menuitem').first()
@@ -439,49 +451,105 @@ test('VPS overview subscription relation reaches the exact filtered subscription
   })
   await page.goto('/vps/vps_001')
 
-  const card = page.locator('.vps-overview-relations__item').filter({ hasText: '订阅' })
-  await card.getByRole('link').click()
-  await expectLocation(page, '/subscriptions?vps_id=vps_001')
-  await expect(page.getByRole('heading', { name: /订阅成本中枢/ })).toBeVisible()
+  await page.getByRole('region', { name: '订阅与续费', exact: true }).getByRole('link', { name: '查看订阅列表', exact: true }).click()
+
+  await expectLocation(page, '/subscriptions?vps_id=vps_001&view=details')
+  await expect(page.getByRole('button', { name: '新建订阅', exact: true })).toBeVisible()
   await expect.poll(() => api.requestCount('GET', '/api/subscriptions?vps_id=vps_001')).toBe(1)
 })
 
 const RELATION_PANELS = [
   {
     label: '监控实例',
-    dialog: '关联监控实例',
+    trigger: '查看实例',
+    dialog: '已关联监控实例',
     content: 'Tokyo Monitor',
     apiPath: '/api/vps/vps_001/monitoring-instances',
+    offered: ['接入/升级 agent', '解除关联'] as const,
+    entry: {
+      action: '解除关联',
+      dialog: '确认解除监控实例关联',
+      role: 'alertdialog' as const,
+      writePath: '/api/vps/vps_001/unlink-monitoring-instance',
+    },
   },
   {
     label: '服务',
-    dialog: '关联服务',
+    trigger: '查看服务',
+    dialog: '已关联服务',
     content: 'Overview Gateway',
     apiPath: '/api/vps/vps_001/services',
+    offered: ['新增服务'] as const,
+    entry: {
+      action: '新增服务',
+      dialog: '新增服务',
+      role: 'dialog' as const,
+      field: '服务名称',
+      writePath: '/api/vps/vps_001/services',
+    },
   },
   {
     label: '域名',
-    dialog: '关联域名',
+    trigger: '查看域名',
+    dialog: '已关联域名',
     content: 'edge.example.com',
     apiPath: '/api/vps/vps_001/domains',
+    offered: ['新增域名'] as const,
+    entry: {
+      action: '新增域名',
+      dialog: '新增域名',
+      role: 'dialog' as const,
+      field: '域名',
+      writePath: '/api/vps/vps_001/domains',
+    },
   },
 ] as const
 
 for (const contract of RELATION_PANELS) {
-  test(`VPS overview ${contract.label} relation opens its scoped read-only panel`, async ({ api, page }) => {
-    api.useProfile(vpsOverviewProfile())
+  test(`VPS overview ${contract.label} relation opens scoped management entry`, async ({ api, page }) => {
+    api.useProfile({
+      ...vpsOverviewProfile(),
+      [apiRouteKey('GET', '/api/targets')]: { status: 200, body: [] },
+    })
     await page.goto('/vps/vps_001')
 
-    const card = page.locator('.vps-overview-relations__item').filter({ hasText: contract.label })
-    await card.locator('button.vps-overview-relations__link').click()
-    await expect(page.getByRole('dialog', { name: contract.dialog })).toBeVisible()
-    await expect(page.getByText(contract.content, { exact: true })).toBeVisible()
-    expect(api.requestCount('GET', contract.apiPath)).toBe(1)
-    await expect(page.getByRole('dialog', { name: contract.dialog }).getByRole('button', {
-      name: /新增|解除关联|接入\/升级/,
-    })).toHaveCount(0)
+    await page.getByRole('button', { name: contract.trigger, exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: contract.dialog, exact: true })
+    await expect(dialog).toBeVisible()
+    await expect(dialog.getByText(contract.content, { exact: true })).toBeVisible()
+    expect(api.requestCount('GET', contract.apiPath)).toBeGreaterThan(0)
+
+    for (const action of contract.offered) {
+      await expect(dialog.getByRole('button', { name: action, exact: true })).toBeVisible()
+    }
+
+    await dialog.getByRole('button', { name: contract.entry.action, exact: true }).click()
+    const entry = page.getByRole(contract.entry.role, { name: contract.entry.dialog, exact: true })
+    await expect(entry).toBeVisible()
+    if ('field' in contract.entry) {
+      await expect(entry.getByRole('textbox', { name: contract.entry.field, exact: true })).toBeVisible()
+    }
+    await expectLocation(page, '/vps/vps_001')
+    expect(api.requestCount('POST', contract.entry.writePath)).toBe(0)
   })
 }
+
+test('VPS overview resource row view affordance opens details and restores keyboard focus', async ({ api, page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  api.useProfile(vpsOverviewProfile())
+  await page.goto('/vps/vps_001')
+  const trigger = page.getByRole('button', { name: '查看关联服务：Overview Gateway', exact: true })
+  await trigger.click()
+  const dialog = page.getByRole('dialog', { name: '已关联服务', exact: true })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByText('Overview Gateway', { exact: true })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '新增服务', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(trigger).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(dialog).toBeVisible()
+})
 
 test('VPS overview fails closed for malicious and mismatched destinations', async ({ api, page }) => {
   const malicious = [
@@ -498,7 +566,7 @@ test('VPS overview fails closed for malicious and mismatched destinations', asyn
       id: 'open_ip_quality', label: 'backslash route', route: '\\evil.invalid\\path',
     }),
     anomaly('renewal.subscription.missing.v1', {
-      id: 'open_subscription', label: 'command with route', route: '/subscriptions?vps_id=vps_001',
+      id: 'open_subscription', label: 'command with route', route: '/subscriptions?vps_id=vps_001&view=details',
     }),
   ]
   const relations = [
@@ -530,27 +598,44 @@ test('VPS overview fails closed for malicious and mismatched destinations', asyn
     await expect(text).toBeVisible()
     expect(await text.evaluate((element) => element.closest('a,button') === null)).toBe(true)
   }
-  const relationText = page.locator('.vps-overview-relations__label')
-    .getByText('mismatched subscription', { exact: true })
-  await expect(relationText).toBeVisible()
-  expect(await relationText.evaluate((element) => element.closest('a,button') === null)).toBe(true)
+  await expect(page.getByRole('region', { name: '订阅与续费', exact: true }).getByRole('link', { name: '查看订阅列表', exact: true })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001&view=details')
+
   await expectLocation(page, '/vps/vps_001')
 })
 
-test('VPS overview relation dialog is keyboard-safe, mobile-safe, and accessible at 390px', async ({ api, page }) => {
+test('VPS overview relation dialogs support keyboard navigation and focus return at 390px', async ({ api, page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   api.useProfile(vpsOverviewProfile())
   await page.goto('/vps/vps_001')
+  await expect.poll(() => page.locator('#vps-section-relations').evaluate(element => (
+    element.scrollWidth <= element.clientWidth + 1
+  ))).toBe(true)
 
-  const card = page.locator('.vps-overview-relations__item').filter({ hasText: '监控实例' })
-  const trigger = card.locator('button.vps-overview-relations__link')
+  const main = page.locator('main#main-content')
+  await main.evaluate((element) => {
+    element.scrollTop = Math.min(1200, Math.max(80, element.scrollHeight - element.clientHeight))
+  })
+
+  const trigger = page.getByRole('button', { name: '查看实例', exact: true })
   await trigger.scrollIntoViewIfNeeded()
   await trigger.focus()
   await page.keyboard.press('Enter')
-  const dialog = page.getByRole('dialog', { name: '关联监控实例' })
+  const dialog = page.getByRole('dialog', { name: '已关联监控实例', exact: true })
   await expect(dialog).toBeVisible()
   await expectNoDocumentOverflow(page)
+
+  const backgroundScroll = await main.evaluate((element) => element.scrollTop)
+  expect(backgroundScroll).toBeGreaterThan(0)
+  const hit = dialog.locator('.badge').first()
+  await expect(hit).toBeVisible()
+  const box = await hit.boundingBox()
+  expect(box).toBeTruthy()
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2)
+  await page.mouse.wheel(0, 650)
+  await expect.poll(() => main.evaluate((element) => element.scrollTop)).toBe(backgroundScroll)
+
+
 
   const result = await new AxeBuilder({ page }).analyze()
   expect(result.violations.filter((violation) => (
@@ -564,6 +649,33 @@ test('VPS overview relation dialog is keyboard-safe, mobile-safe, and accessible
   await page.keyboard.press('Escape')
   await expect(dialog).toHaveCount(0)
   await expect(trigger).toBeFocused()
+
+  for (const kind of ['服务', '域名']) {
+    const resourceTrigger = page.getByRole('button', { name: `查看${kind}`, exact: true })
+    await resourceTrigger.scrollIntoViewIfNeeded()
+    await resourceTrigger.focus()
+    await resourceTrigger.press('Enter')
+    const resourceDialog = page.getByRole('dialog')
+    await expect(resourceDialog.getByRole('listitem').first()).toBeVisible()
+    const controls = resourceDialog.locator(':is(button:not([disabled]),a[href],[tabindex="0"]):visible')
+    await expect(controls.first()).toBeFocused()
+    await page.keyboard.press('Shift+Tab')
+    await expect(controls.last()).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(controls.first()).toBeFocused()
+    for (let index = 0; index < await controls.count(); index += 1) {
+      await page.keyboard.press('Tab')
+      expect(await resourceDialog.evaluate(element => element.contains(document.activeElement))).toBe(true)
+    }
+    await expectNoDocumentOverflow(page)
+    const resourceAudit = await new AxeBuilder({ page }).analyze()
+    expect(resourceAudit.violations.filter(violation => (
+      violation.impact === 'serious' || violation.impact === 'critical'
+    )).map(violation => violation.id)).toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(resourceDialog).toHaveCount(0)
+    await expect(resourceTrigger).toBeFocused()
+  }
 })
 
 test('runtime stream fixture rejects foreign-origin sockets even with an allowlisted id', async ({ api, page }) => {
@@ -604,3 +716,119 @@ test('runtime stream fixture rejects raw path traversal before URL normalization
     return sockets.find((socket) => socket.url.includes('/child/../runtime-stream'))?.phase ?? ''
   }).toBe('error')
 })
+
+for (const workspace of ['workbench', 'ledger'] as const) {
+  test('30-asset ' + workspace + ' inventory opens one full detail and restores its context', async ({ api, page }) => {
+    const rows = Array.from({ length: 30 }, (_, index) => vpsAssetFixture({
+      vps_id: 'vps_' + String(index + 1).padStart(3, '0'),
+      display_name: 'Tokyo Edge ' + (index + 1),
+    }))
+    const selected = rows[29]!
+    const overview = vpsOverviewFixture()
+    overview.identity = { ...overview.identity, vps_id: selected.vps_id, display_name: selected.display_name }
+    overview.anomalies = [anomaly(
+      'ip_quality.risk.elevated.v1',
+      { id: 'open_ip_quality', label: '查看 IP 质量', route: `/vps/${selected.vps_id}/ip-quality` },
+    )]
+    api.useProfile({
+      ...coreRouteProfile('/vps'),
+      [apiRouteKey('GET', '/api/vps')]: { status: 200, body: rows },
+      [apiRouteKey('GET', '/api/vps/' + selected.vps_id + '/overview')]: { status: 200, body: overview },
+      [apiRouteKey('GET', `/api/subscriptions?vps_id=${selected.vps_id}&sort=renew_at&order=asc`)]: { status: 200, body: [] },
+      [apiRouteKey('GET', `/api/vps/${selected.vps_id}/services`)]: { status: 200, body: [] },
+      [apiRouteKey('GET', `/api/vps/${selected.vps_id}/domains`)]: { status: 200, body: [] },
+      [apiRouteKey('GET', `/api/vps/${selected.vps_id}/ip-quality`)]: {
+        status: 404, body: { error: 'no report', code: 'resource_not_found' },
+      },
+      [apiRouteKey('GET', `/api/subjects/vps/${selected.vps_id}/activity`)]: {
+        status: 200,
+        body: subjectActivityFixture({
+          subject: { kind: 'vps', source_id: selected.vps_id, identity: { display_name: selected.display_name }, live_route: `/vps/${selected.vps_id}`, status: 'live' },
+        }),
+      },
+    })
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.goto('/vps?workspace=' + workspace + '&q=Tokyo&source=inventory-flow')
+    const pick = page.getByRole('button', { name: '选择 ' + selected.display_name, exact: true })
+    await pick.scrollIntoViewIfNeeded()
+    await pick.focus()
+    await pick.press('Enter')
+    await expect(pick).toHaveAttribute('aria-pressed', 'true')
+    if (workspace === 'workbench') {
+      const quick = page.getByRole('region', { name: 'VPS 快速查看' })
+      await expect(quick).toBeVisible()
+      expect(await quick.evaluate(panel => panel.closest('tr')?.previousElementSibling?.querySelector('[aria-expanded="true"]')?.getAttribute('aria-label'))).toBe('选择 ' + selected.display_name)
+      await pick.press('Enter')
+      await expect(pick).toHaveAttribute('aria-expanded', 'false')
+      await expect(quick).toHaveCount(0)
+      await expect(pick).toHaveAttribute('aria-pressed', 'true')
+      await pick.focus()
+      await pick.press('Enter')
+      await expect(quick).toBeVisible()
+    }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.locator('main#main-content').evaluate(main => { main.scrollTop = 56 })
+    expect(await page.locator('main#main-content').evaluate(main => main.scrollTop)).toBeGreaterThan(0)
+    await page.getByRole('link', { name: '打开 VPS 详情', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === '/vps/' + selected.vps_id)
+    await expect(page.getByRole('heading', { name: selected.display_name, exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: '返回 VPS 列表', exact: true })).toBeVisible()
+    await expect.poll(() => page.getByRole('link', { name: '返回 VPS 列表', exact: true }).evaluate(link => {
+      const rect = link.getBoundingClientRect()
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+      return rect.top >= 0 && rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth && !!hit && link.contains(hit)
+    })).toBe(true)
+    const manage = page.getByRole('button', { name: '管理', exact: true })
+    await manage.click()
+    await expect(page.getByRole('menu')).toBeVisible()
+    await manage.click()
+    await expect(page.getByRole('menu')).toHaveCount(0)
+    const returnLink = page.getByRole('link', { name: '返回 VPS 列表', exact: true })
+    await expectMinTouchTarget(returnLink)
+    const inventoryHref = await returnLink.getAttribute('href')
+    const toc = page.getByRole('navigation', { name: '当前页分区' })
+    await toc.getByText('页面目录').click()
+    await toc.getByRole('link', { name: '运行观测' }).click()
+
+    await expect(page).toHaveURL(url => url.hash === '#vps-section-monitoring')
+    await expect(returnLink).toHaveAttribute('href', inventoryHref!)
+
+    await expect.poll(() => page.evaluate(() => {
+      const target = document.getElementById('vps-section-monitoring')!.getBoundingClientRect()
+      return target.top >= document.querySelector('.topbar')!.getBoundingClientRect().bottom && target.top < innerHeight
+    })).toBe(true)
+    await page.goBack()
+    await expect(page).toHaveURL(url => url.pathname === '/vps/' + selected.vps_id && url.hash === '')
+    await expect(returnLink).toHaveAttribute('href', inventoryHref!)
+    await page.getByRole('navigation', { name: '主体局部导航' }).getByRole('link', { name: '活动', exact: true }).click()
+    await expect(page.getByRole('link', { name: '返回 VPS 列表', exact: true })).toHaveAttribute('href', inventoryHref!)
+    await page.getByRole('link', { name: '返回详情', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `/vps/${selected.vps_id}`)
+    await expect(returnLink).toHaveAttribute('href', inventoryHref!)
+    await page.locator('#vps-section-activity').getByRole('link', { name: '查看全部', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `/vps/${selected.vps_id}/activity`)
+    await expect(returnLink).toHaveAttribute('href', inventoryHref!)
+    await page.getByRole('link', { name: '返回详情', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `/vps/${selected.vps_id}`)
+    for (const reportEntry of [
+      page.locator('#vps-section-monitoring a[href$="/ip-quality"]'),
+      page.getByRole('link', { name: '查看 IP 质量', exact: true }),
+    ]) {
+      await reportEntry.click()
+      await expect(page).toHaveURL(url => url.pathname === `/vps/${selected.vps_id}/ip-quality`)
+      await expect(returnLink).toHaveAttribute('href', inventoryHref!)
+      await page.getByRole('link', { name: '返回 VPS 详情', exact: true }).click()
+      await expect(page).toHaveURL(url => url.pathname === `/vps/${selected.vps_id}`)
+      await expect(returnLink).toHaveAttribute('href', inventoryHref!)
+    }
+    await page.getByRole('link', { name: '返回 VPS 列表', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === '/vps' && url.searchParams.get('workspace') === workspace && url.searchParams.get('q') === 'Tokyo' && url.searchParams.get('selected') === selected.vps_id && url.searchParams.get('source') === 'inventory-flow')
+    await expect(pick).toHaveAttribute('aria-pressed', 'true')
+    if (workspace === 'workbench') {
+      await expect(pick).toHaveAttribute('aria-expanded', 'false')
+      await page.getByRole('button', { name: '选择 ' + rows[0]!.display_name, exact: true }).click()
+      await expect(page.getByRole('region', { name: 'VPS 快速查看' }).getByRole('link', { name: '打开 VPS 详情', exact: true })).toBeInViewport({ ratio: 1 })
+    }
+  })
+}
+

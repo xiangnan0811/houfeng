@@ -278,6 +278,9 @@ type Event struct {
 	Actor        *ActorSnapshot    `json:"actor,omitempty"`
 	Subjects     []SubjectSnapshot `json:"subjects"`
 	Presentation Presentation      `json:"presentation"`
+	RecordID     string            `json:"record_id,omitempty"`
+	RevisionID   string            `json:"revision_id,omitempty"`
+	EvidenceID   string            `json:"evidence_snapshot_id,omitempty"`
 	Corrects     string            `json:"corrects_activity_id,omitempty"`
 
 	IngestSequence uint64                   `json:"-"`

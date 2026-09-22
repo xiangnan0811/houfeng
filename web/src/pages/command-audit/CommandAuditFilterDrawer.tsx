@@ -35,7 +35,7 @@ export function CommandAuditFilterDrawer({
     <Modal open={open} onClose={onClose} title="高级筛选" ariaLabel="命令审计高级筛选" size="lg">
       <form className="events-filter-drawer command-audit-drawer" onSubmit={handleSubmit}>
         <p className="page-sub command-audit-drawer__hint">
-          按敏感级别、操作者快照或稳定 Action ID 缩小审计范围。
+          按敏感级别、操作者快照或稳定动作 ID 缩小审计范围。
         </p>
         <div className="events-filter-drawer__fields command-audit-drawer__fields">
           <Select
@@ -51,7 +51,7 @@ export function CommandAuditFilterDrawer({
             onChange={(event) => onChange('actor', event.target.value)}
           />
           <Input
-            label="Action ID"
+            label="动作 ID"
             placeholder="act_…"
             value={filters.action_id}
             onChange={(event) => onChange('action_id', event.target.value)}

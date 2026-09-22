@@ -10,6 +10,8 @@ import type {
   ComparisonEvaluateResponse,
   DashboardOverview,
   MonitoringInstanceRecord,
+  MonitoringInstanceRuntimeFacts,
+  MonitoringInstanceRuntimeSummariesResponse,
   MonitoringInstanceSparklinesResponse,
   ProviderRecord,
   RecordDraft,
@@ -218,6 +220,11 @@ const ASSET_DECISION_OVERVIEW = {
 const MONITORING_SPARKLINES = {
   monitoring_instances: {},
 } satisfies MonitoringInstanceSparklinesResponse
+
+const MONITORING_RUNTIME_SUMMARIES = {
+  read_at: '2026-08-20T09:00:00Z',
+  monitoring_instances: {},
+} satisfies MonitoringInstanceRuntimeSummariesResponse
 
 const TARGET_SPARKLINES = {
   targets: {},
@@ -527,6 +534,10 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
           status: 200,
           body: MONITORING_SPARKLINES,
         },
+        [apiRouteKey('GET', '/api/monitoring-instances/runtime-summaries')]: {
+          status: 200,
+          body: MONITORING_RUNTIME_SUMMARIES,
+        },
         [apiRouteKey('GET', '/api/settings')]: { status: 200, body: SETTINGS },
       })
     case '/targets':
@@ -694,7 +705,12 @@ export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOve
       renewal: { status: 'keep', section: { ...EMPTY_SECTION } },
     },
     recent_activity: {
-      section: { ...EMPTY_SECTION },
+      section: {
+        state: 'ready',
+        observed_at: '2026-08-19T12:00:01Z',
+        last_success_at: '2026-08-19T12:00:01Z',
+        reason_code: '',
+      },
       items: [{
         activity_id: 'act_e2e_recent',
         event_kind: 'record_created',
@@ -714,7 +730,7 @@ export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOve
         label: '监控实例', section: { ...EMPTY_SECTION },
       },
       {
-        kind: 'subscriptions', count: 1, status: 'keep', route: '/subscriptions?vps_id=vps_001',
+        kind: 'subscriptions', count: 1, status: 'keep', route: '/subscriptions?vps_id=vps_001&view=details',
         label: '订阅', section: { ...EMPTY_SECTION },
       },
       {
@@ -783,7 +799,7 @@ export function vpsOverviewPartialFixture(): VPSOverview {
         label: '监控实例', section: { ...EMPTY_SECTION },
       },
       {
-        kind: 'subscriptions', count: 0, status: 'unavailable', route: '/subscriptions?vps_id=vps_001',
+        kind: 'subscriptions', count: 0, status: 'unavailable', route: '/subscriptions?vps_id=vps_001&view=details',
         label: '订阅', section: unavailable('subscription_timeout'),
       },
       {
@@ -862,10 +878,38 @@ export function monitoringInstanceDetailProfile(monitoringInstanceId = 'mi_001')
     created_at: '2026-08-01T00:00:00Z',
     updated_at: '2026-08-20T09:00:00Z',
   } satisfies MonitoringInstanceRecord
-  const runtimeFacts = {
+  const runtimeFacts24h = {
     monitoring_instance_id: monitoringInstanceId,
+    read_at: '2026-08-20T09:00:00Z',
+    window: {
+      key: '24h',
+      started_at: '2026-08-19T09:00:00Z',
+      ended_at: '2026-08-20T09:00:00Z',
+      bucket_count: 288,
+      available_started_at: null,
+      available_ended_at: null,
+      sample_count: 0,
+    },
     latest_host_sample: null,
-  }
+    host_metric_points: [],
+    recent_host_samples: [],
+  } satisfies MonitoringInstanceRuntimeFacts
+  const runtimeFactsRealtime = {
+    monitoring_instance_id: monitoringInstanceId,
+    read_at: '2026-08-20T09:00:00Z',
+    window: {
+      key: 'realtime',
+      started_at: '2026-08-20T08:00:00Z',
+      ended_at: '2026-08-20T09:00:00Z',
+      bucket_count: 720,
+      available_started_at: null,
+      available_ended_at: null,
+      sample_count: 0,
+    },
+    latest_host_sample: null,
+    host_metric_points: [],
+    recent_host_samples: [],
+  } satisfies MonitoringInstanceRuntimeFacts
   const onboarding = {
     ...record,
     phase: '接入完成',
@@ -876,11 +920,11 @@ export function monitoringInstanceDetailProfile(monitoringInstanceId = 'mi_001')
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}`)]: { status: 200, body: record },
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=realtime`)]: {
       status: 200,
-      body: runtimeFacts,
+      body: runtimeFactsRealtime,
     },
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=24h`)]: {
       status: 200,
-      body: runtimeFacts,
+      body: runtimeFacts24h,
     },
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/onboarding`)]: {
       status: 200,
@@ -904,13 +948,25 @@ export function vpsOverviewProfile(options: {
   overviewStatus?: number
   overviewWaitFor?: Promise<void>
   detail?: VPSAssetDetail
+  subscriptions?: readonly SubscriptionRecord[]
+  subscriptionsStatus?: number
+  subscriptionsWaitFor?: Promise<void>
+  services?: readonly AssetServiceRecord[]
+  servicesStatus?: number
+  servicesWaitFor?: Promise<void>
+  domains?: readonly AssetDomainRecord[]
+  domainsStatus?: number
+  domainsWaitFor?: Promise<void>
 } = {}): ApiFixtureProfile {
-  const status = options.overviewStatus ?? 200
+  const overviewStatus = options.overviewStatus ?? 200
+  const subscriptionsStatus = options.subscriptionsStatus ?? 200
+  const servicesStatus = options.servicesStatus ?? 200
+  const domainsStatus = options.domainsStatus ?? 200
   return authenticatedProfile({
     [apiRouteKey('GET', '/api/vps/vps_001/overview')]: {
-      status,
-      body: status >= 400
-        ? { error: 'overview unavailable', code: status === 503 ? 'overview_unavailable' : 'resource_not_found' }
+      status: overviewStatus,
+      body: overviewStatus >= 400
+        ? { error: 'overview unavailable', code: overviewStatus === 503 ? 'overview_unavailable' : 'resource_not_found' }
         : options.overview ?? vpsOverviewFixture(),
       ...(options.overviewWaitFor ? { waitFor: options.overviewWaitFor } : {}),
     },
@@ -923,12 +979,19 @@ export function vpsOverviewProfile(options: {
       body: [VPS_OVERVIEW_MONITORING],
     },
     [apiRouteKey('GET', '/api/vps/vps_001/services')]: {
-      status: 200,
-      body: [VPS_OVERVIEW_SERVICE],
+      status: servicesStatus,
+      body: servicesStatus >= 400 ? { error: 'services unavailable' } : options.services ?? [VPS_OVERVIEW_SERVICE],
+      ...(options.servicesWaitFor ? { waitFor: options.servicesWaitFor } : {}),
     },
     [apiRouteKey('GET', '/api/vps/vps_001/domains')]: {
-      status: 200,
-      body: [VPS_OVERVIEW_DOMAIN],
+      status: domainsStatus,
+      body: domainsStatus >= 400 ? { error: 'domains unavailable' } : options.domains ?? [VPS_OVERVIEW_DOMAIN],
+      ...(options.domainsWaitFor ? { waitFor: options.domainsWaitFor } : {}),
+    },
+    [apiRouteKey('GET', '/api/subscriptions?vps_id=vps_001&sort=renew_at&order=asc')]: {
+      status: subscriptionsStatus,
+      body: subscriptionsStatus >= 400 ? { error: 'subscriptions unavailable' } : options.subscriptions ?? [SUBSCRIPTION],
+      ...(options.subscriptionsWaitFor ? { waitFor: options.subscriptionsWaitFor } : {}),
     },
   })
 }

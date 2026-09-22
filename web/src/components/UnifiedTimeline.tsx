@@ -1,9 +1,15 @@
 import { type ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Timestamp } from './atoms'
 import type { SubjectActivityItem, SubjectActivitySourceStatus } from '../lib/types'
-import { timelineChannel, TIMELINE_CHANNEL_LABELS, type TimelineChannel } from './timelineChannel'
+import {
+  SOURCE_KIND_LABELS,
+  SOURCE_STATE_LABELS,
+  timelineChannel,
+  TIMELINE_CHANNEL_LABELS,
+  type TimelineChannel,
+} from './timelineChannel'
 
 type Props = {
   items: SubjectActivityItem[]
@@ -12,8 +18,6 @@ type Props = {
   emptyDescription?: string
   itemActions?: (item: SubjectActivityItem) => ReactNode
 }
-
-const CHANNEL_LABEL = TIMELINE_CHANNEL_LABELS
 
 function dayKey(iso: string): string {
   const parsed = Date.parse(iso)
@@ -38,6 +42,12 @@ function itemHref(item: SubjectActivityItem, channel: TimelineChannel): string |
     return `/records/${encodeURIComponent(recordId)}`
   }
   return null
+}
+
+function itemActionLabel(item: SubjectActivityItem, channel: TimelineChannel): string {
+  if (channel === 'evidence') return '查看证据'
+  if (item.revision_id?.trim()) return '查看修订'
+  return '查看记录'
 }
 
 function evidenceMeta(item: SubjectActivityItem): string | null {
@@ -70,6 +80,12 @@ function groupByDay(items: SubjectActivityItem[]): Array<{ day: string; items: S
   return groups
 }
 
+function sourceStatusLabel(status: SubjectActivitySourceStatus): string {
+  const source = SOURCE_KIND_LABELS[status.source_kind] ?? status.source_kind
+  const state = SOURCE_STATE_LABELS[status.state] ?? status.state
+  return status.reason_code ? `${source}：${state}（${status.reason_code}）` : `${source}：${state}`
+}
+
 export function UnifiedTimeline({
   items,
   sourceStatuses = [],
@@ -77,6 +93,7 @@ export function UnifiedTimeline({
   emptyDescription = '当前筛选条件下没有可见活动。',
   itemActions,
 }: Props) {
+  const { state } = useLocation()
   const degraded = sourceStatuses.filter((status) => status.state !== 'ready')
 
   if (items.length === 0) {
@@ -93,10 +110,7 @@ export function UnifiedTimeline({
       {degraded.length > 0 ? (
         <ul className="unified-timeline__source-status" aria-label="来源状态">
           {degraded.map((status) => (
-            <li key={status.source_kind}>
-              {status.source_kind}：{status.state}
-              {status.reason_code ? `（${status.reason_code}）` : ''}
-            </li>
+            <li key={status.source_kind}>{sourceStatusLabel(status)}</li>
           ))}
         </ul>
       ) : null}
@@ -108,6 +122,7 @@ export function UnifiedTimeline({
               const channel = timelineChannel(item)
               const href = itemHref(item, channel)
               const meta = evidenceMeta(item)
+              const recordedDistinct = item.recorded_at.trim() && item.recorded_at !== item.event_at
               return (
                 <li
                   key={item.activity_id}
@@ -119,19 +134,29 @@ export function UnifiedTimeline({
                   />
                   <div className="unified-timeline__body">
                     <div className="unified-timeline__header">
-                      <p className="unified-timeline__channel">{CHANNEL_LABEL[channel]}</p>
-                      <Timestamp value={item.event_at} mode="absolute" />
+                      <p className="unified-timeline__channel">{TIMELINE_CHANNEL_LABELS[channel]}</p>
+                      <div className="unified-timeline__time">
+                        <Timestamp value={item.event_at} mode="absolute" />
+                        {recordedDistinct ? (
+                          <p className="unified-timeline__recorded">
+                            记入 <Timestamp value={item.recorded_at} mode="absolute" />
+                          </p>
+                        ) : null}
+                      </div>
                     </div>
                     <h3 className="unified-timeline__title">{item.presentation.title}</h3>
                     {item.presentation.summary ? (
                       <p className="unified-timeline__summary">{item.presentation.summary}</p>
                     ) : null}
+                    {item.backfilled ? (
+                      <p className="unified-timeline__recorded">回填条目，不是实时观测</p>
+                    ) : null}
                     {meta ? <p className="unified-timeline__evidence-meta">{meta}</p> : null}
                     {href || itemActions ? (
                       <p className="unified-timeline__actions">
                         {href ? (
-                          <Link className="text-link" to={href}>
-                            {channel === 'evidence' ? '查看证据' : '查看修订'}
+                          <Link className="text-link" to={href} state={state}>
+                            {itemActionLabel(item, channel)}
                           </Link>
                         ) : null}
                         {itemActions?.(item)}

@@ -154,6 +154,29 @@ describe('Tabs', () => {
     expect(screen.getByRole('tab', { name: /活跃异常.*2/ })).toBeInTheDocument()
     expect(screen.getByText('2')).toHaveClass('badge--count')
   })
+
+  it('moves focus without activating when activation is manual', () => {
+    const onChange = vi.fn()
+    render(
+      <Tabs
+        label="监控视图"
+        idBase="monitoring-view"
+        items={items}
+        value="a"
+        onChange={onChange}
+        activation="manual"
+      />,
+    )
+    const overview = screen.getByRole('tab', { name: '概览' })
+    const metrics = screen.getByRole('tab', { name: '指标趋势' })
+    overview.focus()
+    fireEvent.keyDown(overview, { key: 'ArrowRight' })
+    expect(metrics).toHaveFocus()
+    expect(onChange).not.toHaveBeenCalled()
+    expect(overview).toHaveAttribute('aria-selected', 'true')
+    fireEvent.click(metrics)
+    expect(onChange).toHaveBeenCalledWith('b')
+  })
 })
 
 describe('TabPanel', () => {

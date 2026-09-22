@@ -154,6 +154,13 @@ func TestPostgresIntegrationRecordDomainSourceReadsSubjectsFromTheRightRevision(
 	// Revision 1 had one subject; the event that belongs to it must not pick up
 	// the subject the record gained later.
 	created := byEventID["rac_domaincreate"]
+	if created.RecordID != "rec_domainsrc" || created.RevisionID != "rrv_domainone" {
+		t.Fatalf("record_created route refs = record %q revision %q, want rec_domainsrc/rrv_domainone",
+			created.RecordID, created.RevisionID)
+	}
+	if created.EvidenceID != "" {
+		t.Fatalf("record_created unexpectedly carries evidence ref %q", created.EvidenceID)
+	}
 	if len(created.Subjects) != 1 {
 		t.Fatalf("record_created has %d subjects, want the 1 its revision had", len(created.Subjects))
 	}
@@ -613,6 +620,16 @@ func TestPostgresIntegrationRecordDomainRestrictedVisibilityHidesFromViewer(t *t
 	if viewerPage.Events[0].ActivityID != projectCandidate.ActivityID {
 		t.Fatalf("viewer event = %s, want %s", viewerPage.Events[0].ActivityID, projectCandidate.ActivityID)
 	}
+	if viewerPage.Events[0].RecordID != projectCandidate.RecordID ||
+		viewerPage.Events[0].RevisionID != projectCandidate.RevisionID {
+		t.Fatalf("viewer route refs = record %q revision %q, want project refs %q/%q",
+			viewerPage.Events[0].RecordID, viewerPage.Events[0].RevisionID,
+			projectCandidate.RecordID, projectCandidate.RevisionID)
+	}
+	if viewerPage.Events[0].RecordID == restrictedCandidate.RecordID ||
+		viewerPage.Events[0].RevisionID == restrictedCandidate.RevisionID {
+		t.Fatalf("viewer page leaked restricted route refs: %+v", viewerPage.Events[0])
+	}
 
 	adminPage, err := repository.ListSubjectPage(ctx, activity.SubjectPageRequest{
 		Query:            query,
@@ -626,5 +643,19 @@ func TestPostgresIntegrationRecordDomainRestrictedVisibilityHidesFromViewer(t *t
 	}
 	if len(adminPage.Events) != 2 {
 		t.Fatalf("admin saw %d events, want both project and restricted", len(adminPage.Events))
+	}
+	byActivityID := make(map[string]activity.Event, len(adminPage.Events))
+	for _, event := range adminPage.Events {
+		byActivityID[event.ActivityID] = event
+	}
+	restrictedEvent, ok := byActivityID[restrictedCandidate.ActivityID]
+	if !ok {
+		t.Fatalf("admin page omitted restricted event: %+v", adminPage.Events)
+	}
+	if restrictedEvent.RecordID != restrictedCandidate.RecordID ||
+		restrictedEvent.RevisionID != restrictedCandidate.RevisionID {
+		t.Fatalf("admin restricted route refs = record %q revision %q, want %q/%q",
+			restrictedEvent.RecordID, restrictedEvent.RevisionID,
+			restrictedCandidate.RecordID, restrictedCandidate.RevisionID)
 	}
 }

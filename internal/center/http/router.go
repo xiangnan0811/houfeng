@@ -91,6 +91,7 @@ type RouterOptions struct {
 	MonitoringInstanceBindingRejectPendingHandler stdhttp.Handler
 	MonitoringInstanceBindingResetHandler         stdhttp.Handler
 	MonitoringInstanceSparklinesHandler           stdhttp.Handler
+	MonitoringInstanceRuntimeSummariesHandler     stdhttp.Handler
 	MonitoringInstanceActionsHandler              stdhttp.Handler
 	MonitoringInstanceBatchHandler                stdhttp.Handler
 	TargetsCollectionHandler                      stdhttp.Handler
@@ -416,6 +417,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.MonitoringInstancesCollectionHandler != nil {
 		mux.Handle("/api/monitoring-instances", protect(opts.MonitoringInstancesCollectionHandler))
+	}
+	if opts.MonitoringInstanceRuntimeSummariesHandler != nil {
+		mux.Handle("/api/monitoring-instances/runtime-summaries", protect(opts.MonitoringInstanceRuntimeSummariesHandler))
 	}
 	if opts.MonitoringInstanceBatchHandler != nil {
 		mux.Handle("/api/monitoring-instances/batch", protect(opts.MonitoringInstanceBatchHandler))

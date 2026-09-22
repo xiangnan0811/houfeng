@@ -35,6 +35,39 @@ describe('Sparkline', () => {
     expect(getByText('样本不足')).toBeInTheDocument()
   })
 
+  it('keeps null buckets as gaps without joining the line across them', () => {
+    const { container } = render(<Sparkline values={[10, null, 20]} width={100} />)
+    const polylines = [...container.querySelectorAll('polyline')]
+    expect(polylines).toHaveLength(2)
+    // Bucket 0 sits at 0, bucket 2 at the far edge: gaps keep their own position.
+    const xs = polylines.map((line) => Number(line.getAttribute('points')!.split(',')[0]))
+    expect(xs).toEqual([0, 100])
+    expect(container.querySelectorAll('[style]')).toHaveLength(0)
+  })
+
+  it('treats an all-null series as empty', () => {
+    const { container, getByText } = render(<Sparkline values={[null, null]} />)
+    expect(container.querySelector('svg.sparkline--empty')).toBeTruthy()
+    expect(container.querySelector('polyline')).toBeNull()
+    expect(getByText('暂无数据')).toBeInTheDocument()
+  })
+
+  it('draws a lone finite bucket at its own position without a line', () => {
+    const { container } = render(<Sparkline values={[null, 7, null, null]} width={120} />)
+    expect(container.querySelectorAll('polyline')).toHaveLength(0)
+    // Bucket index 1 of 4 bucket positions.
+    expect(container.querySelector('circle')?.getAttribute('cx')).toBe('40')
+  })
+
+  it('ignores null buckets when deriving the shared domain', () => {
+    const { container } = render(<Sparkline values={[10, null, 90]} width={100} height={16} />)
+    const polylines = [...container.querySelectorAll('polyline')]
+    const ys = polylines.map((line) => Number(line.getAttribute('points')!.split(' ')[0]!.split(',')[1]))
+    // min=10 maps to the bottom, max=90 to the top.
+    expect(ys[0]).toBeCloseTo(15, 1)
+    expect(ys[1]).toBeCloseTo(1, 1)
+  })
+
   it('accepts samples with timestamps and renders polyline points', () => {
     const samples: SparklineSample[] = [
       { value: 1, observedAt: '2026-04-24T08:00:00Z' },
@@ -105,5 +138,16 @@ describe('Sparkline', () => {
 
     fireEvent.mouseMove(svg, { clientX: 200 })
     expect(container.querySelector('.sparkline__tooltip-value')?.textContent).toBe('75.0%')
+  })
+
+  it('projects values onto an explicit shared domain instead of the local series', () => {
+    const { container: low } = render(<Sparkline values={[10]} domain={{ min: 0, max: 100 }} height={16} />)
+    const { container: high } = render(<Sparkline values={[90]} domain={{ min: 0, max: 100 }} height={16} />)
+    const { container: local } = render(<Sparkline values={[10]} height={16} />)
+    const yLow = Number(low.querySelector('circle')!.getAttribute('cy'))
+    const yHigh = Number(high.querySelector('circle')!.getAttribute('cy'))
+    const yLocal = Number(local.querySelector('circle')!.getAttribute('cy'))
+    expect(yHigh).toBeLessThan(yLow - 4)
+    expect(yLocal).toBeGreaterThan(yLow)
   })
 })

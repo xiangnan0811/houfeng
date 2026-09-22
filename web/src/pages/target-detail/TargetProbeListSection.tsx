@@ -1,8 +1,6 @@
 import type { ReactNode, RefObject } from 'react'
 
-import { DetailSection } from '../../components/DetailSection'
 import { Button } from '../../components/atoms/Button'
-import { MonoDigits } from '../../components/atoms/Mono'
 import {
   TargetProbeList,
   type PendingProbeConfirmation,
@@ -28,6 +26,7 @@ type TargetProbeListSectionProps = {
   probeMutationError: string | null
   addDisabled: boolean
   onOpenCreate: () => void
+  readOnly?: boolean
 }
 
 export function TargetProbeListSection({
@@ -49,18 +48,10 @@ export function TargetProbeListSection({
   probeMutationError,
   addDisabled,
   onOpenCreate,
+  readOnly = false,
 }: TargetProbeListSectionProps) {
-  const enabledProbeCount = probeItems.filter((item) => item.enabled).length
-  const latestObservationCount = Array.from(observationsByProbe.values()).reduce(
-    (total, observations) => total + observations.length,
-    0,
-  )
-  const defaultAside = (
-    <div className="detail-section__aside-actions">
-      <span className="detail-section__aside-meta">
-        启用 <MonoDigits>{enabledProbeCount}</MonoDigits> / <MonoDigits>{probeItems.length}</MonoDigits> · 最新观测{' '}
-        <MonoDigits>{latestObservationCount}</MonoDigits>
-      </span>
+  const defaultAside = readOnly ? null : (
+    <div className="target-probe-section__tools">
       <Button
         ref={addProbeButtonRef}
         variant="secondary"
@@ -74,12 +65,11 @@ export function TargetProbeListSection({
   )
 
   return (
-    <DetailSection
-      eyebrow="ProbeItem 工作区"
-      title="ProbeItem 列表"
-      ribbon="accent"
-      aside={aside ?? defaultAside}
-    >
+    <section className="monitoring-detail-section target-probe-section" aria-label="探测方式">
+      <header className="monitoring-detail-section__head">
+        <h2>探测方式</h2>
+        {aside ?? defaultAside}
+      </header>
       {probeMutationError ? (
         <p className="watchtower-runtime-error" role="alert">
           {probeMutationError}
@@ -92,6 +82,7 @@ export function TargetProbeListSection({
         pendingProbeConfirmation={pendingProbeConfirmation}
         confirmationCardDisabled={confirmationCardDisabled}
         registerDeleteButtonRef={registerDeleteButtonRef}
+        hideActions={readOnly}
         onAddProbe={onAddProbe}
         onEdit={onEdit}
         onToggle={onToggle}
@@ -99,6 +90,6 @@ export function TargetProbeListSection({
         onConfirmDelete={onConfirmDelete}
         onCancelDeleteConfirmation={onCancelDeleteConfirmation}
       />
-    </DetailSection>
+    </section>
   )
 }

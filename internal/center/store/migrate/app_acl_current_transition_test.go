@@ -34,7 +34,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactV0794Predecessor(t *testing.
 	if got, want := transition.predecessor.sources.names[62], "0062_create_vps_create_idempotency.sql"; got != want {
 		t.Fatalf("predecessor final migration = %q, want %q", got, want)
 	}
-	if got, want := transition.successor.names, []string{"0063_tune_heartbeat_incident_policy.sql"}; !equalStringSlices(got, want) {
+	if got, want := transition.successor.names, []string{"0063_tune_heartbeat_incident_policy.sql", "0064_add_network_rates_valid.sql"}; !equalStringSlices(got, want) {
 		t.Fatalf("successor migrations = %#v, want %#v", got, want)
 	}
 	if !bytes.Equal(transition.predecessor.sources.canonicalSet, appACLCurrentV0794MigrationGolden) {

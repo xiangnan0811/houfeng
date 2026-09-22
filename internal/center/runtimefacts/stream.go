@@ -66,10 +66,25 @@ func (h *StreamHub) SubscribeHostSamples(monitoringInstanceID string) HostSample
 	}
 }
 
-func (h *StreamHub) AfterSuccessfulSync(_ context.Context, batch syncing.Batch, _ syncing.Result) error {
+func (h *StreamHub) AfterSuccessfulSync(_ context.Context, batch syncing.Batch, result syncing.Result) error {
+	if h == nil || batch.MonitoringInstanceID == "" {
+		return nil
+	}
+	if result.Disposition != syncing.ResultDispositionRecorded {
+		return nil
+	}
 	for _, sample := range batch.Observations.HostSamples {
 		if sample.MonitoringInstanceID == "" {
 			sample.MonitoringInstanceID = batch.MonitoringInstanceID
+		}
+		if sample.MonitoringInstanceID != batch.MonitoringInstanceID {
+			continue
+		}
+		if sample.ReceivedAt.IsZero() {
+			sample.ReceivedAt = result.AcceptedAt
+		}
+		if sample.ReceivedAt.IsZero() {
+			continue
 		}
 		h.publishHostSample(hostSampleFromWrite(sample))
 	}
@@ -131,6 +146,7 @@ func hostSampleFromWrite(sample observations.HostSampleWrite) HostSample {
 		InodeUsedPct:         sample.InodeUsedPct,
 		NetInBytesPerSec:     sample.NetInBytesPerSec,
 		NetOutBytesPerSec:    sample.NetOutBytesPerSec,
+		NetworkRatesValid:    sample.NetworkRatesValid,
 		CPUIOWaitPct:         sample.CPUIOWaitPct,
 		CPUStealPct:          sample.CPUStealPct,
 		DiskReadBytesPerSec:  sample.DiskReadBytesPerSec,

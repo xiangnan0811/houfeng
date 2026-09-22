@@ -78,9 +78,9 @@ describe('TargetProbeList', () => {
     )
 
     expect(screen.getByText('HTTP')).toBeInTheDocument()
-    expect(screen.getByText('mi_001')).toBeInTheDocument()
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
+    expect(screen.queryByText('mi_001')).not.toBeInTheDocument()
   })
 
   it('invokes onDelete when the delete button is clicked', () => {
@@ -121,7 +121,7 @@ describe('TargetProbeList', () => {
     expect(screen.getByRole('button', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
   })
 
-  it('renders observations as a DataTable with status glyph, hostname, latency and http columns', () => {
+  it('puts latest HTTP, TLS, and error evidence in one compact table cell', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem()]}
@@ -150,31 +150,26 @@ describe('TargetProbeList', () => {
       />,
     )
 
-    // DataTable rendered as a real <table>
     const table = screen.getByRole('table')
     expect(table).toBeInTheDocument()
-    expect(table).toHaveClass('probe-observations')
+    expect(table).toHaveClass('target-probe-table')
+    expect(screen.getByRole('columnheader', { name: '方式' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '状态' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '频率' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '最近结果' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '最近观测' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '操作' })).toBeInTheDocument()
 
-    // Column headers
-    expect(screen.getByRole('columnheader', { name: '执行监控实例' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '观测时间' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '延迟' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: 'HTTP / TLS' })).toBeInTheDocument()
-    expect(screen.getByRole('columnheader', { name: '错误摘要' })).toBeInTheDocument()
-
-    // Row content
-    expect(screen.getByText('mi_alpha')).toBeInTheDocument()
-    expect(screen.getByText('mi_beta')).toBeInTheDocument()
+    expect(screen.getByText('成功')).toBeInTheDocument()
     expect(screen.getByText('42 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
-    expect(screen.getByText('connect: timeout')).toBeInTheDocument()
-
-    // Status glyph: success → 成功 ; failure → 失败
-    expect(screen.getByLabelText('成功')).toBeInTheDocument()
-    expect(screen.getByLabelText('失败')).toBeInTheDocument()
+    expect(screen.queryByText('connect: timeout')).not.toBeInTheDocument()
+    expect(screen.queryByText('mi_alpha')).not.toBeInTheDocument()
+    expect(screen.queryByText('mi_beta')).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: '执行监控实例' })).not.toBeInTheDocument()
   })
 
-  it('shows the per-card empty state when a probe item has no observations yet', () => {
+  it('shows quiet empty copy in the latest cells when a probe item has no observations yet', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem({ probe_item_id: 'pb_quiet' })]}
@@ -186,12 +181,9 @@ describe('TargetProbeList', () => {
       />,
     )
 
-    // No DataTable rendered
-    expect(screen.queryByRole('table')).not.toBeInTheDocument()
-    // Inline empty placeholder
-    expect(screen.getByText('尚未收到观测')).toBeInTheDocument()
-    // dl meta also reflects "尚无观测结果"
-    expect(screen.getByText('尚无观测结果')).toBeInTheDocument()
+    expect(screen.getByRole('table')).toBeInTheDocument()
+    expect(screen.getByText('尚无观测')).toBeInTheDocument()
+    expect(screen.getByText('—')).toBeInTheDocument()
   })
 
   it('renders an "添加 Probe" CTA button in the empty state when onAddProbe is provided', () => {

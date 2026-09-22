@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { RecordNewPage } from './RecordNewPage'
@@ -32,5 +32,28 @@ describe('RecordNewPage', () => {
     expect(screen.getByRole('heading', { name: '新建运维记录' })).toBeInTheDocument()
     expect(screen.getByLabelText('标题')).toBeInTheDocument()
     expect(screen.getByLabelText('Markdown 源文')).toBeInTheDocument()
+  })
+
+  it('preselects the subject carried by the existing new-record codec', () => {
+    render(
+      <MemoryRouter initialEntries={['/records/new?subject=vps%3Avps_001%3Aaffected%3Aprimary&return_to=%2Fvps%2Fvps_001%2Factivity']}>
+        <Routes>
+          <Route path="/records/new" element={<RecordNewPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(screen.getByLabelText('主体 ID')).toHaveValue('vps_001')
+    expect(screen.getByRole('link', { name: '返回主体' })).toHaveAttribute('href', '/vps/vps_001/activity')
+  })
+
+  it('ignores a non-canonical return_to', () => {
+    render(
+      <MemoryRouter initialEntries={['/records/new?return_to=%2Frecords%2Fnew']}>
+        <Routes>
+          <Route path="/records/new" element={<RecordNewPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('link', { name: '返回主体' })).not.toBeInTheDocument()
   })
 })

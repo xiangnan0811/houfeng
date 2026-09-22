@@ -548,6 +548,7 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 			InodeUsedPct:         sample.InodeUsedPct,
 			NetInBytesPerSec:     sample.NetInBytesPerSec,
 			NetOutBytesPerSec:    sample.NetOutBytesPerSec,
+			NetworkRatesValid:    sample.NetworkRatesValid,
 			CPUIOWaitPct:         sample.CPUIOWaitPct,
 			CPUStealPct:          sample.CPUStealPct,
 			DiskReadBytesPerSec:  sample.DiskReadBytesPerSec,

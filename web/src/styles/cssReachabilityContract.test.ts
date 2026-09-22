@@ -89,6 +89,33 @@ function splitSelectors(value: string) {
 }
 
 describe('production CSS reachability', () => {
+  it('splits selector branches correctly preserving commas inside pseudo-classes and attributes', () => {
+    expect(splitSelectors('.a, .b, .c')).toEqual(['.a', '.b', '.c'])
+    expect(splitSelectors('.btn:is(.primary, .secondary), .card')).toEqual([
+      '.btn:is(.primary, .secondary)',
+      '.card',
+    ])
+    expect(splitSelectors('[data-action="create,edit"], .trigger')).toEqual([
+      '[data-action="create,edit"]',
+      '.trigger',
+    ])
+    expect(splitSelectors('.panel:not([data-item="x,y"], .disabled)')).toEqual([
+      '.panel:not([data-item="x,y"], .disabled)',
+    ])
+  })
+
+  it('distinguishes exact class tokens from dynamic hyphen-terminated prefixes', () => {
+    const exact = new Set<string>()
+    const prefixes = new Set<string>()
+
+    addSourceTokens('badge-- ${tone} card static-item', exact, prefixes)
+
+    expect(prefixes.has('badge--')).toBe(true)
+    expect(exact.has('card')).toBe(true)
+    expect(exact.has('static-item')).toBe(true)
+    expect(prefixes.has('card')).toBe(false)
+  })
+
   it('requires every class selector branch to have a production source owner', {
     timeout: repositoryScanTimeoutMilliseconds,
   }, () => {

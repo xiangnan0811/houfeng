@@ -158,7 +158,7 @@ describe('RecordExecutionBoard', () => {
     )
 
     expect(screen.getByRole('link', { name: '打开取消/退役工作台' })).toHaveAttribute('href', '/vps/vps_1?workbench=cancellation')
-    expect(screen.getByRole('link', { name: '打开订阅上下文' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_2')
+    expect(screen.getByRole('link', { name: '打开订阅上下文' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_2&view=details')
     fireEvent.click(screen.getByRole('button', { name: '复核记录' }))
     expect(onReviewRecord).toHaveBeenCalledWith(rows[2])
     expect(screen.queryByText('Node 4')).not.toBeInTheDocument()

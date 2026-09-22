@@ -173,20 +173,14 @@ export function RecordDraftsPage() {
   ]
 
   return (
-    <div className="page-stack record-drafts-page">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">运维知识 · DRAFTS</div>
-          <h1 className="page-title">记录草稿</h1>
-          <p className="page-sub">
-            未发布的草稿只对作者可见，到期后会被自动清理。
-          </p>
-        </div>
-        <div className="header-actions">
+    <div className="page record-drafts-page">
+      <header className="page__head">
+        <h1 className="page__title">记录草稿</h1>
+        <div className="page__actions">
           <Link className="btn sm secondary" to="/records">返回记录</Link>
           <Link className="btn sm primary" to="/records/new">新建记录</Link>
         </div>
-      </div>
+      </header>
 
       <section className="page-stack record-drafts-results" aria-label="记录草稿">
         {discardError ? <p role="alert">丢弃草稿失败：{discardError}</p> : null}

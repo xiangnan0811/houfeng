@@ -34,7 +34,7 @@ export function buildShellSummaryModel(
   if (!overview) {
     return {
       state: 'unavailable',
-      label: '摘要不可用',
+      label: '系统摘要不可用',
       showAnomalyCounts: false,
     }
   }
@@ -46,7 +46,7 @@ export function buildShellSummaryModel(
   if (summary.status === 'error' || snapshotIsStale) {
     return {
       state: 'stale',
-      label: '摘要已过期',
+      label: '系统摘要已过期',
       generatedAt: overview.snapshot_generated_at,
       showAnomalyCounts: false,
     }
@@ -58,7 +58,7 @@ export function buildShellSummaryModel(
   if (abnormalCount > 0) {
     return {
       state: 'anomaly',
-      label: '摘要有异常',
+      label: '系统摘要有异常',
       generatedAt: overview.snapshot_generated_at,
       showAnomalyCounts: true,
     }
@@ -66,7 +66,7 @@ export function buildShellSummaryModel(
 
   return {
     state: 'clear',
-    label: '摘要无异常',
+    label: '系统摘要无异常',
     generatedAt: overview.snapshot_generated_at,
     showAnomalyCounts: true,
   }

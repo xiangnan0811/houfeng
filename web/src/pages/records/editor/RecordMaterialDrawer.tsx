@@ -1,3 +1,5 @@
+import { Link, useLocation } from 'react-router-dom'
+
 import { Button, Modal } from '../../../components/atoms'
 import type { DocumentReference } from '../../../lib/documentMarkdown'
 
@@ -23,6 +25,7 @@ export function RecordMaterialDrawer({
   onInsert,
   onRemove,
 }: RecordMaterialDrawerProps) {
+  const { state } = useLocation()
   return (
     <Modal open={open} onClose={onClose} title="材料与引用" size="lg">
       {items.length === 0 ? <p className="text-muted">当前修订没有可引用材料</p> : (
@@ -33,6 +36,11 @@ export function RecordMaterialDrawer({
               <span>{item.label}</span>
               <code>{item.id}</code>
               {!item.available ? <span>引用已失效</span> : null}
+              {item.kind === 'evidence' ? (
+                <Link className="text-link" to={`/evidence/${encodeURIComponent(item.id)}`} state={state}>
+                  查看证据
+                </Link>
+              ) : null}
               <div className="page-form-actions">
                 <Button size="sm" variant="secondary" disabled={readOnly || !item.available} onClick={() => onInsert(item)}
                   aria-label={`插入${item.label}`}>

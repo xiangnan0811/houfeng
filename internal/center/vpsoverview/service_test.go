@@ -222,7 +222,7 @@ func TestServiceGetRelationDestinations(t *testing.T) {
 		route string
 	}{
 		{kind: "monitoring_instances", label: "监控实例", count: 1},
-		{kind: "subscriptions", label: "订阅", count: 2, route: "/subscriptions?vps_id=" + url.QueryEscape(vpsID)},
+		{kind: "subscriptions", label: "订阅", count: 2, route: "/subscriptions?vps_id=" + url.QueryEscape(vpsID) + "&view=details"},
 		{kind: "services", label: "服务", count: 3},
 		{kind: "domains", label: "域名", count: 4},
 	}

@@ -176,10 +176,10 @@ func seedSyncInterleavingFixture(t *testing.T, ctx context.Context, fixture reco
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.monitoring_instances (
 			monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
-			monitoring_status, binding_status, binding_fingerprint, sync_token_hash
-		) values ($1,$2,'','','',$3,$4,$5,$6,$7)`,
+			monitoring_status, binding_status, binding_fingerprint, binding_epoch_started_at, sync_token_hash
+		) values ($1,$2,'','','',$3,$4,$5,$6,$7,$8)`,
 		monitoringInstanceID, prefix, lifecycle, monitoringinstances.MonitoringEnabled,
-		monitoringinstances.BindingBound, "fp_"+prefix, hashSyncToken("token_"+prefix),
+		monitoringinstances.BindingBound, "fp_"+prefix, syncInterleavingT1.Add(-time.Hour), hashSyncToken("token_"+prefix),
 	); err != nil {
 		t.Fatal("seed interleaving monitoring instance")
 	}
@@ -540,8 +540,11 @@ func seedReplaySafeLatestFixture(t *testing.T, ctx context.Context, fixture reco
 
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.monitoring_instances (
-			monitoring_instance_id, display_name, region, city, provider, lifecycle_status
-		) values ($1, $2, '', '', '', '在用')`, monitoringInstanceID, prefix); err != nil {
+			monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
+			binding_status, binding_fingerprint, binding_epoch_started_at
+		) values ($1, $2, '', '', '', '在用', '已绑定', 'fixture', $3)`,
+		monitoringInstanceID, prefix, observedAt.Add(-time.Hour),
+	); err != nil {
 		t.Fatalf("seed monitoring instance: %v", err)
 	}
 	if _, err := fixture.db.Exec(ctx, `

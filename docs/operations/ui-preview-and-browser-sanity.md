@@ -31,7 +31,9 @@ Use the lowest level that honestly proves the change.
 | Local screenshot for review | First-viewport structure, page hierarchy, theme, or cross-page UX materially changes and a reviewer asks for visual context | Local, untracked screenshots or external attachments; do not commit bulk screenshots or manifests by default |
 | Manual review | Visual quality, taste, density, copy, or product judgment cannot be automated | Explicit reviewer notes; do not present automated tests as visual acceptance |
 
-Vitest, coverage, lint, build, static budgets and Chromium are required quality gates, but they still do not prove visual taste or real inventory truth.
+Vitest, coverage, lint, build, static analysis and Chromium remain required checks, but they still do not prove visual taste or real inventory truth.
+
+For the first controlled online trial, `npm run bundle:check` and `npm run css:analyze` use `--budget-policy advisory`: all 13 numeric budgets are historical reference lines, not CI blockers. Exceedances remain visible as warnings with actual/limit evidence and a failing measurement status; malformed inputs, CSS ownership/parse errors and invalid bundle entries still fail the command. The checked-in budget files are not rebased. For a strict audit, run either CLI directly with its default policy or `--budget-policy enforce`; JSON reports include `budgetPolicy` separately from measurement status. This policy does not relax security, behavior or browser checks.
 
 ## Local preview
 
@@ -50,6 +52,18 @@ VITE_API_TARGET=http://127.0.0.1:8080 npm run dev -- --host 127.0.0.1 --port 517
 ```
 
 If port `5178` is occupied, use another explicit port and report the actual URL.
+
+For a local read-only VPS detail demonstration, explicitly opt in before starting Vite:
+
+```bash
+VITE_READ_ONLY_PREVIEW=true VITE_API_TARGET=http://127.0.0.1:8080 npm run dev -- --host 127.0.0.1 --port 5178
+```
+
+This flag defaults to off. It labels the VPS detail preview and suppresses its write affordances, including direct workbench-query entry, while retaining reading, copying, navigation, and retries. It is a frontend preview convenience, **not authorization or a global read-only API mode**: the sample API must independently reject mutations, and links to other pages retain those pages' existing behavior. Do not infer permissions from usernames or sample display text. Production deployments should leave the flag unset; backend sessions, capabilities, lifecycle rules, and write ownership remain authoritative. As with other Vite client variables, changing it requires restarting the dev server or rebuilding the SPA.
+
+For a VPS detail redesign, capture real CSS viewports in both themes: ordinary desktop (1440×1000), the 1800×1200 comparison view, 2560×1440, 3840×2160, narrower desktops (1280×900 and 1024×768), and mobile (390×844). Record actual `innerWidth`, `innerHeight`, `devicePixelRatio`, and `visualViewport.scale`. Check comfortable internal grouping, bounded content width, actual computed font sizes, column transitions, main/module overflow, and nearby actions—not merely a larger outer container. Capture default-closed and open menus, and scroll the application main container to inspect lower mobile sections.
+
+Supplement with high-DPI browser metrics when available, for example 2560×1440 at DPR 1.5 or 1920×1080 at DPR 2 (both produce 3840×2160 raster output). These are browser device-metric simulations, not proof of physical monitor or operating-system scaling. Do not use CSS zoom, transforms, or resized screenshots as responsive evidence. State the browser and any system-scaling limitation explicitly. Exercise long titles/SSH/notes, many resources, empty/loading/normal/stale/unavailable/read-only states, exact scoped failure-to-retry, native keyboard menus/focus return, and copy success/rejection. Shared-token changes also require checking dashboard, inventory, monitoring, and settings. Do not disable contrast rules or swallow accessibility scan failures to obtain a clean result.
 
 Every UI task final report should include:
 

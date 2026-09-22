@@ -186,7 +186,7 @@ describe('VPSCancellationWorkbench', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('请显式选择要取消自动续费的 active 订阅。')
+    expect(await screen.findByRole('alert')).toHaveTextContent('请显式选择要取消自动续费的生效中订阅。')
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
@@ -230,7 +230,7 @@ describe('VPSCancellationWorkbench', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('请显式选择要取消自动续费的 active 订阅。')
+    expect(await screen.findByRole('alert')).toHaveTextContent('请显式选择要取消自动续费的生效中订阅。')
     expect(onSubmit).not.toHaveBeenCalled()
   })
 

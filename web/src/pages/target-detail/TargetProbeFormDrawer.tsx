@@ -1,6 +1,6 @@
-import type { FormEvent } from 'react'
+import { type FormEvent, useId } from 'react'
 
-import { Modal } from '../../components/atoms'
+import { Button, Modal } from '../../components/atoms'
 import {
   TargetProbeForm,
   type ProbeCreateFormState,
@@ -36,9 +36,17 @@ export function TargetProbeFormDrawer({
   onProbeKindChange,
   onFieldChange,
 }: TargetProbeFormDrawerProps) {
+  const formId = useId()
   const title = mode.kind === 'edit'
     ? `${target.name} · 编辑 ProbeItem`
     : `${target.name} · 创建 ProbeItem`
+  const submitLabel = submitting
+    ? mode.kind === 'edit'
+      ? '正在保存…'
+      : '正在创建…'
+    : mode.kind === 'edit'
+      ? '保存 ProbeItem'
+      : '创建 ProbeItem'
 
   function handleClose() {
     if (submitting) return
@@ -46,27 +54,33 @@ export function TargetProbeFormDrawer({
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title={title} ariaLabel="ProbeItem 表单抽屉">
-      <div className="target-probe-drawer">
-        <div className="target-probe-drawer__intro">
-          <div>
-            <p className="target-probe-drawer__eyebrow">ProbeItem 工作面</p>
-            <p className="target-probe-drawer__description">
-              创建和编辑探测规则在抽屉内完成，主页面保留 ProbeItem 证据扫描路径。
-            </p>
-          </div>
+    <Modal
+      open={open}
+      onClose={handleClose}
+      title={title}
+      ariaLabel="ProbeItem 表单抽屉"
+      size="md"
+      contentClassName="watchtower-form-modal"
+      footer={
+        <div className="watchtower-form-footer">
+          {error ? <p className="create-form__error" role="alert">{error}</p> : null}
+          <Button type="submit" form={formId} disabled={submitting}>
+            {submitLabel}
+          </Button>
         </div>
-
-        <TargetProbeForm
-          mode={mode}
-          form={form}
-          submitting={submitting}
-          error={error}
-          onSubmit={onSubmit}
-          onProbeKindChange={onProbeKindChange}
-          onFieldChange={onFieldChange}
-        />
-      </div>
+      }
+    >
+      <TargetProbeForm
+        formId={formId}
+        hideActions
+        mode={mode}
+        form={form}
+        submitting={submitting}
+        error={null}
+        onSubmit={onSubmit}
+        onProbeKindChange={onProbeKindChange}
+        onFieldChange={onFieldChange}
+      />
     </Modal>
   )
 }

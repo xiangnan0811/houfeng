@@ -12,9 +12,10 @@ import (
 
 // MonitoringInstanceSparklinesRepository provides downsampled metric time-series for all
 // active monitoring instances, grouped by monitoring_instance_id. Each metric returns exactly downSample
-// bucket-level average values spanning the window [since, now].
+// bucket-level average values spanning the window [since, now]. A nil bucket means no samples were
+// recorded in that bucket.
 type MonitoringInstanceSparklinesRepository interface {
-	GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]float64, error)
+	GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]*float64, error)
 }
 
 type sparklinesQueryer interface {
@@ -83,7 +84,7 @@ const getMonitoringInstanceSparklinesSQL = `
 	where observed_at >= $1
 	order by monitoring_instance_id, observed_at asc`
 
-func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]float64, error) {
+func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparklines(ctx context.Context, metrics []string, since time.Time, downsample int) (map[string]map[string][]*float64, error) {
 	if downsample <= 0 {
 		return nil, fmt.Errorf("downsample must be positive, got %d", downsample)
 	}
@@ -149,7 +150,7 @@ func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSp
 	now := time.Now()
 	windowDuration := now.Sub(since)
 	if windowDuration <= 0 {
-		return map[string]map[string][]float64{}, nil
+		return map[string]map[string][]*float64{}, nil
 	}
 
 	// Accumulators: per-monitoring instance -> per-metric -> per-bucket -> (sum, count)
@@ -232,15 +233,19 @@ func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSp
 	}
 
 	// Build the result map. MonitoringInstances with no rows in the window are absent.
-	result := make(map[string]map[string][]float64, len(monitoringInstanceAcc))
+	result := make(map[string]map[string][]*float64, len(monitoringInstanceAcc))
 	for monitoringInstanceID, ma := range monitoringInstanceAcc {
-		monitoringInstanceResult := make(map[string][]float64, len(metrics))
+		monitoringInstanceResult := make(map[string][]*float64, len(metrics))
 		for _, m := range metrics {
-			buckets := make([]float64, downsample)
+			// Keep bucket values in one backing slice and expose pointers only for
+			// buckets with observations; JSON encodes nil pointers as null.
+			values := make([]float64, downsample)
+			buckets := make([]*float64, downsample)
 			acc := ma[m]
-			for b := 0; b < downsample; b++ {
+			for b := range downsample {
 				if acc[b].count > 0 {
-					buckets[b] = math.Round(acc[b].sum/float64(acc[b].count)*10) / 10
+					values[b] = math.Round(acc[b].sum/float64(acc[b].count)*10) / 10
+					buckets[b] = &values[b]
 				}
 			}
 			monitoringInstanceResult[m] = buckets

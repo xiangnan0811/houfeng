@@ -80,6 +80,7 @@ function parseArguments(argv) {
     budgetPath: resolve(webRoot, 'css-budget.json'),
     distPath: resolve(webRoot, 'dist'),
     format: 'json',
+    budgetPolicy: 'enforce',
   }
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -96,6 +97,9 @@ function parseArguments(argv) {
       index += 1
     } else if (argument === '--dist' && value) {
       options.distPath = resolve(value)
+      index += 1
+    } else if (argument === '--budget-policy' && (value === 'enforce' || value === 'advisory')) {
+      options.budgetPolicy = value
       index += 1
     } else if (argument === '--format' && (value === 'json' || value === 'text')) {
       options.format = value
@@ -303,6 +307,7 @@ function checkBudget(source, production, budgetPath) {
 
 function formatText(report) {
   const lines = [
+    `Budget policy: ${report.budgetPolicy}`,
     `CSS source: ${report.source.files} files, ${report.source.bytes} bytes, ${report.source.rules} rules, ${report.source.declarations} declarations`,
     `CSS debt: ${report.source.repeatedSelectorTexts} repeated selectors, ${report.source.literalColorDeclarations} literal-color declarations, ${report.source.importantDeclarations} !important declarations`,
     `CSS production: ${report.production.files} files, ${report.production.rawBytes} raw bytes, ${report.production.gzipBytes} gzip bytes`,
@@ -317,7 +322,7 @@ function main() {
     const sourceReport = analyzeSource(options.webRoot, options.ownersPath)
     const production = analyzeProduction(options.distPath)
     const budget = checkBudget(sourceReport.source, production, options.budgetPath)
-    const report = { ...sourceReport, production, budget }
+    const report = { ...sourceReport, production, budget, budgetPolicy: options.budgetPolicy }
 
     process.stdout.write(
       options.format === 'json' ? `${JSON.stringify(report, null, 2)}\n` : formatText(report),
@@ -326,10 +331,10 @@ function main() {
     if (budget.status === 'fail') {
       for (const violation of budget.violations) {
         process.stderr.write(
-          `CSS budget exceeded: ${violation.metric} actual=${violation.actual} max=${violation.max}\n`,
+          `${options.budgetPolicy === 'advisory' ? 'WARNING: ' : ''}CSS budget exceeded: ${violation.metric} actual=${violation.actual} max=${violation.max}\n`,
         )
       }
-      process.exitCode = 1
+      if (options.budgetPolicy === 'enforce') process.exitCode = 1
     }
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

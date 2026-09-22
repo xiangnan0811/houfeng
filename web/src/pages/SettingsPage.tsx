@@ -387,14 +387,10 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="page-stack animate-in">
-      <div className="page-header">
-        <div>
-          <div className="page-eyebrow">配置 · SETTINGS</div>
-          <h1 className="page-title">系统设置</h1>
-          <p className="page-sub">通知、阈值、策略配置</p>
-        </div>
-      </div>
+    <div className="page settings-page">
+      <header className="page__head">
+        <h1 className="page__title">系统设置</h1>
+      </header>
 
       <div className="settings-tabs">
         <Tabs
@@ -413,13 +409,13 @@ export function SettingsPage() {
         ) : systemSettings && systemForm ? (
           <form className="settings-system-form" onSubmit={handleSubmit}>
           {activeTab === 'appearance' && (
-            <div className="settings-section animate-in">
+            <div className="settings-section">
               <ThemeSettingsSection />
             </div>
           )}
 
           {activeTab === 'notification' && (
-            <div className="settings-section animate-in">
+            <div className="settings-section">
               <div className="ss-title">通知通道</div>
               <div className="ss-desc">Telegram / 飞书异常推送</div>
               {activeChannels.has('telegram') && (
@@ -450,13 +446,13 @@ export function SettingsPage() {
 
           {activeTab === 'monitoring' && (
             <>
-              <div className="settings-section animate-in">
+              <div className="settings-section">
                 <IncidentDefaultsSection
                   value={systemForm.incidentDefaults}
                   onChange={(next) => patchForm((f) => ({ ...f, incidentDefaults: next }))}
                 />
               </div>
-              <div className="settings-section animate-in">
+              <div className="settings-section">
                 <FrequencyDefaultsSection
                   hostSampleFrequencyTier={systemForm.hostSampleFrequencyTier}
                   probeFrequencyDefaults={systemForm.probeFrequencyDefaults}
@@ -464,13 +460,13 @@ export function SettingsPage() {
                   onProbeFrequencyDefaultsChange={(patch) => patchForm((f) => ({ ...f, probeFrequencyDefaults: { ...f.probeFrequencyDefaults, ...patch } }))}
                 />
               </div>
-              <div className="settings-section animate-in">
+              <div className="settings-section">
                 <IPQualitySettingsSection
                   value={systemForm.ipQuality}
                   onChange={(patch) => patchForm((f) => ({ ...f, ipQuality: { ...f.ipQuality, ...patch } }))}
                 />
               </div>
-              <div className="settings-section animate-in">
+              <div className="settings-section">
                 <RetentionPolicySection
                   value={systemForm.retentionPolicy}
                   onChange={(patch) => patchForm((f) => ({ ...f, retentionPolicy: { ...f.retentionPolicy, ...patch } }))}
@@ -480,7 +476,7 @@ export function SettingsPage() {
           )}
 
           {activeTab === 'advanced' && (
-            <div className="settings-section animate-in">
+            <div className="settings-section">
               <OverrideRulesSection
                 form={systemForm}
                 onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
@@ -495,10 +491,6 @@ export function SettingsPage() {
               {state.saveSuccess && <p className="settings-save-footer__message settings-save-footer__message--success">{state.saveSuccess}</p>}
             </div>
             <button type="submit" className="btn md primary" disabled={state.saving}>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
-                <path d="M17 21v-8H7v8M7 3v5h8" />
-              </svg>
               {state.saving ? '保存中…' : '保存设置'}
             </button>
           </div>

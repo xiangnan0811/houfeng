@@ -224,44 +224,126 @@ describe('vpsDetailOverviewModel', () => {
     })).toBe('已取消自动续费 · 2 个月后到期')
   })
 
-  it('builds V17 facts, related items, ledger and IP overview for a stable VPS', () => {
-    vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-06-01T08:00:00Z'))
+  it('orders mixed timeline families globally by date and namespaces source IDs', () => {
+    const baseDecision = baseTimeline.renewal_decisions[0]
+    const baseExperience = baseTimeline.experience_logs[0]
+    if (!baseDecision || !baseExperience) throw new Error('base timeline fixture is incomplete')
 
-    const model = buildModel()
+    const metadataPriceHistory = {
+      price_history_id: 'price_new',
+      subscription_id: 'sub_001',
+      vps_id: 'vps_001',
+      from_price: 12,
+      to_price: 12,
+      from_currency: 'USD',
+      to_currency: 'USD',
+      from_billing_cycle: 'monthly',
+      to_billing_cycle: 'annual',
+      from_billing_months: 1,
+      to_billing_months: 12,
+      from_billing_period_unit: 'month',
+      to_billing_period_unit: 'year',
+      from_billing_period_length: 1,
+      to_billing_period_length: 1,
+      from_monthly_price: 12,
+      to_monthly_price: 12,
+      from_renew_at: '2026-05-01',
+      to_renew_at: '2026-06-01',
+      from_auto_renew: true,
+      to_auto_renew: false,
+      from_auto_renew_cancelled: false,
+      to_auto_renew_cancelled: false,
+      from_renewal_mode: 'auto',
+      to_renewal_mode: 'manual',
+      from_status: 'active',
+      to_status: 'active',
+      changed_at: '2026-05-13T08:00:00Z',
+      created_at: '2026-05-13T08:00:01Z',
+    } satisfies VPSTimeline['price_histories'][number]
+    const statusOnlyPriceHistory = {
+      ...metadataPriceHistory,
+      price_history_id: 'price_status_only',
+      from_billing_cycle: 'monthly',
+      to_billing_cycle: 'monthly',
+      from_billing_months: 1,
+      to_billing_months: 1,
+      from_billing_period_unit: 'month',
+      to_billing_period_unit: 'month',
+      from_billing_period_length: 1,
+      to_billing_period_length: 1,
+      from_renew_at: '2026-05-01',
+      to_renew_at: '2026-05-01',
+      from_auto_renew: true,
+      to_auto_renew: true,
+      from_renewal_mode: 'auto',
+      to_renewal_mode: 'auto',
+      from_status: 'active',
+      to_status: 'cancelled',
+      changed_at: '2026-05-12T08:00:00Z',
+      created_at: '2026-05-12T08:00:01Z',
+    } satisfies VPSTimeline['price_histories'][number]
 
-    expect(model.facts.map((fact) => fact.label)).toEqual([
-      'Provider',
-      '地区 / 数据中心',
-      '规格',
-      '访问',
-      '系统',
-      '订阅',
-      '监控',
-      'IP 质量',
+    const model = buildModel({
+      timeline: {
+        vps_id: 'vps_001',
+        renewal_decisions: [{
+          ...baseDecision,
+          decision_id: 'decision_old',
+          decided_at: '2026-05-11T08:00:00Z',
+          reason: '历史续费判断',
+        }],
+        price_histories: [metadataPriceHistory, statusOnlyPriceHistory],
+        ip_histories: [{
+          ip_history_id: 'ip_old',
+          vps_id: 'vps_001',
+          from_ipv4: '192.0.2.1',
+          to_ipv4: '192.0.2.2',
+          from_ipv6: '',
+          to_ipv6: '',
+          changed_at: '2026-05-10T08:00:00Z',
+          created_at: '2026-05-10T08:00:01Z',
+        }],
+        spec_snapshots: [{
+          snapshot_id: 'snapshot_new',
+          vps_id: 'vps_001',
+          product_name: 'cx32',
+          ssh_host: '192.0.2.1',
+          ssh_port: 22,
+          ssh_user: 'root',
+          os_name: 'Debian',
+          virtualization: 'kvm',
+          captured_at: '2026-05-11T08:00:00Z',
+          created_at: '2026-05-11T08:00:01Z',
+        }],
+        experience_logs: [{
+          ...baseExperience,
+          experience_log_id: 'experience_latest',
+          occurred_at: '2026-05-14T08:00:00Z',
+          summary: '最新网络经验',
+        }],
+      },
+    })
+
+    expect(model.recentActivity).toEqual([
+      {
+        key: 'experience:experience_latest',
+        date: '2026-05-14T08:00:00Z',
+        kind: '经验记录',
+        summary: '最新网络经验',
+      },
+      {
+        key: 'price:price_new',
+        date: '2026-05-13T08:00:00Z',
+        kind: '账单更新',
+        summary: '计费周期 每 1 月 -> 每 1 年 · 续费日 2026-05-01 -> 2026-06-01 · 续费方式 自动续费 -> 手动续费',
+      },
+      {
+        key: 'price:price_status_only',
+        date: '2026-05-12T08:00:00Z',
+        kind: '账单更新',
+        summary: '账单更新',
+      },
     ])
-    expect(model.facts.find((fact) => fact.label === '访问')?.value).toBe('192.0.2.1:22')
-    expect(model.judgement.rows).toEqual([
-      { label: '决策', value: '保留' },
-      { label: '续费', value: '3 个月后续费' },
-      { label: '动作', value: '无' },
-    ])
-    expect(model.judgement.attentionItems).toEqual([])
-    expect(model.judgement.primaryAction).toBeNull()
-    expect(model).not.toHaveProperty('contextAction')
-    expect(model.relatedItems.map((item) => item.key)).toEqual([
-      'subscription',
-      'monitoring',
-      'ip-quality',
-      'services',
-      'domains',
-      'history',
-    ])
-    expect(model.relatedItems.find((item) => item.key === 'services')?.titleAction).toEqual({ kind: 'modal', mode: 'services-detail' })
-    expect(model.relatedItems.find((item) => item.key === 'domains')?.titleAction).toEqual({ kind: 'modal', mode: 'domains-detail' })
-    expect(model.ledger.records[0]?.summary).toBe('晚高峰丢包')
-    expect(model.ledger.carriers.map((carrier) => carrier.name)).toEqual(['Blog', 'www.example.com'])
-    expect(model.ipOverview.titleValue).toBe('59 · 1 风险 · 1 可用')
   })
 
   it('does not treat subscription load failure as a missing subscription', () => {
@@ -275,10 +357,9 @@ describe('vpsDetailOverviewModel', () => {
     const subscriptionItem = model.relatedItems.find((item) => item.key === 'subscription')
     expect(subscriptionItem?.primary).toBe('订阅证据暂不可用')
     expect(subscriptionItem?.tone).toBe('notice')
-    expect(subscriptionItem?.quickActions.map((action) => action.label)).not.toContain('创建/更新订阅')
-    expect(model).not.toHaveProperty('contextAction')
+    expect(subscriptionItem?.quickActions.map((action) => action.label)).not.toContain('新增订阅事实')
     expect(model.judgement.attentionItems.map((item) => item.title)).toContain('订阅证据暂不可用')
-    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'link', label: '核对订阅', to: '/subscriptions?vps_id=vps_001' })
+    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'link', label: '核对订阅', to: '/subscriptions?vps_id=vps_001&view=details' })
   })
 
   it('promotes true missing subscription only after a successful empty subscription response', () => {
@@ -292,13 +373,12 @@ describe('vpsDetailOverviewModel', () => {
     const subscriptionItem = model.relatedItems.find((item) => item.key === 'subscription')
     expect(subscriptionItem?.primary).toBe('未记录当前订阅')
     expect(subscriptionItem?.tone).toBe('critical')
-    expect(subscriptionItem?.quickActions.map((action) => action.label)).toContain('创建/更新订阅')
-    expect(model).not.toHaveProperty('contextAction')
+    expect(subscriptionItem?.quickActions.map((action) => action.label)).toContain('新增订阅事实')
     expect(model.judgement.attentionItems.map((item) => item.title)).toContain('缺少当前订阅')
-    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'modal', label: '创建/更新订阅', mode: 'subscription' })
+    expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({ kind: 'modal', label: '新增订阅事实', mode: 'subscription' })
   })
 
-  it('promotes monitoring attention into the top judgement', () => {
+  it('keeps monitoring attention in the monitoring section', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-06-01T08:00:00Z'))
 
@@ -314,21 +394,8 @@ describe('vpsDetailOverviewModel', () => {
       },
     })
 
-    expect(model).not.toHaveProperty('contextAction')
-    expect(model.judgement.rows.find((row) => row.label === '动作')?.value).toBe('查看监控实例')
-    expect(model.judgement.attentionItems).toEqual([
-      {
-        title: '运行观测需要核对',
-        reason: 'Tokyo Monitoring Instance · 2 个活跃异常',
-        tone: 'alert',
-        primaryAction: {
-          kind: 'link',
-          label: '查看监控实例',
-          to: '/monitoring/mi_001?return_vps=vps_001',
-        },
-        secondaryActions: [{ kind: 'modal', label: '监控观测', mode: 'monitoring-instance-evidence' }],
-      },
-    ])
+    expect(model.judgement.attentionItems).toEqual([])
+    expect(model.monitoringAttentionItems.map((item) => item.title)).toEqual(['运行观测需要核对'])
   })
 
   it('keeps cancellation, monitoring and renewal work together in the top judgement', () => {
@@ -361,18 +428,15 @@ describe('vpsDetailOverviewModel', () => {
       },
     })
 
-    expect(model).not.toHaveProperty('contextAction')
-    expect(model.judgement.rows.find((row) => row.label === '动作')?.value).toBe('取消/退役')
     expect(model.judgement.primaryAction).toEqual({
       kind: 'modal',
       label: '处理取消/退役',
       mode: 'cancellation',
     })
     expect(model.judgement.attentionItems.map((item) => item.title)).toEqual([
-      '取消/退役',
-      '运行观测需要核对',
-      '自动续费已取消',
-    ])
+          '取消/退役',
+          '自动续费已取消',
+        ])
     expect(model.judgement.attentionItems[0]?.primaryAction).toEqual({
       kind: 'modal',
       label: '处理取消/退役',

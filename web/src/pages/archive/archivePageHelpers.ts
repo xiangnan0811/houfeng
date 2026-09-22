@@ -18,8 +18,8 @@ export function lifecycleTone(status: VPSAssetRecord['lifecycle_status']): 'neut
   return status === 'cancelled' || status === 'archived' ? 'offline' : 'neutral'
 }
 
-export function subscriptionMonthlySummary(subscriptions: SubscriptionRecord[]): string {
-  if (subscriptions.length === 0) return '暂无月成本'
+export function subscriptionMonthlySummary(subscriptions: SubscriptionRecord[], emptyLabel = '无关联订阅'): string {
+  if (subscriptions.length === 0) return emptyLabel
 
   const totals = new Map<string, number>()
   for (const subscription of subscriptions) {

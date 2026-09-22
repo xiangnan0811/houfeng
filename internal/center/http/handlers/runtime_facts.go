@@ -132,8 +132,18 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 				if !ok {
 					return
 				}
+				current, err := repo.GetMonitoringInstance(ctx, monitoringInstanceID)
+				if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+					return
+				}
+				if err != nil {
+					return
+				}
+				if !eligibleRuntimeStreamMessage(message, monitoringInstanceID, current, time.Now().UTC()) {
+					continue
+				}
 				writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				err := wsjson.Write(writeCtx, conn, message)
+				err = wsjson.Write(writeCtx, conn, message)
 				cancel()
 				if err != nil {
 					return
@@ -141,6 +151,31 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 			}
 		}
 	})
+}
+
+func eligibleRuntimeStreamMessage(message runtimefacts.HostSampleStreamMessage, monitoringInstanceID string, record monitoringinstances.Record, readAt time.Time) bool {
+	if message.Type != "host_sample" ||
+		message.MonitoringInstanceID != monitoringInstanceID ||
+		!message.ReceivedAt.Equal(message.Sample.ReceivedAt) {
+		return false
+	}
+	sample := message.Sample
+	if sample.MonitoringInstanceID != monitoringInstanceID ||
+		sample.ObservedAt.IsZero() ||
+		sample.ReceivedAt.IsZero() ||
+		sample.AgentVersion == "" ||
+		sample.Fingerprint == "" ||
+		sample.SyncBatchID == "" ||
+		record.BindingStatus != monitoringinstances.BindingBound ||
+		record.BindingFingerprint == "" ||
+		record.BindingEpochStartedAt == nil ||
+		sample.Fingerprint != record.BindingFingerprint {
+		return false
+	}
+	if sample.ObservedAt.After(readAt) || sample.ReceivedAt.After(readAt) {
+		return false
+	}
+	return !sample.ReceivedAt.Before(*record.BindingEpochStartedAt)
 }
 
 func monitoringInstanceRuntimeFactsPath(path string) (monitoringInstanceID string, ok bool) {

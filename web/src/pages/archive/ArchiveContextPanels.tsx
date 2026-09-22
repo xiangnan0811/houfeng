@@ -14,7 +14,6 @@ export function ArchiveMonitoringPanel({ monitoring }: { monitoring: VPSMonitori
     <section className="page-panel archive-page__readonly-panel">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">MONITORING HISTORY</p>
           <h2 className="section-heading__title">监控关联</h2>
           <p className="section-heading__description">只读展示归档前保留在 VPS 台账里的监控实例证据。</p>
         </div>
@@ -78,7 +77,6 @@ export function ArchiveServicesPanel({ services }: { services: AssetServiceRecor
     <section className="page-panel page-panel--scroll-x archive-page__readonly-panel">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">SERVICE CONTEXT</p>
           <h2 className="section-heading__title">服务资产</h2>
           <p className="section-heading__description">只读保留归档 VPS 的服务记录和 Target 关联。</p>
         </div>
@@ -146,7 +144,6 @@ export function ArchiveDomainsPanel({ domains }: { domains: AssetDomainRecord[] 
     <section className="page-panel page-panel--scroll-x archive-page__readonly-panel">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">DOMAIN CONTEXT</p>
           <h2 className="section-heading__title">域名资产</h2>
           <p className="section-heading__description">只读保留归档 VPS 的域名、证书和 Target 关联。</p>
         </div>

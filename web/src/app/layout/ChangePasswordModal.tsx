@@ -1,7 +1,8 @@
 import { useId, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 
-import { Button, Input } from '../../components/atoms'
+import { Button } from '../../components/atoms/Button'
+import { Input } from '../../components/atoms/Input'
 import { changePassword } from '../../lib/auth-client'
 import { getModalDepth, isTopModal, subscribeModalStack } from '../../lib/modalStack'
 import { useModalFocus } from '../../lib/useModalFocus'

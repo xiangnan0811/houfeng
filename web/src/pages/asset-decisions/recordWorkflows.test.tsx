@@ -390,7 +390,7 @@ describe('Asset Decisions saved record workflows', () => {
     fireEvent.click(within(dialog).getByRole('tab', { name: /执行/ }))
     expect(within(dialog).getAllByText('证据仍未补齐，先补上下文再确认判断').length).toBeGreaterThan(0)
     const subscriptionLinks = within(dialog).getAllByRole('link', { name: '核对订阅上下文' })
-    expect(subscriptionLinks[0]).toHaveAttribute('href', '/subscriptions?vps_id=vps_primary')
+    expect(subscriptionLinks[0]).toHaveAttribute('href', '/subscriptions?vps_id=vps_primary&view=details')
     const writeCalls = fetchMock.mock.calls.filter((call) => call[1]?.method && call[1]?.method !== 'GET')
     expect(writeCalls).toEqual([])
   })

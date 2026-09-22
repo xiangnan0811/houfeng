@@ -332,7 +332,7 @@ function vpsOverviewResponse(): VPSOverview {
         kind: 'subscriptions',
         count: 1,
         status: '续费中',
-        route: '/subscriptions?vps_id=vps_001',
+        route: '/subscriptions?vps_id=vps_001&view=details',
         label: '订阅',
         section: { ...ready },
       },

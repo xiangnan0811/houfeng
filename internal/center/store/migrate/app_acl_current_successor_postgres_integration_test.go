@@ -32,7 +32,8 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 			migratorDB := fixture.openRolePool(t, ctx, appACLCurrentTransitionMigrator)
 			oldFS := appACLCurrentTransitionTestFS(t)
 			delete(oldFS, "0063_tune_heartbeat_incident_policy.sql")
-			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-1]...)
+			delete(oldFS, "0064_add_network_rates_valid.sql")
+			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-2]...)
 			oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 			if err != nil {
 				t.Fatalf("compile exact v0.79.4 source: %v", err)
@@ -109,7 +110,7 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 			if successor.ManifestRevision != 2 || successor.PreviousManifestDigest != predecessor.ManifestDigest {
 				t.Fatalf("successor manifest = %#v, want revision 2 linked to frozen predecessor", successor)
 			}
-			assertSingleIntValue(t, ctx, migratorDB, `select count(*)::int from public.schema_migrations`, 64)
+			assertSingleIntValue(t, ctx, migratorDB, `select count(*)::int from public.schema_migrations`, 65)
 			assertSingleIntValue(t, ctx, migratorDB, `select count(*)::int from public.schema_migrations where name = '0063_tune_heartbeat_incident_policy.sql'`, 1)
 			assertSingleIntValue(t, ctx, migratorDB, `select count(*)::int from public.app_acl_manifest_revisions`, 2)
 			assertSingleIntValue(t, ctx, migratorDB, `select manifest_revision::int from public.app_acl_manifest_head where singleton`, 2)
@@ -287,7 +288,8 @@ func seedExactAppACLCurrentPredecessor(t *testing.T, ctx context.Context, global
 	migratorDB := fixture.openRolePool(t, ctx, appACLCurrentTransitionMigrator)
 	oldFS := appACLCurrentTransitionTestFS(t)
 	delete(oldFS, "0063_tune_heartbeat_incident_policy.sql")
-	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-1]...)
+	delete(oldFS, "0064_add_network_rates_valid.sql")
+	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-2]...)
 	oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 	if err != nil {
 		t.Fatalf("compile exact v0.79.4 source: %v", err)

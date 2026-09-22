@@ -70,11 +70,9 @@ describe('TargetLatencyTrends', () => {
       />,
     )
 
-    expect(screen.getByText('近期延迟趋势')).toBeInTheDocument()
-    // Two metric cards, one per enabled probe item
-    expect(container.querySelectorAll('.metric-card').length).toBe(2)
-    // Sparkline polyline rendered for multi-sample series
-    expect(container.querySelectorAll('svg.sparkline polyline').length).toBe(2)
+    expect(screen.getByRole('region', { name: '近期延迟趋势' })).toBeInTheDocument()
+    expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(2)
+    expect(container.querySelectorAll('.monitoring-detail-chart svg').length).toBe(2)
     // Card titles include the kind label
     expect(
       screen.getByRole('heading', { name: 'HTTP · path: /healthz' }),
@@ -93,13 +91,37 @@ describe('TargetLatencyTrends', () => {
     )
 
     expect(
-      screen.getByRole('heading', { name: '近 24h 暂无可用延迟样本' }),
+      screen.getByRole('heading', { name: '近 24h 尚未配置探测' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(
-        '该目标尚未收到带有 latency_ms 的成功观测，或所有 ProbeItem 当前均处于停用状态。',
-      ),
+      screen.getByText('添加至少一种 ProbeItem 后才会产生延迟样本。'),
     ).toBeInTheDocument()
+  })
+
+  it('distinguishes disabled probes from missing observations and failed samples', () => {
+    const { rerender } = render(
+      <TargetLatencyTrends
+        probeItems={[probeItem({ enabled: false })]}
+        recentObservations={[]}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: '近 24h 探测已停用' })).toBeInTheDocument()
+
+    rerender(
+      <TargetLatencyTrends
+        probeItems={[probeItem()]}
+        recentObservations={[]}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: '近 24h 尚无观测' })).toBeInTheDocument()
+
+    rerender(
+      <TargetLatencyTrends
+        probeItems={[probeItem()]}
+        recentObservations={[observation({ latency_ms: null, result_kind: 'failure' })]}
+      />,
+    )
+    expect(screen.getByRole('heading', { name: '近 24h 无可用延迟样本' })).toBeInTheDocument()
   })
 
   it('shows aside meta with sample count, oldest, newest, and backfill count', () => {
@@ -114,7 +136,7 @@ describe('TargetLatencyTrends', () => {
       />,
     )
 
-    const meta = container.querySelector('.detail-section__aside-meta')
+    const meta = container.querySelector('.target-detail-latency__meta')
     expect(meta).not.toBeNull()
     expect(meta?.textContent ?? '').toContain('24h 2 样本')
     expect(meta?.textContent ?? '').toContain('backfill 1')
@@ -129,8 +151,7 @@ describe('TargetLatencyTrends', () => {
       />,
     )
 
-    const section = container.querySelector('.detail-section')
-    expect(section?.className ?? '').toContain('detail-section--ribbon-maintenance')
+    expect(container.querySelector('.monitoring-detail-chart')).not.toBeNull()
   })
 
   it('skips disabled probe items even when observations exist', () => {
@@ -141,9 +162,9 @@ describe('TargetLatencyTrends', () => {
     const { container } = render(
       <TargetLatencyTrends probeItems={items} recentObservations={observations} />,
     )
-    expect(container.querySelectorAll('.metric-card').length).toBe(0)
+    expect(container.querySelectorAll('.monitoring-detail-chart').length).toBe(0)
     expect(
-      screen.getByRole('heading', { name: '近 24h 暂无可用延迟样本' }),
+      screen.getByRole('heading', { name: '近 24h 探测已停用' }),
     ).toBeInTheDocument()
   })
 })

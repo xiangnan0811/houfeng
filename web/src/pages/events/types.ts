@@ -1,6 +1,6 @@
 import type { StateChangeEventRecord, StateChangeEventType } from '../../lib/types'
 
-export type TimeRange = '24h' | '7d' | '30d' | 'custom'
+export type TimeRange = '24h' | '7d' | '30d' | 'all' | 'custom'
 
 export type FilterState = {
   object_type: '' | 'monitoring_instance' | 'target'

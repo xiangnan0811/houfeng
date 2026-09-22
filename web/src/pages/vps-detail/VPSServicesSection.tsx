@@ -1,13 +1,14 @@
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
-import { Badge, Button, DataTable, MonoDigits, type DataTableColumn } from '../../components/atoms'
-import { formatOptional } from '../../lib/format'
+import { Button, MonoDigits } from '../../components/atoms'
+import type { AssetServiceRecord } from '../../lib/types'
+import { VPSCopyValueButton } from './VPSCopyValueButton'
 import {
-  ASSET_SERVICE_STATUS_LABELS,
-  ASSET_SERVICE_TYPE_LABELS,
-  type AssetServiceRecord,
-} from '../../lib/types'
-import { AssetLabels } from '../assetPageBadges'
+  httpHref,
+  serviceResourceName,
+  serviceResourceStatus,
+  serviceResourceType,
+} from './vpsDetailResourcePresentation'
 
 type VPSServicesSectionProps = {
   services: AssetServiceRecord[]
@@ -24,78 +25,16 @@ export function VPSServicesSection({
   readOnly = false,
   onCreate,
 }: VPSServicesSectionProps) {
-  const serviceColumns: DataTableColumn<AssetServiceRecord>[] = [
-    {
-      key: 'service',
-      label: '服务',
-      render: (service) => (
-        <div className="asset-table__identity">
-          <strong>{service.name}</strong>
-          <span>{service.service_id}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'type',
-      label: '类型 / 状态',
-      render: (service) => (
-        <span className="asset-status-stack">
-          <Badge variant="info" tone="neutral">
-            {ASSET_SERVICE_TYPE_LABELS[service.service_type]}
-          </Badge>
-          <Badge variant="count" tone={service.status === 'active' ? 'normal' : 'neutral'}>
-            {ASSET_SERVICE_STATUS_LABELS[service.status]}
-          </Badge>
-        </span>
-      ),
-    },
-    {
-      key: 'endpoint',
-      label: '入口',
-      render: (service) => (
-        <div className="asset-table__stack">
-          <strong>{formatOptional(service.url)}</strong>
-          <span>{service.port ? `端口 ${service.port}` : '端口未记录'}</span>
-        </div>
-      ),
-    },
-    {
-      key: 'target',
-      label: 'Target',
-      render: (service) =>
-        service.target_id ? (
-          <Link className="text-link" to={`/targets/${service.target_id}`}>
-            {service.target_id}
-          </Link>
-        ) : (
-          <span className="asset-table__muted">未关联</span>
-        ),
-    },
-    {
-      key: 'labels',
-      label: '标签',
-      render: (service) => <AssetLabels labels={service.labels} />,
-    },
-    {
-      key: 'note',
-      label: '备注',
-      render: (service) => formatOptional(service.note),
-    },
-  ]
-
   return (
-    <section className="page-panel page-panel--scroll-x">
-      <div className="section-heading">
+    <div className="vps-objects">
+      <p className="vps-context">
+        共<MonoDigits>{services.length}</MonoDigits>项
+      </p>
+      {!readOnly ? (
         <div>
-          <p className="section-heading__eyebrow">SERVICE CONTEXT</p>
-          <h2>服务资产</h2>
-          <p className="section-heading__description">当前 VPS 的手工服务记录，只提供上下文和 Target 跳转。</p>
+          <Button variant="secondary" size="sm" onClick={onCreate}>新增服务</Button>
         </div>
-        <span className="section-heading__meta">
-          <MonoDigits>{services.length}</MonoDigits> 个手工记录服务
-        </span>
-        {!readOnly ? <Button variant="secondary" size="sm" onClick={onCreate}>新增服务</Button> : null}
-      </div>
+      ) : null}
       {error ? (
         <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
           {error}
@@ -103,13 +42,91 @@ export function VPSServicesSection({
       ) : notice ? (
         <p className="asset-operation-feedback" role="status">{notice}</p>
       ) : null}
-      <DataTable
-        className="asset-table vps-service-table"
-        columns={serviceColumns}
-        rows={services}
-        rowKey={(service) => service.service_id}
-        emptyContent={<span className="empty-inline">尚未记录服务</span>}
-      />
-    </section>
+      {services.length > 0 ? (
+        <ul className="vps-object-list vps-relation-dossiers">
+          {services.map((service) => (
+            <ServiceDossier key={service.service_id} service={service} />
+          ))}
+        </ul>
+      ) : (
+        <p className="empty-inline">尚未记录服务</p>
+      )}
+    </div>
+  )
+}
+
+function ServiceDossier({ service }: { service: AssetServiceRecord }) {
+  const location = useLocation()
+  const url = service.url.trim()
+  const href = httpHref(url)
+  const probe = service.target_id?.trim() ?? ''
+  const note = service.note.trim()
+
+  return (
+    <li className="vps-relation-dossier">
+      <div className="vps-relation-dossier__head">
+        <h4 className="vps-relation-dossier__title">{serviceResourceName(service)}</h4>
+        <div className="vps-relation-dossier__mast">
+          <span className="vps-relation-dossier__lead">
+            <span className="vps-relation-badge">{serviceResourceStatus(service)}</span>
+            <span>{serviceResourceType(service)}</span>
+          </span>
+        </div>
+      </div>
+      <section className="vps-relation-dossier__body">
+        <div className="vps-relation-urlblock">
+          <p className="vps-relation-urlblock__label">访问入口</p>
+          {url ? (
+            <code className="vps-relation-urlblock__url">{url}</code>
+          ) : (
+            <p className="vps-relation-urlblock__empty empty-inline">未记录</p>
+          )}
+          {url ? (
+            <div className="vps-relation-urlblock__actions">
+              <VPSCopyValueButton value={url} label="入口" />
+              {href ? (
+                <a
+                  className="btn sm ghost"
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="打开入口"
+                >
+                  打开
+                </a>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        <div className="vps-relation-dossier__target">
+          <p className="vps-relation-dossier__index">
+            <span>
+              端口 {service.port != null ? <MonoDigits>{service.port}</MonoDigits> : '未记录'}
+            </span>
+            <span className="vps-relation-sep" aria-hidden="true">·</span>
+            <span>入口探测</span>
+          </p>
+          {probe ? (
+            <p className="vps-relation-id">
+              <Link to={`/targets/${encodeURIComponent(probe)}`} state={location.state}>{probe}</Link>
+            </p>
+          ) : (
+            <p className="vps-relation-id">未关联</p>
+          )}
+        </div>
+        {note ? <p className="vps-relation-dossier__note">{note}</p> : null}
+        {service.labels.length > 0 ? (
+          <div className="vps-relation-chips">
+            {service.labels.map((label) => (
+              <span key={label} className="vps-relation-chip">{label}</span>
+            ))}
+          </div>
+        ) : null}
+        <div className="vps-relation-dossier__meta">
+          <span className="vps-relation-dossier__meta-label">记录 ID</span>
+          <span className="vps-relation-id">{service.service_id}</span>
+        </div>
+      </section>
+    </li>
   )
 }

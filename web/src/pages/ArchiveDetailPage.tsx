@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { Badge, DataTable, Modal, MonoDigits, Timestamp } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
@@ -20,7 +20,6 @@ import {
   type AssetDomainRecord,
   type AssetServiceRecord,
   type SubscriptionRecord,
-  type TargetImpact,
   type VPSExperienceLogRecord,
   type VPSIPHistoryRecord,
   type VPSPriceHistoryRecord,
@@ -29,23 +28,13 @@ import {
 } from '../lib/types'
 import { formatDate, formatDateTime, formatMoney, formatOptional } from '../lib/format'
 import { LifecycleBadge, RenewalBadge, SubscriptionStatusBadge, UsageBadge } from './assetPageBadges'
-import { lifecycleLabel, renewalLabel, subscriptionStatusLabel, vpsAccessLabel, vpsLocationLabel } from './assetPageUtils'
+import { renewalLabel, subscriptionStatusLabel, vpsAccessLabel, vpsLocationLabel } from './assetPageUtils'
 import { subscriptionMonthlySummary } from './archive/archivePageHelpers'
 
-type PageState = {
+type AsyncState<T> = {
   loading: boolean
   error: string | null
-  review: ArchiveReview | null
-  timeline: VPSTimeline | null
-  subscriptions: SubscriptionRecord[]
-}
-
-const INITIAL_STATE: PageState = {
-  loading: true,
-  error: null,
-  review: null,
-  timeline: null,
-  subscriptions: [],
+  data: T
 }
 
 function describeError(error: unknown, fallback: string): string {
@@ -54,44 +43,10 @@ function describeError(error: unknown, fallback: string): string {
   return fallback
 }
 
-function SectionCard({
-  title,
-  eyebrow,
-  children,
-}: {
-  title: string
-  eyebrow: string
-  children: ReactNode
-}) {
-  return (
-    <section className="page-panel archive-detail-card" aria-label={title}>
-      <div className="archive-detail-card__heading">
-        <p>{eyebrow}</p>
-        <h2>{title}</h2>
-      </div>
-      {children}
-    </section>
-  )
-}
-
-function SummaryCard({
-  title,
-  eyebrow,
-  children,
-}: {
-  title: string
-  eyebrow: string
-  children: ReactNode
-}) {
-  return (
-    <section className="archive-detail-summary-card">
-      <div className="archive-detail-summary-card__heading">
-        <p>{eyebrow}</p>
-        <h2>{title}</h2>
-      </div>
-      {children}
-    </section>
-  )
+function parseEventTime(t?: string | null): number {
+  if (!t) return -Infinity
+  const parsed = Date.parse(t)
+  return Number.isNaN(parsed) ? -Infinity : parsed
 }
 
 function DetailList({ items }: { items: Array<{ label: string; value: ReactNode }> }) {
@@ -147,10 +102,9 @@ function TimelineItem({
 
 function UserRecordsSection({ records }: { records: VPSExperienceLogRecord[] }) {
   return (
-    <section className="page-panel archive-detail-card archive-detail-user-records" aria-label="用户记录">
+    <section className="page-panel archive-detail-card archive-detail-user-records" role="region" aria-label="用户记录">
       <div className="section-heading">
         <div>
-          <p className="section-heading__eyebrow">USER RECORDS</p>
           <h2>用户记录</h2>
           <p className="section-heading__description">归档后最重要的回看材料，优先展示自身使用体验、感受和问题判断。</p>
         </div>
@@ -173,53 +127,6 @@ function UserRecordsSection({ records }: { records: VPSExperienceLogRecord[] }) 
           />
         ))}
       </HistoryList>
-    </section>
-  )
-}
-
-function CompactTimelineSections({ timeline }: { timeline: VPSTimeline }) {
-  return (
-    <section className="page-panel archive-detail-card" aria-label="续费、价格、规格与 IP 历史">
-      <div className="section-heading">
-        <div>
-          <p className="section-heading__eyebrow">FACT HISTORY</p>
-          <h2>续费、价格、规格与 IP 历史</h2>
-          <p className="section-heading__description">这些是辅助判断材料，保留为归档 VPS 的事实变化证据。</p>
-        </div>
-      </div>
-      <div className="archive-detail-history-grid">
-        <HistoryGroup title="续费决策" count={timeline.renewal_decisions.length}>
-          <HistoryList empty="暂无续费决策历史">
-            {timeline.renewal_decisions.map((record) => (
-              <TimelineItem
-                key={record.decision_id}
-                title={`${renewalLabel(record.from_decision ?? 'unreviewed')} -> ${renewalLabel(record.to_decision)}`}
-                subtitle={record.reason || '未记录原因'}
-                time={record.decided_at}
-                meta={[
-                  { label: 'Decision ID', value: record.decision_id },
-                  { label: '创建时间', value: <Timestamp value={record.created_at} mode="absolute" /> },
-                ]}
-              />
-            ))}
-          </HistoryList>
-        </HistoryGroup>
-        <HistoryGroup title="价格历史" count={timeline.price_histories.length}>
-          <HistoryList empty="暂无价格历史">
-            {timeline.price_histories.map((record) => renderPriceHistory(record))}
-          </HistoryList>
-        </HistoryGroup>
-        <HistoryGroup title="规格快照" count={timeline.spec_snapshots.length}>
-          <HistoryList empty="暂无规格快照">
-            {timeline.spec_snapshots.map((record) => renderSpecSnapshot(record))}
-          </HistoryList>
-        </HistoryGroup>
-        <HistoryGroup title="IP 历史" count={timeline.ip_histories.length}>
-          <HistoryList empty="暂无 IP 历史">
-            {timeline.ip_histories.map((record) => renderIPHistory(record))}
-          </HistoryList>
-        </HistoryGroup>
-      </div>
     </section>
   )
 }
@@ -260,11 +167,16 @@ function renderPriceHistory(record: VPSPriceHistoryRecord) {
 }
 
 function renderSpecSnapshot(record: VPSSpecSnapshotRecord) {
+  const userPart = record.ssh_user ? `${record.ssh_user}@` : ''
+  const hostPart = record.ssh_host || '—'
+  const portPart = record.ssh_port ? `:${record.ssh_port}` : ''
+  const sshSubtitle = record.ssh_host ? `${userPart}${hostPart}${portPart}` : '—'
+
   return (
     <TimelineItem
       key={record.snapshot_id}
       title={record.product_name || '规格快照'}
-      subtitle={`${record.ssh_user || 'root'}@${record.ssh_host || '—'}:${record.ssh_port}`}
+      subtitle={sshSubtitle}
       time={record.captured_at}
       meta={[
         { label: '操作系统', value: formatOptional(record.os_name) },
@@ -298,9 +210,20 @@ function SubscriptionTable({ subscriptions }: { subscriptions: SubscriptionRecor
       emptyContent={<span className="empty-inline">暂无历史订阅</span>}
       columns={[
         {
+          key: 'identity',
+          label: '订阅',
+          width: '180px',
+          render: (subscription) => (
+            <div className="asset-table__identity">
+              <strong>{subscription.display_name || '未命名订阅'}</strong>
+              <small className="mono-text">{subscription.subscription_id}</small>
+            </div>
+          ),
+        },
+        {
           key: 'period',
-          label: '周期',
-          width: '176px',
+          label: '周期与费用',
+          width: '200px',
           render: (subscription) => (
             <div className="asset-subscription-cell">
               <strong>{formatMoney(subscription.monthly_price, subscription.currency)}/月</strong>
@@ -310,14 +233,19 @@ function SubscriptionTable({ subscriptions }: { subscriptions: SubscriptionRecor
         },
         {
           key: 'status',
-          label: '状态',
+          label: '账单状态',
           width: '112px',
           render: (subscription) => <SubscriptionStatusBadge value={subscription.status} />,
         },
         {
           key: 'note',
-          label: '备注',
-          render: (subscription) => subscription.note || subscription.payment_method || '—',
+          label: '支付方式与说明',
+          render: (subscription) => (
+            <div className="asset-table__stack">
+              <span>{subscription.payment_method || '—'}</span>
+              {subscription.note ? <small>{subscription.note}</small> : null}
+            </div>
+          ),
         },
       ]}
     />
@@ -403,150 +331,159 @@ function DomainsTable({ domains }: { domains: AssetDomainRecord[] }) {
   )
 }
 
-function MonitoringHistory({ review }: { review: ArchiveReview }) {
-  return (
-    <section className="page-panel archive-detail-card archive-detail__full-width" aria-label="监控历史">
-      <div className="section-heading">
-        <div>
-          <p className="section-heading__eyebrow">MONITORING HISTORY</p>
-          <h2>监控历史</h2>
-          <p className="section-heading__description">归档前保留在 VPS 台账里的监控实例证据，只读用于服务商质量回看。</p>
-        </div>
-        <Badge variant="count" tone="neutral"><MonoDigits>{review.monitoring_instance_links.length}</MonoDigits> 个关联</Badge>
-      </div>
-      <DataTable
-        className="archive-detail-monitoring-table"
-        rows={review.monitoring_instance_links}
-        rowKey={(item) => item.monitoring_instance_id}
-        emptyContent={<span className="empty-inline">暂无监控关联历史</span>}
-        columns={[
-          {
-            key: 'identity',
-            label: '监控实例',
-            width: '220px',
-            render: (item) => (
-              <div className="asset-table__identity">
-                <strong>{item.display_name}</strong>
-                <small>{item.monitoring_instance_id}</small>
-              </div>
-            ),
-          },
-          {
-            key: 'status',
-            label: '状态',
-            width: '168px',
-            render: (item) => `${item.lifecycle_status || '未知'} / ${item.monitoring_status || '未知'}`,
-          },
-          {
-            key: 'health',
-            label: '历史健康',
-            render: (item) => item.current_primary_issue_summary || item.current_health_status || '—',
-          },
-        ]}
-      />
-    </section>
-  )
-}
-
-function TargetHistory({ targets }: { targets: TargetImpact[] }) {
-  return (
-    <section className="page-panel archive-detail-card archive-detail__full-width" aria-label="Target 历史">
-      <div className="section-heading">
-        <div>
-          <p className="section-heading__eyebrow">TARGET HISTORY</p>
-          <h2>Target 历史</h2>
-          <p className="section-heading__description">来自归档 review 的服务/域名关联图，不依赖普通 Target 列表过滤。</p>
-        </div>
-        <Badge variant="count" tone="neutral"><MonoDigits>{targets.length}</MonoDigits> 个 Target</Badge>
-      </div>
-      <DataTable
-        className="archive-detail-target-table"
-        rows={targets}
-        rowKey={(target) => target.target_id}
-        emptyContent={<span className="empty-inline">暂无 Target 关联历史</span>}
-        columns={[
-          {
-            key: 'identity',
-            label: 'Target',
-            width: '220px',
-            render: (target) => (
-              <div className="asset-table__identity">
-                <strong>{target.name || target.target_id}</strong>
-                <small>{target.target_id}</small>
-              </div>
-            ),
-          },
-          {
-            key: 'status',
-            label: '状态',
-            width: '120px',
-            render: (target) => target.run_status || '未知',
-          },
-          {
-            key: 'links',
-            label: '关联',
-            render: (target) => `服务 ${target.service_ids.length} · 域名 ${target.domain_ids.length}`,
-          },
-        ]}
-      />
-    </section>
-  )
-}
-
 export function ArchiveDetailPage() {
   const { vpsId } = useParams()
+  return (
+    <ArchiveDetailPageContent
+      key={vpsId ?? 'missing-vps-id'}
+      {...(vpsId === undefined ? {} : { vpsId })}
+    />
+  )
+}
+
+function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
   const navigate = useNavigate()
-  const [state, setState] = useState<PageState>(INITIAL_STATE)
+  const location = useLocation()
+
+  const [reviewState, setReviewState] = useState<AsyncState<ArchiveReview | null>>({
+    loading: true,
+    error: null,
+    data: null,
+  })
+  const [timelineState, setTimelineState] = useState<AsyncState<VPSTimeline | null>>({
+    loading: true,
+    error: null,
+    data: null,
+  })
+  const [subscriptionsState, setSubscriptionsState] = useState<AsyncState<SubscriptionRecord[] | null>>({
+    loading: true,
+    error: null,
+    data: null,
+  })
+
   const [restoreOpen, setRestoreOpen] = useState(false)
   const [restoreSubmitting, setRestoreSubmitting] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
+  const restoreTriggerRef = useRef<HTMLButtonElement>(null)
+  const restoreSubmittingRef = useRef(false)
+
+  const reviewGenRef = useRef(0)
+  const timelineGenRef = useRef(0)
+  const subsGenRef = useRef(0)
+
+  const fetchTimeline = useCallback((id: string, gen: number) => {
+    getVPSTimeline(id)
+      .then((timeline) => {
+        if (gen === timelineGenRef.current) {
+          setTimelineState({ loading: false, error: null, data: timeline })
+        }
+      })
+      .catch((error: unknown) => {
+        if (gen === timelineGenRef.current) {
+          setTimelineState({
+            loading: false,
+            error: describeError(error, '加载变更历史失败'),
+            data: null,
+          })
+        }
+      })
+  }, [])
+
+  const fetchSubscriptions = useCallback((id: string, gen: number) => {
+    listSubscriptions({ vps_id: id, sort: 'renew_at', order: 'asc', asset_scope: 'all' })
+      .then((subscriptions) => {
+        if (gen === subsGenRef.current) {
+          setSubscriptionsState({ loading: false, error: null, data: subscriptions })
+        }
+      })
+      .catch((error: unknown) => {
+        if (gen === subsGenRef.current) {
+          setSubscriptionsState((prev) => ({
+            loading: false,
+            error: describeError(error, '加载历史订阅失败'),
+            data: prev.data,
+          }))
+        }
+      })
+  }, [])
+
+  const fetchReview = useCallback((id: string, gen: number) => {
+    getVPSArchiveReview(id)
+      .then((review) => {
+        if (gen !== reviewGenRef.current) return
+        const lifecycleStatus = review.vps.lifecycle_status
+        if (lifecycleStatus !== 'archived' && lifecycleStatus !== 'cancelled') {
+          navigate('/vps/' + encodeURIComponent(review.vps.vps_id), { replace: true, state: location.state })
+          return
+        }
+        setReviewState({ loading: false, error: null, data: review })
+        fetchTimeline(id, ++timelineGenRef.current)
+        fetchSubscriptions(id, ++subsGenRef.current)
+      })
+      .catch((error: unknown) => {
+        if (gen !== reviewGenRef.current) return
+        setReviewState({
+          loading: false,
+          error: describeError(error, '加载归档详情失败'),
+          data: null,
+        })
+      })
+  }, [navigate, location.state, fetchTimeline, fetchSubscriptions])
 
   useEffect(() => {
     if (!vpsId) return
-    let cancelled = false
-
-    getVPSArchiveReview(vpsId)
-      .then(async (review) => {
-        if (cancelled) return
-        const lifecycleStatus = review.vps.lifecycle_status
-        if (lifecycleStatus !== 'archived' && lifecycleStatus !== 'cancelled') {
-          navigate(`/vps/${encodeURIComponent(review.vps.vps_id)}`, { replace: true })
-          return
-        }
-        const [timeline, subscriptions] = await Promise.all([
-          getVPSTimeline(vpsId),
-          listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc', asset_scope: 'all' }),
-        ])
-        if (cancelled) return
-        setState({ loading: false, error: null, review, timeline, subscriptions })
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setState({
-          loading: false,
-          error: describeError(error, '加载归档详情失败'),
-          review: null,
-          timeline: null,
-          subscriptions: [],
-        })
-      })
-
+    reviewGenRef.current += 1
+    timelineGenRef.current += 1
+    subsGenRef.current += 1
+    fetchReview(vpsId, reviewGenRef.current)
     return () => {
-      cancelled = true
+      ++reviewGenRef.current
+      ++timelineGenRef.current
+      ++subsGenRef.current
     }
-  }, [navigate, vpsId])
+  }, [vpsId, fetchReview])
+
+  const handleRetryReview = useCallback(() => {
+    if (!vpsId) return
+    setReviewState({ loading: true, error: null, data: null })
+    fetchReview(vpsId, ++reviewGenRef.current)
+  }, [vpsId, fetchReview])
+
+  const handleRetryTimeline = useCallback(() => {
+    if (!vpsId) return
+    const nextGen = ++timelineGenRef.current
+    setTimelineState({ loading: true, error: null, data: null })
+    fetchTimeline(vpsId, nextGen)
+  }, [vpsId, fetchTimeline])
+
+  const handleRetrySubscriptions = useCallback(() => {
+    if (!vpsId) return
+    const nextGen = ++subsGenRef.current
+    setSubscriptionsState((prev) => ({ ...prev, loading: true, error: null }))
+    fetchSubscriptions(vpsId, nextGen)
+  }, [vpsId, fetchSubscriptions])
 
   async function handleRestore() {
-    if (!state.review) return
+    if (restoreSubmittingRef.current || !reviewState.data) return
+    const targetVpsId = reviewState.data.vps.vps_id
+    const currentGen = reviewGenRef.current
+
+    restoreSubmittingRef.current = true
     setRestoreSubmitting(true)
     setRestoreError(null)
+
     try {
-      await restoreVPSFromArchive(state.review.vps.vps_id)
-      navigate(`/vps/${encodeURIComponent(state.review.vps.vps_id)}`, { replace: true })
+      await restoreVPSFromArchive(targetVpsId)
+      if (currentGen !== reviewGenRef.current) return
+      navigate(`/vps/${encodeURIComponent(targetVpsId)}`, { replace: true, state: location.state })
     } catch (error: unknown) {
+      if (currentGen !== reviewGenRef.current) return
       setRestoreError(describeError(error, '恢复归档 VPS 失败'))
     } finally {
-      setRestoreSubmitting(false)
+      if (currentGen === reviewGenRef.current) {
+        restoreSubmittingRef.current = false
+        setRestoreSubmitting(false)
+      }
     }
   }
 
@@ -560,53 +497,117 @@ export function ArchiveDetailPage() {
     )
   }
 
-  if (state.loading) {
+  if (reviewState.loading) {
     return <PageStateView kind="loading" title="正在加载归档详情" />
   }
 
-  if (state.error || !state.review || !state.timeline) {
+  if (reviewState.error || !reviewState.data) {
     return (
       <PageStateView
         kind="error"
         title="归档详情加载失败"
-        technicalSummary={state.error ?? 'missing archive detail'}
-        action={<Link className="btn sm secondary" to="/archive">返回归档列表</Link>}
+        technicalSummary={reviewState.error ?? 'missing archive detail'}
+        action={
+          <div className="page-state__actions">
+            <button className="btn sm primary" type="button" onClick={handleRetryReview}>
+              重试加载详情
+            </button>
+            <Link className="btn sm secondary" to="/archive">返回归档列表</Link>
+          </div>
+        }
       />
     )
   }
 
-  const { review, timeline, subscriptions } = state
+  const review = reviewState.data
   const vps = review.vps
   const isArchived = vps.lifecycle_status === 'archived'
   const isCancelled = vps.lifecycle_status === 'cancelled'
 
+  const reviewSnapshotSubscriptions = review.subscriptions.map((s) => s.record)
+  const effectiveSubscriptions = subscriptionsState.data !== null
+    ? subscriptionsState.data
+    : reviewSnapshotSubscriptions
+  const isUsingSnapshotFallback = subscriptionsState.data === null &&
+    reviewSnapshotSubscriptions.length > 0 &&
+    subscriptionsState.error !== null
+
+  const sortedSubscriptions = [...effectiveSubscriptions].sort((a, b) => (
+    parseEventTime(b.renew_at || b.started_at) - parseEventTime(a.renew_at || a.started_at)
+  ))
+  const latestSubscription = sortedSubscriptions[0]
+
+  const sortedExperienceLogs = timelineState.data
+    ? [...timelineState.data.experience_logs].sort((a, b) => (
+        parseEventTime(b.occurred_at || b.created_at) - parseEventTime(a.occurred_at || a.created_at)
+      ))
+    : []
+
+  const sortedDecisions = timelineState.data
+    ? [...timelineState.data.renewal_decisions].sort((a, b) => (
+        parseEventTime(b.decided_at || b.created_at) - parseEventTime(a.decided_at || a.created_at)
+      ))
+    : []
+
+  const sortedPriceHistories = timelineState.data
+    ? [...timelineState.data.price_histories].sort((a, b) => (
+        parseEventTime(b.changed_at || b.created_at) - parseEventTime(a.changed_at || a.created_at)
+      ))
+    : []
+
+  const sortedSpecSnapshots = timelineState.data
+    ? [...timelineState.data.spec_snapshots].sort((a, b) => (
+        parseEventTime(b.captured_at || b.created_at) - parseEventTime(a.captured_at || a.created_at)
+      ))
+    : []
+
+  const sortedIPHistories = timelineState.data
+    ? [...timelineState.data.ip_histories].sort((a, b) => (
+        parseEventTime(b.changed_at || b.created_at) - parseEventTime(a.changed_at || a.created_at)
+      ))
+    : []
+
+  const sshUser = vps.ssh_user ? `${vps.ssh_user}@` : ''
+  const sshPort = vps.ssh_port ? `:${vps.ssh_port}` : ''
+  const sshConnection = vps.ssh_host ? `${sshUser}${vps.ssh_host}${sshPort}` : '—'
+
   return (
-    <div className="page-stack archive-detail-page animate-in">
-      <header className="watchtower-header archive-detail-header" role="banner" aria-label="归档 VPS 身份">
-        <div className="watchtower-header__row1">
-          <div className="watchtower-header__title-block">
-            <p className="archive-detail-header__eyebrow">只读归档详情</p>
-            <h1>{vps.display_name}</h1>
-            <div className="badge-row">
-              <LifecycleBadge value={vps.lifecycle_status} />
-              <UsageBadge value={vps.usage_status} />
-              <RenewalBadge value={vps.renewal_decision} />
-            </div>
-          </div>
-          <div className="watchtower-header__actions">
-            <Link className="btn sm secondary" to="/archive">归档列表</Link>
-            <Link className="btn sm ghost" to="/vps">VPS 列表</Link>
-            {isArchived ? (
-              <button className="btn sm primary" type="button" onClick={() => setRestoreOpen(true)}>
-                恢复为闲置
-              </button>
-            ) : null}
+    <div className="page archive-detail-page">
+      <header className="page__head" role="banner" aria-label="归档 VPS 身份">
+        <div>
+          <h1 className="page__title">
+            <span>{vps.display_name}</span>
+            <small className="archive-detail-head-id mono-text">{vps.vps_id}</small>
+          </h1>
+          <p className="page-sub">只读归档详情</p>
+          <p className="page-sub">
+            {formatOptional(vps.provider_name)}
+            {' · '}
+            {vpsLocationLabel(vps)}
+            {vps.datacenter ? ` (${vps.datacenter})` : ''}
+          </p>
+          <div className="badge-row">
+            <LifecycleBadge value={vps.lifecycle_status} />
+            <UsageBadge value={vps.usage_status} />
+            <RenewalBadge value={vps.renewal_decision} />
           </div>
         </div>
-        <div className="watchtower-header__row2">
-          <span className="watchtower-header__meta-item">{formatOptional(vps.provider_name)}</span>
-          <span className="watchtower-header__meta-sep" aria-hidden>·</span>
-          <span className="watchtower-header__meta-item">{vpsLocationLabel(vps)}</span>
+        <div className="page__actions">
+          <Link className="btn sm secondary" to="/archive">归档列表</Link>
+          <Link className="btn sm ghost" to="/vps">VPS 列表</Link>
+          {isArchived ? (
+            <button
+              ref={restoreTriggerRef}
+              className="btn sm primary"
+              type="button"
+              onClick={() => {
+                setRestoreError(null)
+                setRestoreOpen(true)
+              }}
+            >
+              恢复为闲置
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -621,103 +622,368 @@ export function ArchiveDetailPage() {
         )}
       </section>
 
-      <div className="archive-detail-summary-grid">
-        <SummaryCard title="基础信息" eyebrow="IDENTITY">
-          <DetailList items={[
-            { label: '服务商', value: formatOptional(vps.provider_name) },
-            { label: '产品', value: formatOptional(vps.product_name) },
-            { label: '位置', value: vpsLocationLabel(vps) },
-            { label: '归档时间', value: formatDateTime(vps.archived_at ?? vps.updated_at) },
-          ]}
-          />
-        </SummaryCard>
-        <SummaryCard title="访问入口" eyebrow="ACCESS">
-          <DetailList items={[
-            { label: '主入口', value: vpsAccessLabel(vps) },
-            { label: 'IPv4', value: formatOptional(vps.ipv4) },
-            { label: 'IPv6', value: formatOptional(vps.ipv6) },
-            { label: 'SSH', value: `${vps.ssh_user || 'root'}@${vps.ssh_host || '—'}:${vps.ssh_port}` },
-          ]}
-          />
-        </SummaryCard>
-        <SummaryCard title="订阅历史" eyebrow="BILLING">
-          <DetailList items={[
-            { label: '历史次数', value: <MonoDigits>{subscriptions.length}</MonoDigits> },
-            { label: '最近状态', value: subscriptions[0] ? <SubscriptionStatusBadge value={subscriptions[0].status} /> : '—' },
-            { label: '最近续费日', value: formatDate(subscriptions[0]?.renew_at) },
-          ]}
-          />
-        </SummaryCard>
-        <SummaryCard title="月成本" eyebrow="MONTHLY">
-          <strong className="archive-detail-summary-card__metric">{subscriptionMonthlySummary(subscriptions)}</strong>
-        </SummaryCard>
-        <SummaryCard title="服务" eyebrow="SERVICES">
-          <DetailList items={[
-            { label: '服务数量', value: <MonoDigits>{review.services.length}</MonoDigits> },
-            { label: '首个服务', value: review.services[0]?.name ?? '—' },
-          ]}
-          />
-        </SummaryCard>
-        <SummaryCard title="域名" eyebrow="DOMAINS">
-          <DetailList items={[
-            { label: '域名数量', value: <MonoDigits>{review.domains.length}</MonoDigits> },
-            { label: '首个域名', value: review.domains[0]?.domain_name ?? '—' },
-          ]}
-          />
-        </SummaryCard>
-        <SummaryCard title="续费判断" eyebrow="DECISION">
-          <DetailList items={[
-            { label: '当前判断', value: lifecycleLabel(vps.lifecycle_status) },
-            { label: '续费决策', value: renewalLabel(vps.renewal_decision) },
-            { label: '归档资格', value: review.eligible ? '可归档' : '归档动作不可用' },
-          ]}
-          />
-        </SummaryCard>
-        <SummaryCard title="资产历史" eyebrow="TIMELINE">
-          <DetailList items={[
-            { label: '用户记录', value: <MonoDigits>{timeline.experience_logs.length}</MonoDigits> },
-            { label: '续费历史', value: <MonoDigits>{timeline.renewal_decisions.length}</MonoDigits> },
-            { label: '价格历史', value: <MonoDigits>{timeline.price_histories.length}</MonoDigits> },
-            { label: 'IP / 规格', value: `${timeline.ip_histories.length} / ${timeline.spec_snapshots.length}` },
-          ]}
-          />
-        </SummaryCard>
-      </div>
+      {/* 历史身份与访问事实 */}
+      <section className="page-panel archive-detail-card">
+        <div className="section-heading">
+          <div>
+            <h2>历史身份与访问事实</h2>
+            <p className="section-heading__description">资产在归档前记录的规格、归档时间及网络连接入口。</p>
+          </div>
+        </div>
+        <div className="archive-detail-identity-grid">
+          <div className="archive-detail-fact-block">
+            <h3 className="archive-detail-block-title">基础与归档事实</h3>
+            <DetailList
+              items={[
+                { label: '服务商', value: formatOptional(vps.provider_name) },
+                { label: '产品型号', value: formatOptional(vps.product_name) },
+                { label: '位置与机房', value: `${vpsLocationLabel(vps)}${vps.datacenter ? ` · ${vps.datacenter}` : ''}` },
+                {
+                  label: vps.archived_at ? '归档时间' : '更新时间',
+                  value: vps.archived_at ? (
+                    <MonoDigits>{formatDateTime(vps.archived_at)}</MonoDigits>
+                  ) : (
+                    <span>
+                      <span className="text-muted">未记录归档时间</span>
+                      {' · '}
+                      <small className="text-muted">更新于 <MonoDigits>{formatDateTime(vps.updated_at)}</MonoDigits></small>
+                    </span>
+                  ),
+                },
+                { label: '续费决策', value: renewalLabel(vps.renewal_decision) },
+                { label: '归档资格', value: review.eligible ? '可归档' : (review.blockers[0] || '归档动作不可用') },
+                { label: '备注', value: formatOptional(vps.note) },
+              ]}
+            />
+          </div>
+          <div className="archive-detail-fact-block">
+            <h3 className="archive-detail-block-title">网络与访问入口</h3>
+            <DetailList
+              items={[
+                { label: '主入口', value: vpsAccessLabel(vps) },
+                { label: 'IPv4', value: formatOptional(vps.ipv4) },
+                { label: 'IPv6', value: formatOptional(vps.ipv6) },
+                { label: 'SSH 连接', value: <MonoDigits>{sshConnection}</MonoDigits> },
+              ]}
+            />
+          </div>
+        </div>
+      </section>
 
-      <UserRecordsSection records={timeline.experience_logs} />
-      <CompactTimelineSections timeline={timeline} />
+      {/* 历史账单与订阅 */}
+      <section className="page-panel archive-detail-card">
+        <div className="section-heading">
+          <div>
+            <h2>历史账单与订阅</h2>
+            <p className="section-heading__description">记录已归档资产的历史续费与账单记录。</p>
+          </div>
+        </div>
 
-      <SectionCard title="订阅明细" eyebrow="SUBSCRIPTIONS">
-        <SubscriptionTable subscriptions={subscriptions} />
-      </SectionCard>
+        {subscriptionsState.loading && effectiveSubscriptions.length === 0 ? (
+          <p className="empty-inline">正在加载历史订阅…</p>
+        ) : subscriptionsState.error && effectiveSubscriptions.length === 0 ? (
+          <div className="archive-detail-local-error" role="alert">
+            <p>历史订阅加载失败：{subscriptionsState.error}</p>
+            <button
+              type="button"
+              className="btn sm secondary"
+              onClick={handleRetrySubscriptions}
+            >
+              重试加载订阅
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="archive-detail-billing-meta">
+              <div>
+                <span>历史月成本：</span>
+                <strong>{subscriptionMonthlySummary(effectiveSubscriptions, '无历史订阅')}</strong>
+              </div>
+              <div>
+                <span>订阅笔数：</span>
+                <strong><MonoDigits>{effectiveSubscriptions.length}</MonoDigits> 笔</strong>
+              </div>
+              {latestSubscription?.renew_at ? (
+                <div>
+                  <span>最近续费计划：</span>
+                  <strong><MonoDigits>{formatDate(latestSubscription.renew_at)}</MonoDigits></strong>
+                </div>
+              ) : null}
+              {isUsingSnapshotFallback ? (
+                <span className="text-muted">来自本次归档审查数据</span>
+              ) : null}
+            </div>
 
+            {subscriptionsState.loading ? (
+              <p className="empty-inline" role="status">正在更新历史订阅，保留已知账单…</p>
+            ) : null}
+            {subscriptionsState.error ? (
+              <div className="archive-detail-local-error" role="alert">
+                <p>订阅重读失败：{subscriptionsState.error}，当前保留归档审查时的已知快照。</p>
+                <button
+                  type="button"
+                  className="btn sm secondary"
+                  onClick={handleRetrySubscriptions}
+                  disabled={subscriptionsState.loading}
+                >
+                  重试加载订阅
+                </button>
+              </div>
+            ) : null}
+
+            <div
+              className="page-panel--scroll-x"
+              role="region"
+              aria-label="订阅明细"
+              tabIndex={0}
+            >
+              <SubscriptionTable subscriptions={sortedSubscriptions} />
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* 监控历史 */}
+      <section className="page-panel archive-detail-card archive-detail__full-width">
+        <div className="section-heading">
+          <div>
+            <h2>监控历史</h2>
+            <p className="section-heading__description">归档前保留在 VPS 台账里的监控实例证据，只读用于服务商质量回看。</p>
+          </div>
+          <Badge variant="count" tone="neutral"><MonoDigits>{review.monitoring_instance_links.length}</MonoDigits> 个关联</Badge>
+        </div>
+        <div
+          className="page-panel--scroll-x"
+          role="region"
+          aria-label="监控历史"
+          tabIndex={0}
+        >
+          <DataTable
+            className="archive-detail-monitoring-table"
+            rows={review.monitoring_instance_links}
+            rowKey={(item) => item.monitoring_instance_id}
+            emptyContent={<span className="empty-inline">暂无监控关联历史</span>}
+            columns={[
+              {
+                key: 'identity',
+                label: '监控实例',
+                width: '220px',
+                render: (item) => (
+                  <div className="asset-table__identity">
+                    <strong>{item.display_name}</strong>
+                    <small>{item.monitoring_instance_id}</small>
+                  </div>
+                ),
+              },
+              {
+                key: 'status',
+                label: '状态',
+                width: '168px',
+                render: (item) => `${item.lifecycle_status || '未知'} / ${item.monitoring_status || '未知'}`,
+              },
+              {
+                key: 'health',
+                label: '历史健康',
+                render: (item) => item.current_primary_issue_summary || item.current_health_status || '—',
+              },
+            ]}
+          />
+        </div>
+      </section>
+
+      {/* 入口探测历史 */}
+      <section className="page-panel archive-detail-card archive-detail__full-width">
+        <div className="section-heading">
+          <div>
+            <h2>入口探测历史</h2>
+            <p className="section-heading__description">已归档资产的服务与域名关联入口探测。</p>
+          </div>
+          <Badge variant="count" tone="neutral"><MonoDigits>{review.target_links.length}</MonoDigits> 个入口探测</Badge>
+        </div>
+        <div
+          className="page-panel--scroll-x"
+          role="region"
+          aria-label="入口探测历史"
+          tabIndex={0}
+        >
+          <DataTable
+            className="archive-detail-target-table"
+            rows={review.target_links}
+            rowKey={(target) => target.target_id}
+            emptyContent={<span className="empty-inline">暂无入口探测关联历史</span>}
+            columns={[
+              {
+                key: 'identity',
+                label: '入口探测',
+                width: '220px',
+                render: (target) => (
+                  <div className="asset-table__identity">
+                    <strong>{target.name || target.target_id}</strong>
+                    <small>{target.target_id}</small>
+                  </div>
+                ),
+              },
+              {
+                key: 'status',
+                label: '状态',
+                width: '120px',
+                render: (target) => target.run_status || '未知',
+              },
+              {
+                key: 'links',
+                label: '关联',
+                render: (target) => `服务 ${target.service_ids.length} · 域名 ${target.domain_ids.length}`,
+              },
+            ]}
+          />
+        </div>
+      </section>
+
+      {/* 服务与域名资产 */}
       <div className="archive-detail-two-col">
-        <SectionCard title="服务资产" eyebrow="SERVICES">
-          <ServicesTable services={review.services} />
-        </SectionCard>
-        <SectionCard title="域名资产" eyebrow="DOMAINS">
-          <DomainsTable domains={review.domains} />
-        </SectionCard>
+        <section className="page-panel archive-detail-card">
+          <div className="section-heading">
+            <div>
+              <h2>服务资产</h2>
+              <p className="section-heading__description">归档 VPS 保留的服务记录与端点事实。</p>
+            </div>
+            <Badge variant="count" tone="neutral"><MonoDigits>{review.services.length}</MonoDigits> 个服务</Badge>
+          </div>
+          <div
+            className="page-panel--scroll-x"
+            role="region"
+            aria-label="服务资产"
+            tabIndex={0}
+          >
+            <ServicesTable services={review.services} />
+          </div>
+        </section>
+
+        <section className="page-panel archive-detail-card">
+          <div className="section-heading">
+            <div>
+              <h2>域名资产</h2>
+              <p className="section-heading__description">归档 VPS 保留的域名、证书与注册事实。</p>
+            </div>
+            <Badge variant="count" tone="neutral"><MonoDigits>{review.domains.length}</MonoDigits> 个域名</Badge>
+          </div>
+          <div
+            className="page-panel--scroll-x"
+            role="region"
+            aria-label="域名资产"
+            tabIndex={0}
+          >
+            <DomainsTable domains={review.domains} />
+          </div>
+        </section>
       </div>
 
-      <MonitoringHistory review={review} />
-      <TargetHistory targets={review.target_links} />
+      {/* 变更记录与用户体验 */}
+      {timelineState.loading ? (
+        <section className="page-panel archive-detail-card">
+          <p className="empty-inline">正在加载资产变更记录与用户体验…</p>
+        </section>
+      ) : timelineState.error ? (
+        <section className="page-panel archive-detail-card">
+          <div className="archive-detail-local-error" role="alert">
+            <p>变更历史加载失败：{timelineState.error}</p>
+            <button
+              className="btn sm secondary"
+              type="button"
+              onClick={handleRetryTimeline}
+            >
+              重试加载变更历史
+            </button>
+          </div>
+        </section>
+      ) : timelineState.data ? (
+        <>
+          <UserRecordsSection records={sortedExperienceLogs} />
+          <section className="page-panel archive-detail-card" role="region" aria-label="续费、价格、规格与 IP 历史">
+            <div className="section-heading">
+              <div>
+                <h2>续费、价格、规格与 IP 历史</h2>
+                <p className="section-heading__description">辅助判断材料，保留为归档 VPS 的事实变化证据。</p>
+              </div>
+            </div>
+            <div className="archive-detail-history-grid">
+              <HistoryGroup title="续费决策" count={sortedDecisions.length}>
+                <HistoryList empty="暂无续费决策历史">
+                  {sortedDecisions.map((record) => (
+                    <TimelineItem
+                      key={record.decision_id}
+                      title={`${renewalLabel(record.from_decision ?? 'unreviewed')} -> ${renewalLabel(record.to_decision)}`}
+                      subtitle={record.reason || '未记录原因'}
+                      time={record.decided_at}
+                      meta={[
+                        { label: 'Decision ID', value: record.decision_id },
+                        { label: '创建时间', value: <Timestamp value={record.created_at} mode="absolute" /> },
+                      ]}
+                    />
+                  ))}
+                </HistoryList>
+              </HistoryGroup>
+              <HistoryGroup title="价格历史" count={sortedPriceHistories.length}>
+                <HistoryList empty="暂无价格历史">
+                  {sortedPriceHistories.map((record) => renderPriceHistory(record))}
+                </HistoryList>
+              </HistoryGroup>
+              <HistoryGroup title="规格快照" count={sortedSpecSnapshots.length}>
+                <HistoryList empty="暂无规格快照">
+                  {sortedSpecSnapshots.map((record) => renderSpecSnapshot(record))}
+                </HistoryList>
+              </HistoryGroup>
+              <HistoryGroup title="IP 历史" count={sortedIPHistories.length}>
+                <HistoryList empty="暂无 IP 历史">
+                  {sortedIPHistories.map((record) => renderIPHistory(record))}
+                </HistoryList>
+              </HistoryGroup>
+            </div>
+          </section>
+        </>
+      ) : null}
 
+      {/* 恢复确认弹窗 */}
       <Modal
         open={restoreOpen}
-        onClose={() => setRestoreOpen(false)}
+        onClose={() => {
+          if (restoreSubmittingRef.current) return
+          setRestoreOpen(false)
+          restoreTriggerRef.current?.focus()
+        }}
         title="确认恢复归档 VPS"
         dialogRole="alertdialog"
         size="md"
+        persistent={restoreSubmitting}
       >
         <div className="asset-lifecycle-confirm">
-          <p className="asset-lifecycle-confirm__eyebrow">RESTORE</p>
+          <p className="asset-lifecycle-confirm__eyebrow">恢复</p>
           <h4>恢复后进入闲置状态，关联订阅、监控、服务、域名和历史记录会保留。</h4>
           <p className="asset-lifecycle-confirm__callouts">恢复不会把它还原到归档前的精确生命周期，只会变为闲置。</p>
-          {restoreError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{restoreError}</p> : null}
+          {restoreError ? (
+            <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+              {restoreError}
+            </p>
+          ) : null}
           <div className="page-form-actions">
-            <button className="btn md secondary" type="button" disabled={restoreSubmitting} onClick={() => setRestoreOpen(false)}>取消</button>
-            <button className="btn md primary" type="button" disabled={restoreSubmitting} onClick={() => void handleRestore()}>
+            <button
+              className="btn md secondary"
+              type="button"
+              disabled={restoreSubmitting}
+              onClick={() => {
+                if (restoreSubmittingRef.current) return
+                setRestoreOpen(false)
+                restoreTriggerRef.current?.focus()
+              }}
+            >
+              取消
+            </button>
+            <button
+              className="btn md primary"
+              type="button"
+              disabled={restoreSubmitting}
+              onClick={() => void handleRestore()}
+            >
               {restoreSubmitting ? '恢复中…' : '确认恢复'}
             </button>
           </div>

@@ -128,4 +128,37 @@ describe('UserChip', () => {
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(onLogout).toHaveBeenCalledTimes(1)
   })
+
+  it('presents the full account label in the opened menu panel for long QA environment identities', () => {
+    const longUser = {
+      user_id: 'u_qa',
+      username: 'qa-env-cluster-admin-operator-2026@houfeng-test.internal',
+      role: 'admin',
+      display_name: 'QA 测试环境自动化运维管理员',
+    }
+    render(
+      <MemoryRouter>
+        <UserChip user={longUser} onLogout={vi.fn()} onChangePassword={vi.fn()} />
+      </MemoryRouter>,
+    )
+
+    const trigger = screen.getByRole('button', {
+      name: `${longUser.username} 用户菜单`,
+    })
+    expect(trigger).toBeInTheDocument()
+    expect(screen.getByText(longUser.display_name)).toBeInTheDocument()
+
+    // Open via click (or keyboard / touch)
+    fireEvent.click(trigger)
+
+    const menu = screen.getByRole('menu')
+    expect(menu).toBeInTheDocument()
+    const summary = menu.querySelector('.user-chip__account-summary')
+    expect(summary).not.toBeNull()
+    expect(within(summary as HTMLElement).getByText(longUser.display_name)).toBeInTheDocument()
+    expect(
+      within(summary as HTMLElement).getByText(`@${longUser.username} ·`),
+    ).toBeInTheDocument()
+    expect(within(summary as HTMLElement).getByText('管理员')).toBeInTheDocument()
+  })
 })

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -193,14 +193,14 @@ describe('VPSIPQualityPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
     expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/ip-quality', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
     expect(screen.getByRole('link', { name: '返回 VPS 详情' })).toHaveAttribute('href', '/vps/vps_001')
-    const headerActions = screen.getByRole('link', { name: '返回 VPS 详情' }).closest('.section-heading__actions')
+    const headerActions = screen.getByRole('link', { name: '返回 VPS 详情' }).closest('.page__actions')
     expect(headerActions).not.toBeNull()
     expect(within(headerActions as HTMLElement).queryByText('高风险')).not.toBeInTheDocument()
     expect(screen.getAllByText('风险信号').length).toBeGreaterThan(0)
@@ -212,13 +212,12 @@ describe('VPSIPQualityPage', () => {
     expect(screen.queryByText(/Server \/ Datacenter 本身只作为上下文/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '各 IP 数据库判断' })).toBeInTheDocument()
     expect(screen.queryByText(/逐 provider 展示/)).not.toBeInTheDocument()
-    expect(screen.getByText('ipinfo')).toBeInTheDocument()
-    expect(screen.getByText('fraud-check')).toBeInTheDocument()
+    expect(screen.getAllByText('ipinfo').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('fraud-check').length).toBeGreaterThan(0)
     expect(screen.queryByRole('cell', { name: 'maxmind' })).not.toBeInTheDocument()
     const sourceGaps = screen.getByLabelText('未配置 IP 数据库来源')
     expect(within(sourceGaps).getByText('未配置来源：')).toBeInTheDocument()
     expect(within(sourceGaps).getByText('maxmind')).toBeInTheDocument()
-    expect(screen.getAllByText('查看').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Server').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Proxy').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Abuse').length).toBeGreaterThan(0)
@@ -228,31 +227,45 @@ describe('VPSIPQualityPage', () => {
     expect(screen.getByText('52')).toBeInTheDocument()
     expect(screen.getByText('31')).toBeInTheDocument()
     expect(screen.getByText('风险分')).toBeInTheDocument()
-    expect(screen.queryByText(/optional IP quality source requires configuration/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/http status 429/)).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '服务解锁矩阵' })).toBeInTheDocument()
+    const providerPanel = screen.getByRole('heading', { name: '各 IP 数据库判断' }).closest('section') as HTMLElement
+    const servicePanel = screen.getByRole('heading', { name: '服务检测' }).closest('section') as HTMLElement
+    const diagnostics = screen.getByLabelText('采集诊断')
+    expect(providerPanel).not.toHaveClass('page-panel--scroll-x')
+    const providerTable = screen.getByRole('region', { name: '各 IP 数据库判断' })
+    expect(providerTable).toHaveAttribute('tabindex', '0')
+    expect(providerTable).toHaveAttribute('aria-labelledby', 'ip-quality-provider-table-title')
+    expect(providerTable).toHaveAttribute('aria-describedby', 'ip-quality-provider-table-hint')
+    expect(within(providerPanel).queryByText(/optional IP quality source requires configuration/)).not.toBeInTheDocument()
+    expect(within(providerPanel).queryByText(/http status 429/)).not.toBeInTheDocument()
+    expect(within(servicePanel).queryByText(/safe default probe is not available/)).not.toBeInTheDocument()
+    expect(within(servicePanel).queryByText(/disney_default_probe/)).not.toBeInTheDocument()
+    expect(within(servicePanel).queryByText(/openai_status_probe/)).not.toBeInTheDocument()
+    expect(within(servicePanel).queryByText('not_configured')).not.toBeInTheDocument()
+    expect(screen.queryByText('跳过')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '服务检测' })).toBeInTheDocument()
     expect(screen.getByLabelText('服务解锁状态统计')).toHaveClass('vps-ip-quality-dashboard__service-stats')
-    expect(screen.getByText('ChatGPT')).toBeInTheDocument()
-    expect(screen.getByText('Netflix')).toBeInTheDocument()
-    expect(screen.getByText('Disney+')).toBeInTheDocument()
-    expect(screen.getByText('YouTube Premium')).toBeInTheDocument()
+    expect(screen.getAllByText('ChatGPT').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Netflix').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Disney+').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('YouTube Premium').length).toBeGreaterThan(0)
     expect(screen.getAllByText('默认探测暂不支持该服务').length).toBeGreaterThan(0)
     expect(screen.getByText('需要可选配置后才能检测')).toBeInTheDocument()
-    expect(screen.queryByText(/safe default probe is not available/)).not.toBeInTheDocument()
-    expect(screen.queryByText('disney_default_probe · —')).not.toBeInTheDocument()
-    expect(screen.queryByText(/disney_default_probe/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/default_probe/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/openai_status_probe/)).not.toBeInTheDocument()
-    expect(screen.queryByText('跳过')).not.toBeInTheDocument()
-    expect(screen.queryByText('not_configured')).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '证据上下文与采集完整性' })).toBeInTheDocument()
     expect(screen.getByText('AS64500')).toBeInTheDocument()
     expect(screen.getByText('Example Transit')).toBeInTheDocument()
+    const identity = screen.getByLabelText('报告身份')
+    expect(identity.tagName).toBe('DL')
+    expect(within(identity).queryByText('link')).not.toBeInTheDocument()
+    expect(document.querySelector('.vps-ip-quality-dashboard .page-sub')).not.toHaveTextContent('192.0.2.1')
+    expect(document.querySelector('.vps-ip-quality-dashboard .page-sub')).not.toHaveTextContent('link')
+    expect(within(screen.getByLabelText('采集诊断')).getByText('监控关联')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '质量变化历史' })).toBeInTheDocument()
     expect(screen.getAllByRole('link', { name: '查看详情' })[0]).toHaveAttribute('href', '/vps/vps_001/ip-quality?report_id=ipq_001')
-    expect(screen.getByRole('heading', { name: '诊断与异常' })).toBeInTheDocument()
-    expect(screen.getByText(/source_version/)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '诊断与异常' }).closest('details')).not.toHaveAttribute('open')
+    expect(within(diagnostics).getByText(/source_version/)).toBeInTheDocument()
+    expect(within(diagnostics).getByText(/http status 429/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /保存|编辑|删除/ })).not.toBeInTheDocument()
   })
+
 
   it('loads a historical report detail when report_id is present', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse({
@@ -264,13 +277,15 @@ describe('VPSIPQualityPage', () => {
 
     renderPage('/vps/vps_001/ip-quality?report_id=ipq_000')
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
     expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/ip-quality/reports/ipq_000', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(screen.getByText('ipq_000')).toBeInTheDocument()
+    expect(screen.getAllByText('ipq_000').length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: '查看最新报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality')
+    expect(screen.queryByRole('button', { name: /保存|编辑|删除/ })).not.toBeInTheDocument()
   })
 
   it('renders raw JSON details as text rather than HTML', async () => {
@@ -290,7 +305,7 @@ describe('VPSIPQualityPage', () => {
 
     const { container } = renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
     expect(container.querySelector('img')).toBeNull()
     expect(screen.getByText(/<img src=x onerror=alert\(1\)>/)).toBeInTheDocument()
     expect(screen.getByText(/<script>alert\(1\)<\/script>/)).toBeInTheDocument()
@@ -336,11 +351,80 @@ describe('VPSIPQualityPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量驾驶舱' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: '风险信号矩阵' })).toBeInTheDocument()
     expect(screen.getByText('暂无 provider 结果。')).toBeInTheDocument()
     expect(screen.getByText('暂无服务解锁结果。')).toBeInTheDocument()
     expect(screen.getByText('暂无历史变化。')).toBeInTheDocument()
     expect(screen.getAllByText('未采集').length).toBeGreaterThan(0)
+  })
+
+  it('retries a failed report load without leaving the page', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'temporary failure' }, 500))
+      .mockResolvedValueOnce(mockJSONResponse(ipQualityReportBody))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告加载失败' })).toBeInTheDocument())
+    expect(screen.getByText('temporary failure')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001/ip-quality', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+  })
+
+  it('loads the selected history report after switching from latest', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(ipQualityReportBody))
+      .mockResolvedValueOnce(mockJSONResponse({
+        ...ipQualityReportBody,
+        summary: { ...ipQualitySummaryBody, report_id: 'ipq_000', observed_at: '2026-06-07T12:00:00Z', risk_level: 'medium' },
+        latest_report: { ...ipQualityReportBody.latest_report, report_id: 'ipq_000' },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
+    const historyLink = screen.getAllByRole('link', { name: '查看详情' }).find((link) => link.getAttribute('href')?.includes('report_id=ipq_000'))
+    expect(historyLink).toBeDefined()
+    fireEvent.click(historyLink as HTMLAnchorElement)
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/ip-quality/reports/ipq_000', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    }))
+    await waitFor(() => expect(screen.getByRole('link', { name: '查看最新报告' })).toBeInTheDocument())
+  })
+
+  it('keeps partial facts visible and does not treat unknown services as blocked', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse({
+      ...ipQualityReportBody,
+      summary: { ...ipQualitySummaryBody, status: 'partial' },
+      latest_report: { ...ipQualityReportBody.latest_report, status: 'partial' },
+      service_unlocks: [
+        { service: 'chatgpt', source: 'openai_status_probe', status: 'unknown', probe_status: 'failure', error_code: 'http_status', error_summary: 'http status 429' },
+        { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', probe_status: 'skipped' },
+      ],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告' })).toBeInTheDocument())
+    expect(screen.getAllByText('192.0.2.1').length).toBeGreaterThan(0)
+    const serviceStats = screen.getByLabelText('服务解锁状态统计')
+    expect(serviceStats).toHaveTextContent('0 受阻')
+    expect(serviceStats).toHaveTextContent('2 未知')
+    const servicePanel = screen.getByRole('heading', { name: '服务检测' }).closest('section') as HTMLElement
+    expect(within(servicePanel).queryByText(/openai_status_probe/)).not.toBeInTheDocument()
   })
 })

@@ -13,6 +13,9 @@ import { useVPSOverview } from './vps-detail/hooks/useVPSOverview'
 import { parseOverviewWorkbench } from './vps-detail/vpsManagementHelpers'
 import { useOptionalVPSWriteRegistry } from '../lib/vpsWriteRegistry-context'
 import { createVPSWriteOwnerStore, type VPSWriteOwnerStore } from './vps-detail/vpsWriteOwnerStore'
+import { READ_ONLY_PREVIEW } from '../lib/readOnlyPreview'
+
+import './vps-detail/VPSDetailWorkspace.css'
 
 const LegacyVPSDetailPage = lazy(() =>
   import('./vps-detail/LegacyVPSDetail').then((module) => ({ default: module.LegacyVPSDetail })),
@@ -49,6 +52,21 @@ function isReadonlyArchiveLifecycle(status: string | undefined): boolean {
  * not pay for the full workbench graph.
  */
 export function VPSDetailPage() {
+  const { pathname, hash } = useLocation()
+
+  useLayoutEffect(() => {
+    const main = document.getElementById('main-content')
+    if (main && !hash) main.scrollTop = 0
+  }, [pathname, hash])
+
+  return (
+    <div className="vps-detail-route">
+      <VPSDetailRoute />
+    </div>
+  )
+}
+
+function VPSDetailRoute() {
   const { vpsId } = useParams()
   const location = useLocation()
   const normalizedVPSId = vpsId?.trim() ?? ''
@@ -242,7 +260,7 @@ export function VPSDetailPage() {
   }
 
   if (gate === 'archive') {
-    return <Navigate to={`/archive/${encodeURIComponent(normalizedVPSId)}`} replace />
+    return <Navigate to={`/archive/${encodeURIComponent(normalizedVPSId)}`} replace state={location.state} />
   }
 
   if (gate === 'legacy') {
@@ -282,15 +300,17 @@ function VPSOverviewRoute({
   const management = useVPSManagementController()
   const managementTriggerRef = useRef<HTMLButtonElement>(null)
   const [searchParams, setSearchParams] = useSearchParams()
+  const location = useLocation()
   const openManagementPanel = management.openPanel
   const pendingWorkbenchPanelRef = useRef<ReturnType<typeof parseOverviewWorkbench>>(null)
 
   useEffect(() => {
     if (searchParams.has('workbench')) {
-      pendingWorkbenchPanelRef.current = parseOverviewWorkbench(searchParams.get('workbench'))
+      const parsed = parseOverviewWorkbench(searchParams.get('workbench'))
+      pendingWorkbenchPanelRef.current = READ_ONLY_PREVIEW ? null : parsed
       const next = new URLSearchParams(searchParams)
       next.delete('workbench')
-      setSearchParams(next, { replace: true })
+      setSearchParams(next, { replace: true, state: location.state })
       return
     }
 
@@ -298,7 +318,8 @@ function VPSOverviewRoute({
     if (!pendingPanel) return
     pendingWorkbenchPanelRef.current = null
     openManagementPanel(pendingPanel)
-  }, [openManagementPanel, searchParams, setSearchParams])
+  }, [openManagementPanel, searchParams, setSearchParams, location.state])
+
 
   if (state.status === 'loading' && !state.overview) {
     return <PageState kind="loading" title="正在加载 VPS 概览" />
@@ -326,7 +347,7 @@ function VPSOverviewRoute({
 
   const lifecycleStatus = state.overview.identity.lifecycle_status
   if (lifecycleStatus === 'cancelled' || lifecycleStatus === 'archived') {
-    return <Navigate to={`/archive/${encodeURIComponent(vpsId ?? '')}`} replace />
+    return <Navigate to={`/archive/${encodeURIComponent(vpsId ?? '')}`} replace state={location.state} />
   }
 
   return (

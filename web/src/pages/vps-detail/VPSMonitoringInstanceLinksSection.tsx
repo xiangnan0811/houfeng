@@ -1,9 +1,20 @@
-import { Badge, Button, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
-import { formatOptional } from '../../lib/format'
+import { Link, useLocation } from 'react-router-dom'
+
+import { Button, MonoDigits, Timestamp } from '../../components/atoms'
 import type { VPSMonitoringInstanceSummary } from '../../lib/types'
 import { HealthBadge } from '../assetPageBadges'
+import { VPSObject } from './VPSDetailDialog'
+import {
+  monitoringConfigurationLabel,
+  monitoringInstanceDetailHref,
+  monitoringInstanceName,
+  monitoringObservedHealthLabel,
+  monitoringProviderLabel,
+  monitoringRegionLabel,
+} from './vpsDetailResourcePresentation'
 
 type VPSMonitoringInstanceLinksSectionProps = {
+  vpsId: string
   monitoring: VPSMonitoringInstanceSummary[]
   readOnly?: boolean
   writeBlocked?: boolean
@@ -20,6 +31,7 @@ type VPSMonitoringInstanceLinksSectionProps = {
 }
 
 export function VPSMonitoringInstanceLinksSection({
+  vpsId,
   monitoring,
   readOnly = false,
   writeBlocked = false,
@@ -34,32 +46,22 @@ export function VPSMonitoringInstanceLinksSection({
   onCancelUnlinkMonitoringInstance,
   onConfirmUnlinkMonitoringInstance,
 }: VPSMonitoringInstanceLinksSectionProps) {
+  const location = useLocation()
   const pendingUnlinkName = pendingUnlinkMonitoringInstance?.display_name ?? pendingUnlinkMonitoringInstance?.monitoring_instance_id ?? ''
   const hasNoActiveLinks = monitoring.length === 0
-  const singleActiveLink = monitoring.length === 1 ? monitoring[0] ?? null : null
   const hasDuplicateActiveLinks = monitoring.length > 1
 
   return (
-    <section className="page-panel">
-      <div className="section-heading">
+    <div className="vps-objects">
+      <p className="vps-context">
+        共<MonoDigits>{monitoring.length}</MonoDigits>项
+      </p>
+      {!readOnly && hasNoActiveLinks ? (
         <div>
-          <p className="section-heading__eyebrow">MONITORING EVIDENCE</p>
-          <h2>监控观测</h2>
+          <Button variant="primary" size="sm" disabled={writeBlocked} onClick={onCreateMonitoringInstance}>接入/升级 agent</Button>
+          <Button variant="secondary" size="sm" disabled={writeBlocked} onClick={onOpenLink}>关联已有监控实例</Button>
         </div>
-        <span className="section-heading__meta">
-          <MonoDigits>{monitoring.length}</MonoDigits> 个 active link
-        </span>
-        {!readOnly && hasNoActiveLinks ? (
-          <div className="section-heading__actions">
-            <Button variant="primary" size="sm" disabled={writeBlocked} onClick={onCreateMonitoringInstance}>接入/升级 agent</Button>
-            <Button variant="secondary" size="sm" disabled={writeBlocked} onClick={onOpenLink}>关联已有监控实例</Button>
-          </div>
-        ) : !readOnly && singleActiveLink ? (
-          <div className="section-heading__actions">
-            <Button variant="primary" size="sm" disabled={writeBlocked} onClick={() => onUpgradeMonitoringInstance(singleActiveLink)}>接入/升级 agent</Button>
-          </div>
-        ) : null}
-      </div>
+      ) : null}
       {hasDuplicateActiveLinks ? (
         <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
           检测到 <MonoDigits>{monitoring.length}</MonoDigits> 个 active 监控实例关联。请人工核对要保留的实例，逐个接入/升级或解除多余关联。
@@ -109,53 +111,79 @@ export function VPSMonitoringInstanceLinksSection({
         </section>
       ) : null}
       {monitoring.length > 0 ? (
-        <div className="vps-monitoring-instance-evidence-strip" aria-label="监控观测摘要">
-          {monitoring.map((monitoringInstance) => (
-            <article key={monitoringInstance.monitoring_instance_id} className="vps-monitoring-instance-evidence-strip__item">
-              <div>
-                <strong>{monitoringInstance.display_name}</strong>
-                <Hostname truncate>{monitoringInstance.monitoring_instance_id}</Hostname>
-              </div>
-              <HealthBadge value={monitoringInstance.current_health_status} />
-              <span className="asset-status-stack">
-                <Badge variant="info" tone="neutral">{monitoringInstance.monitoring_status || '未知'}</Badge>
-              </span>
-              <span><MonoDigits>{monitoringInstance.current_active_incident_count}</MonoDigits> 个活跃异常</span>
-              <small>{formatOptional(monitoringInstance.current_primary_issue_summary)}</small>
-              <div className="vps-monitoring-instance-evidence-strip__location">
-                <span>{[monitoringInstance.region, monitoringInstance.city].filter(Boolean).join(' · ') || '—'}</span>
-                <span>{formatOptional(monitoringInstance.provider)}</span>
-              </div>
-              <div className="vps-monitoring-instance-evidence-strip__heartbeat">
-                <span>最近心跳</span>
-                <Timestamp value={monitoringInstance.last_heartbeat_at} />
-              </div>
-              {!readOnly ? (
-                <div className="vps-monitoring-instance-evidence-strip__actions">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={writeBlocked || unlinkingMonitoringInstanceId !== null}
-                    onClick={() => onUpgradeMonitoringInstance(monitoringInstance)}
-                  >
-                    接入/升级 agent
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={writeBlocked || unlinkingMonitoringInstanceId !== null}
-                    onClick={() => onRequestUnlinkMonitoringInstance(monitoringInstance)}
-                  >
-                    {unlinkingMonitoringInstanceId === monitoringInstance.monitoring_instance_id ? '解除中…' : '解除关联'}
-                  </Button>
-                </div>
-              ) : null}
-            </article>
-          ))}
-        </div>
+        <ul className="vps-object-list">
+          {monitoring.map((monitoringInstance) => {
+            const name = monitoringInstanceName(monitoringInstance)
+            const health = monitoringObservedHealthLabel(monitoringInstance.current_health_status)
+            const healthRecorded = health !== '观测健康未记录'
+            const heartbeat = monitoringInstance.last_heartbeat_at?.trim() ?? ''
+            return (
+              <VPSObject
+                key={monitoringInstance.monitoring_instance_id}
+                name={name}
+                id={monitoringInstance.monitoring_instance_id}
+                status={
+                  <span>
+                    {healthRecorded ? <>观测健康 <HealthBadge value={health} /></> : health}
+                  </span>
+                }
+                actions={
+                  <div className="vps-object__actions">
+                    <Link
+                      className="btn sm ghost"
+                      to={monitoringInstanceDetailHref(vpsId, monitoringInstance.monitoring_instance_id)}
+                      state={location.state}
+                    >
+                      查看监控实例
+                    </Link>
+                    {!readOnly ? (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={writeBlocked || unlinkingMonitoringInstanceId !== null}
+                          onClick={() => onUpgradeMonitoringInstance(monitoringInstance)}
+                        >
+                          接入/升级 agent
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={writeBlocked || unlinkingMonitoringInstanceId !== null}
+                          onClick={() => onRequestUnlinkMonitoringInstance(monitoringInstance)}
+                        >
+                          {unlinkingMonitoringInstanceId === monitoringInstance.monitoring_instance_id ? '解除中…' : '解除关联'}
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                }
+              >
+                <dl className="vps-object__facts">
+                  <div>
+                    <dt>监控配置</dt>
+                    <dd>{monitoringConfigurationLabel(monitoringInstance.monitoring_status)}</dd>
+                  </div>
+                  <div>
+                    <dt>服务商</dt>
+                    <dd>{monitoringProviderLabel(monitoringInstance.provider)}</dd>
+                  </div>
+                  <div>
+                    <dt>区域</dt>
+                    <dd>{monitoringRegionLabel(monitoringInstance.region, monitoringInstance.city)}</dd>
+                  </div>
+                  <div>
+                    <dt>最近心跳</dt>
+                    <dd>{heartbeat ? <Timestamp value={heartbeat} /> : '尚未收到心跳'}</dd>
+                  </div>
+                </dl>
+              </VPSObject>
+            )
+          })}
+        </ul>
       ) : (
         <p className="empty-inline">尚未关联监控实例</p>
       )}
-    </section>
+    </div>
   )
 }

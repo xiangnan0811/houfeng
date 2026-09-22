@@ -218,7 +218,7 @@ function buildNextAction(
       summary: '续费和成本证据不可用。页面不会把读取失败误判为真实缺订阅。',
       tone: 'notice',
       linkLabel: '核对订阅',
-      to: `/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}`,
+      to: `/subscriptions?vps_id=${encodeURIComponent(detail.vps_id)}&view=details`,
     }
   }
   if (!primarySubscription) {
@@ -226,7 +226,7 @@ function buildNextAction(
       title: '补录续费成本',
       summary: '订阅接口已成功返回空结果，当前缺少真实续费日和月化成本。',
       tone: 'critical',
-      buttonLabel: '创建/更新订阅',
+      buttonLabel: '新增订阅事实',
       onAction: onSubscriptionCreate,
     }
   }

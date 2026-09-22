@@ -3,9 +3,11 @@ import type {
   RecordBusinessStatus,
   RecordFollowUpState,
   RecordLifecycle,
+  RecordRelationRole,
   RecordSearchFilter,
   RecordSearchSubjectFilter,
   RecordStatusGroup,
+  RecordSubjectKind,
   RecordType,
 } from '../../lib/types'
 import {
@@ -334,5 +336,22 @@ export function recordSearchToAPIQuery(
   return {
     ...recordSearchFiltersFromSearchParams(recordSearchParamsFromFilters(filters)),
     ...optional('cursor', cursor),
+  }
+}
+
+/** Consumes the same `kind:source:role:placement` codec as search and subjectNewRecordHref. */
+export function recordSubjectPrefillFromSearchParams(searchParams: URLSearchParams): {
+  kind: RecordSubjectKind
+  source_id: string
+  role: RecordRelationRole
+  primary: boolean
+} | null {
+  const subject = recordSearchFiltersFromSearchParams(searchParams).subject?.[0]
+  if (!subject?.kind || !subject.source_id) return null
+  return {
+    kind: subject.kind,
+    source_id: subject.source_id,
+    role: subject.role ?? 'affected',
+    primary: subject.placement !== 'related',
   }
 }

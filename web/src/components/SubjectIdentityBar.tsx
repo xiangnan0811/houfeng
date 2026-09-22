@@ -1,20 +1,15 @@
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Badge } from './atoms'
 import type { SubjectActivityHeader } from '../lib/types'
+import { SUBJECT_KIND_LABELS } from './timelineChannel'
 
 type Props = {
   subject: SubjectActivityHeader
   actions?: ReactNode
   returnHref?: string
   returnLabel?: string
-}
-
-const KIND_LABELS: Record<SubjectActivityHeader['kind'], string> = {
-  vps: 'VPS',
-  monitoring_instance: '监控实例',
-  target: '入口探测',
 }
 
 function displayName(subject: SubjectActivityHeader): string {
@@ -30,29 +25,31 @@ export function SubjectIdentityBar({
   returnHref,
   returnLabel = '返回主体',
 }: Props) {
+  const { state } = useLocation()
   const tombstoned = subject.status === 'tombstoned'
   const title = displayName(subject)
 
   return (
-    <header className="subject-identity-bar">
-      <div className="subject-identity-bar__lead">
-        <p className="subject-identity-bar__eyebrow">{KIND_LABELS[subject.kind]}</p>
-        <h1 className="subject-identity-bar__title">{title}</h1>
-        <p className="subject-identity-bar__meta">
+    <header className="page__head subject-identity-bar">
+      <div className="subject-identity-bar__main">
+        <p className="subject-identity-bar__kind">{SUBJECT_KIND_LABELS[subject.kind]}</p>
+        <h1 className="page__title">{title}</h1>
+        <p className="page-sub subject-identity-bar__meta">
           <span className="mono">{subject.source_id}</span>
+          {' · '}
           {tombstoned ? (
             <Badge variant="state" tone="critical">已删除主体</Badge>
           ) : (
-            <Badge variant="state" tone="normal">在册</Badge>
+            <Badge variant="info" tone="neutral">在册</Badge>
           )}
         </p>
         {returnHref ? (
-          <p className="subject-identity-bar__return">
-            <Link className="text-link" to={returnHref}>{returnLabel}</Link>
+          <p className="page-sub">
+            <Link className="text-link" to={returnHref} state={subject.kind === 'target' ? undefined : state}>{returnLabel}</Link>
           </p>
         ) : null}
       </div>
-      {actions ? <div className="subject-identity-bar__actions">{actions}</div> : null}
+      {actions ? <div className="page__actions subject-identity-bar__actions">{actions}</div> : null}
     </header>
   )
 }

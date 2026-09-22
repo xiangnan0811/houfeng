@@ -23,7 +23,7 @@ import (
 	"testing"
 )
 
-func TestPreviewImageGoldenMetadataFreeBoundedPNG(t *testing.T) {
+func TestPreviewImageMetadataFreeBoundedPNG(t *testing.T) {
 	t.Parallel()
 
 	paths := previewTestWorkspace(t)
@@ -36,6 +36,13 @@ func TestPreviewImageGoldenMetadataFreeBoundedPNG(t *testing.T) {
 	}
 	if err := os.WriteFile(paths.source, source.Bytes(), 0o600); err != nil {
 		t.Fatalf("write image source: %v", err)
+	}
+	sourceImage, err := jpeg.Decode(bytes.NewReader(source.Bytes()))
+	if err != nil {
+		t.Fatalf("jpeg.Decode() error = %v", err)
+	}
+	if bounds := sourceImage.Bounds(); bounds.Dx() != 2 || bounds.Dy() != 1 {
+		t.Fatalf("decoded JPEG bounds = %v, want 2x1", bounds)
 	}
 
 	processor := newPreviewProcessor(PreviewConfig{
@@ -56,9 +63,25 @@ func TestPreviewImageGoldenMetadataFreeBoundedPNG(t *testing.T) {
 	if bytes.Contains(preview.Bytes, []byte("tEXt")) || bytes.Contains(preview.Bytes, []byte("eXIf")) {
 		t.Fatalf("PNG preview retained metadata chunks: %x", preview.Bytes)
 	}
-	digest := sha256.Sum256(preview.Bytes)
-	if got, want := hex.EncodeToString(digest[:]), "dac4e6f598e26f4dcfb32ea88f81375f42a14739719a9761db54160b1267ed9d"; got != want {
-		t.Fatalf("PNG preview digest = %q, want golden %q", got, want)
+	decoded, err := png.Decode(bytes.NewReader(preview.Bytes))
+	if err != nil {
+		t.Fatalf("decode canonical PNG: %v", err)
+	}
+	if bounds := decoded.Bounds(); bounds.Dx() != 2 || bounds.Dy() != 1 {
+		t.Fatalf("canonical PNG bounds = %v, want 2x1", bounds)
+	}
+	for y := decoded.Bounds().Min.Y; y < decoded.Bounds().Max.Y; y++ {
+		for x := decoded.Bounds().Min.X; x < decoded.Bounds().Max.X; x++ {
+			gotR, gotG, gotB, gotA := decoded.At(x, y).RGBA()
+			wantR, wantG, wantB, wantA := sourceImage.At(x, y).RGBA()
+			if gotR != wantR || gotG != wantG || gotB != wantB || gotA != wantA {
+				t.Fatalf("canonical PNG pixel (%d,%d) = %#v, want JPEG-decoded %#v",
+					x, y,
+					[4]uint32{gotR, gotG, gotB, gotA},
+					[4]uint32{wantR, wantG, wantB, wantA},
+				)
+			}
+		}
 	}
 }
 

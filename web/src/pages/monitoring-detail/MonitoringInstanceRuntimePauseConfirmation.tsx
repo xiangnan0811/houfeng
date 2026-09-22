@@ -3,14 +3,14 @@ import type { MonitoringInstanceRecord } from '../../lib/types'
 import { pauseConfirmationCurrent } from './monitoringDetailHelpers'
 
 type MonitoringInstanceRuntimePauseConfirmationProps = {
-  monitoringInstance: MonitoringInstanceRecord
+  monitoringStatus: MonitoringInstanceRecord['monitoring_status']
   disabled: boolean
   onConfirm: () => void
   onCancel: () => void
 }
 
 export function MonitoringInstanceRuntimePauseConfirmation({
-  monitoringInstance,
+  monitoringStatus,
   disabled,
   onConfirm,
   onCancel,
@@ -19,7 +19,7 @@ export function MonitoringInstanceRuntimePauseConfirmation({
     <ActionConfirmationModal
       open
       title="确认暂停监控实例监控"
-      current={pauseConfirmationCurrent(monitoringInstance)}
+      current={pauseConfirmationCurrent({ monitoring_status: monitoringStatus } as MonitoringInstanceRecord)}
       result="操作后：监控运行状态变为暂停。"
       impact="会停止主机指标采集，并停止该监控实例承担的探针执行。趋势图会从此开始出现数据空档。"
       unchanged="不会删除历史事件、观测记录或 agent 绑定关系。"

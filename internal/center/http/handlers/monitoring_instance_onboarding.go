@@ -94,11 +94,11 @@ func MonitoringInstanceInstallCommand(repo monitoringinstances.OnboardingReposit
 			return
 		}
 		if publicBaseURL == "" {
-			writeError(w, http.StatusConflict, "public base URL is not configured")
+			writeCodedError(w, http.StatusConflict, "public base URL is not configured", "install_command_unconfigured")
 			return
 		}
 		if agentVersion == "" || agentVersion == "dev" {
-			writeError(w, http.StatusConflict, "agent release version is not configured")
+			writeCodedError(w, http.StatusConflict, "agent release version is not configured", "install_command_unconfigured")
 			return
 		}
 
@@ -114,7 +114,7 @@ func MonitoringInstanceInstallCommand(repo monitoringinstances.OnboardingReposit
 			return
 		}
 		if errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance) {
-			writeError(w, http.StatusConflict, "archived monitoring instance")
+			writeCodedError(w, http.StatusConflict, "archived monitoring instance", "monitoring_instance_archived")
 			return
 		}
 		if err != nil {

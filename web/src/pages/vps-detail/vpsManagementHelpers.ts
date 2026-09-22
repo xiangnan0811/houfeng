@@ -108,15 +108,15 @@ export function subscriptionLinkageAction(
     }
     return {
       to: `/vps/${encodeURIComponent(vpsId)}?workbench=subscription`,
-      label: '创建/更新订阅',
+      label: '新增订阅事实',
       panel: 'subscription',
     }
   }
   if (linkage.status === 'multiple_active_subscriptions') {
-    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsId)}`, label: '去订阅页选择处理' }
+    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsId)}&view=details`, label: '去订阅页选择处理' }
   }
   if (linkage.subscription_id) {
-    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsId)}`, label: '查看关联订阅' }
+    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsId)}&view=details`, label: '查看关联订阅' }
   }
   return null
 }

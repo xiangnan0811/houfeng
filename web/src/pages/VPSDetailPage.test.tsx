@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../lib/apiRequest'
 import * as api from '../lib/api'
@@ -177,7 +177,7 @@ function DetailLocationProbe() {
   const [searchParams, setSearchParams] = useSearchParams()
   return (
     <>
-      <span data-testid="detail-location">{location.pathname}{location.search}</span>
+      <span data-testid="detail-location" data-state={JSON.stringify(location.state ?? null)}>{location.pathname}{location.search}</span>
       <button
         type="button"
         onClick={() => {
@@ -198,7 +198,7 @@ function renderDetail({
   reactStrictMode = false,
   showLocationProbe = false,
 }: {
-  initialEntry?: string
+  initialEntry?: string | { pathname: string; search?: string; state?: unknown }
   nextEntry?: string
   reactStrictMode?: boolean
   showLocationProbe?: boolean
@@ -220,6 +220,13 @@ describe('VPSDetailPage gate', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
+
+  beforeEach(() => {
+    vi.spyOn(api, 'listSubscriptions').mockResolvedValue([])
+    vi.spyOn(api, 'listVPSServices').mockResolvedValue([])
+    vi.spyOn(api, 'listVPSDomains').mockResolvedValue([])
+  })
+
 
   it('reuses one pending capability probe through StrictMode effect replay', async () => {
     const probe = deferredOverview()
@@ -311,10 +318,8 @@ describe('VPSDetailPage gate', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument())
     expect(screen.getByRole('link', { name: '新建记录' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '时间线' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '管理' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '概览' })).toHaveAttribute('aria-current', 'page')
-    expect(screen.queryByText('动作：无')).not.toBeInTheDocument()
     // Gate probe seeds the overview route — no duplicate first-paint fetch.
     expect(get).toHaveBeenCalledTimes(1)
   })
@@ -337,7 +342,8 @@ describe('VPSDetailPage gate', () => {
 
     renderDetail()
 
-    const retry = await screen.findByRole('button', { name: '重试 IP 质量' })
+    const retry = await screen.findByRole('button', { name: '刷新 概览 IP 质量' })
+
     fireEvent.click(retry)
 
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
@@ -346,7 +352,8 @@ describe('VPSDetailPage gate', () => {
     expect(retry).toBeDisabled()
 
     resolveRefresh(overviewFixture())
-    await waitFor(() => expect(screen.queryByRole('button', { name: '重试 IP 质量' })).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByRole('button', { name: '刷新 概览 IP 质量' })).not.toBeInTheDocument())
+
     expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
   })
 
@@ -368,7 +375,8 @@ describe('VPSDetailPage gate', () => {
 
     renderDetail()
 
-    const retry = await screen.findByRole('button', { name: '重试 IP 质量' })
+    const retry = await screen.findByRole('button', { name: '重试 概览 IP 质量' })
+
     fireEvent.click(retry)
 
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
@@ -379,7 +387,6 @@ describe('VPSDetailPage gate', () => {
 
     await waitFor(() => expect(retry).toBeEnabled())
     expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
-    expect(screen.getByText('IP 质量数据暂不可用，请稍后重试。')).toBeInTheDocument()
     expect(get).toHaveBeenCalledTimes(2)
   })
 
@@ -508,13 +515,13 @@ describe('VPSDetailPage gate', () => {
       renewal_reason: '等待下月价格确认',
     }, { expectedUpdatedAt: '2026-08-20T00:00:00Z' })
     expect(screen.getByRole('status')).toHaveTextContent('续费决策已更新，概览已刷新。未找到 active 订阅。')
-    const linkageAction = screen.getByRole('link', { name: '创建/更新订阅' })
+    const linkageAction = screen.getByRole('link', { name: '新增订阅事实' })
     expect(linkageAction).toHaveAttribute(
       'href',
       '/vps/vps_001?workbench=subscription',
     )
     fireEvent.click(linkageAction)
-    expect(await screen.findByRole('dialog', { name: '订阅事实' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: '新增订阅事实' })).toBeInTheDocument()
   })
 
   it('creates a subscription fact from the overview management menu', async () => {
@@ -527,11 +534,11 @@ describe('VPSDetailPage gate', () => {
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
 
-    const dialog = await screen.findByRole('dialog', { name: '订阅事实' })
+    const dialog = await screen.findByRole('dialog', { name: '新增订阅事实' })
     fireEvent.change(screen.getByRole('spinbutton', { name: '价格' }), {
       target: { value: '12.5' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '创建/更新订阅' }))
+    fireEvent.click(screen.getByRole('button', { name: '新增订阅' }))
 
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     expect(create).toHaveBeenCalledWith(
@@ -555,7 +562,7 @@ describe('VPSDetailPage gate', () => {
       const getDetail = vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture())
 
       renderDetail({
-        initialEntry: `/vps/vps_001?workbench=${workbench}`,
+        initialEntry: { pathname: '/vps/vps_001', search: `?workbench=${workbench}`, state: { vpsInventoryHref: '/vps?workspace=workbench&view=unlinked&q=Tokyo&selected=vps_001' } },
         showLocationProbe: true,
       })
 
@@ -601,8 +608,17 @@ describe('VPSDetailPage gate', () => {
     overview.identity.lifecycle_status = lifecycle
     overview.capabilities = capabilities
     vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overview)
-    renderDetail()
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
+    renderDetail({
+      initialEntry: { pathname: '/vps/vps_001', state: inventoryState },
+      showLocationProbe: true,
+    })
     expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
+    expect(screen.getByTestId('detail-location')).toHaveTextContent('/archive/vps_001')
+    expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(screen.queryByRole('button', { name: '管理' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '新建记录' })).not.toBeInTheDocument()
     expect(screen.queryByText('Legacy VPS detail shell')).not.toBeInTheDocument()
@@ -659,8 +675,15 @@ describe('VPSDetailPage gate', () => {
     vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
     const review = vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(archiveReviewFixture())
     const archive = vi.spyOn(api, 'archiveVPS').mockResolvedValue(archiveReviewFixture())
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
 
-    renderDetail()
+    renderDetail({
+      initialEntry: { pathname: '/vps/vps_001', state: inventoryState },
+      showLocationProbe: true,
+    })
 
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
@@ -678,6 +701,7 @@ describe('VPSDetailPage gate', () => {
       confirmation_name: '东京边缘',
     }))
     expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
+    expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(review).toHaveBeenCalledWith('vps_001')
   })
 
@@ -716,6 +740,67 @@ describe('VPSDetailPage gate', () => {
     expect(await screen.findByRole('textbox', { name: '输入 VPS 名称确认归档' })).toBeInTheDocument()
     expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
     expect(review).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves inventory state when overview refresh becomes terminal', async () => {
+    const active = overviewFixture()
+    active.anomalies = [{
+      rule_id: 'source.unavailable.v1',
+      severity: 'notice',
+      title: '判断依据暂不可用',
+      source: 'overview',
+      primary_action: { id: 'retry_overview', label: '重试概览' },
+      secondary_actions: [],
+    }]
+    const archived = overviewFixture()
+    archived.identity.lifecycle_status = 'archived'
+    vi.spyOn(recordsApi, 'getVPSOverview')
+      .mockResolvedValueOnce(active)
+      .mockResolvedValue(archived)
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
+
+    renderDetail({
+      initialEntry: { pathname: '/vps/vps_001', state: inventoryState },
+      showLocationProbe: true,
+    })
+
+    expect(await screen.findByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试概览' }))
+
+    expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
+    expect(screen.getByTestId('detail-location')).toHaveTextContent('/archive/vps_001')
+    expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+  })
+
+  it('keeps inventory state and the archive dialog when archive write fails', async () => {
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
+    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(archiveReviewFixture())
+    vi.spyOn(api, 'archiveVPS').mockRejectedValue(new ApiError(409, 'archive conflict'))
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
+
+    renderDetail({
+      initialEntry: { pathname: '/vps/vps_001', state: inventoryState },
+      showLocationProbe: true,
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
+      target: { value: '东京边缘' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('archive conflict')
+    expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
+    expect(screen.getByTestId('detail-location')).toHaveTextContent('/vps/vps_001')
+    expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+    expect(screen.queryByText('Archive detail route')).not.toBeInTheDocument()
   })
 
   it('shows overview not-found when identity is missing', async () => {

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from 'react'
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-import { Button, Modal } from '../../components/atoms'
+import { Button } from '../../components/atoms'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { VPSCancellationWorkbench } from '../../components/VPSCancellationWorkbench'
 import { VPSTimelinePanel } from '../../components/VPSTimelinePanel'
@@ -31,6 +31,8 @@ import {
   unlinkVPSMonitoringInstance,
   updateVPSAsset,
 } from '../../lib/api'
+import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
+
 import { useOptionalVPSWriteRegistry } from '../../lib/vpsWriteRegistry-context'
 import type {
   ArchiveReview,
@@ -48,6 +50,7 @@ import type {
   VPSIPQualityReport,
   VPSMonitoringInstanceSummary,
 } from '../../lib/types'
+import { VPSDetailDialog, VPSDialogActions } from './VPSDetailDialog'
 import { VPSDetailErrorPanel } from './VPSDetailErrorPanel'
 import { VPSDetailLoading } from './VPSDetailLoading'
 import { VPSDetailMissingID } from './VPSDetailMissingID'
@@ -57,13 +60,10 @@ import { VPSDomainsSection } from './VPSDomainsSection'
 import { VPSExperienceLogForm } from './VPSExperienceLogForm'
 import { VPSFactsEditForm } from './VPSFactsEditForm'
 import { VPSFactsSection } from './VPSFactsSection'
-import { VPSIPQualitySection } from './VPSIPQualitySection'
 import { VPSMonitoringInstanceCreateForm } from './VPSMonitoringInstanceCreateForm'
 import { VPSMonitoringInstanceLinkForm } from './VPSMonitoringInstanceLinkForm'
 import { VPSMonitoringInstanceLinksSection } from './VPSMonitoringInstanceLinksSection'
 import { VPSRenewalDecisionForm } from './VPSRenewalDecisionForm'
-import { VPSRelatedOverview } from './VPSRelatedOverview'
-import { VPSSingleMachineLedger } from './VPSSingleMachineLedger'
 import { VPSSubscriptionForm } from './VPSSubscriptionForm'
 import { VPSValidityExtensionForm } from './VPSValidityExtensionForm'
 import { VPSServicesForm } from './VPSServicesForm'
@@ -209,8 +209,8 @@ function selectPrimarySubscription(subscriptions: SubscriptionRecord[]): Subscri
   return subscriptions[0] ?? null
 }
 
-function selectActiveSubscription(subscriptions: SubscriptionRecord[]): SubscriptionRecord | null {
-  return subscriptions.filter((subscription) => subscription.status === 'active')[0] ?? null
+function selectActiveSubscriptions(subscriptions: SubscriptionRecord[]): SubscriptionRecord[] {
+  return subscriptions.filter((subscription) => subscription.status === 'active')
 }
 
 function normalizeVPSDetail(detail: VPSAssetDetail): VPSAssetDetail {
@@ -249,11 +249,14 @@ export function LegacyVPSDetail({
   viewToken: providedViewToken,
   onViewAuthorityInvalidatedWriteSettled,
 }: LegacyVPSDetailProps = {}) {
+  const formId = useId()
   const { vpsId } = useParams()
-  const navigate = useNavigate()
+  const navigate = useNavigate(), location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
-  const initialDrawerFromQuery = drawerModeFromWorkbenchQuery(searchParams.get('workbench'))
+  const requestedWorkbench = drawerModeFromWorkbenchQuery(searchParams.get('workbench'))
+  const initialDrawerFromQuery = READ_ONLY_PREVIEW ? null : requestedWorkbench
   const openCancellationFromQuery = initialDrawerFromQuery === 'cancellation'
+
   const skipNextQueryDrivenReload = useRef(false)
   const cancellationPreviewGenerationRef = useRef(0)
   const mutationGenerationRef = useRef(0)
@@ -325,7 +328,7 @@ export function LegacyVPSDetail({
     const next = new URLSearchParams(searchParams)
     next.delete('workbench')
     skipNextQueryDrivenReload.current = true
-    setSearchParams(next, { replace: true })
+    setSearchParams(next, { replace: true, state: location.state })
   }
 
   function replaceFactDraft(next: FactEditFormState | null) {
@@ -421,7 +424,7 @@ export function LegacyVPSDetail({
         const normalizedDetail = normalizeVPSDetail(detail)
         if (normalizedDetail.lifecycle_status === 'archived' || normalizedDetail.lifecycle_status === 'cancelled') {
           if (!routeIsCurrent()) return null
-          navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true })
+          navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true, state: location.state })
           return null
         }
         const [timeline, services, domains, subscriptionState, ipQualityState, cancellationState] = await Promise.all([
@@ -522,7 +525,7 @@ export function LegacyVPSDetail({
         const initialMonitoringLinks = normalizedDetail.monitoring_instance_links ?? []
         const initialMonitoringLink = initialMonitoringLinks[0]
         if (initialDrawerFromQuery === 'monitoring-instance-create' && initialMonitoringLinks.length === 1 && initialMonitoringLink) {
-          navigate(`/monitoring/${encodeURIComponent(initialMonitoringLink.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(normalizedDetail.vps_id)}`)
+          navigate(`/monitoring/${encodeURIComponent(initialMonitoringLink.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(normalizedDetail.vps_id)}`, { state: location.state })
           return
         }
         if (initialDrawerFromQuery === 'monitoring-instance-create' && initialMonitoringLinks.length > 1) {
@@ -557,7 +560,7 @@ export function LegacyVPSDetail({
       cancelled = true
       invalidateRouteAuthority()
     }
-  }, [initialDrawerFromQuery, navigate, openCancellationFromQuery, vpsId])
+  }, [initialDrawerFromQuery, location.state, navigate, openCancellationFromQuery, vpsId])
 
   const applyCancellationPreview = useCallback(async (
     targetVPSId: string,
@@ -765,8 +768,43 @@ export function LegacyVPSDetail({
     setSelectors((current) => ({ ...current, targetsLoading: true, targetsError: null }))
     listTargets()
       .then((targets) => setSelectors((current) => ({ ...current, targetsLoading: false, targetsError: null, targets })))
-      .catch((error: unknown) => setSelectors((current) => ({ ...current, targetsLoading: false, targetsError: describeError(error, '加载 Target 列表失败'), targets: [] })))
+      .catch((error: unknown) => setSelectors((current) => ({ ...current, targetsLoading: false, targetsError: describeError(error, '加载入口探测列表失败'), targets: [] })))
   }
+
+  function retryTargets() {
+    setSelectors((current) => ({ ...current, targetsLoading: true, targetsError: null }))
+    listTargets()
+      .then((targets) => setSelectors((current) => ({ ...current, targetsLoading: false, targetsError: null, targets })))
+      .catch((error: unknown) => setSelectors((current) => ({ ...current, targetsLoading: false, targetsError: describeError(error, '加载入口探测列表失败'), targets: [] })))
+  }
+
+  function retryMonitoringInstances() {
+    setSelectors((current) => ({ ...current, monitoringInstancesLoading: true, monitoringInstancesError: null }))
+    listMonitoringInstances()
+      .then((monitoring) => setSelectors((current) => ({ ...current, monitoringInstancesLoading: false, monitoringInstancesError: null, monitoring })))
+      .catch((error: unknown) => setSelectors((current) => ({
+        ...current,
+        monitoringInstancesLoading: false,
+        monitoringInstancesError: describeError(error, '加载监控实例列表失败'),
+        monitoring: [],
+      })))
+  }
+
+  function retrySubscriptions() {
+    const targetVPSId = vpsId
+    if (!targetVPSId) return
+    void loadSubscriptions(targetVPSId).then((subscriptionState) => {
+      setState((current) => {
+        if (current.vpsId !== targetVPSId) return current
+        return {
+          ...current,
+          subscriptions: subscriptionState.subscriptions,
+          subscriptionsError: subscriptionState.subscriptionsError,
+        }
+      })
+    })
+  }
+
 
   function openDrawer(mode: NonNullable<VPSDetailDrawerMode>) {
     if (mode === 'decision') {
@@ -828,7 +866,7 @@ export function LegacyVPSDetail({
     }
     const activeLink = activeLinks[0]
     if (activeLinks.length === 1 && activeLink) {
-      navigate(`/monitoring/${encodeURIComponent(activeLink.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`)
+      navigate(`/monitoring/${encodeURIComponent(activeLink.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`, { state: location.state })
       return
     }
     openDrawer('monitoring-instance-evidence')
@@ -837,7 +875,7 @@ export function LegacyVPSDetail({
   function openMonitoringAgentWorkbenchFor(monitoringInstance: VPSMonitoringInstanceSummary) {
     const detail = state.detail
     if (!detail) return
-    navigate(`/monitoring/${encodeURIComponent(monitoringInstance.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`)
+    navigate(`/monitoring/${encodeURIComponent(monitoringInstance.monitoring_instance_id)}?onboarding=1&return_vps=${encodeURIComponent(detail.vps_id)}`, { state: location.state })
   }
 
   function closeDrawer() {
@@ -943,7 +981,7 @@ export function LegacyVPSDetail({
       const latest = normalizeVPSDetail(await getVPSAsset(vpsID))
       if (!mutationIsCurrent(generation)) return true
       if (isTerminalVPSLifecycle(latest.lifecycle_status)) {
-        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true })
+        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true, state: location.state })
         return true
       }
     } catch {
@@ -966,7 +1004,7 @@ export function LegacyVPSDetail({
       const latest = normalizeVPSDetail(await getVPSAsset(targetVpsId))
       if (!mutationIsCurrent(generation)) return
       if (isTerminalVPSLifecycle(latest.lifecycle_status)) {
-        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true })
+        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true, state: location.state })
         return
       }
       if (mutationConflict?.draftKind === 'decision' && decisionDraftAlreadySatisfied(decisionDraft, latest)) {
@@ -1226,7 +1264,7 @@ export function LegacyVPSDetail({
         if (!mutationIsCurrent(generation)) return
         setMonitoringCreateNotice('监控实例已创建并关联，正在进入接入流程')
         collapseDrawer()
-        navigate(onboardingPath)
+        navigate(onboardingPath, { state: location.state })
       } catch (refreshError: unknown) {
         if (!mutationIsCurrent(generation)) return
         setMonitoringCreateNotice(`监控实例已创建并关联，但权威状态刷新失败：${describeError(refreshError, '权威状态刷新失败')}`)
@@ -1303,6 +1341,25 @@ export function LegacyVPSDetail({
 
     clearValidityExtensionFeedback()
 
+    const activeSubscriptions = selectActiveSubscriptions(state.subscriptions)
+    if (state.subscriptionsError) {
+      setValidityExtensionError(state.subscriptionsError)
+      return
+    }
+    if (activeSubscriptions.length === 0) {
+      setValidityExtensionError('当前 VPS 没有生效中订阅，无法延长有效期。')
+      return
+    }
+    if (activeSubscriptions.length > 1) {
+      setValidityExtensionError('当前 VPS 存在多个生效中订阅，无法直接延长有效期。')
+      return
+    }
+    const activeSubscription = activeSubscriptions[0]
+    if (!activeSubscription) {
+      setValidityExtensionError('当前 VPS 没有唯一的生效中订阅，无法延长有效期。')
+      return
+    }
+
     let input
     try {
       input = buildValidityExtensionInput(validityExtensionDraft)
@@ -1310,11 +1367,10 @@ export function LegacyVPSDetail({
       setValidityExtensionError(describeError(error, '有效期延长输入无效'))
       return
     }
-    if (activeSubscription?.renew_at && input.extend_to < activeSubscription.renew_at) {
-      setValidityExtensionError('延长至日期不能早于当前 active 订阅续费日。')
+    if (activeSubscription.renew_at && input.extend_to < activeSubscription.renew_at) {
+      setValidityExtensionError('延长至日期不能早于当前生效中订阅续费日。')
       return
     }
-
     const owner = beginVpsWrite(detail.vps_id, 'validity-extension')
     if (!owner) {
       setValidityExtensionError('上一次保存仍在进行，请稍后再试')
@@ -1415,7 +1471,7 @@ export function LegacyVPSDetail({
     try {
       await archiveVPS(detail.vps_id, { confirmation_name: confirmationName })
       if (!mutationIsCurrent(generation)) return
-      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true })
+      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true, state: location.state })
     } catch (error: unknown) {
       if (!mutationIsCurrent(generation)) return
       setLifecycleError(describeError(error, '归档 VPS 失败'))
@@ -1428,7 +1484,7 @@ export function LegacyVPSDetail({
     const detail = state.detail
     if (!detail) return
     if (detail.lifecycle_status === 'archived') {
-      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true })
+      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true, state: location.state })
       return
     }
     setLifecycleError('归档恢复请在归档详情页执行')
@@ -1462,7 +1518,7 @@ export function LegacyVPSDetail({
       const refreshed = await refreshDetailAndTimeline(detail.vps_id, stillCurrent)
       if (!stillCurrent()) return
       if (refreshed.lifecycle_status === 'cancelled' || refreshed.lifecycle_status === 'archived') {
-        navigate(`/archive/${encodeURIComponent(refreshed.vps_id)}`, { replace: true })
+        navigate(`/archive/${encodeURIComponent(refreshed.vps_id)}`, { replace: true, state: location.state })
         return
       }
       const applied = await applyCancellationPreview(detail.vps_id, generation, stillCurrent)
@@ -1694,7 +1750,8 @@ export function LegacyVPSDetail({
   const linkFeedback = linkError ?? unlinkError ?? linkNotice
   const linkFeedbackIsError = linkError !== null || unlinkError !== null
   const primarySubscription = selectPrimarySubscription(state.subscriptions)
-  const activeSubscription = selectActiveSubscription(state.subscriptions)
+  const activeSubscriptions = selectActiveSubscriptions(state.subscriptions)
+  const activeSubscription = activeSubscriptions.length === 1 ? (activeSubscriptions[0] ?? null) : null
   const subscriptionLoadFailed = state.subscriptionsError !== null
   const showCancellationWorkbench = shouldExposeCancellationWorkbench(detail, state.cancellationPreview)
   const overviewModel = buildVPSDetailOverviewModel({
@@ -1719,20 +1776,44 @@ export function LegacyVPSDetail({
   const lifecycleConfirmDisabled = writeBlocked ||
     (lifecycleConfirmingAction === 'archive' ? !archiveCanConfirm : false)
 
+  const drawerTemplate = activeDrawer === 'decision' ? 'decision'
+    : activeDrawer === 'facts' || activeDrawer === 'subscription' || activeDrawer === 'service' || activeDrawer === 'domain' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-link' || activeDrawer === 'monitoring-instance-create' || activeDrawer === 'experience' ? 'form'
+      : activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'services-detail' || activeDrawer === 'domains-detail' ? 'objects'
+        : undefined
+  const drawerFooter = activeDrawer === 'facts' && factDraft ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked || latestLoading} error={factError} notice={factError ? null : factNotice} submitLabel="保存基础信息" cancelLabel="取消编辑" />
+  ) : activeDrawer === 'decision' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked || latestLoading} error={decisionError} notice={decisionError ? null : decisionNotice} disabled={!decisionChanged} submitLabel="保存续费决策" />
+  ) : activeDrawer === 'subscription' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked} error={subscriptionError} notice={subscriptionNotice} submitLabel="新增订阅" />
+  ) : activeDrawer === 'service' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked} error={serviceError} notice={serviceNotice} submitLabel="创建服务记录" />
+  ) : activeDrawer === 'domain' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked} error={domainError} notice={domainNotice} submitLabel="创建域名记录" />
+  ) : activeDrawer === 'validity-extension' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked} error={validityExtensionError} notice={validityExtensionNotice} disabled={subscriptionLoadFailed || activeSubscriptions.length !== 1} submitLabel="保存延长记录" />
+  ) : activeDrawer === 'monitoring-instance-link' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked} error={linkError} notice={linkNotice} disabled={linkControlsDisabled} submitLabel="关联监控实例" />
+  ) : activeDrawer === 'monitoring-instance-create' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked} error={monitoringCreateError} notice={monitoringCreateNotice} submitLabel="接入/升级 agent" submittingLabel="创建中…" />
+  ) : activeDrawer === 'experience' ? (
+    <VPSDialogActions formId={formId} onCancel={closeDrawer} submitting={writeBlocked} error={experienceError} notice={experienceNotice} submitLabel="写入经验记录" submittingLabel="记录中…" />
+  ) : undefined
+
   function drawerTitle(): string {
-    if (activeDrawer === 'decision') return '调整决策'
+    if (activeDrawer === 'decision') return '续费决策'
     if (activeDrawer === 'cancellation') return '取消/退役'
-    if (activeDrawer === 'facts') return '编辑基础资料'
-    if (activeDrawer === 'subscription') return '创建/更新订阅'
+    if (activeDrawer === 'facts') return '编辑 VPS 事实'
+    if (activeDrawer === 'subscription') return '新增订阅事实'
     if (activeDrawer === 'validity-extension') return '延长有效期'
     if (activeDrawer === 'monitoring-instance-create') return '接入/升级 agent'
     if (activeDrawer === 'monitoring-instance-link') return '关联已有监控实例'
     if (activeDrawer === 'experience') return '记录经验'
     if (activeDrawer === 'service') return '新增服务'
     if (activeDrawer === 'domain') return '新增域名'
-    if (activeDrawer === 'monitoring-instance-evidence') return '监控观测'
-    if (activeDrawer === 'services-detail') return '服务详情'
-    if (activeDrawer === 'domains-detail') return '域名详情'
+    if (activeDrawer === 'monitoring-instance-evidence') return '已关联监控实例'
+    if (activeDrawer === 'services-detail') return '已关联服务'
+    if (activeDrawer === 'domains-detail') return '已关联域名'
     if (activeDrawer === 'timeline-detail') return '资产历史'
     if (activeDrawer === 'facts-detail') return '基础资料'
     return 'VPS 操作'
@@ -1753,10 +1834,7 @@ export function LegacyVPSDetail({
             detail={detail}
             draft={decisionDraft}
             submitting={writeBlocked || latestLoading}
-            error={decisionError}
-            notice={decisionNotice}
-            decisionChanged={decisionChanged}
-            onCancel={closeDrawer}
+            formId={formId}
             onDraftChange={handleDecisionDraftChange}
             onFeedbackClear={clearDecisionFeedback}
             onSubmit={(event) => void handleDecisionSubmit(event)}
@@ -1813,9 +1891,7 @@ export function LegacyVPSDetail({
             providersLoading={selectors.providersLoading}
             providersError={selectors.providersError}
             submitting={writeBlocked || latestLoading}
-            error={factError}
-            notice={factNotice}
-            onCancel={closeDrawer}
+            formId={formId}
             onDraftChange={handleFactDraftChange}
             onSubmit={(event) => void handleFactSubmit(event)}
           />
@@ -1824,32 +1900,36 @@ export function LegacyVPSDetail({
     }
     if (activeDrawer === 'monitoring-instance-link') {
       return (
-        <VPSMonitoringInstanceLinkForm
-          detail={detail}
-          draft={linkDraft}
-          monitoring={selectors.monitoring}
-          monitoringInstancesLoading={selectors.monitoringInstancesLoading}
-          monitoringInstancesError={selectors.monitoringInstancesError}
-          controlsDisabled={linkControlsDisabled}
-          submitting={writeBlocked}
-          error={linkError}
-          notice={linkNotice}
-          onCancel={closeDrawer}
-          onDraftChange={handleLinkDraftChange}
-          onFeedbackClear={clearLinkFormFeedback}
-          onSubmit={(event) => void handleLinkSubmit(event)}
-        />
+        <>
+          {selectors.monitoringInstancesError ? (
+            <>
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{selectors.monitoringInstancesError}</p>
+              <Button onClick={retryMonitoringInstances}>重试加载</Button>
+            </>
+          ) : null}
+          <VPSMonitoringInstanceLinkForm
+            formId={formId}
+            detail={detail}
+            draft={linkDraft}
+            monitoring={selectors.monitoringInstancesError ? [] : selectors.monitoring}
+            monitoringInstancesLoading={selectors.monitoringInstancesLoading}
+            monitoringInstancesError={selectors.monitoringInstancesError}
+            controlsDisabled={linkControlsDisabled || Boolean(selectors.monitoringInstancesError)}
+            submitting={writeBlocked}
+            onDraftChange={handleLinkDraftChange}
+            onFeedbackClear={clearLinkFormFeedback}
+            onSubmit={(event) => void handleLinkSubmit(event)}
+          />
+        </>
       )
     }
     if (activeDrawer === 'monitoring-instance-create') {
       return monitoringCreateDraft ? (
         <VPSMonitoringInstanceCreateForm
+          formId={formId}
           detail={detail}
           draft={monitoringCreateDraft}
           submitting={writeBlocked}
-          error={monitoringCreateError}
-          notice={monitoringCreateNotice}
-          onCancel={closeDrawer}
           onDraftChange={handleMonitoringCreateDraftChange}
           onFeedbackClear={clearMonitoringCreateFeedback}
           onSubmit={(event) => void handleMonitoringInstanceCreateSubmit(event)}
@@ -1862,9 +1942,7 @@ export function LegacyVPSDetail({
           detail={detail}
           draft={subscriptionDraft}
           submitting={writeBlocked}
-          error={subscriptionError}
-          notice={subscriptionNotice}
-          onCancel={closeDrawer}
+          formId={formId}
           onDraftChange={handleSubscriptionDraftChange}
           onFeedbackClear={clearSubscriptionFeedback}
           onSubmit={(event) => void handleSubscriptionSubmit(event)}
@@ -1873,29 +1951,46 @@ export function LegacyVPSDetail({
     }
     if (activeDrawer === 'validity-extension') {
       return (
-        <VPSValidityExtensionForm
-          detail={detail}
-          activeSubscription={activeSubscription}
-          draft={validityExtensionDraft}
-          submitting={writeBlocked}
-          error={validityExtensionError}
-          notice={validityExtensionNotice}
-          onCancel={closeDrawer}
-          onDraftChange={handleValidityExtensionDraftChange}
-          onFeedbackClear={clearValidityExtensionFeedback}
-          onSubmit={(event) => void handleValidityExtensionSubmit(event)}
-        />
+        <>
+          {subscriptionLoadFailed ? (
+            <>
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{state.subscriptionsError}</p>
+              <Button onClick={() => retrySubscriptions()}>重试加载</Button>
+            </>
+          ) : (
+            <>
+              {activeSubscriptions.length > 1 ? (
+                <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
+                  当前 VPS 存在多个生效中订阅，无法直接延长有效期。
+                </p>
+              ) : null}
+              {activeSubscriptions.length === 0 ? (
+                <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+                  当前 VPS 没有生效中订阅，无法直接延长有效期。
+                </p>
+              ) : null}
+              <VPSValidityExtensionForm
+                formId={formId}
+                detail={detail}
+                activeSubscription={activeSubscription}
+                draft={validityExtensionDraft}
+                submitting={writeBlocked}
+                onDraftChange={handleValidityExtensionDraftChange}
+                onFeedbackClear={clearValidityExtensionFeedback}
+                onSubmit={(event) => void handleValidityExtensionSubmit(event)}
+              />
+            </>
+          )}
+        </>
       )
     }
     if (activeDrawer === 'experience') {
       return (
         <VPSExperienceLogForm
+          formId={formId}
           timeline={timeline}
           draft={experienceDraft}
           submitting={writeBlocked}
-          error={experienceError}
-          notice={experienceNotice}
-          onCancel={closeDrawer}
           onDraftChange={handleExperienceDraftChange}
           onFeedbackClear={clearExperienceFeedback}
           onSubmit={(event) => void handleExperienceSubmit(event)}
@@ -1904,44 +1999,58 @@ export function LegacyVPSDetail({
     }
     if (activeDrawer === 'service') {
       return (
-        <VPSServicesForm
-          draft={serviceDraft}
-          targets={selectors.targets}
-          targetsLoading={selectors.targetsLoading}
-          targetsError={selectors.targetsError}
-          submitting={writeBlocked}
-          error={serviceError}
-          notice={serviceNotice}
-          onCancel={closeDrawer}
-          onDraftChange={handleServiceDraftChange}
-          onFeedbackClear={clearServiceFeedback}
-          onSubmit={(event) => void handleServiceSubmit(event)}
-        />
+        <>
+          {selectors.targetsError ? (
+            <>
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{selectors.targetsError}</p>
+              <Button onClick={retryTargets}>重试加载</Button>
+            </>
+          ) : null}
+          <VPSServicesForm
+            formId={formId}
+            draft={serviceDraft}
+            targets={selectors.targetsError ? [] : selectors.targets}
+            targetsLoading={selectors.targetsLoading}
+            targetsError={selectors.targetsError}
+            submitting={writeBlocked}
+            onDraftChange={handleServiceDraftChange}
+            onFeedbackClear={clearServiceFeedback}
+            onSubmit={(event) => void handleServiceSubmit(event)}
+          />
+        </>
       )
     }
     if (activeDrawer === 'domain') {
       return (
-        <VPSDomainsForm
-          draft={domainDraft}
-          services={state.services}
-          targets={selectors.targets}
-          targetsLoading={selectors.targetsLoading}
-          targetsError={selectors.targetsError}
-          submitting={writeBlocked}
-          error={domainError}
-          notice={domainNotice}
-          onCancel={closeDrawer}
-          onDraftChange={handleDomainDraftChange}
-          onFeedbackClear={clearDomainFeedback}
-          onSubmit={(event) => void handleDomainSubmit(event)}
-        />
+        <>
+          {selectors.targetsError ? (
+            <>
+              <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{selectors.targetsError}</p>
+              <Button onClick={retryTargets}>重试加载</Button>
+            </>
+          ) : null}
+          <VPSDomainsForm
+            formId={formId}
+            draft={domainDraft}
+            services={state.services}
+            targets={selectors.targetsError ? [] : selectors.targets}
+            targetsLoading={selectors.targetsLoading}
+            targetsError={selectors.targetsError}
+            submitting={writeBlocked}
+            onDraftChange={handleDomainDraftChange}
+            onFeedbackClear={clearDomainFeedback}
+            onSubmit={(event) => void handleDomainSubmit(event)}
+          />
+        </>
       )
     }
     if (activeDrawer === 'monitoring-instance-evidence') {
       return (
         <VPSMonitoringInstanceLinksSection
+          vpsId={detail.vps_id}
           monitoring={detail.monitoring_instance_links ?? []}
           writeBlocked={writeBlocked}
+          readOnly={READ_ONLY_PREVIEW}
           unlinkingMonitoringInstanceId={unlinkingMonitoringInstanceId}
           pendingUnlinkMonitoringInstance={pendingUnlinkMonitoringInstance}
           linkFeedback={linkFeedback}
@@ -1961,6 +2070,7 @@ export function LegacyVPSDetail({
           services={state.services}
           error={serviceError}
           notice={serviceNotice}
+          readOnly={READ_ONLY_PREVIEW}
           onCreate={() => openDrawer('service')}
         />
       )
@@ -1969,10 +2079,13 @@ export function LegacyVPSDetail({
       return (
         <VPSDomainsSection
           domains={state.domains}
+          services={state.services}
           error={domainError}
           notice={domainNotice}
+          readOnly={READ_ONLY_PREVIEW}
           onCreate={() => openDrawer('domain')}
         />
+
       )
     }
     if (activeDrawer === 'timeline-detail') {
@@ -2015,7 +2128,7 @@ export function LegacyVPSDetail({
   const pageFeedbackItems = pageFeedbackCandidates.filter(isPageFeedbackItem)
 
   return (
-    <div className="page-stack asset-page vps-detail-page">
+    <div className="page asset-page vps-detail-page vps-detail-workspace">
       {currentWriteOwner && currentWriteOwner.viewToken !== viewToken ? (
         <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
           操作处理中，请等待当前写入完成。
@@ -2027,6 +2140,15 @@ export function LegacyVPSDetail({
         isArchived={isArchived}
         lifecycleSubmitting={lifecycleSubmitting}
         writeBlocked={writeBlocked}
+        subscriptions={state.subscriptions}
+        subscriptionsError={state.subscriptionsError}
+        services={state.services}
+        domains={state.domains}
+        recordsPending={!state.detail}
+        ipQuality={state.ipQuality}
+        ipQualityError={state.ipQualityError}
+        monitoringInstances={detail.monitoring_instance_links ?? []}
+
         onDecisionEdit={() => openDrawer('decision')}
         onTimelineOpen={() => openDrawer('timeline-detail')}
         onServicesOpen={() => openDrawer('services-detail')}
@@ -2061,23 +2183,17 @@ export function LegacyVPSDetail({
               {item.action ? (
                 <>
                   {' '}
-                  <Link className="text-link" to={item.action.to}>{item.action.label}</Link>
+                  <Link
+                    className="text-link"
+                    to={item.action.to}
+                    {...(item.action.to.startsWith('/vps/') || item.action.to.startsWith('/monitoring/') || item.action.to.startsWith('/targets/') ? { state: location.state } : {})}
+                  >{item.action.label}</Link>
                 </>
               ) : null}
             </p>
           ))}
         </div>
       ) : null}
-
-      <VPSRelatedOverview
-        items={overviewModel.relatedItems}
-        onOpenModal={openDrawer}
-        onMonitoringAgent={openMonitoringAgentWorkbench}
-      />
-
-      <VPSSingleMachineLedger ledger={overviewModel.ledger} onOpenModal={openDrawer} />
-
-      <VPSIPQualitySection vpsId={detail.vps_id} report={state.ipQuality} error={state.ipQualityError} />
 
       {lifecycleConfirmingAction ? (
         <ActionConfirmationModal
@@ -2108,7 +2224,7 @@ export function LegacyVPSDetail({
         >
           {lifecycleConfirmingAction === 'archive' ? (
             <div className="asset-lifecycle-confirm">
-              <p className="asset-lifecycle-confirm__eyebrow">ARCHIVE REVIEW</p>
+              <p className="asset-lifecycle-confirm__eyebrow">归档审查</p>
               {archiveReviewLoading ? (
                 <p className="asset-lifecycle-confirm__callouts">正在检查归档资格…</p>
               ) : archiveBlockers.length > 0 ? (
@@ -2147,19 +2263,24 @@ export function LegacyVPSDetail({
         </ActionConfirmationModal>
       ) : null}
 
-      <Modal
+      <VPSDetailDialog
+        {...(drawerTemplate ? { template: drawerTemplate } : {})}
+        footer={drawerFooter}
         open={activeDrawer !== null}
         onClose={closeDrawer}
         title={drawerTitle()}
         ariaLabel={drawerTitle()}
         persistent={activeDrawer != null && !activeDrawer.endsWith('-detail') && activeDrawer !== 'monitoring-instance-evidence'}
-        {...(activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'monitoring-instance-evidence' || activeDrawer === 'facts' || activeDrawer === 'cancellation' || activeDrawer === 'subscription' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-create') ? { size: LARGE_MODAL_SIZE } : {})}
-        {...(activeDrawer === 'cancellation' ? { contentClassName: 'modal-content--asset-cancel' } : {})}
+        {...(activeDrawer === 'subscription' || (drawerTemplate === undefined && activeDrawer != null && (activeDrawer.endsWith('-detail') || activeDrawer === 'cancellation' || activeDrawer === 'validity-extension' || activeDrawer === 'monitoring-instance-create')) ? { size: LARGE_MODAL_SIZE } : {})}
+        contentClassName={activeDrawer === 'facts' ? 'vps-dialog--facts'
+          : activeDrawer === 'services-detail' ? 'vps-dialog--services'
+            : activeDrawer === 'domains-detail' ? 'vps-dialog--domains'
+              : activeDrawer === 'cancellation' ? 'modal-content--asset-cancel' : ''}
       >
         <div className="vps-detail-modal">
           {renderDrawerContent()}
         </div>
-      </Modal>
+      </VPSDetailDialog>
     </div>
   )
 }

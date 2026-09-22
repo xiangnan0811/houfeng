@@ -13,11 +13,11 @@ import (
 )
 
 type fakeMonitoringInstanceSparklinesRepository struct {
-	result map[string]map[string][]float64
+	result map[string]map[string][]*float64
 	err    error
 }
 
-func (f *fakeMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparklines(_ context.Context, _ []string, _ time.Time, _ int) (map[string]map[string][]float64, error) {
+func (f *fakeMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparklines(_ context.Context, _ []string, _ time.Time, _ int) (map[string]map[string][]*float64, error) {
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -26,7 +26,7 @@ func (f *fakeMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSparkl
 
 func TestMonitoringInstanceSparklinesHandlerBasic(t *testing.T) {
 	repo := &fakeMonitoringInstanceSparklinesRepository{
-		result: map[string]map[string][]float64{
+		result: map[string]map[string][]*float64{
 			"mi_001": {
 				"cpu_usage_pct": make24(12.5, 13.0, 14.2),
 				"mem_used_pct":  make24(65.0, 64.2, 63.8),
@@ -52,7 +52,7 @@ func TestMonitoringInstanceSparklinesHandlerBasic(t *testing.T) {
 	}
 
 	var body struct {
-		MonitoringInstances map[string]map[string][]float64 `json:"monitoring_instances"`
+		MonitoringInstances map[string]map[string][]*float64 `json:"monitoring_instances"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
@@ -79,9 +79,53 @@ func TestMonitoringInstanceSparklinesHandlerBasic(t *testing.T) {
 	}
 }
 
+func TestMonitoringInstanceSparklinesHandlerPreservesNullAndZero(t *testing.T) {
+	zero := 0.0
+	nonzero := 15.5
+	repo := &fakeMonitoringInstanceSparklinesRepository{
+		result: map[string]map[string][]*float64{
+			"mi_001": {
+				"cpu_usage_pct": {&zero, nil, &nonzero},
+			},
+		},
+	}
+
+	handler := handlers.MonitoringInstanceSparklines(repo)
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/monitoring-instances/sparklines?metrics=cpu_usage_pct&window=24h&downsample=3", nil)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	var body struct {
+		MonitoringInstances map[string]map[string][]*float64 `json:"monitoring_instances"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	values := body.MonitoringInstances["mi_001"]["cpu_usage_pct"]
+	if len(values) != 3 {
+		t.Fatalf("values length = %d, want 3", len(values))
+	}
+	if values[0] == nil || *values[0] != 0 {
+		t.Fatalf("zero bucket = %#v, want non-nil pointer to 0", values[0])
+	}
+	if values[1] != nil {
+		t.Fatalf("empty bucket = %v, want nil", *values[1])
+	}
+	if values[2] == nil || *values[2] != nonzero {
+		t.Fatalf("nonzero bucket = %#v, want %v", values[2], nonzero)
+	}
+	if !strings.Contains(recorder.Body.String(), `"cpu_usage_pct":[0,null,15.5]`) {
+		t.Fatalf("response should serialize zero and empty buckets distinctly, got %s", recorder.Body.String())
+	}
+}
+
 func TestMonitoringInstanceSparklinesHandlerEmpty(t *testing.T) {
 	repo := &fakeMonitoringInstanceSparklinesRepository{
-		result: map[string]map[string][]float64{},
+		result: map[string]map[string][]*float64{},
 	}
 
 	handler := handlers.MonitoringInstanceSparklines(repo)
@@ -146,10 +190,12 @@ func TestMonitoringInstanceSparklinesHandlerInvalidMetrics(t *testing.T) {
 }
 
 // make24 creates a 24-element slice with the given values repeated.
-func make24(values ...float64) []float64 {
-	out := make([]float64, 24)
-	for i := range out {
-		out[i] = values[i%len(values)]
+func make24(values ...float64) []*float64 {
+	storage := make([]float64, 24)
+	out := make([]*float64, len(storage))
+	for i := range storage {
+		storage[i] = values[i%len(values)]
+		out[i] = &storage[i]
 	}
 	return out
 }

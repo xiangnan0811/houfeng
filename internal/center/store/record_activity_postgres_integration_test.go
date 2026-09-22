@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -405,5 +406,176 @@ func TestPostgresIntegrationRecordActivitySubjectPageKeepsFixedWatermark(t *test
 	}
 	if len(pageFresh.Events) != 5 {
 		t.Fatalf("refreshed page length = %d, want 5", len(pageFresh.Events))
+	}
+}
+
+func TestPostgresIntegrationActivityListHydratesPersistedRouteReferences(t *testing.T) {
+	ctx := context.Background()
+	pool := openActivityTestPool(t, ctx)
+	base := time.Date(2026, 8, 19, 14, 0, 0, 0, time.UTC)
+
+	projectScope, err := activity.ProjectAuthScope(recordauth.ProjectIDDefault)
+	if err != nil {
+		t.Fatalf("ProjectAuthScope() error = %v", err)
+	}
+	subject := activity.SubjectSnapshot{
+		Kind:     records.SubjectKindVPS,
+		SourceID: "vps_7c2a4e18b09d5f31",
+		Role:     records.RelationRoleAffected,
+		Primary:  true,
+		Identity: map[string]string{"display_name": "hk-edge-01"},
+	}
+
+	recordSource := activity.SourceIdentity{
+		Kind:    activity.SourceKindRecordDomain,
+		EventID: "rac_refs_record",
+		Version: 1,
+	}
+	recordActivityID, err := activity.NewActivityID(
+		activityTestNamespace(), recordSource, activity.EventKindRecordRevised,
+	)
+	if err != nil {
+		t.Fatalf("mint record activity id: %v", err)
+	}
+	recordCandidate := activity.CandidateEvent{
+		ActivityID: recordActivityID,
+		Source:     recordSource,
+		EventKind:  activity.EventKindRecordRevised,
+		EventAt:    base,
+		RecordedAt: base,
+		Subjects:   []activity.SubjectSnapshot{subject},
+		Presentation: activity.Presentation{
+			Version: activity.PresentationVersionV1,
+			Title:   "记录已修订",
+		},
+		Severity:   "info",
+		RecordID:   "rec_activityrefs",
+		RevisionID: "rrv_activityrefs",
+		AuthScope:  projectScope,
+	}
+	recordCandidate.CanonicalHash = recordCandidate.ComputeCanonicalHash()
+
+	evidenceSource := activity.SourceIdentity{
+		Kind:    activity.SourceKindEvidenceSnapshot,
+		EventID: "evs_refs_evidence",
+		Version: 1,
+	}
+	evidenceActivityID, err := activity.NewActivityID(
+		activityTestNamespace(), evidenceSource, activity.EventKindEvidenceCaptured,
+	)
+	if err != nil {
+		t.Fatalf("mint evidence activity id: %v", err)
+	}
+	evidenceCandidate := activity.CandidateEvent{
+		ActivityID: evidenceActivityID,
+		Source:     evidenceSource,
+		EventKind:  activity.EventKindEvidenceCaptured,
+		EventAt:    base.Add(time.Minute),
+		RecordedAt: base.Add(time.Minute),
+		Subjects:   []activity.SubjectSnapshot{subject},
+		Presentation: activity.Presentation{
+			Version: activity.PresentationVersionV1,
+			Title:   "证据已捕获",
+			Summary: "monitoring.host.v1",
+		},
+		Severity:   "info",
+		EvidenceID: "evs_activityrefs",
+		AuthScope:  projectScope,
+	}
+	evidenceCandidate.CanonicalHash = evidenceCandidate.ComputeCanonicalHash()
+
+	if _, err := PublishActivityBatch(ctx, pool, 1, []activity.CandidateEvent{
+		recordCandidate, evidenceCandidate,
+	}); err != nil {
+		t.Fatalf("publish route-reference candidates: %v", err)
+	}
+	repository, err := NewActivityProjectionRepository(pool)
+	if err != nil {
+		t.Fatalf("new repository: %v", err)
+	}
+	head, err := repository.LoadPublishedHead(ctx)
+	if err != nil {
+		t.Fatalf("load published head: %v", err)
+	}
+	query, err := activity.NormalizeQuery(activity.Query{
+		Subject: activity.SubjectRef{
+			Kind: records.SubjectKindVPS, SourceID: subject.SourceID,
+		},
+		View:  activity.ViewActivity,
+		Limit: 50,
+	})
+	if err != nil {
+		t.Fatalf("normalize query: %v", err)
+	}
+	page, err := repository.ListSubjectPage(ctx, activity.SubjectPageRequest{
+		Query:            query,
+		Generation:       head.Generation,
+		AsOf:             head.PublishedIngestSequence,
+		Limit:            50,
+		AuthUnrestricted: true,
+	})
+	if err != nil {
+		t.Fatalf("list subject page: %v", err)
+	}
+	if len(page.Events) != 2 {
+		t.Fatalf("listed %d events, want 2: %+v", len(page.Events), page.Events)
+	}
+
+	byKind := make(map[activity.EventKind]activity.Event, len(page.Events))
+	for _, event := range page.Events {
+		byKind[event.EventKind] = event
+	}
+	recordEvent, ok := byKind[activity.EventKindRecordRevised]
+	if !ok {
+		t.Fatalf("record revision event missing from page: %+v", page.Events)
+	}
+	if recordEvent.RecordID != recordCandidate.RecordID ||
+		recordEvent.RevisionID != recordCandidate.RevisionID ||
+		recordEvent.EvidenceID != "" {
+		t.Fatalf("record route refs = record %q revision %q evidence %q, want record/revision only",
+			recordEvent.RecordID, recordEvent.RevisionID, recordEvent.EvidenceID)
+	}
+	evidenceEvent, ok := byKind[activity.EventKindEvidenceCaptured]
+	if !ok {
+		t.Fatalf("evidence event missing from page: %+v", page.Events)
+	}
+	if evidenceEvent.RecordID != "" ||
+		evidenceEvent.RevisionID != "" ||
+		evidenceEvent.EvidenceID != evidenceCandidate.EvidenceID {
+		t.Fatalf("evidence route refs = record %q revision %q evidence %q, want evidence only",
+			evidenceEvent.RecordID, evidenceEvent.RevisionID, evidenceEvent.EvidenceID)
+	}
+
+	wire, err := json.Marshal(page.Events)
+	if err != nil {
+		t.Fatalf("marshal listed events: %v", err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(wire, &decoded); err != nil {
+		t.Fatalf("decode listed events: %v", err)
+	}
+	if len(decoded) != 2 {
+		t.Fatalf("decoded %d events, want 2", len(decoded))
+	}
+	for _, item := range decoded {
+		switch item["event_kind"] {
+		case string(activity.EventKindRecordRevised):
+			if item["record_id"] != recordCandidate.RecordID ||
+				item["revision_id"] != recordCandidate.RevisionID {
+				t.Fatalf("record JSON refs = %#v, want persisted refs", item)
+			}
+			if _, present := item["evidence_snapshot_id"]; present {
+				t.Fatalf("record JSON unexpectedly carries evidence ref: %#v", item)
+			}
+		case string(activity.EventKindEvidenceCaptured):
+			if item["evidence_snapshot_id"] != evidenceCandidate.EvidenceID {
+				t.Fatalf("evidence JSON ref = %#v, want %q", item["evidence_snapshot_id"], evidenceCandidate.EvidenceID)
+			}
+			if _, present := item["record_id"]; present {
+				t.Fatalf("evidence JSON unexpectedly carries record ref: %#v", item)
+			}
+		default:
+			t.Fatalf("unexpected JSON event: %#v", item)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
+import { Button } from '../components/atoms'
 import { IPQualityDashboard } from '../components/ip-quality/IPQualityDashboard'
 import { PageState } from '../components/PageState'
 import { ApiError, getVPSIPQuality, getVPSIPQualityReport } from '../lib/api'
@@ -26,9 +27,11 @@ function describeError(error: unknown, fallback: string): string {
 
 export function VPSIPQualityPage() {
   const { vpsId } = useParams()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const reportId = searchParams.get('report_id')?.trim() || ''
   const requestKey = vpsId ? `${vpsId}:${reportId}` : null
+  const [reloadKey, setReloadKey] = useState(0)
   const [state, setState] = useState<PageLoadState>(INITIAL_STATE)
 
   useEffect(() => {
@@ -47,15 +50,16 @@ export function VPSIPQualityPage() {
       })
 
     return () => { cancelled = true }
-  }, [vpsId, reportId, requestKey])
+  }, [vpsId, reportId, requestKey, reloadKey])
 
   const detailPath = vpsId ? `/vps/${encodeURIComponent(vpsId)}` : '/vps'
+  const returnLink = <Link className="btn sm secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
 
   if (!vpsId) {
     return (
       <PageState
         kind="empty"
-        eyebrow="IP QUALITY"
+        eyebrow="IP 质量"
         title="缺少 VPS ID"
         description="需要从 VPS 详情页进入对应 IP 质量报告。"
         action={<Link className="btn sm secondary" to="/vps">返回 VPS 列表</Link>}
@@ -64,17 +68,25 @@ export function VPSIPQualityPage() {
   }
 
   if (state.requestKey !== requestKey) {
-    return <PageState kind="loading" eyebrow="IP QUALITY" title="正在加载 IP 质量报告" />
+    return <PageState kind="loading" eyebrow="IP 质量" title="正在加载 IP 质量报告" />
   }
 
   if (state.error) {
     return (
       <PageState
         kind="error"
-        eyebrow="IP QUALITY"
+        eyebrow="IP 质量"
         title="IP 质量报告加载失败"
         technicalSummary={state.error}
-        action={<Link className="btn sm secondary" to={detailPath}>返回 VPS 详情</Link>}
+        action={(
+          <>
+            <Button size="sm" onClick={() => {
+              setState(INITIAL_STATE)
+              setReloadKey((key) => key + 1)
+            }}>重试</Button>
+            {returnLink}
+          </>
+        )}
       />
     )
   }
@@ -86,10 +98,10 @@ export function VPSIPQualityPage() {
     return (
       <PageState
         kind="empty"
-        eyebrow="IP QUALITY"
+        eyebrow="IP 质量"
         title="尚无可展示的 IP 质量事实"
         description="center 会保留 failure 诊断，但用户侧报告只展示真实出口 IP 事实。等待 agent 下次低频采集后再查看。"
-        action={<Link className="btn sm secondary" to={detailPath}>返回 VPS 详情</Link>}
+        action={returnLink}
       />
     )
   }

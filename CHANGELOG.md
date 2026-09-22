@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* **web:** bring the accepted compact VPS dialog design into the real frontend: common facts plus one optional section, searchable grouped country input, retained hidden IPv6/SSH values, native usage-state/importance controls, and read-only service/domain dossiers with full URL copy/open actions. Preserve real facts saving, conflicts and existing create flows; service/domain editing APIs remain deferred.
+* **web:** isolate facts and dossier styles under the VPS owner. Rebase measured source/built-CSS ceilings for the two local surfaces and entry-JS gzip from 110738 to 111670 bytes (+932); retain existing color, duplicate-selector, importance, font and async-JS ceilings.
+
+* **web:** add shared-state VPS directory and table views with persistent presentation preference, URL-preserved search and selection, and an inline asset inspector. Existing VPS management and onboarding destinations remain shared.
+* **web:** separate compact, collapsible VPS quick inspection from a shared independent detail workspace, organize full detail by responsibility, and retain inventory context on return navigation.
+* **web:** expand table quick inspection beneath the selected row, support global dark/light themes in both VPS layouts, and remove redundant inventory explanatory copy.
+* **web:** unify both VPS layouts with the shared shell and component visual language, replacing independent palettes and serif headings with common semantic tokens and layout-based view names.
+* **web:** unify both VPS detail capability modes with compact identity headers, existing update/observation times, business/renewal and monitoring evidence first, quieter section navigation, and grouped management entries without changing management contracts.
+* **web:** rebuild VPS detail as a compact infrastructure asset-and-facts workspace: flexible connection facts beside a bounded billing summary, independent observation/resource/activity sections, true subscription names with inline amount/cadence, restrained typography, adjacent copy/actions, and less repeated status/title text. Preserve shared light/dark surfaces, inventory return context, business tabs, state rules and default-off read-only preview boundaries.
+* **web:** refine VPS detail with shared observation columns, subordinate source-error explanations, clearer content surfaces, common fact rendering and lightweight empty resources. Preserve existing result/read-outcome/freshness distinctions and separate activity data time from event time without changing APIs or business state rules.
+* **web:** flatten VPS association modals into full-value, labelled rows; separate monitoring configuration from observed health, give resources two content layers with independent actions, and keep long subscription/SSH fields readable. Clarify scoped empty entries, single unlinked-monitoring attention and registered renewal facts versus pending cancellation plans without changing business-state aggregation.
+
+### Bug Fixes
+
+* **web:** reset stale inventory scroll on detail entry, close the management menu reliably from its trigger, and preserve the mobile overflow menu's accessible name.
+* **web:** remove unreachable legacy styles, improve inventory and account-label contrast, and move column-width defaults ref updates out of render.
+* **web:** improve shared tab and light-theme secondary-text contrast instead of maintaining VPS-only color overrides.
+* **web:** keep the VPS detail management menu inside narrow viewports, restore fallback keyboard dismissal and post-dialog focus, and remove obsolete fact-grid spans that created implicit columns.
+* **web:** avoid healthy overall runtime claims from incomplete observations, deduplicate equivalent freshness timestamps, and make copy success/failure feedback and resource-row hover contrast consistent.
+* **web:** preserve inventory context through VPS business tabs and filter changes, distinguish system-summary freshness from asset observations, retain valid monitoring findings during IP-source failures, and improve narrow-screen action targets and shared control accessibility.
+* **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
+* **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
+
 ## [0.79.6](https://github.com/xiangnan0811/houfeng/compare/v0.79.5...v0.79.6) (2026-09-01)
 
 

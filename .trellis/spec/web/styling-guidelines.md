@@ -133,7 +133,7 @@
 - **不要**为某个 page 单独建 `.css` 文件（LoginPage 是历史例外），也不要新建 `misc.css` / `legacy-misc.css` / “final overrides” bucket。无法归属的规则先作为删除候选。
 - loading / error / empty 的共享页面状态样式统一用 `.page-state` 系列，落在 `styles/partials/page.css`。页面不要复制 `.page-panel` + 裸文本；空态如果需要当前装饰和 CTA，使用 `PageState surface="empty"` 复用 `.empty-state.page-state`。
 
-## Scenario: CSS owner manifest 与 AST budget ratchet
+## Scenario: CSS owner manifest 与 AST budget policy
 
 ### 1. Scope / Trigger
 
@@ -141,8 +141,8 @@
 
 ### 2. Signatures
 
-- `npm --prefix web run css:analyze`：读取 `web/css-owners.json`、`web/css-budget.json` 与 fresh `web/dist/**/*.css`，输出文本摘要；owner/config/预算失败时返回非零。
-- `node scripts/analyze-web-css.mjs --format json|text [--web-root PATH --owners PATH --budget PATH --dist PATH]`：供 synthetic fixture 与 `make verify-web` 的 CI gate 调用。
+- `npm --prefix web run css:analyze`：读取 `web/css-owners.json`、`web/css-budget.json` 与 fresh `web/dist/**/*.css`，输出文本摘要。首版受控试用使用 `--budget-policy advisory`：数值超限输出 `WARNING:` 与 metric/actual/max，退出 0；读取、JSON/config、CSS 解析与 owner 错误仍返回 1。
+- `node scripts/analyze-web-css.mjs --format json|text [--budget-policy enforce|advisory] [--web-root PATH --owners PATH --budget PATH --dist PATH]`：直接 CLI 默认 `enforce`；严格审计可显式加 `--budget-policy enforce`。`make verify-web` 调用的是上一条 advisory npm 入口，不是默认严格 CLI。JSON 顶层 `budgetPolicy` 与 `budget.status` 分离；advisory 超限仍报告 `fail`。
 - `web/css-owners.json`：`version=1`，恰好包含 app-shell、dashboard、assets、vps、observability、settings-subscriptions、shared-atoms-page 七个 key。
 - `web/css-budget.json`：`version=1`，固定 source files/bytes、rules、declarations、repeated selector texts、literal colors、`!important`、production raw/gzip 九个上限。
 
@@ -152,8 +152,8 @@
 - `index.css` 的每个 partial import 必须紧随唯一 `/* owner: <name> */` section，所有 imported partial 必须含非 comment node；manifest 与 owner map 的 partial 集合完全相等。
 - production selector branch 的每个 class 必须由非测试 TS/TSX/HTML 字符串 inventory 或明确动态 modifier prefix 拥有。不可达 branch 删除；同一 rule 仍可达的 selector branch 保留。
 - 同一 selector 在同一 at-rule context 只有一个定义。唯一 allowlist 是入口包与 Login 懒加载包各自需要的 root `.login-page`；media/theme context 不做机械合并。
-- 预算只能随有证据的清理降低；不得为让 CI 变绿而抬高上限。production 指标必须在 fresh build 后测量。
-- 九项上限当前全部精确等于实测值（2026-08-18 复核：source 26 文件 / 310967 字节 / 2106 规则、production 293189 raw / 38109 gzip），因此**新页面的净新增 CSS 预算是 0**：既不能往 `index.css` 加规则，也不能新增第 27 个 CSS 文件绕过。这是 ratchet 的设计意图而不是缺陷——新页面应当由 `page.css` / `atoms.css` 既有词汇组合出来，Child 5 的整个 Markdown 工作区就是零新增 CSS 交付的。
+- 首版受控试用保留九项预算为历史参考线，不重新基线化、不抬高上限来让 CI 变绿；production 指标必须在 fresh build 后测量。
+- 数值超限是可见提示，不是本阶段的试用阻塞；不得将历史“净新增 CSS 预算为 0”当作当前强制门禁。优化由实际慢页面或操作阻塞证据触发，不为追平旧数字继续 CSS 优化。owner 唯一性、语法、可达性与行为/安全合同不降级。
 - 想靠删死代码腾预算前先量：`cssReachabilityContract` 已经保证每个 class 都被 TS/TSX/HTML inventory 或声明的动态 modifier prefix 拥有，2026-08-18 实测可回收的"疑似无引用"规则只有约 12KB raw，且绝大多数是动态拼接的 `--tone` 类修饰符，属于假阳性。真要腾空间，走独立的、有视觉回归保护的整合任务，不要塞进功能 child。
 - route CSS 只有在 owner 真正 route-private、无 FOUC、workflow/browser gate 通过且入口 raw+gzip 下降时保留；跨 VPS/Subscriptions/Providers/Archive 共享的 Assets owner 不得伪装成 Asset Decisions 单路由 CSS。
 
@@ -162,7 +162,7 @@
 | 条件 | 结果 |
 | --- | --- |
 | CSS 未配置 owner，或同一路径配置两个 owner | analyzer 返回 1，并列出路径与 exactly one owner 错误 |
-| 任一九项 actual > max | analyzer 返回 1，输出 metric、actual、max |
+| 任一九项 actual > max | 默认/显式 enforce 返回 1；advisory 返回 0 并在 stderr 加 `WARNING:`；两者均保留 metric、actual、max 与 `budget.status=fail` |
 | budget/owner JSON 缺字段、类型错误或引用未知 CSS | analyzer 返回 1，不回退默认值 |
 | analyzer 的 `--dist` 不存在 | 返回非零；正式 production 分析不得使用陈旧/虚构产物 |
 | Vitest 仅检查 source、且运行阶段早于 build | 为该测试传入已存在的空临时 `--dist`；不要依赖本机上次留下的 `web/dist` |
@@ -171,13 +171,13 @@
 
 ### 5. Good / Base / Bad Cases
 
-- Good：先 fresh build，再运行 analyzer；指标低于现有 budget 后把 limits 精确降至新值，并用 9 route × 3 viewport 复验。
+- Good：先 fresh build，再运行 npm analyzer；保留历史限值与超限证据，区分数值 warning 和结构错误。需要严格审计时显式运行 enforce CLI。
 - Base：只改一个已归属 owner 的规则，focused AST tests 通过，最终仍跑 build + analyzer。
 - Bad：把新规则塞进 `misc.css`；删除整个含可达 branch 的 selector list；测试阶段读取偶然存在的旧 `dist`；无证据提高 budget。
 
 ### 6. Tests Required
 
-- `cssAnalyzerContract.test.ts`：JSON inventory、唯一 owner、超预算 fail-closed、同 context 唯一性与 Login bundle allowlist。
+- `cssAnalyzerContract.test.ts`：JSON inventory、唯一 owner、默认 enforce 超限失败与 advisory 超限成功且测量不变、advisory owner 错误仍失败、非法 policy、同 context 唯一性与 Login bundle allowlist。
 - `cssReachabilityContract.test.ts`：扫描真实 production glob，并列出 file/line/selector/unowned class。
 - `indexCssContract.test.ts`：递归本地 import graph、cycle/owner/non-empty partial、selector/context/declaration 唯一性与 synthetic first-match loophole。
 - 提交前运行 `make verify-web`（production build → bundle/font → `css:analyze`）；涉及布局删除/重排时再跑 `npm --prefix web run test:e2e`，断言 1440/1024/390 的 document、关键命令、局部 scroll owner 与 console/network/CSP。
@@ -201,8 +201,8 @@
 // Wrong: Vitest 先于 build，却读取默认 web/dist，clean CI 会 ENOENT。
 spawnSync(process.execPath, [analyzerPath, '--format', 'json'])
 
-// Correct: source-only contract 显式传入测试创建的空 dist；正式 analyzer 仍 fail closed。
-spawnSync(process.execPath, [analyzerPath, '--dist', emptyDist, '--format', 'json'])
+// Correct: source-only contract 用空 dist 与 advisory 解耦数值预算；仍断言结构合同与 exit 0。
+spawnSync(process.execPath, [analyzerPath, '--dist', emptyDist, '--format', 'json', '--budget-policy', 'advisory'])
 ```
 
 ---

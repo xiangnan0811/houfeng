@@ -127,7 +127,7 @@ export function PortfolioWorkbench({
 
   return (
     <>
-      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone} animate-in d1`} aria-label="资产组合决策当前判断">
+      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone}`} aria-label="资产组合决策当前判断">
         <div className="asset-decision-command-summary__lead">
           <span className="section-heading__eyebrow">{portfolioLead.eyebrow}</span>
           <h2 className="asset-decision-command-summary__title">{portfolioLead.title}</h2>
@@ -170,7 +170,7 @@ export function PortfolioWorkbench({
         </div>
       )}
 
-      <div className="page-panel--scan page-panel--scan--single animate-in d2">
+      <div className="page-panel--scan page-panel--scan--single">
         <section className="page-panel asset-decision-command">
           <div className="asset-decision-board__header">
             <div>

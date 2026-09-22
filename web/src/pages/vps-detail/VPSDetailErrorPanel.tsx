@@ -8,10 +8,10 @@ type VPSDetailErrorPanelProps = {
 
 export function VPSDetailErrorPanel({ error, onBack }: VPSDetailErrorPanelProps) {
   return (
-    <div className="page-stack asset-page vps-detail-page">
+    <div className="page asset-page vps-detail-page vps-detail-workspace">
       <PageState
         kind="error"
-        eyebrow="VPS DETAIL"
+        eyebrow="VPS 详情"
         title="VPS 详情不可用"
         description={error ?? 'VPS 不存在'}
         technicalSummary={error}

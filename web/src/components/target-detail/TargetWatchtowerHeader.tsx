@@ -1,5 +1,4 @@
-import { StatusBadge } from '../StatusBadge'
-import { Hostname, Timestamp } from '../atoms'
+import { Badge, Hostname } from '../atoms'
 import { Button } from '../atoms/Button'
 import { formatLabelList } from '../../lib/format'
 import type { TargetRecord } from '../../lib/types'
@@ -31,6 +30,7 @@ type Props = {
   target: TargetRecord
   runtimeSubmitting: boolean
   disabled?: boolean
+  readOnly?: boolean
   onRuntimeAction: (action: TargetRuntimeAction) => void
   registerActionRef: (
     action: TargetRuntimeAction,
@@ -44,6 +44,7 @@ export function TargetWatchtowerHeader({
   target,
   runtimeSubmitting,
   disabled = false,
+  readOnly = false,
   onRuntimeAction,
   registerActionRef,
   onOpenHistory,
@@ -55,29 +56,64 @@ export function TargetWatchtowerHeader({
   const labelText = formatLabelList(target.labels)
   const execLabelText = formatLabelList(target.execution_monitoring_instance_labels)
   const runtimeActions = targetRuntimeActions(target)
+  const controlBadge =
+    target.run_status === '维护中'
+      ? { label: '维护中', tone: 'maintenance' as const }
+      : target.run_status === '暂停'
+        ? { label: '暂停', tone: 'offline' as const }
+        : target.run_status === '已归档'
+          ? { label: '已归档', tone: 'offline' as const }
+          : null
 
   return (
-    <header className="watchtower-header" role="banner" aria-label="目标身份与操作">
-      <div className="watchtower-header__row1">
-        <div className="watchtower-header__title-block">
-          <h1>{target.name}</h1>
-          <div className="badge-row">
-            <StatusBadge label={target.run_status} />
-            <StatusBadge label={target.current_health_status} />
-            <StatusBadge label={target.target_type} />
-          </div>
+    <header className="target-detail-header" role="banner" aria-label="目标身份与操作">
+      <div className="target-detail-header__identity">
+        <div className="target-detail-header__title-row">
+          <h1 className="target-detail-header__title">{target.name}</h1>
+          {controlBadge ? (
+            <Badge variant="state" tone={controlBadge.tone}>{controlBadge.label}</Badge>
+          ) : null}
+          {readOnly ? <span className="monitoring-detail-readonly">只读预览</span> : null}
         </div>
-        <div className="watchtower-header__actions-block">
-          <span className="watchtower-header__freshness" aria-label="数据新鲜度">
-            最近成功{' '}
-            <Timestamp value={target.last_success_at ?? null} mode="relative" />
-            {' · '}最近失败{' '}
-            <Timestamp value={target.last_failure_at ?? null} mode="relative" />
-          </span>
-          <div className="watchtower-header__actions">
-            <Button variant="ghost" size="sm" onClick={onOpenHistory}>
-              查看历史
-            </Button>
+        <dl className="target-detail-identity">
+          <div className="target-detail-identity__item">
+            <dt>类型</dt>
+            <dd>{target.target_type}</dd>
+          </div>
+          <div className="target-detail-identity__item">
+            <dt>主机</dt>
+            <dd><Hostname>{hostDisplay}</Hostname></dd>
+          </div>
+          {target.group ? (
+            <div className="target-detail-identity__item">
+              <dt>分组</dt>
+              <dd>{target.group}</dd>
+            </div>
+          ) : null}
+          {target.labels.length > 0 ? (
+            <div className="target-detail-identity__item">
+              <dt>标签</dt>
+              <dd>{labelText}</dd>
+            </div>
+          ) : null}
+          {target.execution_monitoring_instance_labels.length > 0 ? (
+            <div className="target-detail-identity__item">
+              <dt>执行</dt>
+              <dd>{execLabelText}</dd>
+            </div>
+          ) : null}
+          <div className="target-detail-identity__item">
+            <dt>ID</dt>
+            <dd><Hostname truncate maxChars={14}>{target.target_id}</Hostname></dd>
+          </div>
+        </dl>
+      </div>
+      <div className="target-detail-header__end">
+        <div className="target-detail-header__actions">
+          <Button variant="ghost" size="sm" onClick={onOpenHistory}>
+            查看历史
+          </Button>
+          {readOnly ? null : runtimeActions.length > 0 ? (
             <details className="watchtower-actions-menu">
               <summary aria-label="运行控制操作">…</summary>
               <div className="watchtower-actions-menu__panel">
@@ -92,52 +128,15 @@ export function TargetWatchtowerHeader({
                     {label}
                   </button>
                 ))}
-                <button type="button" onClick={onOpenMaintenance}>
-                  资料维护
-                </button>
               </div>
             </details>
-          </div>
+          ) : null}
+          {readOnly ? null : (
+            <Button variant="ghost" size="sm" onClick={onOpenMaintenance}>
+              资料维护
+            </Button>
+          )}
         </div>
-      </div>
-      <div className="watchtower-header__row2">
-        {target.group ? (
-          <>
-            <span className="watchtower-header__meta-item">{target.group}</span>
-            <span className="watchtower-header__meta-sep" aria-hidden>
-              ·
-            </span>
-          </>
-        ) : null}
-        <span className="watchtower-header__meta-item">
-          <Hostname truncate maxChars={14}>{target.target_id}</Hostname>
-        </span>
-        <span className="watchtower-header__meta-sep" aria-hidden>
-          ·
-        </span>
-        <span className="watchtower-header__meta-item">
-          <Hostname>{hostDisplay}</Hostname>
-        </span>
-        {target.labels.length > 0 ? (
-          <>
-            <span className="watchtower-header__meta-sep" aria-hidden>
-              ·
-            </span>
-            <span className="watchtower-header__meta-item watchtower-header__labels">
-              {labelText}
-            </span>
-          </>
-        ) : null}
-        {target.execution_monitoring_instance_labels.length > 0 ? (
-          <>
-            <span className="watchtower-header__meta-sep" aria-hidden>
-              ·
-            </span>
-            <span className="watchtower-header__meta-item watchtower-header__labels">
-              {execLabelText}
-            </span>
-          </>
-        ) : null}
       </div>
     </header>
   )

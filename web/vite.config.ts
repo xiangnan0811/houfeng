@@ -36,10 +36,19 @@ export default defineConfig(({ mode }) => {
     )
   }
 
+  const isDev = mode === 'development'
+  const devHeaders = isDev
+    ? {
+        'Content-Security-Policy': contentSecurityPolicy
+          .replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
+          .replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"),
+      }
+    : securityHeaders
+
   return {
     plugins,
     server: {
-      headers: securityHeaders,
+      headers: devHeaders,
       proxy: {
         '/api': {
           target,

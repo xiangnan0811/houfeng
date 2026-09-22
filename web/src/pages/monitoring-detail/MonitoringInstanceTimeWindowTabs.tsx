@@ -24,19 +24,19 @@ export function MonitoringInstanceTimeWindowTabs({
   streamError,
 }: MonitoringInstanceTimeWindowTabsProps) {
   return (
-    <div className="watchtower-window-tabs">
-      <SegmentedControl<TimeWindow>
-        label="监控实例观测时间窗口"
-        value={value}
-        onChange={onChange}
-        items={TIME_WINDOW_ITEMS}
-      />
+    <div className="monitoring-detail-window-tabs">
       {value === 'realtime' ? (
-        <span className={`watchtower-stream-status watchtower-stream-status--${streamStatus}`}>
+        <span className={`monitoring-detail-stream-status monitoring-detail-stream-status--${streamStatus}`}>
           {STREAM_STATUS_LABELS[streamStatus]}
           {streamError ? ` · ${streamError}` : ''}
         </span>
       ) : null}
+      <SegmentedControl<TimeWindow>
+        label="观测时间窗口"
+        value={value}
+        onChange={onChange}
+        items={TIME_WINDOW_ITEMS}
+      />
     </div>
   )
 }
