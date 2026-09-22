@@ -12,7 +12,7 @@ case "$branch" in
 Rebase blocked: local main/master is read-only for development work.
 
 Create or switch to a feature branch before rewriting development history.
-Do not use git worktree for this repository workflow.
+Use a non-main branch in the current checkout or a dedicated git worktree.
 EOF
     exit 1
     ;;

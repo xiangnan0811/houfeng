@@ -1,3 +1,0 @@
-{"file": ".trellis/tasks/07-14-vps-records-portability-migration/research/current-main-reconciliation-2026-08-21.md", "reason": "scope B boundaries: no second comparison exporter, no workbench download"}
-{"file": ".trellis/spec/backend/evidence-snapshot-contract.md", "reason": "Export/Summarize reuse and AdmissionGate fail-closed"}
-{"file": ".trellis/spec/guides/branch-workflow-governance.md", "reason": "non-main branch and protected main"}

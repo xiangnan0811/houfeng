@@ -1,0 +1,5 @@
+# Project discovery and bounded native delegation; model/effort/Advisor stay native.
+project_doc_fallback_filenames = ["AGENTS.md"]
+
+[agents]
+max_depth = 1

@@ -1,4 +1,0 @@
-{"file": ".trellis/tasks/07-14-vps-records-portability-migration/research/current-main-reconciliation-2026-08-21.md", "reason": "v0.71.0 Keep/Shrink/Split and locked scope B"}
-{"file": ".trellis/spec/backend/evidence-snapshot-contract.md", "reason": "comparison.result/v1 Export plus nil AdmissionGate fail-closed"}
-{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "AdmissionGate transaction primitive and record_portability adapter name"}
-{"file": ".trellis/spec/backend/record-collaboration-notification-contract.md", "reason": "no AdmissionGateFunc in production; collaboration PortabilityAdapter is Backup/Restore"}

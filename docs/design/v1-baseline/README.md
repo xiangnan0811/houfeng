@@ -7,7 +7,7 @@ status: historical-stub
 
 This directory used to contain the first large design bundle for Houfeng. The old text mixed useful product thinking with obsolete phase boundaries, outdated object names, and rigid requirements that no longer serve the project.
 
-The maintained design guidance now lives in [`../current/`](../current/README.md). Use that directory, current code, task artifacts, and `.trellis/spec/` for planning and implementation.
+The maintained design guidance now lives in [`../current/`](../current/README.md). Use that directory, current code, task artifacts, and `spec/` for planning and implementation.
 
 ## What remains useful
 

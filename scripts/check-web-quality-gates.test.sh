@@ -169,11 +169,11 @@ requireMatch(stagingJob, /web\/test-results\/staging-audit/, 'staging artifact m
 requireMatch(stagingJob, /retention-days:\s*30/, 'staging audit artifact must retain evidence for 30 days')
 
 const webSpecCorpus = [
-  read('.trellis/spec/web/quality-guidelines.md'),
-  read('.trellis/spec/web/directory-structure.md'),
-  read('.trellis/spec/web/styling-guidelines.md'),
-  read('.trellis/spec/web/component-conventions.md'),
-  read('.trellis/spec/web/state-and-data.md'),
+  read('spec/web/quality-guidelines.md'),
+  read('spec/web/directory-structure.md'),
+  read('spec/web/styling-guidelines.md'),
+  read('spec/web/component-conventions.md'),
+  read('spec/web/state-and-data.md'),
   read('docs/operations/ui-preview-and-browser-sanity.md'),
 ].join('\n')
 for (const obsoletePath of ['styles/atoms.css', 'styles/pages.css', 'app/layout/layout.css']) {

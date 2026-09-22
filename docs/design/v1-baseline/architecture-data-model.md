@@ -7,6 +7,6 @@ status: historical-stub
 
 This file used to contain early architecture and model detail. That detail included outdated names and obsolete scope language, so it has been removed from the maintained docs.
 
-Current architecture and product guidance lives in [`../current/product-and-architecture.md`](../current/product-and-architecture.md). Current executable contracts live in code and `.trellis/spec/`.
+Current architecture and product guidance lives in [`../current/product-and-architecture.md`](../current/product-and-architecture.md). Current executable contracts live in code and `spec/`.
 
 Use git history if you need to inspect the original V1 architecture text for archaeology.
