@@ -164,3 +164,18 @@ cd web && npm run test:e2e
 - 不要为过 `css:analyze` 抬预算。
 - 不要写「全站已完成」除非 AC1–AC7 都有证据。
 - 不要把 Gemini 分支 cherry-pick 进来。
+
+## Local acceptance checkpoint — 2026-09-22
+
+- 用户要求先补齐本地验收，再提交、归档和记录；现全部本地工程验收已通过，工作成果已提交为 `0c04c5891d55f53c6e90f1626c66479aa365186d`，按该授权归档本任务。没有 push/merge、远程部署或访问既有数据库。目标分支 `feat/operator-ui-observatory`；提交包含新增的 `globalAssetSearch.ts` 和 `vps-inventory-archive-restore.spec.ts`。两个 heartbeat 任务不在本次归档范围。
+- 已批准的首版受控试用策略覆盖历史 R7/AC5 的数值预算要求：全部 13 项预算保留为可见参考线，npm 使用 advisory；CLI 默认 enforce，结构/owner/解析/入口错误仍失败。不继续 CSS 优化，不移植隔离 A/B 实验，不把旧 F08 的 NOT PROVEN 改写为通过。
+- Go：使用 `go.mod` 声明的 `go1.26.2`，`make fmt-go vet-go` 和完整 `go test ./agent/... ./cmd/... ./db/... ./internal/...` 范围通过，75 个包通过、7 个包没有测试。普通 Go 测试不代替环境门控的真实 PG 证据。由于 tmpfs 用户配额，编译使用 home 分区 `GOTMPDIR`，测试通过 `-exec 'env -u GOTMPDIR TMPDIR=/tmp'` 恢复短临时路径；未 skip 测试、未修改 socket/工作区安全限制。fmt 仅额外对齐 `store/runtime_facts.go` 五个局部声明。
+- PNG：原测试固定标准库压缩字节 SHA-256，改为可解码 PNG、2×1 尺寸和逐像素等于实际 JPEG 解码结果；保留输出上限、媒体类型、去元数据断言。生产图片处理及内容寻址摘要没有改变。附件包全测通过；修正的用例同时在宿主机 Go1.27.1 上通过。runtime-stream/handler 聚焦 race 检查通过。
+- Web：Node22.23.1 的精确 `NODE_ENV=production make verify-web` 通过；235 文件 / 2088 测试，lint 0 错误、3 条既有 MonitoringDetailPage 警告；覆盖 statements83.38%、branches76.9%、functions83.9%、lines87.41%；生产构建、bundle advisory、CSS advisory 全部完成，5 项 CSS 超限警告保留。
+- Chromium：生产构建后的完整 146/146 通过，0 失败、0 跳过，1 worker、0 retry。修复仅为本次浏览器 `TMPDIR` 放到 home 分区，未改 Playwright/axe/断言。此前 10 项字体共享内存配额崩溃已关闭。预览 `127.0.0.1:4175` 已停止；本地 fixture API 浏览器证据不等于真实部署或真实库存验收。
+- PostgreSQL：仓库 strict runner 创建并清理独立、带 ownership label 的临时容器，未连接已有数据库。runtime facts/store、runtime summaries、sparklines、stream eligibility 4 项真实 PG 测试通过。PG16.0/16.6/16.12 的 `TestPostgresIntegrationAppACLR2` 与 `TestPostgresIntegrationAppACLCurrent` 两个 CI anchors 均 RUN/PASS，0 skip/fail。
+- 独立双审：当前完整未提交候选（93 个已跟踪改动 + 2 个新增文件）及直接消费者 discovery 已完成。主会话 native hub 元数据确认 integration-reviewer=`openai-codex/gpt-5.6-sol:high`，grok-reviewer=`xai-oauth/grok-4.7`；两路均无有效发现，无修复循环。审查期间冻结实现、不共享兄弟发现。此前预算策略双审结论仍保留，不重新开启。
+- 依赖扫描：`npm audit --omit=dev` 为 0 漏洞；完整 audit 仍报告既有开发工具依赖 10 项（6 high、4 moderate）。未改依赖或锁文件，不宣称开发工具依赖全部无告警。
+- 镜像下载阻塞已关闭：用户授权重试后，未修改 Dockerfile/依赖锁/TLS/校验和，`docker build --network=host --build-arg VERSION=dev` 完成全部 37 步。工作提交对应本地镜像 `houfeng-local-acceptance:0c04c589`，image ID `sha256:aca5798533b200ef35aedcbbb2b7b496516ac585872c54ebffedd14366423ee2`（linux/amd64）。只读、无网络的容器检查确认 UID10001、三个二进制/entrypoint、SPA、CA 与 Poppler；未启动已配置的真实 center、未发布镜像。历史 EOF 和首次重试超时保留为已解决环境证据。
+- 后续真实部署验收仍包括 systemd/部署配置、正式签名发行资产和安装器、真实 agent enroll/sync、Target/ProbeItem 观测和 incident 路径。原 AC 中的人工作品/视觉判断不因自动化测试全绿被自动勾选。
+- 原始日志位于本次主会话 `2026-09-22T01-15-14-584Z_01a0c6ae-6b18-72a2-a14a-cfc81bba2351`：Go `artifact://231`、Web `artifact://237`、Chromium `artifact://122`、PG16.0 `artifact://239`、历史镜像失败 `artifact://301` 与 `artifact://328`、成功镜像 `artifact://361`、精确工作提交镜像重建 `artifact://377`；汇总 `local://local-acceptance-evidence.json`。提交前仅清除两个前端文件的多余 EOF 空行；此后镜像重建产物 ID 与此前一致，未产生行为变化。

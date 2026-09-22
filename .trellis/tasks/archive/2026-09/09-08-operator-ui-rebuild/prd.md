@@ -38,7 +38,19 @@
 - 把浅色主题设计成第二套完整身份。
 - 把本次重建拆成 Go-only / UI-only PR（2026-09-21 已否决）。
 
-## Acceptance Criteria
+## Final local acceptance — 2026-09-22
+
+按用户已批准的首版受控试用方向完成本地工程交付并归档，工作提交 `0c04c5891d55f53c6e90f1626c66479aa365186d`。R7/AC5 中原数值预算 ratchet 已由批准的 advisory 策略替代：13 项历史参考线保留，超限可见，结构/安全/行为检查不降级；不继续 CSS 优化或移植 A/B 实验。
+
+- [x] Go1.26.2 fmt/vet/全测试范围、center/agent 构建、runtime-stream 聚焦 race 通过。
+- [x] Node22 精确 verify-web（2088 测试）与 Chromium（146 测试）通过。
+- [x] 隔离 runtime PostgreSQL 4 项与 PG16.0/16.6/16.12 catalog anchors 实跑通过，无跳过。
+- [x] 当前完整候选及直接消费者的独立 GPT/Grok discovery 完成，无待修复问题。
+- [x] 工作提交对应本地镜像构建及只读无网络打包检查通过；此前下载阻塞关闭。
+
+详细证据见 `implement.md` 的 Local acceptance checkpoint。归档不等于已完成线上部署、正式发行安装器、真实 agent/库存验收，也不把自动化测试解释成人工视觉品味的全面通过。以下原始设计条目作为历史依据保留，不追补没有执行证据的人工勾选。
+
+## Original design acceptance criteria
 
 - [ ] AC1. 日常路径在 1440×1000 与 390×900 下，第一屏能完成该页主任务，无需先读解释段。
 - [ ] AC2. 登录、壳、工作台、VPS 列表/详情、监控列表/详情、入口探测、设置已按夜间观测仪语法重建，并经浏览器实操（点、填、进详情），不是只截一张图。
