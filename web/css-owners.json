@@ -14,19 +14,12 @@
       "src/styles/partials/legacy-provider.css"
     ],
     "vps": [
-      "src/pages/VPSPage.css",
       "src/pages/vps-detail/VPSDetailWorkspace.css",
-      "src/pages/vps-detail/VPSFactsEditForm.css",
-      "src/pages/vps-detail/VPSRelationDossiers.css",
       "src/styles/partials/legacy-vps.css",
       "src/styles/partials/vps-overview-freshness.css"
     ],
     "observability": [
-      "src/components/observability/ObservabilityNotice.css",
-      "src/pages/MonitoringComparePage.css",
-      "src/pages/monitoring/MonitoringCommands.css",
       "src/pages/monitoring-detail/MonitoringDetailWorkspace.css",
-      "src/pages/target-detail/TargetDetailWorkspace.css",
       "src/styles/partials/legacy-events.css",
       "src/styles/partials/legacy-observability.css",
       "src/styles/partials/legacy-onboarding.css",

@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { Link, useLocation, useNavigate, useRouteError } from 'react-router-dom'
 
-import { Button } from '../components/atoms'
+import { Button } from '../components/atoms/Button'
 import { PageState } from '../components/PageState'
 
 type RouteErrorPageProps = {

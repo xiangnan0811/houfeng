@@ -4,7 +4,6 @@ import { Button, MonoDigits } from '../../components/atoms'
 import { formatDate } from '../../lib/format'
 import type { AssetDomainRecord, AssetServiceRecord } from '../../lib/types'
 import { domainResourceName, domainResourceStatus, serviceResourceName } from './vpsDetailResourcePresentation'
-import './VPSRelationDossiers.css'
 
 type VPSDomainsSectionProps = {
   domains: AssetDomainRecord[]

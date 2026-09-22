@@ -1141,7 +1141,7 @@ export function VPSOverviewManagementActions({
     try {
       await archiveVPS(vpsId, { confirmation_name: confirmationName })
       if (!submissionIsCurrent(generation)) return
-      navigate(`/archive/${encodeURIComponent(vpsId)}`, { replace: true })
+      navigate(`/archive/${encodeURIComponent(vpsId)}`, { replace: true, state: location.state })
     } catch (error: unknown) {
       if (!submissionIsCurrent(generation)) return
       setArchiveError(describeManagementError(error, '归档 VPS 失败'))

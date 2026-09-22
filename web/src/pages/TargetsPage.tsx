@@ -244,6 +244,13 @@ export function TargetsPage() {
   const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
   const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
   const visibleIds = useMemo(() => filteredTargets.map((target) => target.target_id), [filteredTargets])
+  const [prevVisibleIds, setPrevVisibleIds] = useState(visibleIds)
+  if (visibleIds !== prevVisibleIds) {
+    setPrevVisibleIds(visibleIds)
+    if (selectedIds.some((id) => !visibleIds.includes(id))) {
+      setSelectedIds(selectedIds.filter((id) => visibleIds.includes(id)))
+    }
+  }
   const batchTargetIds = frozenBatchIds ?? selectedIds.filter((id) => visibleIds.includes(id))
   const selectedVisibleCount = visibleIds.filter((id) => selectedIds.includes(id)).length
   const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length
@@ -261,10 +268,6 @@ export function TargetsPage() {
         : filterState.runStatus === '已归档'
           ? 'archived'
           : 'all'
-
-  useEffect(() => {
-    setSelectedIds((current) => current.filter((id) => visibleIds.includes(id)))
-  }, [visibleIds])
 
   async function runBatchOnIds(action: TargetRuntimeAction, ids: string[]) {
     setBatchSubmitting(true)

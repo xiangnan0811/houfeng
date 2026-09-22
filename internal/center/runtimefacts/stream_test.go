@@ -34,7 +34,7 @@ func TestStreamHubPublishesHostSamplesToMatchingSubscribers(t *testing.T) {
 			NetOutBytesPerSec: 2048,
 			NetworkRatesValid: &networkRatesValid,
 		}}},
-	}, syncing.Result{}); err != nil {
+	}, syncing.Result{Disposition: syncing.ResultDispositionRecorded}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 
@@ -57,6 +57,64 @@ func TestStreamHubPublishesHostSamplesToMatchingSubscribers(t *testing.T) {
 	case message := <-other.Messages:
 		t.Fatalf("unexpected message for other subscriber: %#v", message)
 	default:
+	}
+}
+func TestStreamHubPublishesOnlyRecordedSyncResults(t *testing.T) {
+	t.Parallel()
+
+	observedAt := time.Date(2026, time.April, 24, 9, 0, 0, 0, time.UTC)
+	receivedAt := observedAt.Add(time.Second)
+	acceptedAt := receivedAt.Add(time.Second)
+	tests := []struct {
+		name        string
+		disposition syncing.ResultDisposition
+		wantMessage bool
+	}{
+		{name: "recorded", disposition: syncing.ResultDispositionRecorded, wantMessage: true},
+		{name: "suppressed", disposition: syncing.ResultDispositionSuppressed},
+		{name: "exact duplicate", disposition: syncing.ResultDispositionExactDuplicate},
+		{name: "empty", disposition: ""},
+		{name: "unknown", disposition: syncing.ResultDisposition("unknown")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			hub := NewStreamHub()
+			subscription := hub.SubscribeHostSamples("mi_001")
+			defer subscription.Close()
+
+			if err := hub.AfterSuccessfulSync(context.Background(), syncing.Batch{
+				MonitoringInstanceID: "mi_001",
+				Observations: observations.BatchWrite{HostSamples: []observations.HostSampleWrite{{
+					MonitoringInstanceID: "mi_001",
+					ObservedAt:           observedAt,
+					ReceivedAt:           receivedAt,
+					AgentVersion:         "agent/v0.1.0",
+					Fingerprint:          "fp-001",
+					SyncBatchID:          "sync-recorded",
+					CPUUsagePct:          42,
+				}}},
+			}, syncing.Result{Disposition: tt.disposition, AcceptedAt: acceptedAt}); err != nil {
+				t.Fatalf("AfterSuccessfulSync() error = %v", err)
+			}
+
+			select {
+			case message := <-subscription.Messages:
+				if !tt.wantMessage {
+					t.Fatalf("unexpected message for disposition %q: %#v", tt.disposition, message)
+				}
+				if message.MonitoringInstanceID != "mi_001" || message.Sample.CPUUsagePct != 42 {
+					t.Fatalf("message = %#v, want mi_001 CPU=42 sample", message)
+				}
+				if !message.Sample.ReceivedAt.Equal(receivedAt) || !message.ReceivedAt.Equal(receivedAt) {
+					t.Fatalf("received timestamps = sample=%v message=%v, want %v", message.Sample.ReceivedAt, message.ReceivedAt, receivedAt)
+				}
+			default:
+				if tt.wantMessage {
+					t.Fatalf("no message for recorded result")
+				}
+			}
+		})
 	}
 }
 
@@ -88,7 +146,7 @@ func TestStreamHubDropsCrossInstanceHostSamples(t *testing.T) {
 				MonitoringInstanceID: "",
 			},
 		}},
-	}, syncing.Result{}); err != nil {
+	}, syncing.Result{Disposition: syncing.ResultDispositionRecorded}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 
@@ -125,7 +183,7 @@ func TestStreamHubStampsZeroReceivedAtFromAcceptedAt(t *testing.T) {
 			SyncBatchID:  "sync-agent-shape",
 			CPUUsagePct:  11,
 		}}},
-	}, syncing.Result{AcceptedAt: acceptedAt}); err != nil {
+	}, syncing.Result{Disposition: syncing.ResultDispositionRecorded, AcceptedAt: acceptedAt}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 
@@ -163,7 +221,7 @@ func TestStreamHubDoesNotPublishWhenReceivedAtAndAcceptedAtAreZero(t *testing.T)
 			Fingerprint:  "fp-001",
 			SyncBatchID:  "sync-zero-receipt",
 		}}},
-	}, syncing.Result{}); err != nil {
+	}, syncing.Result{Disposition: syncing.ResultDispositionRecorded}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 

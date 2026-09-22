@@ -1,13 +1,18 @@
-import { requestJSON, withQuery } from './api'
+import { requestJSON, withQuery } from './apiRequest'
 import type {
   ActiveIncidentRecord,
   CommandAuditListFilter,
   CommandAuditListResponse,
+  DashboardOverview,
   EventListFilter,
   EventListResponse,
   IncidentListFilter,
   StateChangeEventRecord,
 } from './types'
+
+export function getDashboard() {
+  return requestJSON<DashboardOverview>('/api/dashboard')
+}
 
 export function listEvents(filter?: EventListFilter) {
   return requestJSON<EventListResponse | StateChangeEventRecord[]>(

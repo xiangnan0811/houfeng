@@ -424,7 +424,7 @@ export function LegacyVPSDetail({
         const normalizedDetail = normalizeVPSDetail(detail)
         if (normalizedDetail.lifecycle_status === 'archived' || normalizedDetail.lifecycle_status === 'cancelled') {
           if (!routeIsCurrent()) return null
-          navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true })
+          navigate(`/archive/${encodeURIComponent(normalizedDetail.vps_id)}`, { replace: true, state: location.state })
           return null
         }
         const [timeline, services, domains, subscriptionState, ipQualityState, cancellationState] = await Promise.all([
@@ -981,7 +981,7 @@ export function LegacyVPSDetail({
       const latest = normalizeVPSDetail(await getVPSAsset(vpsID))
       if (!mutationIsCurrent(generation)) return true
       if (isTerminalVPSLifecycle(latest.lifecycle_status)) {
-        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true })
+        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true, state: location.state })
         return true
       }
     } catch {
@@ -1004,7 +1004,7 @@ export function LegacyVPSDetail({
       const latest = normalizeVPSDetail(await getVPSAsset(targetVpsId))
       if (!mutationIsCurrent(generation)) return
       if (isTerminalVPSLifecycle(latest.lifecycle_status)) {
-        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true })
+        navigate(`/archive/${encodeURIComponent(latest.vps_id)}`, { replace: true, state: location.state })
         return
       }
       if (mutationConflict?.draftKind === 'decision' && decisionDraftAlreadySatisfied(decisionDraft, latest)) {
@@ -1471,7 +1471,7 @@ export function LegacyVPSDetail({
     try {
       await archiveVPS(detail.vps_id, { confirmation_name: confirmationName })
       if (!mutationIsCurrent(generation)) return
-      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true })
+      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true, state: location.state })
     } catch (error: unknown) {
       if (!mutationIsCurrent(generation)) return
       setLifecycleError(describeError(error, '归档 VPS 失败'))
@@ -1484,7 +1484,7 @@ export function LegacyVPSDetail({
     const detail = state.detail
     if (!detail) return
     if (detail.lifecycle_status === 'archived') {
-      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true })
+      navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true, state: location.state })
       return
     }
     setLifecycleError('归档恢复请在归档详情页执行')
@@ -1518,7 +1518,7 @@ export function LegacyVPSDetail({
       const refreshed = await refreshDetailAndTimeline(detail.vps_id, stillCurrent)
       if (!stillCurrent()) return
       if (refreshed.lifecycle_status === 'cancelled' || refreshed.lifecycle_status === 'archived') {
-        navigate(`/archive/${encodeURIComponent(refreshed.vps_id)}`, { replace: true })
+        navigate(`/archive/${encodeURIComponent(refreshed.vps_id)}`, { replace: true, state: location.state })
         return
       }
       const applied = await applyCancellationPreview(detail.vps_id, generation, stillCurrent)

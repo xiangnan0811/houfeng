@@ -552,7 +552,7 @@ func TestMonitoringInstanceRuntimeStreamDropsStaleAndFutureSamplesBeforeWriting(
 			},
 		}},
 	}
-	if err := hub.AfterSuccessfulSync(ctx, batch, syncing.Result{}); err != nil {
+	if err := hub.AfterSuccessfulSync(ctx, batch, syncing.Result{Disposition: syncing.ResultDispositionRecorded}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
 
@@ -637,5 +637,5 @@ func agentShapedSyncingBatchWithHostSample(monitoringInstanceID string, cpuUsage
 }
 
 func runtimefactsTestResult() syncing.Result {
-	return syncing.Result{AcceptedAt: time.Date(2026, time.April, 24, 9, 0, 1, 0, time.UTC)}
+	return syncing.Result{Disposition: syncing.ResultDispositionRecorded, AcceptedAt: time.Date(2026, time.April, 24, 9, 0, 1, 0, time.UTC)}
 }

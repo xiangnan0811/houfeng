@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { useRef, useState } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -258,6 +258,7 @@ function Harness({
       <button type="button" onClick={() => management.openPanel('validity-extension')}>打开延长有效期</button>
       <button type="button" onClick={() => management.openPanel('monitoring-instance-link')}>打开关联监控</button>
       <button type="button" onClick={() => management.openPanel('monitoring-instance-evidence')}>打开已关联监控</button>
+      <button type="button" onClick={() => management.openPanel('archive')}>打开归档</button>
       <button type="button" onClick={() => setVpsId('vps_b')}>切换 VPS</button>
       <VPSOverviewManagementActions
         vpsId={vpsId}
@@ -984,14 +985,22 @@ describe('VPSOverviewManagementActions', () => {
     vi.spyOn(api, 'updateVPSAsset')
       .mockRejectedValueOnce(new ApiError(409, 'vps asset readonly', { code: 'vps_asset_readonly' }))
     const refresh = vi.fn().mockResolvedValue(true)
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_a',
+      extraProvenance: 'keep-me',
+    }
 
     function LocationProbe() {
       const location = useLocation()
-      return <div data-testid="location-path">{location.pathname}</div>
+      return (
+        <div data-testid="location-path" data-state={JSON.stringify(location.state ?? null)}>
+          {location.pathname}
+        </div>
+      )
     }
 
     render(
-      <MemoryRouter initialEntries={['/vps/vps_a']}>
+      <MemoryRouter initialEntries={[{ pathname: '/vps/vps_a', state: inventoryState }]}>
         <Routes>
           <Route path="/vps/:vpsId" element={<Harness onRefresh={refresh} />} />
           <Route path="/archive/:vpsId" element={<LocationProbe />} />
@@ -1005,6 +1014,7 @@ describe('VPSOverviewManagementActions', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存基础信息' }))
     await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_a'))
+    expect(screen.getByTestId('location-path')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
   })
 
   it('does not write a stale readonly error onto the next VPS after a delayed identity GET', async () => {
@@ -1455,6 +1465,116 @@ describe('VPSOverviewManagementActions', () => {
     expect(await screen.findByRole('option', { name: /Restored Probe/ })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '服务名称' })).toHaveValue('Kept Service')
     expect(listTargets).toHaveBeenCalledTimes(2)
+  })
+
+  it('archives through the confirmation dialog and preserves inventory location state', async () => {
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_a',
+      extraProvenance: 'keep-me',
+    }
+    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue({
+      vps: detailFixture('vps_a', '东京边缘'),
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: [],
+      eligible: true,
+    })
+    const archive = vi.spyOn(api, 'archiveVPS').mockResolvedValue({
+      vps: { ...detailFixture('vps_a', '东京边缘'), lifecycle_status: 'archived' },
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
+      eligible: false,
+    })
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    function ArchiveProbe() {
+      const location = useLocation()
+      return (
+        <output data-testid="archive-location" data-state={JSON.stringify(location.state)}>
+          {location.pathname}
+        </output>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/', state: inventoryState }]}>
+        <Routes>
+          <Route path="/" element={<Harness onRefresh={refresh} />} />
+          <Route path="/archive/:vpsId" element={<ArchiveProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
+      target: { value: '东京边缘' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+
+    await waitFor(() => expect(archive).toHaveBeenCalledWith('vps_a', { confirmation_name: '东京边缘' }))
+    expect(screen.getByTestId('archive-location')).toHaveTextContent('/archive/vps_a')
+    expect(screen.getByTestId('archive-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+  })
+
+  it('keeps inventory state and the archive dialog when archive write fails', async () => {
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_a',
+      extraProvenance: 'keep-me',
+    }
+    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue({
+      vps: detailFixture('vps_a', '东京边缘'),
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: [],
+      eligible: true,
+    })
+    vi.spyOn(api, 'archiveVPS').mockRejectedValue(new ApiError(409, 'archive conflict'))
+    const refresh = vi.fn().mockResolvedValue(true)
+
+    function LocationProbe() {
+      const location = useLocation()
+      return (
+        <div data-testid="location-path" data-state={JSON.stringify(location.state ?? null)}>
+          {location.pathname}
+        </div>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/', state: inventoryState }]}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/" element={<Harness onRefresh={refresh} />} />
+          <Route path="/archive/:vpsId" element={<div>archived</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
+      target: { value: '东京边缘' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+
+    expect(await within(dialog).findByText('archive conflict')).toBeInTheDocument()
+    expect(screen.getByTestId('location-path')).toHaveTextContent('/')
+    expect(screen.getByTestId('location-path')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+    expect(screen.queryByText('archived')).not.toBeInTheDocument()
   })
 
 })

@@ -20,7 +20,6 @@ import {
   withReturnVPSQuery,
 } from './monitoring-detail/monitoringDetailHelpers'
 import './monitoring-detail/MonitoringDetailWorkspace.css'
-import './MonitoringComparePage.css'
 
 type MonitoringInstanceState = {
   loading: boolean

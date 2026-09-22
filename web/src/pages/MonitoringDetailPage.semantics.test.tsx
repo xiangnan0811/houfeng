@@ -391,7 +391,7 @@ describe('MonitoringDetailPage source semantics', () => {
     const { container } = renderPage()
     await waitFor(() => expect(screen.getAllByText(/数据陈旧/).length).toBeGreaterThan(0))
     expect(container.querySelector('.monitoring-detail-status__stale')).toHaveTextContent('数据陈旧')
-    expect(container.querySelector('.monitoring-detail-notice--notice')).toHaveTextContent('心跳与采样已落后')
+    expect(container.querySelector('.observability-notice--notice')).toHaveTextContent('心跳与采样已落后')
   })
 
   it('does not copy sample time onto heartbeat when heartbeat is missing', async () => {

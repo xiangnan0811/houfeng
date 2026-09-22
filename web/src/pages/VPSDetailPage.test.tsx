@@ -177,7 +177,7 @@ function DetailLocationProbe() {
   const [searchParams, setSearchParams] = useSearchParams()
   return (
     <>
-      <span data-testid="detail-location">{location.pathname}{location.search}</span>
+      <span data-testid="detail-location" data-state={JSON.stringify(location.state ?? null)}>{location.pathname}{location.search}</span>
       <button
         type="button"
         onClick={() => {
@@ -608,8 +608,17 @@ describe('VPSDetailPage gate', () => {
     overview.identity.lifecycle_status = lifecycle
     overview.capabilities = capabilities
     vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overview)
-    renderDetail()
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
+    renderDetail({
+      initialEntry: { pathname: '/vps/vps_001', state: inventoryState },
+      showLocationProbe: true,
+    })
     expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
+    expect(screen.getByTestId('detail-location')).toHaveTextContent('/archive/vps_001')
+    expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(screen.queryByRole('button', { name: '管理' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '新建记录' })).not.toBeInTheDocument()
     expect(screen.queryByText('Legacy VPS detail shell')).not.toBeInTheDocument()
@@ -666,8 +675,15 @@ describe('VPSDetailPage gate', () => {
     vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
     const review = vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(archiveReviewFixture())
     const archive = vi.spyOn(api, 'archiveVPS').mockResolvedValue(archiveReviewFixture())
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
 
-    renderDetail()
+    renderDetail({
+      initialEntry: { pathname: '/vps/vps_001', state: inventoryState },
+      showLocationProbe: true,
+    })
 
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
@@ -685,6 +701,7 @@ describe('VPSDetailPage gate', () => {
       confirmation_name: '东京边缘',
     }))
     expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
+    expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(review).toHaveBeenCalledWith('vps_001')
   })
 
@@ -723,6 +740,67 @@ describe('VPSDetailPage gate', () => {
     expect(await screen.findByRole('textbox', { name: '输入 VPS 名称确认归档' })).toBeInTheDocument()
     expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
     expect(review).toHaveBeenCalledTimes(2)
+  })
+
+  it('preserves inventory state when overview refresh becomes terminal', async () => {
+    const active = overviewFixture()
+    active.anomalies = [{
+      rule_id: 'source.unavailable.v1',
+      severity: 'notice',
+      title: '判断依据暂不可用',
+      source: 'overview',
+      primary_action: { id: 'retry_overview', label: '重试概览' },
+      secondary_actions: [],
+    }]
+    const archived = overviewFixture()
+    archived.identity.lifecycle_status = 'archived'
+    vi.spyOn(recordsApi, 'getVPSOverview')
+      .mockResolvedValueOnce(active)
+      .mockResolvedValue(archived)
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
+
+    renderDetail({
+      initialEntry: { pathname: '/vps/vps_001', state: inventoryState },
+      showLocationProbe: true,
+    })
+
+    expect(await screen.findByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试概览' }))
+
+    expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
+    expect(screen.getByTestId('detail-location')).toHaveTextContent('/archive/vps_001')
+    expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+  })
+
+  it('keeps inventory state and the archive dialog when archive write fails', async () => {
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
+    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(archiveReviewFixture())
+    vi.spyOn(api, 'archiveVPS').mockRejectedValue(new ApiError(409, 'archive conflict'))
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
+
+    renderDetail({
+      initialEntry: { pathname: '/vps/vps_001', state: inventoryState },
+      showLocationProbe: true,
+    })
+
+    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.change(await screen.findByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
+      target: { value: '东京边缘' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('archive conflict')
+    expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
+    expect(screen.getByTestId('detail-location')).toHaveTextContent('/vps/vps_001')
+    expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+    expect(screen.queryByText('Archive detail route')).not.toBeInTheDocument()
   })
 
   it('shows overview not-found when identity is missing', async () => {

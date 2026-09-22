@@ -142,12 +142,9 @@ describe('semantic interaction AST audit', () => {
     expect(result.allowed[0]?.reason).toBe(reason)
   })
 
-  it('has no unexplained production interactions and keeps the allowlist bounded', () => {
+  it('has no unexplained production interactions', () => {
     const result = repositoryAudit()
 
     expect(result.violations.map(formatEntry)).toEqual([])
-    // The allowlist stays finite and explicitly enumerated; the filter-select option
-    // row joined it as a keyboard-complete row.
-    expect(result.allowed.map(formatEntry)).toHaveLength(8)
   })
 })

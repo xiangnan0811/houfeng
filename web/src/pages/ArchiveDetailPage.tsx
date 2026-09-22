@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
 import { Badge, DataTable, Modal, MonoDigits, Timestamp } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
@@ -343,6 +343,7 @@ export function ArchiveDetailPage() {
 
 function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
   const navigate = useNavigate()
+  const location = useLocation()
 
   const [reviewState, setReviewState] = useState<AsyncState<ArchiveReview | null>>({
     loading: true,
@@ -412,7 +413,7 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
         if (gen !== reviewGenRef.current) return
         const lifecycleStatus = review.vps.lifecycle_status
         if (lifecycleStatus !== 'archived' && lifecycleStatus !== 'cancelled') {
-          navigate('/vps/' + encodeURIComponent(review.vps.vps_id), { replace: true })
+          navigate('/vps/' + encodeURIComponent(review.vps.vps_id), { replace: true, state: location.state })
           return
         }
         setReviewState({ loading: false, error: null, data: review })
@@ -427,7 +428,7 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
           data: null,
         })
       })
-  }, [navigate, fetchTimeline, fetchSubscriptions])
+  }, [navigate, location.state, fetchTimeline, fetchSubscriptions])
 
   useEffect(() => {
     if (!vpsId) return
@@ -474,7 +475,7 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
     try {
       await restoreVPSFromArchive(targetVpsId)
       if (currentGen !== reviewGenRef.current) return
-      navigate(`/vps/${encodeURIComponent(targetVpsId)}`, { replace: true })
+      navigate(`/vps/${encodeURIComponent(targetVpsId)}`, { replace: true, state: location.state })
     } catch (error: unknown) {
       if (currentGen !== reviewGenRef.current) return
       setRestoreError(describeError(error, '恢复归档 VPS 失败'))

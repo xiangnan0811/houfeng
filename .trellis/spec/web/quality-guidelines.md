@@ -29,13 +29,15 @@
 | `npm run dev` | `vite` —— 起 dev server，`/api/*` 反代到 `VITE_API_TARGET`（默认 `http://127.0.0.1:8080`，见 `web/vite.config.ts:11-23`） | 本地开发 |
 | `npm run build` | `tsc -b && vite build` —— 严格 TS 多项目 build + Vite 产物到 `web/dist/` | 提交前必跑（CI 也跑），产物由 center 通过 `HOUFENG_WEB_DIST_DIR` 吐给浏览器 |
 | `npm run test:coverage` | Vitest V8 覆盖全部 production TS/TSX，并读取 `coverage-budget.json` 阻断全局或关键文件回退 | `make verify-web` 与 CI；本地改关键模块时先 focused test 再跑 |
-| `npm run css:analyze` | PostCSS AST owner/debt inventory + source/production budget ratchet | production build 后运行；已由 `make verify-web` 接入 CI |
-| `npm run bundle:check` | 校验入口 JS/CSS gzip、最大 async JS gzip 与全部 WOFF2 raw budget | production build 后运行；默认只读 `bundle-budget.json` |
+| `npm run css:analyze` | PostCSS AST owner/debt inventory + 九项 source/production 预算测量；首版试用用 advisory，数值超限 warning/exit 0，结构错误仍 exit 1 | production build 后运行；已由 `make verify-web` 接入 CI |
+| `npm run bundle:check` | 测量入口 JS/CSS gzip、最大 async JS gzip 与全部 WOFF2 raw；首版试用用 advisory，数值超限 warning/exit 0，输入/入口资源错误仍 exit 1 | production build 后运行；只读 `bundle-budget.json`，不重设历史参考线 |
 | `npm run lint` | `eslint .` —— 跑 `web/eslint.config.js` 的 flat config | 提交前必跑 |
 | `npm run test` | `vitest` —— 默认进 watch（CI 用 `--run` 一次性跑完） | 本地反复跑测；CI 用 `npm run test -- --run` |
 | `npm run test:e2e` | 先 production build，再用固定 Chromium 跑 fail-closed fixture browser gate | 本地完整浏览器验证与独立 `web-browser` CI job |
 | `npm run test:e2e:staging` | 使用 `playwright.staging.config.ts` 对已部署 staging 做真实认证审计 | 只由受保护的 manual staging workflow 调用 |
 | `npm run preview` | `vite preview` —— 看本地 build 产物效果 | 偶尔做产物 sanity check |
+
+首版受控试用的 13 项 CSS/bundle 数值预算均为历史参考线；advisory 超限仍输出 actual/limit 与 `fail` 测量状态，JSON 用独立 `budgetPolicy` 标明退出策略。`make verify-web` / CI 使用上述 npm 入口。严格审计从仓库根直接运行 `node scripts/analyze-web-css.mjs --budget-policy enforce --format text` 与 `node scripts/check-web-bundle-budget.mjs --budget-policy enforce`（直接 CLI 省略 policy 也默认 enforce）。不重设预算、不使用 `|| true` 或 continue-on-error；coverage、安全、行为与 Chromium 检查不降级。
 
 **Makefile 端**（`Makefile:92-104`）：
 
@@ -91,7 +93,7 @@ verify-web: test-web-toolchain
 | Node major 不是 22 | install 前失败，输出 `web requires Node 22.x; found vX.Y.Z` |
 | 调用者设置 `NODE_ENV=production` | 仍安装 devDependencies，并完成 lint/test/production build |
 | `.node-version`、CI、tsconfig 或 Node types 漂移 | `test-web-toolchain` 在 npm install 前失败 |
-| lint、coverage、build 或预算任一失败 | `verify-web` 原样返回非零，不继续掩盖失败 |
+| lint、coverage、build 或预算分析的结构/输入错误 | `verify-web` 原样返回非零，不掩盖失败；仅 CSS/bundle 数值超限在 advisory 下输出 warning 并退出 0 |
 
 ### 5. Good / Base / Bad Cases
 
@@ -103,7 +105,7 @@ verify-web: test-web-toolchain
 
 - fake Node 22 通过、fake/real Node 24 被拒绝，并断言完整错误文本。
 - 断言 `.node-version`、setup-node `node-version-file`、两个 strict 配置和 `@types/node` 一致。
-- CI 以 `NODE_ENV=production make verify-web` 执行，断言 coverage、production build 与静态预算均通过；`scripts/check-web-quality-gates.test.sh` 还必须证明独立 browser job 的 Node pin/install/test 位于同一 job block。
+- CI 以 `NODE_ENV=production make verify-web` 执行：coverage、production build 与静态结构/输入检查仍必须通过；CSS/bundle 数值超限保留 warning，不阻断。`scripts/check-web-quality-gates.test.sh` 还必须证明独立 browser job 的 Node pin/install/test 位于同一 job block。
 
 ### 7. Wrong vs Correct
 
@@ -447,13 +449,13 @@ export default defineConfig([
 |------|----------------|
 | 新增 / 修改 center HTTP 端点的请求 / 响应字段 | 1) 后端按 `.trellis/spec/backend/` 改完；2) `web/src/lib/types.ts` 加 / 改 `*Record` `*Input`，**保持 snake_case 与 Go JSON tag 一致**；3) owning `web/src/lib/*Api.ts` façade 加 / 改函数；4) page / component 调用方更新；5) 必要时 page 测试的 `toHaveBeenLastCalledWith` 断言一起更新 |
 | 新增 / 修改业务 API 调用 | 必须落到 `web/src/lib/` façade，**不要**在 page / component 里直接 `fetch()`；默认使用 `api.ts`，只有全部 consumer 都是 lazy route 且 fresh bundle 证据要求隔离时才使用 domain façade，详见 `state-and-data.md` |
-| 移动 API helper 到 route-lazy domain façade | wire shape/API tests 不变；fresh production build 后同时检查 entry 与 max async budget，不得让入口下降以换取 async 超限；除 Child 5 lazy `MarkdownPreview` 的已审计 max-async 例外外不得抬预算 |
+| 移动 API helper 到 route-lazy domain façade | wire shape/API tests 不变；fresh production build 后同时报告 entry 与 max async actual/limit，不能只报入口下降而隐藏 async 增长；首版试用数值超限为提示，不抬高历史预算 |
 | 修改 Asset Decisions controller / route composition | 运行 `AssetDecisionsPage.test.tsx`、全部 `asset-decisions/` domain workflow/controller tests 与 `assetDecisionArchitectureContract.test.ts`；核对四个 filtered GET、11 GET renewal inventory、group/manual/record focus restore 和结构预算 |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/partials/atoms.css` 加样式（用令牌） |
 | 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步检查 3 套运行时主题（`:root` / `theme-houfeng-light` / `theme-classic-dark`）；`classic-light` 复用 `houfeng-light`，见 `.trellis/spec/web/styling-guidelines.md` |
 | 改首屏防闪烁脚本 | `web/public/theme-bootstrap.js` 与 `web/src/lib/theme.ts` 的 preset/mode allowlist、system scheme 和 `classic-light` 回退必须保持一致；`web/index.html` 只同步加载同源脚本，不得恢复 inline script |
-| 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；fresh build 后运行 `bundle:check`，确认 entry 仍在 ratchet 内；最大 async 只允许 Child 5 `MarkdownPreview` 这类已隔离 markdown chunk，不得把 Records transport 打进 entry，也不得为编辑器放宽 `style-src` |
+| 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；fresh build 后运行 `bundle:check` 并报告 entry/async 测量与超限提示；不得把 Records transport 打进 entry，也不得为编辑器放宽 `style-src` |
 
 ---
 

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import './ObservabilityNotice.css'
+import '../../pages/monitoring-detail/MonitoringDetailWorkspace.css'
 
 export type ObservabilityTone = 'critical' | 'alert' | 'notice' | 'maintenance' | 'offline'
 
@@ -23,18 +23,18 @@ export function ObservabilityNotice({
 }: ObservabilityNoticeProps) {
   return (
     <div
-      className={`observability-notice observability-notice--${tone} monitoring-detail-notice monitoring-detail-notice--${tone}`}
+      className={`observability-notice observability-notice--${tone}`}
       role={role}
     >
-      <div className="observability-notice__copy monitoring-detail-notice__copy">
-        <span className="observability-notice__mark monitoring-detail-notice__mark">{mark}</span>
-        <span className="observability-notice__text monitoring-detail-notice__text">{title}</span>
+      <div className="observability-notice__copy">
+        <span className="observability-notice__mark">{mark}</span>
+        <span className="observability-notice__text">{title}</span>
         {detail ? (
-          <span className="observability-notice__detail monitoring-detail-notice__detail">{detail}</span>
+          <span className="observability-notice__detail">{detail}</span>
         ) : null}
       </div>
       {action ? (
-        <div className="observability-notice__actions monitoring-detail-notice__actions">{action}</div>
+        <div className="observability-notice__actions">{action}</div>
       ) : null}
     </div>
   )

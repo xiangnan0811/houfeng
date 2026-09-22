@@ -41,7 +41,6 @@ import type {
   LinkVPSMonitoringInstanceInput,
   LifecycleActionResult,
   UpdateProbeItemInput,
-  DashboardOverview,
   ExtendVPSValidityInput,
   MonitoringInstanceInstallCommandIssue,
   MonitoringInstanceArchiveInput,
@@ -361,10 +360,6 @@ export function archiveTarget(targetId: string) {
 
 export function restoreTargetToPaused(targetId: string) {
   return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/restore-to-paused`)
-}
-
-export function getDashboard() {
-  return requestJSON<DashboardOverview>('/api/dashboard')
 }
 
 export function getSettings() {

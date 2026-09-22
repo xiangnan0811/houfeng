@@ -11,21 +11,6 @@ export type ObservationLayout = 'wide' | 'medium' | 'narrow'
 export const OBSERVATION_CHART_HEIGHT = 200
 
 /**
- * Plot SVG height for one equal cell.
- *
- * Eight tiles share one plot height so the two rows match. 200px is a step
- * up from the old 160/168 band without turning plates into posters.
- */
-export function observationChartHeight(_args?: {
-  layout?: ObservationLayout
-  gridWidth?: number
-  gridTop?: number
-  viewportHeight?: number
-}): number {
-  return OBSERVATION_CHART_HEIGHT
-}
-
-/**
  * Round a raw upper bound up to the 1–1.5–2–2.5–3–4–5–6–8 ladder.
  *
  * There is deliberately no `max(raw, 1)` floor: I/O wait sits around 0.5%, and a

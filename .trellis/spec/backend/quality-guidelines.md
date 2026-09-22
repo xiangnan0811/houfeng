@@ -455,7 +455,11 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 
 `actions/setup-go@v6` 通过 `go-version-file: go.mod`（`.github/workflows/ci.yml:16`）锁定精确工具链。本地完成/发布门禁也必须使用 `go.mod` 声明的精确版本；仅仅“更高版本”不能替代该证据，因为标准库编码器等实现细节可能让 byte-level golden 在未来工具链上产生不同输出。
 
-当前仓库门禁示例为 `GOTOOLCHAIN=go1.26.2 make verify-go`。如果默认 `go version` 不同，先用精确工具链复现失败；不得在只看到未来/实验性工具链的不同摘要后更新 golden 或修改生产代码。
+当前仓库门禁示例为 `GOTOOLCHAIN=go1.26.2 make verify-go`。如果默认 `go version` 不同，使用精确工具链完成验收；不得因为未来/实验性工具链的不同摘要直接更新 golden 或修改生产代码。
+
+图片预览的合同是可解码、尺寸与像素正确、去元数据、资源限制有效，不是标准库 PNG 编码字节跨工具链恒定。此类测试应比较解码后的输出与实际输入图像（JPEG 须与 JPEG 解码结果比较），不能重钉压缩字节哈希。内容寻址存储仍必须对实际输出字节计算摘要；该身份合同与预览编码的偶然字节表示不可混淆。
+
+本地 tmpfs 用户配额不足时，可把编译临时目录 `GOTMPDIR` 放到有余量的文件系统；Go 1.26 的 `testing.T.TempDir` 也读取它。长目录可能超过 Unix socket 路径限制，不能通过跳过 socket 测试解决。必要时使用 `go test -exec 'env -u GOTMPDIR TMPDIR=/tmp' ...` 分离编译与测试进程的临时目录，保持测试运行环境及清理边界。浏览器只需为该次命令设置 home 分区的私有 `TMPDIR`；不要清理其他任务的临时文件。
 
 ---
 

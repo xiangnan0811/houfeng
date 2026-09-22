@@ -5,7 +5,6 @@ import type { ProviderRecord, VPSUsageStatus } from '../../lib/types'
 import { CountryCombo } from './CountryCombo'
 import type { FactEditFormState } from './types'
 import { USAGE_OPTIONS } from './vpsDetailOptions'
-import './VPSFactsEditForm.css'
 
 const IMPORTANCE_OPTIONS: Array<[string, string]> = [
   ['low', '低'],

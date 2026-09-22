@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -453,13 +452,7 @@ describe('MonitoringPage', () => {
     expect(within(dialog).getByRole('button', { name: /df -h/ })).toBeInTheDocument()
     const uptime = within(dialog).getByRole('button', { name: /uptime/ })
     expect(uptime).toHaveClass('monitoring-detail-commands__item')
-    const panelSource = readFileSync('src/pages/monitoring/MonitoringInstancesBatchPanel.tsx', 'utf8')
-    const pageSource = readFileSync('src/pages/MonitoringPage.tsx', 'utf8')
-    const commandCss = readFileSync('src/pages/monitoring/MonitoringCommands.css', 'utf8')
-    expect(panelSource).toContain("import './MonitoringCommands.css'")
-    expect(pageSource).not.toContain('MonitoringDetailWorkspace.css')
-    expect(commandCss).toMatch(/padding:\s*10px 12px/)
-    expect(commandCss).toMatch(/border:\s*var\(--border-w\)/)
+
 
     fireEvent.click(uptime)
     await waitFor(() => {

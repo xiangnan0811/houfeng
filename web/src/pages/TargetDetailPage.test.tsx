@@ -3626,7 +3626,7 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('banner', { name: '目标身份与操作' })).not.toHaveTextContent('正常')
     expect(screen.queryByText('未发现活跃异常')).not.toBeInTheDocument()
     expect(document.querySelector('.watchtower-danger')).not.toBeInTheDocument()
-    expect(document.querySelector('.monitoring-detail-notice')).toHaveTextContent('覆盖缺口')
+    expect(document.querySelector('.observability-notice')).toHaveTextContent('覆盖缺口')
   })
 
   it('renders the danger zone with summary and status badge when active incidents exist', async () => {
@@ -3684,7 +3684,7 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Has Issues' })).toBeInTheDocument(),
     )
 
-    const notice = document.querySelector('.monitoring-detail-notice')
+    const notice = document.querySelector('.observability-notice')
     expect(notice).toBeInTheDocument()
     expect(notice).toHaveTextContent('HTTP 探测持续失败')
     expect(notice).toHaveTextContent('活跃')

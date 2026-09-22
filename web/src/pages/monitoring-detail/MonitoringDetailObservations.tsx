@@ -23,7 +23,7 @@ import {
 } from '../../components/monitoring-detail/metricSeries'
 import {
   niceMax,
-  observationChartHeight,
+  OBSERVATION_CHART_HEIGHT,
   type ObservationLayout,
 } from './monitoringDetailScale'
 import type { TimeWindow } from './types'
@@ -35,7 +35,6 @@ const NARROW_CONTAINER_PX = 640 // 40rem
 /** Four columns need ~270px cells after padding; below this, drop to 2×4. */
 const WIDE_CONTAINER_PX = 1100
 const NARROW_VIEWPORT_QUERY = '(max-width: 760px)'
-const CHART_HEIGHT = observationChartHeight()
 /** Same left gutter on every tile so plot origins line up. Keep it tight:
  *  axis ticks use compact labels (100%, 2.0, 3.2M), not "3.2 MB/s". */
 const PLOT_GUTTER = 34
@@ -343,7 +342,7 @@ export function MonitoringDetailObservations({
         samples={samples}
         {...shared}
         tone={primaryTone}
-        height={CHART_HEIGHT}
+        height={OBSERVATION_CHART_HEIGHT}
         paddingLeft={PLOT_GUTTER}
         yMin={0}
         yMax={100}
@@ -420,7 +419,7 @@ export function MonitoringDetailObservations({
               secondaryTone={outboundTone}
               {...shared}
               tone={primaryTone}
-              height={CHART_HEIGHT}
+              height={OBSERVATION_CHART_HEIGHT}
               paddingLeft={PLOT_GUTTER}
               yMin={0}
               yMax={100}
@@ -486,7 +485,7 @@ export function MonitoringDetailObservations({
               tertiaryTone="muted"
               {...shared}
               tone={primaryTone}
-              height={CHART_HEIGHT}
+              height={OBSERVATION_CHART_HEIGHT}
               paddingLeft={PLOT_GUTTER}
               yMin={0}
               {...(loadYMax === undefined ? {} : { yMax: loadYMax })}
@@ -519,7 +518,7 @@ export function MonitoringDetailObservations({
               secondaryTone={outboundTone}
               {...shared}
               tone={primaryTone}
-              height={CHART_HEIGHT}
+              height={OBSERVATION_CHART_HEIGHT}
               paddingLeft={PLOT_GUTTER}
               yMin={0}
               {...(iowaitYMax === undefined ? {} : { yMax: iowaitYMax })}
@@ -551,7 +550,7 @@ export function MonitoringDetailObservations({
               secondaryTone={outboundTone}
               {...shared}
               tone={primaryTone}
-              height={CHART_HEIGHT}
+              height={OBSERVATION_CHART_HEIGHT}
               paddingLeft={PLOT_GUTTER}
               yMin={0}
               yMax={netYMax}
@@ -580,7 +579,7 @@ export function MonitoringDetailObservations({
               secondaryTone={outboundTone}
               {...shared}
               tone={primaryTone}
-              height={CHART_HEIGHT}
+              height={OBSERVATION_CHART_HEIGHT}
               paddingLeft={PLOT_GUTTER}
               yMin={0}
               yMax={diskIOYMax}

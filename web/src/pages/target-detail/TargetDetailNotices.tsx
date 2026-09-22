@@ -167,7 +167,7 @@ export function TargetDetailNotices({
   }
   if (rows.length === 0) return null
   return (
-    <div className="observability-notices monitoring-detail-notices">
+    <div className="observability-notices">
       {rows.map((row) => (
         <div key={row.key}>{row.node}</div>
       ))}

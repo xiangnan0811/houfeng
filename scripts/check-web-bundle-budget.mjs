@@ -19,6 +19,7 @@ function parseArguments(argv) {
     distPath: resolve(repositoryRoot, 'web', 'dist'),
     budgetPath: resolve(repositoryRoot, 'web', 'bundle-budget.json'),
     format: 'text',
+    budgetPolicy: 'enforce',
     writeBaseline: false,
   }
 
@@ -30,6 +31,9 @@ function parseArguments(argv) {
       index += 1
     } else if (argument === '--budget' && value) {
       options.budgetPath = resolve(value)
+      index += 1
+    } else if (argument === '--budget-policy' && (value === 'enforce' || value === 'advisory')) {
+      options.budgetPolicy = value
       index += 1
     } else if (argument === '--format' && (value === 'json' || value === 'text')) {
       options.format = value
@@ -208,9 +212,10 @@ function formatText(report) {
     const limit = report.budget?.[metric]
     return limit === undefined
       ? `${metric}: ${report.metrics[metric]} bytes (baseline written)`
-      : `${metric}: actual ${report.metrics[metric]} <= limit ${limit}`
+      : `${metric}: actual ${report.metrics[metric]} ${report.metrics[metric] > limit ? '>' : '<='} limit ${limit}`
   })
   lines.push(
+    `Budget policy: ${report.budgetPolicy}`,
     `entry files: ${report.files.entryJs}, ${report.files.entryCss}`,
     `largest async: ${report.files.largestAsyncJs} (${report.files.asyncJsCount} chunks)`,
     `fonts: ${report.files.fontWoff2Count} WOFF2 files`,
@@ -234,6 +239,7 @@ function main() {
 
     const report = {
       ...analysis,
+      budgetPolicy: options.budgetPolicy,
       ...(budget ? { budget } : {}),
       status: violations.length === 0 ? 'pass' : 'fail',
     }
@@ -243,10 +249,10 @@ function main() {
 
     for (const violation of violations) {
       process.stderr.write(
-        `${violation.metric}: actual ${violation.actual} > limit ${violation.limit}\n`,
+        `${options.budgetPolicy === 'advisory' ? 'WARNING: ' : ''}${violation.metric}: actual ${violation.actual} > limit ${violation.limit}\n`,
       )
     }
-    if (violations.length > 0) process.exitCode = 1
+    if (violations.length > 0 && options.budgetPolicy === 'enforce') process.exitCode = 1
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
     process.exitCode = 1

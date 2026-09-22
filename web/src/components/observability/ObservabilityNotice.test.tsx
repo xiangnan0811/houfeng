@@ -19,7 +19,6 @@ describe('ObservabilityNotice', () => {
 
     const well = document.querySelector('.observability-notice')
     expect(well).toHaveClass('observability-notice--critical')
-    expect(well).toHaveClass('monitoring-detail-notice--critical')
     expect(screen.getByText('严重')).toBeInTheDocument()
     expect(screen.getByText('磁盘使用率持续超过阈值')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看事件' })).toBeInTheDocument()

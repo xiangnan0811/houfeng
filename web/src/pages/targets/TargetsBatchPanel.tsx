@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 
@@ -36,7 +36,6 @@ export function TargetsBatchPanel({
   const containerRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const triggerDisabled = selectedCount === 0 || batchSubmitting
-  const menuOpen = open && selectedCount > 0
 
   const items: BatchMenuItem[] = [
     { key: 'enter-maintenance', label: '进入维护', onSelect: () => onBatchAction('enter-maintenance') },
@@ -46,9 +45,8 @@ export function TargetsBatchPanel({
     { key: 'archive', label: '归档', onSelect: () => onBatchAction('archive') },
   ]
 
-  useEffect(() => {
-    if (selectedCount === 0 && open) setOpen(false)
-  }, [selectedCount, open])
+  if (selectedCount === 0 && open) setOpen(false)
+  const menuOpen = open && selectedCount > 0
 
   useEffect(() => {
     if (!menuOpen) return
@@ -71,14 +69,6 @@ export function TargetsBatchPanel({
     }
   }, [menuOpen])
 
-  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (triggerDisabled) return
-    if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault()
-      setOpen(true)
-    }
-  }
-
   return (
     <>
       <div className="monitoring-batch" ref={containerRef}>
@@ -88,22 +78,19 @@ export function TargetsBatchPanel({
           type="button"
           className="btn sm ghost"
           aria-label="批量操作"
-          aria-haspopup="menu"
           aria-expanded={menuOpen}
-          aria-controls={menuOpen ? menuId : undefined}
+          aria-controls={menuId}
           disabled={triggerDisabled}
           onClick={() => setOpen((current) => !current)}
-          onKeyDown={handleTriggerKeyDown}
         >
           {selectedCount > 0 ? `批量操作 (${selectedCount})` : '批量操作'}
         </button>
         {menuOpen ? (
-          <div className="monitoring-batch__menu" id={menuId} role="menu" aria-labelledby={triggerId}>
+          <div className="monitoring-batch__menu" id={menuId} role="group" aria-labelledby={triggerId}>
             {items.map((item) => (
               <button
                 key={item.key}
                 type="button"
-                role="menuitem"
                 className="monitoring-batch__item"
                 disabled={batchSubmitting}
                 onClick={() => {

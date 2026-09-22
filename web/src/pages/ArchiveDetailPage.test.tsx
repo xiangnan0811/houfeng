@@ -208,7 +208,20 @@ const timeline: VPSTimeline = {
 
 function PathProbe() {
   const location = useLocation()
-  return <div data-testid="path-probe">{location.pathname}</div>
+  return (
+    <div data-testid="path-probe" data-state={JSON.stringify(location.state ?? null)}>
+      {location.pathname}
+    </div>
+  )
+}
+
+function LocationStateProbe() {
+  const location = useLocation()
+  return (
+    <div data-testid="location-state" data-state={JSON.stringify(location.state ?? null)}>
+      {location.pathname}
+    </div>
+  )
 }
 
 describe('ArchiveDetailPage', () => {
@@ -309,9 +322,13 @@ describe('ArchiveDetailPage', () => {
       .fn()
       .mockResolvedValueOnce(mockJSONResponse(activeReview))
     vi.stubGlobal('fetch', fetchMock)
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_active',
+      extraProvenance: 'keep-me',
+    }
 
     render(
-      <MemoryRouter initialEntries={['/archive/vps_active']}>
+      <MemoryRouter initialEntries={[{ pathname: '/archive/vps_active', state: inventoryState }]}>
         <Routes>
           <Route path="/archive/:vpsId" element={<ArchiveDetailPage />} />
           <Route path="/vps/:vpsId" element={<PathProbe />} />
@@ -320,6 +337,7 @@ describe('ArchiveDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByTestId('path-probe')).toHaveTextContent('/vps/vps_active'))
+    expect(screen.getByTestId('path-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_active/archive-review', {
       headers: { Accept: 'application/json' },
@@ -337,9 +355,13 @@ describe('ArchiveDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([subscription]))
       .mockResolvedValueOnce(mockJSONResponse(restored))
     vi.stubGlobal('fetch', fetchMock)
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_archived',
+      extraProvenance: 'keep-me',
+    }
 
     render(
-      <MemoryRouter initialEntries={['/archive/vps_archived']}>
+      <MemoryRouter initialEntries={[{ pathname: '/archive/vps_archived', state: inventoryState }]}>
         <Routes>
           <Route path="/archive/:vpsId" element={<ArchiveDetailPage />} />
           <Route path="/vps/:vpsId" element={<PathProbe />} />
@@ -354,6 +376,7 @@ describe('ArchiveDetailPage', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '确认恢复' }))
 
     await waitFor(() => expect(screen.getByTestId('path-probe')).toHaveTextContent('/vps/vps_archived'))
+    expect(screen.getByTestId('path-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_archived/restore-from-archive', {
       method: 'POST',
       headers: { Accept: 'application/json' },
@@ -436,9 +459,14 @@ describe('ArchiveDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse({ error: 'restore conflict' }, 409))
       .mockResolvedValueOnce(mockJSONResponse({ ...archivedVPS, lifecycle_status: 'idle' }))
     vi.stubGlobal('fetch', fetchMock)
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_archived',
+      extraProvenance: 'keep-me',
+    }
 
     const { unmount } = render(
-      <MemoryRouter initialEntries={['/archive/vps_archived']}>
+      <MemoryRouter initialEntries={[{ pathname: '/archive/vps_archived', state: inventoryState }]}>
+        <LocationStateProbe />
         <Routes>
           <Route path="/archive/:vpsId" element={<ArchiveDetailPage />} />
           <Route path="/vps/:vpsId" element={<PathProbe />} />
@@ -454,10 +482,13 @@ describe('ArchiveDetailPage', () => {
     fireEvent.click(confirmBtn)
     await waitFor(() => expect(within(dialog).getByText('restore conflict')).toBeInTheDocument())
     expect(screen.queryByTestId('path-probe')).not.toBeInTheDocument()
+    expect(screen.getByTestId('location-state')).toHaveTextContent('/archive/vps_archived')
+    expect(screen.getByTestId('location-state')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
 
     // Now test retry
     fireEvent.click(confirmBtn)
     await waitFor(() => expect(screen.getByTestId('path-probe')).toHaveTextContent('/vps/vps_archived'))
+    expect(screen.getByTestId('path-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(fetchMock).toHaveBeenCalledTimes(5)
 
     // Unmount safely without late errors

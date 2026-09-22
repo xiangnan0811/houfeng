@@ -31,7 +31,9 @@ Use the lowest level that honestly proves the change.
 | Local screenshot for review | First-viewport structure, page hierarchy, theme, or cross-page UX materially changes and a reviewer asks for visual context | Local, untracked screenshots or external attachments; do not commit bulk screenshots or manifests by default |
 | Manual review | Visual quality, taste, density, copy, or product judgment cannot be automated | Explicit reviewer notes; do not present automated tests as visual acceptance |
 
-Vitest, coverage, lint, build, static budgets and Chromium are required quality gates, but they still do not prove visual taste or real inventory truth.
+Vitest, coverage, lint, build, static analysis and Chromium remain required checks, but they still do not prove visual taste or real inventory truth.
+
+For the first controlled online trial, `npm run bundle:check` and `npm run css:analyze` use `--budget-policy advisory`: all 13 numeric budgets are historical reference lines, not CI blockers. Exceedances remain visible as warnings with actual/limit evidence and a failing measurement status; malformed inputs, CSS ownership/parse errors and invalid bundle entries still fail the command. The checked-in budget files are not rebased. For a strict audit, run either CLI directly with its default policy or `--budget-policy enforce`; JSON reports include `budgetPolicy` separately from measurement status. This policy does not relax security, behavior or browser checks.
 
 ## Local preview
 

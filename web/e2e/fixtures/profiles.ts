@@ -10,6 +10,8 @@ import type {
   ComparisonEvaluateResponse,
   DashboardOverview,
   MonitoringInstanceRecord,
+  MonitoringInstanceRuntimeFacts,
+  MonitoringInstanceRuntimeSummariesResponse,
   MonitoringInstanceSparklinesResponse,
   ProviderRecord,
   RecordDraft,
@@ -218,6 +220,11 @@ const ASSET_DECISION_OVERVIEW = {
 const MONITORING_SPARKLINES = {
   monitoring_instances: {},
 } satisfies MonitoringInstanceSparklinesResponse
+
+const MONITORING_RUNTIME_SUMMARIES = {
+  read_at: '2026-08-20T09:00:00Z',
+  monitoring_instances: {},
+} satisfies MonitoringInstanceRuntimeSummariesResponse
 
 const TARGET_SPARKLINES = {
   targets: {},
@@ -526,6 +533,10 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
         [apiRouteKey('GET', '/api/monitoring-instances/sparklines?metrics=cpu_usage_pct,mem_used_pct,disk_used_pct&window=24h&downsample=24')]: {
           status: 200,
           body: MONITORING_SPARKLINES,
+        },
+        [apiRouteKey('GET', '/api/monitoring-instances/runtime-summaries')]: {
+          status: 200,
+          body: MONITORING_RUNTIME_SUMMARIES,
         },
         [apiRouteKey('GET', '/api/settings')]: { status: 200, body: SETTINGS },
       })
@@ -867,10 +878,38 @@ export function monitoringInstanceDetailProfile(monitoringInstanceId = 'mi_001')
     created_at: '2026-08-01T00:00:00Z',
     updated_at: '2026-08-20T09:00:00Z',
   } satisfies MonitoringInstanceRecord
-  const runtimeFacts = {
+  const runtimeFacts24h = {
     monitoring_instance_id: monitoringInstanceId,
+    read_at: '2026-08-20T09:00:00Z',
+    window: {
+      key: '24h',
+      started_at: '2026-08-19T09:00:00Z',
+      ended_at: '2026-08-20T09:00:00Z',
+      bucket_count: 288,
+      available_started_at: null,
+      available_ended_at: null,
+      sample_count: 0,
+    },
     latest_host_sample: null,
-  }
+    host_metric_points: [],
+    recent_host_samples: [],
+  } satisfies MonitoringInstanceRuntimeFacts
+  const runtimeFactsRealtime = {
+    monitoring_instance_id: monitoringInstanceId,
+    read_at: '2026-08-20T09:00:00Z',
+    window: {
+      key: 'realtime',
+      started_at: '2026-08-20T08:00:00Z',
+      ended_at: '2026-08-20T09:00:00Z',
+      bucket_count: 720,
+      available_started_at: null,
+      available_ended_at: null,
+      sample_count: 0,
+    },
+    latest_host_sample: null,
+    host_metric_points: [],
+    recent_host_samples: [],
+  } satisfies MonitoringInstanceRuntimeFacts
   const onboarding = {
     ...record,
     phase: '接入完成',
@@ -881,11 +920,11 @@ export function monitoringInstanceDetailProfile(monitoringInstanceId = 'mi_001')
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}`)]: { status: 200, body: record },
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=realtime`)]: {
       status: 200,
-      body: runtimeFacts,
+      body: runtimeFactsRealtime,
     },
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=24h`)]: {
       status: 200,
-      body: runtimeFacts,
+      body: runtimeFacts24h,
     },
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/onboarding`)]: {
       status: 200,

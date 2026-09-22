@@ -278,7 +278,6 @@ test('VPS overview creates the first monitoring instance and reaches its onboard
   page,
 }) => {
   api.useProfile(firstMonitoringCreateProfile())
-  await api.allowRuntimeStream('mi_created')
   await page.goto('/vps/vps_001')
 
   await page.getByRole('button', { name: '创建并接入 agent' }).click()
@@ -303,7 +302,29 @@ test('VPS overview creates the first monitoring instance and reaches its onboard
   )
   await onboardingNavigation
   await expect(page.getByRole('heading', { name: 'Tokyo Monitor', exact: true, level: 1 })).toBeVisible()
-  await expect(page.getByRole('dialog', { name: '监控实例接入抽屉' })).toBeVisible()
+  const onboardingDrawer = page.getByRole('dialog', { name: '监控实例接入抽屉' })
+  await expect(onboardingDrawer).toBeVisible()
+  await expect.poll(() => (
+    api.requestCount('GET', '/api/monitoring-instances/mi_created/runtime-facts?window=24h')
+  )).toBeGreaterThan(0)
+  await expect(page.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true')
+  await api.assertRuntimeStreamNotConnected('mi_created')
+
+  await onboardingDrawer.getByRole('button', { name: '关闭' }).click()
+  await expect(onboardingDrawer).toHaveCount(0)
+  await api.allowRuntimeStream('mi_created')
+  await page.getByRole('button', { name: '实时' }).click()
+  await expect.poll(() => (
+    api.requestCount('GET', '/api/monitoring-instances/mi_created/runtime-facts?window=realtime')
+  )).toBeGreaterThan(0)
+  await expect(page.getByRole('button', { name: '实时' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page).toHaveURL((url) => (
+    url.pathname === '/monitoring/mi_created'
+    && url.searchParams.get('return_vps') === 'vps_001'
+    && url.searchParams.get('window') === 'realtime'
+    && !url.searchParams.has('onboarding')
+  ))
+  await expect(page.getByText('已连接', { exact: true })).toBeVisible()
   await api.assertRuntimeStreamConnected('mi_created')
   expect(api.requestCount('GET', '/api/vps/vps_001/overview')).toBe(2)
   expect(api.requestCount('POST', '/api/vps/vps_001/monitoring-instances')).toBe(1)

@@ -260,7 +260,7 @@ function VPSDetailRoute() {
   }
 
   if (gate === 'archive') {
-    return <Navigate to={`/archive/${encodeURIComponent(normalizedVPSId)}`} replace />
+    return <Navigate to={`/archive/${encodeURIComponent(normalizedVPSId)}`} replace state={location.state} />
   }
 
   if (gate === 'legacy') {
@@ -347,7 +347,7 @@ function VPSOverviewRoute({
 
   const lifecycleStatus = state.overview.identity.lifecycle_status
   if (lifecycleStatus === 'cancelled' || lifecycleStatus === 'archived') {
-    return <Navigate to={`/archive/${encodeURIComponent(vpsId ?? '')}`} replace />
+    return <Navigate to={`/archive/${encodeURIComponent(vpsId ?? '')}`} replace state={location.state} />
   }
 
   return (

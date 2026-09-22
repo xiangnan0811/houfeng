@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 
 import { PageState } from '../components/PageState'
-import { ApiError, getDashboard, getSubscriptionOverview, listVPSAssets } from '../lib/api'
+import { getSubscriptionOverview, listVPSAssets } from '../lib/api'
+import { ApiError } from '../lib/apiRequest'
+import { getDashboard } from '../lib/observabilityApi'
 import type { DashboardOverview, SubscriptionOverview, VPSAssetRecord } from '../lib/types'
 import { DashboardCommandSurface } from './dashboard/DashboardCommandSurface'
 import { buildDashboardModel } from './dashboard/dashboardModel'

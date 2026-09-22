@@ -404,11 +404,11 @@ func scanRuntimeWindowSummary(scanner runtimeFactsScanner, summary *runtimefacts
 
 func scanHostMetricPoint(scanner runtimeFactsScanner, point *runtimefacts.HostMetricPoint) error {
 	var (
-		cpuUsagePct       sql.NullFloat64
-		memUsedPct        sql.NullFloat64
-		diskUsedPct       sql.NullFloat64
-		inodeUsedPct      sql.NullFloat64
-		load5             sql.NullFloat64
+		cpuUsagePct          sql.NullFloat64
+		memUsedPct           sql.NullFloat64
+		diskUsedPct          sql.NullFloat64
+		inodeUsedPct         sql.NullFloat64
+		load5                sql.NullFloat64
 		cpuIOWaitPct         sql.NullFloat64
 		netInBytesPerSec     sql.NullFloat64
 		netOutBytesPerSec    sql.NullFloat64

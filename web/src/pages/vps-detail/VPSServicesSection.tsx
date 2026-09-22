@@ -9,7 +9,6 @@ import {
   serviceResourceStatus,
   serviceResourceType,
 } from './vpsDetailResourcePresentation'
-import './VPSRelationDossiers.css'
 
 type VPSServicesSectionProps = {
   services: AssetServiceRecord[]

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { niceMax, observationChartHeight, OBSERVATION_CHART_HEIGHT } from './monitoringDetailScale'
+import { niceMax } from './monitoringDetailScale'
 
 describe('niceMax', () => {
   it('follows the data instead of an artificial lower bound', () => {
@@ -37,14 +37,5 @@ describe('niceMax', () => {
     expect(niceMax(0.65 * 1.15)).toBeCloseTo(0.8, 6)
     // 0.23 raw snaps to 0.25, still far below the first threshold.
     expect(niceMax(0.2 * 1.15)).toBeCloseTo(0.25, 6)
-  })
-})
-
-describe('observationChartHeight', () => {
-  it('is a compact 4×2 tile height and does not grow with the monitor', () => {
-    expect(OBSERVATION_CHART_HEIGHT).toBe(200)
-    expect(observationChartHeight()).toBe(200)
-    expect(observationChartHeight({ layout: 'wide', gridWidth: 3516, viewportHeight: 1923 })).toBe(200)
-    expect(observationChartHeight({ layout: 'narrow', gridWidth: 269 })).toBe(200)
   })
 })

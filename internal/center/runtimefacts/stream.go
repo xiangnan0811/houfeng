@@ -70,6 +70,9 @@ func (h *StreamHub) AfterSuccessfulSync(_ context.Context, batch syncing.Batch, 
 	if h == nil || batch.MonitoringInstanceID == "" {
 		return nil
 	}
+	if result.Disposition != syncing.ResultDispositionRecorded {
+		return nil
+	}
 	for _, sample := range batch.Observations.HostSamples {
 		if sample.MonitoringInstanceID == "" {
 			sample.MonitoringInstanceID = batch.MonitoringInstanceID

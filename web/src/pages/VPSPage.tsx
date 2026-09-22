@@ -45,7 +45,7 @@ import {
   vpsLocationLabel,
   type AssetQualityIssue,
 } from './assetPageUtils'
-import './VPSPage.css'
+import './vps-detail/VPSDetailWorkspace.css'
 
 const WORKSPACE_STORAGE_KEY = 'houfeng.vps.workspace'
 

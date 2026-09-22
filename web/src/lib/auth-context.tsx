@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import * as client from './auth-client'
-import { setUnauthorizedHandler } from './api'
+import { setUnauthorizedHandler } from './apiRequest'
 
 export interface AuthValue {
   user: client.User | null

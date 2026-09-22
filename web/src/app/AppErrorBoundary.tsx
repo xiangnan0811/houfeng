@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 
-import { Button } from '../components/atoms'
+import { Button } from '../components/atoms/Button'
 import { PageState } from '../components/PageState'
 
 type AppErrorBoundaryProps = {

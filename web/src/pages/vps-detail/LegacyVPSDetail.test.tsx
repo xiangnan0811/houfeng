@@ -304,7 +304,7 @@ function LocationProbe() {
   const location = useLocation()
   return (
     <>
-      <div data-testid="location-path">{location.pathname}</div>
+      <div data-testid="location-path" data-state={JSON.stringify(location.state ?? null)}>{location.pathname}</div>
       <div data-testid="location-search">{location.search}</div>
     </>
   )
@@ -2600,9 +2600,13 @@ describe('LegacyVPSDetail', () => {
     }
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse(detailBody))
     vi.stubGlobal('fetch', fetchMock)
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
 
     render(
-      <MemoryRouter initialEntries={['/vps/vps_001']}>
+      <MemoryRouter initialEntries={[{ pathname: '/vps/vps_001', state: inventoryState }]}>
         <Routes>
           <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
           <Route path="/archive/:vpsId" element={<LocationProbe />} />
@@ -2611,6 +2615,7 @@ describe('LegacyVPSDetail', () => {
     )
 
     await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_001'))
+    expect(screen.getByTestId('location-path')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(screen.queryByRole('heading', { name: 'Tokyo Edge' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -2741,7 +2746,10 @@ describe('LegacyVPSDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <MemoryRouter initialEntries={['/vps/vps_001']}>
+      <MemoryRouter initialEntries={[{ pathname: '/vps/vps_001', state: {
+        vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+        extraProvenance: 'keep-me',
+      } }]}>
         <Routes>
           <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
           <Route path="/archive/:vpsId" element={<LocationProbe />} />
@@ -2765,6 +2773,10 @@ describe('LegacyVPSDetail', () => {
     fireEvent.click(confirmButton)
 
     await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_001'))
+    expect(screen.getByTestId('location-path')).toHaveAttribute('data-state', JSON.stringify({
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }))
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/vps/vps_001/archive-review', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
@@ -2780,6 +2792,64 @@ describe('LegacyVPSDetail', () => {
       credentials: 'include',
       body: JSON.stringify({ confirmation_name: 'Tokyo Edge' }),
     })
+  })
+
+  it('keeps inventory state and archive confirmation when archive write fails', async () => {
+    const detailBody = {
+      ...vpsDetailBody,
+      monitoring_instance_links: [],
+      active_monitoring_instance_link_count: 0,
+    }
+    const archiveReview = {
+      vps: detailBody,
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: [],
+      eligible: true,
+    }
+    const inventoryState = {
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/vps/vps_001' && method === 'GET') return Promise.resolve(mockJSONResponse(detailBody))
+      if (url === '/api/vps/vps_001/timeline') return Promise.resolve(mockJSONResponse(timelineEmptyBody))
+      if (url === '/api/vps/vps_001/services') return Promise.resolve(mockJSONResponse(servicesEmptyBody))
+      if (url === '/api/vps/vps_001/domains') return Promise.resolve(mockJSONResponse(domainsEmptyBody))
+      if (String(url).startsWith('/api/subscriptions')) return Promise.resolve(mockJSONResponse([]))
+      if (url === '/api/vps/vps_001/archive-review') return Promise.resolve(mockJSONResponse(archiveReview))
+      if (url === '/api/vps/vps_001/archive' && method === 'POST') {
+        return Promise.resolve(mockJSONResponse({ error: 'archive conflict' }, 409))
+      }
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={[{ pathname: '/vps/vps_001', state: inventoryState }]}>
+        <LocationProbe />
+        <Routes>
+          <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
+          <Route path="/archive/:vpsId" element={<div>archived</div>} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    clickVPSAction('归档 VPS')
+    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.change(within(dialog).getByLabelText('输入 VPS 名称确认归档'), { target: { value: 'Tokyo Edge' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+
+    expect(await within(dialog).findByText('archive conflict')).toBeInTheDocument()
+    expect(screen.getByTestId('location-path')).toHaveTextContent('/vps/vps_001')
+    expect(screen.getByTestId('location-path')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
+    expect(screen.queryByText('archived')).not.toBeInTheDocument()
   })
 
   describe('archive review request ownership', () => {
@@ -5645,7 +5715,10 @@ describe('LegacyVPSDetail', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <MemoryRouter initialEntries={['/vps/vps_001']}>
+      <MemoryRouter initialEntries={[{ pathname: '/vps/vps_001', state: {
+        vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+        extraProvenance: 'keep-me',
+      } }]}>
         <Routes>
           <Route path="/vps/:vpsId" element={<LegacyVPSDetail />} />
           <Route path="/archive/:vpsId" element={<LocationProbe />} />
@@ -5659,6 +5732,10 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(factsDrawer).getByLabelText('VPS 名称'), { target: { value: '我的草稿' } })
     fireEvent.click(within(factsDrawer).getByRole('button', { name: '保存基础信息' }))
     await waitFor(() => expect(screen.getByTestId('location-path')).toHaveTextContent('/archive/vps_001'))
+    expect(screen.getByTestId('location-path')).toHaveAttribute('data-state', JSON.stringify({
+      vpsInventoryHref: '/vps?workspace=ledger&q=Tokyo&selected=vps_001',
+      extraProvenance: 'keep-me',
+    }))
   })
 
   it('does not archive from a delayed readonly identity GET after switching VPS', async () => {

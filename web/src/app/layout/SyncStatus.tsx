@@ -1,4 +1,4 @@
-import { Timestamp } from '../../components/atoms'
+import { Timestamp } from '../../components/atoms/Mono'
 import { formatDateTime } from '../../lib/format'
 
 export type ShellSummaryStatus =

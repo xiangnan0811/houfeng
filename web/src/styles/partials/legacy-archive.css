@@ -280,10 +280,6 @@
   overflow-wrap: anywhere;
 }
 
-.archive-detail__full-width {
-  width: 100%;
-}
-
 .archive-detail-page .page-panel--scroll-x {
   padding: 0;
   border: none;
@@ -306,15 +302,12 @@
   table-layout: fixed;
 }
 
-.archive-detail-card .data-table {
+.archive-detail__full-width,.archive-detail-card .data-table {
   width: 100%;
 }
 
 @media (max-width: 900px) {
-  .archive-detail-page .archive-detail-two-col {
-    grid-template-columns: 1fr;
-  }
-  .archive-detail-identity-grid {
+  .archive-detail-page .archive-detail-two-col,.archive-detail-identity-grid {
     grid-template-columns: 1fr;
   }
   .archive-detail-fact-block:first-child {

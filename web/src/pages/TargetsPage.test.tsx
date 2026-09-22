@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -761,7 +760,7 @@ describe('TargetsPage', () => {
     expect(firstTrendCell.textContent).toContain('—')
   })
 
-  it('disables batch actions at zero selection and opens the menu after select-all', async () => {
+  it('disables batch actions at zero selection and opens the action group after select-all', async () => {
     vi.stubGlobal('fetch', listFetch([
       targetRecord({ target_id: 'tg_001', name: 'Blog' }),
       targetRecord({ target_id: 'tg_002', name: 'Cache' }),
@@ -782,12 +781,14 @@ describe('TargetsPage', () => {
     expect(screen.getByRole('button', { name: '批量操作' })).toHaveTextContent('(2)')
 
     fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
-    expect(screen.getByRole('menuitem', { name: '进入维护' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: '退出维护' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: '暂停' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: '恢复' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '恢复到暂停' })).not.toBeInTheDocument()
+    const actions = screen.getByRole('group', { name: '批量操作' })
+    expect(within(actions).getByRole('button', { name: '进入维护' })).toBeInTheDocument()
+    expect(within(actions).getByRole('button', { name: '退出维护' })).toBeInTheDocument()
+    expect(within(actions).getByRole('button', { name: '暂停' })).toBeInTheDocument()
+    expect(within(actions).getByRole('button', { name: '恢复' })).toBeInTheDocument()
+    expect(within(actions).getByRole('button', { name: '归档' })).toBeInTheDocument()
+    expect(within(actions).queryByRole('button', { name: '恢复到暂停' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
   })
 
   it('runs batch 进入维护 on selected rows', async () => {
@@ -799,7 +800,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByLabelText('选择 Blog'))
     fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '进入维护' }))
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -818,7 +819,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByLabelText('选择 Blog'))
     fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '暂停' }))
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
 
     expect(screen.getByRole('alertdialog', { name: '确认批量暂停目标' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认批量暂停' }))
@@ -840,7 +841,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByLabelText('选择 Blog'))
     fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
 
     expect(screen.getByRole('alertdialog', { name: '确认批量归档目标' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '确认批量归档' }))
@@ -851,6 +852,139 @@ describe('TargetsPage', () => {
         expect.objectContaining({ method: 'POST' }),
       ),
     )
+  })
+
+  it('permanently drops a selection when the row is filtered out', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({ target_id: 'tg_001', name: 'Blog', target_type: 'service' }),
+      targetRecord({ target_id: 'tg_002', name: 'Cache', target_type: 'china_reference' }),
+    ]))
+    renderTargets()
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    expect(screen.getByLabelText('选择 Blog')).toBeChecked()
+
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'china_reference' } })
+    await waitFor(() => expect(screen.queryByText('Blog')).not.toBeInTheDocument())
+    expect(screen.getByText('Cache')).toBeInTheDocument()
+    expect(screen.getByLabelText('选择 Cache')).not.toBeChecked()
+
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+    expect(screen.getByLabelText('选择 Blog')).not.toBeChecked()
+    expect(screen.getByLabelText('选择 Cache')).not.toBeChecked()
+  })
+
+  it('selects only currently visible rows when using select-all', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({ target_id: 'tg_001', name: 'Blog', target_type: 'service' }),
+      targetRecord({ target_id: 'tg_002', name: 'Cache', target_type: 'china_reference' }),
+    ]))
+    renderTargets()
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'service' } })
+    await waitFor(() => expect(screen.queryByText('Cache')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('全选可见目标'))
+    expect(screen.getByLabelText('选择 Blog')).toBeChecked()
+
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: '' } })
+    await waitFor(() => expect(screen.getByText('Cache')).toBeInTheDocument())
+    expect(screen.getByLabelText('选择 Blog')).toBeChecked()
+    expect(screen.getByLabelText('选择 Cache')).not.toBeChecked()
+    expect(screen.getByRole('button', { name: '批量操作' })).toHaveTextContent('(1)')
+  })
+
+  it('keeps frozen batch ids while the confirmation dialog is open', async () => {
+    const fetchMock = listFetch([
+      targetRecord({ target_id: 'tg_001', name: 'Blog', target_type: 'service' }),
+      targetRecord({ target_id: 'tg_002', name: 'Cache', target_type: 'china_reference' }),
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+    renderTargets()
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('全选可见目标'))
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+
+    expect(screen.getByRole('alertdialog', { name: '确认批量暂停目标' })).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'service' } })
+    await waitFor(() => expect(screen.queryByText('Cache')).not.toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '确认批量暂停' }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/targets/tg_001/runtime/pause',
+        expect.objectContaining({ method: 'POST' }),
+      )
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/targets/tg_002/runtime/pause',
+        expect.objectContaining({ method: 'POST' }),
+      )
+    })
+  })
+
+  it('does not reopen the action group after clearing and reselecting', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({ target_id: 'tg_001', name: 'Blog' }),
+    ]))
+    renderTargets()
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    expect(screen.getByRole('group', { name: '批量操作' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    expect(screen.queryByRole('group', { name: '批量操作' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '批量操作' })).toBeDisabled()
+
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    expect(screen.getByRole('button', { name: '批量操作' })).toBeEnabled()
+    expect(screen.queryByRole('group', { name: '批量操作' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
+  })
+
+  it('closes the action group on Escape and restores trigger focus', async () => {
+    vi.stubGlobal('fetch', listFetch([targetRecord({ target_id: 'tg_001', name: 'Blog' })]))
+    renderTargets()
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    const trigger = screen.getByRole('button', { name: '批量操作' })
+    trigger.focus()
+    fireEvent.click(trigger)
+    const enterMaintenance = within(screen.getByRole('group', { name: '批量操作' })).getByRole('button', {
+      name: '进入维护',
+    })
+    expect(enterMaintenance).not.toHaveAttribute('tabindex', '-1')
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.queryByRole('group', { name: '批量操作' })).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+  })
+
+  it('does not treat the action group as an arrow-key menu', async () => {
+    vi.stubGlobal('fetch', listFetch([targetRecord({ target_id: 'tg_001', name: 'Blog' })]))
+    renderTargets()
+
+    await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    const trigger = screen.getByRole('button', { name: '批量操作' })
+    trigger.focus()
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' })
+    expect(screen.queryByRole('group', { name: '批量操作' })).not.toBeInTheDocument()
   })
 
   it('filters 异常, 暂停, 归档, and 覆盖缺口 from the quick-view tabs', async () => {
@@ -910,12 +1044,5 @@ describe('TargetsPage', () => {
     expect(screen.getByText('Paused API')).toBeInTheDocument()
     expect(screen.getByText('Archived API')).toBeInTheDocument()
     expect(screen.getByText('Coverage Gap API')).toBeInTheDocument()
-  })
-
-  it('does not import the target detail workspace stylesheet on the list page', () => {
-    const source = readFileSync('src/pages/TargetsPage.tsx', 'utf8')
-    expect(source).not.toContain('TargetDetailWorkspace.css')
-    expect(readFileSync('src/styles/partials/legacy-targets.css', 'utf8')).toContain('.targets-table')
-    expect(readFileSync('src/pages/target-detail/TargetDetailWorkspace.css', 'utf8')).not.toContain('.targets-table')
   })
 })

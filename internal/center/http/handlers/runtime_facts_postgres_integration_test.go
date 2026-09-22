@@ -139,7 +139,7 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeFactsAndStreamEligibility(t
 				NetworkRatesValid:    &marker,
 			},
 		}},
-	}, syncing.Result{}); err != nil {
+	}, syncing.Result{Disposition: syncing.ResultDispositionRecorded}); err != nil {
 		t.Fatalf("publish stream samples: %v", err)
 	}
 

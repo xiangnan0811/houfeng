@@ -2025,10 +2025,10 @@ describe('MonitoringDetailPage', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '重试加载活跃异常' }))
     await waitFor(() => {
-      expect(document.querySelector('.monitoring-detail-notice')?.textContent).toContain('活跃 1')
+      expect(document.querySelector('.observability-notice')?.textContent).toContain('活跃 1')
     })
-    expect(document.querySelector('.monitoring-detail-notice')?.textContent).toMatch(/已持续 \d+ 天/)
-    expect(document.querySelector('.monitoring-detail-notice')?.textContent).not.toMatch(/持续 .+\s前/)
+    expect(document.querySelector('.observability-notice')?.textContent).toMatch(/已持续 \d+ 天/)
+    expect(document.querySelector('.observability-notice')?.textContent).not.toMatch(/持续 .+\s前/)
     // The explicit primary issue summary wins over the incident summary.
     expect(screen.getByText('磁盘使用率偏高')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Singapore Edge' })).toBeInTheDocument()
@@ -2053,8 +2053,8 @@ describe('MonitoringDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByText('绑定冲突待确认')).toBeInTheDocument())
-    const conflictNotice = document.querySelector('.monitoring-detail-notice')
-    expect(conflictNotice?.querySelector('.monitoring-detail-notice__actions')).toContainElement(
+    const conflictNotice = document.querySelector('.observability-notice')
+    expect(conflictNotice?.querySelector('.observability-notice__actions')).toContainElement(
       screen.getByRole('button', { name: '处置绑定冲突' }),
     )
     expect(screen.queryByRole('heading', { name: '绑定冲突处置' })).not.toBeInTheDocument()
@@ -3181,11 +3181,11 @@ describe('MonitoringDetailPage', () => {
     // One notice line replaces the danger card plus the duplicated incident list.
     expect(container.querySelector('.watchtower-danger')).toBeNull()
     expect(screen.queryByText('当前主问题')).not.toBeInTheDocument()
-    const notice = container.querySelector('.monitoring-detail-notice')!
+    const notice = container.querySelector('.observability-notice')!
     expect(notice.textContent).toContain('磁盘使用率持续超过阈值')
     expect(notice.textContent).toContain('活跃 3')
-    expect(notice.className).toContain('monitoring-detail-notice--critical')
-    expect(notice.querySelector('.monitoring-detail-notice__actions')).toContainElement(
+    expect(notice.className).toContain('observability-notice--critical')
+    expect(notice.querySelector('.observability-notice__actions')).toContainElement(
       within(notice as HTMLElement).getByRole('button', { name: '查看事件' }),
     )
     fireEvent.click(within(notice as HTMLElement).getByRole('button', { name: '查看事件' }))

@@ -111,11 +111,11 @@ describe('MonitoringDetailNotices', () => {
       }),
       incidents,
     })
-    const notice = container.querySelector('.monitoring-detail-notice--critical')
+    const notice = container.querySelector('.observability-notice--critical')
     expect(notice).not.toBeNull()
     expect(notice).toHaveTextContent('严重')
     expect(notice).toHaveTextContent('磁盘使用率持续超过阈值')
-    expect(notice?.querySelector('.monitoring-detail-notice__actions')).toContainElement(
+    expect(notice?.querySelector('.observability-notice__actions')).toContainElement(
       screen.getByRole('button', { name: '查看事件' }),
     )
     expect(container.querySelector('.text-link')).toBeNull()
@@ -150,7 +150,7 @@ describe('MonitoringDetailNotices', () => {
       heartbeatFreshness: { kind: 'stale', at: '2026-04-24T09:30:00Z' },
       sample: sample({ observed_at: '2026-04-24T04:00:00Z' }),
     })
-    const notice = container.querySelector('.monitoring-detail-notice--notice')
+    const notice = container.querySelector('.observability-notice--notice')
     expect(notice).toHaveTextContent('数据陈旧')
     expect(notice).toHaveTextContent('心跳与采样已落后')
     expect(screen.queryByRole('button', { name: '查看事件' })).not.toBeInTheDocument()
@@ -165,29 +165,29 @@ describe('MonitoringDetailNotices', () => {
       heartbeatFreshness: { kind: 'missing' },
       sample: null,
     })
-    expect(container.querySelector('.monitoring-detail-notice')).toBeNull()
+    expect(container.querySelector('.observability-notice')).toBeNull()
   })
 
   it('surfaces maintenance and pause as their own wells', () => {
     const maintenance = renderNotices({
       monitoringInstance: instance({ monitoring_status: '维护中' }),
     })
-    expect(maintenance.container.querySelector('.monitoring-detail-notice--maintenance')).toHaveTextContent('观测继续，异常通知已抑制')
+    expect(maintenance.container.querySelector('.observability-notice--maintenance')).toHaveTextContent('观测继续，异常通知已抑制')
     maintenance.unmount()
 
     const paused = renderNotices({
       monitoringInstance: instance({ monitoring_status: '暂停' }),
     })
-    expect(paused.container.querySelector('.monitoring-detail-notice--offline')).toHaveTextContent('监控已暂停')
+    expect(paused.container.querySelector('.observability-notice--offline')).toHaveTextContent('监控已暂停')
   })
 
   it('keeps the binding-conflict action inside the notice well', () => {
     const { container } = renderNotices({
       monitoringInstance: instance({ binding_status: '指纹变更待确认' }),
     })
-    const notice = container.querySelector('.monitoring-detail-notice--alert')
+    const notice = container.querySelector('.observability-notice--alert')
     expect(notice).toHaveTextContent('绑定冲突待确认')
-    expect(notice?.querySelector('.monitoring-detail-notice__actions')).toContainElement(
+    expect(notice?.querySelector('.observability-notice__actions')).toContainElement(
       screen.getByRole('button', { name: '处置绑定冲突' }),
     )
   })
