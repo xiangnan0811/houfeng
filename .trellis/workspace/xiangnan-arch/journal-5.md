@@ -1252,3 +1252,42 @@ Fixed PostgreSQL 16 ON CONFLICT permission failure for agent sync batch idempote
 ### Next Steps
 
 - 仅在取得 staging 部署授权、备份和回滚方案后启动 08-31-staging-heartbeat-policy-acceptance。
+
+
+## Session 271: 完成 operator UI 本地验收并归档
+
+**Date**: 2026-09-22
+**Task**: 完成 operator UI 本地验收并归档
+**Branch**: `feat/operator-ui-observatory`
+
+### Summary
+
+首版受控试用的本地工程验收完成；镜像下载阻塞重试关闭，独立双审通过，提交并归档 UI 重建任务。未推送、合并或部署。
+
+### Main Changes
+
+- 整体提交 UI/CSS、runtime-stream、全局资产搜索和归档恢复工作；保留13项 advisory 数值预算，结构检查不降级。
+- PNG 测试改为解码像素合同，生产处理和存储摘要未改；本地临时目录配额问题仅通过运行环境隔离解决。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0c04c5891d55f53c6e90f1626c66479aa365186d` | (see git log) |
+| `2844e2075081820288e511be6dfe31f79eaac9d5` | (see git log) |
+
+### Testing
+
+- [OK] Go1.26.2 fmt/vet及75测试包、center/agent构建、runtime-stream聚焦race通过。
+- [OK] Node22 verify-web:235文件2088测试；Chromium146/146；严格PG运行时4项及16.0/16.6/16.12 catalog anchors全部通过。
+- [OK] integration-reviewer GPT5.6-sol high与grok-reviewer Grok4.7独立discovery均无发现。
+- [OK] docker build --network=host通过；镜像houfeng-local-acceptance:0c04c589，ID aca5798533b200ef35aedcbbb2b7b496516ac585872c54ebffedd14366423ee2；只读无网络打包检查通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 真实部署/systemd、正式发行资产和安装器、agent enroll/sync及探测与事件路径的线上验收；本次未推送/合并/部署。
+- 保留3条既有lint警告、开发工具依赖审计告警及历史F08 NOT PROVEN；其他heartbeat任务保持原状。
