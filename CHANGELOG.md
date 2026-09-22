@@ -27,6 +27,54 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [0.80.0](https://github.com/xiangnan0811/houfeng/compare/v0.79.6...v0.80.0) (2026-09-22)
+
+
+### Features
+
+* rebuild monitoring instance detail observations ([930f17c](https://github.com/xiangnan0811/houfeng/commit/930f17cd15db5879c060fcdbe36e96aed6d29d74))
+* refine monitoring workbench and runtime summaries ([17f2dcd](https://github.com/xiangnan0811/houfeng/commit/17f2dcd447990959a0e204efd854415d256de1e3))
+* **web:** align events and command-audit with the observation language ([6c36bad](https://github.com/xiangnan0811/houfeng/commit/6c36bad45fe7b43d4008c81aed41d9637bc55c98))
+* **web:** close leftover observation surfaces onto shared notices ([5c451b9](https://github.com/xiangnan0811/houfeng/commit/5c451b9db8b180adffa597ebff23fd3563a27580))
+* **web:** complete operator observation workspaces and local acceptance ([3058a99](https://github.com/xiangnan0811/houfeng/commit/3058a998fd961d9d102b91d4d1aa81ce28cdd017))
+* **web:** implement approved VPS facts and resource dialogs ([da6c97d](https://github.com/xiangnan0811/houfeng/commit/da6c97d3d6ea63ad285e8fcdb864a6bb64646255))
+* **web:** keep list and VPS provenance across shell and records ([7ed8f32](https://github.com/xiangnan0811/houfeng/commit/7ed8f32c944717eae02d511437ed84b2b7574b24))
+* **web:** rebuild archive review and restore workspace ([9886b76](https://github.com/xiangnan0811/houfeng/commit/9886b76b5f7c3b0e2653c77ac8aff43b791a2583))
+* **web:** rebuild associated operator workspaces ([9ea86eb](https://github.com/xiangnan0811/houfeng/commit/9ea86eb7b0420e0130278c93df21bc5eaab326cf))
+* **web:** rebuild monitoring compare as compact dual-column tiles ([6fceb51](https://github.com/xiangnan0811/houfeng/commit/6fceb51994321254947a6ec8a395365f670e05b7))
+* **web:** rebuild target list and detail in the observation language ([3514477](https://github.com/xiangnan0811/houfeng/commit/3514477c9de03929e7b98ae2f1daa8f614736ef0))
+* **web:** refine subscription insights and operator workflows ([ed3ac82](https://github.com/xiangnan0811/houfeng/commit/ed3ac8290f5a121167b3795b7aec4cb2de0a3363))
+* **web:** restyle monitoring drawers in the observation language ([3727827](https://github.com/xiangnan0811/houfeng/commit/372782775df5834947cd7b5a6f913cccb1b6a85d))
+
+
+### Bug Fixes
+
+* close preview write leaks, stamp runtime-stream receipts, drop dead CSS ([e8d531c](https://github.com/xiangnan0811/houfeng/commit/e8d531c4b8c7fdeb7c2412081baddeca6d8562f5))
+* close VPS monitoring handoff and evidence gaps ([40b9317](https://github.com/xiangnan0811/houfeng/commit/40b931794c44dae87179dd3cc4a9bd88d4ff5102))
+* finalize operator UI and local acceptance contracts ([0c04c58](https://github.com/xiangnan0811/houfeng/commit/0c04c5891d55f53c6e90f1626c66479aa365186d))
+* **web:** align monitoring plot origins and pull notes out of the floor ([8d31cca](https://github.com/xiangnan0811/houfeng/commit/8d31cca4e9e3fa0402f2b3f0ff92740f3375db6a))
+* **web:** align monitoring tiles and keep threshold copy off the cap ([5d537bc](https://github.com/xiangnan0811/houfeng/commit/5d537bcfcde43b122cfddfff314c81066b438422))
+* **web:** allow keyboard-complete filter option rows ([636c7e8](https://github.com/xiangnan0811/houfeng/commit/636c7e81daad773aff7851102f5f0a1e8253c1e6))
+* **web:** close operator UI review mediums for nav, filters, and batch commands ([85aa43d](https://github.com/xiangnan0811/houfeng/commit/85aa43d9fcba1635e73ff03ebde1f46fff095de9))
+* **web:** close third-round operator UI review follow-ups ([6d5189d](https://github.com/xiangnan0811/houfeng/commit/6d5189da2e198be62707a78b3e4fe6dca76e8be6))
+* **web:** equalize monitoring chart tiles and raise plot height ([ff57252](https://github.com/xiangnan0811/houfeng/commit/ff57252af5283e2c8f749c58a7e5b73105908619))
+* **web:** keep binding disposition disabled until metadata arrives ([357fc40](https://github.com/xiangnan0811/houfeng/commit/357fc40f76c533b01d2d2b242a80be4d3c5c49ab))
+* **web:** keep monitoring list attention silent on 正常 ([620d205](https://github.com/xiangnan0811/houfeng/commit/620d20517eb0e54af2b674f7b71374c8524bcc65))
+* **web:** keep subscription trend pan-y in CSS ([42ed31e](https://github.com/xiangnan0811/houfeng/commit/42ed31eafc7741c13f39842a8ca78ed5ce3e5198))
+* **web:** lift monitoring detail tiles off the nested well ([e274632](https://github.com/xiangnan0811/houfeng/commit/e27463228ba1b4b291bb4c3f88187f752337eade))
+* **web:** load list batch command styles and close remaining review items ([69f02d8](https://github.com/xiangnan0811/houfeng/commit/69f02d8b24a0eae77386a6eec884188ca1e64bb6))
+* **web:** make monitoring-detail abnormal states a first-class notice ([1d36bde](https://github.com/xiangnan0811/houfeng/commit/1d36bde6a3c38de6d74063bf4a79c45ced106a65))
+* **web:** move runtime freshness into the header and drop health copy ([e29ef8a](https://github.com/xiangnan0811/houfeng/commit/e29ef8aba5d2eb08511377bfd97e2250372fecb1))
+* **web:** preserve shared VPS form control density ([45c1fb5](https://github.com/xiangnan0811/houfeng/commit/45c1fb55cb8102cdb3d5c5c175cb3becc2d34f48))
+* **web:** stack notice wells on narrow screens and drop unused EventList ([53f97c0](https://github.com/xiangnan0811/houfeng/commit/53f97c04a2670d590479a661f59785263f869a12))
+* **web:** tighten chart gutters and restore hover tooltips ([e8e372d](https://github.com/xiangnan0811/houfeng/commit/e8e372d815d6b54e8b91622e8cfe4b267186a276))
+
+
+### Documentation
+
+* **spec:** record monitoring detail runtime and navigation facts ([3fd9e50](https://github.com/xiangnan0811/houfeng/commit/3fd9e508aaa7affbf1c9ea95502cd3a95c5f69a2))
+* **workspace:** record operator UI local acceptance ([a7e4a90](https://github.com/xiangnan0811/houfeng/commit/a7e4a901a1c847edc31b2dfac7006ce38ea2c682))
+
 ## [0.79.6](https://github.com/xiangnan0811/houfeng/compare/v0.79.5...v0.79.6) (2026-09-01)
 
 
