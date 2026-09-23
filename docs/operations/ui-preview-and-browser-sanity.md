@@ -73,6 +73,14 @@ Every UI task final report should include:
 - whether the server is still running or has been stopped;
 - any blocked evidence, with reason.
 
+### Diagnosing dev-server rendering failures
+
+A successful production build does not prove that the running Vite dev server or browser session is healthy. When styles disappear or a lazy-loaded module fails, inspect the browser console/network errors and the actual CSS/TSX module response from the affected dev-server URL. Check its content as well as its status and size: an HTTP 200 or syntactically valid but unexpectedly empty module is not evidence of a working page.
+
+Distinguish source errors, server-side transformation problems, and stale browser state before choosing a remedy. If evidence points to a stale transformation, touching the specific affected source file can trigger re-transformation; then inspect the response again and reload the browser to verify the page. This is a targeted troubleshooting step, not a requirement after every edit. Response size alone does not establish cache corruption or prove that a large stylesheet caused it.
+
+Before restarting a dev server, confirm the process and port belong to the preview being investigated and that interrupting it is within the task's scope. Do not terminate unrelated previews. Build checks and a healthy root URL do not replace verification of the affected route in a browser.
+
 ## Repository Chromium gate
 
 From `web/`, run:
