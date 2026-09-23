@@ -1008,14 +1008,8 @@ func TestProductionComposeSpecsMatchReleaseAndAuthorityContract(t *testing.T) {
 	t.Parallel()
 
 	root := repoRoot(t)
-	deploymentSpec := readText(t, filepath.Join(root, "spec", "backend", "directory-structure.md"))
-	databaseSpec := readText(t, filepath.Join(root, "spec", "backend", "database-guidelines.md"))
-	composeScenario := markdownSection(
-		t,
-		deploymentSpec,
-		"#### Scenario: release-asset production Compose and image contract",
-		"### `internal/contracts/agentapi/`",
-	)
+	composeScenario := readText(t, filepath.Join(root, "docs", "spec", "contracts", "platform", "production-compose.md"))
+	databaseSpec := readText(t, filepath.Join(root, "docs", "spec", "contracts", "platform", "compose-authority.md"))
 	for _, required := range []string{
 		"1. **Scope / Trigger**",
 		"2. **Signatures**",

@@ -175,7 +175,7 @@ Upload `dist/houfeng-agent_v1.2.3_linux_amd64`, `dist/houfeng-agent_v1.2.3_linux
 
 ## API compatibility
 
-`POST /api/subscriptions` requires an `Idempotency-Key` header. Use a stable UUID for retries of the same request body. Generate a new key when the logical operation changes. The in-repo Web UI sends this header; external scripts and CLI callers must do the same. Create receipts stay for the lifetime of the subscription row.
+Subscription creation is idempotent so retrying a request does not create duplicate billing facts. External callers must follow the [subscription contract](docs/spec/contracts/subscriptions.md), including its request key, error and receipt lifecycle rules.
 
 ## Verification commands
 
@@ -187,6 +187,7 @@ make vet-go
 make test-go
 make verify-go
 make verify-web
+make verify-docs
 ./scripts/verify.sh
 ```
 
@@ -205,13 +206,13 @@ Primary operator docs:
 
 - `docs/deploy/local-and-systemd.md` — canonical production Compose, advanced local/systemd, and one-command agent install guide.
 - `docs/operations/fresh-install-smoke-run.md` — fresh-install smoke run with one-command onboarding as the primary path.
-- `docs/operations/ui-preview-and-browser-sanity.md` — UI preview and browser-sanity workflow; screenshots are local/untracked unless explicitly approved as public assets.
+- `docs/development/ui-preview-and-browser-sanity.md` — UI preview and browser-sanity workflow; screenshots are local/untracked unless explicitly approved as public assets.
 - `docs/operations/asset-ledger-real-data-validation-readiness.md` — local sample and real-data validation boundaries for Asset Ledger.
 
 Design/reference docs:
 
-- `docs/design/current/` — maintained product, architecture, interface, and component guidance.
-- `docs/design/v1-baseline/` and `docs/design/v2-houfeng/` — historical stubs retained for traceability; full old bundles are available through git history and do not freeze future direction.
+- `docs/design/` — maintained product, architecture, interface, and component guidance.
+- [Domain contracts](docs/spec/contracts/README.md) — behavior, authorization, compatibility, and recovery requirements; historical designs remain available through Git history.
 
 Completed roadmap, release-gate, archived visual-history, and one-off evidence logs have been removed from the tracked public docs tree. Durable operator cautions and current constraints are folded into README, `docs/README.md`, deployment guidance, smoke guidance, and current design guidance.
 

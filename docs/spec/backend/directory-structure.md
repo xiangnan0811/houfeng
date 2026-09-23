@@ -1,0 +1,209 @@
+# 目录结构
+
+> 项目权威入口为根 `AGENTS.md`；领域行为见 [合同索引](../contracts/README.md)。
+
+---
+
+## Overview
+
+候风 / Houfeng Fleet Control Plane 当前后端代码组织围绕 **1 个 Go center + 1 个隔离 content processor + 1 个 required scanner + 1 个 Postgres + N 个 systemd Go agent** 这一拓扑。仓库严格区分：
+
+- **入口（`cmd/`）**：单个二进制的 `main.go` + 装配代码，不放业务逻辑。
+- **center 业务实现（`internal/center/`）**：按领域拆子包；HTTP 路由、Postgres 仓库、incident 判定、Telegram 通知、retention 等都各占一个子包。
+- **agent 业务实现（`agent/`）**：thin agent，只做采集 / 缓冲 / 同步 / 应用计划。
+- **跨进程契约（`internal/contracts/`）**：center 与 agent **同时依赖**的请求/响应类型、错误码、路径常量。
+- **持久化 schema（`db/migrations/`）**：手写 SQL 迁移，启动时通过 `embed.FS` 嵌入并应用。
+- **前端 SPA（`web/`）**：本文件不展开，详见 `docs/spec/web/`。
+
+代码搜索友好性是核心约束：所有 wiring 在 `cmd/houfeng-center/bootstrap.go` 内显式拼装，禁止隐式依赖注入。
+
+---
+
+## Directory Layout
+
+```
+.
+├── Makefile                   # fmt-go / vet-go / test-go / verify-go / verify-web 等
+├── cmd/
+│   ├── houfeng-center/        # center 二进制入口
+│   │   ├── main.go
+│   │   ├── bootstrap.go       # 装配 pgxpool、仓库、notifier、router、worker
+│   │   └── bootstrap_test.go
+│   ├── houfeng-content-processor/ # attachment processor 入口与显式 wiring
+│   │   ├── main.go
+│   │   ├── bootstrap.go
+│   │   └── bootstrap_test.go
+│   └── houfeng-agent/         # agent 二进制入口
+│       └── main.go
+├── agent/                     # agent 业务子包（外部可被 cmd/houfeng-agent 引用）
+│   ├── config/                # env 装载
+│   ├── token/                 # 文件 token 源
+│   ├── fingerprint/           # 主机指纹
+│   ├── enroll/                # 首次 enroll
+│   ├── hostsample/            # 主机采样
+│   ├── probe/                 # tcp / http / tls 探针执行
+│   ├── syncqueue/             # 单文件 JSON 缓冲队列（纯 Go，无嵌入式 DB）
+│   └── runtime/               # 主循环：collect → buffer → sync → apply plan
+├── internal/
+│   ├── center/                # center 业务，仓库内独占
+│   │   ├── app/               # HTTP server + Worker.Run(ctx) 进程生命周期
+│   │   ├── config/            # CenterConfig / env 装载
+│   │   ├── http/              # router.go + middleware.go
+│   │   │   ├── router.go      # 用 RouterOptions 显式 wire 每个 handler
+│   │   │   └── handlers/      # 一文件一资源，详见下表
+│   │   ├── store/             # Postgres 仓库（一文件一 aggregate）
+│   │   │   └── migrate/       # store/migrate.Apply：启动时应用 embed 的迁移
+│   │   ├── auth/              # 用户、会话、密码、cookie、cleanup worker
+│   │   ├── enrollment/        # token 颁发、指纹绑定、binding 状态机
+│   │   ├── incidents/         # incident 判定、debounce、SettingsBackedService
+│   │   ├── notify/            # Telegram 通知；被 incidents 包装为 SettingsAware
+│   │   ├── syncing/           # /api/agent/sync 的批量 ingest 管线
+│   │   ├── retention/         # 按表 retention worker
+│   │   ├── settings/          # CenterSettings 模型 + Repository
+│   │   ├── providers/         # Asset Ledger 服务商主数据 + Repository 接口
+│   │   ├── vpsassets/         # Asset Ledger VPS 资产 + Repository 接口
+│   │   ├── subscriptions/     # Asset Ledger VPS 订阅 + Repository 接口
+│   │   ├── assetlinks/        # Asset Ledger VPS ↔ MonitoringInstance 关联 + 摘要查询接口
+│   │   ├── renewals/          # Asset Ledger 续费 / 价格 / IP / 规格历史 + VPS timeline 接口
+│   │   ├── importing/         # Asset Ledger JSON dry-run/import 解析、校验、报告与编排
+│   │   ├── targets/           # Target / ProbeItem 领域类型与频率档枚举
+│   │   ├── monitoringinstances/             # MonitoringInstance 领域类型 + Repository 接口
+│   │   ├── agentplan/         # 下发给 agent 的 plan 类型
+│   │   ├── runtimefacts/      # 运行时事实领域类型
+│   │   ├── observations/      # 原始观测的 service / 校验
+│   │   └── ids/               # ID 生成（monitoring_instance_id / target_id 等）
+│   └── contracts/
+│       └── agentapi/          # ★ center 与 agent 共享的契约：路径、类型、错误码
+├── db/
+│   └── migrations/            # 迁移文件 + embed.go（embed.FS），当前最大 0064_add_network_rates_valid.sql
+├── docs/                      # 设计基线 / 部署 / 验证
+├── scripts/                   # verify.sh 等
+├── bin/                       # build 产物（go build 输出）
+└── web/                       # React 19 + Vite SPA（不展开）
+```
+
+> **`internal/center/` 子包以实际目录为准**。`auth/` 负责用户、会话、密码、cookie 与 cleanup；目录和部署变更必须保留此职责边界。
+
+---
+
+## Module Organization
+
+### `cmd/`
+
+每个二进制一个目录。`main.go` 仅做：解析配置 / flag → 调用同包内 `bootstrap*` 或内部领域包 → 处理信号。`bootstrap.go` 把所有依赖显式注入（参见 `cmd/houfeng-center/bootstrap.go:58-147`，`bootstrapCenter` 函数），并通过 `bootstrapDeps` 暴露可替换的工厂以便测试（见 `bootstrap_test.go`）。**禁止把业务逻辑写进 `cmd/`**。
+
+`cmd/houfeng-import-vps-json` 是当前第一个运维型 CLI：它只负责 flag、文件读取、数据库连接 / migration、事务与报告输出；JSON 结构、dry-run 校验、导入编排和报告模型都放在 `internal/center/importing/`。后续新增 CLI 时沿用这个边界，不要在 `cmd/<binary>/main.go` 里直接堆业务规则。
+
+`cmd/houfeng-backup` / `cmd/houfeng-restore` 同样只做 flag、信号和 `recordbackup.NewService` / `recordrestore.NewService` 装配。编排、manifest、local/S3 store 与恢复状态机分别在 `internal/center/recordbackup/` 与 `internal/center/recordrestore/`。`cmd/houfeng-record-platform-admin` 只做 APP ACL migrate / bootstrap / finalize，**禁止**改成备份 CLI。能力矩阵在 `internal/center/recordreadiness/`，由 `newProductionRecordReadinessRegistry` 接线。
+
+### `internal/center/<domain>/`
+
+按领域拆包。每个子包遵循以下惯例：
+
+- `types.go`：领域类型与接口（`Repository`、`Service`、领域错误）
+- `service.go`：业务行为
+- `<file>_test.go`：与被测文件并列
+- 包对外 API 通过包级函数 / 构造器暴露，例如 `incidents.NewSettingsBackedService(...)`、`auth.New(...)`、`enrollment.NewService(...)`
+
+新增一个领域子包前先确认 `internal/center/` 下没有合适归属。**不要为每个新需求都建子包**；如果只是给 MonitoringInstance 加一个查询函数，就放进 `internal/center/monitoringinstances/` 与 `internal/center/store/monitoring_instances.go`。
+
+### `internal/center/http/handlers/`
+
+**一文件一资源**。当前实际文件（`ls internal/center/http/handlers/` 结果）：
+
+| 文件 | 资源 |
+|------|------|
+| `agent.go` | `/api/agent/enroll`、`/api/agent/sync` |
+| `auth.go` | `/api/auth/login`、`/logout`、`/me`、`/password` |
+| `dashboard.go` | `/api/dashboard` |
+| `events.go` | `/api/events` |
+| `health.go` | `/api/healthz` |
+| `incidents.go` | `/api/incidents` |
+| `metadata.go` | 元数据查询辅助 |
+| `monitoring_instance_onboarding.go` | 监控实例接入与 binding 操作 |
+| `monitoring_instances.go` | `/api/monitoring-instances`、`/api/monitoring-instances/{id}` |
+| `providers.go` | `/api/providers`、`/api/providers/{provider_id}` |
+| `subscriptions.go` | `/api/subscriptions`、`/api/subscriptions/{subscription_id}` |
+| `vps.go` | `/api/vps`、`/api/vps/{vps_id}`、`/api/vps/{vps_id}/timeline` |
+| `asset_links.go` | `/api/vps/{vps_id}/monitoring-instances`、`link-monitoring-instance`、`unlink-monitoring-instance`、`/api/monitoring-instances/{monitoring_instance_id}/vps` |
+| `runtime_controls.go` | 监控实例 / 目标 runtime 控制（含维护开关） |
+| `runtime_facts.go` | 监控实例 / 目标运行时事实 |
+| `settings.go` | `/api/settings` |
+| `spa.go` | 静态 SPA fallback（`HOUFENG_WEB_DIST_DIR`） |
+| `targets.go` | `/api/targets` |
+| `json.go` | `writeJSON` / `decodeJSON` / `writeError` 共用辅助（详见 `handlers/json.go:10-31`） |
+
+> `auth.go` 与 `metadata.go` 是正式 handler；`/api/auth/*` 的注册与会话边界由 `internal/center/http/router.go` 维护。
+
+### `internal/center/store/`
+
+**一文件一 aggregate** 的 Postgres 仓库，全部使用 `pgxpool.Pool`。当前真实文件：
+
+```
+agent_plan.go          dashboard.go       incidents.go      monitoring_instances.go
+observations.go        postgres.go        probe_metadata.go providers.go
+renewal_decisions.go   retention.go       runtime_facts.go  sessions.go
+settings.go            subscriptions.go   sync_batches.go   targets.go
+users.go               vps_assets.go      vps_monitoring_instance_links.go
+migrate/
+```
+
+每个文件提供一个 `NewPostgres<Aggregate>Repository(*pgxpool.Pool)` 构造器（参见 `store/monitoring.go:34-36`）。`postgres.go` 提供共享的 `OpenPostgres` 入口（`store/postgres.go:11-31`）。
+
+### `agent/<subpkg>/`
+
+agent 子包扁平化拆分，每个职责一个包：
+
+- `config/`、`token/`、`fingerprint/`、`enroll/`、`hostsample/`、`probe/`、`containersample/`、`exec/`、`syncqueue/`、`runtime/`
+- `runtime/` 是装配中心，把其余子包按 `collect → buffer → sync → apply plan` 串起来
+- agent 必须保持"thin"：不接受任意脚本 / 用户自定义参数、不本地评估规则；当前仅允许 `exec/` 中编译期白名单命令，以及 `containersample/` 对本机 Docker CLI 的 best-effort 事实采样（Docker 不存在或 daemon 不可用时静默跳过）。`exec.Lookup` 必须返回参数副本，避免调用方篡改编译期白名单；`exec.Run` 必须使用 `exec.CommandContext` 而不是 shell；Docker 采样只能调用固定参数形状的 `docker ps --all --no-trunc --format ...` 与 `docker stats --no-stream --format ...`，不得扩展为 Docker 控制、编排或容器生命周期操作。
+
+### `internal/contracts/agentapi/`
+
+center 与 agent 同时引用的唯一契约包。内容：
+
+- `routes.go`：`EnrollPath = "/api/agent/enroll"`、`SyncPath = "/api/agent/sync"`、`InstallScriptPath = "/api/agent/install.sh"`
+- `types.go`：请求 / 响应 DTO、`BindingStatus*` / `ErrorCode*` / `ProbeKind*` / `ProbeError*` 常量
+
+> 这是**唯一**允许同时被 `cmd/houfeng-center` / `internal/center/http/handlers` 与 `cmd/houfeng-agent` / `agent/runtime` 引用的包。新增 agent ↔ center 字段时，先改这里，两侧再各自适配。**不要把 DTO 定义在 handler 包或 runtime 包内自己重复一份**。
+
+---
+
+## Naming Conventions
+
+- 包名：全小写、单词内部不用下划线。一个领域一个子包（`incidents`、`enrollment`、`runtimefacts`）。
+- 文件名：`snake_case.go`，与其内最重要的类型 / 资源对齐（`runtime_facts.go`、`monitoring_instance_onboarding.go`）。
+- 测试文件：`<file>_test.go`，与被测文件**同目录同包**；端到端测试加 `_e2e_test.go` 后缀（参考 `internal/center/http/auth_e2e_test.go`）。
+- 仓库类型：`Postgres<Aggregate>Repository`，构造器 `NewPostgres<Aggregate>Repository`。
+- HTTP handler 工厂：`handlers.<Resource>(repoOrSvc)` 或 `handlers.<Resource><Action>(...)`，统一返回 `http.Handler`，由 `bootstrap.go` 注入到 `RouterOptions`。
+- 迁移文件：`<NNNN>_<verb>_<scope>.sql`，序号 4 位起步、动词放第一个（`add`、`normalize`、`create`），见 `db/migrations/0001_initial_schema.sql` … `0021_create_asset_histories.sql`。
+
+---
+
+## 哪里放新代码
+
+| 变更类型 | 落点 |
+|----------|------|
+| 新增 HTTP endpoint | 1) `internal/center/http/handlers/<resource>.go` 内增加工厂；2) 在 `internal/center/http/router.go` 的 `RouterOptions` 加字段并 mux 注册；3) 在 `cmd/houfeng-center/bootstrap.go` 的 `bootstrapCenter` 显式构造并塞进 `RouterOptions`；4) 同目录 `<resource>_test.go` 增 table-driven 测试 |
+| 新持久化字段 / 表 | 1) `db/migrations/<next-NNNN>_<verb>_<scope>.sql` 写原生 SQL；2) 更新 `internal/center/store/<aggregate>.go` 仓库的 select / insert / update；3) 更新对应 `internal/center/<domain>/types.go` |
+| 新 agent ↔ center 字段 | 1) `internal/contracts/agentapi/types.go` 改 DTO；2) center 端在 `internal/center/syncing/` 或对应 handler 处理；3) agent 端在 `agent/runtime/` 或采集子包消费；**严禁两侧各自定义同名结构** |
+| 新领域行为 | 优先放进既有 `internal/center/<domain>/`；只有当确实属于新领域时才新增子包 |
+| 新运维型 CLI / import 命令 | `cmd/<binary>/main.go` 只放 flag、I/O、数据库连接和调用；解析、校验、dry-run 报告、写入编排放到 `internal/center/<domain>/` 或专用领域包（当前 import 落在 `internal/center/importing/`） |
+| agent 新增采集项 | 在 `agent/hostsample/` 或 `agent/probe/` 内扩展，并通过 `agent/runtime/` 串接；不要往 agent 里塞规则判定 |
+
+---
+
+## Examples
+
+以下是当前代码库内"组织到位"的真实参考点：
+
+- **MonitoringInstance 资源完整一条线**：`internal/center/http/handlers/monitoring_instances.go`（handler）+ `internal/center/http/handlers/monitoring_instances_test.go`（table-driven 测试）+ `internal/center/store/monitoring_instances.go`（仓库）+ `internal/center/monitoringinstances/`（领域类型）+ `cmd/houfeng-center/bootstrap.go`（wiring）。
+- **Asset Ledger providers 完整一条线**：`internal/center/http/handlers/providers.go`（handler）+ `internal/center/store/providers.go`（仓库）+ `internal/center/providers/`（领域类型 / 校验 / PATCH presence helper）+ `db/migrations/0016_create_asset_ledger.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源是资产层服务商主数据，不回写 `monitoring_instances.provider`。
+- **Asset Ledger VPS assets 完整一条线**：`internal/center/http/handlers/vps.go`（handler）+ `internal/center/store/vps_assets.go`（仓库）+ `internal/center/vpsassets/`（领域类型 / 校验 / PATCH presence helper）+ `db/migrations/0017_add_vps_assets.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护资产层 VPS 账本，不改写 MonitoringInstance / Target / Agent 语义。
+- **Asset Ledger subscriptions 完整一条线**：`internal/center/http/handlers/subscriptions.go`（handler）+ `internal/center/store/subscriptions.go`（仓库）+ `internal/center/subscriptions/`（领域类型 / 校验 / PATCH presence helper / nullable date）+ `db/migrations/0018_add_subscriptions.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护资产层 VPS 订阅账本，不创建 monitoring-instance-link、不改写 MonitoringInstance / Target / Agent 语义。
+- **Asset Ledger VPS ↔ MonitoringInstance link 完整一条线**：`internal/center/http/handlers/asset_links.go`（link / unlink / query handler）+ `internal/center/store/vps_monitoring_instance_links.go`（仓库）+ `internal/center/assetlinks/`（领域类型 / 摘要 DTO / sentinel errors）+ `db/migrations/0019_create_vps_node_links.sql` + `0029_rename_nodes_to_monitoring_instances.sql`（schema 历史与重命名迁移）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只维护关联历史；link / unlink 不改写 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target 或 Agent。
+- **Asset Ledger history / timeline 完整一条线**：`internal/center/http/handlers/vps.go`（`VPSTimeline` handler 与 VPS PATCH 入口）+ `internal/center/store/renewal_decisions.go`（续费、价格、IP、规格历史仓库与 timeline 聚合）+ `internal/center/store/vps_assets.go`（续费 / IP / 规格 PATCH 事务内记录历史）+ `internal/center/store/subscriptions.go`（价格 / 续费日期 PATCH 事务内记录历史）+ `internal/center/renewals/`（历史 DTO / timeline DTO / sentinel errors）+ `db/migrations/0020_create_renewal_decisions.sql` / `0021_create_asset_histories.sql`（schema）+ `bootstrap.go` / `router.go` 显式 wiring。该资源只记录资产层历史；不得创建 MonitoringInstance link、不得改写 MonitoringInstance / Target / Agent。
+- **Asset Ledger JSON import CLI**：`cmd/houfeng-import-vps-json/main.go`（flag / 文件 / DB / migration / 事务 / 输出）+ `internal/center/importing/`（严格 JSON、复用 provider/VPS/subscription 领域校验、dry-run 报告、导入编排）。dry-run 不写库；`-import` 才能写 provider、VPS asset、subscription，且不得创建 `vps_monitoring_instance_links` 或改写 MonitoringInstance / Target / Agent。
+- **Settings-aware notifier**：`internal/center/notify/`（基础 Telegram / Feishu 客户端）被 `internal/center/incidents/` 用 `NewSettingsAwareNotifier` 包装，最终在 `bootstrap.go:88-99` 装配。`notify/` 只负责单 channel HTTP 调用；settings 读取、fallback、channel 展开与 notification record 状态判定都属于 `incidents/` 领域层。
+- **agent ↔ center 契约**：`internal/contracts/agentapi/routes.go` + `types.go` 同时被 `internal/center/http/handlers/agent.go` 与 `agent/runtime/` 引用。
+- **迁移闭环**：`db/migrations/0010_add_users_and_sessions.sql`（schema） + `internal/center/store/users.go` + `internal/center/store/sessions.go`（仓库） + `internal/center/auth/`（领域）+ `bootstrap.go:102-113`（wiring）。

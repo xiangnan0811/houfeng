@@ -1,52 +1,25 @@
-# Houfeng documentation index
+# 候风文档
 
-This index keeps the current public/operator path separate from design references and local validation workflows. Completed roadmap, release-gate, historical archive, and one-off process/evidence logs have been removed from tracked docs rather than kept as in-repository archive copies.
+按问题选择正文；项目授权与工作区边界见 [AGENTS.md](../AGENTS.md)，开发命令见
+[CONTRIBUTING.md](../CONTRIBUTING.md)，产品概览见 [项目 README](../README.md)。
 
-## Start here
+| 要回答的问题 | 入口 | 修改时同步什么 |
+| --- | --- | --- |
+| 为什么这样设计、产品对象是什么 | [设计](design/README.md) | 产品解释、架构理由、视觉原则 |
+| 功能必须遵守什么行为、权限和兼容承诺 | [规范与领域合同](spec/README.md) | 所属合同及其回归证据 |
+| 如何开发、协作、检查和浏览器验收 | [开发](development/README.md) | 开发方法、检查命令与工具 |
+| 如何安装、配置、升级和备份恢复 | [部署](deploy/README.md) | 操作步骤及原位运行资源 |
+| 如何验证真实安装及实际数据 | [运维](operations/README.md) | 验收步骤、数据来源与证据边界 |
 
-- `../README.md` — public project overview, quick start, components, verification commands, and documentation map.
-- `deploy/local-and-systemd.md` — canonical guide for the full published-image production Compose stack, advanced direct/systemd center installs, and one-command Linux agent onboarding.
-- `operations/fresh-install-smoke-run.md` — fresh-install smoke run. The primary onboarding path is the center-generated one-command installer.
-- `design/current/README.md` — maintained design guidance and change rule.
+## 维护规则
 
-## Current operator guides
-
-- `deploy/local-and-systemd.md` — release-asset Compose quick start, NPM external-network setup with no public host port, automatic storage/database initialization, Center/Web + Records processor + ClamAV + PostgreSQL, the portable `./data/` recovery unit, upgrades/rollbacks, authentication, advanced direct/systemd examples, and generated agent install commands.
-- `deploy/systemd/houfeng-center.service` — example center systemd unit.
-- `deploy/systemd/houfeng-agent.service` — example agent systemd unit for manual installs and reference.
-- `operations/fresh-install-smoke-run.md` — live PostgreSQL smoke path for center/auth/monitoring instance/agent/target/probe/incident/event checks.
-- `operations/ui-preview-and-browser-sanity.md` — frontend preview, browser sanity, local screenshot policy, and protected-route mock/local-center data-source rules.
-- `operations/asset-ledger-real-data-validation-readiness.md` — non-sensitive sample, import dry-run/import workflow, authenticated browser sanity, and real-data privacy checklist.
-- `operations/asset-ledger-local-sample.json` — fake local sample for Asset Ledger dry-run/import validation.
-
-## Current design guidance
-
-- `design/current/README.md` — entry point, historical-reference boundary, and change rule.
-- `design/current/product-and-architecture.md` — current product shape, topology, model, and durable safety boundaries.
-- `design/current/interface-language.md` — current UI tone, visual defaults, state/evidence language, and browser-sanity workflow.
-- `design/current/component-patterns.md` — current component defaults, page responsibilities, and test expectations.
-
-## Historical design references
-
-- `design/v1-baseline/README.md` — early design-bundle map and traceability note.
-- `design/v1-baseline/architecture-data-model.md` — historical stub for early architecture/data-model thinking.
-- `design/v1-baseline/rules-and-interaction.md` — historical stub for early rules and interaction thinking.
-- `design/v1-baseline/tech-selection.md` — historical stub for early technology-selection thinking.
-- `design/v1-baseline/interactive-prototype-and-operation-flow.md` — historical stub for early operation-flow thinking.
-- `design/v2-houfeng/design-language.md` — historical stub for the previous visual-language bundle.
-- `design/v2-houfeng/component-spec.md` — historical stub for the previous component/page contract bundle.
-
-Historical design stubs explain where old bundles went. Full old text is available through git history when needed for archaeology, but it is not the public quick-start path and should not be treated as a reason to freeze future detail. Use `design/current/` for maintained guidance.
-
-## Evidence and validation
-
-- `operations/ui-preview-and-browser-sanity.md` — records the local preview/browser-sanity workflow and the policy that screenshots remain untracked unless explicitly approved as public README/docs assets.
-- `operations/asset-ledger-real-data-validation-readiness.md` — records the active local-sample evidence level and the privacy checklist required before using real inventory data.
-
-## Documentation contribution rules for this early-stage repo
-
-- Keep README and this index concise and public-reader friendly.
-- Keep current operator commands verifiable against `.env.example`, `Makefile`, code routes, and checked-in scripts.
-- Label evidence level and data source honestly: mock API, local center sample, or real data.
-- Do not claim production readiness, package manager support, Kubernetes deployment, containerized agents, automatic upgrades, completed real-data validation, provider account truth, or billing accuracy unless current code/evidence proves it.
-- Preserve token and real-data secrecy: enrollment tokens, sync tokens, passwords, SSH keys, provider credentials, session cookies, webhook URLs, and unrelated private notes must not be committed or pasted into public docs.
+- 完整规则只有一个归属；设计解释目的，合同规定行为，操作指南链接合同并提供执行步骤。
+- 所有维护目录使用 `README.md` 导航，新增正文和资源同步所在目录入口。历史内容通过 Git
+  追溯，不保留占位、已完成提案或旧目录兼容副本。
+- 发现代码偏离有效合同，在合同中记录实现缺口、影响与依据；未决产品选择不能由代码现状自动裁决。
+- 文档路径或标题改变时更新仓库内消费者，包括脚本、测试中的拼接路径和平台导入；运行
+  `make verify-docs`，有定向文档断言时一并执行。此门禁检查结构，不证明语义一致。
+- 明确区分本地测试、mock、浏览器观察、CI、发行资产、真实安装和生产验收。示例数据不证明
+  提供商账户、账单或汇率真实性；未执行的验证不得标为通过。
+- 安装 token、sync token、密码、会话 cookie、私钥、提供商凭据、webhook URL 和实际库存
+  不进入公开文档、截图、日志或会话输出。
