@@ -11,7 +11,7 @@ Commit blocked: local main/master is read-only for development work.
 Create a feature branch first:
   git switch -c <type>/<short-description>
 
-Do not use git worktree for this repository workflow.
+Use a non-main branch in the current checkout or a dedicated git worktree.
 EOF
     exit 1
     ;;

@@ -9,7 +9,7 @@ case "$branch" in
 Merge blocked: local main/master is read-only for development work.
 
 Merge feature work through a pull request instead of merging directly into local main/master.
-Do not use git worktree for this repository workflow.
+Use a non-main branch in the current checkout or a dedicated git worktree.
 EOF
     exit 1
     ;;

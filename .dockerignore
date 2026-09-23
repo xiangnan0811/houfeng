@@ -21,7 +21,7 @@ docs/deploy/compose.env
 .idea
 .vscode
 
-# AI/Trellis/local runtime noise
+# AI/local runtime noise (including retired tool directories)
 .agents
 .agent
 .claude

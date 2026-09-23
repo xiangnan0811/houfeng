@@ -15,7 +15,11 @@ docs/deploy/secrets/
 .omc/
 .omx/
 .claude/
-.codex/
+.codex/*
+!.codex/config.toml
+!.codex/agents/
+.codex/agents/*
+!.codex/agents/implement.toml
 .gemini/
 .agent/
 .superpowers/

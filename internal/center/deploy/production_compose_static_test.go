@@ -1004,12 +1004,12 @@ func TestPublishWorkflowVerifiesPublicDeploymentAssetsAfterUpload(t *testing.T) 
 	}
 }
 
-func TestProductionComposeTrellisSpecsMatchReleaseAndAuthorityContract(t *testing.T) {
+func TestProductionComposeSpecsMatchReleaseAndAuthorityContract(t *testing.T) {
 	t.Parallel()
 
 	root := repoRoot(t)
-	deploymentSpec := readText(t, filepath.Join(root, ".trellis", "spec", "backend", "directory-structure.md"))
-	databaseSpec := readText(t, filepath.Join(root, ".trellis", "spec", "backend", "database-guidelines.md"))
+	deploymentSpec := readText(t, filepath.Join(root, "spec", "backend", "directory-structure.md"))
+	databaseSpec := readText(t, filepath.Join(root, "spec", "backend", "database-guidelines.md"))
 	composeScenario := markdownSection(
 		t,
 		deploymentSpec,
@@ -1067,7 +1067,7 @@ func TestProductionComposeTrellisSpecsMatchReleaseAndAuthorityContract(t *testin
 		"PostgreSQL, local attachments, and Records authority state are one coordinated restore unit",
 	} {
 		if !strings.Contains(composeScenario, required) {
-			t.Fatalf("deployment Trellis Compose scenario must contain %q", required)
+			t.Fatalf("deployment  Compose scenario must contain %q", required)
 		}
 	}
 	rotationSteps := []string{
@@ -1080,10 +1080,10 @@ func TestProductionComposeTrellisSpecsMatchReleaseAndAuthorityContract(t *testin
 	for _, step := range rotationSteps {
 		offset := strings.Index(composeScenario, step)
 		if offset < 0 {
-			t.Fatalf("deployment Trellis Compose scenario must preserve password rotation step %q", step)
+			t.Fatalf("deployment  Compose scenario must preserve password rotation step %q", step)
 		}
 		if offset <= lastRotationStep {
-			t.Fatalf("deployment Trellis Compose scenario password rotation steps are out of order at %q", step)
+			t.Fatalf("deployment  Compose scenario password rotation steps are out of order at %q", step)
 		}
 		lastRotationStep = offset
 	}
@@ -1104,7 +1104,7 @@ func TestProductionComposeTrellisSpecsMatchReleaseAndAuthorityContract(t *testin
 		`name: "${HOUFENG_PROXY_NETWORK:?set HOUFENG_PROXY_NETWORK in .env}"`,
 	} {
 		if strings.Contains(composeScenario, forbidden) {
-			t.Fatalf("deployment Trellis Compose scenario retains obsolete single-mode contract %q", forbidden)
+			t.Fatalf("deployment  Compose scenario retains obsolete single-mode contract %q", forbidden)
 		}
 	}
 	for _, required := range []string{
@@ -1115,7 +1115,7 @@ func TestProductionComposeTrellisSpecsMatchReleaseAndAuthorityContract(t *testin
 		"restore PostgreSQL and authority state together",
 	} {
 		if !strings.Contains(databaseSpec, required) {
-			t.Fatalf("database Trellis spec must contain authority contract %q", required)
+			t.Fatalf("database  spec must contain authority contract %q", required)
 		}
 	}
 }

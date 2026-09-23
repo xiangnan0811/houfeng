@@ -267,7 +267,7 @@ The smoke checks `/api/healthz.version` before login, authenticates through the 
 
 Staging Playwright disables trace, video and automatic screenshots, places internal output outside the audit path, and uses `preserveOutput: 'never'` so `error-context` snapshots cannot enter the artifact. Explicit screenshots mask login inputs and the user chip. `StagingAudit` stores only allowlisted document headers, sanitized origin-relative paths with query values redacted, method/status/timing, counters and step outcomes; it never stores cookies, Authorization, credentials, request bodies or response bodies.
 
-The always-uploaded artifact is `frontend-staging-audit-<run-id>` from `web/test-results/staging-audit`, retained 30 days. A successful artifact is still not enough to close Gate C: record the workflow run URL/id, artifact name, expected/observed version, commit/tag and conclusion in the Trellis Task 10 and parent task. If the environment, credentials or main-only policy do not exist, keep staging acceptance and Task 10 open; mock results are not a substitute.
+The always-uploaded artifact is `frontend-staging-audit-<run-id>` from `web/test-results/staging-audit`, retained 30 days. A successful artifact is still not enough to close Gate C: report the workflow run URL/id, artifact name, expected/observed version, commit/tag and conclusion in the delivery evidence (conversation or PR). If the environment, credentials or main-only policy do not exist, report staging acceptance as incomplete; mock results are not a substitute. No task or journal is required.
 
 ## Screenshot and image policy
 
