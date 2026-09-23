@@ -26,4 +26,4 @@ cd web
 npm exec -- vitest run src/lib/documentMarkdown.test.ts src/pages/records/editor/markdownGolden.test.ts src/pages/records/editor/markdownEquivalence.test.tsx
 ```
 
-若变更影响契约或实现，还须同步相关 `spec/`，并按修改范围运行项目要求的完整验证；以上针对性检查不能替代交付门禁。
+若变更影响契约或实现，还须同步相关 `docs/spec/`，并按修改范围运行项目要求的完整验证；以上针对性检查不能替代交付门禁。

@@ -66,6 +66,8 @@ jobs:
           node-version-file: .node-version
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - name: Verify documentation links and indexes
+        run: make verify-docs
       - name: Verify web recipe isolates caller environment
         run: NODE_ENV=production make verify-web
 

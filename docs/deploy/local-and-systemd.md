@@ -1,7 +1,7 @@
 # Houfeng local, Docker Compose, and systemd deployment guide
 
 > Authentication note: the center requires a username + password login for
-> every API call except `/api/healthz` and `/api/agent/*`.
+> protected application API routes; health, public installer, token-authenticated agent routes and authentication endpoints have their own semantics.
 > First-startup credentials come from `HOUFENG_INITIAL_USERNAME` and
 > `HOUFENG_INITIAL_PASSWORD` or `HOUFENG_INITIAL_PASSWORD_FILE`; once the
 > `users` table is populated those variables are ignored. Session cookies are
@@ -10,6 +10,8 @@
 > See the **Authentication** section below.
 
 ## Scope
+
+规范正文见 [APP ACL 与迁移](../spec/contracts/platform/app-acl-current.md)、[Compose authority](../spec/contracts/platform/compose-authority.md)及[生产 Compose 合同](../spec/contracts/platform/production-compose.md)。本页给出操作顺序与恢复步骤；更改权限、迁移或拓扑时同步所属合同。
 
 This guide describes the current deployment paths for `候风 / Houfeng Fleet Control Plane`: one Go center process serving API + web UI, one isolated attachment content-processor process, one required ClamAV scanner, one PostgreSQL database, and one or more Go agents managed by systemd on the monitored hosts. The center, processor, scanner, and database can run directly on the host or in the provided Docker Compose stack; agents are not containerized.
 
@@ -39,12 +41,13 @@ For one-command agent installation, each published GitHub Release must contain L
 make build-agent-release VERSION=v1.2.3
 ```
 
-Expected release outputs under `dist/`:
+Local `make build-agent-release` outputs under `dist/`:
 
 - `houfeng-agent_v1.2.3_linux_amd64`
 - `houfeng-agent_v1.2.3_linux_arm64`
 - `sha256sums.txt`
-- `sha256sums.txt.minisig`
+
+The local target does not sign the manifest. The release workflow additionally creates `sha256sums.txt.minisig`; all four assets must exist before testing the installer.
 
 `build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary and signed-checksum assets. Maintainers must configure `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` in GitHub Secrets with the secret key matching the installer-pinned public key before publishing installable agent assets. If the key is encrypted, also set `HOUFENG_RELEASE_MINISIGN_PASSWORD`. Target hosts need `minisign` to verify the signed checksum manifest. The generated command includes `--install-missing-deps`, so if `minisign` is absent the installer downloads the pinned upstream static verifier, checks its SHA256, installs it to `/usr/local/bin/minisign`, and only then verifies Houfeng release assets.
 
@@ -418,11 +421,10 @@ docker compose ps
 ```
 
 The database initializer applies only a forward transition explicitly supported
-by the target release before Center starts. For v0.79.6, the only existing-state
-upgrade admitted by the current APP migrator is the exact released v0.79.4
+by the target release before Center starts. The current APP migrator accepts only the exact released v0.79.4
 `0062_create_vps_create_idempotency.sql` revision-1 predecessor; it atomically
-applies `0063_tune_heartbeat_incident_policy.sql` and publishes revision 2.
-Fresh v0.79.6 databases and exact revision-2 repeats are also supported. A
+applies `0063_tune_heartbeat_incident_policy.sql` and `0064_add_network_rates_valid.sql` and publishes revision 2.
+Fresh databases and exact current revision-2 repeats are also supported. A
 partial, checksum-drifted, unknown-prefix, null-head, or otherwise unknown
 database fails initialization; do not bypass db-init, run ad hoc SQL, or start
 Center manually.
@@ -437,7 +439,7 @@ isolated rehearsal resources. A successful database-only dry run is not a cold
 restore rehearsal.
 
 Do not roll an older image back over a database already migrated by a newer
-incompatible release. For v0.79.6, image-only rollback after revision 2 is not
+incompatible release. For the current migration chain, image-only rollback after revision 2 is not
 supported: rollback means stopping the target stack and restoring the complete
 pre-upgrade cold recovery point together with its matching PostgreSQL,
 attachments, Records authority state, common Compose file, mode file, env
@@ -663,9 +665,7 @@ Adjust users, paths, PostgreSQL URL, TLS/reverse-proxy setup, public center URL,
 
 ## Authentication
 
-The center protects every `/api/*` route except `/api/healthz` and the agent
-endpoints (`/api/agent/enroll`, `/api/agent/sync`, `/api/agent/install.sh`) with a session-cookie auth
-layer. Required environment variables:
+The center protects application API routes with a session-cookie auth layer. Health, authentication endpoints (including public login), public installer download, and token-authenticated agent enroll/sync routes have their own semantics. Required environment variables:
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |

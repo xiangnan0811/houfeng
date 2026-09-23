@@ -10,7 +10,7 @@ AGENT_RELEASE_DIR ?= ./dist
 AGENT_RELEASE_AMD64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_amd64
 AGENT_RELEASE_ARM64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_arm64
 
-.PHONY: fmt-go test-go vet-go build-center build-agent build-agent-release verify-go test-web-toolchain verify-web verify
+.PHONY: fmt-go test-go vet-go build-center build-agent build-agent-release verify-go test-web-toolchain verify-web verify-docs verify
 
 fmt-go:
 	@if ! command -v $(GO) >/dev/null 2>&1; then \
@@ -105,6 +105,10 @@ verify-web: test-web-toolchain
 	else \
 		echo 'web workspace not initialized yet'; \
 	fi
+
+verify-docs:
+	node --test scripts/verify-docs.test.mjs
+	node scripts/verify-docs.mjs
 
 verify:
 	./scripts/verify.sh

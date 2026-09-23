@@ -169,12 +169,12 @@ requireMatch(stagingJob, /web\/test-results\/staging-audit/, 'staging artifact m
 requireMatch(stagingJob, /retention-days:\s*30/, 'staging audit artifact must retain evidence for 30 days')
 
 const webSpecCorpus = [
-  read('spec/web/quality-guidelines.md'),
-  read('spec/web/directory-structure.md'),
-  read('spec/web/styling-guidelines.md'),
-  read('spec/web/component-conventions.md'),
-  read('spec/web/state-and-data.md'),
-  read('docs/operations/ui-preview-and-browser-sanity.md'),
+  read('docs/spec/web/quality-guidelines.md'),
+  read('docs/spec/web/directory-structure.md'),
+  read('docs/spec/web/styling-guidelines.md'),
+  read('docs/spec/web/component-conventions.md'),
+  read('docs/spec/web/state-and-data.md'),
+  read('docs/development/ui-preview-and-browser-sanity.md'),
 ].join('\n')
 for (const obsoletePath of ['styles/atoms.css', 'styles/pages.css', 'app/layout/layout.css']) {
   if (webSpecCorpus.includes(obsoletePath)) failures.push(`web specs must not reference removed ${obsoletePath}`)

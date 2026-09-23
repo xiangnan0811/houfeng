@@ -10,7 +10,7 @@
 
 ## Purpose
 
-UX-7E made protected Asset Ledger routes renderable with `mock-api asset-workflows`. That is useful visual evidence, but it is not proof of real authentication, database import fidelity, or the user's actual inventory shape.
+The local browser helper renders protected Asset Ledger routes with `mock-api asset-workflows`. That is useful visual evidence, but it is not proof of real authentication, database import fidelity, or the user's actual inventory shape.
 
 This workflow is the bridge between mocked layout evidence and real inventory validation:
 
@@ -190,139 +190,10 @@ When real or local-sample data is visible:
 
 If the real-data shape materially changes visual judgment, capture local screenshots for private review or external attachment, but do not commit screenshot directories or manifests by default. Browser sanity plus explicit row counts and limitations is enough for the readiness pass unless the user explicitly approves public README/docs image assets.
 
-## Local Center Sample Evidence
+## 历史证据与本次验收记录
 
-> Date: 2026-05-14
->
-> Evidence level: authenticated browser sanity, no committed screenshots
->
-> Data source: `local center sample`
+2026-05-14 的样例执行记录已通过 Git 保留；它只证明当时的本地认证、样例导入和浏览器几何检查，不是当前数据库迁移、真实库存或生产验收结论。固定 JSON 样例继续供 dry-run 使用。
 
-### Runtime
+每次重新验收记录日期、Center 版本、数据库范围、数据来源、dry-run 与导入计数、认证方式、路线和视口、通知配置及限制。只清理本次创建的可丢弃实例和临时文件，保护已有数据库与其他预览进程。
 
-- PostgreSQL: disposable `postgres:16-alpine` container named `houfeng-local-sample-postgres`, published on `127.0.0.1:15432`.
-- Center: `./bin/houfeng-center`, `HOUFENG_HTTP_ADDR=:18080`, `HOUFENG_WEB_DIST_DIR=web/dist`.
-- Browser base URL: `http://127.0.0.1:18080/`.
-- Browser runtime: local Python Playwright through `/opt/homebrew/opt/python@3.11/bin/python3.11`.
-- Temp directory: `TMPDIR=/Users/weibo/Code/houfeng/.tmp/playwright`.
-- Credentials: local throwaway initial user credentials via `HOUFENG_INITIAL_USERNAME` and `HOUFENG_INITIAL_PASSWORD`; no real account credentials.
-
-### Build And Startup
-
-```bash
-npm --prefix web run build
-TMPDIR=/Users/weibo/Code/houfeng/.tmp/tmp GOTMPDIR=/Users/weibo/Code/houfeng/.tmp/go-build go build -o ./bin/houfeng-center ./cmd/houfeng-center
-```
-
-Center health passed:
-
-```text
-{"name":"houfeng-center","version":"dev","status":"ok"}
-```
-
-The center applied 25 schema migrations in the disposable database.
-
-### Sample Dry-Run
-
-After center startup and migrations, the sample dry-run was database-aware:
-
-```bash
-HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@127.0.0.1:15432/houfeng?sslmode=disable' \
-TMPDIR=/Users/weibo/Code/houfeng/.tmp/tmp \
-GOTMPDIR=/Users/weibo/Code/houfeng/.tmp/go-build \
-go run ./cmd/houfeng-import-vps-json \
-  -file docs/operations/asset-ledger-local-sample.json \
-  -dry-run \
-  -format json
-```
-
-Result summary:
-
-- `database_checked: true`
-- `can_import: true`
-- `warnings: []`
-- `input_rows: 5`
-- `provider_create_candidates: 4`
-- `vps_create_candidates: 5`
-- `subscription_candidates: 4`
-- `validation_errors: 0`
-- `duplicate_candidates: 0`
-- `monitoring_instance_association_candidates: 3`
-- `renewal_candidates: 2`
-- `idle_paid_candidates: 1`
-
-### Sample Import
-
-```bash
-HOUFENG_DATABASE_URL='postgres://houfeng:houfeng@127.0.0.1:15432/houfeng?sslmode=disable' \
-TMPDIR=/Users/weibo/Code/houfeng/.tmp/tmp \
-GOTMPDIR=/Users/weibo/Code/houfeng/.tmp/go-build \
-go run ./cmd/houfeng-import-vps-json \
-  -file docs/operations/asset-ledger-local-sample.json \
-  -import \
-  -format json
-```
-
-Result summary:
-
-- `imported_providers: 4`
-- `imported_vps_assets: 5`
-- `imported_subscriptions: 4`
-
-Post-import database row counts:
-
-```text
-providers: 4
-vps_assets: 5
-subscriptions: 4
-```
-
-### Authenticated Browser Sanity
-
-Command:
-
-```bash
-HOUFENG_INITIAL_USERNAME=admin \
-HOUFENG_INITIAL_PASSWORD='<redacted local throwaway password>' \
-TMPDIR=/Users/weibo/Code/houfeng/.tmp/playwright \
-/opt/homebrew/opt/python@3.11/bin/python3.11 scripts/visual_evidence.py browser-sanity \
-  --base-url http://127.0.0.1:18080/ \
-  --login-username-env HOUFENG_INITIAL_USERNAME \
-  --login-password-env HOUFENG_INITIAL_PASSWORD \
-  --route /asset-decisions \
-  --route /vps \
-  --route /providers \
-  --route /subscriptions \
-  --viewport 1440x1000 \
-  --viewport 390x900
-```
-
-Result:
-
-```text
-PASS /asset-decisions 1440x1000 text=1436 doc=1440 body=1440 panels=4 auth=session-login url=http://127.0.0.1:18080/asset-decisions
-PASS /asset-decisions 390x900 text=1424 doc=390 body=390 panels=4 auth=session-login url=http://127.0.0.1:18080/asset-decisions
-PASS /vps 1440x1000 text=1568 doc=1440 body=1440 panels=4 auth=session-login url=http://127.0.0.1:18080/vps
-PASS /vps 390x900 text=1556 doc=390 body=390 panels=4 auth=session-login url=http://127.0.0.1:18080/vps
-PASS /providers 1440x1000 text=528 doc=1440 body=1440 panels=3 auth=session-login url=http://127.0.0.1:18080/providers
-PASS /providers 390x900 text=516 doc=390 body=390 panels=3 auth=session-login url=http://127.0.0.1:18080/providers
-PASS /subscriptions 1440x1000 text=938 doc=1440 body=1440 panels=5 auth=session-login url=http://127.0.0.1:18080/subscriptions
-PASS /subscriptions 390x900 text=926 doc=390 body=390 panels=5 auth=session-login url=http://127.0.0.1:18080/subscriptions
-```
-
-The run found no blank page, no unexpected login redirect, no page/body horizontal overflow, and no reported leaf-text overflow warnings on the standard desktop and mobile viewports.
-
-### Cleanup
-
-The local center process was stopped, and the disposable PostgreSQL container was removed:
-
-```text
-docker rm -f houfeng-local-sample-postgres
-```
-
-### Limitations
-
-- No screenshots were committed; screenshot directories and manifests are intentionally not tracked by default.
-- This proves the local center sample path, not the user's real 40+ VPS inventory.
-- MonitoringInstance association hints correctly remained manual evidence; the import did not create `vps_monitoring_instance_links`.
-- Provider account truth, external billing truth, linked monitoring instance health, exchange rates, and production deployment behavior were not validated.
+样例中的 MonitoringInstance 关联提示需要人工确认，导入不会创建 `vps_monitoring_instance_links`。供应商账户、外部账单、关联监控健康、汇率和生产部署均需独立证据。

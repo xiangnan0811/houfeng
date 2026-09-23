@@ -33,6 +33,8 @@ npm --version
 psql --version
 ```
 
+The loopback HTTP examples below are for local API/manual-agent checks. For a remote Linux installer or browser run, use a reachable HTTPS origin with the reverse proxy configured by the [deployment guide](../deploy/local-and-systemd.md), set `HOUFENG_PUBLIC_BASE_URL` to it, and replace API/browser origins consistently. A remote agent cannot reach this center through its own `127.0.0.1`.
+
 Required center environment:
 
 ```bash
@@ -58,12 +60,13 @@ make build-center VERSION=v1.2.3
 make build-agent-release VERSION=v1.2.3
 ```
 
-Release assets expected under `dist/`:
+Local build outputs expected under `dist/`:
 
 - `houfeng-agent_v1.2.3_linux_amd64`
 - `houfeng-agent_v1.2.3_linux_arm64`
 - `sha256sums.txt`
-- `sha256sums.txt.minisig`
+
+The release workflow additionally signs the checksum manifest as `sha256sums.txt.minisig`; the local build target does not generate this signature.
 
 Published releases should already contain those files because `.github/workflows/publish-images.yml` uploads them on `release.published`. Use `make build-agent-release VERSION=<tag>` locally as a sanity check or emergency backfill source if a historical release is missing assets, but remember that installable releases also need the signed manifest produced by the release workflow. GitHub Release hosts only the binary and signed-checksum assets; the installer script is served by the running center at `/api/agent/install.sh`.
 
@@ -88,10 +91,12 @@ Stop the center at the end with `kill "$CENTER_PID"`. If you also start a local 
 
 ## Step 0: Log in and keep a session cookie
 
-All `/api/*` routes except `/api/healthz` and `/api/agent/*` require the session cookie. Log in once and reuse the cookie jar for every protected center API call below.
+Protected application API routes require the session cookie. `/api/healthz`, public installer and agent token-authenticated routes, and authentication endpoints such as login have their own authentication semantics. Log in once and reuse the cookie jar for every protected center API call below.
 
 ```bash
-COOKIE_JAR=/tmp/houfeng-smoke-cookie.txt
+umask 077
+HOUFENG_SMOKE_DIR="$(mktemp -d)"
+COOKIE_JAR="$HOUFENG_SMOKE_DIR/cookie.txt"
 curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   -X POST http://127.0.0.1:8080/api/auth/login \
   -H 'Content-Type: application/json' \
@@ -106,7 +111,9 @@ Expected: HTTP 200 JSON response with the current user and a `__Host-houfeng_ses
 ## Step 1: Create a VPS and its scoped MonitoringInstance
 
 ```bash
+VPS_CREATE_KEY="$(openssl rand -hex 16)"
 curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/vps \
+  -H "Idempotency-Key: $VPS_CREATE_KEY" \
   -H 'Content-Type: application/json' \
   -d '{
     "display_name": "smoke-vps-01",
@@ -120,10 +127,14 @@ curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/vps \
   }'
 ```
 
+Generate each idempotency key once per create intent; retries of that same request reuse its key and body. The VPS and scoped MonitoringInstance use separate keys.
+
 Record the returned `vps_id`, then create the monitoring instance through the VPS-scoped contract:
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/vps/<vps_id>/monitoring-instances \
+MONITORING_CREATE_KEY="$(openssl rand -hex 16)"
+curl -fsS -b "$COOKIE_JAR" -X POST 'http://127.0.0.1:8080/api/vps/<vps_id>/monitoring-instances' \
+  -H "Idempotency-Key: $MONITORING_CREATE_KEY" \
   -H 'Content-Type: application/json' \
   -d '{}'
 ```
@@ -143,7 +154,7 @@ API equivalent:
 
 ```bash
 curl -fsS -b "$COOKIE_JAR" \
-  -X POST http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/install-command
+  -X POST 'http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/install-command'
 ```
 
 Expected response fields:
@@ -184,8 +195,8 @@ Expected runtime behavior:
 Check from the center machine:
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/onboarding
-curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/runtime-facts
+curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/onboarding'
+curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/runtime-facts'
 ```
 
 On the agent host:
@@ -196,6 +207,8 @@ journalctl -u houfeng-agent -n 100 --no-pager
 ```
 
 ## Step 4: Create a Target
+
+`127.0.0.1:8080` is evaluated on the executing agent host. Keep it only when that host runs the checked service; otherwise replace host/port with an endpoint reachable from that agent and keep the service lifecycle within the smoke's authorized scope.
 
 ```bash
 curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets \
@@ -218,7 +231,7 @@ Record the returned `target_id`.
 ## Step 5: Add a ProbeItem
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/targets/<target_id>/probe-items \
+curl -fsS -b "$COOKIE_JAR" -X POST 'http://127.0.0.1:8080/api/targets/<target_id>/probe-items' \
   -H 'Content-Type: application/json' \
   -d '{
     "probe_kind": "http",
@@ -239,7 +252,7 @@ Expected: the target detail page and runtime facts show probe observations on th
 Check:
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" http://127.0.0.1:8080/api/targets/<target_id>/runtime-facts
+curl -fsS -b "$COOKIE_JAR" 'http://127.0.0.1:8080/api/targets/<target_id>/runtime-facts'
 ```
 
 ## Step 6: Trigger an incident
@@ -301,7 +314,7 @@ Open `http://127.0.0.1:8080/` and check the current UI surfaces that are relevan
 - Events page filters by object, time, severity/type, notification-only, recovery-only, maintenance-only, and explicit backfilled-event opt-in.
 - Settings page shows effective defaults and notification/retention behavior truthfully.
 
-For broader frontend checks, use the local preview and browser-sanity workflow in `docs/operations/ui-preview-and-browser-sanity.md` rather than removed historical screenshot flows.
+For broader frontend checks, use the local preview and browser-sanity workflow in `docs/development/ui-preview-and-browser-sanity.md` rather than removed historical screenshot flows.
 
 ### Troubleshooting: `minisign is required to verify release checksums`
 
@@ -336,28 +349,29 @@ Use this only when debugging the installer or doing API-level local verification
 Issue a raw enrollment token:
 
 ```bash
-curl -fsS -b "$COOKIE_JAR" -X POST http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/enrollment-token
+curl -fsS -b "$COOKIE_JAR" -X POST 'http://127.0.0.1:8080/api/monitoring-instances/<monitoring_instance_id>/enrollment-token'
 ```
 
 The response key is `token`. Store it in a private token file:
 
 ```bash
-printf '%s' '<enrollment_token>' > /tmp/houfeng-agent-token
-chmod 0600 /tmp/houfeng-agent-token
+printf '%s' '<enrollment_token>' > "$HOUFENG_SMOKE_DIR/agent-token"
+chmod 0600 "$HOUFENG_SMOKE_DIR/agent-token"
 ```
 
 Run a locally built agent:
 
 ```bash
 export HOUFENG_AGENT_SERVER_URL=http://127.0.0.1:8080
-export HOUFENG_AGENT_TOKEN_FILE=/tmp/houfeng-agent-token
-install -d -m 0700 /tmp/houfeng-agent
-export HOUFENG_AGENT_BUFFER_FILE=/tmp/houfeng-agent/sync-buffer.json
+export HOUFENG_AGENT_TOKEN_FILE="$HOUFENG_SMOKE_DIR/agent-token"
+export HOUFENG_AGENT_BUFFER_FILE="$HOUFENG_SMOKE_DIR/sync-buffer.json"
 export HOUFENG_AGENT_BUFFER_MAX_BYTES=67108864
 make build-agent
 ./bin/houfeng-agent > /tmp/houfeng-agent.log 2>&1 &
 AGENT_PID=$!
 ```
+
+After stopping this smoke's center and any local agent, remove its private cookie/token/buffer directory with `rm -rf -- "$HOUFENG_SMOKE_DIR"`. Do not delete another installation's state.
 
 After the first successful enrollment, the agent replaces the enrollment token file with post-enrollment sync credentials for that MonitoringInstance. Do not reuse a consumed token for another host.
 
