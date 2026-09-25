@@ -27,6 +27,14 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [0.80.4](https://github.com/xiangnan0811/houfeng/compare/v0.80.3...v0.80.4) (2026-09-25)
+
+
+### Bug Fixes
+
+* **migrate:** support released P63 database upgrades ([245f450](https://github.com/xiangnan0811/houfeng/commit/245f4500f54e9b32b2c84cb7010f25dc69b14cbb))
+* **migrate:** support released P63 database upgrades ([73fb2fb](https://github.com/xiangnan0811/houfeng/commit/73fb2fb198ea2fc35bcebb901ed689531ca27a3c))
+
 ## [0.80.3](https://github.com/xiangnan0811/houfeng/compare/v0.80.2...v0.80.3) (2026-09-25)
 
 
