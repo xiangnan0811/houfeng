@@ -31,6 +31,14 @@ var appACLCurrentV0802MigrationGolden []byte
 //go:embed testdata/app_acl_current_v0.80.2_privileges.v1.bin
 var appACLCurrentV0802PrivilegeGolden []byte
 
+// Exported from the v0.79.6 release compiler, independently of current sources.
+//
+//go:embed testdata/app_acl_current_v0.79.6_migrations.v1.bin
+var appACLCurrentV0796MigrationGolden []byte
+
+//go:embed testdata/app_acl_current_v0.79.6_privileges.v1.bin
+var appACLCurrentV0796PrivilegeGolden []byte
+
 var appACLCurrentV0794ManifestDigestGolden = func() [32]byte {
 	var digest [32]byte
 	copy(digest[:], appACLCurrentV0794ManifestDigestGoldenBytes)
@@ -42,6 +50,7 @@ type appACLCurrentProfileID uint8
 const (
 	appACLCurrentProfileP62 appACLCurrentProfileID = iota + 1
 	appACLCurrentProfileP64
+	appACLCurrentProfileP63
 )
 
 type appACLCurrentTransitionDefinition struct {
@@ -85,12 +94,25 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 		predecessorMigrationGolden: appACLCurrentV0802MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0802PrivilegeGolden,
 	},
+	{
+		profile:                  appACLCurrentProfileP63,
+		predecessorLastMigration: "0063_tune_heartbeat_incident_policy.sql",
+		successorMigrations: []string{
+			"0064_add_network_rates_valid.sql",
+			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+			"0066_constrain_monitoring_and_target_state_values.sql",
+		},
+		predecessorMigrationGolden: appACLCurrentV0796MigrationGolden,
+		predecessorPrivilegeGolden: appACLCurrentV0796PrivilegeGolden,
+	},
 }
 
 var appACLCurrentAcceptedPredecessorProfileChains = [][]appACLCurrentProfileID{
 	{appACLCurrentProfileP62},
 	{appACLCurrentProfileP64},
 	{appACLCurrentProfileP62, appACLCurrentProfileP64},
+	{appACLCurrentProfileP63},
+	{appACLCurrentProfileP62, appACLCurrentProfileP63},
 }
 
 func cloneAppACLCurrentTransitionDefinitions(source []appACLCurrentTransitionDefinition) []appACLCurrentTransitionDefinition {
@@ -112,14 +134,14 @@ func compileAppACLCurrentTransitions(
 	if len(definitions) == 0 {
 		return nil, fmt.Errorf("current APP ACL transition registry has no definitions")
 	}
-	if len(definitions) != 2 {
-		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62 and P64 profiles")
+	if len(definitions) != 3 {
+		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64 and P63 profiles")
 	}
 	expectedDefinitions := appACLCurrentTransitionDefinitions
 	compiled := make([]appACLCurrentTransition, 0, len(definitions))
 	claimedProfiles := make(map[appACLCurrentProfileID]struct{}, len(definitions))
 	for index, definition := range cloneAppACLCurrentTransitionDefinitions(definitions) {
-		if definition.profile != appACLCurrentProfileP62 && definition.profile != appACLCurrentProfileP64 {
+		if definition.profile != appACLCurrentProfileP62 && definition.profile != appACLCurrentProfileP64 && definition.profile != appACLCurrentProfileP63 {
 			return nil, fmt.Errorf("current APP ACL transition %d has unknown predecessor profile", index)
 		}
 		if _, duplicate := claimedProfiles[definition.profile]; duplicate {
@@ -154,8 +176,10 @@ func compileAppACLCurrentTransitions(
 		}
 		compiled = append(compiled, transition)
 	}
-	if !bytes.Equal(compiled[0].predecessorPrivilegeBody, compiled[1].predecessorPrivilegeBody) {
-		return nil, fmt.Errorf("registered P62 and P64 privilege profiles differ")
+	for _, transition := range compiled[1:] {
+		if !bytes.Equal(compiled[0].predecessorPrivilegeBody, transition.predecessorPrivilegeBody) {
+			return nil, fmt.Errorf("registered P62, P64 and P63 privilege profiles differ")
+		}
 	}
 	if err := validateAppACLCurrentTransitionPrivilegeDelta(compiled[1].predecessorPrivilegeBody, current); err != nil {
 		return nil, err
@@ -195,8 +219,8 @@ func compileAppACLCurrentTransition(
 	if definition.profile == appACLCurrentProfileP62 && len(definition.predecessorManifestDigestGolden) != 32 {
 		return appACLCurrentTransition{}, fmt.Errorf("P62 predecessor manifest digest golden has invalid length")
 	}
-	if definition.profile == appACLCurrentProfileP64 && len(definition.predecessorManifestDigestGolden) != 0 {
-		return appACLCurrentTransition{}, fmt.Errorf("P64 predecessor must support role-bound manifest identities")
+	if definition.profile != appACLCurrentProfileP62 && len(definition.predecessorManifestDigestGolden) != 0 {
+		return appACLCurrentTransition{}, fmt.Errorf("P63/P64 predecessor must support role-bound manifest identities")
 	}
 	manifest, err := NewAppACLManifestPersistedV1(1, appACLCurrentTransitionMigrator, [32]byte{}, predecessor.sources.canonicalSet, predecessorPrivileges)
 	if err != nil {

@@ -184,6 +184,11 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 		transition.successor.names[2] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
 		transition.successor.names[3] == "0066_constrain_monitoring_and_target_state_values.sql":
 		return true, nil
+	case len(transition.successor.names) == 3 &&
+		transition.successor.names[0] == "0064_add_network_rates_valid.sql" &&
+		transition.successor.names[1] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
+		transition.successor.names[2] == "0066_constrain_monitoring_and_target_state_values.sql":
+		return false, nil
 	case len(transition.successor.names) == 2 &&
 		transition.successor.names[0] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
 		transition.successor.names[1] == "0066_constrain_monitoring_and_target_state_values.sql":
