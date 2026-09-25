@@ -38,7 +38,7 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 			roles.migrator,
 		)
 		migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
-		predecessor, _, _ := seedAppACLCurrentP64Genesis(t, ctx, fixture, migratorDB, profile)
+		predecessor, _, _ := seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
 		seedAppACLCurrentSuccessorArchivedVPS(t, ctx, migratorDB)
 		_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 		beforeUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
@@ -75,7 +75,7 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 		state := seedExactAppACLCurrentPredecessor(t, ctx, 3)
 		fixture := state.fixture
 		migratorDB := state.migratorDB
-		p64, err := appendAppACLCurrentP64ReleaseSuccessor(t, ctx, fixture, migratorDB, profile)
+		p64, err := appendAppACLCurrentReleasedSuccessor(t, ctx, fixture, migratorDB, profile)
 		if err != nil {
 			t.Fatalf("construct exact released P62 to P64 manifest history: %v", err)
 		}
@@ -118,6 +118,11 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 
 func TestPostgresIntegrationAppACLCurrentP64TransitionRollbackCutpoints(t *testing.T) {
 	profile := appACLCurrentP64PostgresProfile(t)
+	testAppACLCurrentReleasedTransitionRollback(t, profile, false)
+}
+
+func testAppACLCurrentReleasedTransitionRollback(t *testing.T, profile appACLCurrentReleasedPostgresProfileData, fromP62 bool) {
+	t.Helper()
 	for _, tc := range []struct {
 		name string
 		kind string
@@ -129,9 +134,21 @@ func TestPostgresIntegrationAppACLCurrentP64TransitionRollbackCutpoints(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
-			fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
-			migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
-			seedAppACLCurrentP64Genesis(t, ctx, fixture, migratorDB, profile)
+			var fixture exactAppACLCurrentSuccessorPostgresFixture
+			var migratorDB *pgxpool.Pool
+			wantRevision := uint64(2)
+			if fromP62 {
+				state := seedExactAppACLCurrentPredecessor(t, ctx, 3)
+				fixture, migratorDB = state.fixture, state.migratorDB
+				if _, err := appendAppACLCurrentReleasedSuccessor(t, ctx, fixture, migratorDB, profile); err != nil {
+					t.Fatal(err)
+				}
+				wantRevision = 3
+			} else {
+				fixture = newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
+				migratorDB = fixture.openRolePool(t, ctx, fixture.migratorRole)
+				seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
+			}
 			seedAppACLCurrentSuccessorArchivedVPS(t, ctx, migratorDB)
 			_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 			before := readAppACLCurrentTransitionDurableState(t, ctx, migratorDB, currentInput)
@@ -217,8 +234,8 @@ func TestPostgresIntegrationAppACLCurrentP64TransitionRollbackCutpoints(t *testi
 			if err != nil {
 				t.Fatalf("ConvergeAppACLCurrent() retry after %s rollback: %v", tc.kind, err)
 			}
-			if retried.ManifestRevision != 2 {
-				t.Fatalf("retry after %s rollback manifest revision = %d, want 2", tc.kind, retried.ManifestRevision)
+			if retried.ManifestRevision != wantRevision {
+				t.Fatalf("retry after %s rollback manifest revision = %d, want %d", tc.kind, retried.ManifestRevision, wantRevision)
 			}
 			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
 				t.Fatalf("AdmitAppACLCurrentRuntime() after retry from %s: %v", tc.kind, err)
@@ -227,7 +244,12 @@ func TestPostgresIntegrationAppACLCurrentP64TransitionRollbackCutpoints(t *testi
 	}
 }
 
-func appACLCurrentP64PostgresProfile(t *testing.T) appACLCurrentP64PostgresProfileData {
+func appACLCurrentP64PostgresProfile(t *testing.T) appACLCurrentReleasedPostgresProfileData {
+	t.Helper()
+	return appACLCurrentReleasedPostgresProfile(t, appACLCurrentP64LastMigration)
+}
+
+func appACLCurrentReleasedPostgresProfile(t *testing.T, lastMigration string) appACLCurrentReleasedPostgresProfileData {
 	t.Helper()
 	current, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
 	if err != nil {
@@ -237,28 +259,28 @@ func appACLCurrentP64PostgresProfile(t *testing.T) appACLCurrentP64PostgresProfi
 	if err != nil {
 		t.Fatalf("compile exact current APP ACL release profiles: %v", err)
 	}
-	var p64Transition *appACLCurrentTransition
+	var releasedTransition *appACLCurrentTransition
 	for index := range transitions {
 		transition := &transitions[index]
 		last := transition.predecessor.sources.names
-		if len(last) != 0 && last[len(last)-1] == appACLCurrentP64LastMigration {
-			p64Transition = transition
+		if len(last) != 0 && last[len(last)-1] == lastMigration {
+			releasedTransition = transition
 			break
 		}
 	}
-	if p64Transition == nil {
+	if releasedTransition == nil {
 		t.Fatal("compiled release profiles do not include the exact P64 predecessor")
 	}
 
 	profileFS := appACLCurrentTransitionTestFS(t)
 	for _, name := range current.sources.names {
-		if name > appACLCurrentP64LastMigration {
+		if name > lastMigration {
 			delete(profileFS, name)
 		}
 	}
 	profileFragments := make([]AppACLCurrentMigrationFragment, 0, len(appACLCurrentMigrationFragments))
 	for _, fragment := range appACLCurrentMigrationFragments {
-		if fragment.Migration <= appACLCurrentP64LastMigration {
+		if fragment.Migration <= lastMigration {
 			profileFragments = append(profileFragments, cloneAppACLCurrentMigrationFragment(fragment))
 		}
 	}
@@ -266,7 +288,7 @@ func appACLCurrentP64PostgresProfile(t *testing.T) appACLCurrentP64PostgresProfi
 	if err != nil {
 		t.Fatalf("compile exact P64 fixture source: %v", err)
 	}
-	if !bytes.Equal(profileSource.sources.canonicalSet, p64Transition.predecessor.sources.canonicalSet) {
+	if !bytes.Equal(profileSource.sources.canonicalSet, releasedTransition.predecessor.sources.canonicalSet) {
 		t.Fatal("P64 fixture source differs from the transition compiler's independently checked release profile")
 	}
 	fixedContract, err := compileAppACLCurrentCatalogContract(profileSource, appACLCurrentTransitionDatabase, appACLCurrentTransitionBindings, appACLCurrentTransitionMigrator)
@@ -277,10 +299,10 @@ func appACLCurrentP64PostgresProfile(t *testing.T) appACLCurrentP64PostgresProfi
 	if err != nil {
 		t.Fatalf("encode fixed-binding P64 privilege body: %v", err)
 	}
-	if !bytes.Equal(privileges, p64Transition.predecessorPrivilegeBody) {
+	if !bytes.Equal(privileges, releasedTransition.predecessorPrivilegeBody) {
 		t.Fatal("P64 fixture privilege body differs from the transition compiler's independently checked release profile")
 	}
-	return appACLCurrentP64PostgresProfileData{
+	return appACLCurrentReleasedPostgresProfileData{
 		fs:              profileFS,
 		fragments:       profileFragments,
 		source:          profileSource,
@@ -288,22 +310,22 @@ func appACLCurrentP64PostgresProfile(t *testing.T) appACLCurrentP64PostgresProfi
 	}
 }
 
-type appACLCurrentP64PostgresProfileData struct {
+type appACLCurrentReleasedPostgresProfileData struct {
 	fs              fstest.MapFS
 	fragments       []AppACLCurrentMigrationFragment
 	source          appACLCurrentSourceContract
 	privilegeGolden []byte
 }
 
-func seedAppACLCurrentP64Genesis(
+func seedAppACLCurrentReleasedGenesis(
 	t *testing.T,
 	ctx context.Context,
 	fixture exactAppACLCurrentSuccessorPostgresFixture,
 	migratorDB *pgxpool.Pool,
-	profile appACLCurrentP64PostgresProfileData,
+	profile appACLCurrentReleasedPostgresProfileData,
 ) (AppACLManifestPersistedV1, appACLEffectiveCatalogContract, appACLEffectiveCatalogVerifierInput) {
 	t.Helper()
-	contract, privileges, input := appACLCurrentP64FixtureContract(t, fixture, profile)
+	contract, privileges, input := appACLCurrentReleasedFixtureContract(t, fixture, profile)
 	dependencies := defaultAppACLCurrentConvergenceDependencies()
 	dependencies.transitionDefinitions = nil
 	manifest, err := convergeAppACLCurrentWithDependencies(
@@ -325,14 +347,14 @@ func seedAppACLCurrentP64Genesis(
 		!bytes.Equal(manifest.CanonicalPrivilegeSet, privileges) {
 		t.Fatalf("P64 release genesis does not preserve exact source/privilege profile: %#v", manifest)
 	}
-	seedAppACLCurrentP64TransitionSettings(t, ctx, migratorDB)
+	seedAppACLCurrentReleasedTransitionSettings(t, ctx, migratorDB)
 	return manifest, contract, input
 }
 
-func appACLCurrentP64FixtureContract(
+func appACLCurrentReleasedFixtureContract(
 	t *testing.T,
 	fixture exactAppACLCurrentSuccessorPostgresFixture,
-	profile appACLCurrentP64PostgresProfileData,
+	profile appACLCurrentReleasedPostgresProfileData,
 ) (appACLEffectiveCatalogContract, []byte, appACLEffectiveCatalogVerifierInput) {
 	t.Helper()
 	bindings := []AppACLRoleBinding{
@@ -354,7 +376,7 @@ func appACLCurrentP64FixtureContract(
 	return contract, privileges, input
 }
 
-func seedAppACLCurrentP64TransitionSettings(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
+func seedAppACLCurrentReleasedTransitionSettings(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
 	if _, err := db.Exec(ctx, `
 		insert into public.center_settings (settings_id, incident_defaults, override_rules, updated_at)
@@ -376,15 +398,15 @@ func seedAppACLCurrentP64TransitionSettings(t *testing.T, ctx context.Context, d
 	}
 }
 
-func appendAppACLCurrentP64ReleaseSuccessor(
+func appendAppACLCurrentReleasedSuccessor(
 	t *testing.T,
 	ctx context.Context,
 	fixture exactAppACLCurrentSuccessorPostgresFixture,
 	migratorDB *pgxpool.Pool,
-	profile appACLCurrentP64PostgresProfileData,
+	profile appACLCurrentReleasedPostgresProfileData,
 ) (AppACLManifestPersistedV1, error) {
 	t.Helper()
-	_, privileges, input := appACLCurrentP64FixtureContract(t, fixture, profile)
+	_, privileges, input := appACLCurrentReleasedFixtureContract(t, fixture, profile)
 	tx, err := migratorDB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("begin P62-to-P64 fixture release transaction: %w", err)

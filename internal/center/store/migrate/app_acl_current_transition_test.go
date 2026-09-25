@@ -24,8 +24,15 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 	if err != nil {
 		t.Fatalf("compileAppACLCurrentTransitions() error = %v", err)
 	}
-	if len(transitions) != 2 {
-		t.Fatalf("compiled transition count = %d, want the P62 and P64 profiles", len(transitions))
+	if len(transitions) != 3 {
+		t.Fatalf("compiled transition count = %d, want the P62, P64 and P63 profiles", len(transitions))
+	}
+	p63 := transitions[2]
+	if p63.profile != appACLCurrentProfileP63 || len(p63.predecessor.sources.names) != 64 ||
+		!bytes.Equal(p63.predecessor.sources.canonicalSet, appACLCurrentV0796MigrationGolden) ||
+		!bytes.Equal(p63.predecessorPrivilegeBody, appACLCurrentV0796PrivilegeGolden) ||
+		!equalStringSlices(p63.successor.names, []string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql"}) {
+		t.Fatal("compiled P63 profile differs from independent v0.79.6 release goldens or expected suffix")
 	}
 
 	p62, p64 := transitions[0], transitions[1]

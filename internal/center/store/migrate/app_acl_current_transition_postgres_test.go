@@ -30,6 +30,9 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 	}{
 		{name: "P62 suffix includes heartbeat policy migration", transition: p62Transition, want: true},
 		{name: "P64 suffix starts after heartbeat policy migration", transition: p64Transition, want: false},
+		{name: "P63 suffix preserves heartbeat policy", transition: appACLCurrentTransition{
+			successor: migrationSourceSnapshot{names: p62Transition.successor.names[1:]},
+		}, want: false},
 		{
 			name: "incomplete successor suffix is rejected",
 			transition: appACLCurrentTransition{
