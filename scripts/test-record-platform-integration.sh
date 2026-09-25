@@ -94,7 +94,7 @@ start_postgres() {
     --label "com.houfeng.records.run=$records_run_id" \
     --label "com.houfeng.records.owner=$records_owner_id" \
     --network=host \
-    --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=512m \
+    --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=4g \
     -e POSTGRES_PASSWORD="$password" \
     "$postgres_image" \
     -c port="$port" >/dev/null

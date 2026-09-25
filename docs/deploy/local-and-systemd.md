@@ -741,3 +741,45 @@ test -s data/logs/center.log
 ```
 
 Continue with `docs/operations/fresh-install-smoke-run.md` for the full fresh-install path.
+
+## VPS state migration maintenance window
+
+Migrations `0065` and `0066` change VPS archived-state handling and constrain
+MonitoringInstance/Target state values. Do not run an old and new Center writer
+against the same database: the old binary does not participate in the graph
+writer protocol and may try to store `archived` + `in_use`, which the migrated
+database rejects.
+
+Before the maintenance window:
+
+1. Stop every Center process that can write to the target database; do not use
+   a rolling deployment that leaves old and new Center writers active together.
+2. Take and verify a database backup.
+3. Run the read-only [VPS state preflight](../../scripts/preflight-vps-state.sql)
+   against the target database before applying migrations:
+
+   ```bash
+   psql -X -v ON_ERROR_STOP=1 --dbname "$HOUFENG_DATABASE_URL" \
+     --file scripts/preflight-vps-state.sql
+   ```
+
+4. Review every reported invalid value, retired MonitoringInstance residue, and
+   receipt-owner record. Correct unknown state values only from independently
+   verified evidence; the migration deliberately fails rather than guessing.
+   The preflight shows the current owner for subscription receipts, but their
+   original requested VPS owner is not stored in the receipt and cannot be
+   reconstructed from its digest alone.
+
+After preflight is clear, deploy one compatible Center release to all writers
+and apply its migrations through the configured migration path before allowing
+Center writes again. Migration `0065` records each pre-existing archived VPS's
+observed three-axis state as `migration_observation` before setting current
+usage to `unknown`; this is not claimed to be the original archive-time
+snapshot.
+
+Application rollback does not roll back these migrations. Preserve
+`archived_state_snapshot`, lifecycle actions/steps, and the new constraints;
+do not drop them or restore archived `in_use` values as part of a binary
+rollback. An old binary may fail when it attempts such a write. Recover forward
+with a compatible release, or restore a pre-migration backup only through a
+separately reviewed maintenance procedure with all Center writers stopped.

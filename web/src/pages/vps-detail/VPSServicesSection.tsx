@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 import { Button, MonoDigits } from '../../components/atoms'
+import { DependencyStatusCorrection } from '../../components/DependencyStatusCorrection'
 import type { AssetServiceRecord } from '../../lib/types'
 import { VPSCopyValueButton } from './VPSCopyValueButton'
 import {
@@ -14,16 +16,20 @@ type VPSServicesSectionProps = {
   services: AssetServiceRecord[]
   error: string | null
   notice: string | null
+  parentLifecycle?: string
   readOnly?: boolean
   onCreate: () => void
+  onChanged?: () => void
 }
 
 export function VPSServicesSection({
   services,
   error,
   notice,
+  parentLifecycle = 'active',
   readOnly = false,
   onCreate,
+  onChanged,
 }: VPSServicesSectionProps) {
   return (
     <div className="vps-objects">
@@ -45,7 +51,13 @@ export function VPSServicesSection({
       {services.length > 0 ? (
         <ul className="vps-object-list vps-relation-dossiers">
           {services.map((service) => (
-            <ServiceDossier key={service.service_id} service={service} />
+            <ServiceDossier
+              key={service.service_id}
+              service={service}
+              readOnly={readOnly}
+              parentLifecycle={parentLifecycle}
+              onChanged={onChanged}
+            />
           ))}
         </ul>
       ) : (
@@ -55,7 +67,18 @@ export function VPSServicesSection({
   )
 }
 
-function ServiceDossier({ service }: { service: AssetServiceRecord }) {
+function ServiceDossier({
+  service,
+  readOnly = false,
+  parentLifecycle,
+  onChanged,
+}: {
+  service: AssetServiceRecord
+  readOnly?: boolean
+  parentLifecycle: string
+  onChanged?: (() => void) | undefined
+}) {
+  const [open, setOpen] = useState(false)
   const location = useLocation()
   const url = service.url.trim()
   const href = httpHref(url)
@@ -71,8 +94,26 @@ function ServiceDossier({ service }: { service: AssetServiceRecord }) {
             <span className="vps-relation-badge">{serviceResourceStatus(service)}</span>
             <span>{serviceResourceType(service)}</span>
           </span>
+          {!readOnly ? (
+            <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>更正状态</Button>
+          ) : null}
         </div>
       </div>
+      {open ? (
+        <DependencyStatusCorrection
+          open
+          kind="service"
+          objectId={service.service_id}
+          displayName={serviceResourceName(service)}
+          currentStatus={service.status}
+          parentLifecycle={parentLifecycle}
+          onClose={() => setOpen(false)}
+          onCompleted={() => {
+            setOpen(false)
+            onChanged?.()
+          }}
+        />
+      ) : null}
       <section className="vps-relation-dossier__body">
         <div className="vps-relation-urlblock">
           <p className="vps-relation-urlblock__label">访问入口</p>

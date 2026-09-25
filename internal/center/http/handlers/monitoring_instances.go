@@ -3,10 +3,10 @@ package handlers
 import (
 	"context"
 	"errors"
+	"houfeng/internal/center/assetlifecycle"
+	"houfeng/internal/center/monitoringinstances"
 	"net/http"
 	"strings"
-
-	"houfeng/internal/center/monitoringinstances"
 )
 
 type MonitoringInstanceManagementRepository interface {
@@ -301,8 +301,12 @@ func writeMonitoringInstanceManagementError(w http.ResponseWriter, err error) bo
 		return false
 	case errors.Is(err, monitoringinstances.ErrInvalidManagementInput):
 		writeError(w, http.StatusBadRequest, "invalid input")
-	case errors.Is(err, monitoringinstances.ErrManagementActionBlocked), errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance):
+	case errors.Is(err, monitoringinstances.ErrManagementActionBlocked), errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance), errors.Is(err, monitoringinstances.ErrRetiredMonitoringInstance):
 		writeError(w, http.StatusConflict, "management action blocked")
+	case errors.Is(err, assetlifecycle.ErrSharedImpactConfirmationRequired):
+		writeCodedError(w, http.StatusConflict, "shared impact confirmation required", "shared_impact_confirmation_required")
+	case errors.Is(err, assetlifecycle.ErrStaleCancellationPreview):
+		writeCodedError(w, http.StatusConflict, "management review stale", "management_review_stale")
 	case errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound):
 		writeError(w, http.StatusNotFound, "monitoring instance not found")
 	default:

@@ -35,6 +35,9 @@ func (adapter *sliceSourceAdapter) ScanAfter(
 		if !window.From.IsZero() && row.RecordedAt.Before(window.From) {
 			continue
 		}
+		if row.RecordedAt.Equal(window.From) && window.AfterEventID != "" && row.Source.EventID <= window.AfterEventID {
+			continue
+		}
 		if !window.Through.IsZero() && row.RecordedAt.After(window.Through) {
 			continue
 		}
@@ -44,7 +47,7 @@ func (adapter *sliceSourceAdapter) ScanAfter(
 		if !matched[i].RecordedAt.Equal(matched[j].RecordedAt) {
 			return matched[i].RecordedAt.Before(matched[j].RecordedAt)
 		}
-		return matched[i].ActivityID < matched[j].ActivityID
+		return matched[i].Source.EventID < matched[j].Source.EventID
 	})
 	if limit > 0 && len(matched) > limit {
 		matched = matched[:limit]
@@ -148,8 +151,8 @@ func TestPostgresIntegrationProjectorPublishesAGapFreePrefixAndIsIdempotent(t *t
 		head: head,
 		rows: []activity.CandidateEvent{
 			newActivityCandidate(t, "rac_p1", head.Add(-30*time.Minute)),
-			newActivityCandidate(t, "rac_p2", head.Add(-20*time.Minute)),
-			newActivityCandidate(t, "rac_p3", head.Add(-10*time.Minute)),
+			newActivityCandidate(t, "rac_p2", head.Add(-30*time.Minute)),
+			newActivityCandidate(t, "rac_p3", head.Add(-30*time.Minute)),
 		},
 	}
 	projector, repository := newProjectorAgainstPostgres(t, ctx, adapter, 2)
@@ -166,6 +169,19 @@ func TestPostgresIntegrationProjectorPublishesAGapFreePrefixAndIsIdempotent(t *t
 		t.Fatalf("projected %d rows, want 3", len(projected))
 	}
 	assertContiguousFromOne(t, projected)
+	wantIDs := make(map[string]bool, len(adapter.rows))
+	for _, candidate := range adapter.rows {
+		wantIDs[candidate.ActivityID] = true
+	}
+	for _, row := range projected {
+		if !wantIDs[row.activityID] {
+			t.Fatalf("unexpected or duplicate projected activity %q", row.activityID)
+		}
+		delete(wantIDs, row.activityID)
+	}
+	if len(wantIDs) != 0 {
+		t.Fatalf("equal-time pagination omitted activities: %v", wantIDs)
+	}
 
 	second := projectOnceAgainstPostgres(t, ctx, projector, adapter.kind)
 	if second.Inserted != 0 {

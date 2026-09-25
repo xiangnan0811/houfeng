@@ -135,6 +135,7 @@ const archiveReview = {
   }],
   warnings: [],
   blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
+  blocker_details: [],
   eligible: false,
 }
 
@@ -246,8 +247,7 @@ describe('ArchiveDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /Tokyo Retired/ })).toBeInTheDocument())
-    expect(screen.getByText('只读归档详情')).toBeInTheDocument()
-    expect(screen.getByText('已归档资产不会进入 VPS、订阅、监控或资产组合决策主流程。')).toBeInTheDocument()
+
 
     const userRecords = screen.getByRole('region', { name: '用户记录' })
     expect(within(userRecords).getByText('晚高峰网络质量明显下降')).toBeInTheDocument()
@@ -301,7 +301,8 @@ describe('ArchiveDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /Tokyo Retired/ })).toBeInTheDocument())
-    expect(screen.getByText('已取消资产不可恢复，仅保留历史回看。')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '处理残留' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '受控归档' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '恢复为闲置' })).not.toBeInTheDocument()
   })
 
@@ -373,16 +374,15 @@ describe('ArchiveDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复为闲置' }))
     const dialog = screen.getByRole('alertdialog', { name: '确认恢复归档 VPS' })
     expect(within(dialog).getByText('恢复后进入闲置状态，关联订阅、监控、服务、域名和历史记录会保留。')).toBeInTheDocument()
+    fireEvent.change(within(dialog).getByLabelText('恢复原因'), { target: { value: '重新评估用途' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认恢复' }))
 
     await waitFor(() => expect(screen.getByTestId('path-probe')).toHaveTextContent('/vps/vps_archived'))
     expect(screen.getByTestId('path-probe')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/vps/vps_archived/restore-from-archive', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_archived/restore-from-archive', expect.objectContaining({
       method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
+      body: JSON.stringify({ reason: '重新评估用途' }),
+    }))
   })
 
   it('keeps review content visible when auxiliary timeline or subscriptions fail and allows independent retry', async () => {
@@ -478,6 +478,7 @@ describe('ArchiveDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复为闲置' }))
     const dialog = screen.getByRole('alertdialog', { name: '确认恢复归档 VPS' })
     const confirmBtn = within(dialog).getByRole('button', { name: '确认恢复' })
+    fireEvent.change(within(dialog).getByLabelText('恢复原因'), { target: { value: '重新评估用途' } })
 
     fireEvent.click(confirmBtn)
     await waitFor(() => expect(within(dialog).getByText('restore conflict')).toBeInTheDocument())
@@ -540,5 +541,168 @@ describe('ArchiveDetailPage', () => {
     await act(async () => { finishOldReview(mockJSONResponse({ ...archiveReview, vps: { ...archivedVPS, display_name: 'obsolete identity' } })) })
     expect(screen.queryByText('obsolete identity')).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.filter(([url]) => url.endsWith('/timeline'))).toHaveLength(1)
+  })
+
+  it('refreshes a stale residual preview without resubmitting or applying a late refresh after close', async () => {
+    const cancelledReview = {
+      ...archiveReview,
+      vps: { ...archivedVPS, lifecycle_status: 'cancelled', archived_at: null },
+      blockers: [],
+      blocker_details: [],
+      eligible: false,
+    }
+    const firstPreview = {
+      vps: cancelledReview.vps,
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      recommended_steps: [],
+      warnings: [],
+      blockers: [],
+      dependency_impacts: [],
+      evaluated_on: '2026-09-24',
+      preview_digest: 'digest-1',
+    }
+    let previewReads = 0
+    let finishRefresh: (response: Response) => void = () => {}
+    const refresh = new Promise<Response>((resolve) => { finishRefresh = resolve })
+    let posts = 0
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/cancellation') && init?.method === 'POST') {
+        posts += 1
+        return Promise.resolve(mockJSONResponse({ error: 'stale', code: 'cancellation_preview_stale' }, 409))
+      }
+      if (url.endsWith('/cancellation-preview')) {
+        previewReads += 1
+        return previewReads === 1
+          ? Promise.resolve(mockJSONResponse(firstPreview))
+          : refresh
+      }
+      if (url.endsWith('/archive-review')) return Promise.resolve(mockJSONResponse(cancelledReview))
+      if (url.endsWith('/timeline')) return Promise.resolve(mockJSONResponse(timeline))
+      return Promise.resolve(mockJSONResponse([]))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/archive/vps_archived']}>
+        <Routes><Route path="/archive/:vpsId" element={<ArchiveDetailPage />} /></Routes>
+      </MemoryRouter>,
+    )
+    await screen.findByRole('button', { name: '处理残留' })
+    fireEvent.click(screen.getByRole('button', { name: '处理残留' }))
+    const reason = await screen.findByLabelText('原因')
+    fireEvent.change(reason, { target: { value: '只整理残留' } })
+    fireEvent.click(screen.getByRole('button', { name: '确认处理残留' }))
+    await waitFor(() => expect(posts).toBe(1))
+    await waitFor(() => expect(previewReads).toBe(2))
+    expect(screen.getByRole('dialog', { name: '处理残留' })).toBeInTheDocument()
+    expect(screen.getByLabelText('原因')).toHaveValue('只整理残留')
+    unmount()
+    await act(async () => { finishRefresh(mockJSONResponse({ ...firstPreview, preview_digest: 'digest-2' })) })
+    expect(posts).toBe(1)
+  })
+
+  it('wires inline blocker action buttons to scoped correction and residual controls', async () => {
+    const cancelledWithBlockers = {
+      ...archiveReview,
+      vps: { ...archivedVPS, lifecycle_status: 'cancelled', archived_at: null },
+      blockers: ['服务状态待确认', '存在残留账单'],
+      blocker_details: [
+        {
+          code: 'service_status_needs_confirmation',
+          object_type: 'service',
+          object_id: 'svc_archived',
+          display_name: 'Legacy API',
+          current_state: 'unknown',
+          blocked_action: 'archive_vps',
+          resolution_action: 'correct_dependency_status',
+        },
+        {
+          code: 'subscription_residual',
+          object_type: 'subscription',
+          object_id: 'sub_archived',
+          display_name: 'Cloud Plan',
+          current_state: 'cancelled',
+          blocked_action: 'archive_vps',
+          resolution_action: 'cancel_vps',
+        },
+      ],
+      eligible: false,
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.endsWith('/archive-review')) return Promise.resolve(mockJSONResponse(cancelledWithBlockers))
+      if (url.endsWith('/timeline')) return Promise.resolve(mockJSONResponse(timeline))
+      if (url.endsWith('/cancellation-preview')) {
+        return Promise.resolve(mockJSONResponse({
+          vps: cancelledWithBlockers.vps,
+          subscriptions: [],
+          monitoring_instance_links: [],
+          services: [],
+          domains: [],
+          target_links: [],
+          recommended_steps: [],
+          warnings: [],
+          blockers: [],
+          dependency_impacts: [],
+          evaluated_on: '2026-09-24',
+          preview_digest: 'digest-residual',
+        }))
+      }
+      return Promise.resolve(mockJSONResponse([]))
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/archive/vps_archived']}>
+        <Routes><Route path="/archive/:vpsId" element={<ArchiveDetailPage />} /></Routes>
+      </MemoryRouter>,
+    )
+    const correctBtn = await screen.findByRole('button', { name: '纠正服务状态' })
+    expect(correctBtn).toBeInTheDocument()
+    fireEvent.click(correctBtn)
+
+    // DependencyStatusCorrection modal must open
+    expect(await screen.findByRole('heading', { name: '纠正服务状态' })).toBeInTheDocument()
+  })
+
+  it('wires inline blocker action buttons from inside CancelledArchiveDialog', async () => {
+    const cancelledWithBlockers = {
+      ...archiveReview,
+      vps: { ...archivedVPS, lifecycle_status: 'cancelled', archived_at: null },
+      blockers: ['服务状态待确认'],
+      blocker_details: [
+        {
+          code: 'service_status_needs_confirmation',
+          object_type: 'service',
+          object_id: 'svc_archived',
+          display_name: 'Legacy API',
+          current_state: 'unknown',
+          blocked_action: 'archive_vps',
+          resolution_action: 'correct_dependency_status',
+        },
+      ],
+      eligible: false,
+    }
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.endsWith('/archive-review')) return Promise.resolve(mockJSONResponse(cancelledWithBlockers))
+      if (url.endsWith('/timeline')) return Promise.resolve(mockJSONResponse(timeline))
+      return Promise.resolve(mockJSONResponse([]))
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/archive/vps_archived']}>
+        <Routes><Route path="/archive/:vpsId" element={<ArchiveDetailPage />} /></Routes>
+      </MemoryRouter>,
+    )
+    const archiveBtn = await screen.findByRole('button', { name: '受控归档' })
+    fireEvent.click(archiveBtn)
+    const archiveModal = await screen.findByRole('dialog', { name: '受控归档' })
+    expect(archiveModal).toBeInTheDocument()
+    const dialogCorrectBtn = within(archiveModal).getByRole('button', { name: '纠正服务状态' })
+    fireEvent.click(dialogCorrectBtn)
+
+    // DependencyStatusCorrection modal must open
+    expect(await screen.findByRole('heading', { name: '纠正服务状态' })).toBeInTheDocument()
   })
 })

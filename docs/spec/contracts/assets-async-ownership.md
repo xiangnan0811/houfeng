@@ -34,6 +34,8 @@
 - mutation refresh 的 predicate 必须在 functional setter 内重检，阻止 A→B→A 的旧 A response 覆盖当前 A。
 - 409 recovery 先加载最新版；facts 三方 merge，decision 保留本地 decision/reason，并用新 `updated_at` 重试。terminal identity 只有 generation 仍 current 时才 replace 到 `/archive/:vpsId`。
 - load-latest 使用独立 in-flight lock；并发点击只发一个 GET，关闭、route 切换或卸载后迟到结果不得提交。
+- cancellation_preview_stale 的恢复仅刷新预览，保留本地 reason/effective_date/有效对象选择并清空共享确认；删除或不可操作对象显式提示，新增对象不自动扩选。不得把 GET 后的新 digest 自动用于重发旧确认。
+- archive 409 带 review 时直接采用最新 blocker_details；旧响应缺 review 再 GET，失败不能推定 eligible。恢复、开始迁移、服务/域名状态纠正与 unlink→重新接入都受现有 VPS transport owner/view generation 约束。
 
 ### 4. Validation & Error Matrix
 

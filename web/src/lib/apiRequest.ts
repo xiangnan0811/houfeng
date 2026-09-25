@@ -7,6 +7,7 @@ export type ApiErrorDetails<TRecovery> = {
   code?: string | undefined
   field_errors?: ApiFieldError[]
   recovery?: TRecovery | undefined
+  review?: unknown
 }
 
 export type ApiErrorDecoder = (
@@ -19,6 +20,7 @@ export class ApiError<TRecovery = unknown> extends Error {
   declare code: string | undefined
   declare field_errors: ApiFieldError[]
   declare recovery: TRecovery | undefined
+  declare review: unknown
 
   constructor(status: number, message: string, details?: ApiErrorDetails<TRecovery>) {
     super(message)

@@ -68,6 +68,193 @@ func TestAdmitAppACLCurrentRuntimeAcceptsProductionRecordsCoreContract(t *testin
 		t.Fatalf("production records-core runtime lifecycle = commit %d rollback %d, want 1/1", tx.commitCalls, tx.rollbackCalls)
 	}
 }
+func TestAdmitAppACLCurrentRuntimeRejectsAllPredecessorsAndAcceptsRegisteredTargetChains(t *testing.T) {
+	source, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transitions, err := compileAppACLCurrentTransitions(source, appACLCurrentTransitionDefinitions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, catalogSnapshot := appACLCurrentRuntimeAdmissionFixture(t, migrations.FS, appACLCurrentMigrationFragments)
+	useProductionRuntimeIdentityForSuccessorTest(&base, &catalogSnapshot)
+	p62, p64 := transitions[0], transitions[1]
+	migratorRole := appACLCurrentTransitionMigrator
+	currentPrivileges, err := appACLCurrentTransitionPrivilegeBodyFor(
+		source,
+		base.DatabaseName,
+		appACLCurrentTransitionBindings,
+		migratorRole,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentManifest, err := NewAppACLManifestPersistedV1(
+		1,
+		migratorRole,
+		[32]byte{},
+		source.sources.canonicalSet,
+		currentPrivileges,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p62Manifest, err := NewAppACLManifestPersistedV1(
+		1,
+		migratorRole,
+		[32]byte{},
+		p62.predecessor.sources.canonicalSet,
+		p62.predecessorPrivilegeBody,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p64Manifest, err := NewAppACLManifestPersistedV1(
+		1,
+		migratorRole,
+		[32]byte{},
+		p64.predecessor.sources.canonicalSet,
+		p64.predecessorPrivilegeBody,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p62P64Manifest, err := NewAppACLManifestPersistedV1(
+		2,
+		migratorRole,
+		p62Manifest.ManifestDigest,
+		p64.predecessor.sources.canonicalSet,
+		p64.predecessorPrivilegeBody,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p62Current, err := NewAppACLManifestPersistedV1(
+		2,
+		migratorRole,
+		p62Manifest.ManifestDigest,
+		currentManifest.CanonicalMigrationSet,
+		currentManifest.CanonicalPrivilegeSet,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p64Current, err := NewAppACLManifestPersistedV1(
+		2,
+		currentManifest.MigratorCatalogRole,
+		p64Manifest.ManifestDigest,
+		currentManifest.CanonicalMigrationSet,
+		currentManifest.CanonicalPrivilegeSet,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p62P64Current, err := NewAppACLManifestPersistedV1(
+		3,
+		currentManifest.MigratorCatalogRole,
+		p62P64Manifest.ManifestDigest,
+		currentManifest.CanonicalMigrationSet,
+		currentManifest.CanonicalPrivilegeSet,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p62Applied, err := ParseCanonicalMigrationSetBodyV1(p62.predecessor.sources.canonicalSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p64Applied, err := ParseCanonicalMigrationSetBodyV1(p64.predecessor.sources.canonicalSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetApplied := base.AppliedMigrations
+	for _, tc := range []struct {
+		name         string
+		manifests    []AppACLManifestPersistedV1
+		applied      []MigrationChecksumEntry
+		wantAdmitted bool
+	}{
+		{
+			name:      "P62 predecessor",
+			manifests: []AppACLManifestPersistedV1{p62Manifest},
+			applied:   p62Applied,
+		},
+		{
+			name:      "P64 predecessor",
+			manifests: []AppACLManifestPersistedV1{p64Manifest},
+			applied:   p64Applied,
+		},
+		{
+			name:      "P62 to P64 predecessor",
+			manifests: []AppACLManifestPersistedV1{p62Manifest, p62P64Manifest},
+			applied:   p64Applied,
+		},
+		{
+			name:         "P62 target chain",
+			manifests:    []AppACLManifestPersistedV1{p62Manifest, p62Current},
+			applied:      targetApplied,
+			wantAdmitted: true,
+		},
+		{
+			name:         "P64 target chain",
+			manifests:    []AppACLManifestPersistedV1{p64Manifest, p64Current},
+			applied:      targetApplied,
+			wantAdmitted: true,
+		},
+		{
+			name:         "three-revision P62 to P64 target chain",
+			manifests:    []AppACLManifestPersistedV1{p62Manifest, p62P64Manifest, p62P64Current},
+			applied:      targetApplied,
+			wantAdmitted: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := base
+			snapshot.Manifests = tc.manifests
+			snapshot.AppliedMigrations = tc.applied
+			latest := tc.manifests[len(tc.manifests)-1]
+			snapshot.Head = &AppACLManifestHeadV1{
+				ManifestRevision: latest.ManifestRevision,
+				ManifestDigest:   latest.ManifestDigest,
+			}
+			tx := &fakeAppACLRuntimeAdmissionTx{}
+			catalogReads := 0
+			err := admitAppACLCurrentRuntimeWithDependencies(
+				context.Background(),
+				migrations.FS,
+				appACLCurrentMigrationFragments,
+				appACLCurrentRuntimeAdmissionDependencies{
+					beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+					readManifest: func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error) {
+						return snapshot, nil
+					},
+					readCatalog: func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+						catalogReads++
+						return catalogSnapshot, nil
+					},
+					verifyCatalog:         verifyAppACLEffectiveCatalogSnapshot,
+					transitionDefinitions: cloneAppACLCurrentTransitionDefinitions(appACLCurrentTransitionDefinitions),
+				},
+			)
+			if tc.wantAdmitted {
+				if err != nil {
+					t.Fatalf("admit registered target chain: %v", err)
+				}
+				if catalogReads != 1 || tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+					t.Fatalf("registered target lifecycle = catalog reads %d, commit %d, rollback %d; want 1/1/1", catalogReads, tx.commitCalls, tx.rollbackCalls)
+				}
+				return
+			}
+			if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+				t.Fatalf("admit predecessor chain error = %v, want successor-convergence rejection", err)
+			}
+			if catalogReads != 0 || tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+				t.Fatalf("predecessor lifecycle = catalog reads %d, commit %d, rollback %d; want 0/0/1", catalogReads, tx.commitCalls, tx.rollbackCalls)
+			}
+		})
+	}
+}
 
 func TestAdmitAppACLCurrentRuntimeUsesOneRepeatableReadOnlySnapshot(t *testing.T) {
 	futureFS, fragments := appACLCurrentRuntimeAdmissionExtendedSource(t)
@@ -177,15 +364,16 @@ func TestAdmitAppACLCurrentRuntimeNullHeadRequiresRebuildBeforeCatalogRead(t *te
 	}
 }
 
-func TestAdmitAppACLCurrentRuntimeSuccessorRequiresRebuildBeforeRoleOrCatalogRead(t *testing.T) {
+func TestAdmitAppACLCurrentRuntimeSuccessorRejectsBeforeCatalogRead(t *testing.T) {
 	futureFS, fragments := appACLCurrentConvergenceFutureSource(t)
 
 	for _, tc := range []struct {
 		name                 string
 		successorRuntimeRole string
+		wantIdentityMismatch bool
 	}{
 		{name: "unchanged latest binding", successorRuntimeRole: "houfeng_center_runtime"},
-		{name: "changed latest binding", successorRuntimeRole: "successor_center_runtime"},
+		{name: "changed latest binding", successorRuntimeRole: "successor_center_runtime", wantIdentityMismatch: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			manifestSnapshot, _, _ := appACLCurrentRuntimeAdmissionFixture(t, futureFS, fragments)
@@ -209,7 +397,11 @@ func TestAdmitAppACLCurrentRuntimeSuccessorRequiresRebuildBeforeRoleOrCatalogRea
 					verifyCatalog: verifyAppACLEffectiveCatalogSnapshot,
 				},
 			)
-			if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+			if tc.wantIdentityMismatch {
+				if err == nil || !strings.Contains(err.Error(), "does not match latest app ACL manifest center runtime binding") {
+					t.Fatalf("successor runtime identity error = %v, want binding mismatch", err)
+				}
+			} else if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
 				t.Fatalf("current successor error = %v, want rebuild-required sentinel", err)
 			}
 			if catalogReads != 0 {

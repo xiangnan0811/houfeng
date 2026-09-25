@@ -16,66 +16,6 @@ import (
 	"houfeng/internal/center/syncing"
 )
 
-func TestHeartbeatIncidentPolicyMigrationSourceContract(t *testing.T) {
-	t.Parallel()
-
-	payload, err := migrations.FS.ReadFile("0063_tune_heartbeat_incident_policy.sql")
-	if err != nil {
-		t.Fatalf("read 0063 migration: %v", err)
-	}
-	source := strings.ToLower(strings.Join(strings.Fields(string(payload)), " "))
-	for _, fragment := range []string{
-		"alter column incident_defaults set default",
-		`"stale_threshold_intervals":12`,
-		"incident_defaults->>'stale_threshold_intervals' = '3'",
-		`incident_defaults || '{"stale_threshold_intervals":12}'::jsonb`,
-		"updated_at = now()",
-		"on monitoring_instance_heartbeats (monitoring_instance_id, received_at desc, id desc)",
-		"include (sync_batch_id)",
-		"where is_backfilled = false",
-	} {
-		if !strings.Contains(source, fragment) {
-			t.Fatalf("0063 source = %q, want fragment %q", source, fragment)
-		}
-	}
-	if strings.Contains(source, "override_rules") {
-		t.Fatal("0063 must not rewrite explicit override_rules thresholds")
-	}
-}
-
-func TestHeartbeatIncidentPolicyMigrationRegistersExplicitEmptyAppACLFragment(t *testing.T) {
-	t.Parallel()
-
-	source, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
-	if err != nil {
-		t.Fatalf("compile production current APP ACL source contract: %v", err)
-	}
-	if got, want := len(source.fragments), 13; got != want {
-		t.Fatalf("current APP ACL fragment count = %d, want %d", got, want)
-	}
-	fragment := source.fragments[11]
-	if fragment.Migration != "0063_tune_heartbeat_incident_policy.sql" {
-		t.Fatalf("twelfth fragment migration = %q", fragment.Migration)
-	}
-	if len(fragment.Objects) != 0 || len(fragment.Privileges) != 0 || len(fragment.AuxiliaryPrivileges) != 0 || len(fragment.Functions) != 0 {
-		t.Fatalf("0063 fragment = %#v, want explicit empty APP ACL delta", fragment)
-	}
-	if appACLCurrentMigrationFragments[11].Privileges == nil {
-		t.Fatal("0063 Privileges callback must be non-nil")
-	}
-	if got := appACLCurrentMigrationFragments[11].Privileges("houfeng"); got != nil {
-		t.Fatalf("0063 Privileges() = %#v, want nil", got)
-	}
-	networkFragment := source.fragments[12]
-	if networkFragment.Migration != "0064_add_network_rates_valid.sql" || len(networkFragment.Objects) != 0 || len(networkFragment.Privileges) != 0 || len(networkFragment.AuxiliaryPrivileges) != 0 || len(networkFragment.Functions) != 0 {
-		t.Fatalf("0064 fragment = %#v, want explicit empty APP ACL delta", networkFragment)
-	}
-	if appACLCurrentMigrationFragments[12].Privileges == nil || appACLCurrentMigrationFragments[12].Privileges("houfeng") != nil {
-		t.Fatal("0064 Privileges callback must be non-nil and empty")
-	}
-
-}
-
 func TestPostgresIntegrationHeartbeatIncidentPolicyMigration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

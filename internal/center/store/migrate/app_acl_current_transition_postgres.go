@@ -18,10 +18,12 @@ const appACLCurrentHeartbeatDefaultV0794 = `{"heartbeat_interval_seconds":5,"sta
 const appACLCurrentHeartbeatDefault = `{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true}`
 
 type appACLCurrentTransitionPreflight struct {
-	incidentDefaults         []byte
-	settingsExceptTransition []byte
-	updatedAt                time.Time
-	staleThreshold           int64
+	heartbeatPolicyMigrationPending bool
+	incidentDefaults                []byte
+	settingsSnapshot                []byte
+	settingsExceptTransition        []byte
+	updatedAt                       time.Time
+	staleThreshold                  int64
 }
 
 func preflightAppACLCurrentTransitionInTx(
@@ -32,28 +34,41 @@ func preflightAppACLCurrentTransitionInTx(
 	if tx == nil {
 		return appACLCurrentTransitionPreflight{}, fmt.Errorf("registered APP transition preflight has no PostgreSQL transaction")
 	}
-	if err := validateHeartbeatAppACLCurrentTransition(transition); err != nil {
+	heartbeatPolicyMigrationPending, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition)
+	if err != nil {
 		return appACLCurrentTransitionPreflight{}, err
 	}
-	var indexAbsent bool
-	if err := tx.QueryRow(ctx, `select to_regclass('public.idx_monitoring_instance_heartbeats_live_received') is null`).Scan(&indexAbsent); err != nil {
-		return appACLCurrentTransitionPreflight{}, fmt.Errorf("read registered APP transition predecessor index state: %w", err)
+	if heartbeatPolicyMigrationPending {
+		var indexAbsent bool
+		if err := tx.QueryRow(ctx, `select to_regclass('public.idx_monitoring_instance_heartbeats_live_received') is null`).Scan(&indexAbsent); err != nil {
+			return appACLCurrentTransitionPreflight{}, fmt.Errorf("read registered APP transition predecessor index state: %w", err)
+		}
+		if !indexAbsent {
+			return appACLCurrentTransitionPreflight{}, fmt.Errorf("registered APP transition predecessor already has reserved heartbeat index")
+		}
+		if err := verifyAppACLCurrentHeartbeatDefault(ctx, tx, appACLCurrentHeartbeatDefaultV0794); err != nil {
+			return appACLCurrentTransitionPreflight{}, fmt.Errorf("verify registered APP transition predecessor default: %w", err)
+		}
+	} else {
+		if err := verifyAppACLCurrentHeartbeatDefault(ctx, tx, appACLCurrentHeartbeatDefault); err != nil {
+			return appACLCurrentTransitionPreflight{}, fmt.Errorf("verify registered APP transition predecessor current default: %w", err)
+		}
+		if err := verifyAppACLCurrentHeartbeatIndex(ctx, tx); err != nil {
+			return appACLCurrentTransitionPreflight{}, fmt.Errorf("verify registered APP transition predecessor current index: %w", err)
+		}
 	}
-	if !indexAbsent {
-		return appACLCurrentTransitionPreflight{}, fmt.Errorf("registered APP transition predecessor already has reserved heartbeat index")
+	snapshot := appACLCurrentTransitionPreflight{
+		heartbeatPolicyMigrationPending: heartbeatPolicyMigrationPending,
 	}
-	if err := verifyAppACLCurrentHeartbeatDefault(ctx, tx, appACLCurrentHeartbeatDefaultV0794); err != nil {
-		return appACLCurrentTransitionPreflight{}, fmt.Errorf("verify registered APP transition predecessor default: %w", err)
-	}
-	var snapshot appACLCurrentTransitionPreflight
 	if err := tx.QueryRow(ctx, `
 			select incident_defaults,
+			       to_jsonb(settings),
 			       to_jsonb(settings) - array['incident_defaults', 'updated_at']::text[],
 			       updated_at
 			from public.center_settings settings
 			where settings_id = 'center'
 			for update
-		`).Scan(&snapshot.incidentDefaults, &snapshot.settingsExceptTransition, &snapshot.updatedAt); err != nil {
+		`).Scan(&snapshot.incidentDefaults, &snapshot.settingsSnapshot, &snapshot.settingsExceptTransition, &snapshot.updatedAt); err != nil {
 		return appACLCurrentTransitionPreflight{}, fmt.Errorf("read registered APP transition settings snapshot: %w", err)
 	}
 	threshold, err := appACLCurrentStaleThreshold(snapshot.incidentDefaults)
@@ -73,16 +88,31 @@ func verifyAppliedAppACLCurrentTransitionInTx(
 	if err := verifyCurrentAppACLCurrentTransitionInTx(ctx, tx, transition); err != nil {
 		return err
 	}
-	var incidentDefaults, settingsExceptTransition []byte
+	var incidentDefaults, settingsSnapshot, settingsExceptTransition []byte
 	var updatedAt time.Time
 	if err := tx.QueryRow(ctx, `
 			select incident_defaults,
+			       to_jsonb(settings),
 			       to_jsonb(settings) - array['incident_defaults', 'updated_at']::text[],
 			       updated_at
 			from public.center_settings settings
 			where settings_id = 'center'
-		`).Scan(&incidentDefaults, &settingsExceptTransition, &updatedAt); err != nil {
+		`).Scan(&incidentDefaults, &settingsSnapshot, &settingsExceptTransition, &updatedAt); err != nil {
 		return fmt.Errorf("read applied registered APP transition settings: %w", err)
+	}
+	return verifyAppliedAppACLCurrentTransitionSettings(before, incidentDefaults, settingsSnapshot, settingsExceptTransition, updatedAt)
+}
+
+func verifyAppliedAppACLCurrentTransitionSettings(
+	before appACLCurrentTransitionPreflight,
+	incidentDefaults, settingsSnapshot, settingsExceptTransition []byte,
+	updatedAt time.Time,
+) error {
+	if !before.heartbeatPolicyMigrationPending {
+		if !appACLCurrentJSONEqual(settingsSnapshot, before.settingsSnapshot) {
+			return fmt.Errorf("registered APP transition changed settings without a heartbeat policy migration")
+		}
+		return nil
 	}
 	if !appACLCurrentJSONEqual(settingsExceptTransition, before.settingsExceptTransition) {
 		return fmt.Errorf("registered APP transition changed non-incident settings")
@@ -142,15 +172,25 @@ func verifyCurrentAppACLCurrentTransitionInTx(
 }
 
 func validateHeartbeatAppACLCurrentTransition(transition appACLCurrentTransition) error {
-	if len(transition.successor.names) != 2 ||
-		transition.successor.names[0] != "0063_tune_heartbeat_incident_policy.sql" ||
-		transition.successor.names[1] != "0064_add_network_rates_valid.sql" ||
-		len(transition.predecessor.sources.names) != 63 ||
-		transition.predecessor.sources.names[62] != "0062_create_vps_create_idempotency.sql" ||
-		transition.predecessorManifestDigest != appACLCurrentV0794ManifestDigestGolden {
-		return fmt.Errorf("unsupported registered APP transition")
+	_, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition)
+	return err
+}
+
+func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
+	switch {
+	case len(transition.successor.names) == 4 &&
+		transition.successor.names[0] == "0063_tune_heartbeat_incident_policy.sql" &&
+		transition.successor.names[1] == "0064_add_network_rates_valid.sql" &&
+		transition.successor.names[2] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
+		transition.successor.names[3] == "0066_constrain_monitoring_and_target_state_values.sql":
+		return true, nil
+	case len(transition.successor.names) == 2 &&
+		transition.successor.names[0] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
+		transition.successor.names[1] == "0066_constrain_monitoring_and_target_state_values.sql":
+		return false, nil
+	default:
+		return false, fmt.Errorf("unsupported registered APP transition")
 	}
-	return nil
 }
 
 func verifyAppACLCurrentHeartbeatDefault(ctx context.Context, tx pgx.Tx, expectedJSON string) error {

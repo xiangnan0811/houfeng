@@ -107,8 +107,7 @@ export function ArchiveVPSWorkspace({
                 }
                 return (
                   <div className="asset-table__stack">
-                    <span className="text-muted">未记录归档时间</span>
-                    <small className="text-muted">更新于 <MonoDigits>{formatDateTime(vps.updated_at)}</MonoDigits></small>
+                    <span>{vps.lifecycle_status === 'cancelled' ? '已取消，未归档' : '未记录归档时间'}</span>
                   </div>
                 )
               },

@@ -17,6 +17,7 @@ var ErrDomainServiceNotFound = errors.New("asset domain service not found")
 var ErrDomainTargetNotFound = errors.New("asset domain target not found")
 var ErrDomainConflict = errors.New("asset domain conflict")
 var ErrInvalidDomainInput = errors.New("invalid asset domain input")
+var ErrDomainStatusConflict = errors.New("asset domain status conflict")
 
 type Date = subscriptions.Date
 
@@ -62,6 +63,11 @@ type CreateInput struct {
 	Note         string       `json:"note"`
 }
 
+type StatusUpdateInput struct {
+	Status DomainStatus `json:"status"`
+	Reason string       `json:"reason"`
+}
+
 type ListFilters struct {
 	VPSID     string
 	ServiceID string
@@ -73,6 +79,7 @@ type Repository interface {
 	ListAssetDomains(context.Context, ListFilters) ([]Record, error)
 	ListAssetDomainsForVPS(context.Context, string) ([]Record, error)
 	CreateAssetDomain(context.Context, CreateInput) (Record, error)
+	UpdateStatus(context.Context, string, DomainStatus, string) (Record, error)
 }
 
 type IdempotentRepository interface {
@@ -107,6 +114,24 @@ func ValidateCreateInput(input CreateInput) error {
 	}
 	if !IsValidDomainStatus(input.Status) {
 		return fmt.Errorf("%w: invalid status", ErrInvalidDomainInput)
+	}
+	return nil
+}
+
+func NormalizeStatusUpdateInput(input StatusUpdateInput) StatusUpdateInput {
+	input.Status = DomainStatus(strings.TrimSpace(string(input.Status)))
+	input.Reason = strings.TrimSpace(input.Reason)
+	return input
+}
+
+func ValidateStatusUpdateInput(input StatusUpdateInput) error {
+	switch input.Status {
+	case DomainStatusActive, DomainStatusPaused, DomainStatusRetired:
+	default:
+		return fmt.Errorf("%w: status must be active, paused, or retired", ErrInvalidDomainInput)
+	}
+	if input.Reason == "" {
+		return fmt.Errorf("%w: reason is required", ErrInvalidDomainInput)
 	}
 	return nil
 }

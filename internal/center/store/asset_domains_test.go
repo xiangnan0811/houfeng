@@ -14,6 +14,8 @@ import (
 
 	"houfeng/internal/center/assetdomains"
 	"houfeng/internal/center/subscriptions"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsassets"
 )
 
 func TestPostgresAssetDomainMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
@@ -66,7 +68,7 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 	var queryArgs [][]any
 	var rowCalls []string
 	var rowArgs [][]any
-	repo := &PostgresAssetDomainRepository{db: fakeAssetDomainDB{
+	domainDB := fakeAssetDomainDB{
 		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 			queryCalls = append(queryCalls, sql)
 			queryArgs = append(queryArgs, append([]any(nil), args...))
@@ -96,12 +98,23 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			rowCalls = append(rowCalls, sql)
 			rowArgs = append(rowArgs, append([]any(nil), args...))
-			if strings.Contains(sql, "from asset_services") {
-				if len(args) != 2 || args[0] != "svc_001" || args[1] != "vps_001" {
-					t.Fatalf("service ownership args = %#v, want svc/vps pair", args)
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetDomainRow{scan: func(dest ...any) error {
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+					return nil
+				}}
+			case strings.Contains(sql, "from asset_services"):
+				if len(args) != 1 || args[0] != "svc_001" {
+					t.Fatalf("service ownership args = %#v, want service id", args)
 				}
 				return fakeAssetDomainRow{scan: func(dest ...any) error {
-					*(dest[0].(*bool)) = true
+					*(dest[0].(*string)) = "vps_001"
+					return nil
+				}}
+			case strings.Contains(sql, "from targets"):
+				return fakeAssetDomainRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "启用"
 					return nil
 				}}
 			}
@@ -133,7 +146,13 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 				return nil
 			}}
 		},
-	}}
+	}
+	repo := &PostgresAssetDomainRepository{
+		db: domainDB,
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeVPSAssetTx{queryRow: domainDB.queryRow}, nil
+		},
+	}
 
 	created, err := repo.CreateAssetDomain(context.Background(), assetdomains.CreateInput{
 		VPSID:        " vps_001 ",
@@ -155,10 +174,11 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 	if !strings.HasPrefix(created.DomainID, "dom_") {
 		t.Fatalf("DomainID = %q, want dom_ prefix", created.DomainID)
 	}
-	if len(rowArgs) != 2 || len(rowArgs[1]) != 13 {
-		t.Fatalf("create args = %#v, want 13 args", rowArgs)
+	insertIndex := indexSQL(rowCalls, "insert into asset_domains")
+	if insertIndex == -1 || len(rowArgs[insertIndex]) != 13 {
+		t.Fatalf("create args = %#v, want one 13-argument insert", rowArgs)
 	}
-	insertArgs := rowArgs[1]
+	insertArgs := rowArgs[insertIndex]
 	if insertArgs[1] != "vps_001" || insertArgs[2] != "svc_001" || insertArgs[3] != "tg_001" || insertArgs[4] != "www.example.com" {
 		t.Fatalf("create normalized args = %#v", insertArgs)
 	}
@@ -173,8 +193,8 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 		"insert into asset_domains",
 		"returning " + assetDomainSelectColumns,
 	} {
-		if !strings.Contains(rowCalls[1], snippet) {
-			t.Fatalf("CreateAssetDomain SQL missing %q in %q", snippet, rowCalls[1])
+		if !strings.Contains(rowCalls[insertIndex], snippet) {
+			t.Fatalf("CreateAssetDomain SQL missing %q in %q", snippet, rowCalls[insertIndex])
 		}
 	}
 
@@ -204,6 +224,53 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 	}
 	if len(queryArgs[0]) != 4 || queryArgs[0][0] != "vps_001" || queryArgs[0][1] != "svc_001" || queryArgs[0][2] != "tg_001" || queryArgs[0][3] != "active" {
 		t.Fatalf("list args = %#v, want normalized filters", queryArgs[0])
+	}
+}
+
+func TestPostgresAssetDomainRejectsActiveReferenceToArchivedTarget(t *testing.T) {
+	t.Parallel()
+
+	inserted := false
+	domainDB := fakeAssetDomainDB{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetDomainRow{scan: func(dest ...any) error {
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+					return nil
+				}}
+			case strings.Contains(sql, "from targets"):
+				return fakeAssetDomainRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = targets.RunStatusArchived
+					return nil
+				}}
+			case strings.Contains(sql, "insert into asset_domains"):
+				inserted = true
+				return fakeAssetDomainRow{scan: func(dest ...any) error { return nil }}
+			default:
+				t.Fatalf("unexpected QueryRow SQL %q", sql)
+				return fakeAssetDomainRow{scan: func(dest ...any) error { return nil }}
+			}
+		},
+	}
+	repo := &PostgresAssetDomainRepository{
+		db: domainDB,
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeVPSAssetTx{queryRow: domainDB.queryRow}, nil
+		},
+	}
+
+	_, err := repo.CreateAssetDomain(context.Background(), assetdomains.CreateInput{
+		VPSID:      "vps_001",
+		TargetID:   stringPtr("tg_archived"),
+		DomainName: "archived-target.example.com",
+		Status:     assetdomains.DomainStatusActive,
+	})
+	if !errors.Is(err, targets.ErrTargetMetadataConflict) {
+		t.Fatalf("CreateAssetDomain() error = %v, want ErrTargetMetadataConflict", err)
+	}
+	if inserted {
+		t.Fatal("CreateAssetDomain() inserted an active relationship to an archived target")
 	}
 }
 
@@ -276,20 +343,34 @@ func TestPostgresAssetDomainListForVPSMissingOwner(t *testing.T) {
 func TestPostgresAssetDomainRejectsServiceFromAnotherVPS(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresAssetDomainRepository{db: fakeAssetDomainDB{
+	domainDB := fakeAssetDomainDB{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if !strings.Contains(sql, "from asset_services") {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetDomainRow{scan: func(dest ...any) error {
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+					return nil
+				}}
+			case strings.Contains(sql, "from asset_services"):
+				if len(args) != 1 || args[0] != "svc_other" {
+					t.Fatalf("service lock args = %#v, want service id", args)
+				}
+				return fakeAssetDomainRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "vps_other"
+					return nil
+				}}
+			default:
 				t.Fatalf("unexpected QueryRow SQL %q", sql)
+				return fakeAssetDomainRow{scan: func(dest ...any) error { return nil }}
 			}
-			if len(args) != 2 || args[0] != "svc_other" || args[1] != "vps_001" {
-				t.Fatalf("service ownership args = %#v, want svc/vps pair", args)
-			}
-			return fakeAssetDomainRow{scan: func(dest ...any) error {
-				*(dest[0].(*bool)) = false
-				return nil
-			}}
 		},
-	}}
+	}
+	repo := &PostgresAssetDomainRepository{
+		db: domainDB,
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeVPSAssetTx{queryRow: domainDB.queryRow}, nil
+		},
+	}
 
 	_, err := repo.CreateAssetDomain(context.Background(), assetdomains.CreateInput{
 		VPSID:      "vps_001",
@@ -354,19 +435,54 @@ func TestPostgresAssetDomainMapsForeignKeyUniqueAndCheckViolations(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &PostgresAssetDomainRepository{db: fakeAssetDomainDB{
-				queryRow: func(context.Context, string, ...any) pgx.Row {
-					return fakeAssetDomainRow{scan: func(dest ...any) error {
-						return tt.err
-					}}
-				},
-			}}
-
-			_, err := repo.CreateAssetDomain(context.Background(), assetdomains.CreateInput{
+			input := assetdomains.CreateInput{
 				VPSID:      "vps_001",
 				DomainName: "example.com",
 				Status:     assetdomains.DomainStatusActive,
-			})
+			}
+			switch tt.name {
+			case "missing service":
+				input.ServiceID = stringPtr("svc_missing")
+			case "missing target":
+				input.TargetID = stringPtr("tg_missing")
+			}
+			domainDB := fakeAssetDomainDB{
+				queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					switch {
+					case strings.Contains(sql, "from vps_assets"):
+						if tt.name == "missing vps" {
+							return fakeAssetDomainRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+						}
+						return fakeAssetDomainRow{scan: func(dest ...any) error {
+							*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+							return nil
+						}}
+					case strings.Contains(sql, "from asset_services"):
+						if tt.name == "missing service" {
+							return fakeAssetDomainRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+						}
+						return fakeAssetDomainRow{scan: func(dest ...any) error {
+							*(dest[0].(*string)) = "vps_001"
+							return nil
+						}}
+					case strings.Contains(sql, "from targets"):
+						return fakeAssetDomainRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+					case strings.Contains(sql, "insert into asset_domains"):
+						return fakeAssetDomainRow{scan: func(dest ...any) error { return tt.err }}
+					default:
+						t.Fatalf("unexpected QueryRow SQL %q", sql)
+						return fakeAssetDomainRow{scan: func(dest ...any) error { return nil }}
+					}
+				},
+			}
+			repo := &PostgresAssetDomainRepository{
+				db: domainDB,
+				beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+					return &fakeVPSAssetTx{queryRow: domainDB.queryRow}, nil
+				},
+			}
+
+			_, err := repo.CreateAssetDomain(context.Background(), input)
 			if !errors.Is(err, tt.wantSentinel) {
 				t.Fatalf("CreateAssetDomain() error = %v, want %v", err, tt.wantSentinel)
 			}

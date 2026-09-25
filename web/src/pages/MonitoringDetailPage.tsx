@@ -27,18 +27,22 @@ import { listHistoricalIncidents } from '../lib/observabilityApi'
 import type {
   ActiveIncidentRecord,
   MonitoringInstanceManagementReview,
+  GlobalActionConfirmation,
   MonitoringInstanceOnboardingState,
   MonitoringInstanceRecord,
 } from '../lib/types'
+import { isManagementReviewStale, isSharedImpactConfirmationRequired } from '../lib/assetLifecycle'
 import { classifyHeartbeatFreshness } from './monitoring/heartbeatFreshness'
 import { useMonitoringDetailSources } from './monitoring-detail/useMonitoringDetailSources'
 import { MonitoringDetailPageBody } from './monitoring-detail/MonitoringDetailPageBody'
 import { MonitoringDetailLoading } from './monitoring-detail/MonitoringDetailLoading'
 import { MonitoringDetailUnavailable } from './monitoring-detail/MonitoringDetailUnavailable'
+
 import {
   MONITORING_INSTANCE_BINDING_ACTION_ERROR,
   MONITORING_INSTANCE_BINDING_CONFLICT_LOAD_ERROR,
   MONITORING_INSTANCE_BINDING_CONFLICT_STATUS,
+  MONITORING_MANAGEMENT_REVIEW_STALE_MESSAGE,
 } from './monitoring-detail/monitoringDetailConstants'
 import { READ_ONLY_PREVIEW } from '../lib/readOnlyPreview'
 import { resolveMonitoringListHref } from './monitoring/monitoringListUrl'
@@ -57,12 +61,17 @@ import type {
   LinkedVPSState,
   MetadataFormState,
   PendingBindingConfirmation,
+  ManagementActionOutcome,
   PendingRuntimeConfirmation,
   TimeWindow,
 } from './monitoring-detail/types'
 
 const LINKED_VPS_SUMMARY_FETCH_DELAY_MS = 300
 type MonitoringManagementAction = 'retire' | 'restore-lifecycle' | 'archive' | 'restore-archive' | 'permanent-cleanup'
+type ManagementReviewLoadOutcome = 'loaded' | 'failed' | 'superseded' | 'pending'
+type ManagementReviewReloadOutcome =
+  | { status: 'loaded' | 'failed'; requestId: number }
+  | { status: 'superseded' }
 
 export function MonitoringDetailPage() {
   const { monitoringInstanceId } = useParams()
@@ -74,7 +83,7 @@ export function MonitoringDetailPage() {
   )
 }
 
-function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInstanceId?: string }) {
+export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInstanceId?: string }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -126,6 +135,8 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const [managementSubmittingAction, setManagementSubmittingAction] =
     useState<MonitoringManagementAction | null>(null)
   const [managementActionError, setManagementActionError] = useState<string | null>(null)
+  const [pauseConfirmationReset, setPauseConfirmationReset] = useState(0)
+  const managementReviewValidRef = useRef(true)
   const [bindingConflictState, setBindingConflictState] = useState<BindingConflictState>({
     requestedMonitoringInstanceId: null,
     onboarding: null,
@@ -192,12 +203,14 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
 
   useEffect(() => {
     managementReviewRequestRef.current += 1
+    managementReviewValidRef.current = true
     setManagementReview(null)
     setManagementRequestedMonitoringInstanceId(null)
     setManagementLoading(false)
     setManagementError(null)
     setManagementSubmittingAction(null)
     setManagementActionError(null)
+    setPauseConfirmationReset(0)
   }, [monitoringInstanceId])
 
   // Deep-link: create/list redirects land here with ?onboarding=1 to open the
@@ -610,7 +623,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
   const linkedVPSLoaded =
     linkedVPSState.requestedMonitoringInstanceId === monitoringInstanceId ? linkedVPSState.loaded : false
 
-  async function handleRuntimeAction(action: MonitoringInstanceRuntimeAction, confirmed = false) {
+  async function handleRuntimeAction(action: MonitoringInstanceRuntimeAction, confirmed = false, confirmation?: GlobalActionConfirmation) {
     if (!monitoringInstance) return
     if (action === 'pause' && !confirmed) {
       setPendingRuntimeConfirmation({
@@ -620,6 +633,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
         updatedAt: monitoringInstance.updated_at,
         monitoringStatus: monitoringInstance.monitoring_status,
       })
+      void loadManagementReview(true)
       return
     }
     if (
@@ -646,7 +660,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
           : action === 'exit-maintenance'
             ? await exitMonitoringInstanceMaintenance(actionMonitoringInstanceId)
             : action === 'pause'
-              ? await pauseMonitoringInstanceMonitoring(actionMonitoringInstanceId)
+              ? await pauseMonitoringInstanceMonitoring(actionMonitoringInstanceId, confirmation)
               : await resumeMonitoringInstanceMonitoring(actionMonitoringInstanceId)
       if (
         !isMountedRef.current ||
@@ -670,6 +684,12 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
         currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
         currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
       ) {
+        return
+      }
+      if (action === 'pause' && (isManagementReviewStale(error) || isSharedImpactConfirmationRequired(error))) {
+        setRuntimeError(MONITORING_MANAGEMENT_REVIEW_STALE_MESSAGE)
+        const refreshed = await reloadAfterStaleManagementReview(actionMonitoringInstanceId)
+        if (!isCurrentManagementReviewReload(actionMonitoringInstanceId, refreshed)) return
         return
       }
       setRuntimeError(describeError(error, '监控实例运行控制操作失败'))
@@ -1015,16 +1035,41 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
           : current.monitoringInstance,
     }))
   }
+  function isCurrentMonitoringInstanceRequest(actionMonitoringInstanceId: string): boolean {
+    return (
+      isMountedRef.current &&
+      currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
+      currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId
+    )
+  }
 
-  async function loadManagementReview(force = false) {
-    if (!monitoringInstanceId) return
+  function isCurrentManagementReviewRequest(actionMonitoringInstanceId: string, requestId: number): boolean {
+    return (
+      isCurrentMonitoringInstanceRequest(actionMonitoringInstanceId) &&
+      managementReviewRequestRef.current === requestId
+    )
+  }
+
+  function isCurrentManagementReviewReload(
+    actionMonitoringInstanceId: string,
+    outcome: ManagementReviewReloadOutcome,
+  ): outcome is Exclude<ManagementReviewReloadOutcome, { status: 'superseded' }> {
+    return (
+      outcome.status !== 'superseded' &&
+      isCurrentManagementReviewRequest(actionMonitoringInstanceId, outcome.requestId)
+    )
+  }
+
+  async function loadManagementReview(force = false): Promise<ManagementReviewLoadOutcome> {
+    if (!monitoringInstanceId) return 'superseded'
     const actionMonitoringInstanceId = monitoringInstanceId
     if (
       !force &&
+      managementReviewValidRef.current &&
       managementRequestedMonitoringInstanceId === actionMonitoringInstanceId &&
       (managementReview || managementLoading)
     ) {
-      return
+      return managementReview ? 'loaded' : 'pending'
     }
 
     const requestId = ++managementReviewRequestRef.current
@@ -1035,43 +1080,56 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
 
     try {
       const review = await getMonitoringInstanceManagementReview(actionMonitoringInstanceId)
-      if (
-        !isMountedRef.current ||
-        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        managementReviewRequestRef.current !== requestId
-      ) {
-        return
+      if (!isCurrentManagementReviewRequest(actionMonitoringInstanceId, requestId)) {
+        return 'superseded'
       }
+      managementReviewValidRef.current = true
       setManagementReview(review)
       applyManagementRecord(actionMonitoringInstanceId, review.record)
+      return 'loaded'
     } catch (error: unknown) {
-      if (
-        !isMountedRef.current ||
-        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        managementReviewRequestRef.current !== requestId
-      ) {
-        return
+      if (!isCurrentManagementReviewRequest(actionMonitoringInstanceId, requestId)) {
+        return 'superseded'
       }
       setManagementError(describeError(error, '加载监控实例管理审查失败'))
+      return 'failed'
     } finally {
-      if (
-        isMountedRef.current &&
-        currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
-        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
-        managementReviewRequestRef.current === requestId
-      ) {
+      if (isCurrentManagementReviewRequest(actionMonitoringInstanceId, requestId)) {
         setManagementLoading(false)
       }
     }
   }
 
+  async function reloadAfterStaleManagementReview(
+    actionMonitoringInstanceId: string,
+  ): Promise<ManagementReviewReloadOutcome> {
+    if (!isCurrentMonitoringInstanceRequest(actionMonitoringInstanceId)) {
+      return { status: 'superseded' }
+    }
+    managementReviewValidRef.current = false
+    setManagementReview(null)
+    setPauseConfirmationReset((value) => value + 1)
+    setManagementActionError(MONITORING_MANAGEMENT_REVIEW_STALE_MESSAGE)
+    const requestId = managementReviewRequestRef.current + 1
+    const refreshed = await loadManagementReview(true)
+    if (!isCurrentManagementReviewRequest(actionMonitoringInstanceId, requestId)) {
+      return { status: 'superseded' }
+    }
+    if (refreshed === 'superseded' || refreshed === 'pending') {
+      return { status: 'superseded' }
+    }
+    if (refreshed === 'failed') {
+      setManagementActionError('影响范围已变化，但审查刷新失败。请关闭后重新打开管理菜单。')
+    }
+    return { status: refreshed, requestId }
+  }
+
+
   async function runManagementRecordAction(
     action: MonitoringManagementAction,
     request: (actionMonitoringInstanceId: string) => Promise<MonitoringInstanceRecord>,
-  ) {
-    if (!monitoringInstance) return
+  ): Promise<ManagementActionOutcome> {
+    if (!monitoringInstance) return 'failed'
     const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
     setManagementSubmittingAction(action)
     setManagementActionError(null)
@@ -1083,19 +1141,34 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
         currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
         currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
       ) {
-        return
+        return 'failed'
       }
       applyManagementRecord(actionMonitoringInstanceId, updated)
-      await loadManagementReview(true)
+      const requestId = managementReviewRequestRef.current + 1
+      const reviewOutcome = await loadManagementReview(true)
+      if (
+        !isCurrentManagementReviewRequest(actionMonitoringInstanceId, requestId) ||
+        reviewOutcome === 'superseded' ||
+        reviewOutcome === 'pending'
+      ) {
+        return 'failed'
+      }
+      return 'success'
     } catch (error: unknown) {
       if (
         !isMountedRef.current ||
         currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
         currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
       ) {
-        return
+        return 'failed'
+      }
+      if (isManagementReviewStale(error) || isSharedImpactConfirmationRequired(error)) {
+        const refreshed = await reloadAfterStaleManagementReview(actionMonitoringInstanceId)
+        if (!isCurrentManagementReviewReload(actionMonitoringInstanceId, refreshed)) return 'failed'
+        return 'stale'
       }
       setManagementActionError(describeError(error, '监控实例管理操作失败'))
+      return 'failed'
     } finally {
       if (
         isMountedRef.current &&
@@ -1107,35 +1180,36 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
     }
   }
 
-  function handleManagementRetire(reason: string) {
-    void runManagementRecordAction('retire', (actionMonitoringInstanceId) =>
-      retireMonitoringInstance(actionMonitoringInstanceId, { reason }),
+  function handleManagementRetire(reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) {
+    return runManagementRecordAction('retire', (actionMonitoringInstanceId) =>
+      retireMonitoringInstance(actionMonitoringInstanceId, { reason, ...confirmation }),
     )
   }
 
-  function handleManagementRestoreLifecycle(reason: string) {
-    void runManagementRecordAction('restore-lifecycle', (actionMonitoringInstanceId) =>
-      restoreMonitoringInstanceLifecycle(actionMonitoringInstanceId, { reason }),
+  function handleManagementRestoreLifecycle(reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) {
+    return runManagementRecordAction('restore-lifecycle', (actionMonitoringInstanceId) =>
+      restoreMonitoringInstanceLifecycle(actionMonitoringInstanceId, { reason, ...confirmation }),
     )
   }
 
-  function handleManagementArchive(reason: string, confirmationName: string) {
-    void runManagementRecordAction('archive', (actionMonitoringInstanceId) =>
+  function handleManagementArchive(reason: string, confirmationName: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) {
+    return runManagementRecordAction('archive', (actionMonitoringInstanceId) =>
       archiveMonitoringInstance(actionMonitoringInstanceId, {
         reason,
         confirmation_name: confirmationName,
+        ...confirmation,
       }),
     )
   }
 
-  function handleManagementRestoreArchive() {
-    void runManagementRecordAction('restore-archive', (actionMonitoringInstanceId) =>
-      restoreMonitoringInstanceFromArchive(actionMonitoringInstanceId),
+  function handleManagementRestoreArchive(confirmation: { preview_digest: string; confirm_shared_impact: boolean }) {
+    return runManagementRecordAction('restore-archive', (actionMonitoringInstanceId) =>
+      restoreMonitoringInstanceFromArchive(actionMonitoringInstanceId, confirmation),
     )
   }
 
-  async function handleManagementPermanentCleanup(reason: string, confirmationName: string) {
-    if (!monitoringInstance) return
+  async function handleManagementPermanentCleanup(reason: string, confirmationName: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }): Promise<ManagementActionOutcome> {
+    if (!monitoringInstance) return 'failed'
     const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
     setManagementSubmittingAction('permanent-cleanup')
     setManagementActionError(null)
@@ -1144,24 +1218,32 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       await permanentCleanupMonitoringInstance(actionMonitoringInstanceId, {
         reason,
         confirmation_name: confirmationName,
+        ...confirmation,
       })
       if (
         !isMountedRef.current ||
         currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
         currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
       ) {
-        return
+        return 'failed'
       }
       navigate(resolveMonitoringListHref(location.state), { state: location.state })
+      return 'success'
     } catch (error: unknown) {
       if (
         !isMountedRef.current ||
         currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
         currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
       ) {
-        return
+        return 'failed'
+      }
+      if (isManagementReviewStale(error) || isSharedImpactConfirmationRequired(error)) {
+        const refreshed = await reloadAfterStaleManagementReview(actionMonitoringInstanceId)
+        if (!isCurrentManagementReviewReload(actionMonitoringInstanceId, refreshed)) return 'failed'
+        return 'stale'
       }
       setManagementActionError(describeError(error, '永久清理监控实例失败'))
+      return 'failed'
     } finally {
       if (
         isMountedRef.current &&
@@ -1172,6 +1254,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       }
     }
   }
+
 
   return (
     <MonitoringDetailPageBody
@@ -1203,7 +1286,10 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       managementError={managementRequestedMonitoringInstanceId === monitoringInstanceId ? managementError : null}
       managementSubmittingAction={managementSubmittingAction}
       managementActionError={managementActionError}
-      onRuntimeAction={(action, confirmed) => void handleRuntimeAction(action, confirmed)}
+      pauseConfirmationReset={pauseConfirmationReset}
+      onRuntimeAction={(action, confirmed, confirmation) => {
+        void handleRuntimeAction(action, confirmed, confirmation)
+      }}
       onCancelRuntimeConfirmation={() => {
         pendingFocusRestoreRef.current = 'pause'
         setPendingRuntimeConfirmation(null)
@@ -1220,7 +1306,7 @@ function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInsta
       onManagementRestoreLifecycle={handleManagementRestoreLifecycle}
       onManagementArchive={handleManagementArchive}
       onManagementRestoreArchive={handleManagementRestoreArchive}
-      onManagementPermanentCleanup={(reason, confirmationName) => void handleManagementPermanentCleanup(reason, confirmationName)}
+      onManagementPermanentCleanup={handleManagementPermanentCleanup}
       incidents={incidents}
       incidentsError={incidentsError}
       events={events}

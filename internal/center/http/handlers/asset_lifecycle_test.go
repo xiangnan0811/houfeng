@@ -87,12 +87,16 @@ func (f *fakeAssetLifecycleRepository) ApplyVPSArchive(_ context.Context, vpsID 
 	return f.archiveResult, nil
 }
 
-func (f *fakeAssetLifecycleRepository) RestoreVPSFromArchive(_ context.Context, vpsID string) (vpsassets.Record, error) {
+func (f *fakeAssetLifecycleRepository) RestoreVPSFromArchive(_ context.Context, vpsID string, _ assetlifecycle.RestoreArchiveInput) (vpsassets.Record, error) {
 	f.restoreVPSID = vpsID
 	if f.restoreErr != nil {
 		return vpsassets.Record{}, f.restoreErr
 	}
 	return f.restoreResult, nil
+}
+
+func (f *fakeAssetLifecycleRepository) StartVPSMigration(context.Context, string, assetlifecycle.StartMigrationInput) (assetlifecycle.LifecycleActionResult, error) {
+	return assetlifecycle.LifecycleActionResult{}, nil
 }
 
 func (f *fakeAssetLifecycleRepository) ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error) {
@@ -315,7 +319,7 @@ func TestVPSArchiveAppliesStrongConfirmation(t *testing.T) {
 		Blockers: []string{"VPS 已归档，只读保留历史。"},
 	}}
 	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/archive", strings.NewReader(`{
-		"confirmation_name":" Tokyo Edge "
+		"confirmation_name":" Tokyo Edge ", "reason":"账单与运行残留已整理"
 	}`))
 	recorder := httptest.NewRecorder()
 
@@ -350,7 +354,7 @@ func TestVPSRestoreFromArchiveReturnsRestoredAsset(t *testing.T) {
 		CreatedAt:       now,
 		UpdatedAt:       now,
 	}}
-	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/restore-from-archive", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/restore-from-archive", strings.NewReader(`{"reason":"重新整理用途"}`))
 	recorder := httptest.NewRecorder()
 
 	handlers.VPSRestoreFromArchive(repo).ServeHTTP(recorder, req)
@@ -400,13 +404,13 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 		{name: "archive review missing vps", handler: handlers.VPSArchiveReview(&fakeAssetLifecycleRepository{archiveReviewErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodGet, path: "/api/vps/vps_missing/archive-review", want: http.StatusNotFound},
 		{name: "archive invalid json", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{`, want: http.StatusBadRequest},
 		{name: "archive missing confirmation", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{}`, want: http.StatusBadRequest},
-		{name: "archive blocked lifecycle action", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"confirmation_name":"Tokyo Edge"}`, want: http.StatusConflict},
-		{name: "archive missing vps", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/archive", body: `{"confirmation_name":"Tokyo Edge"}`, want: http.StatusNotFound},
-		{name: "archive repo failure", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"confirmation_name":"Tokyo Edge"}`, want: http.StatusInternalServerError},
+		{name: "archive blocked lifecycle action", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusConflict},
+		{name: "archive missing vps", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/archive", body: `{"confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusNotFound},
+		{name: "archive repo failure", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusInternalServerError},
 		{name: "restore wrong method", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{}), method: http.MethodGet, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusMethodNotAllowed},
-		{name: "restore blocked lifecycle action", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_cancelled/restore-from-archive", want: http.StatusConflict},
-		{name: "restore missing vps", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/restore-from-archive", want: http.StatusNotFound},
-		{name: "restore repo failure", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusInternalServerError},
+		{name: "restore blocked lifecycle action", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_cancelled/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusConflict},
+		{name: "restore missing vps", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusNotFound},
+		{name: "restore repo failure", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {

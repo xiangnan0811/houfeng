@@ -1,35 +1,50 @@
+import { useState } from 'react'
+
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { Button } from '../../components/atoms/Button'
 import type { TargetRuntimeAction } from '../../components/target-detail'
+import type { GlobalActionConfirmation } from '../../lib/types'
+import { TargetSharedImpactFields } from './TargetSharedImpactFields'
 
 type TargetLifecycleSectionProps = {
+  targetId: string
   isArchived: boolean
   runtimeSubmitting: boolean
   probeConfirmationActive: boolean
   showArchiveConfirmation: boolean
   error: string | null
+  reviewGeneration?: number
   onRestore: () => void
   onStartArchive: () => void
-  onConfirmArchive: () => void
+  onConfirmArchive: (confirmation?: GlobalActionConfirmation) => void
   onCancelArchive: () => void
   registerActionRef: (
     action: TargetRuntimeAction,
     element: HTMLButtonElement | null,
   ) => void
 }
-
 export function TargetLifecycleSection({
+  targetId,
   isArchived,
   runtimeSubmitting,
   probeConfirmationActive,
   showArchiveConfirmation,
   error,
+  reviewGeneration = 0,
   onRestore,
   onStartArchive,
   onConfirmArchive,
   onCancelArchive,
   registerActionRef,
 }: TargetLifecycleSectionProps) {
+  const [blocked, setBlocked] = useState(true)
+  const [confirmation, setConfirmation] = useState<GlobalActionConfirmation | undefined>(undefined)
+  const [seenGeneration, setSeenGeneration] = useState(reviewGeneration)
+  if (seenGeneration !== reviewGeneration) {
+    setSeenGeneration(reviewGeneration)
+    setBlocked(true)
+    setConfirmation(undefined)
+  }
   return (
     <section className="watchtower-secondary">
       <div className="watchtower-secondary__body">
@@ -76,10 +91,23 @@ export function TargetLifecycleSection({
             unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。"
             confirmLabel="确认归档"
             error={error}
-            disabled={runtimeSubmitting}
-            onConfirm={onConfirmArchive}
+            disabled={runtimeSubmitting || blocked}
+            cancelDisabled={runtimeSubmitting}
+            onConfirm={() => {
+              if (blocked) return
+              onConfirmArchive(confirmation)
+            }}
             onCancel={onCancelArchive}
-          />
+          >
+            <TargetSharedImpactFields
+              targetId={targetId}
+              reviewGeneration={reviewGeneration}
+              onChange={(next, nextBlocked) => {
+                setConfirmation(next)
+                setBlocked(nextBlocked)
+              }}
+            />
+          </ActionConfirmationModal>
         ) : null}
       </div>
     </section>

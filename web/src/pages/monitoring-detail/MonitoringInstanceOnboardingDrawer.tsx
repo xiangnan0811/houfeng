@@ -137,6 +137,13 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
 
   async function handleIssue() {
     if (busyRef.current) return
+    if (monitoringInstance.lifecycle_status === '已退役' || monitoringInstance.archived_at) {
+      setState((current) => ({
+        ...current,
+        error: '已退役的监控实例不能签发接入或同步凭据。请先恢复到观察中，再显式恢复监控或重新接入。',
+      }))
+      return
+    }
     const subjectId = monitoringInstance.monitoring_instance_id
     const requestId = issueRequestRef.current + 1
     issueRequestRef.current = requestId
@@ -196,7 +203,12 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               <MonoDigits>{error}</MonoDigits>
             </p>
           ) : null}
-          <button type="button" className="btn md primary" disabled={busy} onClick={() => void handleIssue()}>
+          <button
+            type="button"
+            className="btn md primary"
+            disabled={busy || monitoringInstance.lifecycle_status === '已退役' || Boolean(monitoringInstance.archived_at)}
+            onClick={() => void handleIssue()}
+          >
             {busy ? '正在生成…' : primaryLabel}
           </button>
           {issue ? (
@@ -217,6 +229,9 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
             </>
           ) : null}
         </p>
+        {monitoringInstance.lifecycle_status === '已退役' || monitoringInstance.archived_at ? (
+          <p role="alert">已退役的监控实例不能签发接入或同步凭据。请先恢复到观察中，再显式恢复监控或重新接入。</p>
+        ) : null}
         <ol className="monitoring-detail-onboarding__steps">
           {installSteps.map((step, index) => (
             <li key={step}>

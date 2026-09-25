@@ -8,16 +8,26 @@ export default function allowlistedApiError(
 
   const body = errorBody as Record<string, unknown>
   const candidateMessage = body.error ?? body.message
-  const fieldErrors = Array.isArray(body.field_errors)
-    ? body.field_errors.filter((item): item is ApiFieldError => (
-        typeof item === 'object' && item !== null
-        && typeof (item as Record<string, unknown>).field === 'string'
-        && typeof (item as Record<string, unknown>).message === 'string'
-      )).map((item) => ({ field: item.field, message: item.message }))
-    : []
+  const fieldErrors = readFieldErrors(body.field_errors)
   return [typeof candidateMessage === 'string' ? candidateMessage : rawBody, {
     code: typeof body.code === 'string' ? body.code : undefined,
     field_errors: fieldErrors,
     recovery: body.recovery,
   }]
+}
+
+function readFieldErrors(value: unknown): ApiFieldError[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => {
+      if (typeof item !== 'object' || item === null) return []
+      const record = item as Record<string, unknown>
+      return typeof record.field === 'string' && typeof record.message === 'string'
+        ? [{ field: record.field, message: record.message }]
+        : []
+    })
+  }
+  if (typeof value !== 'object' || value === null) return []
+  return Object.entries(value).flatMap(([field, message]) => (
+    typeof message === 'string' ? [{ field, message }] : []
+  ))
 }

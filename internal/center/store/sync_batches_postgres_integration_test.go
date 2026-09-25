@@ -559,7 +559,7 @@ func seedReplaySafeLatestFixture(t *testing.T, ctx context.Context, fixture reco
 	}
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.targets (target_id, name, target_type, host, run_status)
-		values ($1, $2, 'hostname', 'example.com', 'enabled')`, targetID, prefix); err != nil {
+		values ($1, $2, 'hostname', 'example.com', $3)`, targetID, prefix, targets.RunStatusEnabled); err != nil {
 		t.Fatalf("seed target: %v", err)
 	}
 	if _, err := fixture.db.Exec(ctx, `

@@ -386,6 +386,10 @@ type Fact struct {
 	InactiveSubscriptionCount        int
 	ServiceCount                     int
 	DomainCount                      int
+	EffectiveServiceCount            int
+	EffectiveDomainCount             int
+	UnknownServiceCount              int
+	UnknownDomainCount               int
 	TargetCount                      int
 	RunningTargetCount               int
 	MonitoringLinkCount              int

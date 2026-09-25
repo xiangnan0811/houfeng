@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Navigate, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
@@ -7,6 +7,7 @@ import { getVPSOverview, overviewHasRecordsV2Read } from '../lib/recordsApi'
 import type { VPSOverview } from '../lib/types'
 import { RouteModuleFallback } from '../app/RouteModuleFallback'
 import { VPSOverviewPageView } from './vps-detail/VPSOverviewPageView'
+import { RestoreReorganizationPanel } from '../components/RestoreReorganizationPanel'
 import { VPSOverviewManagementActions } from './vps-detail/VPSOverviewManagementActions'
 import { useVPSManagementController } from './vps-detail/hooks/useVPSManagementController'
 import { useVPSOverview } from './vps-detail/hooks/useVPSOverview'
@@ -299,6 +300,10 @@ function VPSOverviewRoute({
   const { state, commands } = useVPSOverview(vpsId, initialOverview)
   const management = useVPSManagementController()
   const managementTriggerRef = useRef<HTMLButtonElement>(null)
+  const [associationRefreshGeneration, setAssociationRefreshGeneration] = useState(0)
+  const noteMonitoringAssociationChanged = useCallback(() => {
+    setAssociationRefreshGeneration((current) => current + 1)
+  }, [])
   const [searchParams, setSearchParams] = useSearchParams()
   const location = useLocation()
   const openManagementPanel = management.openPanel
@@ -352,6 +357,18 @@ function VPSOverviewRoute({
 
   return (
     <>
+      {searchParams.get('reorganize') === '1' ? (
+        <RestoreReorganizationPanel
+          key={state.overview.identity.vps_id}
+          vpsId={state.overview.identity.vps_id}
+          refreshGeneration={associationRefreshGeneration}
+          onEditUsage={() => management.openPanel('facts')}
+          onEditDecision={() => management.openPanel('decision')}
+          onRelink={() => management.openPanel('monitoring-instance-link')}
+          onCreateMonitoring={() => management.openPanel('monitoring-instance-create')}
+          onChanged={() => void commands.refresh()}
+        />
+      ) : null}
       <VPSOverviewPageView
         overview={state.overview}
         management={management}
@@ -366,6 +383,7 @@ function VPSOverviewRoute({
         management={management}
         managementTriggerRef={managementTriggerRef}
         onOverviewRefresh={commands.refresh}
+        onMonitoringAssociationChanged={noteMonitoringAssociationChanged}
         writeOwnerStore={writeOwnerStore}
         viewToken={viewToken}
       />

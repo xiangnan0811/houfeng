@@ -34,6 +34,8 @@ type RouterOptions struct {
 	AttachmentsHandler                            stdhttp.Handler
 	AssetDomainsCollectionHandler                 stdhttp.Handler
 	AssetServicesCollectionHandler                stdhttp.Handler
+	AssetServiceStatusHandler                     stdhttp.Handler
+	AssetDomainStatusHandler                      stdhttp.Handler
 	AssetDecisionOverviewHandler                  stdhttp.Handler
 	AssetDecisionGroupsHandler                    stdhttp.Handler
 	AssetDecisionGroupHandler                     stdhttp.Handler
@@ -63,6 +65,7 @@ type RouterOptions struct {
 	VPSArchiveReviewHandler                       stdhttp.Handler
 	VPSArchiveHandler                             stdhttp.Handler
 	VPSRestoreFromArchiveHandler                  stdhttp.Handler
+	VPSStartMigrationHandler                      stdhttp.Handler
 	AssetContextTargetsHandler                    stdhttp.Handler
 	SubscriptionsCollectionHandler                stdhttp.Handler
 	SubscriptionItemHandler                       stdhttp.Handler
@@ -99,6 +102,7 @@ type RouterOptions struct {
 	TargetProbeItemsHandler                       stdhttp.Handler
 	TargetRuntimeFactsHandler                     stdhttp.Handler
 	TargetRuntimeControlHandler                   stdhttp.Handler
+	TargetLifecycleReviewHandler                  stdhttp.Handler
 	TargetSparklinesHandler                       stdhttp.Handler
 	AgentEnrollHandler                            stdhttp.Handler
 	AgentSyncHandler                              stdhttp.Handler
@@ -235,6 +239,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.AssetServicesCollectionHandler != nil {
 		mux.Handle("/api/services", protect(opts.AssetServicesCollectionHandler))
 	}
+	if opts.AssetServiceStatusHandler != nil {
+		mux.Handle("/api/services/{id}/status", protect(opts.AssetServiceStatusHandler))
+	}
+	if opts.AssetDomainStatusHandler != nil {
+		mux.Handle("/api/domains/{id}/status", protect(opts.AssetDomainStatusHandler))
+	}
 	if opts.AssetDecisionOverviewHandler != nil {
 		mux.Handle("/api/asset-decisions/overview", protect(opts.AssetDecisionOverviewHandler))
 	}
@@ -274,7 +284,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
-	if opts.VPSItemHandler != nil || opts.VPSOverviewHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSIPQualityHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil || opts.VPSArchiveReviewHandler != nil || opts.VPSArchiveHandler != nil || opts.VPSRestoreFromArchiveHandler != nil {
+	if opts.VPSStartMigrationHandler != nil || opts.VPSItemHandler != nil || opts.VPSOverviewHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSIPQualityHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil || opts.VPSArchiveReviewHandler != nil || opts.VPSArchiveHandler != nil || opts.VPSRestoreFromArchiveHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -385,6 +395,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSRestoreFromArchiveHandler.ServeHTTP(w, r)
+			case vpsSubtreeStartMigration:
+				if opts.VPSStartMigrationHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSStartMigrationHandler.ServeHTTP(w, r)
 			default:
 				stdhttp.NotFound(w, r)
 			}
@@ -564,7 +580,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.InstallerScriptHandler != nil {
 		mux.Handle(agentapi.InstallScriptPath, opts.InstallerScriptHandler)
 	}
-	if opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil || opts.TargetRuntimeFactsHandler != nil || opts.TargetRuntimeControlHandler != nil || opts.TargetSparklinesHandler != nil {
+	if opts.TargetLifecycleReviewHandler != nil || opts.TargetItemHandler != nil || opts.TargetProbeItemsHandler != nil || opts.TargetRuntimeFactsHandler != nil || opts.TargetRuntimeControlHandler != nil || opts.TargetSparklinesHandler != nil {
 		mux.Handle("/api/targets/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			targetID, subtree := targetSubtreePath(r.URL.Path)
 			if targetID == "" && subtree != targetSubtreeSparklines {
@@ -597,6 +613,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.TargetRuntimeControlHandler.ServeHTTP(w, r)
+			case targetSubtreeLifecycleReview:
+				if opts.TargetLifecycleReviewHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.TargetLifecycleReviewHandler.ServeHTTP(w, r)
 			case targetSubtreeSparklines:
 				if opts.TargetSparklinesHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -635,6 +657,7 @@ const (
 	vpsSubtreeArchiveReview            vpsSubtree = "archive-review"
 	vpsSubtreeArchive                  vpsSubtree = "archive"
 	vpsSubtreeRestoreFromArchive       vpsSubtree = "restore-from-archive"
+	vpsSubtreeStartMigration           vpsSubtree = "start-migration"
 )
 
 func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
@@ -689,6 +712,8 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeArchive
 	case "restore-from-archive":
 		return segments[0], vpsSubtreeRestoreFromArchive
+	case "start-migration":
+		return segments[0], vpsSubtreeStartMigration
 	default:
 		return segments[0], vpsSubtreeUnknown
 	}
@@ -795,12 +820,13 @@ func monitoringInstanceSubtreePath(path string) (monitoringInstanceID string, su
 type targetSubtree string
 
 const (
-	targetSubtreeUnknown        targetSubtree = ""
-	targetSubtreeItem           targetSubtree = "item"
-	targetSubtreeProbeItems     targetSubtree = "probe-items"
-	targetSubtreeRuntimeFacts   targetSubtree = "runtime-facts"
-	targetSubtreeRuntimeControl targetSubtree = "runtime-control"
-	targetSubtreeSparklines     targetSubtree = "sparklines"
+	targetSubtreeUnknown         targetSubtree = ""
+	targetSubtreeItem            targetSubtree = "item"
+	targetSubtreeProbeItems      targetSubtree = "probe-items"
+	targetSubtreeRuntimeFacts    targetSubtree = "runtime-facts"
+	targetSubtreeRuntimeControl  targetSubtree = "runtime-control"
+	targetSubtreeSparklines      targetSubtree = "sparklines"
+	targetSubtreeLifecycleReview targetSubtree = "lifecycle-review"
 )
 
 func targetSubtreePath(path string) (targetID string, subtree targetSubtree) {
@@ -821,6 +847,9 @@ func targetSubtreePath(path string) (targetID string, subtree targetSubtree) {
 	}
 	if segments[1] == "probe-items" {
 		return segments[0], targetSubtreeProbeItems
+	}
+	if segments[1] == "lifecycle-review" && len(segments) == 2 {
+		return segments[0], targetSubtreeLifecycleReview
 	}
 	if segments[1] == "runtime-facts" && len(segments) == 2 {
 		return segments[0], targetSubtreeRuntimeFacts

@@ -15,6 +15,8 @@ import (
 
 var ErrSubscriptionNotFound = errors.New("subscription not found")
 var ErrInvalidSubscriptionInput = errors.New("invalid subscription input")
+var ErrSubscriptionOwnershipChangeForbidden = errors.New("subscription ownership change forbidden")
+var ErrSubscriptionReplayOwnershipConflict = errors.New("subscription replay ownership conflict")
 
 type Status string
 
@@ -462,12 +464,6 @@ func NormalizePatchInput(input PatchInput) PatchInput {
 		autoRenew, autoRenewCancelled := LegacyRenewalFlags(input.RenewalMode.Value)
 		input.AutoRenew = PatchBool(autoRenew)
 		input.AutoRenewCancelled = PatchBool(autoRenewCancelled)
-	} else if input.AutoRenew.Set || input.AutoRenewCancelled.Set {
-		renewalMode := string(RenewalModeFromLegacyFlags(input.AutoRenew.Set && input.AutoRenew.Value, input.AutoRenewCancelled.Set && input.AutoRenewCancelled.Value))
-		input.RenewalMode = PatchString(renewalMode)
-		autoRenew, autoRenewCancelled := LegacyRenewalFlags(renewalMode)
-		input.AutoRenew = PatchBool(autoRenew)
-		input.AutoRenewCancelled = PatchBool(autoRenewCancelled)
 	}
 	input.PaymentMethod = normalizeOptionalString(input.PaymentMethod)
 	input.DisplayName = normalizeOptionalString(input.DisplayName)
@@ -476,6 +472,36 @@ func NormalizePatchInput(input PatchInput) PatchInput {
 		input.Labels.Values = NormalizeLabels(input.Labels.Values)
 	}
 	input.Note = normalizeOptionalString(input.Note)
+	return input
+}
+
+func NormalizePatchAgainstRecord(current Record, input PatchInput) PatchInput {
+	input = NormalizePatchInput(input)
+	if input.RenewalMode.Set || (!input.AutoRenew.Set && !input.AutoRenewCancelled.Set) {
+		return input
+	}
+
+	switch RenewalMode(NormalizeRenewalMode(current.RenewalMode)) {
+	case RenewalModeAuto, RenewalModeManual, RenewalModeAutoCancelled:
+		autoRenew := current.AutoRenew
+		autoRenewCancelled := current.AutoRenewCancelled
+		if input.AutoRenew.Set {
+			autoRenew = input.AutoRenew.Value
+		}
+		if input.AutoRenewCancelled.Set {
+			autoRenewCancelled = input.AutoRenewCancelled.Value
+		}
+		mode := RenewalModeFromLegacyFlags(autoRenew, autoRenewCancelled)
+		input.RenewalMode = PatchString(string(mode))
+		autoRenew, autoRenewCancelled = LegacyRenewalFlags(string(mode))
+		input.AutoRenew = PatchBool(autoRenew)
+		input.AutoRenewCancelled = PatchBool(autoRenewCancelled)
+	case RenewalModeGift, RenewalModeLottery, RenewalModeBonus, RenewalModeOther:
+		input.AutoRenew = PatchBool(false)
+		input.AutoRenewCancelled = PatchBool(false)
+	default:
+		return input
+	}
 	return input
 }
 

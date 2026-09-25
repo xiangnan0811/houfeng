@@ -96,7 +96,7 @@ function renderOverview(
       <VPSDetailOverviewPanel
         model={model}
         vpsId="vps_001"
-        isArchived={false}
+        lifecycleStatus="active"
         lifecycleSubmitting={false}
         subscriptions={overrides.primarySubscription === null ? [] : [subscription]}
         subscriptionsError={overrides.subscriptionLoadFailed ? overrides.subscriptionError ?? null : null}

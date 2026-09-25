@@ -75,36 +75,45 @@ const (
 )
 
 type Record struct {
-	VPSID                             string             `json:"vps_id"`
-	DisplayName                       string             `json:"display_name"`
-	ProviderID                        *string            `json:"provider_id"`
-	ProviderName                      string             `json:"provider_name"`
-	ProductName                       string             `json:"product_name"`
-	OrderRef                          string             `json:"order_ref"`
-	Country                           string             `json:"country"`
-	Region                            string             `json:"region"`
-	City                              string             `json:"city"`
-	Datacenter                        string             `json:"datacenter"`
-	IPv4                              string             `json:"ipv4"`
-	IPv6                              string             `json:"ipv6"`
-	SSHHost                           string             `json:"ssh_host"`
-	SSHPort                           int                `json:"ssh_port"`
-	SSHUser                           string             `json:"ssh_user"`
-	OSName                            string             `json:"os_name"`
-	Virtualization                    string             `json:"virtualization"`
-	LifecycleStatus                   LifecycleStatus    `json:"lifecycle_status"`
-	UsageStatus                       UsageStatus        `json:"usage_status"`
-	RenewalDecision                   RenewalDecision    `json:"renewal_decision"`
-	Importance                        string             `json:"importance"`
-	Labels                            []string           `json:"labels"`
-	Note                              string             `json:"note"`
-	ActiveMonitoringInstanceLinkCount int                `json:"active_monitoring_instance_link_count"`
-	RunningMonitoringInstanceCount    int                `json:"running_monitoring_instance_count"`
-	RunningTargetCount                int                `json:"running_target_count"`
-	IPQualitySummary                  *ipquality.Summary `json:"ip_quality_summary,omitempty"`
-	CreatedAt                         time.Time          `json:"created_at"`
-	UpdatedAt                         time.Time          `json:"updated_at"`
-	ArchivedAt                        *time.Time         `json:"archived_at"`
+	VPSID                             string                 `json:"vps_id"`
+	DisplayName                       string                 `json:"display_name"`
+	ProviderID                        *string                `json:"provider_id"`
+	ProviderName                      string                 `json:"provider_name"`
+	ProductName                       string                 `json:"product_name"`
+	OrderRef                          string                 `json:"order_ref"`
+	Country                           string                 `json:"country"`
+	Region                            string                 `json:"region"`
+	City                              string                 `json:"city"`
+	Datacenter                        string                 `json:"datacenter"`
+	IPv4                              string                 `json:"ipv4"`
+	IPv6                              string                 `json:"ipv6"`
+	SSHHost                           string                 `json:"ssh_host"`
+	SSHPort                           int                    `json:"ssh_port"`
+	SSHUser                           string                 `json:"ssh_user"`
+	OSName                            string                 `json:"os_name"`
+	Virtualization                    string                 `json:"virtualization"`
+	LifecycleStatus                   LifecycleStatus        `json:"lifecycle_status"`
+	UsageStatus                       UsageStatus            `json:"usage_status"`
+	RenewalDecision                   RenewalDecision        `json:"renewal_decision"`
+	Importance                        string                 `json:"importance"`
+	Labels                            []string               `json:"labels"`
+	Note                              string                 `json:"note"`
+	ActiveMonitoringInstanceLinkCount int                    `json:"active_monitoring_instance_link_count"`
+	RunningMonitoringInstanceCount    int                    `json:"running_monitoring_instance_count"`
+	RunningTargetCount                int                    `json:"running_target_count"`
+	IPQualitySummary                  *ipquality.Summary     `json:"ip_quality_summary,omitempty"`
+	CreatedAt                         time.Time              `json:"created_at"`
+	UpdatedAt                         time.Time              `json:"updated_at"`
+	ArchivedAt                        *time.Time             `json:"archived_at"`
+	ArchivedStateSnapshot             *ArchivedStateSnapshot `json:"archived_state_snapshot"`
+}
+
+type ArchivedStateSnapshot struct {
+	LifecycleStatus LifecycleStatus `json:"lifecycle_status"`
+	UsageStatus     UsageStatus     `json:"usage_status"`
+	RenewalDecision RenewalDecision `json:"renewal_decision"`
+	CapturedAt      time.Time       `json:"captured_at"`
+	Source          string          `json:"source"`
 }
 
 type RenewalSubscriptionLinkage struct {
@@ -585,23 +594,34 @@ func IsValidAssetScope(scope AssetScope) bool {
 	}
 }
 
+type StateCombinationError struct{ FieldErrors map[string]string }
+
+func (e *StateCombinationError) Error() string { return "invalid vps state combination" }
+func (e *StateCombinationError) Unwrap() error { return ErrInvalidVPSAssetInput }
+func invalidStateCombination(message string) error {
+	return &StateCombinationError{FieldErrors: map[string]string{"lifecycle_status": message, "usage_status": message, "renewal_decision": message}}
+}
+
 func ValidateVPSStateCombination(lifecycle LifecycleStatus, usage UsageStatus, renewal RenewalDecision) error {
+	if lifecycle == LifecycleArchived && usage == UsageInUse {
+		return invalidStateCombination("已归档资产不能标记为在用，请先恢复并重新评估用途。")
+	}
 	if lifecycle == LifecycleCancelled {
 		if !IsCancellationRenewalDecision(renewal) {
-			return fmt.Errorf("%w: cancelled lifecycle requires cancellation renewal_decision", ErrInvalidVPSAssetInput)
+			return invalidStateCombination("cancelled lifecycle requires cancellation renewal_decision")
 		}
 		if usage == UsageInUse {
-			return fmt.Errorf("%w: cancelled lifecycle cannot be in_use", ErrInvalidVPSAssetInput)
+			return invalidStateCombination("cancelled lifecycle cannot be in_use")
 		}
 	}
 	if lifecycle == LifecycleToCancel && !IsCancellationRenewalDecision(renewal) {
-		return fmt.Errorf("%w: to_cancel lifecycle requires cancellation renewal_decision", ErrInvalidVPSAssetInput)
+		return invalidStateCombination("to_cancel lifecycle requires cancellation renewal_decision")
 	}
 	if lifecycle == LifecycleToMigrate && renewal != RenewalMigrate {
-		return fmt.Errorf("%w: to_migrate lifecycle requires migrate renewal_decision", ErrInvalidVPSAssetInput)
+		return invalidStateCombination("to_migrate lifecycle requires migrate renewal_decision")
 	}
 	if renewal == RenewalReplaced && (lifecycle == LifecycleActive || usage == UsageInUse) {
-		return fmt.Errorf("%w: replaced renewal_decision cannot remain active or in_use", ErrInvalidVPSAssetInput)
+		return invalidStateCombination("replaced renewal_decision cannot remain active or in_use")
 	}
 	return nil
 }
@@ -611,24 +631,24 @@ func ValidateVPSPatchStateCombination(input PatchInput) error {
 		lifecycle := input.LifecycleStatus.Value
 		if lifecycle == LifecycleCancelled {
 			if input.RenewalDecision.Set && !IsCancellationRenewalDecision(input.RenewalDecision.Value) {
-				return fmt.Errorf("%w: cancelled lifecycle requires cancellation renewal_decision", ErrInvalidVPSAssetInput)
+				return invalidStateCombination("cancelled lifecycle requires cancellation renewal_decision")
 			}
 			if input.UsageStatus.Set && input.UsageStatus.Value == UsageInUse {
-				return fmt.Errorf("%w: cancelled lifecycle cannot be in_use", ErrInvalidVPSAssetInput)
+				return invalidStateCombination("cancelled lifecycle cannot be in_use")
 			}
 		}
 		if lifecycle == LifecycleToCancel && input.RenewalDecision.Set && !IsCancellationRenewalDecision(input.RenewalDecision.Value) {
-			return fmt.Errorf("%w: to_cancel lifecycle requires cancellation renewal_decision", ErrInvalidVPSAssetInput)
+			return invalidStateCombination("to_cancel lifecycle requires cancellation renewal_decision")
 		}
 		if lifecycle == LifecycleToMigrate && input.RenewalDecision.Set && input.RenewalDecision.Value != RenewalMigrate {
-			return fmt.Errorf("%w: to_migrate lifecycle requires migrate renewal_decision", ErrInvalidVPSAssetInput)
+			return invalidStateCombination("to_migrate lifecycle requires migrate renewal_decision")
 		}
 		if lifecycle == LifecycleActive && input.RenewalDecision.Set && input.RenewalDecision.Value == RenewalReplaced {
-			return fmt.Errorf("%w: replaced renewal_decision cannot remain active", ErrInvalidVPSAssetInput)
+			return invalidStateCombination("replaced renewal_decision cannot remain active")
 		}
 	}
 	if input.UsageStatus.Set && input.RenewalDecision.Set && input.UsageStatus.Value == UsageInUse && input.RenewalDecision.Value == RenewalReplaced {
-		return fmt.Errorf("%w: replaced renewal_decision cannot remain in_use", ErrInvalidVPSAssetInput)
+		return invalidStateCombination("replaced renewal_decision cannot remain in_use")
 	}
 	return nil
 }

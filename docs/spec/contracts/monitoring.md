@@ -177,21 +177,23 @@ type commandAuditActorResponse struct {
   - `POST /api/monitoring-instances/{id}/archive` with `{"reason":"...","confirmation_name":"<display_name>"}`
   - `POST /api/monitoring-instances/{id}/restore-from-archive`
   - `POST /api/monitoring-instances/{id}/permanent-cleanup` with `{"reason":"...","confirmation_name":"<display_name>"}`
-- Domain types: `monitoringinstances.ListScope`、`ManagementReview`、`ManagementCounts`、`ManagementActions`、`LifecycleActionInput`、`ArchiveInput`、`PermanentCleanupInput`、`PermanentCleanupResult`。
+- Domain types: `monitoringinstances.ListScope`、`ManagementReview`、`ManagementCounts`、按动作 `action_reviews`、`LifecycleActionInput`、`ArchiveInput`、`PermanentCleanupInput`、`PermanentCleanupResult`。
 
 ### 3. Contracts
 
 - `lifecycle_status` 不包含 `已归档`；归档只由 `archived_at is not null` 表达。允许的 lifecycle 仍是 `待接入`、`在用`、`观察中`、`不续费`、`已退役`。
 - 默认列表只返回未归档实例；`scope=archived` 只返回归档实例；`scope=all` 返回全部实例，但仍沿用已有 VPS 关联工作集裁剪规则。
-- `management-review` 必须一次返回实例、活跃 VPS link、数据 / 审计计数、warnings、blockers、actions 和 `empty_mistake_candidate`；前端不得自行拼多个接口后决定危险操作是否允许。
-- 退役必须设置 `已退役 + 暂停`，清空 enrollment token、sync token、pending binding、pending action，并写生命周期事件。
+- `management-review` 一次返回实例、VPS 关联、证据计数、empty_mistake_candidate、dependency_impacts、preview_digest 及 `action_reviews`。动作 key 为 retire/restore/archive/restore_from_archive/permanent_cleanup，各自 allowed/blockers/warnings；不得将 archive blocker 当作 cleanup blocker。共享全局动作按 [资产合同](assets.md) 确认影响。
+- 专用退役与 VPS 工作台调用同一事务内核心：设置已退役+暂停，撤销 enrollment/sync token、所有 pending binding 与 pending action；pending last_action 清空但永久 command audit 不删除、完成历史不伪造。binding_status 根据保留指纹还原绑定或未绑定。已退役但残留不满足不变量仍整理，写 monitoring_instance_retirement_reconciled 同态事件，只记录布尔摘要；完全干净重复退役不追加事件。
 - 从退役恢复必须设置 `观察中 + 暂停`，不自动恢复 token、action 或采集。
-- 归档必须在事务内 `select ... for update` 锁定实例，重新计算 review，校验 `confirmation_name`，要求实例已退役且没有仍在当前工作集的 VPS link；成功后设置归档字段、暂停监控、撤销 token / pending binding / pending action。
-- 从归档恢复必须清空归档字段并设置 `观察中 + 暂停`；恢复后仍需要用户显式接入或恢复监控。
-- 永久清理必须在事务内锁定实例、重新计算 review、校验名称确认。空误创建实例可直接清理；有观测 / 事件 / 通知 / lifecycle step 等证据的实例必须先归档。删除实例前先显式删除没有 FK cascade 保护的直接引用，再删除 `monitoring_instances`，其余心跳、样本、观测、IP 质量和 VPS link 依赖 FK cascade。
+- 新实例不能直接以 `已退役` 创建：未关联 HTTP 创建固定为 `待接入`，存储层对未关联与关联创建都拒绝 `已退役` 输入；退役只能经专用退役动作完成并满足退役不变量。
+- 归档先取 graph exclusive 锁再锁实例，重算该动作 review、校验名称；实例须已退役且无当前工作集 VPS link（cancelled 历史不扩大禁令）。成功归档、暂停并撤销凭据与 pending。
+- 从归档恢复须同事务清空归档字段、设观察中+暂停，写 monitoring_instance_restored_from_archive；恢复仍须显式接入与恢复监控。专用退役恢复保留 retired→observing 事件，普通在用→观察中只发 lifecycle_updated。
+- 永久清理先 graph→实例锁，重算 cleanup review 并名称确认。空误创建实例即使有 VPS link 也可清理，warning 列出被级联解除的 VPS；跨父共享仍须确认。非空有证据者须先归档。删除无 FK 引用后删实例，永久 command audit 保留。
 - 暂停、退役或归档实例的 agent sync 必须在任何心跳、host sample、probe observation、IP 质量报告或 action result 写入前短路，返回空 plan；不要推进 `last_sync_at`。
-- 已归档实例必须阻断 install command / enrollment token、binding confirm/reject/reset、metadata update、runtime resume、action queue/dispatch 等会继续接入或控制 agent 的写路径。
+- 已归档实例阻断接入、绑定、metadata、runtime、command 写路径；已退役实例禁止 enrollment/sync 凭据签发、接入、resume/维护，先受控恢复到观察中+暂停。agent enrollment、accepted heartbeat、sync 以 graph shared 第一锁参与 READ COMMITTED 协议，不能升级或绕过停止抑制。
 
+- MI 与 Target 的管理 preview/写动作遵循统一 graph 第一锁及共享影响确认；Target `/lifecycle-review` 供危险动作确认。Target 固定 maintenance/pause/resume/archive/restore_to_paused 转换核心；pause 不能恢复已归档对象，专用 restore_to_paused 保留恢复事件，重复 pause/archive 无重复跃迁。
 ### 4. Validation & Error Matrix
 
 | Condition | Expected behavior |
@@ -258,7 +260,7 @@ if syncState.SuppressWritesAndPlan() {
 2. **Target = 一个可观测入口**，地址 (`host` / `base_port`) 属于 Target；`ProbeItem` 仅描述**如何观测**它（探针种类、频率档、超时、配置），不再额外存地址。Target 与 ProbeItem 是 1:N，删除 Target 级联清理 ProbeItem (`on delete cascade`)。
 3. **探针种类只有 `tcp` / `http` / `tls`**（`internal/contracts/agentapi/types.go` 中的 `ProbeKind*` 常量）。`https` 不是独立种类，而是带 TLS 配置的 HTTP 观测。新增种类必须先获得基线批准，并同步更新设计文档与契约包。
 4. **健康状态 (`current_health_status`) 是派生量**（`正常 / 关注 / 告警 / 严重`），由 incident service 在写后计算并回写；**不要直接接受外部 API 的健康字段写入**。
-5. **MonitoringInstance 生命周期状态 (`lifecycle_status`) 是 VPS 附属接入/收尾事实，不是独立业务状态入口**（`待接入 / 在用 / 观察中 / 不续费 / 已退役`）。普通监控 handler 只能处理运行控制、接入、绑定和 metadata；退役/不续费类变更只能从 VPS 生命周期工作台的 `asset_lifecycle` 联动路径写入，并记录审计步骤。其他写路径不应触碰该列。
+5. **MonitoringInstance 生命周期是接入/收尾事实，不是 VPS 业务状态替代物**。VPS 工作台与 MI 详情受控动作复用事务内转换和事件；普通 metadata 不得冒用恢复事件。任何 MI 动作不反向改写 VPS 三轴。
 6. **维护模式 (`monitoring_status = '维护中'` / `'暂停'`) 是 runtime control，不是健康状态**。维护期间观测照常落库（`maintenance_context = true`），但 incident / notification 处理需识别该上下文（参考 `store/monitoring_instances.go:74-77`、`incidents/service.go`）。暂停、维护、退役或归档 MonitoringInstance 不应保留当前 active incident 投影；incident service 必须把已有 active incidents 行政恢复为 recovered events，且不得发送恢复通知。
 7. **先提交原始观测，再评估投影**：handler 经 `internal/center/syncing/` 原子提交 heartbeat / host sample / probe observation 后，调用 post-sync hook；`incidentSvc` 同时提供周期 worker 收敛。不得在 raw-ingest transaction 内发送通知，也不得用 post-sync 评估失败反转已提交的 sync 成功结果。具体 provenance、重复批次与 CAS 规则见后续场景。
 8. **回填观测 (`is_backfilled = true`) 必须落库但不得触发实时告警**。请求路径仍旧 `insert`（参见 `store/sync_batches.go:188`），但 incident service 在 select 阶段对历史数据的处理需带条件分支。**不要在 incident 判定里忽略 `is_backfilled` 字段，也不要在写路径里干脆丢弃这条数据**。

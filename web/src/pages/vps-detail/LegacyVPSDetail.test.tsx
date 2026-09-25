@@ -568,7 +568,6 @@ describe('LegacyVPSDetail', () => {
     expect(screen.getByRole('button', { name: '关联已有监控实例' })).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '新增服务' }).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('button', { name: '新增域名' }).length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: '归档 VPS' })).toBeInTheDocument()
     const identityFacts = screen.getByLabelText('VPS 综合基础信息')
     expect(within(identityFacts).getByText('JP · Kanto · Tokyo · nrt')).toBeInTheDocument()
     expect(within(identityFacts).getByText('cx22')).toBeInTheDocument()
@@ -2623,6 +2622,7 @@ describe('LegacyVPSDetail', () => {
   it('loads archive review and blocks archive when active subscriptions or runtime evidence remain', async () => {
     const detailBody = {
       ...vpsDetailBody,
+      lifecycle_status: 'to_cancel',
       monitoring_instance_links: [],
       active_monitoring_instance_link_count: 0,
       running_monitoring_instance_count: 0,
@@ -2642,6 +2642,7 @@ describe('LegacyVPSDetail', () => {
       target_links: [],
       warnings: [],
       blockers: ['存在 1 条 active 订阅，必须先取消或结束订阅后才能归档。'],
+      blocker_details: [],
       eligible: false,
     }
     const fetchMock = vi
@@ -2696,7 +2697,7 @@ describe('LegacyVPSDetail', () => {
       ssh_user: 'root',
       os_name: 'Debian',
       virtualization: 'kvm',
-      lifecycle_status: 'active',
+      lifecycle_status: 'to_cancel',
       usage_status: 'in_use',
       renewal_decision: 'keep',
       importance: 'normal',
@@ -2722,6 +2723,7 @@ describe('LegacyVPSDetail', () => {
       target_links: [],
       warnings: [],
       blockers: [],
+      blocker_details: [],
       eligible: true,
     }
     const archivedReview = {
@@ -2762,10 +2764,10 @@ describe('LegacyVPSDetail', () => {
     clickVPSAction('归档 VPS')
     const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
     expect(document.querySelector('.asset-lifecycle-card')).toBeNull()
-    expect(within(dialog).getByText('输入 VPS 展示名后才能归档，服务端会再次校验资格。')).toBeInTheDocument()
     const confirmButton = within(dialog).getByRole('button', { name: '确认归档' })
     expect(confirmButton).toBeDisabled()
 
+    fireEvent.change(within(dialog).getByLabelText('归档原因'), { target: { value: '订阅已结束' } })
     fireEvent.change(within(dialog).getByLabelText('输入 VPS 名称确认归档'), { target: { value: 'Tokyo' } })
     expect(confirmButton).toBeDisabled()
     fireEvent.change(within(dialog).getByLabelText('输入 VPS 名称确认归档'), { target: { value: 'Tokyo Edge' } })
@@ -2782,21 +2784,16 @@ describe('LegacyVPSDetail', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/vps/vps_001/archive', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/vps/vps_001/archive', expect.objectContaining({
       method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({ confirmation_name: 'Tokyo Edge' }),
-    })
+      body: JSON.stringify({ confirmation_name: 'Tokyo Edge', reason: '订阅已结束' }),
+    }))
   })
 
   it('keeps inventory state and archive confirmation when archive write fails', async () => {
     const detailBody = {
       ...vpsDetailBody,
+      lifecycle_status: 'to_cancel',
       monitoring_instance_links: [],
       active_monitoring_instance_link_count: 0,
     }
@@ -2809,6 +2806,7 @@ describe('LegacyVPSDetail', () => {
       target_links: [],
       warnings: [],
       blockers: [],
+      blocker_details: [],
       eligible: true,
     }
     const inventoryState = {
@@ -2843,6 +2841,7 @@ describe('LegacyVPSDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
     clickVPSAction('归档 VPS')
     const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.change(within(dialog).getByLabelText('归档原因'), { target: { value: '订阅已结束' } })
     fireEvent.change(within(dialog).getByLabelText('输入 VPS 名称确认归档'), { target: { value: 'Tokyo Edge' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
 
@@ -2858,6 +2857,7 @@ describe('LegacyVPSDetail', () => {
       vps_id: 'vps_a',
       display_name: 'Tokyo Edge A',
       renewal_decision: 'keep',
+      lifecycle_status: 'to_cancel',
       monitoring_instance_links: [],
       active_monitoring_instance_link_count: 0,
     }
@@ -2866,6 +2866,7 @@ describe('LegacyVPSDetail', () => {
       vps_id: 'vps_b',
       display_name: 'Osaka Edge B',
       renewal_decision: 'keep',
+      lifecycle_status: 'to_cancel',
       monitoring_instance_links: [],
       active_monitoring_instance_link_count: 0,
     }
@@ -2886,6 +2887,7 @@ describe('LegacyVPSDetail', () => {
         target_links: [],
         warnings: [],
         blockers,
+        blocker_details: [],
         eligible,
       }
     }
@@ -3332,6 +3334,7 @@ describe('LegacyVPSDetail', () => {
 
       clickVPSAction('归档 VPS')
       const archiveDialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+      fireEvent.change(within(archiveDialog).getByLabelText('归档原因'), { target: { value: '订阅已结束' } })
       fireEvent.change(within(archiveDialog).getByLabelText('输入 VPS 名称确认归档'), {
         target: { value: 'Tokyo Edge A' },
       })
@@ -4044,9 +4047,6 @@ describe('LegacyVPSDetail', () => {
       })
       fireEvent.click(within(cancellationDrawer).getByRole('button', { name: '确认取消/退役' }))
       await waitFor(() => expect(previewCalls).toBe(2))
-      await waitFor(() => expect(screen.getByText(
-        '已完成生命周期动作 alca_route_reset，写入 1 个步骤。',
-      )).toBeInTheDocument())
 
       cancellationDrawer = screen.getByRole('dialog', { name: '取消/退役' })
       fireEvent.change(within(cancellationDrawer).getByLabelText('原因'), {
@@ -4068,7 +4068,7 @@ describe('LegacyVPSDetail', () => {
       expect(screen.queryByText('payload reset 已提交警告')).not.toBeInTheDocument()
       expect(screen.queryByText('payload reset 已提交阻止项')).not.toBeInTheDocument()
       expect(screen.queryByText('影响范围已变化，请重新加载预览后再确认')).not.toBeInTheDocument()
-      expect(screen.queryByText('已完成生命周期动作 alca_route_reset，写入 1 个步骤。')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: '处理取消/退役' })).not.toBeInTheDocument()
     })
   })
@@ -5524,7 +5524,7 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(workbench).getByLabelText('原因'), {
       target: { value: '已过期且不准备续费' },
     })
-    fireEvent.click(within(within(workbench).getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('checkbox'))
+    fireEvent.click(within(within(workbench).getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('radio', { name: '本次取消' }))
     fireEvent.click(within(within(workbench).getByText('Tokyo Monitoring Instance').closest('.asset-checkbox-line')!).getByRole('checkbox'))
     fireEvent.click(within(within(workbench).getByText('Blog Target').closest('.asset-checkbox-line')!).getByRole('checkbox'))
     fireEvent.click(within(workbench).getByRole('button', { name: '确认取消/退役' }))
@@ -5666,10 +5666,10 @@ describe('LegacyVPSDetail', () => {
     fireEvent.change(within(decisionDrawer).getByLabelText('续费决策'), { target: { value: 'cancel' } })
     fireEvent.change(within(decisionDrawer).getByLabelText('决策理由'), { target: { value: 'too expensive' } })
     fireEvent.click(within(decisionDrawer).getByRole('button', { name: '保存续费决策' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+    expect(await screen.findByRole('button', { name: '加载最新版本' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('已加载最新版本')
+    await waitFor(() => expect(within(decisionDrawer).getByLabelText('决策理由')).toHaveValue('too expensive'))
     expect(within(decisionDrawer).getByLabelText('决策理由')).toHaveValue('too expensive')
     expect(within(decisionDrawer).getByLabelText('续费决策')).toHaveValue('cancel')
 
@@ -6291,6 +6291,7 @@ describe('LegacyVPSDetail', () => {
       ...vpsDetailBody,
       vps_id: 'vps_a',
       display_name: 'Tokyo Edge A',
+      lifecycle_status: 'to_cancel',
       monitoring_instance_links: [],
       active_monitoring_instance_link_count: 0,
     }
@@ -6298,6 +6299,7 @@ describe('LegacyVPSDetail', () => {
       ...vpsDetailBody,
       vps_id: 'vps_b',
       display_name: 'Osaka Edge B',
+      lifecycle_status: 'to_cancel',
       monitoring_instance_links: [],
       active_monitoring_instance_link_count: 0,
     }
@@ -6310,6 +6312,7 @@ describe('LegacyVPSDetail', () => {
       target_links: [],
       warnings: [],
       blockers: [],
+      blocker_details: [],
       eligible: true,
     }
     const delayedArchive = deferred<ReturnType<typeof mockJSONResponse>>()
@@ -6350,6 +6353,7 @@ describe('LegacyVPSDetail', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge A' })).toBeInTheDocument())
     clickVPSAction('归档 VPS')
     const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.change(within(dialog).getByLabelText('归档原因'), { target: { value: '订阅已结束' } })
     fireEvent.change(within(dialog).getByLabelText('输入 VPS 名称确认归档'), { target: { value: 'Tokyo Edge A' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(

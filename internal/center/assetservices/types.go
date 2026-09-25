@@ -14,6 +14,7 @@ var ErrServiceNotFound = errors.New("asset service not found")
 var ErrServiceOwnerNotFound = errors.New("asset service owner not found")
 var ErrServiceTargetNotFound = errors.New("asset service target not found")
 var ErrInvalidServiceInput = errors.New("invalid asset service input")
+var ErrServiceStatusConflict = errors.New("asset service status conflict")
 
 type ServiceType string
 
@@ -62,6 +63,11 @@ type CreateInput struct {
 	Note        string        `json:"note"`
 }
 
+type StatusUpdateInput struct {
+	Status ServiceStatus `json:"status"`
+	Reason string        `json:"reason"`
+}
+
 type ListFilters struct {
 	VPSID       string
 	TargetID    string
@@ -73,6 +79,7 @@ type Repository interface {
 	ListAssetServices(context.Context, ListFilters) ([]Record, error)
 	ListAssetServicesForVPS(context.Context, string) ([]Record, error)
 	CreateAssetService(context.Context, CreateInput) (Record, error)
+	UpdateStatus(context.Context, string, ServiceStatus, string) (Record, error)
 }
 
 type IdempotentRepository interface {
@@ -115,6 +122,24 @@ func ValidateCreateInput(input CreateInput) error {
 	}
 	if input.Port != nil && !IsValidPort(*input.Port) {
 		return fmt.Errorf("%w: port must be between 1 and 65535", ErrInvalidServiceInput)
+	}
+	return nil
+}
+
+func NormalizeStatusUpdateInput(input StatusUpdateInput) StatusUpdateInput {
+	input.Status = ServiceStatus(strings.TrimSpace(string(input.Status)))
+	input.Reason = strings.TrimSpace(input.Reason)
+	return input
+}
+
+func ValidateStatusUpdateInput(input StatusUpdateInput) error {
+	switch input.Status {
+	case ServiceStatusActive, ServiceStatusPaused, ServiceStatusRetired:
+	default:
+		return fmt.Errorf("%w: status must be active, paused, or retired", ErrInvalidServiceInput)
+	}
+	if input.Reason == "" {
+		return fmt.Errorf("%w: reason is required", ErrInvalidServiceInput)
 	}
 	return nil
 }

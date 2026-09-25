@@ -86,6 +86,28 @@ func TestValidateCreateInputRejectsInvalidStatusAndMissingVPS(t *testing.T) {
 	}
 }
 
+func TestVPSStateRepairDomainStatusInputValidation(t *testing.T) {
+	t.Parallel()
+
+	input := NormalizeStatusUpdateInput(StatusUpdateInput{Status: " retired ", Reason: " reviewed "})
+	if input.Status != DomainStatusRetired || input.Reason != "reviewed" {
+		t.Fatalf("normalized status input = %#v, want trimmed status and reason", input)
+	}
+	if err := ValidateStatusUpdateInput(input); err != nil {
+		t.Fatalf("ValidateStatusUpdateInput() error = %v, want nil", err)
+	}
+
+	for _, invalid := range []StatusUpdateInput{
+		{Status: DomainStatusUnknown, Reason: "reviewed"},
+		{Status: DomainStatusActive},
+	} {
+		invalid = NormalizeStatusUpdateInput(invalid)
+		if err := ValidateStatusUpdateInput(invalid); !errors.Is(err, ErrInvalidDomainInput) {
+			t.Errorf("ValidateStatusUpdateInput(%#v) error = %v, want ErrInvalidDomainInput", invalid, err)
+		}
+	}
+}
+
 func TestValidateListFiltersRejectsInvalidStatus(t *testing.T) {
 	filters := NormalizeListFilters(ListFilters{Status: "deleted"})
 	if err := ValidateListFilters(filters); !errors.Is(err, ErrInvalidDomainInput) {

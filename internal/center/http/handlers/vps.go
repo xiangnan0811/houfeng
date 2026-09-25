@@ -195,7 +195,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 
 			input = vpsassets.NormalizePatchInput(input)
 			if err := vpsassets.ValidateOrdinaryPatchInput(input); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid input")
+				writeVPSInputError(w, err)
 				return
 			}
 			if input.HasChanges() {
@@ -247,7 +247,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				return
 			}
 			if errors.Is(err, vpsassets.ErrInvalidVPSAssetInput) || errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
-				writeError(w, http.StatusBadRequest, "invalid input")
+				writeVPSInputError(w, err)
 				return
 			}
 			if errors.Is(err, subscriptions.ErrSubscriptionNotFound) {
@@ -273,6 +273,15 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+func writeVPSInputError(w http.ResponseWriter, err error) {
+	var stateErr *vpsassets.StateCombinationError
+	if errors.As(err, &stateErr) {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid input", "field_errors": stateErr.FieldErrors})
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid input")
 }
 
 func enrichVPSAssetRuntimeSummary(ctx context.Context, linkRepo assetlinks.Repository, targetCounter vpsRunningTargetCounter, record *vpsassets.Record) error {

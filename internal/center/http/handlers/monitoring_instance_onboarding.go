@@ -59,6 +59,10 @@ func MonitoringInstanceEnrollmentToken(repo monitoringinstances.OnboardingReposi
 			writeError(w, http.StatusConflict, "archived monitoring instance")
 			return
 		}
+		if errors.Is(err, monitoringinstances.ErrRetiredMonitoringInstance) {
+			writeCodedError(w, http.StatusConflict, "retired monitoring instance", "monitoring_instance_retired")
+			return
+		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -115,6 +119,10 @@ func MonitoringInstanceInstallCommand(repo monitoringinstances.OnboardingReposit
 		}
 		if errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance) {
 			writeCodedError(w, http.StatusConflict, "archived monitoring instance", "monitoring_instance_archived")
+			return
+		}
+		if errors.Is(err, monitoringinstances.ErrRetiredMonitoringInstance) {
+			writeCodedError(w, http.StatusConflict, "retired monitoring instance", "monitoring_instance_retired")
 			return
 		}
 		if err != nil {
@@ -181,6 +189,9 @@ func monitoringInstanceBindingAction(repo monitoringinstances.OnboardingReposito
 			return
 		case errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance):
 			writeError(w, http.StatusConflict, "archived monitoring instance")
+			return
+		case errors.Is(err, monitoringinstances.ErrRetiredMonitoringInstance):
+			writeError(w, http.StatusConflict, "retired monitoring instance")
 			return
 		case errors.Is(err, monitoringinstances.ErrInvalidBindingTransition):
 			writeError(w, http.StatusConflict, "invalid binding transition")

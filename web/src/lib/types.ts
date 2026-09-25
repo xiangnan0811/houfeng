@@ -50,34 +50,67 @@ export type MonitoringInstanceManagementCounts = {
   active_vps_link_count: number
 }
 
-export type MonitoringInstanceManagementActions = {
-  can_retire: boolean
-  can_restore_lifecycle: boolean
-  can_archive: boolean
-  can_restore_archive: boolean
-  can_permanent_cleanup: boolean
+export type DependencyClassification =
+  | 'current'
+  | 'residual'
+  | 'paused'
+  | 'historical'
+  | 'needs_confirmation'
+
+export type DependencyImpact = {
+  object_type: string
+  object_id: string
+  vps_id: string
+  vps_lifecycle_status: string
+  relation_type: string
+  relation_id: string
+  relation_status: string
+  classification: DependencyClassification | string
+}
+
+export type SharedObjectReference = {
+  object_type: string
+  object_id: string
+}
+
+export type GlobalActionConfirmation = {
+  preview_digest: string
+  confirm_shared_impact: boolean
+}
+
+export type MonitoringInstanceManagementActionKey =
+  | 'retire'
+  | 'restore'
+  | 'archive'
+  | 'restore_from_archive'
+  | 'permanent_cleanup'
+
+export type MonitoringInstanceManagementActionReview = {
+  allowed: boolean
+  blockers: string[]
+  warnings: string[]
 }
 
 export type MonitoringInstanceManagementReview = {
   record: MonitoringInstanceRecord
   active_vps_links: MonitoringInstanceManagementVPSLink[]
   counts: MonitoringInstanceManagementCounts
-  warnings: string[]
-  blockers: string[]
-  actions: MonitoringInstanceManagementActions
+  action_reviews: Record<MonitoringInstanceManagementActionKey, MonitoringInstanceManagementActionReview>
+  dependency_impacts: DependencyImpact[]
+  preview_digest: string
   empty_mistake_candidate: boolean
 }
 
-export type MonitoringInstanceLifecycleManagementInput = {
+export type MonitoringInstanceLifecycleManagementInput = GlobalActionConfirmation & {
   reason: string
 }
 
-export type MonitoringInstanceArchiveInput = {
+export type MonitoringInstanceArchiveInput = GlobalActionConfirmation & {
   reason: string
   confirmation_name: string
 }
 
-export type MonitoringInstancePermanentCleanupInput = {
+export type MonitoringInstancePermanentCleanupInput = GlobalActionConfirmation & {
   reason: string
   confirmation_name: string
 }
@@ -399,7 +432,9 @@ export type StateChangeEventType =
   | 'monitoring_instance_binding_reset'
   | 'monitoring_instance_lifecycle_updated'
   | 'monitoring_instance_retired'
+  | 'monitoring_instance_retirement_reconciled'
   | 'monitoring_instance_restored_to_observing'
+  | 'monitoring_instance_restored_from_archive'
   | 'monitoring_instance_monitoring_maintenance_entered'
   | 'monitoring_instance_monitoring_maintenance_exited'
   | 'monitoring_instance_monitoring_paused'
@@ -420,7 +455,9 @@ export const STATE_CHANGE_EVENT_TYPE_LABELS: Record<StateChangeEventType, string
   monitoring_instance_binding_reset: '绑定已重置',
   monitoring_instance_lifecycle_updated: '监控实例生命周期已更新',
   monitoring_instance_retired: '监控实例已退役',
+  monitoring_instance_retirement_reconciled: '监控实例退役残留已整理',
   monitoring_instance_restored_to_observing: '监控实例恢复到观察中',
+  monitoring_instance_restored_from_archive: '监控实例已从归档恢复',
   monitoring_instance_monitoring_maintenance_entered: '监控实例进入维护',
   monitoring_instance_monitoring_maintenance_exited: '监控实例退出维护',
   monitoring_instance_monitoring_paused: '监控实例暂停监控',
@@ -844,6 +881,8 @@ export type AssetServiceStatus = 'active' | 'paused' | 'retired' | 'unknown'
 
 export type AssetDomainStatus = 'active' | 'paused' | 'retired' | 'unknown'
 
+export type DependencyCorrectionStatus = Exclude<AssetServiceStatus, 'unknown'>
+
 export type VPSExperienceCategory =
   | 'note'
   | 'stability'
@@ -930,6 +969,16 @@ export const ASSET_DOMAIN_STATUS_LABELS: Record<AssetDomainStatus, string> = {
   unknown: '未确认',
 }
 
+export type ArchivedStateSnapshotSource = 'archive' | 'migration_observation'
+
+export type ArchivedStateSnapshot = {
+  lifecycle_status: VPSLifecycleStatus | string
+  usage_status: VPSUsageStatus | string
+  renewal_decision: VPSRenewalDecision | string
+  captured_at: string
+  source: ArchivedStateSnapshotSource
+}
+
 export type VPSAssetRecord = {
   vps_id: string
   display_name: string
@@ -961,6 +1010,7 @@ export type VPSAssetRecord = {
   created_at: string
   updated_at: string
   archived_at?: string | null
+  archived_state_snapshot?: ArchivedStateSnapshot | null
 }
 
 export type IPQualityProviderResult = {
@@ -1531,6 +1581,10 @@ export type AssetDecisionExecutionCurrentFacts = {
   active_subscription_count: number
   service_count: number
   domain_count: number
+  effective_service_count: number
+  effective_domain_count: number
+  unknown_service_count: number
+  unknown_domain_count: number
   target_count: number
   running_target_count: number
   monitoring_link_count: number
@@ -1744,7 +1798,7 @@ export type LifecycleActionStep = {
 export type LifecycleActionRecord = {
   action_id: string
   vps_id: string
-  action_type: 'cancel_vps' | 'extend_validity' | string
+  action_type: 'cancel_vps' | 'extend_validity' | 'archive_vps' | 'restore_vps' | 'start_migration' | 'correct_dependency_status' | string
   status: 'completed' | 'failed' | string
   reason: string
   effective_date?: string | null
@@ -1803,6 +1857,18 @@ export type CancellationPreview = {
   warnings: string[]
   blockers: string[]
   preview_digest: string
+  dependency_impacts: DependencyImpact[]
+  evaluated_on: string
+}
+
+export type ArchiveBlockerDetail = {
+  code: string
+  object_type: string
+  object_id: string
+  display_name: string
+  current_state: string
+  blocked_action: string
+  resolution_action: string
 }
 
 export type ArchiveReview = {
@@ -1814,11 +1880,31 @@ export type ArchiveReview = {
   target_links: TargetImpact[]
   warnings: string[]
   blockers: string[]
+  blocker_details: ArchiveBlockerDetail[]
   eligible: boolean
 }
 
 export type ApplyArchiveInput = {
   confirmation_name: string
+  reason: string
+}
+
+export type RestoreArchiveInput = {
+  reason: string
+}
+
+export type StartMigrationInput = {
+  reason: string
+}
+
+export type DependencyStatusCorrectionInput = {
+  status: DependencyCorrectionStatus
+  reason: string
+}
+
+export type TargetLifecycleReview = {
+  dependency_impacts: DependencyImpact[]
+  preview_digest: string
 }
 
 export type MonitoringInstanceLifecycleActionInput = {
@@ -1840,6 +1926,7 @@ export type ApplyCancellationInput = {
   monitoring_instance_actions: MonitoringInstanceLifecycleActionInput[]
   target_actions: TargetLifecycleActionInput[]
   preview_digest: string
+  confirmed_shared_objects: SharedObjectReference[]
 }
 
 export type ExtendVPSValidityInput = {
@@ -1944,6 +2031,7 @@ export type VPSMonitoringInstanceSummary = {
   current_primary_issue_summary: string
   linked_at: string
   note: string
+  archived_at?: string | null
 }
 
 export type VPSMonitoringInstanceLinkRecord = {

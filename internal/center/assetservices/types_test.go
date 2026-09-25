@@ -87,6 +87,28 @@ func TestValidateCreateInput(t *testing.T) {
 	}
 }
 
+func TestVPSStateRepairServiceStatusInputValidation(t *testing.T) {
+	t.Parallel()
+
+	input := NormalizeStatusUpdateInput(StatusUpdateInput{Status: " paused ", Reason: " reviewed "})
+	if input.Status != ServiceStatusPaused || input.Reason != "reviewed" {
+		t.Fatalf("normalized status input = %#v, want trimmed status and reason", input)
+	}
+	if err := ValidateStatusUpdateInput(input); err != nil {
+		t.Fatalf("ValidateStatusUpdateInput() error = %v, want nil", err)
+	}
+
+	for _, invalid := range []StatusUpdateInput{
+		{Status: ServiceStatusUnknown, Reason: "reviewed"},
+		{Status: ServiceStatusActive},
+	} {
+		invalid = NormalizeStatusUpdateInput(invalid)
+		if err := ValidateStatusUpdateInput(invalid); !errors.Is(err, ErrInvalidServiceInput) {
+			t.Errorf("ValidateStatusUpdateInput(%#v) error = %v, want ErrInvalidServiceInput", invalid, err)
+		}
+	}
+}
+
 func TestValidateListFilters(t *testing.T) {
 	t.Parallel()
 

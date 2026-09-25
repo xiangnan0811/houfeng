@@ -9,6 +9,7 @@
 | [Compose application role SQL](compose-application-role.sql) | Compose 初始化器创建和校验受限应用角色 |
 | [Compose 环境模板](compose.env.example) | 发布包环境配置模板；本地秘密不应提交 |
 | [systemd 单元](systemd/README.md) | Center、内容处理器及 agent 的服务资源 |
+| [VPS state preflight SQL](../../scripts/preflight-vps-state.sql) | Read-only review before VPS lifecycle-state migrations |
 
 资源保留固定路径供脚本、安装器及发行流程消费。安装后执行
 [全链路 smoke](../operations/fresh-install-smoke-run.md)；开发检查见 [开发入口](../development/README.md)。

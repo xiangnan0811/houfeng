@@ -45,6 +45,7 @@ var ErrInvalidBindingTransition = errors.New("invalid binding transition")
 var ErrMonitoringInstanceMetadataConflict = errors.New("monitoring instance metadata conflict")
 var ErrInvalidManagementInput = errors.New("invalid monitoring instance management input")
 var ErrManagementActionBlocked = errors.New("monitoring instance management action blocked")
+var ErrRetiredMonitoringInstance = errors.New("retired monitoring instance")
 var ErrArchivedMonitoringInstance = errors.New("archived monitoring instance")
 var ErrInvalidCreateInput = errors.New("invalid monitoring instance create input")
 
@@ -95,12 +96,15 @@ type Record struct {
 	BindingStatus              string          `json:"binding_status"`
 	EnrollmentTokenHash        string          `json:"-"`
 	EnrollmentTokenIssuedAt    *time.Time      `json:"-"`
+	EnrollmentTokenConsumedAt  *time.Time      `json:"-"`
 	SyncTokenHash              string          `json:"-"`
 	BindingFingerprint         string          `json:"-"`
 	BindingEpochStartedAt      *time.Time      `json:"-"`
 	PendingBindingFingerprint  string          `json:"-"`
 	PendingBindingFirstSeenAt  *time.Time      `json:"-"`
 	PendingBindingLastSeenAt   *time.Time      `json:"-"`
+	PendingActionID            string          `json:"-"`
+	PendingActionCommandID     string          `json:"-"`
 	PendingBindingAttemptCount int             `json:"-"`
 	Labels                     []string        `json:"labels"`
 	Note                       string          `json:"note"`
@@ -186,36 +190,49 @@ func (c ManagementCounts) EvidenceCount() int {
 		c.CommandActionAuditCount
 }
 
-type ManagementActions struct {
-	CanRetire           bool `json:"can_retire"`
-	CanRestoreLifecycle bool `json:"can_restore_lifecycle"`
-	CanArchive          bool `json:"can_archive"`
-	CanRestoreArchive   bool `json:"can_restore_archive"`
-	CanPermanentCleanup bool `json:"can_permanent_cleanup"`
+type ManagementActionReview struct {
+	Allowed  bool     `json:"allowed"`
+	Blockers []string `json:"blockers"`
+	Warnings []string `json:"warnings"`
 }
 
+const (
+	ManagementActionRetire             = "retire"
+	ManagementActionRestore            = "restore"
+	ManagementActionArchive            = "archive"
+	ManagementActionRestoreFromArchive = "restore_from_archive"
+	ManagementActionPermanentCleanup   = "permanent_cleanup"
+)
+
 type ManagementReview struct {
-	Record                Record              `json:"record"`
-	ActiveVPSLinks        []ManagementVPSLink `json:"active_vps_links"`
-	Counts                ManagementCounts    `json:"counts"`
-	Warnings              []string            `json:"warnings"`
-	Blockers              []string            `json:"blockers"`
-	Actions               ManagementActions   `json:"actions"`
-	EmptyMistakeCandidate bool                `json:"empty_mistake_candidate"`
+	Record                Record                            `json:"record"`
+	ActiveVPSLinks        []ManagementVPSLink               `json:"active_vps_links"`
+	Counts                ManagementCounts                  `json:"counts"`
+	ActionReviews         map[string]ManagementActionReview `json:"action_reviews"`
+	DependencyImpacts     []assetlinks.DependencyImpact     `json:"dependency_impacts"`
+	PreviewDigest         string                            `json:"preview_digest"`
+	EmptyMistakeCandidate bool                              `json:"empty_mistake_candidate"`
 }
 
 type LifecycleActionInput struct {
 	Reason string `json:"reason"`
+	assetlinks.GlobalActionConfirmation
 }
 
 type ArchiveInput struct {
 	Reason           string `json:"reason"`
 	ConfirmationName string `json:"confirmation_name"`
+	assetlinks.GlobalActionConfirmation
 }
 
 type PermanentCleanupInput struct {
 	Reason           string `json:"reason"`
 	ConfirmationName string `json:"confirmation_name"`
+	assetlinks.GlobalActionConfirmation
+}
+
+type RuntimeControlInput struct {
+	assetlinks.GlobalActionConfirmation
 }
 
 type PermanentCleanupResult struct {

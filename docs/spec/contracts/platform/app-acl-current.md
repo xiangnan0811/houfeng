@@ -5,7 +5,7 @@
 ### 1. Scope / Trigger
 
 - 触发：修改 `HOUFENG_RECORDS_ENABLED` / `HOUFENG_RECORD_PERMANENT_DELETE_ENABLED` 模式选择、`houfeng-record-platform-admin migrate --scope app`、root migration、current APP fragment/compiler、manifest/catalog verifier、`ConvergeAppACLCurrent`、`AdmitAppACLCurrentRuntime`、center bootstrap、VPS importer，或其 PostgreSQL regression 时。
-- current contract 的前 52 个 source 必须 byte-for-byte 等于冻结 `0001…0051` r1 inventory（包含两个按文件名字典序排列的 `0004_*`）。每个后来 embedded migration 必须在同一个 PR 注册一个 exact `AppACLCurrentMigrationFragment`；无 APP object 也必须注册 explicit empty fragment。当前 root set 有 65 个 source并止于 `0064_add_network_rates_valid.sql`，production registry 对 `0052…0064` 各有一个 fragment，其中 `0063` 与 `0064` 均是 explicit empty APP ACL fragment。
+- current contract 的前 52 个 source 必须 byte-for-byte 等于冻结 `0001…0051` r1 inventory（包含两个按文件名字典序排列的 `0004_*`）。每个后来 embedded migration 必须注册 exact `AppACLCurrentMigrationFragment`；无 APP object 也必须注册 explicit empty fragment。当前 root set 有 67 个 source 并止于 `0066_constrain_monitoring_and_target_state_values.sql`，`0063`、`0064`、`0066` 为 empty fragment；`0065` 仅增加 runtime 对 `public.asset_services`、`public.asset_domains` 的表级 `UPDATE`，无 grant option。
 - 两个 record flag 都关闭时保留 legacy owner `migrate.Apply`。`records-on/delete-off` 必须先运行 current scoped migrator，随后 center/importer 只能以 runtime 身份执行 current admission。`false/true` 和 `true/true` 在读取 URL、`_FILE` secret、DNS、数据库、输入文件或外部域配置前失败。
 - `ConvergeAppACLR1`、`AdmitAppACLRuntime` 与 isolated APP R2 bootstrap/finalize/runtime API 是冻结历史合同；保留其导出签名和 regression，但 product migration/startup 不再默认调用它们。
 - frozen `AdmitAppACLRuntime` 必须在开启 transaction 前通过 `snapshotAppACLR1MigrationSources(migrations.FS)` 取得并验证 exact R1 prefix，再把已 canonicalize 的 frozen set 交给 manifest verifier。它不得把 R1 manifest/ledger 与会随 `0052+` 增长的完整 `CanonicalMigrationSetFromFS(migrations.FS)` 比较；后者会让新增 current migration 反向破坏冻结 R1 admission。
@@ -23,12 +23,13 @@
 
 - `center_runtime`、`platform_admin` 与 migrator 是三个预创建、两两不同、直接认证的 `LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS` role。三者的直接与递归 membership 均为空；migration 与 runtime admission 都证明 `session_user == current_user`。`SET ROLE`、复用 owner、role membership、default ACL 或共享 login 都不能满足该合同。
 - source/fragment compiler 必须在 `BeginTx` 前拒绝 missing/extra/duplicate fragment、duplicate object/privilege、unknown subject、unmanaged privilege/function hardening，以及新 function 缺少 exact hardening。每个 fragment 的 `Privileges(databaseName)` callback 只在 source compile 时用固定验证数据库占位符求值一次；结果、fragment input 和 nested function config 都必须 defensive-copy。后续 catalog compile 只能复制已物化 privilege template，并替换 `database` tuple 的占位符，不能再次调用 callback。
-- current convergence 支持三种 closed-world shape：fresh current genesis、exact current revision-1 repeat，以及显式注册 predecessor 到 exact revision-2 successor。fresh 仍在一个 `SERIALIZABLE` transaction 中取得 advisory lock、固定 search path、apply exact source、revoke-first DCL、catalog verify 并插入 genesis；exact repeat 只验证。当前唯一 transition 是 released v0.79.4 的 exact `0062` revision-1（独立 migration/privilege/manifest goldens）到 current `0064` revision-2；preflight、pending migration、ledger/product/catalog verify、successor insert、head CAS 和 final readback必须同处一个 transaction。任意 generic prefix、null-head adoption、未注册 old source、repair 或 chain drift仍禁止；冻结 R1 wrapper 单独保留其历史 null-head adoption。
+- current convergence 只接受 fresh current genesis、下列三个发布起点与各自 exact target repeat：`[P62] → [P62,C66]`（revision 2），`[P64] → [P64,C66]`（revision 2），`[P62,P64] → [P62,P64,C66]`（revision 3）。P62 是独立 v0.79.4 golden 绑定的 `0062`；P64 是基线 `5422f939`（v0.80.2）独立 source/privilege golden 的 `0064`，其 genesis 允许发布版合法的自定义角色和数据库。P62 待执行 `0063…0066`，P64 待执行 `0065/0066`。每项历史 manifest 按其 profile 与原绑定验证，不以 persisted 权限作为授权来源。禁止任意 prefix、未知 checksum、null-head adoption、额外 revision 或旧未发布 `0066` 候选接管。
+- Writer 保持单个 `SERIALIZABLE` transaction、advisory/ledger lock 与整体 serialization retry：先验旧 source/manifest/ledger/catalog，再业务 preflight、pending SQL、复读 ledger、业务后置验证、current revoke-first DCL、current catalog、追加 latest revision+1/CAS head、完整复读后 commit。任何失败整体回滚 schema、ACL、ledger、manifest/head；catalog 漂移不能通过 DCL 自动修复。fresh 保持现有全量路径；target exact repeat 不执行 SQL/DCL/manifest 写入。P62 保留 heartbeat 3→12/custom 不变语义；P64 验证现有默认值/索引并要求完整 settings 逻辑快照不变，不重跑 `0063`。
 - current catalog 以冻结 r1 base（当前为 **204** ACL tuple）加 ordered fragment object/privilege/function hardening 编译。`public.record_platform_cas_contract_activation_projection(bytea)` 与 `public.record_platform_cas_domain_rotation_projection(bytea)` 仍是 migrator-owned、`SECURITY DEFINER`、唯一 `bytea` overload、`search_path=pg_catalog` 且显式 revoke `PUBLIC`。
-- production `0052` fragment 增加九张 Records core table、一个 `record_platform_internal.validate_record_revision_primary_subject()` hardened function 与 29 个精确 APP privilege tuple；后续 `0053…0062` fragment继续累加 current catalog，`0063` 与 `0064` 为 explicit empty fragment且不得扩张 privilege。current expected-function catalog与全部 exact tuple由完整 current compiler产生。不得给 platform admin Records content table读取权，也不得给 immutable history table `UPDATE`。
+- production `0052` fragment 增加九张 Records core table、一个 `record_platform_internal.validate_record_revision_primary_subject()` hardened function 与 29 个精确 APP privilege tuple；后续 fragments 累加 current catalog。发布 predecessor 到 current 的权限差必须恰为 `0065` 的两个 runtime 表级 UPDATE，无权限删除或第三项授权；`0066` 仍为空。表级 UPDATE 在数据库层覆盖整表列，应用状态纠正入口仍只修改 `status`、`updated_at`，不得描述为数据库两列权限约束。platform admin 不获得这两项 UPDATE，也不得取得 Records content 读取权或 immutable history UPDATE。
 - admission 只验证 compiled migration-owned surface：database、managed schema、relation/view/sequence/function、ledger/manifest、role attributes/membership、owner、direct/effective/column/default ACL 和 function hardening。current convergence 的 placement、fresh-state 与 legacy-ledger companion-object preflight 均以完整 `(schema, object identity)` tuple 检查 relation/function；不同 managed schema 可声明同名对象，无关 schema 中的同名 relation、同名 function 或其他 overload 也不属于 managed tuple。冻结 R1 的历史裸名称 shadow rejection 保持不变。managed private schema 内 unknown object 仍是 drift；无关 schema/object 与 unrelated-owner default ACL 必须接受。
 - PostgreSQL 16 `pgcrypto` 必须安装在 `record_platform_internal`；若 extension 已在其他 schema 则 fail closed。extension-member procedure 按 OID 识别，并对普通 managed owner/direct/effective/function reader 保持 opaque，因为受限 migrator 不能可靠改写 bootstrap-owned member ACL。opacity 绝不产生 reachability：`PUBLIC`、runtime、admin 对 `record_platform_internal` 都没有 `USAGE` 或 `CREATE`；同一 admission snapshot 还会拒绝同时具有 schema `USAGE` 与 function `EXECUTE` 的 reachable opaque member。migrator-owned helper/projector 仍必须显式 revoke `PUBLIC`。
-- `AdmitAppACLCurrentRuntime` 精确开启一个 `REPEATABLE READ READ ONLY` transaction。在同一 snapshot 中交叉校验 direct identity、manifest/head、exact applied source、current privileges 与 compiled catalog。它不执行 DDL/DCL、不调用 writer；失败时 center/importer 关闭 pool，不得回退到 owner migration 或 warning-only dry-run。
+- `AdmitAppACLCurrentRuntime` 精确开启一个 `REPEATABLE READ READ ONLY` transaction。先识别并验证完整已注册链；旧 P62/P64 起点返回需要 successor convergence 的 typed 拒绝，仅 C66 终点再比较 current privileges 并验证 catalog。它不执行 DDL/DCL、不调用 writer、不读取 migrator 凭据；失败时 center/importer 关闭 pool，不得回退到 owner migration 或 warning-only dry-run。
 
 ### 4. Validation & Error Matrix
 
@@ -45,8 +46,8 @@
 | exact current：source/manifest/catalog 全匹配 | migrate 与 runtime 都成功；repeat 前后 durable snapshot 深相等。 |
 | applied/manifest source 数量、filename 或 raw-byte checksum 不同 | `errors.Is(err, ErrDevelopmentDatabaseRebuildRequired)`；catalog read 与所有 durable write 为 0。 |
 | nullable historical head、未注册 predecessor 或未知 successor revision | rebuild-required；不得 generic-adopt、repair 或读取 catalog。 |
-| exact v0.79.4 `0062` revision-1 predecessor | 在单个 `SERIALIZABLE` transaction 内完成0063、0064 preflight/apply/product+catalog verify、revision-2 insert与head CAS；任一失败整体回滚。 |
-| registered revision-2 exact successor | convergence/runtime均只读验证成功；repeat前后 durable snapshot深相等。 |
+| 注册 P62/P64 发布起点 | 旧 catalog 先验，按 exact suffix 升级、事务 DCL、revision 2/3 追加与 head CAS；任一阶段失败整体回滚。runtime 只拒绝，不自行升级。 |
+| 注册 revision 2/3 exact C66 successor | convergence/runtime 均只读验证成功；repeat 前后 durable snapshot 深相等。 |
 | malformed manifest chain、exact-source catalog/owner/ACL/function drift | 返回具体 fail-closed corruption/catalog error；不得误标为 rebuild-required。 |
 | 任一 role 不是不同的直接 constrained `LOGIN NOINHERIT` role，具有 direct/recursive membership，或 `session_user != current_user` | 在 scoped migration/admission 前 fail closed。`SET ROLE` runtime snapshot 精确拒绝为 `session user %q does not match current user %q`。 |
 | current compiler output 与 persisted privileges 不同，或 runtime/admin 取得未编译 privilege | catalog/manifest drift，拒绝。runtime/admin 对 base projector 的 direct call 返回 SQLSTATE `42501`。 |
@@ -61,8 +62,8 @@
 ### 5. Good / Base / Bad Cases
 
 - Good：两个 flag 都关闭时保留 legacy migration；records-on/delete-off 时 direct migrator fresh converge exact current，direct runtime 在 repository 打开前通过 current one-snapshot admission。
-- Base：当前 embedded set 是冻结 52-source r1 prefix 加 `0052…0064` 共13个exact fragments；fresh convergence 写入 current revision-1 genesis，exact repeat 和 direct runtime admission均不改 durable state。
-- Good：独立v0.79.4 golden逐字匹配的0062 revision-1由唯一注册transition升级到0064 revision-2；settings/index/catalog验证早于manifest发布，repeat只读。
+- Base：当前 embedded set 是冻结 52-source r1 prefix 加 `0052…0066` 共 15 个 exact fragments；fresh convergence 写入 current revision-1 genesis，exact repeat 和 direct runtime admission 均不改 durable state。
+- Good：独立 P62/P64 profile 验证后沿三个明确起点升级至 C66，旧 catalog、业务变更与新 catalog 全部成功才发布后继；repeat 只读。
 - Good：未来 child 同 PR 添加 `0053+` SQL 与 exact fragment；compiler 在 transaction 前证明一一覆盖，fresh database 自动消费新 source 与 catalog contract。
 - Good：binary 已嵌入 `0052+`，strict R2 PostgreSQL anchor 中的 R1 fixture 仍可调用 frozen `AdmitAppACLRuntime`；admission 只消费 validated R1 prefix，而 current admission 独立消费完整 current set。
 - Good：fragment callback 在 source compile 返回 privilege slice 后，调用方修改 captured slice 或 callback 自身状态；current catalog 仍使用首次物化的深拷贝结果，callback 不会再次执行。
@@ -93,7 +94,8 @@
     -run '^TestPostgresIntegrationAppACLCurrent$' -count=1
   ```
 
-  断言 fresh + direct runtime、exact repeat、独立v0.79.4 predecessor→0064 revision-2、revision-2 repeat、settings global `3→12`/custom `20`/override 保留、除 `incident_defaults`/`updated_at` 外整行settings逐字节逻辑等价、heartbeat rows不变、0063 exact index、Records/attachment readback与runtime admission；错误同名index、released default漂移、非允许settings漂移和partial effect必须零写或整事务rollback。每个predecessor fixture独立持有singleton settings，repeat前后 durable snapshot深相等；wrapper输出不得含 `SKIP`。
+  断言 fresh + direct runtime、三个发布起点升级至 C66 revision 2/3、所有 target repeat、P64 自定义数据库/角色、历史 manifest 字节不变；P62 settings global `3→12`/custom `20`/override 保留、除 `incident_defaults`/`updated_at` 外整行逻辑等价，P64 完整 settings 不变；heartbeat rows、0063 exact index、0065 snapshot/0066 约束、Records readback 与 runtime admission。错误同名 index、released default 漂移、非允许 settings 漂移、旧 catalog 漂移必须零写；至少两个 DCL 切点及 manifest/head 故障证明 schema/ACL/ledger/manifest 完整回滚，重试无残留。repeat 前后 durable snapshot 深相等；wrapper 输出不得含 `SKIP`。
+  `TestVPSStateRepairRuntimeACLDependencyCorrectionAndCancellation` 使用直接受限 runtime 登录覆盖服务 unknown→retired、域名 unknown→paused、空依赖 VPS preview/cancellation、元数据不变、审计原因与前后状态、同态不重复、audit 失败回滚、runtime DELETE 与 admin UPDATE 的 42501 拒绝。
 - Frozen regression：完整 migrate package run 必须保留 `ConvergeAppACLR1` null-head adoption、`AdmitAppACLRuntime` one-snapshot，以及 isolated R2 bootstrap/finalize/runtime suites；current product caller 不得路由到它们。strict `TestPostgresIntegrationAppACLR2` 的 R1 reader/runtime subtest 必须在 binary 已嵌入 `0052+` 时实际调用 `AdmitAppACLRuntime` 并通过，不能只测 injected verifier 或 zero-test compile。
 - Full gate 与 static writer audit：
 

@@ -14,6 +14,7 @@ import { ActionConfirmationModal } from '../../components/ActionConfirmationModa
 import type {
   ActiveIncidentRecord,
   HostSample,
+  GlobalActionConfirmation,
   MonitoringInstanceOnboardingState,
   MonitoringInstanceManagementReview,
   MonitoringInstanceRecord,
@@ -115,7 +116,8 @@ type MonitoringDetailPageBodyProps = {
   managementError: string | null
   managementSubmittingAction: 'retire' | 'restore-lifecycle' | 'archive' | 'restore-archive' | 'permanent-cleanup' | null
   managementActionError: string | null
-  onRuntimeAction: (action: MonitoringInstanceRuntimeAction, confirmed?: boolean) => void
+  pauseConfirmationReset: number
+  onRuntimeAction: (action: MonitoringInstanceRuntimeAction, confirmed?: boolean, confirmation?: GlobalActionConfirmation) => void
   onCancelRuntimeConfirmation: () => void
   registerActionRef: (action: MonitoringInstanceRuntimeAction, element: HTMLButtonElement | null) => void
   onMetadataGroupDraftChange: (value: string) => void
@@ -125,11 +127,11 @@ type MonitoringDetailPageBodyProps = {
   onMetadataCancelEdit: () => void
   onMetadataSubmit: (event: FormEvent<HTMLFormElement>) => void
   onManagementLoadReview: (force?: boolean) => void
-  onManagementRetire: (reason: string) => void
-  onManagementRestoreLifecycle: (reason: string) => void
-  onManagementArchive: (reason: string, confirmationName: string) => void
-  onManagementRestoreArchive: () => void
-  onManagementPermanentCleanup: (reason: string, confirmationName: string) => void
+  onManagementRetire: (reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
+  onManagementRestoreLifecycle: (reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
+  onManagementArchive: (reason: string, confirmationName: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
+  onManagementRestoreArchive: (confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
+  onManagementPermanentCleanup: (reason: string, confirmationName: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
   incidents: ActiveIncidentRecord[]
   incidentsError: string | null
   events: StateChangeEventRecord[]
@@ -210,6 +212,7 @@ export function MonitoringDetailPageBody({
   managementError,
   managementSubmittingAction,
   managementActionError,
+  pauseConfirmationReset,
   onRuntimeAction,
   onCancelRuntimeConfirmation,
   registerActionRef,
@@ -338,6 +341,7 @@ export function MonitoringDetailPageBody({
                 error={managementError}
                 submittingAction={managementSubmittingAction}
                 actionError={managementActionError}
+                confirmationResetKey={pauseConfirmationReset}
                 onLoadReview={onManagementLoadReview}
                 onRetire={onManagementRetire}
                 onRestoreLifecycle={onManagementRestoreLifecycle}
@@ -370,7 +374,7 @@ export function MonitoringDetailPageBody({
         incidentsLoaded={incidentsLoaded}
         incidentsRetrying={incidentsRetrying}
         onRetryIncidents={onRetryIncidents}
-        runtimeError={runtimeError}
+        runtimeError={pendingRuntimeConfirmation ? null : runtimeError}
         runtimeFactsError={runtimeFactsError}
         runtimeFactsLoading={runtimeFactsLoading}
         hasRetainedRuntimeFacts={Boolean(runtimeFacts)}
@@ -418,9 +422,16 @@ export function MonitoringDetailPageBody({
 
       {pendingRuntimeConfirmation?.action === 'pause' ? (
         <MonitoringInstanceRuntimePauseConfirmation
+          monitoringInstanceId={monitoringInstance.monitoring_instance_id}
           monitoringStatus={pendingRuntimeConfirmation.monitoringStatus}
+          impacts={managementReview?.dependency_impacts ?? []}
+          previewDigest={managementReview?.preview_digest ?? ''}
+          reviewLoaded={managementReview != null && !managementLoading}
+          reviewError={managementError}
+          resetKey={pauseConfirmationReset}
           disabled={runtimeSubmitting}
-          onConfirm={() => onRuntimeAction('pause', true)}
+          error={runtimeError}
+          onConfirm={(confirmation) => onRuntimeAction('pause', true, confirmation)}
           onCancel={onCancelRuntimeConfirmation}
         />
       ) : null}

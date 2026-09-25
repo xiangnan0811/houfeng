@@ -39,6 +39,7 @@ type MonitoringInstanceSummary struct {
 	CurrentPrimaryIssueSummary string     `json:"current_primary_issue_summary"`
 	LinkedAt                   time.Time  `json:"linked_at"`
 	Note                       string     `json:"note"`
+	ArchivedAt                 *time.Time `json:"archived_at,omitempty"`
 }
 
 type VPSSummary struct {

@@ -64,6 +64,7 @@ const monitoringInstanceSelectColumns = `
 	binding_status,
 	coalesce(enrollment_token_hash, ''),
 	enrollment_token_issued_at,
+	enrollment_token_consumed_at,
 	coalesce(sync_token_hash, ''),
 	coalesce(binding_fingerprint, ''),
 	binding_epoch_started_at,
@@ -111,6 +112,7 @@ var monitoringInstanceSelectColumnNames = []string{
 	"binding_status",
 	"coalesce(enrollment_token_hash, '')",
 	"enrollment_token_issued_at",
+	"enrollment_token_consumed_at",
 	"coalesce(sync_token_hash, '')",
 	"coalesce(binding_fingerprint, '')",
 	"binding_epoch_started_at",
@@ -149,6 +151,7 @@ func scanMonitoringInstance(row monitoringInstanceScanner) (monitoringinstances.
 		&record.BindingStatus,
 		&record.EnrollmentTokenHash,
 		&record.EnrollmentTokenIssuedAt,
+		&record.EnrollmentTokenConsumedAt,
 		&record.SyncTokenHash,
 		&record.BindingFingerprint,
 		&record.BindingEpochStartedAt,
@@ -173,8 +176,18 @@ func scanMonitoringInstance(row monitoringInstanceScanner) (monitoringinstances.
 	); err != nil {
 		return monitoringinstances.Record{}, err
 	}
+	record.PendingActionID = nullableStringValue(pendingActionID)
+	record.PendingActionCommandID = nullableStringValue(pendingActionCommandID)
+
 	record.LastAction = lastActionFromRaw(record.LastActionRaw)
 	return record, nil
+}
+
+func nullableStringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func lastActionFromRaw(raw json.RawMessage) *monitoringinstances.LastAction {
@@ -235,6 +248,7 @@ func scanMonitoringInstanceWithPreviousState(row monitoringInstanceScanner) (mon
 		&record.BindingStatus,
 		&record.EnrollmentTokenHash,
 		&record.EnrollmentTokenIssuedAt,
+		&record.EnrollmentTokenConsumedAt,
 		&record.SyncTokenHash,
 		&record.BindingFingerprint,
 		&record.BindingEpochStartedAt,
@@ -260,6 +274,9 @@ func scanMonitoringInstanceWithPreviousState(row monitoringInstanceScanner) (mon
 	); err != nil {
 		return monitoringinstances.Record{}, "", err
 	}
+	record.PendingActionID = nullableStringValue(pendingActionID)
+	record.PendingActionCommandID = nullableStringValue(pendingActionCommandID)
+
 	record.LastAction = lastActionFromRaw(record.LastActionRaw)
 	return record, priorState, nil
 }
@@ -284,6 +301,7 @@ func scanMonitoringInstanceOnboarding(row monitoringInstanceScanner) (monitoring
 		&record.BindingStatus,
 		&record.EnrollmentTokenHash,
 		&record.EnrollmentTokenIssuedAt,
+		&record.EnrollmentTokenConsumedAt,
 		&record.SyncTokenHash,
 		&record.BindingFingerprint,
 		&record.BindingEpochStartedAt,
@@ -310,6 +328,9 @@ func scanMonitoringInstanceOnboarding(row monitoringInstanceScanner) (monitoring
 	); err != nil {
 		return monitoringinstances.OnboardingState{}, err
 	}
+	record.PendingActionID = nullableStringValue(pendingActionID)
+	record.PendingActionCommandID = nullableStringValue(pendingActionCommandID)
+
 	record.LastAction = lastActionFromRaw(record.LastActionRaw)
 
 	state := monitoringinstances.OnboardingState{
@@ -453,11 +474,30 @@ func (r *PostgresMonitoringInstanceRepository) loadMonitoringRecordSubject(
 }
 
 func (r *PostgresMonitoringInstanceRepository) GetMonitoringInstanceManagementReview(ctx context.Context, monitoringInstanceID string) (monitoringinstances.ManagementReview, error) {
-	record, err := r.GetMonitoringInstance(ctx, monitoringInstanceID)
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return monitoringinstances.ManagementReview{}, fmt.Errorf("begin monitoring instance management review transaction for %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		select `+monitoringInstanceSelectColumns+`
+		from monitoring_instances
+		where monitoring_instance_id = $1`, monitoringInstanceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return monitoringinstances.ManagementReview{}, monitoringinstances.ErrMonitoringInstanceNotFound
+	}
+	if err != nil {
+		return monitoringinstances.ManagementReview{}, fmt.Errorf("load monitoring instance management review %q: %w", monitoringInstanceID, err)
+	}
+	review, err := r.buildMonitoringInstanceManagementReview(ctx, tx, record, monitoringInstanceID)
 	if err != nil {
 		return monitoringinstances.ManagementReview{}, err
 	}
-	return r.buildMonitoringInstanceManagementReview(ctx, r.db, record, monitoringInstanceID)
+	if err := tx.Commit(ctx); err != nil {
+		return monitoringinstances.ManagementReview{}, fmt.Errorf("commit monitoring instance management review for %q: %w", monitoringInstanceID, err)
+	}
+	return review, nil
 }
 
 func (r *PostgresMonitoringInstanceRepository) RetireMonitoringInstance(ctx context.Context, monitoringInstanceID string, input monitoringinstances.LifecycleActionInput) (monitoringinstances.Record, error) {
@@ -466,51 +506,36 @@ func (r *PostgresMonitoringInstanceRepository) RetireMonitoringInstance(ctx cont
 		return monitoringinstances.Record{}, monitoringinstances.ErrInvalidManagementInput
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin retire monitoring instance transaction for %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	record, previousLifecycleStatus, err := scanMonitoringInstanceWithPreviousState(tx.QueryRow(ctx, `
-		with prior as (
-			select lifecycle_status
-			from monitoring_instances
-			where monitoring_instance_id = $1
-			for update
-		),
-		updated as (
-			update monitoring_instances
-			set lifecycle_status = '已退役',
-				monitoring_status = '暂停',
-				enrollment_token_hash = null,
-				enrollment_token_issued_at = null,
-				enrollment_token_consumed_at = null,
-				sync_token_hash = '',
-				pending_binding_fingerprint = null,
-				pending_binding_first_seen_at = null,
-				pending_binding_last_seen_at = null,
-				pending_binding_attempt_count = 0,
-				pending_action_id = null,
-				pending_action_command_id = null,
-				updated_at = now()
-			where monitoring_instance_id = $1
-				and archived_at is null
-				and lifecycle_status = (select lifecycle_status from prior)
-			returning *
-		)
-		select `+qualifiedMonitoringInstanceSelectColumns("updated")+`, prior.lifecycle_status
-		from updated
-		join prior on true`,
-		monitoringInstanceID,
-	))
+	current, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		select `+monitoringInstanceSelectColumns+`
+		from monitoring_instances
+		where monitoring_instance_id = $1
+		for update`, monitoringInstanceID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
 	}
 	if err != nil {
-		return monitoringinstances.Record{}, fmt.Errorf("retire monitoring instance %q: %w", monitoringInstanceID, err)
+		return monitoringinstances.Record{}, fmt.Errorf("lock monitoring instance for retirement %q: %w", monitoringInstanceID, err)
 	}
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRetired, "监控实例已退役并暂停监控", reason, previousLifecycleStatus, record.LifecycleStatus, monitoringEventProvenanceWeb); err != nil {
+	if current.ArchivedAt != nil {
+		return monitoringinstances.Record{}, monitoringinstances.ErrArchivedMonitoringInstance
+	}
+	review, err := r.buildMonitoringInstanceManagementReview(ctx, tx, current, monitoringInstanceID)
+	if err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	if err := requireSharedAssetConfirmation(review.DependencyImpacts, review.PreviewDigest, input.GlobalActionConfirmation); err != nil {
+		return monitoringinstances.Record{}, err
+	}
+
+	record, _, err := retireMonitoringInstanceTx(ctx, tx, monitoringInstanceID, reason)
+	if err != nil {
 		return monitoringinstances.Record{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -519,17 +544,129 @@ func (r *PostgresMonitoringInstanceRepository) RetireMonitoringInstance(ctx cont
 	return record, nil
 }
 
+// retireMonitoringInstanceTx reconciles every persisted MI lifecycle invariant
+// without acquiring the graph lock or committing the caller's transaction.
+func retireMonitoringInstanceTx(ctx context.Context, tx pgx.Tx, monitoringInstanceID, reason string) (monitoringinstances.Record, bool, error) {
+	current, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		select `+monitoringInstanceSelectColumns+`
+		from monitoring_instances
+		where monitoring_instance_id = $1
+		for update`, monitoringInstanceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return monitoringinstances.Record{}, false, monitoringinstances.ErrMonitoringInstanceNotFound
+	}
+	if err != nil {
+		return monitoringinstances.Record{}, false, fmt.Errorf("load locked monitoring instance for retirement %q: %w", monitoringInstanceID, err)
+	}
+	if current.ArchivedAt != nil {
+		return monitoringinstances.Record{}, false, monitoringinstances.ErrArchivedMonitoringInstance
+	}
+
+	wantBindingStatus := monitoringinstances.BindingUnbound
+	if current.BindingFingerprint != "" {
+		wantBindingStatus = monitoringinstances.BindingBound
+	}
+	pendingLastAction := current.LastAction != nil && current.LastAction.Status == "pending"
+	changed := current.LifecycleStatus != monitoringinstances.LifecycleRetired ||
+		current.MonitoringStatus != monitoringinstances.MonitoringPaused ||
+		current.EnrollmentTokenHash != "" ||
+		current.EnrollmentTokenIssuedAt != nil ||
+		current.EnrollmentTokenConsumedAt != nil ||
+		current.SyncTokenHash != "" ||
+		current.BindingStatus != wantBindingStatus ||
+		current.PendingBindingFingerprint != "" ||
+		current.PendingBindingFirstSeenAt != nil ||
+		current.PendingBindingLastSeenAt != nil ||
+		current.PendingBindingAttemptCount != 0 ||
+		current.PendingActionID != "" ||
+		current.PendingActionCommandID != "" ||
+		pendingLastAction
+	if !changed {
+		return current, false, nil
+	}
+
+	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		update monitoring_instances
+		set lifecycle_status = $2,
+			monitoring_status = $3,
+			binding_status = $4,
+			enrollment_token_hash = null,
+			enrollment_token_issued_at = null,
+			enrollment_token_consumed_at = null,
+			sync_token_hash = '',
+			pending_binding_fingerprint = null,
+			pending_binding_first_seen_at = null,
+			pending_binding_last_seen_at = null,
+			pending_binding_attempt_count = 0,
+			pending_action_id = null,
+			pending_action_command_id = null,
+			last_action = case when last_action->>'status' = 'pending' then null else last_action end,
+			updated_at = now()
+		where monitoring_instance_id = $1
+			and archived_at is null
+		returning `+monitoringInstanceSelectColumns,
+		monitoringInstanceID,
+		monitoringinstances.LifecycleRetired,
+		monitoringinstances.MonitoringPaused,
+		wantBindingStatus,
+	))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return monitoringinstances.Record{}, false, monitoringinstances.ErrArchivedMonitoringInstance
+	}
+	if err != nil {
+		return monitoringinstances.Record{}, false, fmt.Errorf("reconcile retired monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+
+	if current.LifecycleStatus != monitoringinstances.LifecycleRetired {
+		err = insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRetired, "监控实例已退役并暂停监控", reason, current.LifecycleStatus, record.LifecycleStatus, monitoringEventProvenanceWeb)
+	} else {
+		err = insertMonitoringInstanceRetirementReconciledEvent(ctx, tx, record, reason, monitoringRetirementReconciliation{
+			MonitoringPaused:             current.MonitoringStatus != monitoringinstances.MonitoringPaused,
+			BindingReconciled:            current.BindingStatus != wantBindingStatus,
+			EnrollmentCredentialsRevoked: current.EnrollmentTokenHash != "" || current.EnrollmentTokenIssuedAt != nil || current.EnrollmentTokenConsumedAt != nil,
+			SyncCredentialRevoked:        current.SyncTokenHash != "",
+			PendingBindingCleared:        current.PendingBindingFingerprint != "" || current.PendingBindingFirstSeenAt != nil || current.PendingBindingLastSeenAt != nil || current.PendingBindingAttemptCount != 0,
+			PendingActionCleared:         current.PendingActionID != "" || current.PendingActionCommandID != "" || pendingLastAction,
+		})
+	}
+	if err != nil {
+		return monitoringinstances.Record{}, false, err
+	}
+	return record, true, nil
+}
+
 func (r *PostgresMonitoringInstanceRepository) RestoreMonitoringInstanceLifecycle(ctx context.Context, monitoringInstanceID string, input monitoringinstances.LifecycleActionInput) (monitoringinstances.Record, error) {
 	reason := strings.TrimSpace(input.Reason)
 	if monitoringInstanceID = strings.TrimSpace(monitoringInstanceID); monitoringInstanceID == "" || reason == "" {
 		return monitoringinstances.Record{}, monitoringinstances.ErrInvalidManagementInput
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin restore monitoring instance lifecycle transaction for %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	current, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		select `+monitoringInstanceSelectColumns+`
+		from monitoring_instances
+		where monitoring_instance_id = $1
+		for update`, monitoringInstanceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
+	}
+	if err != nil {
+		return monitoringinstances.Record{}, fmt.Errorf("load monitoring instance before lifecycle restore %q: %w", monitoringInstanceID, err)
+	}
+	if current.ArchivedAt != nil {
+		return monitoringinstances.Record{}, monitoringinstances.ErrArchivedMonitoringInstance
+	}
+	if current.LifecycleStatus != monitoringinstances.LifecycleRetired {
+		return monitoringinstances.Record{}, monitoringinstances.ErrManagementActionBlocked
+	}
+	if _, _, err := retireMonitoringInstanceTx(ctx, tx, monitoringInstanceID, reason); err != nil {
+		return monitoringinstances.Record{}, err
+	}
 
 	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 		update monitoring_instances
@@ -542,9 +679,6 @@ func (r *PostgresMonitoringInstanceRepository) RestoreMonitoringInstanceLifecycl
 		returning `+monitoringInstanceSelectColumns,
 		monitoringInstanceID,
 	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return monitoringinstances.Record{}, monitoringinstances.ErrManagementActionBlocked
-	}
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("restore monitoring instance lifecycle %q: %w", monitoringInstanceID, err)
 	}
@@ -564,7 +698,7 @@ func (r *PostgresMonitoringInstanceRepository) ArchiveMonitoringInstance(ctx con
 		return monitoringinstances.Record{}, monitoringinstances.ErrInvalidManagementInput
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin archive monitoring instance transaction for %q: %w", monitoringInstanceID, err)
 	}
@@ -586,12 +720,21 @@ func (r *PostgresMonitoringInstanceRepository) ArchiveMonitoringInstance(ctx con
 	if strings.TrimSpace(current.DisplayName) != confirmationName {
 		return monitoringinstances.Record{}, monitoringinstances.ErrInvalidManagementInput
 	}
+	if current.LifecycleStatus == monitoringinstances.LifecycleRetired {
+		current, _, err = retireMonitoringInstanceTx(ctx, tx, monitoringInstanceID, reason)
+		if err != nil {
+			return monitoringinstances.Record{}, err
+		}
+	}
 	review, err := r.buildMonitoringInstanceManagementReview(ctx, tx, current, monitoringInstanceID)
 	if err != nil {
 		return monitoringinstances.Record{}, err
 	}
-	if !review.Actions.CanArchive {
+	if !review.ActionReviews[monitoringinstances.ManagementActionArchive].Allowed {
 		return monitoringinstances.Record{}, monitoringinstances.ErrManagementActionBlocked
+	}
+	if err := requireSharedAssetConfirmation(review.DependencyImpacts, review.PreviewDigest, input.GlobalActionConfirmation); err != nil {
+		return monitoringinstances.Record{}, err
 	}
 
 	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
@@ -609,6 +752,7 @@ func (r *PostgresMonitoringInstanceRepository) ArchiveMonitoringInstance(ctx con
 			pending_binding_attempt_count = 0,
 			pending_action_id = null,
 			pending_action_command_id = null,
+			last_action = case when last_action->>'status' = 'pending' then null else last_action end,
 			updated_at = now()
 		where monitoring_instance_id = $1
 			and archived_at is null
@@ -637,12 +781,30 @@ func (r *PostgresMonitoringInstanceRepository) RestoreMonitoringInstanceFromArch
 		return monitoringinstances.Record{}, monitoringinstances.ErrInvalidManagementInput
 	}
 
-	record, err := scanMonitoringInstance(r.db.QueryRow(ctx, `
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return monitoringinstances.Record{}, fmt.Errorf("begin restore monitoring instance archive transaction for %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 		update monitoring_instances
 		set archived_at = null,
 			archived_reason = '',
 			lifecycle_status = '观察中',
 			monitoring_status = '暂停',
+			binding_status = case when coalesce(binding_fingerprint, '') <> '' then '已绑定' else '未绑定' end,
+			enrollment_token_hash = null,
+			enrollment_token_issued_at = null,
+			enrollment_token_consumed_at = null,
+			sync_token_hash = '',
+			pending_binding_fingerprint = null,
+			pending_binding_first_seen_at = null,
+			pending_binding_last_seen_at = null,
+			pending_binding_attempt_count = 0,
+			pending_action_id = null,
+			pending_action_command_id = null,
+			last_action = case when last_action->>'status' = 'pending' then null else last_action end,
 			updated_at = now()
 		where monitoring_instance_id = $1
 			and archived_at is not null
@@ -650,10 +812,17 @@ func (r *PostgresMonitoringInstanceRepository) RestoreMonitoringInstanceFromArch
 		monitoringInstanceID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		return monitoringinstances.Record{}, monitoringinstances.ErrManagementActionBlocked
+		missErr := mapMonitoringInstanceArchiveStateMiss(ctx, tx, monitoringInstanceID, monitoringinstances.ErrManagementActionBlocked)
+		return monitoringinstances.Record{}, missErr
 	}
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("restore monitoring instance from archive %q: %w", monitoringInstanceID, err)
+	}
+	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, record, incidents.EventMonitoringInstanceRestoredFromArchive, "监控实例已从归档恢复为观察中并保持暂停", "", "archived", "unarchived", monitoringEventProvenanceWeb); err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return monitoringinstances.Record{}, fmt.Errorf("commit restore monitoring instance from archive %q: %w", monitoringInstanceID, err)
 	}
 	return record, nil
 }
@@ -665,7 +834,7 @@ func (r *PostgresMonitoringInstanceRepository) PermanentCleanupMonitoringInstanc
 		return monitoringinstances.PermanentCleanupResult{}, monitoringinstances.ErrInvalidManagementInput
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.PermanentCleanupResult{}, fmt.Errorf("begin permanent cleanup monitoring instance transaction for %q: %w", monitoringInstanceID, err)
 	}
@@ -692,8 +861,11 @@ func (r *PostgresMonitoringInstanceRepository) PermanentCleanupMonitoringInstanc
 	if err != nil {
 		return monitoringinstances.PermanentCleanupResult{}, err
 	}
-	if !review.Actions.CanPermanentCleanup {
+	if !review.ActionReviews[monitoringinstances.ManagementActionPermanentCleanup].Allowed {
 		return monitoringinstances.PermanentCleanupResult{}, monitoringinstances.ErrManagementActionBlocked
+	}
+	if err := requireSharedAssetConfirmation(review.DependencyImpacts, review.PreviewDigest, input.GlobalActionConfirmation); err != nil {
+		return monitoringinstances.PermanentCleanupResult{}, err
 	}
 
 	var deletedReferences int64
@@ -739,15 +911,30 @@ func (r *PostgresMonitoringInstanceRepository) buildMonitoringInstanceManagement
 	if err != nil {
 		return monitoringinstances.ManagementReview{}, err
 	}
+	impacts, err := loadAssetDependencyImpacts(ctx, queryer, []string{monitoringInstanceID}, nil)
+	if err != nil {
+		return monitoringinstances.ManagementReview{}, err
+	}
 	counts.ActiveVPSLinkCount = len(links)
 
+	archivedAt := ""
+	if record.ArchivedAt != nil {
+		archivedAt = record.ArchivedAt.UTC().Format(time.RFC3339Nano)
+	}
 	review := monitoringinstances.ManagementReview{
 		Record:                record,
 		ActiveVPSLinks:        links,
 		Counts:                counts,
+		DependencyImpacts:     impacts,
 		EmptyMistakeCandidate: counts.EvidenceCount() == 0,
 	}
-	review.Warnings, review.Blockers, review.Actions = deriveMonitoringInstanceManagementFindings(review)
+	review.PreviewDigest = digestAssetManagementReview(
+		"monitoring_instance",
+		monitoringInstanceID,
+		[]string{record.LifecycleStatus, record.MonitoringStatus, record.BindingStatus, archivedAt},
+		impacts,
+	)
+	review.ActionReviews = deriveMonitoringInstanceManagementFindings(review)
 	return review, nil
 }
 
@@ -829,43 +1016,96 @@ func queryMonitoringInstanceManagementVPSLinks(ctx context.Context, queryer moni
 	return links, nil
 }
 
-func deriveMonitoringInstanceManagementFindings(review monitoringinstances.ManagementReview) ([]string, []string, monitoringinstances.ManagementActions) {
-	warnings := make([]string, 0)
-	blockers := make([]string, 0)
-	actions := monitoringinstances.ManagementActions{}
-
+func deriveMonitoringInstanceManagementFindings(review monitoringinstances.ManagementReview) map[string]monitoringinstances.ManagementActionReview {
 	record := review.Record
 	archived := record.ArchivedAt != nil
-	hasLiveVPSLink := false
-	for _, link := range review.ActiveVPSLinks {
-		if link.LifecycleStatus != "cancelled" && link.LifecycleStatus != "archived" {
-			hasLiveVPSLink = true
+
+	hasCurrentVPSLink := false
+	for _, impact := range review.DependencyImpacts {
+		if impact.ObjectType == "monitoring_instance" &&
+			impact.RelationType == "monitoring_instance_link" &&
+			impact.Classification == assetlinks.DependencyCurrent {
+			hasCurrentVPSLink = true
 			break
 		}
 	}
 
-	actions.CanRetire = !archived && record.LifecycleStatus != monitoringinstances.LifecycleRetired
-	actions.CanRestoreLifecycle = !archived && record.LifecycleStatus == monitoringinstances.LifecycleRetired
-	actions.CanRestoreArchive = archived
-	actions.CanArchive = !archived && record.LifecycleStatus == monitoringinstances.LifecycleRetired && !hasLiveVPSLink
-	actions.CanPermanentCleanup = review.EmptyMistakeCandidate || archived
+	retireBlockers := make([]string, 0, 1)
+	if archived {
+		retireBlockers = append(retireBlockers, "已归档监控实例不能直接退役")
+	}
+	restoreBlockers := make([]string, 0, 1)
+	if archived {
+		restoreBlockers = append(restoreBlockers, "请先从归档恢复监控实例")
+	} else if record.LifecycleStatus != monitoringinstances.LifecycleRetired {
+		restoreBlockers = append(restoreBlockers, "仅已退役监控实例可恢复生命周期")
+	}
+	restoreArchiveBlockers := make([]string, 0, 1)
+	if !archived {
+		restoreArchiveBlockers = append(restoreArchiveBlockers, "监控实例当前未归档")
+	}
+	archiveBlockers := make([]string, 0, 2)
+	if archived {
+		archiveBlockers = append(archiveBlockers, "监控实例已归档")
+	} else if record.LifecycleStatus != monitoringinstances.LifecycleRetired {
+		archiveBlockers = append(archiveBlockers, "归档前需要先退役监控实例")
+	}
+	if hasCurrentVPSLink {
+		archiveBlockers = append(archiveBlockers, "存在仍在当前工作集的 VPS 关联")
+	}
 
-	if hasLiveVPSLink {
-		blockers = append(blockers, "存在仍在当前工作集的 VPS 关联")
+	cleanupBlockers := make([]string, 0, 1)
+	if !archived && !review.EmptyMistakeCandidate {
+		cleanupBlockers = append(cleanupBlockers, "存在监控历史或审计引用，永久清理前需要先归档")
 	}
-	if !archived && !review.EmptyMistakeCandidate && review.Counts.EvidenceCount() > 0 {
-		blockers = append(blockers, "存在监控历史或审计引用，永久清理前需要先归档")
-	}
-	if !archived && record.LifecycleStatus != monitoringinstances.LifecycleRetired {
-		warnings = append(warnings, "归档前需要先退役监控实例")
-	}
+	cleanupWarnings := make([]string, 0, 2)
 	if review.EmptyMistakeCandidate {
-		warnings = append(warnings, "该实例没有观测或审计证据，可作为误创建实例清理")
+		cleanupWarnings = append(cleanupWarnings, "该实例没有观测或审计证据，可作为误创建实例清理")
 	}
-	return warnings, blockers, actions
+	if len(review.ActiveVPSLinks) > 0 {
+		cascadeLinks := make([]string, 0, len(review.ActiveVPSLinks))
+		for _, link := range review.ActiveVPSLinks {
+			cascadeLinks = append(cascadeLinks, fmt.Sprintf("%s（%s）", link.DisplayName, link.VPSID))
+		}
+		cleanupWarnings = append(cleanupWarnings, "永久清理会级联解除 VPS 关联："+strings.Join(cascadeLinks, "、"))
+	}
+
+	return map[string]monitoringinstances.ManagementActionReview{
+		monitoringinstances.ManagementActionRetire: {
+			Allowed:  len(retireBlockers) == 0,
+			Blockers: retireBlockers,
+			Warnings: []string{},
+		},
+		monitoringinstances.ManagementActionRestore: {
+			Allowed:  len(restoreBlockers) == 0,
+			Blockers: restoreBlockers,
+			Warnings: []string{},
+		},
+		monitoringinstances.ManagementActionArchive: {
+			Allowed:  len(archiveBlockers) == 0,
+			Blockers: archiveBlockers,
+			Warnings: []string{},
+		},
+		monitoringinstances.ManagementActionRestoreFromArchive: {
+			Allowed:  len(restoreArchiveBlockers) == 0,
+			Blockers: restoreArchiveBlockers,
+			Warnings: []string{"恢复后为观察中且监控暂停，需显式重新接入并恢复监控"},
+		},
+		monitoringinstances.ManagementActionPermanentCleanup: {
+			Allowed:  len(cleanupBlockers) == 0,
+			Blockers: cleanupBlockers,
+			Warnings: cleanupWarnings,
+		},
+	}
 }
 
 func (r *PostgresMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(ctx context.Context, monitoringInstanceID string, input monitoringinstances.UpdateMetadataInput) (monitoringinstances.Record, error) {
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return monitoringinstances.Record{}, fmt.Errorf("begin update monitoring instance metadata transaction for %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	args := []any{monitoringInstanceID}
 	if input.Group != nil {
 		args = append(args, *input.Group)
@@ -880,7 +1120,7 @@ func (r *PostgresMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(
 		  and updated_at = $5`
 	}
 
-	record, err := scanMonitoringInstance(r.db.QueryRow(ctx, `
+	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 		update monitoring_instances
 		set "group" = coalesce($2, "group"),
 		    labels = $3,
@@ -890,21 +1130,17 @@ func (r *PostgresMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(
 		  and archived_at is null
 		returning `+monitoringInstanceSelectColumns, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
-		archived, archiveErr := monitoringInstanceArchived(ctx, r.db, monitoringInstanceID)
-		if archiveErr != nil {
-			return monitoringinstances.Record{}, fmt.Errorf("check monitoring instance metadata archive state %q: %w", monitoringInstanceID, archiveErr)
+		exists, archived, stateErr := monitoringInstanceArchiveState(ctx, tx, monitoringInstanceID)
+		if stateErr != nil {
+			return monitoringinstances.Record{}, fmt.Errorf("check monitoring instance metadata state %q: %w", monitoringInstanceID, stateErr)
+		}
+		if !exists {
+			return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
 		}
 		if archived {
 			return monitoringinstances.Record{}, monitoringinstances.ErrArchivedMonitoringInstance
 		}
 		if input.ExpectedUpdatedAt != nil {
-			exists, existsErr := r.monitoringInstanceExists(ctx, monitoringInstanceID)
-			if existsErr != nil {
-				return monitoringinstances.Record{}, fmt.Errorf("check monitoring instance metadata conflict %q: %w", monitoringInstanceID, existsErr)
-			}
-			if !exists {
-				return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
-			}
 			return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceMetadataConflict
 		}
 		return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
@@ -912,16 +1148,28 @@ func (r *PostgresMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("update monitoring instance metadata %q: %w", monitoringInstanceID, err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return monitoringinstances.Record{}, fmt.Errorf("commit monitoring instance metadata update %q: %w", monitoringInstanceID, err)
+	}
 	return record, nil
 }
 
 func (r *PostgresMonitoringInstanceRepository) CreateMonitoringInstance(ctx context.Context, input monitoringinstances.CreateInput) (monitoringinstances.Record, error) {
+	if strings.TrimSpace(input.LifecycleStatus) == monitoringinstances.LifecycleRetired {
+		return monitoringinstances.Record{}, fmt.Errorf("%w: retired monitoring instances must be retired through the dedicated retirement flow", monitoringinstances.ErrInvalidCreateInput)
+	}
 	monitoringInstanceID, err := ids.New("mi")
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("generate monitoring instance id: %w", err)
 	}
 
-	record, err := scanMonitoringInstance(r.db.QueryRow(ctx, `
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return monitoringinstances.Record{}, fmt.Errorf("begin create monitoring instance transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
 		insert into monitoring_instances (
 			monitoring_instance_id,
 			display_name,
@@ -970,6 +1218,9 @@ func (r *PostgresMonitoringInstanceRepository) CreateMonitoringInstance(ctx cont
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("create monitoring instance: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return monitoringinstances.Record{}, fmt.Errorf("commit create monitoring instance %q: %w", monitoringInstanceID, err)
+	}
 	return record, nil
 }
 
@@ -978,7 +1229,7 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstance(ct
 		return monitoringinstances.Record{}, assetlinks.Record{}, assetlinks.ErrInvalidVPSMonitoringInstanceLinkInput
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, fmt.Errorf("begin linked monitoring instance transaction for vps %q: %w", vpsID, err)
 	}
@@ -1019,7 +1270,7 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstanceIde
 		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("begin linked monitoring instance create transaction: %w", err)
 	}
@@ -1066,6 +1317,9 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstanceIde
 		return monitoringinstances.Record{}, assetlinks.Record{}, false, fmt.Errorf("lookup linked monitoring instance create receipt: %w", err)
 	}
 
+	if err := lockVPSLifecycleForLinkedMonitoringInstanceCreate(ctx, tx, vpsID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
 	defaults, err := loadLinkedMonitoringInstanceVPSDefaults(ctx, tx, vpsID)
 	if err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
@@ -1073,6 +1327,9 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstanceIde
 	input, linkNote := deriveLinkedMonitoringInstanceCreateInput(vpsID, wireIdentity, defaults)
 	input = monitoringinstances.NormalizeCreateInput(input)
 	if err := monitoringinstances.ValidateCreateInput(input); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
+	}
+	if err := rejectRetiredLinkedMonitoringInstanceCreate(input); err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
 	}
 	if err := monitoringinstances.ValidateCreateInputMetadata(input); err != nil {
@@ -1195,10 +1452,40 @@ func insertLinkedMonitoringInstance(
 	input monitoringinstances.CreateInput,
 	linkNote string,
 ) (monitoringinstances.Record, assetlinks.Record, error) {
-	if err := lockVPSAndRejectActiveMonitoringLink(ctx, tx, vpsID); err != nil {
+	if err := lockVPSForLinkedMonitoringInstanceCreate(ctx, tx, vpsID); err != nil {
+		return monitoringinstances.Record{}, assetlinks.Record{}, err
+	}
+	if err := rejectRetiredLinkedMonitoringInstanceCreate(input); err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, err
 	}
 	return insertLinkedMonitoringInstanceRows(ctx, tx, vpsID, input, linkNote)
+}
+
+func lockVPSForLinkedMonitoringInstanceCreate(ctx context.Context, tx pgx.Tx, vpsID string) error {
+	if err := lockVPSLifecycleForLinkedMonitoringInstanceCreate(ctx, tx, vpsID); err != nil {
+		return err
+	}
+	return rejectActiveMonitoringLink(ctx, tx, vpsID)
+}
+
+func lockVPSLifecycleForLinkedMonitoringInstanceCreate(ctx context.Context, tx pgx.Tx, vpsID string) error {
+	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, vpsID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assetlinks.ErrVPSMonitoringInstanceLinkNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock vps %q before linked monitoring instance create: %w", vpsID, err)
+	}
+	if isTerminalVPSLifecycle(lifecycle) {
+		return fmt.Errorf("%w: terminal vps %q cannot accept a monitoring instance link", assetlinks.ErrVPSMonitoringInstanceLinkConflict, vpsID)
+	}
+	return nil
+}
+func rejectRetiredLinkedMonitoringInstanceCreate(input monitoringinstances.CreateInput) error {
+	if strings.TrimSpace(input.LifecycleStatus) == monitoringinstances.LifecycleRetired {
+		return fmt.Errorf("%w: retired monitoring instance must be restored before linking", assetlinks.ErrVPSMonitoringInstanceLinkConflict)
+	}
+	return nil
 }
 
 func insertLinkedMonitoringInstanceRows(
@@ -1307,8 +1594,14 @@ func (r *PostgresMonitoringInstanceRepository) IssueMonitoringInstanceEnrollment
 		return monitoringinstances.EnrollmentTokenIssue{}, fmt.Errorf("generate enrollment token: %w", err)
 	}
 
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return monitoringinstances.EnrollmentTokenIssue{}, fmt.Errorf("begin issue enrollment token transaction for %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var issuedAt time.Time
-	if err := r.db.QueryRow(ctx, `
+	if err := tx.QueryRow(ctx, `
 		update monitoring_instances
 		set enrollment_token_hash = $2,
 			enrollment_token_issued_at = now(),
@@ -1316,20 +1609,17 @@ func (r *PostgresMonitoringInstanceRepository) IssueMonitoringInstanceEnrollment
 			updated_at = now()
 		where monitoring_instance_id = $1
 			and archived_at is null
+			and lifecycle_status <> '已退役'
 		returning enrollment_token_issued_at`,
 		monitoringInstanceID,
 		r.tokenHasher.hashEnrollmentToken(token),
 	).Scan(&issuedAt); errors.Is(err, pgx.ErrNoRows) {
-		archived, archiveErr := monitoringInstanceArchived(ctx, r.db, monitoringInstanceID)
-		if archiveErr != nil {
-			return monitoringinstances.EnrollmentTokenIssue{}, fmt.Errorf("issue enrollment token for monitoring instance %q: %w", monitoringInstanceID, archiveErr)
-		}
-		if archived {
-			return monitoringinstances.EnrollmentTokenIssue{}, monitoringinstances.ErrArchivedMonitoringInstance
-		}
-		return monitoringinstances.EnrollmentTokenIssue{}, monitoringinstances.ErrMonitoringInstanceNotFound
+		return monitoringinstances.EnrollmentTokenIssue{}, mapMonitoringInstanceArchiveStateMiss(ctx, tx, monitoringInstanceID, monitoringinstances.ErrMonitoringInstanceNotFound)
 	} else if err != nil {
 		return monitoringinstances.EnrollmentTokenIssue{}, fmt.Errorf("issue enrollment token for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return monitoringinstances.EnrollmentTokenIssue{}, fmt.Errorf("commit issue enrollment token for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
 	return monitoringinstances.EnrollmentTokenIssue{
@@ -1429,6 +1719,13 @@ func mapMonitoringInstanceArchiveStateMiss(ctx context.Context, queryer monitori
 	if !exists {
 		return monitoringinstances.ErrMonitoringInstanceNotFound
 	}
+	var lifecycleStatus string
+	if err := queryer.QueryRow(ctx, `select lifecycle_status from monitoring_instances where monitoring_instance_id = $1`, monitoringInstanceID).Scan(&lifecycleStatus); err != nil {
+		return fmt.Errorf("check monitoring instance %q lifecycle status: %w", monitoringInstanceID, err)
+	}
+	if lifecycleStatus == monitoringinstances.LifecycleRetired {
+		return monitoringinstances.ErrRetiredMonitoringInstance
+	}
 	return fallback
 }
 
@@ -1492,7 +1789,7 @@ func insertMonitoringInstanceBindingEvent(
 }
 
 func (r *PostgresMonitoringInstanceRepository) ConfirmMonitoringInstanceRebind(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin confirm monitoring instance rebind transaction for %q: %w", monitoringInstanceID, err)
 	}
@@ -1517,6 +1814,7 @@ func (r *PostgresMonitoringInstanceRepository) ConfirmMonitoringInstanceRebind(c
 			and binding_status = '指纹变更待确认'
 			and coalesce(pending_binding_fingerprint, '') <> ''
 			and archived_at is null
+			and lifecycle_status <> '已退役'
 		returning `+monitoringInstanceSelectColumns,
 		monitoringInstanceID,
 	))
@@ -1556,7 +1854,7 @@ func (r *PostgresMonitoringInstanceRepository) ConfirmMonitoringInstanceRebind(c
 }
 
 func (r *PostgresMonitoringInstanceRepository) RejectPendingFingerprint(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin reject pending fingerprint transaction for %q: %w", monitoringInstanceID, err)
 	}
@@ -1576,6 +1874,7 @@ func (r *PostgresMonitoringInstanceRepository) RejectPendingFingerprint(ctx cont
 			and binding_status = '指纹变更待确认'
 			and coalesce(pending_binding_fingerprint, '') <> ''
 			and archived_at is null
+			and lifecycle_status <> '已退役'
 		returning `+monitoringInstanceSelectColumns,
 		monitoringInstanceID,
 	))
@@ -1615,7 +1914,7 @@ func (r *PostgresMonitoringInstanceRepository) RejectPendingFingerprint(ctx cont
 }
 
 func (r *PostgresMonitoringInstanceRepository) ResetMonitoringInstanceBinding(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin reset monitoring instance binding transaction for %q: %w", monitoringInstanceID, err)
 	}
@@ -1645,6 +1944,7 @@ func (r *PostgresMonitoringInstanceRepository) ResetMonitoringInstanceBinding(ct
 				updated_at = now()
 			where monitoring_instance_id = $1
 				and archived_at is null
+				and lifecycle_status <> '已退役'
 				and binding_status = (select binding_status from prior)
 			returning *
 		)
@@ -1654,14 +1954,7 @@ func (r *PostgresMonitoringInstanceRepository) ResetMonitoringInstanceBinding(ct
 		monitoringInstanceID,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		archived, archiveErr := monitoringInstanceArchived(ctx, tx, monitoringInstanceID)
-		if archiveErr != nil {
-			return monitoringinstances.Record{}, fmt.Errorf("reset monitoring instance binding for %q: %w", monitoringInstanceID, archiveErr)
-		}
-		if archived {
-			return monitoringinstances.Record{}, monitoringinstances.ErrArchivedMonitoringInstance
-		}
-		return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
+		return monitoringinstances.Record{}, mapMonitoringInstanceArchiveStateMiss(ctx, tx, monitoringInstanceID, monitoringinstances.ErrInvalidBindingTransition)
 	}
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("reset monitoring instance binding for %q: %w", monitoringInstanceID, err)
@@ -1747,6 +2040,77 @@ func insertMonitoringInstanceLifecycleEvent(
 	return nil
 }
 
+type monitoringRetirementReconciliation struct {
+	MonitoringPaused             bool
+	BindingReconciled            bool
+	EnrollmentCredentialsRevoked bool
+	SyncCredentialRevoked        bool
+	PendingBindingCleared        bool
+	PendingActionCleared         bool
+}
+
+func insertMonitoringInstanceRetirementReconciledEvent(
+	ctx context.Context,
+	tx pgx.Tx,
+	record monitoringinstances.Record,
+	reason string,
+	reconciled monitoringRetirementReconciliation,
+) error {
+	eventID, err := ids.New("evt")
+	if err != nil {
+		return fmt.Errorf("generate monitoring instance retirement reconciliation event id: %w", err)
+	}
+
+	eventAt := canonicalTask4MonitoringEventTimestamp(record.UpdatedAt)
+	payload, err := marshalTask4MonitoringEventPayload(task4MonitoringEventPayload{
+		ObjectType:                             incidents.ObjectTypeMonitoringInstance,
+		EventType:                              incidents.EventMonitoringInstanceRetirementReconciled,
+		EventAt:                                eventAt,
+		RecordedAt:                             eventAt,
+		IsBackfilled:                           false,
+		Provenance:                             monitoringEventProvenanceWeb,
+		ProducerVersion:                        monitoringEventProducerVersion,
+		RuleVersion:                            monitoringEventLifecycleRuleVersion,
+		PriorState:                             monitoringinstances.LifecycleRetired,
+		ResultingState:                         monitoringinstances.LifecycleRetired,
+		LifecycleStatus:                        record.LifecycleStatus,
+		Reason:                                 strings.TrimSpace(reason),
+		RetirementMonitoringStatusReconciled:   reconciled.MonitoringPaused,
+		RetirementBindingStatusReconciled:      reconciled.BindingReconciled,
+		RetirementEnrollmentCredentialsRevoked: reconciled.EnrollmentCredentialsRevoked,
+		RetirementSyncCredentialRevoked:        reconciled.SyncCredentialRevoked,
+		RetirementPendingBindingCleared:        reconciled.PendingBindingCleared,
+		RetirementPendingActionCleared:         reconciled.PendingActionCleared,
+	})
+	if err != nil {
+		return fmt.Errorf("build monitoring instance retirement reconciliation event payload: %w", err)
+	}
+
+	if _, err := tx.Exec(ctx, `
+		insert into state_change_events (
+			event_id,
+			object_type,
+			object_id,
+			event_type,
+			severity,
+			summary,
+			payload,
+			created_at
+		) values ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)`,
+		eventID,
+		string(incidents.ObjectTypeMonitoringInstance),
+		record.MonitoringInstanceID,
+		string(incidents.EventMonitoringInstanceRetirementReconciled),
+		"",
+		"已退役监控实例残留状态已整理",
+		payload,
+		eventAt,
+	); err != nil {
+		return fmt.Errorf("insert retirement reconciliation event for monitoring instance %q: %w", record.MonitoringInstanceID, err)
+	}
+	return nil
+}
+
 func insertMonitoringInstanceRuntimeEvent(
 	ctx context.Context,
 	tx pgx.Tx,
@@ -1807,7 +2171,7 @@ func insertMonitoringInstanceRuntimeEvent(
 }
 
 func (r *PostgresMonitoringInstanceRepository) SetMonitoringInstanceMonitoringMaintenance(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin set monitoring instance maintenance transaction for %q: %w", monitoringInstanceID, err)
 	}
@@ -1820,6 +2184,7 @@ func (r *PostgresMonitoringInstanceRepository) SetMonitoringInstanceMonitoringMa
 		where monitoring_instance_id = $1
 			and monitoring_status = '启用'
 			and archived_at is null
+			and lifecycle_status <> '已退役'
 		returning `+monitoringInstanceSelectColumns,
 		monitoringInstanceID,
 	))
@@ -1848,12 +2213,42 @@ func (r *PostgresMonitoringInstanceRepository) SetMonitoringInstanceMonitoringMa
 	return record, nil
 }
 
-func (r *PostgresMonitoringInstanceRepository) PauseMonitoringInstanceMonitoring(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+func (r *PostgresMonitoringInstanceRepository) PauseMonitoringInstanceMonitoring(ctx context.Context, monitoringInstanceID string, inputs ...monitoringinstances.RuntimeControlInput) (monitoringinstances.Record, error) {
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin pause monitoring instance monitoring transaction for %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if len(inputs) > 1 {
+		return monitoringinstances.Record{}, monitoringinstances.ErrInvalidManagementInput
+	}
+	var input monitoringinstances.RuntimeControlInput
+	if len(inputs) == 1 {
+		input = inputs[0]
+	}
+	current, err := scanMonitoringInstance(tx.QueryRow(ctx, `
+		select `+monitoringInstanceSelectColumns+`
+		from monitoring_instances
+		where monitoring_instance_id = $1
+		for update`, monitoringInstanceID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		missErr := mapMonitoringInstanceArchiveStateMiss(ctx, tx, monitoringInstanceID, ErrInvalidMonitoringInstanceRuntimeTransition)
+		return monitoringinstances.Record{}, missErr
+	}
+	if err != nil {
+		return monitoringinstances.Record{}, fmt.Errorf("load monitoring instance before pause %q: %w", monitoringInstanceID, err)
+	}
+	if current.LifecycleStatus == monitoringinstances.LifecycleRetired {
+		return monitoringinstances.Record{}, monitoringinstances.ErrRetiredMonitoringInstance
+	}
+	review, err := r.buildMonitoringInstanceManagementReview(ctx, tx, current, monitoringInstanceID)
+	if err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	if err := requireSharedAssetConfirmation(review.DependencyImpacts, review.PreviewDigest, input.GlobalActionConfirmation); err != nil {
+		return monitoringinstances.Record{}, err
+	}
 
 	record, previousStatus, err := scanMonitoringInstanceWithPreviousState(tx.QueryRow(ctx, `
 		with prior as (
@@ -1869,6 +2264,7 @@ func (r *PostgresMonitoringInstanceRepository) PauseMonitoringInstanceMonitoring
 			where monitoring_instance_id = $1
 				and monitoring_status in ('启用', '维护中')
 				and archived_at is null
+				and lifecycle_status <> '已退役'
 				and monitoring_status = (select monitoring_status from prior)
 			returning *
 		)
@@ -1903,7 +2299,7 @@ func (r *PostgresMonitoringInstanceRepository) PauseMonitoringInstanceMonitoring
 }
 
 func (r *PostgresMonitoringInstanceRepository) ResumeMonitoringInstanceMonitoring(ctx context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return monitoringinstances.Record{}, fmt.Errorf("begin resume monitoring instance monitoring transaction for %q: %w", monitoringInstanceID, err)
 	}
@@ -1923,6 +2319,7 @@ func (r *PostgresMonitoringInstanceRepository) ResumeMonitoringInstanceMonitorin
 			where monitoring_instance_id = $1
 				and monitoring_status in ('维护中', '暂停')
 				and archived_at is null
+				and lifecycle_status <> '已退役'
 				and monitoring_status = (select monitoring_status from prior)
 			returning *
 		)
@@ -1969,12 +2366,19 @@ func (r *PostgresMonitoringInstanceRepository) IssueSyncToken(ctx context.Contex
 		return "", fmt.Errorf("generate sync token: %w", err)
 	}
 
-	tag, err := r.db.Exec(ctx, `
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return "", fmt.Errorf("begin issue sync token transaction for %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
 		update monitoring_instances
 		set sync_token_hash = $2,
 			updated_at = now()
 		where monitoring_instance_id = $1
-			and archived_at is null`,
+			and archived_at is null
+			and lifecycle_status <> '已退役'`,
 		monitoringInstanceID,
 		r.tokenHasher.hashSyncToken(token),
 	)
@@ -1982,16 +2386,11 @@ func (r *PostgresMonitoringInstanceRepository) IssueSyncToken(ctx context.Contex
 		return "", fmt.Errorf("issue sync token for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	if tag.RowsAffected() == 0 {
-		archived, archiveErr := monitoringInstanceArchived(ctx, r.db, monitoringInstanceID)
-		if archiveErr != nil {
-			return "", fmt.Errorf("issue sync token for monitoring instance %q: %w", monitoringInstanceID, archiveErr)
-		}
-		if archived {
-			return "", monitoringinstances.ErrArchivedMonitoringInstance
-		}
-		return "", monitoringinstances.ErrMonitoringInstanceNotFound
+		return "", mapMonitoringInstanceArchiveStateMiss(ctx, tx, monitoringInstanceID, monitoringinstances.ErrMonitoringInstanceNotFound)
 	}
-
+	if err := tx.Commit(ctx); err != nil {
+		return "", fmt.Errorf("commit issue sync token for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
 	return token, nil
 }
 
@@ -2001,6 +2400,7 @@ func (r *PostgresMonitoringInstanceRepository) FindMonitoringInstanceByEnrollmen
 		from monitoring_instances
 		where enrollment_token_hash in ($1, $2)
 			and archived_at is null
+			and lifecycle_status <> '已退役'
 			and enrollment_token_consumed_at is null
 			and enrollment_token_issued_at >= now() - interval '30 minutes'`,
 		r.tokenHasher.hashEnrollmentToken(token),
@@ -2071,13 +2471,17 @@ func resolveEnrollmentBindingTransition(record monitoringinstances.Record, newFi
 }
 
 func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Context, input enrollment.EnrollInput) (monitoringinstances.Record, string, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return monitoringinstances.Record{}, "", fmt.Errorf("begin enrollment transaction: %w", err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return monitoringinstances.Record{}, "", fmt.Errorf("lock asset graph for enrollment: %w", err)
+	}
 
 	var (
 		monitoringInstanceID       string
@@ -2103,6 +2507,7 @@ func (r *PostgresMonitoringInstanceRepository) ApplyEnrollment(ctx context.Conte
 		from monitoring_instances
 		where enrollment_token_hash in ($1, $2)
 			and archived_at is null
+			and lifecycle_status <> '已退役'
 			and enrollment_token_consumed_at is null
 			and enrollment_token_issued_at >= now() - interval '30 minutes'
 		for update`,
@@ -2200,13 +2605,17 @@ func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats(ctx cont
 	}
 
 	monitoringInstanceID := writes[0].MonitoringInstanceID
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return fmt.Errorf("begin heartbeat transaction for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return fmt.Errorf("lock asset graph for heartbeat: %w", err)
+	}
 
 	var (
 		bindingStatus       string
@@ -2219,6 +2628,8 @@ func (r *PostgresMonitoringInstanceRepository) RecordAcceptedHeartbeats(ctx cont
 			coalesce(sync_token_hash, '')
 		from monitoring_instances
 		where monitoring_instance_id = $1
+			and archived_at is null
+			and lifecycle_status <> '已退役'
 		for update`,
 		monitoringInstanceID,
 	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash); errors.Is(err, pgx.ErrNoRows) {
@@ -2324,7 +2735,15 @@ func (r *PostgresMonitoringInstanceRepository) SetPendingAction(ctx context.Cont
 }
 
 func (r *PostgresMonitoringInstanceRepository) RecordRejectedCommandAction(ctx context.Context, monitoringInstanceID string, input monitoringinstances.RejectedCommandActionInput) error {
-	if err := insertCommandActionAudit(ctx, r.db, commandActionAuditEvent{
+	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return fmt.Errorf("begin rejected command action audit for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return fmt.Errorf("lock asset graph for rejected command action audit: %w", err)
+	}
+	if err := insertCommandActionAudit(ctx, tx, commandActionAuditEvent{
 		MonitoringInstanceID: monitoringInstanceID,
 		CommandID:            input.CommandID,
 		Sensitivity:          input.Sensitivity,
@@ -2334,6 +2753,9 @@ func (r *PostgresMonitoringInstanceRepository) RecordRejectedCommandAction(ctx c
 		OccurredAt:           input.OccurredAt,
 	}); err != nil {
 		return fmt.Errorf("insert rejected command action audit for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit rejected command action audit for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	return nil
 }
@@ -2361,27 +2783,21 @@ func (r *PostgresMonitoringInstanceRepository) QueueCommandAction(ctx context.Co
 		return fmt.Errorf("marshal pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return fmt.Errorf("begin queue command action transaction for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	tag, err := tx.Exec(ctx,
-		`UPDATE monitoring_instances SET pending_action_id = $1, pending_action_command_id = $2, last_action = $3, updated_at = now() WHERE monitoring_instance_id = $4 AND archived_at is null`,
+		`UPDATE monitoring_instances SET pending_action_id = $1, pending_action_command_id = $2, last_action = $3, updated_at = now() WHERE monitoring_instance_id = $4 AND archived_at is null AND lifecycle_status <> '已退役'`,
 		actionID, commandID, raw, monitoringInstanceID)
 	if err != nil {
 		return fmt.Errorf("set pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	if tag.RowsAffected() == 0 {
-		archived, archiveErr := monitoringInstanceArchived(ctx, tx, monitoringInstanceID)
-		if archiveErr != nil {
-			return fmt.Errorf("set pending action for monitoring instance %q: %w", monitoringInstanceID, archiveErr)
-		}
-		if archived {
-			return monitoringinstances.ErrArchivedMonitoringInstance
-		}
-		return monitoringinstances.ErrMonitoringInstanceNotFound
+		missErr := mapMonitoringInstanceArchiveStateMiss(ctx, tx, monitoringInstanceID, monitoringinstances.ErrMonitoringInstanceNotFound)
+		return missErr
 	}
 
 	if err := insertCommandActionAudit(ctx, tx, commandActionAuditEvent{
@@ -2421,22 +2837,59 @@ func (r *PostgresMonitoringInstanceRepository) GetPendingAction(ctx context.Cont
 // ClearPendingAction removes the queued pending action for a monitoring instance without
 // storing a result. Used when the action has been dispatched to the agent.
 func (r *PostgresMonitoringInstanceRepository) ClearPendingAction(ctx context.Context, monitoringInstanceID string) error {
-	_, err := r.db.Exec(ctx,
-		`UPDATE monitoring_instances SET pending_action_id = NULL, pending_action_command_id = NULL WHERE monitoring_instance_id = $1`,
-		monitoringInstanceID)
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return fmt.Errorf("begin clear pending action transaction for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
+		update monitoring_instances
+		set pending_action_id = null,
+			pending_action_command_id = null
+		where monitoring_instance_id = $1
+			and archived_at is null
+			and lifecycle_status <> '已退役'`,
+		monitoringInstanceID,
+	)
 	if err != nil {
 		return fmt.Errorf("clear pending action for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return mapMonitoringInstanceArchiveStateMiss(ctx, tx, monitoringInstanceID, monitoringinstances.ErrMonitoringInstanceNotFound)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit clear pending action for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	return nil
 }
 
 // StoreActionResult writes the command execution result into the monitoring instance record.
 func (r *PostgresMonitoringInstanceRepository) StoreActionResult(ctx context.Context, monitoringInstanceID string, raw []byte) error {
-	_, err := r.db.Exec(ctx,
-		`UPDATE monitoring_instances SET last_action = $1, updated_at = now() WHERE monitoring_instance_id = $2`,
-		raw, monitoringInstanceID)
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return fmt.Errorf("begin store action result transaction for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
+		update monitoring_instances
+		set last_action = $1,
+			updated_at = now()
+		where monitoring_instance_id = $2
+			and archived_at is null
+			and lifecycle_status <> '已退役'`,
+		raw,
+		monitoringInstanceID,
+	)
 	if err != nil {
 		return fmt.Errorf("store action result for monitoring instance %q: %w", monitoringInstanceID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return mapMonitoringInstanceArchiveStateMiss(ctx, tx, monitoringInstanceID, monitoringinstances.ErrMonitoringInstanceNotFound)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit store action result for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 	return nil
 }

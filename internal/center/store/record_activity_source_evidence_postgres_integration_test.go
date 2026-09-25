@@ -157,19 +157,47 @@ func TestPostgresIntegrationEvidenceSourceProjectsSubjectScopedCaptures(t *testi
 func TestPostgresIntegrationEvidenceSourceReportsExcludedHeadroomRows(t *testing.T) {
 	ctx := context.Background()
 	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
-	source, _ := newEvidenceActivitySourceFixture(t, ctx, base)
+	source, pool := newEvidenceActivitySourceFixture(t, ctx, base)
 
-	readiness, err := source.Readiness(ctx, activity.ExportScope{}, activity.NewSettledSourceHead(
-		activity.SourceKindEvidenceSnapshot, base.Add(time.Hour), 9000,
-	))
+	head, err := source.AuthoritativeHead(ctx, activity.ExportScope{})
+	if err != nil {
+		t.Fatalf("authoritative head: %v", err)
+	}
+	readiness, err := source.Readiness(ctx, activity.ExportScope{}, head)
 	if err != nil {
 		t.Fatalf("readiness: %v", err)
 	}
 	if readiness.ExcludedRows != 1 {
 		t.Fatalf("readiness reports %d excluded rows, want the 1 headroom snapshot", readiness.ExcludedRows)
 	}
-	if !readiness.CaughtUp {
-		t.Fatal("an excluded row must not leave the source looking behind")
+	if readiness.CaughtUp {
+		t.Fatal("a source without a checkpoint must remain behind")
+	}
+	repository, err := NewActivityProjectionRepository(pool)
+	if err != nil {
+		t.Fatalf("new projection repository: %v", err)
+	}
+	projector, err := activity.NewProjector(activity.ProjectorOptions{
+		Namespace:          activityTestNamespace(),
+		Adapters:           []activity.SourceAdapter{source},
+		Checkpoints:        repository,
+		Publisher:          repository,
+		BatchSize:          1,
+		ReprojectionWindow: time.Hour,
+	})
+	if err != nil {
+		t.Fatalf("new projector: %v", err)
+	}
+	outcome := projectOnceAgainstPostgres(t, ctx, projector, source.Kind())
+	if outcome.Inserted != 2 || !outcome.CaughtUp {
+		t.Fatalf("project eligible captures: %+v, want 2 inserted and caught up", outcome)
+	}
+	readiness, err = source.Readiness(ctx, activity.ExportScope{}, head)
+	if err != nil {
+		t.Fatalf("readiness after projection: %v", err)
+	}
+	if !readiness.CaughtUp || readiness.ExcludedRows != 1 {
+		t.Fatalf("readiness after projection = %+v, want caught up with 1 excluded row", readiness)
 	}
 }
 

@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/assetservices"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsassets"
 )
 
 func TestPostgresAssetServiceMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
@@ -61,7 +63,7 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 	var queryArgs [][]any
 	var rowCalls []string
 	var rowArgs [][]any
-	repo := &PostgresAssetServiceRepository{db: fakeAssetServiceDB{
+	serviceDB := fakeAssetServiceDB{
 		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 			queryCalls = append(queryCalls, sql)
 			queryArgs = append(queryArgs, append([]any(nil), args...))
@@ -87,8 +89,20 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			rowCalls = append(rowCalls, sql)
 			rowArgs = append(rowArgs, append([]any(nil), args...))
-			if !strings.Contains(sql, "insert into asset_services") {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetServiceRow{scan: func(dest ...any) error {
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+					return nil
+				}}
+			case strings.Contains(sql, "from targets"):
+				return fakeAssetServiceRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "启用"
+					return nil
+				}}
+			case !strings.Contains(sql, "insert into asset_services"):
 				t.Fatalf("unexpected QueryRow SQL %q", sql)
+				return fakeAssetServiceRow{scan: func(dest ...any) error { return nil }}
 			}
 			return fakeAssetServiceRow{scan: func(dest ...any) error {
 				serviceID, ok := args[0].(string)
@@ -112,7 +126,13 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 				return nil
 			}}
 		},
-	}}
+	}
+	repo := &PostgresAssetServiceRepository{
+		db: serviceDB,
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeVPSAssetTx{queryRow: serviceDB.queryRow}, nil
+		},
+	}
 
 	created, err := repo.CreateAssetService(context.Background(), assetservices.CreateInput{
 		VPSID:       " vps_001 ",
@@ -131,22 +151,24 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 	if !strings.HasPrefix(created.ServiceID, "svc_") {
 		t.Fatalf("ServiceID = %q, want svc_ prefix", created.ServiceID)
 	}
-	if len(rowArgs) != 1 || len(rowArgs[0]) != 10 {
-		t.Fatalf("create args = %#v, want 10 args", rowArgs)
+	insertIndex := indexSQL(rowCalls, "insert into asset_services")
+	if insertIndex == -1 || len(rowArgs[insertIndex]) != 10 {
+		t.Fatalf("create args = %#v, want one 10-argument insert", rowArgs)
 	}
-	if rowArgs[0][1] != "vps_001" || rowArgs[0][2] != "tg_001" || rowArgs[0][3] != "Blog" || rowArgs[0][7] != 443 {
-		t.Fatalf("create normalized args = %#v", rowArgs[0])
+	insertArgs := rowArgs[insertIndex]
+	if insertArgs[1] != "vps_001" || insertArgs[2] != "tg_001" || insertArgs[3] != "Blog" || insertArgs[7] != 443 {
+		t.Fatalf("create normalized args = %#v", insertArgs)
 	}
-	labels, ok := rowArgs[0][8].([]string)
+	labels, ok := insertArgs[8].([]string)
 	if !ok || len(labels) != 1 || labels[0] != "prod" {
-		t.Fatalf("labels arg = %#v, want normalized labels", rowArgs[0][8])
+		t.Fatalf("labels arg = %#v, want normalized labels", insertArgs[8])
 	}
 	for _, snippet := range []string{
 		"insert into asset_services",
 		"returning " + assetServiceSelectColumns,
 	} {
-		if !strings.Contains(rowCalls[0], snippet) {
-			t.Fatalf("CreateAssetService SQL missing %q in %q", snippet, rowCalls[0])
+		if !strings.Contains(rowCalls[insertIndex], snippet) {
+			t.Fatalf("CreateAssetService SQL missing %q in %q", snippet, rowCalls[insertIndex])
 		}
 	}
 
@@ -176,6 +198,54 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 	}
 	if len(queryArgs[0]) != 4 || queryArgs[0][0] != "vps_001" || queryArgs[0][1] != "tg_001" || queryArgs[0][2] != "web" || queryArgs[0][3] != "active" {
 		t.Fatalf("list args = %#v, want normalized filters", queryArgs[0])
+	}
+}
+
+func TestPostgresAssetServiceRejectsActiveReferenceToArchivedTarget(t *testing.T) {
+	t.Parallel()
+
+	inserted := false
+	serviceDB := fakeAssetServiceDB{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeAssetServiceRow{scan: func(dest ...any) error {
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+					return nil
+				}}
+			case strings.Contains(sql, "from targets"):
+				return fakeAssetServiceRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = targets.RunStatusArchived
+					return nil
+				}}
+			case strings.Contains(sql, "insert into asset_services"):
+				inserted = true
+				return fakeAssetServiceRow{scan: func(dest ...any) error { return nil }}
+			default:
+				t.Fatalf("unexpected QueryRow SQL %q", sql)
+				return fakeAssetServiceRow{scan: func(dest ...any) error { return nil }}
+			}
+		},
+	}
+	repo := &PostgresAssetServiceRepository{
+		db: serviceDB,
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeVPSAssetTx{queryRow: serviceDB.queryRow}, nil
+		},
+	}
+
+	_, err := repo.CreateAssetService(context.Background(), assetservices.CreateInput{
+		VPSID:       "vps_001",
+		TargetID:    stringPtr("tg_archived"),
+		Name:        "archived target reference",
+		ServiceType: assetservices.ServiceTypeWeb,
+		Status:      assetservices.ServiceStatusActive,
+	})
+	if !errors.Is(err, targets.ErrTargetMetadataConflict) {
+		t.Fatalf("CreateAssetService() error = %v, want ErrTargetMetadataConflict", err)
+	}
+	if inserted {
+		t.Fatal("CreateAssetService() inserted an active relationship to an archived target")
 	}
 }
 
@@ -287,20 +357,44 @@ func TestPostgresAssetServiceMapsForeignKeyAndCheckViolations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			repo := &PostgresAssetServiceRepository{db: fakeAssetServiceDB{
-				queryRow: func(context.Context, string, ...any) pgx.Row {
-					return fakeAssetServiceRow{scan: func(dest ...any) error {
-						return tt.err
-					}}
-				},
-			}}
-
-			_, err := repo.CreateAssetService(context.Background(), assetservices.CreateInput{
+			input := assetservices.CreateInput{
 				VPSID:       "vps_001",
 				Name:        "Blog",
 				ServiceType: assetservices.ServiceTypeWeb,
 				Status:      assetservices.ServiceStatusActive,
-			})
+			}
+			if tt.name == "missing target" {
+				input.TargetID = stringPtr("tg_missing")
+			}
+			serviceDB := fakeAssetServiceDB{
+				queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					switch {
+					case strings.Contains(sql, "from vps_assets"):
+						if tt.name == "missing vps" {
+							return fakeAssetServiceRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+						}
+						return fakeAssetServiceRow{scan: func(dest ...any) error {
+							*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+							return nil
+						}}
+					case strings.Contains(sql, "from targets"):
+						return fakeAssetServiceRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+					case strings.Contains(sql, "insert into asset_services"):
+						return fakeAssetServiceRow{scan: func(dest ...any) error { return tt.err }}
+					default:
+						t.Fatalf("unexpected QueryRow SQL %q", sql)
+						return fakeAssetServiceRow{scan: func(dest ...any) error { return nil }}
+					}
+				},
+			}
+			repo := &PostgresAssetServiceRepository{
+				db: serviceDB,
+				beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+					return &fakeVPSAssetTx{queryRow: serviceDB.queryRow}, nil
+				},
+			}
+
+			_, err := repo.CreateAssetService(context.Background(), input)
 			if !errors.Is(err, tt.wantSentinel) {
 				t.Fatalf("CreateAssetService() error = %v, want %v", err, tt.wantSentinel)
 			}

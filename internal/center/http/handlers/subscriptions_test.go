@@ -925,6 +925,54 @@ func TestSubscriptionItemPatchesSubscription(t *testing.T) {
 	}
 }
 
+func TestSubscriptionCreateMapsReplayOwnershipConflict(t *testing.T) {
+	handler := handlers.SubscriptionsCollection(&fakeSubscriptionRepository{
+		createSubscriptionErr: subscriptions.ErrSubscriptionReplayOwnershipConflict,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(`{
+		"vps_id":"vps_001",
+		"price":12,
+		"currency":"USD",
+		"billing_months":1
+	}`))
+	req.Header.Set("Idempotency-Key", "replay-owner-sub-001")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
+	}
+	var response map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if response["code"] != "subscription_replay_ownership_conflict" {
+		t.Fatalf("code = %q, want subscription_replay_ownership_conflict", response["code"])
+	}
+}
+
+func TestSubscriptionPatchMapsOwnershipChangeConflict(t *testing.T) {
+	handler := handlers.SubscriptionItem(&fakeSubscriptionRepository{
+		patchSubscriptionErr: subscriptions.ErrSubscriptionOwnershipChangeForbidden,
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/subscriptions/sub_001", strings.NewReader(`{"vps_id":"vps_002"}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusConflict, recorder.Body.String())
+	}
+	var response map[string]string
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	if response["code"] != "subscription_ownership_change_forbidden" {
+		t.Fatalf("code = %q, want subscription_ownership_change_forbidden", response["code"])
+	}
+}
+
 func TestSubscriptionItemReturnsNotFound(t *testing.T) {
 	tests := []struct {
 		name   string

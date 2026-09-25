@@ -5,6 +5,18 @@
 - Legacy VPS 详情页（`LegacyVPSDetail.tsx`）所有会在 await 之后改 notice / draft / drawer / navigate 的写操作都必须走现有 `beginVpsWrite` + `mutationIsCurrent`。不得只给 facts/decision 加归属。晚到的 VPS A 结果不得关闭 B 的抽屉或导航离开 B。服务端请求不必取消；`finishVpsWrite` 仍在 `finally` 释放同 VPS 锁。
 - Asset Ledger 共享枚举必须跟后端机器值同步：`AssetScope = 'current'|'historical'|'archived'|'all'`，其中 `archived` 是旧 API 兼容别名；`RenewalMode = 'auto'|'manual'|'auto_cancelled'|'lottery'|'gift'|'bonus'|'other'`，其中 `lottery` 展示为“抽奖”，`gift` 展示为“赠送”。选项和标签集中在 `web/src/lib/assetOptions.ts`，页面不得散落 `抽奖/赠送` 这种混合标签。
 
+## 生命周期处理与恢复入口
+
+- cancelled 展示“已取消，未归档”，提供受控归档和同态处理残留；archived 展示归档历史及带原因恢复，不能重复显示归档资格。操作成功反馈与当前动作能力分开。归档/恢复原因必填，恢复后用途 unknown，显示最近快照和整理入口，不自动恢复任何 MI/token/监控。
+- 取消工作台逐条确认 active 订阅处理或保留；保留可提交但说明计费及归档阻塞。未选对象不进请求。选 MI 退役必须展示暂停/撤销后果而不自动选择其他对象；全局影响逐对象列明父 VPS 与依赖来源，显式确认后提交 confirmed_shared_objects。另一 VPS 上状态待确认的依赖同样列为需要确认的共享对象。
+- stale preview 保留原因、日期与选择草稿，刷新事实、清空共享确认；不自动重提，不扩选新增对象。已删除/不可操作对象剔出提交并提示。
+- 归档409优先使用响应 review/blocker_details；没有 review 才刷新，刷新失败明确未知。按 object_type/ID 构造受控本地路由，不接受服务端任意链接。active 账单、MI、Target 和 unknown 服务/域名均有对象级处理入口。
+- 恢复后提供用途/续费整理、当前 MI 及归档原因、专用恢复/解除旧 link/重新关联或创建。unlink 后创建失败显示未关联，可重试，不自动复活旧关系。整理面板在同页 MI 创建、关联、更换或解除成功后重新读取当前关联，迟到回包不覆盖较新结果。
+- 开始迁移提交非空原因到 start-migration，不把普通 PATCH 包装为迁移审计。服务/域名状态纠正必须显式选择 active/paused/retired 并填写原因。
+- replaced 选择在 active 或 in_use 时禁用并解释先调整事实；后端 field_errors 附三轴冲突。Legacy 表单使用精确英文机器值及当前值，禁止用中文展示词回写或把未编辑的既有状态降为默认值。
+- MI 管理按 action_reviews 分别展示能力/阻塞/警告；Target lifecycle-review 和 MI review 的共享确认不能被列表或批量入口绕过。所有请求复用既有 mutation/read owner 与 generation，迟到回包不覆盖其他路由。
+- MI/Target 详情危险动作（含运行暂停）只要已读取 review，就必须随请求发送该 preview_digest；confirm_shared_impact 仅在需要共享确认时反映勾选，是否要求勾选与是否发送摘要独立判断，review 未加载或失败时禁止提交。确认参数须经各层回调完整转发。摘要过期或共享确认冲突时重新读取 review、清空旧共享确认、保留原因等草稿并提示，不重用旧缓存或自动重提。
+
 ### VPS 详情 agent 接入/升级复用已有 MonitoringInstance
 
 #### 1. Scope / Trigger

@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`monitoring_instances.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current root 已扩展到 `0064_add_network_rates_valid.sql`，共 65 个 source。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator收敛 current exact set 或一个明确注册、完整 golden 匹配的 predecessor，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。
+- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current root 已扩展到 `0066_constrain_monitoring_and_target_state_values.sql`，共 67 个 source。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator收敛 current exact set 或一个明确注册、完整 golden 匹配的 predecessor，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（MonitoringInstance/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -74,7 +74,7 @@
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号的文件。冻结 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，current root 已到 `0064_add_network_rates_valid.sql`，因此若没有并发新增文件，下一个候选是 `0065_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须在同一 PR 注册 exact current fragment，不能由 records-on 启动路径补跑。
+2. 在 `db/migrations/` 新建下一个未占用序号的文件。冻结 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，current root 已到 `0066_constrain_monitoring_and_target_state_values.sql`，因此若没有并发新增文件，下一个候选是 `0067_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须在同一 PR 注册 exact current fragment，不能由 records-on 启动路径补跑。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/fresh-install-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。

@@ -2,10 +2,10 @@
 
 ## VPS 资产状态组合不变量
 
-- `vps_assets.lifecycle_status`、`usage_status`、`renewal_decision` 是一个组合状态，不是三个互不相关的枚举。所有写路径必须验证最终组合：`cancelled` 必须使用取消类续费决策且不能 `in_use`；`to_cancel` 必须使用取消类续费决策；`to_migrate` 必须使用 `migrate`；`replaced` 不能仍是 `active` 或 `in_use`。
+- 三轴分别表达业务生命周期、当前用途、续费决策，但必须合成校验：`cancelled` 必须使用取消类决策且不能 `in_use`；`archived` 不能 `in_use`；`to_cancel` 必须使用取消类决策；`to_migrate` 必须使用 `migrate`；`replaced` 不能仍是 `active` 或 `in_use`。其余枚举组合不额外收紧，`active+idle`、`testing+in_use` 均可表达真实情况。
 - PATCH 入口不能只校验请求体内出现的字段。仓库写入边界必须读取当前行，应用 patch preview 后调用 `vpsassets.ValidateVPSStateCombination`，再执行 `update vps_assets`；受控生命周期 action 若直接调用底层 update helper，也必须先做同样的合成状态校验。
 - DB 必须有跨列 check constraint 作为最后兜底。新增或调整这类约束是破坏性数据完整性收口：迁移必须先用幂等 backfill 处理可确定归一化的历史组合，再添加 validated constraint；无法安全推导的脏数据才应 fail fast。不得用 `not valid` 静默放过。
-- 如果某个已发布迁移在记录到 `schema_migrations` 前已经会因历史数据违反新约束而失败，可以按例外修正该失败迁移本身；修正必须把 backfill 放在 `add constraint` 前，并增加 `migrate_test.go` 断言 backfill 语句存在且顺序早于约束。
+- 已发布迁移保持不变；新增迁移通过真实 PostgreSQL 回归证明历史数据回填、约束及审计行为，不以 SQL 文本断言替代数据库证据。
 - JSON 导入的 `subscription` 对象必须同步订阅创建合同。`subscription.renewal_mode` 是合法字段，支持 `auto|manual|auto_cancelled|lottery|gift|bonus|other`；`gift` 和 `lottery` 归一后 legacy `auto_renew` / `auto_renew_cancelled` 必须为 `false,false`。`DecodeRecords` 继续 `DisallowUnknownFields`，新增可导入字段时必须同时改 DTO、dry-run report、create input 传递和测试。
 
 ## Asset Ledger providers
@@ -57,7 +57,7 @@
 - Ordinary PATCH remains current-fact only for lifecycle: `active|idle|testing`。流程态/终态只能由 lifecycle action/archive API 或 store-level historical fixtures 写入。
 - Full combination hard failures:
   - `cancelled` requires `renewal_decision in (cancel, auto_renew_cancelled)`。
-  - `cancelled` cannot pair with `usage_status=in_use`。
+  - `cancelled` 和 `archived` cannot pair with `usage_status=in_use`。
   - `to_cancel` requires `renewal_decision in (cancel, auto_renew_cancelled)`。
   - `to_migrate` requires `renewal_decision=migrate`。
   - `renewal_decision=replaced` cannot pair with `lifecycle_status=active` or `usage_status=in_use`。
@@ -87,7 +87,7 @@
 #### 6. Tests Required
 
 - Domain tests: create lifecycle boundary、full combination hard failures、allowed coherent states、PATCH delta hard failures。
-- Handler/store tests: ordinary API create/patch maps invalid matrix to invalid input; archive/lifecycle paths keep their dedicated tests.
+- Handler/store tests: ordinary PATCH 合成状态冲突返回 400 和 `field_errors`（lifecycle_status/usage_status/renewal_decision）；专用动作保持独立资格校验。
 - Import tests: dry-run/import reuse `vpsassets.NormalizeCreateInput` + `ValidateCreateInput` and reject workflow/terminal lifecycle creation.
 
 #### 7. Wrong vs Correct
@@ -119,14 +119,32 @@ if err := ValidateVPSStateCombination(input.LifecycleStatus, input.UsageStatus, 
   - `GET /api/asset-context/targets` 是 Target 批量上下文接口，供 Target 列表 / 详情显示关联 VPS 的取消 / 过期 / 不一致状态，避免前端逐行请求。Monitoring 列表不再暴露批量 asset-context 接口；Monitoring 详情使用 `/api/monitoring-instances/{id}/vps` 返回所属 VPS。
 - 审计表：`asset_lifecycle_actions` 保存一次操作的发起对象、确认时间、原因、执行摘要和最终状态；`asset_lifecycle_action_steps` 保存每个 subscription / VPS / MonitoringInstance / Target 步骤的前后状态、状态码、错误和摘要。
 - 普通 CRUD 不得静默调用 lifecycle action；只有工作台或等价的显式确认入口可以调用 `POST /api/vps/{vps_id}/cancellation`。
-- 如果 VPS 没有 active subscription，但存在 expired/cancelled/paused/unknown subscription，preview 和旧续费联动提示必须说明“订阅账单记录已无续费动作，仍需处理 VPS、MonitoringInstance 与入口探测状态”，不得误导为“没有关联订阅，需要创建订阅”。
-- 默认语义：已过期且不续费的 VPS 写 `renewal_decision=cancel`、`lifecycle_status=cancelled`；未来到期但已决定不续费的 VPS 写 `renewal_decision=cancel`、`lifecycle_status=to_cancel`；未来取消但仍观察的 MonitoringInstance 用 `lifecycle_status='不续费'` 且监控保持启用；实际退役 MonitoringInstance 用 `lifecycle_status='已退役'` 并可按确认步骤暂停监控；随 VPS 下线的 Target/实例确认后用 `run_status='已归档'`，临时停用才用 `暂停`。
-- `vps_monitoring_instance_links` 默认保留为历史证据；取消 / 退役 action 不自动 unlink，除非未来新增单独的“解除错误关联”显式动作。
-- 执行事务必须先锁定 VPS，再写 action 与各步骤；任何一步失败时业务状态与步骤写入整体回滚，避免部分取消造成新割裂。失败审计是例外：必须先显式回滚业务事务，再用独立事务写入 `status='failed'` 的 action 和 failed step，避免失败记录随业务回滚消失，也避免复用同一 `action_id` 时被未回滚事务锁住。
-- preview 的 blocker 必须在 POST 执行路径重新校验；例如 `lifecycle_status='archived'` 的 VPS 不允许通过 cancellation POST 改回 cancelled/to_cancel，handler 应返回冲突而不是清空 `archived_at`。
-- VPS 归档 / 恢复必须走受控 archive API：`GET /api/vps/{vps_id}/archive-review` 返回 VPS、订阅、MonitoringInstance、服务、域名、Target、warnings/blockers/eligible；`POST /api/vps/{vps_id}/archive` 在事务中锁定 VPS、重新计算 review、校验 `confirmation_name` 与 blockers 后才写 `lifecycle_status='archived'`；`POST /api/vps/{vps_id}/restore-from-archive` 只允许 `archived -> idle`。普通 `PATCH /api/vps/{vps_id}` 不得写入 `archived`，也不得从 `archived` 恢复。
-- archive blockers 至少包括：任一关联订阅仍为 `active`；任一关联 MonitoringInstance lifecycle 非 `不续费` / `已退役` 或 monitoring status 非 `暂停`；任一关联 Target 非 `暂停` / `已归档`。这些 blockers 必须在 archive POST 内重新计算，前端 review 只能作为提示，不能作为权限来源。
+- 历史 `expired/cancelled/paused` 和待确认 `unknown` 订阅必须展示，不能误称为“没有关联订阅”。账单 status、`auto_renew`、`auto_renew_cancelled` 和 renewal_mode 分别读回；历史状态但 `auto_renew=true` 必须警告并提供显式处理候选，不能推断已经停止续费。Target 批量上下文检查任一历史/待确认订阅的实际自动续费，不得被优先展示的 active/expired 记录或 VPS 待取消/不续费决策遮蔽。
+- 取消建议使用一次注入的 UTC 日期，等于当天视为到期；`cancelled` 保持同态，`to_cancel` 每次重算。当前权益证据包括 active 订阅，以及 status=cancelled、auto_renew=false 且能按下一条规则确定权益终点的订阅（ends_at；非来源模式缺 ends_at 时用 renew_at）；expired、paused、unknown 与无法确定终点的 cancelled（含只有 renew_at 的来源模式）仅作历史。只有全部当前权益证据的终点明确到期，且没有实际自动续费、未知或矛盾事实，才建议 cancelled。任一未来权益仍建议 to_cancel；确定未来权益且自动续费事实与模式一致时不额外提示证据矛盾。没有当前权益证据、缺日期或矛盾事实时建议 to_cancel 并提示人工确认，所有模式的续费标志一致性都须检查，顺序不影响结果。建议只预选取消工作台状态，不自动改变 VPS。
+- `ends_at` 为权益终点；缺省时只有非来源模式可用 `renew_at`。`gift/lottery/bonus/other` 不能仅用续费日期推定权益结束，`trial_ends_at` 不替代付费权益终点；开始日晚于终点或续费日晚于显式终点均需确认。用户仍可在完整确认后主动选择 cancelled，不新增定时取消。
+- 订阅推荐步骤不等于必选范围；未选择的账单保持不变，保留 active 订阅仍会阻止最终归档。
+- 取消工作台只提交用户选中的对象。MI 仅允许不续费、退役及暂停；退役必然暂停并撤销凭据和 pending 残留。已退役 MI 不能借改为不续费退出退役，须先详情专用恢复；同态退役仍可整理残留。Target 仅允许暂停或归档，不得把归档对象以 pause 隐式恢复。恢复由详情专用动作完成。
+- 取消 / 退役不自动 unlink；显式解除只设置 `unlinked_at`，历史关联保留。MI 退役本身不改变关联身份。
+- 执行事务先获取下述 graph 锁，再锁定 VPS、写 action 与各步骤；失败整体回滚后独立保存 failed action/step。失败审计不能吞错；业务与审计同时失败按内部错误返回，保留两项原因。
+- preview 的 blocker 必须在 POST 执行路径重新校验：`archived` 拒绝全部 cancellation；`cancelled` 仅可同态处理明确选择的残留，不可借 cancellation 改回 `to_cancel`。重新使用须先归档再专用恢复。普通 PATCH 仍允许 `to_cancel/to_migrate` 调整回合法当前态。
+- 归档 API：GET `archive-review` 返回对象及 `warnings/blockers/blocker_details/eligible`；POST `archive` 必须提供匹配名称和非空 `reason`，仅 to_cancel/cancelled 且最新 review 无阻塞可归档。原三轴保存为只读 `archived_state_snapshot {lifecycle_status,usage_status,renewal_decision,captured_at,source}`，当前写 archived+unknown。POST `restore-from-archive {reason}` 仅 archived→idle+unknown，续费决策及全部关联保持不变，最近快照继续保留。两者同事务写原因与完整前后状态审计。旧归档行在0065保存 `source=migration_observation`（非当年快照）后置当前用途 unknown；新归档 source=archive。
+- 归档阻塞：全部 active 订阅；未解除 MI 不满足不续费/已退役且暂停；有效 active 服务/域名引用的 Target 未暂停/归档；unknown 服务/域名待确认。paused/retired 历史引用不要求再停止其 Target。409 `lifecycle_action_blocked` 附最新 `review`，`blocker_details` 含 code/object_type/object_id/display_name/current_state/blocked_action/resolution_action。
 - Dashboard asset summary 只返回聚合计数；成本只统计 active subscriptions，取消待处理 / 已取消 VPS、状态割裂 VPS、仍运行的关联 MonitoringInstance/Target 进入告警计数。
+
+### 共享依赖与并发确认
+
+- `assetlinks.DependencyImpact` 是共同 DTO（避免 assetlifecycle 与 MI/Target 的导入环）：object_type/object_id/vps_id/vps_lifecycle_status/relation_type/relation_id/relation_status/classification。服务/域名 active=current，paused=paused，retired=historical，unknown=needs_confirmation；cancelled 父的有效关联=residual；archived 父及已解除 MI link=historical。全部历史仍展示，不当作当前承载。
+- Preview 带 dependency_impacts、evaluated_on 和 preview_digest；摘要对排序的结构化 JSON 做 SHA256，覆盖三轴、订阅权益/模式/标志、关系身份及状态、MI 生命周期/监控/绑定/归档、Target 状态及建议。普通 UpdatedAt、心跳、健康和秘密不入摘要。执行重读后先校验摘要，再校验 confirmed_shared_objects。过期返回现有 `cancellation_preview_stale`；缺跨 VPS 全局影响确认返回 `shared_impact_confirmation_required`，均409，不能自动重提。
+- 所有管理写入和 preview/review 使用 READ COMMITTED，第一条 SQL 获取双 int advisory exclusive `(1213154899,1)`；agent enrollment、accepted heartbeat、sync 整个事务第一条 SQL 获取同键 shared 锁。后续独立语句读最新快照，禁止锁升级。锁序 graph→receipt→按ID的VPS→订阅→MI/link→service/domain→Target；不能在事务内调用另开事务的 public 方法。
+- 终态 VPS 拒绝新增当前资源、重新激活依赖和延长权益；历史状态纠正/显式 unlink 可保留。已退役/已归档 MI 不能新增当前关联，active 服务/域名不能指向已归档 Target；暂停 Target 可保留配置依赖。
+- Target 专用 GET `/api/targets/{id}/lifecycle-review` 返回 dependency_impacts/preview_digest；MI management-review 使用相同保护。危险动作带 preview_digest/confirm_shared_impact，跨两个以上有效父必须确认；Target unknown 依赖也需明确确认。批量 MI 按 ID 的 confirmations 逐项校验，不以批量绕过。取消工作台选中的 Target 若另一 VPS 存在 needs_confirmation 依赖，同样必须在 confirmed_shared_objects 中逐对象确认；本 VPS 自身的待确认依赖由归档阻塞处理，不作为跨 VPS 确认。
+- 迁移读回保留 service_count/domain_count 历史总数，另报 effective_service_count/effective_domain_count/unknown_service_count/unknown_domain_count；running_target_count 仅有效引用的启用/维护 Target。old_carrier_remaining 只由已知有效承载产生；unknown 发 carrier_needs_confirmation，不能显示全部完成。
+
+### 受控迁移与依赖状态纠正
+
+- POST `/api/vps/{id}/start-migration {reason}` 仅 active/idle/testing→to_migrate+migrate，保留用途且不自动改关系或停机；已有同态不重复审计，其他流程/终态409。普通 PATCH 仍可将 to_cancel/to_migrate 调整回合法当前态。
+- PATCH `/api/services/{id}/status` 与 `/api/domains/{id}/status` 接受 `{status,reason}`，只写 `status` 与 `updated_at`，不改父、Target 或其他元数据；显式目标 active/paused/retired。同事务写 correct_dependency_status action 与 dependency_status step；同态无重复记录。terminal 父不得激活，暂停/退役历史纠正允许。runtime 的两表表级 UPDATE 是数据库权限，不是数据库层两列限制；接口继续遵循以上写入边界。
+- 0065/0066 增加动作/快照与 MI/Target 枚举约束；未知旧值 fail fast，不猜测权益来源或生命周期。部署须按只读 preflight、备份、停止旧 Center 写者后整体切换，不能混跑旧写协议，见 [部署流程](../../deploy/local-and-systemd.md)。
 
 ### Scenario: VPS renewal decision links subscription auto-renew
 
@@ -147,7 +165,7 @@ if err := ValidateVPSStateCombination(input.LifecycleStatus, input.UsageStatus, 
 - Cancellation-class decisions are currently `cancel` and `auto_renew_cancelled` only; `migrate`, `observe`, `keep`, `replaced`, and `unreviewed` must not modify subscriptions.
 - The transaction must `select ... for update` the VPS row before patching and must lock active subscription candidates before deciding whether to write.
 - Exactly one `subscriptions.status = 'active'` row for the VPS is the only unambiguous write case.
-- In the write case, final subscription state must be `auto_renew=false` and `auto_renew_cancelled=true`.
+- In the write case, `auto|manual|auto_cancelled` become `auto_renew=false, auto_renew_cancelled=true`; `gift|lottery|bonus|other` retain their source mode and `false,false`. Cancellation never erases entitlement provenance. Normalization merges the locked current record with explicitly supplied fields.
 - The linkage write must reuse the existing subscription patch/history semantics: when automatic-renewal fields change, insert `price_histories` in the same transaction.
 - The response `message` is user-facing Chinese copy; frontend may display it directly but must not infer extra writes from it.
 - This path must not create/update `vps_monitoring_instance_links`, Provider, MonitoringInstance, Target, ProbeItem, Agent plans, runtime controls, Dashboard summary rows, or import state.
@@ -246,7 +264,7 @@ return vpsassets.RenewalSubscriptionLinkage{Status: vpsassets.RenewalSubscriptio
 
 - shared key trim/format 为 8..128 且只允许 `[A-Za-z0-9._:-]`；缺失、重复或非法 header 为 400 `invalid_idempotency_key`，且不得调用 create repository。
 - digest 必须来自 normalize 后的 path VPS scope + 实际 wire identity。Monitoring digest 不包含从可变 VPS 状态派生的 persistence defaults；相同 wire retry 即使 VPS 默认值变化也必须 replay 原 instance/link。
-- 顺序统一为 normalize/validate → begin transaction → operation-namespaced advisory xact lock → receipt lookup → mismatch/replay 或 result insert → receipt insert → commit。任一 cut point 失败都 rollback/fail closed。
+- 顺序为 normalize/validate→READ COMMITTED transaction→graph 锁（service/domain/MI）→operation-namespaced receipt lock→receipt lookup→mismatch/replay 或 result+receipt insert→commit。experience-log 不修改依赖图，保留原 receipt 协议。任一 cut point 失败都 rollback/fail closed。
 - first create 为 201；same key + same digest 为 200 原 ID 且无额外写；same key + different digest 为 409 `idempotency_key_reused`。HTTP 错误/日志不得包含 key、digest、body、note/details、SQL 或 wrapped internal error。
 - `0062` 是 `0061` 后的 additive migration；runtime APP 对四张 receipt 表只有 `select`/`insert`，无 update/delete/sequence 权限。不得修改已发布 migration。
 

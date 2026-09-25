@@ -36,6 +36,7 @@ type VPSOverviewMonitoringOnboardingProps = {
   management: VPSManagementController
   managementTriggerRef: RefObject<HTMLButtonElement | null>
   onOverviewRefresh: () => Promise<boolean>
+  onMonitoringAssociationChanged?: (() => void) | undefined
   writeOwnerStore: VPSWriteOwnerStore
   viewToken: string
 }
@@ -123,6 +124,7 @@ export function VPSOverviewMonitoringOnboarding({
   management,
   managementTriggerRef,
   onOverviewRefresh,
+  onMonitoringAssociationChanged,
   writeOwnerStore,
   viewToken,
 }: VPSOverviewMonitoringOnboardingProps) {
@@ -502,6 +504,7 @@ export function VPSOverviewMonitoringOnboarding({
       )
       settleOutcome = 'confirmed'
       if (!generationIsCurrent(generation, targetVPSID, targetViewToken, targetAuthorityGeneration)) return
+      onMonitoringAssociationChanged?.()
 
       const to = onboardingPath(targetVPSID, created.monitoring_instance_id)
       let refreshed = false
@@ -551,6 +554,8 @@ export function VPSOverviewMonitoringOnboarding({
           const latest = await getVPSAsset(targetVPSID)
           if (!generationIsCurrent(generation, targetVPSID, targetViewToken, targetAuthorityGeneration)) return
           const activeLinks = authoritativeActiveLinks(latest)
+          // Another writer created the association; the reorganization panel must reread it.
+          if (activeLinks && activeLinks.length > 0) onMonitoringAssociationChanged?.()
           if (activeLinks?.length === 1) {
             const monitoringInstanceId = activeLinks[0]?.monitoring_instance_id
             const to = onboardingPath(targetVPSID, monitoringInstanceId)

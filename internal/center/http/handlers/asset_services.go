@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"houfeng/internal/center/assetservices"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsassets"
 )
 
 type vpsAssetServiceRepository interface {
@@ -61,6 +64,48 @@ func AssetServicesCollection(repo assetservices.Repository) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
+}
+
+func AssetServiceStatus(repo assetservices.Repository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serviceID, ok := parseAssetDependencyStatusPath(r.URL.Path, "services")
+		if !ok {
+			writeError(w, http.StatusNotFound, "asset service not found")
+			return
+		}
+		if r.Method != http.MethodPatch {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var input assetservices.StatusUpdateInput
+		if err := decodeJSON(r, &input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		input = assetservices.NormalizeStatusUpdateInput(input)
+		if err := assetservices.ValidateStatusUpdateInput(input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid input")
+			return
+		}
+
+		record, err := repo.UpdateStatus(r.Context(), serviceID, input.Status, input.Reason)
+		if handled := writeAssetServiceRepositoryError(w, err); handled {
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		writeJSON(w, http.StatusOK, record)
+	})
+}
+
+func parseAssetDependencyStatusPath(path, collection string) (string, bool) {
+	parts := strings.Split(strings.TrimPrefix(path, "/"), "/")
+	if len(parts) != 4 || parts[0] != "api" || parts[1] != collection || parts[2] == "" || parts[3] != "status" {
+		return "", false
+	}
+	return parts[2], true
 }
 
 func VPSServices(repo vpsAssetServiceRepository) http.Handler {
@@ -130,6 +175,12 @@ func writeAssetServiceRepositoryError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusNotFound, "target not found")
 	case errors.Is(err, assetservices.ErrServiceNotFound):
 		writeError(w, http.StatusNotFound, "asset service not found")
+	case errors.Is(err, assetservices.ErrServiceStatusConflict):
+		writeError(w, http.StatusConflict, "asset service status conflict")
+	case errors.Is(err, vpsassets.ErrVPSAssetReadonly):
+		writeError(w, http.StatusConflict, "vps asset is read-only")
+	case errors.Is(err, targets.ErrTargetMetadataConflict):
+		writeError(w, http.StatusConflict, "target metadata conflict")
 	default:
 		return false
 	}

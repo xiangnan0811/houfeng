@@ -23,6 +23,7 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("unrelated_same_name_objects_are_ignored", testPostgresIntegrationAppACLCurrentUnrelatedSameNames)
 	t.Run("registered_successor", testPostgresIntegrationAppACLCurrentRegisteredSuccessor)
 	t.Run("registered_successor_rejections", testPostgresIntegrationAppACLCurrentRegisteredSuccessorRejectsInvalidPredecessor)
+	t.Run("runtime_update_acl_drift", testPostgresIntegrationAppACLCurrentRuntimeUpdateDrift)
 }
 
 func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {

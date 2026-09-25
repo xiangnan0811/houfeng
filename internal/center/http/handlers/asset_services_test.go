@@ -12,22 +12,30 @@ import (
 
 	"houfeng/internal/center/assetservices"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsassets"
 )
 
 type fakeAssetServiceRepository struct {
-	listResult       []assetservices.Record
-	listErr          error
-	listFilters      assetservices.ListFilters
-	listForVPSResult []assetservices.Record
-	listForVPSErr    error
-	listForVPSID     string
-	createResult     assetservices.Record
-	createErr        error
-	createInput      assetservices.CreateInput
-	createCalls      int
-	idempotentCalls  int
-	idempotentKey    string
-	replayed         bool
+	listResult         []assetservices.Record
+	listErr            error
+	listFilters        assetservices.ListFilters
+	listForVPSResult   []assetservices.Record
+	listForVPSErr      error
+	listForVPSID       string
+	createResult       assetservices.Record
+	createErr          error
+	createInput        assetservices.CreateInput
+	createCalls        int
+	idempotentCalls    int
+	updateStatusResult assetservices.Record
+	updateStatusErr    error
+	updateStatusID     string
+	updateStatus       assetservices.ServiceStatus
+	updateStatusReason string
+	updateStatusCalls  int
+	idempotentKey      string
+	replayed           bool
 }
 
 type statefulAssetServiceRepository struct {
@@ -77,6 +85,17 @@ func (f *fakeAssetServiceRepository) CreateAssetService(_ context.Context, input
 		return assetservices.Record{}, f.createErr
 	}
 	return f.createResult, nil
+}
+
+func (f *fakeAssetServiceRepository) UpdateStatus(_ context.Context, serviceID string, status assetservices.ServiceStatus, reason string) (assetservices.Record, error) {
+	f.updateStatusCalls++
+	f.updateStatusID = serviceID
+	f.updateStatus = status
+	f.updateStatusReason = reason
+	if f.updateStatusErr != nil {
+		return assetservices.Record{}, f.updateStatusErr
+	}
+	return f.updateStatusResult, nil
 }
 
 func (f *fakeAssetServiceRepository) CreateAssetServiceIdempotent(_ context.Context, input assetservices.CreateInput, key string) (assetservices.Record, bool, error) {
@@ -172,6 +191,59 @@ func TestAssetServicesCollectionCreatesService(t *testing.T) {
 	}
 	if repo.createCalls != 1 || repo.idempotentCalls != 0 {
 		t.Fatalf("create calls = legacy:%d idempotent:%d, want collection legacy create only", repo.createCalls, repo.idempotentCalls)
+	}
+}
+
+func TestVPSStateRepairAssetServiceStatusHandler(t *testing.T) {
+	repo := &fakeAssetServiceRepository{updateStatusResult: assetservices.Record{
+		ServiceID: "svc_001",
+		VPSID:     "vps_001",
+		Status:    assetservices.ServiceStatusPaused,
+	}}
+	handler := handlers.AssetServiceStatus(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/services/svc_001/status", strings.NewReader(`{"status":" paused ","reason":" corrected after review "}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.updateStatusCalls != 1 || repo.updateStatusID != "svc_001" || repo.updateStatus != assetservices.ServiceStatusPaused || repo.updateStatusReason != "corrected after review" {
+		t.Fatalf("update status request = calls:%d id:%q status:%q reason:%q", repo.updateStatusCalls, repo.updateStatusID, repo.updateStatus, repo.updateStatusReason)
+	}
+	record := decodeTestResponse[assetservices.Record](t, recorder)
+	if record.ServiceID != "svc_001" || record.Status != assetservices.ServiceStatusPaused {
+		t.Fatalf("response service = %#v, want the updated service", record)
+	}
+}
+
+func TestVPSStateRepairAssetServiceStatusValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		want   int
+	}{
+		{name: "missing reason", method: http.MethodPatch, path: "/api/services/svc_001/status", body: `{"status":"paused"}`, want: http.StatusBadRequest},
+		{name: "unknown requested status", method: http.MethodPatch, path: "/api/services/svc_001/status", body: `{"status":"unknown","reason":"reviewed"}`, want: http.StatusBadRequest},
+		{name: "invalid json", method: http.MethodPatch, path: "/api/services/svc_001/status", body: `{"status":`, want: http.StatusBadRequest},
+		{name: "invalid path", method: http.MethodPatch, path: "/api/services/svc_001/status/extra", body: `{"status":"paused","reason":"reviewed"}`, want: http.StatusNotFound},
+		{name: "method", method: http.MethodPost, path: "/api/services/svc_001/status", body: `{"status":"paused","reason":"reviewed"}`, want: http.StatusMethodNotAllowed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeAssetServiceRepository{}
+			recorder := httptest.NewRecorder()
+			handlers.AssetServiceStatus(repo).ServeHTTP(recorder, httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body)))
+			if recorder.Code != tt.want {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tt.want, recorder.Body.String())
+			}
+			if repo.updateStatusCalls != 0 {
+				t.Fatalf("UpdateStatus calls = %d, want zero for rejected request", repo.updateStatusCalls)
+			}
+		})
 	}
 }
 
@@ -466,6 +538,13 @@ func TestAssetServicesMapRepositoryErrors(t *testing.T) {
 		{name: "vps list invalid", handler: handlers.VPSServices(&fakeAssetServiceRepository{listForVPSErr: assetservices.ErrInvalidServiceInput}), method: http.MethodGet, path: "/api/vps/vps_001/services", want: http.StatusBadRequest},
 		{name: "vps list failure", handler: handlers.VPSServices(&fakeAssetServiceRepository{listForVPSErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/vps/vps_001/services", want: http.StatusInternalServerError},
 		{name: "vps create failure", handler: handlers.VPSServices(&fakeAssetServiceRepository{createErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/vps/vps_001/services", body: `{"name":"Blog","service_type":"web"}`, want: http.StatusInternalServerError},
+		{name: "service status not found", handler: handlers.AssetServiceStatus(&fakeAssetServiceRepository{updateStatusErr: assetservices.ErrServiceNotFound}), method: http.MethodPatch, path: "/api/services/missing/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusNotFound},
+		{name: "service status failure", handler: handlers.AssetServiceStatus(&fakeAssetServiceRepository{updateStatusErr: errors.New("status update failed")}), method: http.MethodPatch, path: "/api/services/svc_001/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusInternalServerError},
+		{name: "service status conflict", handler: handlers.AssetServiceStatus(&fakeAssetServiceRepository{updateStatusErr: assetservices.ErrServiceStatusConflict}), method: http.MethodPatch, path: "/api/services/svc_001/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusConflict},
+		{name: "status terminal vps conflict", handler: handlers.AssetServiceStatus(&fakeAssetServiceRepository{updateStatusErr: vpsassets.ErrVPSAssetReadonly}), method: http.MethodPatch, path: "/api/services/svc_001/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusConflict},
+		{name: "status archived target conflict", handler: handlers.AssetServiceStatus(&fakeAssetServiceRepository{updateStatusErr: targets.ErrTargetMetadataConflict}), method: http.MethodPatch, path: "/api/services/svc_001/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusConflict},
+		{name: "create terminal vps conflict", handler: handlers.AssetServicesCollection(&fakeAssetServiceRepository{createErr: vpsassets.ErrVPSAssetReadonly}), method: http.MethodPost, path: "/api/services", body: `{"vps_id":"vps_001","name":"Blog","service_type":"web"}`, want: http.StatusConflict},
+		{name: "create archived target conflict", handler: handlers.AssetServicesCollection(&fakeAssetServiceRepository{createErr: targets.ErrTargetMetadataConflict}), method: http.MethodPost, path: "/api/services", body: `{"vps_id":"vps_001","target_id":"tg_archived","name":"Blog","service_type":"web"}`, want: http.StatusConflict},
 	}
 
 	for _, tt := range tests {

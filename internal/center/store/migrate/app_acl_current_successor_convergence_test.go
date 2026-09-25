@@ -83,9 +83,6 @@ func TestConvergeAppACLCurrentRegisteredPredecessorPublishesRevisionTwo(t *testi
 	}
 	dependencies.insertSuccessor = func(_ context.Context, _ pgx.Tx, previous AppACLManifestPersistedV1, migrationBody, privilegeBody []byte) (AppACLManifestPersistedV1, error) {
 		steps = append(steps, "revision-two")
-		if !reflect.DeepEqual(privilegeBody, transition.predecessorPrivilegeBody) {
-			t.Fatal("current privilege compiler changed across empty 0063 transition")
-		}
 		inserted, buildErr := NewAppACLManifestPersistedV1(2, previous.MigratorCatalogRole, previous.ManifestDigest, migrationBody, privilegeBody)
 		if buildErr != nil {
 			return AppACLManifestPersistedV1{}, buildErr
@@ -96,7 +93,20 @@ func TestConvergeAppACLCurrentRegisteredPredecessorPublishesRevisionTwo(t *testi
 	}
 	dependencies.rejectFresh = currentUnexpectedRejectFresh(t, "registered predecessor")
 	dependencies.ensureLedger = currentUnexpectedEnsureLedger(t, "registered predecessor")
-	dependencies.applyDCL = currentUnexpectedApplyDCL(t, "registered predecessor")
+	dependencies.applyDCL = func(_ context.Context, _ pgx.Tx, contract appACLEffectiveCatalogContract) error {
+		for _, table := range []string{"asset_services", "asset_domains"} {
+			found := false
+			for _, privilege := range contract.Privileges {
+				if privilege.Subject == AppACLSubjectCenterRuntime && privilege.ObjectIdentity == table && privilege.Privilege == AppACLPrivilegeUpdate && !privilege.GrantOption {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("successor DCL lacks approved UPDATE on %s", table)
+			}
+		}
+		return nil
+	}
 	dependencies.insertGenesis = currentUnexpectedInsertGenesis(t, "registered predecessor")
 
 	result, err := convergeAppACLCurrentWithDependencies(
@@ -182,6 +192,7 @@ func TestConvergeAppACLCurrentRegisteredPredecessorRollsBackEveryTransitionCutpo
 		"apply",
 		"ledger-reread",
 		"applied-verifier",
+		"dcl",
 		"post-apply-catalog",
 		"successor-insert",
 		"head-readback",
@@ -259,6 +270,9 @@ func TestConvergeAppACLCurrentRegisteredPredecessorRollsBackEveryTransitionCutpo
 			}
 			dependencies.verifyTransitionApplied = func(context.Context, pgx.Tx, appACLCurrentTransition, appACLCurrentTransitionPreflight) error {
 				return fail("applied-verifier")
+			}
+			dependencies.applyDCL = func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error {
+				return fail("dcl")
 			}
 			catalogReads := 0
 			dependencies.readCatalog = func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {

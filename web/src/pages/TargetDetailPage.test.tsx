@@ -14,6 +14,15 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
+function withEmptyLifecycleReview(fetchMock: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response> | Response) {
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : 'url' in input ? input.url : String(input)
+    if (url.includes('/lifecycle-review')) {
+      return mockJSONResponse({ dependency_impacts: [], preview_digest: 'tg-digest' })
+    }
+    return fetchMock(input, init)
+  })
+}
 function deferredResponse() {
   let resolve!: (response: Response) => void
   let reject!: (error?: unknown) => void
@@ -2388,7 +2397,7 @@ describe('TargetDetailPage', () => {
           updated_at: '2026-04-24T09:20:00Z',
         }),
       )
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', withEmptyLifecycleReview(fetchMock))
 
     render(
       <MemoryRouter initialEntries={['/targets/tg_pause']}>
@@ -2416,6 +2425,7 @@ describe('TargetDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(5)
 
     fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '确认暂停目标' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '确认暂停目标' }))
 
     expect(confirmMock).not.toHaveBeenCalled()
@@ -2423,9 +2433,10 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '恢复' })).toHaveFocus())
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_pause/runtime/pause', {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preview_digest: 'tg-digest', confirm_shared_impact: false }),
       cache: 'no-store',
-        credentials: 'include',
+      credentials: 'include',
     })
   })
 
@@ -2458,7 +2469,7 @@ describe('TargetDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse({ error: 'pause failed' }, 409))
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', withEmptyLifecycleReview(fetchMock))
 
     render(
       <MemoryRouter initialEntries={['/targets/tg_pause_fail']}>
@@ -2471,6 +2482,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '确认暂停目标' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '确认暂停目标' }))
 
     expect(confirmMock).not.toHaveBeenCalled()
@@ -2478,9 +2490,10 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_pause_fail/runtime/pause', {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preview_digest: 'tg-digest', confirm_shared_impact: false }),
       cache: 'no-store',
-        credentials: 'include',
+      credentials: 'include',
     })
   })
 
@@ -2535,7 +2548,6 @@ describe('TargetDetailPage', () => {
           run_status: '已归档',
           labels: ['public'],
           note: '',
-          current_health_status: '正常',
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -2544,7 +2556,7 @@ describe('TargetDetailPage', () => {
           updated_at: '2026-04-24T09:20:00Z',
         }),
       )
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', withEmptyLifecycleReview(fetchMock))
 
     render(
       <MemoryRouter initialEntries={['/targets/tg_archive']}>
@@ -2573,6 +2585,7 @@ describe('TargetDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(5)
 
     fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '确认归档' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
 
     expect(confirmMock).not.toHaveBeenCalled()
@@ -2582,9 +2595,10 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '恢复到暂停' })).toHaveFocus())
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_archive/runtime/archive', {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preview_digest: 'tg-digest', confirm_shared_impact: false }),
       cache: 'no-store',
-        credentials: 'include',
+      credentials: 'include',
     })
   })
 
@@ -2617,7 +2631,7 @@ describe('TargetDetailPage', () => {
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse({ error: 'archive failed' }, 409))
-    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('fetch', withEmptyLifecycleReview(fetchMock))
 
     render(
       <MemoryRouter initialEntries={['/targets/tg_archive_fail']}>
@@ -2631,6 +2645,7 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '确认归档' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
 
     expect(confirmMock).not.toHaveBeenCalled()
@@ -2638,9 +2653,10 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('alertdialog', { name: '确认归档目标' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_archive_fail/runtime/archive', {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preview_digest: 'tg-digest', confirm_shared_impact: false }),
       cache: 'no-store',
-        credentials: 'include',
+      credentials: 'include',
     })
   })
 
@@ -4007,6 +4023,703 @@ describe('TargetDetailPage', () => {
     fireEvent.click(within(drawer).getByRole('tab', { name: '历史异常' }))
 
     expect(fetchMock).toHaveBeenCalledTimes(6)
+  })
+
+  it('requires shared-impact review and confirmation before resuming a paused shared target', async () => {
+    const targetData = {
+      target_id: 'tg_shared_resume',
+      name: 'Shared Blog',
+      target_type: 'service',
+      host: 'blog.example.com',
+      base_port: 443,
+      execution_monitoring_instance_labels: ['edge'],
+      run_status: '暂停',
+      labels: ['public'],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      last_success_at: '2026-04-24T09:00:00Z',
+      last_failure_at: '2026-04-24T08:30:00Z',
+      current_primary_issue_summary: '',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-24T09:20:00Z',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(targetData))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ target_id: 'tg_shared_resume', latest_probe_observations: [] }))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'shared impact confirmation required', code: 'shared_impact_confirmation_required' }, 409))
+      .mockResolvedValueOnce(mockJSONResponse({ ...targetData, run_status: '启用' }))
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : 'url' in input ? input.url : String(input)
+      if (url.includes('/lifecycle-review')) {
+        return mockJSONResponse({
+          dependency_impacts: [
+            {
+              object_type: 'target',
+              object_id: 'tg_shared_resume',
+              vps_id: 'vps_001',
+              vps_lifecycle_status: 'active',
+              relation_type: 'service',
+              relation_id: 'svc_001',
+              relation_status: 'active',
+              classification: 'current',
+            },
+            {
+              object_type: 'target',
+              object_id: 'tg_shared_resume',
+              vps_id: 'vps_002',
+              vps_lifecycle_status: 'active',
+              relation_type: 'service',
+              relation_id: 'svc_002',
+              relation_status: 'active',
+              classification: 'current',
+            },
+          ],
+          preview_digest: 'shared-resume-digest-01',
+        })
+      }
+      return fetchMock(input, init)
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_shared_resume']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Shared Blog' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复' }))
+
+    // Confirmation dialog with shared impact check must appear
+    const dialog = await screen.findByRole('alertdialog', { name: '确认恢复目标监控' })
+    expect(dialog).toBeInTheDocument()
+    expect(await screen.findByText('共享影响摘要 shared-resume-digest-01')).toBeInTheDocument()
+    const checkbox = screen.getByRole('checkbox')
+    const confirmBtn = screen.getByRole('button', { name: '确认恢复目标' })
+    expect(checkbox).not.toBeChecked()
+    expect(confirmBtn).toBeDisabled()
+
+    fireEvent.click(checkbox)
+    expect(confirmBtn).toBeEnabled()
+    fireEvent.click(confirmBtn)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/targets/tg_shared_resume/runtime/resume',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            preview_digest: 'shared-resume-digest-01',
+            confirm_shared_impact: true,
+          }),
+        }),
+      )
+    })
+  })
+
+  it('requires shared-impact review and confirmation before restoring an archived shared target', async () => {
+    const targetData = {
+      target_id: 'tg_shared_restore',
+      name: 'Archived Shared Service',
+      target_type: 'service',
+      host: 'archived.example.com',
+      base_port: 443,
+      execution_monitoring_instance_labels: ['edge'],
+      run_status: '已归档',
+      labels: ['legacy'],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      last_success_at: '2026-04-24T09:00:00Z',
+      last_failure_at: '2026-04-24T08:30:00Z',
+      current_primary_issue_summary: '',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-24T09:20:00Z',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(targetData))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ target_id: 'tg_shared_restore', latest_probe_observations: [] }))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'shared impact confirmation required', code: 'shared_impact_confirmation_required' }, 409))
+      .mockResolvedValueOnce(mockJSONResponse({ ...targetData, run_status: '暂停' }))
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : 'url' in input ? input.url : String(input)
+      if (url.includes('/lifecycle-review')) {
+        return mockJSONResponse({
+          dependency_impacts: [
+            {
+              object_type: 'target',
+              object_id: 'tg_shared_restore',
+              vps_id: 'vps_001',
+              vps_lifecycle_status: 'active',
+              relation_type: 'service',
+              relation_id: 'svc_001',
+              relation_status: 'active',
+              classification: 'current',
+            },
+            {
+              object_type: 'target',
+              object_id: 'tg_shared_restore',
+              vps_id: 'vps_002',
+              vps_lifecycle_status: 'active',
+              relation_type: 'service',
+              relation_id: 'svc_002',
+              relation_status: 'active',
+              classification: 'current',
+            },
+          ],
+          preview_digest: 'shared-restore-digest-01',
+        })
+      }
+      return fetchMock(input, init)
+    }))
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_shared_restore']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Archived Shared Service' })).toBeInTheDocument(),
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
+    fireEvent.click(screen.getByRole('button', { name: '恢复到暂停' }))
+
+    // Confirmation dialog with shared impact check must appear
+    const dialog = await screen.findByRole('alertdialog', { name: '确认恢复已归档目标' })
+    expect(dialog).toBeInTheDocument()
+    expect(await screen.findByText('共享影响摘要 shared-restore-digest-01')).toBeInTheDocument()
+    const checkbox = screen.getByRole('checkbox')
+    const confirmBtn = screen.getByRole('button', { name: '确认恢复到暂停' })
+    expect(confirmBtn).toBeDisabled()
+
+    fireEvent.click(checkbox)
+    expect(confirmBtn).toBeEnabled()
+    fireEvent.click(confirmBtn)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/targets/tg_shared_restore/runtime/restore-to-paused',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            preview_digest: 'shared-restore-digest-01',
+            confirm_shared_impact: true,
+          }),
+        }),
+      )
+    })
+  })
+
+  it('sends the loaded preview digest when pausing a single-parent target', async () => {
+    const targetData = {
+      target_id: 'tg_single_pause',
+      name: 'Solo Blog',
+      target_type: 'service',
+      host: 'solo.example.com',
+      base_port: 443,
+      execution_monitoring_instance_labels: ['edge'],
+      run_status: '启用',
+      labels: ['public'],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      last_success_at: '2026-04-24T09:00:00Z',
+      last_failure_at: '2026-04-24T08:30:00Z',
+      current_primary_issue_summary: '',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-24T09:05:00Z',
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(targetData))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ target_id: 'tg_single_pause', latest_probe_observations: [] }))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse({ ...targetData, run_status: '暂停' }))
+    let finishReview: (response: Response) => void = () => {}
+    const review = new Promise<Response>((resolve) => {
+      finishReview = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : 'url' in input ? input.url : String(input)
+      if (url.includes('/lifecycle-review')) return review
+      return fetchMock(input, init)
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_single_pause']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Solo Blog' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+
+    const confirm = screen.getByRole('button', { name: '确认暂停目标' })
+    expect(confirm).toBeDisabled()
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    finishReview(mockJSONResponse({
+      dependency_impacts: [{
+        object_type: 'target',
+        object_id: 'tg_single_pause',
+        vps_id: 'vps_001',
+        vps_lifecycle_status: 'active',
+        relation_type: 'service',
+        relation_id: 'svc_001',
+        relation_status: 'active',
+        classification: 'current',
+      }],
+      preview_digest: 'single-parent-digest',
+    }))
+    await waitFor(() => expect(confirm).toBeEnabled())
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    fireEvent.click(confirm)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/targets/tg_single_pause/runtime/pause', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          preview_digest: 'single-parent-digest',
+          confirm_shared_impact: false,
+        }),
+      }))
+    })
+  })
+
+  it('reloads the review after a stale pause conflict and retries with the new digest', async () => {
+    const targetData = {
+      target_id: 'tg_stale_pause',
+      name: 'Stale Blog',
+      target_type: 'service',
+      host: 'stale.example.com',
+      base_port: 443,
+      execution_monitoring_instance_labels: ['edge'],
+      run_status: '启用',
+      labels: ['public'],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      last_success_at: '2026-04-24T09:00:00Z',
+      last_failure_at: '2026-04-24T08:30:00Z',
+      current_primary_issue_summary: '',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-24T09:05:00Z',
+    }
+    const reviewReads: string[] = []
+    const pauseBodies: string[] = []
+    let finishSecondReview: (response: Response) => void = () => {}
+    const secondReview = new Promise<Response>((resolve) => {
+      finishSecondReview = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : 'url' in input ? input.url : String(input)
+      const method = init?.method ?? 'GET'
+      if (url.includes('/lifecycle-review')) {
+        reviewReads.push(url)
+        if (reviewReads.length === 1) {
+          return mockJSONResponse({
+            dependency_impacts: [{
+              object_type: 'target',
+              object_id: 'tg_stale_pause',
+              vps_id: 'vps_001',
+              vps_lifecycle_status: 'active',
+              relation_type: 'service',
+              relation_id: 'svc_001',
+              relation_status: 'active',
+              classification: 'current',
+            }],
+            preview_digest: 'digest-a',
+          })
+        }
+        return secondReview
+      }
+      if (url.includes('/runtime/pause') && method === 'POST') {
+        pauseBodies.push(String(init?.body ?? ''))
+        const body = JSON.parse(String(init?.body ?? '{}')) as { preview_digest?: string }
+        if (body.preview_digest === 'digest-a') {
+          return mockJSONResponse({ error: 'management review stale', code: 'management_review_stale' }, 409)
+        }
+        return mockJSONResponse({ ...targetData, run_status: '暂停' })
+      }
+      if (url.includes('/probe-items') || url.includes('/incidents') || url.includes('/events') || url.includes('/asset-context')) {
+        return mockJSONResponse([])
+      }
+      if (url.includes('/runtime-facts')) {
+        return mockJSONResponse({ target_id: 'tg_stale_pause', latest_probe_observations: [] })
+      }
+      return mockJSONResponse(targetData)
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_stale_pause']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Stale Blog' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认暂停目标监控' })
+    const confirm = within(dialog).getByRole('button', { name: '确认暂停目标' })
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
+
+    expect(await within(dialog).findByText('影响范围已变化，共享确认已清除，不会自动重新提交。')).toBeInTheDocument()
+    await waitFor(() => expect(reviewReads.length).toBeGreaterThan(1))
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(confirm).toBeDisabled()
+    expect(pauseBodies).toEqual([
+      JSON.stringify({ preview_digest: 'digest-a', confirm_shared_impact: false }),
+    ])
+
+    finishSecondReview(mockJSONResponse({
+      dependency_impacts: [{
+        object_type: 'target',
+        object_id: 'tg_stale_pause',
+        vps_id: 'vps_001',
+        vps_lifecycle_status: 'active',
+        relation_type: 'service',
+        relation_id: 'svc_001',
+        relation_status: 'active',
+        classification: 'current',
+      }],
+      preview_digest: 'digest-b',
+    }))
+    await waitFor(() => expect(confirm).toBeEnabled())
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument()
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(pauseBodies).toEqual([
+      JSON.stringify({ preview_digest: 'digest-a', confirm_shared_impact: false }),
+      JSON.stringify({ preview_digest: 'digest-b', confirm_shared_impact: false }),
+    ]))
+  })
+
+  it('reloads the review after a stale archive conflict and retries with the new digest', async () => {
+    const targetData = {
+      target_id: 'tg_stale_archive',
+      name: 'Stale Archive',
+      target_type: 'service',
+      host: 'archive.example.com',
+      base_port: 443,
+      execution_monitoring_instance_labels: ['edge'],
+      run_status: '启用',
+      labels: ['public'],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      last_success_at: '2026-04-24T09:00:00Z',
+      last_failure_at: '2026-04-24T08:30:00Z',
+      current_primary_issue_summary: '',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-24T09:05:00Z',
+    }
+    const reviewReads: string[] = []
+    const archiveBodies: string[] = []
+    let finishSecondReview: (response: Response) => void = () => {}
+    const secondReview = new Promise<Response>((resolve) => {
+      finishSecondReview = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : 'url' in input ? input.url : String(input)
+      const method = init?.method ?? 'GET'
+      if (url.includes('/lifecycle-review')) {
+        reviewReads.push(url)
+        if (reviewReads.length === 1) {
+          return mockJSONResponse({
+            dependency_impacts: [{
+              object_type: 'target',
+              object_id: 'tg_stale_archive',
+              vps_id: 'vps_001',
+              vps_lifecycle_status: 'active',
+              relation_type: 'service',
+              relation_id: 'svc_001',
+              relation_status: 'active',
+              classification: 'current',
+            }],
+            preview_digest: 'digest-a',
+          })
+        }
+        return secondReview
+      }
+      if (url.includes('/runtime/archive') && method === 'POST') {
+        archiveBodies.push(String(init?.body ?? ''))
+        const body = JSON.parse(String(init?.body ?? '{}')) as { preview_digest?: string }
+        if (body.preview_digest === 'digest-a') {
+          return mockJSONResponse({ error: 'management review stale', code: 'management_review_stale' }, 409)
+        }
+        return mockJSONResponse({ ...targetData, run_status: '已归档' })
+      }
+      if (url.includes('/probe-items') || url.includes('/incidents') || url.includes('/events') || url.includes('/asset-context')) {
+        return mockJSONResponse([])
+      }
+      if (url.includes('/runtime-facts')) {
+        return mockJSONResponse({ target_id: 'tg_stale_archive', latest_probe_observations: [] })
+      }
+      return mockJSONResponse(targetData)
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_stale_archive']}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Stale Archive' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
+    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认归档目标' })
+    const confirm = within(dialog).getByRole('button', { name: '确认归档' })
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
+
+    expect(await within(dialog).findByText('影响范围已变化，共享确认已清除，不会自动重新提交。')).toBeInTheDocument()
+    await waitFor(() => expect(reviewReads.length).toBeGreaterThan(1))
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(confirm).toBeDisabled()
+    expect(archiveBodies).toEqual([
+      JSON.stringify({ preview_digest: 'digest-a', confirm_shared_impact: false }),
+    ])
+
+    finishSecondReview(mockJSONResponse({
+      dependency_impacts: [{
+        object_type: 'target',
+        object_id: 'tg_stale_archive',
+        vps_id: 'vps_001',
+        vps_lifecycle_status: 'active',
+        relation_type: 'service',
+        relation_id: 'svc_001',
+        relation_status: 'active',
+        classification: 'current',
+      }],
+      preview_digest: 'digest-b',
+    }))
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(archiveBodies).toEqual([
+      JSON.stringify({ preview_digest: 'digest-a', confirm_shared_impact: false }),
+      JSON.stringify({ preview_digest: 'digest-b', confirm_shared_impact: false }),
+    ]))
+  })
+
+  it.each([
+    {
+      action: 'pause',
+      status: '启用',
+      dialogName: '确认暂停目标监控',
+      confirmName: '确认暂停目标',
+      path: '/runtime/pause',
+      opensDialogFirst: true,
+    },
+    {
+      action: 'archive',
+      status: '启用',
+      dialogName: '确认归档目标',
+      confirmName: '确认归档',
+      path: '/runtime/archive',
+      opensDialogFirst: true,
+    },
+    {
+      action: 'resume',
+      status: '暂停',
+      dialogName: '确认恢复目标监控',
+      confirmName: '确认恢复目标',
+      path: '/runtime/resume',
+      opensDialogFirst: false,
+    },
+    {
+      action: 'enter-maintenance',
+      status: '启用',
+      dialogName: '确认进入维护模式',
+      confirmName: '确认进入维护',
+      path: '/runtime/enter-maintenance',
+      opensDialogFirst: false,
+    },
+    {
+      action: 'exit-maintenance',
+      status: '维护中',
+      dialogName: '确认退出维护模式',
+      confirmName: '确认退出维护',
+      path: '/runtime/exit-maintenance',
+      opensDialogFirst: false,
+    },
+    {
+      action: 'restore-to-paused',
+      status: '已归档',
+      dialogName: '确认恢复已归档目标',
+      confirmName: '确认恢复到暂停',
+      path: '/runtime/restore-to-paused',
+      opensDialogFirst: false,
+    },
+  ])('refreshes a confirmed $action review after a stale conflict and retries with the new digest', async ({
+    action,
+    status,
+    dialogName,
+    confirmName,
+    path,
+    opensDialogFirst,
+  }) => {
+    const targetId = `tg_stale_${action}`
+    const targetData = {
+      target_id: targetId,
+      name: `Stale ${action}`,
+      target_type: 'service',
+      host: 'stale.example.com',
+      base_port: 443,
+      execution_monitoring_instance_labels: ['edge'],
+      run_status: status,
+      labels: ['public'],
+      note: '',
+      current_health_status: '正常',
+      current_active_incident_count: 0,
+      last_success_at: '2026-04-24T09:00:00Z',
+      last_failure_at: '2026-04-24T08:30:00Z',
+      current_primary_issue_summary: '',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-24T09:05:00Z',
+    }
+    const sharedImpacts = [
+      {
+        object_type: 'target',
+        object_id: targetId,
+        vps_id: 'vps_001',
+        vps_lifecycle_status: 'active',
+        relation_type: 'service',
+        relation_id: 'svc_001',
+        relation_status: 'active',
+        classification: 'current',
+      },
+      {
+        object_type: 'target',
+        object_id: targetId,
+        vps_id: 'vps_002',
+        vps_lifecycle_status: 'active',
+        relation_type: 'service',
+        relation_id: 'svc_002',
+        relation_status: 'active',
+        classification: 'current',
+      },
+    ]
+    const reviewReads: string[] = []
+    const actionBodies: string[] = []
+    let finishSecondReview: (response: Response) => void = () => {}
+    const secondReview = new Promise<Response>((resolve) => {
+      finishSecondReview = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : 'url' in input ? input.url : String(input)
+      const method = init?.method ?? 'GET'
+      if (url.includes('/lifecycle-review')) {
+        reviewReads.push(url)
+        if (reviewReads.length === 1) {
+          return mockJSONResponse({ dependency_impacts: sharedImpacts, preview_digest: 'digest-a' })
+        }
+        return secondReview
+      }
+      if (url.includes(path) && method === 'POST') {
+        actionBodies.push(String(init?.body ?? ''))
+        const body = init?.body ? JSON.parse(String(init.body)) as { preview_digest?: string } : {}
+        if (body.preview_digest === 'digest-a') {
+          return mockJSONResponse({ error: 'management review stale', code: 'management_review_stale' }, 409)
+        }
+        if (body.preview_digest === 'digest-b') {
+          return mockJSONResponse({ ...targetData, run_status: status === '启用' ? '暂停' : status })
+        }
+        return mockJSONResponse({
+          error: 'shared impact confirmation required',
+          code: 'shared_impact_confirmation_required',
+        }, 409)
+      }
+      if (url.includes('/probe-items') || url.includes('/incidents') || url.includes('/events') || url.includes('/asset-context')) {
+        return mockJSONResponse([])
+      }
+      if (url.includes('/runtime-facts')) {
+        return mockJSONResponse({ target_id: targetId, latest_probe_observations: [] })
+      }
+      return mockJSONResponse(targetData)
+    }))
+
+    render(
+      <MemoryRouter initialEntries={[`/targets/${targetId}`]}>
+        <Routes>
+          <Route path="/targets/:targetId" element={<TargetDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByRole('heading', { name: `Stale ${action}` })).toBeInTheDocument())
+
+    if (action === 'archive') {
+      fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
+      fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    } else if (action === 'restore-to-paused') {
+      fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
+      fireEvent.click(screen.getByRole('button', { name: '恢复到暂停' }))
+    } else if (action === 'resume') {
+      fireEvent.click(screen.getByRole('button', { name: '恢复' }))
+    } else if (action === 'enter-maintenance') {
+      fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+    } else if (action === 'exit-maintenance') {
+      fireEvent.click(screen.getByRole('button', { name: '退出维护' }))
+    } else {
+      fireEvent.click(screen.getByRole('button', { name: '暂停' }))
+    }
+
+    const dialog = await screen.findByRole('alertdialog', { name: dialogName })
+    const confirm = within(dialog).getByRole('button', { name: confirmName })
+    const checkbox = await within(dialog).findByRole('checkbox')
+    fireEvent.click(checkbox)
+    await waitFor(() => expect(confirm).toBeEnabled())
+    fireEvent.click(confirm)
+
+    expect(await within(dialog).findByText('影响范围已变化，共享确认已清除，不会自动重新提交。')).toBeInTheDocument()
+    await waitFor(() => expect(reviewReads.length).toBeGreaterThan(1))
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(confirm).toBeDisabled()
+    expect(actionBodies.at(-1)).toBe(JSON.stringify({
+      preview_digest: 'digest-a',
+      confirm_shared_impact: true,
+    }))
+    expect(actionBodies.filter((body) => body.includes('digest-b'))).toHaveLength(0)
+    if (!opensDialogFirst) {
+      expect(actionBodies[0]).toBe('')
+    }
+
+    finishSecondReview(mockJSONResponse({
+      dependency_impacts: [sharedImpacts[0]],
+      preview_digest: 'digest-b',
+    }))
+    await waitFor(() => expect(confirm).toBeEnabled())
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument()
+    fireEvent.click(confirm)
+
+    await waitFor(() => expect(actionBodies.at(-1)).toBe(JSON.stringify({
+      preview_digest: 'digest-b',
+      confirm_shared_impact: false,
+    })))
+    expect(actionBodies.filter((body) => body.includes('digest-b'))).toHaveLength(1)
   })
 
 })

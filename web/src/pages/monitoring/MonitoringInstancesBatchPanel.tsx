@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
@@ -29,6 +29,7 @@ type MonitoringInstancesBatchPanelProps = {
   onCommandIDChange: (commandID: string) => void
   onExecuteBatchCommand: (commandId: string, options?: { confirmedSensitive?: boolean }) => void
   onConfirmBatchPause: () => void
+  pauseSharedContent?: ReactNode
   onCancelBatchPause: () => void
 }
 
@@ -48,6 +49,7 @@ export function MonitoringInstancesBatchPanel({
   onCommandIDChange,
   onExecuteBatchCommand,
   onConfirmBatchPause,
+  pauseSharedContent,
   onCancelBatchPause,
 }: MonitoringInstancesBatchPanelProps) {
   const [pendingSensitiveCommand, setPendingSensitiveCommand] = useState<MonitoringInstanceCommand | null>(null)
@@ -315,7 +317,9 @@ export function MonitoringInstancesBatchPanel({
           disabled={batchSubmitting}
           onConfirm={onConfirmBatchPause}
           onCancel={onCancelBatchPause}
-        />
+        >
+          {pauseSharedContent}
+        </ActionConfirmationModal>
       ) : null}
     </>
   )

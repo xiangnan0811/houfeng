@@ -34,7 +34,9 @@ const EVENT_TYPES = new Set([
   'monitoring_instance_monitoring_resumed',
   'monitoring_instance_lifecycle_updated',
   'monitoring_instance_retired',
+  'monitoring_instance_retirement_reconciled',
   'monitoring_instance_restored_to_observing',
+  'monitoring_instance_restored_from_archive',
   'target_maintenance_entered',
   'target_maintenance_exited',
   'target_paused',
@@ -60,7 +62,7 @@ const EVENT_CONTRACTS: Record<string, {
   },
   'monitoring-lifecycle-rules/v1': {
     objects: new Set(['monitoring_instance']),
-    events: new Set(['monitoring_instance_lifecycle_updated', 'monitoring_instance_retired', 'monitoring_instance_restored_to_observing', 'event_corrected']),
+    events: new Set(['monitoring_instance_lifecycle_updated', 'monitoring_instance_retired', 'monitoring_instance_retirement_reconciled', 'monitoring_instance_restored_to_observing', 'monitoring_instance_restored_from_archive', 'event_corrected']),
     states: new Set(['待接入', '在用', '观察中', '不续费', '已退役', 'unarchived', 'archived']),
   },
   'monitoring-runtime-rules/v1': {

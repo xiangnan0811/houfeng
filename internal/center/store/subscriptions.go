@@ -230,7 +230,41 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 	if err := subscriptions.ValidateCreateInput(input); err != nil {
 		return subscriptions.Record{}, err
 	}
-	return insertSubscription(ctx, r.db, input)
+	if r.beginTx == nil {
+		return subscriptions.Record{}, errors.New("subscription repository cannot create without transaction support")
+	}
+
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
+	if err != nil {
+		return subscriptions.Record{}, fmt.Errorf("begin subscription create transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := ensureSubscriptionVPSAllowsCreate(ctx, tx, input); err != nil {
+		return subscriptions.Record{}, err
+	}
+	record, err := insertSubscription(ctx, tx, input)
+	if err != nil {
+		return subscriptions.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return subscriptions.Record{}, fmt.Errorf("commit subscription create transaction: %w", err)
+	}
+	return record, nil
+}
+
+func ensureSubscriptionVPSAllowsCreate(ctx context.Context, tx pgx.Tx, input subscriptions.CreateInput) error {
+	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, input.VPSID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return subscriptions.ErrInvalidSubscriptionInput
+	}
+	if err != nil {
+		return fmt.Errorf("query vps asset %q before subscription create: %w", input.VPSID, err)
+	}
+	if input.Status == subscriptions.StatusActive {
+		return ensureVPSAcceptsCurrentAssetRelationship(input.VPSID, lifecycle, "subscription")
+	}
+	return nil
 }
 
 func (r *PostgresSubscriptionRepository) CreateSubscriptionIdempotent(
@@ -254,7 +288,7 @@ func (r *PostgresSubscriptionRepository) CreateSubscriptionIdempotent(
 		return subscriptions.Record{}, false, errors.New("subscription repository cannot create idempotently without transaction support")
 	}
 
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
 	if err != nil {
 		return subscriptions.Record{}, false, fmt.Errorf("begin subscription create idempotency transaction: %w", err)
 	}
@@ -281,6 +315,9 @@ func (r *PostgresSubscriptionRepository) CreateSubscriptionIdempotent(
 		if err != nil {
 			return subscriptions.Record{}, false, fmt.Errorf("load replayed subscription %q: %w", subscriptionID, err)
 		}
+		if record.VPSID != input.VPSID {
+			return subscriptions.Record{}, false, subscriptions.ErrSubscriptionReplayOwnershipConflict
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return subscriptions.Record{}, false, fmt.Errorf("commit subscription create idempotency replay: %w", err)
 		}
@@ -290,6 +327,9 @@ func (r *PostgresSubscriptionRepository) CreateSubscriptionIdempotent(
 		return subscriptions.Record{}, false, fmt.Errorf("lookup subscription create idempotency: %w", err)
 	}
 
+	if err := ensureSubscriptionVPSAllowsCreate(ctx, tx, input); err != nil {
+		return subscriptions.Record{}, false, err
+	}
 	record, err := insertSubscription(ctx, tx, input)
 	if err != nil {
 		return subscriptions.Record{}, false, err
@@ -403,34 +443,35 @@ func (r *PostgresSubscriptionRepository) PatchSubscription(ctx context.Context, 
 	if !input.HasChanges() {
 		return r.GetSubscription(ctx, subscriptionID)
 	}
-
-	if patchRequiresPriceHistory(input) {
-		return r.patchSubscriptionWithPriceHistory(ctx, subscriptionID, input)
+	if r.beginTx == nil {
+		return subscriptions.Record{}, errors.New("subscription repository cannot patch without transaction support")
 	}
+	return r.patchSubscriptionInTransaction(ctx, subscriptionID, input)
+}
 
-	record, err := patchSubscriptionRow(ctx, r.db, subscriptionID, input)
+func (r *PostgresSubscriptionRepository) patchSubscriptionInTransaction(ctx context.Context, subscriptionID string, input subscriptions.PatchInput) (subscriptions.Record, error) {
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
+	if err != nil {
+		return subscriptions.Record{}, fmt.Errorf("begin subscription patch transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var vpsID string
+	if err := tx.QueryRow(ctx, `
+		select vps_id
+		from subscriptions
+		where subscription_id = $1`, subscriptionID).Scan(&vpsID); errors.Is(err, pgx.ErrNoRows) {
+		return subscriptions.Record{}, subscriptions.ErrSubscriptionNotFound
+	} else if err != nil {
+		return subscriptions.Record{}, fmt.Errorf("query subscription %q before locking its vps: %w", subscriptionID, err)
+	}
+	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, vpsID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return subscriptions.Record{}, subscriptions.ErrSubscriptionNotFound
 	}
 	if err != nil {
-		if isSubscriptionInvalidPostgresError(err) {
-			return subscriptions.Record{}, subscriptions.ErrInvalidSubscriptionInput
-		}
-		return subscriptions.Record{}, fmt.Errorf("patch subscription %q: %w", subscriptionID, err)
+		return subscriptions.Record{}, fmt.Errorf("lock vps %q before subscription patch: %w", vpsID, err)
 	}
-	return record, nil
-}
-
-func (r *PostgresSubscriptionRepository) patchSubscriptionWithPriceHistory(ctx context.Context, subscriptionID string, input subscriptions.PatchInput) (subscriptions.Record, error) {
-	if r.beginTx == nil {
-		return subscriptions.Record{}, errors.New("subscription repository cannot record price history without transaction support")
-	}
-
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return subscriptions.Record{}, fmt.Errorf("begin subscription price history transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
 
 	current, err := scanSubscription(tx.QueryRow(ctx, `
 		select `+subscriptionSelectColumns+`
@@ -441,7 +482,31 @@ func (r *PostgresSubscriptionRepository) patchSubscriptionWithPriceHistory(ctx c
 		return subscriptions.Record{}, subscriptions.ErrSubscriptionNotFound
 	}
 	if err != nil {
-		return subscriptions.Record{}, fmt.Errorf("query subscription %q before price history patch: %w", subscriptionID, err)
+		return subscriptions.Record{}, fmt.Errorf("query subscription %q before patch: %w", subscriptionID, err)
+	}
+	if current.VPSID != vpsID {
+		return subscriptions.Record{}, subscriptions.ErrSubscriptionOwnershipChangeForbidden
+	}
+
+	input = subscriptions.NormalizePatchAgainstRecord(current, input)
+	if input.VPSID.Set {
+		if input.VPSID.Value != current.VPSID {
+			return subscriptions.Record{}, subscriptions.ErrSubscriptionOwnershipChangeForbidden
+		}
+		input.VPSID = subscriptions.OptionalString{}
+	}
+	if err := subscriptions.ValidatePatchInput(input); err != nil {
+		return subscriptions.Record{}, err
+	}
+	if err := ensureTerminalVPSSubscriptionPatchAllowed(lifecycle, vpsID, subscriptionID, current, input); err != nil {
+		return subscriptions.Record{}, err
+	}
+
+	if !input.HasChanges() {
+		if err := tx.Commit(ctx); err != nil {
+			return subscriptions.Record{}, fmt.Errorf("commit subscription patch transaction: %w", err)
+		}
+		return current, nil
 	}
 
 	record, err := patchSubscriptionRow(ctx, tx, subscriptionID, input)
@@ -468,9 +533,82 @@ func (r *PostgresSubscriptionRepository) patchSubscriptionWithPriceHistory(ctx c
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return subscriptions.Record{}, fmt.Errorf("commit subscription price history transaction: %w", err)
+		return subscriptions.Record{}, fmt.Errorf("commit subscription patch transaction: %w", err)
 	}
 	return record, nil
+}
+
+func ensureTerminalVPSSubscriptionPatchAllowed(lifecycle vpsassets.LifecycleStatus, vpsID, subscriptionID string, current subscriptions.Record, input subscriptions.PatchInput) error {
+	if !isTerminalVPSLifecycle(lifecycle) {
+		return nil
+	}
+
+	nextStatus := current.Status
+	if input.Status.Set {
+		nextStatus = input.Status.Value
+	}
+	if current.Status != subscriptions.StatusActive && nextStatus == subscriptions.StatusActive {
+		return fmt.Errorf("%w: terminal vps %q cannot activate subscription %q", vpsassets.ErrVPSAssetReadonly, vpsID, subscriptionID)
+	}
+	if nextStatus != subscriptions.StatusActive {
+		return nil
+	}
+
+	if subscriptionPatchEnablesAutomaticRenewal(current, input) || subscriptionPatchExtendsEffectivePeriod(current, input) {
+		return fmt.Errorf("%w: terminal vps %q cannot extend the effective period of subscription %q", vpsassets.ErrVPSAssetReadonly, vpsID, subscriptionID)
+	}
+	return nil
+}
+
+func subscriptionPatchEnablesAutomaticRenewal(current subscriptions.Record, input subscriptions.PatchInput) bool {
+	currentAutoRenew := current.AutoRenew && !current.AutoRenewCancelled
+	if input.RenewalMode.Set &&
+		subscriptions.RenewalMode(subscriptions.NormalizeRenewalMode(input.RenewalMode.Value)) == subscriptions.RenewalModeAuto &&
+		!currentAutoRenew {
+		return true
+	}
+
+	autoRenew := current.AutoRenew
+	autoRenewCancelled := current.AutoRenewCancelled
+	if input.AutoRenew.Set {
+		autoRenew = input.AutoRenew.Value
+	}
+	if input.AutoRenewCancelled.Set {
+		autoRenewCancelled = input.AutoRenewCancelled.Value
+	}
+	return !currentAutoRenew && autoRenew && !autoRenewCancelled
+}
+
+func subscriptionPatchExtendsEffectivePeriod(current subscriptions.Record, input subscriptions.PatchInput) bool {
+	next := current
+	if input.RenewalMode.Set {
+		next.RenewalMode = input.RenewalMode.Value
+	}
+	if input.RenewAt.Set {
+		next.RenewAt = input.RenewAt.Value
+	}
+	if input.EndsAt.Set {
+		next.EndsAt = input.EndsAt.Value
+	}
+
+	currentEnd := subscriptionEffectivePeriodEnd(current)
+	nextEnd := subscriptionEffectivePeriodEnd(next)
+	if currentEnd == nil || nextEnd == nil {
+		return currentEnd != nextEnd
+	}
+	return nextEnd.Time.After(currentEnd.Time)
+}
+
+func subscriptionEffectivePeriodEnd(record subscriptions.Record) *subscriptions.Date {
+	if record.EndsAt != nil {
+		return record.EndsAt
+	}
+	switch subscriptions.RenewalMode(record.RenewalMode) {
+	case subscriptions.RenewalModeGift, subscriptions.RenewalModeLottery, subscriptions.RenewalModeBonus, subscriptions.RenewalModeOther:
+		return nil
+	default:
+		return record.RenewAt
+	}
 }
 
 func patchSubscriptionRow(ctx context.Context, db subscriptionQueryer, subscriptionID string, input subscriptions.PatchInput) (subscriptions.Record, error) {

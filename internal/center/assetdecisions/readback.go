@@ -33,6 +33,10 @@ type ExecutionCurrentFacts struct {
 	ActiveSubscriptionCount          int                       `json:"active_subscription_count"`
 	ServiceCount                     int                       `json:"service_count"`
 	DomainCount                      int                       `json:"domain_count"`
+	EffectiveServiceCount            int                       `json:"effective_service_count"`
+	EffectiveDomainCount             int                       `json:"effective_domain_count"`
+	UnknownServiceCount              int                       `json:"unknown_service_count"`
+	UnknownDomainCount               int                       `json:"unknown_domain_count"`
 	TargetCount                      int                       `json:"target_count"`
 	RunningTargetCount               int                       `json:"running_target_count"`
 	MonitoringLinkCount              int                       `json:"monitoring_link_count"`
@@ -185,6 +189,10 @@ func memberReadbackStatus(member RecordMember, issues []ExecutionReadbackIssue, 
 	if critical && member.FollowupStatus == FollowupSkipped {
 		return ReadbackDrift, "已跳过跟进，但关键事实仍未闭环"
 	}
+	if hasIssueKind(issues, "carrier_needs_confirmation") &&
+		(member.FollowupStatus == FollowupDone || member.FollowupStatus == FollowupSkipped) {
+		return ReadbackDrift, "承载状态待确认，已完成或跳过的迁移跟进仍未闭环"
+	}
 	if member.FollowupStatus == FollowupBlocked {
 		return ReadbackBlocked, "成员跟进阻塞"
 	}
@@ -235,8 +243,17 @@ func executionIssuesForAction(action SuggestedAction, fact Fact) []ExecutionRead
 		if fact.VPS.RenewalDecision != vpsassets.RenewalMigrate && fact.VPS.RenewalDecision != vpsassets.RenewalReplaced && fact.VPS.LifecycleStatus != vpsassets.LifecycleToMigrate {
 			issues = append(issues, ExecutionReadbackIssue{Kind: "migration_not_started", Label: "未进入迁移链路", Tone: "alert", Details: "续费决策或 lifecycle 尚未体现迁移/替换"})
 		}
-		if fact.ServiceCount+fact.DomainCount+fact.RunningTargetCount > 0 {
-			issues = append(issues, ExecutionReadbackIssue{Kind: "old_carrier_remaining", Label: "旧 VPS 仍有承载", Tone: "critical", Details: fmt.Sprintf("service %d / domain %d / running target %d", fact.ServiceCount, fact.DomainCount, fact.RunningTargetCount)})
+		if fact.EffectiveServiceCount+fact.EffectiveDomainCount+fact.RunningTargetCount > 0 {
+			issues = append(issues, ExecutionReadbackIssue{
+				Kind: "old_carrier_remaining", Label: "旧 VPS 仍有承载", Tone: "critical",
+				Details: fmt.Sprintf("effective service %d / effective domain %d / running target %d", fact.EffectiveServiceCount, fact.EffectiveDomainCount, fact.RunningTargetCount),
+			})
+		}
+		if fact.UnknownServiceCount+fact.UnknownDomainCount > 0 {
+			issues = append(issues, ExecutionReadbackIssue{
+				Kind: "carrier_needs_confirmation", Label: "服务/域名承载状态待确认", Tone: "warning",
+				Details: fmt.Sprintf("unknown service %d / domain %d", fact.UnknownServiceCount, fact.UnknownDomainCount),
+			})
 		}
 	case ActionKeep:
 		if isTerminalLifecycle(fact.VPS.LifecycleStatus) {
@@ -285,6 +302,10 @@ func currentFactsFromFact(fact Fact) ExecutionCurrentFacts {
 		ActiveSubscriptionCount:          fact.ActiveSubscriptionCount,
 		ServiceCount:                     fact.ServiceCount,
 		DomainCount:                      fact.DomainCount,
+		EffectiveServiceCount:            fact.EffectiveServiceCount,
+		EffectiveDomainCount:             fact.EffectiveDomainCount,
+		UnknownServiceCount:              fact.UnknownServiceCount,
+		UnknownDomainCount:               fact.UnknownDomainCount,
 		TargetCount:                      fact.TargetCount,
 		RunningTargetCount:               fact.RunningTargetCount,
 		MonitoringLinkCount:              fact.MonitoringLinkCount,

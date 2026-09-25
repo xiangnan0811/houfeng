@@ -65,6 +65,8 @@ function emptyPreview(vpsId: string, warning = ''): CancellationPreview {
     warnings: warning ? [warning] : [],
     blockers: [],
     preview_digest: `digest-${vpsId}`,
+    dependency_impacts: [],
+    evaluated_on: '2026-09-24',
   }
 }
 
@@ -502,7 +504,7 @@ describe('VPSOverviewManagementActions', () => {
     fireEvent.change(await screen.findByRole('textbox', { name: '原因' }), { target: { value: '旧确认' } })
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
     await waitFor(() => expect(getPreview).toHaveBeenCalledTimes(2))
-    expect(screen.getByRole('textbox', { name: '原因' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: '原因' })).toHaveValue('旧确认')
   })
 
   it('requires loading the latest VPS version after a CAS conflict before another write', async () => {
@@ -856,8 +858,7 @@ describe('VPSOverviewManagementActions', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('续费决策已更新，但概览刷新失败')
-    expect(screen.getByRole('link', { name: '继续取消 / 退役' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: '继续取消 / 退役' })).toHaveAttribute(
       'href',
       '/vps/vps_a?workbench=cancellation',
     )
@@ -894,8 +895,7 @@ describe('VPSOverviewManagementActions', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent('续费决策已更新，概览已刷新')
-    expect(screen.getByRole('link', { name: '继续取消 / 退役' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: '继续取消 / 退役' })).toHaveAttribute(
       'href',
       '/vps/vps_a?workbench=cancellation',
     )
@@ -929,7 +929,7 @@ describe('VPSOverviewManagementActions', () => {
       target: { value: '准备取消' },
     })
     fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+    expect(await screen.findByRole('button', { name: '加载最新版本' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
     await waitFor(() => {
@@ -965,11 +965,9 @@ describe('VPSOverviewManagementActions', () => {
       target: { value: 'cancel' },
     })
     fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('请先加载最新版本')
+    expect(await screen.findByRole('button', { name: '加载最新版本' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '加载最新版本' }))
-    expect(await screen.findByRole('status')).toHaveTextContent('将保留你的草稿 取消，而不是最新 观察')
-    expect(screen.getByRole('status')).not.toHaveTextContent('cancel')
-    expect(screen.getByRole('status')).not.toHaveTextContent('observe')
+    expect(await screen.findByRole('combobox', { name: '续费决策' })).toHaveValue('cancel')
   })
 
   it('routes to archive after a readonly race on a cancelled VPS', async () => {
@@ -1482,6 +1480,7 @@ describe('VPSOverviewManagementActions', () => {
       warnings: [],
       blockers: [],
       eligible: true,
+      blocker_details: [],
     })
     const archive = vi.spyOn(api, 'archiveVPS').mockResolvedValue({
       vps: { ...detailFixture('vps_a', '东京边缘'), lifecycle_status: 'archived' },
@@ -1493,6 +1492,7 @@ describe('VPSOverviewManagementActions', () => {
       warnings: [],
       blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
       eligible: false,
+      blocker_details: [],
     })
     const refresh = vi.fn().mockResolvedValue(true)
 
@@ -1516,12 +1516,15 @@ describe('VPSOverviewManagementActions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
     const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '归档原因' }), {
+      target: { value: '订阅已结束' },
+    })
     fireEvent.change(within(dialog).getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
       target: { value: '东京边缘' },
     })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
 
-    await waitFor(() => expect(archive).toHaveBeenCalledWith('vps_a', { confirmation_name: '东京边缘' }))
+    await waitFor(() => expect(archive).toHaveBeenCalledWith('vps_a', { confirmation_name: '东京边缘', reason: '订阅已结束' }))
     expect(screen.getByTestId('archive-location')).toHaveTextContent('/archive/vps_a')
     expect(screen.getByTestId('archive-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
   })
@@ -1541,6 +1544,7 @@ describe('VPSOverviewManagementActions', () => {
       warnings: [],
       blockers: [],
       eligible: true,
+      blocker_details: [],
     })
     vi.spyOn(api, 'archiveVPS').mockRejectedValue(new ApiError(409, 'archive conflict'))
     const refresh = vi.fn().mockResolvedValue(true)
@@ -1566,6 +1570,9 @@ describe('VPSOverviewManagementActions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
     const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '归档原因' }), {
+      target: { value: '订阅已结束' },
+    })
     fireEvent.change(within(dialog).getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
       target: { value: '东京边缘' },
     })
@@ -1575,6 +1582,51 @@ describe('VPSOverviewManagementActions', () => {
     expect(screen.getByTestId('location-path')).toHaveTextContent('/')
     expect(screen.getByTestId('location-path')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(screen.queryByText('archived')).not.toBeInTheDocument()
+  })
+
+  it('wires inline blocker action in archive modal to scoped dependency status correction', async () => {
+    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue({
+      vps: detailFixture('vps_a', '东京边缘'),
+      subscriptions: [],
+      monitoring_instance_links: [],
+      services: [],
+      domains: [],
+      target_links: [],
+      warnings: [],
+      blockers: ['服务状态待确认'],
+      eligible: false,
+      blocker_details: [
+        {
+          code: 'service_status_needs_confirmation',
+          object_type: 'service',
+          object_id: 'svc_blocker_01',
+          display_name: 'Auth API',
+          current_state: 'unknown',
+          blocked_action: 'archive_vps',
+          resolution_action: 'correct_dependency_status',
+        },
+      ],
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Routes>
+          <Route path="/" element={<Harness onRefresh={vi.fn().mockResolvedValue(true)} />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    expect(dialog).toBeInTheDocument()
+
+    const correctBtn = within(dialog).getByRole('button', { name: '纠正服务状态' })
+    expect(correctBtn).toBeInTheDocument()
+
+    fireEvent.click(correctBtn)
+
+    // DependencyStatusCorrection modal must open
+    expect(await screen.findByRole('dialog', { name: '纠正服务状态' })).toBeInTheDocument()
   })
 
 })

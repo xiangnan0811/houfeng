@@ -1,9 +1,9 @@
 import { StrictMode } from 'react'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { MonitoringDetailPage } from './MonitoringDetailPage'
+import { MonitoringDetailPage, MonitoringDetailPageContent } from './MonitoringDetailPage'
 import { SubjectActivityPage } from './SubjectActivityPage'
 import { SubjectRecordsPage } from './SubjectRecordsPage'
 import { RecordNewPage } from './records/RecordNewPage'
@@ -116,24 +116,105 @@ function emptyManagementCounts(overrides: Partial<Record<string, unknown>> = {})
   }
 }
 
-function managementReview(record: Record<string, unknown>, overrides: Partial<Record<string, unknown>> = {}) {
+function managementReview(record: Record<string, unknown>, overrides: Record<string, unknown> = {}) {
+  const flags = (overrides.actions ?? {}) as Record<string, boolean>
+  const blockers = (overrides.blockers ?? []) as string[]
+  const warnings = (overrides.warnings ?? []) as string[]
+  const action = (allowed = false) => ({ allowed, blockers, warnings })
+  const rest = { ...overrides }
+  delete rest.actions
+  delete rest.blockers
+  delete rest.warnings
   return {
     record,
     active_vps_links: [],
     counts: emptyManagementCounts(),
-    warnings: [],
-    blockers: [],
-    actions: {
-      can_retire: true,
-      can_restore_lifecycle: false,
-      can_archive: false,
-      can_restore_archive: false,
-      can_permanent_cleanup: false,
+    action_reviews: {
+      retire: action(flags.can_retire ?? true),
+      restore: action(flags.can_restore_lifecycle ?? false),
+      archive: action(flags.can_archive ?? false),
+      restore_from_archive: action(flags.can_restore_archive ?? false),
+      permanent_cleanup: action(flags.can_permanent_cleanup ?? false),
     },
+    dependency_impacts: [],
+    preview_digest: 'review-digest',
     empty_mistake_candidate: false,
-    ...overrides,
+    ...rest,
   }
 }
+function sharedMonitoringImpacts(monitoringInstanceId: string) {
+  return [
+    {
+      object_type: 'monitoring_instance',
+      object_id: monitoringInstanceId,
+      vps_id: 'vps_001',
+      vps_lifecycle_status: 'active',
+      relation_type: 'agent',
+      relation_id: 'rel_001',
+      relation_status: 'active',
+      classification: 'current',
+    },
+    {
+      object_type: 'monitoring_instance',
+      object_id: monitoringInstanceId,
+      vps_id: 'vps_002',
+      vps_lifecycle_status: 'active',
+      relation_type: 'agent',
+      relation_id: 'rel_002',
+      relation_status: 'active',
+      classification: 'current',
+    },
+  ]
+}
+
+function activeMonitoringRecord(monitoringInstanceId: string, displayName = 'Tokyo Edge') {
+  return monitoringInstanceRecord({
+    monitoring_instance_id: monitoringInstanceId,
+    display_name: displayName,
+    binding_status: '已绑定',
+    monitoring_status: '启用',
+    lifecycle_status: '在用',
+    current_health_status: '正常',
+    current_active_incident_count: 0,
+    current_primary_issue_summary: '',
+    updated_at: '2026-04-27T09:05:00Z',
+  })
+}
+
+function renderMonitoringDetail(monitoringInstanceId: string) {
+  render(
+    <MemoryRouter initialEntries={[`/monitoring/${monitoringInstanceId}`]}>
+      <Routes>
+        <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+function detailFetch(
+  monitoringInstanceId: string,
+  record: Record<string, unknown>,
+  respond: (path: string, init: RequestInit | undefined) => Response | Promise<Response> | null,
+) {
+  return vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input)
+    const handled = respond(path, init)
+    if (handled) return handled
+    if (path === `/api/monitoring-instances/${monitoringInstanceId}`) return Promise.resolve(mockJSONResponse(record))
+    if (path === `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=24h`) {
+      return Promise.resolve(mockJSONResponse(emptyRuntimeFacts(monitoringInstanceId)))
+    }
+    if (path === `/api/incidents?object_type=monitoring_instance&object_id=${monitoringInstanceId}`) {
+      return Promise.resolve(mockJSONResponse([]))
+    }
+    if (path === `/api/events?object_type=monitoring_instance&object_id=${monitoringInstanceId}`) {
+      return Promise.resolve(mockJSONResponse([]))
+    }
+    if (path === `/api/monitoring-instances/${monitoringInstanceId}/vps`) return Promise.resolve(mockJSONResponse([]))
+    return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+  })
+}
+
 
 function hostSampleRecord(monitoringInstanceId: string, overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -251,6 +332,22 @@ function MonitoringDetailTestHarness() {
       <Routes>
         <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
       </Routes>
+    </>
+  )
+}
+
+function ReusedMonitoringDetailRoute() {
+  const navigate = useNavigate()
+  const { monitoringInstanceId } = useParams()
+
+  return (
+    <>
+      <button type="button" onClick={() => navigate('/monitoring/mi_refresh_target')}>
+        navigate to target instance
+      </button>
+      <MonitoringDetailPageContent
+        {...(monitoringInstanceId === undefined ? {} : { monitoringInstanceId })}
+      />
     </>
   )
 }
@@ -759,18 +856,12 @@ describe('MonitoringDetailPage', () => {
     fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '已不再需要观测' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认退役' }))
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_retire/lifecycle/retire', {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        cache: 'no-store',
-        credentials: 'include',
-        body: JSON.stringify({ reason: '已不再需要观测' }),
-      }),
-    )
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([url, init]) => (
+        String(url) === '/api/monitoring-instances/mi_retire/lifecycle/retire' && init?.method === 'POST'
+      ))
+      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ reason: '已不再需要观测' })
+    })
     openRuntimeMenu()
     expect(screen.getByText('当前：已退役')).toBeInTheDocument()
     expect(screen.getAllByText('暂停').length).toBeGreaterThan(0)
@@ -849,18 +940,15 @@ describe('MonitoringDetailPage', () => {
     fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Archive Edge' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_archive/archive', {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        cache: 'no-store',
-        credentials: 'include',
-        body: JSON.stringify({ reason: '重复创建', confirmation_name: 'Tokyo Archive Edge' }),
-      }),
-    )
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([url, init]) => (
+        String(url) === '/api/monitoring-instances/mi_archive/archive' && init?.method === 'POST'
+      ))
+      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+        reason: '重复创建',
+        confirmation_name: 'Tokyo Archive Edge',
+      })
+    })
     expect(screen.getByText('已归档')).toBeInTheDocument()
   })
 
@@ -946,18 +1034,15 @@ describe('MonitoringDetailPage', () => {
     fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Cleanup Edge' } })
     fireEvent.click(within(dialog).getByRole('button', { name: '确认永久清理' }))
 
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith('/api/monitoring-instances/mi_cleanup/permanent-cleanup', {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        cache: 'no-store',
-        credentials: 'include',
-        body: JSON.stringify({ reason: '误创建空实例', confirmation_name: 'Tokyo Cleanup Edge' }),
-      }),
-    )
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([url, init]) => (
+        String(url) === '/api/monitoring-instances/mi_cleanup/permanent-cleanup' && init?.method === 'POST'
+      ))
+      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
+        reason: '误创建空实例',
+        confirmation_name: 'Tokyo Cleanup Edge',
+      })
+    })
     await waitFor(() => expect(screen.getByText('monitoring list')).toBeInTheDocument())
   })
 
@@ -985,7 +1070,7 @@ describe('MonitoringDetailPage', () => {
       }
       if (path === '/api/monitoring-instances/mi_stale/management-review') {
         reviewGets += 1
-        if (reviewGets === 1) {
+        if (reviewGets <= 2) {
           return Promise.resolve(mockJSONResponse(managementReview(currentRecord, {
             actions: {
               can_retire: true,
@@ -1044,7 +1129,7 @@ describe('MonitoringDetailPage', () => {
     openRuntimeMenu()
     await waitFor(() => expect(screen.getByText('正在加载…')).toBeInTheDocument())
     expect(screen.queryByRole('menuitem', { name: '退役' })).not.toBeInTheDocument()
-    expect(reviewGets).toBe(2)
+    expect(reviewGets).toBe(3)
 
     await act(async () => {
       secondReview.resolve(mockJSONResponse(managementReview(refreshed, {
@@ -1061,7 +1146,7 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('menuitem', { name: '归档' })).toBeEnabled())
     expect(screen.queryByRole('menuitem', { name: '退役' })).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toEqual([])
-    expect(reviewGets).toBe(2)
+    expect(reviewGets).toBe(3)
   })
 
   it('renders monitoringInstance header and latest host sample cards', async () => {
@@ -2035,15 +2120,25 @@ describe('MonitoringDetailPage', () => {
   })
 
   it('renders the binding conflict as a notice row with a disposition dialog', async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockJSONResponse(monitoringInstanceRecord()))
-      .mockResolvedValueOnce(mockJSONResponse(emptyRuntimeFacts()))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse(onboardingConflictState()))
+    const record = monitoringInstanceRecord()
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_conflict') return Promise.resolve(mockJSONResponse(record))
+      if (path === '/api/monitoring-instances/mi_conflict/runtime-facts?window=24h') {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts()))
+      }
+      if (path.startsWith('/api/incidents')) return Promise.resolve(mockJSONResponse([]))
+      if (path.startsWith('/api/events')) return Promise.resolve(mockJSONResponse([]))
+      if (path === '/api/monitoring-instances/mi_conflict/onboarding') {
+        return Promise.resolve(mockJSONResponse(onboardingConflictState()))
+      }
+      if (path === '/api/monitoring-instances/mi_conflict/management-review') {
+        return Promise.resolve(mockJSONResponse(managementReview(record)))
+      }
+      if (path === '/api/monitoring-instances/mi_conflict/vps') return Promise.resolve(mockJSONResponse([]))
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
+    })
     vi.stubGlobal('fetch', fetchMock)
-
     render(
       <MemoryRouter initialEntries={['/monitoring/mi_conflict']}>
         <Routes>
@@ -2687,6 +2782,42 @@ describe('MonitoringDetailPage', () => {
         ),
       )
       .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_001',
+              display_name: 'Tokyo Edge',
+              monitoring_status: '启用',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              last_heartbeat_at: '2026-04-24T09:00:00Z',
+              last_sync_at: '2026-04-24T09:05:00Z',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+              updated_at: '2026-04-24T09:05:00Z',
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_001',
+              display_name: 'Tokyo Edge',
+              monitoring_status: '启用',
+              binding_status: '已绑定',
+              current_health_status: '正常',
+              last_heartbeat_at: '2026-04-24T09:00:00Z',
+              last_sync_at: '2026-04-24T09:05:00Z',
+              current_active_incident_count: 0,
+              current_primary_issue_summary: '',
+              updated_at: '2026-04-24T09:05:00Z',
+            }),
+          ),
+        ),
+      )
+      .mockResolvedValueOnce(
         mockJSONResponse({
           monitoring_instance_id: 'mi_001',
           display_name: 'Tokyo Edge',
@@ -2707,7 +2838,46 @@ describe('MonitoringDetailPage', () => {
           updated_at: '2026-04-24T09:20:00Z',
         }),
       )
-    vi.stubGlobal('fetch', fetchMock)
+    const fetchSpy = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_001/management-review') {
+        return Promise.resolve(mockJSONResponse(managementReview(monitoringInstanceRecord({
+          monitoring_instance_id: 'mi_001',
+          display_name: 'Tokyo Edge',
+          monitoring_status: '启用',
+          binding_status: '已绑定',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_sync_at: '2026-04-24T09:05:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          updated_at: '2026-04-24T09:05:00Z',
+        }))))
+      }
+      if (path === '/api/monitoring-instances/mi_001/runtime/pause' && init?.method === 'POST') {
+        return Promise.resolve(mockJSONResponse({
+          monitoring_instance_id: 'mi_001',
+          display_name: 'Tokyo Edge',
+          region: 'ap-northeast-1',
+          city: 'Tokyo',
+          provider: 'Vultr',
+          lifecycle_status: '在用',
+          monitoring_status: '暂停',
+          binding_status: '已绑定',
+          labels: ['core'],
+          note: '',
+          current_health_status: '正常',
+          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_sync_at: '2026-04-24T09:05:00Z',
+          current_active_incident_count: 0,
+          current_primary_issue_summary: '',
+          created_at: '2026-04-20T00:00:00Z',
+          updated_at: '2026-04-24T09:20:00Z',
+        }))
+      }
+      return fetchMock(input, init)
+    })
+    vi.stubGlobal('fetch', fetchSpy)
 
     render(
       <MemoryRouter initialEntries={['/monitoring/mi_001']}>
@@ -2734,26 +2904,33 @@ describe('MonitoringDetailPage', () => {
       ),
     ).toBeInTheDocument()
     expect(screen.getByText('不会删除历史事件、观测记录或 agent 绑定关系。')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchSpy.mock.calls.filter(([url, request]) => (
+      String(url) === '/api/monitoring-instances/mi_001/runtime/pause' && request?.method === 'POST'
+    ))).toEqual([])
 
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     expect(screen.queryByRole('heading', { name: '确认暂停监控实例监控' })).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(5)
+    expect(fetchSpy.mock.calls.filter(([url, request]) => (
+      String(url) === '/api/monitoring-instances/mi_001/runtime/pause' && request?.method === 'POST'
+    ))).toEqual([])
     await waitFor(() => expect(screen.getByRole('menuitem', { name: '暂停监控' })).toHaveFocus())
 
     fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
+    const confirmPause = await screen.findByRole('button', { name: '确认暂停监控' })
+    await waitFor(() => expect(confirmPause).toBeEnabled())
+    fireEvent.click(confirmPause)
 
     expect(confirmMock).not.toHaveBeenCalled()
-    await waitFor(() =>
-      expect(screen.getByRole('menuitem', { name: '恢复监控' })).toBeInTheDocument(),
-    )
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: '恢复监控' })).toBeInTheDocument())
     await waitFor(() => expect(screen.getByRole('menuitem', { name: '恢复监控' })).toHaveFocus())
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_001/runtime/pause', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-        credentials: 'include',
+    await waitFor(() => {
+      const post = fetchSpy.mock.calls.find(([url, request]) => (
+        String(url) === '/api/monitoring-instances/mi_001/runtime/pause' && request?.method === 'POST'
+      ))
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        preview_digest: 'review-digest',
+        confirm_shared_impact: false,
+      })
     })
   })
 
@@ -2827,6 +3004,19 @@ describe('MonitoringDetailPage', () => {
           ),
         ),
       )
+      .mockResolvedValueOnce(
+        mockJSONResponse(
+          managementReview(
+            monitoringInstanceRecord({
+              monitoring_instance_id: 'mi_pause_error',
+              binding_status: '已绑定',
+              monitoring_status: '启用',
+              current_health_status: '正常',
+              current_primary_issue_summary: '',
+            }),
+          ),
+        ),
+      )
       .mockResolvedValueOnce(mockJSONResponse({ error: 'pause failed' }, 500))
       .mockResolvedValueOnce(
         mockJSONResponse(
@@ -2856,7 +3046,10 @@ describe('MonitoringDetailPage', () => {
 
     openRuntimeMenu()
     fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认暂停监控' }))
+    const confirmPause = await screen.findByRole('button', { name: '确认暂停监控' })
+    await waitFor(() => expect(confirmPause).toBeEnabled())
+    fireEvent.click(confirmPause)
+
 
     await waitFor(() => expect(screen.getByText('pause failed')).toBeInTheDocument())
     expect(screen.getByRole('alertdialog', { name: '确认暂停监控实例监控' })).toBeInTheDocument()
@@ -2867,19 +3060,551 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('menuitem', { name: '恢复监控' })).toBeInTheDocument(),
     )
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_pause_error/runtime/pause', {
+    expect(fetchMock).toHaveBeenNthCalledWith(7, '/api/monitoring-instances/mi_pause_error/runtime/pause', {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        preview_digest: 'review-digest',
+        confirm_shared_impact: false,
+      }),
       cache: 'no-store',
-        credentials: 'include',
+      credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/monitoring-instances/mi_pause_error/runtime/pause', {
+    expect(fetchMock).toHaveBeenNthCalledWith(8, '/api/monitoring-instances/mi_pause_error/runtime/pause', {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        preview_digest: 'review-digest',
+        confirm_shared_impact: false,
+      }),
       cache: 'no-store',
-        credentials: 'include',
+      credentials: 'include',
     })
   })
+  it('sends preview digest and shared-impact confirmation when pausing a shared monitoring instance from the detail page', async () => {
+    const id = 'mi_shared_pause'
+    const record = activeMonitoringRecord(id, 'Shared Edge')
+    const paused = { ...record, monitoring_status: '暂停', updated_at: '2026-04-27T09:20:00Z' }
+    const fetchMock = detailFetch(id, record, (path, init) => {
+      if (path === `/api/monitoring-instances/${id}/management-review`) {
+        return Promise.resolve(mockJSONResponse(managementReview(record, {
+          dependency_impacts: sharedMonitoringImpacts(id),
+          preview_digest: 'shared-pause-digest',
+        })))
+      }
+      if (path === `/api/monitoring-instances/${id}/runtime/pause` && init?.method === 'POST') {
+        return Promise.resolve(mockJSONResponse(paused))
+      }
+      return null
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderMonitoringDetail(id)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Shared Edge' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
+
+    const dialog = await screen.findByRole('alertdialog', { name: '确认暂停监控实例监控' })
+    expect(await within(dialog).findByText('共享影响摘要 shared-pause-digest')).toBeInTheDocument()
+    const confirm = within(dialog).getByRole('button', { name: '确认暂停监控' })
+    expect(confirm).toBeDisabled()
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    expect(confirm).toBeEnabled()
+    fireEvent.click(confirm)
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([url, request]) => (
+        String(url) === `/api/monitoring-instances/${id}/runtime/pause` && request?.method === 'POST'
+      ))
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        preview_digest: 'shared-pause-digest',
+        confirm_shared_impact: true,
+      })
+    })
+  })
+
+  it('blocks pause until the management review loads, then sends the digest without shared confirmation', async () => {
+    const id = 'mi_plain_pause'
+    const record = activeMonitoringRecord(id, 'Plain Edge')
+    const paused = { ...record, monitoring_status: '暂停', updated_at: '2026-04-27T09:20:00Z' }
+    const review = deferredResponse()
+    const fetchMock = detailFetch(id, record, (path, init) => {
+      if (path === `/api/monitoring-instances/${id}/management-review`) return review.promise
+      if (path === `/api/monitoring-instances/${id}/runtime/pause` && init?.method === 'POST') {
+        return Promise.resolve(mockJSONResponse(paused))
+      }
+      return null
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderMonitoringDetail(id)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Plain Edge' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认暂停监控实例监控' })
+    expect(within(dialog).getByText('管理审查尚未就绪，暂不能暂停。')).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '确认暂停监控' })).toBeDisabled()
+
+    await act(async () => {
+      review.resolve(mockJSONResponse(managementReview(record, { preview_digest: 'plain-pause-digest' })))
+    })
+
+    expect(within(dialog).queryByText('管理审查尚未就绪，暂不能暂停。')).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('checkbox')).not.toBeInTheDocument()
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认暂停监控' }))
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(([url, request]) => (
+        String(url) === `/api/monitoring-instances/${id}/runtime/pause` && request?.method === 'POST'
+      ))
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+        preview_digest: 'plain-pause-digest',
+        confirm_shared_impact: false,
+      })
+    })
+  })
+
+  it('reloads the management review after a stale pause and resubmits the fresh digest', async () => {
+    const id = 'mi_stale_pause'
+    const record = activeMonitoringRecord(id, 'Stale Pause Edge')
+    const paused = { ...record, monitoring_status: '暂停', updated_at: '2026-04-27T09:20:00Z' }
+    let reviewGets = 0
+    const posts: Array<Record<string, unknown>> = []
+    const freshReview = deferredResponse()
+    const fetchMock = detailFetch(id, record, (path, init) => {
+      if (path === `/api/monitoring-instances/${id}/management-review`) {
+        reviewGets += 1
+        if (!posts.length) {
+          return Promise.resolve(mockJSONResponse(managementReview(record, {
+            dependency_impacts: sharedMonitoringImpacts(id),
+            preview_digest: 'pause-digest-old',
+          })))
+        }
+        return freshReview.promise
+      }
+      if (path === `/api/monitoring-instances/${id}/runtime/pause` && init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body ?? 'null')) as Record<string, unknown>)
+        if (posts.length === 1) {
+          return Promise.resolve(mockJSONResponse({
+            error: 'management review stale',
+            code: 'management_review_stale',
+          }, 409))
+        }
+        return Promise.resolve(mockJSONResponse(paused))
+      }
+      return null
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderMonitoringDetail(id)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Stale Pause Edge' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认暂停监控实例监控' })
+    fireEvent.click(await within(dialog).findByRole('checkbox'))
+    const getsAtSubmit = reviewGets
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认暂停监控' }))
+
+    await waitFor(() => expect(reviewGets).toBe(getsAtSubmit + 1))
+    expect(posts).toEqual([{
+      preview_digest: 'pause-digest-old',
+      confirm_shared_impact: true,
+    }])
+    expect(within(dialog).getByText('影响范围已变化，共享确认已清除，不会自动重新提交。')).toBeInTheDocument()
+
+    await act(async () => {
+      freshReview.resolve(mockJSONResponse(managementReview(record, {
+        dependency_impacts: sharedMonitoringImpacts(id),
+        preview_digest: 'pause-digest-fresh',
+      })))
+    })
+
+    const refreshedCheckbox = within(dialog).getByRole('checkbox')
+    expect(refreshedCheckbox).not.toBeChecked()
+    expect(within(dialog).getByText('共享影响摘要 pause-digest-fresh')).toBeInTheDocument()
+    fireEvent.click(refreshedCheckbox)
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认暂停监控' }))
+
+    await waitFor(() => expect(posts).toHaveLength(2))
+    expect(posts[1]).toEqual({
+      preview_digest: 'pause-digest-fresh',
+      confirm_shared_impact: true,
+    })
+  })
+
+  it('does not show a superseded stale pause refresh failure on the next monitoring instance', async () => {
+    const sourceId = 'mi_refresh_source'
+    const targetId = 'mi_refresh_target'
+    const sourceRecord = activeMonitoringRecord(sourceId, 'Refresh Source')
+    const targetRecord = activeMonitoringRecord(targetId, 'Refresh Target')
+    const lateSourceReview = deferredResponse()
+    let sourceReviewGets = 0
+    const fetchMock = detailFetch(sourceId, sourceRecord, (path, init) => {
+      if (path === `/api/monitoring-instances/${sourceId}/management-review`) {
+        sourceReviewGets += 1
+        if (sourceReviewGets >= 3) return lateSourceReview.promise
+        return Promise.resolve(mockJSONResponse(managementReview(sourceRecord, {
+          preview_digest: 'source-review-digest',
+        })))
+      }
+      if (path === `/api/monitoring-instances/${sourceId}/runtime/pause` && init?.method === 'POST') {
+        return Promise.resolve(mockJSONResponse({
+          error: 'management review stale',
+          code: 'management_review_stale',
+        }, 409))
+      }
+      if (path === `/api/monitoring-instances/${targetId}`) {
+        return Promise.resolve(mockJSONResponse(targetRecord))
+      }
+      if (path === `/api/monitoring-instances/${targetId}/runtime-facts?window=24h`) {
+        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts(targetId)))
+      }
+      if (path === `/api/incidents?object_type=monitoring_instance&object_id=${targetId}`) {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === `/api/events?object_type=monitoring_instance&object_id=${targetId}`) {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === `/api/monitoring-instances/${targetId}/vps`) {
+        return Promise.resolve(mockJSONResponse([]))
+      }
+      if (path === `/api/monitoring-instances/${targetId}/management-review`) {
+        return Promise.resolve(mockJSONResponse(managementReview(targetRecord, {
+          actions: { can_retire: false, can_archive: true },
+          preview_digest: 'target-review-digest',
+        })))
+      }
+      return null
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={[`/monitoring/${sourceId}`]}>
+        <Routes>
+          <Route path="/monitoring/:monitoringInstanceId" element={<ReusedMonitoringDetailRoute />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Refresh Source' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
+    const pauseDialog = await screen.findByRole('alertdialog', { name: '确认暂停监控实例监控' })
+    await waitFor(() => expect(
+      within(pauseDialog).getByRole('button', { name: '确认暂停监控' }),
+    ).toBeEnabled())
+    fireEvent.click(within(pauseDialog).getByRole('button', { name: '确认暂停监控' }))
+    await waitFor(() => expect(sourceReviewGets).toBe(3))
+
+    fireEvent.click(screen.getByRole('button', { name: 'navigate to target instance' }))
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Refresh Target' })).toBeInTheDocument())
+    fireEvent.click(within(pauseDialog).getByRole('button', { name: '取消' }))
+    const targetMenuTrigger = screen.getByRole('button', { name: '管理' })
+    if (targetMenuTrigger.getAttribute('aria-expanded') === 'true') fireEvent.click(targetMenuTrigger)
+    fireEvent.click(targetMenuTrigger)
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument())
+
+    await act(async () => {
+      lateSourceReview.resolve(mockJSONResponse(managementReview(sourceRecord, {
+        preview_digest: 'late-source-review',
+      })))
+    })
+
+    expect(screen.getByRole('heading', { name: 'Refresh Target' })).toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument()
+    expect(screen.queryByText('影响范围已变化，但审查刷新失败。请关闭后重新打开管理菜单。')).not.toBeInTheDocument()
+  })
+
+  it('shows the stale management refresh failure when the current instance review request fails', async () => {
+    const id = 'mi_stale_pause_refresh_error'
+    const record = activeMonitoringRecord(id, 'Stale Pause Refresh Error')
+    let reviewGets = 0
+    const fetchMock = detailFetch(id, record, (path, init) => {
+      if (path === `/api/monitoring-instances/${id}/management-review`) {
+        reviewGets += 1
+        if (reviewGets >= 3) {
+          return Promise.resolve(mockJSONResponse({ error: 'review unavailable' }, 503))
+        }
+        return Promise.resolve(mockJSONResponse(managementReview(record, {
+          preview_digest: 'review-before-stale-pause',
+        })))
+      }
+      if (path === `/api/monitoring-instances/${id}/runtime/pause` && init?.method === 'POST') {
+        return Promise.resolve(mockJSONResponse({
+          error: 'management review stale',
+          code: 'management_review_stale',
+        }, 409))
+      }
+      return null
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderMonitoringDetail(id)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Stale Pause Refresh Error' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
+    const pauseDialog = await screen.findByRole('alertdialog', { name: '确认暂停监控实例监控' })
+    await waitFor(() => expect(
+      within(pauseDialog).getByRole('button', { name: '确认暂停监控' }),
+    ).toBeEnabled())
+    fireEvent.click(within(pauseDialog).getByRole('button', { name: '确认暂停监控' }))
+    await waitFor(() => expect(reviewGets).toBe(3))
+    expect(await screen.findByText('影响范围已变化，但审查刷新失败。请关闭后重新打开管理菜单。')).toBeInTheDocument()
+  })
+
+
+  it('blocks pause confirmation when the management review fails', async () => {
+    const id = 'mi_pause_review_error'
+    const record = activeMonitoringRecord(id)
+    vi.stubGlobal('fetch', detailFetch(id, record, (path) => {
+      if (path === `/api/monitoring-instances/${id}/management-review`) {
+        return Promise.resolve(mockJSONResponse({ error: 'review unavailable' }, 503))
+      }
+      return null
+    }))
+    renderMonitoringDetail(id)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '暂停监控' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认暂停监控实例监控' })
+    expect(within(dialog).getByRole('button', { name: '确认暂停监控' })).toBeDisabled()
+    expect(within(dialog).getByText('管理审查加载失败，不能继续暂停。')).toBeInTheDocument()
+    expect(vi.mocked(fetch).mock.calls.filter(([url, request]) => (
+      String(url) === `/api/monitoring-instances/${id}/runtime/pause` && request?.method === 'POST'
+    ))).toEqual([])
+  })
+
+  it('reloads the management review after a stale conflict, preserves the draft, and resubmits the fresh digest', async () => {
+    const id = 'mi_stale_archive'
+    const record = activeMonitoringRecord(id, 'Tokyo Stale Edge')
+    const archived = { ...record, archived_at: '2026-04-27T10:00:00Z', updated_at: record.updated_at }
+    let reviewGets = 0
+    const posts: Array<Record<string, unknown>> = []
+    const freshReview = deferredResponse()
+    const fetchMock = detailFetch(id, record, (path, init) => {
+      if (path === `/api/monitoring-instances/${id}/management-review`) {
+        reviewGets += 1
+        if (!posts.length) {
+          return Promise.resolve(mockJSONResponse(managementReview(record, {
+            actions: { can_retire: false, can_archive: true },
+            dependency_impacts: sharedMonitoringImpacts(id),
+            preview_digest: 'digest-old',
+            warnings: ['旧审查'],
+          })))
+        }
+        return freshReview.promise
+      }
+      if (path === `/api/monitoring-instances/${id}/archive` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        posts.push(body)
+        if (posts.length === 1) {
+          return Promise.resolve(mockJSONResponse({
+            error: 'management review stale',
+            code: 'management_review_stale',
+          }, 409))
+        }
+        return Promise.resolve(mockJSONResponse(archived))
+      }
+      return null
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderMonitoringDetail(id)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Stale Edge' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: '归档' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '归档监控实例' })
+    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '重复创建' } })
+    fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Stale Edge' } })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '确认此监控实例对多台 VPS 的当前或残留影响' }))
+    const getsAtSubmit = reviewGets
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+
+    await waitFor(() => expect(reviewGets).toBe(getsAtSubmit + 1))
+    expect(posts).toEqual([{
+      reason: '重复创建',
+      confirmation_name: 'Tokyo Stale Edge',
+      preview_digest: 'digest-old',
+      confirm_shared_impact: true,
+    }])
+    expect(within(dialog).getByText('影响范围已变化，共享确认已清除，不会自动重新提交。')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('原因')).toHaveValue('重复创建')
+    expect(within(dialog).getByLabelText('输入实例名称确认')).toHaveValue('Tokyo Stale Edge')
+    expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
+
+    await act(async () => {
+      freshReview.resolve(mockJSONResponse(managementReview(record, {
+        actions: { can_retire: false, can_archive: true },
+        dependency_impacts: sharedMonitoringImpacts(id),
+        preview_digest: 'digest-fresh',
+        warnings: ['影响范围已更新'],
+      })))
+    })
+
+    expect(within(dialog).getByText('影响范围已更新')).toBeInTheDocument()
+    expect(within(dialog).queryByText('旧审查')).not.toBeInTheDocument()
+    const refreshedCheckbox = within(dialog).getByRole('checkbox', { name: '确认此监控实例对多台 VPS 的当前或残留影响' })
+    expect(refreshedCheckbox).not.toBeChecked()
+    expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
+    fireEvent.click(refreshedCheckbox)
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+
+    await waitFor(() => expect(posts).toHaveLength(2))
+    expect(posts[1]).toEqual({
+      reason: '重复创建',
+      confirmation_name: 'Tokyo Stale Edge',
+      preview_digest: 'digest-fresh',
+      confirm_shared_impact: true,
+    })
+  })
+  it('keeps the retire draft after shared impact confirmation is required and resubmits the fresh digest', async () => {
+    const id = 'mi_shared_required'
+    const record = activeMonitoringRecord(id, 'Tokyo Shared Retire')
+    const retired = { ...record, lifecycle_status: '已退役', monitoring_status: '暂停', updated_at: record.updated_at }
+    let reviewGets = 0
+    let submitted = false
+    const posts: Array<Record<string, unknown>> = []
+    const freshReview = deferredResponse()
+    const fetchMock = detailFetch(id, record, (path, init) => {
+      if (path === `/api/monitoring-instances/${id}/management-review`) {
+        reviewGets += 1
+        if (!submitted) {
+          return Promise.resolve(mockJSONResponse(managementReview(record, {
+            actions: { can_retire: true, can_archive: true },
+            dependency_impacts: sharedMonitoringImpacts(id),
+            preview_digest: 'digest-old',
+          })))
+        }
+        return freshReview.promise
+      }
+      if (path === `/api/monitoring-instances/${id}/lifecycle/retire` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        posts.push(body)
+        if (posts.length === 1) {
+          submitted = true
+          return Promise.resolve(mockJSONResponse({
+            error: 'shared impact confirmation required',
+            code: 'shared_impact_confirmation_required',
+          }, 409))
+        }
+        return Promise.resolve(mockJSONResponse(retired))
+      }
+      if (path === `/api/monitoring-instances/${id}/archive` && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>
+        posts.push(body)
+        return Promise.resolve(mockJSONResponse(record))
+      }
+      return null
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderMonitoringDetail(id)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Shared Retire' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: '退役' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '退役监控实例' })
+    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '停止观测' } })
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: '确认此监控实例对多台 VPS 的当前或残留影响' }))
+    const getsAtSubmit = reviewGets
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认退役' }))
+
+    await waitFor(() => expect(reviewGets).toBe(getsAtSubmit + 1))
+    expect(posts).toEqual([{
+      reason: '停止观测',
+      preview_digest: 'digest-old',
+      confirm_shared_impact: true,
+    }])
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByText('影响范围已变化，共享确认已清除，不会自动重新提交。')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('原因')).toHaveValue('停止观测')
+    expect(within(dialog).getByRole('button', { name: '确认退役' })).toBeDisabled()
+
+    await act(async () => {
+      freshReview.resolve(mockJSONResponse(managementReview(record, {
+        actions: { can_retire: true, can_archive: true },
+        dependency_impacts: sharedMonitoringImpacts(id),
+        preview_digest: 'digest-fresh',
+      })))
+    })
+
+    const refreshedCheckbox = within(dialog).getByRole('checkbox', { name: '确认此监控实例对多台 VPS 的当前或残留影响' })
+    expect(refreshedCheckbox).not.toBeChecked()
+    fireEvent.click(refreshedCheckbox)
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认退役' }))
+
+    await waitFor(() => expect(posts).toHaveLength(2))
+    expect(posts[1]).toEqual({
+      reason: '停止观测',
+      preview_digest: 'digest-fresh',
+      confirm_shared_impact: true,
+    })
+    expect(posts.filter((body) => body.confirmation_name)).toEqual([])
+  })
+
+  it('refetches the management review when reopening a management dialog and blocks submit until it loads', async () => {
+    const id = 'mi_reopen_review'
+    const record = activeMonitoringRecord(id, 'Reopen Edge')
+    let reviewGets = 0
+    let reopenArmed = false
+    const reopenReview = deferredResponse()
+    const posts: Array<Record<string, unknown>> = []
+    const fetchMock = detailFetch(id, record, (path, init) => {
+      if (path === `/api/monitoring-instances/${id}/management-review`) {
+        reviewGets += 1
+        if (reopenArmed) return reopenReview.promise
+        return Promise.resolve(mockJSONResponse(managementReview(record, {
+          actions: { can_retire: true },
+          preview_digest: 'digest-cached',
+        })))
+      }
+      if (path === `/api/monitoring-instances/${id}/lifecycle/retire` && init?.method === 'POST') {
+        posts.push(JSON.parse(String(init.body)) as Record<string, unknown>)
+        return Promise.resolve(mockJSONResponse({ ...record, lifecycle_status: '已退役', monitoring_status: '暂停' }))
+      }
+      return null
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderMonitoringDetail(id)
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Reopen Edge' })).toBeInTheDocument())
+    openRuntimeMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: '退役' }))
+    fireEvent.click(within(await screen.findByRole('alertdialog', { name: '退役监控实例' })).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('alertdialog', { name: '退役监控实例' })).not.toBeInTheDocument()
+
+    reopenArmed = true
+    const getsBeforeReopen = reviewGets
+    openRuntimeMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: '退役' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '退役监控实例' })
+    await waitFor(() => expect(reviewGets).toBe(getsBeforeReopen + 1))
+    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '重新确认' } })
+    expect(within(dialog).getByRole('button', { name: '确认退役' })).toBeDisabled()
+    expect(posts).toEqual([])
+
+    await act(async () => {
+      reopenReview.resolve(mockJSONResponse(managementReview(record, {
+        actions: { can_retire: true },
+        preview_digest: 'digest-reopened',
+      })))
+    })
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认退役' }))
+    await waitFor(() => expect(posts).toEqual([{
+      reason: '重新确认',
+      preview_digest: 'digest-reopened',
+      confirm_shared_impact: false,
+    }]))
+  })
+
+
 
   it('keeps monitoring lifecycle actions out of the watchtower actions menu', async () => {
     vi.stubGlobal(

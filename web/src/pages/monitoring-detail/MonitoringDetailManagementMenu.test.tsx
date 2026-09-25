@@ -31,8 +31,26 @@ function record(overrides: Partial<MonitoringInstanceRecord> = {}): MonitoringIn
 
 function review(
   current: MonitoringInstanceRecord,
-  overrides: Partial<MonitoringInstanceManagementReview> = {},
+  overrides: Partial<MonitoringInstanceManagementReview> & {
+    actions?: {
+      can_retire?: boolean
+      can_restore_lifecycle?: boolean
+      can_archive?: boolean
+      can_restore_archive?: boolean
+      can_permanent_cleanup?: boolean
+    }
+    blockers?: string[]
+    warnings?: string[]
+  } = {},
 ): MonitoringInstanceManagementReview {
+  const flags = overrides.actions ?? {}
+  const blockers = overrides.blockers ?? []
+  const warnings = overrides.warnings ?? []
+  const action = (allowed = false) => ({ allowed, blockers, warnings })
+  const rest = { ...overrides }
+  delete rest.actions
+  delete rest.blockers
+  delete rest.warnings
   return {
     record: current,
     active_vps_links: [],
@@ -49,17 +67,17 @@ function review(
       command_action_audit_count: 2,
       active_vps_link_count: 0,
     },
-    warnings: [],
-    blockers: [],
-    actions: {
-      can_retire: true,
-      can_restore_lifecycle: false,
-      can_archive: false,
-      can_restore_archive: false,
-      can_permanent_cleanup: false,
+    action_reviews: {
+      retire: action(flags.can_retire ?? true),
+      restore: action(flags.can_restore_lifecycle ?? false),
+      archive: action(flags.can_archive ?? false),
+      restore_from_archive: action(flags.can_restore_archive ?? false),
+      permanent_cleanup: action(flags.can_permanent_cleanup ?? false),
     },
+    dependency_impacts: [],
+    preview_digest: 'review-digest',
     empty_mistake_candidate: false,
-    ...overrides,
+    ...rest,
   }
 }
 
@@ -308,7 +326,10 @@ describe('MonitoringDetailManagementMenu', () => {
     fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Managed Edge' } })
     expect(confirm).toBeEnabled()
     fireEvent.click(confirm)
-    expect(onArchive).toHaveBeenCalledWith('重复创建', 'Tokyo Managed Edge')
+    expect(onArchive).toHaveBeenCalledWith('重复创建', 'Tokyo Managed Edge', {
+      preview_digest: 'review-digest',
+      confirm_shared_impact: false,
+    })
   })
 
   it('closes on Escape and restores focus to the 管理 trigger', async () => {
@@ -356,6 +377,214 @@ describe('MonitoringDetailManagementMenu', () => {
     fireEvent.mouseDown(document.body)
     expect(screen.queryByRole('menu', { name: '管理' })).not.toBeInTheDocument()
   })
+
+  it('resets shared-impact consent when dialog is closed and reopened with the same or another action', () => {
+    const current = record()
+    const sharedReview = review(current, {
+      dependency_impacts: [
+        {
+          object_type: 'monitoring_instance',
+          object_id: 'mi_manage',
+          vps_id: 'vps_001',
+          vps_lifecycle_status: 'active',
+          relation_type: 'agent',
+          relation_id: 'rel_001',
+          relation_status: 'active',
+          classification: 'current',
+        },
+        {
+          object_type: 'monitoring_instance',
+          object_id: 'mi_manage',
+          vps_id: 'vps_002',
+          vps_lifecycle_status: 'active',
+          relation_type: 'agent',
+          relation_id: 'rel_002',
+          relation_status: 'active',
+          classification: 'current',
+        },
+      ],
+      preview_digest: 'shared-digest-v1',
+      actions: { can_retire: true },
+    })
+
+    renderMenu({ monitoringInstance: current, review: sharedReview })
+    openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '退役' }))
+
+    // Fill reason
+    fireEvent.change(screen.getByLabelText('原因'), { target: { value: '退役实例' } })
+    const confirmBtn = screen.getByRole('button', { name: '确认退役' })
+    const checkbox = screen.getByLabelText('确认此监控实例对多台 VPS 的当前或残留影响')
+
+    // Confirm should be disabled until checked
+    expect(confirmBtn).toBeDisabled()
+    expect(checkbox).not.toBeChecked()
+
+    fireEvent.click(checkbox)
+    expect(checkbox).toBeChecked()
+    expect(confirmBtn).toBeEnabled()
+
+    // Cancel dialog
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+
+    // Reopen menu and dialog
+    openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '退役' }))
+
+    const reopenedCheckbox = screen.getByLabelText('确认此监控实例对多台 VPS 的当前或残留影响')
+    const reopenedConfirmBtn = screen.getByRole('button', { name: '确认退役' })
+    expect(reopenedCheckbox).not.toBeChecked()
+    expect(reopenedConfirmBtn).toBeDisabled()
+  })
+
+  it('invalidates shared-impact consent when review digest changes', () => {
+    const current = record()
+    const sharedReview = review(current, {
+      dependency_impacts: [
+        {
+          object_type: 'monitoring_instance',
+          object_id: 'mi_manage',
+          vps_id: 'vps_001',
+          vps_lifecycle_status: 'active',
+          relation_type: 'agent',
+          relation_id: 'rel_001',
+          relation_status: 'active',
+          classification: 'current',
+        },
+        {
+          object_type: 'monitoring_instance',
+          object_id: 'mi_manage',
+          vps_id: 'vps_002',
+          vps_lifecycle_status: 'active',
+          relation_type: 'agent',
+          relation_id: 'rel_002',
+          relation_status: 'active',
+          classification: 'current',
+        },
+      ],
+      preview_digest: 'shared-digest-v1',
+      actions: { can_retire: true },
+    })
+
+    const { rerender } = render(
+      <MemoryRouter>
+        <MonitoringDetailManagementMenu
+          {...renderMenuProps(current, sharedReview, {})}
+        />
+      </MemoryRouter>,
+    )
+    openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '退役' }))
+
+    fireEvent.change(screen.getByLabelText('原因'), { target: { value: '退役实例' } })
+    const checkbox = screen.getByLabelText('确认此监控实例对多台 VPS 的当前或残留影响')
+    fireEvent.click(checkbox)
+    expect(checkbox).toBeChecked()
+    expect(screen.getByRole('button', { name: '确认退役' })).toBeEnabled()
+
+    // Review refreshes with changed digest
+    const updatedReview = { ...sharedReview, preview_digest: 'shared-digest-v2' }
+    rerender(
+      <MemoryRouter>
+        <MonitoringDetailManagementMenu
+          {...renderMenuProps(current, updatedReview, {})}
+        />
+      </MemoryRouter>,
+    )
+
+    const updatedCheckbox = screen.getByLabelText('确认此监控实例对多台 VPS 的当前或残留影响')
+    expect(updatedCheckbox).not.toBeChecked()
+    expect(screen.getByRole('button', { name: '确认退役' })).toBeDisabled()
+  })
+
+  it('blocks management confirmation while the review digest is missing or the review failed', () => {
+    const current = record()
+    const loaded = review(current, {
+      actions: { can_retire: false, can_archive: true },
+    })
+    const { rerender } = render(
+      <MemoryRouter>
+        <MonitoringDetailManagementMenu
+          {...renderMenuProps(current, { ...loaded, preview_digest: '' }, {})}
+        />
+      </MemoryRouter>,
+    )
+    openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.change(screen.getByLabelText('原因'), { target: { value: '重复创建' } })
+    fireEvent.change(screen.getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Managed Edge' } })
+    expect(screen.getByRole('button', { name: '确认归档' })).toBeDisabled()
+
+    rerender(
+      <MemoryRouter>
+        <MonitoringDetailManagementMenu
+          {...renderMenuProps(current, loaded, { error: '管理审查加载失败' })}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('button', { name: '确认归档' })).toBeDisabled()
+
+    rerender(
+      <MemoryRouter>
+        <MonitoringDetailManagementMenu
+          {...renderMenuProps(current, loaded, { review: null })}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('button', { name: '确认归档' })).toBeDisabled()
+  })
+
+  it('keeps the reason and display-name draft and clears shared confirmation when the action is stale', async () => {
+    const current = record()
+    const onArchive = vi.fn().mockResolvedValue('stale')
+    renderMenu({
+      monitoringInstance: current,
+      review: review(current, {
+        actions: { can_retire: false, can_archive: true },
+        dependency_impacts: [
+          {
+            object_type: 'monitoring_instance',
+            object_id: 'mi_manage',
+            vps_id: 'vps_001',
+            vps_lifecycle_status: 'active',
+            relation_type: 'agent',
+            relation_id: 'rel_001',
+            relation_status: 'active',
+            classification: 'current',
+          },
+          {
+            object_type: 'monitoring_instance',
+            object_id: 'mi_manage',
+            vps_id: 'vps_002',
+            vps_lifecycle_status: 'active',
+            relation_type: 'agent',
+            relation_id: 'rel_002',
+            relation_status: 'active',
+            classification: 'current',
+          },
+        ],
+        preview_digest: 'shared-digest-v1',
+      }),
+      onArchive,
+    })
+    openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.change(screen.getByLabelText('原因'), { target: { value: '重复创建' } })
+    fireEvent.change(screen.getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Managed Edge' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: '确认此监控实例对多台 VPS 的当前或残留影响' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+
+    expect(onArchive).toHaveBeenCalledWith('重复创建', 'Tokyo Managed Edge', {
+      preview_digest: 'shared-digest-v1',
+      confirm_shared_impact: true,
+    })
+    const dialog = await screen.findByRole('alertdialog', { name: '归档监控实例' })
+    expect(within(dialog).getByText('影响范围已变化，共享确认已清除，不会自动重新提交。')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('原因')).toHaveValue('重复创建')
+    expect(within(dialog).getByLabelText('输入实例名称确认')).toHaveValue('Tokyo Managed Edge')
+    expect(within(dialog).getByRole('checkbox', { name: '确认此监控实例对多台 VPS 的当前或残留影响' })).not.toBeChecked()
+  })
+
 })
 
 function renderMenuProps(

@@ -21,6 +21,8 @@ import type {
   BulkUpsertSubscriptionMonthlyBudgetResult,
   CancellationPreview,
   CreateAssetDomainInput,
+  DependencyStatusCorrectionInput,
+  GlobalActionConfirmation,
   CreateAssetDecisionManualGroupInput,
   CreateAssetDecisionManualGroupMemberInput,
   CreateProviderInput,
@@ -50,6 +52,9 @@ import type {
   MonitoringInstanceOnboardingState,
   MonitoringInstancePermanentCleanupInput,
   MonitoringInstancePermanentCleanupResult,
+  RestoreArchiveInput,
+  StartMigrationInput,
+  TargetLifecycleReview,
   MonitoringInstanceRecord,
   MonitoringInstanceRuntimeFacts,
   MonitoringInstanceSparklinesResponse,
@@ -93,7 +98,10 @@ import type {
   VPSSummary,
   VPSTimeline,
 } from './types'
+import allowlistedApiError from './apiError'
+import { isArchiveReview } from './assetLifecycle'
 import { jsonBodyInit, postJSON, postJSONBody, requestEmpty, requestJSON, withQuery } from './apiRequest'
+import type { ApiErrorDetails } from './apiRequest'
 
 export {
   ApiError,
@@ -109,10 +117,22 @@ type PatchJSONOptions = {
   ifMatch?: string
 }
 
+function decodeAssetActionError(errorBody: unknown, rawBody: string): [string, ApiErrorDetails<unknown>] {
+  const [message, details] = allowlistedApiError(errorBody, rawBody)
+  if (typeof errorBody === 'object' && errorBody !== null && 'review' in errorBody && isArchiveReview(errorBody.review)) {
+    return [message, { ...details, review: errorBody.review }]
+  }
+  return [message, details]
+}
+
+function postAssetAction<T>(path: string, body?: unknown): Promise<T> {
+  return requestJSON<T>(path, body === undefined ? { method: 'POST' } : jsonBodyInit('POST', body), decodeAssetActionError)
+}
+
 function patchJSONBody<T>(path: string, body: unknown, options: PatchJSONOptions = {}): Promise<T> {
   return requestJSON<T>(path, jsonBodyInit('PATCH', body, options.ifMatch
     ? { 'If-Match': `"${options.ifMatch}"` }
-    : undefined))
+    : undefined), decodeAssetActionError)
 }
 
 export function listMonitoringInstances(scope?: MonitoringInstanceListScope) {
@@ -191,8 +211,14 @@ export function exitMonitoringInstanceMaintenance(monitoringInstanceId: string) 
   )
 }
 
-export function pauseMonitoringInstanceMonitoring(monitoringInstanceId: string) {
-  return postJSON<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/runtime/pause`)
+export function pauseMonitoringInstanceMonitoring(
+  monitoringInstanceId: string,
+  confirmation?: GlobalActionConfirmation,
+) {
+  return postAssetAction<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}/runtime/pause`,
+    confirmation,
+  )
 }
 
 export function resumeMonitoringInstanceMonitoring(monitoringInstanceId: string) {
@@ -209,7 +235,7 @@ export function retireMonitoringInstance(
   monitoringInstanceId: string,
   input: MonitoringInstanceLifecycleManagementInput,
 ) {
-  return postJSONBody<MonitoringInstanceRecord>(
+  return postAssetAction<MonitoringInstanceRecord>(
     `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/retire`,
     input,
   )
@@ -219,25 +245,31 @@ export function restoreMonitoringInstanceLifecycle(
   monitoringInstanceId: string,
   input: MonitoringInstanceLifecycleManagementInput,
 ) {
-  return postJSONBody<MonitoringInstanceRecord>(
+  return postAssetAction<MonitoringInstanceRecord>(
     `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/restore`,
     input,
   )
 }
 
 export function archiveMonitoringInstance(monitoringInstanceId: string, input: MonitoringInstanceArchiveInput) {
-  return postJSONBody<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/archive`, input)
+  return postAssetAction<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/archive`, input)
 }
 
-export function restoreMonitoringInstanceFromArchive(monitoringInstanceId: string) {
-  return postJSON<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/restore-from-archive`)
+export function restoreMonitoringInstanceFromArchive(
+  monitoringInstanceId: string,
+  confirmation?: GlobalActionConfirmation,
+) {
+  return postAssetAction<MonitoringInstanceRecord>(
+    `/api/monitoring-instances/${monitoringInstanceId}/restore-from-archive`,
+    confirmation,
+  )
 }
 
 export function permanentCleanupMonitoringInstance(
   monitoringInstanceId: string,
   input: MonitoringInstancePermanentCleanupInput,
 ) {
-  return postJSONBody<MonitoringInstancePermanentCleanupResult>(
+  return postAssetAction<MonitoringInstancePermanentCleanupResult>(
     `/api/monitoring-instances/${monitoringInstanceId}/permanent-cleanup`,
     input,
   )
@@ -338,28 +370,32 @@ export function getTargetRuntimeFacts(targetId: string, timeWindow = '24h') {
   return requestJSON<TargetRuntimeFacts>(`/api/targets/${targetId}/runtime-facts?window=${timeWindow}`)
 }
 
-export function enterTargetMaintenance(targetId: string) {
-  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/enter-maintenance`)
+export function enterTargetMaintenance(targetId: string, confirmation?: GlobalActionConfirmation) {
+  return postAssetAction<TargetRecord>(`/api/targets/${targetId}/runtime/enter-maintenance`, confirmation)
 }
 
-export function exitTargetMaintenance(targetId: string) {
-  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/exit-maintenance`)
+export function exitTargetMaintenance(targetId: string, confirmation?: GlobalActionConfirmation) {
+  return postAssetAction<TargetRecord>(`/api/targets/${targetId}/runtime/exit-maintenance`, confirmation)
 }
 
-export function pauseTarget(targetId: string) {
-  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/pause`)
+export function pauseTarget(targetId: string, confirmation?: GlobalActionConfirmation) {
+  return postAssetAction<TargetRecord>(`/api/targets/${targetId}/runtime/pause`, confirmation)
 }
 
-export function resumeTarget(targetId: string) {
-  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/resume`)
+export function resumeTarget(targetId: string, confirmation?: GlobalActionConfirmation) {
+  return postAssetAction<TargetRecord>(`/api/targets/${targetId}/runtime/resume`, confirmation)
 }
 
-export function archiveTarget(targetId: string) {
-  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/archive`)
+export function archiveTarget(targetId: string, confirmation?: GlobalActionConfirmation) {
+  return postAssetAction<TargetRecord>(`/api/targets/${targetId}/runtime/archive`, confirmation)
 }
 
-export function restoreTargetToPaused(targetId: string) {
-  return postJSON<TargetRecord>(`/api/targets/${targetId}/runtime/restore-to-paused`)
+export function restoreTargetToPaused(targetId: string, confirmation?: GlobalActionConfirmation) {
+  return postAssetAction<TargetRecord>(`/api/targets/${targetId}/runtime/restore-to-paused`, confirmation)
+}
+
+export function getTargetLifecycleReview(targetId: string) {
+  return requestJSON<TargetLifecycleReview>(`/api/targets/${encodeURIComponent(targetId)}/lifecycle-review`)
 }
 
 export function getSettings() {
@@ -394,13 +430,17 @@ export type BatchActionResult = {
   error?: string
 }
 
-export function postMonitoringInstanceBatch(monitoringInstanceIDs: string[], action: string) {
-  return postJSONBody<{ results: BatchActionResult[] }>('/api/monitoring-instances/batch', {
+export function postMonitoringInstanceBatch(
+  monitoringInstanceIDs: string[],
+  action: string,
+  confirmations?: Record<string, GlobalActionConfirmation>,
+) {
+  return postAssetAction<{ results: BatchActionResult[] }>('/api/monitoring-instances/batch', {
     monitoring_instance_ids: monitoringInstanceIDs,
     action,
+    ...(confirmations ? { confirmations } : {}),
   })
 }
-
 export function listProviders() {
   return requestJSON<ProviderRecord[]>('/api/providers')
 }
@@ -433,6 +473,22 @@ export function listAssetDomains(filter?: AssetDomainListFilter) {
 
 export function createAssetDomain(input: CreateAssetDomainInput): Promise<AssetDomainRecord> {
   return postJSONBody<AssetDomainRecord>('/api/domains', input)
+}
+
+export function updateAssetServiceStatus(serviceId: string, input: DependencyStatusCorrectionInput) {
+  return requestJSON<AssetServiceRecord>(
+    `/api/services/${encodeURIComponent(serviceId)}/status`,
+    jsonBodyInit('PATCH', input),
+    decodeAssetActionError,
+  )
+}
+
+export function updateAssetDomainStatus(domainId: string, input: DependencyStatusCorrectionInput) {
+  return requestJSON<AssetDomainRecord>(
+    `/api/domains/${encodeURIComponent(domainId)}/status`,
+    jsonBodyInit('PATCH', input),
+    decodeAssetActionError,
+  )
 }
 
 export function createProvider(input: CreateProviderInput): Promise<ProviderRecord> {
@@ -642,15 +698,19 @@ export function getVPSArchiveReview(vpsId: string) {
 }
 
 export function applyVPSCancellation(vpsId: string, input: ApplyCancellationInput): Promise<LifecycleActionResult> {
-  return postJSONBody<LifecycleActionResult>(`/api/vps/${vpsId}/cancellation`, input)
+  return postAssetAction<LifecycleActionResult>(`/api/vps/${vpsId}/cancellation`, input)
 }
 
 export function archiveVPS(vpsId: string, input: ApplyArchiveInput): Promise<ArchiveReview> {
-  return postJSONBody<ArchiveReview>(`/api/vps/${vpsId}/archive`, input)
+  return postAssetAction<ArchiveReview>(`/api/vps/${vpsId}/archive`, input)
 }
 
-export function restoreVPSFromArchive(vpsId: string): Promise<VPSAssetRecord> {
-  return postJSON<VPSAssetRecord>(`/api/vps/${vpsId}/restore-from-archive`)
+export function restoreVPSFromArchive(vpsId: string, input: RestoreArchiveInput): Promise<VPSAssetRecord> {
+  return postAssetAction<VPSAssetRecord>(`/api/vps/${vpsId}/restore-from-archive`, input)
+}
+
+export function startVPSMigration(vpsId: string, input: StartMigrationInput): Promise<LifecycleActionResult> {
+  return postAssetAction<LifecycleActionResult>(`/api/vps/${vpsId}/start-migration`, input)
 }
 
 export function extendVPSValidity(vpsId: string, input: ExtendVPSValidityInput): Promise<LifecycleActionResult> {

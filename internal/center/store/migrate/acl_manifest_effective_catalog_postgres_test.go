@@ -890,9 +890,7 @@ func requirePostgresSQLState(t *testing.T, err error, want string) {
 
 func (fixture appACLEffectiveCatalogPostgresFixture) materializeMigratedBaseline(t *testing.T, ctx context.Context) {
 	t.Helper()
-	if err := Apply(ctx, fixture.db); err != nil {
-		t.Fatalf("Apply() real migration baseline error = %v", err)
-	}
+	applyPostgresMigrationsThrough(t, ctx, fixture.db, appACLCurrentR1BoundaryMigration)
 	fixture.transferManagedSurfaceOwnershipToMigrator(t, ctx)
 	fixture.revokeManagedSurfacePrivileges(t, ctx)
 

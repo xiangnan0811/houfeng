@@ -616,3 +616,49 @@ func TestTargetProbeItemsHandlerRejectsMalformedItemPaths(t *testing.T) {
 		t.Fatalf("unexpected repository mutation for malformed path: update=%q delete=%q", repo.updateProbeItemID, repo.deleteProbeItemID)
 	}
 }
+
+type fakeTargetLifecycleReviewRepository struct {
+	err error
+}
+
+func (f *fakeTargetLifecycleReviewRepository) GetTargetLifecycleReview(context.Context, string) (targets.LifecycleReview, error) {
+	return targets.LifecycleReview{}, f.err
+}
+
+func TestTargetLifecycleReviewHandlerMapsMissingTargetAndInvalidRoute(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		path string
+		err  error
+		want int
+	}{
+		{name: "missing target", path: "/api/targets/tg_missing/lifecycle-review", err: targets.ErrTargetNotFound, want: http.StatusNotFound},
+		{name: "repository failure", path: "/api/targets/tg_001/lifecycle-review", err: context.DeadlineExceeded, want: http.StatusInternalServerError},
+		{name: "invalid route", path: "/api/targets/tg_001/lifecycle-review/extra", want: http.StatusNotFound},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeTargetLifecycleReviewRepository{err: tt.err}
+			handler := handlers.TargetLifecycleReview(repo)
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			recorder := httptest.NewRecorder()
+
+			handler.ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.want {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.want)
+			}
+		})
+	}
+}
+
+func TestTargetLifecycleReviewHandlerRejectsNonGet(t *testing.T) {
+	handler := handlers.TargetLifecycleReview(&fakeTargetLifecycleReviewRepository{})
+	req := httptest.NewRequest(http.MethodPost, "/api/targets/tg_001/lifecycle-review", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
+	}
+}

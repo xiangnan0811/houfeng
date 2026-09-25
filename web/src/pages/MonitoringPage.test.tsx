@@ -123,6 +123,17 @@ function listFetch(records: unknown[] | ((path: string) => unknown[])) {
         monitoring_instances: {},
       }))
     }
+    if (/\/api\/monitoring-instances\/[^/]+\/management-review$/.test(path)) {
+      const id = path.split('/')[3] ?? 'mi_001'
+      return Promise.resolve(mockJSONResponse({
+        record: { monitoring_instance_id: id, display_name: id },
+        dependency_impacts: [],
+        preview_digest: 'batch-digest',
+        active_vps_links: [],
+        counts: {},
+        action_reviews: {},
+      }))
+    }
     return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
   })
 }

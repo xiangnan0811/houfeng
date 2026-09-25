@@ -96,6 +96,8 @@ function previewFixture(): CancellationPreview {
     warnings: ['订阅账单记录已无续费动作，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
     blockers: [],
     preview_digest: 'preview-digest-test',
+    dependency_impacts: [],
+    evaluated_on: '2026-09-24',
   }
 }
 
@@ -115,7 +117,7 @@ describe('VPSCancellationWorkbench', () => {
     fireEvent.change(screen.getByLabelText('原因'), {
       target: { value: '已过期且不准备续费' },
     })
-    fireEvent.click(within(screen.getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('checkbox'))
+    fireEvent.click(within(screen.getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('radio', { name: '本次取消' }))
     fireEvent.click(within(screen.getByText('Tokyo Monitoring Instance').closest('.asset-checkbox-line')!).getByRole('checkbox'))
     fireEvent.click(within(screen.getByText('Blog').closest('.asset-checkbox-line')!).getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
@@ -126,10 +128,66 @@ describe('VPSCancellationWorkbench', () => {
       effective_date: expect.any(String),
       subscription_ids: ['sub_001'],
       vps_lifecycle_status: 'cancelled',
-      monitoring_instance_actions: [{ monitoring_instance_id: 'mi_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
+      monitoring_instance_actions: [{ monitoring_instance_id: 'mi_001', lifecycle_status: '不续费' }],
       target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
       preview_digest: 'preview-digest-test',
+      confirmed_shared_objects: [],
     })
+  })
+
+  it('requires confirming a selected Target whose dependency on another VPS is unconfirmed', async () => {
+    const onSubmit = vi.fn()
+    const preview = previewFixture()
+    preview.dependency_impacts = [
+      {
+        object_type: 'target',
+        object_id: 'tg_001',
+        vps_id: 'vps_001',
+        vps_lifecycle_status: 'active',
+        relation_type: 'service',
+        relation_id: 'svc_001',
+        relation_status: 'active',
+        classification: 'current',
+      },
+      {
+        object_type: 'target',
+        object_id: 'tg_001',
+        vps_id: 'vps_other',
+        vps_lifecycle_status: 'active',
+        relation_type: 'service',
+        relation_id: 'svc_other',
+        relation_status: 'unknown',
+        classification: 'needs_confirmation',
+      },
+    ]
+    render(
+      <VPSCancellationWorkbench
+        preview={preview}
+        submitting={false}
+        error={null}
+        result={null}
+        onSubmit={onSubmit}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('原因'), {
+      target: { value: '已过期且不准备续费' },
+    })
+    fireEvent.click(within(screen.getByText('sub_001').closest('.asset-cancel-workbench__row')!).getByRole('radio', { name: '本次取消' }))
+    fireEvent.click(within(screen.getByText('Blog').closest('.asset-checkbox-line')!).getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
+
+    expect(await screen.findByText('请确认 Blog 对其他 VPS 的影响后再提交。')).toBeInTheDocument()
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '确认 Blog 的跨 VPS 影响' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
+      confirmed_shared_objects: [{ object_type: 'target', object_id: 'tg_001' }],
+    }))
   })
 
   it('omits monitoring status when the selected instance remains enabled', async () => {
@@ -159,7 +217,7 @@ describe('VPSCancellationWorkbench', () => {
     if (!subscriptionRow || !monitoringRow) {
       throw new Error('workbench fixture rows must be rendered')
     }
-    fireEvent.click(within(subscriptionRow).getByRole('checkbox'))
+    fireEvent.click(within(subscriptionRow).getByRole('radio', { name: '本次取消' }))
     fireEvent.click(within(monitoringRow).getByRole('checkbox'))
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
 
@@ -186,7 +244,7 @@ describe('VPSCancellationWorkbench', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('请显式选择要取消自动续费的生效中订阅。')
+    expect(await screen.findByRole('alert')).toHaveTextContent('每条生效中订阅都要明确选择本次取消或保留。')
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
@@ -218,8 +276,8 @@ describe('VPSCancellationWorkbench', () => {
 
     const firstRow = screen.getByText('sub_001').closest('.asset-cancel-workbench__row') as HTMLElement
     const secondRow = screen.getByText('sub_002').closest('.asset-cancel-workbench__row') as HTMLElement
-    const first = within(firstRow).getByRole('checkbox')
-    const second = within(secondRow).getByRole('checkbox')
+    const first = within(firstRow).getByRole('radio', { name: '本次取消' })
+    const second = within(secondRow).getByRole('radio', { name: '本次取消' })
     expect(first).not.toBeChecked()
     expect(second).not.toBeChecked()
     expect(firstRow).toHaveTextContent('需要显式确认取消自动续费')
@@ -230,7 +288,7 @@ describe('VPSCancellationWorkbench', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('请显式选择要取消自动续费的生效中订阅。')
+    expect(await screen.findByRole('alert')).toHaveTextContent('每条生效中订阅都要明确选择本次取消或保留。')
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
@@ -260,5 +318,130 @@ describe('VPSCancellationWorkbench', () => {
       />,
     )
     expect(screen.getByLabelText('原因')).toHaveValue('')
+  })
+
+  it('displays historical subscriptions and allows explicit cancellation of non-active auto-renew subscriptions', async () => {
+    const onSubmit = vi.fn()
+    const preview = previewFixture()
+    const activeSub = preview.subscriptions[0]!
+    preview.subscriptions = [
+      activeSub,
+      {
+        record: {
+          ...activeSub.record,
+          subscription_id: 'sub_expired_renew',
+          status: 'expired',
+          auto_renew: true,
+          renew_at: '2026-04-01',
+        },
+        role: 'attention',
+        recommended_action: 'cancel_auto_renew_and_mark_cancelled',
+        message: '账单已过期但仍开启自动续费，存在扣费风险。',
+      },
+      {
+        record: {
+          ...activeSub.record,
+          subscription_id: 'sub_cancelled_norenew',
+          status: 'cancelled',
+          auto_renew: false,
+          renew_at: '2025-12-01',
+        },
+        role: 'inactive',
+        recommended_action: 'keep_inactive',
+        message: '历史已取消账单，无自动续费。',
+      },
+    ]
+
+    render(
+      <VPSCancellationWorkbench
+        preview={preview}
+        submitting={false}
+        error={null}
+        result={null}
+        onSubmit={onSubmit}
+      />,
+    )
+
+    // Historical facts must be visible
+    expect(screen.getByText('sub_expired_renew')).toBeInTheDocument()
+    expect(screen.getByText('账单已过期但仍开启自动续费，存在扣费风险。')).toBeInTheDocument()
+    expect(screen.getByText('sub_cancelled_norenew')).toBeInTheDocument()
+    expect(screen.getByText('历史已取消账单，无自动续费。')).toBeInTheDocument()
+
+    // sub_cancelled_norenew has no auto_renew, so it has no cancel radio
+    const cancelledRow = screen.getByText('sub_cancelled_norenew').closest<HTMLElement>('.asset-cancel-workbench__row')!
+    expect(within(cancelledRow).queryByRole('radio', { name: '本次取消' })).not.toBeInTheDocument()
+
+    // sub_expired_renew has auto_renew, so it offers explicit cancellation
+    const expiredRow = screen.getByText('sub_expired_renew').closest<HTMLElement>('.asset-cancel-workbench__row')!
+    const expiredCancelRadio = within(expiredRow).getByRole('radio', { name: '本次取消' })
+    expect(expiredCancelRadio).not.toBeChecked()
+
+    // Active sub: choose retain
+    const activeRow = screen.getByText('sub_001').closest<HTMLElement>('.asset-cancel-workbench__row')!
+    fireEvent.click(within(activeRow).getByRole('radio', { name: '保留' }))
+
+    // Non-active auto-renew sub: choose cancel
+    fireEvent.click(expiredCancelRadio)
+    expect(expiredCancelRadio).toBeChecked()
+
+    fireEvent.change(screen.getByLabelText('原因'), {
+      target: { value: '清理历史自动续费扣费风险' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscription_ids: ['sub_expired_renew'],
+      }),
+    )
+  })
+
+  it('leaves non-active auto-renew subscriptions unchanged when unselected', async () => {
+    const onSubmit = vi.fn()
+    const preview = previewFixture()
+    const activeSub = preview.subscriptions[0]!
+    preview.subscriptions = [
+      activeSub,
+      {
+        record: {
+          ...activeSub.record,
+          subscription_id: 'sub_expired_renew',
+          status: 'expired',
+          auto_renew: true,
+          renew_at: '2026-04-01',
+        },
+        role: 'attention',
+        recommended_action: 'cancel_auto_renew_and_mark_cancelled',
+        message: '账单已过期但仍开启自动续费，存在扣费风险。',
+      },
+    ]
+
+    render(
+      <VPSCancellationWorkbench
+        preview={preview}
+        submitting={false}
+        error={null}
+        result={null}
+        onSubmit={onSubmit}
+      />,
+    )
+
+    // Choose cancel for active sub, leave expired sub unselected
+    const activeRow = screen.getByText('sub_001').closest<HTMLElement>('.asset-cancel-workbench__row')!
+    fireEvent.click(within(activeRow).getByRole('radio', { name: '本次取消' }))
+
+    fireEvent.change(screen.getByLabelText('原因'), {
+      target: { value: '只取消生效中订阅' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1))
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        subscription_ids: ['sub_001'],
+      }),
+    )
   })
 })

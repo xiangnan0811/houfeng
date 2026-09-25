@@ -2,7 +2,7 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './e2e',
-  testIgnore: ['staging/**', 'component-tests/**'],
+  testIgnore: ['staging/**', 'component-tests/**', 'local-live/**'],
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,

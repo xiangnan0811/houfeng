@@ -5,6 +5,7 @@ import type {
   TargetRecord,
   TargetRuntimeFacts,
 } from '../../lib/types'
+import type { TargetRuntimeAction } from '../../components/target-detail'
 
 export type TargetDetailPageState = {
   requestedTargetId: string | null
@@ -20,7 +21,7 @@ export type TargetDetailPageState = {
 }
 
 export type PendingRuntimeConfirmation = {
-  action: 'pause' | 'archive'
+  action: TargetRuntimeAction
 }
 
 export type ProbeFocusRestoreRequest = {

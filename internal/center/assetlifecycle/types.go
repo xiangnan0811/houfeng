@@ -20,12 +20,17 @@ var ErrInvalidLifecycleActionInput = errors.New("invalid lifecycle action input"
 var ErrLifecycleActionBlocked = errors.New("lifecycle action blocked")
 var ErrStaleCancellationPreview = errors.New("stale cancellation preview")
 var ErrRetryableLifecycleConflict = errors.New("lifecycle transaction conflict")
+var ErrSharedImpactConfirmationRequired = errors.New("shared impact confirmation required")
 
 type ActionType string
 
 const (
-	ActionTypeCancelVPS      ActionType = "cancel_vps"
-	ActionTypeExtendValidity ActionType = "extend_validity"
+	ActionTypeCancelVPS               ActionType = "cancel_vps"
+	ActionTypeExtendValidity          ActionType = "extend_validity"
+	ActionTypeArchiveVPS              ActionType = "archive_vps"
+	ActionTypeRestoreVPS              ActionType = "restore_vps"
+	ActionTypeStartMigration          ActionType = "start_migration"
+	ActionTypeCorrectDependencyStatus ActionType = "correct_dependency_status"
 
 	ActionStatusCompleted = "completed"
 	ActionStatusFailed    = "failed"
@@ -53,7 +58,8 @@ type Repository interface {
 	ExtendVPSValidity(context.Context, string, ExtendValidityInput) (LifecycleActionResult, error)
 	GetVPSArchiveReview(context.Context, string) (ArchiveReview, error)
 	ApplyVPSArchive(context.Context, string, ApplyArchiveInput) (ArchiveReview, error)
-	RestoreVPSFromArchive(context.Context, string) (vpsassets.Record, error)
+	RestoreVPSFromArchive(context.Context, string, RestoreArchiveInput) (vpsassets.Record, error)
+	StartVPSMigration(context.Context, string, StartMigrationInput) (LifecycleActionResult, error)
 	ListTargetAssetContexts(context.Context) ([]AssetContextForTarget, error)
 }
 
@@ -68,6 +74,8 @@ type CancellationPreview struct {
 	Warnings                []string                               `json:"warnings"`
 	Blockers                []string                               `json:"blockers"`
 	PreviewDigest           string                                 `json:"preview_digest"`
+	DependencyImpacts       []assetlinks.DependencyImpact          `json:"dependency_impacts"`
+	EvaluatedOn             subscriptions.Date                     `json:"evaluated_on"`
 }
 
 type ArchiveReview struct {
@@ -79,8 +87,26 @@ type ArchiveReview struct {
 	TargetLinks             []TargetImpact                         `json:"target_links"`
 	Warnings                []string                               `json:"warnings"`
 	Blockers                []string                               `json:"blockers"`
+	BlockerDetails          []BlockerDetail                        `json:"blocker_details"`
 	Eligible                bool                                   `json:"eligible"`
 }
+
+type BlockerDetail struct {
+	Code             string `json:"code"`
+	ObjectType       string `json:"object_type"`
+	ObjectID         string `json:"object_id"`
+	DisplayName      string `json:"display_name"`
+	CurrentState     string `json:"current_state"`
+	BlockedAction    string `json:"blocked_action"`
+	ResolutionAction string `json:"resolution_action"`
+}
+
+type ArchiveBlockedError struct{ Review ArchiveReview }
+
+func (e *ArchiveBlockedError) Error() string {
+	return "lifecycle action blocked: archive blockers remain"
+}
+func (e *ArchiveBlockedError) Unwrap() error { return ErrLifecycleActionBlocked }
 
 type SubscriptionImpact struct {
 	Record            subscriptions.Record `json:"record"`
@@ -109,13 +135,14 @@ type RecommendedLifecycleStep struct {
 }
 
 type ApplyCancellationInput struct {
-	Reason                    string                          `json:"reason"`
-	EffectiveDate             *subscriptions.Date             `json:"effective_date"`
-	SubscriptionIDs           []string                        `json:"subscription_ids"`
-	VPSLifecycleStatus        vpsassets.LifecycleStatus       `json:"vps_lifecycle_status"`
-	MonitoringInstanceActions []MonitoringInstanceActionInput `json:"monitoring_instance_actions"`
-	TargetActions             []TargetActionInput             `json:"target_actions"`
-	PreviewDigest             string                          `json:"preview_digest"`
+	Reason                    string                             `json:"reason"`
+	EffectiveDate             *subscriptions.Date                `json:"effective_date"`
+	SubscriptionIDs           []string                           `json:"subscription_ids"`
+	VPSLifecycleStatus        vpsassets.LifecycleStatus          `json:"vps_lifecycle_status"`
+	MonitoringInstanceActions []MonitoringInstanceActionInput    `json:"monitoring_instance_actions"`
+	TargetActions             []TargetActionInput                `json:"target_actions"`
+	PreviewDigest             string                             `json:"preview_digest"`
+	ConfirmedSharedObjects    []assetlinks.SharedObjectReference `json:"confirmed_shared_objects"`
 }
 
 type ExtendValidityInput struct {
@@ -128,6 +155,14 @@ type ExtendValidityInput struct {
 
 type ApplyArchiveInput struct {
 	ConfirmationName string `json:"confirmation_name"`
+	Reason           string `json:"reason"`
+}
+
+type RestoreArchiveInput struct {
+	Reason string `json:"reason"`
+}
+type StartMigrationInput struct {
+	Reason string `json:"reason"`
 }
 
 type MonitoringInstanceActionInput struct {
@@ -208,6 +243,10 @@ func NormalizeApplyCancellationInput(input ApplyCancellationInput) ApplyCancella
 		input.TargetActions[i].TargetID = strings.TrimSpace(input.TargetActions[i].TargetID)
 		input.TargetActions[i].RunStatus = strings.TrimSpace(input.TargetActions[i].RunStatus)
 	}
+	for i := range input.ConfirmedSharedObjects {
+		input.ConfirmedSharedObjects[i].ObjectType = strings.TrimSpace(input.ConfirmedSharedObjects[i].ObjectType)
+		input.ConfirmedSharedObjects[i].ObjectID = strings.TrimSpace(input.ConfirmedSharedObjects[i].ObjectID)
+	}
 	return input
 }
 
@@ -220,12 +259,20 @@ func NormalizeExtendValidityInput(input ExtendValidityInput) ExtendValidityInput
 
 func NormalizeApplyArchiveInput(input ApplyArchiveInput) ApplyArchiveInput {
 	input.ConfirmationName = strings.TrimSpace(input.ConfirmationName)
+	input.Reason = strings.TrimSpace(input.Reason)
 	return input
 }
 
 func ValidateApplyArchiveInput(input ApplyArchiveInput) error {
 	if strings.TrimSpace(input.ConfirmationName) == "" {
 		return fmt.Errorf("%w: confirmation_name is required", ErrInvalidLifecycleActionInput)
+	}
+	return ValidateLifecycleReason(input.Reason)
+}
+
+func ValidateLifecycleReason(reason string) error {
+	if strings.TrimSpace(reason) == "" {
+		return fmt.Errorf("%w: reason is required", ErrInvalidLifecycleActionInput)
 	}
 	return nil
 }
@@ -256,6 +303,11 @@ func ValidateApplyCancellationInput(input ApplyCancellationInput) error {
 	if input.VPSLifecycleStatus != vpsassets.LifecycleToCancel && input.VPSLifecycleStatus != vpsassets.LifecycleCancelled {
 		return fmt.Errorf("%w: vps_lifecycle_status must be to_cancel or cancelled", ErrInvalidLifecycleActionInput)
 	}
+	for _, object := range input.ConfirmedSharedObjects {
+		if object.ObjectID == "" || object.ObjectType != ObjectTypeMonitoringInstance && object.ObjectType != ObjectTypeTarget {
+			return fmt.Errorf("%w: invalid confirmed shared object", ErrInvalidLifecycleActionInput)
+		}
+	}
 	seenSubscriptions := map[string]struct{}{}
 	for _, subscriptionID := range input.SubscriptionIDs {
 		if subscriptionID == "" {
@@ -274,10 +326,10 @@ func ValidateApplyCancellationInput(input ApplyCancellationInput) error {
 		if action.LifecycleStatus == "" && action.MonitoringStatus == "" {
 			return fmt.Errorf("%w: monitoringInstance action must include lifecycle_status or monitoring_status", ErrInvalidLifecycleActionInput)
 		}
-		if action.LifecycleStatus != "" && !monitoringinstances.IsValidLifecycleStatus(action.LifecycleStatus) {
+		if action.LifecycleStatus != "" && action.LifecycleStatus != monitoringinstances.LifecycleNoRenewal && action.LifecycleStatus != monitoringinstances.LifecycleRetired {
 			return fmt.Errorf("%w: invalid monitoringInstance lifecycle_status", ErrInvalidLifecycleActionInput)
 		}
-		if action.MonitoringStatus != "" && !isValidMonitoringInstanceMonitoringStatus(action.MonitoringStatus) {
+		if action.MonitoringStatus != "" && action.MonitoringStatus != monitoringinstances.MonitoringPaused {
 			return fmt.Errorf("%w: invalid monitoringInstance monitoring_status", ErrInvalidLifecycleActionInput)
 		}
 		if _, ok := seenMonitoringInstances[action.MonitoringInstanceID]; ok {
@@ -293,7 +345,7 @@ func ValidateApplyCancellationInput(input ApplyCancellationInput) error {
 		if action.RunStatus == "" {
 			return fmt.Errorf("%w: target action must include run_status", ErrInvalidLifecycleActionInput)
 		}
-		if !targets.IsValidRunStatus(action.RunStatus) {
+		if action.RunStatus != targets.RunStatusPaused && action.RunStatus != targets.RunStatusArchived {
 			return fmt.Errorf("%w: invalid target run_status", ErrInvalidLifecycleActionInput)
 		}
 		if _, ok := seenTargets[action.TargetID]; ok {

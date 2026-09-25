@@ -19,7 +19,8 @@ type AssetLifecycleRepository interface {
 	ExtendVPSValidity(context.Context, string, assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionResult, error)
 	GetVPSArchiveReview(context.Context, string) (assetlifecycle.ArchiveReview, error)
 	ApplyVPSArchive(context.Context, string, assetlifecycle.ApplyArchiveInput) (assetlifecycle.ArchiveReview, error)
-	RestoreVPSFromArchive(context.Context, string) (vpsassets.Record, error)
+	RestoreVPSFromArchive(context.Context, string, assetlifecycle.RestoreArchiveInput) (vpsassets.Record, error)
+	StartVPSMigration(context.Context, string, assetlifecycle.StartMigrationInput) (assetlifecycle.LifecycleActionResult, error)
 	ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error)
 }
 
@@ -183,7 +184,16 @@ func VPSRestoreFromArchive(repo AssetLifecycleRepository) http.Handler {
 			return
 		}
 
-		record, err := repo.RestoreVPSFromArchive(r.Context(), vpsID)
+		var input assetlifecycle.RestoreArchiveInput
+		if err := decodeJSON(r, &input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		if err := assetlifecycle.ValidateLifecycleReason(input.Reason); err != nil {
+			writeAssetLifecycleError(w, err)
+			return
+		}
+		record, err := repo.RestoreVPSFromArchive(r.Context(), vpsID, input)
 		if handled := writeAssetLifecycleError(w, err); handled {
 			return
 		} else if err != nil {
@@ -191,6 +201,39 @@ func VPSRestoreFromArchive(repo AssetLifecycleRepository) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, record)
+	})
+}
+
+func VPSStartMigration(repo AssetLifecycleRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "start-migration")
+		if !ok {
+			writeError(w, http.StatusNotFound, "vps asset not found")
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		var input assetlifecycle.StartMigrationInput
+		if err := decodeJSON(r, &input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json body")
+			return
+		}
+		input.Reason = strings.TrimSpace(input.Reason)
+		if err := assetlifecycle.ValidateLifecycleReason(input.Reason); err != nil {
+			writeAssetLifecycleError(w, err)
+			return
+		}
+		result, err := repo.StartVPSMigration(r.Context(), vpsID, input)
+		if writeAssetLifecycleError(w, err) {
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
 	})
 }
 
@@ -215,6 +258,11 @@ func AssetContextTargets(repo AssetLifecycleRepository) http.Handler {
 }
 
 func writeAssetLifecycleError(w http.ResponseWriter, err error) bool {
+	var archiveBlocked *assetlifecycle.ArchiveBlockedError
+	if errors.As(err, &archiveBlocked) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "lifecycle action blocked", "code": "lifecycle_action_blocked", "review": archiveBlocked.Review})
+		return true
+	}
 	switch {
 	case err == nil:
 		return false
@@ -222,6 +270,8 @@ func writeAssetLifecycleError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusBadRequest, "invalid input")
 	case errors.Is(err, assetlifecycle.ErrLifecycleActionBlocked):
 		writeCodedError(w, http.StatusConflict, "lifecycle action blocked", "lifecycle_action_blocked")
+	case errors.Is(err, assetlifecycle.ErrSharedImpactConfirmationRequired):
+		writeCodedError(w, http.StatusConflict, "shared impact confirmation required", "shared_impact_confirmation_required")
 	case errors.Is(err, assetlifecycle.ErrStaleCancellationPreview):
 		writeCodedError(w, http.StatusConflict, "cancellation preview stale", "cancellation_preview_stale")
 	case errors.Is(err, assetlifecycle.ErrRetryableLifecycleConflict):

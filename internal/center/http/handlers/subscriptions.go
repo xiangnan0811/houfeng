@@ -197,8 +197,20 @@ func writeSubscriptionCreate(w http.ResponseWriter, r *http.Request, repo subscr
 		writeCodedError(w, http.StatusBadRequest, "invalid idempotency key", "invalid_idempotency_key")
 		return
 	}
+	if errors.Is(err, subscriptions.ErrSubscriptionReplayOwnershipConflict) {
+		writeCodedError(w, http.StatusConflict, "subscription replay ownership conflict", "subscription_replay_ownership_conflict")
+		return
+	}
 	if errors.Is(err, subscriptions.ErrIdempotencyKeyReused) {
 		writeCodedError(w, http.StatusConflict, "idempotency key reused", "idempotency_key_reused")
+		return
+	}
+	if errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
+		writeCodedError(w, http.StatusConflict, "vps asset readonly", "vps_asset_readonly")
+		return
+	}
+	if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
+		writeError(w, http.StatusNotFound, "vps asset not found")
 		return
 	}
 	if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
@@ -253,6 +265,14 @@ func SubscriptionItem(repo subscriptions.Repository) http.Handler {
 			record, err := repo.PatchSubscription(r.Context(), subscriptionID, input)
 			if errors.Is(err, subscriptions.ErrSubscriptionNotFound) {
 				writeError(w, http.StatusNotFound, "subscription not found")
+				return
+			}
+			if errors.Is(err, subscriptions.ErrSubscriptionOwnershipChangeForbidden) {
+				writeCodedError(w, http.StatusConflict, "subscription ownership change forbidden", "subscription_ownership_change_forbidden")
+				return
+			}
+			if errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
+				writeCodedError(w, http.StatusConflict, "vps asset readonly", "vps_asset_readonly")
 				return
 			}
 			if errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {

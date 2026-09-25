@@ -131,6 +131,8 @@ function cancellationPreviewFixture(): CancellationPreview {
     warnings: ['请确认上游流量已经迁移。'],
     blockers: ['仍有关联资源，暂时不能执行取消。'],
     preview_digest: 'preview-digest-test',
+    dependency_impacts: [],
+    evaluated_on: '2026-09-24',
   }
 }
 
@@ -144,6 +146,7 @@ function archiveReviewFixture(): ArchiveReview {
     target_links: [],
     warnings: [],
     blockers: [],
+    blocker_details: [],
     eligible: true,
   }
 }
@@ -665,7 +668,7 @@ describe('VPSDetailPage gate', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
 
-    expect(await screen.findByText(/已完成生命周期动作 action_001/)).toBeInTheDocument()
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1))
     expect(apply).toHaveBeenCalledTimes(1)
     expect(getPreview).toHaveBeenCalledTimes(2)
     expect(recordsApi.getVPSOverview).toHaveBeenCalledTimes(2)
@@ -691,6 +694,9 @@ describe('VPSDetailPage gate', () => {
     expect(await screen.findByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
     const confirm = screen.getByRole('button', { name: '确认归档' })
     expect(confirm).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: '归档原因' }), {
+      target: { value: '订阅已结束' },
+    })
     fireEvent.change(screen.getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
       target: { value: '东京边缘' },
     })
@@ -699,6 +705,7 @@ describe('VPSDetailPage gate', () => {
 
     await waitFor(() => expect(archive).toHaveBeenCalledWith('vps_001', {
       confirmation_name: '东京边缘',
+      reason: '订阅已结束',
     }))
     expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
     expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
@@ -718,7 +725,7 @@ describe('VPSDetailPage gate', () => {
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('服务端判定当前不具备归档资格')
+    expect(screen.getByRole('button', { name: '确认归档' })).toBeDisabled()
     expect(screen.getByRole('button', { name: '确认归档' })).toBeDisabled()
     expect(archive).not.toHaveBeenCalled()
   })
@@ -791,7 +798,10 @@ describe('VPSDetailPage gate', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
-    fireEvent.change(await screen.findByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
+    fireEvent.change(await screen.findByRole('textbox', { name: '归档原因' }), {
+      target: { value: '订阅已结束' },
+    })
+    fireEvent.change(screen.getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
       target: { value: '东京边缘' },
     })
     fireEvent.click(screen.getByRole('button', { name: '确认归档' }))

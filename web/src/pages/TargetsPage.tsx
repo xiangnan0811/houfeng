@@ -14,9 +14,11 @@ import {
   listTargetSparklines,
   listTargets,
   pauseTarget,
+  getTargetLifecycleReview,
   restoreTargetToPaused,
   resumeTarget,
 } from '../lib/api'
+import { requiresSharedImpactConfirmation } from '../lib/assetLifecycle'
 import type { AssetContextForTarget, CreateTargetInput, TargetRecord, TargetSparklinesResponse } from '../lib/types'
 import {
   assetContextHasAttention,
@@ -276,12 +278,17 @@ export function TargetsPage() {
     let failCount = 0
     for (const targetID of ids) {
       try {
+        const review = await getTargetLifecycleReview(targetID)
+        if (review && requiresSharedImpactConfirmation(review.dependency_impacts ?? [], 'target', targetID)) {
+          throw new Error('目标影响多台 VPS，请在目标详情确认共享影响')
+        }
+        const confirmation = undefined
         if (action === 'enter-maintenance') await enterTargetMaintenance(targetID)
         else if (action === 'exit-maintenance') await exitTargetMaintenance(targetID)
-        else if (action === 'pause') await pauseTarget(targetID)
+        else if (action === 'pause') await pauseTarget(targetID, confirmation)
         else if (action === 'resume') await resumeTarget(targetID)
-        else if (action === 'archive') await archiveTarget(targetID)
-        else await restoreTargetToPaused(targetID)
+        else if (action === 'archive') await archiveTarget(targetID, confirmation)
+        else await restoreTargetToPaused(targetID, confirmation)
       } catch {
         failCount++
       }

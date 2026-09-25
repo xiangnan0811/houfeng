@@ -158,8 +158,8 @@ set +e
       HOUFENG_RECORDS_KEEP_WORKSPACE=0 \
       "$root/scripts/test-record-platform-integration.sh" postgres -- \
       "${minio_args[@]}" \
-      go test ./internal/center/recordbackup ./internal/center/recordrestore ./internal/center/store ./internal/center/portability \
-      -run 'LocalProfile|WitnessedRecordSubject|RecordPortabilityDeletion|RecordWatchVersionedDefaultAnchor|MinIO' \
+      go test -v ./internal/center/recordbackup ./internal/center/recordrestore ./internal/center/store ./internal/center/portability \
+      -run 'LocalProfile|WitnessedRecordSubject|RecordPortabilityDeletion|RecordWatchVersionedDefaultAnchor|MinIO|AttachmentDeletionPurgesExclusiveS3BlobExactlyOnce|AttachmentUploadServiceS3DirectWorkflow' \
       -count=1
   else
     exec setsid env \
@@ -190,9 +190,9 @@ else
   final_status=$?
 fi
 
-if [ "$command_status" -ne 0 ]
+if [ "$command_status" -ne 0 ] || [ "$profile" = "s3" ]
 then
-  cat "$stdout_file"
+  cat "$stdout_file" >&2
   cat "$stderr_file" >&2
 fi
 if [ "$final_status" -ne 0 ]
@@ -204,7 +204,7 @@ commit=$(git -C "$root" rev-parse HEAD)
 config_material="profile=${profile};postgres=postgres:16-alpine;suites=LocalProfile,WitnessedRecordSubject,RecordPortabilityDeletion,RecordWatchVersionedDefaultAnchor"
 if [ "$profile" = "s3" ]
 then
-  config_material="${config_material},MinIO;object=s3"
+  config_material="${config_material},MinIO,TestPostgresIntegrationAttachmentDeletionPurgesExclusiveS3BlobExactlyOnce,TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow,TestPostgresMinIOIntegrationAttachmentDeletionPurgesExclusiveExactVersion,TestPostgresMinIOIntegrationAttachmentBlobGCExactVersionWorkflow,TestPostgresMinIOIntegrationAttachmentProcessorS3WorkspaceWorkflow,TestPostgresMinIOIntegrationAttachmentBlobPublicationCrashRestartS3;object=s3"
 else
   config_material="${config_material};object=local"
 fi
@@ -223,6 +223,14 @@ suites = [
 ]
 if profile == "s3":
     suites.append("portability.MinIO")
+    suites.extend([
+        "store.TestPostgresIntegrationAttachmentDeletionPurgesExclusiveS3BlobExactlyOnce",
+        "store.TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow",
+        "store.TestPostgresMinIOIntegrationAttachmentDeletionPurgesExclusiveExactVersion",
+        "store.TestPostgresMinIOIntegrationAttachmentBlobGCExactVersionWorkflow",
+        "store.TestPostgresMinIOIntegrationAttachmentProcessorS3WorkspaceWorkflow",
+        "store.TestPostgresMinIOIntegrationAttachmentBlobPublicationCrashRestartS3",
+    ])
 payload = {
     "format": "houfeng-record-profile-report/v1",
     "profile": profile,

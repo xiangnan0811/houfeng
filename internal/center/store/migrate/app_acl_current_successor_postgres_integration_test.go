@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -31,9 +32,15 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 			fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
 			migratorDB := fixture.openRolePool(t, ctx, appACLCurrentTransitionMigrator)
 			oldFS := appACLCurrentTransitionTestFS(t)
-			delete(oldFS, "0063_tune_heartbeat_incident_policy.sql")
-			delete(oldFS, "0064_add_network_rates_valid.sql")
-			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-2]...)
+			for _, name := range []string{
+				"0063_tune_heartbeat_incident_policy.sql",
+				"0064_add_network_rates_valid.sql",
+				"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+				"0066_constrain_monitoring_and_target_state_values.sql",
+			} {
+				delete(oldFS, name)
+			}
+			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-4]...)
 			oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 			if err != nil {
 				t.Fatalf("compile exact v0.79.4 source: %v", err)
@@ -94,9 +101,14 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 				`, tc.globalBefore, oldUpdatedAt); err != nil {
 				t.Fatalf("seed predecessor settings: %v", err)
 			}
-			seedAppACLCurrentSuccessorHeartbeatRows(t, ctx, migratorDB)
 			settingsBefore := readAppACLCurrentSettingsExceptTransitionDigest(t, ctx, migratorDB)
 			heartbeatsBefore := readAppACLCurrentSuccessorHeartbeatDigest(t, ctx, migratorDB)
+			_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
+			beforeUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			runtimeDB := fixture.openRolePool(t, ctx, appACLCurrentTransitionBindings[0].CatalogRole)
+			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+				t.Fatalf("AdmitAppACLCurrentRuntime() registered predecessor error = %v, want rebuild-required", err)
+			}
 
 			successor, err := ConvergeAppACLCurrent(
 				ctx,
@@ -110,7 +122,6 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 			if successor.ManifestRevision != 2 || successor.PreviousManifestDigest != predecessor.ManifestDigest {
 				t.Fatalf("successor manifest = %#v, want revision 2 linked to frozen predecessor", successor)
 			}
-			assertSingleIntValue(t, ctx, migratorDB, `select count(*)::int from public.schema_migrations`, 65)
 			assertSingleIntValue(t, ctx, migratorDB, `select count(*)::int from public.schema_migrations where name = '0063_tune_heartbeat_incident_policy.sql'`, 1)
 			assertSingleIntValue(t, ctx, migratorDB, `select count(*)::int from public.app_acl_manifest_revisions`, 2)
 			assertSingleIntValue(t, ctx, migratorDB, `select manifest_revision::int from public.app_acl_manifest_head where singleton`, 2)
@@ -142,17 +153,21 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 			}
 			assertAppACLCurrentSuccessorHeartbeatIndexShape(t, ctx, migratorDB)
 
-			runtimeDB := fixture.openRolePool(t, ctx, appACLCurrentTransitionBindings[0].CatalogRole)
+			// The direct runtime login now succeeds after the successor transaction commits.
 			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
 				t.Fatalf("AdmitAppACLCurrentRuntime() registered successor: %v", err)
 			}
-			_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
-			beforeRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
+			afterUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			if len(beforeUpgrade.Manifest.Manifests) != 1 || len(afterUpgrade.Manifest.Manifests) != 2 ||
+				!reflect.DeepEqual(afterUpgrade.Manifest.Manifests[0], beforeUpgrade.Manifest.Manifests[0]) {
+				t.Fatalf("registered successor changed predecessor manifest history\nbefore: %#v\nafter:  %#v", beforeUpgrade.Manifest.Manifests, afterUpgrade.Manifest.Manifests)
+			}
+			beforeRepeat := afterUpgrade
 			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, appACLCurrentTransitionBindings[0].CatalogRole, appACLCurrentTransitionBindings[1].CatalogRole)
 			if err != nil {
 				t.Fatalf("ConvergeAppACLCurrent() registered successor repeat: %v", err)
 			}
-			afterRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
+			afterRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 			if repeated.ManifestDigest != successor.ManifestDigest || !reflect.DeepEqual(afterRepeat, beforeRepeat) {
 				t.Fatalf("registered successor repeat changed durable state\nbefore: %#v\nafter: %#v", beforeRepeat, afterRepeat)
 			}
@@ -278,6 +293,7 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessorRejectsInvalidPredec
 }
 
 type exactAppACLCurrentPredecessorState struct {
+	fixture    exactAppACLCurrentSuccessorPostgresFixture
 	migratorDB *pgxpool.Pool
 	input      appACLEffectiveCatalogVerifierInput
 }
@@ -287,9 +303,15 @@ func seedExactAppACLCurrentPredecessor(t *testing.T, ctx context.Context, global
 	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
 	migratorDB := fixture.openRolePool(t, ctx, appACLCurrentTransitionMigrator)
 	oldFS := appACLCurrentTransitionTestFS(t)
-	delete(oldFS, "0063_tune_heartbeat_incident_policy.sql")
-	delete(oldFS, "0064_add_network_rates_valid.sql")
-	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-2]...)
+	for _, name := range []string{
+		"0063_tune_heartbeat_incident_policy.sql",
+		"0064_add_network_rates_valid.sql",
+		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+		"0066_constrain_monitoring_and_target_state_values.sql",
+	} {
+		delete(oldFS, name)
+	}
+	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-4]...)
 	oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 	if err != nil {
 		t.Fatalf("compile exact v0.79.4 source: %v", err)
@@ -335,7 +357,7 @@ func seedExactAppACLCurrentPredecessor(t *testing.T, ctx context.Context, global
 		t.Fatalf("seed predecessor settings: %v", err)
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
-	return exactAppACLCurrentPredecessorState{migratorDB: migratorDB, input: input}
+	return exactAppACLCurrentPredecessorState{fixture: fixture, migratorDB: migratorDB, input: input}
 }
 
 type appACLCurrentTransitionDurableState struct {
@@ -346,6 +368,8 @@ type appACLCurrentTransitionDurableState struct {
 	ColumnDefault                  string
 	IndexDefinitions               []string
 	HeartbeatRowsDigest            [32]byte
+	VPSAssetsDigest                [32]byte
+	LifecycleConstraintDefinitions []string
 }
 
 func readAppACLCurrentTransitionDurableState(
@@ -366,6 +390,31 @@ func readAppACLCurrentTransitionDurableState(
 		t.Fatalf("read transition settings state: %v", err)
 	}
 	state.SettingsExceptTransitionDigest = sha256.Sum256(settingsExceptTransition)
+	var vpsAssetsState string
+	if err := db.QueryRow(ctx, `
+		select coalesce(jsonb_agg(to_jsonb(assets) order by assets.vps_id), '[]'::jsonb)::text
+		from public.vps_assets assets
+	`).Scan(&vpsAssetsState); err != nil {
+		t.Fatalf("read transition VPS asset state: %v", err)
+	}
+	state.VPSAssetsDigest = sha256.Sum256([]byte(vpsAssetsState))
+	if err := db.QueryRow(ctx, `
+		select coalesce(array_agg(
+		  relation.relname || ':' || constraints.conname || ':' ||
+		  pg_get_constraintdef(constraints.oid) || ':' || constraints.convalidated::text
+		  order by relation.relname collate "C", constraints.conname collate "C"
+		), '{}'::text[])
+		from pg_catalog.pg_constraint constraints
+		join pg_catalog.pg_class relation on relation.oid = constraints.conrelid
+		join pg_catalog.pg_namespace namespaces on namespaces.oid = relation.relnamespace
+		where namespaces.nspname = 'public'
+		  and relation.relname in (
+		    'asset_lifecycle_actions', 'asset_lifecycle_action_steps',
+		    'monitoring_instances', 'targets', 'vps_assets'
+		  )
+	`).Scan(&state.LifecycleConstraintDefinitions); err != nil {
+		t.Fatalf("read transition lifecycle constraint state: %v", err)
+	}
 	state.HeartbeatRowsDigest = readAppACLCurrentSuccessorHeartbeatDigest(t, ctx, db)
 	if err := db.QueryRow(ctx, `
 		select pg_get_expr(defaults.adbin, defaults.adrelid)
@@ -494,10 +543,25 @@ type exactAppACLCurrentSuccessorPostgresFixture struct {
 	db             *pgxpool.Pool
 	databaseName   string
 	bootstrapOwner string
+	runtimeRole    string
+	adminRole      string
+	migratorRole   string
 	passwords      map[string]string
 }
 
 func newExactAppACLCurrentSuccessorPostgresFixture(t *testing.T, ctx context.Context) exactAppACLCurrentSuccessorPostgresFixture {
+	t.Helper()
+	return newExactAppACLCurrentSuccessorPostgresFixtureWithNames(
+		t,
+		ctx,
+		appACLCurrentTransitionDatabase,
+		appACLCurrentTransitionBindings[0].CatalogRole,
+		appACLCurrentTransitionBindings[1].CatalogRole,
+		appACLCurrentTransitionMigrator,
+	)
+}
+
+func newExactAppACLCurrentSuccessorPostgresFixtureWithNames(t *testing.T, ctx context.Context, databaseName, runtimeRole, adminRole, migratorRole string) exactAppACLCurrentSuccessorPostgresFixture {
 	t.Helper()
 	if os.Getenv(postgresIntegrationFlag) != "1" {
 		t.Skipf("%s=1 is required for postgres integration tests", postgresIntegrationFlag)
@@ -516,24 +580,23 @@ func newExactAppACLCurrentSuccessorPostgresFixture(t *testing.T, ctx context.Con
 	}
 	t.Cleanup(adminPool.Close)
 	fixture := exactAppACLCurrentSuccessorPostgresFixture{
-		databaseName: appACLCurrentTransitionDatabase,
+		databaseName: databaseName,
+		runtimeRole:  runtimeRole,
+		adminRole:    adminRole,
+		migratorRole: migratorRole,
 		passwords:    make(map[string]string, 3),
 	}
 	if err := adminPool.QueryRow(ctx, `select current_user`).Scan(&fixture.bootstrapOwner); err != nil {
 		t.Fatalf("read exact-successor bootstrap owner: %v", err)
 	}
-	for _, role := range []string{
-		appACLCurrentTransitionBindings[0].CatalogRole,
-		appACLCurrentTransitionBindings[1].CatalogRole,
-		appACLCurrentTransitionMigrator,
-	} {
+	for _, role := range []string{runtimeRole, adminRole, migratorRole} {
 		password := appACLEffectiveCatalogTemporaryPassword(t)
 		fixture.passwords[role] = password
 		if _, err := adminPool.Exec(ctx, `create role `+quotePostgresIdentifier(role)+` login noinherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls password '`+password+`'`); err != nil {
 			t.Fatalf("create exact-successor role %q: %v", role, err)
 		}
 	}
-	if _, err := adminPool.Exec(ctx, `create database `+quotePostgresIdentifier(fixture.databaseName)+` owner `+quotePostgresIdentifier(appACLCurrentTransitionMigrator)); err != nil {
+	if _, err := adminPool.Exec(ctx, `create database `+quotePostgresIdentifier(fixture.databaseName)+` owner `+quotePostgresIdentifier(migratorRole)); err != nil {
 		t.Fatalf("create exact-successor database: %v", err)
 	}
 	t.Cleanup(func() {
@@ -542,11 +605,7 @@ func newExactAppACLCurrentSuccessorPostgresFixture(t *testing.T, ctx context.Con
 		if _, err := adminPool.Exec(cleanupCtx, `drop database if exists `+quotePostgresIdentifier(fixture.databaseName)+` with (force)`); err != nil {
 			t.Errorf("drop exact-successor database: %v", err)
 		}
-		for _, role := range []string{
-			appACLCurrentTransitionBindings[0].CatalogRole,
-			appACLCurrentTransitionBindings[1].CatalogRole,
-			appACLCurrentTransitionMigrator,
-		} {
+		for _, role := range []string{runtimeRole, adminRole, migratorRole} {
 			if _, err := adminPool.Exec(cleanupCtx, `drop role if exists `+quotePostgresIdentifier(role)); err != nil {
 				t.Errorf("drop exact-successor role %q: %v", role, err)
 			}
@@ -587,9 +646,9 @@ func (fixture exactAppACLCurrentSuccessorPostgresFixture) asConvergenceFixture()
 		db:             fixture.db,
 		databaseName:   fixture.databaseName,
 		bootstrapOwner: fixture.bootstrapOwner,
-		runtime:        appACLCurrentTransitionBindings[0].CatalogRole,
-		admin:          appACLCurrentTransitionBindings[1].CatalogRole,
-		migrator:       appACLCurrentTransitionMigrator,
+		runtime:        fixture.runtimeRole,
+		admin:          fixture.adminRole,
+		migrator:       fixture.migratorRole,
 		rolePasswords:  fixture.passwords,
 	}
 }

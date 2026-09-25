@@ -11,13 +11,17 @@ import {
   listMonitoringInstanceSparklines,
   postMonitoringInstanceAction,
   postMonitoringInstanceBatch,
+  getMonitoringInstanceManagementReview,
 } from '../lib/api'
 import { resolveThresholds, type MetricThresholds } from '../config/thresholds'
 import type {
+  GlobalActionConfirmation,
+  MonitoringInstanceManagementReview,
   MonitoringInstanceRecord,
   MonitoringInstanceRuntimeSummariesResponse,
   MonitoringInstanceSparklinesResponse,
 } from '../lib/types'
+import { requiresSharedImpactConfirmation } from '../lib/assetLifecycle'
 import { MonitoringHero } from './monitoring/MonitoringHero'
 import { MonitoringInstancesBatchPanel } from './monitoring/MonitoringInstancesBatchPanel'
 import { MonitoringInstancesFilterPanel } from './monitoring/MonitoringInstancesFilterPanel'
@@ -90,6 +94,8 @@ export function MonitoringPage() {
   const [pendingBatchAction, setPendingBatchAction] = useState<string | null>(null)
   const [frozenBatchIds, setFrozenBatchIds] = useState<string[] | null>(null)
   const [batchError, setBatchError] = useState<string | null>(null)
+  const [batchPauseReviews, setBatchPauseReviews] = useState<MonitoringInstanceManagementReview[]>([])
+  const [batchPauseConfirmations, setBatchPauseConfirmations] = useState<Record<string, GlobalActionConfirmation>>({})
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandID, setCommandID] = useState('')
   const [listReloadKey, setListReloadKey] = useState(0)
@@ -440,8 +446,8 @@ export function MonitoringPage() {
 
   async function executeBatchPauseConfirmed() {
     const monitoringInstanceIDs = frozenBatchIds ?? batchTargetIds
-    setPendingBatchAction(null)
     if (monitoringInstanceIDs.length === 0) {
+      setPendingBatchAction(null)
       replaceSelectedIds([])
       setFrozenBatchIds(null)
       return
@@ -450,17 +456,50 @@ export function MonitoringPage() {
     setBatchSubmitting(true)
     setBatchError(null)
     try {
-      const res = await postMonitoringInstanceBatch(monitoringInstanceIDs, 'pause')
+      const reviews = await Promise.all(monitoringInstanceIDs.map(async (id) => {
+        try {
+          return await getMonitoringInstanceManagementReview(id)
+        } catch {
+          return null
+        }
+      }))
+      if (reviews.some((review) => review === null)) {
+        setBatchError('共享影响预览加载失败，未执行批量暂停')
+        return
+      }
+      const confirmations: Record<string, GlobalActionConfirmation> = {}
+      const missing = reviews.filter((review) => {
+        if (!review) return false
+        const id = review.record.monitoring_instance_id
+        if (!requiresSharedImpactConfirmation(review.dependency_impacts ?? [], 'monitoring_instance', id)) return false
+        const existing = batchPauseConfirmations[id]
+        if (existing?.confirm_shared_impact && existing.preview_digest === review.preview_digest) {
+          confirmations[id] = existing
+          return false
+        }
+        return true
+      })
+      if (missing.length > 0) {
+        setBatchPauseReviews(reviews.filter((review): review is MonitoringInstanceManagementReview => review !== null))
+        setBatchError('有监控实例影响多台 VPS。请确认共享影响后再暂停。')
+        return
+      }
+      const res = await postMonitoringInstanceBatch(
+        monitoringInstanceIDs,
+        'pause',
+        Object.keys(confirmations).length > 0 ? confirmations : undefined,
+      )
       const failed = res.results.filter((result) => !result.ok)
       if (failed.length > 0) {
         setBatchError(`${failed.length}/${monitoringInstanceIDs.length} 个监控实例失败`)
       }
+      setPendingBatchAction(null)
+      replaceSelectedIds([])
+      setFrozenBatchIds(null)
     } catch (e) {
       setBatchError(describeError(e, '批量暂停失败'))
     } finally {
       setBatchSubmitting(false)
-      replaceSelectedIds([])
-      setFrozenBatchIds(null)
       refreshAll()
     }
   }
@@ -569,9 +608,38 @@ export function MonitoringPage() {
                 onCommandIDChange={setCommandID}
                 onExecuteBatchCommand={(commandId, options) => void executeBatchCommand(commandId, options)}
                 onConfirmBatchPause={() => void executeBatchPauseConfirmed()}
+                pauseSharedContent={batchPauseReviews.length > 0 ? (
+                  <div>
+                    {batchPauseReviews.map((review) => {
+                      const id = review.record.monitoring_instance_id
+                      if (!requiresSharedImpactConfirmation(review.dependency_impacts ?? [], 'monitoring_instance', id)) return null
+                      const checked = Boolean(batchPauseConfirmations[id]?.confirm_shared_impact)
+                      return (
+                        <label key={id}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(event) => {
+                              setBatchPauseConfirmations((current) => ({
+                                ...current,
+                                [id]: {
+                                  preview_digest: review.preview_digest,
+                                  confirm_shared_impact: event.target.checked,
+                                },
+                              }))
+                            }}
+                          />
+                          <span>确认 {review.record.display_name || id} 对多台 VPS 的影响。摘要 {review.preview_digest}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                ) : null}
                 onCancelBatchPause={() => {
                   setPendingBatchAction(null)
                   setFrozenBatchIds(null)
+                  setBatchPauseReviews([])
+                  setBatchPauseConfirmations({})
                 }}
               />
             )}

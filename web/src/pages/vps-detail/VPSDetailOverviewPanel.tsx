@@ -5,6 +5,7 @@ import { Badge, Button, Timestamp } from '../../components/atoms'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import type { AssetDomainRecord, AssetServiceRecord, SubscriptionRecord, VPSIPQualityReport, VPSMonitoringInstanceSummary } from '../../lib/types'
 import { overviewLifecycleLabel, overviewMonitoringInstanceCountLabel, overviewSameAssetActionTitle } from '../../lib/vpsOverviewPresentation'
+import { vpsCanArchive, vpsCanRestore } from '../../lib/assetLifecycle'
 
 import { LifecycleBadge, RenewalBadge, UsageBadge } from '../assetPageBadges'
 import { VPSAssetMark } from './VPSAssetMark'
@@ -43,7 +44,7 @@ import type {
 type VPSDetailOverviewPanelProps = {
   model: VPSDetailOverviewModel
   vpsId: string
-  isArchived: boolean
+  lifecycleStatus: string
   lifecycleSubmitting: boolean
   writeBlocked?: boolean
   subscriptions?: SubscriptionRecord[]
@@ -127,7 +128,7 @@ function AttentionList({
 export function VPSDetailOverviewPanel({
   model,
   vpsId,
-  isArchived,
+  lifecycleStatus,
   lifecycleSubmitting,
   writeBlocked = false,
   subscriptions = [],
@@ -175,7 +176,7 @@ export function VPSDetailOverviewPanel({
   const monitoringDescription = [monitoringCountLabel, distinctIncident ? incidentDetail : ''].filter(Boolean).join(' · ')
   const primarySubscription = subscriptions[0]
   const extraSubscriptions = subscriptions.slice(1)
-  const plannedCancellation = model.badges[0] === overviewLifecycleLabel('to_cancel')
+  const plannedCancellation = model.lifecycleStatus === 'to_cancel'
   const decisionRow = model.judgement.rows.find((row) => row.label === '决策')
   const renewalStatusRow = model.judgement.rows.find((row) => row.label === '续费')
   const providerFact = identityFacts.find((fact) => fact.label === '服务商')
@@ -452,11 +453,12 @@ export function VPSDetailOverviewPanel({
                 <button type="button" onClick={() => runMenuAction(onDomainCreate)}>新增域名</button>
                 <button type="button" onClick={() => runMenuAction(onExperienceLog)}>记录经验</button>
                 <p className="vps-detail-actions-menu__group">生命周期</p>
-                {isArchived ? (
+                {vpsCanRestore(lifecycleStatus) ? (
                   <button type="button" disabled={writeBlocked} onClick={() => runMenuAction(onRestoreStart)}>
                     {lifecycleSubmitting ? '恢复中…' : '恢复为闲置'}
                   </button>
-                ) : (
+                ) : null}
+                {vpsCanArchive(lifecycleStatus) ? (
                   <button
                     type="button"
                     className="watchtower-actions-menu__danger"
@@ -465,7 +467,7 @@ export function VPSDetailOverviewPanel({
                   >
                     {lifecycleSubmitting ? '归档中…' : '归档 VPS'}
                   </button>
-                )}
+                ) : null}
               </div>
             </details>
           </div>

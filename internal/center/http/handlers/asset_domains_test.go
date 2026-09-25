@@ -13,22 +13,30 @@ import (
 	"houfeng/internal/center/assetdomains"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/subscriptions"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsassets"
 )
 
 type fakeAssetDomainRepository struct {
-	listResult       []assetdomains.Record
-	listErr          error
-	listFilters      assetdomains.ListFilters
-	listForVPSResult []assetdomains.Record
-	listForVPSErr    error
-	listForVPSID     string
-	createResult     assetdomains.Record
-	createErr        error
-	createInput      assetdomains.CreateInput
-	createCalls      int
-	idempotentCalls  int
-	idempotentKey    string
-	replayed         bool
+	listResult         []assetdomains.Record
+	listErr            error
+	listFilters        assetdomains.ListFilters
+	listForVPSResult   []assetdomains.Record
+	listForVPSErr      error
+	listForVPSID       string
+	createResult       assetdomains.Record
+	createErr          error
+	createInput        assetdomains.CreateInput
+	createCalls        int
+	updateStatusResult assetdomains.Record
+	updateStatusErr    error
+	updateStatusID     string
+	updateStatus       assetdomains.DomainStatus
+	updateStatusReason string
+	updateStatusCalls  int
+	idempotentCalls    int
+	idempotentKey      string
+	replayed           bool
 }
 
 type statefulAssetDomainRepository struct {
@@ -77,6 +85,17 @@ func (f *fakeAssetDomainRepository) CreateAssetDomain(_ context.Context, input a
 		return assetdomains.Record{}, f.createErr
 	}
 	return f.createResult, nil
+}
+
+func (f *fakeAssetDomainRepository) UpdateStatus(_ context.Context, domainID string, status assetdomains.DomainStatus, reason string) (assetdomains.Record, error) {
+	f.updateStatusCalls++
+	f.updateStatusID = domainID
+	f.updateStatus = status
+	f.updateStatusReason = reason
+	if f.updateStatusErr != nil {
+		return assetdomains.Record{}, f.updateStatusErr
+	}
+	return f.updateStatusResult, nil
 }
 
 func (f *fakeAssetDomainRepository) CreateAssetDomainIdempotent(_ context.Context, input assetdomains.CreateInput, key string) (assetdomains.Record, bool, error) {
@@ -181,6 +200,59 @@ func TestAssetDomainsCollectionCreatesDomain(t *testing.T) {
 	}
 	if repo.createCalls != 1 || repo.idempotentCalls != 0 {
 		t.Fatalf("create calls = legacy:%d idempotent:%d, want collection legacy create only", repo.createCalls, repo.idempotentCalls)
+	}
+}
+
+func TestVPSStateRepairAssetDomainStatusHandler(t *testing.T) {
+	repo := &fakeAssetDomainRepository{updateStatusResult: assetdomains.Record{
+		DomainID: "dom_001",
+		VPSID:    "vps_001",
+		Status:   assetdomains.DomainStatusRetired,
+	}}
+	handler := handlers.AssetDomainStatus(repo)
+	req := httptest.NewRequest(http.MethodPatch, "/api/domains/dom_001/status", strings.NewReader(`{"status":" retired ","reason":" stopped after review "}`))
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if repo.updateStatusCalls != 1 || repo.updateStatusID != "dom_001" || repo.updateStatus != assetdomains.DomainStatusRetired || repo.updateStatusReason != "stopped after review" {
+		t.Fatalf("update status request = calls:%d id:%q status:%q reason:%q", repo.updateStatusCalls, repo.updateStatusID, repo.updateStatus, repo.updateStatusReason)
+	}
+	record := decodeTestResponse[assetdomains.Record](t, recorder)
+	if record.DomainID != "dom_001" || record.Status != assetdomains.DomainStatusRetired {
+		t.Fatalf("response domain = %#v, want the updated domain", record)
+	}
+}
+
+func TestVPSStateRepairAssetDomainStatusValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		want   int
+	}{
+		{name: "missing reason", method: http.MethodPatch, path: "/api/domains/dom_001/status", body: `{"status":"paused"}`, want: http.StatusBadRequest},
+		{name: "unknown requested status", method: http.MethodPatch, path: "/api/domains/dom_001/status", body: `{"status":"unknown","reason":"reviewed"}`, want: http.StatusBadRequest},
+		{name: "invalid json", method: http.MethodPatch, path: "/api/domains/dom_001/status", body: `{"status":`, want: http.StatusBadRequest},
+		{name: "invalid path", method: http.MethodPatch, path: "/api/domains/dom_001/status/extra", body: `{"status":"paused","reason":"reviewed"}`, want: http.StatusNotFound},
+		{name: "method", method: http.MethodPost, path: "/api/domains/dom_001/status", body: `{"status":"paused","reason":"reviewed"}`, want: http.StatusMethodNotAllowed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := &fakeAssetDomainRepository{}
+			recorder := httptest.NewRecorder()
+			handlers.AssetDomainStatus(repo).ServeHTTP(recorder, httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body)))
+			if recorder.Code != tt.want {
+				t.Fatalf("status = %d, want %d; body=%s", recorder.Code, tt.want, recorder.Body.String())
+			}
+			if repo.updateStatusCalls != 0 {
+				t.Fatalf("UpdateStatus calls = %d, want zero for rejected request", repo.updateStatusCalls)
+			}
+		})
 	}
 }
 
@@ -469,6 +541,13 @@ func TestAssetDomainsMapRepositoryErrors(t *testing.T) {
 		{name: "list failure", handler: handlers.AssetDomainsCollection(&fakeAssetDomainRepository{listErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/domains", want: http.StatusInternalServerError},
 		{name: "create invalid", handler: handlers.AssetDomainsCollection(&fakeAssetDomainRepository{createErr: assetdomains.ErrInvalidDomainInput}), method: http.MethodPost, path: "/api/domains", body: `{"vps_id":"vps_001","domain_name":"example.com"}`, want: http.StatusBadRequest},
 		{name: "create conflict", handler: handlers.AssetDomainsCollection(&fakeAssetDomainRepository{createErr: assetdomains.ErrDomainConflict}), method: http.MethodPost, path: "/api/domains", body: `{"vps_id":"vps_001","domain_name":"example.com"}`, want: http.StatusConflict},
+		{name: "domain status not found", handler: handlers.AssetDomainStatus(&fakeAssetDomainRepository{updateStatusErr: assetdomains.ErrDomainNotFound}), method: http.MethodPatch, path: "/api/domains/missing/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusNotFound},
+		{name: "domain status failure", handler: handlers.AssetDomainStatus(&fakeAssetDomainRepository{updateStatusErr: errors.New("status update failed")}), method: http.MethodPatch, path: "/api/domains/dom_001/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusInternalServerError},
+		{name: "domain status conflict", handler: handlers.AssetDomainStatus(&fakeAssetDomainRepository{updateStatusErr: assetdomains.ErrDomainStatusConflict}), method: http.MethodPatch, path: "/api/domains/dom_001/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusConflict},
+		{name: "status terminal vps conflict", handler: handlers.AssetDomainStatus(&fakeAssetDomainRepository{updateStatusErr: vpsassets.ErrVPSAssetReadonly}), method: http.MethodPatch, path: "/api/domains/dom_001/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusConflict},
+		{name: "status archived target conflict", handler: handlers.AssetDomainStatus(&fakeAssetDomainRepository{updateStatusErr: targets.ErrTargetMetadataConflict}), method: http.MethodPatch, path: "/api/domains/dom_001/status", body: `{"status":"active","reason":"reviewed"}`, want: http.StatusConflict},
+		{name: "create terminal vps conflict", handler: handlers.AssetDomainsCollection(&fakeAssetDomainRepository{createErr: vpsassets.ErrVPSAssetReadonly}), method: http.MethodPost, path: "/api/domains", body: `{"vps_id":"vps_001","domain_name":"example.com"}`, want: http.StatusConflict},
+		{name: "create archived target conflict", handler: handlers.AssetDomainsCollection(&fakeAssetDomainRepository{createErr: targets.ErrTargetMetadataConflict}), method: http.MethodPost, path: "/api/domains", body: `{"vps_id":"vps_001","target_id":"tg_archived","domain_name":"example.com"}`, want: http.StatusConflict},
 		{name: "create failure", handler: handlers.AssetDomainsCollection(&fakeAssetDomainRepository{createErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/domains", body: `{"vps_id":"vps_001","domain_name":"example.com"}`, want: http.StatusInternalServerError},
 		{name: "vps list invalid", handler: handlers.VPSDomains(&fakeAssetDomainRepository{listForVPSErr: assetdomains.ErrInvalidDomainInput}), method: http.MethodGet, path: "/api/vps/vps_001/domains", want: http.StatusBadRequest},
 		{name: "vps list failure", handler: handlers.VPSDomains(&fakeAssetDomainRepository{listForVPSErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/vps/vps_001/domains", want: http.StatusInternalServerError},

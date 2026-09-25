@@ -90,6 +90,10 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 			writeError(w, http.StatusConflict, "archived monitoring instance")
 			return
 		}
+		if record.LifecycleStatus == monitoringinstances.LifecycleRetired {
+			writeError(w, http.StatusConflict, "retired monitoring instance")
+			return
+		}
 		if record.BindingStatus != monitoringinstances.BindingBound {
 			writeError(w, http.StatusConflict, "monitoring instance agent not bound")
 			return
@@ -118,6 +122,10 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 				writeError(w, http.StatusConflict, "archived monitoring instance")
 				return
 			}
+			if errors.Is(err, monitoringinstances.ErrRetiredMonitoringInstance) {
+				writeError(w, http.StatusConflict, "retired monitoring instance")
+				return
+			}
 			if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
 				writeError(w, http.StatusNotFound, "monitoring instance not found")
 				return
@@ -136,6 +144,7 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 
 func commandActionExecutable(record monitoringinstances.Record) bool {
 	return record.ArchivedAt == nil &&
+		record.LifecycleStatus != monitoringinstances.LifecycleRetired &&
 		record.BindingStatus == monitoringinstances.BindingBound &&
 		record.MonitoringStatus != monitoringinstances.MonitoringPaused
 }

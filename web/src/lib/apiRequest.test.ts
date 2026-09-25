@@ -184,18 +184,37 @@ describe('API request transport', () => {
     expect(typed.recovery?.server_lock_version).toBe(7)
   })
 
-  it('ignores malformed structured error metadata', async () => {
+  it('normalizes VPS axis field errors and ignores non-string map values', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error: 'invalid input',
+      field_errors: {
+        lifecycle_status: 'archived cannot stay in use',
+        usage_status: 'archived cannot stay in use',
+        renewal_decision: 'archived cannot stay in use',
+      },
+    }), { status: 400 }))
+
+    await expect(requestJSON('/api/vps/vps_001', undefined, allowlistedApiError)).rejects.toMatchObject({
+      status: 400,
+      message: 'invalid input',
+      field_errors: [
+        { field: 'lifecycle_status', message: 'archived cannot stay in use' },
+        { field: 'usage_status', message: 'archived cannot stay in use' },
+        { field: 'renewal_decision', message: 'archived cannot stay in use' },
+      ],
+    })
+
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
       code: 409,
       error: 'legacy message',
-      field_errors: { field: 'title', message: 'invalid' },
+      field_errors: { field: 'title', message: 1 },
     }), { status: 409 }))
 
     await expect(requestJSON('/api/failure', undefined, allowlistedApiError)).rejects.toMatchObject({
       status: 409,
       message: 'legacy message',
       code: undefined,
-      field_errors: [],
+      field_errors: [{ field: 'field', message: 'title' }],
       recovery: undefined,
     })
   })

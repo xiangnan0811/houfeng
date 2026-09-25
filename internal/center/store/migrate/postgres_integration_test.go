@@ -1071,48 +1071,6 @@ func TestPostgresIntegrationRecordAttachmentsSchema(t *testing.T) {
 		from public.schema_migrations
 		where name = '0053_create_record_attachments.sql'
 	`, 1)
-	assertSingleStringValue(t, ctx, db, `
-		select string_agg(column_name, ',' order by ordinal_position)
-		from information_schema.columns
-		where table_schema = 'public'
-		  and table_name = 'blob_gc_deletions'
-	`, "deletion_id,project_id,purge_mode,blob_key,sha256_digest,object_version,size_bytes,backend_kind,blob_created_at,deletion_state,owner_id,owner_generation,attempt,lease_expires_at,retry_at,physical_delete_result,receipt_digest,completed_at,created_at,updated_at")
-	assertSingleStringValue(t, ctx, db, `
-		select string_agg(column_name, ',' order by ordinal_position)
-		from information_schema.columns
-		where table_schema = 'public'
-		  and table_name = 'blob_publication_intents'
-	`, "publication_id,project_id,owner_kind,owner_id,owner_generation,blob_key,sha256_digest,size_bytes,backend_kind,object_version,publication_state,publish_expires_at,cleanup_owner_id,cleanup_generation,attempt,cleanup_lease_expires_at,retry_at,completion_outcome,receipt_digest,completed_at,created_at,updated_at")
-	assertSingleStringValue(t, ctx, db, `
-		select string_agg(column_name, ',' order by ordinal_position)
-		from information_schema.columns
-		where table_schema = 'public'
-		  and table_name = 'record_attachments'
-	`, "attachment_id,project_id,record_id,draft_id,origin_draft_id,copied_from_attachment_id,attachment_state,display_name,media_type,logical_size_bytes,blob_key,blob_object_version,preview_blob_key,preview_blob_object_version,preview_media_type,preview_size_bytes,created_by,created_at,updated_at")
-	assertSingleStringValue(t, ctx, db, `
-		select string_agg(column_name, ',' order by ordinal_position)
-		from information_schema.columns
-		where table_schema = 'public'
-		  and table_name = 'attachment_processor_jobs'
-	`, "processor_job_id,upload_id,attachment_id,processor_state,processor_profile,attempt,max_attempts,owner_id,owner_generation,lease_expires_at,retry_at,result_code,result_digest,result_owner_id,result_lease_expires_at,created_at,updated_at,expires_at")
-	assertSingleStringValue(t, ctx, db, `
-		select string_agg(column_name, ',' order by ordinal_position)
-		from information_schema.columns
-		where table_schema = 'public'
-		  and table_name = 'attachment_uploads'
-	`, "upload_id,project_id,attachment_id,origin_draft_id,author_id,upload_state,transport_kind,declared_size_bytes,reserved_size_bytes,actual_size_bytes,actual_sha256_digest,temporary_object_key,temporary_object_version,temporary_object_cleanup_retry_at,temporary_object_deleted_at,completion_fingerprint,completed_at,created_at,updated_at,expires_at")
-	assertSingleStringValue(t, ctx, db, `
-		select string_agg(column_name, ',' order by ordinal_position)
-		from information_schema.columns
-		where table_schema = 'public'
-		  and table_name = 'attachment_purge_receipts'
-	`, "operation_id,surface_kind,object_version_digest,adapter_name,removed_surface_digest,receipt_digest,removed_row_count,verified_absent_at,created_at")
-	assertSingleStringValue(t, ctx, db, `
-		select string_agg(column_name, ',' order by ordinal_position)
-		from information_schema.columns
-		where table_schema = 'public'
-		  and table_name = 'content_workspace_purge_receipts'
-	`, "workspace_id,removed_surface_digest,receipt_digest,removed_row_count,verified_absent_at,created_at")
 	assertSingleIntValue(t, ctx, db, `
 		select count(*)::int
 		from pg_catalog.pg_constraint

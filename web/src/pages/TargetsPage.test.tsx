@@ -73,6 +73,9 @@ function listFetch(records: ReturnType<typeof targetRecord>[]) {
     if (url.includes('/runtime/')) {
       return mockJSONResponse(records[0] ?? targetRecord())
     }
+    if (url.includes('/lifecycle-review')) {
+      return mockJSONResponse({ dependency_impacts: [], preview_digest: 'target-digest' })
+    }
     return mockJSONResponse({ error: `unexpected ${url}` }, 500)
   })
 }
@@ -807,6 +810,42 @@ describe('TargetsPage', () => {
         '/api/targets/tg_001/runtime/enter-maintenance',
         expect.objectContaining({ method: 'POST' }),
       ),
+    )
+  })
+
+  it('rejects batch 进入维护 on shared targets with error directing to detail page', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/targets' && init?.method !== 'POST') {
+        return mockJSONResponse([targetRecord({ target_id: 'tg_shared_batch', name: 'Shared Target' })])
+      }
+      if (url.includes('/lifecycle-review')) {
+        return mockJSONResponse({
+          dependency_impacts: [
+            { object_type: 'target', object_id: 'tg_shared_batch', vps_id: 'vps_001', vps_lifecycle_status: 'active', relation_type: 'service', relation_id: 'svc_001', relation_status: 'active', classification: 'current' },
+            { object_type: 'target', object_id: 'tg_shared_batch', vps_id: 'vps_002', vps_lifecycle_status: 'active', relation_type: 'service', relation_id: 'svc_002', relation_status: 'active', classification: 'current' },
+          ],
+          preview_digest: 'batch-shared-digest',
+        })
+      }
+      if (url.includes('/runtime/')) {
+        return mockJSONResponse(targetRecord({ target_id: 'tg_shared_batch' }))
+      }
+      return mockJSONResponse({ error: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTargets()
+
+    await waitFor(() => expect(screen.getByText('Shared Target')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByLabelText('选择 Shared Target'))
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+
+    await waitFor(() => expect(screen.getByText('1/1 个目标失败')).toBeInTheDocument())
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      '/api/targets/tg_shared_batch/runtime/enter-maintenance',
+      expect.anything(),
     )
   })
 
