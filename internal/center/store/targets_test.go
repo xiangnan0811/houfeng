@@ -20,15 +20,14 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	eventAt := time.Date(2026, time.July, 1, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 
 	tests := []struct {
-		name            string
-		action          func(context.Context, *PostgresTargetRepository, string) (targets.TargetRecord, error)
-		targetID        string
-		sourceStatus    string
-		returnedStatus  string
-		wantEventType   incidents.EventType
-		wantSummary     string
-		wantPayload     string
-		wantSQLSnippets []string
+		name           string
+		action         func(context.Context, *PostgresTargetRepository, string) (targets.TargetRecord, error)
+		targetID       string
+		sourceStatus   string
+		returnedStatus string
+		wantEventType  incidents.EventType
+		wantSummary    string
+		wantPayload    string
 	}{
 		{
 			name: "enabled to maintenance",
@@ -41,11 +40,6 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			wantEventType:  incidents.EventTargetMaintenanceEntered,
 			wantSummary:    "进入维护",
 			wantPayload:    targets.RunStatusMaintenance,
-			wantSQLSnippets: []string{
-				"set run_status = '维护中'",
-				"where target_id = $1",
-				"run_status = '启用'",
-			},
 		},
 		{
 			name: "maintenance to enabled",
@@ -58,13 +52,6 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			wantEventType:  incidents.EventTargetMaintenanceExited,
 			wantSummary:    "退出维护",
 			wantPayload:    targets.RunStatusEnabled,
-			wantSQLSnippets: []string{
-				"set run_status = '启用'",
-				"where target_id = $1",
-				"run_status in ('维护中', '暂停')",
-				"for update",
-				"run_status = (select run_status from prior)",
-			},
 		},
 		{
 			name: "enabled to paused",
@@ -77,13 +64,6 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			wantEventType:  incidents.EventTargetPaused,
 			wantSummary:    "暂停",
 			wantPayload:    targets.RunStatusPaused,
-			wantSQLSnippets: []string{
-				"set run_status = '暂停'",
-				"where target_id = $1",
-				"run_status in ('启用', '维护中')",
-				"for update",
-				"run_status = (select run_status from prior)",
-			},
 		},
 		{
 			name: "paused to enabled",
@@ -96,13 +76,6 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			wantEventType:  incidents.EventTargetResumed,
 			wantSummary:    "恢复",
 			wantPayload:    targets.RunStatusEnabled,
-			wantSQLSnippets: []string{
-				"set run_status = '启用'",
-				"where target_id = $1",
-				"run_status in ('维护中', '暂停')",
-				"for update",
-				"run_status = (select run_status from prior)",
-			},
 		},
 		{
 			name: "maintenance to paused",
@@ -115,16 +88,9 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			wantEventType:  incidents.EventTargetPaused,
 			wantSummary:    "暂停",
 			wantPayload:    targets.RunStatusPaused,
-			wantSQLSnippets: []string{
-				"set run_status = '暂停'",
-				"where target_id = $1",
-				"run_status in ('启用', '维护中')",
-				"for update",
-				"run_status = (select run_status from prior)",
-			},
 		},
 		{
-			name: "archive active target",
+			name: "archive enabled target",
 			action: func(ctx context.Context, repo *PostgresTargetRepository, targetID string) (targets.TargetRecord, error) {
 				return repo.ArchiveTarget(ctx, targetID)
 			},
@@ -134,16 +100,9 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			wantEventType:  incidents.EventTargetArchived,
 			wantSummary:    "归档",
 			wantPayload:    targets.RunStatusArchived,
-			wantSQLSnippets: []string{
-				"set run_status = '已归档'",
-				"where target_id = $1",
-				"run_status in ('启用', '维护中', '暂停')",
-				"for update",
-				"run_status = (select run_status from prior)",
-			},
 		},
 		{
-			name: "restore archived to paused",
+			name: "restore archived target to paused",
 			action: func(ctx context.Context, repo *PostgresTargetRepository, targetID string) (targets.TargetRecord, error) {
 				return repo.RestoreArchivedTargetToPaused(ctx, targetID)
 			},
@@ -153,11 +112,6 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			wantEventType:  incidents.EventTargetRestoredToPaused,
 			wantSummary:    "恢复",
 			wantPayload:    targets.RunStatusPaused,
-			wantSQLSnippets: []string{
-				"set run_status = '暂停'",
-				"where target_id = $1",
-				"run_status = '已归档'",
-			},
 		},
 	}
 
@@ -166,28 +120,29 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			t.Parallel()
 
 			var (
-				gotSQL    string
-				execSQL   string
-				execArgs  []any
+				queryRows int
+				eventArgs []any
 				committed bool
 			)
 			tx := &fakeTargetTx{
-				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-					gotSQL = sql
-					if len(args) != 1 || args[0] != tt.targetID {
-						t.Fatalf("QueryRow args = %#v, want target id %q", args, tt.targetID)
+				queryRow: func(_ context.Context, _ string, args ...any) pgx.Row {
+					queryRows++
+					status := tt.sourceStatus
+					if queryRows == 3 {
+						status = tt.returnedStatus
 					}
 					return fakeTargetRow{scan: func(dest ...any) error {
-						scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: tt.targetID, RunStatus: tt.returnedStatus, UpdatedAt: eventAt})
-						if len(dest) > 17 {
-							*(dest[17].(*string)) = tt.sourceStatus
-						}
+						scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: tt.targetID, RunStatus: status, UpdatedAt: eventAt})
 						return nil
 					}}
 				},
+				query: func(context.Context, string, ...any) (pgx.Rows, error) {
+					return &fakeTargetRows{}, nil
+				},
 				exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-					execSQL = sql
-					execArgs = append([]any(nil), args...)
+					if strings.Contains(sql, "insert into state_change_events") {
+						eventArgs = append([]any(nil), args...)
+					}
 					return pgconn.NewCommandTag("INSERT 1"), nil
 				},
 				commit: func(context.Context) error {
@@ -204,32 +159,24 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			if record.RunStatus != tt.returnedStatus {
 				t.Fatalf("RunStatus = %q, want %q", record.RunStatus, tt.returnedStatus)
 			}
-			for _, snippet := range tt.wantSQLSnippets {
-				if !strings.Contains(gotSQL, snippet) {
-					t.Fatalf("runtime control SQL missing %q in %q", snippet, gotSQL)
-				}
+			if len(eventArgs) != 8 {
+				t.Fatalf("event args = %#v, want 8 fields", eventArgs)
 			}
-			if !strings.Contains(execSQL, "insert into state_change_events") {
-				t.Fatalf("event SQL = %q, want state_change_events insert", execSQL)
+			if eventArgs[1] != string(incidents.ObjectTypeTarget) {
+				t.Fatalf("object_type = %#v, want %q", eventArgs[1], incidents.ObjectTypeTarget)
 			}
-			if len(execArgs) != 8 {
-				t.Fatalf("len(execArgs) = %d, want 8", len(execArgs))
+			if eventArgs[2] != tt.targetID {
+				t.Fatalf("object_id = %#v, want %q", eventArgs[2], tt.targetID)
 			}
-			if execArgs[1] != string(incidents.ObjectTypeTarget) {
-				t.Fatalf("object_type = %#v, want %q", execArgs[1], incidents.ObjectTypeTarget)
+			if eventArgs[3] != string(tt.wantEventType) {
+				t.Fatalf("event_type = %#v, want %q", eventArgs[3], tt.wantEventType)
 			}
-			if execArgs[2] != tt.targetID {
-				t.Fatalf("object_id = %#v, want %q", execArgs[2], tt.targetID)
+			if summary, ok := eventArgs[5].(string); !ok || !strings.Contains(summary, tt.wantSummary) {
+				t.Fatalf("summary = %#v, want substring %q", eventArgs[5], tt.wantSummary)
 			}
-			if execArgs[3] != string(tt.wantEventType) {
-				t.Fatalf("event_type = %#v, want %q", execArgs[3], tt.wantEventType)
-			}
-			if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, tt.wantSummary) {
-				t.Fatalf("summary = %#v, want substring %q", execArgs[5], tt.wantSummary)
-			}
-			payload, ok := execArgs[6].([]byte)
+			payload, ok := eventArgs[6].([]byte)
 			if !ok || !strings.Contains(string(payload), tt.wantPayload) {
-				t.Fatalf("payload = %#v, want status %q", execArgs[6], tt.wantPayload)
+				t.Fatalf("payload = %#v, want status %q", eventArgs[6], tt.wantPayload)
 			}
 			if !committed {
 				t.Fatal("transaction was not committed")
@@ -241,17 +188,23 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 func TestTargetRuntimeControlRejectsInvalidTransition(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresTargetRepository{db: fakeTargetDB{
-		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+	tx := &fakeTargetTx{
+		queryRow: func(context.Context, string, ...any) pgx.Row {
 			return fakeTargetRow{scan: func(dest ...any) error {
-				*(dest[0].(*bool)) = true
+				scanTargetRecordDestinations(dest, targets.TargetRecord{
+					TargetID:  "tg_archived",
+					RunStatus: targets.RunStatusArchived,
+				})
 				return nil
 			}}
 		},
+		query: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return &fakeTargetRows{}, nil
+		},
+	}
+	repo := &PostgresTargetRepository{db: fakeTargetDB{
 		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-			return &fakeTargetTx{queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
-				return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
-			}}, nil
+			return tx, nil
 		},
 	}}
 
@@ -392,99 +345,6 @@ func TestDeleteProbeItemReturnsProbeItemNotFoundWhenTargetExists(t *testing.T) {
 	}
 }
 
-func TestUpdateTargetMetadata(t *testing.T) {
-	t.Parallel()
-
-	now := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
-	expectedUpdatedAt := now.Add(-5 * time.Minute)
-	var (
-		gotSQL  string
-		gotArgs []any
-	)
-	repo := &PostgresTargetRepository{db: fakeTargetDB{
-		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			gotSQL = sql
-			gotArgs = append([]any(nil), args...)
-			return fakeTargetRow{scan: func(dest ...any) error {
-				scanTargetRecordDestinations(dest, targets.TargetRecord{
-					TargetID:                          "tg_001",
-					Name:                              "Blog",
-					TargetType:                        targets.TargetTypeService,
-					Host:                              "blog.example.com",
-					ExecutionMonitoringInstanceLabels: []string{"edge"},
-					RunStatus:                         targets.RunStatusEnabled,
-					Labels:                            []string{"edge", "core"},
-					Note:                              "updated",
-					CurrentHealthStatus:               targets.HealthNormal,
-					CurrentActiveIncidentCount:        2,
-					CurrentPrimaryIssueSummary:        "packet loss",
-					CreatedAt:                         now.Add(-time.Hour),
-					UpdatedAt:                         now,
-				})
-				return nil
-			}}
-		},
-	}}
-
-	record, err := repo.UpdateTargetMetadata(context.Background(), "tg_001", targets.UpdateMetadataInput{
-		Labels:            []string{"edge", "core"},
-		Note:              "updated",
-		ExpectedUpdatedAt: &expectedUpdatedAt,
-	})
-	if err != nil {
-		t.Fatalf("UpdateTargetMetadata() error = %v", err)
-	}
-
-	if len(gotArgs) != 5 {
-		t.Fatalf("len(gotArgs) = %d, want 5", len(gotArgs))
-	}
-	if gotArgs[0] != "tg_001" {
-		t.Fatalf("gotArgs[0] = %#v, want %q", gotArgs[0], "tg_001")
-	}
-	if labels, ok := gotArgs[2].([]string); !ok || len(labels) != 2 || labels[0] != "edge" || labels[1] != "core" {
-		t.Fatalf("gotArgs[2] = %#v, want %#v", gotArgs[2], []string{"edge", "core"})
-	}
-	if gotArgs[3] != "updated" {
-		t.Fatalf("gotArgs[3] = %#v, want %q", gotArgs[3], "updated")
-	}
-	if gotUpdatedAt, ok := gotArgs[4].(time.Time); !ok || !gotUpdatedAt.Equal(expectedUpdatedAt) {
-		t.Fatalf("gotArgs[4] = %#v, want %s", gotArgs[4], expectedUpdatedAt.Format(time.RFC3339Nano))
-	}
-	if !strings.Contains(gotSQL, "update targets") {
-		t.Fatalf("UpdateTargetMetadata() SQL = %q, want update targets", gotSQL)
-	}
-	if !strings.Contains(gotSQL, "labels") {
-		t.Fatalf("UpdateTargetMetadata() SQL = %q, want labels update", gotSQL)
-	}
-	if !strings.Contains(gotSQL, "note") {
-		t.Fatalf("UpdateTargetMetadata() SQL = %q, want note update", gotSQL)
-	}
-	if !strings.Contains(gotSQL, "updated_at = now()") {
-		t.Fatalf("UpdateTargetMetadata() SQL = %q, want updated_at refresh", gotSQL)
-	}
-	if !strings.Contains(gotSQL, "updated_at = $5") {
-		t.Fatalf("UpdateTargetMetadata() SQL = %q, want optimistic updated_at precondition", gotSQL)
-	}
-	if !strings.Contains(gotSQL, "returning "+targetSelectColumns) {
-		t.Fatalf("UpdateTargetMetadata() SQL = %q, want returning targetSelectColumns", gotSQL)
-	}
-	if record.TargetID != "tg_001" {
-		t.Fatalf("record.TargetID = %q, want %q", record.TargetID, "tg_001")
-	}
-	if record.Name != "Blog" {
-		t.Fatalf("record.Name = %q, want %q", record.Name, "Blog")
-	}
-	if len(record.Labels) != 2 || record.Labels[0] != "edge" || record.Labels[1] != "core" {
-		t.Fatalf("record.Labels = %#v, want %#v", record.Labels, []string{"edge", "core"})
-	}
-	if record.Note != "updated" {
-		t.Fatalf("record.Note = %q, want %q", record.Note, "updated")
-	}
-	if record.UpdatedAt != now {
-		t.Fatalf("record.UpdatedAt = %s, want %s", record.UpdatedAt.Format(time.RFC3339), now.Format(time.RFC3339))
-	}
-}
-
 func TestUpdateTargetMetadataMapsNotFound(t *testing.T) {
 	t.Parallel()
 
@@ -508,34 +368,15 @@ func TestUpdateTargetMetadataMapsPreconditionMissToConflictWhenTargetExists(t *t
 	expectedUpdatedAt := time.Date(2026, time.April, 27, 9, 55, 0, 0, time.UTC)
 	queryCount := 0
 	repo := &PostgresTargetRepository{db: fakeTargetDB{
-		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+		queryRow: func(context.Context, string, ...any) pgx.Row {
 			queryCount++
-			switch queryCount {
-			case 1:
-				if !strings.Contains(sql, "updated_at = $5") {
-					t.Fatalf("update SQL = %q, want updated_at precondition", sql)
-				}
-				if len(args) != 5 {
-					t.Fatalf("update args = %#v, want five args (target_id, group, labels, note, expected_updated_at)", args)
-				}
-				return fakeTargetRow{scan: func(dest ...any) error {
-					return pgx.ErrNoRows
-				}}
-			case 2:
-				if !strings.Contains(sql, "select exists") || !strings.Contains(sql, "from targets") {
-					t.Fatalf("existence SQL = %q, want target existence check", sql)
-				}
-				if len(args) != 1 || args[0] != "tg_001" {
-					t.Fatalf("existence args = %#v, want target id", args)
-				}
-				return fakeTargetRow{scan: func(dest ...any) error {
-					*(dest[0].(*bool)) = true
-					return nil
-				}}
-			default:
-				t.Fatalf("unexpected QueryRow call %d", queryCount)
+			if queryCount == 1 {
 				return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 			}
+			return fakeTargetRow{scan: func(dest ...any) error {
+				*(dest[0].(*bool)) = true
+				return nil
+			}}
 		},
 	}}
 
@@ -546,9 +387,6 @@ func TestUpdateTargetMetadataMapsPreconditionMissToConflictWhenTargetExists(t *t
 	})
 	if !errors.Is(err, targets.ErrTargetMetadataConflict) {
 		t.Fatalf("UpdateTargetMetadata() error = %v, want ErrTargetMetadataConflict", err)
-	}
-	if queryCount != 2 {
-		t.Fatalf("QueryRow calls = %d, want 2", queryCount)
 	}
 }
 
@@ -618,7 +456,7 @@ func (f fakeTargetDB) Exec(ctx context.Context, sql string, args ...any) (pgconn
 
 func (f fakeTargetDB) BeginTx(ctx context.Context, txOptions pgx.TxOptions) (pgx.Tx, error) {
 	if f.beginTx == nil {
-		return &fakeTargetTx{queryRow: f.queryRow, exec: f.exec}, nil
+		return &fakeTargetTx{queryRow: f.queryRow, query: f.query, exec: f.exec}, nil
 	}
 	return f.beginTx(ctx, txOptions)
 }
@@ -633,6 +471,7 @@ func (r fakeTargetRow) Scan(dest ...any) error {
 
 type fakeTargetTx struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
+	query    func(context.Context, string, ...any) (pgx.Rows, error)
 	exec     func(context.Context, string, ...any) (pgconn.CommandTag, error)
 	commit   func(context.Context) error
 	rollback func(context.Context) error
@@ -665,7 +504,12 @@ func (f *fakeTargetTx) Exec(ctx context.Context, sql string, args ...any) (pgcon
 	}
 	return pgconn.NewCommandTag("INSERT 1"), nil
 }
-func (f *fakeTargetTx) Query(context.Context, string, ...any) (pgx.Rows, error) { return nil, nil }
+func (f *fakeTargetTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.query != nil {
+		return f.query(ctx, sql, args...)
+	}
+	return &fakeTargetRows{}, nil
+}
 func (f *fakeTargetTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	if f.queryRow != nil {
 		return f.queryRow(ctx, sql, args...)

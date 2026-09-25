@@ -32,26 +32,31 @@ const (
 // duplicated in JSON, but remains part of the typed input so chronology is
 // validated before any write.
 type task4MonitoringEventPayload struct {
-	ObjectType          incidents.ObjectType      `json:"-"`
-	EventType           incidents.EventType       `json:"-"`
-	Severity            incidents.Severity        `json:"-"`
-	EventAt             time.Time                 `json:"event_at"`
-	RecordedAt          time.Time                 `json:"-"`
-	IsBackfilled        bool                      `json:"is_backfilled"`
-	Provenance          monitoringEventProvenance `json:"provenance"`
-	ProducerVersion     string                    `json:"producer_version"`
-	RuleVersion         string                    `json:"rule_version"`
-	PriorState          string                    `json:"prior_state"`
-	ResultingState      string                    `json:"resulting_state"`
-	CorrectionOfEventID string                    `json:"correction_of_event_id,omitempty"`
-
-	IncidentID       string `json:"incident_id,omitempty"`
-	IncidentClass    string `json:"incident_class,omitempty"`
-	BindingStatus    string `json:"binding_status,omitempty"`
-	LifecycleStatus  string `json:"lifecycle_status,omitempty"`
-	MonitoringStatus string `json:"monitoring_status,omitempty"`
-	RunStatus        string `json:"run_status,omitempty"`
-	Reason           string `json:"reason,omitempty"`
+	ObjectType                             incidents.ObjectType      `json:"-"`
+	EventType                              incidents.EventType       `json:"-"`
+	Severity                               incidents.Severity        `json:"-"`
+	EventAt                                time.Time                 `json:"event_at"`
+	RecordedAt                             time.Time                 `json:"-"`
+	IsBackfilled                           bool                      `json:"is_backfilled"`
+	Provenance                             monitoringEventProvenance `json:"provenance"`
+	ProducerVersion                        string                    `json:"producer_version"`
+	RuleVersion                            string                    `json:"rule_version"`
+	PriorState                             string                    `json:"prior_state"`
+	ResultingState                         string                    `json:"resulting_state"`
+	Reason                                 string                    `json:"reason,omitempty"`
+	CorrectionOfEventID                    string                    `json:"correction_of_event_id,omitempty"`
+	IncidentID                             string                    `json:"incident_id,omitempty"`
+	IncidentClass                          string                    `json:"incident_class,omitempty"`
+	BindingStatus                          string                    `json:"binding_status,omitempty"`
+	LifecycleStatus                        string                    `json:"lifecycle_status,omitempty"`
+	MonitoringStatus                       string                    `json:"monitoring_status,omitempty"`
+	RunStatus                              string                    `json:"run_status,omitempty"`
+	RetirementMonitoringStatusReconciled   bool                      `json:"retirement_monitoring_status_reconciled,omitempty"`
+	RetirementBindingStatusReconciled      bool                      `json:"retirement_binding_status_reconciled,omitempty"`
+	RetirementEnrollmentCredentialsRevoked bool                      `json:"retirement_enrollment_credentials_revoked,omitempty"`
+	RetirementSyncCredentialRevoked        bool                      `json:"retirement_sync_credential_revoked,omitempty"`
+	RetirementPendingBindingCleared        bool                      `json:"retirement_pending_binding_cleared,omitempty"`
+	RetirementPendingActionCleared         bool                      `json:"retirement_pending_action_cleared,omitempty"`
 }
 
 func marshalTask4MonitoringEventPayload(payload task4MonitoringEventPayload) ([]byte, error) {
@@ -123,6 +128,26 @@ func validMonitoringEventLegacyFields(payload task4MonitoringEventPayload) bool 
 		}
 		families++
 	}
+	reconciliationFields := []bool{
+		payload.RetirementMonitoringStatusReconciled,
+		payload.RetirementBindingStatusReconciled,
+		payload.RetirementEnrollmentCredentialsRevoked,
+		payload.RetirementSyncCredentialRevoked,
+		payload.RetirementPendingBindingCleared,
+		payload.RetirementPendingActionCleared,
+	}
+	hasReconciliation := false
+	for _, value := range reconciliationFields {
+		hasReconciliation = hasReconciliation || value
+	}
+	if payload.EventType == incidents.EventMonitoringInstanceRetirementReconciled {
+		if payload.PriorState != "已退役" || payload.ResultingState != "已退役" || !hasReconciliation {
+			return false
+		}
+	} else if hasReconciliation {
+		return false
+	}
+
 	if families != 1 || (payload.Reason != "" && !validMonitoringEventText(payload.Reason, 2048)) {
 		return false
 	}
@@ -130,7 +155,9 @@ func validMonitoringEventLegacyFields(payload task4MonitoringEventPayload) bool 
 	case monitoringEventBindingRuleVersion:
 		return payload.BindingStatus == payload.ResultingState
 	case monitoringEventLifecycleRuleVersion:
-		return payload.LifecycleStatus == payload.ResultingState || (payload.EventType == incidents.EventMonitoringInstanceLifecycleUpdated && payload.PriorState == "unarchived" && payload.ResultingState == "archived")
+		return payload.LifecycleStatus == payload.ResultingState ||
+			(payload.EventType == incidents.EventMonitoringInstanceLifecycleUpdated && payload.PriorState == "unarchived" && payload.ResultingState == "archived") ||
+			(payload.EventType == incidents.EventMonitoringInstanceRestoredFromArchive && payload.PriorState == "archived" && payload.ResultingState == "unarchived" && payload.LifecycleStatus == "观察中")
 	case monitoringEventRuntimeRuleVersion:
 		return payload.MonitoringStatus == payload.ResultingState
 	case monitoringEventTargetRuleVersion:

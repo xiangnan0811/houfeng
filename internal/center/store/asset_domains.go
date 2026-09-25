@@ -190,16 +190,60 @@ func (r *PostgresAssetDomainRepository) CreateAssetDomain(ctx context.Context, i
 	if err := assetdomains.ValidateCreateInput(input); err != nil {
 		return assetdomains.Record{}, err
 	}
+	if r.beginTx == nil {
+		return assetdomains.Record{}, errors.New("asset domain repository cannot create without transaction support")
+	}
+
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
+	if err != nil {
+		return assetdomains.Record{}, fmt.Errorf("begin asset domain create transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := ensureAssetDomainCreateAllowed(ctx, tx, input); err != nil {
+		return assetdomains.Record{}, err
+	}
+	record, err := insertAssetDomain(ctx, tx, input)
+	if err != nil {
+		return assetdomains.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return assetdomains.Record{}, fmt.Errorf("commit asset domain create transaction: %w", err)
+	}
+	return record, nil
+}
+
+func ensureAssetDomainCreateAllowed(ctx context.Context, tx pgx.Tx, input assetdomains.CreateInput) error {
+	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, input.VPSID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assetdomains.ErrDomainOwnerNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("query vps asset %q before domain create: %w", input.VPSID, err)
+	}
+	if err := ensureVPSAllowsAssetRelationshipCreate(input.VPSID, lifecycle, string(input.Status), "domain"); err != nil {
+		return err
+	}
 	if input.ServiceID != nil {
-		exists, err := r.serviceAssetBelongsToVPS(ctx, *input.ServiceID, input.VPSID)
-		if err != nil {
-			return assetdomains.Record{}, err
+		ownerVPSID, err := lockAssetServiceOwner(ctx, tx, *input.ServiceID)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && ownerVPSID != input.VPSID) {
+			return assetdomains.ErrDomainServiceNotFound
 		}
-		if !exists {
-			return assetdomains.Record{}, assetdomains.ErrDomainServiceNotFound
+		if err != nil {
+			return fmt.Errorf("query asset service %q before domain create: %w", *input.ServiceID, err)
 		}
 	}
-	return insertAssetDomain(ctx, r.db, input)
+	if input.TargetID == nil {
+		return nil
+	}
+	targetStatus, err := lockAssetTargetRunStatus(ctx, tx, *input.TargetID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assetdomains.ErrDomainTargetNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("query target %q before domain create: %w", *input.TargetID, err)
+	}
+	return ensureTargetAllowsAssetRelationship(*input.TargetID, targetStatus, string(input.Status), "domain")
 }
 
 func (r *PostgresAssetDomainRepository) CreateAssetDomainIdempotent(
@@ -223,7 +267,7 @@ func (r *PostgresAssetDomainRepository) CreateAssetDomainIdempotent(
 		return assetdomains.Record{}, false, errors.New("asset domain repository cannot create idempotently without transaction support")
 	}
 
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
 	if err != nil {
 		return assetdomains.Record{}, false, fmt.Errorf("begin asset domain create transaction: %w", err)
 	}
@@ -261,14 +305,8 @@ func (r *PostgresAssetDomainRepository) CreateAssetDomainIdempotent(
 		return assetdomains.Record{}, false, fmt.Errorf("lookup asset domain create receipt: %w", err)
 	}
 
-	if input.ServiceID != nil {
-		exists, err := assetDomainServiceBelongsToVPS(ctx, tx, *input.ServiceID, input.VPSID)
-		if err != nil {
-			return assetdomains.Record{}, false, fmt.Errorf("check asset domain service scope: %w", err)
-		}
-		if !exists {
-			return assetdomains.Record{}, false, assetdomains.ErrDomainServiceNotFound
-		}
+	if err := ensureAssetDomainCreateAllowed(ctx, tx, input); err != nil {
+		return assetdomains.Record{}, false, err
 	}
 	record, err := insertAssetDomain(ctx, tx, input)
 	if err != nil {
@@ -362,24 +400,6 @@ func (r *PostgresAssetDomainRepository) vpsAssetExists(ctx context.Context, vpsI
 			where vps_id = $1
 		)`, vpsID).Scan(&exists); err != nil {
 		return false, fmt.Errorf("check vps asset %q for domains: %w", vpsID, err)
-	}
-	return exists, nil
-}
-
-func (r *PostgresAssetDomainRepository) serviceAssetBelongsToVPS(ctx context.Context, serviceID, vpsID string) (bool, error) {
-	return assetDomainServiceBelongsToVPS(ctx, r.db, serviceID, vpsID)
-}
-
-func assetDomainServiceBelongsToVPS(ctx context.Context, db assetDomainQueryer, serviceID, vpsID string) (bool, error) {
-	var exists bool
-	if err := db.QueryRow(ctx, `
-		select exists (
-			select 1
-			from asset_services
-			where service_id = $1
-			  and vps_id = $2
-		)`, serviceID, vpsID).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check asset service %q for domain vps %q: %w", serviceID, vpsID, err)
 	}
 	return exists, nil
 }

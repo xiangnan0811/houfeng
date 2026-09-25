@@ -24,6 +24,8 @@ function cancellationPreview(): CancellationPreview {
     recommended_steps: [],
     warnings: [],
     blockers: [],
+    dependency_impacts: [],
+    evaluated_on: '2026-09-24',
     preview_digest: 'digest-cancel-e2e',
   }
 }

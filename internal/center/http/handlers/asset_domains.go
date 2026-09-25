@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"houfeng/internal/center/assetdomains"
+	"houfeng/internal/center/targets"
+	"houfeng/internal/center/vpsassets"
 )
 
 type vpsAssetDomainRepository interface {
@@ -60,6 +62,40 @@ func AssetDomainsCollection(repo assetdomains.Repository) http.Handler {
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
+	})
+}
+
+func AssetDomainStatus(repo assetdomains.Repository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		domainID, ok := parseAssetDependencyStatusPath(r.URL.Path, "domains")
+		if !ok {
+			writeError(w, http.StatusNotFound, "asset domain not found")
+			return
+		}
+		if r.Method != http.MethodPatch {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		var input assetdomains.StatusUpdateInput
+		if err := decodeJSON(r, &input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid json")
+			return
+		}
+		input = assetdomains.NormalizeStatusUpdateInput(input)
+		if err := assetdomains.ValidateStatusUpdateInput(input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid input")
+			return
+		}
+
+		record, err := repo.UpdateStatus(r.Context(), domainID, input.Status, input.Reason)
+		if handled := writeAssetDomainRepositoryError(w, err); handled {
+			return
+		} else if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal server error")
+			return
+		}
+		writeJSON(w, http.StatusOK, record)
 	})
 }
 
@@ -134,6 +170,12 @@ func writeAssetDomainRepositoryError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusConflict, "asset domain conflict")
 	case errors.Is(err, assetdomains.ErrDomainNotFound):
 		writeError(w, http.StatusNotFound, "asset domain not found")
+	case errors.Is(err, assetdomains.ErrDomainStatusConflict):
+		writeError(w, http.StatusConflict, "asset domain status conflict")
+	case errors.Is(err, vpsassets.ErrVPSAssetReadonly):
+		writeError(w, http.StatusConflict, "vps asset is read-only")
+	case errors.Is(err, targets.ErrTargetMetadataConflict):
+		writeError(w, http.StatusConflict, "target metadata conflict")
 	default:
 		return false
 	}

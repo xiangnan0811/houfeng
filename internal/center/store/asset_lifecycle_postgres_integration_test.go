@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -129,8 +130,16 @@ func TestApplyVPSCancellationConcurrentWithSubscriptionInsertOverlapsWithoutDead
 	if applyErr := <-applyDone; applyErr != nil {
 		t.Fatalf("ApplyVPSCancellation after holder release: %v", applyErr)
 	}
-	if insertErr := <-insertDone; insertErr != nil {
-		t.Fatalf("CreateSubscription after holder release: %v", insertErr)
+	if insertErr := <-insertDone; !errors.Is(insertErr, vpsassets.ErrVPSAssetReadonly) {
+		t.Fatalf("CreateSubscription after cancellation = %v, want ErrVPSAssetReadonly", insertErr)
+	}
+	var currentSubscriptions int
+	if err := pool.QueryRow(ctx, `select count(*) from subscriptions where vps_id = $1 and status = $2`,
+		vps.VPSID, subscriptions.StatusActive).Scan(&currentSubscriptions); err != nil {
+		t.Fatalf("count current subscriptions: %v", err)
+	}
+	if currentSubscriptions != 0 {
+		t.Fatalf("cancelled VPS has %d active subscriptions, want 0", currentSubscriptions)
 	}
 
 	var failedActions int
@@ -139,6 +148,76 @@ func TestApplyVPSCancellationConcurrentWithSubscriptionInsertOverlapsWithoutDead
 	}
 	if failedActions != 0 {
 		t.Fatalf("failed lifecycle actions = %d, want 0 after production apply path", failedActions)
+	}
+}
+
+func TestVPSStateRepairValidityExtensionSucceedsAfter0065(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	pool := openTemporaryAssetLifecyclePostgresSchema(t, ctx)
+	vpsRepository := NewPostgresVPSAssetRepository(pool)
+	subscriptionRepository := NewPostgresSubscriptionRepository(pool)
+	lifecycleRepository := NewPostgresAssetLifecycleRepository(pool)
+
+	vps, err := vpsRepository.CreateVPSAsset(ctx, vpsassets.CreateInput{
+		DisplayName:     "Validity extension after 0065",
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageIdle,
+		RenewalDecision: vpsassets.RenewalKeep,
+	})
+	if err != nil {
+		t.Fatalf("create VPS: %v", err)
+	}
+	oldRenewAt := subscriptions.NewDate(time.Date(2026, time.December, 1, 0, 0, 0, 0, time.UTC))
+	subscription, err := subscriptionRepository.CreateSubscription(ctx, subscriptions.CreateInput{
+		VPSID:         vps.VPSID,
+		Price:         120,
+		Currency:      "USD",
+		BillingMonths: 12,
+		RenewAt:       &oldRenewAt,
+		AutoRenew:     true,
+		RenewalMode:   string(subscriptions.RenewalModeAuto),
+		Status:        subscriptions.StatusActive,
+	})
+	if err != nil {
+		t.Fatalf("create active subscription: %v", err)
+	}
+
+	extendTo := subscriptions.NewDate(time.Date(2027, time.January, 1, 0, 0, 0, 0, time.UTC))
+	const reason = "post-0065 validity extension regression"
+	result, err := lifecycleRepository.ExtendVPSValidity(ctx, vps.VPSID, assetlifecycle.ExtendValidityInput{
+		ExtendTo:    &extendTo,
+		Reason:      reason,
+		FeeCurrency: "USD",
+		SourceType:  "regression",
+	})
+	if err != nil {
+		t.Fatalf("ExtendVPSValidity after 0065: %v", err)
+	}
+	if result.Action.ActionType != assetlifecycle.ActionTypeExtendValidity || result.Action.Status != assetlifecycle.ActionStatusCompleted || result.Action.Reason != reason || len(result.Steps) != 1 {
+		t.Fatalf("extension result = %#v, want completed extend_validity action and one audited step", result)
+	}
+	step := result.Steps[0]
+	if step.ObjectType != assetlifecycle.ObjectTypeSubscription || step.ObjectID != subscription.SubscriptionID || step.StepType != assetlifecycle.StepTypeSubscriptionRenewAt || step.Status != assetlifecycle.StepStatusCompleted {
+		t.Fatalf("extension step = %#v, want completed subscription_renew_at audit", step)
+	}
+
+	var persistedRenewAt, actionType, actionStatus, actionReason, stepType, stepStatus string
+	if err := pool.QueryRow(ctx, `select renew_at::text from subscriptions where subscription_id = $1`, subscription.SubscriptionID).Scan(&persistedRenewAt); err != nil {
+		t.Fatalf("read updated subscription renewal date: %v", err)
+	}
+	if persistedRenewAt != "2027-01-01" {
+		t.Fatalf("persisted renew_at = %q, want 2027-01-01", persistedRenewAt)
+	}
+	if err := pool.QueryRow(ctx, `
+		select a.action_type, a.status, a.reason, s.step_type, s.status
+		from asset_lifecycle_actions a
+		join asset_lifecycle_action_steps s on s.action_id = a.action_id
+		where a.action_id = $1`, result.Action.ActionID).Scan(&actionType, &actionStatus, &actionReason, &stepType, &stepStatus); err != nil {
+		t.Fatalf("read persisted validity-extension audit: %v", err)
+	}
+	if actionType != string(assetlifecycle.ActionTypeExtendValidity) || actionStatus != assetlifecycle.ActionStatusCompleted || actionReason != reason || stepType != assetlifecycle.StepTypeSubscriptionRenewAt || stepStatus != assetlifecycle.StepStatusCompleted {
+		t.Fatalf("persisted validity-extension audit = action:%q/%q/%q step:%q/%q", actionType, actionStatus, actionReason, stepType, stepStatus)
 	}
 }
 

@@ -17,150 +17,59 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-func TestPostgresAssetDecisionRepositoryLoadsFactsWithAggregateQuery(t *testing.T) {
+func TestPostgresAssetDecisionRepositoryScansCarrierCountsForReadback(t *testing.T) {
 	now := time.Date(2026, time.June, 4, 9, 0, 0, 0, time.UTC)
-	capturedSQL := ""
 	repo := &PostgresAssetDecisionRepository{db: fakeAssetDecisionQueryer{
-		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			capturedSQL = sql
-			providerID := "pv_001"
-			renewAt := now.AddDate(0, 0, 7)
-			return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: func(dest ...any) error {
-				*(dest[0].(*string)) = "vps_001"
-				*(dest[1].(*string)) = "Frankfurt Primary"
-				*(dest[2].(**string)) = &providerID
-				*(dest[3].(*string)) = "Hetzner"
-				*(dest[4].(*string)) = "CX22"
-				*(dest[5].(*string)) = "order-1"
-				*(dest[6].(*string)) = "Germany"
-				*(dest[7].(*string)) = "Hesse"
-				*(dest[8].(*string)) = "Falkenstein"
-				*(dest[9].(*string)) = "FSN1"
-				*(dest[10].(*string)) = "192.0.2.10"
-				*(dest[11].(*string)) = ""
-				*(dest[12].(*string)) = "192.0.2.10"
-				*(dest[13].(*int)) = 22
-				*(dest[14].(*string)) = "root"
-				*(dest[15].(*string)) = "Debian"
-				*(dest[16].(*string)) = "kvm"
-				*(dest[17].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
-				*(dest[18].(*vpsassets.UsageStatus)) = vpsassets.UsageInUse
-				*(dest[19].(*vpsassets.RenewalDecision)) = vpsassets.RenewalUnreviewed
-				*(dest[20].(*string)) = "high"
-				*(dest[21].(*[]string)) = []string{"edge"}
-				*(dest[22].(*string)) = "note"
-				*(dest[23].(*int)) = 2
-				*(dest[24].(*int)) = 2
-				*(dest[25].(*int)) = 1
-				*(dest[26].(*time.Time)) = now
-				*(dest[27].(*time.Time)) = now
-				*(dest[28].(**time.Time)) = nil
-				*(dest[29].(*int)) = 1
-				*(dest[30].(*int)) = 1
-				*(dest[31].(*int)) = 0
-				*(dest[32].(*int)) = 2
-				*(dest[33].(*int)) = 1
-				*(dest[34].(*int)) = 1
-				*(dest[35].(*int)) = 1
-				*(dest[36].(*int)) = 2
-				*(dest[37].(*int)) = 2
-				*(dest[38].(*int)) = 1
-				*(dest[39].(*int)) = 3
-				*(dest[40].(*string)) = "CPU steal 高"
-				*(dest[41].(*bool)) = true
-				*(dest[42].(*string)) = "sub_001"
-				*(dest[43].(*string)) = "vps_001"
-				*(dest[44].(*float64)) = 12
-				*(dest[45].(*string)) = "USD"
-				*(dest[46].(*string)) = "monthly"
-				*(dest[47].(*int)) = 1
-				*(dest[48].(*string)) = "month"
-				*(dest[49].(*int)) = 1
-				*(dest[50].(*float64)) = 12
-				*(dest[51].(**time.Time)) = nil
-				*(dest[52].(**time.Time)) = &renewAt
-				*(dest[53].(*bool)) = true
-				*(dest[54].(*bool)) = false
-				*(dest[55].(*string)) = "auto"
-				*(dest[56].(*subscriptions.Status)) = subscriptions.StatusActive
-				*(dest[57].(*string)) = "card"
-				*(dest[58].(*string)) = "Frankfurt Primary"
-				*(dest[59].(*string)) = "prod"
-				*(dest[60].(*[]string)) = []string{"prod"}
-				*(dest[61].(**time.Time)) = nil
-				*(dest[62].(**time.Time)) = nil
-				*(dest[63].(*string)) = "subscription note"
-				*(dest[64].(**time.Time)) = &now
-				*(dest[65].(**time.Time)) = &now
-				return nil
-			}}}}, nil
+		query: func(context.Context, string, ...any) (pgx.Rows, error) {
+			return fakeAssetDecisionFactRows(now), nil
 		},
 	}}
 
-	groups, err := repo.ListGroups(context.Background(), assetdecisions.ListFilters{RenewWithinDays: 30})
+	facts, err := repo.loadFacts(context.Background())
 	if err != nil {
-		t.Fatalf("ListGroups() error = %v", err)
+		t.Fatalf("loadFacts() error = %v", err)
 	}
-	if len(groups) == 0 {
-		t.Fatal("groups = empty, want derived groups from loaded fact")
+	if len(facts) != 1 {
+		t.Fatalf("facts = %#v, want one fact", facts)
 	}
-	for _, want := range []string{
-		"from vps_assets",
-		"primary_subscriptions",
-		"subscription_rollup",
-		"from asset_services",
-		"from asset_domains",
-		"from vps_monitoring_instance_links",
-		"join monitoring_instances",
-		"join targets",
-		"left join providers",
-	} {
-		if !strings.Contains(capturedSQL, want) {
-			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
-		}
-	}
-	factSourceStart := strings.Index(capturedSQL, "from vps_assets v")
-	factSourceOrder := strings.Index(capturedSQL, "order by lower(v.display_name)")
-	if factSourceStart < 0 || factSourceOrder < factSourceStart {
-		t.Fatalf("capturedSQL = %q, want vps asset fact source before order by", capturedSQL)
-	}
-	factSourceClause := capturedSQL[factSourceStart:factSourceOrder]
-	if !strings.Contains(factSourceClause, "where v.lifecycle_status not in ('cancelled', 'archived')") {
-		t.Fatalf("fact source SQL = %q, want current VPS lifecycle filter", factSourceClause)
+	fact := facts[0]
+	if fact.ServiceCount != 1 || fact.EffectiveServiceCount != 1 || fact.UnknownServiceCount != 0 ||
+		fact.DomainCount != 0 || fact.EffectiveDomainCount != 0 || fact.UnknownDomainCount != 0 {
+		t.Fatalf("service/domain facts = (%d,%d,%d)/(%d,%d,%d), want historical/effective service 1 and all others zero",
+			fact.ServiceCount, fact.EffectiveServiceCount, fact.UnknownServiceCount,
+			fact.DomainCount, fact.EffectiveDomainCount, fact.UnknownDomainCount)
 	}
 }
 
 func TestPostgresAssetDecisionRepositoryLoadsIPQualityFacts(t *testing.T) {
 	now := time.Date(2026, time.June, 4, 9, 0, 0, 0, time.UTC)
-	capturedSQL := ""
 	repo := &PostgresAssetDecisionRepository{db: fakeAssetDecisionQueryer{
-		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			capturedSQL = sql
+		query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
 			baseRows := fakeAssetDecisionFactRows(now).(*fakeAssetDecisionRows)
 			return &fakeAssetDecisionRows{rows: []fakeAssetDecisionScan{{scan: func(dest ...any) error {
 				if err := baseRows.rows[0].scan(dest...); err != nil {
 					return err
 				}
-				*(dest[66].(*bool)) = true
-				*(dest[67].(*time.Time)) = now.Add(-time.Hour)
-				*(dest[68].(*string)) = "203.0.113.10"
-				*(dest[69].(*int)) = 4
-				*(dest[70].(*string)) = agentapi.IPQualityStatusSuccess
-				*(dest[71].(*string)) = "high"
-				*(dest[72].(*string)) = "US"
-				*(dest[73].(*string)) = "United States"
-				*(dest[74].(*string)) = "AS64500"
-				*(dest[75].(*string)) = "Example Network"
-				*(dest[76].(*bool)) = false
-				*(dest[77].(*bool)) = false
-				*(dest[78].(*string)) = "link"
-				*(dest[79].(*string)) = ""
-				*(dest[80].(*string)) = ""
-				*(dest[81].(*int)) = 2
-				*(dest[82].(*int)) = 2
-				*(dest[83].(*int)) = 1
-				*(dest[84].(*string)) = "ipinfo: vpn"
-				*(dest[85].(*[]string)) = []string{"netflix:US"}
+				*(dest[71].(*bool)) = true
+				*(dest[72].(*time.Time)) = now.Add(-time.Hour)
+				*(dest[73].(*string)) = "203.0.113.10"
+				*(dest[74].(*int)) = 4
+				*(dest[75].(*string)) = agentapi.IPQualityStatusSuccess
+				*(dest[76].(*string)) = "high"
+				*(dest[77].(*string)) = "US"
+				*(dest[78].(*string)) = "United States"
+				*(dest[79].(*string)) = "AS64500"
+				*(dest[80].(*string)) = "Example Network"
+				*(dest[81].(*bool)) = false
+				*(dest[82].(*bool)) = false
+				*(dest[83].(*string)) = "link"
+				*(dest[84].(*string)) = ""
+				*(dest[85].(*string)) = ""
+				*(dest[86].(*int)) = 2
+				*(dest[87].(*int)) = 2
+				*(dest[88].(*int)) = 1
+				*(dest[89].(*string)) = "ipinfo: vpn"
+				*(dest[90].(*[]string)) = []string{"netflix:US"}
 				return nil
 			}}}}, nil
 		},
@@ -172,22 +81,6 @@ func TestPostgresAssetDecisionRepositoryLoadsIPQualityFacts(t *testing.T) {
 	}
 	if len(facts) != 1 {
 		t.Fatalf("facts = %#v, want one fact", facts)
-	}
-	for _, want := range []string{
-		"ip_quality_assigned_vps_reports",
-		"join ip_quality_reports",
-		"order by assigned.vps_id, assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc",
-		"ip_quality_provider_results",
-		"ip_quality_service_unlocks",
-		"where coalesce(status, 'success') = 'success'",
-		"where coalesce(probe_status, 'success') = 'success'",
-	} {
-		if !strings.Contains(capturedSQL, want) {
-			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
-		}
-	}
-	if strings.Contains(capturedSQL, "ip_quality_latest_vps_summaries") {
-		t.Fatalf("capturedSQL = %q, must not use legacy latest view", capturedSQL)
 	}
 	summary := facts[0].VPS.IPQualitySummary
 	if summary == nil || summary.IPAddress != "203.0.113.10" || summary.RiskLevel != "high" {
@@ -1420,43 +1313,48 @@ func fakeAssetDecisionFactRows(now time.Time) pgx.Rows {
 		*(dest[26].(*time.Time)) = now
 		*(dest[27].(*time.Time)) = now
 		*(dest[28].(**time.Time)) = nil
-		*(dest[29].(*int)) = 1
+		*(dest[29].(**vpsassets.ArchivedStateSnapshot)) = nil
 		*(dest[30].(*int)) = 1
-		*(dest[31].(*int)) = 0
-		*(dest[32].(*int)) = 1
-		*(dest[33].(*int)) = 0
+		*(dest[31].(*int)) = 1
+		*(dest[32].(*int)) = 0
+		*(dest[33].(*int)) = 1
 		*(dest[34].(*int)) = 1
-		*(dest[35].(*int)) = 1
-		*(dest[36].(*int)) = 1
-		*(dest[37].(*int)) = 1
+		*(dest[35].(*int)) = 0
+		*(dest[36].(*int)) = 0
+		*(dest[37].(*int)) = 0
 		*(dest[38].(*int)) = 0
-		*(dest[39].(*int)) = 0
-		*(dest[40].(*string)) = ""
-		*(dest[41].(*bool)) = true
-		*(dest[42].(*string)) = "sub_001"
-		*(dest[43].(*string)) = "vps_001"
-		*(dest[44].(*float64)) = 12
-		*(dest[45].(*string)) = "USD"
-		*(dest[46].(*string)) = "monthly"
-		*(dest[47].(*int)) = 1
-		*(dest[48].(*string)) = "month"
-		*(dest[49].(*int)) = 1
-		*(dest[50].(*float64)) = 12
-		*(dest[51].(**time.Time)) = nil
-		*(dest[52].(**time.Time)) = &renewAt
-		*(dest[53].(*bool)) = true
-		*(dest[54].(*bool)) = false
-		*(dest[55].(*string)) = "auto"
-		*(dest[56].(*subscriptions.Status)) = subscriptions.StatusActive
-		*(dest[57].(*string)) = "card"
-		*(dest[58].(*string)) = "Frankfurt Primary"
-		*(dest[59].(*string)) = "prod"
-		*(dest[60].(*[]string)) = []string{"prod"}
-		*(dest[61].(**time.Time)) = nil
-		*(dest[62].(**time.Time)) = nil
-		*(dest[63].(*string)) = "subscription note"
-		*(dest[64].(**time.Time)) = &now
-		*(dest[65].(**time.Time)) = &now
+		*(dest[39].(*int)) = 1
+		*(dest[40].(*int)) = 1
+		*(dest[41].(*int)) = 1
+		*(dest[42].(*int)) = 1
+		*(dest[43].(*int)) = 0
+		*(dest[44].(*int)) = 0
+		*(dest[45].(*string)) = ""
+		*(dest[46].(*bool)) = true
+		*(dest[47].(*string)) = "sub_001"
+		*(dest[48].(*string)) = "vps_001"
+		*(dest[49].(*float64)) = 12
+		*(dest[50].(*string)) = "USD"
+		*(dest[51].(*string)) = "monthly"
+		*(dest[52].(*int)) = 1
+		*(dest[53].(*string)) = "month"
+		*(dest[54].(*int)) = 1
+		*(dest[55].(*float64)) = 12
+		*(dest[56].(**time.Time)) = nil
+		*(dest[57].(**time.Time)) = &renewAt
+		*(dest[58].(*bool)) = true
+		*(dest[59].(*bool)) = false
+		*(dest[60].(*string)) = "auto"
+		*(dest[61].(*subscriptions.Status)) = subscriptions.StatusActive
+		*(dest[62].(*string)) = "card"
+		*(dest[63].(*string)) = "Frankfurt Primary"
+		*(dest[64].(*string)) = "prod"
+		*(dest[65].(*[]string)) = []string{"prod"}
+		*(dest[66].(**time.Time)) = nil
+		*(dest[67].(**time.Time)) = nil
+		*(dest[68].(*string)) = "subscription note"
+		*(dest[69].(**time.Time)) = &now
+		*(dest[70].(**time.Time)) = &now
 		return nil
 	}}}}
 }

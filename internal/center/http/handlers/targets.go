@@ -8,6 +8,39 @@ import (
 	"houfeng/internal/center/targets"
 )
 
+func TargetLifecycleReview(repo targets.LifecycleReviewRepository) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+
+		targetID := targetLifecycleReviewPath(r.URL.Path)
+		if targetID == "" {
+			writeError(w, http.StatusNotFound, "target not found")
+			return
+		}
+
+		review, err := repo.GetTargetLifecycleReview(r.Context(), targetID)
+		switch {
+		case errors.Is(err, targets.ErrTargetNotFound):
+			writeError(w, http.StatusNotFound, "target not found")
+		case err != nil:
+			writeError(w, http.StatusInternalServerError, "internal server error")
+		default:
+			writeJSON(w, http.StatusOK, review)
+		}
+	})
+}
+
+func targetLifecycleReviewPath(path string) string {
+	segments := strings.Split(strings.Trim(strings.TrimPrefix(path, "/api/targets/"), "/"), "/")
+	if len(segments) != 2 || segments[0] == "" || segments[1] != "lifecycle-review" {
+		return ""
+	}
+	return segments[0]
+}
+
 func TargetsCollection(repo targets.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

@@ -15,7 +15,7 @@ import (
 	"houfeng/db/migrations"
 )
 
-func TestAppACLCurrentTransitionCompilerAcceptsExactV0794Predecessor(t *testing.T) {
+func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.T) {
 	current, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
 	if err != nil {
 		t.Fatal(err)
@@ -24,29 +24,53 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactV0794Predecessor(t *testing.
 	if err != nil {
 		t.Fatalf("compileAppACLCurrentTransitions() error = %v", err)
 	}
-	if len(transitions) != 1 {
-		t.Fatalf("compiled transition count = %d, want 1", len(transitions))
+	if len(transitions) != 2 {
+		t.Fatalf("compiled transition count = %d, want the P62 and P64 profiles", len(transitions))
 	}
-	transition := transitions[0]
-	if got, want := len(transition.predecessor.sources.names), 63; got != want {
-		t.Fatalf("predecessor migration count = %d, want %d", got, want)
+
+	p62, p64 := transitions[0], transitions[1]
+	if p62.profile != appACLCurrentProfileP62 || p64.profile != appACLCurrentProfileP64 {
+		t.Fatalf("compiled transition profiles = %d/%d, want P62/P64", p62.profile, p64.profile)
 	}
-	if got, want := transition.predecessor.sources.names[62], "0062_create_vps_create_idempotency.sql"; got != want {
-		t.Fatalf("predecessor final migration = %q, want %q", got, want)
+	if got, want := len(p62.predecessor.sources.names), 63; got != want {
+		t.Fatalf("P62 migration count = %d, want %d", got, want)
 	}
-	if got, want := transition.successor.names, []string{"0063_tune_heartbeat_incident_policy.sql", "0064_add_network_rates_valid.sql"}; !equalStringSlices(got, want) {
-		t.Fatalf("successor migrations = %#v, want %#v", got, want)
+	if got, want := p62.predecessor.sources.names[62], "0062_create_vps_create_idempotency.sql"; got != want {
+		t.Fatalf("P62 final migration = %q, want %q", got, want)
 	}
-	if !bytes.Equal(transition.predecessor.sources.canonicalSet, appACLCurrentV0794MigrationGolden) {
-		t.Fatal("compiled predecessor canonical migration body differs from v0.79.4 golden")
+	if got, want := p62.successor.names, []string{
+		"0063_tune_heartbeat_incident_policy.sql",
+		"0064_add_network_rates_valid.sql",
+		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+		"0066_constrain_monitoring_and_target_state_values.sql",
+	}; !equalStringSlices(got, want) {
+		t.Fatalf("P62 successor migrations = %#v, want %#v", got, want)
 	}
-	if !bytes.Equal(transition.predecessorPrivilegeBody, appACLCurrentV0794PrivilegeGolden) {
-		t.Fatal("compiled predecessor privilege body differs from v0.79.4 golden")
+	if got, want := len(p64.predecessor.sources.names), 65; got != want {
+		t.Fatalf("P64 migration count = %d, want %d", got, want)
 	}
-	if transition.predecessorManifestDigest != appACLCurrentV0794ManifestDigestGolden {
-		t.Fatalf("compiled predecessor manifest digest = %x, want %x", transition.predecessorManifestDigest, appACLCurrentV0794ManifestDigestGolden)
+	if got, want := p64.predecessor.sources.names[64], "0064_add_network_rates_valid.sql"; got != want {
+		t.Fatalf("P64 final migration = %q, want %q", got, want)
 	}
-	privileges, err := ParseCanonicalPrivilegeSetBodyV1(transition.predecessorPrivilegeBody)
+	if got, want := p64.successor.names, []string{
+		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+		"0066_constrain_monitoring_and_target_state_values.sql",
+	}; !equalStringSlices(got, want) {
+		t.Fatalf("P64 successor migrations = %#v, want %#v", got, want)
+	}
+	if !bytes.Equal(p62.predecessor.sources.canonicalSet, appACLCurrentV0794MigrationGolden) ||
+		!bytes.Equal(p62.predecessorPrivilegeBody, appACLCurrentV0794PrivilegeGolden) ||
+		p62.predecessorManifestDigest != appACLCurrentV0794ManifestDigestGolden {
+		t.Fatal("compiled P62 profile differs from its immutable released goldens")
+	}
+	if !bytes.Equal(p64.predecessor.sources.canonicalSet, appACLCurrentV0802MigrationGolden) ||
+		!bytes.Equal(p64.predecessorPrivilegeBody, appACLCurrentV0802PrivilegeGolden) {
+		t.Fatal("compiled P64 profile differs from the independent v0.80.2 source/privilege goldens")
+	}
+	if !bytes.Equal(p62.predecessorPrivilegeBody, p64.predecessorPrivilegeBody) {
+		t.Fatal("P62 and P64 released profiles unexpectedly differ in privileges")
+	}
+	privileges, err := ParseCanonicalPrivilegeSetBodyV1(p62.predecessorPrivilegeBody)
 	if err != nil {
 		t.Fatalf("parse compiled predecessor privileges: %v", err)
 	}
@@ -54,20 +78,21 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactV0794Predecessor(t *testing.
 		{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_runtime"},
 		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
 	}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("compiled predecessor role bindings = %#v, want exact Compose bindings %#v", got, want)
+		t.Fatalf("released profile role bindings = %#v, want exact fixed bindings %#v", got, want)
 	}
 
-	transition.successor.names[0] = "mutated.sql"
-	transition.predecessor.sources.canonicalSet[0] ^= 0xff
-	transition.predecessorPrivilegeBody[0] ^= 0xff
+	p62.successor.names[0] = "mutated.sql"
+	p64.predecessor.sources.canonicalSet[0] ^= 0xff
+	p64.predecessorPrivilegeBody[0] ^= 0xff
 	recompiled, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if recompiled[0].successor.names[0] != "0063_tune_heartbeat_incident_policy.sql" ||
 		!bytes.Equal(recompiled[0].predecessor.sources.canonicalSet, appACLCurrentV0794MigrationGolden) ||
-		!bytes.Equal(recompiled[0].predecessorPrivilegeBody, appACLCurrentV0794PrivilegeGolden) {
-		t.Fatal("compiled transition leaked mutable backing storage")
+		!bytes.Equal(recompiled[1].predecessor.sources.canonicalSet, appACLCurrentV0802MigrationGolden) ||
+		!bytes.Equal(recompiled[1].predecessorPrivilegeBody, appACLCurrentV0802PrivilegeGolden) {
+		t.Fatal("compiled profile leaked mutable backing storage")
 	}
 }
 
@@ -82,32 +107,47 @@ func TestAppACLCurrentTransitionCompilerRejectsInvalidDefinitions(t *testing.T) 
 		definitions []appACLCurrentTransitionDefinition
 		want        string
 	}{
-		{name: "missing suffix", definitions: func() []appACLCurrentTransitionDefinition {
-			value := cloneAppACLCurrentTransitionDefinitions(valid)
-			value[0].successorMigrations = nil
-			return value
-		}(), want: "successor"},
-		{name: "duplicate suffix", definitions: func() []appACLCurrentTransitionDefinition {
-			value := cloneAppACLCurrentTransitionDefinitions(valid)
-			value[0].successorMigrations = []string{"0063_tune_heartbeat_incident_policy.sql", "0063_tune_heartbeat_incident_policy.sql"}
-			return value
-		}(), want: "duplicate"},
-		{name: "unknown suffix", definitions: func() []appACLCurrentTransitionDefinition {
-			value := cloneAppACLCurrentTransitionDefinitions(valid)
-			value[0].successorMigrations = []string{"0064_unknown.sql"}
-			return value
-		}(), want: "unknown"},
-		{name: "out of order suffix", definitions: func() []appACLCurrentTransitionDefinition {
-			value := cloneAppACLCurrentTransitionDefinitions(valid)
-			value[0].successorMigrations = []string{"0063_tune_heartbeat_incident_policy.sql", "0062_create_vps_create_idempotency.sql"}
-			return value
-		}(), want: "order"},
-		{name: "unknown predecessor", definitions: func() []appACLCurrentTransitionDefinition {
-			value := cloneAppACLCurrentTransitionDefinitions(valid)
-			value[0].predecessorLastMigration = "0061_unknown.sql"
-			return value
-		}(), want: "predecessor"},
-		{name: "overlap", definitions: append(cloneAppACLCurrentTransitionDefinitions(valid), cloneAppACLCurrentTransitionDefinitions(valid)[0]), want: "overlap"},
+		{
+			name:        "missing profile",
+			definitions: valid[:1],
+			want:        "exactly",
+		},
+		{
+			name: "duplicate profile",
+			definitions: func() []appACLCurrentTransitionDefinition {
+				value := cloneAppACLCurrentTransitionDefinitions(valid)
+				value[1].profile = appACLCurrentProfileP62
+				return value
+			}(),
+			want: "duplicates",
+		},
+		{
+			name: "wrong predecessor",
+			definitions: func() []appACLCurrentTransitionDefinition {
+				value := cloneAppACLCurrentTransitionDefinitions(valid)
+				value[1].predecessorLastMigration = "0063_tune_heartbeat_incident_policy.sql"
+				return value
+			}(),
+			want: "registered profile",
+		},
+		{
+			name: "incomplete successor suffix",
+			definitions: func() []appACLCurrentTransitionDefinition {
+				value := cloneAppACLCurrentTransitionDefinitions(valid)
+				value[1].successorMigrations = []string{"0066_constrain_monitoring_and_target_state_values.sql"}
+				return value
+			}(),
+			want: "suffix",
+		},
+		{
+			name: "unknown profile",
+			definitions: func() []appACLCurrentTransitionDefinition {
+				value := cloneAppACLCurrentTransitionDefinitions(valid)
+				value[1].profile = 99
+				return value
+			}(),
+			want: "unknown predecessor profile",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := compileAppACLCurrentTransitions(current, tc.definitions); err == nil || !strings.Contains(strings.ToLower(err.Error()), tc.want) {
@@ -124,31 +164,58 @@ func TestAppACLCurrentTransitionCompilerRejectsInvalidDefinitions(t *testing.T) 
 	}
 }
 
-func TestAppACLCurrentTransitionCompilerRejectsPrivilegeChangeMarkedUnchanged(t *testing.T) {
-	fragments := cloneAppACLCurrentMigrationFragmentsForTransitionTest(appACLCurrentMigrationFragments)
-	fragments[len(fragments)-1].Privileges = func(string) []AppACLPrivilege {
-		return []AppACLPrivilege{{
-			Subject:        AppACLSubjectPlatformAdmin,
-			ObjectClass:    AppACLObjectClassTable,
-			SchemaName:     appACLManagedPublicSchemaR1,
-			ObjectIdentity: "experience_log_create_idempotency",
-			Privilege:      AppACLPrivilegeSelect,
-		}}
-	}
-	current, err := compileAppACLCurrentSourceContract(migrations.FS, fragments)
-	if err != nil {
-		t.Fatalf("compile changed current source: %v", err)
-	}
-	if _, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions); err == nil || !strings.Contains(strings.ToLower(err.Error()), "privilege") {
-		t.Fatalf("compileAppACLCurrentTransitions() error = %v, want unchanged-privilege rejection", err)
-	}
-	assertAppACLCurrentTransitionRejectedBeforeBeginTx(
-		t,
-		migrations.FS,
-		fragments,
-		appACLCurrentTransitionDefinitions,
-		"privilege",
-	)
+func TestAppACLCurrentTransitionCompilerRejectsUnapprovedPrivilegeDelta(t *testing.T) {
+	t.Run("additional grant", func(t *testing.T) {
+		fragments := cloneAppACLCurrentMigrationFragmentsForTransitionTest(appACLCurrentMigrationFragments)
+		originalPrivileges := fragments[len(fragments)-2].Privileges
+		fragments[len(fragments)-2].Privileges = func(databaseName string) []AppACLPrivilege {
+			privileges := originalPrivileges(databaseName)
+			return append(privileges, AppACLPrivilege{
+				Subject:        AppACLSubjectCenterRuntime,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: "asset_services",
+				Privilege:      AppACLPrivilegeDelete,
+			})
+		}
+		current, err := compileAppACLCurrentSourceContract(migrations.FS, fragments)
+		if err != nil {
+			t.Fatalf("compile current source with additional grant: %v", err)
+		}
+		if _, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions); err == nil || !strings.Contains(strings.ToLower(err.Error()), "exactly") {
+			t.Fatalf("compileAppACLCurrentTransitions() error = %v, want exact-delta rejection", err)
+		}
+	})
+
+	t.Run("removed predecessor grant", func(t *testing.T) {
+		current, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		transitions, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		modified := current
+		modified.fragments = make([]appACLCurrentCompiledMigrationFragment, len(current.fragments))
+		for index, fragment := range current.fragments {
+			modified.fragments[index] = cloneAppACLCurrentCompiledMigrationFragment(fragment)
+		}
+		removed := false
+		for index := range modified.fragments {
+			if len(modified.fragments[index].Privileges) > 0 {
+				modified.fragments[index].Privileges = nil
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			t.Fatal("current source has no migration-fragment privileges to remove")
+		}
+		if err := validateAppACLCurrentTransitionPrivilegeDelta(transitions[1].predecessorPrivilegeBody, modified); err == nil || !strings.Contains(strings.ToLower(err.Error()), "removes") {
+			t.Fatalf("validateAppACLCurrentTransitionPrivilegeDelta() error = %v, want privilege-removal rejection", err)
+		}
+	})
 }
 
 func TestAppACLCurrentTransitionCompilerRejectsReleasedGoldenDrift(t *testing.T) {

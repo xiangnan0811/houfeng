@@ -83,6 +83,7 @@ export type VPSIPQualityOverviewModel = {
 
 export type VPSDetailOverviewModel = {
   title: string
+  lifecycleStatus: string
   badges: string[]
   updatedAt: string
   monitoringFreshness: {
@@ -159,6 +160,7 @@ export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput):
 
   return {
     title: input.detail.display_name,
+    lifecycleStatus: input.detail.lifecycle_status,
     updatedAt: input.detail.updated_at,
     monitoringFreshness,
     badges: [

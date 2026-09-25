@@ -248,6 +248,8 @@ var monitoringEventTitles = map[incidents.EventType]string{
 	incidents.EventMonitoringInstanceMonitoringResumed:            "监控已恢复",
 	incidents.EventMonitoringInstanceLifecycleUpdated:             "生命周期已更新",
 	incidents.EventMonitoringInstanceRetired:                      "实例已退役",
+	incidents.EventMonitoringInstanceRetirementReconciled:         "退役实例残留状态已整理",
+	incidents.EventMonitoringInstanceRestoredFromArchive:          "实例已从归档恢复",
 	incidents.EventMonitoringInstanceRestoredToObserving:          "已恢复为观察中",
 	incidents.EventTargetMaintenanceEntered:                       "目标进入维护",
 	incidents.EventTargetMaintenanceExited:                        "目标退出维护",

@@ -69,13 +69,16 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 		return syncing.Result{}, syncing.ErrHeartbeatRequired
 	}
 
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return syncing.Result{}, fmt.Errorf("begin sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 	}
 	defer func() {
 		_ = tx.Rollback(ctx)
 	}()
+	if err := lockAssetGraphForSync(ctx, tx); err != nil {
+		return syncing.Result{}, fmt.Errorf("lock asset graph for sync batch of monitoring instance %q: %w", batch.MonitoringInstanceID, err)
+	}
 
 	syncState, err := r.validateAcceptedSyncBatch(ctx, tx, batch)
 	if err != nil {

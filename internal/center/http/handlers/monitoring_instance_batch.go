@@ -5,19 +5,21 @@ import (
 	"errors"
 	"net/http"
 
+	"houfeng/internal/center/assetlifecycle"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/store"
 )
 
 type monitoringInstanceBatchRepository interface {
 	SetMonitoringInstanceMonitoringMaintenance(context.Context, string) (monitoringinstances.Record, error)
-	PauseMonitoringInstanceMonitoring(context.Context, string) (monitoringinstances.Record, error)
+	PauseMonitoringInstanceMonitoring(context.Context, string, ...monitoringinstances.RuntimeControlInput) (monitoringinstances.Record, error)
 	ResumeMonitoringInstanceMonitoring(context.Context, string) (monitoringinstances.Record, error)
 }
 
 type batchActionRequest struct {
-	MonitoringInstanceIDs []string `json:"monitoring_instance_ids"`
-	Action                string   `json:"action"`
+	MonitoringInstanceIDs []string                                           `json:"monitoring_instance_ids"`
+	Action                string                                             `json:"action"`
+	Confirmations         map[string]monitoringinstances.RuntimeControlInput `json:"confirmations"`
 }
 
 type batchActionResult struct {
@@ -64,7 +66,7 @@ func MonitoringInstanceBatch(repo monitoringInstanceBatchRepository) http.Handle
 
 		results := make([]batchActionResult, 0, len(req.MonitoringInstanceIDs))
 		for _, monitoringInstanceID := range req.MonitoringInstanceIDs {
-			result := executeBatchAction(r.Context(), repo, monitoringInstanceID, req.Action)
+			result := executeBatchAction(r.Context(), repo, monitoringInstanceID, req.Action, req.Confirmations[monitoringInstanceID])
 			results = append(results, result)
 		}
 
@@ -77,6 +79,7 @@ func executeBatchAction(
 	repo monitoringInstanceBatchRepository,
 	monitoringInstanceID string,
 	action string,
+	confirmation monitoringinstances.RuntimeControlInput,
 ) batchActionResult {
 	var err error
 	switch action {
@@ -85,7 +88,7 @@ func executeBatchAction(
 	case "exit-maintenance":
 		_, err = repo.ResumeMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
 	case "pause":
-		_, err = repo.PauseMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
+		_, err = repo.PauseMonitoringInstanceMonitoring(ctx, monitoringInstanceID, confirmation)
 	case "resume":
 		_, err = repo.ResumeMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
 	default:
@@ -102,6 +105,12 @@ func executeBatchAction(
 		message = "monitoring instance not found"
 	case errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance):
 		message = "archived monitoring instance"
+	case errors.Is(err, monitoringinstances.ErrRetiredMonitoringInstance):
+		message = "retired monitoring instance"
+	case errors.Is(err, assetlifecycle.ErrSharedImpactConfirmationRequired):
+		message = "shared impact confirmation required"
+	case errors.Is(err, assetlifecycle.ErrStaleCancellationPreview):
+		message = "management review stale"
 	case errors.Is(err, store.ErrInvalidMonitoringInstanceRuntimeTransition):
 		message = "invalid runtime transition"
 	}

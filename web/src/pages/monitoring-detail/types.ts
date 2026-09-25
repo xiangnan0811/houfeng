@@ -44,6 +44,9 @@ export type PendingRuntimeConfirmation = FrozenDestructiveSubject & {
   monitoringStatus: MonitoringInstanceRecord['monitoring_status']
 }
 
+export type ManagementActionOutcome = 'success' | 'stale' | 'failed'
+
+
 export type MetadataFormState = {
   group: string
   labels: string

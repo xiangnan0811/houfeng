@@ -38,6 +38,7 @@ const ITEMS: Array<{
   { panel: 'domain', label: '新增域名', group: 'relations' },
   { panel: 'cancellation', label: '取消 / 退役', group: 'lifecycle' },
   { panel: 'archive', label: '归档', group: 'lifecycle' },
+  { panel: 'start-migration', label: '开始迁移', group: 'lifecycle' },
 ]
 
 const WRITEABLE_LIFECYCLES = new Set(['active', 'idle', 'testing'])
@@ -54,6 +55,9 @@ function visibleManagementPanels(lifecycleStatus: string, renewalDecision = ''):
     }
     if (item.panel === 'archive') {
       return lifecycleStatus === 'to_cancel'
+    }
+    if (item.panel === 'start-migration') {
+      return lifecycleStatus === 'active' || lifecycleStatus === 'idle' || lifecycleStatus === 'testing'
     }
     return true
   }).map((item) => item.panel)

@@ -488,29 +488,48 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 			from subscriptions s
 			group by s.vps_id
 		),
+		-- Mirrors assetlinks.ClassifyDependency for service/domain rows: an
+		-- archived parent or retired relation is historical; paused is paused;
+		-- active on an unarchived parent is effective; unknown needs confirmation.
 		service_rollup as (
 			select
-				vps_id,
-				count(*)::int as service_count
-			from asset_services
-			group by vps_id
+				s.vps_id,
+				count(*)::int as service_count,
+				(count(*) filter (where v.lifecycle_status <> 'archived' and s.status = 'active'))::int as effective_service_count,
+				(count(*) filter (where v.lifecycle_status <> 'archived' and s.status = 'unknown'))::int as unknown_service_count
+			from asset_services s
+			join vps_assets v on v.vps_id = s.vps_id
+			group by s.vps_id
 		),
 		domain_rollup as (
 			select
-				vps_id,
-				count(*)::int as domain_count
-			from asset_domains
-			group by vps_id
+				d.vps_id,
+				count(*)::int as domain_count,
+				(count(*) filter (where v.lifecycle_status <> 'archived' and d.status = 'active'))::int as effective_domain_count,
+				(count(*) filter (where v.lifecycle_status <> 'archived' and d.status = 'unknown'))::int as unknown_domain_count
+			from asset_domains d
+			join vps_assets v on v.vps_id = d.vps_id
+			group by d.vps_id
 		),
 		target_rollup as (
 			select
 				a.vps_id,
 				count(distinct a.target_id)::int as target_count,
-				(count(distinct a.target_id) filter (where t.run_status not in ('已归档', '暂停')))::int as running_target_count
+				(count(distinct a.target_id) filter (
+					where a.relation_status = 'active'
+						and a.vps_lifecycle_status <> 'archived'
+						and t.run_status in ('启用', '维护中')
+				))::int as running_target_count
 			from (
-				select vps_id, target_id from asset_services where target_id is not null
+				select s.vps_id, s.target_id, s.status as relation_status, v.lifecycle_status as vps_lifecycle_status
+				from asset_services s
+				join vps_assets v on v.vps_id = s.vps_id
+				where s.target_id is not null
 				union all
-				select vps_id, target_id from asset_domains where target_id is not null
+				select d.vps_id, d.target_id, d.status as relation_status, v.lifecycle_status as vps_lifecycle_status
+				from asset_domains d
+				join vps_assets v on v.vps_id = d.vps_id
+				where d.target_id is not null
 			) a
 			left join targets t on t.target_id = a.target_id
 			group by a.vps_id
@@ -604,11 +623,16 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 			v.created_at,
 			v.updated_at,
 			v.archived_at,
+			v.archived_state_snapshot,
 			coalesce(sr.subscription_count, 0),
 			coalesce(sr.active_subscription_count, 0),
 			coalesce(sr.inactive_subscription_count, 0),
 			coalesce(svr.service_count, 0),
+			coalesce(svr.effective_service_count, 0),
+			coalesce(svr.unknown_service_count, 0),
 			coalesce(dr.domain_count, 0),
+			coalesce(dr.effective_domain_count, 0),
+			coalesce(dr.unknown_domain_count, 0),
 			coalesce(tr.target_count, 0),
 			coalesce(tr.running_target_count, 0),
 			coalesce(mr.monitoring_link_count, 0),
@@ -830,11 +854,16 @@ func scanAssetDecisionFact(row assetDecisionFactScanner) (assetdecisions.Fact, e
 		&fact.VPS.CreatedAt,
 		&fact.VPS.UpdatedAt,
 		&fact.VPS.ArchivedAt,
+		&fact.VPS.ArchivedStateSnapshot,
 		&fact.SubscriptionCount,
 		&fact.ActiveSubscriptionCount,
 		&fact.InactiveSubscriptionCount,
 		&fact.ServiceCount,
+		&fact.EffectiveServiceCount,
+		&fact.UnknownServiceCount,
 		&fact.DomainCount,
+		&fact.EffectiveDomainCount,
+		&fact.UnknownDomainCount,
 		&fact.TargetCount,
 		&fact.RunningTargetCount,
 		&fact.MonitoringLinkCount,

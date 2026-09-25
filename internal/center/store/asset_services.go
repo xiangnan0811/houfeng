@@ -178,7 +178,51 @@ func (r *PostgresAssetServiceRepository) CreateAssetService(ctx context.Context,
 	if err := assetservices.ValidateCreateInput(input); err != nil {
 		return assetservices.Record{}, err
 	}
-	return insertAssetService(ctx, r.db, input)
+	if r.beginTx == nil {
+		return assetservices.Record{}, errors.New("asset service repository cannot create without transaction support")
+	}
+
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
+	if err != nil {
+		return assetservices.Record{}, fmt.Errorf("begin asset service create transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := ensureAssetServiceCreateAllowed(ctx, tx, input); err != nil {
+		return assetservices.Record{}, err
+	}
+	record, err := insertAssetService(ctx, tx, input)
+	if err != nil {
+		return assetservices.Record{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return assetservices.Record{}, fmt.Errorf("commit asset service create transaction: %w", err)
+	}
+	return record, nil
+}
+
+func ensureAssetServiceCreateAllowed(ctx context.Context, tx pgx.Tx, input assetservices.CreateInput) error {
+	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, input.VPSID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assetservices.ErrServiceOwnerNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("query vps asset %q before service create: %w", input.VPSID, err)
+	}
+	if err := ensureVPSAllowsAssetRelationshipCreate(input.VPSID, lifecycle, string(input.Status), "service"); err != nil {
+		return err
+	}
+	if input.TargetID == nil {
+		return nil
+	}
+	targetStatus, err := lockAssetTargetRunStatus(ctx, tx, *input.TargetID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assetservices.ErrServiceTargetNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("query target %q before service create: %w", *input.TargetID, err)
+	}
+	return ensureTargetAllowsAssetRelationship(*input.TargetID, targetStatus, string(input.Status), "service")
 }
 
 func (r *PostgresAssetServiceRepository) CreateAssetServiceIdempotent(
@@ -202,7 +246,7 @@ func (r *PostgresAssetServiceRepository) CreateAssetServiceIdempotent(
 		return assetservices.Record{}, false, errors.New("asset service repository cannot create idempotently without transaction support")
 	}
 
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
 	if err != nil {
 		return assetservices.Record{}, false, fmt.Errorf("begin asset service create transaction: %w", err)
 	}
@@ -238,6 +282,10 @@ func (r *PostgresAssetServiceRepository) CreateAssetServiceIdempotent(
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return assetservices.Record{}, false, fmt.Errorf("lookup asset service create receipt: %w", err)
+	}
+
+	if err := ensureAssetServiceCreateAllowed(ctx, tx, input); err != nil {
+		return assetservices.Record{}, false, err
 	}
 
 	record, err := insertAssetService(ctx, tx, input)

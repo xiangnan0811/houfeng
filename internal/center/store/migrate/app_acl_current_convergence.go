@@ -257,17 +257,32 @@ func verifyExactAppACLCurrentInTx(
 		head,
 		compiledPrivileges,
 		migratorRole,
+		verifierInput.Contract.DatabaseName,
+		verifierInput.Contract.RoleBindings,
 	)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	if err := dependencies.rejectMisplaced(ctx, tx, verifierInput.Contract); err != nil {
+	priorSource := source
+	priorVerifier := verifierInput
+	if shape.kind == appACLCurrentManifestShapePredecessor {
+		priorSource = shape.transition.predecessor
+		contract, err := compileAppACLCurrentCatalogContract(priorSource, verifierInput.Contract.DatabaseName, verifierInput.Contract.RoleBindings, migratorRole)
+		if err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("compile predecessor catalog: %w", err)
+		}
+		priorVerifier, err = newAppACLEffectiveCatalogVerifierInput(contract, migratorRole)
+		if err != nil {
+			return AppACLManifestPersistedV1{}, err
+		}
+	}
+	if err := dependencies.rejectMisplaced(ctx, tx, priorVerifier.Contract); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	if err := dependencies.rejectLegacy(ctx, tx, source.sources, verifierInput.Contract, migratorRole); err != nil {
+	if err := dependencies.rejectLegacy(ctx, tx, priorSource.sources, priorVerifier.Contract, migratorRole); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, verifierInput, dependencies); err != nil {
+	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, priorVerifier, dependencies); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
 	if shape.kind == appACLCurrentManifestShapeSuccessor {
@@ -296,6 +311,9 @@ func verifyExactAppACLCurrentInTx(
 	}
 	if err := dependencies.verifyTransitionApplied(ctx, tx, *shape.transition, before); err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("verify applied registered APP transition: %w", err)
+	}
+	if err := dependencies.applyDCL(ctx, tx, verifierInput.Contract); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("apply registered APP transition DCL: %w", err)
 	}
 	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, verifierInput, dependencies); err != nil {
 		return AppACLManifestPersistedV1{}, err
@@ -326,6 +344,8 @@ func verifyExactAppACLCurrentInTx(
 		head,
 		compiledPrivileges,
 		migratorRole,
+		verifierInput.Contract.DatabaseName,
+		verifierInput.Contract.RoleBindings,
 	)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("read back registered APP successor: %w", err)

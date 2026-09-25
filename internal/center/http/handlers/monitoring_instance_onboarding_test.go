@@ -186,6 +186,25 @@ func TestMonitoringInstanceEnrollmentTokenHandlerReturnsPlaintextToken(t *testin
 	}
 }
 
+func TestMonitoringInstanceEnrollmentTokenHandlerRejectsRetiredInstance(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeMonitoringInstanceOnboardingRepository{
+		issueEnrollmentTokenErr: monitoringinstances.ErrRetiredMonitoringInstance,
+	}
+	handler := handlers.MonitoringInstanceEnrollmentToken(repo)
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_retired/enrollment-token", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusConflict)
+	}
+	assertAdminError(t, recorder, "retired monitoring instance")
+	assertAdminErrorCode(t, recorder, "monitoring_instance_retired")
+}
+
 func TestMonitoringInstanceInstallCommandHandlerReturnsCommand(t *testing.T) {
 	t.Parallel()
 
@@ -386,6 +405,7 @@ func TestMonitoringInstanceInstallCommandHandlerMapsRepositoryErrors(t *testing.
 	}{
 		{name: "missing monitoring instance", repoErr: monitoringinstances.ErrMonitoringInstanceNotFound, wantStatus: http.StatusNotFound, wantError: "monitoring instance not found"},
 		{name: "archived monitoring instance", repoErr: monitoringinstances.ErrArchivedMonitoringInstance, wantStatus: http.StatusConflict, wantError: "archived monitoring instance", wantCode: "monitoring_instance_archived"},
+		{name: "retired monitoring instance", repoErr: monitoringinstances.ErrRetiredMonitoringInstance, wantStatus: http.StatusConflict, wantError: "retired monitoring instance", wantCode: "monitoring_instance_retired"},
 		{name: "repository failure", repoErr: errors.New("db boom"), wantStatus: http.StatusInternalServerError, wantError: "internal server error"},
 	}
 

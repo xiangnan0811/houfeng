@@ -1,6 +1,7 @@
 package assetdecisions
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -681,15 +682,82 @@ func TestExecutionReadbackCancelAlignedWhenFactsClosed(t *testing.T) {
 	}
 }
 
-func TestExecutionReadbackMigrateKeepsOldCarrierAsDrift(t *testing.T) {
+func TestExecutionReadbackMigrateUsesEffectiveAndUnknownCarriers(t *testing.T) {
 	f := fact("vps_migrate", "Migrate Candidate", "pv_1", "Provider", "US", "CA", "Los Angeles", vpsassets.UsageInUse, sub("sub_1", 20, 30))
 	f.VPS.RenewalDecision = vpsassets.RenewalMigrate
-	f.ServiceCount = 1
+	f.ServiceCount = 2
+	f.DomainCount = 1
+	f.TargetCount = 3
 	member := RecordMember{VPSID: "vps_migrate", DecidedAction: ActionMigrate, FollowupStatus: FollowupDone}
 
-	readback := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{f}))
-	if readback.Status != ReadbackDrift || !hasReadbackIssue(readback, "old_carrier_remaining") {
-		t.Fatalf("readback = %#v, want old carrier drift", readback)
+	historicalOnly := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{f}))
+	if historicalOnly.Status != ReadbackAligned || hasReadbackIssue(historicalOnly, "old_carrier_remaining") || hasReadbackIssue(historicalOnly, "carrier_needs_confirmation") {
+		t.Fatalf("historical-only readback = %#v, want aligned without carrier issues", historicalOnly)
+	}
+	if historicalOnly.CurrentFacts.ServiceCount != 2 || historicalOnly.CurrentFacts.DomainCount != 1 {
+		t.Fatalf("historical counts = (%d,%d), want (2,1)", historicalOnly.CurrentFacts.ServiceCount, historicalOnly.CurrentFacts.DomainCount)
+	}
+
+	unknown := f
+	unknown.UnknownServiceCount = 1
+	unknownReadback := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{unknown}))
+	if unknownReadback.Status != ReadbackDrift || hasReadbackIssue(unknownReadback, "old_carrier_remaining") {
+		t.Fatalf("unknown readback = %#v, want incomplete confirmation without known-carrier drift", unknownReadback)
+	}
+	var confirmationWarning bool
+	for _, issue := range unknownReadback.Issues {
+		if issue.Kind == "carrier_needs_confirmation" && issue.Tone == "warning" {
+			confirmationWarning = true
+			break
+		}
+	}
+	if !confirmationWarning {
+		t.Fatalf("unknown issues = %#v, want carrier_needs_confirmation warning", unknownReadback.Issues)
+	}
+
+	skippedMember := member
+	skippedMember.FollowupStatus = FollowupSkipped
+	skippedReadback := EvaluateMemberExecutionReadback(skippedMember, FactsByVPSID([]Fact{unknown}))
+	if skippedReadback.Status != ReadbackDrift {
+		t.Fatalf("skipped unknown readback = %#v, want unresolved carrier confirmation", skippedReadback)
+	}
+	recordReadback := EvaluateRecordExecutionReadback(RecordStatusCompleted, []RecordMember{{
+		FollowupStatus:    FollowupSkipped,
+		ExecutionReadback: skippedReadback,
+	}})
+	if recordReadback.Status != ReadbackDrift {
+		t.Fatalf("completed record readback = %#v, want unknown carrier to prevent aligned completion", recordReadback)
+	}
+
+	currentFactsJSON, err := json.Marshal(unknownReadback.CurrentFacts)
+	if err != nil {
+		t.Fatalf("marshal migration current facts: %v", err)
+	}
+	var serializedCurrentFacts struct {
+		ServiceCount          *int `json:"service_count"`
+		DomainCount           *int `json:"domain_count"`
+		EffectiveServiceCount *int `json:"effective_service_count"`
+		EffectiveDomainCount  *int `json:"effective_domain_count"`
+		UnknownServiceCount   *int `json:"unknown_service_count"`
+		UnknownDomainCount    *int `json:"unknown_domain_count"`
+	}
+	if err := json.Unmarshal(currentFactsJSON, &serializedCurrentFacts); err != nil {
+		t.Fatalf("unmarshal migration current facts: %v", err)
+	}
+	if serializedCurrentFacts.ServiceCount == nil || *serializedCurrentFacts.ServiceCount != 2 ||
+		serializedCurrentFacts.DomainCount == nil || *serializedCurrentFacts.DomainCount != 1 ||
+		serializedCurrentFacts.EffectiveServiceCount == nil || *serializedCurrentFacts.EffectiveServiceCount != 0 ||
+		serializedCurrentFacts.EffectiveDomainCount == nil || *serializedCurrentFacts.EffectiveDomainCount != 0 ||
+		serializedCurrentFacts.UnknownServiceCount == nil || *serializedCurrentFacts.UnknownServiceCount != 1 ||
+		serializedCurrentFacts.UnknownDomainCount == nil || *serializedCurrentFacts.UnknownDomainCount != 0 {
+		t.Fatalf("serialized migration current facts = %#v, want historical/effective/unknown counts in the API DTO", serializedCurrentFacts)
+	}
+
+	effective := f
+	effective.EffectiveDomainCount = 1
+	effectiveReadback := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{effective}))
+	if effectiveReadback.Status != ReadbackDrift || !hasReadbackIssue(effectiveReadback, "old_carrier_remaining") {
+		t.Fatalf("effective readback = %#v, want known carrier drift", effectiveReadback)
 	}
 }
 

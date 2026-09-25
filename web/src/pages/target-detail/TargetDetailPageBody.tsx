@@ -19,6 +19,7 @@ import type {
   ProbeKind,
   ProbeObservation,
   StateChangeEventRecord,
+  GlobalActionConfirmation,
   TargetRecord,
 } from '../../lib/types'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
@@ -61,12 +62,13 @@ type TargetDetailPageBodyProps = {
   observationsByProbe: Map<string, ProbeObservation[]>
   runtimeSubmitting: boolean
   runtimeError: string | null
+  reviewGeneration?: number
   pendingRuntimeConfirmation: PendingRuntimeConfirmation | null
   runtimeConfirmationActive: boolean
   probeConfirmationActive: boolean
   assetContext: AssetContextForTarget | null
   assetContextError: string | null
-  onRuntimeAction: (action: TargetRuntimeAction, confirmed?: boolean) => void
+  onRuntimeAction: (action: TargetRuntimeAction, confirmed?: boolean, confirmation?: GlobalActionConfirmation) => void
   onCancelPauseConfirmation: () => void
   onCancelArchiveConfirmation: () => void
   registerActionRef: (
@@ -139,6 +141,7 @@ export function TargetDetailPageBody({
   observationsByProbe,
   runtimeSubmitting,
   runtimeError,
+  reviewGeneration = 0,
   pendingRuntimeConfirmation,
   runtimeConfirmationActive,
   probeConfirmationActive,
@@ -242,11 +245,14 @@ export function TargetDetailPageBody({
         />
       </div>
 
-      {pendingRuntimeConfirmation?.action === 'pause' ? (
+      {pendingRuntimeConfirmation && pendingRuntimeConfirmation.action !== 'archive' ? (
         <TargetRuntimePauseConfirmation
           target={target}
+          action={pendingRuntimeConfirmation.action}
           disabled={runtimeSubmitting}
-          onConfirm={() => onRuntimeAction('pause', true)}
+          error={runtimeError}
+          reviewGeneration={reviewGeneration}
+          onConfirm={(confirmation) => onRuntimeAction(pendingRuntimeConfirmation.action, true, confirmation)}
           onCancel={onCancelPauseConfirmation}
         />
       ) : null}
@@ -256,7 +262,7 @@ export function TargetDetailPageBody({
         incidentsError={incidentsError}
         incidentsRetrying={incidentsRetrying}
         onRetryIncidents={onRetryIncidents}
-        runtimeError={runtimeError && pendingRuntimeConfirmation?.action !== 'archive' ? runtimeError : null}
+        runtimeError={pendingRuntimeConfirmation ? null : runtimeError}
         onOpenEvents={() => onOpenHistory('incidents')}
       />
 
@@ -329,14 +335,16 @@ export function TargetDetailPageBody({
           />
 
           <TargetLifecycleSection
+            targetId={target.target_id}
             isArchived={isArchived}
             runtimeSubmitting={runtimeSubmitting}
             probeConfirmationActive={probeConfirmationActive}
             showArchiveConfirmation={pendingRuntimeConfirmation?.action === 'archive'}
             error={archiveRuntimeError}
+            reviewGeneration={reviewGeneration}
             onRestore={() => onRuntimeAction('restore-to-paused')}
             onStartArchive={() => onRuntimeAction('archive')}
-            onConfirmArchive={() => onRuntimeAction('archive', true)}
+            onConfirmArchive={(confirmation) => onRuntimeAction('archive', true, confirmation)}
             onCancelArchive={onCancelArchiveConfirmation}
             registerActionRef={registerActionRef}
           />

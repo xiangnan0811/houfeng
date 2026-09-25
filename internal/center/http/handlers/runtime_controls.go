@@ -3,9 +3,12 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
+	"houfeng/internal/center/assetlifecycle"
+	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/targets"
@@ -13,16 +16,16 @@ import (
 
 type monitoringInstanceRuntimeControlRepository interface {
 	SetMonitoringInstanceMonitoringMaintenance(context.Context, string) (monitoringinstances.Record, error)
-	PauseMonitoringInstanceMonitoring(context.Context, string) (monitoringinstances.Record, error)
+	PauseMonitoringInstanceMonitoring(context.Context, string, ...monitoringinstances.RuntimeControlInput) (monitoringinstances.Record, error)
 	ResumeMonitoringInstanceMonitoring(context.Context, string) (monitoringinstances.Record, error)
 }
 
 type targetRuntimeControlRepository interface {
-	SetTargetMaintenance(context.Context, string) (targets.TargetRecord, error)
-	PauseTargetRun(context.Context, string) (targets.TargetRecord, error)
-	ResumeTargetRun(context.Context, string) (targets.TargetRecord, error)
-	ArchiveTarget(context.Context, string) (targets.TargetRecord, error)
-	RestoreArchivedTargetToPaused(context.Context, string) (targets.TargetRecord, error)
+	SetTargetMaintenance(context.Context, string, ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error)
+	PauseTargetRun(context.Context, string, ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error)
+	ResumeTargetRun(context.Context, string, ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error)
+	ArchiveTarget(context.Context, string, ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error)
+	RestoreArchivedTargetToPaused(context.Context, string, ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error)
 }
 
 func MonitoringInstanceRuntimeControls(repo monitoringInstanceRuntimeControlRepository) http.Handler {
@@ -48,7 +51,11 @@ func MonitoringInstanceRuntimeControls(repo monitoringInstanceRuntimeControlRepo
 		case "exit-maintenance", "resume":
 			record, err = repo.ResumeMonitoringInstanceMonitoring(r.Context(), monitoringInstanceID)
 		case "pause":
-			record, err = repo.PauseMonitoringInstanceMonitoring(r.Context(), monitoringInstanceID)
+			confirmation, ok := decodeMonitoringInstanceRuntimeConfirmation(w, r)
+			if !ok {
+				return
+			}
+			record, err = repo.PauseMonitoringInstanceMonitoring(r.Context(), monitoringInstanceID, confirmation)
 		default:
 			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
@@ -61,6 +68,15 @@ func MonitoringInstanceRuntimeControls(repo monitoringInstanceRuntimeControlRepo
 		case errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance):
 			writeError(w, http.StatusConflict, "archived monitoring instance")
 			return
+		case errors.Is(err, monitoringinstances.ErrRetiredMonitoringInstance):
+			writeError(w, http.StatusConflict, "retired monitoring instance")
+			return
+		case errors.Is(err, assetlifecycle.ErrSharedImpactConfirmationRequired):
+			writeCodedError(w, http.StatusConflict, "shared impact confirmation required", "shared_impact_confirmation_required")
+			return
+		case errors.Is(err, assetlifecycle.ErrStaleCancellationPreview):
+			writeCodedError(w, http.StatusConflict, "monitoring instance management review stale", "management_review_stale")
+			return
 		case errors.Is(err, store.ErrInvalidMonitoringInstanceRuntimeTransition):
 			writeError(w, http.StatusConflict, "invalid runtime transition")
 			return
@@ -71,6 +87,21 @@ func MonitoringInstanceRuntimeControls(repo monitoringInstanceRuntimeControlRepo
 
 		writeJSON(w, http.StatusOK, record)
 	})
+}
+
+func decodeMonitoringInstanceRuntimeConfirmation(w http.ResponseWriter, r *http.Request) (monitoringinstances.RuntimeControlInput, bool) {
+	var input monitoringinstances.RuntimeControlInput
+	if r.Body == nil {
+		return input, true
+	}
+	if err := decodeJSON(r, &input); err != nil {
+		if errors.Is(err, io.EOF) {
+			return input, true
+		}
+		writeError(w, http.StatusBadRequest, "invalid monitoring instance runtime input")
+		return monitoringinstances.RuntimeControlInput{}, false
+	}
+	return input, true
 }
 
 func TargetRuntimeControls(repo targetRuntimeControlRepository) http.Handler {
@@ -85,6 +116,17 @@ func TargetRuntimeControls(repo targetRuntimeControlRepository) http.Handler {
 			writeError(w, http.StatusNotFound, "target not found")
 			return
 		}
+		switch action {
+		case "enter-maintenance", "exit-maintenance", "resume", "pause", "archive", "restore-to-paused":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid target action")
+			return
+		}
+
+		confirmation, ok := decodeTargetRuntimeConfirmation(w, r)
+		if !ok {
+			return
+		}
 
 		var (
 			record targets.TargetRecord
@@ -92,26 +134,32 @@ func TargetRuntimeControls(repo targetRuntimeControlRepository) http.Handler {
 		)
 		switch action {
 		case "enter-maintenance":
-			record, err = repo.SetTargetMaintenance(r.Context(), targetID)
+			record, err = repo.SetTargetMaintenance(r.Context(), targetID, confirmation)
 		case "exit-maintenance", "resume":
-			record, err = repo.ResumeTargetRun(r.Context(), targetID)
+			record, err = repo.ResumeTargetRun(r.Context(), targetID, confirmation)
 		case "pause":
-			record, err = repo.PauseTargetRun(r.Context(), targetID)
+			record, err = repo.PauseTargetRun(r.Context(), targetID, confirmation)
 		case "archive":
-			record, err = repo.ArchiveTarget(r.Context(), targetID)
+			record, err = repo.ArchiveTarget(r.Context(), targetID, confirmation)
 		case "restore-to-paused":
-			record, err = repo.RestoreArchivedTargetToPaused(r.Context(), targetID)
-		default:
-			writeError(w, http.StatusNotFound, "target not found")
-			return
+			record, err = repo.RestoreArchivedTargetToPaused(r.Context(), targetID, confirmation)
 		}
 
 		switch {
 		case errors.Is(err, targets.ErrTargetNotFound):
 			writeError(w, http.StatusNotFound, "target not found")
 			return
+		case errors.Is(err, store.ErrInvalidTargetRuntimeAction):
+			writeError(w, http.StatusBadRequest, "invalid target action")
+			return
 		case errors.Is(err, store.ErrInvalidTargetRuntimeTransition):
 			writeError(w, http.StatusConflict, "invalid runtime transition")
+			return
+		case errors.Is(err, assetlifecycle.ErrSharedImpactConfirmationRequired):
+			writeCodedError(w, http.StatusConflict, "shared impact confirmation required", "shared_impact_confirmation_required")
+			return
+		case errors.Is(err, assetlifecycle.ErrStaleCancellationPreview):
+			writeCodedError(w, http.StatusConflict, "target management review stale", "management_review_stale")
 			return
 		case err != nil:
 			writeError(w, http.StatusInternalServerError, "internal server error")
@@ -120,6 +168,21 @@ func TargetRuntimeControls(repo targetRuntimeControlRepository) http.Handler {
 
 		writeJSON(w, http.StatusOK, record)
 	})
+}
+
+func decodeTargetRuntimeConfirmation(w http.ResponseWriter, r *http.Request) (assetlinks.GlobalActionConfirmation, bool) {
+	var confirmation assetlinks.GlobalActionConfirmation
+	if r.Body == nil {
+		return confirmation, true
+	}
+	if err := decodeJSON(r, &confirmation); err != nil {
+		if errors.Is(err, io.EOF) {
+			return confirmation, true
+		}
+		writeError(w, http.StatusBadRequest, "invalid target lifecycle action input")
+		return assetlinks.GlobalActionConfirmation{}, false
+	}
+	return confirmation, true
 }
 
 func monitoringInstanceRuntimeControlAction(path string) (string, string) {

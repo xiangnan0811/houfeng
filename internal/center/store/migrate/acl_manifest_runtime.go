@@ -161,11 +161,6 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
 	}
-	if len(snapshot.Manifests) != 1 && len(transitions) == 0 {
-		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, appACLDevelopmentDatabaseRebuildError(
-			"APP manifest chain is not a registered current shape",
-		)
-	}
 	if err := validateAppACLManifestRuntimeRoles(snapshot, envelope); err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err
 	}
@@ -183,9 +178,6 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, fmt.Errorf("compile current app ACL runtime privilege set: %w", err)
 	}
-	if !bytes.Equal(envelope.Latest.CanonicalPrivilegeSet, compiledPrivileges) {
-		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, fmt.Errorf("latest app ACL manifest privilege set does not match current compiler output")
-	}
 	shape, err := classifyAppACLCurrentManifestShape(
 		source,
 		transitions,
@@ -194,6 +186,8 @@ func verifyAppACLCurrentManifestRuntimeSnapshot(
 		snapshot.Head,
 		compiledPrivileges,
 		envelope.Latest.MigratorCatalogRole,
+		snapshot.DatabaseName,
+		envelope.PrivilegeSet.RoleBindings,
 	)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, appACLEffectiveCatalogContract{}, err

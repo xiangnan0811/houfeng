@@ -17,6 +17,7 @@ import (
 	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/renewals"
+	"houfeng/internal/center/vpsassets"
 )
 
 var errCreateIdempotencyCutPoint = errors.New("create idempotency cut point")
@@ -433,7 +434,7 @@ func TestCreateAssetServiceIdempotentCreateReplayAndReuse(t *testing.T) {
 			receiptInserts := 0
 			tx := &fakeCreateIdempotencyTx{}
 			tx.exec = func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-				if strings.Contains(sql, "pg_advisory_xact_lock") {
+				if strings.Contains(sql, "hashtext($1)") {
 					lockArg = args[0]
 				} else if strings.Contains(sql, "insert into asset_service_create_idempotency") {
 					receiptInserts++
@@ -442,6 +443,11 @@ func TestCreateAssetServiceIdempotentCreateReplayAndReuse(t *testing.T) {
 			}
 			tx.queryRow = func(_ context.Context, sql string, args ...any) pgx.Row {
 				switch {
+				case strings.Contains(sql, "from vps_assets"):
+					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+						return nil
+					}}
 				case strings.Contains(sql, "from asset_service_create_idempotency"):
 					if test.storedDigest == "" {
 						return fakeCreateIdempotencyRow{scan: func(...any) error { return pgx.ErrNoRows }}
@@ -508,13 +514,18 @@ func TestCreateAssetServiceIdempotentFailsClosedAtEveryCutPoint(t *testing.T) {
 
 			tx := &fakeCreateIdempotencyTx{}
 			tx.exec = func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
-				if (cutPoint == "lock" && strings.Contains(sql, "pg_advisory_xact_lock")) || (cutPoint == "receipt" && strings.Contains(sql, "insert into asset_service_create_idempotency")) {
+				if (cutPoint == "lock" && strings.Contains(sql, "hashtext($1)")) || (cutPoint == "receipt" && strings.Contains(sql, "insert into asset_service_create_idempotency")) {
 					return pgconn.CommandTag{}, errCreateIdempotencyCutPoint
 				}
 				return pgconn.NewCommandTag("INSERT 1"), nil
 			}
 			tx.queryRow = func(_ context.Context, sql string, args ...any) pgx.Row {
 				switch {
+				case strings.Contains(sql, "from vps_assets"):
+					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+						return nil
+					}}
 				case strings.Contains(sql, "from asset_service_create_idempotency"):
 					if cutPoint == "lookup" {
 						return fakeCreateIdempotencyRow{scan: func(...any) error { return errCreateIdempotencyCutPoint }}
@@ -560,6 +571,32 @@ func TestCreateAssetServiceIdempotentFailsClosedAtEveryCutPoint(t *testing.T) {
 				t.Fatalf("rollbackCalls=%d, want 1", tx.rollbackCalls)
 			}
 		})
+	}
+}
+
+func TestCreateAssetServiceIdempotentFailsClosedOnGraphLockError(t *testing.T) {
+	t.Parallel()
+
+	tx := &fakeCreateIdempotencyTx{
+		exec: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+			if strings.Contains(sql, "pg_advisory_xact_lock(1213154899, 1)") {
+				return pgconn.CommandTag{}, errCreateIdempotencyCutPoint
+			}
+			return pgconn.NewCommandTag("SELECT 1"), nil
+		},
+	}
+	repo := &PostgresAssetServiceRepository{
+		db: fakeAssetServiceDB{},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
+
+	if _, _, err := repo.CreateAssetServiceIdempotent(context.Background(), testAssetServiceInput(), "idempotency-key-0001"); !errors.Is(err, errCreateIdempotencyCutPoint) {
+		t.Fatalf("CreateAssetServiceIdempotent() did not preserve the graph lock error")
+	}
+	if tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+		t.Fatalf("commitCalls=%d rollbackCalls=%d, want 0/1", tx.commitCalls, tx.rollbackCalls)
 	}
 }
 
@@ -624,7 +661,7 @@ func TestCreateAssetDomainIdempotentCreateReplayAndReuse(t *testing.T) {
 			receiptInserts := 0
 			tx := &fakeCreateIdempotencyTx{}
 			tx.exec = func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-				if strings.Contains(sql, "pg_advisory_xact_lock") {
+				if strings.Contains(sql, "hashtext($1)") {
 					lockArg = args[0]
 				} else if strings.Contains(sql, "insert into asset_domain_create_idempotency") {
 					receiptInserts++
@@ -633,6 +670,11 @@ func TestCreateAssetDomainIdempotentCreateReplayAndReuse(t *testing.T) {
 			}
 			tx.queryRow = func(_ context.Context, sql string, args ...any) pgx.Row {
 				switch {
+				case strings.Contains(sql, "from vps_assets"):
+					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+						return nil
+					}}
 				case strings.Contains(sql, "from asset_domain_create_idempotency"):
 					if test.storedDigest == "" {
 						return fakeCreateIdempotencyRow{scan: func(...any) error { return pgx.ErrNoRows }}
@@ -699,13 +741,18 @@ func TestCreateAssetDomainIdempotentFailsClosedAtEveryCutPoint(t *testing.T) {
 
 			tx := &fakeCreateIdempotencyTx{}
 			tx.exec = func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
-				if (cutPoint == "lock" && strings.Contains(sql, "pg_advisory_xact_lock")) || (cutPoint == "receipt" && strings.Contains(sql, "insert into asset_domain_create_idempotency")) {
+				if (cutPoint == "lock" && strings.Contains(sql, "hashtext($1)")) || (cutPoint == "receipt" && strings.Contains(sql, "insert into asset_domain_create_idempotency")) {
 					return pgconn.CommandTag{}, errCreateIdempotencyCutPoint
 				}
 				return pgconn.NewCommandTag("INSERT 1"), nil
 			}
 			tx.queryRow = func(_ context.Context, sql string, args ...any) pgx.Row {
 				switch {
+				case strings.Contains(sql, "from vps_assets"):
+					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+						return nil
+					}}
 				case strings.Contains(sql, "from asset_domain_create_idempotency"):
 					if cutPoint == "lookup" {
 						return fakeCreateIdempotencyRow{scan: func(...any) error { return errCreateIdempotencyCutPoint }}
@@ -784,9 +831,14 @@ func TestCreateAssetDomainIdempotentChecksServiceScopeInsideTransaction(t *testi
 		switch {
 		case strings.Contains(sql, "from asset_domain_create_idempotency"):
 			return fakeCreateIdempotencyRow{scan: func(...any) error { return pgx.ErrNoRows }}
+		case strings.Contains(sql, "from vps_assets"):
+			return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+				*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+				return nil
+			}}
 		case strings.Contains(sql, "from asset_services"):
 			return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
-				*(dest[0].(*bool)) = false
+				*(dest[0].(*string)) = "vps_other"
 				return nil
 			}}
 		default:
@@ -855,7 +907,7 @@ func TestCreateLinkedMonitoringInstanceIdempotentCreateReplayAndReuse(t *testing
 			receiptLookedUp := false
 			tx := &fakeCreateIdempotencyTx{}
 			tx.exec = func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-				if strings.Contains(sql, "pg_advisory_xact_lock") {
+				if strings.Contains(sql, "pg_advisory_xact_lock") && len(args) > 0 {
 					lockArg = args[0]
 				} else if strings.Contains(sql, "insert into vps_monitoring_instance_create_idempotency") {
 					receiptInserts++
@@ -876,6 +928,17 @@ func TestCreateLinkedMonitoringInstanceIdempotentCreateReplayAndReuse(t *testing
 						*(dest[0].(*string)) = test.storedDigest
 						*(dest[1].(*string)) = monitoringRecord.MonitoringInstanceID
 						*(dest[2].(*string)) = linkRecord.LinkID
+						return nil
+					}}
+				case strings.Contains(sql, "select lifecycle_status") && strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
+					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+						if !receiptLookedUp {
+							t.Fatal("VPS lifecycle guard queried before receipt lookup")
+						}
+						if test.vpsMissing {
+							return pgx.ErrNoRows
+						}
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
 						return nil
 					}}
 				case strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
@@ -1011,6 +1074,11 @@ func TestCreateLinkedMonitoringInstanceIdempotentReplayIgnoresChangedDerivedPers
 		switch {
 		case strings.Contains(sql, "from vps_monitoring_instance_create_idempotency"):
 			return fakeCreateIdempotencyRow{scan: func(...any) error { return pgx.ErrNoRows }}
+		case strings.Contains(sql, "select lifecycle_status") && strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
+			return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+				*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+				return nil
+			}}
 		case strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
 			defaultLookups++
 			return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
@@ -1168,6 +1236,11 @@ func TestCreateLinkedMonitoringInstanceIdempotentRejectsInvalidDerivedMetadataBe
 				case strings.Contains(sql, "from vps_monitoring_instance_create_idempotency"):
 					receiptLookups++
 					return fakeCreateIdempotencyRow{scan: func(...any) error { return pgx.ErrNoRows }}
+				case strings.Contains(sql, "select lifecycle_status") && strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
+					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+						return nil
+					}}
 				case strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
 					defaultLookups++
 					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
@@ -1265,10 +1338,15 @@ func TestCreateLinkedMonitoringInstanceIdempotentFailsClosedAtEveryCutPoint(t *t
 						}}
 					}
 					return fakeCreateIdempotencyRow{scan: func(...any) error { return pgx.ErrNoRows }}
-				case strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
+				case strings.Contains(sql, "select lifecycle_status") && strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
 					if cutPoint == "vps guard" {
 						return fakeCreateIdempotencyRow{scan: func(...any) error { return errCreateIdempotencyCutPoint }}
 					}
+					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+						return nil
+					}}
+				case strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
 					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
 						scanLinkedMonitoringVPSDefaultDestinations(dest, linkedMonitoringInstanceVPSDefaults{
 							VPSID:        "vps_001",

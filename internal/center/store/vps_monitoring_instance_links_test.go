@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/monitoringinstances"
+	"houfeng/internal/center/vpsassets"
 )
 
 func TestPostgresVPSMonitoringInstanceLinkMigrationDefinesTableConstraintsAndIndexes(t *testing.T) {
@@ -42,7 +44,9 @@ func TestPostgresVPSMonitoringInstanceLinkLinkUnlinkListAndCount(t *testing.T) {
 
 	now := time.Date(2026, time.May, 9, 16, 0, 0, 0, time.UTC)
 	unlinkedAt := now.Add(time.Hour)
+	miArchivedAt := now.Add(-time.Minute)
 	providerID := "pv_001"
+	vpsLifecycle := vpsassets.LifecycleActive
 	var rowCalls []string
 	var rowArgs [][]any
 	var queryCalls []string
@@ -55,7 +59,13 @@ func TestPostgresVPSMonitoringInstanceLinkLinkUnlinkListAndCount(t *testing.T) {
 			switch {
 			case strings.Contains(sql, "from vps_assets") && strings.Contains(sql, "for update"):
 				return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "vps_001"
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsLifecycle
+					return nil
+				}}
+			case strings.Contains(sql, "from monitoring_instances") && strings.Contains(sql, "for update"):
+				return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = monitoringinstances.LifecycleInUse
+					*(dest[1].(**time.Time)) = nil
 					return nil
 				}}
 			case strings.Contains(sql, "insert into vps_monitoring_instance_links"):
@@ -113,16 +123,17 @@ func TestPostgresVPSMonitoringInstanceLinkLinkUnlinkListAndCount(t *testing.T) {
 						*(dest[3].(*string)) = "JP"
 						*(dest[4].(*string)) = "Tokyo"
 						*(dest[5].(*string)) = "MonitoringInstance Hint"
-						*(dest[6].(*string)) = "在用"
-						*(dest[7].(*string)) = "启用"
-						*(dest[8].(*string)) = "已绑定"
-						*(dest[9].(*string)) = "关注"
-						*(dest[10].(**time.Time)) = cloneTimePtr(&now)
+						*(dest[6].(*string)) = monitoringinstances.LifecycleInUse
+						*(dest[7].(**time.Time)) = cloneTimePtr(&miArchivedAt)
+						*(dest[8].(*string)) = "启用"
+						*(dest[9].(*string)) = "已绑定"
+						*(dest[10].(*string)) = "关注"
 						*(dest[11].(**time.Time)) = cloneTimePtr(&now)
-						*(dest[12].(*int)) = 1
-						*(dest[13].(*string)) = "high latency"
-						*(dest[14].(*time.Time)) = now
-						*(dest[15].(*string)) = "primary"
+						*(dest[12].(**time.Time)) = cloneTimePtr(&now)
+						*(dest[13].(*int)) = 1
+						*(dest[14].(*string)) = "high latency"
+						*(dest[15].(*time.Time)) = now
+						*(dest[16].(*string)) = "primary"
 						return nil
 					},
 				}}}, nil
@@ -169,6 +180,8 @@ func TestPostgresVPSMonitoringInstanceLinkLinkUnlinkListAndCount(t *testing.T) {
 		t.Fatalf("link args = %#v, want normalized vps/monitoringInstance/note", rowArgs[insertIndex])
 	}
 
+	vpsLifecycle = vpsassets.LifecycleCancelled
+
 	unlinked, err := repo.UnlinkMonitoringInstance(context.Background(), "vps_001", assetlinks.UnlinkInput{MonitoringInstanceID: " mi_001 ", Note: " rotated "})
 	if err != nil {
 		t.Fatalf("UnlinkMonitoringInstance() error = %v", err)
@@ -198,11 +211,11 @@ func TestPostgresVPSMonitoringInstanceLinkLinkUnlinkListAndCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMonitoringInstancesForVPS() error = %v", err)
 	}
-	if len(monitoringInstances) != 1 || monitoringInstances[0].MonitoringInstanceID != "mi_001" || monitoringInstances[0].CurrentHealthStatus != "关注" {
-		t.Fatalf("ListMonitoringInstancesForVPS() = %#v, want monitoringInstance health summary", monitoringInstances)
+	if len(monitoringInstances) != 1 || monitoringInstances[0].MonitoringInstanceID != "mi_001" || monitoringInstances[0].CurrentHealthStatus != "关注" || monitoringInstances[0].ArchivedAt == nil || !monitoringInstances[0].ArchivedAt.Equal(miArchivedAt) {
+		t.Fatalf("ListMonitoringInstancesForVPS() = %#v, want monitoringInstance health and archive summary", monitoringInstances)
 	}
-	if queryArgs[0][0] != "vps_001" || !strings.Contains(queryCalls[0], "where l.vps_id = $1") || !strings.Contains(queryCalls[0], "l.unlinked_at is null") {
-		t.Fatalf("ListMonitoringInstancesForVPS SQL/args = %q %#v, want active vps filter", queryCalls[0], queryArgs[0])
+	if queryArgs[0][0] != "vps_001" || !strings.Contains(queryCalls[0], "where l.vps_id = $1") || !strings.Contains(queryCalls[0], "l.unlinked_at is null") || !strings.Contains(queryCalls[0], "n.archived_at") {
+		t.Fatalf("ListMonitoringInstancesForVPS SQL/args = %q %#v, want active vps filter and archived_at", queryCalls[0], queryArgs[0])
 	}
 
 	vpsAssets, err := repo.ListVPSForMonitoringInstance(context.Background(), "mi_001")
@@ -228,6 +241,65 @@ func TestPostgresVPSMonitoringInstanceLinkLinkUnlinkListAndCount(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(rowCalls, "\n"), "update monitoring_instances") {
 		t.Fatalf("repository must not update monitoring_instances; SQL calls: %#v", rowCalls)
+	}
+}
+
+func TestPostgresVPSMonitoringInstanceLinkRejectsTerminalVPSAndUnavailableMonitoringInstance(t *testing.T) {
+	t.Parallel()
+
+	archivedAt := time.Date(2026, time.May, 9, 16, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name             string
+		vpsLifecycle     vpsassets.LifecycleStatus
+		miLifecycle      string
+		miArchivedAt     *time.Time
+		wantQueryRowCall int
+	}{
+		{name: "cancelled vps", vpsLifecycle: vpsassets.LifecycleCancelled, wantQueryRowCall: 1},
+		{name: "archived vps", vpsLifecycle: vpsassets.LifecycleArchived, wantQueryRowCall: 1},
+		{name: "archived monitoring instance", vpsLifecycle: vpsassets.LifecycleActive, miLifecycle: monitoringinstances.LifecycleInUse, miArchivedAt: &archivedAt, wantQueryRowCall: 2},
+		{name: "retired monitoring instance", vpsLifecycle: vpsassets.LifecycleActive, miLifecycle: monitoringinstances.LifecycleRetired, wantQueryRowCall: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var queryRowCalls []string
+			inserted := false
+			tx := &fakeVPSMonitoringInstanceLinkTx{
+				queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					queryRowCalls = append(queryRowCalls, sql)
+					switch {
+					case strings.Contains(sql, "from vps_assets"):
+						return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
+							*(dest[0].(*vpsassets.LifecycleStatus)) = test.vpsLifecycle
+							return nil
+						}}
+					case strings.Contains(sql, "from monitoring_instances"):
+						return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
+							*(dest[0].(*string)) = test.miLifecycle
+							*(dest[1].(**time.Time)) = cloneTimePtr(test.miArchivedAt)
+							return nil
+						}}
+					case strings.Contains(sql, "insert into vps_monitoring_instance_links"):
+						inserted = true
+						return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error { return nil }}
+					default:
+						t.Fatalf("unexpected QueryRow SQL %q", sql)
+						return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error { return nil }}
+					}
+				},
+			}
+			repo := &PostgresVPSMonitoringInstanceLinkRepository{
+				db: fakeVPSMonitoringInstanceLinkDB{
+					beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+				},
+			}
+
+			if _, err := repo.LinkMonitoringInstance(context.Background(), "vps_001", assetlinks.LinkInput{MonitoringInstanceID: "mi_001"}); !errors.Is(err, assetlinks.ErrVPSMonitoringInstanceLinkConflict) {
+				t.Fatalf("LinkMonitoringInstance() error = %v, want ErrVPSMonitoringInstanceLinkConflict", err)
+			}
+			if len(queryRowCalls) != test.wantQueryRowCall || inserted {
+				t.Fatalf("query rows=%d inserted=%t, want %d query rows and no insert; SQL=%#v", len(queryRowCalls), inserted, test.wantQueryRowCall, queryRowCalls)
+			}
+		})
 	}
 }
 
@@ -265,10 +337,16 @@ func TestPostgresVPSMonitoringInstanceLinkMapsConflictForeignKeyAndMissingActive
 					switch call {
 					case 1:
 						return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
-							*(dest[0].(*string)) = "vps_001"
+							*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
 							return nil
 						}}
 					case 2:
+						return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
+							*(dest[0].(*string)) = monitoringinstances.LifecycleInUse
+							*(dest[1].(**time.Time)) = nil
+							return nil
+						}}
+					case 3:
 						return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
 							*(dest[0].(*int)) = 0
 							return nil
@@ -285,8 +363,16 @@ func TestPostgresVPSMonitoringInstanceLinkMapsConflictForeignKeyAndMissingActive
 		})
 	}
 
+	var call int
 	repo := &PostgresVPSMonitoringInstanceLinkRepository{db: fakeVPSMonitoringInstanceLinkDB{
 		queryRow: func(context.Context, string, ...any) pgx.Row {
+			call++
+			if call == 1 {
+				return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+					return nil
+				}}
+			}
 			return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 		},
 	}}
@@ -305,16 +391,31 @@ func TestPostgresVPSMonitoringInstanceLinkRejectsExistingActiveLinkBeforeInsert(
 	tx := &fakeVPSMonitoringInstanceLinkTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
 			queryRows = append(queryRows, sql)
-			if len(args) != 1 || args[0] != "vps_001" {
-				t.Fatalf("guard QueryRow args = %#v, want vps id only", args)
+			if len(args) != 1 {
+				t.Fatalf("guard QueryRow args = %#v, want one row key", args)
 			}
-			switch len(queryRows) {
-			case 1:
+			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				if args[0] != "vps_001" {
+					t.Fatalf("VPS lock argument = %#v, want VPS ID", args[0])
+				}
 				return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "vps_001"
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
 					return nil
 				}}
-			case 2:
+			case strings.Contains(sql, "from monitoring_instances"):
+				if args[0] != "mi_002" {
+					t.Fatalf("MI lock argument = %#v, want monitoring instance ID", args[0])
+				}
+				return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = monitoringinstances.LifecycleInUse
+					*(dest[1].(**time.Time)) = nil
+					return nil
+				}}
+			case strings.Contains(sql, "select count(*)"):
+				if args[0] != "vps_001" {
+					t.Fatalf("active-link count argument = %#v, want VPS ID", args[0])
+				}
 				return fakeVPSMonitoringInstanceLinkRow{scan: func(dest ...any) error {
 					*(dest[0].(*int)) = 1
 					return nil
@@ -337,14 +438,14 @@ func TestPostgresVPSMonitoringInstanceLinkRejectsExistingActiveLinkBeforeInsert(
 	if !errors.Is(err, assetlinks.ErrVPSActiveMonitoringInstanceExists) {
 		t.Fatalf("LinkMonitoringInstance() error = %v, want ErrVPSActiveMonitoringInstanceExists", err)
 	}
-	if len(queryRows) != 2 {
-		t.Fatalf("QueryRow calls = %d, want lock and active count only; SQL=%#v", len(queryRows), queryRows)
+	if len(queryRows) != 3 {
+		t.Fatalf("QueryRow calls = %d, want VPS/MI locks and active-link count only; SQL=%#v", len(queryRows), queryRows)
 	}
 	if !strings.Contains(queryRows[0], "from vps_assets") || !strings.Contains(queryRows[0], "for update") {
 		t.Fatalf("first guard SQL = %q, want VPS row lock", queryRows[0])
 	}
-	if !strings.Contains(queryRows[1], "select count(*)") || !strings.Contains(queryRows[1], "from vps_monitoring_instance_links") || !strings.Contains(queryRows[1], "unlinked_at is null") {
-		t.Fatalf("second guard SQL = %q, want active link count", queryRows[1])
+	if !strings.Contains(queryRows[2], "select count(*)") || !strings.Contains(queryRows[2], "from vps_monitoring_instance_links") || !strings.Contains(queryRows[2], "unlinked_at is null") {
+		t.Fatalf("third guard SQL = %q, want active link count", queryRows[2])
 	}
 	if committed {
 		t.Fatal("transaction committed despite active-link conflict")

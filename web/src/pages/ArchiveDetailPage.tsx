@@ -1,21 +1,30 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 
-import { Badge, DataTable, Modal, MonoDigits, Timestamp } from '../components/atoms'
+import { Badge, DataTable, Input, Modal, MonoDigits, Timestamp } from '../components/atoms'
+import { ArchiveBlockerDetails } from '../components/ArchiveBlockerDetails'
+import { DependencyStatusCorrection } from '../components/DependencyStatusCorrection'
 import { PageState as PageStateView } from '../components/PageState'
+import { VPSCancellationWorkbench } from '../components/VPSCancellationWorkbench'
 import {
   ApiError,
+  archiveVPS,
+  applyVPSCancellation,
   getVPSArchiveReview,
+  getVPSCancellationPreview,
   getVPSTimeline,
   listSubscriptions,
   restoreVPSFromArchive,
 } from '../lib/api'
+import { isArchiveReview, isManagementReviewStale } from '../lib/assetLifecycle'
+import type { ApplyCancellationInput, CancellationPreview } from '../lib/types'
 import {
   ASSET_DOMAIN_STATUS_LABELS,
   ASSET_SERVICE_STATUS_LABELS,
   ASSET_SERVICE_TYPE_LABELS,
   VPS_EXPERIENCE_CATEGORY_LABELS,
   VPS_EXPERIENCE_SEVERITY_LABELS,
+  type ArchiveBlockerDetail,
   type ArchiveReview,
   type AssetDomainRecord,
   type AssetServiceRecord,
@@ -41,6 +50,140 @@ function describeError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.message
   if (error instanceof Error) return error.message
   return fallback
+}
+
+function ResidualHandlingDialog({
+  vpsId,
+  onClose,
+  onApplied,
+}: {
+  vpsId: string
+  onClose: () => void
+  onApplied: () => void
+}) {
+  const [preview, setPreview] = useState<CancellationPreview | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const generation = useRef(0)
+
+  useEffect(() => {
+    const current = ++generation.current
+    void getVPSCancellationPreview(vpsId)
+      .then((next) => {
+        if (current !== generation.current) return
+        setPreview(next)
+      })
+      .catch((caught: unknown) => {
+        if (current !== generation.current) return
+        setError(describeError(caught, '加载残留预览失败'))
+      })
+    return () => {
+      generation.current += 1
+    }
+  }, [vpsId])
+
+  async function submit(input: ApplyCancellationInput) {
+    const current = generation.current
+    setSubmitting(true)
+    setError(null)
+    try {
+      await applyVPSCancellation(vpsId, input)
+      if (current !== generation.current) return
+      onApplied()
+      onClose()
+    } catch (caught: unknown) {
+      if (current !== generation.current) return
+      if (isManagementReviewStale(caught)) {
+        try {
+          const next = await getVPSCancellationPreview(vpsId)
+          if (current !== generation.current) return
+          setPreview(next)
+          setError('影响范围已变化，共享确认已清除，不会自动重新提交。')
+        } catch (refreshError: unknown) {
+          if (current !== generation.current) return
+          setError(describeError(refreshError, '影响范围已变化，但预览刷新失败'))
+        }
+        return
+      }
+      setError(describeError(caught, '处理残留失败'))
+    } finally {
+      if (current === generation.current) setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="处理残留" size="xl">
+      {error ? <p role="alert">{error}</p> : null}
+      {preview ? (
+        <VPSCancellationWorkbench
+          preview={preview}
+          submitting={submitting}
+          error={error}
+          onCancel={onClose}
+          onSubmit={submit}
+        />
+      ) : <p role="status">正在加载残留预览…</p>}
+    </Modal>
+  )
+}
+
+function CancelledArchiveDialog({
+  vpsId,
+  displayName,
+  review,
+  onClose,
+  onArchived,
+  onInline,
+}: {
+  vpsId: string
+  displayName: string
+  review: ArchiveReview
+  onClose: () => void
+  onArchived: () => void
+  onInline: (detail: ArchiveBlockerDetail, kind: 'service-status' | 'domain-status' | 'residual' | 'restore') => void
+}) {
+  const [reason, setReason] = useState('')
+  const [confirmationName, setConfirmationName] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [conflict, setConflict] = useState<ArchiveReview | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const shown = conflict ?? review
+  const nameMatches = confirmationName.trim() === displayName
+
+  async function submit() {
+    if (!reason.trim() || !nameMatches || submitting) return
+    setSubmitting(true)
+    setError(null)
+    try {
+      await archiveVPS(vpsId, { reason: reason.trim(), confirmation_name: confirmationName.trim() })
+      onArchived()
+      onClose()
+    } catch (caught: unknown) {
+      const nextReview = caught instanceof ApiError && isArchiveReview(caught.review) ? caught.review : null
+      if (nextReview) setConflict(nextReview)
+      setError(describeError(caught, '归档失败'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title="受控归档" size="lg">
+      <p>归档成功和当前可归档是两件事。下面只展示这次审查看到的阻塞，不会把“不可归档”写成“已归档”。</p>
+      {shown.blocker_details.length > 0 ? (
+        <ArchiveBlockerDetails details={shown.blocker_details} vpsId={vpsId} onInline={onInline} />
+      ) : <p role="status">这次审查没有列出归档阻塞。</p>}
+      {error ? <p role="alert">{error}</p> : null}
+      <Input label="归档原因" value={reason} onChange={(event) => setReason(event.target.value)} />
+      <Input label="输入 VPS 名称确认" value={confirmationName} onChange={(event) => setConfirmationName(event.target.value)} />
+      <div className="page-form-actions">
+        <button className="btn sm secondary" type="button" onClick={onClose}>取消</button>
+        <button className="btn sm primary" type="button" disabled={submitting || !reason.trim() || !nameMatches} onClick={() => void submit()}>
+          {submitting ? '归档中…' : '确认归档'}
+        </button>
+      </div>
+    </Modal>
+  )
 }
 
 function parseEventTime(t?: string | null): number {
@@ -252,7 +395,7 @@ function SubscriptionTable({ subscriptions }: { subscriptions: SubscriptionRecor
   )
 }
 
-function ServicesTable({ services }: { services: AssetServiceRecord[] }) {
+function ServicesTable({ services, onCorrect }: { services: AssetServiceRecord[]; onCorrect?: (service: AssetServiceRecord) => void }) {
   return (
     <DataTable
       className="archive-detail-service-table"
@@ -287,12 +430,20 @@ function ServicesTable({ services }: { services: AssetServiceRecord[] }) {
           label: '入口',
           render: (service) => service.url || (service.port ? `端口 ${service.port}` : '—'),
         },
+        ...(onCorrect ? [{
+          key: 'correct',
+          label: '状态',
+          width: '112px',
+          render: (service: AssetServiceRecord) => (
+            <button className="btn sm ghost" type="button" onClick={() => onCorrect(service)}>更正状态</button>
+          ),
+        }] : []),
       ]}
     />
   )
 }
 
-function DomainsTable({ domains }: { domains: AssetDomainRecord[] }) {
+function DomainsTable({ domains, onCorrect }: { domains: AssetDomainRecord[]; onCorrect?: (domain: AssetDomainRecord) => void }) {
   return (
     <DataTable
       className="archive-detail-domain-table"
@@ -326,6 +477,14 @@ function DomainsTable({ domains }: { domains: AssetDomainRecord[] }) {
           label: '用途',
           render: (domain) => domain.purpose || domain.registrar || '—',
         },
+        ...(onCorrect ? [{
+          key: 'correct',
+          label: '更正',
+          width: '112px',
+          render: (domain: AssetDomainRecord) => (
+            <button className="btn sm ghost" type="button" onClick={() => onCorrect(domain)}>更正状态</button>
+          ),
+        }] : []),
       ]}
     />
   )
@@ -360,12 +519,41 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
     error: null,
     data: null,
   })
-
-  const [restoreOpen, setRestoreOpen] = useState(false)
   const [restoreSubmitting, setRestoreSubmitting] = useState(false)
   const [restoreError, setRestoreError] = useState<string | null>(null)
+  const [restoreOpen, setRestoreOpen] = useState(false)
+  const [restoreReason, setRestoreReason] = useState('')
+  const [residualOpen, setResidualOpen] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archiveNotice, setArchiveNotice] = useState<string | null>(null)
+  const [statusTarget, setStatusTarget] = useState<{ kind: 'service' | 'domain'; id: string; name: string; status: string } | null>(null)
   const restoreTriggerRef = useRef<HTMLButtonElement>(null)
   const restoreSubmittingRef = useRef(false)
+  function handleInlineBlocker(
+    detail: ArchiveBlockerDetail,
+    kind: 'service-status' | 'domain-status' | 'residual' | 'restore',
+  ) {
+    if (kind === 'service-status') {
+      setStatusTarget({
+        kind: 'service',
+        id: detail.object_id,
+        name: detail.display_name || detail.object_id,
+        status: detail.current_state,
+      })
+    } else if (kind === 'domain-status') {
+      setStatusTarget({
+        kind: 'domain',
+        id: detail.object_id,
+        name: detail.display_name || detail.object_id,
+        status: detail.current_state,
+      })
+    } else if (kind === 'residual') {
+      setResidualOpen(true)
+    } else if (kind === 'restore') {
+      setRestoreOpen(true)
+    }
+  }
+
 
   const reviewGenRef = useRef(0)
   const timelineGenRef = useRef(0)
@@ -465,6 +653,11 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
 
   async function handleRestore() {
     if (restoreSubmittingRef.current || !reviewState.data) return
+    const reason = restoreReason.trim()
+    if (!reason) {
+      setRestoreError('需要填写恢复原因。')
+      return
+    }
     const targetVpsId = reviewState.data.vps.vps_id
     const currentGen = reviewGenRef.current
 
@@ -473,9 +666,9 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
     setRestoreError(null)
 
     try {
-      await restoreVPSFromArchive(targetVpsId)
+      await restoreVPSFromArchive(targetVpsId, { reason })
       if (currentGen !== reviewGenRef.current) return
-      navigate(`/vps/${encodeURIComponent(targetVpsId)}`, { replace: true, state: location.state })
+      navigate(`/vps/${encodeURIComponent(targetVpsId)}?reorganize=1`, { replace: true, state: location.state })
     } catch (error: unknown) {
       if (currentGen !== reviewGenRef.current) return
       setRestoreError(describeError(error, '恢复归档 VPS 失败'))
@@ -579,7 +772,7 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
             <span>{vps.display_name}</span>
             <small className="archive-detail-head-id mono-text">{vps.vps_id}</small>
           </h1>
-          <p className="page-sub">只读归档详情</p>
+          <p className="page-sub">{isArchived ? '已归档' : isCancelled ? '已取消，未归档' : '历史资产'}</p>
           <p className="page-sub">
             {formatOptional(vps.provider_name)}
             {' · '}
@@ -608,18 +801,66 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
               恢复为闲置
             </button>
           ) : null}
+          {isCancelled ? (
+            <>
+              <button className="btn sm secondary" type="button" onClick={() => setResidualOpen(true)}>处理残留</button>
+              <button className="btn sm primary" type="button" onClick={() => setArchiveOpen(true)}>受控归档</button>
+            </>
+          ) : null}
         </div>
       </header>
 
       <section className="page-panel archive-detail-notice">
-        <p>已归档资产不会进入 VPS、订阅、监控或资产组合决策主流程。</p>
+        {archiveNotice ? <p role="status">{archiveNotice}</p> : null}
         {isArchived ? (
-          <p>恢复会把 VPS 放回闲置状态，但不会删除、重建或改写历史关联。</p>
+          <p>已归档资产不会进入当前工作集。恢复只回到闲置，不展示再次归档资格。</p>
         ) : isCancelled ? (
-          <p>已取消资产不可恢复，仅保留历史回看。</p>
+          <p>已取消，未归档。处理残留和受控归档是分开的动作；当前审查不可归档不等于已经归档。</p>
         ) : (
-          <p>当前资产处于只读归档视图。</p>
+          <p>当前资产处于只读历史视图。</p>
         )}
+        {isCancelled && review.blocker_details.length > 0 ? (
+          <ArchiveBlockerDetails details={review.blocker_details} vpsId={vps.vps_id} onInline={handleInlineBlocker} />
+        ) : null}
+      {residualOpen && isCancelled ? (
+        <ResidualHandlingDialog
+          vpsId={vps.vps_id}
+          onClose={() => setResidualOpen(false)}
+          onApplied={() => {
+            setArchiveNotice('残留处理已提交。这不是归档成功。')
+            fetchReview(vps.vps_id, ++reviewGenRef.current)
+          }}
+        />
+      ) : null}
+      {statusTarget ? (
+        <DependencyStatusCorrection
+          open
+          kind={statusTarget.kind}
+          objectId={statusTarget.id}
+          displayName={statusTarget.name}
+          currentStatus={statusTarget.status}
+          parentLifecycle={vps.lifecycle_status}
+          onClose={() => setStatusTarget(null)}
+          onCompleted={() => {
+            setStatusTarget(null)
+            setArchiveNotice('依赖状态已更正。归档资格以刷新后的审查为准。')
+            fetchReview(vps.vps_id, ++reviewGenRef.current)
+          }}
+        />
+      ) : null}
+      {archiveOpen && isCancelled ? (
+        <CancelledArchiveDialog
+          vpsId={vps.vps_id}
+          displayName={vps.display_name}
+          review={review}
+          onClose={() => setArchiveOpen(false)}
+          onInline={handleInlineBlocker}
+          onArchived={() => {
+            setArchiveNotice('归档已提交。页面将按最新审查刷新，不会用归档前的可归档资格代替成功结果。')
+            fetchReview(vps.vps_id, ++reviewGenRef.current)
+          }}
+        />
+      ) : null}
       </section>
 
       {/* 历史身份与访问事实 */}
@@ -651,7 +892,7 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
                   ),
                 },
                 { label: '续费决策', value: renewalLabel(vps.renewal_decision) },
-                { label: '归档资格', value: review.eligible ? '可归档' : (review.blockers[0] || '归档动作不可用') },
+                { label: '当前审查', value: review.eligible ? '当前审查未列出归档阻塞' : '当前审查不可归档' },
                 { label: '备注', value: formatOptional(vps.note) },
               ]}
             />
@@ -855,7 +1096,10 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
             aria-label="服务资产"
             tabIndex={0}
           >
-            <ServicesTable services={review.services} />
+            <ServicesTable
+              services={review.services}
+              onCorrect={(service) => setStatusTarget({ kind: 'service', id: service.service_id, name: service.name, status: service.status })}
+            />
           </div>
         </section>
 
@@ -873,7 +1117,10 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
             aria-label="域名资产"
             tabIndex={0}
           >
-            <DomainsTable domains={review.domains} />
+            <DomainsTable
+              domains={review.domains}
+              onCorrect={(domain) => setStatusTarget({ kind: 'domain', id: domain.domain_id, name: domain.domain_name, status: domain.status })}
+            />
           </div>
         </section>
       </div>
@@ -959,7 +1206,11 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
         <div className="asset-lifecycle-confirm">
           <p className="asset-lifecycle-confirm__eyebrow">恢复</p>
           <h4>恢复后进入闲置状态，关联订阅、监控、服务、域名和历史记录会保留。</h4>
-          <p className="asset-lifecycle-confirm__callouts">恢复不会把它还原到归档前的精确生命周期，只会变为闲置。</p>
+          <p className="asset-lifecycle-confirm__callouts">恢复不会启用监控，也不会改写旧关联。成功后回到当前详情整理恢复记录。</p>
+          <label className="input-field">
+            <span className="input-field__label">恢复原因</span>
+            <input className="input" aria-label="恢复原因" value={restoreReason} onChange={(event) => setRestoreReason(event.target.value)} />
+          </label>
           {restoreError ? (
             <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
               {restoreError}

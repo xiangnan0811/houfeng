@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"time"
+
+	"houfeng/internal/center/assetlinks"
 )
 
 const (
@@ -77,6 +79,15 @@ type TargetRecord struct {
 	CurrentPrimaryIssueSummary        string     `json:"current_primary_issue_summary"`
 	CreatedAt                         time.Time  `json:"created_at"`
 	UpdatedAt                         time.Time  `json:"updated_at"`
+}
+
+type LifecycleReview struct {
+	DependencyImpacts []assetlinks.DependencyImpact `json:"dependency_impacts"`
+	PreviewDigest     string                        `json:"preview_digest"`
+}
+
+type LifecycleReviewRepository interface {
+	GetTargetLifecycleReview(context.Context, string) (LifecycleReview, error)
 }
 
 type ProbeItemRecord struct {

@@ -117,11 +117,27 @@ func appACLCurrentRegisteredSuccessorFixture(t *testing.T) (appACLCurrentTransit
 		t.Fatal(err)
 	}
 	transition := transitions[0]
-	predecessor, err := NewAppACLManifestPersistedV1(1, appACLCurrentTransitionMigrator, [32]byte{}, transition.predecessor.sources.canonicalSet, transition.predecessorPrivilegeBody)
+	predecessor, err := NewAppACLManifestPersistedV1(
+		1,
+		appACLCurrentTransitionMigrator,
+		[32]byte{},
+		transition.predecessor.sources.canonicalSet,
+		transition.predecessorPrivilegeBody,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	successor, err := NewAppACLManifestPersistedV1(2, appACLCurrentTransitionMigrator, predecessor.ManifestDigest, current.sources.canonicalSet, transition.predecessorPrivilegeBody)
+	currentPrivileges, err := appACLCurrentTransitionPrivilegeBody(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err := NewAppACLManifestPersistedV1(
+		2,
+		appACLCurrentTransitionMigrator,
+		predecessor.ManifestDigest,
+		current.sources.canonicalSet,
+		currentPrivileges,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

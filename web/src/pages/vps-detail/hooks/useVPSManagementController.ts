@@ -9,6 +9,7 @@ export type VPSManagementPanel =
   | 'validity-extension'
   | 'cancellation'
   | 'archive'
+  | 'start-migration'
   | 'monitoring-instance-create'
   | 'monitoring-instance-evidence'
   | 'monitoring-instance-link'

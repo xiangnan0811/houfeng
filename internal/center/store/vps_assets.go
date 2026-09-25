@@ -70,7 +70,8 @@ const vpsAssetSelectColumns = `
 		0::int as running_target_count,
 		created_at,
 		updated_at,
-		archived_at`
+		archived_at,
+		archived_state_snapshot`
 
 type vpsAssetScanner interface {
 	Scan(dest ...any) error
@@ -108,6 +109,7 @@ func scanVPSAsset(row vpsAssetScanner) (vpsassets.Record, error) {
 		&record.CreatedAt,
 		&record.UpdatedAt,
 		&record.ArchivedAt,
+		&record.ArchivedStateSnapshot,
 	); err != nil {
 		return vpsassets.Record{}, err
 	}
@@ -214,13 +216,21 @@ func (r *PostgresVPSAssetRepository) CreateVPSAsset(ctx context.Context, input v
 	if err := vpsassets.ValidateCreateInput(input); err != nil {
 		return vpsassets.Record{}, err
 	}
+	if r.beginTx == nil {
+		return vpsassets.Record{}, errors.New("vps asset repository cannot create without transaction support")
+	}
 
 	vpsID, err := ids.New("vps")
 	if err != nil {
 		return vpsassets.Record{}, fmt.Errorf("generate vps asset id: %w", err)
 	}
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
+	if err != nil {
+		return vpsassets.Record{}, fmt.Errorf("begin vps asset create transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	record, err := scanVPSAsset(r.db.QueryRow(ctx, `
+	record, err := scanVPSAsset(tx.QueryRow(ctx, `
 		insert into vps_assets (
 			vps_id,
 			display_name,
@@ -303,6 +313,9 @@ func (r *PostgresVPSAssetRepository) CreateVPSAsset(ctx context.Context, input v
 		}
 		return vpsassets.Record{}, fmt.Errorf("create vps asset: %w", err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return vpsassets.Record{}, fmt.Errorf("commit vps asset create transaction: %w", err)
+	}
 	return record, nil
 }
 
@@ -318,10 +331,26 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 	if patchRequiresVPSAssetHistory(input) {
 		return r.patchVPSAssetWithHistory(ctx, vpsID, input)
 	}
+	if r.beginTx == nil {
+		return vpsassets.Record{}, errors.New("vps asset repository cannot patch without transaction support")
+	}
 
-	current, err := r.GetVPSAsset(ctx, vpsID)
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
 	if err != nil {
-		return vpsassets.Record{}, err
+		return vpsassets.Record{}, fmt.Errorf("begin vps asset patch transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	current, err := scanVPSAsset(tx.QueryRow(ctx, `
+		select `+vpsAssetSelectColumns+`
+		from vps_assets
+		where vps_id = $1
+		for update`, vpsID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
+	}
+	if err != nil {
+		return vpsassets.Record{}, fmt.Errorf("query vps asset %q before ordinary patch: %w", vpsID, err)
 	}
 	if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
 		return vpsassets.Record{}, err
@@ -333,15 +362,24 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 		return vpsassets.Record{}, conflict
 	}
 
-	record, err := patchOrdinaryVPSAssetRow(ctx, r.db, vpsID, input)
+	record, err := patchOrdinaryVPSAssetRow(ctx, tx, vpsID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return vpsassets.Record{}, vpsAssetPatchMissingRowError(ctx, r, vpsID, input.ExpectedUpdatedAt)
+		if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+			return vpsassets.Record{}, err
+		}
+		if input.ExpectedUpdatedAt != nil {
+			return vpsassets.Record{}, vpsassets.ErrVPSAssetConflict
+		}
+		return vpsassets.Record{}, vpsassets.ErrVPSAssetNotFound
 	}
 	if err != nil {
 		if isVPSAssetInvalidPostgresError(err) {
 			return vpsassets.Record{}, vpsassets.ErrInvalidVPSAssetInput
 		}
 		return vpsassets.Record{}, fmt.Errorf("patch vps asset %q: %w", vpsID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return vpsassets.Record{}, fmt.Errorf("commit vps asset patch transaction: %w", err)
 	}
 	return record, nil
 }
@@ -372,7 +410,7 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, errors.New("vps asset repository cannot record asset history without transaction support")
 	}
 
-	tx, err := r.beginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.beginTx)
 	if err != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("begin vps asset history transaction: %w", err)
 	}
@@ -505,7 +543,7 @@ func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vps
 	if len(activeRecords) == 0 {
 		message := "缺少生效中的订阅记录，续费决策已保存但没有自动取消订阅自动续费。"
 		if len(records) > 0 {
-			message = "关联订阅账单记录已无续费动作，续费决策已保存；仍需通过取消/退役工作台处理 VPS、监控实例与入口探测状态。"
+			message = "仍有关联历史或待确认订阅；本次未改写账单，不能由账单状态推断自动续费已停止。请在取消/退役工作台逐条核对处理。"
 		}
 		return vpsassets.RenewalSubscriptionLinkage{
 			Status:         vpsassets.RenewalSubscriptionLinkageNoActiveSubscription,
@@ -517,12 +555,12 @@ func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vps
 		return vpsassets.RenewalSubscriptionLinkage{
 			Status:         vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription,
 			CandidateCount: len(activeRecords),
-			Message:        "存在多条仍显示自动续费有效的订阅账单记录，续费决策已保存但未自动批量修改；请到订阅页核对要取消自动续费的记录。",
+			Message:        "存在多条 active 订阅账单，续费决策已保存但未自动批量修改；请逐条核对并确认处理范围。",
 		}, nil
 	}
 
 	current := activeRecords[0]
-	input := subscriptions.NormalizePatchInput(subscriptions.PatchInput{
+	input := subscriptions.NormalizePatchAgainstRecord(current, subscriptions.PatchInput{
 		AutoRenew:          subscriptions.PatchBool(false),
 		AutoRenewCancelled: subscriptions.PatchBool(true),
 	})

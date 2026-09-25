@@ -50,6 +50,7 @@ function archiveReview(overview: VPSOverview, options: {
     target_links: [],
     warnings: [],
     blockers: options.blockers ?? [],
+    blocker_details: [],
     eligible: options.eligible,
   }
 }
@@ -137,6 +138,7 @@ async function confirmArchive(page: Page) {
   await menu.getByRole('menuitem', { name: '归档' }).click()
   const dialog = page.getByRole('alertdialog', { name: '确认归档 VPS' })
   await expect(dialog).toBeVisible()
+  await dialog.getByRole('textbox', { name: '归档原因' }).fill('订阅已结束')
   await dialog.getByRole('textbox', { name: '输入 VPS 名称确认归档' }).fill('Tokyo Edge')
   await dialog.getByRole('button', { name: '确认归档' }).click()
 }
@@ -159,7 +161,7 @@ test('inventory provenance survives archive, restore, and the return link', asyn
         eligible: false,
         blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
       }),
-      expectedBodyKeys: ['confirmation_name'],
+      expectedBodyKeys: ['confirmation_name', 'reason'],
       waitFor: {
         then(resolve?: () => void) {
           api.useProfile({
@@ -167,7 +169,7 @@ test('inventory provenance survives archive, restore, and the return link', asyn
             [apiRouteKey('POST', '/api/vps/vps_001/restore-from-archive')]: {
               status: 200,
               body: vpsAssetFixture({ lifecycle_status: 'idle', usage_status: 'idle', archived_at: null }),
-              expectNoBody: true,
+              expectedBodyKeys: ['reason'],
               waitFor: {
                 then(restoreResolve?: () => void) {
                   api.useProfile(restoredProfile(overview))
@@ -196,6 +198,7 @@ test('inventory provenance survives archive, restore, and the return link', asyn
 
   await page.getByRole('button', { name: '恢复为闲置' }).click()
   const restoreDialog = page.getByRole('alertdialog', { name: '确认恢复归档 VPS' })
+  await restoreDialog.getByRole('textbox', { name: '恢复原因' }).fill('重新评估用途')
   await restoreDialog.getByRole('button', { name: '确认恢复' }).click()
 
   await expect(page).toHaveURL((url) => url.pathname === '/vps/vps_001')
@@ -233,7 +236,7 @@ test('failed archive write stays on detail and keeps inventory provenance', asyn
     [apiRouteKey('POST', '/api/vps/vps_001/archive')]: {
       status: 409,
       body: { error: 'archive conflict' },
-      expectedBodyKeys: ['confirmation_name'],
+      expectedBodyKeys: ['confirmation_name', 'reason'],
     },
   })
 
@@ -259,7 +262,7 @@ test('failed restore write stays on archive detail and keeps inventory provenanc
         eligible: false,
         blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
       }),
-      expectedBodyKeys: ['confirmation_name'],
+      expectedBodyKeys: ['confirmation_name', 'reason'],
       waitFor: {
         then(resolve?: () => void) {
           api.useProfile({
@@ -267,7 +270,7 @@ test('failed restore write stays on archive detail and keeps inventory provenanc
             [apiRouteKey('POST', '/api/vps/vps_001/restore-from-archive')]: {
               status: 409,
               body: { error: 'restore conflict' },
-              expectNoBody: true,
+              expectedBodyKeys: ['reason'],
             },
           })
           resolve?.()
@@ -284,6 +287,7 @@ test('failed restore write stays on archive detail and keeps inventory provenanc
 
   await page.getByRole('button', { name: '恢复为闲置' }).click()
   const restoreDialog = page.getByRole('alertdialog', { name: '确认恢复归档 VPS' })
+  await restoreDialog.getByRole('textbox', { name: '恢复原因' }).fill('重新评估用途')
   await restoreDialog.getByRole('button', { name: '确认恢复' }).click()
   await expect(restoreDialog.getByText('restore conflict')).toBeVisible()
   await expect(page).toHaveURL((url) => url.pathname === '/archive/vps_001')

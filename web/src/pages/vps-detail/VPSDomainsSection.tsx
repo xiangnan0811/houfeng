@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 import { Button, MonoDigits } from '../../components/atoms'
+import { DependencyStatusCorrection } from '../../components/DependencyStatusCorrection'
 import { formatDate } from '../../lib/format'
 import type { AssetDomainRecord, AssetServiceRecord } from '../../lib/types'
 import { domainResourceName, domainResourceStatus, serviceResourceName } from './vpsDetailResourcePresentation'
@@ -10,9 +12,11 @@ type VPSDomainsSectionProps = {
   services: AssetServiceRecord[]
   error: string | null
   notice: string | null
+  parentLifecycle?: string
   readOnly?: boolean
   onCreate: () => void
   onRetryServices?: (() => void) | undefined
+  onChanged?: () => void
 }
 
 export function VPSDomainsSection({
@@ -20,9 +24,11 @@ export function VPSDomainsSection({
   services,
   error,
   notice,
+  parentLifecycle = 'active',
   readOnly = false,
   onCreate,
   onRetryServices,
+  onChanged,
 }: VPSDomainsSectionProps) {
   return (
     <div className="vps-objects">
@@ -55,6 +61,9 @@ export function VPSDomainsSection({
               key={domain.domain_id}
               domain={domain}
               services={services}
+              readOnly={readOnly}
+              parentLifecycle={parentLifecycle}
+              onChanged={onChanged}
             />
           ))}
         </ul>
@@ -68,10 +77,17 @@ export function VPSDomainsSection({
 function DomainDossier({
   domain,
   services,
+  readOnly = false,
+  parentLifecycle,
+  onChanged,
 }: {
   domain: AssetDomainRecord
   services: AssetServiceRecord[]
+  readOnly?: boolean
+  parentLifecycle: string
+  onChanged?: (() => void) | undefined
 }) {
+  const [open, setOpen] = useState(false)
   const location = useLocation()
   const purpose = domain.purpose.trim()
   const registrar = domain.registrar.trim()
@@ -93,8 +109,26 @@ function DomainDossier({
             <span className="vps-relation-badge">{domainResourceStatus(domain)}</span>
             <span>{purpose || '未记录'}</span>
           </span>
+          {!readOnly ? (
+            <Button variant="ghost" size="sm" onClick={() => setOpen(true)}>更正状态</Button>
+          ) : null}
         </div>
       </div>
+      {open ? (
+        <DependencyStatusCorrection
+          open
+          kind="domain"
+          objectId={domain.domain_id}
+          displayName={domainResourceName(domain)}
+          currentStatus={domain.status}
+          parentLifecycle={parentLifecycle}
+          onClose={() => setOpen(false)}
+          onCompleted={() => {
+            setOpen(false)
+            onChanged?.()
+          }}
+        />
+      ) : null}
       <section className="vps-relation-dossier__body">
         <div className="vps-relation-fields">
           <div className="vps-relation-field">

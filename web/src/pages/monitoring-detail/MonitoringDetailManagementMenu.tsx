@@ -4,8 +4,14 @@ import { Link, useLocation } from 'react-router-dom'
 import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
 import { Button, Input, MonoDigits, Timestamp, type ButtonSize, type ButtonVariant } from '../../components/atoms'
 import type { MonitoringInstanceManagementReview, MonitoringInstanceRecord } from '../../lib/types'
+import { requiresSharedImpactConfirmation } from '../../lib/assetLifecycle'
 import type { MonitoringInstanceRuntimeAction } from '../../components/monitoring-detail'
-import type { FrozenDestructiveSubject } from './types'
+import { MONITORING_MANAGEMENT_REVIEW_STALE_MESSAGE } from './monitoringDetailConstants'
+import type { FrozenDestructiveSubject, ManagementActionOutcome } from './types'
+
+
+type ManagementConfirmation = { preview_digest: string; confirm_shared_impact: boolean }
+type ManagementActionResult = Promise<ManagementActionOutcome | void> | ManagementActionOutcome | void
 
 type ManagementDialogAction =
   | 'retire'
@@ -31,12 +37,14 @@ type Props = {
   error: string | null
   submittingAction: ManagementDialogAction | null
   actionError: string | null
+  confirmationResetKey?: number
   onLoadReview: (force?: boolean) => void
-  onRetire: (reason: string) => void
-  onRestoreLifecycle: (reason: string) => void
-  onArchive: (reason: string, confirmationName: string) => void
-  onRestoreArchive: () => void
-  onPermanentCleanup: (reason: string, confirmationName: string) => void
+  onRetire: (reason: string, confirmation: ManagementConfirmation) => ManagementActionResult
+  onRestoreLifecycle: (reason: string, confirmation: ManagementConfirmation) => ManagementActionResult
+  onArchive: (reason: string, confirmationName: string, confirmation: ManagementConfirmation) => ManagementActionResult
+  onRestoreArchive: (confirmation: ManagementConfirmation) => ManagementActionResult
+  onPermanentCleanup: (reason: string, confirmationName: string, confirmation: ManagementConfirmation) => ManagementActionResult
+
 }
 
 const COUNT_ITEMS: Array<{ key: keyof MonitoringInstanceManagementReview['counts']; label: string }> = [
@@ -141,6 +149,7 @@ export function MonitoringDetailManagementMenu({
   error,
   submittingAction,
   actionError,
+  confirmationResetKey = 0,
   onLoadReview,
   onRetire,
   onRestoreLifecycle,
@@ -153,12 +162,16 @@ export function MonitoringDetailManagementMenu({
   const menuId = `monitoring-detail-management-${generatedId}`
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
+  const mountedRef = useRef(true)
   const [open, setOpen] = useState(false)
   const [dialogAction, setDialogAction] = useState<ManagementDialogAction | null>(null)
   const [frozenSubject, setFrozenSubject] = useState<FrozenDestructiveSubject | null>(null)
   const [reason, setReason] = useState('')
   const [confirmationName, setConfirmationName] = useState('')
+  const [confirmedKey, setConfirmedKey] = useState<string | null>(null)
   const [versionError, setVersionError] = useState<string | null>(null)
+  const [staleNotice, setStaleNotice] = useState<string | null>(null)
+
 
   const archived = Boolean(monitoringInstance.archived_at)
   const retired = archived || monitoringInstance.lifecycle_status === '已退役'
@@ -166,10 +179,20 @@ export function MonitoringDetailManagementMenu({
   const copy = dialogAction ? dialogCopy(dialogAction, displayName) : null
   const reasonRequired = needsReason(dialogAction)
   const confirmationRequired = needsConfirmation(dialogAction)
+  const currentDigest = review?.preview_digest ?? ''
+  const activeKey = dialogAction && currentDigest
+    ? `${monitoringInstance.monitoring_instance_id}:${dialogAction}:${currentDigest}:${confirmationResetKey}`
+    : null
+  const sharedConfirmed = Boolean(activeKey && confirmedKey === activeKey)
+  const sharedRequired = Boolean(review && requiresSharedImpactConfirmation(review.dependency_impacts ?? [], 'monitoring_instance', monitoringInstance.monitoring_instance_id))
+  const reviewReady = Boolean(review?.preview_digest) && !error && !loading
   const confirmDisabled =
+    !reviewReady ||
     submittingAction !== null ||
     (reasonRequired && !reason.trim()) ||
-    (confirmationRequired && confirmationName.trim() !== displayName)
+    (confirmationRequired && confirmationName.trim() !== displayName) ||
+    (sharedRequired && !sharedConfirmed)
+
 
   const closeMenu = (restoreFocus = false) => {
     setOpen(false)
@@ -177,6 +200,13 @@ export function MonitoringDetailManagementMenu({
       queueMicrotask(() => triggerRef.current?.focus())
     }
   }
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     if (!open) return
@@ -231,25 +261,34 @@ export function MonitoringDetailManagementMenu({
     }
   }, [open])
 
+  function clearDialog() {
+    setDialogAction(null)
+    setFrozenSubject(null)
+    setReason('')
+    setConfirmationName('')
+    setConfirmedKey(null)
+    setVersionError(null)
+    setStaleNotice(null)
+  }
+
   function openDialog(action: ManagementDialogAction) {
     setFrozenSubject(freezeSubject(monitoringInstance))
     setDialogAction(action)
     setReason('')
     setConfirmationName('')
+    setConfirmedKey(null)
     setVersionError(null)
+    setStaleNotice(null)
+    onLoadReview(true)
   }
 
   function closeDialog() {
     if (submittingAction !== null) return
-    setDialogAction(null)
-    setFrozenSubject(null)
-    setReason('')
-    setConfirmationName('')
-    setVersionError(null)
+    clearDialog()
   }
 
-  function confirmDialog() {
-    if (!dialogAction || !frozenSubject || confirmDisabled) return
+  async function confirmDialog() {
+    if (!dialogAction || !frozenSubject || confirmDisabled || !review?.preview_digest) return
     if (
       monitoringInstance.monitoring_instance_id !== frozenSubject.monitoringInstanceId ||
       monitoringInstance.updated_at !== frozenSubject.updatedAt
@@ -260,17 +299,34 @@ export function MonitoringDetailManagementMenu({
     }
     const trimmedReason = reason.trim()
     const trimmedConfirmationName = confirmationName.trim()
-    if (dialogAction === 'retire') onRetire(trimmedReason)
-    if (dialogAction === 'restore-lifecycle') onRestoreLifecycle(trimmedReason)
-    if (dialogAction === 'archive') onArchive(trimmedReason, trimmedConfirmationName)
-    if (dialogAction === 'restore-archive') onRestoreArchive()
-    if (dialogAction === 'permanent-cleanup') onPermanentCleanup(trimmedReason, trimmedConfirmationName)
-    setDialogAction(null)
-    setFrozenSubject(null)
-    setReason('')
-    setConfirmationName('')
-    setVersionError(null)
+    const confirmation = {
+      preview_digest: review.preview_digest,
+      confirm_shared_impact: sharedRequired ? sharedConfirmed : false,
+    }
+    const actionMonitoringInstanceId = frozenSubject.monitoringInstanceId
+    setStaleNotice(null)
+    const pending = dialogAction === 'retire'
+      ? onRetire(trimmedReason, confirmation)
+      : dialogAction === 'restore-lifecycle'
+        ? onRestoreLifecycle(trimmedReason, confirmation)
+        : dialogAction === 'archive'
+          ? onArchive(trimmedReason, trimmedConfirmationName, confirmation)
+          : dialogAction === 'restore-archive'
+            ? onRestoreArchive(confirmation)
+            : onPermanentCleanup(trimmedReason, trimmedConfirmationName, confirmation)
+    const outcome = await pending
+    if (
+      !mountedRef.current ||
+      monitoringInstance.monitoring_instance_id !== actionMonitoringInstanceId
+    ) return
+    if (outcome === 'stale') {
+      setConfirmedKey(null)
+      setStaleNotice(MONITORING_MANAGEMENT_REVIEW_STALE_MESSAGE)
+      return
+    }
+    clearDialog()
   }
+
 
   return (
     <div className="monitoring-detail-management" ref={rootRef}>
@@ -375,35 +431,35 @@ export function MonitoringDetailManagementMenu({
               <p className="monitoring-detail-management__note" role="status">正在加载…</p>
             ) : review ? (
               <>
-                {review.actions.can_retire ? (
+                {review.action_reviews.retire.allowed ? (
                   <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
                     disabled={submittingAction !== null}
                     onClick={() => { closeMenu(); openDialog('retire') }}>
                     退役
                   </button>
                 ) : null}
-                {review.actions.can_restore_lifecycle ? (
+                {review.action_reviews.restore.allowed ? (
                   <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
                     disabled={submittingAction !== null}
                     onClick={() => { closeMenu(); openDialog('restore-lifecycle') }}>
                     恢复生命周期
                   </button>
                 ) : null}
-                {review.actions.can_archive ? (
+                {review.action_reviews.archive.allowed ? (
                   <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
                     disabled={submittingAction !== null}
                     onClick={() => { closeMenu(); openDialog('archive') }}>
                     归档
                   </button>
                 ) : null}
-                {review.actions.can_restore_archive ? (
+                {review.action_reviews.restore_from_archive.allowed ? (
                   <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
                     disabled={submittingAction !== null}
                     onClick={() => { closeMenu(); openDialog('restore-archive') }}>
                     恢复归档
                   </button>
                 ) : null}
-                {review.actions.can_permanent_cleanup ? (
+                {review.action_reviews.permanent_cleanup.allowed ? (
                   <button type="button" role="menuitem"
                     className="btn lg ghost monitoring-detail-management__item monitoring-detail-management__item--danger"
                     disabled={submittingAction !== null}
@@ -428,7 +484,7 @@ export function MonitoringDetailManagementMenu({
           confirmLabel={copy.confirmLabel}
           disabled={confirmDisabled}
           cancelDisabled={submittingAction !== null}
-          error={versionError}
+          error={versionError || actionError || staleNotice}
           onCancel={closeDialog}
           onConfirm={confirmDialog}
         >
@@ -448,10 +504,16 @@ export function MonitoringDetailManagementMenu({
                   {review.active_vps_links.map((link) => link.display_name).join('、')}
                 </p>
               ) : null}
-              {review.blockers.length > 0 || review.warnings.length > 0 ? (
+              {sharedRequired ? (
+                <label className="asset-cancel-workbench__inline-check">
+                  <input type="checkbox" checked={sharedConfirmed} onChange={(event) => setConfirmedKey(event.target.checked && activeKey ? activeKey : null)} />
+                  <span>确认此监控实例对多台 VPS 的当前或残留影响</span>
+                </label>
+              ) : null}
+              {dialogAction ? (
                 <ul>
-                  {review.blockers.map((blocker) => <li key={`blocker-${blocker}`}>{blocker}</li>)}
-                  {review.warnings.map((warning) => <li key={`warning-${warning}`}>{warning}</li>)}
+                  {(review.action_reviews[dialogAction === 'restore-lifecycle' ? 'restore' : dialogAction === 'restore-archive' ? 'restore_from_archive' : dialogAction === 'permanent-cleanup' ? 'permanent_cleanup' : dialogAction].blockers).map((blocker) => <li key={`blocker-${blocker}`}>{blocker}</li>)}
+                  {(review.action_reviews[dialogAction === 'restore-lifecycle' ? 'restore' : dialogAction === 'restore-archive' ? 'restore_from_archive' : dialogAction === 'permanent-cleanup' ? 'permanent_cleanup' : dialogAction].warnings).map((warning) => <li key={`warning-${warning}`}>{warning}</li>)}
                 </ul>
               ) : null}
               {monitoringInstance.archived_at ? (

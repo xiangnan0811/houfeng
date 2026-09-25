@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"houfeng/internal/center/assetlifecycle"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/store"
@@ -18,6 +19,7 @@ type fakeMonitoringInstanceBatchRepository struct {
 	setMaintenanceCalled []string
 	pauseErr             error
 	pauseCalled          []string
+	pauseExpectedDigests map[string]string
 	resumeErr            error
 	resumeCalled         []string
 }
@@ -30,10 +32,18 @@ func (f *fakeMonitoringInstanceBatchRepository) SetMonitoringInstanceMonitoringM
 	return monitoringinstances.Record{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: "维护中"}, nil
 }
 
-func (f *fakeMonitoringInstanceBatchRepository) PauseMonitoringInstanceMonitoring(_ context.Context, monitoringInstanceID string) (monitoringinstances.Record, error) {
+func (f *fakeMonitoringInstanceBatchRepository) PauseMonitoringInstanceMonitoring(_ context.Context, monitoringInstanceID string, inputs ...monitoringinstances.RuntimeControlInput) (monitoringinstances.Record, error) {
 	f.pauseCalled = append(f.pauseCalled, monitoringInstanceID)
 	if f.pauseErr != nil {
 		return monitoringinstances.Record{}, f.pauseErr
+	}
+	if expectedDigest, ok := f.pauseExpectedDigests[monitoringInstanceID]; ok {
+		if len(inputs) != 1 || inputs[0].PreviewDigest != expectedDigest || !inputs[0].ConfirmSharedImpact {
+			return monitoringinstances.Record{}, assetlifecycle.ErrSharedImpactConfirmationRequired
+		}
+	}
+	if len(inputs) > 1 {
+		return monitoringinstances.Record{}, monitoringinstances.ErrInvalidManagementInput
 	}
 	return monitoringinstances.Record{MonitoringInstanceID: monitoringInstanceID, MonitoringStatus: "暂停"}, nil
 }
@@ -130,6 +140,44 @@ func TestMonitoringInstanceBatchSingleFailureDoesNotBlockOthers(t *testing.T) {
 
 	if len(repo.pauseCalled) != 3 {
 		t.Fatalf("pause called %d times, want 3", len(repo.pauseCalled))
+	}
+}
+func TestMonitoringInstanceBatchUsesPerInstancePauseConfirmation(t *testing.T) {
+	t.Parallel()
+
+	repo := &fakeMonitoringInstanceBatchRepository{
+		pauseExpectedDigests: map[string]string{
+			"mi_001": "review-001",
+			"mi_002": "review-002",
+		},
+	}
+	handler := handlers.MonitoringInstanceBatch(repo)
+	body := strings.NewReader(`{"monitoring_instance_ids":["mi_001","mi_002"],"action":"pause","confirmations":{"mi_001":{"preview_digest":"review-001","confirm_shared_impact":true}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/batch", body)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var response struct {
+		Results []struct {
+			MonitoringInstanceID string `json:"monitoring_instance_id"`
+			OK                   bool   `json:"ok"`
+			Error                string `json:"error,omitempty"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if len(response.Results) != 2 ||
+		response.Results[0].MonitoringInstanceID != "mi_001" ||
+		!response.Results[0].OK ||
+		response.Results[1].MonitoringInstanceID != "mi_002" ||
+		response.Results[1].OK ||
+		response.Results[1].Error != "shared impact confirmation required" {
+		t.Fatalf("batch results = %#v, want confirmed mi_001 success and unconfirmed mi_002 failure", response.Results)
 	}
 }
 

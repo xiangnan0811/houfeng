@@ -1402,6 +1402,7 @@ describe('api helpers', () => {
       monitoring_instance_actions: [{ monitoring_instance_id: 'mi_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
       target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
       preview_digest: 'preview-digest-test',
+      confirmed_shared_objects: [],
     } satisfies ApplyCancellationInput
     const fetchMock = vi
       .fn()
@@ -1477,7 +1478,7 @@ describe('api helpers', () => {
       lifecycle_status: 'idle',
       archived_at: null,
     }
-    const input = { confirmation_name: 'Tokyo Edge' } satisfies ApplyArchiveInput
+    const input = { confirmation_name: 'Tokyo Edge', reason: '归档历史' } satisfies ApplyArchiveInput
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(review)))
@@ -1487,7 +1488,7 @@ describe('api helpers', () => {
 
     await expect(getVPSArchiveReview('vps_001')).resolves.toEqual(review)
     await expect(archiveVPS('vps_001', input)).resolves.toEqual(archivedReview)
-    await expect(restoreVPSFromArchive('vps_001')).resolves.toEqual(restored)
+    await expect(restoreVPSFromArchive('vps_001', { reason: '恢复整理' })).resolves.toEqual(restored)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/archive-review', {
       headers: { Accept: 'application/json' },
@@ -1506,9 +1507,13 @@ describe('api helpers', () => {
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/vps/vps_001/restore-from-archive', {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
       cache: 'no-store',
       credentials: 'include',
+      body: JSON.stringify({ reason: '恢复整理' }),
     })
   })
 
@@ -2622,13 +2627,14 @@ describe('api helpers', () => {
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(cleanupResult)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(retireMonitoringInstance('mi_001', { reason: '停止观测' })).resolves.toEqual(responseBody)
-    await expect(restoreMonitoringInstanceLifecycle('mi_001', { reason: '重新观察' })).resolves.toEqual(responseBody)
-    await expect(archiveMonitoringInstance('mi_001', { reason: '重复创建', confirmation_name: 'Tokyo Edge' })).resolves.toMatchObject({
+    const confirmation = { preview_digest: 'review-digest', confirm_shared_impact: false }
+    await expect(retireMonitoringInstance('mi_001', { reason: '停止观测', ...confirmation })).resolves.toEqual(responseBody)
+    await expect(restoreMonitoringInstanceLifecycle('mi_001', { reason: '重新观察', ...confirmation })).resolves.toEqual(responseBody)
+    await expect(archiveMonitoringInstance('mi_001', { reason: '重复创建', confirmation_name: 'Tokyo Edge', ...confirmation })).resolves.toMatchObject({
       archived_at: '2026-04-26T09:20:00Z',
     })
     await expect(restoreMonitoringInstanceFromArchive('mi_001')).resolves.toEqual(responseBody)
-    await expect(permanentCleanupMonitoringInstance('mi_001', { reason: '误创建空实例', confirmation_name: 'Tokyo Edge' })).resolves.toEqual(cleanupResult)
+    await expect(permanentCleanupMonitoringInstance('mi_001', { reason: '误创建空实例', confirmation_name: 'Tokyo Edge', ...confirmation })).resolves.toEqual(cleanupResult)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances/mi_001/lifecycle/retire', {
       method: 'POST',
@@ -2638,7 +2644,7 @@ describe('api helpers', () => {
       },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({ reason: '停止观测' }),
+      body: JSON.stringify({ reason: '停止观测', preview_digest: 'review-digest', confirm_shared_impact: false }),
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/lifecycle/restore', {
       method: 'POST',
@@ -2648,7 +2654,7 @@ describe('api helpers', () => {
       },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({ reason: '重新观察' }),
+      body: JSON.stringify({ reason: '重新观察', preview_digest: 'review-digest', confirm_shared_impact: false }),
     })
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/monitoring-instances/mi_001/archive', {
       method: 'POST',
@@ -2658,7 +2664,7 @@ describe('api helpers', () => {
       },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({ reason: '重复创建', confirmation_name: 'Tokyo Edge' }),
+      body: JSON.stringify({ reason: '重复创建', confirmation_name: 'Tokyo Edge', preview_digest: 'review-digest', confirm_shared_impact: false }),
     })
     expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/monitoring-instances/mi_001/restore-from-archive', {
       method: 'POST',
@@ -2674,7 +2680,7 @@ describe('api helpers', () => {
       },
       cache: 'no-store',
       credentials: 'include',
-      body: JSON.stringify({ reason: '误创建空实例', confirmation_name: 'Tokyo Edge' }),
+      body: JSON.stringify({ reason: '误创建空实例', confirmation_name: 'Tokyo Edge', preview_digest: 'review-digest', confirm_shared_impact: false }),
     })
   })
 

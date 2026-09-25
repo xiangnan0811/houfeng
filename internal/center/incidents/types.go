@@ -285,7 +285,9 @@ const (
 	EventMonitoringInstanceMonitoringResumed            EventType = "monitoring_instance_monitoring_resumed"
 	EventMonitoringInstanceLifecycleUpdated             EventType = "monitoring_instance_lifecycle_updated"
 	EventMonitoringInstanceRetired                      EventType = "monitoring_instance_retired"
+	EventMonitoringInstanceRetirementReconciled         EventType = "monitoring_instance_retirement_reconciled"
 	EventMonitoringInstanceRestoredToObserving          EventType = "monitoring_instance_restored_to_observing"
+	EventMonitoringInstanceRestoredFromArchive          EventType = "monitoring_instance_restored_from_archive"
 	EventTargetMaintenanceEntered                       EventType = "target_maintenance_entered"
 	EventTargetMaintenanceExited                        EventType = "target_maintenance_exited"
 	EventTargetPaused                                   EventType = "target_paused"
@@ -366,7 +368,7 @@ func ValidMonitoringEventMetadata(
 		if objectType != ObjectTypeMonitoringInstance {
 			return false
 		}
-		validEventType = eventType == EventMonitoringInstanceLifecycleUpdated || eventType == EventMonitoringInstanceRetired || eventType == EventMonitoringInstanceRestoredToObserving || eventType == EventCorrected
+		validEventType = eventType == EventMonitoringInstanceLifecycleUpdated || eventType == EventMonitoringInstanceRetired || eventType == EventMonitoringInstanceRetirementReconciled || eventType == EventMonitoringInstanceRestoredToObserving || eventType == EventMonitoringInstanceRestoredFromArchive || eventType == EventCorrected
 		states = map[string]struct{}{
 			monitoringinstances.LifecyclePendingEnrollment: {},
 			monitoringinstances.LifecycleInUse:             {},
@@ -399,7 +401,10 @@ func ValidMonitoringEventMetadata(
 	if !validPrior || !validResult {
 		return false
 	}
-	if ruleVersion == MonitoringEventLifecycleRuleVersion && !validMonitoringEventLifecycleStateDomain(priorState, resultingState) {
+	if ruleVersion == MonitoringEventLifecycleRuleVersion &&
+		eventType != EventMonitoringInstanceRetirementReconciled &&
+		eventType != EventMonitoringInstanceRestoredFromArchive &&
+		!validMonitoringEventLifecycleStateDomain(priorState, resultingState) {
 		return false
 	}
 	if eventType == EventCorrected {
@@ -436,10 +441,14 @@ func ValidMonitoringEventMetadata(
 		switch eventType {
 		case EventMonitoringInstanceLifecycleUpdated:
 			return priorState != resultingState
+		case EventMonitoringInstanceRetirementReconciled:
+			return priorState == monitoringinstances.LifecycleRetired && resultingState == monitoringinstances.LifecycleRetired
 		case EventMonitoringInstanceRetired:
 			return resultingState == monitoringinstances.LifecycleRetired
 		case EventMonitoringInstanceRestoredToObserving:
 			return priorState == monitoringinstances.LifecycleRetired && resultingState == monitoringinstances.LifecycleObserving
+		case EventMonitoringInstanceRestoredFromArchive:
+			return priorState == "archived" && resultingState == "unarchived"
 		}
 	case MonitoringEventRuntimeRuleVersion:
 		if severity != "" {

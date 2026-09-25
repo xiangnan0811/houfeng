@@ -378,10 +378,11 @@ func TestMonitoringInstanceManagementReviewReturnsReview(t *testing.T) {
 				CreatedAt:            now,
 				UpdatedAt:            now,
 			},
-			Counts:                monitoringinstances.ManagementCounts{HeartbeatCount: 2},
-			Warnings:              []string{"可清理"},
+			Counts: monitoringinstances.ManagementCounts{HeartbeatCount: 2},
+			ActionReviews: map[string]monitoringinstances.ManagementActionReview{
+				monitoringinstances.ManagementActionArchive: {Allowed: true},
+			},
 			EmptyMistakeCandidate: false,
-			Actions:               monitoringinstances.ManagementActions{CanArchive: true},
 		},
 	}
 
@@ -401,8 +402,10 @@ func TestMonitoringInstanceManagementReviewReturnsReview(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body.Record.MonitoringInstanceID != "mi_001" || body.Counts.HeartbeatCount != 2 || !body.Actions.CanArchive {
-		t.Fatalf("review body = %#v, want populated review", body)
+	if body.Record.MonitoringInstanceID != "mi_001" ||
+		body.Counts.HeartbeatCount != 2 ||
+		!body.ActionReviews[monitoringinstances.ManagementActionArchive].Allowed {
+		t.Fatalf("review body = %#v, want populated action review", body)
 	}
 }
 

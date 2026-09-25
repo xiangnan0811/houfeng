@@ -355,8 +355,10 @@ export function currentFactsLabel(facts?: AssetDecisionExecutionCurrentFacts): s
   if (!facts.found) return '当前事实缺失'
   return [
     `订阅 ${facts.active_subscription_count}`,
-    `服务 ${facts.service_count}`,
-    `域名 ${facts.domain_count}`,
+    `当前服务 ${facts.effective_service_count}`,
+    `当前域名 ${facts.effective_domain_count}`,
+    `历史服务 ${facts.service_count}`,
+    `历史域名 ${facts.domain_count}`,
     `Target ${facts.running_target_count}/${facts.target_count}`,
     `监控 ${facts.running_monitoring_count}/${facts.monitoring_link_count}`,
     currentFactsIPQualityLabel(facts),
@@ -370,6 +372,9 @@ export function currentFactsStateLabel(facts?: AssetDecisionExecutionCurrentFact
     facts.lifecycle_status ? lifecycleLabel(facts.lifecycle_status) : '',
     facts.usage_status ? usageLabel(facts.usage_status) : '',
     facts.renewal_decision ? renewalLabel(facts.renewal_decision) : '',
+    facts.unknown_service_count > 0 || facts.unknown_domain_count > 0
+      ? `承载待确认 服务 ${facts.unknown_service_count} · 域名 ${facts.unknown_domain_count}`
+      : '',
     facts.abnormal_monitoring_count > 0 ? `异常监控 ${facts.abnormal_monitoring_count}` : '',
     facts.active_incident_count > 0 ? `事件 ${facts.active_incident_count}` : '',
     ...currentFactsIPQualityStateLabels(facts),

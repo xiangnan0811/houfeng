@@ -47,7 +47,7 @@ func SeedAuthority(ctx context.Context, pool *pgxpool.Pool, vpsID string) error 
 				monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
 				monitoring_status, binding_status, current_health_status, last_heartbeat_at, updated_at
 			) values ('mi_overview_perf', 'perf-monitor', 'Tokyo', 'Tokyo', 'Performance Provider', '在用',
-				'启用', '已绑定', '正常', now() - interval '1 minute', now() - interval '1 minute')`,
+				'启用', '已绑定', '正常', now(), now() - interval '1 minute')`,
 		},
 		{
 			name: "monitoring link",

@@ -54,6 +54,8 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	vpsCreateIdempotencyAppACLCurrentMigrationFragment(),
 	heartbeatIncidentPolicyAppACLCurrentMigrationFragment(),
 	networkRatesValidAppACLCurrentMigrationFragment(),
+	vpsStateRepairLifecycleAppACLCurrentMigrationFragment(),
+	monitoringStateEnumAppACLCurrentMigrationFragment(),
 }
 
 func heartbeatIncidentPolicyAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -66,6 +68,25 @@ func heartbeatIncidentPolicyAppACLCurrentMigrationFragment() AppACLCurrentMigrat
 func networkRatesValidAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
 	return AppACLCurrentMigrationFragment{
 		Migration:  "0064_add_network_rates_valid.sql",
+		Privileges: func(string) []AppACLPrivilege { return nil },
+	}
+}
+
+func vpsStateRepairLifecycleAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return []AppACLPrivilege{
+				{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "asset_services", Privilege: AppACLPrivilegeUpdate, GrantOption: false},
+				{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "asset_domains", Privilege: AppACLPrivilegeUpdate, GrantOption: false},
+			}
+		},
+	}
+}
+
+func monitoringStateEnumAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0066_constrain_monitoring_and_target_state_values.sql",
 		Privileges: func(string) []AppACLPrivilege { return nil },
 	}
 }

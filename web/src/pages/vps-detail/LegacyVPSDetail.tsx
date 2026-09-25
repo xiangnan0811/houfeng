@@ -312,6 +312,7 @@ export function LegacyVPSDetail({
   const [archiveReview, setArchiveReview] = useState<ArchiveReview | null>(null)
   const [archiveReviewLoading, setArchiveReviewLoading] = useState(false)
   const [archiveConfirmationName, setArchiveConfirmationName] = useState('')
+  const [archiveReason, setArchiveReason] = useState('')
   const [cancellationError, setCancellationError] = useState<string | null>(null)
   const [experienceDraft, setExperienceDraft] = useState<ExperienceDraftState>(INITIAL_EXPERIENCE_DRAFT)
   const [experienceError, setExperienceError] = useState<string | null>(null)
@@ -1454,6 +1455,11 @@ export function LegacyVPSDetail({
       return
     }
     const confirmationName = archiveConfirmationName.trim()
+    const reason = archiveReason.trim()
+    if (!reason) {
+      setLifecycleError('需要填写归档原因。')
+      return
+    }
     if (confirmationName !== detail.display_name.trim()) {
       setLifecycleError('请输入完整 VPS 展示名后再确认归档')
       return
@@ -1469,7 +1475,7 @@ export function LegacyVPSDetail({
     setLifecycleNotice(null)
 
     try {
-      await archiveVPS(detail.vps_id, { confirmation_name: confirmationName })
+      await archiveVPS(detail.vps_id, { confirmation_name: confirmationName, reason })
       if (!mutationIsCurrent(generation)) return
       navigate(`/archive/${encodeURIComponent(detail.vps_id)}`, { replace: true, state: location.state })
     } catch (error: unknown) {
@@ -1746,7 +1752,7 @@ export function LegacyVPSDetail({
     : null
   const decisionChanged = decisionDraft.renewalDecision !== detail.renewal_decision
   const linkControlsDisabled = writeBlocked || unlinkingMonitoringInstanceId !== null
-  const isArchived = detail.lifecycle_status === 'archived' || detail.lifecycle_status === 'cancelled'
+  const lifecycleStatus = detail.lifecycle_status
   const linkFeedback = linkError ?? unlinkError ?? linkNotice
   const linkFeedbackIsError = linkError !== null || unlinkError !== null
   const primarySubscription = selectPrimarySubscription(state.subscriptions)
@@ -2137,7 +2143,7 @@ export function LegacyVPSDetail({
       <VPSDetailOverviewPanel
         model={overviewModel}
         vpsId={detail.vps_id}
-        isArchived={isArchived}
+        lifecycleStatus={lifecycleStatus}
         lifecycleSubmitting={lifecycleSubmitting}
         writeBlocked={writeBlocked}
         subscriptions={state.subscriptions}
@@ -2238,7 +2244,20 @@ export function LegacyVPSDetail({
                 </>
               ) : archiveReview ? (
                 <>
-                  <h4>输入 VPS 展示名后才能归档，服务端会再次校验资格。</h4>
+                  <h4>归档需要原因和完整展示名。服务端会再次校验资格。</h4>
+                  <label className="input-field">
+                    <span className="input-field__label">归档原因</span>
+                    <input
+                      className="input"
+                      aria-label="归档原因"
+                      value={archiveReason}
+                      onChange={(event) => {
+                        setArchiveReason(event.target.value)
+                        setLifecycleError(null)
+                      }}
+                      disabled={lifecycleSubmitting}
+                    />
+                  </label>
                   <label className="input-field">
                     <span className="input-field__label">输入 VPS 名称确认归档</span>
                     <input

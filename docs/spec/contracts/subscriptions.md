@@ -150,6 +150,52 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 
 ---
 
+## Scenario: Subscription PATCH ownership and renewal normalization
+
+### 1. Scope / Trigger
+
+- Trigger: 修改普通 `PATCH /api/subscriptions/{subscription_id}`、订阅创建幂等回放、续费模式或 legacy `auto_renew` / `auto_renew_cancelled` 归一化。
+- 目标：订阅的 VPS 归属只能由创建事实确定；legacy flags 的部分更新不能因 Go 零值而丢失当前账单来源或续费意向。
+
+### 2. Contracts
+
+- 普通 PATCH 不允许将订阅改挂到另一 VPS。省略 `vps_id` 不改归属；显式提交当前 `vps_id` 作为 no-op 接受，并且不写归属/价格历史；提交不同 VPS 返回 HTTP 409 `subscription_ownership_change_forbidden`。
+- `CreateSubscriptionIdempotent` 在匹配 receipt digest 后，必须在提交重放事务前读回 subscription 并验证其当前 `vps_id` 等于本次规范化输入的 `vps_id`。不一致时返回 HTTP 409 `subscription_replay_ownership_conflict`，不得返回他属记录或创建替代对象。
+- 同 key 的不同规范化请求仍返回 HTTP 409 `idempotency_key_reused`。Receipt 指向不存在的 subscription 是内部一致性错误，不能当作 ownership conflict 或自动重建。
+- `NormalizePatchInput` 只做与当前记录无关的存在字段规范化；缺失的 legacy bool 不得当作 `false` 推导 `renewal_mode`。生产 PATCH 在锁定并读取当前订阅后调用 `NormalizePatchAgainstRecord(current, input)`。
+- 显式 PATCH `renewal_mode` 可切换来源并按该 mode 生成两个 legacy flags。仅 PATCH legacy flags 时，`auto` / `manual` / `auto_cancelled` 必须将未提供的另一 flag 与当前记录合成后再映射 mode。
+- `gift`、`lottery`、`bonus`、`other` 是独立来源，不从 legacy flags 推断或覆盖；取消/归一这类账单时保留当前来源并持久化 `auto_renew=false`、`auto_renew_cancelled=false`。
+- 订阅 `status` 与续费字段没有新增互斥约束。正常 PATCH 允许把 `cancelled` 修正回 `active`，也允许独立纠正自动续费事实。
+
+### 3. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| PATCH 未提供 `vps_id` | 原归属不变 |
+| PATCH 显式提交相同 `vps_id` | 200；作为归属 no-op，不写归属/价格历史 |
+| PATCH 提交不同 `vps_id` | 409 `subscription_ownership_change_forbidden`；其它 PATCH 字段也不写入 |
+| idempotency receipt digest 相同且当前归属与请求一致 | 200，返回原记录 |
+| idempotency receipt digest 相同但当前归属与请求不一致 | 409 `subscription_replay_ownership_conflict`；不提交或替代创建 |
+| 同 key、不同规范化请求 | 409 `idempotency_key_reused` |
+| 订阅状态 `cancelled` PATCH 为 `active` | 接受；续费事实只按显式输入或当前记录归一 |
+| 部分 legacy flag PATCH | 未提供 flag 取锁定当前记录值后再映射；非 legacy 来源保留且 flags 为 false/false |
+
+### 4. Good/Base/Bad Cases
+
+- Good: 对同一订阅提交当前 VPS ID，不改变归属或追加历史；对不同 VPS ID 的 PATCH 整体拒绝。
+- Good: 历史上经受控数据修复改过归属的 receipt 被原始创建请求重放时，返回专用冲突，不把已改挂记录交给旧 VPS 请求方。
+- Good: `auto` 订阅只 PATCH `auto_renew_cancelled=true` 时，读取锁定记录中的 `auto_renew=true` 并得到 `auto_cancelled`；`gift` 等来源在取消路径仍保留原 mode 与 false/false flags。
+- Bad: PATCH 单独一个 bool 时把另一个缺失 bool 当作 false，再误写 `manual` 或覆盖 `gift` / `lottery` 来源。
+- Bad: receipt digest 匹配便直接返回记录，不检查该记录当前是否仍归属于请求中的 VPS。
+
+### 5. Tests Required
+
+- Domain: context-free partial bool 不派生 mode；四种非 legacy 来源保留，legacy 三种 mode 按当前未提供 flag 合成。
+- PostgreSQL: 改挂 PATCH 返回冲突且不写其它字段；相同 VPS ID 接受为 no-op；用受控 SQL 构造历史改挂后验证 receipt 重放冲突；legacy 来源/部分 flag/status 纠错使用生产读写。
+- Handler: 两种 ownership conflict 分别返回稳定 409 code。
+
+---
+
 ## Scenario: Subscription Cost Center Contracts
 
 ### 1. Scope / Trigger

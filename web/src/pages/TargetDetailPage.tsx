@@ -24,6 +24,7 @@ import {
   updateTargetMetadata,
   updateProbeItem,
 } from '../lib/api'
+import { isManagementReviewStale, isSharedImpactConfirmationRequired } from '../lib/assetLifecycle'
 import { listEvents, listHistoricalIncidents, listIncidents } from '../lib/observabilityApi'
 import type {
   ActiveIncidentRecord,
@@ -32,6 +33,7 @@ import type {
   ProbeItemRecord,
   ProbeObservation,
   TargetRecord,
+  GlobalActionConfirmation,
   UpdateProbeItemInput,
 } from '../lib/types'
 import { TargetDetailPageBody } from './target-detail/TargetDetailPageBody'
@@ -75,6 +77,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const [state, setState] = useState<TargetDetailPageState>(INITIAL_TARGET_DETAIL_STATE)
   const [runtimeSubmitting, setRuntimeSubmitting] = useState(false)
   const [runtimeError, setRuntimeError] = useState<string | null>(null)
+  const [reviewGeneration, setReviewGeneration] = useState(0)
   const [pendingRuntimeConfirmation, setPendingRuntimeConfirmation] =
     useState<PendingRuntimeConfirmation | null>(null)
   const [maintenanceOpen, setMaintenanceOpen] = useState(false)
@@ -613,10 +616,13 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     }
   }
 
-  async function handleRuntimeAction(action: TargetRuntimeAction, confirmed = false) {
+  async function handleRuntimeAction(
+    action: TargetRuntimeAction,
+    confirmed = false,
+    confirmation?: GlobalActionConfirmation,
+  ) {
     if (!target) return
     if (probeConfirmationActive) return
-    if (runtimeConfirmationActive && !confirmed) return
     if ((action === 'pause' || action === 'archive') && !confirmed) {
       setPendingRuntimeConfirmation({ action })
       return
@@ -629,16 +635,16 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     try {
       const updated =
         action === 'enter-maintenance'
-          ? await enterTargetMaintenance(actionTargetId)
+          ? await enterTargetMaintenance(actionTargetId, confirmation)
           : action === 'exit-maintenance'
-            ? await exitTargetMaintenance(actionTargetId)
+            ? await exitTargetMaintenance(actionTargetId, confirmation)
             : action === 'pause'
-              ? await pauseTarget(actionTargetId)
+              ? await pauseTarget(actionTargetId, confirmation)
               : action === 'resume'
-                ? await resumeTarget(actionTargetId)
+                ? await resumeTarget(actionTargetId, confirmation)
                 : action === 'archive'
-                ? await archiveTarget(actionTargetId)
-                  : await restoreTargetToPaused(actionTargetId)
+                  ? await archiveTarget(actionTargetId, confirmation)
+                  : await restoreTargetToPaused(actionTargetId, confirmation)
       if (
         !isMountedRef.current ||
         currentRouteTargetIdRef.current !== actionTargetId ||
@@ -661,6 +667,18 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         currentRouteTargetIdRef.current !== actionTargetId ||
         currentRequestedTargetIdRef.current !== actionTargetId
       ) {
+        return
+      }
+      if (
+        confirmed
+        && (isManagementReviewStale(error) || isSharedImpactConfirmationRequired(error))
+      ) {
+        setRuntimeError('影响范围已变化，共享确认已清除，不会自动重新提交。')
+        setReviewGeneration((current) => current + 1)
+        return
+      }
+      if (isSharedImpactConfirmationRequired(error) && !confirmed) {
+        setPendingRuntimeConfirmation({ action })
         return
       }
       setRuntimeError(describeError(error, '目标运行控制操作失败'))
@@ -960,14 +978,15 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       observationsByProbe={observationsByProbe}
       runtimeSubmitting={runtimeSubmitting}
       runtimeError={runtimeError}
+      reviewGeneration={reviewGeneration}
       pendingRuntimeConfirmation={pendingRuntimeConfirmation}
       runtimeConfirmationActive={runtimeConfirmationActive}
       probeConfirmationActive={probeConfirmationActive}
       assetContext={assetContext}
       assetContextError={assetContextError}
-      onRuntimeAction={(action, confirmed) => void handleRuntimeAction(action, confirmed)}
+      onRuntimeAction={(action, confirmed, confirmation) => void handleRuntimeAction(action, confirmed, confirmation)}
       onCancelPauseConfirmation={() => {
-        pendingRuntimeFocusRestoreRef.current = 'pause'
+        pendingRuntimeFocusRestoreRef.current = pendingRuntimeConfirmation?.action ?? 'pause'
         setPendingRuntimeConfirmation(null)
       }}
       onCancelArchiveConfirmation={() => {

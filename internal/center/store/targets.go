@@ -11,6 +11,8 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/assetlifecycle"
+	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/observations"
@@ -91,6 +93,8 @@ type targetScanner interface {
 var _ targets.Repository = (*PostgresTargetRepository)(nil)
 var _ observations.ProbeMetadataRepository = (*PostgresTargetRepository)(nil)
 
+var _ targets.LifecycleReviewRepository = (*PostgresTargetRepository)(nil)
+
 func scanTarget(row targetScanner) (targets.TargetRecord, error) {
 	var record targets.TargetRecord
 	if err := row.Scan(
@@ -123,36 +127,6 @@ func qualifiedTargetSelectColumns(alias string) string {
 		parts = append(parts, alias+"."+column)
 	}
 	return strings.Join(parts, ",\n\t\t")
-}
-
-func scanTargetWithPreviousRunStatus(row targetScanner) (targets.TargetRecord, string, error) {
-	var (
-		record     targets.TargetRecord
-		priorState string
-	)
-	if err := row.Scan(
-		&record.TargetID,
-		&record.Name,
-		&record.TargetType,
-		&record.Host,
-		&record.BasePort,
-		&record.ExecutionMonitoringInstanceLabels,
-		&record.RunStatus,
-		&record.Group,
-		&record.Labels,
-		&record.Note,
-		&record.CurrentHealthStatus,
-		&record.CurrentActiveIncidentCount,
-		&record.LastSuccessAt,
-		&record.LastFailureAt,
-		&record.CurrentPrimaryIssueSummary,
-		&record.CreatedAt,
-		&record.UpdatedAt,
-		&priorState,
-	); err != nil {
-		return targets.TargetRecord{}, "", err
-	}
-	return record, priorState, nil
 }
 
 func scanProbeItem(row targetScanner) (targets.ProbeItemRecord, error) {
@@ -221,6 +195,12 @@ func (r *PostgresTargetRepository) ListTargets(ctx context.Context) ([]targets.T
 }
 
 func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, targetID string, input targets.UpdateMetadataInput) (targets.TargetRecord, error) {
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("begin target metadata transaction for %q: %w", targetID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	args := []any{targetID}
 	if input.Group != nil {
 		args = append(args, *input.Group)
@@ -235,18 +215,18 @@ func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, tar
 		  and updated_at = $5`
 	}
 
-	record, err := scanTarget(r.db.QueryRow(ctx, `
+	record, err := scanTarget(tx.QueryRow(ctx, `
 		update targets
 		set "group" = coalesce($2, "group"),
 		    labels = $3,
 		    note = $4,
-			    updated_at = now()
+		    updated_at = now()
 		where target_id = $1`+precondition+`
 		returning `+targetSelectColumns, args...))
 	if errors.Is(err, pgx.ErrNoRows) {
 		if input.ExpectedUpdatedAt != nil {
-			exists, existsErr := r.targetExists(ctx, targetID)
-			if existsErr != nil {
+			var exists bool
+			if existsErr := tx.QueryRow(ctx, `select exists (select 1 from targets where target_id = $1)`, targetID).Scan(&exists); existsErr != nil {
 				return targets.TargetRecord{}, fmt.Errorf("check target metadata conflict %q: %w", targetID, existsErr)
 			}
 			if exists {
@@ -257,6 +237,9 @@ func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, tar
 	}
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("update target metadata %q: %w", targetID, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("commit target metadata update %q: %w", targetID, err)
 	}
 	return record, nil
 }
@@ -273,6 +256,23 @@ func (r *PostgresTargetRepository) GetTarget(ctx context.Context, targetID strin
 		return targets.TargetRecord{}, fmt.Errorf("query target %q: %w", targetID, err)
 	}
 	return record, nil
+}
+
+func (r *PostgresTargetRepository) GetTargetLifecycleReview(ctx context.Context, targetID string) (targets.LifecycleReview, error) {
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return targets.LifecycleReview{}, fmt.Errorf("begin target lifecycle review for %q: %w", targetID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	_, impacts, digest, err := loadTargetLifecycleReviewTx(ctx, tx, targetID)
+	if err != nil {
+		return targets.LifecycleReview{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return targets.LifecycleReview{}, fmt.Errorf("commit target lifecycle review for %q: %w", targetID, err)
+	}
+	return targets.LifecycleReview{DependencyImpacts: impacts, PreviewDigest: digest}, nil
 }
 
 func (r *PostgresTargetRepository) loadTargetRecordSubject(ctx context.Context, targetID string) (targetRecordSubject, error) {
@@ -300,7 +300,13 @@ func (r *PostgresTargetRepository) CreateTarget(ctx context.Context, input targe
 		return targets.TargetRecord{}, fmt.Errorf("generate target id: %w", err)
 	}
 
-	record, err := scanTarget(r.db.QueryRow(ctx, `
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("begin create target transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	record, err := scanTarget(tx.QueryRow(ctx, `
 		insert into targets (
 			target_id,
 			name,
@@ -326,6 +332,7 @@ func (r *PostgresTargetRepository) CreateTarget(ctx context.Context, input targe
 			$8,
 			$9,
 			$10,
+			$11,
 			0,
 			''
 		)
@@ -345,22 +352,10 @@ func (r *PostgresTargetRepository) CreateTarget(ctx context.Context, input targe
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("create target: %w", err)
 	}
-	return record, nil
-}
-
-func (r *PostgresTargetRepository) targetExists(ctx context.Context, targetID string) (bool, error) {
-	var exists bool
-	if err := r.db.QueryRow(ctx, `
-		select exists (
-			select 1
-			from targets
-			where target_id = $1
-		)`,
-		targetID,
-	).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check target %q existence: %w", targetID, err)
+	if err := tx.Commit(ctx); err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("commit create target: %w", err)
 	}
-	return exists, nil
+	return record, nil
 }
 
 func insertTargetRuntimeEvent(
@@ -421,237 +416,256 @@ func insertTargetRuntimeEvent(
 	return nil
 }
 
-func (r *PostgresTargetRepository) SetTargetMaintenance(ctx context.Context, targetID string) (targets.TargetRecord, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+var ErrInvalidTargetRuntimeAction = errors.New("invalid target runtime action")
+
+type targetTransitionSpec struct {
+	runStatus string
+	eventType incidents.EventType
+	summary   string
+	noChange  bool
+}
+
+func validTargetRuntimeAction(action string) bool {
+	switch action {
+	case "maintenance", "pause", "resume", "archive", "restore_to_paused":
+		return true
+	default:
+		return false
+	}
+}
+
+func targetTransitionFor(currentStatus, action string) (targetTransitionSpec, error) {
+	if !validTargetRuntimeAction(action) {
+		return targetTransitionSpec{}, fmt.Errorf("%w: %q", ErrInvalidTargetRuntimeAction, action)
+	}
+	switch action {
+	case "maintenance":
+		if currentStatus == targets.RunStatusEnabled {
+			return targetTransitionSpec{
+				runStatus: targets.RunStatusMaintenance,
+				eventType: incidents.EventTargetMaintenanceEntered,
+				summary:   "目标运行已进入维护",
+			}, nil
+		}
+	case "pause":
+		if currentStatus == targets.RunStatusPaused {
+			return targetTransitionSpec{runStatus: targets.RunStatusPaused, noChange: true}, nil
+		}
+		if currentStatus == targets.RunStatusEnabled || currentStatus == targets.RunStatusMaintenance {
+			return targetTransitionSpec{
+				runStatus: targets.RunStatusPaused,
+				eventType: incidents.EventTargetPaused,
+				summary:   "目标运行已暂停",
+			}, nil
+		}
+	case "resume":
+		if currentStatus == targets.RunStatusMaintenance {
+			return targetTransitionSpec{
+				runStatus: targets.RunStatusEnabled,
+				eventType: incidents.EventTargetMaintenanceExited,
+				summary:   "目标运行已退出维护",
+			}, nil
+		}
+		if currentStatus == targets.RunStatusPaused {
+			return targetTransitionSpec{
+				runStatus: targets.RunStatusEnabled,
+				eventType: incidents.EventTargetResumed,
+				summary:   "目标运行已恢复",
+			}, nil
+		}
+	case "archive":
+		if currentStatus == targets.RunStatusArchived {
+			return targetTransitionSpec{runStatus: targets.RunStatusArchived, noChange: true}, nil
+		}
+		if currentStatus == targets.RunStatusEnabled || currentStatus == targets.RunStatusMaintenance || currentStatus == targets.RunStatusPaused {
+			return targetTransitionSpec{
+				runStatus: targets.RunStatusArchived,
+				eventType: incidents.EventTargetArchived,
+				summary:   "目标已归档",
+			}, nil
+		}
+	case "restore_to_paused":
+		if currentStatus == targets.RunStatusArchived {
+			return targetTransitionSpec{
+				runStatus: targets.RunStatusPaused,
+				eventType: incidents.EventTargetRestoredToPaused,
+				summary:   "目标已恢复到暂停",
+			}, nil
+		}
+	}
+	return targetTransitionSpec{}, fmt.Errorf("%w: action %q cannot transition from run status %q", ErrInvalidTargetRuntimeTransition, action, currentStatus)
+}
+
+func targetLifecycleDigestState(record targets.TargetRecord) []string {
+	state, _ := json.Marshal(struct {
+		Name                              string   `json:"name"`
+		TargetType                        string   `json:"target_type"`
+		Host                              string   `json:"host"`
+		BasePort                          *int     `json:"base_port"`
+		ExecutionMonitoringInstanceLabels []string `json:"execution_monitoring_instance_labels"`
+		RunStatus                         string   `json:"run_status"`
+		Group                             string   `json:"group"`
+		Labels                            []string `json:"labels"`
+		Note                              string   `json:"note"`
+	}{
+		Name:                              record.Name,
+		TargetType:                        record.TargetType,
+		Host:                              record.Host,
+		BasePort:                          record.BasePort,
+		ExecutionMonitoringInstanceLabels: record.ExecutionMonitoringInstanceLabels,
+		RunStatus:                         record.RunStatus,
+		Group:                             record.Group,
+		Labels:                            record.Labels,
+		Note:                              record.Note,
+	})
+	return []string{string(state)}
+}
+
+func loadTargetLifecycleReviewTx(ctx context.Context, tx pgx.Tx, targetID string) (targets.TargetRecord, []assetlinks.DependencyImpact, string, error) {
+	record, err := scanTarget(tx.QueryRow(ctx, `
+		select `+targetSelectColumns+`
+		from targets
+		where target_id = $1`, targetID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return targets.TargetRecord{}, nil, "", targets.ErrTargetNotFound
+	}
 	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("begin set target maintenance transaction for %q: %w", targetID, err)
+		return targets.TargetRecord{}, nil, "", fmt.Errorf("load target lifecycle review for %q: %w", targetID, err)
+	}
+
+	impacts, err := loadAssetDependencyImpacts(ctx, tx, nil, []string{targetID})
+	if err != nil {
+		return targets.TargetRecord{}, nil, "", err
+	}
+	digest := digestAssetManagementReview(assetlifecycle.ObjectTypeTarget, targetID, targetLifecycleDigestState(record), impacts)
+	return record, impacts, digest, nil
+}
+
+func requireTargetLifecycleConfirmation(impacts []assetlinks.DependencyImpact, expectedDigest string, input assetlinks.GlobalActionConfirmation) error {
+	if err := requireSharedAssetConfirmation(impacts, expectedDigest, input); err != nil {
+		return err
+	}
+	if strings.TrimSpace(input.PreviewDigest) == "" || !input.ConfirmSharedImpact {
+		for _, impact := range impacts {
+			if impact.Classification == assetlinks.DependencyNeedsConfirmation {
+				return assetlifecycle.ErrSharedImpactConfirmationRequired
+			}
+		}
+	}
+	return nil
+}
+
+func (r *PostgresTargetRepository) runTargetLifecycleAction(ctx context.Context, targetID, action string, confirmations ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error) {
+	if len(confirmations) > 1 {
+		return targets.TargetRecord{}, fmt.Errorf("%w: at most one confirmation is allowed", ErrInvalidTargetRuntimeAction)
+	}
+	var confirmation assetlinks.GlobalActionConfirmation
+	if len(confirmations) == 1 {
+		confirmation = confirmations[0]
+	}
+
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("begin target %s transaction for %q: %w", action, targetID, err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	current, impacts, digest, err := loadTargetLifecycleReviewTx(ctx, tx, targetID)
+	if err != nil {
+		return targets.TargetRecord{}, err
+	}
+	spec, err := targetTransitionFor(current.RunStatus, action)
+	if err != nil {
+		return targets.TargetRecord{}, err
+	}
+	if spec.noChange {
+		if strings.TrimSpace(confirmation.PreviewDigest) != "" {
+			confirmation.ConfirmSharedImpact = true
+			err = requireSharedAssetConfirmation(impacts, digest, confirmation)
+		}
+	} else {
+		err = requireTargetLifecycleConfirmation(impacts, digest, confirmation)
+	}
+	if err != nil {
+		return targets.TargetRecord{}, err
+	}
+
+	record, _, err := transitionTargetTx(ctx, tx, targetID, action)
+	if err != nil {
+		return targets.TargetRecord{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("commit target %s transaction for %q: %w", action, targetID, err)
+	}
+	return record, nil
+}
+
+func transitionTargetTx(ctx context.Context, tx pgx.Tx, targetID, action string) (targets.TargetRecord, bool, error) {
+	if !validTargetRuntimeAction(action) {
+		return targets.TargetRecord{}, false, fmt.Errorf("%w: %q", ErrInvalidTargetRuntimeAction, action)
+	}
+
+	current, err := scanTarget(tx.QueryRow(ctx, `
+		select `+targetSelectColumns+`
+		from targets
+		where target_id = $1
+		for update`, targetID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return targets.TargetRecord{}, false, targets.ErrTargetNotFound
+	}
+	if err != nil {
+		return targets.TargetRecord{}, false, fmt.Errorf("lock target %q for %s: %w", targetID, action, err)
+	}
+
+	spec, err := targetTransitionFor(current.RunStatus, action)
+	if err != nil {
+		return targets.TargetRecord{}, false, err
+	}
+	if spec.noChange {
+		return current, false, nil
+	}
 
 	record, err := scanTarget(tx.QueryRow(ctx, `
 		update targets
-		set run_status = '维护中',
+		set run_status = $2,
 			updated_at = now()
 		where target_id = $1
-			and run_status = '启用'
+			and run_status = $3
 		returning `+targetSelectColumns,
 		targetID,
+		spec.runStatus,
+		current.RunStatus,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
-		exists, existsErr := r.targetExists(ctx, targetID)
-		if existsErr != nil {
-			return targets.TargetRecord{}, fmt.Errorf("set target maintenance for %q: %w", targetID, existsErr)
-		}
-		if !exists {
-			return targets.TargetRecord{}, fmt.Errorf("%w: target %q", targets.ErrTargetNotFound, targetID)
-		}
-		return targets.TargetRecord{}, fmt.Errorf("%w: target %q cannot enter maintenance from current run status", ErrInvalidTargetRuntimeTransition, targetID)
+		return targets.TargetRecord{}, false, fmt.Errorf("%w: target %q changed run status during %s", ErrInvalidTargetRuntimeTransition, targetID, action)
 	}
 	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("set target maintenance for %q: %w", targetID, err)
+		return targets.TargetRecord{}, false, fmt.Errorf("update target %q for %s: %w", targetID, action, err)
 	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetMaintenanceEntered, "目标运行已进入维护", targets.RunStatusEnabled, monitoringEventProvenanceWeb); err != nil {
-		return targets.TargetRecord{}, err
+	if err := insertTargetRuntimeEvent(ctx, tx, record, spec.eventType, spec.summary, current.RunStatus, monitoringEventProvenanceWeb); err != nil {
+		return targets.TargetRecord{}, false, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("commit set target maintenance for %q: %w", targetID, err)
-	}
-	return record, nil
+	return record, true, nil
 }
 
-func (r *PostgresTargetRepository) PauseTargetRun(ctx context.Context, targetID string) (targets.TargetRecord, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("begin pause target transaction for %q: %w", targetID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	record, previousStatus, err := scanTargetWithPreviousRunStatus(tx.QueryRow(ctx, `
-		with prior as (
-			select run_status
-			from targets
-			where target_id = $1
-			for update
-		),
-		updated as (
-			update targets
-			set run_status = '暂停',
-				updated_at = now()
-			where target_id = $1
-				and run_status in ('启用', '维护中')
-				and run_status = (select run_status from prior)
-			returning *
-		)
-		select `+qualifiedTargetSelectColumns("updated")+`, prior.run_status
-		from updated
-		join prior on true`,
-		targetID,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		exists, existsErr := r.targetExists(ctx, targetID)
-		if existsErr != nil {
-			return targets.TargetRecord{}, fmt.Errorf("pause target %q: %w", targetID, existsErr)
-		}
-		if !exists {
-			return targets.TargetRecord{}, fmt.Errorf("%w: target %q", targets.ErrTargetNotFound, targetID)
-		}
-		return targets.TargetRecord{}, fmt.Errorf("%w: target %q cannot pause from current run status", ErrInvalidTargetRuntimeTransition, targetID)
-	}
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("pause target %q: %w", targetID, err)
-	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetPaused, "目标运行已暂停", previousStatus, monitoringEventProvenanceWeb); err != nil {
-		return targets.TargetRecord{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("commit pause target %q: %w", targetID, err)
-	}
-	return record, nil
+func (r *PostgresTargetRepository) SetTargetMaintenance(ctx context.Context, targetID string, confirmation ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error) {
+	return r.runTargetLifecycleAction(ctx, targetID, "maintenance", confirmation...)
 }
 
-func (r *PostgresTargetRepository) ResumeTargetRun(ctx context.Context, targetID string) (targets.TargetRecord, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("begin resume target transaction for %q: %w", targetID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	record, previousStatus, err := scanTargetWithPreviousRunStatus(tx.QueryRow(ctx, `
-		with prior as (
-			select run_status
-			from targets
-			where target_id = $1
-			for update
-		),
-		updated as (
-			update targets
-			set run_status = '启用',
-				updated_at = now()
-			where target_id = $1
-				and run_status in ('维护中', '暂停')
-				and run_status = (select run_status from prior)
-			returning *
-		)
-		select `+qualifiedTargetSelectColumns("updated")+`, prior.run_status
-		from updated
-		join prior on true`,
-		targetID,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		exists, existsErr := r.targetExists(ctx, targetID)
-		if existsErr != nil {
-			return targets.TargetRecord{}, fmt.Errorf("resume target %q: %w", targetID, existsErr)
-		}
-		if !exists {
-			return targets.TargetRecord{}, fmt.Errorf("%w: target %q", targets.ErrTargetNotFound, targetID)
-		}
-		return targets.TargetRecord{}, fmt.Errorf("%w: target %q cannot resume from current run status", ErrInvalidTargetRuntimeTransition, targetID)
-	}
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("resume target %q: %w", targetID, err)
-	}
-
-	eventType := incidents.EventTargetResumed
-	summary := "目标运行已恢复"
-	if previousStatus == targets.RunStatusMaintenance {
-		eventType = incidents.EventTargetMaintenanceExited
-		summary = "目标运行已退出维护"
-	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, eventType, summary, previousStatus, monitoringEventProvenanceWeb); err != nil {
-		return targets.TargetRecord{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("commit resume target %q: %w", targetID, err)
-	}
-	return record, nil
+func (r *PostgresTargetRepository) PauseTargetRun(ctx context.Context, targetID string, confirmation ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error) {
+	return r.runTargetLifecycleAction(ctx, targetID, "pause", confirmation...)
 }
 
-func (r *PostgresTargetRepository) ArchiveTarget(ctx context.Context, targetID string) (targets.TargetRecord, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("begin archive target transaction for %q: %w", targetID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	record, previousStatus, err := scanTargetWithPreviousRunStatus(tx.QueryRow(ctx, `
-		with prior as (
-			select run_status
-			from targets
-			where target_id = $1
-			for update
-		),
-		updated as (
-			update targets
-			set run_status = '已归档',
-				updated_at = now()
-			where target_id = $1
-				and run_status in ('启用', '维护中', '暂停')
-				and run_status = (select run_status from prior)
-			returning *
-		)
-		select `+qualifiedTargetSelectColumns("updated")+`, prior.run_status
-		from updated
-		join prior on true`,
-		targetID,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		exists, existsErr := r.targetExists(ctx, targetID)
-		if existsErr != nil {
-			return targets.TargetRecord{}, fmt.Errorf("archive target %q: %w", targetID, existsErr)
-		}
-		if !exists {
-			return targets.TargetRecord{}, fmt.Errorf("%w: target %q", targets.ErrTargetNotFound, targetID)
-		}
-		return targets.TargetRecord{}, fmt.Errorf("%w: target %q cannot archive from current run status", ErrInvalidTargetRuntimeTransition, targetID)
-	}
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("archive target %q: %w", targetID, err)
-	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetArchived, "目标已归档", previousStatus, monitoringEventProvenanceWeb); err != nil {
-		return targets.TargetRecord{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("commit archive target %q: %w", targetID, err)
-	}
-	return record, nil
+func (r *PostgresTargetRepository) ResumeTargetRun(ctx context.Context, targetID string, confirmation ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error) {
+	return r.runTargetLifecycleAction(ctx, targetID, "resume", confirmation...)
 }
 
-func (r *PostgresTargetRepository) RestoreArchivedTargetToPaused(ctx context.Context, targetID string) (targets.TargetRecord, error) {
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("begin restore archived target transaction for %q: %w", targetID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
+func (r *PostgresTargetRepository) ArchiveTarget(ctx context.Context, targetID string, confirmation ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error) {
+	return r.runTargetLifecycleAction(ctx, targetID, "archive", confirmation...)
+}
 
-	record, err := scanTarget(tx.QueryRow(ctx, `
-		update targets
-		set run_status = '暂停',
-			updated_at = now()
-		where target_id = $1
-			and run_status = '已归档'
-		returning `+targetSelectColumns,
-		targetID,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		exists, existsErr := r.targetExists(ctx, targetID)
-		if existsErr != nil {
-			return targets.TargetRecord{}, fmt.Errorf("restore archived target %q: %w", targetID, existsErr)
-		}
-		if !exists {
-			return targets.TargetRecord{}, fmt.Errorf("%w: target %q", targets.ErrTargetNotFound, targetID)
-		}
-		return targets.TargetRecord{}, fmt.Errorf("%w: target %q cannot restore to paused from current run status", ErrInvalidTargetRuntimeTransition, targetID)
-	}
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("restore archived target %q: %w", targetID, err)
-	}
-	if err := insertTargetRuntimeEvent(ctx, tx, record, incidents.EventTargetRestoredToPaused, "目标已恢复到暂停", targets.RunStatusArchived, monitoringEventProvenanceWeb); err != nil {
-		return targets.TargetRecord{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("commit restore archived target %q: %w", targetID, err)
-	}
-	return record, nil
+func (r *PostgresTargetRepository) RestoreArchivedTargetToPaused(ctx context.Context, targetID string, confirmation ...assetlinks.GlobalActionConfirmation) (targets.TargetRecord, error) {
+	return r.runTargetLifecycleAction(ctx, targetID, "restore_to_paused", confirmation...)
 }
 
 func (r *PostgresTargetRepository) ListProbeItems(ctx context.Context, targetID string) ([]targets.ProbeItemRecord, error) {

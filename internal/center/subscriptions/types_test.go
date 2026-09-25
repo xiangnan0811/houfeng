@@ -135,6 +135,102 @@ func TestPatchInputPresenceNormalizationAndDates(t *testing.T) {
 	}
 }
 
+func TestNormalizePatchInputDoesNotInferRenewalModeFromMissingLegacyFlags(t *testing.T) {
+	input := NormalizePatchInput(PatchInput{
+		AutoRenewCancelled: PatchBool(true),
+	})
+
+	if input.RenewalMode.Set {
+		t.Fatalf("RenewalMode = %#v, want unset without current subscription context", input.RenewalMode)
+	}
+	if input.AutoRenew.Set {
+		t.Fatalf("AutoRenew = %#v, want omitted field to remain omitted", input.AutoRenew)
+	}
+	if !input.AutoRenewCancelled.Set || !input.AutoRenewCancelled.Value {
+		t.Fatalf("AutoRenewCancelled = %#v, want explicit true", input.AutoRenewCancelled)
+	}
+}
+
+func TestNormalizePatchAgainstRecordPreservesNonLegacyRenewalSources(t *testing.T) {
+	for _, mode := range []string{"gift", "lottery", "bonus", "other"} {
+		t.Run(mode, func(t *testing.T) {
+			input := NormalizePatchAgainstRecord(Record{
+				RenewalMode: mode,
+			}, PatchInput{
+				AutoRenewCancelled: PatchBool(true),
+			})
+
+			if input.RenewalMode.Set {
+				t.Fatalf("RenewalMode = %#v, want source mode untouched", input.RenewalMode)
+			}
+			if !input.AutoRenew.Set || input.AutoRenew.Value {
+				t.Fatalf("AutoRenew = %#v, want false", input.AutoRenew)
+			}
+			if !input.AutoRenewCancelled.Set || input.AutoRenewCancelled.Value {
+				t.Fatalf("AutoRenewCancelled = %#v, want false", input.AutoRenewCancelled)
+			}
+		})
+	}
+}
+
+func TestNormalizePatchAgainstRecordMergesOmittedLegacyFlagsFromCurrent(t *testing.T) {
+	tests := []struct {
+		name       string
+		current    Record
+		patch      PatchInput
+		wantMode   string
+		wantAuto   bool
+		wantCancel bool
+	}{
+		{
+			name:     "auto with partial cancellation",
+			current:  Record{RenewalMode: "auto", AutoRenew: true},
+			patch:    PatchInput{AutoRenewCancelled: PatchBool(true)},
+			wantMode: "auto_cancelled", wantCancel: true,
+		},
+		{
+			name:     "manual with partial auto enable",
+			current:  Record{RenewalMode: "manual"},
+			patch:    PatchInput{AutoRenew: PatchBool(true)},
+			wantMode: "auto", wantAuto: true,
+		},
+		{
+			name:     "auto cancelled with partial cancellation clear",
+			current:  Record{RenewalMode: "auto_cancelled", AutoRenewCancelled: true},
+			patch:    PatchInput{AutoRenewCancelled: PatchBool(false)},
+			wantMode: "manual",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := NormalizePatchAgainstRecord(tt.current, tt.patch)
+			if !input.RenewalMode.Set || input.RenewalMode.Value != tt.wantMode {
+				t.Fatalf("RenewalMode = %#v, want %q", input.RenewalMode, tt.wantMode)
+			}
+			if !input.AutoRenew.Set || input.AutoRenew.Value != tt.wantAuto {
+				t.Fatalf("AutoRenew = %#v, want %t", input.AutoRenew, tt.wantAuto)
+			}
+			if !input.AutoRenewCancelled.Set || input.AutoRenewCancelled.Value != tt.wantCancel {
+				t.Fatalf("AutoRenewCancelled = %#v, want %t", input.AutoRenewCancelled, tt.wantCancel)
+			}
+		})
+	}
+}
+
+func TestNormalizePatchAgainstRecordAllowsExplicitRenewalSourceChange(t *testing.T) {
+	input := NormalizePatchAgainstRecord(Record{RenewalMode: "gift"}, PatchInput{
+		RenewalMode: PatchString(" auto "),
+	})
+
+	if !input.RenewalMode.Set || input.RenewalMode.Value != "auto" {
+		t.Fatalf("RenewalMode = %#v, want explicit auto source change", input.RenewalMode)
+	}
+	if !input.AutoRenew.Set || !input.AutoRenew.Value || !input.AutoRenewCancelled.Set || input.AutoRenewCancelled.Value {
+		t.Fatalf("legacy flags = %#v/%#v, want true/false for explicit auto mode", input.AutoRenew, input.AutoRenewCancelled)
+	}
+}
+
 func TestValidatePatchInputRejectsInvalidValues(t *testing.T) {
 	tests := []struct {
 		name  string

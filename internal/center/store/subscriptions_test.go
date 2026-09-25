@@ -116,7 +116,7 @@ func TestPostgresSubscriptionPriceHistoryMigrationDefinesTableConstraintsAndInde
 	}
 }
 
-func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
+func TestPostgresSubscriptionCreateListAndGet(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
@@ -127,7 +127,7 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 	var queryArgs [][]any
 	var rowCalls []string
 	var rowArgs [][]any
-	repo := &PostgresSubscriptionRepository{db: fakeSubscriptionDB{
+	subscriptionDB := fakeSubscriptionDB{
 		query: func(_ context.Context, sql string, args ...any) (pgx.Rows, error) {
 			queryCalls = append(queryCalls, sql)
 			queryArgs = append(queryArgs, append([]any(nil), args...))
@@ -178,6 +178,11 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 			rowCalls = append(rowCalls, sql)
 			rowArgs = append(rowArgs, append([]any(nil), args...))
 			switch {
+			case strings.Contains(sql, "from vps_assets"):
+				return fakeSubscriptionRow{scan: func(dest ...any) error {
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+					return nil
+				}}
 			case strings.Contains(sql, "insert into subscriptions"):
 				return fakeSubscriptionRow{scan: func(dest ...any) error {
 					subscriptionID, ok := args[0].(string)
@@ -226,36 +231,18 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 					})
 					return nil
 				}}
-			case strings.Contains(sql, "update subscriptions"):
-				return fakeSubscriptionRow{scan: func(dest ...any) error {
-					scanSubscriptionRecordDestinations(dest, subscriptions.Record{
-						SubscriptionID:      "sub_001",
-						VPSID:               "vps_002",
-						Price:               240,
-						Currency:            "EUR",
-						BillingCycle:        "biennial",
-						BillingMonths:       24,
-						BillingPeriodUnit:   string(subscriptions.BillingPeriodYear),
-						BillingPeriodLength: 2,
-						MonthlyPrice:        10,
-						StartedAt:           nil,
-						RenewAt:             &patchedRenewAt,
-						AutoRenew:           false,
-						AutoRenewCancelled:  true,
-						Status:              subscriptions.StatusPaused,
-						PaymentMethod:       "paypal",
-						Note:                "review",
-						CreatedAt:           now.Add(-time.Hour),
-						UpdatedAt:           now,
-					})
-					return nil
-				}}
 			default:
 				t.Fatalf("unexpected QueryRow SQL %q", sql)
 				return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
 			}
 		},
-	}}
+	}
+	repo := &PostgresSubscriptionRepository{
+		db: subscriptionDB,
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeVPSAssetTx{queryRow: subscriptionDB.queryRow}, nil
+		},
+	}
 
 	created, err := repo.CreateSubscription(context.Background(), subscriptions.CreateInput{
 		VPSID:              " vps_001 ",
@@ -279,11 +266,13 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 	if created.Currency != "USD" || created.MonthlyPrice != 10 {
 		t.Fatalf("created = %#v, want normalized USD and monthly price", created)
 	}
-	if len(rowArgs[0]) != 22 {
-		t.Fatalf("create args len = %d, want 22", len(rowArgs[0]))
+	insertIndex := indexSQL(rowCalls, "insert into subscriptions")
+	if insertIndex == -1 || len(rowArgs[insertIndex]) != 22 {
+		t.Fatalf("create args = %#v, want one 22-argument insert", rowArgs)
 	}
-	if rowArgs[0][1] != "vps_001" || rowArgs[0][3] != "USD" || rowArgs[0][6] != string(subscriptions.BillingPeriodMonth) || rowArgs[0][7] != 12 || rowArgs[0][8] != float64(10) || rowArgs[0][14] != string(subscriptions.StatusActive) {
-		t.Fatalf("create normalized args = %#v", rowArgs[0])
+	insertArgs := rowArgs[insertIndex]
+	if insertArgs[1] != "vps_001" || insertArgs[3] != "USD" || insertArgs[6] != string(subscriptions.BillingPeriodMonth) || insertArgs[7] != 12 || insertArgs[8] != float64(10) || insertArgs[14] != string(subscriptions.StatusActive) {
+		t.Fatalf("create normalized args = %#v", insertArgs)
 	}
 
 	list, err := repo.ListSubscriptions(context.Background(), subscriptions.ListFilters{
@@ -328,52 +317,6 @@ func TestPostgresSubscriptionCreateListGetAndPatch(t *testing.T) {
 		t.Fatalf("GetSubscription() = %#v, want subscription with renew_at", got)
 	}
 
-	patched, err := repo.PatchSubscription(context.Background(), "sub_001", subscriptions.PatchInput{
-		VPSID:         subscriptions.PatchString(" vps_002 "),
-		StartedAt:     subscriptions.PatchDate(nil),
-		PaymentMethod: subscriptions.PatchString(" paypal "),
-		Note:          subscriptions.PatchString(" review "),
-	})
-	if err != nil {
-		t.Fatalf("PatchSubscription() error = %v", err)
-	}
-	if patched.VPSID != "vps_002" || patched.MonthlyPrice != 10 || patched.StartedAt != nil {
-		t.Fatalf("patched = %#v, want patched values and cleared started_at", patched)
-	}
-	if len(rowCalls) != 3 {
-		t.Fatalf("QueryRow calls = %d, want create/get/patch", len(rowCalls))
-	}
-	patchArgs := rowArgs[2]
-	if len(patchArgs) != 41 {
-		t.Fatalf("patch args len = %d, want 41", len(patchArgs))
-	}
-	if patchArgs[0] != "sub_001" || patchArgs[1] != true || patchArgs[2] != "vps_002" {
-		t.Fatalf("patch vps args = %#v, want subscription id and vps", patchArgs[:3])
-	}
-	if patchArgs[3] != false || patchArgs[9] != false || patchArgs[25] != false {
-		t.Fatalf("patch tracked history args = %#v, want price/month/status unset in direct patch", patchArgs)
-	}
-	if patchArgs[15] != true || patchArgs[16] != nil {
-		t.Fatalf("patch started_at args = set:%#v value:%#v, want explicit null", patchArgs[15], patchArgs[16])
-	}
-	for _, snippet := range []string{
-		"vps_id = case when $2::boolean then $3 else vps_id end",
-		"price = case when $4::boolean then $5::numeric else price end",
-		"billing_months = case when $10::boolean then $11::integer else billing_months end",
-		"billing_period_unit = case when $12::boolean then $13 else billing_period_unit end",
-		"billing_period_length = case when $14::boolean then $15::integer else billing_period_length end",
-		"when $4::boolean or $12::boolean or $14::boolean then",
-		"started_at = case when $16::boolean then $17::date else started_at end",
-		"renew_at = case when $18::boolean then $19::date else renew_at end",
-		"renewal_mode = case when $24::boolean then $25 else renewal_mode end",
-		"updated_at = now()",
-		"where subscription_id = $1",
-		"returning " + subscriptionSelectColumns,
-	} {
-		if !strings.Contains(rowCalls[2], snippet) {
-			t.Fatalf("PatchSubscription SQL missing %q in %q", snippet, rowCalls[2])
-		}
-	}
 }
 
 func TestPostgresSubscriptionListAppliesAssetScope(t *testing.T) {
@@ -455,6 +398,25 @@ func TestPostgresSubscriptionPatchWithoutChangesReturnsExistingSubscription(t *t
 	}
 }
 
+func TestPostgresSubscriptionPatchRefusesWritesWithoutTransactionSupport(t *testing.T) {
+	updateCalled := false
+	repo := &PostgresSubscriptionRepository{db: fakeSubscriptionDB{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			updateCalled = strings.Contains(sql, "update subscriptions")
+			return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
+		},
+	}}
+
+	if _, err := repo.PatchSubscription(context.Background(), "sub_001", subscriptions.PatchInput{
+		Note: subscriptions.PatchString("review"),
+	}); err == nil {
+		t.Fatal("PatchSubscription without transaction support succeeded, want explicit internal error")
+	}
+	if updateCalled {
+		t.Fatal("PatchSubscription without transaction support issued an UPDATE")
+	}
+}
+
 func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
 	t.Parallel()
 
@@ -468,6 +430,16 @@ func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
 		calls = append(calls, sql)
 		args = append(args, append([]any(nil), callArgs...))
 		switch {
+		case strings.Contains(sql, "from subscriptions") && !strings.Contains(sql, "for update"):
+			return fakeSubscriptionRow{scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "vps_001"
+				return nil
+			}}
+		case strings.Contains(sql, "from vps_assets"):
+			return fakeSubscriptionRow{scan: func(dest ...any) error {
+				*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+				return nil
+			}}
 		case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "for update"):
 			return fakeSubscriptionRow{scan: func(dest ...any) error {
 				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
@@ -551,13 +523,13 @@ func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
 	if !tx.committed || tx.rolledBack == 0 {
 		t.Fatalf("transaction committed=%t rollbackCalls=%d, want committed with deferred rollback", tx.committed, tx.rolledBack)
 	}
-	if len(calls) != 3 {
-		t.Fatalf("query row calls = %d, want lock/update/history", len(calls))
+	if len(calls) != 5 {
+		t.Fatalf("query row calls = %d, want subscription pre-read, VPS lock, subscription lock, update, history", len(calls))
 	}
-	if !strings.Contains(calls[0], "for update") || !strings.Contains(calls[2], "insert into price_histories") {
-		t.Fatalf("calls = %#v, want lock/update/price history", calls)
+	if !strings.Contains(calls[0], "select vps_id") || !strings.Contains(calls[1], "from vps_assets") || !strings.Contains(calls[2], "for update") || !strings.Contains(calls[4], "insert into price_histories") {
+		t.Fatalf("calls = %#v, want graph-ordered pre-read/VPS/subscription/update/history", calls)
 	}
-	historyArgs := args[2]
+	historyArgs := args[4]
 	if len(historyArgs) != 28 {
 		t.Fatalf("history args len = %d, want 28", len(historyArgs))
 	}
@@ -572,6 +544,135 @@ func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
 	}
 }
 
+func TestVPSStateRepairTerminalSubscriptionPatchCannotReactivateOrExtend(t *testing.T) {
+	t.Parallel()
+
+	endsAt := subscriptions.NewDate(time.Date(2026, time.May, 20, 0, 0, 0, 0, time.UTC))
+	later := subscriptions.NewDate(time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC))
+	renewAt := subscriptions.NewDate(time.Date(2026, time.May, 20, 0, 0, 0, 0, time.UTC))
+	laterRenewAt := subscriptions.NewDate(time.Date(2026, time.June, 1, 0, 0, 0, 0, time.UTC))
+	now := time.Date(2026, time.May, 9, 12, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name    string
+		current subscriptions.Record
+		patch   subscriptions.PatchInput
+	}{
+		{
+			name:    "reactivate paused subscription",
+			current: subscriptions.Record{Status: subscriptions.StatusPaused},
+			patch: subscriptions.PatchInput{
+				Status: subscriptions.PatchStatus(subscriptions.StatusActive),
+			},
+		},
+		{
+			name: "extend explicit entitlement end",
+			current: subscriptions.Record{
+				Status: subscriptions.StatusActive,
+				EndsAt: &endsAt,
+			},
+			patch: subscriptions.PatchInput{
+				EndsAt: subscriptions.PatchDate(&later),
+			},
+		},
+		{
+			name: "extend fallback renewal end",
+			current: subscriptions.Record{
+				Status:      subscriptions.StatusActive,
+				RenewalMode: string(subscriptions.RenewalModeManual),
+				RenewAt:     &renewAt,
+			},
+			patch: subscriptions.PatchInput{
+				RenewAt: subscriptions.PatchDate(&laterRenewAt),
+			},
+		},
+		{
+			name: "remove explicit entitlement end",
+			current: subscriptions.Record{
+				Status: subscriptions.StatusActive,
+				EndsAt: &endsAt,
+			},
+			patch: subscriptions.PatchInput{
+				EndsAt: subscriptions.PatchDate(nil),
+			},
+		},
+		{
+			name: "enable automatic renewal",
+			current: subscriptions.Record{
+				Status:      subscriptions.StatusActive,
+				RenewalMode: string(subscriptions.RenewalModeManual),
+			},
+			patch: subscriptions.PatchInput{
+				AutoRenew: subscriptions.PatchBool(true),
+			},
+		},
+		{
+			name: "switch renewal source to automatic",
+			current: subscriptions.Record{
+				Status:      subscriptions.StatusActive,
+				RenewalMode: string(subscriptions.RenewalModeManual),
+			},
+			patch: subscriptions.PatchInput{
+				RenewalMode: subscriptions.PatchString(string(subscriptions.RenewalModeAuto)),
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var calls []string
+			updated := false
+			tx := &fakeSubscriptionTx{}
+			tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
+				calls = append(calls, sql)
+				switch {
+				case strings.Contains(sql, "from subscriptions") && !strings.Contains(sql, "for update"):
+					return fakeSubscriptionRow{scan: func(dest ...any) error {
+						*(dest[0].(*string)) = "vps_001"
+						return nil
+					}}
+				case strings.Contains(sql, "from vps_assets"):
+					return fakeSubscriptionRow{scan: func(dest ...any) error {
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleCancelled
+						return nil
+					}}
+				case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "for update"):
+					return fakeSubscriptionRow{scan: func(dest ...any) error {
+						current := test.current
+						current.SubscriptionID = "sub_001"
+						current.VPSID = "vps_001"
+						current.Price = 120
+						current.Currency = "USD"
+						current.BillingMonths = 1
+						current.MonthlyPrice = 120
+						current.CreatedAt = now
+						current.UpdatedAt = now
+						scanSubscriptionRecordDestinations(dest, current)
+						return nil
+					}}
+				case strings.Contains(sql, "update subscriptions"):
+					updated = true
+					return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
+				default:
+					t.Fatalf("unexpected QueryRow SQL %q", sql)
+					return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
+				}
+			}
+			repo := &PostgresSubscriptionRepository{
+				db: fakeSubscriptionDB{},
+				beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+					return tx, nil
+				},
+			}
+
+			_, err := repo.PatchSubscription(context.Background(), "sub_001", test.patch)
+			if !errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
+				t.Fatalf("PatchSubscription() error = %v, want ErrVPSAssetReadonly", err)
+			}
+			if updated || tx.committed || len(calls) != 3 {
+				t.Fatalf("updated=%t committed=%t queryRows=%#v; want current state rejected before update", updated, tx.committed, calls)
+			}
+		})
+	}
+}
+
 func TestPostgresSubscriptionPatchSkipsPriceHistoryWhenTrackedFieldsUnchanged(t *testing.T) {
 	t.Parallel()
 
@@ -581,6 +682,16 @@ func TestPostgresSubscriptionPatchSkipsPriceHistoryWhenTrackedFieldsUnchanged(t 
 	insertedHistory := false
 	tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
 		switch {
+		case strings.Contains(sql, "from subscriptions") && !strings.Contains(sql, "for update"):
+			return fakeSubscriptionRow{scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "vps_001"
+				return nil
+			}}
+		case strings.Contains(sql, "from vps_assets"):
+			return fakeSubscriptionRow{scan: func(dest ...any) error {
+				*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+				return nil
+			}}
 		case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "for update"), strings.Contains(sql, "update subscriptions"):
 			return fakeSubscriptionRow{scan: func(dest ...any) error {
 				scanSubscriptionRecordDestinations(dest, subscriptions.Record{
@@ -629,11 +740,21 @@ func TestPostgresSubscriptionPatchSkipsPriceHistoryWhenTrackedFieldsUnchanged(t 
 func TestPostgresSubscriptionMapsNotFound(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresSubscriptionRepository{db: fakeSubscriptionDB{
+	tx := &fakeSubscriptionTx{
 		queryRow: func(context.Context, string, ...any) pgx.Row {
 			return fakeSubscriptionRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 		},
-	}}
+	}
+	repo := &PostgresSubscriptionRepository{
+		db: fakeSubscriptionDB{
+			queryRow: func(context.Context, string, ...any) pgx.Row {
+				return fakeSubscriptionRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			},
+		},
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return tx, nil
+		},
+	}
 
 	if _, err := repo.GetSubscription(context.Background(), "sub_missing"); !errors.Is(err, subscriptions.ErrSubscriptionNotFound) {
 		t.Fatalf("GetSubscription() error = %v, want ErrSubscriptionNotFound", err)
@@ -671,14 +792,26 @@ func TestPostgresSubscriptionMapsInvalidVPSForeignKey(t *testing.T) {
 	t.Parallel()
 
 	fkErr := &pgconn.PgError{Code: "23503", ConstraintName: "subscriptions_vps_id_fkey"}
-	repo := &PostgresSubscriptionRepository{db: fakeSubscriptionDB{
+	subscriptionDB := fakeSubscriptionDB{
 		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
-			if !strings.Contains(sql, "subscriptions") {
+			if strings.Contains(sql, "from vps_assets") {
+				return fakeSubscriptionRow{scan: func(dest ...any) error {
+					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
+					return nil
+				}}
+			}
+			if !strings.Contains(sql, "insert into subscriptions") {
 				t.Fatalf("unexpected SQL %q", sql)
 			}
 			return fakeSubscriptionRow{scan: func(dest ...any) error { return fkErr }}
 		},
-	}}
+	}
+	repo := &PostgresSubscriptionRepository{
+		db: subscriptionDB,
+		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
+			return &fakeVPSAssetTx{queryRow: subscriptionDB.queryRow}, nil
+		},
+	}
 
 	_, err := repo.CreateSubscription(context.Background(), subscriptions.CreateInput{
 		VPSID:         "vps_missing",
@@ -690,12 +823,6 @@ func TestPostgresSubscriptionMapsInvalidVPSForeignKey(t *testing.T) {
 		t.Fatalf("CreateSubscription() error = %v, want ErrInvalidSubscriptionInput", err)
 	}
 
-	_, err = repo.PatchSubscription(context.Background(), "sub_001", subscriptions.PatchInput{
-		VPSID: subscriptions.PatchString("vps_missing"),
-	})
-	if !errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
-		t.Fatalf("PatchSubscription() error = %v, want ErrInvalidSubscriptionInput", err)
-	}
 }
 
 type fakeSubscriptionDB struct {

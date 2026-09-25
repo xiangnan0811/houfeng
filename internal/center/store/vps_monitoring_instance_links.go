@@ -56,20 +56,28 @@ func scanVPSMonitoringInstanceLink(row vpsMonitoringInstanceLinkScanner) (assetl
 	return record, nil
 }
 
-func lockVPSAndRejectActiveMonitoringLink(ctx context.Context, tx pgx.Tx, vpsID string) error {
-	var lockedVPSID string
-	if err := tx.QueryRow(ctx, `
-		select vps_id
-		from vps_assets
-		where vps_id = $1
-		for update`,
-		vpsID,
-	).Scan(&lockedVPSID); errors.Is(err, pgx.ErrNoRows) {
+func lockVPSAndRejectActiveMonitoringLink(ctx context.Context, tx pgx.Tx, vpsID, monitoringInstanceID string) error {
+	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, vpsID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return assetlinks.ErrVPSMonitoringInstanceLinkNotFound
-	} else if err != nil {
+	}
+	if err != nil {
 		return fmt.Errorf("lock vps %q before monitoring instance link write: %w", vpsID, err)
 	}
+	if isTerminalVPSLifecycle(lifecycle) {
+		return fmt.Errorf("%w: terminal vps %q cannot accept a monitoring instance link", assetlinks.ErrVPSMonitoringInstanceLinkConflict, vpsID)
+	}
 
+	miLifecycle, archivedAt, err := lockMonitoringInstanceForAssetLink(ctx, tx, monitoringInstanceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return assetlinks.ErrVPSMonitoringInstanceLinkNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock monitoring instance %q before vps link write: %w", monitoringInstanceID, err)
+	}
+	if err := ensureMonitoringInstanceCanBeLinked(monitoringInstanceID, miLifecycle, archivedAt); err != nil {
+		return err
+	}
 	return rejectActiveMonitoringLink(ctx, tx, vpsID)
 }
 
@@ -96,15 +104,13 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) LinkMonitoringInstance(ctx
 		return assetlinks.Record{}, err
 	}
 
-	tx, err := r.db.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
 	if err != nil {
 		return assetlinks.Record{}, fmt.Errorf("begin vps monitoring instance link transaction for vps %q: %w", vpsID, err)
 	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := lockVPSAndRejectActiveMonitoringLink(ctx, tx, vpsID); err != nil {
+	if err := lockVPSAndRejectActiveMonitoringLink(ctx, tx, vpsID, input.MonitoringInstanceID); err != nil {
 		return assetlinks.Record{}, err
 	}
 
@@ -146,7 +152,19 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) UnlinkMonitoringInstance(c
 		return assetlinks.Record{}, err
 	}
 
-	record, err := scanVPSMonitoringInstanceLink(r.db.QueryRow(ctx, `
+	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
+	if err != nil {
+		return assetlinks.Record{}, fmt.Errorf("begin vps monitoring instance unlink transaction for vps %q: %w", vpsID, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := lockAssetVPSLifecycle(ctx, tx, vpsID); errors.Is(err, pgx.ErrNoRows) {
+		return assetlinks.Record{}, assetlinks.ErrVPSMonitoringInstanceLinkNotFound
+	} else if err != nil {
+		return assetlinks.Record{}, fmt.Errorf("lock vps %q before monitoring instance unlink: %w", vpsID, err)
+	}
+
+	record, err := scanVPSMonitoringInstanceLink(tx.QueryRow(ctx, `
 		update vps_monitoring_instance_links
 		set unlinked_at = now(),
 		    note = case when $3 <> '' then $3 else note end
@@ -164,6 +182,9 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) UnlinkMonitoringInstance(c
 	if err != nil {
 		return assetlinks.Record{}, fmt.Errorf("unlink vps %q from monitoring instance %q: %w", vpsID, input.MonitoringInstanceID, err)
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return assetlinks.Record{}, fmt.Errorf("commit vps monitoring instance unlink transaction for vps %q: %w", vpsID, err)
+	}
 	return record, nil
 }
 
@@ -177,6 +198,7 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) ListMonitoringInstancesFor
 			n.city,
 			n.provider,
 			n.lifecycle_status,
+			n.archived_at,
 			n.monitoring_status,
 			n.binding_status,
 			n.current_health_status,
@@ -207,6 +229,7 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) ListMonitoringInstancesFor
 			&summary.City,
 			&summary.Provider,
 			&summary.LifecycleStatus,
+			&summary.ArchivedAt,
 			&summary.MonitoringStatus,
 			&summary.BindingStatus,
 			&summary.CurrentHealthStatus,

@@ -336,6 +336,7 @@ export function VPSOverviewRelationPanels({
               ? () => {}
               : (onOpenDomainCreate ?? (() => management.openPanel('domain'))),
             onRetryServices: handleRetryServices,
+            onChanged: () => setLoadRevision((current) => current + 1),
           }}
         />
       ) : null}
@@ -380,6 +381,7 @@ type RenderPanelOptions = {
   onOpenServiceCreate: () => void
   onOpenDomainCreate: () => void
   onRetryServices?: (() => void) | undefined
+  onChanged: () => void
 }
 
 function RenderPanel({
@@ -417,6 +419,7 @@ function RenderPanel({
           notice={null}
           readOnly={options.readOnly}
           onCreate={options.onOpenServiceCreate}
+          onChanged={options.onChanged}
         />
       )
     case 'domains-detail':
@@ -429,6 +432,7 @@ function RenderPanel({
           readOnly={options.readOnly}
           onCreate={options.onOpenDomainCreate}
           {...(options.onRetryServices ? { onRetryServices: options.onRetryServices } : {})}
+          onChanged={options.onChanged}
         />
       )
   }
