@@ -23,14 +23,14 @@
 
 - `center_runtime`、`platform_admin` 与 migrator 是三个预创建、两两不同、直接认证的 `LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS` role。三者的直接与递归 membership 均为空；migration 与 runtime admission 都证明 `session_user == current_user`。`SET ROLE`、复用 owner、role membership、default ACL 或共享 login 都不能满足该合同。
 - source/fragment compiler 必须在 `BeginTx` 前拒绝 missing/extra/duplicate fragment、duplicate object/privilege、unknown subject、unmanaged privilege/function hardening，以及新 function 缺少 exact hardening。每个 fragment 的 `Privileges(databaseName)` callback 只在 source compile 时用固定验证数据库占位符求值一次；结果、fragment input 和 nested function config 都必须 defensive-copy。后续 catalog compile 只能复制已物化 privilege template，并替换 `database` tuple 的占位符，不能再次调用 callback。
-- current convergence 只接受 fresh current genesis、五个发布起点与各自 exact target repeat：`[P62]`、`[P63]`、`[P64]` 追加 C67 为 revision 2；`[P62,P63]`、`[P62,P64]` 追加 C67 为 revision 3。P62 是独立 v0.79.4 golden 绑定的 `0062`；P63 是 `2cda12e874b9f9cd4431f477566b72c2d2a5e414`（v0.79.6）发布源码的 compiler 独立导出的 source/privilege golden，止于 `0063`；P64 是基线 `5422f939`（v0.80.2）独立 source/privilege golden 的 `0064`。P63/P64 genesis 允许发布版合法的自定义角色和数据库。P62 待执行 `0063…0067`，P63 待执行 `0064…0067`，P64 待执行 `0065…0067`。每项历史 manifest 按其 profile 与原绑定验证，不以 persisted 权限作为授权来源。禁止任意 prefix、未知 checksum、null-head adoption、额外 revision、未发布的 `[P63,P64]` 链或旧未发布 `0066` 候选接管。
-- Writer 保持单个 `SERIALIZABLE` transaction、advisory/ledger lock 与整体 serialization retry：先验旧 source/manifest/ledger/catalog，再业务 preflight、pending SQL、复读 ledger、业务后置验证、current revoke-first DCL、current catalog、追加 revision/CAS head、完整复读后 commit。失败整体回滚 schema、ACL、ledger、manifest/head；漂移不能由 DCL 自动修复。target exact repeat 不执行 SQL/DCL/manifest 写入。P62 保留 heartbeat 3→12/custom 不变语义；P63/P64 不重跑 `0063`。`0067` 只接受没有旧 VPS/监控/服务/域名/Target/订阅业务数据的部署，已注册 predecessor 身份不等于数据转换支持。
+- current convergence 只接受 fresh current genesis、四个发布起点与七个已注册发布 profile chain，并分别接受 exact C67 target repeat：`[P62]`、`[P63]`、`[P64]`、`[P66]` 追加 C67 为 revision 2；`[P62,P63]`、`[P62,P64]`、`[P62,P66]`、`[P64,P66]`、`[P63,P66]` 追加 C67 为 revision 3；`[P62,P64,P66]`、`[P62,P63,P66]` 追加 C67 为 revision 4。P62 是独立 v0.79.4 golden 绑定的 `0062`；P63 是 `2cda12e874b9f9cd4431f477566b72c2d2a5e414`（v0.79.6）发布源码 compiler 独立导出的 source/privilege golden，止于 `0063`；P64 是基线 `5422f939`（v0.80.2）独立 source/privilege golden 的 `0064`；P66 是 v0.80.3/v0.80.4 共用发布 profile 的 source/privilege golden，由 v0.80.4 release compiler 独立导出并止于 `0066`，与真实部署 rev3 的 sorted migration-set digest `64d48ce1…`、privilege-set digest `4ac0c84e…` 一致。P63/P64/P66 genesis 允许发布版合法的自定义角色和数据库。P62 待执行 `0063…0067`，P63 待执行 `0064…0067`，P64 待执行 `0065…0067`，P66 待执行 `0067`；P66 的 heartbeat/incident 默认值与 `0065` runtime UPDATE 已按该发布 profile 生效，从 P66 到 current 仅 pending `0067` lifecycle privilege delta，settings 只执行 exact `0067` transform。每项历史 manifest 按其 profile 与原绑定验证，不以 persisted 权限作为授权来源。禁止任意 prefix、未知 checksum、null-head adoption、额外 revision、未发布的 `[P63,P64]` 链或未发布 `0066` 候选接管。
+- Writer 保持单个 `SERIALIZABLE` transaction、advisory/ledger lock 与整体 serialization retry：先验旧 source/manifest/ledger/catalog，再业务 preflight、pending SQL、复读 ledger、业务后置验证、current revoke-first DCL、current catalog、追加 revision/CAS head、完整复读后 commit。失败整体回滚 schema、ACL、ledger、manifest/head；漂移不能由 DCL 自动修复。target exact repeat 不执行 SQL/DCL/manifest 写入。P62 保留 heartbeat 3→12/custom 不变语义；P63/P64/P66 不重跑 `0063`。P66 只执行 `0067` 生命周期迁移及其 exact settings transform，heartbeat/incident 默认值与其余设置保持不变。`0067` 只接受没有旧 VPS/监控/服务/域名/Target/订阅业务数据的部署，已注册 predecessor 身份不等于数据转换支持。
 - `0067` 的 settings 白名单变换为：retention 删除 event/notification days，设置 raw=30、aggregate=365；IPQuality 删除 raw/history days；其余字段保持原逻辑值。不得扩大为任意 settings 修复或修改冻结历史。
 - current catalog 以冻结 r1 base（当前为 **204** ACL tuple）加 ordered fragment object/privilege/function hardening 编译。`public.record_platform_cas_contract_activation_projection(bytea)` 与 `public.record_platform_cas_domain_rotation_projection(bytea)` 仍是 migrator-owned、`SECURITY DEFINER`、唯一 `bytea` overload、`search_path=pg_catalog` 且显式 revoke `PUBLIC`。
 - production `0052` fragment 的九张 Records core table、hardened function 与 29 个精确 privilege tuple 保持不变；`0065` 的两个 runtime 表级 UPDATE 保留，`0066` 为空。`0067` 为 monitoring_agent_sessions、receiver_health、vps_followups、asset_service_associations、asset_domain_associations、vps_maintenance_actions 注册 runtime SELECT/INSERT/UPDATE；agent_live_signals、vps_archive_requests、monitoring_instance_lifecycle_receipts、vps_maintenance_effects 只注册 SELECT/INSERT。两个 ownership/session invoker trigger 注册 exact hardening，不给 runtime 直接 EXECUTE。不能授予任意 DELETE、Records content 读取或 immutable history UPDATE。
 - admission 只验证 compiled migration-owned surface：database、managed schema、relation/view/sequence/function、ledger/manifest、role attributes/membership、owner、direct/effective/column/default ACL 和 function hardening。current convergence 的 placement、fresh-state 与 legacy-ledger companion-object preflight 均以完整 `(schema, object identity)` tuple 检查 relation/function；不同 managed schema 可声明同名对象，无关 schema 中的同名 relation、同名 function 或其他 overload 也不属于 managed tuple。冻结 R1 的历史裸名称 shadow rejection 保持不变。managed private schema 内 unknown object 仍是 drift；无关 schema/object 与 unrelated-owner default ACL 必须接受。
 - PostgreSQL 16 `pgcrypto` 必须安装在 `record_platform_internal`；若 extension 已在其他 schema 则 fail closed。extension-member procedure 按 OID 识别，并对普通 managed owner/direct/effective/function reader 保持 opaque，因为受限 migrator 不能可靠改写 bootstrap-owned member ACL。opacity 绝不产生 reachability：`PUBLIC`、runtime、admin 对 `record_platform_internal` 都没有 `USAGE` 或 `CREATE`；同一 admission snapshot 还会拒绝同时具有 schema `USAGE` 与 function `EXECUTE` 的 reachable opaque member。migrator-owned helper/projector 仍必须显式 revoke `PUBLIC`。
-- `AdmitAppACLCurrentRuntime` 精确开启一个 `REPEATABLE READ READ ONLY` transaction。先识别并验证完整已注册链；旧 P62/P63/P64 起点返回需要 successor convergence 的 typed 拒绝，仅 C67 终点再比较 current privileges 并验证 catalog。它不执行 DDL/DCL、不调用 writer、不读取 migrator 凭据；失败时 center/importer 关闭 pool，不得回退到 owner migration 或 warning-only dry-run。
+- `AdmitAppACLCurrentRuntime` 精确开启一个 `REPEATABLE READ READ ONLY` transaction。先识别并验证完整已注册链；旧 P62/P63/P64/P66 起点返回需要 successor convergence 的 typed 拒绝，仅 C67 终点再比较 current privileges 并验证 catalog。它不执行 DDL/DCL、不调用 writer、不读取 migrator 凭据；失败时 center/importer 关闭 pool，不得回退到 owner migration 或 warning-only dry-run。
 
 ### 4. Validation & Error Matrix
 
@@ -47,9 +47,9 @@
 | exact current：source/manifest/catalog 全匹配 | migrate 与 runtime 都成功；repeat 前后 durable snapshot 深相等。 |
 | applied/manifest source 数量、filename 或 raw-byte checksum 不同 | `errors.Is(err, ErrDevelopmentDatabaseRebuildRequired)`；catalog read 与所有 durable write 为 0。 |
 | nullable historical head、未注册 predecessor 或未知 successor revision | rebuild-required；不得 generic-adopt、repair 或读取 catalog。 |
-| 注册 P62/P63/P64 发布起点且无旧业务数据 | 旧 catalog 先验，按 exact suffix 升级、事务 DCL、revision 2/3 追加与 head CAS；任一阶段失败整体回滚。runtime 只拒绝，不自行升级。 |
-| 存在需转换的旧 VPS/监控/服务/域名/Target/订阅数据 | 0067 明确拒绝；不猜测状态、不删数据、不改变原 ledger/manifest/catalog |
-| 注册 revision 2/3 exact C67 successor | convergence/runtime 均只读验证成功；repeat 前后 durable snapshot 深相等。 |
+| 注册的 P62/P63/P64/P66 发布起点或上述精确 profile chain，且无旧业务数据 | 旧 catalog 先验，按 exact suffix 升级、事务 DCL、revision 2/3/4 追加与 head CAS；任一阶段失败整体回滚。runtime 只拒绝，不自行升级。 |
+| 存在需转换的旧 VPS/监控/服务/域名/Target/订阅数据 | `0067` 因 `requires a fresh installation` 明确拒绝；不猜测状态、不删数据、不改变原 ledger/manifest/catalog。 |
+| 注册 revision 2/3/4 exact C67 successor | convergence/runtime 均只读验证成功；repeat 前后 durable snapshot 深相等。 |
 | malformed manifest chain、exact-source catalog/owner/ACL/function drift | 返回具体 fail-closed corruption/catalog error；不得误标为 rebuild-required。 |
 | 任一 role 不是不同的直接 constrained `LOGIN NOINHERIT` role，具有 direct/recursive membership，或 `session_user != current_user` | 在 scoped migration/admission 前 fail closed。`SET ROLE` runtime snapshot 精确拒绝为 `session user %q does not match current user %q`。 |
 | current compiler output 与 persisted privileges 不同，或 runtime/admin 取得未编译 privilege | catalog/manifest drift，拒绝。runtime/admin 对 base projector 的 direct call 返回 SQLSTATE `42501`。 |
@@ -65,7 +65,7 @@
 
 - Good：两个 flag 都关闭时保留 legacy migration；records-on/delete-off 时 direct migrator fresh converge exact current，direct runtime 在 repository 打开前通过 current one-snapshot admission。
 - Base：当前 embedded set 是冻结 52-source r1 prefix 加 `0052…0067` 共 16 个 exact fragments；fresh convergence 写入 current revision-1 genesis，exact repeat 和 direct runtime admission 均不改 durable state。
-- Good：独立 P62/P63/P64 profile 验证后沿五个明确起点升级至 C67，旧 catalog、业务变更与新 catalog 全部成功才发布后继；repeat 只读。
+- Good：独立 P62/P63/P64/P66 profile 验证后沿十一个明确起点/链升级至 C67；P66 pending 仅为 `0067`，旧 catalog、业务变更与新 catalog 全部成功才发布后继；repeat 只读。
 - Good：未来 child 同 PR 添加 `0053+` SQL 与 exact fragment；compiler 在 transaction 前证明一一覆盖，fresh database 自动消费新 source 与 catalog contract。
 - Good：binary 已嵌入 `0052+`，strict R2 PostgreSQL anchor 中的 R1 fixture 仍可调用 frozen `AdmitAppACLRuntime`；admission 只消费 validated R1 prefix，而 current admission 独立消费完整 current set。
 - Good：fragment callback 在 source compile 返回 privilege slice 后，调用方修改 captured slice 或 callback 自身状态；current catalog 仍使用首次物化的深拷贝结果，callback 不会再次执行。
@@ -96,7 +96,14 @@
     -run '^TestPostgresIntegrationAppACLCurrent' -count=1
   ```
 
-  断言 fresh + direct runtime、空业务数据库的五个发布起点升级至 C67 revision 2/3、target repeat、P64 自定义数据库/角色、历史 manifest 字节不变；P62 heartbeat 默认变换与 custom/override 保留，所有 profile 仅允许已声明 retention/IPQuality settings 变换。含旧业务数据的测试独立断言拒绝且零业务删除。覆盖 0063 exact index、0065/0066 历史约束、0067 所有权/会话/当前实例唯一约束与运行角色权限。错误 index/default/settings/catalog 漂移零写；DCL 与 manifest/head 故障证明事务完整回滚；repeat 深相等，wrapper 不得含 SKIP。
+  完成下列聚焦 package 检查：
+
+  ```bash
+  go test ./internal/center/store/migrate -count=1
+  go vet ./internal/center/store/migrate
+  ```
+
+  断言 fresh + direct runtime、P62/P63/P64/P66 release profile genesis 与已声明的 PostgreSQL predecessor chains、target repeat、P64/P66 自定义数据库/角色、历史 manifest 字节不变；P66 genesis 升级为 revision 2 并链接原 P66 digest，runtime 在升级前拒绝、升级后通过，repeat 深相等。PostgreSQL integration 还复现真实发布链 `[P62,P63,P66]`：从 P66 revision 3 升至 revision 4，successor 链接 P66 digest、历史前缀不变、runtime reject-before/admit-after 且 exact repeat 深相等。`[P62,P66]`、`[P64,P66]`、`[P62,P64,P66]`、`[P63,P66]` 的 predecessor 与 C67 successor 分类由 `TestClassifyAppACLCurrentManifestShapeRegisteredChains` 以独立枚举的 manifest 历史覆盖，不从生产 accepted-chain 表派生。P62 heartbeat 默认变换与 custom/override 保留，所有 profile 仅允许已声明 retention/IPQuality settings 变换。含旧业务数据的测试独立断言 `0067` 因 requires a fresh installation 拒绝且零业务删除。覆盖 0063 exact index、0065/0066 历史约束、0067 所有权/会话/当前实例唯一约束与运行角色权限。错误 index/default/settings/catalog 漂移零写；P66 lifecycle-fragment grant 部分执行、完整 DCL 与 manifest/head 故障证明事务完整回滚。
   生命周期与 retention 集成用当前 `ConvergeAppACLCurrent` 和 `AdmitAppACLCurrentRuntime`，不能以冻结 R1 fixture 代替。覆盖原子归档、重复退役拒绝、关联历史、健康观察、可信在线、保留边界及 runtime 越权拒绝。
 - Frozen regression：完整 migrate package run 必须保留 `ConvergeAppACLR1` null-head adoption、`AdmitAppACLRuntime` one-snapshot，以及 isolated R2 bootstrap/finalize/runtime suites；current product caller 不得路由到它们。strict `TestPostgresIntegrationAppACLR2` 的 R1 reader/runtime subtest 必须在 binary 已嵌入 `0052+` 时实际调用 `AdmitAppACLRuntime` 并通过，不能只测 injected verifier 或 zero-test compile。
 - Full gate 与 static writer audit：

@@ -33,6 +33,10 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 		{name: "P63 suffix preserves heartbeat policy", transition: appACLCurrentTransition{
 			successor: migrationSourceSnapshot{names: p62Transition.successor.names[1:]},
 		}, want: false},
+		{name: "P66 lifecycle-only suffix preserves heartbeat policy", transition: appACLCurrentTransition{
+			successor: migrationSourceSnapshot{names: []string{"0067_refactor_vps_monitoring_lifecycle.sql"}},
+		}, want: false},
+		{name: "empty successor suffix is rejected", transition: appACLCurrentTransition{}, wantError: true},
 		{
 			name: "incomplete successor suffix is rejected",
 			transition: appACLCurrentTransition{

@@ -224,10 +224,15 @@ func validateHeartbeatAppACLCurrentTransition(transition appACLCurrentTransition
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
 	// 0067 changes the fresh-install lifecycle contract, not the heartbeat policy.
+	lifecyclePending := false
 	if n := len(transition.successor.names); n > 0 && transition.successor.names[n-1] == "0067_refactor_vps_monitoring_lifecycle.sql" {
 		transition.successor.names = transition.successor.names[:n-1]
+		lifecyclePending = true
 	}
 	switch {
+	case len(transition.successor.names) == 0 && lifecyclePending:
+		// P66 already contains 0063 and only has the lifecycle refactor pending.
+		return false, nil
 	case len(transition.successor.names) == 4 &&
 		transition.successor.names[0] == "0063_tune_heartbeat_incident_policy.sql" &&
 		transition.successor.names[1] == "0064_add_network_rates_valid.sql" &&

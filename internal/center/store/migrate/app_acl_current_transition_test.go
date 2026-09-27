@@ -24,8 +24,8 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 	if err != nil {
 		t.Fatalf("compileAppACLCurrentTransitions() error = %v", err)
 	}
-	if len(transitions) != 3 {
-		t.Fatalf("compiled transition count = %d, want the P62, P64 and P63 profiles", len(transitions))
+	if len(transitions) != 4 {
+		t.Fatalf("compiled transition count = %d, want the P62, P64, P63 and P66 profiles", len(transitions))
 	}
 	p63 := transitions[2]
 	if p63.profile != appACLCurrentProfileP63 || len(p63.predecessor.sources.names) != 64 ||
@@ -33,6 +33,13 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		!bytes.Equal(p63.predecessorPrivilegeBody, appACLCurrentV0796PrivilegeGolden) ||
 		!equalStringSlices(p63.successor.names, []string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql", "0067_refactor_vps_monitoring_lifecycle.sql"}) {
 		t.Fatal("compiled P63 profile differs from independent v0.79.6 release goldens or expected suffix")
+	}
+	p66 := transitions[3]
+	if p66.profile != appACLCurrentProfileP66 || len(p66.predecessor.sources.names) != 67 ||
+		!bytes.Equal(p66.predecessor.sources.canonicalSet, appACLCurrentV0804MigrationGolden) ||
+		!bytes.Equal(p66.predecessorPrivilegeBody, appACLCurrentV0804PrivilegeGolden) ||
+		!equalStringSlices(p66.successor.names, []string{"0067_refactor_vps_monitoring_lifecycle.sql"}) {
+		t.Fatal("compiled P66 profile differs from independent v0.80.4 release goldens or expected suffix")
 	}
 
 	p62, p64 := transitions[0], transitions[1]
@@ -176,8 +183,8 @@ func TestAppACLCurrentTransitionCompilerRejectsInvalidDefinitions(t *testing.T) 
 func TestAppACLCurrentTransitionCompilerRejectsUnapprovedPrivilegeDelta(t *testing.T) {
 	t.Run("additional grant", func(t *testing.T) {
 		fragments := cloneAppACLCurrentMigrationFragmentsForTransitionTest(appACLCurrentMigrationFragments)
-		originalPrivileges := fragments[len(fragments)-2].Privileges
-		fragments[len(fragments)-2].Privileges = func(databaseName string) []AppACLPrivilege {
+		originalPrivileges := fragments[len(fragments)-1].Privileges
+		fragments[len(fragments)-1].Privileges = func(databaseName string) []AppACLPrivilege {
 			privileges := originalPrivileges(databaseName)
 			return append(privileges, AppACLPrivilege{
 				Subject:        AppACLSubjectCenterRuntime,
@@ -221,7 +228,7 @@ func TestAppACLCurrentTransitionCompilerRejectsUnapprovedPrivilegeDelta(t *testi
 		if !removed {
 			t.Fatal("current source has no migration-fragment privileges to remove")
 		}
-		if err := validateAppACLCurrentTransitionPrivilegeDelta(transitions[1].predecessorPrivilegeBody, modified); err == nil || !strings.Contains(strings.ToLower(err.Error()), "removes") {
+		if err := validateAppACLCurrentTransitionPrivilegeDelta(transitions[1].predecessorPrivilegeBody, modified, true); err == nil || !strings.Contains(strings.ToLower(err.Error()), "removes") {
 			t.Fatalf("validateAppACLCurrentTransitionPrivilegeDelta() error = %v, want privilege-removal rejection", err)
 		}
 	})
