@@ -39,6 +39,15 @@ var appACLCurrentV0796MigrationGolden []byte
 //go:embed testdata/app_acl_current_v0.79.6_privileges.v1.bin
 var appACLCurrentV0796PrivilegeGolden []byte
 
+// Exported from the v0.80.4 release compiler, independently of current sources.
+// v0.80.3 and v0.80.4 embed the same migration and privilege contract.
+//
+//go:embed testdata/app_acl_current_v0.80.4_migrations.v1.bin
+var appACLCurrentV0804MigrationGolden []byte
+
+//go:embed testdata/app_acl_current_v0.80.4_privileges.v1.bin
+var appACLCurrentV0804PrivilegeGolden []byte
+
 var appACLCurrentV0794ManifestDigestGolden = func() [32]byte {
 	var digest [32]byte
 	copy(digest[:], appACLCurrentV0794ManifestDigestGoldenBytes)
@@ -51,6 +60,7 @@ const (
 	appACLCurrentProfileP62 appACLCurrentProfileID = iota + 1
 	appACLCurrentProfileP64
 	appACLCurrentProfileP63
+	appACLCurrentProfileP66
 )
 
 type appACLCurrentTransitionDefinition struct {
@@ -108,6 +118,15 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 		predecessorMigrationGolden: appACLCurrentV0796MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0796PrivilegeGolden,
 	},
+	{
+		profile:                  appACLCurrentProfileP66,
+		predecessorLastMigration: "0066_constrain_monitoring_and_target_state_values.sql",
+		successorMigrations: []string{
+			"0067_refactor_vps_monitoring_lifecycle.sql",
+		},
+		predecessorMigrationGolden: appACLCurrentV0804MigrationGolden,
+		predecessorPrivilegeGolden: appACLCurrentV0804PrivilegeGolden,
+	},
 }
 
 var appACLCurrentAcceptedPredecessorProfileChains = [][]appACLCurrentProfileID{
@@ -116,6 +135,12 @@ var appACLCurrentAcceptedPredecessorProfileChains = [][]appACLCurrentProfileID{
 	{appACLCurrentProfileP62, appACLCurrentProfileP64},
 	{appACLCurrentProfileP63},
 	{appACLCurrentProfileP62, appACLCurrentProfileP63},
+	{appACLCurrentProfileP66},
+	{appACLCurrentProfileP62, appACLCurrentProfileP66},
+	{appACLCurrentProfileP64, appACLCurrentProfileP66},
+	{appACLCurrentProfileP62, appACLCurrentProfileP64, appACLCurrentProfileP66},
+	{appACLCurrentProfileP63, appACLCurrentProfileP66},
+	{appACLCurrentProfileP62, appACLCurrentProfileP63, appACLCurrentProfileP66},
 }
 
 func cloneAppACLCurrentTransitionDefinitions(source []appACLCurrentTransitionDefinition) []appACLCurrentTransitionDefinition {
@@ -137,14 +162,15 @@ func compileAppACLCurrentTransitions(
 	if len(definitions) == 0 {
 		return nil, fmt.Errorf("current APP ACL transition registry has no definitions")
 	}
-	if len(definitions) != 3 {
-		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64 and P63 profiles")
+	if len(definitions) != 4 {
+		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64, P63 and P66 profiles")
 	}
 	expectedDefinitions := appACLCurrentTransitionDefinitions
 	compiled := make([]appACLCurrentTransition, 0, len(definitions))
 	claimedProfiles := make(map[appACLCurrentProfileID]struct{}, len(definitions))
 	for index, definition := range cloneAppACLCurrentTransitionDefinitions(definitions) {
-		if definition.profile != appACLCurrentProfileP62 && definition.profile != appACLCurrentProfileP64 && definition.profile != appACLCurrentProfileP63 {
+		if definition.profile != appACLCurrentProfileP62 && definition.profile != appACLCurrentProfileP64 &&
+			definition.profile != appACLCurrentProfileP63 && definition.profile != appACLCurrentProfileP66 {
 			return nil, fmt.Errorf("current APP ACL transition %d has unknown predecessor profile", index)
 		}
 		if _, duplicate := claimedProfiles[definition.profile]; duplicate {
@@ -179,12 +205,17 @@ func compileAppACLCurrentTransitions(
 		}
 		compiled = append(compiled, transition)
 	}
-	for _, transition := range compiled[1:] {
+	// P62/P64/P63 predate 0065, so they share one privilege body and still
+	// need its two runtime UPDATE grants. P66 already carries them.
+	for _, transition := range compiled[1:3] {
 		if !bytes.Equal(compiled[0].predecessorPrivilegeBody, transition.predecessorPrivilegeBody) {
 			return nil, fmt.Errorf("registered P62, P64 and P63 privilege profiles differ")
 		}
 	}
-	if err := validateAppACLCurrentTransitionPrivilegeDelta(compiled[1].predecessorPrivilegeBody, current); err != nil {
+	if err := validateAppACLCurrentTransitionPrivilegeDelta(compiled[1].predecessorPrivilegeBody, current, true); err != nil {
+		return nil, err
+	}
+	if err := validateAppACLCurrentTransitionPrivilegeDelta(compiled[3].predecessorPrivilegeBody, current, false); err != nil {
 		return nil, err
 	}
 	return compiled, nil
@@ -223,7 +254,7 @@ func compileAppACLCurrentTransition(
 		return appACLCurrentTransition{}, fmt.Errorf("P62 predecessor manifest digest golden has invalid length")
 	}
 	if definition.profile != appACLCurrentProfileP62 && len(definition.predecessorManifestDigestGolden) != 0 {
-		return appACLCurrentTransition{}, fmt.Errorf("P63/P64 predecessor must support role-bound manifest identities")
+		return appACLCurrentTransition{}, fmt.Errorf("P63/P64/P66 predecessor must support role-bound manifest identities")
 	}
 	manifest, err := NewAppACLManifestPersistedV1(1, appACLCurrentTransitionMigrator, [32]byte{}, predecessor.sources.canonicalSet, predecessorPrivileges)
 	if err != nil {
@@ -242,7 +273,11 @@ func compileAppACLCurrentTransition(
 	}, nil
 }
 
-func validateAppACLCurrentTransitionPrivilegeDelta(predecessorPrivilegeBody []byte, current appACLCurrentSourceContract) error {
+func validateAppACLCurrentTransitionPrivilegeDelta(
+	predecessorPrivilegeBody []byte,
+	current appACLCurrentSourceContract,
+	stateCorrectionUpdatesPending bool,
+) error {
 	oldSet, err := ParseCanonicalPrivilegeSetBodyV1(predecessorPrivilegeBody)
 	if err != nil {
 		return fmt.Errorf("parse registered APP predecessor privileges: %w", err)
@@ -277,21 +312,17 @@ func validateAppACLCurrentTransitionPrivilegeDelta(predecessorPrivilegeBody []by
 			additions[privilege] = struct{}{}
 		}
 	}
-	expectedAdditions := map[AppACLPrivilege]struct{}{
-		{
-			Subject:        AppACLSubjectCenterRuntime,
-			ObjectClass:    AppACLObjectClassTable,
-			SchemaName:     appACLManagedPublicSchemaR1,
-			ObjectIdentity: "asset_services",
-			Privilege:      AppACLPrivilegeUpdate,
-		}: {},
-		{
-			Subject:        AppACLSubjectCenterRuntime,
-			ObjectClass:    AppACLObjectClassTable,
-			SchemaName:     appACLManagedPublicSchemaR1,
-			ObjectIdentity: "asset_domains",
-			Privilege:      AppACLPrivilegeUpdate,
-		}: {},
+	expectedAdditions := map[AppACLPrivilege]struct{}{}
+	if stateCorrectionUpdatesPending {
+		for _, table := range []string{"asset_services", "asset_domains"} {
+			expectedAdditions[AppACLPrivilege{
+				Subject:        AppACLSubjectCenterRuntime,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: table,
+				Privilege:      AppACLPrivilegeUpdate,
+			}] = struct{}{}
+		}
 	}
 	for _, privilege := range vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
 		expectedAdditions[privilege] = struct{}{}

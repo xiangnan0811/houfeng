@@ -16,7 +16,7 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p62, p64 := transitions[0], transitions[1]
+	p62, p64, p63, p66 := transitions[0], transitions[1], transitions[2], transitions[3]
 	currentPrivileges, err := appACLCurrentTransitionPrivilegeBody(current)
 	if err != nil {
 		t.Fatal(err)
@@ -24,6 +24,14 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 	p62Manifest := appACLCurrentShapeManifest(t, 1, [32]byte{}, p62.predecessor, p62.predecessorPrivilegeBody)
 	p64Manifest := appACLCurrentShapeManifest(t, 1, [32]byte{}, p64.predecessor, p64.predecessorPrivilegeBody)
 	p62P64Manifest := appACLCurrentShapeManifest(t, 2, p62Manifest.ManifestDigest, p64.predecessor, p64.predecessorPrivilegeBody)
+	p66Manifest := appACLCurrentShapeManifest(t, 1, [32]byte{}, p66.predecessor, p66.predecessorPrivilegeBody)
+	p62P63Manifest := appACLCurrentShapeManifest(t, 2, p62Manifest.ManifestDigest, p63.predecessor, p63.predecessorPrivilegeBody)
+	p62P63P66Manifest := appACLCurrentShapeManifest(t, 3, p62P63Manifest.ManifestDigest, p66.predecessor, p66.predecessorPrivilegeBody)
+	p62P66Manifest := appACLCurrentShapeManifest(t, 2, p62Manifest.ManifestDigest, p66.predecessor, p66.predecessorPrivilegeBody)
+	p64P66Manifest := appACLCurrentShapeManifest(t, 2, p64Manifest.ManifestDigest, p66.predecessor, p66.predecessorPrivilegeBody)
+	p62P64P66Manifest := appACLCurrentShapeManifest(t, 3, p62P64Manifest.ManifestDigest, p66.predecessor, p66.predecessorPrivilegeBody)
+	p63Manifest := appACLCurrentShapeManifest(t, 1, [32]byte{}, p63.predecessor, p63.predecessorPrivilegeBody)
+	p63P66Manifest := appACLCurrentShapeManifest(t, 2, p63Manifest.ManifestDigest, p66.predecessor, p66.predecessorPrivilegeBody)
 	currentGenesis, err := NewAppACLManifestPersistedV1(
 		1,
 		appACLCurrentTransitionMigrator,
@@ -37,9 +45,16 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 	p62Current := appACLCurrentShapeManifest(t, 2, p62Manifest.ManifestDigest, current, currentPrivileges)
 	p64Current := appACLCurrentShapeManifest(t, 2, p64Manifest.ManifestDigest, current, currentPrivileges)
 	p62P64Current := appACLCurrentShapeManifest(t, 3, p62P64Manifest.ManifestDigest, current, currentPrivileges)
+	p66Current := appACLCurrentShapeManifest(t, 2, p66Manifest.ManifestDigest, current, currentPrivileges)
+	p62P63P66Current := appACLCurrentShapeManifest(t, 4, p62P63P66Manifest.ManifestDigest, current, currentPrivileges)
+	p62P66Current := appACLCurrentShapeManifest(t, 3, p62P66Manifest.ManifestDigest, current, currentPrivileges)
+	p64P66Current := appACLCurrentShapeManifest(t, 3, p64P66Manifest.ManifestDigest, current, currentPrivileges)
+	p62P64P66Current := appACLCurrentShapeManifest(t, 4, p62P64P66Manifest.ManifestDigest, current, currentPrivileges)
+	p63P66Current := appACLCurrentShapeManifest(t, 3, p63P66Manifest.ManifestDigest, current, currentPrivileges)
 
 	p62Applied := appACLCurrentShapeApplied(t, p62.predecessor)
 	p64Applied := appACLCurrentShapeApplied(t, p64.predecessor)
+	p66Applied := appACLCurrentShapeApplied(t, p66.predecessor)
 	currentApplied := appACLCurrentShapeApplied(t, current)
 	for _, tc := range []struct {
 		name        string
@@ -96,6 +111,42 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 			wantKind:    appACLCurrentManifestShapeSuccessor,
 			wantProfile: appACLCurrentProfileP64,
 		},
+		{
+			name:        "P66 predecessor",
+			applied:     p66Applied,
+			manifests:   []AppACLManifestPersistedV1{p66Manifest},
+			wantKind:    appACLCurrentManifestShapePredecessor,
+			wantProfile: appACLCurrentProfileP66,
+		},
+		{
+			name:        "released P62 to P63 to P66 predecessor chain",
+			applied:     p66Applied,
+			manifests:   []AppACLManifestPersistedV1{p62Manifest, p62P63Manifest, p62P63P66Manifest},
+			wantKind:    appACLCurrentManifestShapePredecessor,
+			wantProfile: appACLCurrentProfileP66,
+		},
+		{
+			name:        "P66 successor",
+			applied:     currentApplied,
+			manifests:   []AppACLManifestPersistedV1{p66Manifest, p66Current},
+			wantKind:    appACLCurrentManifestShapeSuccessor,
+			wantProfile: appACLCurrentProfileP66,
+		},
+		{
+			name:        "four-revision P62 to P63 to P66 successor",
+			applied:     currentApplied,
+			manifests:   []AppACLManifestPersistedV1{p62Manifest, p62P63Manifest, p62P63P66Manifest, p62P63P66Current},
+			wantKind:    appACLCurrentManifestShapeSuccessor,
+			wantProfile: appACLCurrentProfileP66,
+		},
+		{name: "P62 to P66 predecessor chain", applied: p66Applied, manifests: []AppACLManifestPersistedV1{p62Manifest, p62P66Manifest}, wantKind: appACLCurrentManifestShapePredecessor, wantProfile: appACLCurrentProfileP66},
+		{name: "P62 to P66 successor", applied: currentApplied, manifests: []AppACLManifestPersistedV1{p62Manifest, p62P66Manifest, p62P66Current}, wantKind: appACLCurrentManifestShapeSuccessor, wantProfile: appACLCurrentProfileP66},
+		{name: "P64 to P66 predecessor chain", applied: p66Applied, manifests: []AppACLManifestPersistedV1{p64Manifest, p64P66Manifest}, wantKind: appACLCurrentManifestShapePredecessor, wantProfile: appACLCurrentProfileP66},
+		{name: "P64 to P66 successor", applied: currentApplied, manifests: []AppACLManifestPersistedV1{p64Manifest, p64P66Manifest, p64P66Current}, wantKind: appACLCurrentManifestShapeSuccessor, wantProfile: appACLCurrentProfileP66},
+		{name: "P62 to P64 to P66 predecessor chain", applied: p66Applied, manifests: []AppACLManifestPersistedV1{p62Manifest, p62P64Manifest, p62P64P66Manifest}, wantKind: appACLCurrentManifestShapePredecessor, wantProfile: appACLCurrentProfileP66},
+		{name: "four-revision P62 to P64 to P66 successor", applied: currentApplied, manifests: []AppACLManifestPersistedV1{p62Manifest, p62P64Manifest, p62P64P66Manifest, p62P64P66Current}, wantKind: appACLCurrentManifestShapeSuccessor, wantProfile: appACLCurrentProfileP66},
+		{name: "P63 to P66 predecessor chain", applied: p66Applied, manifests: []AppACLManifestPersistedV1{p63Manifest, p63P66Manifest}, wantKind: appACLCurrentManifestShapePredecessor, wantProfile: appACLCurrentProfileP66},
+		{name: "P63 to P66 successor", applied: currentApplied, manifests: []AppACLManifestPersistedV1{p63Manifest, p63P66Manifest, p63P66Current}, wantKind: appACLCurrentManifestShapeSuccessor, wantProfile: appACLCurrentProfileP66},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			shape, err := appACLCurrentClassifyShape(

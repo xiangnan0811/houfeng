@@ -122,6 +122,10 @@ func TestPostgresIntegrationAppACLCurrentP64TransitionRollbackCutpoints(t *testi
 
 func testAppACLCurrentReleasedTransitionRollback(t *testing.T, profile appACLCurrentReleasedPostgresProfileData, fromP62 bool) {
 	t.Helper()
+	partialDCLGrantTarget := ""
+	if names := profile.source.sources.names; len(names) > 0 && names[len(names)-1] == appACLCurrentP66LastMigration {
+		partialDCLGrantTarget = `"monitoring_agent_sessions"`
+	}
 	for _, tc := range []struct {
 		name string
 		kind string
@@ -163,7 +167,9 @@ func testAppACLCurrentReleasedTransitionRollback(t *testing.T, profile appACLCur
 					return nil, err
 				}
 				if tc.kind == "partial_dcl" {
-					dclFaultTx = &appACLCurrentSuccessorDCLFaultTx{Tx: transaction, failure: cutpoint}
+					dclFaultTx = &appACLCurrentSuccessorDCLFaultTx{
+						Tx: transaction, failure: cutpoint, lifecycleGrantTarget: partialDCLGrantTarget,
+					}
 					return dclFaultTx, nil
 				}
 				return transaction, nil
@@ -172,7 +178,7 @@ func testAppACLCurrentReleasedTransitionRollback(t *testing.T, profile appACLCur
 			manifestHeadWritten := false
 			switch tc.kind {
 			case "partial_dcl":
-				// appACLCurrentSuccessorDCLFaultTx fails after one real new UPDATE grant.
+				// Fail after one successful matching 0065 UPDATE or 0067 lifecycle grant.
 			case "after_dcl":
 				applyDCL := dependencies.applyDCL
 				dependencies.applyDCL = func(ctx context.Context, tx pgx.Tx, contract appACLEffectiveCatalogContract) error {
@@ -406,9 +412,17 @@ func appendAppACLCurrentReleasedSuccessor(
 ) (AppACLManifestPersistedV1, error) {
 	t.Helper()
 	_, privileges, input := appACLCurrentReleasedFixtureContract(t, fixture, profile)
+	profileLastMigration := ""
+	if names := profile.source.sources.names; len(names) > 0 {
+		profileLastMigration = names[len(names)-1]
+	}
+	if profileLastMigration == "" {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("released APP profile has no migrations")
+	}
+	isP66 := profileLastMigration == appACLCurrentP66LastMigration
 	tx, err := migratorDB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("begin P62-to-P64 fixture release transaction: %w", err)
+		return AppACLManifestPersistedV1{}, fmt.Errorf("begin released APP profile fixture transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	applied, err := readAppliedAppMigrationsV1(ctx, tx)
@@ -416,40 +430,105 @@ func appendAppACLCurrentReleasedSuccessor(
 		return AppACLManifestPersistedV1{}, err
 	}
 	if err := applyPendingMigrationSourcesInTx(ctx, tx, profile.source.sources, applied); err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("apply released P64 migration suffix: %w", err)
+		return AppACLManifestPersistedV1{}, fmt.Errorf("apply released APP profile migration suffix: %w", err)
 	}
 	applied, err = readAppliedAppMigrationsV1(ctx, tx)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	if err := compareAppACLCurrentMigrationEntries(profile.source.sources.canonicalSet, applied, "P64 release fixture migration ledger"); err != nil {
+	if err := compareAppACLCurrentMigrationEntries(profile.source.sources.canonicalSet, applied, "released APP profile fixture migration ledger"); err != nil {
 		return AppACLManifestPersistedV1{}, err
-	}
-	catalog, err := readAppACLEffectiveCatalogSnapshotInTx(ctx, tx, input)
-	if err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("read exact P64 release fixture catalog: %w", err)
-	}
-	if err := verifyAppACLEffectiveCatalogSnapshot(catalog, input); err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("verify exact P64 release fixture catalog: %w", err)
 	}
 	manifests, err := readAppACLManifestRevisionsV1(ctx, tx)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
-	if len(manifests) != 1 {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("P62-to-P64 fixture history has %d rows before release append, want one", len(manifests))
+	if len(manifests) == 0 {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("released APP profile fixture has no predecessor history")
 	}
-	if !bytes.Equal(manifests[0].CanonicalPrivilegeSet, privileges) {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("released P64 privilege body changes the exact P62 fixture grants")
+	for index, manifest := range manifests {
+		if manifest.ManifestRevision != uint64(index+1) {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("released APP profile fixture history revision %d has row %d", manifest.ManifestRevision, index+1)
+		}
+		if index == 0 {
+			if manifest.PreviousManifestDigest != ([32]byte{}) {
+				return AppACLManifestPersistedV1{}, fmt.Errorf("released APP profile fixture genesis has a predecessor digest")
+			}
+		} else if manifest.PreviousManifestDigest != manifests[index-1].ManifestDigest {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("released APP profile fixture revision %d is not linked to revision %d", manifest.ManifestRevision, index)
+		}
 	}
-	manifest, err := insertAppACLManifestSuccessorV1(ctx, tx, manifests[0], profile.source.sources.canonicalSet, privileges)
+	previous := manifests[len(manifests)-1]
+	if isP66 {
+		if err := validateAppACLCurrentReleasedP66PrivilegeDelta(previous.CanonicalPrivilegeSet, privileges); err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("released P66 privilege body delta: %w", err)
+		}
+		for _, table := range []string{"asset_services", "asset_domains"} {
+			statement := "grant update on table " +
+				pgx.Identifier{appACLManagedPublicSchemaR1, table}.Sanitize() +
+				" to " + pgx.Identifier{fixture.runtimeRole}.Sanitize()
+			if _, err := tx.Exec(ctx, statement); err != nil {
+				return AppACLManifestPersistedV1{}, fmt.Errorf("grant released P66 runtime UPDATE on %s: %w", table, err)
+			}
+		}
+	} else if !bytes.Equal(previous.CanonicalPrivilegeSet, privileges) {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("released profile privilege body changes the exact predecessor grants")
+	}
+	catalog, err := readAppACLEffectiveCatalogSnapshotInTx(ctx, tx, input)
 	if err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("insert released P64 fixture manifest successor: %w", err)
+		return AppACLManifestPersistedV1{}, fmt.Errorf("read exact released APP profile fixture catalog: %w", err)
+	}
+	if err := verifyAppACLEffectiveCatalogSnapshot(catalog, input); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("verify exact released APP profile fixture catalog: %w", err)
+	}
+	manifest, err := insertAppACLManifestSuccessorV1(ctx, tx, previous, profile.source.sources.canonicalSet, privileges)
+	if err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("insert released APP profile fixture manifest successor: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return AppACLManifestPersistedV1{}, fmt.Errorf("commit released P64 fixture manifest successor: %w", err)
+		return AppACLManifestPersistedV1{}, fmt.Errorf("commit released APP profile fixture manifest successor: %w", err)
 	}
 	return manifest, nil
+}
+
+func validateAppACLCurrentReleasedP66PrivilegeDelta(previousBody, p66Body []byte) error {
+	previous, err := ParseCanonicalPrivilegeSetBodyV1(previousBody)
+	if err != nil {
+		return fmt.Errorf("parse predecessor privileges: %w", err)
+	}
+	p66, err := ParseCanonicalPrivilegeSetBodyV1(p66Body)
+	if err != nil {
+		return fmt.Errorf("parse P66 privileges: %w", err)
+	}
+	if !reflect.DeepEqual(previous.RoleBindings, p66.RoleBindings) {
+		return fmt.Errorf("role bindings changed")
+	}
+	remaining := make(map[AppACLPrivilege]struct{}, len(previous.Privileges))
+	for _, privilege := range previous.Privileges {
+		remaining[privilege] = struct{}{}
+	}
+	added := make([]AppACLPrivilege, 0, 2)
+	for _, privilege := range p66.Privileges {
+		if _, exists := remaining[privilege]; exists {
+			delete(remaining, privilege)
+			continue
+		}
+		added = append(added, privilege)
+	}
+	if len(remaining) != 0 {
+		return fmt.Errorf("P66 removed predecessor privileges: %#v", remaining)
+	}
+	want, err := canonicalPrivileges([]AppACLPrivilege{
+		{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "asset_services", Privilege: AppACLPrivilegeUpdate},
+		{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "asset_domains", Privilege: AppACLPrivilegeUpdate},
+	})
+	if err != nil {
+		return fmt.Errorf("canonicalize expected 0065 UPDATE grants: %w", err)
+	}
+	if !reflect.DeepEqual(added, want) {
+		return fmt.Errorf("P66 added privileges %#v, want exactly the two 0065 runtime UPDATE grants %#v", added, want)
+	}
+	return nil
 }
 
 func assertAppACLCurrentSuccessorRejectsLegacyVPS(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
@@ -458,7 +537,7 @@ func assertAppACLCurrentSuccessorRejectsLegacyVPS(t *testing.T, ctx context.Cont
 		insert into public.vps_assets (
 		  vps_id, display_name, lifecycle_status, usage_status, renewal_decision, archived_at
 		) values (
-		  'vps_acl_successor_archive', 'P64 archived state fixture', 'archived', 'in_use', 'keep', '2025-01-02 03:04:05+00'::timestamptz
+		  'vps_acl_successor_archive', 'legacy archived state fixture', 'archived', 'unknown', 'keep', '2025-01-02 03:04:05+00'::timestamptz
 		)
 	`); err != nil {
 		t.Fatalf("seed archived VPS before current successor migrations: %v", err)
@@ -529,15 +608,20 @@ func assertAppACLCurrentManifestHistoryPrefix(t *testing.T, before, after []AppA
 
 type appACLCurrentSuccessorDCLFaultTx struct {
 	pgx.Tx
-	failure             error
-	matchingNewGrants   int
-	successfulNewGrants int
+	failure              error
+	lifecycleGrantTarget string
+	matchingNewGrants    int
+	successfulNewGrants  int
 }
 
 func (tx *appACLCurrentSuccessorDCLFaultTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	statement := strings.ToLower(strings.TrimSpace(sql))
-	if strings.HasPrefix(statement, "grant update on table ") &&
-		(strings.Contains(statement, `"asset_services"`) || strings.Contains(statement, `"asset_domains"`)) {
+	matches := strings.HasPrefix(statement, "grant update on table ") &&
+		(strings.Contains(statement, `"asset_services"`) || strings.Contains(statement, `"asset_domains"`))
+	if tx.lifecycleGrantTarget != "" {
+		matches = strings.HasPrefix(statement, "grant ") && strings.Contains(statement, tx.lifecycleGrantTarget)
+	}
+	if matches {
 		tx.matchingNewGrants++
 		if tx.matchingNewGrants == 2 {
 			return pgconn.CommandTag{}, tx.failure
