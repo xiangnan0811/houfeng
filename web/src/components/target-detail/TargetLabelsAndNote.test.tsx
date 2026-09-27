@@ -11,6 +11,7 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
     target_type: 'service',
     host: 'blog.example.com',
     execution_monitoring_instance_labels: [],
+    lifecycle_status: 'active',
     run_status: '启用',
     group: 'prod-group',
     labels: ['公开', '生产'],

@@ -13,6 +13,7 @@ function draftFixture(overrides: Partial<FactEditFormState> = {}): FactEditFormS
     providerName: 'Example',
     productName: 'VPS',
     orderRef: '',
+    acquisitionSource: '',
     country: 'JP',
     region: 'Tokyo',
     city: 'Tokyo',
@@ -24,7 +25,11 @@ function draftFixture(overrides: Partial<FactEditFormState> = {}): FactEditFormS
     sshUser: 'root',
     osName: 'Debian',
     virtualization: 'KVM',
-    usageStatus: 'in_use',
+    usageTags: '生产',
+    validityMode: 'unknown',
+    expiresAt: '',
+    autoRenewCheck: 'unchecked',
+    autoRenewCheckedAt: '',
     importance: 'high',
     labels: '',
     note: '',
@@ -68,16 +73,30 @@ describe('VPSFactsEditForm', () => {
     expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ productName: 'cx32' }))
   })
 
-  it('writes the usage enum and low/normal/high importance into the draft', () => {
+  it('accepts multiple arbitrary purposes independently of importance', () => {
     const { onDraftChange } = renderForm(draftFixture())
-    fireEvent.change(screen.getByRole('combobox', { name: '使用状态' }), {
-      target: { value: 'standby' },
+    fireEvent.change(screen.getByRole('textbox', { name: '用途' }), {
+      target: { value: '自定义应用, 备用' },
     })
-    expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ usageStatus: 'standby' }))
+    expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ usageTags: '自定义应用, 备用' }))
     fireEvent.change(screen.getByRole('combobox', { name: '重要性' }), {
       target: { value: 'low' },
     })
     expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ importance: 'low' }))
+  })
+
+  it('records provider verification without changing purpose or validity', () => {
+    const { onDraftChange } = renderForm(draftFixture({ usageTags: '自定义用途', validityMode: 'unlimited' }))
+    fireEvent.change(screen.getByRole('combobox', { name: /服务商自动续费/ }), { target: { value: 'disabled' } })
+    expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({
+      usageTags: '自定义用途', validityMode: 'unlimited', autoRenewCheck: 'disabled', autoRenewCheckedAt: expect.stringMatching(/^\d{4}-/),
+    }))
+  })
+
+  it('offers multiple purposes without replacing the existing selection', () => {
+    const { onDraftChange } = renderForm(draftFixture({ usageTags: '自定义用途' }))
+    fireEvent.click(screen.getByRole('button', { name: '备用' }))
+    expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ usageTags: '自定义用途, 备用' }))
   })
 
   it('hides IPv6 and SSH boxes until enabled and does not erase values when hiding', () => {
@@ -413,7 +432,7 @@ describe('VPSFactsEditForm', () => {
     expect(screen.getByRole('textbox', { name: 'VPS 名称' })).toBeDisabled()
     expect(screen.getByRole('combobox', { name: '国家 / 地区' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'IPv4' })).toBeDisabled()
-    expect(screen.getByRole('combobox', { name: '使用状态' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '用途' })).toBeDisabled()
     expect(screen.getByRole('checkbox', { name: '启用 IPv6' })).toBeDisabled()
     expect(screen.getByRole('checkbox', { name: '单独填写 SSH' })).toBeDisabled()
     expect(screen.getByRole('textbox', { name: 'IPv6 地址' })).toBeDisabled()

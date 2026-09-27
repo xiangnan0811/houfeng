@@ -10,15 +10,10 @@ import { MONITORING_MANAGEMENT_REVIEW_STALE_MESSAGE } from './monitoringDetailCo
 import type { FrozenDestructiveSubject, ManagementActionOutcome } from './types'
 
 
-type ManagementConfirmation = { preview_digest: string; confirm_shared_impact: boolean }
+type ManagementConfirmation = { preview_digest: string; confirm_shared_impact: boolean; idempotency_key?: string }
 type ManagementActionResult = Promise<ManagementActionOutcome | void> | ManagementActionOutcome | void
 
-type ManagementDialogAction =
-  | 'retire'
-  | 'restore-lifecycle'
-  | 'archive'
-  | 'restore-archive'
-  | 'permanent-cleanup'
+type ManagementDialogAction = 'retire'
 
 type Props = {
   monitoringInstance: MonitoringInstanceRecord
@@ -40,10 +35,6 @@ type Props = {
   confirmationResetKey?: number
   onLoadReview: (force?: boolean) => void
   onRetire: (reason: string, confirmation: ManagementConfirmation) => ManagementActionResult
-  onRestoreLifecycle: (reason: string, confirmation: ManagementConfirmation) => ManagementActionResult
-  onArchive: (reason: string, confirmationName: string, confirmation: ManagementConfirmation) => ManagementActionResult
-  onRestoreArchive: (confirmation: ManagementConfirmation) => ManagementActionResult
-  onPermanentCleanup: (reason: string, confirmationName: string, confirmation: ManagementConfirmation) => ManagementActionResult
 
 }
 
@@ -61,62 +52,15 @@ const COUNT_ITEMS: Array<{ key: keyof MonitoringInstanceManagementReview['counts
   { key: 'active_vps_link_count', label: 'VPS 关联' },
 ]
 
-function dialogCopy(action: ManagementDialogAction, displayName: string) {
-  switch (action) {
-    case 'retire':
-      return {
-        title: '退役监控实例',
-        current: '当前：实例仍在工作集内，可继续接入或采集。',
-        result: '之后：生命周期变为已退役，运行状态变为暂停。',
-        impact: '会撤销继续控制和接入所需的 token，并让 agent 后续只拿到空计划。',
-        unchanged: '不会删除历史心跳、样本、事件或关联审查信息。',
-        confirmLabel: '确认退役',
-      }
-    case 'restore-lifecycle':
-      return {
-        title: '恢复监控实例生命周期',
-        current: '当前：实例处于已退役状态。',
-        result: '之后：生命周期回到观察中，运行状态保持暂停。',
-        impact: '后续需要用户显式恢复监控或重新接入，不会自动开始采集。',
-        unchanged: '不会恢复旧 token 或待执行命令。',
-        confirmLabel: '确认恢复生命周期',
-      }
-    case 'archive':
-      return {
-        title: '归档监控实例',
-        current: `当前：${displayName} 仍在可操作工作集内。`,
-        result: '之后：实例退出默认列表，变为只读归档对象。',
-        impact: '会撤销 token、待绑定指纹和待执行动作，阻止继续接入、控制或写入观测。',
-        unchanged: '不会删除历史观测、事件、通知或审查计数。',
-        confirmLabel: '确认归档',
-      }
-    case 'restore-archive':
-      return {
-        title: '恢复归档监控实例',
-        current: '当前：实例处于归档只读状态。',
-        result: '之后：实例回到观察中 + 暂停。',
-        impact: '恢复后仍需显式恢复监控或重新接入，不会自动采集。',
-        unchanged: '不会恢复旧 token、待绑定指纹或待执行命令。',
-        confirmLabel: '确认恢复归档',
-      }
-    case 'permanent-cleanup':
-      return {
-        title: '永久清理监控实例',
-        current: `当前：${displayName} 将进入不可恢复清理流程。`,
-        result: '之后：监控实例和可删除关联记录会被删除。',
-        impact: '此操作不可撤销，只适合清理误创建的空实例或已归档且审查允许的实例。',
-        unchanged: '命令审计元数据将永久保留，可继续在全局审计页查询，且不会计入已删除关联数量；有阻塞项时后端会拒绝清理。',
-        confirmLabel: '确认永久清理',
-      }
+function dialogCopy() {
+  return {
+    title: '退役监控实例',
+    current: '当前：实例仍可接入或采集。',
+    result: '之后：生命周期变为已退役，停止采集、告警和命令。',
+    impact: '已有会话仅保留最小在线证据权限；待执行命令会被清理并保留审计。',
+    unchanged: '历史观测与接入阶段永久归属于当前 VPS。重新接入需要签发新会话。',
+    confirmLabel: '确认退役',
   }
-}
-
-function needsReason(action: ManagementDialogAction | null) {
-  return action === 'retire' || action === 'restore-lifecycle' || action === 'archive' || action === 'permanent-cleanup'
-}
-
-function needsConfirmation(action: ManagementDialogAction | null) {
-  return action === 'archive' || action === 'permanent-cleanup'
 }
 
 function freezeSubject(monitoringInstance: MonitoringInstanceRecord): FrozenDestructiveSubject {
@@ -152,10 +96,6 @@ export function MonitoringDetailManagementMenu({
   confirmationResetKey = 0,
   onLoadReview,
   onRetire,
-  onRestoreLifecycle,
-  onArchive,
-  onRestoreArchive,
-  onPermanentCleanup,
 }: Props) {
   const location = useLocation()
   const generatedId = useId()
@@ -163,22 +103,21 @@ export function MonitoringDetailManagementMenu({
   const rootRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const mountedRef = useRef(true)
+  const retireKeyRef = useRef('')
+  const submissionRef = useRef(false)
   const [open, setOpen] = useState(false)
   const [dialogAction, setDialogAction] = useState<ManagementDialogAction | null>(null)
   const [frozenSubject, setFrozenSubject] = useState<FrozenDestructiveSubject | null>(null)
   const [reason, setReason] = useState('')
-  const [confirmationName, setConfirmationName] = useState('')
   const [confirmedKey, setConfirmedKey] = useState<string | null>(null)
   const [versionError, setVersionError] = useState<string | null>(null)
   const [staleNotice, setStaleNotice] = useState<string | null>(null)
 
 
-  const archived = Boolean(monitoringInstance.archived_at)
+  const archived = Boolean(monitoringInstance.archived_at) || monitoringInstance.vps_lifecycle_status === 'archived'
   const retired = archived || monitoringInstance.lifecycle_status === '已退役'
-  const displayName = frozenSubject?.displayName ?? monitoringInstance.display_name
-  const copy = dialogAction ? dialogCopy(dialogAction, displayName) : null
-  const reasonRequired = needsReason(dialogAction)
-  const confirmationRequired = needsConfirmation(dialogAction)
+  const copy = dialogAction ? dialogCopy() : null
+  const reasonRequired = Boolean(dialogAction)
   const currentDigest = review?.preview_digest ?? ''
   const activeKey = dialogAction && currentDigest
     ? `${monitoringInstance.monitoring_instance_id}:${dialogAction}:${currentDigest}:${confirmationResetKey}`
@@ -188,9 +127,10 @@ export function MonitoringDetailManagementMenu({
   const reviewReady = Boolean(review?.preview_digest) && !error && !loading
   const confirmDisabled =
     !reviewReady ||
+    retired ||
+    review?.action_reviews.retire.allowed !== true ||
     submittingAction !== null ||
     (reasonRequired && !reason.trim()) ||
-    (confirmationRequired && confirmationName.trim() !== displayName) ||
     (sharedRequired && !sharedConfirmed)
 
 
@@ -265,17 +205,16 @@ export function MonitoringDetailManagementMenu({
     setDialogAction(null)
     setFrozenSubject(null)
     setReason('')
-    setConfirmationName('')
     setConfirmedKey(null)
     setVersionError(null)
     setStaleNotice(null)
   }
 
   function openDialog(action: ManagementDialogAction) {
+    retireKeyRef.current = crypto.randomUUID()
     setFrozenSubject(freezeSubject(monitoringInstance))
     setDialogAction(action)
     setReason('')
-    setConfirmationName('')
     setConfirmedKey(null)
     setVersionError(null)
     setStaleNotice(null)
@@ -288,7 +227,7 @@ export function MonitoringDetailManagementMenu({
   }
 
   async function confirmDialog() {
-    if (!dialogAction || !frozenSubject || confirmDisabled || !review?.preview_digest) return
+    if (submissionRef.current || !dialogAction || !frozenSubject || confirmDisabled || !review?.preview_digest) return
     if (
       monitoringInstance.monitoring_instance_id !== frozenSubject.monitoringInstanceId ||
       monitoringInstance.updated_at !== frozenSubject.updatedAt
@@ -298,23 +237,20 @@ export function MonitoringDetailManagementMenu({
       return
     }
     const trimmedReason = reason.trim()
-    const trimmedConfirmationName = confirmationName.trim()
     const confirmation = {
       preview_digest: review.preview_digest,
       confirm_shared_impact: sharedRequired ? sharedConfirmed : false,
+      idempotency_key: retireKeyRef.current,
     }
     const actionMonitoringInstanceId = frozenSubject.monitoringInstanceId
     setStaleNotice(null)
-    const pending = dialogAction === 'retire'
-      ? onRetire(trimmedReason, confirmation)
-      : dialogAction === 'restore-lifecycle'
-        ? onRestoreLifecycle(trimmedReason, confirmation)
-        : dialogAction === 'archive'
-          ? onArchive(trimmedReason, trimmedConfirmationName, confirmation)
-          : dialogAction === 'restore-archive'
-            ? onRestoreArchive(confirmation)
-            : onPermanentCleanup(trimmedReason, trimmedConfirmationName, confirmation)
-    const outcome = await pending
+    submissionRef.current = true
+    let outcome: ManagementActionOutcome | void
+    try {
+      outcome = await onRetire(trimmedReason, confirmation)
+    } finally {
+      submissionRef.current = false
+    }
     if (
       !mountedRef.current ||
       monitoringInstance.monitoring_instance_id !== actionMonitoringInstanceId
@@ -324,6 +260,7 @@ export function MonitoringDetailManagementMenu({
       setStaleNotice(MONITORING_MANAGEMENT_REVIEW_STALE_MESSAGE)
       return
     }
+    if (outcome === 'failed') return
     clearDialog()
   }
 
@@ -396,6 +333,14 @@ export function MonitoringDetailManagementMenu({
               </Link>
             </li>
           )}
+          {retired && !archived && monitoringInstance.vps_lifecycle_status === 'active' ? (
+            <li role="none" className="monitoring-detail-management__group">
+              <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
+                onClick={() => { closeMenu(); onOpenOnboarding() }}>
+                重新接入 agent…
+              </button>
+            </li>
+          ) : null}
 
           <li role="none" className="monitoring-detail-management__group">
             <p className="monitoring-detail-management__group-label">资料</p>
@@ -403,7 +348,7 @@ export function MonitoringDetailManagementMenu({
               type="button"
               role="menuitem"
               className="btn lg ghost monitoring-detail-management__item"
-              disabled={archived}
+              disabled={retired}
               onClick={() => {
                 closeMenu()
                 onOpenMetadata()
@@ -412,7 +357,7 @@ export function MonitoringDetailManagementMenu({
               编辑分组、标签与备注
             </button>
             {archived ? (
-              <p className="monitoring-detail-management__note">已归档实例资料只读</p>
+              <p className="monitoring-detail-management__note">所属 VPS 已归档，监控历史只读</p>
             ) : null}
           </li>
 
@@ -431,40 +376,11 @@ export function MonitoringDetailManagementMenu({
               <p className="monitoring-detail-management__note" role="status">正在加载…</p>
             ) : review ? (
               <>
-                {review.action_reviews.retire.allowed ? (
+                {!retired && review.action_reviews.retire.allowed ? (
                   <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
                     disabled={submittingAction !== null}
                     onClick={() => { closeMenu(); openDialog('retire') }}>
                     退役
-                  </button>
-                ) : null}
-                {review.action_reviews.restore.allowed ? (
-                  <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
-                    disabled={submittingAction !== null}
-                    onClick={() => { closeMenu(); openDialog('restore-lifecycle') }}>
-                    恢复生命周期
-                  </button>
-                ) : null}
-                {review.action_reviews.archive.allowed ? (
-                  <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
-                    disabled={submittingAction !== null}
-                    onClick={() => { closeMenu(); openDialog('archive') }}>
-                    归档
-                  </button>
-                ) : null}
-                {review.action_reviews.restore_from_archive.allowed ? (
-                  <button type="button" role="menuitem" className="btn lg ghost monitoring-detail-management__item"
-                    disabled={submittingAction !== null}
-                    onClick={() => { closeMenu(); openDialog('restore-archive') }}>
-                    恢复归档
-                  </button>
-                ) : null}
-                {review.action_reviews.permanent_cleanup.allowed ? (
-                  <button type="button" role="menuitem"
-                    className="btn lg ghost monitoring-detail-management__item monitoring-detail-management__item--danger"
-                    disabled={submittingAction !== null}
-                    onClick={() => { closeMenu(); openDialog('permanent-cleanup') }}>
-                    永久清理
                   </button>
                 ) : null}
               </>
@@ -512,8 +428,8 @@ export function MonitoringDetailManagementMenu({
               ) : null}
               {dialogAction ? (
                 <ul>
-                  {(review.action_reviews[dialogAction === 'restore-lifecycle' ? 'restore' : dialogAction === 'restore-archive' ? 'restore_from_archive' : dialogAction === 'permanent-cleanup' ? 'permanent_cleanup' : dialogAction].blockers).map((blocker) => <li key={`blocker-${blocker}`}>{blocker}</li>)}
-                  {(review.action_reviews[dialogAction === 'restore-lifecycle' ? 'restore' : dialogAction === 'restore-archive' ? 'restore_from_archive' : dialogAction === 'permanent-cleanup' ? 'permanent_cleanup' : dialogAction].warnings).map((warning) => <li key={`warning-${warning}`}>{warning}</li>)}
+                  {(review.action_reviews[dialogAction].blockers).map((blocker) => <li key={`blocker-${blocker}`}>{blocker}</li>)}
+                  {(review.action_reviews[dialogAction].warnings).map((warning) => <li key={`warning-${warning}`}>{warning}</li>)}
                 </ul>
               ) : null}
               {monitoringInstance.archived_at ? (
@@ -531,15 +447,6 @@ export function MonitoringDetailManagementMenu({
               value={reason}
               onChange={(event) => setReason(event.target.value)}
               placeholder="记录这次管理操作的原因"
-            />
-          ) : null}
-          {confirmationRequired ? (
-            <Input
-              label="输入实例名称确认"
-              value={confirmationName}
-              onChange={(event) => setConfirmationName(event.target.value)}
-              placeholder={displayName}
-              hint={`请输入 ${displayName}`}
             />
           ) : null}
         </ActionConfirmationModal>

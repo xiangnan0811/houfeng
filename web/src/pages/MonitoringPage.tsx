@@ -131,7 +131,7 @@ export function MonitoringPage() {
       .then((result) => {
         if (generation !== listGeneration.current) return
         loadedRef.current = true
-        setMonitoringInstances(result)
+        setMonitoringInstances(result.filter((record) => !record.archived_at && record.lifecycle_status !== '已退役' && record.is_current !== false && record.vps_lifecycle_status !== 'archived'))
         setError(null)
         setSnapshotReadAt(new Date())
         setLoading(false)
@@ -213,7 +213,7 @@ export function MonitoringPage() {
       map.set(
         monitoringInstance.monitoring_instance_id,
         classifyHeartbeatFreshness(
-          monitoringInstance.last_heartbeat_at,
+          monitoringInstance.last_trusted_online_at ?? undefined,
           heartbeatPolicy,
           now,
           settingsResolved,

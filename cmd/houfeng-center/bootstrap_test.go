@@ -38,6 +38,7 @@ func TestBootstrapCenterReturnsOpenPostgresError(t *testing.T) {
 	calledApp := false
 
 	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil },
 		openPostgres: func(context.Context, string) (postgresDB, error) {
 			return nil, wantErr
 		},
@@ -82,6 +83,7 @@ func TestBootstrapCenterClosesDBOnMigrationFailure(t *testing.T) {
 	calledApp := false
 
 	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil },
 		openPostgres: func(context.Context, string) (postgresDB, error) {
 			return db, nil
 		},
@@ -128,6 +130,7 @@ func TestBootstrapCenterRetainsMigrationPathWhenRecordPlatformIsLegacy(t *testin
 	admitCalls := 0
 
 	_, _, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil },
 		openPostgres: func(context.Context, string) (postgresDB, error) {
 			return db, nil
 		},
@@ -174,6 +177,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	var gotWorkers []centerapp.Worker
 
 	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil },
 		openPostgres: func(context.Context, string) (postgresDB, error) {
 			return db, nil
 		},
@@ -217,6 +221,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 			*store.PostgresMonitoringInstanceRepository,
 			*store.PostgresTargetRepository,
 			[]byte,
+			bool,
 		) (http.Handler, error) {
 			return http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), nil
 		},
@@ -255,7 +260,7 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if activityGenerationCalls != 1 {
 		t.Fatalf("ensureActivityGeneration calls = %d, want 1", activityGenerationCalls)
 	}
-	if len(gotWorkers) != 7 {
+	if len(gotWorkers) != 8 {
 		t.Fatalf("runtime workers = %d, want search rebuild + activity projection with evidence maintenance still disabled", len(gotWorkers))
 	}
 	// The projector only indexes commits, so records written before the index
@@ -357,6 +362,7 @@ func TestBootstrapCenterClosesDBOnRuntimeAdmissionFailure(t *testing.T) {
 	admitCalls := 0
 
 	app, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil },
 		openPostgres: func(context.Context, string) (postgresDB, error) {
 			return db, nil
 		},
@@ -395,7 +401,8 @@ func TestBootstrapCenterDefaultRuntimeAdmissionFailsClosed(t *testing.T) {
 	}
 	db := &fakePostgresDB{}
 	applyCalls := 0
-	deps := (bootstrapDeps{}).withDefaults()
+	deps := (bootstrapDeps{
+		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil }}).withDefaults()
 	deps.openPostgres = func(context.Context, string) (postgresDB, error) {
 		return db, nil
 	}
@@ -436,6 +443,7 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	var gotSessionHMACKey []byte
 
 	builtApp, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
+		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil },
 		openPostgres: func(context.Context, string) (postgresDB, error) {
 			return db, nil
 		},
@@ -467,7 +475,7 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		newApp: func(addr string, handler http.Handler, workers ...centerapp.Worker) appRunner {
 			gotAddr = addr
 			gotHandler = handler
-			if len(workers) != 5 {
+			if len(workers) != 6 {
 				t.Fatalf("len(workers) = %d, want 5", len(workers))
 			}
 			for i, worker := range workers {
@@ -536,6 +544,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.AssetServicesCollectionHandler == nil {
 		t.Fatal("router asset services collection handler = nil, want non-nil")
 	}
+	if gotOpts.VPSOverviewHandler == nil {
+		t.Fatal("core mode VPS overview handler = nil; VPS detail must not require Records admission")
+	}
 	if gotOpts.AssetDecisionOverviewHandler == nil {
 		t.Fatal("router asset decision overview handler = nil, want non-nil")
 	}
@@ -581,11 +592,11 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSSubscriptionsHandler == nil {
 		t.Fatal("router vps subscriptions handler = nil, want non-nil")
 	}
-	if gotOpts.VPSLinkMonitoringInstanceHandler == nil {
-		t.Fatal("router vps link monitoringInstance handler = nil, want non-nil")
+	if gotOpts.VPSLinkMonitoringInstanceHandler != nil {
+		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
 	}
-	if gotOpts.VPSUnlinkMonitoringInstanceHandler == nil {
-		t.Fatal("router vps unlink monitoringInstance handler = nil, want non-nil")
+	if gotOpts.VPSUnlinkMonitoringInstanceHandler != nil {
+		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
 	}
 	if gotOpts.VPSTimelineHandler == nil {
 		t.Fatal("router vps timeline handler = nil, want non-nil")
@@ -602,11 +613,11 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.VPSIPQualityHandler == nil {
 		t.Fatal("router vps ip quality handler = nil, want non-nil")
 	}
-	if gotOpts.VPSCancellationPreviewHandler == nil {
-		t.Fatal("router vps cancellation preview handler = nil, want non-nil")
+	if gotOpts.VPSCancellationPreviewHandler != nil {
+		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
 	}
-	if gotOpts.VPSCancellationHandler == nil {
-		t.Fatal("router vps cancellation handler = nil, want non-nil")
+	if gotOpts.VPSCancellationHandler != nil {
+		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
 	}
 	if gotOpts.VPSExtendValidityHandler == nil {
 		t.Fatal("router vps extend validity handler = nil, want non-nil")
@@ -656,17 +667,17 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if gotOpts.MonitoringInstanceLifecycleRetireHandler == nil {
 		t.Fatal("router monitoringInstance lifecycle retire handler = nil, want non-nil")
 	}
-	if gotOpts.MonitoringInstanceLifecycleRestoreHandler == nil {
-		t.Fatal("router monitoringInstance lifecycle restore handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceLifecycleRestoreHandler != nil {
+		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
 	}
-	if gotOpts.MonitoringInstanceArchiveHandler == nil {
-		t.Fatal("router monitoringInstance archive handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceArchiveHandler != nil {
+		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
 	}
-	if gotOpts.MonitoringInstanceRestoreFromArchiveHandler == nil {
-		t.Fatal("router monitoringInstance restore from archive handler = nil, want non-nil")
+	if gotOpts.MonitoringInstanceRestoreFromArchiveHandler != nil {
+		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
 	}
-	if gotOpts.MonitoringInstancePermanentCleanupHandler == nil {
-		t.Fatal("router monitoringInstance permanent cleanup handler = nil, want non-nil")
+	if gotOpts.MonitoringInstancePermanentCleanupHandler != nil {
+		t.Fatal("removed lifecycle or transferable ownership handler remains wired")
 	}
 	if gotOpts.MonitoringInstanceOnboardingHandler == nil {
 		t.Fatal("router monitoringInstance onboarding handler = nil, want non-nil")
@@ -789,7 +800,8 @@ func TestBootstrapDefaultSeedInitialUserUsesConfiguredBcryptCost(t *testing.T) {
 		PasswordBcryptCost: bcrypt.MinCost,
 	}
 
-	deps := bootstrapDeps{}.withDefaults()
+	deps := bootstrapDeps{
+		newReceiverHealthObserver: func(context.Context, *pgxpool.Pool) (centerapp.Worker, error) { return fakeReceiverHealthWorker{}, nil }}.withDefaults()
 	if err := deps.seedInitialUser(context.Background(), users, cfg); err != nil {
 		t.Fatalf("seedInitialUser: %v", err)
 	}
@@ -1407,6 +1419,10 @@ func (fakeApp) Run(context.Context) error {
 }
 
 type fakeActivityProjectionWorker struct{}
+
+type fakeReceiverHealthWorker struct{}
+
+func (fakeReceiverHealthWorker) Run(context.Context) error { return nil }
 
 func (fakeActivityProjectionWorker) Run(context.Context) error {
 	return nil

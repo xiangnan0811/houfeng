@@ -50,7 +50,7 @@ const MEMBER = {
     region: 'Hesse',
     city: 'Frankfurt',
     lifecycle_status: 'active',
-    usage_status: 'in_use',
+    usage_tags: ['in_use'],
     renewal_decision: 'unreviewed',
   },
 } as unknown as AssetDecisionManualGroupMember

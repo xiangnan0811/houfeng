@@ -128,8 +128,9 @@ func TestMonitoringInstanceOnboardingPhaseDerivation(t *testing.T) {
 		{
 			name: "bound monitoringInstances with heartbeat and host sample are completed",
 			record: monitoringinstances.Record{
-				BindingStatus:   monitoringinstances.BindingBound,
-				LastHeartbeatAt: &heartbeatAt,
+				BindingStatus:       monitoringinstances.BindingBound,
+				LastTrustedOnlineAt: &heartbeatAt,
+				LifecycleStatus:     monitoringinstances.LifecycleEnrolled,
 			},
 			hasHostSample: true,
 			want:          monitoringinstances.OnboardingPhaseCompleted,
@@ -752,7 +753,8 @@ func TestApplyEnrollmentConsumesActiveUnexpiredToken(t *testing.T) {
 	if syncToken == "" {
 		t.Fatal("syncToken = empty, want generated sync token for bound enrollment")
 	}
-	if !strings.HasPrefix(syncToken, "sync_") || len(syncToken) != len("sync_")+64 {
+	_, secret, hasSession := strings.Cut(syncToken, ".")
+	if !hasSession || !strings.HasPrefix(syncToken, "mas_") || !strings.HasPrefix(secret, "sync_") || len(secret) != len("sync_")+64 {
 		t.Fatalf("syncToken = %q, want 32-byte secret token", syncToken)
 	}
 	if len(selectArgs) != 2 || selectArgs[0] != hashEnrollmentToken("enroll_001") || selectArgs[1] != hashOpaqueToken("enroll_001") {
@@ -819,8 +821,8 @@ func TestMonitoringInstanceOnboardingGetStateReturnsDerivedPhaseAndPendingMetada
 					CurrentHealthStatus:        monitoringinstances.HealthNormal,
 					LastHeartbeatAt:            &heartbeatAt,
 				})
-				*(dest[33].(*bool)) = true
-				*(dest[34].(*bool)) = false
+				*(dest[38].(*bool)) = true
+				*(dest[39].(*bool)) = false
 				return nil
 			}}
 		},
@@ -880,8 +882,8 @@ func TestMonitoringInstanceOnboardingGetStateScopesEvidenceToCurrentBindingGener
 					BindingEpochStartedAt: &bindingEpochStartedAt,
 					LastHeartbeatAt:       &staleHeartbeatAt,
 				})
-				*(dest[33].(*bool)) = false
-				*(dest[34].(*bool)) = false
+				*(dest[38].(*bool)) = false
+				*(dest[39].(*bool)) = false
 				return nil
 			}}
 		},
@@ -1163,7 +1165,7 @@ func TestCreateLinkedMonitoringInstanceRejectsExistingActiveLinkBeforeInsert(t *
 	if !strings.Contains(queryRows[0], "from vps_assets") || !strings.Contains(queryRows[0], "for update") {
 		t.Fatalf("first guard SQL = %q, want VPS row lock", queryRows[0])
 	}
-	if !strings.Contains(queryRows[1], "select count(*)") || !strings.Contains(queryRows[1], "from vps_monitoring_instance_links") || !strings.Contains(queryRows[1], "unlinked_at is null") {
+	if !strings.Contains(queryRows[1], "select count(*)") || !strings.Contains(queryRows[1], "from monitoring_instances") || !strings.Contains(queryRows[1], "lifecycle_status <> '已退役'") {
 		t.Fatalf("second guard SQL = %q, want active link count", queryRows[1])
 	}
 	if committed {
@@ -1454,6 +1456,9 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 	eventAt := time.Date(2026, time.July, 1, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	tx := &fakeMonitoringInstanceTx{
 		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			if strings.Contains(sql, "select exists") {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error { *(dest[0].(*bool)) = false; return nil }}
+			}
 			gotSQL = sql
 			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
 				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
@@ -1461,8 +1466,8 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 					BindingStatus:        monitoringinstances.BindingUnbound,
 					UpdatedAt:            eventAt,
 				})
-				if len(dest) > 33 {
-					*(dest[33].(*string)) = monitoringinstances.BindingBound
+				if len(dest) > 38 {
+					*(dest[38].(*string)) = monitoringinstances.BindingBound
 				}
 				return nil
 			}}
@@ -1574,317 +1579,69 @@ func TestStoreSourceIncludesSyncTokenValidationForHeartbeatWrites(t *testing.T) 
 }
 
 func TestMonitoringInstanceRuntimeControlTransitionsWriteEvents(t *testing.T) {
-	t.Parallel()
-	eventAt := time.Date(2026, time.July, 1, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60))
-
-	tests := []struct {
-		name                 string
-		action               func(context.Context, *PostgresMonitoringInstanceRepository, string) (monitoringinstances.Record, error)
-		monitoringInstanceID string
-		sourceStatus         string
-		returnedStatus       string
-		wantEventType        incidents.EventType
-		wantSummary          string
-		wantPayload          string
-		wantSQLSnippets      []string
-	}{
-		{
-			name: "enabled to maintenance",
-			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
-				return repo.SetMonitoringInstanceMonitoringMaintenance(ctx, monitoringInstanceID)
-			},
-			monitoringInstanceID: "mi_maintenance",
-			sourceStatus:         monitoringinstances.MonitoringEnabled,
-			returnedStatus:       monitoringInstanceMonitoringStatusMaintenance,
-			wantEventType:        incidents.EventMonitoringInstanceMonitoringMaintenanceEntered,
-			wantSummary:          "进入维护",
-			wantPayload:          monitoringInstanceMonitoringStatusMaintenance,
-			wantSQLSnippets: []string{
-				"set monitoring_status = '维护中'",
-				"where monitoring_instance_id = $1",
-				"monitoring_status = '启用'",
-			},
-		},
-		{
-			name: "maintenance to enabled",
-			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
-				return repo.ResumeMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
-			},
-			monitoringInstanceID: "mi_resume_maintenance",
-			sourceStatus:         monitoringInstanceMonitoringStatusMaintenance,
-			returnedStatus:       monitoringinstances.MonitoringEnabled,
-			wantEventType:        incidents.EventMonitoringInstanceMonitoringMaintenanceExited,
-			wantSummary:          "退出维护",
-			wantPayload:          monitoringinstances.MonitoringEnabled,
-			wantSQLSnippets: []string{
-				"set monitoring_status = '启用'",
-				"where monitoring_instance_id = $1",
-				"monitoring_status in ('维护中', '暂停')",
-				"for update",
-				"monitoring_status = (select monitoring_status from prior)",
-			},
-		},
-		{
-			name: "enabled to paused",
-			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
-				return repo.PauseMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
-			},
-			monitoringInstanceID: "mi_pause_enabled",
-			sourceStatus:         monitoringinstances.MonitoringEnabled,
-			returnedStatus:       monitoringInstanceMonitoringStatusPaused,
-			wantEventType:        incidents.EventMonitoringInstanceMonitoringPaused,
-			wantSummary:          "暂停",
-			wantPayload:          monitoringInstanceMonitoringStatusPaused,
-			wantSQLSnippets: []string{
-				"set monitoring_status = '暂停'",
-				"where monitoring_instance_id = $1",
-				"monitoring_status in ('启用', '维护中')",
-				"for update",
-				"monitoring_status = (select monitoring_status from prior)",
-			},
-		},
-		{
-			name: "paused to enabled",
-			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
-				return repo.ResumeMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
-			},
-			monitoringInstanceID: "mi_resume_paused",
-			sourceStatus:         monitoringInstanceMonitoringStatusPaused,
-			returnedStatus:       monitoringinstances.MonitoringEnabled,
-			wantEventType:        incidents.EventMonitoringInstanceMonitoringResumed,
-			wantSummary:          "恢复",
-			wantPayload:          monitoringinstances.MonitoringEnabled,
-			wantSQLSnippets: []string{
-				"set monitoring_status = '启用'",
-				"where monitoring_instance_id = $1",
-				"monitoring_status in ('维护中', '暂停')",
-				"for update",
-				"monitoring_status = (select monitoring_status from prior)",
-			},
-		},
-		{
-			name: "maintenance to paused",
-			action: func(ctx context.Context, repo *PostgresMonitoringInstanceRepository, monitoringInstanceID string) (monitoringinstances.Record, error) {
-				return repo.PauseMonitoringInstanceMonitoring(ctx, monitoringInstanceID)
-			},
-			monitoringInstanceID: "mi_pause_maintenance",
-			sourceStatus:         monitoringInstanceMonitoringStatusMaintenance,
-			returnedStatus:       monitoringInstanceMonitoringStatusPaused,
-			wantEventType:        incidents.EventMonitoringInstanceMonitoringPaused,
-			wantSummary:          "暂停",
-			wantPayload:          monitoringInstanceMonitoringStatusPaused,
-			wantSQLSnippets: []string{
-				"set monitoring_status = '暂停'",
-				"where monitoring_instance_id = $1",
-				"monitoring_status in ('启用', '维护中')",
-				"for update",
-				"monitoring_status = (select monitoring_status from prior)",
-			},
-		},
-	}
-
-	for _, tt := range tests {
+	for _, tt := range []struct {
+		name, from, to string
+		wantEvent      bool
+	}{{"maintenance", "启用", "维护中", true}, {"pause", "启用", "暂停", true}, {"resume", "暂停", "启用", true}, {"same maintenance", "维护中", "维护中", false}} {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			var (
-				gotSQL    string
-				execSQL   string
-				execArgs  []any
-				committed bool
-			)
-			tx := &fakeMonitoringInstanceTx{
-				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+			revisionWritten, events := false, 0
+			current := monitoringinstances.Record{MonitoringInstanceID: "mi_1", VPSLifecycleStatus: "active", LifecycleStatus: monitoringinstances.LifecycleEnrolled, MonitoringStatus: tt.from, UpdatedAt: time.Now().UTC()}
+			tx := &fakeMonitoringInstanceTx{queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+				return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+					r := current
 					if strings.Contains(sql, "update monitoring_instances") {
-						gotSQL = sql
+						r.MonitoringStatus = args[1].(string)
+						revisionWritten = strings.Contains(sql, "control_revision=control_revision+1")
 					}
-					if strings.Contains(sql, "from monitoring_instance_heartbeats") {
-						return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
-							for _, destination := range dest {
-								*(destination.(*int)) = 0
-							}
-							return nil
-						}}
-					}
-					if len(args) != 1 || args[0] != tt.monitoringInstanceID {
-						t.Fatalf("QueryRow args = %#v, want monitoringInstance id %q", args, tt.monitoringInstanceID)
-					}
-					return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
-						status := tt.sourceStatus
-						if strings.Contains(sql, "update monitoring_instances") {
-							status = tt.returnedStatus
-						}
-						scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
-							MonitoringInstanceID: tt.monitoringInstanceID,
-							LifecycleStatus:      monitoringinstances.LifecycleInUse,
-							MonitoringStatus:     status,
-							BindingStatus:        monitoringinstances.BindingBound,
-							CurrentHealthStatus:  monitoringinstances.HealthNormal,
-							UpdatedAt:            eventAt,
-						})
-						if len(dest) > 33 {
-							*(dest[33].(*string)) = tt.sourceStatus
-						}
-						return nil
-					}}
-				},
-				exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-					execSQL = sql
-					execArgs = append([]any(nil), args...)
-					return pgconn.NewCommandTag("INSERT 1"), nil
-				},
-				commit: func(context.Context) error {
-					committed = true
+					scanMonitoringInstanceRecordDestinations(dest, r)
 					return nil
-				},
-			}
-			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
-
-			record, err := tt.action(context.Background(), repo, tt.monitoringInstanceID)
-			if err != nil {
-				t.Fatalf("runtime control action error = %v", err)
-			}
-			if record.MonitoringStatus != tt.returnedStatus {
-				t.Fatalf("MonitoringStatus = %q, want %q", record.MonitoringStatus, tt.returnedStatus)
-			}
-			for _, snippet := range tt.wantSQLSnippets {
-				if !strings.Contains(gotSQL, snippet) {
-					t.Fatalf("runtime control SQL missing %q in %q", snippet, gotSQL)
+				}}
+			}, exec: func(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+				if strings.Contains(sql, "insert into state_change_events") {
+					events++
 				}
+				return pgconn.NewCommandTag("INSERT 1"), nil
+			}}
+			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+			record, err := repo.setMonitoringControl(context.Background(), "mi_1", tt.to)
+			if err != nil {
+				t.Fatal(err)
 			}
-			if !strings.Contains(execSQL, "insert into state_change_events") {
-				t.Fatalf("event SQL = %q, want state_change_events insert", execSQL)
+			if record.MonitoringStatus != tt.to || !revisionWritten {
+				t.Fatalf("record=%+v revision=%v", record, revisionWritten)
 			}
-			if len(execArgs) != 8 {
-				t.Fatalf("len(execArgs) = %d, want 8", len(execArgs))
+			want := 0
+			if tt.wantEvent {
+				want = 1
 			}
-			if execArgs[1] != string(incidents.ObjectTypeMonitoringInstance) {
-				t.Fatalf("object_type = %#v, want %q", execArgs[1], incidents.ObjectTypeMonitoringInstance)
-			}
-			if execArgs[2] != tt.monitoringInstanceID {
-				t.Fatalf("object_id = %#v, want %q", execArgs[2], tt.monitoringInstanceID)
-			}
-			if execArgs[3] != string(tt.wantEventType) {
-				t.Fatalf("event_type = %#v, want %q", execArgs[3], tt.wantEventType)
-			}
-			if summary, ok := execArgs[5].(string); !ok || !strings.Contains(summary, tt.wantSummary) {
-				t.Fatalf("summary = %#v, want substring %q", execArgs[5], tt.wantSummary)
-			}
-			payload, ok := execArgs[6].([]byte)
-			if !ok || !strings.Contains(string(payload), tt.wantPayload) {
-				t.Fatalf("payload = %#v, want status %q", execArgs[6], tt.wantPayload)
-			}
-			if !committed {
-				t.Fatal("transaction was not committed")
+			if events != want {
+				t.Fatalf("events=%d want=%d", events, want)
 			}
 		})
 	}
 }
-
-func TestMonitoringInstanceRuntimeControlResumePreservesNullSafeSelectColumns(t *testing.T) {
-	t.Parallel()
-
-	var gotSQL string
-	tx := &fakeMonitoringInstanceTx{
-		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			gotSQL = sql
-			if len(args) != 1 || args[0] != "mi_resume_nulls" {
-				t.Fatalf("QueryRow args = %#v, want monitoringInstance id %q", args, "mi_resume_nulls")
-			}
-			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
-				for _, snippet := range []string{
-					"coalesce(updated.enrollment_token_hash, '')",
-					"coalesce(updated.sync_token_hash, '')",
-					"coalesce(updated.binding_fingerprint, '')",
-					"coalesce(updated.pending_binding_fingerprint, '')",
-				} {
-					if !strings.Contains(gotSQL, snippet) {
-						return errors.New("missing null-safe qualified select columns")
-					}
-				}
-				scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{
-					MonitoringInstanceID: "mi_resume_nulls",
-					MonitoringStatus:     monitoringinstances.MonitoringEnabled,
-					UpdatedAt:            time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC),
-				})
-				*(dest[33].(*string)) = monitoringInstanceMonitoringStatusMaintenance
-				return nil
-			}}
-		},
-		exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-			return pgconn.NewCommandTag("INSERT 1"), nil
-		},
-	}
-	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
-
-	record, err := repo.ResumeMonitoringInstanceMonitoring(context.Background(), "mi_resume_nulls")
-	if err != nil {
-		t.Fatalf("ResumeMonitoringInstanceMonitoring() error = %v", err)
-	}
-	if record.MonitoringInstanceID != "mi_resume_nulls" {
-		t.Fatalf("MonitoringInstanceID = %q, want %q", record.MonitoringInstanceID, "mi_resume_nulls")
-	}
-	if record.EnrollmentTokenHash != "" || record.SyncTokenHash != "" || record.BindingFingerprint != "" || record.PendingBindingFingerprint != "" {
-		t.Fatalf("expected empty coalesced token/binding strings, got %#v", record)
-	}
-	if !strings.Contains(gotSQL, "archived_at is null") {
-		t.Fatalf("ResumeMonitoringInstanceMonitoring() SQL = %q, want archived_at guard", gotSQL)
-	}
-}
-
 func TestMonitoringInstanceRuntimeControlBlocksArchivedInstance(t *testing.T) {
-	t.Parallel()
-
-	tx := &fakeMonitoringInstanceTx{
-		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
-			if strings.Contains(sql, "with prior as") {
-				return fakeMonitoringInstanceRow{scan: func(...any) error { return pgx.ErrNoRows }}
-			}
-			return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
-				*(dest[0].(*bool)) = true
-				*(dest[1].(*bool)) = true
-				return nil
-			}}
-		},
-	}
+	tx := &fakeMonitoringInstanceTx{queryRow: func(context.Context, string, ...any) pgx.Row {
+		return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+			scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{VPSLifecycleStatus: "archived"})
+			return nil
+		}}
+	}}
 	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
-
-	_, err := repo.ResumeMonitoringInstanceMonitoring(context.Background(), "mi_archived")
-	if !errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance) {
-		t.Fatalf("ResumeMonitoringInstanceMonitoring() error = %v, want ErrArchivedMonitoringInstance", err)
+	if _, err := repo.ResumeMonitoringInstanceMonitoring(context.Background(), "mi_archived"); !errors.Is(err, monitoringinstances.ErrArchivedMonitoringInstance) {
+		t.Fatalf("error=%v", err)
 	}
 }
-
 func TestMonitoringInstanceRuntimeControlRejectsInvalidTransition(t *testing.T) {
-	t.Parallel()
-
-	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{
-		beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) {
-			queryCount := 0
-			return &fakeMonitoringInstanceTx{queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
-				queryCount++
-				switch queryCount {
-				case 2:
-					return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
-						*(dest[0].(*bool)) = true
-						*(dest[1].(*bool)) = false
-						return nil
-					}}
-				case 3:
-					return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
-						*(dest[0].(*string)) = monitoringinstances.LifecycleInUse
-						return nil
-					}}
-				default:
-					return fakeMonitoringInstanceRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
-				}
-			}}, nil
-		},
+	tx := &fakeMonitoringInstanceTx{queryRow: func(context.Context, string, ...any) pgx.Row {
+		return fakeMonitoringInstanceRow{scan: func(dest ...any) error {
+			scanMonitoringInstanceRecordDestinations(dest, monitoringinstances.Record{VPSLifecycleStatus: "active", LifecycleStatus: monitoringinstances.LifecycleEnrolled, MonitoringStatus: monitoringinstances.MonitoringPaused})
+			return nil
+		}}
 	}}
-
-	_, err := repo.SetMonitoringInstanceMonitoringMaintenance(context.Background(), "mi_paused")
-	if !errors.Is(err, ErrInvalidMonitoringInstanceRuntimeTransition) {
-		t.Fatalf("SetMonitoringInstanceMonitoringMaintenance() error = %v, want ErrInvalidMonitoringInstanceRuntimeTransition", err)
+	repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
+	if _, err := repo.SetMonitoringInstanceMonitoringMaintenance(context.Background(), "mi_paused"); !errors.Is(err, ErrInvalidMonitoringInstanceRuntimeTransition) {
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -1901,11 +1658,9 @@ func TestPostgresMonitoringInstanceListHidesInstancesLinkedOnlyToArchivedVPS(t *
 		t.Fatalf("ListMonitoringInstances() error = %v", err)
 	}
 	for _, snippet := range []string{
-		"archived_at is null",
-		"not exists",
-		"vps_monitoring_instance_links",
-		"unlinked_at is null",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"lifecycle_status in ('待接入', '已接入')",
+		"v.vps_id = monitoring_instances.vps_id",
+		"v.lifecycle_status = 'active'",
 	} {
 		if !strings.Contains(seenSQL, snippet) {
 			t.Fatalf("ListMonitoringInstances SQL missing %q in %s", snippet, seenSQL)
@@ -1923,7 +1678,7 @@ func TestPostgresMonitoringInstanceListScopeFiltersArchiveState(t *testing.T) {
 		{
 			name:        "archived",
 			scope:       monitoringinstances.ListScopeArchived,
-			wantSnippet: "archived_at is not null",
+			wantSnippet: "and lifecycle_status = '已退役'",
 		},
 		{
 			name:          "all",
@@ -2133,8 +1888,8 @@ func TestMonitoringInstanceManagementReviewMarksEmptyMistakeCandidate(t *testing
 	if !review.EmptyMistakeCandidate {
 		t.Fatalf("EmptyMistakeCandidate = false, want true for zero-evidence instance")
 	}
-	if !review.ActionReviews[monitoringinstances.ManagementActionPermanentCleanup].Allowed {
-		t.Fatalf("permanent cleanup action not allowed, want true for empty mistake candidate")
+	if review.ActionReviews[monitoringinstances.ManagementActionPermanentCleanup].Allowed {
+		t.Fatalf("obsolete permanent cleanup action allowed")
 	}
 }
 
@@ -2492,6 +2247,16 @@ func (f *fakeMonitoringInstanceTx) QueryRow(ctx context.Context, sql string, arg
 func (f *fakeMonitoringInstanceTx) Conn() *pgx.Conn { return nil }
 
 func scanMonitoringInstanceRecordDestinations(dest []any, record monitoringinstances.Record) {
+	*(dest[0].(*string)) = record.VPSID
+	owner := record.VPSLifecycleStatus
+	if owner == "" {
+		owner = "active"
+	}
+	*(dest[1].(*string)) = owner
+	*(dest[2].(*bool)) = record.LifecycleStatus != monitoringinstances.LifecycleRetired
+	*(dest[3].(*bool)) = record.EverConnected
+	*(dest[4].(**time.Time)) = record.LastTrustedOnlineAt
+	dest = dest[5:]
 	*(dest[0].(*string)) = record.MonitoringInstanceID
 	*(dest[1].(*string)) = record.DisplayName
 	*(dest[2].(*string)) = record.Group

@@ -16,8 +16,6 @@
   - `enabled bool`
   - `frequency_seconds int`
   - `timeout_seconds int`
-  - `raw_retention_days int`
-  - `history_retention_days int`
   - `stale_after_seconds int`
   - `services []string`
 - Agent plan: `agentapi.SyncPlan.IPQualityPlan`:
@@ -59,7 +57,7 @@
 - 默认 service probe registry 必须对 settings 默认服务集合产生逐服务结果或逐服务诊断行；探测不可安全实现的服务要上报 `probe_status=skipped` / `status=unknown`，不能让页面长期显示 `0 / 0`。
 - 每个 provider source 和每个 service probe 必须有独立 timeout，且受总采集 context 约束；一个慢源只能生成该源 failure/timeout 行，不能吃完整体 timeout 或阻塞其他结果。
 - Service probe 的 HTTP 状态语义必须保守：只有明确成功响应和明确阻断响应才能判定 `unlocked` / `blocked`；429、404、5xx、HTML/非 JSON 或无法解析响应应写 `probe_status=failure`、`status=unknown`，不得误判为解锁成功。
-- IP 质量采集默认关闭；默认配置保留 86400 秒周期、15 秒 timeout、raw 90 天、history 365 天和默认服务集合。用户必须在 Settings 显式开启。
+- IP 质量采集默认关闭；默认配置保留 86400 秒周期、15 秒 timeout 和默认服务集合。用户必须在 Settings 显式开启。低频报告与脱敏原始结果长期保留，不再提供 raw/history 按天自动删除配置，见 [数据保留合同](retention.md)。
 - IP 质量 stale 窗口由 `stale_after_seconds` 控制，默认 604800 秒。该值必须不小于 `frequency_seconds`，避免还没到下一次采集就判过期。API、Settings 页面、Go/TS 类型和迁移默认必须同步该字段。
 - IP 质量采集频率独立于 host sample / probe frequency。Agent 心跳 tick 只 drain 已完成报告，不在同步路径内阻塞外部 HTTP 请求。
 - Agent due 判断必须按 `LastAttemptedAt` 节流；lookup 持续失败时也只能按 `frequency_seconds` 周期重试，不能因为 `LastSucceededAt` 为空而在每个 heartbeat tick 重复采集/上报 failure。
@@ -86,8 +84,7 @@
 | --- | --- |
 | Settings `frequency_seconds < 60` | `settings.Validate` 返回 `ErrInvalidSettings` |
 | Settings `timeout_seconds < 1` 或 `> 300` | `settings.Validate` 返回 `ErrInvalidSettings` |
-| Settings `raw_retention_days < 7` | `settings.Validate` 返回 `ErrInvalidSettings` |
-| Settings `history_retention_days < raw_retention_days` | `settings.Validate` 返回 `ErrInvalidSettings` |
+| Settings 带 `raw_retention_days` 或 `history_retention_days` | 严格 JSON 解码拒绝已移除字段；低频报告长期保留 |
 | Settings service 不在默认允许集合 | `settings.Validate` 返回 `ErrInvalidSettings` |
 | Settings `stale_after_seconds < frequency_seconds` | `settings.Validate` 返回 `ErrInvalidSettings` |
 | Sync report 缺 observed_at / metadata / ip / status | `/api/agent/sync` 返回 400 `invalid_request` |
@@ -135,14 +132,14 @@
 
 - `internal/contracts/agentapi`: sync plan 和 sync request JSON round-trip，覆盖 `ip_quality_plan` 与 `ip_quality_reports` 字段。
 - `internal/contracts/agentapi`: provider/service v2 字段、`coverage`、`diagnostics_json` JSON round-trip，并覆盖旧 payload 兼容。
-- `internal/center/settings`: 默认关闭、低频默认值、`stale_after_seconds` 默认值与校验、service normalization、非法频率/timeout/retention/service。
+- `internal/center/settings`: 默认关闭、低频默认值、`stale_after_seconds` 默认值与校验、service normalization、非法频率/timeout/service；不暴露低频 TTL 配置。
 - `agent/ipquality`: due 判断、state store、HTTP collector 成功/partial/failure、service bool unlock 映射、raw JSON 脱敏和合法 JSON。
 - `agent/ipquality`: 默认多 provider registry、optional not_configured rows、默认 service probe rows、per-source/per-probe timeout 隔离、ipapi.is 嵌套 JSON 解析、HTML/非 JSON 清洁 failure、失败 attempt 节流。
 - `agent/ipquality`: service probe HTTP status 回归测试，确认 429/404/5xx 不会被当作 unlocked。
 - `agent/runtime`: plan 到后台 collector 的启动/drain 行为，disabled plan 不启动采集。
 - `agent/syncqueue`: IP 质量报告随 sync request 离线队列 round-trip。
 - `internal/center/http/handlers`: agent sync 写入 IP 质量 DTO、非法报告拒绝、raw/extra/diagnostics JSON 脱敏；VPS IP quality API 返回 report/matrix/history；历史详情 endpoint 返回 selected report summary。
-- `internal/center/store`: sync batch 事务内写三表，repository latest/history 查询、历史详情查询、migration view 使用正确 alias，retention 清 raw/history。
+- `internal/center/store`: sync batch 事务内写三表，repository latest/history 查询、历史详情查询、migration view 使用正确 alias；retention 长期保留报告与脱敏 raw。
 - `internal/center/store/migrate`: IP 质量 read view 重建迁移必须过滤 failure、`0.0.0.0` 和非法 IP version，并保留 partial 真实 IP 报告。
 - `internal/center/assetdecisions`: IP 质量缺失/过期/失败/partial/ambiguous/风险/解锁阻断 evidence 与 readback 语义，确认只统计 successful provider/probe rows。
 - `web`: API client、Settings、VPS list badge、VPS detail section、完整 IP 质量页、历史详情、Asset Decisions evidence/current facts 展示。

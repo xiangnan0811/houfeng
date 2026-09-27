@@ -1,0 +1,5 @@
+.vps-lifecycle-workspace{display:grid;gap:var(--space-4,16px);min-width:0;overflow-wrap:anywhere}
+.vps-lifecycle-workspace article{display:grid;gap:var(--space-2,8px);padding:var(--space-4,16px);border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-3)}
+.vps-lifecycle-workspace article h4,.vps-lifecycle-workspace article p{margin:0}
+.vps-lifecycle-workspace pre{max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text-secondary);font-size:var(--type-small-size)}
+.vps-lifecycle-workspace label{display:grid;gap:var(--space-2,8px);min-width:0}

@@ -86,17 +86,13 @@ const settingsResponseBody = {
   },
   retention_policy: {
     raw_layer_days: 30,
-    aggregate_layer_days: 30,
-    event_layer_days: 90,
-    notification_layer_days: 180,
+    aggregate_layer_days: 365,
   },
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86400,
     stale_after_seconds: 604800,
     timeout_seconds: 15,
-    raw_retention_days: 90,
-    history_retention_days: 365,
     services: ['netflix', 'chatgpt', 'youtube-premium'],
   },
   subscription_cost_settings: {
@@ -151,6 +147,12 @@ describe('SettingsPage', () => {
     expect(screen.getByRole('switch', { name: '启用 IP 质量采集' })).toBeChecked()
     expect(screen.getByLabelText('IP 质量采集周期秒数')).toHaveValue('86400')
     expect(screen.getByLabelText('IP 质量采集服务集合')).toHaveValue('netflix, chatgpt, youtube-premium')
+    expect(screen.getByLabelText('原始层保留天数')).toHaveValue('30')
+    expect(screen.getByLabelText('聚合层保留天数')).toHaveValue('365')
+    for (const removed of ['事件层保留天数', '通知层保留天数', 'IP 质量原始 JSON 保留天数', 'IP 质量历史保留天数']) {
+      expect(screen.queryByLabelText(removed)).not.toBeInTheDocument()
+    }
+    expect(screen.getByText('IP 质量报告及脱敏后的原始结果长期保留。')).toBeInTheDocument()
 
     // Switch to notification tab to check Telegram
     await expandTelegram()
@@ -350,9 +352,7 @@ describe('SettingsPage', () => {
       override_rules: settingsResponseBody.override_rules,
       retention_policy: {
         raw_layer_days: 45,
-        aggregate_layer_days: 30,
-        event_layer_days: 90,
-        notification_layer_days: 180,
+        aggregate_layer_days: 365,
       },
       ip_quality_settings: settingsResponseBody.ip_quality_settings,
     })
@@ -370,8 +370,6 @@ describe('SettingsPage', () => {
             frequency_seconds: 259200,
             stale_after_seconds: 864000,
             timeout_seconds: 20,
-            raw_retention_days: 45,
-            history_retention_days: 180,
             services: ['netflix', 'chatgpt'],
           },
         }),
@@ -387,8 +385,6 @@ describe('SettingsPage', () => {
     fireEvent.change(screen.getByLabelText('IP 质量采集周期秒数'), { target: { value: '259200' } })
     fireEvent.change(screen.getByLabelText('IP 质量过期窗口秒数'), { target: { value: '864000' } })
     fireEvent.change(screen.getByLabelText('IP 质量请求超时秒数'), { target: { value: '20' } })
-    fireEvent.change(screen.getByLabelText('IP 质量原始 JSON 保留天数'), { target: { value: '45' } })
-    fireEvent.change(screen.getByLabelText('IP 质量历史保留天数'), { target: { value: '180' } })
     fireEvent.change(screen.getByLabelText('IP 质量采集服务集合'), { target: { value: 'netflix, chatgpt' } })
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
@@ -399,8 +395,6 @@ describe('SettingsPage', () => {
         frequency_seconds: 259200,
         stale_after_seconds: 864000,
         timeout_seconds: 20,
-        raw_retention_days: 45,
-        history_retention_days: 180,
         services: ['netflix', 'chatgpt'],
       },
     })
@@ -717,6 +711,18 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('原始层天数必须至少为 30 天。'))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects raw retention above the 365 day maximum', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('原始层保留天数'), { target: { value: '366' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('原始层天数不能超过 365 天。'))
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 

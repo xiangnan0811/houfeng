@@ -7,23 +7,18 @@ import * as api from '../lib/api'
 import * as recordsApi from '../lib/recordsApi'
 import type {
   ArchiveReview,
-  CancellationPreview,
-  LifecycleActionResult,
   SubscriptionRecord,
   VPSAssetDetail,
   VPSOverview,
 } from '../lib/types'
 import { VPSDetailPage } from './VPSDetailPage'
 
-vi.mock('./vps-detail/LegacyVPSDetail', () => ({
-  LegacyVPSDetail: () => <div>Legacy VPS detail shell</div>,
-}))
 
 function toCancelOverview(): VPSOverview {
   const overview = overviewFixture()
   return {
     ...overview,
-    identity: { ...overview.identity, lifecycle_status: 'to_cancel' },
+    identity: { ...overview.identity, lifecycle_status: 'active' },
   }
 }
 
@@ -119,23 +114,6 @@ function subscriptionFixture(): SubscriptionRecord {
   }
 }
 
-function cancellationPreviewFixture(): CancellationPreview {
-  return {
-    vps: detailFixture(),
-    subscriptions: [],
-    monitoring_instance_links: [],
-    services: [],
-    domains: [],
-    target_links: [],
-    recommended_steps: [],
-    warnings: ['请确认上游流量已经迁移。'],
-    blockers: ['仍有关联资源，暂时不能执行取消。'],
-    preview_digest: 'preview-digest-test',
-    dependency_impacts: [],
-    evaluated_on: '2026-09-24',
-  }
-}
-
 function archiveReviewFixture(): ArchiveReview {
   return {
     vps: detailFixture(),
@@ -148,20 +126,6 @@ function archiveReviewFixture(): ArchiveReview {
     blockers: [],
     blocker_details: [],
     eligible: true,
-  }
-}
-
-function cancellationResultFixture(): LifecycleActionResult {
-  return {
-    action: {
-      action_id: 'action_001',
-      vps_id: 'vps_001',
-      action_type: 'cancel_vps',
-      status: 'completed',
-      reason: '测试退役',
-      created_at: '2026-08-23T00:00:00Z',
-    },
-    steps: [],
   }
 }
 
@@ -505,7 +469,7 @@ describe('VPSDetailPage gate', () => {
 
     const dialog = await screen.findByRole('dialog', { name: '续费决策' })
     fireEvent.change(screen.getByRole('combobox', { name: '续费决策' }), {
-      target: { value: 'observe' },
+      target: { value: 'cancel' },
     })
     fireEvent.change(screen.getByRole('textbox', { name: '决策理由' }), {
       target: { value: '等待下月价格确认' },
@@ -514,17 +478,12 @@ describe('VPSDetailPage gate', () => {
 
     await waitFor(() => expect(dialog).not.toBeInTheDocument())
     expect(update).toHaveBeenCalledWith('vps_001', {
-      renewal_decision: 'observe',
+      renewal_decision: 'cancel',
       renewal_reason: '等待下月价格确认',
+      renewal_review_at: null,
     }, { expectedUpdatedAt: '2026-08-20T00:00:00Z' })
     expect(screen.getByRole('status')).toHaveTextContent('续费决策已更新，概览已刷新。未找到 active 订阅。')
-    const linkageAction = screen.getByRole('link', { name: '新增订阅事实' })
-    expect(linkageAction).toHaveAttribute(
-      'href',
-      '/vps/vps_001?workbench=subscription',
-    )
-    fireEvent.click(linkageAction)
-    expect(await screen.findByRole('dialog', { name: '新增订阅事实' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '新增订阅事实' })).not.toBeInTheDocument()
   })
 
   it('creates a subscription fact from the overview management menu', async () => {
@@ -590,7 +549,7 @@ describe('VPSDetailPage gate', () => {
     const getDetail = vi.spyOn(api, 'getVPSAsset')
 
     renderDetail({
-      initialEntry: '/vps/vps_001?workbench=archive',
+      initialEntry: '/vps/vps_001?workbench=cancellation',
       showLocationProbe: true,
     })
 
@@ -602,9 +561,7 @@ describe('VPSDetailPage gate', () => {
   })
 
   it.each([
-    { lifecycle: 'cancelled' as const, capabilities: ['records_v2_read'] },
     { lifecycle: 'archived' as const, capabilities: ['records_v2_read'] },
-    { lifecycle: 'cancelled' as const, capabilities: [] as string[] },
     { lifecycle: 'archived' as const, capabilities: [] as string[] },
   ])('redirects $lifecycle VPS to archive when capabilities=$capabilities', async ({ lifecycle, capabilities }) => {
     const overview = overviewFixture()
@@ -627,52 +584,8 @@ describe('VPSDetailPage gate', () => {
     expect(screen.queryByText('Legacy VPS detail shell')).not.toBeInTheDocument()
   })
 
-  it('loads cancellation preview and preserves server blockers', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
-    const getPreview = vi.spyOn(api, 'getVPSCancellationPreview')
-      .mockResolvedValue(cancellationPreviewFixture())
 
-    renderDetail({ initialEntry: '/vps/vps_001?workbench=cancellation' })
 
-    expect(await screen.findByRole('dialog', { name: '取消 / 退役' })).toBeInTheDocument()
-    expect(await screen.findByRole('alert')).toHaveTextContent('仍有关联资源，暂时不能执行取消')
-    expect(screen.getByRole('button', { name: '确认取消/退役' })).toBeDisabled()
-    expect(getPreview).toHaveBeenCalledWith('vps_001')
-  })
-
-  it('retries a failed cancellation preview read in the open workbench', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
-    const getPreview = vi.spyOn(api, 'getVPSCancellationPreview')
-      .mockRejectedValueOnce(new ApiError(503, 'preview unavailable'))
-      .mockResolvedValueOnce(cancellationPreviewFixture())
-
-    renderDetail({ initialEntry: '/vps/vps_001?workbench=cancellation' })
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('preview unavailable')
-    fireEvent.click(screen.getByRole('button', { name: '重试加载' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('仍有关联资源，暂时不能执行取消')
-    expect(screen.getByRole('dialog', { name: '取消 / 退役' })).toBeInTheDocument()
-    expect(getPreview).toHaveBeenCalledTimes(2)
-  })
-
-  it('keeps the cancellation audit result and refreshes preview plus overview', async () => {
-    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
-    const safePreview = { ...cancellationPreviewFixture(), warnings: [], blockers: [] }
-    const getPreview = vi.spyOn(api, 'getVPSCancellationPreview').mockResolvedValue(safePreview)
-    const apply = vi.spyOn(api, 'applyVPSCancellation').mockResolvedValue(cancellationResultFixture())
-
-    renderDetail({ initialEntry: '/vps/vps_001?workbench=cancellation' })
-    fireEvent.change(await screen.findByRole('textbox', { name: '原因' }), {
-      target: { value: '测试退役' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
-
-    await waitFor(() => expect(apply).toHaveBeenCalledTimes(1))
-    expect(apply).toHaveBeenCalledTimes(1)
-    expect(getPreview).toHaveBeenCalledTimes(2)
-    expect(recordsApi.getVPSOverview).toHaveBeenCalledTimes(2)
-  })
 
   it('requires a fresh eligible archive review and exact display-name confirmation', async () => {
     vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(toCancelOverview())
@@ -689,10 +602,10 @@ describe('VPSDetailPage gate', () => {
     })
 
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '结束使用并归档' }))
 
-    expect(await screen.findByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
-    const confirm = screen.getByRole('button', { name: '确认归档' })
+    expect(await screen.findByRole('alertdialog', { name: '结束使用并归档' })).toBeInTheDocument()
+    const confirm = screen.getByRole('button', { name: '结束使用并归档' })
     expect(confirm).toBeDisabled()
     fireEvent.change(screen.getByRole('textbox', { name: '归档原因' }), {
       target: { value: '订阅已结束' },
@@ -706,6 +619,7 @@ describe('VPSDetailPage gate', () => {
     await waitFor(() => expect(archive).toHaveBeenCalledWith('vps_001', {
       confirmation_name: '东京边缘',
       reason: '订阅已结束',
+      preview_digest: '', never_connected_confirmation: false, idempotency_key: expect.any(String),
     }))
     expect(await screen.findByText('Archive detail route')).toBeInTheDocument()
     expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
@@ -723,10 +637,10 @@ describe('VPSDetailPage gate', () => {
     renderDetail()
 
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '结束使用并归档' }))
 
-    expect(screen.getByRole('button', { name: '确认归档' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '确认归档' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
     expect(archive).not.toHaveBeenCalled()
   })
 
@@ -739,13 +653,13 @@ describe('VPSDetailPage gate', () => {
     renderDetail()
 
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '结束使用并归档' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('review unavailable')
     fireEvent.click(screen.getByRole('button', { name: '重试加载' }))
 
     expect(await screen.findByRole('textbox', { name: '输入 VPS 名称确认归档' })).toBeInTheDocument()
-    expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: '结束使用并归档' })).toBeInTheDocument()
     expect(review).toHaveBeenCalledTimes(2)
   })
 
@@ -797,17 +711,17 @@ describe('VPSDetailPage gate', () => {
     })
 
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '归档' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '结束使用并归档' }))
     fireEvent.change(await screen.findByRole('textbox', { name: '归档原因' }), {
       target: { value: '订阅已结束' },
     })
     fireEvent.change(screen.getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
       target: { value: '东京边缘' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '结束使用并归档' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent('archive conflict')
-    expect(screen.getByRole('alertdialog', { name: '确认归档 VPS' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: '结束使用并归档' })).toBeInTheDocument()
     expect(screen.getByTestId('detail-location')).toHaveTextContent('/vps/vps_001')
     expect(screen.getByTestId('detail-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
     expect(screen.queryByText('Archive detail route')).not.toBeInTheDocument()
@@ -826,25 +740,25 @@ describe('VPSDetailPage gate', () => {
     expect(screen.queryByText('Legacy VPS detail shell')).not.toBeInTheDocument()
   })
 
-  it('falls back to legacy only after a valid capability-off overview', async () => {
+  it('fails closed when overview capabilities are absent', async () => {
     const capabilityOff = overviewFixture()
     capabilityOff.capabilities = []
     const get = vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(capabilityOff)
 
     renderDetail()
 
-    await waitFor(() => expect(screen.getByText('Legacy VPS detail shell')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('无法加载 VPS 概览')).toBeInTheDocument())
     expect(get).toHaveBeenCalledTimes(1)
   })
 
-  it('falls back to legacy when overview capability is unavailable', async () => {
+  it('fails closed when overview capability is unavailable', async () => {
     vi.spyOn(recordsApi, 'getVPSOverview').mockRejectedValue(
       new ApiError(503, 'overview unavailable', { code: 'overview_unavailable' }),
     )
 
     renderDetail()
 
-    await waitFor(() => expect(screen.getByText('Legacy VPS detail shell')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('无法加载 VPS 概览')).toBeInTheDocument())
     expect(screen.queryByRole('button', { name: '管理' })).not.toBeInTheDocument()
   })
 

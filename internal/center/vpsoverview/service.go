@@ -448,7 +448,7 @@ func (service *Service) buildOverview(identitySource IdentitySource, collected s
 		Anomalies:   anomalies,
 		Summary: Summary{
 			Overall: SummaryCell{
-				Status: overallStatus(anomalies, identity.LifecycleStatus), Section: overallSection,
+				Status: overallStatus(anomalies, identity.LifecycleStatus, monitoring), Section: overallSection,
 			},
 			Monitoring: SummaryCell{
 				Status: firstNonEmpty(monitoring.Health, monitoring.Status, "unknown"),
@@ -654,7 +654,10 @@ func snapshotFromSources(
 	return snapshot
 }
 
-func overallStatus(anomalies []Anomaly, lifecycle string) string {
+func overallStatus(anomalies []Anomaly, lifecycle string, monitoring MonitoringSource) string {
+	if lifecycle == "archived" {
+		return "archived"
+	}
 	for _, anomaly := range anomalies {
 		if anomaly.Severity == SeverityCritical {
 			return "critical"
@@ -665,11 +668,14 @@ func overallStatus(anomalies []Anomaly, lifecycle string) string {
 			return "attention"
 		}
 	}
-	if lifecycle == "to_cancel" || lifecycle == "to_migrate" {
-		return "attention"
-	}
 	if len(anomalies) > 0 {
 		return "notice"
+	}
+	if monitoring.Status == "暂停" || monitoring.Status == "维护中" || monitoring.Status == "待接入" {
+		return monitoring.Status
+	}
+	if monitoring.Section.State != SectionReady || (monitoring.Health != "正常" && monitoring.Health != "healthy") {
+		return "unknown"
 	}
 	return "healthy"
 }

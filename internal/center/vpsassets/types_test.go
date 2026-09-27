@@ -148,11 +148,9 @@ func TestValidateVPSStateCombinationAllowsCoherentStates(t *testing.T) {
 		renewal   RenewalDecision
 	}{
 		{name: "active keep", lifecycle: LifecycleActive, usage: UsageInUse, renewal: RenewalKeep},
-		{name: "idle unreviewed", lifecycle: LifecycleIdle, usage: UsageIdle, renewal: RenewalUnreviewed},
-		{name: "testing observe", lifecycle: LifecycleTesting, usage: UsageTesting, renewal: RenewalObserve},
-		{name: "to migrate", lifecycle: LifecycleToMigrate, usage: UsageStandby, renewal: RenewalMigrate},
-		{name: "to cancel", lifecycle: LifecycleToCancel, usage: UsageIdle, renewal: RenewalCancel},
-		{name: "cancelled", lifecycle: LifecycleCancelled, usage: UsageIdle, renewal: RenewalAutoRenewCancelled},
+		{name: "active unreviewed", lifecycle: LifecycleActive, usage: UsageIdle, renewal: RenewalUnreviewed},
+		{name: "active cancel", lifecycle: LifecycleActive, usage: UsageInUse, renewal: RenewalCancel},
+		{name: "archived keep", lifecycle: LifecycleArchived, usage: UsageInUse, renewal: RenewalKeep},
 	}
 
 	for _, tt := range tests {
@@ -169,9 +167,9 @@ func TestPatchInputPresenceNormalizationAndNullableProvider(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{
 		"display_name":" Tokyo Edge ",
 		"provider_id":null,
-		"lifecycle_status":" testing ",
-		"usage_status":" idle ",
-		"renewal_decision":" observe ",
+		"lifecycle_status":" active ",
+		"usage_tags":[" 闲置 ","归档备份","闲置"],
+		"renewal_decision":" cancel ",
 		"ssh_port":2222,
 		"labels":[" edge ","","edge","backup"]
 	}`), &input); err != nil {
@@ -185,14 +183,14 @@ func TestPatchInputPresenceNormalizationAndNullableProvider(t *testing.T) {
 	if !input.ProviderID.Set || input.ProviderID.Value != nil {
 		t.Fatalf("ProviderID patch = %#v, want explicit nil", input.ProviderID)
 	}
-	if !input.LifecycleStatus.Set || input.LifecycleStatus.Value != LifecycleTesting {
-		t.Fatalf("LifecycleStatus patch = %#v, want testing", input.LifecycleStatus)
+	if !input.LifecycleStatus.Set || input.LifecycleStatus.Value != LifecycleActive {
+		t.Fatalf("LifecycleStatus patch = %#v, want active", input.LifecycleStatus)
 	}
-	if !input.UsageStatus.Set || input.UsageStatus.Value != UsageIdle {
-		t.Fatalf("UsageStatus patch = %#v, want idle", input.UsageStatus)
+	if !input.UsageTags.Set || !reflect.DeepEqual(input.UsageTags.Values, []string{"闲置", "归档备份"}) {
+		t.Fatalf("UsageTags patch = %#v, want normalized tags", input.UsageTags)
 	}
-	if !input.RenewalDecision.Set || input.RenewalDecision.Value != RenewalObserve {
-		t.Fatalf("RenewalDecision patch = %#v, want observe", input.RenewalDecision)
+	if !input.RenewalDecision.Set || input.RenewalDecision.Value != RenewalCancel {
+		t.Fatalf("RenewalDecision patch = %#v, want cancel", input.RenewalDecision)
 	}
 	if !input.SSHPort.Set || input.SSHPort.Value != 2222 {
 		t.Fatalf("SSHPort patch = %#v, want 2222", input.SSHPort)

@@ -111,7 +111,7 @@ func createOverviewIPQualityVPS(t *testing.T, ctx context.Context, pool *pgxpool
 		DisplayName:     "Leftover IP Quality",
 		IPv4:            ipv4,
 		LifecycleStatus: vpsassets.LifecycleActive,
-		UsageStatus:     vpsassets.UsageInUse,
+		UsageTags:       []string{"业务"},
 		RenewalDecision: vpsassets.RenewalKeep,
 	})
 	if err != nil {
@@ -128,8 +128,6 @@ func seedDisabledCenterSettings(t *testing.T, ctx context.Context, pool *pgxpool
 			'enabled', false,
 			'frequency_seconds', 86400,
 			'timeout_seconds', 15,
-			'raw_retention_days', 90,
-			'history_retention_days', 365,
 			'stale_after_seconds', 604800,
 			'services', '[]'::jsonb
 		))`); err != nil {
@@ -142,11 +140,12 @@ func seedHealthyNonIPOverviewSources(t *testing.T, ctx context.Context, pool *pg
 	if _, err := pool.Exec(ctx, `
 		insert into public.monitoring_instances (
 			monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
-			monitoring_status, binding_status, current_health_status, last_heartbeat_at, updated_at
+			monitoring_status, binding_status, current_health_status, last_heartbeat_at, updated_at,
+			vps_id, ever_connected, last_trusted_online_at
 		) values (
-			$1, 'overview-ipq-monitor', 'Tokyo', 'Tokyo', 'Example', '在用',
-			'启用', '已绑定', '正常', now() - interval '1 minute', now() - interval '1 minute'
-		)`, monitoringInstanceID); err != nil {
+			$1, 'overview-ipq-monitor', 'Tokyo', 'Tokyo', 'Example', '已接入',
+			'启用', '已绑定', '正常', now(), now() - interval '1 minute', $2, true, now()
+		)`, monitoringInstanceID, vpsID); err != nil {
 		t.Fatalf("seed monitoring instance: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `

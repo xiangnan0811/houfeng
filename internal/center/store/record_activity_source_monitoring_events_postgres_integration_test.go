@@ -14,6 +14,7 @@ import (
 )
 
 const (
+	monitoringEventFixtureVPSID      = "vps_monitoring_event_fixture"
 	monitoringEventFixtureInstanceID = "mi_3b7d1e9a04c6f285"
 	monitoringEventFixtureTargetID   = "tg_9f8e7d6c5b4a3210"
 )
@@ -28,10 +29,14 @@ func seedMonitoringEventFixture(t *testing.T, ctx context.Context, pool *pgxpool
 		arguments []any
 	}{
 		{
+			sql:       `insert into vps_assets(vps_id, display_name, lifecycle_status) values ($1, 'timeline owner', 'active')`,
+			arguments: []any{monitoringEventFixtureVPSID},
+		},
+		{
 			sql: `insert into monitoring_instances (
-				monitoring_instance_id, display_name, region, city, provider, lifecycle_status
-			) values ($1, 'hk-edge-01', 'HK', 'Hong Kong', 'Test Provider', '在用')`,
-			arguments: []any{monitoringEventFixtureInstanceID},
+				monitoring_instance_id, vps_id, display_name, region, city, provider, lifecycle_status
+			) values ($1, $2, 'hk-edge-01', 'HK', 'Hong Kong', 'Test Provider', '已接入')`,
+			arguments: []any{monitoringEventFixtureInstanceID, monitoringEventFixtureVPSID},
 		},
 		{
 			sql: `insert into targets (target_id, name, target_type, host, run_status)

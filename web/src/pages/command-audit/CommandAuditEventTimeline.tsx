@@ -6,6 +6,7 @@ const EVENT_LABELS: Record<CommandAuditEvent['event_type'], string> = {
   dispatched: '已派发',
   completed: '已完成',
   rejected: '已拒绝',
+  cancelled: '已取消',
 }
 
 function compareEvents(left: CommandAuditEvent, right: CommandAuditEvent): number {

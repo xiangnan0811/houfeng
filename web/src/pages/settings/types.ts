@@ -28,8 +28,6 @@ export type SettingsIncidentDefaultsForm = {
 export type SettingsRetentionPolicyForm = {
   rawLayerDays: string
   aggregateLayerDays: string
-  eventLayerDays: string
-  notificationLayerDays: string
 }
 
 export type SettingsIPQualityForm = {
@@ -37,8 +35,6 @@ export type SettingsIPQualityForm = {
   frequencySeconds: string
   staleAfterSeconds: string
   timeoutSeconds: string
-  rawRetentionDays: string
-  historyRetentionDays: string
   servicesText: string
 }
 

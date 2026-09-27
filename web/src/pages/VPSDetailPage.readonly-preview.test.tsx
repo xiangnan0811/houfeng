@@ -17,10 +17,6 @@ vi.mock('../lib/readOnlyPreview', () => ({
   READ_ONLY_PREVIEW: true,
 }))
 
-vi.mock('./vps-detail/LegacyVPSDetail', () => ({
-  LegacyVPSDetail: () => <div>Legacy VPS detail shell</div>,
-}))
-
 function overviewFixture(): VPSOverview {
   return {
     generated_at: '2026-08-20T00:00:00Z',
@@ -36,7 +32,7 @@ function overviewFixture(): VPSOverview {
       ipv4: '192.0.2.10',
       ipv6: '',
       lifecycle_status: 'active',
-      usage_status: 'in_use',
+      usage_tags: ['承载业务'],
       renewal_decision: 'keep',
       importance: 'high',
       labels: [],
@@ -98,7 +94,7 @@ function detailFixture(): VPSAssetDetail {
     os_name: 'Debian',
     virtualization: 'KVM',
     lifecycle_status: 'active',
-    usage_status: 'in_use',
+    usage_tags: ['承载业务'],
     renewal_decision: 'keep',
     importance: 'high',
     labels: [],
@@ -150,11 +146,12 @@ function monitoringFixture(): VPSMonitoringInstanceSummary {
     region: 'Tokyo',
     city: 'Tokyo',
     provider: 'Example',
-    lifecycle_status: 'active',
+    lifecycle_status: '已接入',
     monitoring_status: '启用',
-    binding_status: 'bound',
+    binding_status: '已绑定',
     current_health_status: '正常',
     last_heartbeat_at: '2026-08-24T00:00:00Z',
+    last_trusted_online_at: '2026-08-24T00:00:00Z',
     current_active_incident_count: 0,
     current_primary_issue_summary: '',
     linked_at: '2026-08-01T00:00:00Z',
@@ -163,6 +160,29 @@ function monitoringFixture(): VPSMonitoringInstanceSummary {
 }
 
 describe('VPSDetailPage readonly preview workbench', () => {
+  it('fails closed when the overview capability is unavailable', async () => {
+    vi.mocked(recordsApi.getVPSOverview).mockResolvedValue({ ...overviewFixture(), capabilities: [] })
+    render(<MemoryRouter initialEntries={['/vps/vps_001?workbench=monitoring-instance-create']}>
+      <Routes><Route path="/vps/:vpsId" element={<VPSDetailPage />} /></Routes>
+    </MemoryRouter>)
+    expect(await screen.findByText('VPS 概览请求或响应校验失败，请重试。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '管理' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(api.getVPSAsset).not.toHaveBeenCalled()
+    expect(api.createVPSService).not.toHaveBeenCalled()
+    expect(api.issueMonitoringInstanceInstallCommand).not.toHaveBeenCalled()
+  })
+
+  it('keeps an overview read failure on the error surface without opening another write path', async () => {
+    vi.mocked(recordsApi.getVPSOverview).mockRejectedValue(new Error('offline'))
+    render(<MemoryRouter initialEntries={['/vps/vps_001']}>
+      <Routes><Route path="/vps/:vpsId" element={<VPSDetailPage />} /></Routes>
+    </MemoryRouter>)
+    expect(await screen.findByText('VPS 概览请求或响应校验失败，请重试。')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(api.getVPSAsset).not.toHaveBeenCalled()
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -176,7 +196,6 @@ describe('VPSDetailPage readonly preview workbench', () => {
     vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture())
     vi.spyOn(api, 'createVPSService')
     vi.spyOn(api, 'createVPSDomain')
-    vi.spyOn(api, 'unlinkVPSMonitoringInstance')
     vi.spyOn(api, 'issueMonitoringInstanceInstallCommand')
   })
 
@@ -227,7 +246,6 @@ describe('VPSDetailPage readonly preview workbench', () => {
     expect(screen.queryByRole('textbox', { name: '监控实例名称' })).not.toBeInTheDocument()
     expect(api.createVPSService).not.toHaveBeenCalled()
     expect(api.createVPSDomain).not.toHaveBeenCalled()
-    expect(api.unlinkVPSMonitoringInstance).not.toHaveBeenCalled()
     expect(api.issueMonitoringInstanceInstallCommand).not.toHaveBeenCalled()
   })
 })

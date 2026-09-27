@@ -30,7 +30,7 @@ func TestDecodeRecordsAcceptsSubscriptionRenewalMode(t *testing.T) {
 		"display_name":"gifted-vps",
 		"provider_name":"Example",
 		"lifecycle_status":"active",
-		"usage_status":"in_use",
+		"usage_tags":["生产"],
 		"subscription":{
 			"price":0,
 			"currency":"usd",
@@ -47,7 +47,7 @@ func TestDecodeRecordsAcceptsSubscriptionRenewalMode(t *testing.T) {
 	}
 }
 
-func TestDryRunKeepsSubscriptionRenewalModeGift(t *testing.T) {
+func TestDryRunRejectsAcquisitionSourceAsSubscriptionRenewalMode(t *testing.T) {
 	renewAt := "2026-06-01"
 	report, err := DryRun(context.Background(), []InputRecord{{
 		DisplayName:     "gifted-vps",
@@ -74,8 +74,8 @@ func TestDryRunKeepsSubscriptionRenewalModeGift(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
-	if !report.CanImport {
-		t.Fatalf("CanImport = false, validation errors = %#v", report.ValidationErrors)
+	if report.CanImport || len(report.ValidationErrors) == 0 {
+		t.Fatalf("source-valued renewal mode must block import: %#v", report)
 	}
 	if len(report.SubscriptionCandidates) != 1 || report.SubscriptionCandidates[0].RenewalMode != "gift" {
 		t.Fatalf("SubscriptionCandidates = %#v, want renewal_mode gift", report.SubscriptionCandidates)
@@ -124,7 +124,7 @@ func TestDryRunReportsValidationAndDecisionSignals(t *testing.T) {
 			IPv4:                   "192.0.2.10",
 			SSHPort:                22,
 			LifecycleStatus:        vpsassets.LifecycleActive,
-			UsageStatus:            vpsassets.UsageIdle,
+			UsageTags:              []string{"闲置"},
 			Labels:                 []string{" proxy ", "proxy", ""},
 			MonitoringInstanceName: "tokyo-monitoringInstance",
 			TargetURL:              "https://tokyo.example",
@@ -238,10 +238,11 @@ func TestDryRunReportsExistingDuplicates(t *testing.T) {
 
 func TestDryRunCanIgnoreRepositoryErrors(t *testing.T) {
 	report, err := DryRun(context.Background(), []InputRecord{{
-		DisplayName:     "Tokyo",
-		ProviderName:    "Example Provider",
-		LifecycleStatus: vpsassets.LifecycleActive,
-		UsageStatus:     vpsassets.UsageInUse,
+		DisplayName:       "Tokyo",
+		ProviderName:      "Example Provider",
+		AcquisitionSource: "gift",
+		LifecycleStatus:   vpsassets.LifecycleActive,
+		UsageStatus:       vpsassets.UsageInUse,
 	}}, Repositories{
 		Providers: &fakeProviderRepo{listErr: errors.New("providers missing")},
 		VPSAssets: &fakeVPSRepo{},
@@ -276,7 +277,7 @@ func TestImportCreatesRecordsWhenDryRunIsClean(t *testing.T) {
 			Currency:           "usd",
 			BillingMonths:      12,
 			RenewAt:            &renewAt,
-			RenewalMode:        "gift",
+			RenewalMode:        "manual",
 			AutoRenew:          true,
 			AutoRenewCancelled: true,
 		},
@@ -305,7 +306,7 @@ func TestImportCreatesRecordsWhenDryRunIsClean(t *testing.T) {
 	if len(subscriptionRepo.created) != 1 || subscriptionRepo.created[0].VPSID != "vps_created_1" {
 		t.Fatalf("created subscriptions = %#v, want vps_created_1", subscriptionRepo.created)
 	}
-	if subscriptionRepo.created[0].RenewalMode != "gift" || subscriptionRepo.created[0].AutoRenew || subscriptionRepo.created[0].AutoRenewCancelled {
+	if subscriptionRepo.created[0].RenewalMode != "manual" || subscriptionRepo.created[0].AutoRenew || subscriptionRepo.created[0].AutoRenewCancelled {
 		t.Fatalf("created subscription renewal fields = mode:%q auto:%t cancelled:%t, want gift false/false", subscriptionRepo.created[0].RenewalMode, subscriptionRepo.created[0].AutoRenew, subscriptionRepo.created[0].AutoRenewCancelled)
 	}
 	if report.Totals.ImportedProviders != 1 || report.Totals.ImportedVPSAssets != 1 || report.Totals.ImportedSubscriptions != 1 {

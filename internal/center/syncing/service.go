@@ -9,6 +9,7 @@ import (
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/observations"
+	"houfeng/internal/contracts/agentapi"
 )
 
 // MaxBatchItems is the admitted per-collection item limit for one agent sync
@@ -36,6 +37,8 @@ type CommandResult struct {
 }
 
 type Batch struct {
+	SessionID            string
+	LiveSignal           *agentapi.LiveSignal
 	MonitoringInstanceID string
 	SyncToken            string
 	Heartbeats           []HeartbeatPayload
@@ -53,9 +56,10 @@ const (
 )
 
 type Result struct {
-	Disposition ResultDisposition
-	AcceptedAt  time.Time
-	Plan        agentplan.SyncPlan
+	StopCollection bool
+	Disposition    ResultDisposition
+	AcceptedAt     time.Time
+	Plan           agentplan.SyncPlan
 }
 
 type PostSyncProcessor interface {
@@ -107,7 +111,7 @@ func (s *Service) SyncBatch(ctx context.Context, batch Batch) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	if s.postSync != nil && result.Disposition != ResultDispositionExactDuplicate {
+	if s.postSync != nil && result.Disposition == ResultDispositionRecorded {
 		if err := s.postSync.AfterSuccessfulSync(ctx, batch, result); err != nil {
 			return Result{}, err
 		}

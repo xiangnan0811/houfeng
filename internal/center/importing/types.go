@@ -62,7 +62,15 @@ type InputRecord struct {
 	OSName                 string                    `json:"os_name"`
 	Virtualization         string                    `json:"virtualization"`
 	LifecycleStatus        vpsassets.LifecycleStatus `json:"lifecycle_status"`
-	UsageStatus            vpsassets.UsageStatus     `json:"usage_status"`
+	UsageStatus            vpsassets.UsageStatus     `json:"-"`
+	UsageTags              []string                  `json:"usage_tags"`
+	ValidityMode           string                    `json:"validity_mode"`
+	ExpiresAt              *string                   `json:"expires_at"`
+	AutoRenewCheck         string                    `json:"auto_renew_check"`
+	AutoRenewCheckedAt     *time.Time                `json:"auto_renew_checked_at"`
+	RenewalReason          string                    `json:"renewal_reason"`
+	RenewalReviewAt        *time.Time                `json:"renewal_review_at"`
+	AcquisitionSource      string                    `json:"acquisition_source"`
 	RenewalDecision        vpsassets.RenewalDecision `json:"renewal_decision"`
 	Importance             string                    `json:"importance"`
 	Labels                 []string                  `json:"labels"`

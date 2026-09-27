@@ -17,13 +17,11 @@ import { overviewImportanceLabel } from '../lib/vpsOverviewPresentation'
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
-  VPS_USAGE_STATUS_LABELS,
   type ProviderRecord,
   type SubscriptionRecord,
   type VPSAssetRecord,
   type VPSLifecycleStatus,
   type VPSRenewalDecision,
-  type VPSUsageStatus,
 } from '../lib/types'
 import {
   IPQualityBadge,
@@ -86,7 +84,7 @@ type FilterState = {
   view: VPSQuickView
   provider_id: string | null
   lifecycle_status: VPSLifecycleStatus | null
-  usage_status: VPSUsageStatus | null
+  usage_tag: string | null
   renewal_decision: VPSRenewalDecision | null
 }
 
@@ -106,7 +104,7 @@ const INITIAL_FILTER_STATE: FilterState = {
   view: 'all',
   provider_id: null,
   lifecycle_status: null,
-  usage_status: null,
+  usage_tag: null,
   renewal_decision: null,
 }
 
@@ -116,15 +114,11 @@ function vpsDetailHref(vpsID: string, view: VPSQuickView): string {
 }
 
 const LIFECYCLE_OPTIONS = Object.entries(VPS_LIFECYCLE_STATUS_LABELS)
-  .filter(([value]) => value !== 'cancelled' && value !== 'archived')
+  .filter(([value]) => value !== 'archived')
   .map(([value, label]) => ({
     value,
     label,
   }))
-const USAGE_OPTIONS = Object.entries(VPS_USAGE_STATUS_LABELS).map(([value, label]) => ({
-  value,
-  label,
-}))
 const RENEWAL_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABELS).map(([value, label]) => ({
   value,
   label,
@@ -151,14 +145,14 @@ function describeError(error: unknown, fallback: string): string {
 
 function parseFilters(searchParams: URLSearchParams): FilterState {
   const lifecycle = searchParams.get('lifecycle_status') as VPSLifecycleStatus | null
-  const usage = searchParams.get('usage_status') as VPSUsageStatus | null
+  const usage = searchParams.get('usage_tag')
   const renewal = searchParams.get('renewal_decision') as VPSRenewalDecision | null
   const view = searchParams.get('view') as VPSQuickView | null
   return {
     view: view && QUICK_VIEW_VALUES.includes(view) ? view : 'all',
     provider_id: searchParams.get('provider_id') || null,
     lifecycle_status: lifecycle && lifecycle in VPS_LIFECYCLE_STATUS_LABELS ? lifecycle : null,
-    usage_status: usage && usage in VPS_USAGE_STATUS_LABELS ? usage : null,
+    usage_tag: usage || null,
     renewal_decision: renewal && renewal in VPS_RENEWAL_DECISION_LABELS ? renewal : null,
   }
 }
@@ -170,8 +164,8 @@ function writeFilters(params: URLSearchParams, filters: FilterState) {
   else params.delete('provider_id')
   if (filters.lifecycle_status) params.set('lifecycle_status', filters.lifecycle_status)
   else params.delete('lifecycle_status')
-  if (filters.usage_status) params.set('usage_status', filters.usage_status)
-  else params.delete('usage_status')
+  if (filters.usage_tag) params.set('usage_tag', filters.usage_tag)
+  else params.delete('usage_tag')
   if (filters.renewal_decision) params.set('renewal_decision', filters.renewal_decision)
   else params.delete('renewal_decision')
 }
@@ -204,7 +198,7 @@ function assetDecisionHrefForFilters(filters: FilterState): string {
   if (filters.view === 'renewal') {
     params.set('view', 'renewal')
   }
-  if (filters.lifecycle_status === 'to_cancel' || filters.renewal_decision === 'cancel' || filters.view === 'cancellation_attention') {
+  if (filters.renewal_decision === 'cancel' || filters.view === 'cancellation_attention') {
     params.set('scenario', 'migration_retirement')
   } else if (filters.view === 'missing_subscription' || filters.view === 'unlinked' || filters.view === 'missing_facts') {
     params.set('view', 'evidence')
@@ -218,7 +212,7 @@ function hasActiveFilters(filters: FilterState): boolean {
     filters.view !== 'all' ||
       filters.provider_id ||
       filters.lifecycle_status ||
-      filters.usage_status ||
+      filters.usage_tag ||
       filters.renewal_decision,
   )
 }
@@ -236,7 +230,7 @@ function buildInventoryRows(
   subscriptionEvidence: SubscriptionEvidenceStatus,
 ): InventoryRow[] {
   return vpsRows
-    .filter((vps) => vps.lifecycle_status !== 'cancelled' && vps.lifecycle_status !== 'archived')
+    .filter((vps) => vps.lifecycle_status !== 'archived')
     .map((vps) => {
     const subscription =
       subscriptionEvidence === 'ready'
@@ -261,7 +255,7 @@ function applyInventoryFilters(rows: InventoryRow[], filters: FilterState): Inve
     .filter((row) => {
       if (filters.provider_id && row.vps.provider_id !== filters.provider_id) return false
       if (filters.lifecycle_status && row.vps.lifecycle_status !== filters.lifecycle_status) return false
-      if (filters.usage_status && row.vps.usage_status !== filters.usage_status) return false
+      if (filters.usage_tag && !(row.vps.usage_tags ?? []).includes(filters.usage_tag)) return false
       if (filters.renewal_decision && row.vps.renewal_decision !== filters.renewal_decision) return false
       return matchesQuickView(row, filters.view)
     })
@@ -288,19 +282,10 @@ function matchesQuickView(row: InventoryRow, view: VPSQuickView): boolean {
 }
 
 function cancellationAttentionReason(row: InventoryRow): string | null {
-  const vpsToCancel = row.vps.lifecycle_status === 'to_cancel'
-  const vpsCancelDecision = row.vps.renewal_decision === 'cancel' || row.vps.renewal_decision === 'auto_renew_cancelled'
-  const runningLinkedAssetCount = (row.vps.running_monitoring_instance_count ?? 0) + (row.vps.running_target_count ?? 0)
-  const subscriptionInactive = row.subscriptionEvidence === 'ready' &&
-    row.subscription != null &&
-    row.subscription.status !== 'active'
-  const subscriptionActive = row.subscriptionEvidence === 'ready' &&
-    row.subscription?.status === 'active'
-
-  if (subscriptionInactive && !vpsToCancel) return '订阅非活跃，VPS 尚未取消'
-  if (vpsToCancel && subscriptionActive) return 'VPS 待取消，订阅仍生效中'
-  if (vpsToCancel && runningLinkedAssetCount > 0) return `VPS 待取消，仍有 ${runningLinkedAssetCount} 个监控实例/入口探测运行`
-  if (vpsCancelDecision && !vpsToCancel) return '已决定不续费，生命周期未同步'
+  if (row.vps.renewal_decision !== 'cancel') return null
+  const check = row.vps.auto_renew_check ?? 'unchecked'
+  if (check === 'unchecked') return '已决定不续费，请核对服务商自动续费'
+  if (check === 'enabled') return '服务商自动续费仍开启，可能继续扣费'
   return null
 }
 
@@ -324,7 +309,7 @@ function quickViewLabel(value: VPSQuickView): string {
   if (value === 'renewal') return '30天续费'
   if (value === 'unreviewed') return '未评估'
   if (value === 'unlinked') return '未关联'
-  if (value === 'cancellation_attention') return '取消待处理'
+  if (value === 'cancellation_attention') return '自动续费待核对'
   if (value === 'missing_subscription') return '缺订阅'
   if (value === 'missing_facts') return '缺基础信息'
   return '全部'
@@ -361,7 +346,15 @@ function matchesSearch(row: InventoryRow, query: string): boolean {
     vps.region,
     vps.city,
     vps.datacenter,
+    ...(vps.usage_tags ?? []),
+    ...vps.labels,
   ].some((part) => part.toLowerCase().includes(needle))
+}
+
+function validityLabel(vps: VPSAssetRecord): string {
+  if (vps.validity_mode === 'unlimited') return '无固定期限'
+  if (vps.validity_mode === 'fixed' && vps.expires_at) return formatDate(vps.expires_at)
+  return '未知'
 }
 
 function compactLine(parts: Array<string | null | undefined>): string {
@@ -462,9 +455,11 @@ function VPSInspector({
               <dt>生命周期</dt>
               <dd><LifecycleBadge value={row.vps.lifecycle_status} /></dd>
               <dt>用途</dt>
-              <dd><UsageBadge value={row.vps.usage_status} /></dd>
+              <dd><UsageBadge value={(row.vps.usage_tags ?? []).join('、')} /></dd>
               <dt>续费</dt>
               <dd><RenewalBadge value={row.vps.renewal_decision} /> · {row.subscriptionEvidence === 'ready' ? (row.subscription?.renew_at ? formatDate(row.subscription.renew_at) : '无续费日') : '续费日未知'}</dd>
+              <dt>VPS 有效期</dt>
+              <dd>{validityLabel(row.vps)}</dd>
               <dt>订阅</dt>
               <dd>{subscriptionFact(row, subscriptionsError)}</dd>
               <dt>关联</dt>
@@ -530,9 +525,10 @@ function VPSQuickFacts({ row }: { row: InventoryRow }) {
         <div className="vps-accordion__fact-value">
           <LifecycleBadge value={row.vps.lifecycle_status} />
           {' · '}
-          <UsageBadge value={row.vps.usage_status} />
+          <UsageBadge value={(row.vps.usage_tags ?? []).join('、')} />
           {' · '}
           <RenewalBadge value={row.vps.renewal_decision} />
+          {' · VPS 有效期 '}{validityLabel(row.vps)}
           {' · '}
           {renderRenewalDate(row)}
           {attention ? <span className="vps-tone-warn"> · {attention}</span> : null}
@@ -609,6 +605,8 @@ export function VPSPage() {
   const [draftFilters, setDraftFilters] = useState<FilterState>(filters)
   const [filterDrawerOpen, setFilterDrawerOpen] = useState(false)
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
+  const usageSuggestions = useMemo(() => [...new Set(state.vps.flatMap((vps) => vps.usage_tags ?? []))].sort(), [state.vps])
+  const usageOptions = useMemo(() => [...new Set([...usageSuggestions, ...(filters.usage_tag ? [filters.usage_tag] : [])])].map((tag) => ({ value: tag, label: tag })), [usageSuggestions, filters.usage_tag])
   const [createOpen, setCreateOpen] = useState(false)
   const [accordionOpen, setAccordionOpen] = useState(false)
   const [inventoryReloadKey, setInventoryReloadKey] = useState(0)
@@ -753,7 +751,7 @@ export function VPSPage() {
     { value: 'renewal', label: '30天续费', ...(renewalDueCount == null ? {} : { count: renewalDueCount }) },
     { value: 'unreviewed', label: '未评估', count: unreviewedCount },
     { value: 'unlinked', label: '未关联', count: unlinkedCount },
-    { value: 'cancellation_attention', label: '取消待处理', count: cancellationAttentionCount },
+    { value: 'cancellation_attention', label: '自动续费待核对', count: cancellationAttentionCount },
     { value: 'missing_subscription', label: '缺订阅', ...(missingSubscriptionCount == null ? {} : { count: missingSubscriptionCount }) },
     { value: 'missing_facts', label: '缺信息', count: missingFactsCount },
   ] satisfies Array<{ value: VPSQuickView; label: string; count?: number }>
@@ -871,7 +869,7 @@ export function VPSPage() {
           {filters.view !== 'all' && <FilterChip label={`视图: ${quickViewLabel(filters.view)}`} onRemove={() => setFilter('view', 'all')} />}
           {filters.provider_id && <FilterChip label={`服务商: ${providerName(filters.provider_id, state.providers)}`} onRemove={() => setFilter('provider_id', null)} />}
           {filters.lifecycle_status && <FilterChip label={`生命周期: ${lifecycleLabel(filters.lifecycle_status)}`} onRemove={() => setFilter('lifecycle_status', null)} />}
-          {filters.usage_status && <FilterChip label={`用途: ${usageLabel(filters.usage_status)}`} onRemove={() => setFilter('usage_status', null)} />}
+          {filters.usage_tag && <FilterChip label={`用途: ${usageLabel(filters.usage_tag)}`} onRemove={() => setFilter('usage_tag', null)} />}
           {filters.renewal_decision && <FilterChip label={`续费: ${renewalLabel(filters.renewal_decision)}`} onRemove={() => setFilter('renewal_decision', null)} />}
           <button type="button" className="filter-clear" onClick={clearFilters}>清除全部</button>
         </div>
@@ -985,7 +983,7 @@ export function VPSPage() {
                             <td>
                               <div className="badge-row">
                                 <LifecycleBadge value={row.vps.lifecycle_status} />
-                                <UsageBadge value={row.vps.usage_status} />
+                                <UsageBadge value={(row.vps.usage_tags ?? []).join('、')} />
                               </div>
                               <div className="vps-workbench__meta">
                                 <RenewalBadge value={row.vps.renewal_decision} />
@@ -1073,6 +1071,7 @@ export function VPSPage() {
       </div>
 
       <VPSCreateModal
+        usageSuggestions={usageSuggestions}
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         providers={state.providers}
@@ -1102,10 +1101,10 @@ export function VPSPage() {
             onChange={(value) => setDraftFilters({ ...draftFilters, lifecycle_status: value as VPSLifecycleStatus | null })}
           />
           <FilterSelect
-            label="用途状态"
-            value={draftFilters.usage_status}
-            options={USAGE_OPTIONS}
-            onChange={(value) => setDraftFilters({ ...draftFilters, usage_status: value as VPSUsageStatus | null })}
+            label="用途"
+            value={draftFilters.usage_tag}
+            options={usageOptions}
+            onChange={(value) => setDraftFilters({ ...draftFilters, usage_tag: value })}
           />
           <FilterSelect
             label="续费决策"

@@ -19,6 +19,8 @@ import (
 var ErrInvalidLifecycleActionInput = errors.New("invalid lifecycle action input")
 var ErrLifecycleActionBlocked = errors.New("lifecycle action blocked")
 var ErrStaleCancellationPreview = errors.New("stale cancellation preview")
+var ErrStaleArchivePreview = errors.New("stale archive preview")
+var ErrArchiveIdempotencyConflict = errors.New("archive idempotency key reused")
 var ErrRetryableLifecycleConflict = errors.New("lifecycle transaction conflict")
 var ErrSharedImpactConfirmationRequired = errors.New("shared impact confirmation required")
 
@@ -53,13 +55,10 @@ const (
 )
 
 type Repository interface {
-	GetVPSCancellationPreview(context.Context, string) (CancellationPreview, error)
-	ApplyVPSCancellation(context.Context, string, ApplyCancellationInput) (LifecycleActionResult, error)
 	ExtendVPSValidity(context.Context, string, ExtendValidityInput) (LifecycleActionResult, error)
 	GetVPSArchiveReview(context.Context, string) (ArchiveReview, error)
 	ApplyVPSArchive(context.Context, string, ApplyArchiveInput) (ArchiveReview, error)
 	RestoreVPSFromArchive(context.Context, string, RestoreArchiveInput) (vpsassets.Record, error)
-	StartVPSMigration(context.Context, string, StartMigrationInput) (LifecycleActionResult, error)
 	ListTargetAssetContexts(context.Context) ([]AssetContextForTarget, error)
 }
 
@@ -89,7 +88,40 @@ type ArchiveReview struct {
 	Blockers                []string                               `json:"blockers"`
 	BlockerDetails          []BlockerDetail                        `json:"blocker_details"`
 	Eligible                bool                                   `json:"eligible"`
+	PreviewDigest           string                                 `json:"preview_digest"`
+	PreviewExpiresAt        time.Time                              `json:"preview_expires_at"`
+	OnlineEvidence          ArchiveOnlineEvidence                  `json:"online_evidence"`
+	AssociationDigest       string                                 `json:"association_digest"`
+	ReceiverFaultGeneration uint64                                 `json:"-"`
 }
+
+// ArchiveOnlineEvidence uses only Center receipt time, never Agent timestamps or
+// raw rows which retention may remove. A valid issued session counts as prior
+// enrollment even before its first performance sample or heartbeat.
+type ArchiveOnlineEvidence struct {
+	ObservedAt                 time.Time                 `json:"observed_at"`
+	ReceiverGeneration         string                    `json:"receiver_generation"`
+	ReceiverHealthy            bool                      `json:"receiver_healthy"`
+	HealthySince               *time.Time                `json:"healthy_since"`
+	LastHealthCheckAt          *time.Time                `json:"last_health_check_at"`
+	EarliestArchiveAt          *time.Time                `json:"earliest_archive_at"`
+	NeverConnected             bool                      `json:"never_connected"`
+	ManualConfirmationRequired bool                      `json:"manual_confirmation_required"`
+	Instances                  []ArchiveInstanceEvidence `json:"instances"`
+}
+
+type ArchiveInstanceEvidence struct {
+	MonitoringInstanceID string     `json:"monitoring_instance_id"`
+	SessionID            string     `json:"session_id,omitempty"`
+	EverConnected        bool       `json:"ever_connected"`
+	SessionStartedAt     *time.Time `json:"session_started_at,omitempty"`
+	LastTrustedOnlineAt  *time.Time `json:"last_trusted_online_at"`
+}
+
+type StaleArchivePreviewError struct{ Review ArchiveReview }
+
+func (e *StaleArchivePreviewError) Error() string { return ErrStaleArchivePreview.Error() }
+func (e *StaleArchivePreviewError) Unwrap() error { return ErrStaleArchivePreview }
 
 type BlockerDetail struct {
 	Code             string `json:"code"`
@@ -154,14 +186,14 @@ type ExtendValidityInput struct {
 }
 
 type ApplyArchiveInput struct {
-	ConfirmationName string `json:"confirmation_name"`
-	Reason           string `json:"reason"`
+	ConfirmationName           string `json:"confirmation_name"`
+	Reason                     string `json:"reason"`
+	PreviewDigest              string `json:"preview_digest"`
+	IdempotencyKey             string `json:"idempotency_key"`
+	NeverConnectedConfirmation bool   `json:"never_connected_confirmation"`
 }
 
 type RestoreArchiveInput struct {
-	Reason string `json:"reason"`
-}
-type StartMigrationInput struct {
 	Reason string `json:"reason"`
 }
 
@@ -260,10 +292,15 @@ func NormalizeExtendValidityInput(input ExtendValidityInput) ExtendValidityInput
 func NormalizeApplyArchiveInput(input ApplyArchiveInput) ApplyArchiveInput {
 	input.ConfirmationName = strings.TrimSpace(input.ConfirmationName)
 	input.Reason = strings.TrimSpace(input.Reason)
+	input.PreviewDigest = strings.TrimSpace(input.PreviewDigest)
+	input.IdempotencyKey = strings.TrimSpace(input.IdempotencyKey)
 	return input
 }
 
 func ValidateApplyArchiveInput(input ApplyArchiveInput) error {
+	if input.PreviewDigest == "" || input.IdempotencyKey == "" || len(input.IdempotencyKey) > 200 {
+		return fmt.Errorf("%w: preview_digest and idempotency_key (at most 200 characters) are required", ErrInvalidLifecycleActionInput)
+	}
 	if strings.TrimSpace(input.ConfirmationName) == "" {
 		return fmt.Errorf("%w: confirmation_name is required", ErrInvalidLifecycleActionInput)
 	}

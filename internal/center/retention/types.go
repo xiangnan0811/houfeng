@@ -10,12 +10,8 @@ import (
 const DefaultWorkerInterval = time.Hour
 
 type Policy struct {
-	RawLayerDays                  int
-	AggregateLayerDays            int
-	EventLayerDays                int
-	NotificationLayerDays         int
-	IPQualityRawRetentionDays     int
-	IPQualityHistoryRetentionDays int
+	RawLayerDays       int
+	AggregateLayerDays int
 }
 
 type Result struct {
@@ -26,11 +22,7 @@ type Result struct {
 	DeletedProbeObservations            int64
 	DeletedMonitoringInstanceAggregates int64
 	DeletedTargetAggregates             int64
-	DeletedEvents                       int64
-	DeletedNotifications                int64
 	ClearedCommandActionOutputs         int64
-	ClearedIPQualityRawJSON             int64
-	DeletedIPQualityReports             int64
 }
 
 type Repository interface {
@@ -47,11 +39,7 @@ func PolicyFromSettings(record centersettings.CenterSettings) (Policy, error) {
 		return Policy{}, err
 	}
 	return Policy{
-		RawLayerDays:                  validated.RetentionPolicy.RawLayerDays,
-		AggregateLayerDays:            validated.RetentionPolicy.AggregateLayerDays,
-		EventLayerDays:                validated.RetentionPolicy.EventLayerDays,
-		NotificationLayerDays:         validated.RetentionPolicy.NotificationLayerDays,
-		IPQualityRawRetentionDays:     validated.IPQuality.RawRetentionDays,
-		IPQualityHistoryRetentionDays: validated.IPQuality.HistoryRetentionDays,
+		RawLayerDays:       validated.RetentionPolicy.RawLayerDays,
+		AggregateLayerDays: validated.RetentionPolicy.AggregateLayerDays,
 	}, nil
 }

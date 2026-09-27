@@ -13,7 +13,7 @@ function renderCorrection(currentStatus: string, onCompleted = vi.fn()) {
       objectId="svc_001"
       displayName="Blog service"
       currentStatus={currentStatus}
-      parentLifecycle="cancelled"
+      parentLifecycle="archived"
       onClose={vi.fn()}
       onCompleted={onCompleted}
     />,

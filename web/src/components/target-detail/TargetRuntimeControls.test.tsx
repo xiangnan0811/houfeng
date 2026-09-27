@@ -11,6 +11,7 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
     target_type: 'service',
     host: 'blog.example.com',
     execution_monitoring_instance_labels: [],
+    lifecycle_status: 'active',
     run_status: '启用',
     group: '',
     labels: [],
@@ -46,14 +47,14 @@ describe('TargetRuntimeControls', () => {
 
     expect(screen.getByRole('button', { name: '进入维护' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '暂停' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '归档' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '退役' })).toBeInTheDocument()
   })
 
   it('invokes onAction with the corresponding action when a button is clicked', () => {
     const onAction = vi.fn()
     render(
       <TargetRuntimeControls
-        target={targetRecord({ run_status: '已归档' })}
+        target={targetRecord({ lifecycle_status: 'retired', run_status: '暂停' })}
         disabled={false}
         submitting={false}
         error={null}

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/assetdomains"
+	"houfeng/internal/center/assetrelations"
 	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/ids"
 )
@@ -40,7 +41,7 @@ const assetDomainCreateOperation = "asset-domain.create"
 
 const assetDomainSelectColumns = `
 	domain_id,
-	vps_id,
+	coalesce(vps_id, '') as vps_id,
 	service_id,
 	target_id,
 	domain_name,
@@ -116,34 +117,34 @@ func (r *PostgresAssetDomainRepository) listAssetDomains(ctx context.Context, fi
 	conditions := []string{}
 	if filters.VPSID != "" {
 		args = append(args, filters.VPSID)
-		conditions = append(conditions, fmt.Sprintf("asset_domains.vps_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("a.vps_id = $%d", len(args)))
 	}
 	if filters.ServiceID != "" {
 		args = append(args, filters.ServiceID)
-		conditions = append(conditions, fmt.Sprintf("asset_domains.service_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("a.service_id = $%d", len(args)))
 	}
 	if filters.TargetID != "" {
 		args = append(args, filters.TargetID)
-		conditions = append(conditions, fmt.Sprintf("asset_domains.target_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("a.target_id = $%d", len(args)))
 	}
 	if filters.Status != "" {
 		args = append(args, string(filters.Status))
 		conditions = append(conditions, fmt.Sprintf("asset_domains.status = $%d", len(args)))
 	}
-	if currentAssetScope {
-		conditions = append(conditions, "v.lifecycle_status not in ('cancelled', 'archived')")
+	placementScope := filters.VPSID != "" || filters.TargetID != "" || filters.ServiceID != ""
+	if currentAssetScope && placementScope {
+		conditions = append(conditions, "v.lifecycle_status <> 'archived'", "a.ended_at is null")
 	}
 
-	selectColumns := assetDomainSelectColumns
-	if currentAssetScope {
-		selectColumns = assetDomainQualifiedSelectColumns
-	}
+	selectColumns := strings.NewReplacer("asset_domains.vps_id", "a.vps_id", "asset_domains.service_id", "a.service_id", "asset_domains.target_id", "a.target_id").Replace(assetDomainQualifiedSelectColumns)
 	query := `
 		select ` + selectColumns + `
-		from asset_domains`
-	if currentAssetScope {
-		query += `
-		join vps_assets v on v.vps_id = asset_domains.vps_id`
+		from asset_domains
+		join asset_domain_associations a on a.domain_id = asset_domains.domain_id
+		join vps_assets v on v.vps_id = a.vps_id`
+	if !placementScope {
+		selectColumns = strings.Replace(assetDomainQualifiedSelectColumns, "asset_domains.vps_id", "coalesce(asset_domains.vps_id, '')", 1)
+		query = `select ` + selectColumns + ` from asset_domains`
 	}
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
@@ -182,7 +183,9 @@ func (r *PostgresAssetDomainRepository) ListAssetDomainsForVPS(ctx context.Conte
 	if !exists {
 		return nil, assetdomains.ErrDomainOwnerNotFound
 	}
-	return r.listAssetDomains(ctx, assetdomains.ListFilters{VPSID: vpsID}, false)
+	// Keep overview and ordinary domain lists current; the association endpoint
+	// retains ended placements and their frozen snapshots.
+	return r.listAssetDomains(ctx, assetdomains.ListFilters{VPSID: vpsID}, true)
 }
 
 func (r *PostgresAssetDomainRepository) CreateAssetDomain(ctx context.Context, input assetdomains.CreateInput) (assetdomains.Record, error) {
@@ -225,8 +228,9 @@ func ensureAssetDomainCreateAllowed(ctx context.Context, tx pgx.Tx, input assetd
 		return err
 	}
 	if input.ServiceID != nil {
-		ownerVPSID, err := lockAssetServiceOwner(ctx, tx, *input.ServiceID)
-		if errors.Is(err, pgx.ErrNoRows) || (err == nil && ownerVPSID != input.VPSID) {
+		var linked bool
+		err := tx.QueryRow(ctx, `select exists(select 1 from asset_service_associations where service_id=$1 and vps_id=$2 and ended_at is null)`, *input.ServiceID, input.VPSID).Scan(&linked)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && !linked) {
 			return assetdomains.ErrDomainServiceNotFound
 		}
 		if err != nil {
@@ -236,14 +240,14 @@ func ensureAssetDomainCreateAllowed(ctx context.Context, tx pgx.Tx, input assetd
 	if input.TargetID == nil {
 		return nil
 	}
-	targetStatus, err := lockAssetTargetRunStatus(ctx, tx, *input.TargetID)
+	targetStatus, err := lockAssetTargetLifecycle(ctx, tx, *input.TargetID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return assetdomains.ErrDomainTargetNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("query target %q before domain create: %w", *input.TargetID, err)
 	}
-	return ensureTargetAllowsAssetRelationship(*input.TargetID, targetStatus, string(input.Status), "domain")
+	return ensureTargetAllowsAssetRelationship(*input.TargetID, targetStatus, "domain")
 }
 
 func (r *PostgresAssetDomainRepository) CreateAssetDomainIdempotent(
@@ -291,14 +295,14 @@ func (r *PostgresAssetDomainRepository) CreateAssetDomainIdempotent(
 		record, err := scanAssetDomain(tx.QueryRow(ctx, `
 			select `+assetDomainSelectColumns+`
 			from asset_domains
-			where domain_id = $1
-			  and vps_id = $2`, domainID, input.VPSID))
+			where domain_id = $1`, domainID))
 		if err != nil {
 			return assetdomains.Record{}, false, fmt.Errorf("load replayed asset domain: %w", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return assetdomains.Record{}, false, fmt.Errorf("commit asset domain create replay: %w", err)
 		}
+		record.VPSID, record.ServiceID, record.TargetID = input.VPSID, input.ServiceID, input.TargetID
 		return record, true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -369,9 +373,9 @@ func insertAssetDomain(ctx context.Context, db assetDomainQueryer, input assetdo
 		)
 		returning `+assetDomainSelectColumns,
 		domainID,
-		input.VPSID,
-		nullableStringArg(input.ServiceID),
-		nullableStringArg(input.TargetID),
+		nil,
+		nil,
+		nil,
 		input.DomainName,
 		input.Purpose,
 		string(input.Status),
@@ -388,6 +392,10 @@ func insertAssetDomain(ctx context.Context, db assetDomainQueryer, input assetdo
 		}
 		return assetdomains.Record{}, fmt.Errorf("create asset domain: %w", err)
 	}
+	if _, err := insertAssetRelation(ctx, db, input.VPSID, assetrelations.Domain, assetrelations.LinkInput{ObjectID: domainID, ServiceID: input.ServiceID, TargetID: input.TargetID}); err != nil {
+		return assetdomains.Record{}, err
+	}
+	record.VPSID, record.ServiceID, record.TargetID = input.VPSID, input.ServiceID, input.TargetID
 	return record, nil
 }
 

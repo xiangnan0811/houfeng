@@ -62,7 +62,7 @@ func (f *fakeSettingsRepository) GetSettings(ctx context.Context) (centersetting
 
 func TestWorkerRunsRetentionPassOnStartup(t *testing.T) {
 	repo := &fakeRepository{}
-	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 30, 90, 180, 45, 180)}}
+	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 365)}}
 	worker := NewWorker(repo, settingsRepo, slog.Default(), time.Hour)
 	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
 	worker.now = func() time.Time { return now }
@@ -75,11 +75,8 @@ func TestWorkerRunsRetentionPassOnStartup(t *testing.T) {
 	if len(repo.calls) != 1 {
 		t.Fatalf("len(calls) = %d, want 1", len(repo.calls))
 	}
-	if repo.calls[0].RawLayerDays != 30 || repo.calls[0].AggregateLayerDays != 30 || repo.calls[0].EventLayerDays != 90 || repo.calls[0].NotificationLayerDays != 180 {
+	if repo.calls[0].RawLayerDays != 30 || repo.calls[0].AggregateLayerDays != 365 {
 		t.Fatalf("policy = %#v, want settings retention policy", repo.calls[0])
-	}
-	if repo.calls[0].IPQualityRawRetentionDays != 45 || repo.calls[0].IPQualityHistoryRetentionDays != 180 {
-		t.Fatalf("ip quality policy = %#v, want settings ip quality retention policy", repo.calls[0])
 	}
 	if !repo.nows[0].Equal(now) {
 		t.Fatalf("now = %s, want %s", repo.nows[0], now)
@@ -89,8 +86,8 @@ func TestWorkerRunsRetentionPassOnStartup(t *testing.T) {
 func TestWorkerContinuesAfterRepositoryFailureAndReloadsSettings(t *testing.T) {
 	repo := &fakeRepository{errs: []error{errors.New("retention boom")}}
 	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{
-		settingsWithRetention(30, 30, 90, 180, 45, 180),
-		settingsWithRetention(45, 60, 120, 240, 90, 365),
+		settingsWithRetention(30, 365),
+		settingsWithRetention(45, 60),
 	}}
 	worker := NewWorker(repo, settingsRepo, slog.Default(), time.Millisecond)
 	calls := 0
@@ -111,7 +108,7 @@ func TestWorkerContinuesAfterRepositoryFailureAndReloadsSettings(t *testing.T) {
 	if len(repo.calls) != 2 {
 		t.Fatalf("len(calls) = %d, want 2", len(repo.calls))
 	}
-	if repo.calls[0].RawLayerDays != 30 || repo.calls[1].RawLayerDays != 45 || repo.calls[1].IPQualityRawRetentionDays != 90 {
+	if repo.calls[0].RawLayerDays != 30 || repo.calls[1].RawLayerDays != 45 {
 		t.Fatalf("policies = %#v, want latest settings each pass", repo.calls)
 	}
 }
@@ -131,7 +128,7 @@ func TestWorkerStopsOnContextCancellationBeforeFirstPass(t *testing.T) {
 
 func TestWorkerTreatsCancellationDuringApplyAsNormalShutdown(t *testing.T) {
 	repo := &fakeRepository{block: make(chan struct{})}
-	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 30, 90, 180, 45, 180)}}
+	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 365)}}
 	var logs strings.Builder
 	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -228,7 +225,7 @@ func TestWorkerStopsWhileSleepingOnTimer(t *testing.T) {
 
 func TestWorkerLogsCommandActionOutputCleanupCount(t *testing.T) {
 	repo := &fakeRepository{results: []Result{{ClearedCommandActionOutputs: 3}}}
-	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 30, 90, 180, 45, 180)}}
+	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 365)}}
 	var logs strings.Builder
 	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
 
@@ -243,15 +240,11 @@ func TestWorkerLogsCommandActionOutputCleanupCount(t *testing.T) {
 	}
 }
 
-func settingsWithRetention(raw, aggregate, event, notification, ipQualityRaw, ipQualityHistory int) centersettings.CenterSettings {
+func settingsWithRetention(raw, aggregate int) centersettings.CenterSettings {
 	record := centersettings.Default()
 	record.RetentionPolicy = centersettings.RetentionPolicy{
-		RawLayerDays:          raw,
-		AggregateLayerDays:    aggregate,
-		EventLayerDays:        event,
-		NotificationLayerDays: notification,
+		RawLayerDays:       raw,
+		AggregateLayerDays: aggregate,
 	}
-	record.IPQuality.RawRetentionDays = ipQualityRaw
-	record.IPQuality.HistoryRetentionDays = ipQualityHistory
 	return record
 }

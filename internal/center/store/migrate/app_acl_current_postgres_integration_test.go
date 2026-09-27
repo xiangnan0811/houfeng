@@ -410,6 +410,19 @@ func readAppACLCurrentPostgresDurableSnapshot(
 	if err != nil {
 		t.Fatalf("read current durable manifest snapshot: %v", err)
 	}
+	// A predecessor snapshot must use its own managed inventory. New current
+	// functions do not exist before the successor transaction executes.
+	if len(manifest.AppliedMigrations) > 0 && len(manifest.AppliedMigrations) < currentRootSourceCount {
+		last := manifest.AppliedMigrations[len(manifest.AppliedMigrations)-1].Filename
+		var fragments []AppACLCurrentMigrationFragment
+		for _, fragment := range appACLCurrentMigrationFragments {
+			if fragment.Migration <= last {
+				fragments = append(fragments, fragment)
+			}
+		}
+		fixture := appACLConvergencePostgresFixture{databaseName: input.Contract.DatabaseName, runtime: input.Contract.RoleBindings[0].CatalogRole, admin: input.Contract.RoleBindings[1].CatalogRole, migrator: input.MigratorRole}
+		_, _, input = appACLCurrentPostgresContract(t, fixture, vpsStateRepairMigrationFSThrough(t, last), fragments)
+	}
 	catalog, err := readAppACLEffectiveCatalogSnapshotInTx(ctx, tx, input)
 	if err != nil {
 		t.Fatalf("read current durable catalog snapshot: %v", err)

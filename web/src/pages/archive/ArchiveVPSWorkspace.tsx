@@ -74,7 +74,7 @@ export function ArchiveVPSWorkspace({
                   <Badge variant="state" tone={lifecycleTone(vps.lifecycle_status)}>
                     {lifecycleLabel(vps.lifecycle_status)}
                   </Badge>
-                  <Badge variant="info" tone="neutral">{usageLabel(vps.usage_status)}</Badge>
+                  <Badge variant="info" tone="neutral">{usageLabel((vps.usage_tags ?? []).join('、'))}</Badge>
                   <Badge variant="info" tone="neutral">{renewalLabel(vps.renewal_decision)}</Badge>
                 </div>
               ),
@@ -107,7 +107,7 @@ export function ArchiveVPSWorkspace({
                 }
                 return (
                   <div className="asset-table__stack">
-                    <span>{vps.lifecycle_status === 'cancelled' ? '已取消，未归档' : '未记录归档时间'}</span>
+                    <span>未记录归档时间</span>
                   </div>
                 )
               },

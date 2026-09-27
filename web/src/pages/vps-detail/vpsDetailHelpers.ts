@@ -219,6 +219,7 @@ export function detailToFactEditForm(detail: VPSAssetDetail): FactEditFormState 
     providerName: detail.provider_name,
     productName: detail.product_name,
     orderRef: detail.order_ref,
+    acquisitionSource: detail.acquisition_source ?? '',
     country: detail.country,
     region: detail.region,
     city: detail.city,
@@ -230,7 +231,11 @@ export function detailToFactEditForm(detail: VPSAssetDetail): FactEditFormState 
     sshUser: detail.ssh_user,
     osName: detail.os_name,
     virtualization: detail.virtualization,
-    usageStatus: detail.usage_status,
+    usageTags: (detail.usage_tags ?? []).join(', '),
+    validityMode: detail.validity_mode ?? 'unknown',
+    expiresAt: detail.expires_at?.slice(0, 10) ?? '',
+    autoRenewCheck: detail.auto_renew_check ?? 'unchecked',
+    autoRenewCheckedAt: detail.auto_renew_checked_at ?? '',
     importance: detail.importance,
     labels: detail.labels.join(', '),
     note: detail.note,
@@ -246,6 +251,7 @@ const FACT_EDIT_COMPARE_FIELDS: ReadonlyArray<{
   { key: 'providerName', label: '服务商名称' },
   { key: 'productName', label: '产品名' },
   { key: 'orderRef', label: '订单号' },
+  { key: 'acquisitionSource', label: '获取来源' },
   { key: 'country', label: '国家 / 地区' },
   { key: 'region', label: '区域' },
   { key: 'city', label: '城市' },
@@ -257,7 +263,11 @@ const FACT_EDIT_COMPARE_FIELDS: ReadonlyArray<{
   { key: 'sshUser', label: 'SSH 用户' },
   { key: 'osName', label: '系统' },
   { key: 'virtualization', label: '虚拟化' },
-  { key: 'usageStatus', label: '使用状态' },
+  { key: 'usageTags', label: '用途' },
+  { key: 'validityMode', label: '有效期类型' },
+  { key: 'expiresAt', label: 'VPS 到期日' },
+  { key: 'autoRenewCheck', label: '服务商自动续费' },
+  { key: 'autoRenewCheckedAt', label: '自动续费核对时间' },
   { key: 'importance', label: '重要性' },
   { key: 'labels', label: '标签' },
   { key: 'note', label: '备注' },
@@ -269,6 +279,7 @@ function normalizeFactEditField(form: FactEditFormState, key: keyof FactEditForm
     case 'providerName':
     case 'productName':
     case 'orderRef':
+    case 'acquisitionSource':
     case 'country':
     case 'region':
     case 'city':
@@ -290,8 +301,13 @@ function normalizeFactEditField(form: FactEditFormState, key: keyof FactEditForm
       }
       return String(sshPort)
     }
-    case 'usageStatus':
-      return form.usageStatus
+    case 'usageTags':
+      return parseLabels(form.usageTags).join('\u0000')
+    case 'validityMode':
+    case 'expiresAt':
+    case 'autoRenewCheck':
+    case 'autoRenewCheckedAt':
+      return form[key]
     case 'importance':
       return form.importance.trim() || 'normal'
     case 'labels':
@@ -344,19 +360,24 @@ export function compareDecisionDraft(
   draft: DecisionDraftState,
   latest: VPSAssetDetail,
 ): Array<{ field: string; yours: string; latest: string }> {
-  if (draft.renewalDecision === latest.renewal_decision) return []
-  return [{
-    field: '续费决策',
-    yours: renewalLabel(draft.renewalDecision),
-    latest: renewalLabel(latest.renewal_decision),
-  }]
+  const differences = []
+  if (draft.renewalDecision !== latest.renewal_decision) differences.push({
+    field: '续费决策', yours: renewalLabel(draft.renewalDecision), latest: renewalLabel(latest.renewal_decision),
+  })
+  if (draft.reason.trim() !== (latest.renewal_reason ?? '').trim()) differences.push({
+    field: '决策理由', yours: draft.reason.trim(), latest: latest.renewal_reason ?? '',
+  })
+  if ((draft.reviewAt ?? '') !== (latest.renewal_review_at?.slice(0, 10) ?? '')) differences.push({
+    field: '复核日期', yours: draft.reviewAt ?? '', latest: latest.renewal_review_at?.slice(0, 10) ?? '',
+  })
+  return differences
 }
 
 export function decisionDraftAlreadySatisfied(
   draft: DecisionDraftState,
   latest: VPSAssetDetail,
 ): boolean {
-  return draft.renewalDecision === latest.renewal_decision
+  return compareDecisionDraft(draft, latest).length === 0
 }
 
 export function buildFactEditInput(form: FactEditFormState) {
@@ -370,6 +391,9 @@ export function buildFactEditInput(form: FactEditFormState) {
   if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) {
     throw new Error('SSH 端口必须为 1 到 65535。')
   }
+  if (form.validityMode === 'fixed' && !/^\d{4}-\d{2}-\d{2}$/.test(form.expiresAt)) {
+    throw new Error('固定有效期必须填写 VPS 到期日。')
+  }
 
   return {
     display_name: form.displayName.trim(),
@@ -377,6 +401,7 @@ export function buildFactEditInput(form: FactEditFormState) {
     provider_name: form.providerName.trim(),
     product_name: form.productName.trim(),
     order_ref: form.orderRef.trim(),
+    acquisition_source: form.acquisitionSource.trim(),
     country: form.country.trim(),
     region: form.region.trim(),
     city: form.city.trim(),
@@ -388,7 +413,11 @@ export function buildFactEditInput(form: FactEditFormState) {
     ssh_user: form.sshUser.trim(),
     os_name: form.osName.trim(),
     virtualization: form.virtualization.trim(),
-    usage_status: form.usageStatus,
+    usage_tags: parseLabels(form.usageTags),
+    validity_mode: form.validityMode,
+    expires_at: form.validityMode === 'fixed' ? form.expiresAt : null,
+    auto_renew_check: form.autoRenewCheck,
+    auto_renew_checked_at: form.autoRenewCheck === 'unchecked' ? null : form.autoRenewCheckedAt || null,
     importance: form.importance.trim() || 'normal',
     labels: parseLabels(form.labels),
     note: form.note.trim(),

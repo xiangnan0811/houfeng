@@ -14,7 +14,7 @@
 - Agent plan: `agentapi.PendingAction{ActionID, CommandID}` serializes as `action_id` + `command_id`。
 - Agent result: `agentapi.CommandResult{ActionID, CommandID, Stdout, Stderr, ExitCode}` serializes as `action_id` + `command_id` + output fields。
 - DB state: `monitoring_instances.pending_action_id`, `monitoring_instances.pending_action_command_id`, and `monitoring_instances.last_action jsonb`。
-- DB audit: `monitoring_instance_command_action_audit(audit_id, action_id?, monitoring_instance_id, monitoring_instance_name_snapshot, command_id, sensitivity, event_type, actor_user_id?, actor_username_snapshot, actor_display_name_snapshot, source, exit_code?, occurred_at, details)`；`event_type in ('queued','dispatched','completed','rejected')`，`rejected` 是唯一允许 `action_id is null` 的事件。
+- DB audit: `monitoring_instance_command_action_audit(audit_id, action_id?, monitoring_instance_id, monitoring_instance_name_snapshot, command_id, sensitivity, event_type, actor_user_id?, actor_username_snapshot, actor_display_name_snapshot, source, exit_code?, occurred_at, details)`；`event_type in ('queued','dispatched','completed','rejected','cancelled')`，`rejected` 是唯一允许 `action_id is null` 的事件。
 - Read API: `GET /api/command-audits`；首次请求支持 `window=24h|7d|30d|all|custom`、custom bounds、实例/命令/敏感级别/outcome/actor/action ID 与 `limit=1..100`，续页只接受 opaque `cursor`。
 - Read model: `commandaudits.Query -> commandaudits.Page`；普通 action 按 `action_id` 分组，拒绝按 `audit_id` 分组，固定执行一条 action query 和一条 page events query。
 - Backend metadata source: `internal/contracts/agentapi.KnownCommandDefinitions()` owns command IDs and `standard|sensitive` sensitivity tiers.
@@ -159,109 +159,52 @@ type commandAuditActorResponse struct {
 }
 ```
 
-## MonitoringInstance lifecycle management and archive gates
+## MonitoringInstance 生命周期、永久归属与在线证据
 
-### 1. Scope / Trigger
+### 范围与公开接口
 
-- Trigger: 修改 `monitoring_instances` lifecycle / monitoring / archive 字段、监控实例列表 scope、管理审查、退役 / 恢复 / 归档 / 永久清理 API、agent sync ingest、onboarding / runtime control / action / metadata 写路径。
-- 目标：MonitoringInstance 是可管理对象，不只是“新增接入 agent”的副产品；错误创建的空实例要能安全清理，真实历史实例要能暂停、退役、归档和恢复，且停止状态不得继续沉淀观测数据。
+监控实例永久属于 `vps_id` 指定的一台 VPS。只允许 VPS 详情的 scoped create 创建；普通集合 POST、关联已有实例、跨 VPS 转绑、解除归属、监控单独归档/恢复归档/永久清理入口均关闭。
 
-### 2. Signatures
+- `GET /api/monitoring-instances?scope=active|retired|all`：默认仅管理中 VPS 的当前待接入或已接入实例；退役历史通过 VPS 关联历史和 `retired` 查询。
+- `GET /api/monitoring-instances/{id}/management-review` 只提供适用的退役资格；已退役禁止新的退役转换。
+- `POST /api/monitoring-instances/{id}/lifecycle/retire` 要求非空原因及 `Idempotency-Key`。同一请求重试回放原结果；同键不同请求冲突；新键重复退役冲突。
+- `POST /api/monitoring-instances/{id}/binding/reset` 是显式重新接入：沿用实例 ID，下一次 enrollment 创建新会话/阶段。所属 VPS 必须管理中，且不能存在另一当前实例。
+- Record 返回 `vps_id`、`vps_lifecycle_status`、`is_current`、`ever_connected`、`last_trusted_online_at`；归档由所属 VPS 派生。
 
-- DB columns: `monitoring_instances.archived_at timestamptz null`、`monitoring_instances.archived_reason text not null default ''`。
-- List API: `GET /api/monitoring-instances?scope=active|archived|all`，省略 scope 等同 `active`。
-- Review API: `GET /api/monitoring-instances/{monitoring_instance_id}/management-review`。
-- Management APIs:
-  - `POST /api/monitoring-instances/{id}/lifecycle/retire` with `{"reason": "..."}`
-  - `POST /api/monitoring-instances/{id}/lifecycle/restore` with `{"reason": "..."}`
-  - `POST /api/monitoring-instances/{id}/archive` with `{"reason":"...","confirmation_name":"<display_name>"}`
-  - `POST /api/monitoring-instances/{id}/restore-from-archive`
-  - `POST /api/monitoring-instances/{id}/permanent-cleanup` with `{"reason":"...","confirmation_name":"<display_name>"}`
-- Domain types: `monitoringinstances.ListScope`、`ManagementReview`、`ManagementCounts`、按动作 `action_reviews`、`LifecycleActionInput`、`ArchiveInput`、`PermanentCleanupInput`、`PermanentCleanupResult`。
+### 状态合同
 
-### 3. Contracts
+- 生命周期只有 `待接入`、`已接入`、`已退役`。已确认身份后的首次可信实时心跳即转已接入，不要求性能样本。
+- 运行控制独立为 `启用`、`维护中`、`暂停`。维护继续采集并抑制相关告警；暂停停止采集但保留最小在线证据。
+- 每台 VPS 最多一个非退役实例，由数据库部分唯一索引保证。不可转移所有权由数据库约束保证。
+- 退役、重新接入及归档将旧会话降为 `evidence_only`，保留 token 身份、指纹摘要、开始/结束时间及在线证据；旧会话不能恢复采集和命令权限。
+- 退役清除待执行命令并写 `cancelled` 永久审计；管理关闭运行异常保留关闭原因，不伪造自然恢复或发送恢复通知。恢复不重放命令。
+- 重新接入将实例置为待接入、启用，清除当前绑定并开启新阶段；`ever_connected` 和可信最后在线事实不可重置。
+- 原始心跳保留期不影响安全计时。实时证据使用 Center 收到时间和独立去重标识，回填、重复标识和 Agent 自报时间不能刷新归档安全时钟。
+- 暂停、维护、待接入、绑定待确认或无可信在线证据时，查询投影不得将健康显示为正常。
+- Target 的 `lifecycle_status=active|retired` 与 `run_status=启用|维护中|暂停` 分离。`GET /api/targets?scope=current|retired|all` 默认 `current`：仅当前工作集的 active Target；`retired` 返回全部退役对象，`all` 返回完整当前与历史对象，历史查询不套用当前 VPS 关联过滤。非法 scope 返回 400，不接受旧 `archived` 状态别名。
+- Target 显式动作沿用 `POST /api/targets/{id}/runtime/archive`（置 retired + 暂停）和 `/runtime/restore-to-paused`（置 active + 暂停）；动作重算共享依赖并校验 preview digest/确认。恢复不重开服务、域名关联，不启用探测；退役状态禁止普通维护、暂停、恢复运行操作。历史列表必须提供显式恢复入口。
+- 创建服务、域名或关联已有对象时，Target 是否接受当前关联只按 `lifecycle_status` 判断；`retired` 返回 409，即使对象本身为暂停、退役或未知。失败不留下新对象或关联。服务、域名对象状态的独立修订不恢复探测，也不重开或结束关联。
+- 直接运行控制动作增加 `control_revision`，即使重复设置相同值，也保护用户后续设置不被先前 VPS 维护结束覆盖。
 
-- `lifecycle_status` 不包含 `已归档`；归档只由 `archived_at is not null` 表达。允许的 lifecycle 仍是 `待接入`、`在用`、`观察中`、`不续费`、`已退役`。
-- 默认列表只返回未归档实例；`scope=archived` 只返回归档实例；`scope=all` 返回全部实例，但仍沿用已有 VPS 关联工作集裁剪规则。
-- `management-review` 一次返回实例、VPS 关联、证据计数、empty_mistake_candidate、dependency_impacts、preview_digest 及 `action_reviews`。动作 key 为 retire/restore/archive/restore_from_archive/permanent_cleanup，各自 allowed/blockers/warnings；不得将 archive blocker 当作 cleanup blocker。共享全局动作按 [资产合同](assets.md) 确认影响。
-- 专用退役与 VPS 工作台调用同一事务内核心：设置已退役+暂停，撤销 enrollment/sync token、所有 pending binding 与 pending action；pending last_action 清空但永久 command audit 不删除、完成历史不伪造。binding_status 根据保留指纹还原绑定或未绑定。已退役但残留不满足不变量仍整理，写 monitoring_instance_retirement_reconciled 同态事件，只记录布尔摘要；完全干净重复退役不追加事件。
-- 从退役恢复必须设置 `观察中 + 暂停`，不自动恢复 token、action 或采集。
-- 新实例不能直接以 `已退役` 创建：未关联 HTTP 创建固定为 `待接入`，存储层对未关联与关联创建都拒绝 `已退役` 输入；退役只能经专用退役动作完成并满足退役不变量。
-- 归档先取 graph exclusive 锁再锁实例，重算该动作 review、校验名称；实例须已退役且无当前工作集 VPS link（cancelled 历史不扩大禁令）。成功归档、暂停并撤销凭据与 pending。
-- 从归档恢复须同事务清空归档字段、设观察中+暂停，写 monitoring_instance_restored_from_archive；恢复仍须显式接入与恢复监控。专用退役恢复保留 retired→observing 事件，普通在用→观察中只发 lifecycle_updated。
-- 永久清理先 graph→实例锁，重算 cleanup review 并名称确认。空误创建实例即使有 VPS link 也可清理，warning 列出被级联解除的 VPS；跨父共享仍须确认。非空有证据者须先归档。删除无 FK 引用后删实例，永久 command audit 保留。
-- 暂停、退役或归档实例的 agent sync 必须在任何心跳、host sample、probe observation、IP 质量报告或 action result 写入前短路，返回空 plan；不要推进 `last_sync_at`。
-- 已归档实例阻断接入、绑定、metadata、runtime、command 写路径；已退役实例禁止 enrollment/sync 凭据签发、接入、resume/维护，先受控恢复到观察中+暂停。agent enrollment、accepted heartbeat、sync 以 graph shared 第一锁参与 READ COMMITTED 协议，不能升级或绕过停止抑制。
+### 验收
 
-- MI 与 Target 的管理 preview/写动作遵循统一 graph 第一锁及共享影响确认；Target `/lifecycle-review` 供危险动作确认。Target 固定 maintenance/pause/resume/archive/restore_to_paused 转换核心；pause 不能恢复已归档对象，专用 restore_to_paused 保留恢复事件，重复 pause/archive 无重复跃迁。
-### 4. Validation & Error Matrix
-
-| Condition | Expected behavior |
-| --- | --- |
-| invalid list scope | HTTP 400 `invalid input` |
-| missing management reason | HTTP 400 `invalid input` |
-| archive / cleanup confirmation name mismatch | HTTP 400 `invalid input` |
-| unknown monitoring instance | HTTP 404 `monitoring instance not found` |
-| archive while not retired | HTTP 409 management blocked |
-| archive with active non-cancelled/non-archived VPS link | HTTP 409 management blocked |
-| restore lifecycle when not retired | HTTP 409 management blocked |
-| restore archive when not archived | HTTP 409 management blocked |
-| non-empty instance cleanup before archive | HTTP 409 management blocked |
-| archived instance metadata/onboarding/runtime/action write | HTTP 409 |
-| paused/retired sync with observations/IP quality/action result | accepted sync response with empty plan, no persisted writes |
-
-### 5. Good/Base/Bad Cases
-
-- Good: 重复创建且没有观测证据的 MonitoringInstance 通过 management review 显示为空误创建候选，用户输入名称和原因后永久清理，VPS link 随实例 cascade 删除。
-- Good: 真实运行过的实例先退役再归档；默认列表消失，但详情和归档范围仍可查看历史并可恢复。
-- Base: 暂停或退役实例的旧 agent 继续同步；center 验证 token 后返回空 plan，不写入新心跳或 IP 质量报告。
-- Bad: 把 `已归档` 塞进 `lifecycle_status`，破坏 VPS lifecycle action 对 `不续费` / `已退役` 的含义。
-- Bad: 只在前端隐藏按钮，后端 action / onboarding / sync 写路径仍允许归档实例产生新状态。
-- Bad: `ApplyBatch` 先写心跳和 IP 质量报告，再依赖 `BuildSyncPlan` 返回空计划；这会让暂停 / 退役实例继续沉淀新数据。
-
-### 6. Tests Required
-
-- Migration / scan tests: 新增归档字段默认值、select/scan/JSON 合同。
-- Store tests: list scope、review counts/blockers/actions、retire/restore/archive/restore archive、cleanup 空实例、cleanup 非空未归档阻塞、cleanup 删除非 FK 引用。
-- Sync tests: paused / retired / archived sync 不写心跳、样本、观测、IP 质量或 action result，并返回空 plan。
-- Handler/router/bootstrap tests: 新 endpoint 方法、输入校验、scope 校验、错误码、router subtree 不落到 item handler / SPA fallback、bootstrap nil 断言。
-- Gating tests: archived metadata、onboarding/binding、runtime resume、action queue/batch 返回冲突。
-
-### 7. Wrong vs Correct
-
-```go
-// 错误：在 buildSyncPlan 返回空计划前已经写入观测事实。
-recordHeartbeatBatch(ctx, tx, id, fingerprint, receivedAt, batch.Heartbeats)
-recordIPQualityReports(ctx, tx, newID, batch.IPQualityReports, receivedAt)
-plan, _ := buildSyncPlan(ctx, tx, id)
-```
-
-```go
-// 正确：先读取并锁定实例状态，暂停 / 退役 / 归档时直接返回空 plan。
-syncState, err := validateAcceptedSyncBatch(ctx, tx, batch)
-if err != nil {
-	return syncing.Result{}, err
-}
-if syncState.SuppressWritesAndPlan() {
-	return syncing.Result{AcceptedAt: receivedAt, Plan: agentplan.SyncPlan{ProbeAssignments: []agentplan.ProbeAssignment{}}}, nil
-}
-```
+覆盖不可转移归属、一个当前实例约束、默认列表排除退役/归档、退役重试幂等性与新请求冲突、旧会话仅保留在线证据、显式重新接入同 ID 新会话、命令取消审计、目标生命周期与控制分离、维护/暂停/未接入不冒充健康。归档连续 180 分钟检查和事务边界由资产生命周期合同定义。
 
 ## 模型层关键不变量
 
 > 来源：当前代码与 `docs/design/product-and-architecture.md`。本节承接原根规范中的模型不变量；历史架构仅作背景。**任何 SQL / 仓库 / 服务改动都必须先验证这些不变量没被破坏**。
 
-- **VPS 是主服务器控制面对象**，拥有 provider identity、业务生命周期、用途、续费 / 迁移 / 取消决策、账单证据及服务 / 域名上下文；`vps_assets.lifecycle_status`、`usage_status`、`renewal_decision` 是人工业务状态的唯一来源。
+- **VPS 是主服务器控制面对象**，拥有 provider identity、业务生命周期、用途、续费 / 迁移 / 归档决策、账单证据及服务 / 域名上下文；`vps_assets.lifecycle_status`、`usage_tags[]`、`renewal_decision` 是人工业务状态的唯一来源。
 - **Subscription 是 VPS 范围内的账单事实**，价格、币种、计费周期、续费日期、自动续费、付款方式和备注服务于 VPS 决策；legacy/internal `status` 不得成为第二套面向用户的业务状态。
-- **MonitoringInstance 是 VPS 范围内或显式关联的运行观测证据**。正常接入从 VPS 详情创建 Subscription 或 create-and-link MonitoringInstance；后者从 VPS 派生显示名、provider、位置、labels 与 note。已有实例的 link/unlink 是高级关联 / 历史操作，不要求重复输入 VPS 身份。
-- **取消 / 退役从 VPS 生命周期工作台发起**，必须经过显式 preview、用户确认和 audit，才可联动运行时或账单事实；不得由普通 Subscription / MonitoringInstance CRUD 反向改写 VPS 业务状态。
+- **MonitoringInstance 永久属于一台 VPS**。从 VPS 详情创建实例，从 VPS 派生显示名、provider、位置、labels 与 note；禁止孤立创建、共享、转绑和解除所有权。关联记录保留历史，当前资格由生命周期派生。
+- **结束使用并归档 / 退役从详情管理入口发起**，必须经过显式 preview、用户确认和 audit，才可联动运行时或账单事实；不得由普通 Subscription / MonitoringInstance CRUD 反向改写 VPS 业务状态。
 
-1. **MonitoringInstance = agent 接入后的运行观测对象**。同一台机重装系统后可保持同一个 MonitoringInstance（保留 `monitoring_instance_id` 与历史时间序列）；换了硬件或明确的新 agent identity 应新建 MonitoringInstance，不要在旧 `monitoring_instance_id` 上重新绑定异种主机。指纹变化通过 `binding_status = '指纹变更待确认'` 进入 `pending_binding_*` 字段（见 `monitoring_instances` 表与 `internal/center/enrollment/`）。
+1. **MonitoringInstance = agent 接入后的运行观测对象**。同一台机重装系统后可保持同一个 MonitoringInstance（保留 `monitoring_instance_id` 与历史时间序列）；重装或重新接入创建新会话/阶段并保留旧阶段指纹摘要、起止时间和观测；资源回收后重新购买创建新的 VPS，不能转移旧监控身份。指纹变化通过 `binding_status = '指纹变更待确认'` 进入 `pending_binding_*` 字段（见 `monitoring_instances` 表与 `internal/center/enrollment/`）。
 2. **Target = 一个可观测入口**，地址 (`host` / `base_port`) 属于 Target；`ProbeItem` 仅描述**如何观测**它（探针种类、频率档、超时、配置），不再额外存地址。Target 与 ProbeItem 是 1:N，删除 Target 级联清理 ProbeItem (`on delete cascade`)。
 3. **探针种类只有 `tcp` / `http` / `tls`**（`internal/contracts/agentapi/types.go` 中的 `ProbeKind*` 常量）。`https` 不是独立种类，而是带 TLS 配置的 HTTP 观测。新增种类必须先获得基线批准，并同步更新设计文档与契约包。
 4. **健康状态 (`current_health_status`) 是派生量**（`正常 / 关注 / 告警 / 严重`），由 incident service 在写后计算并回写；**不要直接接受外部 API 的健康字段写入**。
 5. **MonitoringInstance 生命周期是接入/收尾事实，不是 VPS 业务状态替代物**。VPS 工作台与 MI 详情受控动作复用事务内转换和事件；普通 metadata 不得冒用恢复事件。任何 MI 动作不反向改写 VPS 三轴。
-6. **维护模式 (`monitoring_status = '维护中'` / `'暂停'`) 是 runtime control，不是健康状态**。维护期间观测照常落库（`maintenance_context = true`），但 incident / notification 处理需识别该上下文（参考 `store/monitoring_instances.go:74-77`、`incidents/service.go`）。暂停、维护、退役或归档 MonitoringInstance 不应保留当前 active incident 投影；incident service 必须把已有 active incidents 行政恢复为 recovered events，且不得发送恢复通知。
+6. **维护模式 (`monitoring_status = '维护中'` / `'暂停'`) 是 runtime control，不是健康状态**。维护期间观测照常落库（`maintenance_context = true`），但 incident / notification 处理需识别该上下文（参考 `store/monitoring_instances.go:74-77`、`incidents/service.go`）。暂停、维护、退役或归档 MonitoringInstance 不应保留当前 active incident 投影；已有 active incidents 以管理动作关闭，保存原因、`natural_recovery=false`；禁止伪造 recovered 自然恢复事件和恢复通知。
 7. **先提交原始观测，再评估投影**：handler 经 `internal/center/syncing/` 原子提交 heartbeat / host sample / probe observation 后，调用 post-sync hook；`incidentSvc` 同时提供周期 worker 收敛。不得在 raw-ingest transaction 内发送通知，也不得用 post-sync 评估失败反转已提交的 sync 成功结果。具体 provenance、重复批次与 CAS 规则见后续场景。
 8. **回填观测 (`is_backfilled = true`) 必须落库但不得触发实时告警**。请求路径仍旧 `insert`（参见 `store/sync_batches.go:188`），但 incident service 在 select 阶段对历史数据的处理需带条件分支。**不要在 incident 判定里忽略 `is_backfilled` 字段，也不要在写路径里干脆丢弃这条数据**。
 9. **notification_records.channel 是真实发送通道，不是 evaluator 默认值**。`incidents.NotificationChannel` 当前只允许 `telegram` / `feishu` 作为生产通道语义；Feishu-only 发送只写 `channel='feishu'`，Telegram+Feishu 混合发送必须按 channel 写多条 record，单个 channel 失败只能把该 channel 标为 `failed`。通知策略关闭、维护/回填抑制或无可用 channel 时写 `suppressed`，但不能把 Feishu-only 或 mixed delivery 误记成 Telegram-only。
@@ -445,7 +388,7 @@ where batch_rank = 1 limit 3;
 ### 1. Scope / Trigger
 
 - Trigger: 修改 `internal/center/incidents/service.go`、MonitoringInstance `monitoring_status/lifecycle_status/archived_at` 语义、Target `run_status` 语义、或 active incident mutation / notification 写入。
-- 目标：用户主动暂停、维护、退役或归档的对象不再在页面上表现为“当前 active 风险”，但仍保留一条 recovered event 解释历史收敛。
+- 目标：用户主动暂停、维护、退役或归档的对象不再在页面上表现为“当前 active 风险”，保留管理关闭事件解释历史收敛，不写自然恢复事件。
 
 ### 2. Signatures
 
@@ -453,34 +396,34 @@ where batch_rank = 1 limit 3;
 - Repositories:
   - MonitoringInstance repo must provide current record for MI evaluation.
   - Target repo must provide `GetTarget(ctx, targetID)` so every touched-target attempt reloads current lifecycle state before evaluating observations.
-- Mutation: `IncidentMutation{ObjectType, ObjectID, Active: []IncidentRecord{}, Events: []StateChangeEventRecord{EventType: recovered}}`。
+- Mutation: 清除当前异常投影并写 `incident_closed_by_management`，保存 `closure_reason`、`incident_id`、`natural_recovery=false`；保留原始异常与通知历史。
 
 ### 3. Contracts
 
-- MonitoringInstance inactive states for incident recovery: `monitoring_status in ('暂停','维护中')`、`lifecycle_status='已退役'`、or `archived_at is not null`。
-- Target inactive states for incident recovery: `run_status in ('暂停','已归档')`。
+- MonitoringInstance inactive states for incident recovery: `monitoring_status in ('暂停','维护中')`、`lifecycle_status='已退役'`、or 所属 VPS 已归档。
+- Target inactive states for incident recovery: `run_status in ('暂停','维护中')` 或 `lifecycle_status='retired'`。
 - Periodic stale sweep must close existing active incidents for inactive MonitoringInstances instead of silently skipping them.
 - `AfterSuccessfulSync` must recover inactive MonitoringInstance incidents before host metric evaluation, so old samples cannot keep disk/resource incidents active after an administrative stop.
 - Periodic Target sweep must recover inactive Target incidents and skip probe/TLS/trend evaluation.
 - If a touched Target is inactive, `AfterSuccessfulSync` must recover prior target incidents and skip new evaluation for that target. If the Target disappears before the fresh load or writer guard, the attempt must safely yield with no projection/event/notification side effect; observation-only fallback is forbidden because it can recreate incidents for a deleted object. Ordinary repository errors still fail closed.
-- Administrative recovery writes recovered events but intentionally does not call notification append/dispatch. User-initiated stop should not generate a recovery notification storm.
+- Administrative closure writes incident_closed_by_management events and does not call notification append/dispatch. User-initiated stop should not generate a recovery notification storm.
 
 ### 4. Validation & Error Matrix
 
 | Condition | Expected behavior |
 | --- | --- |
-| paused / maintenance / retired / archived MI has prior active incident | mutation active is empty; recovered event written; no notification records |
+| paused / maintenance / retired / archived MI has prior active incident | mutation active is empty; management closure event written; no notification records |
 | inactive MI has no prior active incident | no mutation required |
 | active MI stale heartbeat | normal heartbeat evaluation still applies |
-| paused / archived Target has prior active incident | target mutation active is empty; recovered event written; no notification records |
+| paused / archived Target has prior active incident | target mutation active is empty; management closure event written; no notification records |
 | touched paused Target has fresh failing observations | administrative recovery wins; no new active probe incident |
 | Target getter or writer guard returns stable object-not-found classification | safe yield with zero projection/event/summary/notification side effect |
 | Target getter returns an ordinary repository error | fail closed; preserve the error cause and do not retry |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: 用户暂停监控实例后，旧 heartbeat/disk active incident 被恢复为“按暂停状态收敛”，当前异常列表清空。
-- Good: 用户归档 Target 后，旧 TLS/probe active incident 被恢复，事件流保留收敛说明。
+- Good: 用户暂停监控实例后，旧 heartbeat/disk active incident 被按“暂停管理动作”关闭，当前异常列表清空。
+- Good: 用户归档 Target 后，旧 TLS/probe active incident 被管理关闭，事件流保留收敛说明。
 - Base: 正常运行对象继续按 stale threshold、probe failure 和 TLS expiry 生成/恢复 incidents。
 - Bad: stale sweep 对暂停对象直接 `continue`，旧 active incident 永远挂在 Dashboard 上。
 - Bad: 行政恢复调用通知派发，用户暂停一批对象后收到大量“恢复”消息。

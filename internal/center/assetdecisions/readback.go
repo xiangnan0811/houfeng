@@ -28,7 +28,7 @@ type ExecutionReadbackIssue struct {
 type ExecutionCurrentFacts struct {
 	Found                            bool                      `json:"found"`
 	LifecycleStatus                  vpsassets.LifecycleStatus `json:"lifecycle_status,omitempty"`
-	UsageStatus                      vpsassets.UsageStatus     `json:"usage_status,omitempty"`
+	UsageTags                        []string                  `json:"usage_tags"`
 	RenewalDecision                  vpsassets.RenewalDecision `json:"renewal_decision,omitempty"`
 	ActiveSubscriptionCount          int                       `json:"active_subscription_count"`
 	ServiceCount                     int                       `json:"service_count"`
@@ -227,22 +227,13 @@ func executionIssuesForAction(action SuggestedAction, fact Fact) []ExecutionRead
 	issues := []ExecutionReadbackIssue{}
 	switch action {
 	case ActionCancel, ActionOpenCancellationWorkbench:
-		if !isCancellationLifecycle(fact.VPS.LifecycleStatus) {
-			issues = append(issues, ExecutionReadbackIssue{Kind: "cancel_lifecycle_open", Label: "未进入取消链路", Tone: "critical", Details: "VPS lifecycle 尚未变为待取消、已取消或已归档"})
+		if fact.VPS.RenewalDecision != vpsassets.RenewalCancel {
+			issues = append(issues, ExecutionReadbackIssue{Kind: "renewal_decision_open", Label: "尚未决定不续费", Tone: "alert", Details: "续费意向与归档是独立操作"})
 		}
-		if fact.ActiveSubscriptionCount > 0 {
-			issues = append(issues, ExecutionReadbackIssue{Kind: "active_subscription_remaining", Label: "仍有 active 订阅", Tone: "critical", Details: fmt.Sprintf("active subscription: %d", fact.ActiveSubscriptionCount)})
-		}
-		if fact.RunningMonitoringCount > 0 {
-			issues = append(issues, ExecutionReadbackIssue{Kind: "running_monitoring_remaining", Label: "仍有关联监控运行", Tone: "critical", Details: fmt.Sprintf("running monitoring: %d", fact.RunningMonitoringCount)})
-		}
-		if fact.RunningTargetCount > 0 {
-			issues = append(issues, ExecutionReadbackIssue{Kind: "running_target_remaining", Label: "仍有关联 Target 运行", Tone: "critical", Details: fmt.Sprintf("running target: %d", fact.RunningTargetCount)})
+		if reason := cancellationReason(fact); reason != "" {
+			issues = append(issues, ExecutionReadbackIssue{Kind: "auto_renew_unchecked", Label: "自动续费待核对", Tone: "alert", Details: reason})
 		}
 	case ActionMigrate:
-		if fact.VPS.RenewalDecision != vpsassets.RenewalMigrate && fact.VPS.RenewalDecision != vpsassets.RenewalReplaced && fact.VPS.LifecycleStatus != vpsassets.LifecycleToMigrate {
-			issues = append(issues, ExecutionReadbackIssue{Kind: "migration_not_started", Label: "未进入迁移链路", Tone: "alert", Details: "续费决策或 lifecycle 尚未体现迁移/替换"})
-		}
 		if fact.EffectiveServiceCount+fact.EffectiveDomainCount+fact.RunningTargetCount > 0 {
 			issues = append(issues, ExecutionReadbackIssue{
 				Kind: "old_carrier_remaining", Label: "旧 VPS 仍有承载", Tone: "critical",
@@ -265,9 +256,6 @@ func executionIssuesForAction(action SuggestedAction, fact Fact) []ExecutionRead
 	case ActionObserve:
 		if isTerminalLifecycle(fact.VPS.LifecycleStatus) {
 			issues = append(issues, ExecutionReadbackIssue{Kind: "observe_lifecycle_conflict", Label: "观察判断与 lifecycle 冲突", Tone: "critical", Details: string(fact.VPS.LifecycleStatus)})
-		}
-		if fact.VPS.RenewalDecision != vpsassets.RenewalObserve {
-			issues = append(issues, ExecutionReadbackIssue{Kind: "observe_decision_missing", Label: "续费决策未观察", Tone: "notice", Details: string(fact.VPS.RenewalDecision)})
 		}
 	case ActionCompleteEvidence:
 		if gaps := executionEvidenceGaps(fact); len(gaps) > 0 {
@@ -297,7 +285,7 @@ func currentFactsFromFact(fact Fact) ExecutionCurrentFacts {
 	current := ExecutionCurrentFacts{
 		Found:                            true,
 		LifecycleStatus:                  fact.VPS.LifecycleStatus,
-		UsageStatus:                      fact.VPS.UsageStatus,
+		UsageTags:                        append([]string{}, fact.VPS.UsageTags...),
 		RenewalDecision:                  fact.VPS.RenewalDecision,
 		ActiveSubscriptionCount:          fact.ActiveSubscriptionCount,
 		ServiceCount:                     fact.ServiceCount,
@@ -332,7 +320,7 @@ func memberAction(member RecordMember) SuggestedAction {
 
 func isCancellationLifecycle(status vpsassets.LifecycleStatus) bool {
 	switch status {
-	case vpsassets.LifecycleToCancel, vpsassets.LifecycleCancelled, vpsassets.LifecycleArchived:
+	case vpsassets.LifecycleArchived:
 		return true
 	default:
 		return false
@@ -341,7 +329,7 @@ func isCancellationLifecycle(status vpsassets.LifecycleStatus) bool {
 
 func isTerminalLifecycle(status vpsassets.LifecycleStatus) bool {
 	switch status {
-	case vpsassets.LifecycleToCancel, vpsassets.LifecycleCancelled, vpsassets.LifecycleArchived:
+	case vpsassets.LifecycleArchived:
 		return true
 	default:
 		return false

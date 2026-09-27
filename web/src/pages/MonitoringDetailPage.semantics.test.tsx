@@ -65,13 +65,13 @@ function record(overrides: Record<string, unknown> = {}) {
     region: 'ap-northeast-1',
     city: 'Tokyo',
     provider: 'Vultr',
-    lifecycle_status: '在用',
+    lifecycle_status: '已接入',
     monitoring_status: '启用',
     binding_status: '已绑定',
     labels: [],
     note: '',
     current_health_status: '正常',
-    last_heartbeat_at: '2026-04-24T09:00:00Z',
+    last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
     last_sync_at: '2026-04-24T09:05:00Z',
     current_active_incident_count: 0,
     current_primary_issue_summary: '',
@@ -310,7 +310,7 @@ describe('MonitoringDetailPage source semantics', () => {
     expect(screen.queryByText(/已运行 1小时 0分钟/)).not.toBeInTheDocument()
     // The heartbeat is its own evidence and is never replaced by the sample time.
     const heartbeat = container.querySelector('.monitoring-detail-status__heartbeat')?.textContent ?? ''
-    expect(heartbeat).toContain('心跳')
+    expect(heartbeat).toContain('在线证据')
     expect(heartbeat).not.toContain('—')
   })
 
@@ -365,7 +365,7 @@ describe('MonitoringDetailPage source semantics', () => {
     vi.mocked(getSettings).mockRejectedValue(new Error('settings down'))
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
-      if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(record({ last_heartbeat_at: '2026-04-24T09:00:00Z' }))
+      if (path === '/api/monitoring-instances/mi_001') return mockJSONResponse(record({ last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z' }))
       if (path.includes('/runtime-facts')) return mockJSONResponse(facts('24h'))
       return mockJSONResponse([])
     }))
@@ -375,7 +375,7 @@ describe('MonitoringDetailPage source semantics', () => {
     // Without a policy nothing is coloured by an invented threshold.
     expect(container.querySelectorAll('.metric-chart__alert-band').length).toBe(0)
     const heartbeat = container.querySelector('.monitoring-detail-status__heartbeat')?.textContent ?? ''
-    expect(heartbeat).toContain('心跳')
+    expect(heartbeat).toContain('在线证据')
     expect(heartbeat).not.toContain('数据陈旧')
   })
 
@@ -383,7 +383,7 @@ describe('MonitoringDetailPage source semantics', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/monitoring-instances/mi_001') {
-        return mockJSONResponse(record({ last_heartbeat_at: '2026-04-24T09:00:00Z' }))
+        return mockJSONResponse(record({ last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z' }))
       }
       if (path.includes('/runtime-facts')) return mockJSONResponse(facts('24h'))
       return mockJSONResponse([])
@@ -398,7 +398,7 @@ describe('MonitoringDetailPage source semantics', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/monitoring-instances/mi_001') {
-        return mockJSONResponse(record({ last_heartbeat_at: undefined, current_health_status: '正常' }))
+        return mockJSONResponse(record({ last_heartbeat_at: undefined, last_trusted_online_at: undefined, current_health_status: '正常' }))
       }
       if (path.includes('/runtime-facts')) return mockJSONResponse(facts('24h'))
       return mockJSONResponse([])
@@ -417,7 +417,7 @@ describe('MonitoringDetailPage source semantics', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/monitoring-instances/mi_001') {
-        return mockJSONResponse(record({ last_heartbeat_at: '2026-04-24T09:00:00Z' }))
+        return mockJSONResponse(record({ last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z' }))
       }
       if (path.includes('/runtime-facts')) return mockJSONResponse(facts('realtime'))
       return mockJSONResponse([])

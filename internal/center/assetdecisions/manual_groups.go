@@ -77,16 +77,16 @@ type ManualGroupSummary struct {
 	RenewWithinDays            int                    `json:"renew_within_days"`
 	MemberCount                int                    `json:"member_count"`
 	LifecycleCounts            map[string]int         `json:"lifecycle_counts"`
-	UsageCounts                map[string]int         `json:"usage_counts"`
+	UsageCounts                map[string]int         `json:"usage_tag_counts"`
 	RenewalDecisionCounts      map[string]int         `json:"renewal_decision_counts"`
 	RenewalWindowCount         int                    `json:"renewal_window_count"`
 	UnreviewedCount            int                    `json:"unreviewed_count"`
-	MigrateCount               int                    `json:"migrate_count"`
+	MigrateCount               int                    `json:"-"`
 	CancelCount                int                    `json:"cancel_count"`
 	CancellationAttentionCount int                    `json:"cancellation_attention_count"`
-	IdleCount                  int                    `json:"idle_count"`
-	StandbyCount               int                    `json:"standby_count"`
-	InUseCount                 int                    `json:"in_use_count"`
+	IdleCount                  int                    `json:"-"`
+	StandbyCount               int                    `json:"-"`
+	InUseCount                 int                    `json:"-"`
 	ServiceCount               int                    `json:"service_count"`
 	DomainCount                int                    `json:"domain_count"`
 	TargetCount                int                    `json:"target_count"`
@@ -600,7 +600,7 @@ func stringifyLifecycleCounts(counts map[vpsassets.LifecycleStatus]int) map[stri
 	return out
 }
 
-func stringifyUsageCounts(counts map[vpsassets.UsageStatus]int) map[string]int {
+func stringifyUsageCounts(counts map[string]int) map[string]int {
 	out := make(map[string]int, len(counts))
 	for status, count := range counts {
 		out[string(status)] = count

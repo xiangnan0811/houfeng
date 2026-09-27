@@ -36,7 +36,7 @@ import type {
 export const RENEWAL_WINDOWS: readonly RenewalWindow[] = [30, 60, 90]
 
 // 决策队列值
-export const DECISION_QUEUE_VALUES: VPSRenewalDecision[] = ['unreviewed', 'migrate', 'cancel']
+export const DECISION_QUEUE_VALUES: VPSRenewalDecision[] = ['unreviewed', 'cancel']
 
 // 初始状态常量
 export const INITIAL_DECISION_DRAFT: AssetDecisionDraft = {
@@ -109,7 +109,6 @@ export const INITIAL_QUEUE_STATE: QueueState = {
   renewals: [],
   subscriptions: [],
   unreviewed: [],
-  migrate: [],
   cancel: [],
 }
 
@@ -140,7 +139,7 @@ export const ACTION_LABELS: Record<AssetDecisionSuggestedAction, string> = {
   observe: '观察',
   migrate: '迁移',
   cancel: '取消',
-  open_cancellation_workbench: '进入取消台',
+  open_archive_preview: '结束使用并归档',
   complete_evidence: '补齐资料',
 }
 
@@ -280,7 +279,7 @@ export const ACTION_OPTIONS: ReadonlyArray<{ value: AssetDecisionSuggestedAction
   { value: 'observe', label: ACTION_LABELS.observe },
   { value: 'migrate', label: ACTION_LABELS.migrate },
   { value: 'cancel', label: ACTION_LABELS.cancel },
-  { value: 'open_cancellation_workbench', label: ACTION_LABELS.open_cancellation_workbench },
+  { value: 'open_archive_preview', label: ACTION_LABELS.open_archive_preview },
   { value: 'complete_evidence', label: ACTION_LABELS.complete_evidence },
 ]
 

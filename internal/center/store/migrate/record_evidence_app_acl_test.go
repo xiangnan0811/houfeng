@@ -18,7 +18,7 @@ func TestRecordEvidenceAppACLFragmentRegistersExactObjectsAndPrivileges(t *testi
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %v", err)
 	}
-	if len(source.fragments) != 15 {
+	if len(source.fragments) != 16 {
 		t.Fatalf("production current APP ACL fragments = %d, want records-core through VPS state enum migrations", len(source.fragments))
 	}
 	fragment := source.fragments[2]

@@ -1,5 +1,11 @@
 # 证据快照合同
 
+## VPS 生命周期投影
+
+- 新捕获的资产事实只接受 active/archived 生命周期和 unreviewed/keep/cancel 续费意向；用途为自由 `usage_tags[]`。历史证据是当时快照，不随当前对象或关联变化重写。
+- 当前成本证据只计管理中资产；归档潜在扣费独立展示，缺少订阅或汇率的金额保持未知，不按零计。
+- 服务/域名归属由带起止时间的关联记录读取；结束一台 VPS 的关联不会改变共享对象身份或其他 VPS 的当前事实。
+
 ## Scenario: Evidence production read/reference authorization 与 metadata binding
 
 - `PostgresEvidenceRepository`的ordinary read/export/existing-reference必须先经真实`AdmissionGate`读取opaque record binding并完成current record/source授权，随后才解析registry kind/schema或读取payload bytes；denied actor不能用unknown kind、坏envelope或坏gzip区分资源存在性。

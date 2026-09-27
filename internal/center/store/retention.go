@@ -33,6 +33,9 @@ func NewPostgresRetentionRepository(db *pgxpool.Pool) *PostgresRetentionReposito
 var _ retention.Repository = (*PostgresRetentionRepository)(nil)
 
 func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy retention.Policy, now time.Time) (retention.Result, error) {
+	if policy.RawLayerDays < 30 || policy.RawLayerDays > 365 || policy.AggregateLayerDays <= 0 {
+		return retention.Result{}, fmt.Errorf("invalid retention policy")
+	}
 	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		return retention.Result{}, fmt.Errorf("begin retention transaction: %w", err)
@@ -42,16 +45,12 @@ func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy
 	stableBefore := startOfUTCDay(now)
 	rawCutoff := now.UTC().AddDate(0, 0, -policy.RawLayerDays)
 	aggregateCutoff := startOfUTCDay(now.UTC().AddDate(0, 0, -policy.AggregateLayerDays))
-	eventCutoff := now.UTC().AddDate(0, 0, -policy.EventLayerDays)
-	notificationCutoff := now.UTC().AddDate(0, 0, -policy.NotificationLayerDays)
-	ipQualityRawCutoff := now.UTC().AddDate(0, 0, -policy.IPQualityRawRetentionDays)
-	ipQualityHistoryCutoff := now.UTC().AddDate(0, 0, -policy.IPQualityHistoryRetentionDays)
 
 	var result retention.Result
-	if result.MonitoringInstanceAggregateRows, err = execRows(ctx, tx, upsertMonitoringInstanceHostDailyAggregatesSQL, "upsert monitoringInstance host daily aggregates", stableBefore); err != nil {
+	if result.MonitoringInstanceAggregateRows, err = execRows(ctx, tx, upsertMonitoringInstanceHostDailyAggregatesSQL, "upsert monitoringInstance host daily aggregates", stableBefore, rawCutoff); err != nil {
 		return retention.Result{}, err
 	}
-	if result.TargetAggregateRows, err = execRows(ctx, tx, upsertTargetProbeDailyAggregatesSQL, "upsert target probe daily aggregates", stableBefore); err != nil {
+	if result.TargetAggregateRows, err = execRows(ctx, tx, upsertTargetProbeDailyAggregatesSQL, "upsert target probe daily aggregates", stableBefore, rawCutoff); err != nil {
 		return retention.Result{}, err
 	}
 	if result.DeletedHeartbeats, err = execRows(ctx, tx, deleteExpiredHeartbeatsSQL, "delete expired heartbeats", rawCutoff); err != nil {
@@ -69,24 +68,8 @@ func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy
 	if result.DeletedTargetAggregates, err = execRows(ctx, tx, deleteExpiredTargetAggregatesSQL, "delete expired target aggregates", aggregateCutoff); err != nil {
 		return retention.Result{}, err
 	}
-	if result.DeletedEvents, err = execRows(ctx, tx, deleteExpiredEventsSQL, "delete expired events", eventCutoff); err != nil {
-		return retention.Result{}, err
-	}
-	if result.DeletedNotifications, err = execRows(ctx, tx, deleteExpiredNotificationsSQL, "delete expired notifications", notificationCutoff); err != nil {
-		return retention.Result{}, err
-	}
 	if result.ClearedCommandActionOutputs, err = execRows(ctx, tx, clearExpiredCommandActionOutputsSQL, "clear expired command action outputs", now.UTC()); err != nil {
 		return retention.Result{}, err
-	}
-	if policy.IPQualityRawRetentionDays > 0 {
-		if result.ClearedIPQualityRawJSON, err = execRows(ctx, tx, clearExpiredIPQualityRawJSONSQL, "clear expired ip quality raw json", ipQualityRawCutoff); err != nil {
-			return retention.Result{}, err
-		}
-	}
-	if policy.IPQualityHistoryRetentionDays > 0 {
-		if result.DeletedIPQualityReports, err = execRows(ctx, tx, deleteExpiredIPQualityReportsSQL, "delete expired ip quality reports", ipQualityHistoryCutoff); err != nil {
-			return retention.Result{}, err
-		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -109,6 +92,9 @@ func startOfUTCDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
+// A UTC day becomes immutable before any of its raw rows can be removed.
+// Later passes may still see survivors or late backfill for that day; those
+// incomplete inputs must never replace its complete pre-cleanup aggregate.
 const upsertMonitoringInstanceHostDailyAggregatesSQL = `
 	insert into monitoring_instance_host_sample_daily_aggregates (
 		monitoring_instance_id, bucket_date, sample_count,
@@ -118,7 +104,7 @@ const upsertMonitoringInstanceHostDailyAggregatesSQL = `
 		avg_cpu_iowait_pct, max_cpu_iowait_pct,
 		avg_cpu_steal_pct, max_cpu_steal_pct,
 		avg_disk_busy_pct, max_disk_busy_pct,
-		backfilled_sample_count, maintenance_sample_count, updated_at
+		backfilled_sample_count, maintenance_sample_count, updated_at, finalized
 	)
 	select
 		monitoring_instance_id,
@@ -132,7 +118,8 @@ const upsertMonitoringInstanceHostDailyAggregatesSQL = `
 		avg(disk_busy_pct), max(disk_busy_pct),
 		count(*) filter (where is_backfilled)::integer,
 		count(*) filter (where maintenance_context)::integer,
-		now()
+		now(),
+		((observed_at at time zone 'UTC')::date::timestamp at time zone 'UTC') < $2::timestamptz
 	from host_samples
 	where observed_at < $1
 	group by monitoring_instance_id, (observed_at at time zone 'UTC')::date
@@ -152,14 +139,16 @@ const upsertMonitoringInstanceHostDailyAggregatesSQL = `
 		max_disk_busy_pct = excluded.max_disk_busy_pct,
 		backfilled_sample_count = excluded.backfilled_sample_count,
 		maintenance_sample_count = excluded.maintenance_sample_count,
-		updated_at = now()`
+		updated_at = now(),
+		finalized = excluded.finalized
+	where not monitoring_instance_host_sample_daily_aggregates.finalized`
 
 const upsertTargetProbeDailyAggregatesSQL = `
 	insert into target_probe_daily_aggregates (
 		target_id, probe_item_id, bucket_date,
 		observation_count, success_count, failure_count,
 		avg_latency_ms, p95_latency_ms, min_tls_expiry_days,
-		backfilled_observation_count, maintenance_observation_count, updated_at
+		backfilled_observation_count, maintenance_observation_count, updated_at, finalized
 	)
 	select
 		target_id,
@@ -173,7 +162,8 @@ const upsertTargetProbeDailyAggregatesSQL = `
 		min(tls_expiry_days) filter (where tls_expiry_days is not null),
 		count(*) filter (where is_backfilled)::integer,
 		count(*) filter (where maintenance_context)::integer,
-		now()
+		now(),
+		((observed_at at time zone 'UTC')::date::timestamp at time zone 'UTC') < $2::timestamptz
 	from probe_observations
 	where observed_at < $1
 	group by target_id, probe_item_id, (observed_at at time zone 'UTC')::date
@@ -186,15 +176,15 @@ const upsertTargetProbeDailyAggregatesSQL = `
 		min_tls_expiry_days = excluded.min_tls_expiry_days,
 		backfilled_observation_count = excluded.backfilled_observation_count,
 		maintenance_observation_count = excluded.maintenance_observation_count,
-		updated_at = now()`
+		updated_at = now(),
+		finalized = excluded.finalized
+	where not target_probe_daily_aggregates.finalized`
 
 const deleteExpiredHeartbeatsSQL = `delete from monitoring_instance_heartbeats where observed_at < $1`
 const deleteExpiredHostSamplesSQL = `delete from host_samples where observed_at < $1`
 const deleteExpiredProbeObservationsSQL = `delete from probe_observations where observed_at < $1`
 const deleteExpiredMonitoringInstanceAggregatesSQL = `delete from monitoring_instance_host_sample_daily_aggregates where bucket_date < $1::date`
 const deleteExpiredTargetAggregatesSQL = `delete from target_probe_daily_aggregates where bucket_date < $1::date`
-const deleteExpiredEventsSQL = `delete from state_change_events where created_at < $1`
-const deleteExpiredNotificationsSQL = `delete from notification_records where created_at < $1`
 const clearExpiredCommandActionOutputsSQL = `
 	update monitoring_instances
 	set last_action = (last_action - 'stdout' - 'stderr') || jsonb_build_object('output_expired', true),
@@ -203,5 +193,3 @@ const clearExpiredCommandActionOutputsSQL = `
 		and coalesce((last_action->>'output_expired')::boolean, false) = false
 		and last_action ? 'output_expires_at'
 		and (last_action->>'output_expires_at')::timestamptz <= $1`
-const clearExpiredIPQualityRawJSONSQL = `update ip_quality_reports set raw_json = null where raw_json is not null and observed_at < $1`
-const deleteExpiredIPQualityReportsSQL = `delete from ip_quality_reports where observed_at < $1`

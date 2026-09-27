@@ -60,7 +60,7 @@ export const ACTION_LABELS: Record<AssetDecisionSuggestedAction, string> = {
   observe: '观察',
   migrate: '迁移',
   cancel: '取消',
-  open_cancellation_workbench: '进入取消台',
+  open_archive_preview: '结束使用并归档',
   complete_evidence: '补齐资料',
 }
 
@@ -206,7 +206,7 @@ export function roleTone(role: AssetDecisionSuggestedRole): BadgeTone {
 
 export function actionTone(action: AssetDecisionSuggestedAction): BadgeTone {
   if (action === 'keep') return 'normal'
-  if (action === 'open_cancellation_workbench' || action === 'cancel') return 'critical'
+  if (action === 'open_archive_preview' || action === 'cancel') return 'critical'
   if (action === 'migrate' || action === 'observe') return 'maintenance'
   return 'notice'
 }
@@ -277,10 +277,8 @@ export function evidenceBiasTone(bias: AssetDecisionEvidenceDecisionBias): Badge
 
 // === 队列标签 ===
 
-const DECISION_QUEUE_VALUES: VPSRenewalDecision[] = ['unreviewed', 'migrate', 'cancel']
-
 export function renewalQueueLabel(value: VPSRenewalDecision): string {
-  return DECISION_QUEUE_VALUES.includes(value) ? renewalLabel(value) : '已处理'
+  return renewalLabel(value)
 }
 
 // === 计数汇总 ===
@@ -370,7 +368,7 @@ export function currentFactsStateLabel(facts?: AssetDecisionExecutionCurrentFact
   if (!facts.found) return '资产聚合中未找到当前 VPS'
   return [
     facts.lifecycle_status ? lifecycleLabel(facts.lifecycle_status) : '',
-    facts.usage_status ? usageLabel(facts.usage_status) : '',
+    (facts.usage_tags ?? []).join('、') ? usageLabel((facts.usage_tags ?? []).join('、')) : '',
     facts.renewal_decision ? renewalLabel(facts.renewal_decision) : '',
     facts.unknown_service_count > 0 || facts.unknown_domain_count > 0
       ? `承载待确认 服务 ${facts.unknown_service_count} · 域名 ${facts.unknown_domain_count}`
@@ -458,7 +456,7 @@ export function actionLabelForMember(member: AssetDecisionRecordMember): string 
     return '复核迁移意向'
   }
   if (plan?.step_label) return plan.step_label
-  if (member.decided_action === 'open_cancellation_workbench' || member.decided_action === 'cancel') return '取消/退役'
+  if (member.decided_action === 'open_archive_preview' || member.decided_action === 'cancel') return '结束使用并归档'
   return 'VPS 详情'
 }
 
@@ -501,7 +499,7 @@ export function groupPressureLabel(group: AssetDecisionGroupSummary): string {
   const parts = [
     group.renewal_window_count > 0 ? `续费窗口 ${group.renewal_window_count}` : '',
     group.unreviewed_count > 0 ? `未评估 ${group.unreviewed_count}` : '',
-    group.cancellation_attention_count > 0 ? `取消联动 ${group.cancellation_attention_count}` : '',
+    group.cancellation_attention_count > 0 ? `结束使用并归档 ${group.cancellation_attention_count}` : '',
     group.evidence_assessment.gap_signal_count > 0 ? `缺口 ${group.evidence_assessment.gap_signal_count}` : '',
   ].filter(Boolean)
   return parts.length > 0 ? parts.join(' · ') : '暂无高压信号'

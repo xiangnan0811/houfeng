@@ -5,14 +5,12 @@ import {
   VPS_EXPERIENCE_CATEGORY_LABELS,
   VPS_EXPERIENCE_SEVERITY_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
-  VPS_USAGE_STATUS_LABELS,
   type AssetDomainStatus,
   type AssetServiceStatus,
   type AssetServiceType,
   type VPSExperienceCategory,
   type VPSExperienceSeverity,
   type VPSRenewalDecision,
-  type VPSUsageStatus,
 } from '../../lib/types'
 
 export const RENEWAL_DECISION_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABELS) as Array<[
@@ -20,10 +18,15 @@ export const RENEWAL_DECISION_OPTIONS = Object.entries(VPS_RENEWAL_DECISION_LABE
   string,
 ]>
 
-export const USAGE_OPTIONS = Object.entries(VPS_USAGE_STATUS_LABELS) as Array<[
-  VPSUsageStatus,
-  string,
-]>
+export const USAGE_SUGGESTIONS = ['生产', '测试', '备用', '闲置', '迁移中']
+
+export const AUTO_RENEW_CHECK_OPTIONS = [
+  ['unchecked', '尚未核对'],
+  ['enabled', '已开启'],
+  ['disabled', '已关闭'],
+  ['never_enabled', '从未开启'],
+  ['unsupported', '服务商不支持'],
+] as const
 
 export const EXPERIENCE_CATEGORY_OPTIONS = Object.entries(VPS_EXPERIENCE_CATEGORY_LABELS) as Array<[
   VPSExperienceCategory,

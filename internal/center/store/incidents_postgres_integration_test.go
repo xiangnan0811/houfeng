@@ -411,16 +411,28 @@ func seedIncidentProjectionCASObject(
 	var err error
 	switch objectType {
 	case incidents.ObjectTypeMonitoringInstance:
+		if _, err := db.Exec(ctx, `insert into public.vps_assets(vps_id,display_name,lifecycle_status) values($1,'Incident projection CAS owner','active')`, "vps_"+objectID); err != nil {
+			failIncidentProjectionPostgresOperation(t, "seed incident projection owner", err)
+		}
 		_, err = db.Exec(ctx, `
 			insert into public.monitoring_instances (
 				monitoring_instance_id, display_name, region, city, provider,
-				lifecycle_status, monitoring_status, binding_status
-			) values ($1, 'Incident projection CAS MI', '', '', '', $2, $3, $4)`,
+				lifecycle_status, monitoring_status, binding_status, vps_id, ever_connected, last_trusted_online_at,
+				binding_fingerprint, binding_epoch_started_at
+			) values ($1, 'Incident projection CAS MI', '', '', '', $2, $3, $4, $5, true, now(), $6, now()-interval '2 hours')`,
 			objectID,
 			monitoringinstances.LifecycleInUse,
 			monitoringinstances.MonitoringEnabled,
 			monitoringinstances.BindingBound,
+			"vps_"+objectID,
+			"fp_"+objectID,
 		)
+		if err == nil {
+			// CAS is exercised on an admitted, observed instance. A trusted
+			// heartbeat alone cannot support a performance-health projection.
+			observedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+			insertRuntimeFactsHostSample(t, ctx, db, objectID, observedAt, observedAt, "fp_"+objectID, 10, 0, false, "cas-observed-"+objectID)
+		}
 	case incidents.ObjectTypeTarget:
 		_, err = db.Exec(ctx, `
 			insert into public.targets (target_id, name, target_type, host, run_status)

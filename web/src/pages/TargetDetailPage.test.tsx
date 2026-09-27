@@ -1790,7 +1790,7 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '暂停' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-    expect(screen.getByRole('button', { name: '归档' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '退役' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '暂停' }))
     expect(screen.queryByRole('alertdialog', { name: '确认暂停目标监控' })).not.toBeInTheDocument()
   })
@@ -2276,7 +2276,7 @@ describe('TargetDetailPage', () => {
           target_type: 'service',
           host: 'legacy.example.com',
           execution_monitoring_instance_labels: ['edge'],
-          run_status: '已归档',
+          lifecycle_status: 'retired', run_status: '暂停',
           labels: ['legacy'],
           note: '',
           current_health_status: '正常',
@@ -2545,7 +2545,7 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
-          run_status: '已归档',
+          lifecycle_status: 'retired', run_status: '暂停',
           labels: ['public'],
           note: '',
           current_active_incident_count: 0,
@@ -2571,22 +2571,22 @@ describe('TargetDetailPage', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
 
-    expect(screen.getByRole('alertdialog', { name: '确认归档目标' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: '确认退役目标' })).toBeInTheDocument()
     expect(screen.getByText('当前：目标仍在当前工作集中。')).toBeInTheDocument()
-    expect(screen.getByText('操作后：目标退出当前工作集，运行状态变为已归档。')).toBeInTheDocument()
-    expect(screen.getByText('归档后不会继续作为活跃目标参与观测、异常判定或通知。')).toBeInTheDocument()
+    expect(screen.getByText('操作后：目标退出当前工作集，生命周期变为已退役，运行控制保持暂停。')).toBeInTheDocument()
+    expect(screen.getByText('退役后不会继续作为活跃目标参与观测、异常判定或通知。')).toBeInTheDocument()
     expect(
       screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'),
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '归档' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('button', { name: '退役' })).toHaveFocus())
     expect(fetchMock).toHaveBeenCalledTimes(5)
 
-    fireEvent.click(screen.getByRole('button', { name: '归档' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '确认归档' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '确认退役' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '确认退役' }))
 
     expect(confirmMock).not.toHaveBeenCalled()
     await waitFor(() =>
@@ -2644,13 +2644,13 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('Blog')).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-    fireEvent.click(screen.getByRole('button', { name: '归档' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '确认归档' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '确认退役' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '确认退役' }))
 
     expect(confirmMock).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.getByText('archive failed')).toBeInTheDocument())
-    expect(screen.getByRole('alertdialog', { name: '确认归档目标' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: '确认退役目标' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_archive_fail/runtime/archive', {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -2748,7 +2748,7 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByRole('alertdialog', { name: '确认暂停目标监控' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-    expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
+    expect(screen.getByRole('button', { name: '退役' })).not.toHaveFocus()
   })
 
   it('ignores a stale confirmed archive action after switching to a different target route', async () => {
@@ -2827,8 +2827,8 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument())
 
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-    fireEvent.click(screen.getByRole('button', { name: '归档' }))
-    fireEvent.click(screen.getByRole('button', { name: '确认归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认退役' }))
     fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
@@ -2837,10 +2837,10 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
     expect(screen.queryByText('archive failed')).not.toBeInTheDocument()
-    expect(screen.queryByRole('alertdialog', { name: '确认归档目标' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '确认退役目标' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-    expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
+    expect(screen.getByRole('button', { name: '退役' })).not.toHaveFocus()
   })
 
   it('ignores a stale confirmed ProbeItem delete after switching to a different target route', async () => {
@@ -2935,7 +2935,7 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByRole('alertdialog', { name: '确认删除 ProbeItem' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-    expect(screen.getByRole('button', { name: '归档' })).not.toHaveFocus()
+    expect(screen.getByRole('button', { name: '退役' })).not.toHaveFocus()
     expect(screen.getByRole('button', { name: '添加 ProbeItem' })).not.toHaveFocus()
   })
 
@@ -4134,7 +4134,7 @@ describe('TargetDetailPage', () => {
       host: 'archived.example.com',
       base_port: 443,
       execution_monitoring_instance_labels: ['edge'],
-      run_status: '已归档',
+      lifecycle_status: 'retired', run_status: '暂停',
       labels: ['legacy'],
       note: '',
       current_health_status: '正常',
@@ -4201,7 +4201,7 @@ describe('TargetDetailPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '恢复到暂停' }))
 
     // Confirmation dialog with shared impact check must appear
-    const dialog = await screen.findByRole('alertdialog', { name: '确认恢复已归档目标' })
+    const dialog = await screen.findByRole('alertdialog', { name: '确认恢复已退役目标' })
     expect(dialog).toBeInTheDocument()
     expect(await screen.findByText('共享影响摘要 shared-restore-digest-01')).toBeInTheDocument()
     const checkbox = screen.getByRole('checkbox')
@@ -4468,7 +4468,7 @@ describe('TargetDetailPage', () => {
         if (body.preview_digest === 'digest-a') {
           return mockJSONResponse({ error: 'management review stale', code: 'management_review_stale' }, 409)
         }
-        return mockJSONResponse({ ...targetData, run_status: '已归档' })
+        return mockJSONResponse({ ...targetData, lifecycle_status: 'retired', run_status: '暂停' })
       }
       if (url.includes('/probe-items') || url.includes('/incidents') || url.includes('/events') || url.includes('/asset-context')) {
         return mockJSONResponse([])
@@ -4489,9 +4489,9 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Stale Archive' })).toBeInTheDocument())
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-    fireEvent.click(screen.getByRole('button', { name: '归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '确认归档目标' })
-    const confirm = within(dialog).getByRole('button', { name: '确认归档' })
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '确认退役目标' })
+    const confirm = within(dialog).getByRole('button', { name: '确认退役' })
     await waitFor(() => expect(confirm).toBeEnabled())
     fireEvent.click(confirm)
 
@@ -4537,8 +4537,8 @@ describe('TargetDetailPage', () => {
     {
       action: 'archive',
       status: '启用',
-      dialogName: '确认归档目标',
-      confirmName: '确认归档',
+      dialogName: '确认退役目标',
+      confirmName: '确认退役',
       path: '/runtime/archive',
       opensDialogFirst: true,
     },
@@ -4568,8 +4568,8 @@ describe('TargetDetailPage', () => {
     },
     {
       action: 'restore-to-paused',
-      status: '已归档',
-      dialogName: '确认恢复已归档目标',
+      status: '暂停',
+      dialogName: '确认恢复已退役目标',
       confirmName: '确认恢复到暂停',
       path: '/runtime/restore-to-paused',
       opensDialogFirst: false,
@@ -4585,6 +4585,7 @@ describe('TargetDetailPage', () => {
     const targetId = `tg_stale_${action}`
     const targetData = {
       target_id: targetId,
+      lifecycle_status: action === 'restore-to-paused' ? 'retired' : 'active',
       name: `Stale ${action}`,
       target_type: 'service',
       host: 'stale.example.com',
@@ -4673,7 +4674,7 @@ describe('TargetDetailPage', () => {
 
     if (action === 'archive') {
       fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
-      fireEvent.click(screen.getByRole('button', { name: '归档' }))
+      fireEvent.click(screen.getByRole('button', { name: '退役' }))
     } else if (action === 'restore-to-paused') {
       fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
       fireEvent.click(screen.getByRole('button', { name: '恢复到暂停' }))

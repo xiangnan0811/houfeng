@@ -59,7 +59,7 @@ export function MonitoringInstanceLinkedVPSSection({
       render: (vps) => (
         <span className="asset-status-stack">
           <LifecycleBadge value={vps.lifecycle_status} />
-          <UsageBadge value={vps.usage_status} />
+          {(vps.usage_tags ?? []).map((tag) => <UsageBadge key={tag} value={tag} />)}
           <RenewalBadge value={vps.renewal_decision} />
         </span>
       ),

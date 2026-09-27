@@ -135,8 +135,11 @@ func MonitoringInstanceInstallCommand(repo monitoringinstances.OnboardingReposit
 		if strings.HasPrefix(publicBaseURL, "http://") {
 			insecureHTTPFlag = " --insecure-allow-http"
 		}
+		// This endpoint explicitly creates an enrollment command, including for
+		// a fresh instance replacing a retired instance on the same host. Host
+		// credentials cannot be inferred from the new instance's session history.
 		command := fmt.Sprintf(
-			"tmp_installer=\"$(mktemp)\" && curl -fsSL %s -o \"$tmp_installer\" && sudo sh \"$tmp_installer\" --server-url %s --enrollment-token-stdin --install-missing-deps --version %s --release-repo %s%s <<'HOUFENG_ENROLLMENT_TOKEN'\n%s\nHOUFENG_ENROLLMENT_TOKEN\nstatus=$?; rm -f \"$tmp_installer\"; test \"$status\" -eq 0",
+			"tmp_installer=\"$(mktemp)\" && curl -fsSL %s -o \"$tmp_installer\" && sudo sh \"$tmp_installer\" --server-url %s --enrollment-token-stdin --reenroll --install-missing-deps --version %s --release-repo %s%s <<'HOUFENG_ENROLLMENT_TOKEN'\n%s\nHOUFENG_ENROLLMENT_TOKEN\nstatus=$?; rm -f \"$tmp_installer\"; test \"$status\" -eq 0",
 			shellQuote(installerURL),
 			shellQuote(publicBaseURL),
 			shellQuote(agentVersion),

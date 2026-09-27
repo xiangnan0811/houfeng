@@ -23,6 +23,7 @@ interface VPSCreateModalProps {
   providers: ProviderRecord[]
   providersLoading?: boolean
   providersError?: string | null
+  usageSuggestions?: string[]
   onCreated: (vps: VPSAssetRecord) => void
   onProviderCreated: (provider: ProviderRecord) => void
 }
@@ -33,6 +34,7 @@ const INITIAL_FORM: FactEditFormState = {
   providerName: '',
   productName: '',
   orderRef: '',
+  acquisitionSource: '',
   country: '',
   region: '',
   city: '',
@@ -44,7 +46,11 @@ const INITIAL_FORM: FactEditFormState = {
   sshUser: 'root',
   osName: '',
   virtualization: '',
-  usageStatus: 'unknown',
+  usageTags: '',
+  validityMode: 'unknown',
+  expiresAt: '',
+  autoRenewCheck: 'unchecked',
+  autoRenewCheckedAt: '',
   importance: 'normal',
   labels: '',
   note: '',
@@ -64,6 +70,7 @@ export function VPSCreateModal({
   providers,
   providersLoading = false,
   providersError = null,
+  usageSuggestions = [],
   onCreated,
   onProviderCreated,
 }: VPSCreateModalProps) {
@@ -165,6 +172,7 @@ export function VPSCreateModal({
       footer={footer}
     >
       <VPSFactsEditForm
+        usageSuggestions={usageSuggestions}
         formId="vps-create-form"
         draft={form}
         providers={providers}

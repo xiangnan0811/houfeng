@@ -2,12 +2,15 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	agentconfig "houfeng/agent/config"
@@ -214,6 +217,7 @@ type Runtime struct {
 	interval             time.Duration
 	syncQueue            SyncQueue
 	currentPlan          *agentapi.SyncPlan
+	collectionStopped    bool
 	lastHostSampleAt     time.Time
 	pendingResults       []agentexec.Result
 	pendingIPReports     []agentapi.IPQualityReportPayload
@@ -355,6 +359,9 @@ func (r *Runtime) Run(ctx context.Context) error {
 			request := r.buildSyncRequest(ctx, monitoringInstanceID, syncToken, observedAt, fingerprint, syncBatchID)
 
 			if r.syncQueue == nil {
+				if err := attachLiveSignal(&request); err != nil {
+					return err
+				}
 				response, err := r.client.Sync(ctx, request)
 				if err != nil {
 					if ctx.Err() != nil {
@@ -433,6 +440,7 @@ func (r *Runtime) enroll(ctx context.Context, fingerprint string) (*agentapi.Enr
 
 func (r *Runtime) buildSyncRequest(ctx context.Context, monitoringInstanceID, syncToken string, observedAt time.Time, fingerprint, syncBatchID string) agentapi.SyncRequest {
 	request := agentapi.SyncRequest{
+		SessionID:            strings.SplitN(syncToken, ".", 2)[0],
 		MonitoringInstanceID: monitoringInstanceID,
 		SyncToken:            syncToken,
 		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
@@ -441,6 +449,9 @@ func (r *Runtime) buildSyncRequest(ctx context.Context, monitoringInstanceID, sy
 			Fingerprint:  fingerprint,
 			SyncBatchID:  syncBatchID,
 		}},
+	}
+	if r.collectionStopped {
+		return request
 	}
 
 	if sample := r.collectHostSample(observedAt, fingerprint, syncBatchID); sample != nil {
@@ -542,6 +553,9 @@ func (r *Runtime) flushSyncQueue(ctx context.Context, currentEntryID string, aut
 		if disposition == syncQueueEntryAcknowledged {
 			round.ackedEntries++
 		}
+		if r.collectionStopped {
+			return syncRoundResult{}, nil
+		}
 	}
 
 	if _, err := r.flushSyncQueueEntry(ctx, *current, true); err != nil {
@@ -581,6 +595,19 @@ func (r *Runtime) flushSyncQueueEntry(ctx context.Context, entry syncqueue.Entry
 		return "", &syncQueueOperationError{operation: "delete_acknowledged", cause: err}
 	}
 	r.applySyncPlan(ctx, response)
+	if response != nil && response.StopCollection {
+		entries, err := r.syncQueue.List(ctx)
+		if err != nil {
+			return "", err
+		}
+		ids := make([]string, 0, len(entries))
+		for _, queued := range entries {
+			ids = append(ids, queued.ID)
+		}
+		if err := r.syncQueue.DeleteMany(ctx, ids); err != nil {
+			return "", err
+		}
+	}
 	return syncQueueEntryAcknowledged, nil
 }
 
@@ -634,6 +661,8 @@ func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, curren
 	request := entry.Request
 	if !current {
 		request = syncqueue.WithBackfilledFacts(entry.Request, true)
+	} else if err := attachLiveSignal(&request); err != nil {
+		return nil, err
 	}
 	response, err := r.client.Sync(ctx, request)
 	if err != nil {
@@ -822,6 +851,20 @@ func syncQueueAuthorityMismatch(request agentapi.SyncRequest, authority syncAuth
 }
 
 func (r *Runtime) applySyncPlan(ctx context.Context, response *agentapi.SyncResponse) {
+	if response != nil && response.StopCollection {
+		r.collectionStopped = true
+		r.currentPlan = nil
+		r.pendingResults = nil
+		r.pendingIPReports = nil
+		if stopper, ok := r.ipQualityProvider.(interface{ Stop() }); ok {
+			stopper.Stop()
+		}
+		if r.ipQualityProvider != nil {
+			r.ipQualityProvider.DrainReports()
+		}
+		return
+	}
+	r.collectionStopped = false
 	if response != nil && response.Plan != nil {
 		r.currentPlan = cloneSyncPlan(response.Plan)
 
@@ -842,6 +885,18 @@ func (r *Runtime) applySyncPlan(ctx context.Context, response *agentapi.SyncResp
 	} else {
 		r.currentPlan = nil
 	}
+}
+
+func attachLiveSignal(request *agentapi.SyncRequest) error {
+	if len(request.Heartbeats) == 0 {
+		return errors.New("live signal requires local identity")
+	}
+	var nonce [24]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return fmt.Errorf("create live signal: %w", err)
+	}
+	request.LiveSignal = &agentapi.LiveSignal{ID: hex.EncodeToString(nonce[:]), Fingerprint: request.Heartbeats[0].Fingerprint}
+	return nil
 }
 
 func (r *Runtime) collectHostSample(observedAt time.Time, fingerprint, syncBatchID string) *agentapi.HostSamplePayload {

@@ -32,9 +32,9 @@ function monitoringLink(id: string): VPSMonitoringInstanceSummary {
     region: 'Tokyo',
     city: 'Tokyo',
     provider: 'Example',
-    lifecycle_status: 'active',
-    monitoring_status: '待接入',
-    binding_status: 'unbound',
+    lifecycle_status: '待接入',
+    monitoring_status: '启用',
+    binding_status: '未绑定',
     current_health_status: '正常',
     last_heartbeat_at: null,
     last_sync_at: null,
@@ -65,12 +65,12 @@ function detailFixture(vpsId: string, links: VPSMonitoringInstanceSummary[] = []
     os_name: 'Debian',
     virtualization: 'KVM',
     lifecycle_status: 'active',
-    usage_status: 'in_use',
+    usage_tags: ['承载业务'],
     renewal_decision: 'keep',
     importance: 'high',
     labels: ['edge', 'prod'],
     note: 'asset note',
-    active_monitoring_instance_link_count: links.length,
+    active_monitoring_instance_link_count: links.filter((link) => link.lifecycle_status !== '已退役' && link.is_current !== false).length,
     created_at: '2026-08-01T00:00:00Z',
     updated_at: '2026-08-29T00:00:00Z',
     monitoring_instance_links: links,
@@ -104,9 +104,9 @@ function createdFixture(id = 'mi_new'): CreateVPSMonitoringInstanceResponse {
     provider: 'Example Cloud',
     labels: ['edge', 'prod'],
     note: 'asset note',
-    lifecycle_status: 'active',
-    monitoring_status: '待接入',
-    binding_status: 'unbound',
+    lifecycle_status: '待接入',
+    monitoring_status: '启用',
+    binding_status: '未绑定',
     current_health_status: '正常',
     current_active_incident_count: 0,
     current_primary_issue_summary: '',
@@ -203,6 +203,40 @@ describe('VPSOverviewMonitoringOnboarding', () => {
     vi.restoreAllMocks()
   })
 
+  it('offers explicit historical reenrollment without treating retired instances as current', async () => {
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture('vps_a', [
+      { ...monitoringLink('mi_history'), vps_id: 'vps_a', lifecycle_status: '已退役', is_current: false },
+    ]))
+    const create = vi.spyOn(api, 'createVPSMonitoringInstance')
+    renderHarness()
+    await openZeroLinkForm()
+    const link = screen.getByRole('link', { name: '重新接入 mi_history' })
+    expect(link).toHaveAttribute('href', '/monitoring/mi_history?onboarding=1&return_vps=vps_a')
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('refuses cross-owner authority instead of opening or rebinding that monitoring instance', async () => {
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture('vps_a', [
+      { ...monitoringLink('mi_other'), vps_id: 'vps_b' },
+    ]))
+    const create = vi.spyOn(api, 'createVPSMonitoringInstance')
+    renderHarness()
+    fireEvent.click(screen.getByRole('button', { name: '打开接入' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('监控关联证据无效')
+    expect(screen.getByTestId('location')).toHaveTextContent('/vps/vps_a')
+    expect(create).not.toHaveBeenCalled()
+  })
+
+  it('refuses onboarding for an archived VPS even with no current monitoring', async () => {
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue({ ...detailFixture('vps_a'), lifecycle_status: 'archived' })
+    const create = vi.spyOn(api, 'createVPSMonitoringInstance')
+    renderHarness()
+    fireEvent.click(screen.getByRole('button', { name: '打开接入' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('所属 VPS 已归档')
+    expect(screen.queryByRole('textbox', { name: '监控实例名称' })).not.toBeInTheDocument()
+    expect(create).not.toHaveBeenCalled()
+  })
+
   it('waits for authoritative zero-link evidence before rendering the create form', async () => {
     const pending = deferred<VPSAssetDetail>()
     vi.spyOn(api, 'getVPSAsset').mockReturnValue(pending.promise)
@@ -293,7 +327,7 @@ describe('VPSOverviewMonitoringOnboarding', () => {
     fireEvent.click(screen.getByRole('button', { name: '打开接入' }))
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
-      '检测到多个 active 监控关联，请先人工复核',
+      '检测到多个当前监控实例，请先人工复核',
     ))
     expect(screen.getByTestId('active-panel')).toHaveTextContent('monitoring-instance-evidence')
     expect(create).not.toHaveBeenCalled()
@@ -554,7 +588,7 @@ describe('VPSOverviewMonitoringOnboarding', () => {
     await openZeroLinkForm()
     await submitCreate()
 
-    expect(await screen.findByRole('status')).toHaveTextContent('检测到多个 active 监控关联，请先人工复核')
+    expect(await screen.findByRole('status')).toHaveTextContent('检测到多个当前监控实例，请先人工复核')
     expect(screen.getByTestId('active-panel')).toHaveTextContent('monitoring-instance-evidence')
     expect(create).toHaveBeenCalledTimes(1)
   })

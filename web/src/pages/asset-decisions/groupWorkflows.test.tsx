@@ -216,7 +216,7 @@ describe('Asset Decisions automatic group workflows', () => {
     }
     const updatedPrimary = {
       ...primaryMember.vps,
-      renewal_decision: 'observe',
+      renewal_decision: 'unreviewed',
     }
     const created = decisionRecord({
       record_id: 'adr_auto_changed',
@@ -253,13 +253,13 @@ describe('Asset Decisions automatic group workflows', () => {
     const firstChangedMemberAction = within(dialog).getAllByRole('button', { name: '处理' })[0]
     if (!firstChangedMemberAction) throw new Error('changed group must expose a member action')
     fireEvent.click(firstChangedMemberAction)
-    fireEvent.change(within(dialog).getByLabelText('续费决策'), { target: { value: 'observe' } })
+    fireEvent.change(within(dialog).getByLabelText('续费决策'), { target: { value: 'unreviewed' } })
     const renewalMutationStart = fetchMock.mock.calls.length
     fireEvent.click(within(dialog).getByRole('button', { name: '保存续费决策' }))
 
     await waitFor(() => expect(screen.getByText(/续费决策已保存：Germany Primary ->/)).toBeInTheDocument())
     await waitFor(() => expect(within(dialog).queryByText('Germany Primary')).not.toBeInTheDocument())
-    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(renewalMutationStart + 13))
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(renewalMutationStart + 12))
     expect(fetchRequestInventory(fetchMock, renewalMutationStart)).toEqual([
       'GET /api/asset-decisions/groups/adg_auto_001?renew_within_days=30',
       'GET /api/asset-decisions/groups?view=needs_decision&renew_within_days=30',
@@ -271,7 +271,6 @@ describe('Asset Decisions automatic group workflows', () => {
       'GET /api/subscriptions?sort=renew_at&order=asc',
       'GET /api/vps',
       'GET /api/vps?renewal_decision=cancel',
-      'GET /api/vps?renewal_decision=migrate',
       'GET /api/vps?renewal_decision=unreviewed',
       'PATCH /api/vps/vps_primary',
     ])
@@ -395,7 +394,7 @@ describe('Asset Decisions automatic group workflows', () => {
     await waitFor(() => expect(screen.getAllByText('德国主力组合').length).toBeGreaterThan(0))
     fireEvent.click(screen.getByRole('button', { name: '查看组' }))
     const dialog = await screen.findByRole('dialog', { name: '资产决策组详情' })
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(16))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(15))
     const mutationStart = fetchMock.mock.calls.length
     fireEvent.click(within(dialog).getByRole('button', { name: '创建组合' }))
 

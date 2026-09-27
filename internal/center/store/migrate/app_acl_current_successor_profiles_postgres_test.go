@@ -3,7 +3,6 @@ package migrate
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -39,7 +38,7 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 		)
 		migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
 		predecessor, _, _ := seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
-		seedAppACLCurrentSuccessorArchivedVPS(t, ctx, migratorDB)
+		assertAppACLCurrentSuccessorRejectsLegacyVPS(t, ctx, migratorDB)
 		_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 		beforeUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 		runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
@@ -82,7 +81,7 @@ func TestPostgresIntegrationAppACLCurrentP64ReleaseProfiles(t *testing.T) {
 		if p64.ManifestRevision != 2 {
 			t.Fatalf("P64 release successor revision = %d, want 2", p64.ManifestRevision)
 		}
-		seedAppACLCurrentSuccessorArchivedVPS(t, ctx, migratorDB)
+		assertAppACLCurrentSuccessorRejectsLegacyVPS(t, ctx, migratorDB)
 		_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 		beforeUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 		if len(beforeUpgrade.Manifest.Manifests) != 2 {
@@ -149,7 +148,7 @@ func testAppACLCurrentReleasedTransitionRollback(t *testing.T, profile appACLCur
 				migratorDB = fixture.openRolePool(t, ctx, fixture.migratorRole)
 				seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
 			}
-			seedAppACLCurrentSuccessorArchivedVPS(t, ctx, migratorDB)
+			assertAppACLCurrentSuccessorRejectsLegacyVPS(t, ctx, migratorDB)
 			_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 			before := readAppACLCurrentTransitionDurableState(t, ctx, migratorDB, currentInput)
 			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
@@ -453,7 +452,7 @@ func appendAppACLCurrentReleasedSuccessor(
 	return manifest, nil
 }
 
-func seedAppACLCurrentSuccessorArchivedVPS(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
+func assertAppACLCurrentSuccessorRejectsLegacyVPS(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
 	if _, err := db.Exec(ctx, `
 		insert into public.vps_assets (
@@ -464,34 +463,33 @@ func seedAppACLCurrentSuccessorArchivedVPS(t *testing.T, ctx context.Context, db
 	`); err != nil {
 		t.Fatalf("seed archived VPS before current successor migrations: %v", err)
 	}
+	// Legacy business rows are now an explicit rebuild boundary. Exercise the
+	// refusal before removing only this test fixture so empty-schema catalog
+	// transition and rollback checks can still cover the released ACL profiles.
+	payload, err := migrations.FS.ReadFile("0067_refactor_vps_monitoring_lifecycle.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, migrationErr := tx.Exec(ctx, string(payload))
+	_ = tx.Rollback(ctx)
+	if migrationErr == nil || !strings.Contains(migrationErr.Error(), "requires a fresh installation") {
+		t.Fatalf("current lifecycle migration legacy refusal = %v", migrationErr)
+	}
+	if _, err := db.Exec(ctx, `delete from public.vps_assets where vps_id='vps_acl_successor_archive'`); err != nil {
+		t.Fatalf("remove refused legacy fixture: %v", err)
+	}
 }
 
 func assertAppACLCurrentSuccessorUpgradeEffects(t *testing.T, ctx context.Context, db *pgxpool.Pool) {
 	t.Helper()
 	assertSingleIntValue(t, ctx, db, `select count(*)::int from public.schema_migrations where name in ('0065_extend_vps_lifecycle_audit_and_snapshot.sql', '0066_constrain_monitoring_and_target_state_values.sql')`, 2)
 	assertSingleIntValue(t, ctx, db, `select count(*)::int from public.schema_migrations`, currentRootSourceCount)
-	var currentUsage string
-	var archivedState []byte
-	if err := db.QueryRow(ctx, `
-		select usage_status, archived_state_snapshot
-		from public.vps_assets
-		where vps_id = 'vps_acl_successor_archive'
-	`).Scan(&currentUsage, &archivedState); err != nil {
-		t.Fatalf("read migrated archived VPS state: %v", err)
-	}
-	var snapshot struct {
-		LifecycleStatus string `json:"lifecycle_status"`
-		UsageStatus     string `json:"usage_status"`
-		RenewalDecision string `json:"renewal_decision"`
-		Source          string `json:"source"`
-	}
-	if err := json.Unmarshal(archivedState, &snapshot); err != nil {
-		t.Fatalf("decode migrated archived VPS snapshot: %v", err)
-	}
-	if currentUsage != "unknown" || snapshot.LifecycleStatus != "archived" || snapshot.UsageStatus != "in_use" ||
-		snapshot.RenewalDecision != "keep" || snapshot.Source != "migration_observation" {
-		t.Fatalf("migrated archived VPS current state/snapshot = %q/%#v, want unknown and preserved migration observation", currentUsage, snapshot)
-	}
+	assertSingleIntValue(t, ctx, db, `select count(*)::int from public.schema_migrations where name='0067_refactor_vps_monitoring_lifecycle.sql'`, 1)
+	assertSingleIntValue(t, ctx, db, `select count(*)::int from public.vps_assets`, 0)
 	var validatedConstraints int
 	if err := db.QueryRow(ctx, `
 		select count(*)::int
@@ -502,7 +500,7 @@ func assertAppACLCurrentSuccessorUpgradeEffects(t *testing.T, ctx context.Contex
 		"asset_lifecycle_actions_type_allowed",
 		"asset_lifecycle_action_steps_object_type_allowed",
 		"asset_lifecycle_action_steps_step_type_allowed",
-		"vps_assets_state_combination_valid",
+		"vps_assets_validity_allowed",
 		"monitoring_instances_lifecycle_status_allowed",
 		"monitoring_instances_monitoring_status_allowed",
 		"monitoring_instances_binding_status_allowed",

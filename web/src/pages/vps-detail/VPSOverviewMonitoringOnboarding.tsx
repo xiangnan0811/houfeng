@@ -80,7 +80,7 @@ type ExternalOwnerObservation = {
   revalidationStarted: boolean
 }
 
-const MULTIPLE_LINKS_WARNING = '检测到多个 active 监控关联，请先人工复核。'
+const MULTIPLE_LINKS_WARNING = '检测到多个当前监控实例，请先人工复核。'
 const INVALID_MONITORING_AUTHORITY_ERROR = '监控关联证据无效，请重试加载。'
 
 function onboardingPath(vpsId: string, monitoringInstanceId: unknown): string | null {
@@ -97,14 +97,15 @@ function authoritativeActiveLinks(detail: VPSAssetDetail): VPSMonitoringInstance
     || !Number.isFinite(declaredCount)
     || !Number.isInteger(declaredCount)
     || declaredCount < 0
-    || links.length !== declaredCount
   ) return null
   if (!links.every((link: unknown) => (
     typeof link === 'object'
     && link !== null
     && isStableMonitoringInstanceID((link as { monitoring_instance_id?: unknown }).monitoring_instance_id)
+    && (!(link as VPSMonitoringInstanceSummary).vps_id || (link as VPSMonitoringInstanceSummary).vps_id === detail.vps_id)
   ))) return null
-  return links as VPSMonitoringInstanceSummary[]
+  const current = (links as VPSMonitoringInstanceSummary[]).filter((link) => link.lifecycle_status !== '已退役' && link.is_current !== false)
+  return current.length === declaredCount ? current : null
 }
 
 function observationMatchesAuthority(
@@ -356,6 +357,11 @@ export function VPSOverviewMonitoringOnboarding({
     void getVPSAsset(targetVPSID).then((latest) => {
       if (!generationIsCurrent(generation, targetVPSID, targetViewToken, loadAuthority.generation)) return
       if (!postOwnerRevalidationIsCurrent()) return
+      if (latest.lifecycle_status !== 'active') {
+        setLoadState({ vpsId: targetVPSID, viewToken: targetViewToken, authorityGeneration: loadAuthority.generation,
+          loading: false, detail: null, draft: null, error: '所属 VPS 已归档，请先从 VPS 详情恢复管理后再显式接入。' })
+        return
+      }
       const activeLinks = authoritativeActiveLinks(latest)
       if (!activeLinks) {
         setLoadState({
@@ -645,6 +651,19 @@ export function VPSOverviewMonitoringOnboarding({
             <Button onClick={() => setLoadRevision((current) => current + 1)}>重试加载</Button>
           ) : null}
           {currentLoad?.detail && currentLoad.draft ? (
+            <>
+            {!writeBlocked && currentLoad.detail.monitoring_instance_links.some((instance) => instance.lifecycle_status === '已退役') ? (
+              <section aria-label="重新接入历史监控实例">
+                <p>可显式重新接入历史实例，沿用实例身份并创建新接入会话。旧会话不会恢复采集权限。</p>
+                {currentLoad.detail.monitoring_instance_links.filter((instance) => instance.lifecycle_status === '已退役').map((instance) => (
+                  <Link key={instance.monitoring_instance_id} className="text-link" state={location.state}
+                    to={onboardingPath(vpsId, instance.monitoring_instance_id)!}>
+                    重新接入 {instance.display_name}
+                  </Link>
+                ))}
+                <p>也可以为这台 VPS 创建新的监控实例。</p>
+              </section>
+            ) : null}
             <VPSMonitoringInstanceCreateForm
               formId={formId}
               detail={currentLoad.detail}
@@ -662,6 +681,7 @@ export function VPSOverviewMonitoringOnboarding({
               onFeedbackClear={() => setMutationError(null)}
               onSubmit={(event) => void submit(event)}
             />
+            </>
           ) : null}
         </div>
       </VPSDetailDialog>

@@ -20,14 +20,15 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 	eventAt := time.Date(2026, time.July, 1, 20, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 
 	tests := []struct {
-		name           string
-		action         func(context.Context, *PostgresTargetRepository, string) (targets.TargetRecord, error)
-		targetID       string
-		sourceStatus   string
-		returnedStatus string
-		wantEventType  incidents.EventType
-		wantSummary    string
-		wantPayload    string
+		name            string
+		action          func(context.Context, *PostgresTargetRepository, string) (targets.TargetRecord, error)
+		targetID        string
+		sourceLifecycle string
+		sourceStatus    string
+		returnedStatus  string
+		wantEventType   incidents.EventType
+		wantSummary     string
+		wantPayload     string
 	}{
 		{
 			name: "enabled to maintenance",
@@ -96,22 +97,23 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 			},
 			targetID:       "tg_archive",
 			sourceStatus:   targets.RunStatusEnabled,
-			returnedStatus: targets.RunStatusArchived,
+			returnedStatus: targets.RunStatusPaused,
 			wantEventType:  incidents.EventTargetArchived,
-			wantSummary:    "归档",
-			wantPayload:    targets.RunStatusArchived,
+			wantSummary:    "退役",
+			wantPayload:    targets.RunStatusPaused,
 		},
 		{
 			name: "restore archived target to paused",
 			action: func(ctx context.Context, repo *PostgresTargetRepository, targetID string) (targets.TargetRecord, error) {
 				return repo.RestoreArchivedTargetToPaused(ctx, targetID)
 			},
-			targetID:       "tg_restore",
-			sourceStatus:   targets.RunStatusArchived,
-			returnedStatus: targets.RunStatusPaused,
-			wantEventType:  incidents.EventTargetRestoredToPaused,
-			wantSummary:    "恢复",
-			wantPayload:    targets.RunStatusPaused,
+			targetID:        "tg_restore",
+			sourceStatus:    targets.RunStatusPaused,
+			sourceLifecycle: targets.LifecycleRetired,
+			returnedStatus:  targets.RunStatusPaused,
+			wantEventType:   incidents.EventTargetRestoredToPaused,
+			wantSummary:     "恢复",
+			wantPayload:     targets.RunStatusPaused,
 		},
 	}
 
@@ -132,7 +134,7 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 						status = tt.returnedStatus
 					}
 					return fakeTargetRow{scan: func(dest ...any) error {
-						scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: tt.targetID, RunStatus: status, UpdatedAt: eventAt})
+						scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: tt.targetID, LifecycleStatus: tt.sourceLifecycle, RunStatus: status, UpdatedAt: eventAt})
 						return nil
 					}}
 				},
@@ -404,9 +406,9 @@ func TestPostgresTargetListHidesTargetsLinkedOnlyToArchivedVPS(t *testing.T) {
 	}
 	for _, snippet := range []string{
 		"not exists",
-		"asset_services",
-		"asset_domains",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"asset_service_associations",
+		"asset_domain_associations",
+		"v.lifecycle_status = 'active'",
 	} {
 		if !strings.Contains(seenSQL, snippet) {
 			t.Fatalf("ListTargets SQL missing %q in %s", snippet, seenSQL)
@@ -519,6 +521,8 @@ func (f *fakeTargetTx) QueryRow(ctx context.Context, sql string, args ...any) pg
 func (f *fakeTargetTx) Conn() *pgx.Conn { return nil }
 
 func scanTargetRecordDestinations(dest []any, record targets.TargetRecord) {
+	*(dest[0].(*string)) = record.LifecycleStatus
+	dest = dest[1:]
 	*(dest[0].(*string)) = record.TargetID
 	*(dest[1].(*string)) = record.Name
 	*(dest[2].(*string)) = record.TargetType

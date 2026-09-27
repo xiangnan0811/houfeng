@@ -49,7 +49,7 @@ function healthyOverview(): VPSOverview {
       ipv4: '192.0.2.1',
       ipv6: '',
       lifecycle_status: 'active',
-      usage_status: 'in_use',
+      usage_tags: ['承载业务'],
       renewal_decision: 'keep',
       importance: 'high',
       labels: ['edge'],
@@ -168,7 +168,7 @@ describe('VPSOverviewPageView', () => {
     fireEvent.click(screen.getByRole('button', { name: '页面目录' }))
     expect(screen.getByRole('link', { name: '最近活动' })).toHaveAttribute('href', expect.stringMatching(/#vps-section-activity$/))
     expect(screen.getByRole('link', { name: '活动' })).toHaveAttribute('href', '/vps/vps_001/activity')
-    expect(screen.getByText('在用')).toBeInTheDocument()
+    expect(screen.getByText('管理中')).toBeInTheDocument()
     expect(screen.getByText('承载业务')).toBeInTheDocument()
     expect(screen.getByText('总体正常')).toBeInTheDocument()
 
@@ -534,7 +534,7 @@ describe('VPSOverviewPageView', () => {
     expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
   })
 
-  it('hides cancellation and archive for an active VPS that is still keeping', () => {
+  it('exposes archive independently of a keep-renewing intent', () => {
     render(
       <MemoryRouter>
         <VPSOverviewPageView
@@ -546,12 +546,12 @@ describe('VPSOverviewPageView', () => {
       </MemoryRouter>,
     )
     expect(screen.queryByRole('menuitem', { name: '取消 / 退役' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '结束使用并归档' })).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: '编辑事实' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '管理' })).toHaveAttribute('aria-controls')
   })
 
-  it('shows cancellation for an active VPS after a cancel renewal decision', () => {
+  it('exposes the same archive action for a no-renewal intent', () => {
     const overview = healthyOverview()
     overview.identity = { ...overview.identity, renewal_decision: 'cancel' }
     render(
@@ -564,14 +564,14 @@ describe('VPSOverviewPageView', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('menuitem', { name: '取消 / 退役' })).toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '取消 / 退役' })).not.toBeInTheDocument()
+    expect(screen.getByRole('menuitem', { name: '结束使用并归档' })).toBeInTheDocument()
   })
 
-  it('opens cancellation from the lifecycle blocker on to_cancel VPS', () => {
+  it('opens the management menu for lifecycle review without a legacy cancellation step', () => {
     const management = managementStub()
     const overview = healthyOverview()
-    overview.identity = { ...overview.identity, lifecycle_status: 'to_cancel' }
+    overview.identity = { ...overview.identity, lifecycle_status: 'active', renewal_decision: 'cancel' }
     overview.anomalies = [{
       rule_id: 'lifecycle.blocker.v1',
       severity: 'warning',
@@ -591,18 +591,19 @@ describe('VPSOverviewPageView', () => {
       </MemoryRouter>,
     )
     fireEvent.click(screen.getByRole('button', { name: '打开管理' }))
-    expect(management.openPanel).toHaveBeenCalledWith('cancellation')
+    expect(management.openMenu).toHaveBeenCalledOnce()
+    expect(management.openPanel).not.toHaveBeenCalled()
   })
 
-  it('opens cancellation from the lifecycle blocker on to_migrate VPS', () => {
+  it('keeps migration-purpose review separate from lifecycle changes', () => {
     const management = managementStub()
     const overview = healthyOverview()
-    overview.identity = { ...overview.identity, lifecycle_status: 'to_migrate' }
+    overview.identity = { ...overview.identity, usage_tags: ['迁移中'] }
     overview.anomalies = [{
       rule_id: 'lifecycle.blocker.v1',
       severity: 'warning',
       title: '生命周期待处理',
-      detail: 'to_migrate',
+      detail: '迁移计划待核对',
       source: 'lifecycle',
       primary_action: { id: 'open_management', label: '打开管理' },
       secondary_actions: [],
@@ -618,8 +619,8 @@ describe('VPSOverviewPageView', () => {
       </MemoryRouter>,
     )
     fireEvent.click(screen.getByRole('button', { name: '打开管理' }))
-    expect(management.openPanel).toHaveBeenCalledWith('cancellation')
-    expect(management.openMenu).not.toHaveBeenCalled()
+    expect(management.openPanel).not.toHaveBeenCalled()
+    expect(management.openMenu).toHaveBeenCalledOnce()
   })
 
   it('copies only raw IP and SSH facts', () => {
@@ -942,9 +943,9 @@ describe('VPSOverviewPageView', () => {
 
   })
 
-  it('uses the same planned-cancellation date context on primary and extra subscriptions', () => {
+  it('uses the same no-renewal intent date context on primary and extra subscriptions', () => {
     const overview = healthyOverview()
-    overview.identity.lifecycle_status = 'to_cancel'
+    overview.identity.renewal_decision = 'cancel'
     mockReadyResources({
       subscriptions: {
         status: 'ready',
@@ -1040,13 +1041,13 @@ describe('VPSOverviewAnomalies', () => {
       status: 'high',
       detail: 'partial',
     }
-    overview.identity = { ...overview.identity, lifecycle_status: 'to_cancel', importance: 'normal' }
+    overview.identity = { ...overview.identity, lifecycle_status: 'archived', importance: 'normal' }
     overview.anomalies = [
       {
         rule_id: 'lifecycle.blocker.v1',
         severity: 'warning',
         title: '生命周期待处理',
-        detail: 'to_cancel',
+        detail: 'archived',
         source: 'lifecycle',
         primary_action: { id: 'open_management', label: '打开管理' },
         secondary_actions: [],
@@ -1073,10 +1074,10 @@ describe('VPSOverviewAnomalies', () => {
     )
     expect(screen.getByText('高风险')).toBeInTheDocument()
     expect(screen.getByText('采集不完整')).toBeInTheDocument()
-    expect(screen.getAllByText('待取消').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('已归档').length).toBeGreaterThan(0)
     expect(screen.getByText('IP 质量、监控、续费')).toBeInTheDocument()
     expect(screen.queryByText('partial')).not.toBeInTheDocument()
-    expect(screen.queryByText('to_cancel')).not.toBeInTheDocument()
+    expect(screen.queryByText('archived')).not.toBeInTheDocument()
     expect(screen.queryByText('ip_quality, monitoring, renewal')).not.toBeInTheDocument()
     expect(screen.queryByText('high')).not.toBeInTheDocument()
   })

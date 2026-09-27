@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { TargetRecord } from '../../lib/types'
-import { targetAttentionBadges, targetIssueSummary } from './targetHelpers'
+import { countAbnormalTargets, countArchivedTargets, countCoverageGapTargets, countPausedTargets, targetAttentionBadges, targetIssueSummary } from './targetHelpers'
 
 function target(overrides: Partial<TargetRecord> = {}): TargetRecord {
   return {
@@ -10,6 +10,7 @@ function target(overrides: Partial<TargetRecord> = {}): TargetRecord {
     target_type: 'service',
     host: 'api.example.com',
     execution_monitoring_instance_labels: ['edge'],
+    lifecycle_status: 'active',
     run_status: '启用',
     group: 'edge',
     labels: [],
@@ -24,6 +25,14 @@ function target(overrides: Partial<TargetRecord> = {}): TargetRecord {
 }
 
 describe('targetAttentionBadges', () => {
+  it('derives retired state independently of paused control and excludes it from operational counters', () => {
+    const retired = target({ lifecycle_status: 'retired', run_status: '暂停', current_health_status: '严重', execution_monitoring_instance_labels: [] })
+    expect(targetAttentionBadges(retired)).toEqual([{ label: '已退役', tone: 'offline' }])
+    expect(countArchivedTargets([retired])).toBe(1)
+    expect(countPausedTargets([retired])).toBe(0)
+    expect(countAbnormalTargets([retired])).toBe(0)
+    expect(countCoverageGapTargets([retired])).toBe(0)
+  })
   it('keeps 正常 silent and does not stack it with maintenance or pause', () => {
     expect(targetAttentionBadges(target())).toEqual([])
     expect(targetAttentionBadges(target({ run_status: '维护中' })).map((badge) => badge.label)).toEqual(['维护中'])

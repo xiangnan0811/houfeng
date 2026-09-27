@@ -1,6 +1,11 @@
 import type { CommentRenderModelV1 } from './commentMarkdown'
 
 export type MonitoringInstanceRecord = {
+  vps_id?: string
+  vps_lifecycle_status?: VPSLifecycleStatus
+  is_current?: boolean
+  ever_connected?: boolean
+  last_trusted_online_at?: string | null
   monitoring_instance_id: string
   display_name: string
   group: string
@@ -24,14 +29,26 @@ export type MonitoringInstanceRecord = {
   updated_at: string
 }
 
-export type MonitoringInstanceListScope = 'active' | 'archived' | 'all'
+export type MonitoringInstanceListScope = 'active' | 'retired' | 'all'
+
+export type MonitoringInstancePhase = {
+  session_id: string
+  capability: string
+  fingerprint_hash: string
+  started_at: string
+  ended_at?: string | null
+  last_trusted_online_at?: string | null
+  ever_connected: boolean
+}
 
 export type MonitoringInstanceManagementVPSLink = {
   link_id: string
   vps_id: string
   display_name: string
   lifecycle_status: string
-  usage_status: string
+  usage_status?: string
+  usage_tags?: string[]
+  acquisition_source?: string
   linked_at: string
   note: string
 }
@@ -137,11 +154,11 @@ export type LastAction = {
 }
 
 export type CommandAuditWindow = '24h' | '7d' | '30d' | 'all' | 'custom'
-export type CommandAuditOutcome = 'rejected' | 'queued' | 'dispatched' | 'succeeded' | 'failed'
+export type CommandAuditOutcome = 'rejected' | 'queued' | 'dispatched' | 'succeeded' | 'failed' | 'cancelled'
 
 export type CommandAuditEvent = {
   audit_id: string
-  event_type: 'queued' | 'dispatched' | 'completed' | 'rejected'
+  event_type: 'queued' | 'dispatched' | 'completed' | 'rejected' | 'cancelled'
   source: 'web' | 'agent_sync'
   occurred_at: string
   exit_code?: number
@@ -327,10 +344,11 @@ export type MonitoringInstanceRuntimeFacts = {
 
 export type TargetType = 'service' | 'china_reference'
 
-export type TargetRunStatus = '启用' | '维护中' | '暂停' | '已归档'
+export type TargetRunStatus = '启用' | '维护中' | '暂停'
 
 export type TargetRecord = {
   target_id: string
+  lifecycle_status: 'active' | 'retired'
   name: string
   target_type: TargetType
   host: string
@@ -546,11 +564,10 @@ export type DashboardAssetSummary = {
   renewal_due_30d_subscription_count: number
   renewal_due_30d_vps_count: number
   unreviewed_vps_count: number
-  to_cancel_vps_count: number
-  cancelled_vps_count: number
-  cancellation_attention_vps_count: number
-  running_cancelled_asset_count: number
-  to_migrate_vps_count: number
+  no_renewal_vps_count: number
+  archived_vps_count: number
+  auto_renew_check_vps_count: number
+  pending_followup_count: number
   unlinked_vps_count: number
   abnormal_linked_vps_count: number
   cost_by_currency: DashboardAssetCostByCurrency[]
@@ -747,8 +764,6 @@ export type OverrideRules = {
 export type RetentionPolicy = {
   raw_layer_days: number
   aggregate_layer_days: number
-  event_layer_days: number
-  notification_layer_days: number
 }
 
 export type SubscriptionCostSettings = {
@@ -787,8 +802,6 @@ export type IPQualitySettings = {
   frequency_seconds: number
   stale_after_seconds: number
   timeout_seconds: number
-  raw_retention_days: number
-  history_retention_days: number
   services: string[]
 }
 
@@ -840,25 +853,11 @@ export type CreateProviderInput = {
 
 export type UpdateProviderInput = Partial<CreateProviderInput>
 
-export type VPSLifecycleStatus =
-  | 'active'
-  | 'idle'
-  | 'testing'
-  | 'to_migrate'
-  | 'to_cancel'
-  | 'cancelled'
-  | 'archived'
-
-export type VPSUsageStatus = 'in_use' | 'idle' | 'standby' | 'testing' | 'unknown'
-
-export type VPSRenewalDecision =
-  | 'unreviewed'
-  | 'keep'
-  | 'observe'
-  | 'migrate'
-  | 'cancel'
-  | 'auto_renew_cancelled'
-  | 'replaced'
+export type VPSLifecycleStatus = 'active' | 'archived'
+export type VPSUsageStatus = string
+export type VPSValidityMode = 'fixed' | 'unlimited' | 'unknown'
+export type VPSAutoRenewCheck = 'unchecked' | 'enabled' | 'disabled' | 'never_enabled' | 'unsupported'
+export type VPSRenewalDecision = 'unreviewed' | 'keep' | 'cancel'
 
 export type RenewalSubscriptionLinkageStatus =
   | 'none'
@@ -871,7 +870,7 @@ export type SubscriptionStatus = 'active' | 'paused' | 'cancelled' | 'expired' |
 
 export type BillingPeriodUnit = 'day' | 'week' | 'month' | 'year'
 
-export type RenewalMode = 'auto' | 'manual' | 'auto_cancelled' | 'lottery' | 'gift' | 'bonus' | 'other'
+export type RenewalMode = 'auto' | 'manual' | 'auto_cancelled'
 
 export type ISODate = string
 
@@ -895,31 +894,11 @@ export type VPSExperienceCategory =
 export type VPSExperienceSeverity = 'info' | 'warning' | 'critical'
 
 export const VPS_LIFECYCLE_STATUS_LABELS: Record<VPSLifecycleStatus, string> = {
-  active: '在用',
-  idle: '闲置',
-  testing: '测试中',
-  to_migrate: '待迁移',
-  to_cancel: '待取消',
-  cancelled: '已取消',
-  archived: '已归档',
+  active: '管理中', archived: '已归档',
 }
-
-export const VPS_USAGE_STATUS_LABELS: Record<VPSUsageStatus, string> = {
-  in_use: '承载业务',
-  idle: '暂无用途',
-  standby: '备用',
-  testing: '测试用途',
-  unknown: '未确认',
-}
-
+export const VPS_USAGE_STATUS_LABELS: Record<string, string> = {}
 export const VPS_RENEWAL_DECISION_LABELS: Record<VPSRenewalDecision, string> = {
-  unreviewed: '未评估',
-  keep: '保留',
-  observe: '观察',
-  migrate: '迁移',
-  cancel: '取消',
-  auto_renew_cancelled: '已取消自动续费',
-  replaced: '已替换',
+  unreviewed: '待决定', keep: '继续续费', cancel: '决定不续费',
 }
 
 export const SUBSCRIPTION_STATUS_LABELS: Record<SubscriptionStatus, string> = {
@@ -973,7 +952,9 @@ export type ArchivedStateSnapshotSource = 'archive' | 'migration_observation'
 
 export type ArchivedStateSnapshot = {
   lifecycle_status: VPSLifecycleStatus | string
-  usage_status: VPSUsageStatus | string
+  usage_status?: VPSUsageStatus | string
+  usage_tags?: string[]
+  acquisition_source?: string
   renewal_decision: VPSRenewalDecision | string
   captured_at: string
   source: ArchivedStateSnapshotSource
@@ -998,7 +979,15 @@ export type VPSAssetRecord = {
   os_name: string
   virtualization: string
   lifecycle_status: VPSLifecycleStatus
-  usage_status: VPSUsageStatus
+  usage_status?: VPSUsageStatus
+  usage_tags?: string[]
+  acquisition_source?: string
+  validity_mode?: VPSValidityMode
+  expires_at?: string | null
+  auto_renew_check?: VPSAutoRenewCheck
+  auto_renew_checked_at?: string | null
+  renewal_reason?: string
+  renewal_review_at?: string | null
   renewal_decision: VPSRenewalDecision
   importance: string
   labels: string[]
@@ -1161,7 +1150,7 @@ export type AssetDecisionSuggestedAction =
   | 'observe'
   | 'migrate'
   | 'cancel'
-  | 'open_cancellation_workbench'
+  | 'open_archive_preview'
   | 'complete_evidence'
 
 export type AssetDecisionEvidenceKind =
@@ -1306,7 +1295,8 @@ export type AssetDecisionGroupSummary = {
   priority: number
   member_count: number
   lifecycle_counts: Partial<Record<VPSLifecycleStatus, number>>
-  usage_counts: Partial<Record<VPSUsageStatus, number>>
+  usage_counts?: Partial<Record<VPSUsageStatus, number>>
+  usage_tag_counts?: Record<string, number>
   renewal_decision_counts: Partial<Record<VPSRenewalDecision, number>>
   renewal_window_count: number
   unreviewed_count: number
@@ -1393,7 +1383,8 @@ export type AssetDecisionManualGroupSummary = {
   renew_within_days: number
   member_count: number
   lifecycle_counts: Partial<Record<VPSLifecycleStatus, number>>
-  usage_counts: Partial<Record<VPSUsageStatus, number>>
+  usage_counts?: Partial<Record<VPSUsageStatus, number>>
+  usage_tag_counts?: Record<string, number>
   renewal_decision_counts: Partial<Record<VPSRenewalDecision, number>>
   renewal_window_count: number
   unreviewed_count: number
@@ -1577,6 +1568,14 @@ export type AssetDecisionExecutionCurrentFacts = {
   found: boolean
   lifecycle_status?: VPSLifecycleStatus
   usage_status?: VPSUsageStatus
+  usage_tags?: string[]
+  acquisition_source?: string
+  validity_mode?: VPSValidityMode
+  expires_at?: string | null
+  auto_renew_check?: VPSAutoRenewCheck
+  auto_renew_checked_at?: string | null
+  renewal_reason?: string
+  renewal_review_at?: string | null
   renewal_decision?: VPSRenewalDecision
   active_subscription_count: number
   service_count: number
@@ -1622,7 +1621,7 @@ export type AssetDecisionExecutionPlanLane =
   | 'review'
 
 export type AssetDecisionExecutionPlanStepKind =
-  | 'open_cancellation_workbench'
+  | 'open_archive_preview'
   | 'open_vps_detail'
   | 'open_subscription_context'
   | 'review_record'
@@ -1872,6 +1871,18 @@ export type ArchiveBlockerDetail = {
 }
 
 export type ArchiveReview = {
+  preview_digest?: string
+  online_evidence?: {
+    observed_at: string
+    receiver_generation: string
+    receiver_healthy: boolean
+    healthy_since: string | null
+    last_health_check_at: string | null
+    earliest_archive_at: string | null
+    never_connected: boolean
+    manual_confirmation_required: boolean
+    instances: Array<{ monitoring_instance_id: string; session_id?: string; ever_connected: boolean; session_started_at?: string; last_trusted_online_at: string | null }>
+  }
   vps: VPSAssetRecord
   subscriptions: SubscriptionImpact[]
   monitoring_instance_links: VPSMonitoringInstanceSummary[]
@@ -1885,6 +1896,9 @@ export type ArchiveReview = {
 }
 
 export type ApplyArchiveInput = {
+  preview_digest: string
+  idempotency_key: string
+  never_connected_confirmation: boolean
   confirmation_name: string
   reason: string
 }
@@ -1922,7 +1936,7 @@ export type ApplyCancellationInput = {
   reason: string
   effective_date?: string | null
   subscription_ids: string[]
-  vps_lifecycle_status: Extract<VPSLifecycleStatus, 'to_cancel' | 'cancelled'>
+  vps_lifecycle_status: 'to_cancel' | 'cancelled'
   monitoring_instance_actions: MonitoringInstanceLifecycleActionInput[]
   target_actions: TargetLifecycleActionInput[]
   preview_digest: string
@@ -1974,6 +1988,14 @@ export type CreateVPSAssetInput = {
   virtualization: string
   lifecycle_status?: VPSLifecycleStatus
   usage_status?: VPSUsageStatus
+  usage_tags?: string[]
+  acquisition_source?: string
+  validity_mode?: VPSValidityMode
+  expires_at?: string | null
+  auto_renew_check?: VPSAutoRenewCheck
+  auto_renew_checked_at?: string | null
+  renewal_reason?: string
+  renewal_review_at?: string | null
   renewal_decision?: VPSRenewalDecision
   importance: string
   labels: string[]
@@ -1998,9 +2020,16 @@ export type UpdateVPSAssetInput = Partial<{
   os_name: string
   virtualization: string
   lifecycle_status: VPSLifecycleStatus
-  usage_status: VPSUsageStatus
+  usage_status?: VPSUsageStatus
+  usage_tags?: string[]
+  acquisition_source?: string
+  validity_mode?: VPSValidityMode
+  expires_at?: string | null
+  auto_renew_check?: VPSAutoRenewCheck
+  auto_renew_checked_at?: string | null
+  renewal_reason?: string
+  renewal_review_at?: string | null
   renewal_decision: VPSRenewalDecision
-  renewal_reason: string
   importance: string
   labels: string[]
   note: string
@@ -2009,12 +2038,17 @@ export type UpdateVPSAssetInput = Partial<{
 export type VPSAssetListFilter = {
   provider_id?: string | null
   lifecycle_status?: VPSLifecycleStatus | '' | null
-  usage_status?: VPSUsageStatus | '' | null
+  usage_tag?: string | null
   renewal_decision?: VPSRenewalDecision | '' | null
   asset_scope?: AssetScope | null
 }
 
 export type VPSMonitoringInstanceSummary = {
+  vps_id?: string
+  vps_lifecycle_status?: VPSLifecycleStatus
+  is_current?: boolean
+  ever_connected?: boolean
+  last_trusted_online_at?: string | null
   monitoring_instance_id: string
   display_name: string
   group: string
@@ -2249,7 +2283,9 @@ export type VPSSummary = {
   region: string
   city: string
   lifecycle_status: VPSLifecycleStatus | string
-  usage_status: VPSUsageStatus | string
+  usage_status?: VPSUsageStatus | string
+  usage_tags?: string[]
+  acquisition_source?: string
   renewal_decision: VPSRenewalDecision | string
   importance: string
   labels: string[]
@@ -2390,6 +2426,7 @@ export type MissingSubscriptionAsset = {
 }
 
 export type SubscriptionCostRow = {
+	 auto_renew_check?: VPSAutoRenewCheck
   subscription_id: string
   vps_id: string
   vps_display_name: string
@@ -2488,6 +2525,11 @@ export type BulkUpsertSubscriptionMonthlyBudgetResult = {
 }
 
 export type SubscriptionOverview = {
+	archived_potential_costs?: SubscriptionCostRow[]
+	archived_missing_subscription_assets?: MissingSubscriptionAsset[]
+	archived_unknown_amount_count?: number
+	archived_potential_monthly_cost?: number | null
+	current_unknown_amount_count?: number
   snapshot_generated_at: string
   base_currency: string
   total_monthly_cost: number
@@ -3456,7 +3498,15 @@ export type VPSOverviewIdentity = {
   ipv4: string
   ipv6: string
   lifecycle_status: string
-  usage_status: string
+  usage_status?: string
+  usage_tags?: string[]
+  acquisition_source?: string
+  validity_mode?: string
+  expires_at?: string | null
+  auto_renew_check?: string
+  auto_renew_checked_at?: string | null
+  renewal_reason?: string
+  renewal_review_at?: string | null
   renewal_decision: string
   importance: string
   labels: string[]
@@ -3712,4 +3762,33 @@ export type SaveComparisonRevisionInput = {
   lock_version: number
   authorization_epoch: number
   comparison_intent: string
+}
+
+export type VPSAssociationRecord = {
+  association_id: string
+  object_id: string
+  vps_id: string
+  target_id?: string | null
+  service_id?: string | null
+  address: string
+  port?: number | null
+  started_at: string
+  ended_at?: string | null
+  end_reason: string
+  ended_by: string
+  snapshot: Record<string, unknown>
+}
+export type VPSFollowupRecord = {
+  followup_id: string
+  vps_id: string
+  kind: string
+  dedupe_key: string
+  status: 'pending' | 'resolved' | 'ignored'
+  summary: string
+  details: Record<string, unknown>
+  resolution_reason: string
+  resolved_by: string
+  created_at: string
+  updated_at: string
+  resolved_at?: string | null
 }

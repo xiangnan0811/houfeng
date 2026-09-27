@@ -9,8 +9,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/assetdomains"
 	"houfeng/internal/center/assetlifecycle"
 	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/assetservices"
 	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/targets"
 )
@@ -29,8 +31,8 @@ func TestVPSStateRepairTargetLifecycleConfirmationAndEvents(t *testing.T) {
 		{id: "vps_target_parent_b", name: "Target Parent B"},
 	} {
 		if _, err := pool.Exec(ctx, `
-			insert into vps_assets (vps_id, display_name, lifecycle_status, usage_status)
-			values ($1, $2, 'active', 'idle')`, vps.id, vps.name); err != nil {
+			insert into vps_assets (vps_id, display_name, lifecycle_status)
+			values ($1, $2, 'active')`, vps.id, vps.name); err != nil {
 			t.Fatalf("insert VPS %q: %v", vps.id, err)
 		}
 	}
@@ -48,14 +50,10 @@ func TestVPSStateRepairTargetLifecycleConfirmationAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTarget: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		insert into asset_services (service_id, vps_id, target_id, name, service_type, status)
-		values ('svc_target_parent_a', 'vps_target_parent_a', $1, 'web service', 'web', 'active')`, target.TargetID); err != nil {
+	if _, err := NewPostgresAssetServiceRepository(pool).CreateAssetService(ctx, assetservices.CreateInput{VPSID: "vps_target_parent_a", TargetID: &target.TargetID, Name: "web service", ServiceType: assetservices.ServiceTypeWeb, Status: assetservices.ServiceStatusActive}); err != nil {
 		t.Fatalf("insert service dependency: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		insert into asset_domains (domain_id, vps_id, target_id, domain_name, status)
-		values ('dom_target_parent_b', 'vps_target_parent_b', $1, 'target-parent-b.example.test', 'active')`, target.TargetID); err != nil {
+	if _, err := NewPostgresAssetDomainRepository(pool).CreateAssetDomain(ctx, assetdomains.CreateInput{VPSID: "vps_target_parent_b", TargetID: &target.TargetID, DomainName: "target-parent-b.example.test", Status: assetdomains.DomainStatusActive}); err != nil {
 		t.Fatalf("insert domain dependency: %v", err)
 	}
 
@@ -145,7 +143,7 @@ func TestVPSStateRepairTargetLifecycleConfirmationAndEvents(t *testing.T) {
 		t.Fatalf("Target archive completed before dependency facts changed: %v", actionErr)
 	default:
 	}
-	if _, err := waiter.Exec(ctx, `update vps_assets set lifecycle_status = 'cancelled', renewal_decision = 'cancel', usage_status = 'idle' where vps_id = 'vps_target_parent_b'`); err != nil {
+	if _, err := waiter.Exec(ctx, `update vps_assets set lifecycle_status = 'archived' where vps_id = 'vps_target_parent_b'`); err != nil {
 		t.Fatalf("change dependency parent lifecycle: %v", err)
 	}
 	if err := waiter.Commit(ctx); err != nil {
@@ -164,21 +162,19 @@ func TestVPSStateRepairTargetLifecycleConfirmationAndEvents(t *testing.T) {
 	if freshReview.PreviewDigest == pausedReview.PreviewDigest {
 		t.Fatal("dependency parent lifecycle change did not invalidate the lifecycle review digest")
 	}
-	if _, err := repo.ArchiveTarget(ctx, target.TargetID, assetlinks.GlobalActionConfirmation{PreviewDigest: freshReview.PreviewDigest}); !errors.Is(err, assetlifecycle.ErrSharedImpactConfirmationRequired) {
-		t.Fatalf("Target archive without explicit shared confirmation = %v, want shared confirmation required", err)
-	}
+	// Only A is current after B is archived. Historical B still affects the
+	// digest, but no longer makes this a shared current action.
 	archived, err := repo.ArchiveTarget(ctx, target.TargetID, assetlinks.GlobalActionConfirmation{
-		PreviewDigest:       freshReview.PreviewDigest,
-		ConfirmSharedImpact: true,
+		PreviewDigest: freshReview.PreviewDigest,
 	})
 	if err != nil {
 		t.Fatalf("Target archive with current shared confirmation: %v", err)
 	}
-	if archived.RunStatus != targets.RunStatusArchived {
-		t.Fatalf("archived run status = %q, want %q", archived.RunStatus, targets.RunStatusArchived)
+	if archived.LifecycleStatus != targets.LifecycleRetired || archived.RunStatus != targets.RunStatusPaused {
+		t.Fatalf("retired target = %+v, want retired/paused", archived)
 	}
-	if _, err := repo.ArchiveTarget(ctx, target.TargetID); err != nil {
-		t.Fatalf("same-state archive: %v", err)
+	if _, err := repo.ArchiveTarget(ctx, target.TargetID); !errors.Is(err, ErrInvalidTargetRuntimeTransition) {
+		t.Fatalf("repeat retirement = %v, want invalid transition", err)
 	}
 	if _, err := repo.PauseTargetRun(ctx, target.TargetID); !errors.Is(err, ErrInvalidTargetRuntimeTransition) {
 		t.Fatalf("pause archived target = %v, want invalid transition", err)
@@ -196,7 +192,7 @@ func TestVPSStateRepairTargetLifecycleConfirmationAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestoreArchivedTargetToPaused: %v", err)
 	}
-	if restored.RunStatus != targets.RunStatusPaused {
+	if restored.LifecycleStatus != targets.LifecycleActive || restored.RunStatus != targets.RunStatusPaused {
 		t.Fatalf("restored run status = %q, want %q", restored.RunStatus, targets.RunStatusPaused)
 	}
 	assertTargetEvents(t, ctx, pool, target.TargetID, map[string]bool{
@@ -320,15 +316,15 @@ func assertTargetEvents(t *testing.T, ctx context.Context, pool *pgxpool.Pool, t
 		}
 	}
 }
-func TestVPSStateRepairTargetUnknownDependencyRequiresConfirmation(t *testing.T) {
+func TestVPSStateRepairTargetUnknownObjectStillHasCurrentAssociation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	pool := openTemporaryAssetLifecyclePostgresSchema(t, ctx)
 	repo := NewPostgresTargetRepository(pool)
 
 	if _, err := pool.Exec(ctx, `
-		insert into vps_assets (vps_id, display_name, lifecycle_status, usage_status)
-		values ('vps_target_unknown', 'Unknown dependency VPS', 'active', 'idle')`); err != nil {
+		insert into vps_assets (vps_id, display_name, lifecycle_status)
+		values ('vps_target_unknown', 'Unknown dependency VPS', 'active')`); err != nil {
 		t.Fatalf("insert VPS: %v", err)
 	}
 	target, err := repo.CreateTarget(ctx, targets.CreateTargetInput{
@@ -342,9 +338,7 @@ func TestVPSStateRepairTargetUnknownDependencyRequiresConfirmation(t *testing.T)
 	if err != nil {
 		t.Fatalf("CreateTarget: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `
-		insert into asset_services (service_id, vps_id, target_id, name, service_type, status)
-		values ('svc_target_unknown', 'vps_target_unknown', $1, 'unknown service', 'web', 'unknown')`, target.TargetID); err != nil {
+	if _, err := NewPostgresAssetServiceRepository(pool).CreateAssetService(ctx, assetservices.CreateInput{VPSID: "vps_target_unknown", TargetID: &target.TargetID, Name: "unknown service", ServiceType: assetservices.ServiceTypeWeb, Status: assetservices.ServiceStatusUnknown}); err != nil {
 		t.Fatalf("insert unknown service dependency: %v", err)
 	}
 
@@ -352,20 +346,16 @@ func TestVPSStateRepairTargetUnknownDependencyRequiresConfirmation(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetTargetLifecycleReview: %v", err)
 	}
-	if len(review.DependencyImpacts) != 1 || review.DependencyImpacts[0].Classification != assetlinks.DependencyNeedsConfirmation {
-		t.Fatalf("dependency impacts = %#v, want one needs-confirmation dependency", review.DependencyImpacts)
-	}
-	if _, err := repo.PauseTargetRun(ctx, target.TargetID); !errors.Is(err, assetlifecycle.ErrSharedImpactConfirmationRequired) {
-		t.Fatalf("PauseTargetRun without unknown-dependency confirmation = %v, want confirmation required", err)
+	if len(review.DependencyImpacts) != 1 || review.DependencyImpacts[0].Classification != assetlinks.DependencyCurrent || review.DependencyImpacts[0].RelationStatus != "current" {
+		t.Fatalf("dependency impacts = %#v, want one current association independent of object status", review.DependencyImpacts)
 	}
 	assertTargetRunStatus(t, ctx, pool, target.TargetID, targets.RunStatusEnabled)
 	assertTargetEventCount(t, ctx, pool, target.TargetID, 0)
 
 	if _, err := repo.PauseTargetRun(ctx, target.TargetID, assetlinks.GlobalActionConfirmation{
-		PreviewDigest:       review.PreviewDigest,
-		ConfirmSharedImpact: true,
+		PreviewDigest: review.PreviewDigest,
 	}); err != nil {
-		t.Fatalf("PauseTargetRun with explicit unknown-dependency confirmation: %v", err)
+		t.Fatalf("PauseTargetRun with one current parent: %v", err)
 	}
 	assertTargetRunStatus(t, ctx, pool, target.TargetID, targets.RunStatusPaused)
 	assertTargetEventCount(t, ctx, pool, target.TargetID, 1)

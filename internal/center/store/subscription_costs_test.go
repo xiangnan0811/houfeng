@@ -78,7 +78,7 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsMarksInsufficient
 	}
 	for _, snippet := range []string{
 		"price_histories",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"v.lifecycle_status = 'active'",
 		"to_monthly_price",
 		"from_monthly_price",
 		"to_currency",
@@ -117,7 +117,7 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsSkipsQueryForInva
 	}
 }
 
-func TestPostgresSubscriptionCostRepositoryListCostRowsExcludesArchivedAndCancelledVPS(t *testing.T) {
+func TestPostgresSubscriptionCostRepositoryListCostRowsIncludesArchivedPotentialCharges(t *testing.T) {
 	t.Parallel()
 
 	var seenSQL string
@@ -136,7 +136,7 @@ func TestPostgresSubscriptionCostRepositoryListCostRowsExcludesArchivedAndCancel
 	}
 	for _, snippet := range []string{
 		"where s.status = 'active'",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"v.auto_renew_check",
 	} {
 		if !strings.Contains(seenSQL, snippet) {
 			t.Fatalf("ListCostRows SQL missing %q in %s", snippet, seenSQL)
@@ -160,7 +160,7 @@ func TestPostgresSubscriptionCostRepositoryListActiveCurrenciesExcludesArchivedA
 	}
 	for _, snippet := range []string{
 		"join vps_assets v on v.vps_id = subscriptions.vps_id",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"v.lifecycle_status = 'active'",
 	} {
 		if !strings.Contains(seenSQL, snippet) {
 			t.Fatalf("ListActiveCurrencies SQL missing %q in %s", snippet, seenSQL)

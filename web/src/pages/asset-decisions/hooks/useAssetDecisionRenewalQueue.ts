@@ -43,7 +43,6 @@ type SettledQueue = Readonly<{
   error: string | null
   subscriptions: SubscriptionRecord[]
   unreviewed: VPSAssetRecord[]
-  migrate: VPSAssetRecord[]
   cancel: VPSAssetRecord[]
 }>
 
@@ -101,6 +100,8 @@ export function useAssetDecisionRenewalQueue({
   const [draft, setDraft] = useState<AssetDecisionDraft>(INITIAL_DECISION_DRAFT)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const submissionInFlight = useRef(false)
+  const selectionRevision = useRef(0)
   const areRenewalsCurrent = settledRenewals?.renewalWindow === renewalWindow &&
     settledRenewals.revision === revision &&
     settledRenewals.retryRevision === renewalsRetryRevision
@@ -143,10 +144,9 @@ export function useAssetDecisionRenewalQueue({
     Promise.all([
       listSubscriptions({ sort: 'renew_at', order: 'asc' }),
       listVPSAssets({ renewal_decision: 'unreviewed' }),
-      listVPSAssets({ renewal_decision: 'migrate' }),
       listVPSAssets({ renewal_decision: 'cancel' }),
     ])
-      .then(([subscriptions, unreviewed, migrate, cancel]) => {
+      .then(([subscriptions, unreviewed, cancel]) => {
         if (cancelled) return
         setSettledQueue({
           revision,
@@ -154,7 +154,6 @@ export function useAssetDecisionRenewalQueue({
           error: null,
           subscriptions,
           unreviewed,
-          migrate,
           cancel,
         })
       })
@@ -166,7 +165,6 @@ export function useAssetDecisionRenewalQueue({
           error: describeError(error, '加载 VPS 单台队列失败'),
           subscriptions: [],
           unreviewed: [],
-          migrate: [],
           cancel: [],
         })
       })
@@ -176,6 +174,7 @@ export function useAssetDecisionRenewalQueue({
   const previousContextKeyRef = useRef(contextKey)
   useEffect(() => {
     if (previousContextKeyRef.current === contextKey) return
+    selectionRevision.current += 1
     previousContextKeyRef.current = contextKey
     let cancelled = false
     queueMicrotask(() => {
@@ -196,7 +195,6 @@ export function useAssetDecisionRenewalQueue({
     queueError: isQueueCurrent ? settledQueue.error : null,
     subscriptions: settledQueue?.subscriptions ?? [],
     unreviewed: settledQueue?.unreviewed ?? [],
-    migrate: settledQueue?.migrate ?? [],
     cancel: settledQueue?.cancel ?? [],
   }), [areRenewalsCurrent, isQueueCurrent, settledQueue, settledRenewals])
   const subscriptionsByVPS = useMemo(
@@ -205,11 +203,11 @@ export function useAssetDecisionRenewalQueue({
   )
   const decisionQueue = useMemo(
     () => buildDecisionQueue(
-      [...queue.unreviewed, ...queue.migrate, ...queue.cancel],
+      [...queue.unreviewed, ...queue.cancel],
       subscriptionsByVPS,
       renewalWindow,
     ),
-    [queue.cancel, queue.migrate, queue.unreviewed, renewalWindow, subscriptionsByVPS],
+    [queue.cancel, queue.unreviewed, renewalWindow, subscriptionsByVPS],
   )
   const visibleDecisionQueue = useMemo(
     () => filterDecisionQueue(decisionQueue, queueView),
@@ -225,13 +223,15 @@ export function useAssetDecisionRenewalQueue({
   }, [])
 
   const selectVPS = useCallback((vps: VPSAssetRecord) => {
+    selectionRevision.current += 1
     setSelectedVPS(vps)
     setSelectedContextKey(contextKey)
-    setDraft({ renewalDecision: vps.renewal_decision, reason: '' })
+    setDraft({ renewalDecision: vps.renewal_decision, reason: vps.renewal_reason ?? '' })
     setError(null)
   }, [contextKey])
 
   const closeVPS = useCallback(() => {
+    selectionRevision.current += 1
     setSelectedVPS(null)
     setSelectedContextKey(null)
     setDraft(INITIAL_DECISION_DRAFT)
@@ -243,52 +243,41 @@ export function useAssetDecisionRenewalQueue({
   }, [])
 
   const submitRenewal = useCallback(async (): Promise<VPSAssetUpdateResult | null> => {
-    if (!selectionIsCurrent || !selectedVPS) return null
+    if (!selectionIsCurrent || !selectedVPS || submissionInFlight.current) return null
     setError(null)
-    if (draft.renewalDecision === selectedVPS.renewal_decision) {
+    if (draft.renewalDecision === selectedVPS.renewal_decision && draft.reason.trim() === (selectedVPS.renewal_reason ?? '').trim()) {
       setError('请选择一个不同的续费决策')
       return null
     }
 
     const reason = draft.reason.trim()
+    const ownerRevision = selectionRevision.current
+    submissionInFlight.current = true
     setSubmitting(true)
     try {
       const updated = await updateVPSAsset(selectedVPS.vps_id, {
         renewal_decision: draft.renewalDecision,
-        ...(reason ? { renewal_reason: reason } : {}),
+        renewal_reason: reason,
       }, { expectedUpdatedAt: selectedVPS.updated_at })
       setSettledQueue((current) => current ? {
         ...current,
-        ...updateDecisionQueues(queue, updated),
-        subscriptions: current.subscriptions.map((subscription) => (
-          updated.renewal_subscription_linkage?.updated &&
-          subscription.subscription_id === updated.renewal_subscription_linkage.subscription_id
-            ? { ...subscription, auto_renew: false, auto_renew_cancelled: true }
-            : subscription
-        )),
+        ...updateDecisionQueues({ ...queue, ...current }, updated),
       } : current)
-      setSettledRenewals((current) => current ? {
-        ...current,
-        renewals: current.renewals.map((subscription) => (
-          updated.renewal_subscription_linkage?.updated &&
-          subscription.subscription_id === updated.renewal_subscription_linkage.subscription_id
-            ? { ...subscription, auto_renew: false, auto_renew_cancelled: true }
-            : subscription
-        )),
-      } : current)
-      setSelectedVPS(null)
-      setSelectedContextKey(null)
-      setDraft(INITIAL_DECISION_DRAFT)
+      if (ownerRevision === selectionRevision.current) {
+        setSelectedVPS(null)
+        setSelectedContextKey(null)
+        setDraft(INITIAL_DECISION_DRAFT)
+      }
       const baseNotice = `续费决策已保存：${updated.display_name} -> ${renewalQueueLabel(updated.renewal_decision)}`
-      const linkageMessage = updated.renewal_subscription_linkage?.message
-      onNotice(linkageMessage ? `${baseNotice}。${linkageMessage}` : baseNotice)
+      onNotice(updated.renewal_decision === 'cancel' && !['disabled', 'never_enabled', 'unsupported'].includes(updated.auto_renew_check ?? 'unchecked') ? `${baseNotice}。请核对服务商自动续费。` : baseNotice)
       onInvalidate({ type: 'renewal-decision-saved', vpsID: updated.vps_id })
       return updated
     } catch (submitError) {
-      setError(describeError(submitError, '更新续费决策失败'))
+      if (ownerRevision === selectionRevision.current) setError(describeError(submitError, '更新续费决策失败'))
       return null
     } finally {
       setSubmitting(false)
+      submissionInFlight.current = false
     }
   }, [draft.reason, draft.renewalDecision, onInvalidate, onNotice, queue, selectedVPS, selectionIsCurrent])
 

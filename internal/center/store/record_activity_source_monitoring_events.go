@@ -239,6 +239,7 @@ var monitoringEventTitles = map[incidents.EventType]string{
 	incidents.EventIncidentStarted:                                "故障开始",
 	incidents.EventIncidentEscalated:                              "故障升级",
 	incidents.EventIncidentRecovered:                              "故障恢复",
+	incidents.EventIncidentClosedByManagement:                     "异常已按管理动作关闭",
 	incidents.EventMonitoringInstanceBindingRebindConfirmed:       "重新绑定已确认",
 	incidents.EventMonitoringInstanceBindingPendingRejected:       "待确认绑定已拒绝",
 	incidents.EventMonitoringInstanceBindingReset:                 "绑定已重置",

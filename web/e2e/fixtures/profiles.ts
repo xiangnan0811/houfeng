@@ -171,16 +171,12 @@ const SETTINGS = {
   retention_policy: {
     raw_layer_days: 30,
     aggregate_layer_days: 30,
-    event_layer_days: 90,
-    notification_layer_days: 180,
   },
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86_400,
     stale_after_seconds: 604_800,
     timeout_seconds: 15,
-    raw_retention_days: 90,
-    history_retention_days: 365,
     services: ['netflix', 'chatgpt'],
   },
   subscription_cost_settings: {
@@ -524,7 +520,6 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
         },
         [apiRouteKey('GET', '/api/vps')]: { status: 200, body: [vps] },
         [apiRouteKey('GET', '/api/vps?renewal_decision=unreviewed')]: { status: 200, body: [] },
-        [apiRouteKey('GET', '/api/vps?renewal_decision=migrate')]: { status: 200, body: [] },
         [apiRouteKey('GET', '/api/vps?renewal_decision=cancel')]: { status: 200, body: [] },
       })
     case '/monitoring':
@@ -543,6 +538,7 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
     case '/targets':
       return authenticatedProfile({
         [apiRouteKey('GET', '/api/targets')]: { status: 200, body: [] },
+        [apiRouteKey('GET', '/api/targets?scope=all')]: { status: 200, body: [] },
         [apiRouteKey('GET', '/api/targets/sparklines?metrics=latency&window=24h&downsample=24')]: {
           status: 200,
           body: TARGET_SPARKLINES,
@@ -631,9 +627,9 @@ const VPS_OVERVIEW_MONITORING = {
   region: 'Kanto',
   city: 'Tokyo',
   provider: 'Example Cloud',
-  lifecycle_status: 'active',
-  monitoring_status: 'active',
-  binding_status: 'bound',
+  lifecycle_status: '已接入',
+  monitoring_status: '启用',
+  binding_status: '已绑定',
   current_health_status: '正常',
   last_heartbeat_at: '2026-08-20T08:59:00Z',
   current_active_incident_count: 0,
@@ -691,7 +687,13 @@ export function vpsOverviewFixture(overrides: Partial<VPSOverview> = {}): VPSOve
       ipv4: '192.0.2.10',
       ipv6: '',
       lifecycle_status: 'active',
-      usage_status: 'in_use',
+      usage_tags: ['业务'],
+      validity_mode: 'unknown',
+      expires_at: null,
+      auto_renew_check: 'unchecked',
+      auto_renew_checked_at: null,
+      renewal_reason: '',
+      renewal_review_at: null,
       renewal_decision: 'keep',
       importance: 'high',
       labels: ['edge'],
@@ -865,7 +867,7 @@ export function monitoringInstanceDetailProfile(monitoringInstanceId = 'mi_001')
     region: 'ap-northeast-1',
     city: 'Tokyo',
     provider: 'Example Cloud',
-    lifecycle_status: '在用',
+    lifecycle_status: '已接入',
     monitoring_status: '启用',
     binding_status: '已绑定',
     labels: [] as string[],
@@ -918,6 +920,23 @@ export function monitoringInstanceDetailProfile(monitoringInstanceId = 'mi_001')
   }
   return authenticatedProfile({
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}`)]: { status: 200, body: record },
+    [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/management-review`)]: {
+      status: 200,
+      body: {
+        record,
+        active_vps_links: [],
+        counts: {
+          heartbeat_count: 1, host_sample_count: 0, probe_observation_count: 0,
+          host_sample_daily_aggregate_count: 0, ip_quality_report_count: 0,
+          active_incident_count: 0, state_change_event_count: 0, notification_record_count: 0,
+          asset_lifecycle_action_step_count: 0, command_action_audit_count: 0, active_vps_link_count: 1,
+        },
+        action_reviews: { retire: { allowed: true, blockers: [], warnings: [] } },
+        dependency_impacts: [],
+        preview_digest: `review-${monitoringInstanceId}`,
+        empty_mistake_candidate: false,
+      },
+    },
     [apiRouteKey('GET', `/api/monitoring-instances/${monitoringInstanceId}/runtime-facts?window=realtime`)]: {
       status: 200,
       body: runtimeFactsRealtime,
@@ -974,10 +993,20 @@ export function vpsOverviewProfile(options: {
       status: 200,
       body: options.detail ?? VPS_OVERVIEW_DETAIL,
     },
-    [apiRouteKey('GET', '/api/vps/vps_001/monitoring-instances')]: {
+    [apiRouteKey('GET', '/api/vps/vps_001/monitoring-instances?scope=current')]: {
       status: 200,
       body: [VPS_OVERVIEW_MONITORING],
     },
+    [apiRouteKey('GET', '/api/vps/vps_001/monitoring-instances?scope=all')]: {
+      status: 200,
+      body: [VPS_OVERVIEW_MONITORING],
+    },
+    [apiRouteKey('GET', '/api/vps/vps_001/service-associations')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/vps/vps_001/domain-associations')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/services')]: { status: 200, body: options.services ?? [VPS_OVERVIEW_SERVICE] },
+    [apiRouteKey('GET', '/api/services?vps_id=vps_001')]: { status: 200, body: options.services ?? [VPS_OVERVIEW_SERVICE] },
+    [apiRouteKey('GET', '/api/domains')]: { status: 200, body: options.domains ?? [VPS_OVERVIEW_DOMAIN] },
+    [apiRouteKey('GET', '/api/targets')]: { status: 200, body: [] },
     [apiRouteKey('GET', '/api/vps/vps_001/services')]: {
       status: servicesStatus,
       body: servicesStatus >= 400 ? { error: 'services unavailable' } : options.services ?? [VPS_OVERVIEW_SERVICE],

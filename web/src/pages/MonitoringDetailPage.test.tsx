@@ -72,17 +72,21 @@ function deferredResponse() {
 function monitoringInstanceRecord(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     monitoring_instance_id: 'mi_conflict',
+    vps_id: 'vps_001',
+    vps_lifecycle_status: 'active',
+    is_current: overrides.lifecycle_status !== '已退役',
+    ever_connected: true,
     display_name: 'Tokyo Edge',
     region: 'ap-northeast-1',
     city: 'Tokyo',
     provider: 'Vultr',
-    lifecycle_status: '在用',
+    lifecycle_status: '已接入',
     monitoring_status: '启用',
     binding_status: '指纹变更待确认',
     labels: ['core'],
     note: '',
     current_health_status: '关注',
-    last_heartbeat_at: '2026-04-27T09:00:00Z',
+    last_heartbeat_at: '2026-04-27T09:00:00Z', last_trusted_online_at: '2026-04-27T09:00:00Z',
     last_sync_at: '2026-04-27T09:05:00Z',
     current_active_incident_count: 1,
     current_primary_issue_summary: '检测到新的指纹接入请求',
@@ -173,7 +177,7 @@ function activeMonitoringRecord(monitoringInstanceId: string, displayName = 'Tok
     display_name: displayName,
     binding_status: '已绑定',
     monitoring_status: '启用',
-    lifecycle_status: '在用',
+    lifecycle_status: '已接入',
     current_health_status: '正常',
     current_active_incident_count: 0,
     current_primary_issue_summary: '',
@@ -378,13 +382,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-northeast-1',
           city: 'Tokyo',
           provider: 'Vultr',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '启用',
           binding_status: '已绑定',
           labels: ['核心', 'edge'],
           note: '',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -769,7 +773,7 @@ describe('MonitoringDetailPage', () => {
       }),
     )
     // The menu shows only the permitted lifecycle actions...
-    expect(screen.getByText('当前：在用')).toBeInTheDocument()
+    expect(screen.getByText('当前：已接入')).toBeInTheDocument()
     expect(screen.getByRole('menuitem', { name: '退役' })).toBeEnabled()
     expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: '永久清理' })).not.toBeInTheDocument()
@@ -867,184 +871,7 @@ describe('MonitoringDetailPage', () => {
     expect(screen.getAllByText('暂停').length).toBeGreaterThan(0)
   })
 
-  it('archives a retired monitoring instance with display-name confirmation', async () => {
-    const retiredRecord = monitoringInstanceRecord({
-      monitoring_instance_id: 'mi_archive',
-      display_name: 'Tokyo Archive Edge',
-      lifecycle_status: '已退役',
-      monitoring_status: '暂停',
-      binding_status: '已绑定',
-      current_health_status: '正常',
-      current_active_incident_count: 0,
-      current_primary_issue_summary: '',
-    })
-    const archivedRecord = {
-      ...retiredRecord,
-      archived_at: '2026-04-27T09:35:00Z',
-      archived_reason: '重复创建',
-      updated_at: '2026-04-27T09:35:00Z',
-    }
-    let currentReviewRecord: Record<string, unknown> = retiredRecord
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input)
-      if (path === '/api/monitoring-instances/mi_archive/archive' && init?.method === 'POST') {
-        currentReviewRecord = archivedRecord
-        return Promise.resolve(mockJSONResponse(archivedRecord))
-      }
-      if (path === '/api/monitoring-instances/mi_archive/management-review') {
-        return Promise.resolve(mockJSONResponse(managementReview(currentReviewRecord, {
-          actions: {
-            can_retire: false,
-            can_restore_lifecycle: !currentReviewRecord.archived_at,
-            can_archive: !currentReviewRecord.archived_at,
-            can_restore_archive: Boolean(currentReviewRecord.archived_at),
-            can_permanent_cleanup: true,
-          },
-          empty_mistake_candidate: true,
-        })))
-      }
-      if (path === '/api/monitoring-instances/mi_archive') {
-        return Promise.resolve(mockJSONResponse(retiredRecord))
-      }
-      if (path === '/api/monitoring-instances/mi_archive/runtime-facts?window=24h') {
-        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_archive')))
-      }
-      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_archive') {
-        return Promise.resolve(mockJSONResponse([]))
-      }
-      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_archive') {
-        return Promise.resolve(mockJSONResponse([]))
-      }
-      if (path === '/api/monitoring-instances/mi_archive/vps') {
-        return Promise.resolve(mockJSONResponse([]))
-      }
-      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
-    })
-    vi.stubGlobal('fetch', fetchMock)
 
-    render(
-      <MemoryRouter initialEntries={['/monitoring/mi_archive']}>
-        <Routes>
-          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Archive Edge' })).toBeInTheDocument())
-    openRuntimeMenu()
-    fireEvent.click(await screen.findByRole('menuitem', { name: '归档' }))
-
-    const dialog = await screen.findByRole('alertdialog', { name: '归档监控实例' })
-    expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
-    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '重复创建' } })
-    fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Archive Edge' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
-
-    await waitFor(() => {
-      const post = fetchMock.mock.calls.find(([url, init]) => (
-        String(url) === '/api/monitoring-instances/mi_archive/archive' && init?.method === 'POST'
-      ))
-      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
-        reason: '重复创建',
-        confirmation_name: 'Tokyo Archive Edge',
-      })
-    })
-    expect(screen.getByText('已归档')).toBeInTheDocument()
-  })
-
-  it('keeps archived details read-only and permanently cleans up from management', async () => {
-    const archivedRecord = monitoringInstanceRecord({
-      monitoring_instance_id: 'mi_cleanup',
-      display_name: 'Tokyo Cleanup Edge',
-      lifecycle_status: '已退役',
-      monitoring_status: '暂停',
-      binding_status: '已绑定',
-      current_health_status: '正常',
-      current_active_incident_count: 0,
-      current_primary_issue_summary: '',
-      archived_at: '2026-04-27T09:35:00Z',
-      archived_reason: '重复创建',
-    })
-    const cleanupResult = {
-      monitoring_instance_id: 'mi_cleanup',
-      counts: emptyManagementCounts(),
-      deleted_reference_count: 0,
-      deleted: true,
-    }
-    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
-      const path = String(input)
-      if (path === '/api/monitoring-instances/mi_cleanup/permanent-cleanup' && init?.method === 'POST') {
-        return Promise.resolve(mockJSONResponse(cleanupResult))
-      }
-      if (path === '/api/monitoring-instances/mi_cleanup/management-review') {
-        return Promise.resolve(mockJSONResponse(managementReview(archivedRecord, {
-          counts: emptyManagementCounts({ command_action_audit_count: 2 }),
-          actions: {
-            can_retire: false,
-            can_restore_lifecycle: false,
-            can_archive: false,
-            can_restore_archive: true,
-            can_permanent_cleanup: true,
-          },
-          empty_mistake_candidate: true,
-        })))
-      }
-      if (path === '/api/monitoring-instances/mi_cleanup') {
-        return Promise.resolve(mockJSONResponse(archivedRecord))
-      }
-      if (path === '/api/monitoring-instances/mi_cleanup/runtime-facts?window=24h') {
-        return Promise.resolve(mockJSONResponse(emptyRuntimeFacts('mi_cleanup')))
-      }
-      if (path === '/api/incidents?object_type=monitoring_instance&object_id=mi_cleanup') {
-        return Promise.resolve(mockJSONResponse([]))
-      }
-      if (path === '/api/events?object_type=monitoring_instance&object_id=mi_cleanup') {
-        return Promise.resolve(mockJSONResponse([]))
-      }
-      if (path === '/api/monitoring-instances/mi_cleanup/vps') {
-        return Promise.resolve(mockJSONResponse([]))
-      }
-      return Promise.resolve(mockJSONResponse({ error: `unexpected ${path}` }, 500))
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
-    render(
-      <MemoryRouter initialEntries={['/monitoring/mi_cleanup']}>
-        <Routes>
-          <Route path="/monitoring" element={<div>monitoring list</div>} />
-          <Route path="/monitoring/:monitoringInstanceId" element={<MonitoringDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Cleanup Edge' })).toBeInTheDocument())
-
-    openRuntimeMenu()
-    // Archived instances hide the whole runtime group and keep profile edits read-only.
-    expect(screen.queryByRole('menuitem', { name: '升级/重新接入 agent…' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '执行诊断命令…' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '恢复监控' })).not.toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: '编辑分组、标签与备注' })).toBeDisabled()
-    expect(screen.getByText('已归档实例资料只读')).toBeInTheDocument()
-
-    fireEvent.click(await screen.findByRole('menuitem', { name: '永久清理' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '永久清理监控实例' })
-    expect(within(dialog).getByText(/命令审计元数据将永久保留/)).toBeInTheDocument()
-    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '误创建空实例' } })
-    fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Cleanup Edge' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认永久清理' }))
-
-    await waitFor(() => {
-      const post = fetchMock.mock.calls.find(([url, init]) => (
-        String(url) === '/api/monitoring-instances/mi_cleanup/permanent-cleanup' && init?.method === 'POST'
-      ))
-      expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
-        reason: '误创建空实例',
-        confirmation_name: 'Tokyo Cleanup Edge',
-      })
-    })
-    await waitFor(() => expect(screen.getByText('monitoring list')).toBeInTheDocument())
-  })
 
   it('forces a second management review GET on frozen version conflict and shows updated permissions without writing', async () => {
     const initial = monitoringInstanceRecord({
@@ -1143,7 +970,7 @@ describe('MonitoringDetailPage', () => {
       })))
     })
 
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: '归档' })).toBeEnabled())
+    await waitFor(() => expect(screen.queryByText('正在加载…')).not.toBeInTheDocument())
     expect(screen.queryByRole('menuitem', { name: '退役' })).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method && init.method !== 'GET')).toEqual([])
     expect(reviewGets).toBe(3)
@@ -1159,13 +986,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-northeast-1',
           city: 'Tokyo',
           provider: 'Vultr',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '启用',
           binding_status: '已绑定',
           labels: ['核心', 'edge'],
           note: '',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -1378,7 +1205,7 @@ describe('MonitoringDetailPage', () => {
             region: 'ap-east-1',
             city: 'Hong Kong',
             provider: 'Vultr',
-            lifecycle_status: '在用',
+            lifecycle_status: '已接入',
             monitoring_status: '启用',
             binding_status: '已绑定',
             labels: [],
@@ -1900,6 +1727,10 @@ describe('MonitoringDetailPage', () => {
         .mockResolvedValueOnce(
           mockJSONResponse({
             monitoring_instance_id: 'mi_002',
+            vps_id: 'vps_002',
+            vps_lifecycle_status: 'active',
+            is_current: true,
+            ever_connected: false,
             display_name: 'Seoul Edge',
             region: 'ap-northeast-2',
             city: 'Seoul',
@@ -1961,13 +1792,13 @@ describe('MonitoringDetailPage', () => {
             region: 'ap-southeast-1',
             city: 'Singapore',
             provider: 'AWS',
-            lifecycle_status: '在用',
+            lifecycle_status: '已接入',
             monitoring_status: '启用',
             binding_status: '已绑定',
             labels: ['sea'],
             note: '',
             current_health_status: '关注',
-            last_heartbeat_at: '2026-04-24T09:00:00Z',
+            last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
             last_sync_at: '2026-04-24T09:05:00Z',
             current_active_incident_count: 1,
             current_primary_issue_summary: '磁盘使用率偏高',
@@ -2049,13 +1880,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-southeast-1',
           city: 'Singapore',
           provider: 'AWS',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '启用',
           binding_status: '已绑定',
           labels: ['sea'],
           note: '',
           current_health_status: '关注',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 1,
           current_primary_issue_summary: '磁盘使用率偏高',
@@ -2479,17 +2310,21 @@ describe('MonitoringDetailPage', () => {
     mi002Response.resolve(
       mockJSONResponse({
         monitoring_instance_id: 'mi_002',
+        vps_id: 'vps_002',
+        vps_lifecycle_status: 'active',
+        is_current: true,
+        ever_connected: true,
         display_name: 'Seoul Edge',
         region: 'ap-northeast-2',
         city: 'Seoul',
         provider: 'Hetzner',
-        lifecycle_status: '在用',
+        lifecycle_status: '已接入',
         monitoring_status: '启用',
         binding_status: '已绑定',
         labels: ['kr'],
         note: '',
         current_health_status: '正常',
-        last_heartbeat_at: '2026-04-24T10:00:00Z',
+        last_heartbeat_at: '2026-04-24T10:00:00Z', last_trusted_online_at: '2026-04-24T10:00:00Z',
         last_sync_at: '2026-04-24T10:05:00Z',
         current_active_incident_count: 0,
         current_primary_issue_summary: '',
@@ -2547,13 +2382,13 @@ describe('MonitoringDetailPage', () => {
         region: 'ap-northeast-1',
         city: 'Tokyo',
         provider: 'Vultr',
-        lifecycle_status: '在用',
+        lifecycle_status: '已接入',
         monitoring_status: '启用',
         binding_status: '已绑定',
         labels: ['jp'],
         note: '',
         current_health_status: '告警',
-        last_heartbeat_at: '2026-04-24T09:00:00Z',
+        last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
         last_sync_at: '2026-04-24T09:05:00Z',
         current_active_incident_count: 1,
         current_primary_issue_summary: '旧监控实例异常',
@@ -2641,13 +2476,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-northeast-1',
           city: 'Tokyo',
           provider: 'Vultr',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '维护中',
           binding_status: '已绑定',
           labels: ['core'],
           note: '',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -2672,7 +2507,7 @@ describe('MonitoringDetailPage', () => {
               monitoring_status: '维护中',
               binding_status: '已绑定',
               current_health_status: '正常',
-              last_heartbeat_at: '2026-04-24T09:00:00Z',
+              last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
               last_sync_at: '2026-04-24T09:05:00Z',
               current_active_incident_count: 0,
               current_primary_issue_summary: '',
@@ -2688,13 +2523,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-northeast-1',
           city: 'Tokyo',
           provider: 'Vultr',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '启用',
           binding_status: '已绑定',
           labels: ['core'],
           note: '',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -2741,13 +2576,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-northeast-1',
           city: 'Tokyo',
           provider: 'Vultr',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '启用',
           binding_status: '已绑定',
           labels: ['core'],
           note: '',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -2772,7 +2607,7 @@ describe('MonitoringDetailPage', () => {
               monitoring_status: '启用',
               binding_status: '已绑定',
               current_health_status: '正常',
-              last_heartbeat_at: '2026-04-24T09:00:00Z',
+              last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
               last_sync_at: '2026-04-24T09:05:00Z',
               current_active_incident_count: 0,
               current_primary_issue_summary: '',
@@ -2790,7 +2625,7 @@ describe('MonitoringDetailPage', () => {
               monitoring_status: '启用',
               binding_status: '已绑定',
               current_health_status: '正常',
-              last_heartbeat_at: '2026-04-24T09:00:00Z',
+              last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
               last_sync_at: '2026-04-24T09:05:00Z',
               current_active_incident_count: 0,
               current_primary_issue_summary: '',
@@ -2808,7 +2643,7 @@ describe('MonitoringDetailPage', () => {
               monitoring_status: '启用',
               binding_status: '已绑定',
               current_health_status: '正常',
-              last_heartbeat_at: '2026-04-24T09:00:00Z',
+              last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
               last_sync_at: '2026-04-24T09:05:00Z',
               current_active_incident_count: 0,
               current_primary_issue_summary: '',
@@ -2824,13 +2659,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-northeast-1',
           city: 'Tokyo',
           provider: 'Vultr',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '暂停',
           binding_status: '已绑定',
           labels: ['core'],
           note: '',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -2847,7 +2682,7 @@ describe('MonitoringDetailPage', () => {
           monitoring_status: '启用',
           binding_status: '已绑定',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -2861,13 +2696,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-northeast-1',
           city: 'Tokyo',
           provider: 'Vultr',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '暂停',
           binding_status: '已绑定',
           labels: ['core'],
           note: '',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-24T09:00:00Z',
+          last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
           last_sync_at: '2026-04-24T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -3308,7 +3143,7 @@ describe('MonitoringDetailPage', () => {
     const targetMenuTrigger = screen.getByRole('button', { name: '管理' })
     if (targetMenuTrigger.getAttribute('aria-expanded') === 'true') fireEvent.click(targetMenuTrigger)
     fireEvent.click(targetMenuTrigger)
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText('正在加载…')).not.toBeInTheDocument())
 
     await act(async () => {
       lateSourceReview.resolve(mockJSONResponse(managementReview(sourceRecord, {
@@ -3317,7 +3152,7 @@ describe('MonitoringDetailPage', () => {
     })
 
     expect(screen.getByRole('heading', { name: 'Refresh Target' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '退役' })).not.toBeInTheDocument()
     expect(screen.queryByText('影响范围已变化，但审查刷新失败。请关闭后重新打开管理菜单。')).not.toBeInTheDocument()
   })
 
@@ -3381,89 +3216,6 @@ describe('MonitoringDetailPage', () => {
     ))).toEqual([])
   })
 
-  it('reloads the management review after a stale conflict, preserves the draft, and resubmits the fresh digest', async () => {
-    const id = 'mi_stale_archive'
-    const record = activeMonitoringRecord(id, 'Tokyo Stale Edge')
-    const archived = { ...record, archived_at: '2026-04-27T10:00:00Z', updated_at: record.updated_at }
-    let reviewGets = 0
-    const posts: Array<Record<string, unknown>> = []
-    const freshReview = deferredResponse()
-    const fetchMock = detailFetch(id, record, (path, init) => {
-      if (path === `/api/monitoring-instances/${id}/management-review`) {
-        reviewGets += 1
-        if (!posts.length) {
-          return Promise.resolve(mockJSONResponse(managementReview(record, {
-            actions: { can_retire: false, can_archive: true },
-            dependency_impacts: sharedMonitoringImpacts(id),
-            preview_digest: 'digest-old',
-            warnings: ['旧审查'],
-          })))
-        }
-        return freshReview.promise
-      }
-      if (path === `/api/monitoring-instances/${id}/archive` && init?.method === 'POST') {
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>
-        posts.push(body)
-        if (posts.length === 1) {
-          return Promise.resolve(mockJSONResponse({
-            error: 'management review stale',
-            code: 'management_review_stale',
-          }, 409))
-        }
-        return Promise.resolve(mockJSONResponse(archived))
-      }
-      return null
-    })
-    vi.stubGlobal('fetch', fetchMock)
-    renderMonitoringDetail(id)
-
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Stale Edge' })).toBeInTheDocument())
-    openRuntimeMenu()
-    fireEvent.click(await screen.findByRole('menuitem', { name: '归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '归档监控实例' })
-    fireEvent.change(within(dialog).getByLabelText('原因'), { target: { value: '重复创建' } })
-    fireEvent.change(within(dialog).getByLabelText('输入实例名称确认'), { target: { value: 'Tokyo Stale Edge' } })
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: '确认此监控实例对多台 VPS 的当前或残留影响' }))
-    const getsAtSubmit = reviewGets
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
-
-    await waitFor(() => expect(reviewGets).toBe(getsAtSubmit + 1))
-    expect(posts).toEqual([{
-      reason: '重复创建',
-      confirmation_name: 'Tokyo Stale Edge',
-      preview_digest: 'digest-old',
-      confirm_shared_impact: true,
-    }])
-    expect(within(dialog).getByText('影响范围已变化，共享确认已清除，不会自动重新提交。')).toBeInTheDocument()
-    expect(within(dialog).getByLabelText('原因')).toHaveValue('重复创建')
-    expect(within(dialog).getByLabelText('输入实例名称确认')).toHaveValue('Tokyo Stale Edge')
-    expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
-
-    await act(async () => {
-      freshReview.resolve(mockJSONResponse(managementReview(record, {
-        actions: { can_retire: false, can_archive: true },
-        dependency_impacts: sharedMonitoringImpacts(id),
-        preview_digest: 'digest-fresh',
-        warnings: ['影响范围已更新'],
-      })))
-    })
-
-    expect(within(dialog).getByText('影响范围已更新')).toBeInTheDocument()
-    expect(within(dialog).queryByText('旧审查')).not.toBeInTheDocument()
-    const refreshedCheckbox = within(dialog).getByRole('checkbox', { name: '确认此监控实例对多台 VPS 的当前或残留影响' })
-    expect(refreshedCheckbox).not.toBeChecked()
-    expect(within(dialog).getByRole('button', { name: '确认归档' })).toBeDisabled()
-    fireEvent.click(refreshedCheckbox)
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
-
-    await waitFor(() => expect(posts).toHaveLength(2))
-    expect(posts[1]).toEqual({
-      reason: '重复创建',
-      confirmation_name: 'Tokyo Stale Edge',
-      preview_digest: 'digest-fresh',
-      confirm_shared_impact: true,
-    })
-  })
   it('keeps the retire draft after shared impact confirmation is required and resubmits the fresh digest', async () => {
     const id = 'mi_shared_required'
     const record = activeMonitoringRecord(id, 'Tokyo Shared Retire')
@@ -3659,7 +3411,7 @@ describe('MonitoringDetailPage', () => {
             region: 'ap-northeast-1',
             city: 'Tokyo',
             provider: 'Vultr',
-            lifecycle_status: '在用',
+            lifecycle_status: '已接入',
             monitoring_status: '维护中',
             binding_status: '已绑定',
             labels: [],
@@ -3699,11 +3451,15 @@ describe('MonitoringDetailPage', () => {
         .mockResolvedValueOnce(
           mockJSONResponse({
             monitoring_instance_id: 'mi_002',
+            vps_id: 'vps_002',
+            vps_lifecycle_status: 'active',
+            is_current: true,
+            ever_connected: true,
             display_name: 'Seoul Edge',
             region: 'ap-northeast-2',
             city: 'Seoul',
             provider: 'Hetzner',
-            lifecycle_status: '在用',
+            lifecycle_status: '已接入',
             monitoring_status: '启用',
             binding_status: '已绑定',
             labels: [],
@@ -3752,7 +3508,7 @@ describe('MonitoringDetailPage', () => {
         region: 'ap-northeast-1',
         city: 'Tokyo',
         provider: 'Vultr',
-        lifecycle_status: '在用',
+        lifecycle_status: '已接入',
         monitoring_status: '启用',
         binding_status: '已绑定',
         labels: [],
@@ -3794,11 +3550,15 @@ describe('MonitoringDetailPage', () => {
         .mockResolvedValueOnce(
           mockJSONResponse({
             monitoring_instance_id: 'mi_002',
+            vps_id: 'vps_002',
+            vps_lifecycle_status: 'active',
+            is_current: true,
+            ever_connected: true,
             display_name: 'Seoul Edge',
             region: 'ap-northeast-2',
             city: 'Seoul',
             provider: 'Hetzner',
-            lifecycle_status: '在用',
+            lifecycle_status: '已接入',
             monitoring_status: '启用',
             binding_status: '已绑定',
             labels: [],
@@ -4334,13 +4094,13 @@ describe('MonitoringDetailPage', () => {
           region: 'ap-east-1',
           city: 'Hong Kong',
           provider: 'Vultr',
-          lifecycle_status: '在用',
+          lifecycle_status: '已接入',
           monitoring_status: '启用',
           binding_status: '已绑定',
           labels: [],
           note: '',
           current_health_status: '正常',
-          last_heartbeat_at: '2026-04-27T09:00:00Z',
+          last_heartbeat_at: '2026-04-27T09:00:00Z', last_trusted_online_at: '2026-04-27T09:00:00Z',
           last_sync_at: '2026-04-27T09:05:00Z',
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
@@ -5068,11 +4828,12 @@ describe('MonitoringDetailPage', () => {
               monitoring_instance_id: 'mi_001',
               binding_status: '未绑定',
               lifecycle_status: '待接入',
-              monitoring_status: '未启用',
+              ever_connected: false,
+              monitoring_status: '启用',
               current_health_status: '正常',
               current_active_incident_count: 0,
               current_primary_issue_summary: '',
-              last_heartbeat_at: null,
+              last_heartbeat_at: null, last_trusted_online_at: null,
               last_sync_at: null,
             }),
           )
@@ -5173,13 +4934,13 @@ describe('MonitoringDetailPage', () => {
       region: 'ap-northeast-1',
       city: 'Tokyo',
       provider: 'Vultr',
-      lifecycle_status: '在用',
+      lifecycle_status: '已接入',
       monitoring_status: '启用',
       binding_status: '已绑定',
       labels: ['edge'],
       note: '',
       current_health_status: '正常',
-      last_heartbeat_at: '2026-04-24T09:00:00Z',
+      last_heartbeat_at: '2026-04-24T09:00:00Z', last_trusted_online_at: '2026-04-24T09:00:00Z',
       last_sync_at: '2026-04-24T09:05:00Z',
       current_active_incident_count: 0,
       current_primary_issue_summary: '',

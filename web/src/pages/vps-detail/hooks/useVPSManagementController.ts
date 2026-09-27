@@ -3,6 +3,8 @@ import { useCallback, useMemo, useState } from 'react'
 export type VPSManagementPanel =
   | null
   | 'menu'
+  | 'followups'
+  | 'maintenance'
   | 'facts'
   | 'decision'
   | 'subscription'

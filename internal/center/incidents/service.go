@@ -435,15 +435,18 @@ func isInactiveMonitoringInstance(record monitoringinstances.Record) bool {
 	if record.LifecycleStatus == monitoringinstances.LifecycleRetired {
 		return true
 	}
-	if record.ArchivedAt != nil {
+	if record.ArchivedAt != nil || record.VPSLifecycleStatus == "archived" {
 		return true
 	}
 	return false
 }
 
 func shouldRecoverIncidentsForTarget(record targets.TargetRecord) bool {
+	if record.LifecycleStatus == targets.LifecycleRetired {
+		return true
+	}
 	switch record.RunStatus {
-	case targets.RunStatusPaused, targets.RunStatusArchived:
+	case targets.RunStatusPaused, targets.RunStatusMaintenance:
 		return true
 	default:
 		return false
@@ -731,7 +734,8 @@ func buildAdministrativeRecoveryMutation(objectType ObjectType, objectID, expect
 			IncidentClass:       incident.IncidentClass,
 			ObjectType:          objectType,
 			ObjectID:            objectID,
-			EventType:           EventIncidentRecovered,
+			EventType:           EventIncidentClosedByManagement,
+			ClosureReason:       summary,
 			Severity:            incident.Severity,
 			Summary:             summary,
 			CreatedAt:           canonicalMonitoringEventTime(now),
@@ -740,7 +744,7 @@ func buildAdministrativeRecoveryMutation(objectType ObjectType, objectID, expect
 			ProducerVersion:     MonitoringEventProducerVersion,
 			RuleVersion:         MonitoringEventIncidentRuleVersion,
 			PriorState:          monitoringEventIncidentState(incident.Severity),
-			ResultingState:      "normal",
+			ResultingState:      "closed_by_management",
 			CorrectionOfEventID: "",
 		})
 	}
@@ -772,7 +776,7 @@ func (s *Service) warnProjectionConflictRetryExhausted(objectType ObjectType) {
 }
 
 func administrativeRecoverySummaryForMonitoringInstance(record monitoringinstances.Record) string {
-	if record.ArchivedAt != nil {
+	if record.ArchivedAt != nil || record.VPSLifecycleStatus == "archived" {
 		return "监控实例已归档，当前异常按行政下线收敛"
 	}
 	if record.LifecycleStatus == monitoringinstances.LifecycleRetired {
@@ -788,7 +792,7 @@ func administrativeRecoverySummaryForMonitoringInstance(record monitoringinstanc
 }
 
 func administrativeRecoverySummaryForTarget(record targets.TargetRecord) string {
-	if record.RunStatus == targets.RunStatusArchived {
+	if record.LifecycleStatus == targets.LifecycleRetired {
 		return "Target 已归档，当前异常按行政下线收敛"
 	}
 	if record.RunStatus == targets.RunStatusPaused {

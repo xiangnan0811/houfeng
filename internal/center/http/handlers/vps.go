@@ -14,10 +14,6 @@ import (
 	"houfeng/internal/center/vpsassets"
 )
 
-type renewalSubscriptionLinker interface {
-	PatchVPSAssetWithSubscriptionRenewalLinkage(context.Context, string, vpsassets.PatchInput) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error)
-}
-
 type vpsRunningTargetCounter interface {
 	CountRunningTargetsForVPS(context.Context, string) (int, error)
 }
@@ -54,7 +50,12 @@ func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
+			if r.URL.Query().Has("usage_status") {
+				writeError(w, http.StatusBadRequest, "usage_status was removed; use usage_tags")
+				return
+			}
 			filters := vpsassets.NormalizeListFilters(vpsassets.ListFilters{
+				UsageTag:        r.URL.Query().Get("usage_tag"),
 				ProviderID:      r.URL.Query().Get("provider_id"),
 				LifecycleStatus: vpsassets.LifecycleStatus(r.URL.Query().Get("lifecycle_status")),
 				UsageStatus:     vpsassets.UsageStatus(r.URL.Query().Get("usage_status")),
@@ -174,7 +175,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
-				record.ActiveMonitoringInstanceLinkCount = len(monitoringInstanceLinks)
+				record.ActiveMonitoringInstanceLinkCount = countCurrentVPSMonitoringInstances(monitoringInstanceLinks)
 				record.RunningMonitoringInstanceCount = countRunningVPSMonitoringInstances(record.LifecycleStatus, monitoringInstanceLinks)
 				runningTargetCount, countErr := countRunningVPSTargets(r.Context(), targetCounter, record.LifecycleStatus, record.VPSID)
 				if countErr != nil {
@@ -208,7 +209,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
-				if current.LifecycleStatus == vpsassets.LifecycleCancelled || current.LifecycleStatus == vpsassets.LifecycleArchived {
+				if current.LifecycleStatus == vpsassets.LifecycleCancelled || (current.LifecycleStatus == vpsassets.LifecycleArchived && !input.IsArchivedSupplement()) {
 					writeCodedError(w, http.StatusConflict, "vps asset readonly", "vps_asset_readonly")
 					return
 				}
@@ -220,20 +221,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				input.ExpectedUpdatedAt = expectedUpdatedAt
 			}
 
-			var linkage *vpsassets.RenewalSubscriptionLinkage
-			var record vpsassets.Record
-			var err error
-			if input.RenewalDecision.Set && vpsassets.IsCancellationRenewalDecision(input.RenewalDecision.Value) {
-				if linker, ok := repo.(renewalSubscriptionLinker); ok {
-					var linked vpsassets.RenewalSubscriptionLinkage
-					record, linked, err = linker.PatchVPSAssetWithSubscriptionRenewalLinkage(r.Context(), vpsID, input)
-					linkage = &linked
-				} else {
-					record, err = repo.PatchVPSAsset(r.Context(), vpsID, input)
-				}
-			} else {
-				record, err = repo.PatchVPSAsset(r.Context(), vpsID, input)
-			}
+			record, err := repo.PatchVPSAsset(r.Context(), vpsID, input)
 			if errors.Is(err, vpsassets.ErrVPSAssetNotFound) {
 				writeError(w, http.StatusNotFound, "vps asset not found")
 				return
@@ -264,10 +252,6 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 					return
 				}
 			}
-			if linkage != nil {
-				writeJSON(w, http.StatusOK, vpsPatchResponse{Record: record, RenewalSubscriptionLinkage: linkage})
-				return
-			}
 			writeJSON(w, http.StatusOK, record)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -289,7 +273,7 @@ func enrichVPSAssetRuntimeSummary(ctx context.Context, linkRepo assetlinks.Repos
 	if err != nil {
 		return err
 	}
-	record.ActiveMonitoringInstanceLinkCount = len(monitoringInstanceLinks)
+	record.ActiveMonitoringInstanceLinkCount = countCurrentVPSMonitoringInstances(monitoringInstanceLinks)
 	record.RunningMonitoringInstanceCount = countRunningVPSMonitoringInstances(record.LifecycleStatus, monitoringInstanceLinks)
 	record.RunningTargetCount, err = countRunningVPSTargets(ctx, targetCounter, record.LifecycleStatus, record.VPSID)
 	if err != nil {
@@ -314,20 +298,30 @@ func enrichVPSAssetIPQualitySummary(ctx context.Context, repo vpsIPQualitySummar
 }
 
 func countRunningVPSMonitoringInstances(lifecycle vpsassets.LifecycleStatus, monitoringInstanceLinks []assetlinks.MonitoringInstanceSummary) int {
-	if lifecycle != vpsassets.LifecycleToCancel && lifecycle != vpsassets.LifecycleCancelled {
+	if lifecycle != vpsassets.LifecycleActive {
 		return 0
 	}
 	running := 0
 	for _, link := range monitoringInstanceLinks {
-		if link.LifecycleStatus != monitoringinstances.LifecycleNoRenewal && link.LifecycleStatus != monitoringinstances.LifecycleRetired {
+		if link.IsCurrent && link.LifecycleStatus != monitoringinstances.LifecycleRetired && link.MonitoringStatus != monitoringinstances.MonitoringPaused {
 			running++
 		}
 	}
 	return running
 }
 
+func countCurrentVPSMonitoringInstances(links []assetlinks.MonitoringInstanceSummary) int {
+	count := 0
+	for _, link := range links {
+		if link.IsCurrent && link.LifecycleStatus != monitoringinstances.LifecycleRetired {
+			count++
+		}
+	}
+	return count
+}
+
 func countRunningVPSTargets(ctx context.Context, targetCounter vpsRunningTargetCounter, lifecycle vpsassets.LifecycleStatus, vpsID string) (int, error) {
-	if lifecycle != vpsassets.LifecycleToCancel && lifecycle != vpsassets.LifecycleCancelled {
+	if lifecycle != vpsassets.LifecycleActive {
 		return 0, nil
 	}
 	if targetCounter == nil {

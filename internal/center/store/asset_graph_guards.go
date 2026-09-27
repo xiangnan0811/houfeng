@@ -44,21 +44,21 @@ func ensureVPSAllowsAssetRelationshipCreate(vpsID string, lifecycle vpsassets.Li
 	return fmt.Errorf("%w: terminal %s vps %q cannot accept a %s relationship in %q state", vpsassets.ErrVPSAssetReadonly, lifecycle, vpsID, relationship, status)
 }
 
-func lockAssetTargetRunStatus(ctx context.Context, tx pgx.Tx, targetID string) (string, error) {
+func lockAssetTargetLifecycle(ctx context.Context, tx pgx.Tx, targetID string) (string, error) {
 	var status string
 	err := tx.QueryRow(ctx, `
-		select run_status
+		select lifecycle_status
 		from targets
 		where target_id = $1
 		for update`, targetID).Scan(&status)
 	return status, err
 }
 
-func ensureTargetAllowsAssetRelationship(targetID, targetStatus, relationshipStatus, relationship string) error {
-	if targetStatus != targets.RunStatusArchived || relationshipStatus != "active" {
+func ensureTargetAllowsAssetRelationship(targetID, targetLifecycle, relationship string) error {
+	if targetLifecycle != targets.LifecycleRetired {
 		return nil
 	}
-	return fmt.Errorf("%w: archived target %q cannot be referenced by an active %s", targets.ErrTargetMetadataConflict, targetID, relationship)
+	return fmt.Errorf("%w: retired target %q cannot be referenced by a current %s association", targets.ErrTargetMetadataConflict, targetID, relationship)
 }
 
 func lockAssetServiceOwner(ctx context.Context, tx pgx.Tx, serviceID string) (string, error) {

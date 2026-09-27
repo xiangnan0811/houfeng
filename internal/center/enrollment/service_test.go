@@ -66,6 +66,7 @@ func TestEnrollMonitoringInstanceBindsUnboundMonitoringInstanceAndIssuesSyncToke
 	}
 
 	if result != (EnrollResult{
+		SessionID: "sync-token-001", Capability: "full",
 		MonitoringInstanceID: "mi_123",
 		BindingStatus:        monitoringinstances.BindingBound,
 		SyncToken:            "sync-token-001",

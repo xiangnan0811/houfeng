@@ -10,6 +10,26 @@ import (
 	"houfeng/internal/center/targets"
 )
 
+func TestRetentionPolicyRawBoundsAndPermanentHistoryContract(t *testing.T) {
+	for _, days := range []int{29, 30, 365, 366} {
+		input := Default()
+		input.RetentionPolicy.RawLayerDays = days
+		_, err := Validate(input)
+		if (err == nil) != (days >= 30 && days <= 365) {
+			t.Fatalf("Validate raw days %d = %v", days, err)
+		}
+	}
+	data, err := json.Marshal(Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, removed := range []string{"event_layer_days", "notification_layer_days", "raw_retention_days", "history_retention_days"} {
+		if strings.Contains(string(data), removed) {
+			t.Fatalf("settings expose removed low-frequency TTL %s", removed)
+		}
+	}
+}
+
 func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 	t.Parallel()
 
@@ -76,10 +96,8 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 			},
 		},
 		RetentionPolicy: RetentionPolicy{
-			RawLayerDays:          30,
-			AggregateLayerDays:    30,
-			EventLayerDays:        90,
-			NotificationLayerDays: 180,
+			RawLayerDays:       30,
+			AggregateLayerDays: 30,
 		},
 	}
 
@@ -109,7 +127,7 @@ func TestSettingsValidateAcceptsStructuredSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	if string(body) != `{"raw_layer_days":30,"aggregate_layer_days":30,"event_layer_days":90,"notification_layer_days":180}` {
+	if string(body) != `{"raw_layer_days":30,"aggregate_layer_days":30}` {
 		t.Fatalf("RetentionPolicy JSON = %s", body)
 	}
 }
@@ -361,8 +379,8 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if got.Telegram.RuntimeManaged {
 		t.Fatal("Telegram.RuntimeManaged = true, want false by default")
 	}
-	if got.RetentionPolicy.EventLayerDays <= 0 {
-		t.Fatalf("EventLayerDays = %d, want positive", got.RetentionPolicy.EventLayerDays)
+	if got.RetentionPolicy.AggregateLayerDays != 365 {
+		t.Fatalf("AggregateLayerDays = %d, want 365", got.RetentionPolicy.AggregateLayerDays)
 	}
 	if got.IncidentDefaults.CPUWarningPct != 80 {
 		t.Fatalf("CPUWarningPct = %d, want 80", got.IncidentDefaults.CPUWarningPct)
@@ -394,12 +412,6 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if got.IPQuality.TimeoutSeconds != 15 {
 		t.Fatalf("IPQuality.TimeoutSeconds = %d, want 15", got.IPQuality.TimeoutSeconds)
 	}
-	if got.IPQuality.RawRetentionDays != 90 {
-		t.Fatalf("IPQuality.RawRetentionDays = %d, want 90", got.IPQuality.RawRetentionDays)
-	}
-	if got.IPQuality.HistoryRetentionDays != 365 {
-		t.Fatalf("IPQuality.HistoryRetentionDays = %d, want 365", got.IPQuality.HistoryRetentionDays)
-	}
 	if got.IPQuality.StaleAfterSeconds != 7*24*60*60 {
 		t.Fatalf("IPQuality.StaleAfterSeconds = %d, want 604800", got.IPQuality.StaleAfterSeconds)
 	}
@@ -416,13 +428,11 @@ func TestSettingsValidateNormalizesIPQualitySettings(t *testing.T) {
 
 	input := Default()
 	input.IPQuality = IPQualitySettings{
-		Enabled:              true,
-		FrequencySeconds:     3 * 86400,
-		StaleAfterSeconds:    10 * 86400,
-		TimeoutSeconds:       20,
-		RawRetentionDays:     30,
-		HistoryRetentionDays: 120,
-		Services:             []string{" Netflix ", "chatgpt", "netflix", "YouTube-Premium"},
+		Enabled:           true,
+		FrequencySeconds:  3 * 86400,
+		StaleAfterSeconds: 10 * 86400,
+		TimeoutSeconds:    20,
+		Services:          []string{" Netflix ", "chatgpt", "netflix", "YouTube-Premium"},
 	}
 
 	got, err := Validate(input)

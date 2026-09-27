@@ -16,6 +16,8 @@ import {
 } from './fixtures/profiles'
 
 const INVENTORY_PATH = '/vps?workspace=ledger&q=Tokyo&selected=vps_001'
+const PREVIEW_DIGEST = 'archive-preview-vps-001'
+const ARCHIVE_BODY_KEYS = ['confirmation_name', 'reason', 'preview_digest', 'idempotency_key', 'never_connected_confirmation']
 const EMPTY_TIMELINE: VPSTimeline = {
   vps_id: 'vps_001',
   renewal_decisions: [],
@@ -31,6 +33,8 @@ function detailFromOverview(overview: VPSOverview, lifecycle: VPSAssetDetail['li
       vps_id: overview.identity.vps_id,
       display_name: overview.identity.display_name,
       lifecycle_status: lifecycle,
+      usage_tags: overview.identity.usage_tags ?? [],
+      active_monitoring_instance_link_count: 0,
     }),
     monitoring_instance_links: [],
   }
@@ -52,13 +56,39 @@ function archiveReview(overview: VPSOverview, options: {
     blockers: options.blockers ?? [],
     blocker_details: [],
     eligible: options.eligible,
+    preview_digest: PREVIEW_DIGEST,
+    online_evidence: {
+      observed_at: '2026-09-26T04:00:00Z',
+      receiver_generation: 'fixture-generation',
+      receiver_healthy: true,
+      healthy_since: '2026-09-26T00:00:00Z',
+      last_health_check_at: '2026-09-26T04:00:00Z',
+      earliest_archive_at: null,
+      never_connected: true,
+      manual_confirmation_required: options.lifecycle === 'active',
+      instances: [],
+    },
   }
 }
 
-function toCancelOverview(): VPSOverview {
+function managedOverview(): VPSOverview {
   const overview = vpsOverviewFixture()
-  overview.identity.lifecycle_status = 'to_cancel'
+  overview.identity.lifecycle_status = 'active'
+  overview.identity.usage_tags = ['业务']
+  overview.identity.renewal_decision = 'keep'
   return overview
+}
+
+function lifecycleRelationsProfile(): ApiFixtureProfile {
+  return {
+    [apiRouteKey('GET', '/api/vps/vps_001/monitoring-instances?scope=current')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/vps/vps_001/monitoring-instances?scope=all')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/vps/vps_001/followups')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/vps/vps_001/service-associations')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/vps/vps_001/domain-associations')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/services')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/domains')]: { status: 200, body: [] },
+  }
 }
 
 function liveProfile(overview: VPSOverview): ApiFixtureProfile {
@@ -66,14 +96,15 @@ function liveProfile(overview: VPSOverview): ApiFixtureProfile {
     ...coreRouteProfile('/vps'),
     ...vpsOverviewProfile({
       overview,
-      detail: detailFromOverview(overview, 'to_cancel'),
+      detail: detailFromOverview(overview, 'active'),
       subscriptions: [],
       services: [],
       domains: [],
     }),
+    ...lifecycleRelationsProfile(),
     [apiRouteKey('GET', '/api/vps/vps_001/archive-review')]: {
       status: 200,
-      body: archiveReview(overview, { lifecycle: 'to_cancel', eligible: true }),
+      body: archiveReview(overview, { lifecycle: 'active', eligible: true }),
     },
   }
 }
@@ -91,6 +122,7 @@ function archivedProfile(overview: VPSOverview): ApiFixtureProfile {
       services: [],
       domains: [],
     }),
+    ...lifecycleRelationsProfile(),
     [apiRouteKey('GET', '/api/vps/vps_001/archive-review')]: {
       status: 200,
       body: archiveReview(archivedOverview, {
@@ -108,23 +140,23 @@ function archivedProfile(overview: VPSOverview): ApiFixtureProfile {
 }
 
 function restoredProfile(overview: VPSOverview): ApiFixtureProfile {
-  const idleOverview = vpsOverviewFixture({
-    identity: { ...overview.identity, lifecycle_status: 'idle', usage_status: 'idle' },
+  const restoredOverview = vpsOverviewFixture({
+    identity: { ...overview.identity, lifecycle_status: 'active', usage_tags: ['闲置'] },
   })
   return {
     ...coreRouteProfile('/vps'),
     ...vpsOverviewProfile({
-      overview: idleOverview,
-      detail: detailFromOverview(idleOverview, 'idle'),
+      overview: restoredOverview,
+      detail: detailFromOverview(restoredOverview, 'active'),
       subscriptions: [],
       services: [],
       domains: [],
     }),
+    ...lifecycleRelationsProfile(),
   }
 }
 
 async function openInventoryDetail(page: Page) {
-  await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto(INVENTORY_PATH)
   await page.getByRole('link', { name: '打开 VPS 详情', exact: true }).click()
   await expect(page).toHaveURL((url) => url.pathname === '/vps/vps_001')
@@ -135,12 +167,14 @@ async function confirmArchive(page: Page) {
   await page.getByRole('button', { name: '管理', exact: true }).click()
   const menu = page.getByRole('menu', { name: '管理' })
   await expect(menu).toBeVisible()
-  await menu.getByRole('menuitem', { name: '归档' }).click()
-  const dialog = page.getByRole('alertdialog', { name: '确认归档 VPS' })
+  await menu.getByRole('menuitem', { name: '结束使用并归档' }).click()
+  const dialog = page.getByRole('alertdialog', { name: '结束使用并归档' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('textbox', { name: '归档原因' }).fill('订阅已结束')
   await dialog.getByRole('textbox', { name: '输入 VPS 名称确认归档' }).fill('Tokyo Edge')
-  await dialog.getByRole('button', { name: '确认归档' }).click()
+  await expect(dialog.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
+  await dialog.getByRole('checkbox', { name: /确认此 VPS 从未形成有效 Agent 会话/ }).check()
+  await dialog.getByRole('button', { name: '结束使用并归档' }).click()
 }
 
 async function historyUserState(page: Page) {
@@ -150,8 +184,12 @@ async function historyUserState(page: Page) {
   })
 }
 
-test('inventory provenance survives archive, restore, and the return link', async ({ api, page }) => {
-  const overview = toCancelOverview()
+for (const viewport of [{ name: 'desktop', width: 1440, height: 1000 }, { name: 'mobile', width: 390, height: 900 }]) {
+for (const theme of ['dark', 'light'] as const) {
+test(`inventory provenance survives archive, restore, and the return link (${viewport.name}, ${theme})`, async ({ api, page }) => {
+  await page.setViewportSize({ width: viewport.width, height: viewport.height })
+  await page.addInitScript((mode) => { localStorage.setItem('houfeng.theme.mode', mode) }, theme)
+  const overview = managedOverview()
   api.useProfile({
     ...liveProfile(overview),
     [apiRouteKey('POST', '/api/vps/vps_001/archive')]: {
@@ -161,14 +199,14 @@ test('inventory provenance survives archive, restore, and the return link', asyn
         eligible: false,
         blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
       }),
-      expectedBodyKeys: ['confirmation_name', 'reason'],
+      expectedBodyKeys: ARCHIVE_BODY_KEYS,
       waitFor: {
         then(resolve?: () => void) {
           api.useProfile({
             ...archivedProfile(overview),
             [apiRouteKey('POST', '/api/vps/vps_001/restore-from-archive')]: {
               status: 200,
-              body: vpsAssetFixture({ lifecycle_status: 'idle', usage_status: 'idle', archived_at: null }),
+              body: vpsAssetFixture({ lifecycle_status: 'active', usage_tags: ['闲置'], archived_at: null }),
               expectedBodyKeys: ['reason'],
               waitFor: {
                 then(restoreResolve?: () => void) {
@@ -187,22 +225,26 @@ test('inventory provenance survives archive, restore, and the return link', asyn
   })
 
   await openInventoryDetail(page)
+  await expect(page.locator('html')).toHaveClass(new RegExp(`theme-houfeng-${theme}`))
   const returnLink = page.getByRole('link', { name: '返回 VPS 列表', exact: true })
   await expect(returnLink).toHaveAttribute('href', INVENTORY_PATH)
 
+  const archiveRequest = page.waitForRequest((request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/vps/vps_001/archive')
   await confirmArchive(page)
+  expect((await archiveRequest).postDataJSON()).toEqual({ confirmation_name: 'Tokyo Edge', reason: '订阅已结束', preview_digest: PREVIEW_DIGEST, idempotency_key: expect.any(String), never_connected_confirmation: true })
   await expect(page).toHaveURL((url) => url.pathname === '/archive/vps_001')
   await expect(page.getByRole('heading', { name: /Tokyo Edge/ })).toBeVisible()
   await expect.poll(async () => historyUserState(page)).toEqual({ vpsInventoryHref: INVENTORY_PATH })
   expect(api.requestCount('POST', '/api/vps/vps_001/archive')).toBe(1)
 
-  await page.getByRole('button', { name: '恢复为闲置' }).click()
+  await page.getByRole('button', { name: '恢复管理' }).click()
   const restoreDialog = page.getByRole('alertdialog', { name: '确认恢复归档 VPS' })
   await restoreDialog.getByRole('textbox', { name: '恢复原因' }).fill('重新评估用途')
   await restoreDialog.getByRole('button', { name: '确认恢复' }).click()
 
   await expect(page).toHaveURL((url) => url.pathname === '/vps/vps_001')
   await expect(page.getByRole('heading', { name: 'Tokyo Edge', exact: true })).toBeVisible()
+  await expect(page.getByText('闲置', { exact: true }).first()).toBeVisible()
   await expect(returnLink).toHaveAttribute('href', INVENTORY_PATH)
   expect(api.requestCount('POST', '/api/vps/vps_001/restore-from-archive')).toBe(1)
 
@@ -214,6 +256,8 @@ test('inventory provenance survives archive, restore, and the return link', asyn
     && url.searchParams.get('selected') === 'vps_001'
   ))
 })
+}
+}
 
 test('archived overview auto-redirects to archive detail without a write', async ({ api, page }) => {
   const overview = vpsOverviewFixture({
@@ -230,13 +274,13 @@ test('archived overview auto-redirects to archive detail without a write', async
 })
 
 test('failed archive write stays on detail and keeps inventory provenance', async ({ api, page }) => {
-  const overview = toCancelOverview()
+  const overview = managedOverview()
   api.useProfile({
     ...liveProfile(overview),
     [apiRouteKey('POST', '/api/vps/vps_001/archive')]: {
       status: 409,
       body: { error: 'archive conflict' },
-      expectedBodyKeys: ['confirmation_name', 'reason'],
+      expectedBodyKeys: ARCHIVE_BODY_KEYS,
     },
   })
 
@@ -245,14 +289,14 @@ test('failed archive write stays on detail and keeps inventory provenance', asyn
   await expect(returnLink).toHaveAttribute('href', INVENTORY_PATH)
   await confirmArchive(page)
 
-  await expect(page.getByRole('alertdialog', { name: '确认归档 VPS' }).getByText('archive conflict')).toBeVisible()
+  await expect(page.getByRole('alertdialog', { name: '结束使用并归档' }).getByText('archive conflict')).toBeVisible()
   await expect(page).toHaveURL((url) => url.pathname === '/vps/vps_001')
   await expect(returnLink).toHaveAttribute('href', INVENTORY_PATH)
   expect(api.requestCount('POST', '/api/vps/vps_001/archive')).toBe(1)
 })
 
 test('failed restore write stays on archive detail and keeps inventory provenance', async ({ api, page }) => {
-  const overview = toCancelOverview()
+  const overview = managedOverview()
   api.useProfile({
     ...liveProfile(overview),
     [apiRouteKey('POST', '/api/vps/vps_001/archive')]: {
@@ -262,7 +306,7 @@ test('failed restore write stays on archive detail and keeps inventory provenanc
         eligible: false,
         blockers: ['VPS 已归档，只能在归档详情页只读查看或执行受控恢复。'],
       }),
-      expectedBodyKeys: ['confirmation_name', 'reason'],
+      expectedBodyKeys: ARCHIVE_BODY_KEYS,
       waitFor: {
         then(resolve?: () => void) {
           api.useProfile({
@@ -285,7 +329,7 @@ test('failed restore write stays on archive detail and keeps inventory provenanc
   await expect(page).toHaveURL((url) => url.pathname === '/archive/vps_001')
   await expect.poll(async () => historyUserState(page)).toEqual({ vpsInventoryHref: INVENTORY_PATH })
 
-  await page.getByRole('button', { name: '恢复为闲置' }).click()
+  await page.getByRole('button', { name: '恢复管理' }).click()
   const restoreDialog = page.getByRole('alertdialog', { name: '确认恢复归档 VPS' })
   await restoreDialog.getByRole('textbox', { name: '恢复原因' }).fill('重新评估用途')
   await restoreDialog.getByRole('button', { name: '确认恢复' }).click()

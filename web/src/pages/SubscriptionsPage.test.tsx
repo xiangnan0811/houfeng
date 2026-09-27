@@ -1022,7 +1022,7 @@ describe('SubscriptionsPage', () => {
     )
     await waitFor(() => expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument())
     expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions?view=insights&vps_id=vps_001')
-    fireEvent.click(screen.getByRole('button', { name: /月均成本/ }))
+    fireEvent.click(screen.getByRole('button', { name: /当前预计月成本/ }))
     await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent('/subscriptions?view=insights'))
     expect(screen.getByRole('region', { name: '订阅成本洞察' })).toBeInTheDocument()
   })

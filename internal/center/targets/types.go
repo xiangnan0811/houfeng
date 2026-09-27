@@ -13,6 +13,8 @@ const (
 	TargetTypeService        = "service"
 	TargetTypeChinaReference = "china_reference"
 
+	LifecycleActive      = "active"
+	LifecycleRetired     = "retired"
 	RunStatusEnabled     = "启用"
 	RunStatusMaintenance = "维护中"
 	RunStatusPaused      = "暂停"
@@ -44,7 +46,6 @@ var allowedRunStatuses = map[string]struct{}{
 	RunStatusEnabled:     {},
 	RunStatusMaintenance: {},
 	RunStatusPaused:      {},
-	RunStatusArchived:    {},
 }
 
 var allowedProbeKinds = map[string]struct{}{
@@ -62,6 +63,7 @@ var allowedFrequencyTiers = map[string]struct{}{
 }
 
 type TargetRecord struct {
+	LifecycleStatus                   string     `json:"lifecycle_status"`
 	TargetID                          string     `json:"target_id"`
 	Name                              string     `json:"name"`
 	TargetType                        string     `json:"target_type"`
@@ -130,6 +132,29 @@ type UpdateMetadataInput struct {
 }
 
 type UpdateProbeItemInput = CreateProbeItemInput
+
+type ListScope string
+
+const (
+	ListScopeCurrent ListScope = "current"
+	ListScopeRetired ListScope = "retired"
+	ListScopeAll     ListScope = "all"
+)
+
+func NormalizeListScope(scope ListScope) (ListScope, bool) {
+	switch scope {
+	case "", ListScopeCurrent:
+		return ListScopeCurrent, true
+	case ListScopeRetired, ListScopeAll:
+		return scope, true
+	default:
+		return "", false
+	}
+}
+
+type ScopedRepository interface {
+	ListTargetsByScope(context.Context, ListScope) ([]TargetRecord, error)
+}
 
 type Repository interface {
 	ListTargets(context.Context) ([]TargetRecord, error)

@@ -134,7 +134,7 @@ func TestVPSOverviewMonitoringFreshnessUsesEffectiveHeartbeatPolicy(t *testing.T
 					MonitoringStatus:     test.monitoring,
 					BindingStatus:        test.binding,
 					CurrentHealthStatus:  monitoringinstances.HealthNormal,
-					LastHeartbeatAt:      test.heartbeat,
+					LastTrustedOnlineAt:  test.heartbeat,
 				}}},
 				&fakeIPQuality{},
 				&fakeIPQualityAvailability{settings: test.settings},

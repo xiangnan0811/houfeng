@@ -15,7 +15,7 @@ export function selectedVPS(rows: VPSAssetRecord[], selectedVPSID: string | null
 }
 
 export function lifecycleTone(status: VPSAssetRecord['lifecycle_status']): 'neutral' | 'offline' {
-  return status === 'cancelled' || status === 'archived' ? 'offline' : 'neutral'
+  return status === 'archived' ? 'offline' : 'neutral'
 }
 
 export function subscriptionMonthlySummary(subscriptions: SubscriptionRecord[], emptyLabel = '无关联订阅'): string {

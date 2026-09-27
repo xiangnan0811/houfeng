@@ -799,8 +799,9 @@ export function SubscriptionsPage() {
           <h1 className="page__title">订阅</h1>
           <div className="subscription-summary" aria-label="订阅摘要">
             <button type="button" onClick={() => clearFilters()}>
-              <span className="subscription-summary__label">月均成本</span>
+              <span className="subscription-summary__label">当前预计月成本</span>
               <span className="subscription-summary__value"><MonoDigits>{overviewReady ? moneyBase(overview?.total_monthly_cost, baseCurrency) : '—'}</MonoDigits></span>
+              {overviewReady && (overview?.current_unknown_amount_count ?? 0) > 0 ? <small>已知金额；另有 {overview?.current_unknown_amount_count} 项待核对</small> : null}
             </button>
             <button
               type="button"

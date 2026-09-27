@@ -170,7 +170,16 @@ export function monitoringConfigurationLabel(status: string): string {
   return MONITORING_CONFIGURATION_LABELS[trimmed] ?? trimmed
 }
 
-export function monitoringObservedHealthLabel(status: string): string {
+export function monitoringObservedHealthLabel(
+  status: string,
+  instance?: Pick<VPSMonitoringInstanceSummary, 'lifecycle_status' | 'monitoring_status' | 'binding_status' | 'last_trusted_online_at'>,
+): string {
+  if (instance) {
+    if (instance.lifecycle_status !== '已接入') return instance.lifecycle_status || '待接入'
+    if (instance.monitoring_status !== '启用') return monitoringConfigurationLabel(instance.monitoring_status)
+    if (instance.binding_status !== '已绑定') return instance.binding_status || '接入未确认'
+    if (!instance.last_trusted_online_at || !Number.isFinite(Date.parse(instance.last_trusted_online_at))) return '观测数据不可用'
+  }
   const trimmed = status.trim()
   if (!trimmed || trimmed === '—') return '观测健康未记录'
   return trimmed
@@ -209,4 +218,3 @@ export function httpHref(value: string): string | null {
   }
   return null
 }
-

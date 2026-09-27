@@ -62,10 +62,6 @@ export const RENEWAL_MODE_OPTIONS: Array<LabeledOption & { value: RenewalMode }>
   { value: 'auto', label: '自动续费', icon: 'Auto' },
   { value: 'manual', label: '手动续费', icon: 'Manual' },
   { value: 'auto_cancelled', label: '已取消自动续费', icon: 'Off' },
-  { value: 'lottery', label: '抽奖', icon: 'Lottery' },
-  { value: 'gift', label: '赠送', icon: 'Gift' },
-  { value: 'bonus', label: 'Bonus/余额抵扣', icon: 'Bonus' },
-  { value: 'other', label: '其他', icon: 'Other' },
 ]
 
 export const VALIDITY_EXTENSION_SOURCE_OPTIONS: LabeledOption[] = [
@@ -73,7 +69,6 @@ export const VALIDITY_EXTENSION_SOURCE_OPTIONS: LabeledOption[] = [
   { value: 'activity', label: '商家活动', icon: 'Act' },
   { value: 'discount_purchase', label: '优惠购买时长', icon: 'Deal' },
   { value: 'manual_adjustment', label: '手动修正', icon: 'Edit' },
-  { value: 'other', label: '其他', icon: 'Other' },
 ]
 
 export function optionSelectValue(value: string, options: readonly LabeledOption[]): string {
@@ -126,11 +121,7 @@ export function normalizeRenewalMode(value: string | undefined | null): RenewalM
   if (
     value === 'auto' ||
     value === 'manual' ||
-    value === 'auto_cancelled' ||
-    value === 'lottery' ||
-    value === 'gift' ||
-    value === 'bonus' ||
-    value === 'other'
+    value === 'auto_cancelled'
   ) {
     return value
   }

@@ -31,7 +31,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 	if p63.profile != appACLCurrentProfileP63 || len(p63.predecessor.sources.names) != 64 ||
 		!bytes.Equal(p63.predecessor.sources.canonicalSet, appACLCurrentV0796MigrationGolden) ||
 		!bytes.Equal(p63.predecessorPrivilegeBody, appACLCurrentV0796PrivilegeGolden) ||
-		!equalStringSlices(p63.successor.names, []string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql"}) {
+		!equalStringSlices(p63.successor.names, []string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql", "0067_refactor_vps_monitoring_lifecycle.sql"}) {
 		t.Fatal("compiled P63 profile differs from independent v0.79.6 release goldens or expected suffix")
 	}
 
@@ -50,6 +50,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		"0064_add_network_rates_valid.sql",
 		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 		"0066_constrain_monitoring_and_target_state_values.sql",
+		"0067_refactor_vps_monitoring_lifecycle.sql",
 	}; !equalStringSlices(got, want) {
 		t.Fatalf("P62 successor migrations = %#v, want %#v", got, want)
 	}
@@ -62,6 +63,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 	if got, want := p64.successor.names, []string{
 		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 		"0066_constrain_monitoring_and_target_state_values.sql",
+		"0067_refactor_vps_monitoring_lifecycle.sql",
 	}; !equalStringSlices(got, want) {
 		t.Fatalf("P64 successor migrations = %#v, want %#v", got, want)
 	}

@@ -53,7 +53,7 @@ import type {
 
 const TARGET_LIST_COLUMN_WIDTHS = [40, 180, 72, 168, 150, 120, 140]
 const TARGET_LIST_HEADERS = ['', '目标', '类型', 'Host', '健康', '资产上下文', '近 24h 延迟'] as const
-const TAB_OWNED_RUN_STATUS = new Set(['暂停', '已归档'])
+const TAB_OWNED_RUN_STATUS = new Set(['暂停'])
 
 type TargetQuickView = 'all' | 'abnormal' | 'paused' | 'archived' | 'coverage'
 
@@ -87,7 +87,7 @@ export function TargetsPage() {
 
   useEffect(() => {
     let cancelled = false
-    listTargets()
+    listTargets('all')
       .then((result) => {
         if (cancelled) return
         setTargets(result)
@@ -201,6 +201,7 @@ export function TargetsPage() {
       group: searchParams.get('group'),
       type: searchParams.get('type'),
       runStatus: searchParams.get('run_status'),
+      lifecycle: searchParams.get('lifecycle_status'),
       health: searchParams.get('health'),
       labels: parseMultiValue(searchParams.get('labels')),
       executionLabels: parseMultiValue(searchParams.get('execution_labels')),
@@ -221,6 +222,8 @@ export function TargetsPage() {
 
   const filteredTargets = useMemo(() => {
     return targets.filter((target) => {
+      if (filterState.lifecycle && target.lifecycle_status !== filterState.lifecycle) return false
+      if (target.lifecycle_status === 'retired' && (filterState.runStatus || filterState.abnormal || filterState.coverageGap)) return false
       if (filterState.group && target.group !== filterState.group) return false
       if (filterState.type && target.target_type !== filterState.type) return false
       if (filterState.runStatus && target.run_status !== filterState.runStatus) return false
@@ -245,7 +248,7 @@ export function TargetsPage() {
   const pausedTargetCount = useMemo(() => countPausedTargets(targets), [targets])
   const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
   const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
-  const visibleIds = useMemo(() => filteredTargets.map((target) => target.target_id), [filteredTargets])
+  const visibleIds = useMemo(() => filteredTargets.filter((target) => target.lifecycle_status !== 'retired').map((target) => target.target_id), [filteredTargets])
   const [prevVisibleIds, setPrevVisibleIds] = useState(visibleIds)
   if (visibleIds !== prevVisibleIds) {
     setPrevVisibleIds(visibleIds)
@@ -258,7 +261,7 @@ export function TargetsPage() {
   const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length
   const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected
   const hasActiveFilters = Boolean(
-    filterState.type || filterState.health || filterState.runStatus || filterState.group,
+    filterState.type || filterState.health || filterState.runStatus || filterState.lifecycle || filterState.group,
   )
   const navigationLocked = pendingBatchAction !== null || batchSubmitting
   const quickView: TargetQuickView = filterState.coverageGap
@@ -267,7 +270,7 @@ export function TargetsPage() {
       ? 'abnormal'
       : filterState.runStatus === '暂停'
         ? 'paused'
-        : filterState.runStatus === '已归档'
+        : filterState.lifecycle === 'retired'
           ? 'archived'
           : 'all'
 
@@ -278,6 +281,10 @@ export function TargetsPage() {
     let failCount = 0
     for (const targetID of ids) {
       try {
+        const selectedTarget = targets.find((target) => target.target_id === targetID)
+        if (selectedTarget?.lifecycle_status === 'retired' && action !== 'restore-to-paused') {
+          throw new Error('已退役目标不能执行运行控制')
+        }
         const review = await getTargetLifecycleReview(targetID)
         if (review && requiresSharedImpactConfirmation(review.dependency_impacts ?? [], 'target', targetID)) {
           throw new Error('目标影响多台 VPS，请在目标详情确认共享影响')
@@ -298,7 +305,7 @@ export function TargetsPage() {
     setFrozenBatchIds(null)
     setSelectedIds([])
     try {
-      const updated = await listTargets()
+      const updated = await listTargets('all')
       setTargets(updated)
     } catch {
       /* keep current rows */
@@ -340,6 +347,7 @@ export function TargetsPage() {
       (current) => {
         const next = new URLSearchParams(current)
         const tabOwnedRunStatus = TAB_OWNED_RUN_STATUS.has(next.get('run_status') ?? '')
+        next.delete('lifecycle_status')
         if (view === 'all') {
           next.delete('abnormal')
           next.delete('coverage_gap')
@@ -353,7 +361,8 @@ export function TargetsPage() {
           next.delete('abnormal')
           next.delete('coverage_gap')
         } else if (view === 'archived') {
-          next.set('run_status', '已归档')
+          next.delete('run_status')
+          next.set('lifecycle_status', 'retired')
           next.delete('abnormal')
           next.delete('coverage_gap')
         } else {
@@ -460,7 +469,7 @@ export function TargetsPage() {
                   { value: 'all', label: '全部', count: targets.length },
                   { value: 'abnormal', label: '异常', count: abnormalTargetCount },
                   { value: 'paused', label: '暂停', count: pausedTargetCount },
-                  { value: 'archived', label: '归档', count: archivedTargetCount },
+                  { value: 'archived', label: '退役', count: archivedTargetCount },
                   { value: 'coverage', label: '覆盖缺口', count: coverageGapTargetCount },
                 ]}
               />
@@ -575,7 +584,7 @@ export function TargetsPage() {
                             type="checkbox"
                             className="monitoring-table__select-check"
                             checked={selectedIds.includes(target.target_id)}
-                            disabled={navigationLocked}
+                            disabled={navigationLocked || target.lifecycle_status === 'retired'}
                             onChange={() => toggleSelected(target.target_id)}
                             onClick={(event) => event.stopPropagation()}
                             aria-label={`选择 ${target.name}`}

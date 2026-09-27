@@ -49,7 +49,7 @@ func TestRunDryRunContinuesWhenDatabaseCheckFails(t *testing.T) {
 			"display_name":"tokyo",
 			"provider_name":"example",
 			"lifecycle_status":"active",
-			"usage_status":"in_use"
+			"usage_tags":["生产"]
 		}
 	]`
 	if err := os.WriteFile(inputPath, []byte(body), 0o600); err != nil {

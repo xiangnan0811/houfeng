@@ -34,24 +34,7 @@ func MonitoringInstancesCollection(repo monitoringinstances.Repository) http.Han
 			}
 			writeJSON(w, http.StatusOK, records)
 		case http.MethodPost:
-			var input monitoringinstances.CreateInput
-			if err := decodeJSON(r, &input); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid json")
-				return
-			}
-
-			input = normalizeCreateInput(input)
-			if !isValidCreateInput(input) {
-				writeError(w, http.StatusBadRequest, "invalid input")
-				return
-			}
-
-			record, err := repo.CreateMonitoringInstance(r.Context(), input)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
-			writeJSON(w, http.StatusCreated, record)
+			writeError(w, http.StatusMethodNotAllowed, "create monitoring through its VPS")
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -275,6 +258,11 @@ func monitoringInstanceLifecycleActionHandler(parent, action string, apply func(
 			return
 		}
 
+		input.IdempotencyKey = r.Header.Get("Idempotency-Key")
+		if _, err := monitoringinstances.NormalizeLifecycleIdempotencyKey(input.IdempotencyKey); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid idempotency key")
+			return
+		}
 		record, err := apply(r.Context(), monitoringInstanceID, input)
 		if handled := writeMonitoringInstanceManagementError(w, err); handled {
 			return
@@ -297,6 +285,9 @@ func parseMonitoringInstanceNestedSubresourcePath(path, parent, action string) (
 
 func writeMonitoringInstanceManagementError(w http.ResponseWriter, err error) bool {
 	switch {
+	case errors.Is(err, monitoringinstances.ErrIdempotencyKeyReused):
+		writeError(w, http.StatusConflict, "idempotency key reused")
+		return true
 	case err == nil:
 		return false
 	case errors.Is(err, monitoringinstances.ErrInvalidManagementInput):

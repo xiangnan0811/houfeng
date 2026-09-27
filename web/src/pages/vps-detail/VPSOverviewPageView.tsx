@@ -6,7 +6,6 @@ import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import type { VPSOverview } from '../../lib/types'
 import {
   overviewIPQualityActionLabel,
-  overviewLifecycleLabel,
   overviewSummaryCellLabel,
 } from '../../lib/vpsOverviewPresentation'
 
@@ -84,7 +83,7 @@ export function VPSOverviewPageView({
   const monitoringCount = monitoringRelations[0]?.count ?? 0
   const subscriptionsHref = `/subscriptions?${new URLSearchParams({ vps_id: vpsId, view: 'details' }).toString()}`
   const primarySubscription = resources.subscriptions.items[0]
-  const plannedCancellation = overview.identity.lifecycle_status === 'to_cancel'
+  const noRenewal = overview.identity.renewal_decision === 'cancel'
 
   function runCommand(command: VPSOverviewCommand) {
     if (READ_ONLY_PREVIEW && isVPSOverviewWriteCommand(command)) return
@@ -96,13 +95,6 @@ export function VPSOverviewPageView({
         management.openPanel('decision')
         return
       case 'open_management':
-        if (
-          overview.identity.lifecycle_status === 'to_cancel'
-          || overview.identity.lifecycle_status === 'to_migrate'
-        ) {
-          management.openPanel('cancellation')
-          return
-        }
         management.openMenu()
         return
       case 'retry_overview':
@@ -202,8 +194,8 @@ export function VPSOverviewPageView({
             empty={resources.subscriptions.status === 'ready'
               ? <p className="vps-detail-resource-group__empty">暂无订阅</p>
               : null}
-            plannedCancellation={plannedCancellation}
-            {...(plannedCancellation ? { cancellationPlanLabel: overviewLifecycleLabel('to_cancel') } : {})}
+            plannedCancellation={noRenewal}
+            {...(noRenewal ? { cancellationPlanLabel: '决定不续费' } : {})}
             trailing={(
               <VPSOverviewFreshness
                 section={overview.summary.renewal.section}

@@ -74,11 +74,7 @@ func assessMember(member GroupMember) EvidenceAssessment {
 		riskSignals++
 		pressure += 12
 	}
-	if member.VPS.RenewalDecision == vpsassets.RenewalMigrate || member.VPS.LifecycleStatus == vpsassets.LifecycleToMigrate {
-		riskSignals++
-		pressure += 22
-	}
-	if member.VPS.RenewalDecision == vpsassets.RenewalCancel || member.VPS.RenewalDecision == vpsassets.RenewalAutoRenewCancelled || member.VPS.LifecycleStatus == vpsassets.LifecycleToCancel || member.VPS.LifecycleStatus == vpsassets.LifecycleCancelled {
+	if member.VPS.RenewalDecision == vpsassets.RenewalCancel {
 		riskSignals++
 		pressure += 34
 	}
@@ -254,7 +250,7 @@ func memberDecisionBias(member GroupMember, confidence, pressure, gapSignals int
 	if pressure >= 70 {
 		return EvidenceBiasReview
 	}
-	if member.VPS.UsageStatus == vpsassets.UsageStandby {
+	if member.SuggestedRole == RoleStandbyCandidate {
 		return EvidenceBiasObserve
 	}
 	return EvidenceBiasReview
@@ -355,7 +351,7 @@ func unavailableSourceCount(source SourceAvailability) int {
 
 func isOrdinaryLifecycle(status vpsassets.LifecycleStatus) bool {
 	switch status {
-	case vpsassets.LifecycleActive, vpsassets.LifecycleIdle, vpsassets.LifecycleTesting, vpsassets.LifecycleToMigrate:
+	case vpsassets.LifecycleActive:
 		return true
 	default:
 		return false

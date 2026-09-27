@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 
-import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useParams, useSearchParams } from 'react-router-dom'
 
 import type { MonitoringInstanceRuntimeAction } from '../components/monitoring-detail'
 import {
-  archiveMonitoringInstance,
   confirmMonitoringInstanceRebind,
   enterMonitoringInstanceMaintenance,
   exitMonitoringInstanceMaintenance,
@@ -13,12 +12,9 @@ import {
   getMonitoringInstanceOnboarding,
   listVPSForMonitoringInstance,
   pauseMonitoringInstanceMonitoring,
-  permanentCleanupMonitoringInstance,
   postMonitoringInstanceAction,
   rejectPendingMonitoringInstanceBinding,
   resetMonitoringInstanceBinding,
-  restoreMonitoringInstanceFromArchive,
-  restoreMonitoringInstanceLifecycle,
   resumeMonitoringInstanceMonitoring,
   retireMonitoringInstance,
   updateMonitoringInstanceMetadata,
@@ -45,7 +41,6 @@ import {
   MONITORING_MANAGEMENT_REVIEW_STALE_MESSAGE,
 } from './monitoring-detail/monitoringDetailConstants'
 import { READ_ONLY_PREVIEW } from '../lib/readOnlyPreview'
-import { resolveMonitoringListHref } from './monitoring/monitoringListUrl'
 import {
   applyOnboardingRecordToMonitoringInstance,
   describeError,
@@ -67,7 +62,7 @@ import type {
 } from './monitoring-detail/types'
 
 const LINKED_VPS_SUMMARY_FETCH_DELAY_MS = 300
-type MonitoringManagementAction = 'retire' | 'restore-lifecycle' | 'archive' | 'restore-archive' | 'permanent-cleanup'
+type MonitoringManagementAction = 'retire'
 type ManagementReviewLoadOutcome = 'loaded' | 'failed' | 'superseded' | 'pending'
 type ManagementReviewReloadOutcome =
   | { status: 'loaded' | 'failed'; requestId: number }
@@ -84,7 +79,6 @@ export function MonitoringDetailPage() {
 }
 
 export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitoringInstanceId?: string }) {
-  const navigate = useNavigate()
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const returnVPSId = validateReturnVPSId(searchParams.get('return_vps'))
@@ -966,6 +960,8 @@ export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitori
 
   function closeOnboardingDrawer() {
     setOnboardingOpen(false)
+    retryRecord()
+    void loadManagementReview(true)
   }
 
   function closeHistoryDrawer() {
@@ -1180,79 +1176,11 @@ export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitori
     }
   }
 
-  function handleManagementRetire(reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) {
+  function handleManagementRetire(reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean; idempotency_key?: string }) {
+    const { idempotency_key, ...reviewConfirmation } = confirmation
     return runManagementRecordAction('retire', (actionMonitoringInstanceId) =>
-      retireMonitoringInstance(actionMonitoringInstanceId, { reason, ...confirmation }),
+      retireMonitoringInstance(actionMonitoringInstanceId, { reason, ...reviewConfirmation }, idempotency_key),
     )
-  }
-
-  function handleManagementRestoreLifecycle(reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) {
-    return runManagementRecordAction('restore-lifecycle', (actionMonitoringInstanceId) =>
-      restoreMonitoringInstanceLifecycle(actionMonitoringInstanceId, { reason, ...confirmation }),
-    )
-  }
-
-  function handleManagementArchive(reason: string, confirmationName: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) {
-    return runManagementRecordAction('archive', (actionMonitoringInstanceId) =>
-      archiveMonitoringInstance(actionMonitoringInstanceId, {
-        reason,
-        confirmation_name: confirmationName,
-        ...confirmation,
-      }),
-    )
-  }
-
-  function handleManagementRestoreArchive(confirmation: { preview_digest: string; confirm_shared_impact: boolean }) {
-    return runManagementRecordAction('restore-archive', (actionMonitoringInstanceId) =>
-      restoreMonitoringInstanceFromArchive(actionMonitoringInstanceId, confirmation),
-    )
-  }
-
-  async function handleManagementPermanentCleanup(reason: string, confirmationName: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }): Promise<ManagementActionOutcome> {
-    if (!monitoringInstance) return 'failed'
-    const actionMonitoringInstanceId = monitoringInstance.monitoring_instance_id
-    setManagementSubmittingAction('permanent-cleanup')
-    setManagementActionError(null)
-
-    try {
-      await permanentCleanupMonitoringInstance(actionMonitoringInstanceId, {
-        reason,
-        confirmation_name: confirmationName,
-        ...confirmation,
-      })
-      if (
-        !isMountedRef.current ||
-        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
-      ) {
-        return 'failed'
-      }
-      navigate(resolveMonitoringListHref(location.state), { state: location.state })
-      return 'success'
-    } catch (error: unknown) {
-      if (
-        !isMountedRef.current ||
-        currentRouteMonitoringInstanceIdRef.current !== actionMonitoringInstanceId ||
-        currentRequestedMonitoringInstanceIdRef.current !== actionMonitoringInstanceId
-      ) {
-        return 'failed'
-      }
-      if (isManagementReviewStale(error) || isSharedImpactConfirmationRequired(error)) {
-        const refreshed = await reloadAfterStaleManagementReview(actionMonitoringInstanceId)
-        if (!isCurrentManagementReviewReload(actionMonitoringInstanceId, refreshed)) return 'failed'
-        return 'stale'
-      }
-      setManagementActionError(describeError(error, '永久清理监控实例失败'))
-      return 'failed'
-    } finally {
-      if (
-        isMountedRef.current &&
-        currentRouteMonitoringInstanceIdRef.current === actionMonitoringInstanceId &&
-        currentRequestedMonitoringInstanceIdRef.current === actionMonitoringInstanceId
-      ) {
-        setManagementSubmittingAction(null)
-      }
-    }
   }
 
 
@@ -1263,7 +1191,7 @@ export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitori
       latestSample={latestSample}
       snapshotReadAt={snapshotReadAt}
       heartbeatFreshness={classifyHeartbeatFreshness(
-        monitoringInstance.last_heartbeat_at,
+        monitoringInstance.last_trusted_online_at ?? undefined,
         heartbeatPolicy,
         snapshotReadAt ?? new Date(0),
         Boolean(settingsResolved && snapshotReadAt),
@@ -1303,10 +1231,6 @@ export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitori
       onMetadataSubmit={(event) => void handleMetadataSave(event)}
       onManagementLoadReview={(force) => void loadManagementReview(force)}
       onManagementRetire={handleManagementRetire}
-      onManagementRestoreLifecycle={handleManagementRestoreLifecycle}
-      onManagementArchive={handleManagementArchive}
-      onManagementRestoreArchive={handleManagementRestoreArchive}
-      onManagementPermanentCleanup={handleManagementPermanentCleanup}
       incidents={incidents}
       incidentsError={incidentsError}
       events={events}

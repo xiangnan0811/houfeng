@@ -2,13 +2,14 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -17,17 +18,13 @@ import (
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/assetservices"
 	"houfeng/internal/center/ids"
-	"houfeng/internal/center/incidents"
-	"houfeng/internal/center/monitoringinstances"
-	"houfeng/internal/center/renewals"
+
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
 
 var _ assetlifecycle.Repository = (*PostgresAssetLifecycleRepository)(nil)
-
-const maxCancellationTxAttempts = 3
 
 type assetLifecycleDB interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
@@ -58,18 +55,18 @@ func (r *PostgresAssetLifecycleRepository) CountRunningTargetsForVPS(ctx context
 	if err := r.db.QueryRow(ctx, `
 		with linked_targets as (
 			select target_id
-			from asset_services
-			where vps_id = $1 and target_id is not null and status = 'active'
+			from asset_service_associations
+			where vps_id = $1 and target_id is not null and ended_at is null
 			union
 			select target_id
-			from asset_domains
-			where vps_id = $1 and target_id is not null and status = 'active'
+			from asset_domain_associations
+			where vps_id = $1 and target_id is not null and ended_at is null
 		)
 		select count(*)::int
 		from linked_targets lt
 		join targets t on t.target_id = lt.target_id
-		where t.run_status in ($2, $3)
-		and exists (select 1 from vps_assets v where v.vps_id = $1 and v.lifecycle_status <> 'archived')`,
+		where t.run_status in ($2, $3) and t.lifecycle_status='active'
+		and exists (select 1 from vps_assets v where v.vps_id = $1 and v.lifecycle_status = 'active')`,
 		vpsID,
 		targets.RunStatusEnabled,
 		targets.RunStatusMaintenance,
@@ -79,95 +76,7 @@ func (r *PostgresAssetLifecycleRepository) CountRunningTargetsForVPS(ctx context
 	return count, nil
 }
 
-func (r *PostgresAssetLifecycleRepository) GetVPSCancellationPreview(ctx context.Context, vpsID string) (assetlifecycle.CancellationPreview, error) {
-	vpsID = strings.TrimSpace(vpsID)
-	if vpsID == "" {
-		return assetlifecycle.CancellationPreview{}, fmt.Errorf("%w: vps_id is required", assetlifecycle.ErrInvalidLifecycleActionInput)
-	}
-
-	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, fmt.Errorf("begin cancellation preview: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	vps, err := getLifecycleVPSAsset(ctx, tx, vpsID, false)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	return loadCancellationPreview(ctx, tx, vps, false)
-}
-
-func assembleCancellationPreview(
-	vps vpsassets.Record,
-	subscriptionRecords []subscriptions.Record,
-	monitoringInstanceLinks []assetlinks.MonitoringInstanceSummary,
-	services []assetservices.Record,
-	domains []assetdomains.Record,
-	targetLinks []assetlifecycle.TargetImpact,
-) assetlifecycle.CancellationPreview {
-	preview := assetlifecycle.CancellationPreview{
-		VPS:                     vps,
-		Subscriptions:           buildSubscriptionImpacts(subscriptionRecords),
-		MonitoringInstanceLinks: monitoringInstanceLinks,
-		Services:                services,
-		Domains:                 domains,
-		TargetLinks:             targetLinks,
-	}
-	today := subscriptions.NewDate(time.Now().UTC())
-	preview.EvaluatedOn = today
-	recommended, confirmationReason := recommendedVPSCancellationLifecycle(preview, today)
-	preview.RecommendedSteps = buildCancellationRecommendedSteps(preview, recommended)
-	preview.Warnings, preview.Blockers = buildCancellationPreviewFindings(preview)
-	if confirmationReason != "" {
-		preview.Warnings = append(preview.Warnings, confirmationReason)
-	}
-	// The caller attaches the digest after the complete dependency graph is loaded.
-	return preview
-}
-
-func loadCancellationPreview(
-	ctx context.Context,
-	queryer assetLifecycleQueryer,
-	vps vpsassets.Record,
-	lockRelated bool,
-) (assetlifecycle.CancellationPreview, error) {
-	vpsID := vps.VPSID
-	subscriptionRecords, err := listLifecycleSubscriptionsForVPS(ctx, queryer, vpsID, lockRelated)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	monitoringInstanceLinks, err := listLifecycleMonitoringInstancesForVPS(ctx, queryer, vpsID, lockRelated)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	services, err := listLifecycleAssetServicesForVPS(ctx, queryer, vpsID, lockRelated)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	domains, err := listLifecycleAssetDomainsForVPS(ctx, queryer, vpsID, lockRelated)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	targetLinks, err := listLifecycleTargetImpacts(ctx, queryer, services, domains, lockRelated)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	preview := assembleCancellationPreview(vps, subscriptionRecords, monitoringInstanceLinks, services, domains, targetLinks)
-	monitoringIDs := make([]string, 0, len(monitoringInstanceLinks))
-	for _, link := range monitoringInstanceLinks {
-		monitoringIDs = append(monitoringIDs, link.MonitoringInstanceID)
-	}
-	targetIDs := make([]string, 0, len(targetLinks))
-	for _, target := range targetLinks {
-		targetIDs = append(targetIDs, target.TargetID)
-	}
-	preview.DependencyImpacts, err = loadAssetDependencyImpacts(ctx, queryer, monitoringIDs, targetIDs)
-	if err != nil {
-		return assetlifecycle.CancellationPreview{}, err
-	}
-	assetlifecycle.AttachCancellationPreviewDigest(&preview)
-	return preview, nil
-}
+// The caller attaches the digest after the complete dependency graph is loaded.
 
 func (r *PostgresAssetLifecycleRepository) GetVPSArchiveReview(ctx context.Context, vpsID string) (assetlifecycle.ArchiveReview, error) {
 	vpsID = strings.TrimSpace(vpsID)
@@ -203,6 +112,24 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSArchive(ctx context.Context, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	requestDigest := assetlifecycle.DigestArchiveRequest(input)
+	var storedDigest string
+	var storedResponse []byte
+	err = tx.QueryRow(ctx, `select request_digest,response from vps_archive_requests where vps_id=$1 and idempotency_key=$2`, vpsID, input.IdempotencyKey).Scan(&storedDigest, &storedResponse)
+	if err == nil {
+		if storedDigest != requestDigest {
+			return assetlifecycle.ArchiveReview{}, assetlifecycle.ErrArchiveIdempotencyConflict
+		}
+		var original assetlifecycle.ArchiveReview
+		if err := json.Unmarshal(storedResponse, &original); err != nil {
+			return original, err
+		}
+		return original, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+
 	currentVPS, err := getLifecycleVPSAsset(ctx, tx, vpsID, true)
 	if err != nil {
 		return assetlifecycle.ArchiveReview{}, err
@@ -218,11 +145,25 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSArchive(ctx context.Context, 
 	if len(review.Blockers) > 0 {
 		return assetlifecycle.ArchiveReview{}, &assetlifecycle.ArchiveBlockedError{Review: review}
 	}
+	if !assetlifecycle.MatchesArchivePreview(review, input.PreviewDigest) {
+		return assetlifecycle.ArchiveReview{}, &assetlifecycle.StaleArchivePreviewError{Review: review}
+	}
+	if review.OnlineEvidence.ManualConfirmationRequired && !input.NeverConnectedConfirmation {
+		return assetlifecycle.ArchiveReview{}, fmt.Errorf("%w: never_connected_confirmation is required for an object without an issued Agent session", assetlifecycle.ErrInvalidLifecycleActionInput)
+	}
+	if err := archiveVPSMonitoringAndTargets(ctx, tx, vpsID, input.Reason); err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	if err := archiveVPSRelations(ctx, tx, vpsID, input.Reason); err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	if err := endVPSMaintenanceForArchive(ctx, tx, vpsID, input.Reason); err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
 
 	before := vpsLifecycleAuditState(currentVPS)
 	archivePatch := vpsassets.PatchInput{
 		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleArchived),
-		UsageStatus:     vpsassets.PatchUsage(vpsassets.UsageUnknown),
 	}
 	if err := vpsassets.ValidatePatchInput(archivePatch); err != nil {
 		return assetlifecycle.ArchiveReview{}, err
@@ -230,7 +171,7 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSArchive(ctx context.Context, 
 	if err := validateMergedVPSAssetPatch(currentVPS, archivePatch); err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
-	if _, err := tx.Exec(ctx, `update vps_assets set archived_state_snapshot = jsonb_build_object('lifecycle_status', lifecycle_status, 'usage_status', usage_status, 'renewal_decision', renewal_decision, 'captured_at', now(), 'source', 'archive') where vps_id = $1`, currentVPS.VPSID); err != nil {
+	if _, err := tx.Exec(ctx, `update vps_assets set archived_state_snapshot = jsonb_build_object('lifecycle_status', lifecycle_status, 'usage_tags', usage_tags, 'renewal_decision', renewal_decision, 'captured_at', now(), 'source', 'archive') where vps_id = $1`, currentVPS.VPSID); err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
 	updated, err := patchVPSAssetRow(ctx, tx, currentVPS.VPSID, archivePatch, false)
@@ -240,14 +181,51 @@ func (r *PostgresAssetLifecycleRepository) ApplyVPSArchive(ctx context.Context, 
 	if _, err := auditVPSStateTransition(ctx, tx, currentVPS.VPSID, assetlifecycle.ActionTypeArchiveVPS, input.Reason, before, updated); err != nil {
 		return assetlifecycle.ArchiveReview{}, err
 	}
+	commitReview := review
+	review.VPS = updated
+	review.Eligible = false
+	response, err := json.Marshal(review)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	if _, err := tx.Exec(ctx, `insert into vps_archive_requests(vps_id,idempotency_key,request_digest,response) values($1,$2,$3,$4)`, vpsID, input.IdempotencyKey, requestDigest, response); err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	// The graph lock keeps enrollment/live evidence and associations stable.
+	// Health must continue ticking during business work, so lock its row only
+	// for this final short validation and commit interval.
+	if err := loadArchiveReceiverEvidence(ctx, tx, &commitReview.OnlineEvidence, true); err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	if receiverFaultGeneration.Load() != commitReview.ReceiverFaultGeneration || receiverFaultGeneration.Load() != receiverObservedFaultGeneration.Load() {
+		commitReview.OnlineEvidence.ReceiverHealthy = false
+	}
+	var finalBlockers []assetlifecycle.BlockerDetail
+	commitReview.OnlineEvidence, finalBlockers = assetlifecycle.EvaluateArchiveSafety(commitReview.OnlineEvidence)
+	if len(finalBlockers) > 0 {
+		commitReview.BlockerDetails = finalBlockers
+		commitReview.Warnings, commitReview.Blockers = buildArchiveReviewFindings(commitReview)
+		commitReview.Eligible = false
+		assetlifecycle.AttachArchivePreviewDigest(&commitReview)
+		return assetlifecycle.ArchiveReview{}, &assetlifecycle.ArchiveBlockedError{Review: commitReview}
+	}
+	if !assetlifecycle.MatchesArchivePreview(commitReview, input.PreviewDigest) {
+		assetlifecycle.AttachArchivePreviewDigest(&commitReview)
+		return assetlifecycle.ArchiveReview{}, &assetlifecycle.StaleArchivePreviewError{Review: commitReview}
+	}
+	if !review.OnlineEvidence.NeverConnected && (receiverFaultGeneration.Load() != review.ReceiverFaultGeneration || receiverFaultGeneration.Load() != receiverObservedFaultGeneration.Load()) {
+		review.VPS = currentVPS
+		review.OnlineEvidence.ReceiverHealthy = false
+		review.OnlineEvidence.EarliestArchiveAt = nil
+		review.Eligible = false
+		review.BlockerDetails = append(review.BlockerDetails, assetlifecycle.BlockerDetail{Code: "receiver_observation_unhealthy", BlockedAction: "archive", ResolutionAction: "wait_for_continuous_offline_observation"})
+		review.Warnings, review.Blockers = buildArchiveReviewFindings(review)
+		return assetlifecycle.ArchiveReview{}, &assetlifecycle.ArchiveBlockedError{Review: review}
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return assetlifecycle.ArchiveReview{}, fmt.Errorf("commit vps archive transaction for %q: %w", currentVPS.VPSID, err)
 	}
 
-	review.VPS = updated
-	review.BlockerDetails = archiveBlockerDetails(review)
-	review.Warnings, review.Blockers = buildArchiveReviewFindings(review)
-	review.Eligible = len(review.Blockers) == 0
 	return review, nil
 }
 
@@ -277,8 +255,7 @@ func (r *PostgresAssetLifecycleRepository) RestoreVPSFromArchive(ctx context.Con
 	}
 
 	restorePatch := vpsassets.PatchInput{
-		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleIdle),
-		UsageStatus:     vpsassets.PatchUsage(vpsassets.UsageUnknown),
+		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleActive),
 	}
 	if err := vpsassets.ValidatePatchInput(restorePatch); err != nil {
 		return vpsassets.Record{}, err
@@ -290,6 +267,16 @@ func (r *PostgresAssetLifecycleRepository) RestoreVPSFromArchive(ctx context.Con
 	if err != nil {
 		return vpsassets.Record{}, err
 	}
+	if _, err := tx.Exec(ctx, `update vps_assets set usage_tags=array['闲置']::text[] where vps_id=$1`, vpsID); err != nil {
+		return vpsassets.Record{}, err
+	}
+	updated, err = getLifecycleVPSAsset(ctx, tx, vpsID, false)
+	if err != nil {
+		return vpsassets.Record{}, err
+	}
+	if err := clearVPSPendingCommands(ctx, tx, vpsID, input.Reason); err != nil {
+		return vpsassets.Record{}, err
+	}
 	if _, err := auditVPSStateTransition(ctx, tx, currentVPS.VPSID, assetlifecycle.ActionTypeRestoreVPS, input.Reason, vpsLifecycleAuditState(currentVPS), updated); err != nil {
 		return vpsassets.Record{}, err
 	}
@@ -297,134 +284,6 @@ func (r *PostgresAssetLifecycleRepository) RestoreVPSFromArchive(ctx context.Con
 		return vpsassets.Record{}, fmt.Errorf("commit restore vps from archive transaction for %q: %w", currentVPS.VPSID, err)
 	}
 	return updated, nil
-}
-
-func (r *PostgresAssetLifecycleRepository) ApplyVPSCancellation(ctx context.Context, vpsID string, input assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionResult, error) {
-	vpsID = strings.TrimSpace(vpsID)
-	if vpsID == "" {
-		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("%w: vps_id is required", assetlifecycle.ErrInvalidLifecycleActionInput)
-	}
-	input = assetlifecycle.NormalizeApplyCancellationInput(input)
-	if err := assetlifecycle.ValidateApplyCancellationInput(input); err != nil {
-		return assetlifecycle.LifecycleActionResult{}, err
-	}
-
-	for attempt := 1; attempt <= maxCancellationTxAttempts; attempt++ {
-		result, err := r.applyVPSCancellationOnce(ctx, vpsID, input)
-		if err == nil {
-			return result, nil
-		}
-		if !isRetryableLifecycleTxAttempt(err) {
-			return assetlifecycle.LifecycleActionResult{}, err
-		}
-	}
-	return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("%w: apply vps cancellation after retries", assetlifecycle.ErrRetryableLifecycleConflict)
-}
-
-func (r *PostgresAssetLifecycleRepository) applyVPSCancellationOnce(ctx context.Context, vpsID string, input assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionResult, error) {
-	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
-	if err != nil {
-		return assetlifecycle.LifecycleActionResult{}, wrapRetryableLifecycleTx(fmt.Errorf("begin asset lifecycle action transaction: %w", err))
-	}
-	txClosed := false
-	defer func() {
-		if !txClosed {
-			_ = tx.Rollback(ctx)
-		}
-	}()
-	rollbackForFailure := func() {
-		if !txClosed {
-			_ = tx.Rollback(ctx)
-			txClosed = true
-		}
-	}
-	var (
-		currentVPS vpsassets.Record
-		action     assetlifecycle.LifecycleActionRecord
-	)
-	recordFailedStep := func(completedSteps []assetlifecycle.LifecycleActionStep, objectType, objectID, stepType, message string, cause error) error {
-		rollbackForFailure()
-		if isRetryableLifecycleTxConflict(cause) {
-			return wrapRetryableLifecycleTx(cause)
-		}
-		return r.recordFailedVPSCancellation(ctx, currentVPS.VPSID, input, action, completedSteps, objectType, objectID, stepType, message, cause)
-	}
-
-	currentVPS, err = getLifecycleVPSAsset(ctx, tx, vpsID, true)
-	if err != nil {
-		return cancellationTxErr(err)
-	}
-	if err := ensureVPSCancellationNotBlocked(currentVPS, input.VPSLifecycleStatus); err != nil {
-		return assetlifecycle.LifecycleActionResult{}, err
-	}
-	preview, err := loadCancellationPreview(ctx, tx, currentVPS, true)
-	if err != nil {
-		return cancellationTxErr(err)
-	}
-	if preview.PreviewDigest != input.PreviewDigest {
-		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("%w: impact graph changed", assetlifecycle.ErrStaleCancellationPreview)
-	}
-	if err := validateCancellationSharedImpacts(vpsID, preview, input); err != nil {
-		return assetlifecycle.LifecycleActionResult{}, err
-	}
-
-	action, err = insertLifecycleAction(ctx, tx, currentVPS.VPSID, input)
-	if err != nil {
-		return cancellationTxErr(err)
-	}
-
-	steps := make([]assetlifecycle.LifecycleActionStep, 0, 1+len(input.SubscriptionIDs)+len(input.MonitoringInstanceActions)*2+len(input.TargetActions))
-	addStep := func(step assetlifecycle.LifecycleActionStep, err error) error {
-		if err != nil {
-			return err
-		}
-		steps = append(steps, step)
-		return nil
-	}
-
-	updatedVPS, err := applyVPSCancellationState(ctx, tx, action.ActionID, currentVPS, input)
-	if err != nil {
-		return assetlifecycle.LifecycleActionResult{}, recordFailedStep(steps, assetlifecycle.ObjectTypeVPS, currentVPS.VPSID, assetlifecycle.StepTypeVPSLifecycle, "VPS 取消/退役状态写入失败。", err)
-	}
-	if err := addStep(updatedVPS, nil); err != nil {
-		return assetlifecycle.LifecycleActionResult{}, err
-	}
-
-	for _, subscriptionID := range input.SubscriptionIDs {
-		step, err := applySubscriptionCancellationState(ctx, tx, action.ActionID, currentVPS.VPSID, subscriptionID)
-		if err != nil {
-			return assetlifecycle.LifecycleActionResult{}, recordFailedStep(steps, assetlifecycle.ObjectTypeSubscription, subscriptionID, assetlifecycle.StepTypeSubscriptionStatus, "订阅取消状态写入失败。", err)
-		}
-		steps = append(steps, step)
-	}
-	for _, monitoringInstanceAction := range input.MonitoringInstanceActions {
-		monitoringInstanceSteps, err := applyMonitoringInstanceLifecycleAction(ctx, tx, action.ActionID, currentVPS.VPSID, input.Reason, monitoringInstanceAction)
-		if err != nil {
-			stepType := assetlifecycle.StepTypeMonitoringInstanceLifecycle
-			if monitoringInstanceAction.LifecycleStatus == "" && monitoringInstanceAction.MonitoringStatus != "" {
-				stepType = assetlifecycle.StepTypeMonitoringInstanceMonitoring
-			}
-			return assetlifecycle.LifecycleActionResult{}, recordFailedStep(steps, assetlifecycle.ObjectTypeMonitoringInstance, monitoringInstanceAction.MonitoringInstanceID, stepType, "MonitoringInstance 生命周期或监控状态写入失败。", err)
-		}
-		steps = append(steps, monitoringInstanceSteps...)
-	}
-	for _, targetAction := range input.TargetActions {
-		step, err := applyTargetLifecycleAction(ctx, tx, action.ActionID, currentVPS.VPSID, targetAction)
-		if err != nil {
-			return assetlifecycle.LifecycleActionResult{}, recordFailedStep(steps, assetlifecycle.ObjectTypeTarget, targetAction.TargetID, assetlifecycle.StepTypeTargetRunStatus, "Target/实例运行状态写入失败。", err)
-		}
-		steps = append(steps, step)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		txClosed = true
-		if isRetryableLifecycleTxConflict(err) {
-			return assetlifecycle.LifecycleActionResult{}, wrapRetryableLifecycleTx(err)
-		}
-		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("commit asset lifecycle action %q: %w", action.ActionID, err)
-	}
-	txClosed = true
-	return assetlifecycle.LifecycleActionResult{Action: action, Steps: steps}, nil
 }
 
 func (r *PostgresAssetLifecycleRepository) ExtendVPSValidity(ctx context.Context, vpsID string, input assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionResult, error) {
@@ -447,37 +306,25 @@ func (r *PostgresAssetLifecycleRepository) ExtendVPSValidity(ctx context.Context
 	if err != nil {
 		return assetlifecycle.LifecycleActionResult{}, err
 	}
-	if currentVPS.LifecycleStatus == vpsassets.LifecycleCancelled || currentVPS.LifecycleStatus == vpsassets.LifecycleArchived {
-		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("%w: terminal VPS validity cannot be extended", assetlifecycle.ErrLifecycleActionBlocked)
+	if currentVPS.LifecycleStatus != vpsassets.LifecycleActive {
+		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("%w: archived VPS validity cannot be extended", assetlifecycle.ErrLifecycleActionBlocked)
 	}
-	currentSubscription, err := lockSingleActiveSubscriptionForValidityExtension(ctx, tx, vpsID)
+	before := map[string]any{"validity_mode": currentVPS.ValidityMode, "expires_at": currentVPS.ExpiresAt}
+	if _, err := tx.Exec(ctx, `update vps_assets set validity_mode='fixed',expires_at=$2,updated_at=now() where vps_id=$1`, vpsID, input.ExtendTo.Time); err != nil {
+		return assetlifecycle.LifecycleActionResult{}, err
+	}
+	action, err := insertAssetLifecycleAudit(ctx, tx, vpsID, assetlifecycle.ActionTypeExtendValidity, assetlifecycle.ActionStatusCompleted, input.Reason, map[string]any{"extend_to": input.ExtendTo.Time.Format(subscriptions.DateLayout), "fee": input.Fee, "fee_currency": input.FeeCurrency, "source_type": input.SourceType})
 	if err != nil {
 		return assetlifecycle.LifecycleActionResult{}, err
 	}
-
-	action, err := insertValidityExtensionAction(ctx, tx, currentVPS.VPSID, currentSubscription, input)
+	step, err := insertLifecycleStep(ctx, tx, action.ActionID, assetlifecycle.ObjectTypeVPS, vpsID, "vps_validity", assetlifecycle.StepStatusCompleted, before, map[string]any{"validity_mode": "fixed", "expires_at": input.ExtendTo.Time.Format(subscriptions.DateLayout)}, input.Reason)
 	if err != nil {
 		return assetlifecycle.LifecycleActionResult{}, err
 	}
-	step, err := applyValidityExtensionToSubscription(ctx, tx, action.ActionID, currentSubscription, input)
-	if err != nil {
-		return assetlifecycle.LifecycleActionResult{}, err
-	}
-
 	if err := tx.Commit(ctx); err != nil {
-		return assetlifecycle.LifecycleActionResult{}, fmt.Errorf("commit vps validity extension action %q: %w", action.ActionID, err)
+		return assetlifecycle.LifecycleActionResult{}, err
 	}
 	return assetlifecycle.LifecycleActionResult{Action: action, Steps: []assetlifecycle.LifecycleActionStep{step}}, nil
-}
-
-func ensureVPSCancellationNotBlocked(current vpsassets.Record, target vpsassets.LifecycleStatus) error {
-	if current.LifecycleStatus == vpsassets.LifecycleArchived {
-		return fmt.Errorf("%w: archived vps %q cannot be cancelled by lifecycle action", assetlifecycle.ErrLifecycleActionBlocked, current.VPSID)
-	}
-	if current.LifecycleStatus == vpsassets.LifecycleCancelled && target != vpsassets.LifecycleCancelled {
-		return fmt.Errorf("%w: cancelled vps %q must be archived and restored before reuse", assetlifecycle.ErrLifecycleActionBlocked, current.VPSID)
-	}
-	return nil
 }
 
 func buildVPSArchiveReview(ctx context.Context, queryer assetLifecycleQueryer, vps vpsassets.Record, vpsID string, lockSubscriptions bool) (assetlifecycle.ArchiveReview, error) {
@@ -510,40 +357,36 @@ func buildVPSArchiveReview(ctx context.Context, queryer assetLifecycleQueryer, v
 		Domains:                 domains,
 		TargetLinks:             targetLinks,
 	}
+	var associationJSON []byte
+	if err := queryer.QueryRow(ctx, `with refs as (select 'service' kind,to_jsonb(a) value,target_id,vps_id from asset_service_associations a where ended_at is null union all select 'domain',to_jsonb(a),target_id,vps_id from asset_domain_associations a where ended_at is null) select coalesce(jsonb_agg(value order by kind,value->>'id'),'[]'::jsonb) from refs where vps_id=$1 or target_id in(select target_id from refs where vps_id=$1)`, vpsID).Scan(&associationJSON); err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	review.AssociationDigest = fmt.Sprintf("%x", sha256.Sum256(associationJSON))
+	evidence, err := loadArchiveOnlineEvidence(ctx, queryer, vpsID, false)
+	if err != nil {
+		return assetlifecycle.ArchiveReview{}, err
+	}
+	var evidenceBlockers []assetlifecycle.BlockerDetail
+	review.ReceiverFaultGeneration = receiverFaultGeneration.Load()
+	review.OnlineEvidence, evidenceBlockers = assetlifecycle.EvaluateArchiveSafety(evidence)
 	review.BlockerDetails = archiveBlockerDetails(review)
+	review.BlockerDetails = append(review.BlockerDetails, evidenceBlockers...)
 	review.Warnings, review.Blockers = buildArchiveReviewFindings(review)
 	review.Eligible = len(review.Blockers) == 0
+	assetlifecycle.AttachArchivePreviewDigest(&review)
 	return review, nil
-}
-
-func (r *PostgresAssetLifecycleRepository) recordFailedVPSCancellation(
-	ctx context.Context,
-	vpsID string,
-	input assetlifecycle.ApplyCancellationInput,
-	action assetlifecycle.LifecycleActionRecord,
-	completedSteps []assetlifecycle.LifecycleActionStep,
-	objectType string,
-	objectID string,
-	stepType string,
-	message string,
-	cause error,
-) error {
-	if auditErr := recordFailedLifecycleAction(ctx, r.db, vpsID, input, action, completedSteps, objectType, objectID, stepType, message, cause); auditErr != nil {
-		return failedLifecycleAuditError{cause: cause, audit: auditErr}
-	}
-	return cause
 }
 
 func (r *PostgresAssetLifecycleRepository) ListTargetAssetContexts(ctx context.Context) ([]assetlifecycle.AssetContextForTarget, error) {
 	rows, err := r.db.Query(ctx, `
 		with target_assets as (
 			select target_id, vps_id, service_id, null::text as domain_id
-			from asset_services
-			where target_id is not null
+			from asset_service_associations
+			where target_id is not null and ended_at is null
 			union all
 			select target_id, vps_id, null::text as service_id, domain_id
-			from asset_domains
-			where target_id is not null
+			from asset_domain_associations
+			where target_id is not null and ended_at is null
 		)
 		select
 			ta.target_id,
@@ -575,7 +418,8 @@ func (r *PostgresAssetLifecycleRepository) ListTargetAssetContexts(ctx context.C
 			) as historical_auto_renew
 		from target_assets ta
 		join vps_assets v on v.vps_id = ta.vps_id
-		where v.lifecycle_status not in ('cancelled', 'archived')
+		join targets t on t.target_id=ta.target_id
+		where v.lifecycle_status='active' and t.lifecycle_status='active'
 		order by ta.target_id, lower(v.display_name), v.vps_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query target asset contexts: %w", err)
@@ -708,37 +552,9 @@ func listLifecycleSubscriptionsForVPS(ctx context.Context, queryer assetLifecycl
 }
 
 func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string, forUpdate bool) ([]assetlinks.MonitoringInstanceSummary, error) {
-	orderBy := "l.linked_at desc, n.display_name, n.monitoring_instance_id"
+	query := `select n.monitoring_instance_id,n.display_name,n."group",n.region,n.city,n.provider,n.lifecycle_status,n.monitoring_status,n.binding_status,` + monitoringHealthProjectionSQL("n", "(select lifecycle_status from vps_assets where vps_id=n.vps_id)") + `,n.last_heartbeat_at,n.last_sync_at,n.current_active_incident_count,n.current_primary_issue_summary,n.created_at,''::text,n.archived_at from monitoring_instances n where n.vps_id=$1 order by n.monitoring_instance_id`
 	if forUpdate {
-		orderBy = "n.monitoring_instance_id, l.linked_at desc, n.display_name"
-	}
-	query := `
-		select
-			n.monitoring_instance_id,
-			n.display_name,
-			n."group",
-			n.region,
-			n.city,
-			n.provider,
-			n.lifecycle_status,
-			n.monitoring_status,
-			n.binding_status,
-			n.current_health_status,
-			n.last_heartbeat_at,
-			n.last_sync_at,
-			n.current_active_incident_count,
-			n.current_primary_issue_summary,
-			l.linked_at,
-			l.note,
-			n.archived_at
-		from vps_monitoring_instance_links l
-		join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
-		where l.vps_id = $1
-		  and l.unlinked_at is null
-		order by ` + orderBy
-	if forUpdate {
-		query += `
-		for update of l, n`
+		query += ` for update of n`
 	}
 	rows, err := queryer.Query(ctx, query, vpsID)
 	if err != nil {
@@ -779,14 +595,9 @@ func listLifecycleMonitoringInstancesForVPS(ctx context.Context, queryer assetLi
 }
 
 func listLifecycleAssetServicesForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string, forUpdate bool) ([]assetservices.Record, error) {
-	query := `
-		select ` + assetServiceSelectColumns + `
-		from asset_services
-		where vps_id = $1
-		order by lower(name), service_id`
+	query := `select s.service_id,a.vps_id,a.target_id,s.name,s.service_type,s.status,a.address,a.port,s.labels,s.note,s.created_at,s.updated_at from asset_services s join asset_service_associations a using(service_id) where a.vps_id=$1 and a.ended_at is null order by lower(s.name),s.service_id`
 	if forUpdate {
-		query += `
-		for update`
+		query += ` for update of s,a`
 	}
 	rows, err := queryer.Query(ctx, query, vpsID)
 	if err != nil {
@@ -809,14 +620,9 @@ func listLifecycleAssetServicesForVPS(ctx context.Context, queryer assetLifecycl
 }
 
 func listLifecycleAssetDomainsForVPS(ctx context.Context, queryer assetLifecycleQueryer, vpsID string, forUpdate bool) ([]assetdomains.Record, error) {
-	query := `
-		select ` + assetDomainSelectColumns + `
-		from asset_domains
-		where vps_id = $1
-		order by lower(domain_name), domain_id`
+	query := `select d.domain_id,a.vps_id,a.service_id,a.target_id,d.domain_name,d.purpose,d.status,d.registrar,d.expires_at,d.auto_renew,d.https_enabled,d.labels,d.note,d.created_at,d.updated_at from asset_domains d join asset_domain_associations a using(domain_id) where a.vps_id=$1 and a.ended_at is null order by lower(d.domain_name),d.domain_id`
 	if forUpdate {
-		query += `
-		for update`
+		query += ` for update of d,a`
 	}
 	rows, err := queryer.Query(ctx, query, vpsID)
 	if err != nil {
@@ -922,842 +728,50 @@ func buildSubscriptionImpacts(records []subscriptions.Record) []assetlifecycle.S
 		switch record.Status {
 		case subscriptions.StatusActive:
 			impact.Role = "active"
-			impact.RecommendedAction = "cancel_auto_renew_and_mark_cancelled"
+			impact.RecommendedAction = "review_provider_auto_renew"
 		case subscriptions.StatusExpired, subscriptions.StatusCancelled, subscriptions.StatusPaused:
 			impact.Role = "inactive"
 			impact.RecommendedAction = "keep_inactive"
 		default:
 			impact.Role = "attention"
-			impact.RecommendedAction = "review_before_cancel"
+			impact.RecommendedAction = "review_billing_facts"
 		}
-		impact.Message = fmt.Sprintf("账单状态 %s；权益/续费来源 %s；auto_renew=%t，auto_renew_cancelled=%t。账单状态不代表自动续费已停止。", record.Status, record.RenewalMode, record.AutoRenew, record.AutoRenewCancelled)
+		impact.Message = fmt.Sprintf("账单状态 %s；续费方式 %s。归档保留账单事实，请独立核对服务商自动续费。", record.Status, record.RenewalMode)
 		if record.AutoRenew && record.Status != subscriptions.StatusActive {
 			impact.Role = "attention"
-			impact.RecommendedAction = "cancel_auto_renew_and_mark_cancelled"
+			impact.RecommendedAction = "review_provider_auto_renew"
 		}
 		impacts = append(impacts, impact)
 	}
 	return impacts
 }
 
-func buildCancellationRecommendedSteps(preview assetlifecycle.CancellationPreview, recommendedVPSLifecycle vpsassets.LifecycleStatus) []assetlifecycle.RecommendedLifecycleStep {
-	steps := make([]assetlifecycle.RecommendedLifecycleStep, 0)
-	if preview.VPS.LifecycleStatus != recommendedVPSLifecycle || preview.VPS.RenewalDecision != vpsassets.RenewalCancel {
-		steps = append(steps, assetlifecycle.RecommendedLifecycleStep{
-			ObjectType: assetlifecycle.ObjectTypeVPS,
-			ObjectID:   preview.VPS.VPSID,
-			StepType:   assetlifecycle.StepTypeVPSLifecycle,
-			FromState:  string(preview.VPS.LifecycleStatus) + "/" + string(preview.VPS.RenewalDecision),
-			ToState:    string(recommendedVPSLifecycle) + "/" + string(vpsassets.RenewalCancel),
-			Required:   true,
-			Message:    "将 VPS 续费决策设为 cancel，并根据订阅到期情况设置生命周期。",
-		})
-	}
-	for _, impact := range preview.Subscriptions {
-		if impact.Record.Status != subscriptions.StatusActive && !impact.Record.AutoRenew {
-			continue
-		}
-		steps = append(steps, assetlifecycle.RecommendedLifecycleStep{
-			ObjectType: assetlifecycle.ObjectTypeSubscription,
-			ObjectID:   impact.Record.SubscriptionID,
-			StepType:   assetlifecycle.StepTypeSubscriptionStatus,
-			FromState:  string(impact.Record.Status),
-			ToState:    string(subscriptions.StatusCancelled),
-			Required:   false,
-			Message:    "仅处理用户明确选择的订阅；未选账单及自动续费事实保持不变。",
-		})
-	}
-	for _, link := range preview.MonitoringInstanceLinks {
-		targetLifecycle := monitoringinstances.LifecycleNoRenewal
-		if recommendedVPSLifecycle == vpsassets.LifecycleCancelled {
-			targetLifecycle = monitoringinstances.LifecycleRetired
-		}
-		if link.LifecycleStatus != targetLifecycle {
-			steps = append(steps, assetlifecycle.RecommendedLifecycleStep{
-				ObjectType: assetlifecycle.ObjectTypeMonitoringInstance,
-				ObjectID:   link.MonitoringInstanceID,
-				StepType:   assetlifecycle.StepTypeMonitoringInstanceLifecycle,
-				FromState:  link.LifecycleStatus,
-				ToState:    targetLifecycle,
-				Required:   false,
-				Message:    "关联监控实例需要由用户确认后标记不续费或已退役。",
-			})
-		}
-		if recommendedVPSLifecycle == vpsassets.LifecycleCancelled && link.MonitoringStatus != monitoringinstances.MonitoringPaused {
-			steps = append(steps, assetlifecycle.RecommendedLifecycleStep{
-				ObjectType: assetlifecycle.ObjectTypeMonitoringInstance,
-				ObjectID:   link.MonitoringInstanceID,
-				StepType:   assetlifecycle.StepTypeMonitoringInstanceMonitoring,
-				FromState:  link.MonitoringStatus,
-				ToState:    monitoringinstances.MonitoringPaused,
-				Required:   false,
-				Message:    "已实际退役的监控实例可在确认后暂停监控。",
-			})
-		}
-	}
-	for _, target := range preview.TargetLinks {
-		if target.RunStatus == targets.RunStatusArchived {
-			continue
-		}
-		steps = append(steps, assetlifecycle.RecommendedLifecycleStep{
-			ObjectType: assetlifecycle.ObjectTypeTarget,
-			ObjectID:   target.TargetID,
-			StepType:   assetlifecycle.StepTypeTargetRunStatus,
-			FromState:  target.RunStatus,
-			ToState:    targets.RunStatusArchived,
-			Required:   false,
-			Message:    "随 VPS 下线的 Target/实例应由用户确认后归档。",
-		})
-	}
-	return steps
-}
-
-func buildCancellationPreviewFindings(preview assetlifecycle.CancellationPreview) ([]string, []string) {
-	warnings := make([]string, 0)
-	blockers := make([]string, 0)
-
-	activeSubscriptions := 0
-	inactiveSubscriptions := 0
-	entitlementEvidence := 0
-	for _, impact := range preview.Subscriptions {
-		if impact.Record.AutoRenew && impact.Record.Status != subscriptions.StatusActive {
-			warnings = append(warnings, fmt.Sprintf("订阅 %s 的账单状态为 %s，但 auto_renew=true；仍须显式处理自动续费。", impact.Record.SubscriptionID, impact.Record.Status))
-		}
-		switch {
-		case impact.Record.Status == subscriptions.StatusActive:
-			activeSubscriptions++
-		case isCancelledEntitlementEvidence(impact.Record):
-			entitlementEvidence++
-		case isInactiveSubscriptionEvidence(impact.Record.Status):
-			inactiveSubscriptions++
-		}
-	}
-
-	if len(preview.Subscriptions) == 0 {
-		warnings = append(warnings, "没有找到关联订阅；仍可继续处理 VPS、MonitoringInstance 与实例生命周期。")
-	}
-	if activeSubscriptions == 0 && entitlementEvidence == 0 && inactiveSubscriptions > 0 {
-		warnings = append(warnings, "仅有关联历史或待确认账单记录；自动续费与权益终点须分别核对，不能据账单状态推定服务已停止。")
-	}
-	if activeSubscriptions > 1 {
-		warnings = append(warnings, "存在多条 active 订阅，执行取消时必须显式选择要处理的订阅。")
-	}
-	if preview.VPS.LifecycleStatus == vpsassets.LifecycleArchived {
-		blockers = append(blockers, "VPS 已归档，普通取消/退役动作不应再修改归档资产。")
-	}
-
-	runningMonitoringInstances := 0
-	for _, link := range preview.MonitoringInstanceLinks {
-		if link.LifecycleStatus != monitoringinstances.LifecycleNoRenewal && link.LifecycleStatus != monitoringinstances.LifecycleRetired {
-			runningMonitoringInstances++
-		}
-	}
-	if runningMonitoringInstances > 0 {
-		warnings = append(warnings, fmt.Sprintf("仍有 %d 个关联 MonitoringInstance 未标记不续费或已退役。", runningMonitoringInstances))
-	}
-
-	runningTargets := 0
-	for _, target := range preview.TargetLinks {
-		if target.RunStatus != targets.RunStatusArchived && target.RunStatus != targets.RunStatusPaused {
-			runningTargets++
-		}
-	}
-	if runningTargets > 0 {
-		warnings = append(warnings, fmt.Sprintf("仍有 %d 个关联 Target/实例处于运行或维护状态。", runningTargets))
-	}
-
-	return warnings, blockers
-}
-
 func buildArchiveReviewFindings(review assetlifecycle.ArchiveReview) ([]string, []string) {
 	warnings := make([]string, 0)
 	blockers := make([]string, 0)
 
-	switch review.VPS.LifecycleStatus {
-	case vpsassets.LifecycleArchived:
-		blockers = append(blockers, "VPS 已归档，只能在归档详情页只读查看或执行受控恢复。")
-	case vpsassets.LifecycleCancelled:
-		warnings = append(warnings, "VPS 已取消，可以归档为只读历史资产。")
-	case vpsassets.LifecycleToCancel:
-		warnings = append(warnings, "VPS 仍处于待取消，归档后将进入只读历史边界。")
-	default:
-		blockers = append(blockers, "只有待取消或已取消的 VPS 可以归档。")
+	if len(review.Subscriptions) == 0 {
+		warnings = append(warnings, "没有订阅记录；资源有效期与服务商扣费请独立核对。")
 	}
-
-	for _, detail := range archiveBlockerDetails(review) {
-		if detail.ObjectType != assetlifecycle.ObjectTypeVPS {
-			blockers = append(blockers, archiveBlockerMessage(detail))
+	if len(review.Services) == 0 {
+		warnings = append(warnings, "没有服务关联。")
+	}
+	if len(review.Domains) == 0 {
+		warnings = append(warnings, "没有域名关联。")
+	}
+	for _, impact := range review.Subscriptions {
+		if impact.Record.Status == subscriptions.StatusActive || impact.Record.AutoRenew {
+			warnings = append(warnings, "订阅仍可能产生费用，归档不会更改服务商续费事实。")
 		}
+	}
+	if review.OnlineEvidence.ManualConfirmationRequired {
+		warnings = append(warnings, "此 VPS 从未形成有效 Agent 会话，归档须人工确认并说明原因。")
+	}
+	for _, detail := range review.BlockerDetails {
+		blockers = append(blockers, archiveBlockerMessage(detail))
 	}
 
 	return warnings, blockers
-}
-
-const cancellationRecommendationConfirmationWarning = "取消建议需人工确认：当前权益证据缺失、日期不明或存在账单/自动续费事实矛盾；不能仅凭历史订阅推定已取消。"
-
-func recommendedVPSCancellationLifecycle(preview assetlifecycle.CancellationPreview, today subscriptions.Date) (vpsassets.LifecycleStatus, string) {
-	if preview.VPS.LifecycleStatus == vpsassets.LifecycleCancelled {
-		return vpsassets.LifecycleCancelled, ""
-	}
-	evidence, future, uncertain := 0, false, false
-	for _, impact := range preview.Subscriptions {
-		record := impact.Record
-		if record.Status == subscriptions.StatusUnknown || record.Status != subscriptions.StatusActive && record.AutoRenew {
-			uncertain = true
-		}
-		if record.Status != subscriptions.StatusActive && !isCancelledEntitlementEvidence(record) {
-			continue
-		}
-		evidence++
-		end := subscriptionEntitlementEnd(record)
-		if end == nil {
-			uncertain = true
-			continue
-		}
-		if record.StartedAt != nil && record.StartedAt.Time.After(end.Time) || record.EndsAt != nil && record.RenewAt != nil && record.RenewAt.Time.After(record.EndsAt.Time) {
-			uncertain = true
-		}
-		expectedAuto, expectedCancelled := subscriptions.LegacyRenewalFlags(record.RenewalMode)
-		if record.AutoRenew != expectedAuto || record.AutoRenewCancelled != expectedCancelled {
-			uncertain = true
-		}
-		if end.Time.After(today.Time) {
-			future = true
-		} else if record.AutoRenew {
-			uncertain = true
-		}
-	}
-	if evidence == 0 || uncertain {
-		return vpsassets.LifecycleToCancel, cancellationRecommendationConfirmationWarning
-	}
-	if future {
-		return vpsassets.LifecycleToCancel, ""
-	}
-	return vpsassets.LifecycleCancelled, ""
-}
-
-// subscriptionEntitlementEnd returns ends_at, falling back to renew_at only for
-// non-source renewal modes; gift/lottery/bonus/other renewal dates never imply
-// an entitlement end.
-func subscriptionEntitlementEnd(record subscriptions.Record) *subscriptions.Date {
-	if record.EndsAt != nil {
-		return record.EndsAt
-	}
-	switch subscriptions.RenewalMode(record.RenewalMode) {
-	case subscriptions.RenewalModeGift, subscriptions.RenewalModeLottery, subscriptions.RenewalModeBonus, subscriptions.RenewalModeOther:
-		return nil
-	}
-	return record.RenewAt
-}
-
-// isCancelledEntitlementEvidence reports whether a cancelled subscription still
-// states a determinable entitlement end with renewal off, making it current
-// entitlement evidence rather than history.
-func isCancelledEntitlementEvidence(record subscriptions.Record) bool {
-	return record.Status == subscriptions.StatusCancelled && !record.AutoRenew && subscriptionEntitlementEnd(record) != nil
-}
-
-func insertLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID string, input assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionRecord, error) {
-	actionID, err := ids.New("ala")
-	if err != nil {
-		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("generate asset lifecycle action id: %w", err)
-	}
-	now := time.Now().UTC()
-	summary := map[string]any{
-		"subscription_count":               len(input.SubscriptionIDs),
-		"monitoring_instance_action_count": len(input.MonitoringInstanceActions),
-		"target_action_count":              len(input.TargetActions),
-		"vps_lifecycle_status":             string(input.VPSLifecycleStatus),
-		"renewal_decision":                 string(vpsassets.RenewalCancel),
-		"confirmed_by_workbench":           true,
-	}
-	summaryJSON, err := json.Marshal(summary)
-	if err != nil {
-		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("marshal asset lifecycle action summary: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		insert into asset_lifecycle_actions (
-			action_id,
-			vps_id,
-			action_type,
-			status,
-			reason,
-			effective_date,
-			summary,
-			created_at,
-			confirmed_at,
-			completed_at
-		) values ($1,$2,$3,$4,$5,$6::date,$7::jsonb,$8,$8,$8)`,
-		actionID,
-		vpsID,
-		string(assetlifecycle.ActionTypeCancelVPS),
-		assetlifecycle.ActionStatusCompleted,
-		input.Reason,
-		subscriptionDateArg(input.EffectiveDate),
-		summaryJSON,
-		now,
-	); err != nil {
-		if isLifecycleActionInvalidPostgresError(err) {
-			return assetlifecycle.LifecycleActionRecord{}, assetlifecycle.ErrInvalidLifecycleActionInput
-		}
-		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("insert asset lifecycle action for vps %q: %w", vpsID, err)
-	}
-
-	return assetlifecycle.LifecycleActionRecord{
-		ActionID:      actionID,
-		VPSID:         vpsID,
-		ActionType:    assetlifecycle.ActionTypeCancelVPS,
-		Status:        assetlifecycle.ActionStatusCompleted,
-		Reason:        input.Reason,
-		EffectiveDate: cloneSubscriptionDate(input.EffectiveDate),
-		CreatedAt:     now,
-		ConfirmedAt:   &now,
-		CompletedAt:   &now,
-		Summary:       summary,
-	}, nil
-}
-
-func insertValidityExtensionAction(ctx context.Context, tx pgx.Tx, vpsID string, currentSubscription subscriptions.Record, input assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionRecord, error) {
-	actionID, err := ids.New("ala")
-	if err != nil {
-		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("generate asset lifecycle action id: %w", err)
-	}
-	now := time.Now().UTC()
-	summary := map[string]any{
-		"subscription_id": currentSubscription.SubscriptionID,
-		"old_renew_at":    subscriptionDateState(currentSubscription.RenewAt),
-		"new_renew_at":    subscriptionDateState(input.ExtendTo),
-		"fee":             input.Fee,
-		"fee_currency":    input.FeeCurrency,
-		"source_type":     input.SourceType,
-	}
-	summaryJSON, err := json.Marshal(summary)
-	if err != nil {
-		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("marshal validity extension action summary: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		insert into asset_lifecycle_actions (
-			action_id,
-			vps_id,
-			action_type,
-			status,
-			reason,
-			effective_date,
-			summary,
-			created_at,
-			confirmed_at,
-			completed_at
-		) values ($1,$2,$3,$4,$5,$6::date,$7::jsonb,$8,$8,$8)`,
-		actionID,
-		vpsID,
-		string(assetlifecycle.ActionTypeExtendValidity),
-		assetlifecycle.ActionStatusCompleted,
-		input.Reason,
-		subscriptionDateArg(input.ExtendTo),
-		summaryJSON,
-		now,
-	); err != nil {
-		if isLifecycleActionInvalidPostgresError(err) {
-			return assetlifecycle.LifecycleActionRecord{}, assetlifecycle.ErrInvalidLifecycleActionInput
-		}
-		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("insert validity extension action for vps %q: %w", vpsID, err)
-	}
-
-	return assetlifecycle.LifecycleActionRecord{
-		ActionID:      actionID,
-		VPSID:         vpsID,
-		ActionType:    assetlifecycle.ActionTypeExtendValidity,
-		Status:        assetlifecycle.ActionStatusCompleted,
-		Reason:        input.Reason,
-		EffectiveDate: cloneSubscriptionDate(input.ExtendTo),
-		CreatedAt:     now,
-		ConfirmedAt:   &now,
-		CompletedAt:   &now,
-		Summary:       summary,
-	}, nil
-}
-
-func recordFailedLifecycleAction(
-	ctx context.Context,
-	db assetLifecycleDB,
-	vpsID string,
-	input assetlifecycle.ApplyCancellationInput,
-	attemptedAction assetlifecycle.LifecycleActionRecord,
-	completedSteps []assetlifecycle.LifecycleActionStep,
-	objectType string,
-	objectID string,
-	stepType string,
-	message string,
-	cause error,
-) error {
-	failureTx, err := db.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin failed asset lifecycle action audit transaction: %w", err)
-	}
-	defer func() { _ = failureTx.Rollback(ctx) }()
-
-	failedAction, err := insertFailedLifecycleAction(ctx, failureTx, vpsID, input, attemptedAction, completedSteps, cause)
-	if err != nil {
-		return err
-	}
-	beforeState := map[string]any{
-		"completed_step_count": len(completedSteps),
-	}
-	afterState := map[string]any{
-		"error": cause.Error(),
-	}
-	if objectID == "" {
-		objectID = vpsID
-	}
-	if message == "" {
-		message = "生命周期动作执行失败。"
-	}
-	if _, err := insertLifecycleStep(ctx, failureTx, failedAction.ActionID, objectType, objectID, stepType, assetlifecycle.StepStatusFailed, beforeState, afterState, message+" "+cause.Error()); err != nil {
-		return err
-	}
-	if err := failureTx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit failed asset lifecycle action audit %q: %w", failedAction.ActionID, err)
-	}
-	return nil
-}
-
-func insertFailedLifecycleAction(
-	ctx context.Context,
-	tx pgx.Tx,
-	vpsID string,
-	input assetlifecycle.ApplyCancellationInput,
-	attemptedAction assetlifecycle.LifecycleActionRecord,
-	completedSteps []assetlifecycle.LifecycleActionStep,
-	cause error,
-) (assetlifecycle.LifecycleActionRecord, error) {
-	actionID := attemptedAction.ActionID
-	if strings.TrimSpace(actionID) == "" {
-		var err error
-		actionID, err = ids.New("ala")
-		if err != nil {
-			return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("generate failed asset lifecycle action id: %w", err)
-		}
-	}
-	now := time.Now().UTC()
-	summary := map[string]any{
-		"subscription_count":               len(input.SubscriptionIDs),
-		"monitoring_instance_action_count": len(input.MonitoringInstanceActions),
-		"target_action_count":              len(input.TargetActions),
-		"vps_lifecycle_status":             string(input.VPSLifecycleStatus),
-		"renewal_decision":                 string(vpsassets.RenewalCancel),
-		"confirmed_by_workbench":           true,
-		"completed_step_count":             len(completedSteps),
-		"failure_reason":                   cause.Error(),
-	}
-	summaryJSON, err := json.Marshal(summary)
-	if err != nil {
-		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("marshal failed asset lifecycle action summary: %w", err)
-	}
-	if _, err := tx.Exec(ctx, `
-		insert into asset_lifecycle_actions (
-			action_id,
-			vps_id,
-			action_type,
-			status,
-			reason,
-			effective_date,
-			summary,
-			created_at,
-			confirmed_at,
-			completed_at
-		) values ($1,$2,$3,$4,$5,$6::date,$7::jsonb,$8,$8,$8)`,
-		actionID,
-		vpsID,
-		string(assetlifecycle.ActionTypeCancelVPS),
-		assetlifecycle.ActionStatusFailed,
-		input.Reason,
-		subscriptionDateArg(input.EffectiveDate),
-		summaryJSON,
-		now,
-	); err != nil {
-		if isLifecycleActionInvalidPostgresError(err) {
-			return assetlifecycle.LifecycleActionRecord{}, assetlifecycle.ErrInvalidLifecycleActionInput
-		}
-		return assetlifecycle.LifecycleActionRecord{}, fmt.Errorf("insert failed asset lifecycle action for vps %q: %w", vpsID, err)
-	}
-
-	return assetlifecycle.LifecycleActionRecord{
-		ActionID:      actionID,
-		VPSID:         vpsID,
-		ActionType:    assetlifecycle.ActionTypeCancelVPS,
-		Status:        assetlifecycle.ActionStatusFailed,
-		Reason:        input.Reason,
-		EffectiveDate: cloneSubscriptionDate(input.EffectiveDate),
-		CreatedAt:     now,
-		ConfirmedAt:   &now,
-		CompletedAt:   &now,
-		Summary:       summary,
-	}, nil
-}
-
-func applyVPSCancellationState(ctx context.Context, tx pgx.Tx, actionID string, current vpsassets.Record, input assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionStep, error) {
-	before := map[string]any{
-		"lifecycle_status": string(current.LifecycleStatus),
-		"usage_status":     string(current.UsageStatus),
-		"renewal_decision": string(current.RenewalDecision),
-	}
-	patch := vpsassets.PatchInput{}
-	if current.LifecycleStatus != input.VPSLifecycleStatus {
-		patch.LifecycleStatus = vpsassets.PatchLifecycle(input.VPSLifecycleStatus)
-	}
-	if input.VPSLifecycleStatus == vpsassets.LifecycleCancelled && current.UsageStatus == vpsassets.UsageInUse {
-		patch.UsageStatus = vpsassets.PatchUsage(vpsassets.UsageIdle)
-	}
-	if current.RenewalDecision != vpsassets.RenewalCancel {
-		patch.RenewalDecision = vpsassets.PatchRenewal(vpsassets.RenewalCancel)
-		patch.RenewalReason = vpsassets.PatchString(input.Reason)
-	}
-
-	if !patch.HasChanges() {
-		return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeVPS, current.VPSID, assetlifecycle.StepTypeVPSLifecycle, assetlifecycle.StepStatusSkipped, before, before, "VPS 已处于确认的取消状态。")
-	}
-	patch = vpsassets.NormalizePatchInput(patch)
-	if err := vpsassets.ValidatePatchInput(patch); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, err
-	}
-	if err := validateMergedVPSAssetPatch(current, patch); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, err
-	}
-
-	updated, err := patchVPSAssetRow(ctx, tx, current.VPSID, patch, false)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return assetlifecycle.LifecycleActionStep{}, vpsassets.ErrVPSAssetNotFound
-	}
-	if err != nil {
-		if isVPSAssetInvalidPostgresError(err) {
-			return assetlifecycle.LifecycleActionStep{}, vpsassets.ErrInvalidVPSAssetInput
-		}
-		return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("patch vps %q for lifecycle action: %w", current.VPSID, err)
-	}
-	if err := recordVPSAssetHistoryChanges(ctx, tx, current, updated, patch); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, err
-	}
-	after := map[string]any{
-		"lifecycle_status": string(updated.LifecycleStatus),
-		"usage_status":     string(updated.UsageStatus),
-		"renewal_decision": string(updated.RenewalDecision),
-	}
-	return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeVPS, current.VPSID, assetlifecycle.StepTypeVPSLifecycle, assetlifecycle.StepStatusCompleted, before, after, "VPS 取消/退役状态已确认。")
-}
-
-func applySubscriptionCancellationState(ctx context.Context, tx pgx.Tx, actionID, vpsID, subscriptionID string) (assetlifecycle.LifecycleActionStep, error) {
-	current, err := lockSubscriptionForLifecycleAction(ctx, tx, vpsID, subscriptionID)
-	if err != nil {
-		return assetlifecycle.LifecycleActionStep{}, err
-	}
-	before := subscriptionLifecycleState(current)
-
-	patch := subscriptions.PatchInput{}
-	switch current.Status {
-	case subscriptions.StatusExpired, subscriptions.StatusCancelled:
-	default:
-		patch.Status = subscriptions.PatchStatus(subscriptions.StatusCancelled)
-	}
-	patch.AutoRenew = subscriptions.PatchBool(false)
-	patch.AutoRenewCancelled = subscriptions.PatchBool(true)
-
-	patch = subscriptions.NormalizePatchAgainstRecord(current, patch)
-	next := applySubscriptionPatchPreview(current, patch)
-	if next.Status == current.Status && !subscriptionPriceHistoryChanged(current, next) {
-		return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeSubscription, current.SubscriptionID, assetlifecycle.StepTypeSubscriptionStatus, assetlifecycle.StepStatusSkipped, before, before, "订阅已处于非活跃或取消自动续费状态。")
-	}
-	if err := subscriptions.ValidatePatchInput(patch); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, err
-	}
-	updated, err := patchSubscriptionRow(ctx, tx, current.SubscriptionID, patch)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrSubscriptionNotFound
-	}
-	if err != nil {
-		if isSubscriptionInvalidPostgresError(err) {
-			return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrInvalidSubscriptionInput
-		}
-		return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("patch subscription %q for lifecycle action: %w", current.SubscriptionID, err)
-	}
-	if subscriptionPriceHistoryChanged(current, updated) {
-		if _, err := createPriceHistory(ctx, tx, renewals.CreatePriceHistoryInput{
-			From: current,
-			To:   updated,
-		}); err != nil {
-			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
-				return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrInvalidSubscriptionInput
-			}
-			return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("record price history for subscription %q: %w", current.SubscriptionID, err)
-		}
-	}
-	return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeSubscription, current.SubscriptionID, assetlifecycle.StepTypeSubscriptionStatus, assetlifecycle.StepStatusCompleted, before, subscriptionLifecycleState(updated), "订阅取消状态已确认。")
-}
-
-func lockSubscriptionForLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID, subscriptionID string) (subscriptions.Record, error) {
-	record, err := scanSubscription(tx.QueryRow(ctx, `
-		select `+subscriptionSelectColumns+`
-		from subscriptions
-		where vps_id = $1
-		  and subscription_id = $2
-		for update`, vpsID, subscriptionID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return subscriptions.Record{}, fmt.Errorf("%w: subscription %q is not associated with vps %q", assetlifecycle.ErrInvalidLifecycleActionInput, subscriptionID, vpsID)
-	}
-	if err != nil {
-		return subscriptions.Record{}, fmt.Errorf("lock subscription %q for lifecycle action: %w", subscriptionID, err)
-	}
-	return record, nil
-}
-
-func lockSingleActiveSubscriptionForValidityExtension(ctx context.Context, tx pgx.Tx, vpsID string) (subscriptions.Record, error) {
-	records, err := listLifecycleSubscriptionsForVPS(ctx, tx, vpsID, true)
-	if err != nil {
-		return subscriptions.Record{}, err
-	}
-	activeRecords := make([]subscriptions.Record, 0, 1)
-	for _, record := range records {
-		if record.Status == subscriptions.StatusActive {
-			activeRecords = append(activeRecords, record)
-		}
-	}
-	if len(activeRecords) == 0 {
-		return subscriptions.Record{}, fmt.Errorf("%w: active subscription is required for validity extension", assetlifecycle.ErrLifecycleActionBlocked)
-	}
-	if len(activeRecords) > 1 {
-		return subscriptions.Record{}, fmt.Errorf("%w: multiple active subscriptions require manual selection before validity extension", assetlifecycle.ErrLifecycleActionBlocked)
-	}
-	return activeRecords[0], nil
-}
-
-func applyValidityExtensionToSubscription(ctx context.Context, tx pgx.Tx, actionID string, current subscriptions.Record, input assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionStep, error) {
-	before := subscriptionValidityState(current)
-	if current.RenewAt != nil && current.RenewAt.Time.Equal(input.ExtendTo.Time) {
-		return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeSubscription, current.SubscriptionID, assetlifecycle.StepTypeSubscriptionRenewAt, assetlifecycle.StepStatusSkipped, before, before, "订阅有效期已经是目标日期。")
-	}
-	if current.RenewAt != nil && input.ExtendTo.Time.Before(current.RenewAt.Time) {
-		return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("%w: extend_to must not be before current renew_at", assetlifecycle.ErrInvalidLifecycleActionInput)
-	}
-
-	patch := subscriptions.NormalizePatchInput(subscriptions.PatchInput{
-		RenewAt: subscriptions.PatchDate(input.ExtendTo),
-	})
-	if err := subscriptions.ValidatePatchInput(patch); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, err
-	}
-	updated, err := patchSubscriptionRow(ctx, tx, current.SubscriptionID, patch)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrSubscriptionNotFound
-	}
-	if err != nil {
-		if isSubscriptionInvalidPostgresError(err) {
-			return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrInvalidSubscriptionInput
-		}
-		return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("patch subscription %q for validity extension: %w", current.SubscriptionID, err)
-	}
-	if subscriptionPriceHistoryChanged(current, updated) {
-		if _, err := createPriceHistory(ctx, tx, renewals.CreatePriceHistoryInput{
-			From: current,
-			To:   updated,
-		}); err != nil {
-			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
-				return assetlifecycle.LifecycleActionStep{}, subscriptions.ErrInvalidSubscriptionInput
-			}
-			return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("record price history for subscription %q validity extension: %w", current.SubscriptionID, err)
-		}
-	}
-	return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeSubscription, current.SubscriptionID, assetlifecycle.StepTypeSubscriptionRenewAt, assetlifecycle.StepStatusCompleted, before, subscriptionValidityState(updated), "订阅续费/有效期日期已延长。")
-}
-
-func applyMonitoringInstanceLifecycleAction(ctx context.Context, tx pgx.Tx, actionID, vpsID, reason string, input assetlifecycle.MonitoringInstanceActionInput) ([]assetlifecycle.LifecycleActionStep, error) {
-	current, err := lockMonitoringInstanceForLifecycleAction(ctx, tx, vpsID, input.MonitoringInstanceID)
-	if err != nil {
-		return nil, err
-	}
-	if current.ArchivedAt != nil {
-		return nil, fmt.Errorf("%w: archived monitoring instance must be restored separately", assetlifecycle.ErrLifecycleActionBlocked)
-	}
-	steps := make([]assetlifecycle.LifecycleActionStep, 0, 2)
-	if input.LifecycleStatus != "" {
-		step, updated, err := applyMonitoringInstanceLifecycleStatus(ctx, tx, actionID, current, input.LifecycleStatus, reason)
-		if err != nil {
-			return nil, err
-		}
-		steps = append(steps, step)
-		current = updated
-	}
-	if input.MonitoringStatus != "" {
-		step, updated, err := applyMonitoringInstanceMonitoringStatus(ctx, tx, actionID, current, input.MonitoringStatus)
-		if err != nil {
-			return nil, err
-		}
-		steps = append(steps, step)
-		current = updated
-	}
-	return steps, nil
-}
-
-func lockMonitoringInstanceForLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID, monitoringInstanceID string) (monitoringinstances.Record, error) {
-	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
-		select `+qualifiedMonitoringInstanceSelectColumns("n")+`
-		from vps_monitoring_instance_links l
-		join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
-		where l.vps_id = $1
-		  and l.monitoring_instance_id = $2
-		  and l.unlinked_at is null
-		for update of l, n`, vpsID, monitoringInstanceID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return monitoringinstances.Record{}, fmt.Errorf("%w: monitoring instance %q is not actively linked to vps %q", assetlifecycle.ErrInvalidLifecycleActionInput, monitoringInstanceID, vpsID)
-	}
-	if err != nil {
-		return monitoringinstances.Record{}, fmt.Errorf("lock monitoring instance %q for lifecycle action: %w", monitoringInstanceID, err)
-	}
-	return record, nil
-}
-
-func applyMonitoringInstanceLifecycleStatus(ctx context.Context, tx pgx.Tx, actionID string, current monitoringinstances.Record, nextStatus, reason string) (assetlifecycle.LifecycleActionStep, monitoringinstances.Record, error) {
-	before := map[string]any{"lifecycle_status": current.LifecycleStatus}
-	if nextStatus == monitoringinstances.LifecycleRetired {
-		updated, changed, err := retireMonitoringInstanceTx(ctx, tx, current.MonitoringInstanceID, reason)
-		if err != nil {
-			return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, err
-		}
-		status := assetlifecycle.StepStatusCompleted
-		if !changed {
-			status = assetlifecycle.StepStatusSkipped
-		}
-		before["monitoring_status"] = current.MonitoringStatus
-		step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceLifecycle, status, before, map[string]any{"lifecycle_status": updated.LifecycleStatus, "monitoring_status": updated.MonitoringStatus}, "监控实例退役及残留整理已确认。")
-		return step, updated, err
-	}
-	if current.LifecycleStatus == monitoringinstances.LifecycleRetired {
-		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, fmt.Errorf("%w: retired monitoring instance must be restored separately", assetlifecycle.ErrLifecycleActionBlocked)
-	}
-	if current.LifecycleStatus == nextStatus {
-		step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceLifecycle, assetlifecycle.StepStatusSkipped, before, before, "监控实例生命周期已处于确认状态。")
-		return step, current, err
-	}
-
-	updated, err := scanMonitoringInstance(tx.QueryRow(ctx, `
-		update monitoring_instances
-		set lifecycle_status = $2,
-		    updated_at = now()
-		where monitoring_instance_id = $1
-		returning `+monitoringInstanceSelectColumns,
-		current.MonitoringInstanceID,
-		nextStatus,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
-	}
-	if err != nil {
-		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, fmt.Errorf("update monitoring instance %q lifecycle for asset lifecycle action: %w", current.MonitoringInstanceID, err)
-	}
-	summary := fmt.Sprintf("监控实例生命周期已更新为%s", nextStatus)
-	if err := insertMonitoringInstanceLifecycleEvent(ctx, tx, updated, incidents.EventMonitoringInstanceLifecycleUpdated, summary, "", current.LifecycleStatus, updated.LifecycleStatus, monitoringEventProvenanceCenter); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, err
-	}
-	after := map[string]any{"lifecycle_status": updated.LifecycleStatus}
-	step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceLifecycle, assetlifecycle.StepStatusCompleted, before, after, "监控实例生命周期状态已确认。")
-	return step, updated, err
-}
-
-func applyMonitoringInstanceMonitoringStatus(ctx context.Context, tx pgx.Tx, actionID string, current monitoringinstances.Record, nextStatus string) (assetlifecycle.LifecycleActionStep, monitoringinstances.Record, error) {
-	before := map[string]any{"monitoring_status": current.MonitoringStatus}
-	if current.MonitoringStatus == nextStatus {
-		step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceMonitoring, assetlifecycle.StepStatusSkipped, before, before, "监控实例监控状态已处于确认状态。")
-		return step, current, err
-	}
-
-	updated, err := scanMonitoringInstance(tx.QueryRow(ctx, `
-		update monitoring_instances
-		set monitoring_status = $2,
-		    updated_at = now()
-		where monitoring_instance_id = $1
-		returning `+monitoringInstanceSelectColumns,
-		current.MonitoringInstanceID,
-		nextStatus,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound
-	}
-	if err != nil {
-		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, fmt.Errorf("update monitoring instance %q monitoring for asset lifecycle action: %w", current.MonitoringInstanceID, err)
-	}
-	eventType, summary := monitoringInstanceMonitoringEventForStatus(current.MonitoringStatus, nextStatus)
-	if err := insertMonitoringInstanceRuntimeEvent(ctx, tx, updated, eventType, summary, current.MonitoringStatus, monitoringEventProvenanceCenter); err != nil {
-		return assetlifecycle.LifecycleActionStep{}, monitoringinstances.Record{}, err
-	}
-	after := map[string]any{"monitoring_status": updated.MonitoringStatus}
-	step, err := insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeMonitoringInstance, current.MonitoringInstanceID, assetlifecycle.StepTypeMonitoringInstanceMonitoring, assetlifecycle.StepStatusCompleted, before, after, "监控实例监控状态已确认。")
-	return step, updated, err
-}
-
-func monitoringInstanceMonitoringEventForStatus(previousStatus, nextStatus string) (incidents.EventType, string) {
-	switch nextStatus {
-	case monitoringinstances.MonitoringMaintenance:
-		return incidents.EventMonitoringInstanceMonitoringMaintenanceEntered, "监控实例已进入维护"
-	case monitoringinstances.MonitoringPaused:
-		return incidents.EventMonitoringInstanceMonitoringPaused, "监控实例监控已暂停"
-	default:
-		if previousStatus == monitoringinstances.MonitoringMaintenance {
-			return incidents.EventMonitoringInstanceMonitoringMaintenanceExited, "监控实例已退出维护"
-		}
-		return incidents.EventMonitoringInstanceMonitoringResumed, "监控实例监控已恢复"
-	}
-}
-
-func applyTargetLifecycleAction(ctx context.Context, tx pgx.Tx, actionID, vpsID string, input assetlifecycle.TargetActionInput) (assetlifecycle.LifecycleActionStep, error) {
-	current, err := lockTargetForLifecycleAction(ctx, tx, vpsID, input.TargetID)
-	if err != nil {
-		return assetlifecycle.LifecycleActionStep{}, err
-	}
-	before := map[string]any{"run_status": current.RunStatus}
-	action := "pause"
-	if input.RunStatus == targets.RunStatusArchived {
-		action = "archive"
-	}
-	updated, changed, err := transitionTargetTx(ctx, tx, current.TargetID, action)
-	if err != nil {
-		if errors.Is(err, ErrInvalidTargetRuntimeTransition) {
-			return assetlifecycle.LifecycleActionStep{}, fmt.Errorf("%w: %v", assetlifecycle.ErrLifecycleActionBlocked, err)
-		}
-		return assetlifecycle.LifecycleActionStep{}, err
-	}
-	status := assetlifecycle.StepStatusCompleted
-	if !changed {
-		status = assetlifecycle.StepStatusSkipped
-	}
-	after := map[string]any{"run_status": updated.RunStatus}
-	return insertLifecycleStep(ctx, tx, actionID, assetlifecycle.ObjectTypeTarget, current.TargetID, assetlifecycle.StepTypeTargetRunStatus, status, before, after, "Target/实例运行状态已确认。")
-}
-
-func lockTargetForLifecycleAction(ctx context.Context, tx pgx.Tx, vpsID, targetID string) (targets.TargetRecord, error) {
-	record, err := scanTarget(tx.QueryRow(ctx, `
-		select `+qualifiedTargetSelectColumns("t")+`
-		from targets t
-		where t.target_id = $2
-		  and (
-			exists (
-				select 1
-				from asset_services s
-				where s.vps_id = $1
-				  and s.target_id = t.target_id
-			)
-			or exists (
-				select 1
-				from asset_domains d
-				where d.vps_id = $1
-				  and d.target_id = t.target_id
-			)
-		  )
-		for update of t`, vpsID, targetID))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return targets.TargetRecord{}, fmt.Errorf("%w: target %q is not associated with vps %q", assetlifecycle.ErrInvalidLifecycleActionInput, targetID, vpsID)
-	}
-	if err != nil {
-		return targets.TargetRecord{}, fmt.Errorf("lock target %q for lifecycle action: %w", targetID, err)
-	}
-	return record, nil
 }
 
 func insertLifecycleStep(ctx context.Context, tx pgx.Tx, actionID, objectType, objectID, stepType, status string, beforeState, afterState map[string]any, message string) (assetlifecycle.LifecycleActionStep, error) {
@@ -1824,42 +838,10 @@ func insertLifecycleStep(ctx context.Context, tx pgx.Tx, actionID, objectType, o
 	}, nil
 }
 
-func subscriptionLifecycleState(record subscriptions.Record) map[string]any {
-	return map[string]any{
-		"status":                 string(record.Status),
-		"auto_renew":             record.AutoRenew,
-		"auto_renew_cancelled":   record.AutoRenewCancelled,
-		"renewal_mode":           record.RenewalMode,
-		"renew_at":               subscriptionDateState(record.RenewAt),
-		"monthly_price":          record.MonthlyPrice,
-		"currency":               record.Currency,
-		"subscription_record_id": record.SubscriptionID,
-	}
-}
-
-func subscriptionValidityState(record subscriptions.Record) map[string]any {
-	return map[string]any{
-		"renew_at":               subscriptionDateState(record.RenewAt),
-		"status":                 string(record.Status),
-		"subscription_record_id": record.SubscriptionID,
-	}
-}
-
-func subscriptionDateState(value *subscriptions.Date) any {
-	if value == nil {
-		return nil
-	}
-	return value.Time.Format(subscriptions.DateLayout)
-}
-
 func linkedVPSCancellationContext(summary assetlifecycle.LinkedVPSContext, historicalAutoRenew bool) (bool, string) {
 	switch {
 	case historicalAutoRenew:
 		return true, "关联历史或待确认订阅仍记录自动续费，请核对账单事实"
-	case summary.LifecycleStatus == vpsassets.LifecycleCancelled:
-		return true, "关联 VPS 已取消"
-	case summary.LifecycleStatus == vpsassets.LifecycleToCancel:
-		return true, "关联 VPS 待取消"
 	case vpsassets.IsCancellationRenewalDecision(summary.RenewalDecision):
 		return true, "关联 VPS 已决定不续费"
 	case isInactiveSubscriptionEvidence(subscriptions.Status(summary.SubscriptionState)):
@@ -1897,57 +879,4 @@ func isLifecycleActionInvalidPostgresError(err error) bool {
 		return false
 	}
 	return pgErr.Code == "23503" || pgErr.Code == "23514"
-}
-
-func isRetryableLifecycleTxConflict(err error) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && (pgErr.Code == "40001" || pgErr.Code == "40P01")
-}
-
-type retryableLifecycleTxError struct {
-	err error
-}
-
-func (e retryableLifecycleTxError) Error() string {
-	if e.err == nil {
-		return "retryable lifecycle transaction conflict"
-	}
-	return e.err.Error()
-}
-
-func (e retryableLifecycleTxError) Unwrap() error {
-	return e.err
-}
-
-func wrapRetryableLifecycleTx(err error) error {
-	if err == nil || !isRetryableLifecycleTxConflict(err) {
-		return err
-	}
-	var already retryableLifecycleTxError
-	if errors.As(err, &already) {
-		return err
-	}
-	return retryableLifecycleTxError{err: err}
-}
-
-func cancellationTxErr(err error) (assetlifecycle.LifecycleActionResult, error) {
-	return assetlifecycle.LifecycleActionResult{}, wrapRetryableLifecycleTx(err)
-}
-
-func isRetryableLifecycleTxAttempt(err error) bool {
-	var retryable retryableLifecycleTxError
-	return errors.As(err, &retryable)
-}
-
-type failedLifecycleAuditError struct {
-	cause error
-	audit error
-}
-
-func (e failedLifecycleAuditError) Error() string {
-	return fmt.Sprintf("%v: record failed asset lifecycle action audit: %v", e.cause, e.audit)
-}
-
-func (e failedLifecycleAuditError) Unwrap() error {
-	return e.cause
 }

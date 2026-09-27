@@ -50,17 +50,7 @@ import {
 } from './utils'
 
 export function hasCancellationAttention(row: DecisionQueueItem): boolean {
-  if (
-    row.vps.renewal_decision === 'cancel' &&
-    row.vps.lifecycle_status !== 'to_cancel' &&
-    row.vps.lifecycle_status !== 'cancelled'
-  ) {
-    return true
-  }
-  if (!row.subscription) return false
-  const inactiveSubscription = row.subscription.status !== 'active'
-  const vpsCancelled = row.vps.lifecycle_status === 'to_cancel' || row.vps.lifecycle_status === 'cancelled'
-  return inactiveSubscription && !vpsCancelled
+  return row.vps.renewal_decision === 'cancel' && (!row.vps.auto_renew_check || row.vps.auto_renew_check === 'unchecked' || row.vps.auto_renew_check === 'enabled')
 }
 
 export function subscriptionCostAttention(subscription: SubscriptionRecord | null): boolean {
@@ -189,7 +179,7 @@ export function buildAssetDecisionPageModel(input: AssetDecisionPageModelInput) 
   )
   const vpsByID = new Map<string, VPSAssetRecord>()
   for (const vps of input.vpsCatalogRows) vpsByID.set(vps.vps_id, vps)
-  for (const vps of [...input.queueState.unreviewed, ...input.queueState.migrate, ...input.queueState.cancel]) {
+  for (const vps of [...input.queueState.unreviewed, ...input.queueState.cancel]) {
     vpsByID.set(vps.vps_id, vps)
   }
   for (const member of input.automaticDetail?.members ?? []) vpsByID.set(member.vps.vps_id, member.vps)
@@ -243,7 +233,7 @@ function queuePriority(
   let priority = 0
   if (vps.renewal_decision === 'unreviewed') priority += 500
   if (renewalDue) priority += 300
-  if (vps.renewal_decision === 'migrate' || vps.renewal_decision === 'cancel') priority += 180
+  if (vps.renewal_decision === 'cancel') priority += 180
   if (subscription?.exchange_rate_stale) priority += 60
   if (vps.active_monitoring_instance_link_count <= 0) priority += 90
   if (!subscription) priority += 80
@@ -289,15 +279,13 @@ export function buildDecisionQueue(
 export function updateDecisionQueues(
   state: QueueState,
   updated: VPSAssetRecord,
-): Pick<QueueState, 'unreviewed' | 'migrate' | 'cancel'> {
+): Pick<QueueState, 'unreviewed' | 'cancel'> {
   const next = {
     unreviewed: state.unreviewed.filter((vps) => vps.vps_id !== updated.vps_id),
-    migrate: state.migrate.filter((vps) => vps.vps_id !== updated.vps_id),
     cancel: state.cancel.filter((vps) => vps.vps_id !== updated.vps_id),
   }
 
   if (updated.renewal_decision === 'unreviewed') next.unreviewed = [updated, ...next.unreviewed]
-  if (updated.renewal_decision === 'migrate') next.migrate = [updated, ...next.migrate]
   if (updated.renewal_decision === 'cancel') next.cancel = [updated, ...next.cancel]
 
   return next

@@ -30,7 +30,7 @@
   - `GET /api/asset-decisions/scenario-templates/{template_id}`
   - `PATCH /api/asset-decisions/scenario-templates/{template_id}`
   - `POST /api/asset-decisions/scenario-templates/{template_id}/manual-groups`
-- Store source tables: `vps_assets`、`providers`、`subscriptions`、`asset_services`、`asset_domains`、`vps_monitoring_instance_links`、`monitoring_instances`、`targets`。
+- Store source tables: `vps_assets`、`providers`、`subscriptions`、`asset_services`、`asset_domains`、`asset_service_associations`、`asset_domain_associations`、`monitoring_instances`、`targets`。
 - Manual scenario tables: `asset_decision_manual_groups`、`asset_decision_manual_group_members`。manual group id 使用 `admg_*`；成员引用现有 `vps_assets.vps_id`，只保存 `intended_role`、`intended_action`、`reason`、`note`、`sort_order` 和创建时 evidence snapshot。
 - Scenario template tables: `asset_decision_scenario_templates`、`asset_decision_scenario_template_members`。内置模板使用确定性 ID `adt_builtin_<scenario>` 且由代码返回，不允许 PATCH；自定义模板使用 `adt_*`，只保存场景 blueprint（status、scenario、title、goal、note、source_manual_group_id 和可选成员 intended role/action/reason/note/sort_order），不得保存当前成本、订阅、监控、服务、域名或 Target 实时事实。
 - Decision memory tables: `asset_decision_records`、`asset_decision_record_members`；view: `asset_decision_records_with_counts`。`source_type` 允许 `auto_group` 与 `manual_group`；未传 source type 时默认 `auto_group` 以兼容旧调用。
@@ -40,11 +40,15 @@
 - Decision recommendation: `GroupSummary`、`GroupMember`、`ManualGroupSummary`、`ManualGroupDetail` 和 manual members 必须返回只读 `decision_recommendation`，字段固定为 `summary`、`next_step`、`reasons[]`、`blockers[]`、`priority_vps_ids[]`、`confidence_label`。它只能解释 `evidence_assessment`、evidence chips、group type、scenario 和已有成员事实计数，不得新增评分引擎、runtime facts detail、HostSample、ProbeObservation、路由/性能/超售判断。
 - Comparison insight: `GroupSummary`、`GroupMember`、`ManualGroupSummary`、`ManualGroupDetail` 和 manual members 必须返回只读 `comparison_insight`，用于解释同组成员差异，不是新的执行层。组级字段固定为 `summary`、`primary_axis`（`renewal|cost|service_context|monitoring|evidence|lifecycle|review`）、`lane_counts[]`、`priority_vps_ids[]`、`tradeoffs[]`；成员级字段固定为 `rank`、`lane`（`primary|standby|observe|retire|evidence|review`）、`summary`、`strengths[]`、`risks[]`、`gaps[]`、`tradeoffs[]`。`tradeoffs/strengths/risks/gaps` item 使用 `kind,label,tone,details?`。
 - Record member follow-up: `asset_decision_record_members.followup_status` 固定为 `todo|in_progress|blocked|done|skipped`，`followup_note` 为 trim 后的执行备注，`followup_updated_at` 为最后一次成员跟进更新时间；`asset_decision_records_with_counts` 必须返回各状态聚合计数。
-- Execution readback: `RecordSummary` / `RecordDetail` 和 `RecordMember` 必须返回只读派生字段 `execution_readback`。记录级字段为 `status`（`open|aligned|drift|blocked|needs_evidence|inactive`）、中文 `summary`、`open_count`、`aligned_count`、`drift_count`、`blocked_count`、`needs_evidence_count`。成员级字段为同一 status、summary、`issues[]`（`kind,label,tone,details?`）和 `current_facts`（当前 VPS lifecycle、usage、renewal decision、active subscription / service / domain / Target / monitoring 计数与 source availability）。
-- Execution plan: records API 响应必须在 readback 之后同步返回只读派生字段 `execution_plan`，但不新增 endpoint / migration。记录级字段为中文 `summary`、`lane_counts[]`、`actionable_count`、`blocked_count`；成员级字段为 `lane`（`cancel_retire|migration|keep_observe|evidence|review`）、`step_kind`（`open_cancellation_workbench|open_vps_detail|open_subscription_context|review_record`）、`tone`（`critical|alert|notice|normal|neutral`）、中文 `summary`、`step_label`、`issue_count`、`blocked`、`actionable`。
+- Execution readback: `RecordSummary` / `RecordDetail` 和 `RecordMember` 必须返回只读派生字段 `execution_readback`。记录级字段为 `status`（`open|aligned|drift|blocked|needs_evidence|inactive`）、中文 `summary`、`open_count`、`aligned_count`、`drift_count`、`blocked_count`、`needs_evidence_count`。成员级字段为同一 status、summary、`issues[]`（`kind,label,tone,details?`）和 `current_facts`（当前 VPS lifecycle、usage_tags、renewal decision、active subscription / service / domain / Target / monitoring 计数与 source availability）。
+- Execution plan: records API 响应必须在 readback 之后同步返回只读派生字段 `execution_plan`，但不新增 endpoint / migration。记录级字段为中文 `summary`、`lane_counts[]`、`actionable_count`、`blocked_count`；成员级字段为 `lane`（`cancel_retire|migration|keep_observe|evidence|review`）、`step_kind`（`open_archive_preview|open_vps_detail|open_subscription_context|review_record`）、`tone`（`critical|alert|notice|normal|neutral`）、中文 `summary`、`step_label`、`issue_count`、`blocked`、`actionable`。
 - Execution plan 只能消费当前 `execution_readback` 与 `loadFacts` 已有事实，不能引入第二套执行状态机。后端只返回 step kind 等语义，不得返回 SPA 路由字符串；URL 深链由前端根据 step kind 本地映射。
 
 ### 3. Contracts
+
+- 服务、域名的当前承载取 `asset_service_associations` / `asset_domain_associations` 的 `ended_at IS NULL`；监控直接按永久 `vps_id` 所有权取未退役实例。已结束关联不参与运行承载计数，历史快照保持当时事实。
+- 运行监控计数只包含已接入且启用的当前实例；暂停、维护、待接入与退役不伪装成健康。
+- 可运行监控还要求绑定已确认且存在可信在线时间；已接入、启用但绑定待确认或证据不可用的实例计入异常关注。聚合先使用与监控详情相同的健康投影，不直接信任可能滞后的 `current_health_status='正常'`。
 
 - 自动组只读派生，不写数据库；手工组合只写 `asset_decision_manual_groups` / `asset_decision_manual_group_members`；用户保存一次判断才写入 `asset_decision_records` / `asset_decision_record_members`。
 - 场景模板只能创建或预填自定义组合，不能直接创建决策记录，不能修改 VPS / Subscription / MonitoringInstance / Target / Service / Domain。`POST /scenario-templates/{id}/manual-groups` 必须重新读取当前 facts 后复用 manual group 创建路径；模板成员缺失、重复或非法输入必须 fail closed。
@@ -58,22 +62,22 @@
 - 成员全部 `done` / `skipped` 不得自动推进整条决策记录状态；组合决策记录状态仍由用户显式修改，避免在 memory layer 内扩张隐式状态机。
 - 执行回读只校验“保存的组合判断是否与当前事实一致”，不得变成第二套状态机：records API 不自动 PATCH record status，不自动完成成员跟进，不自动修改 VPS / Subscription / MonitoringInstance / Target。
 - 执行编排只把已保存判断组织为下一步导览，不执行真实动作：records API 不自动 PATCH VPS / Subscription / MonitoringInstance / Target，不自动 PATCH record status，不自动改写成员 `decided_action` / `decided_role`。若用户判断需要改写，路径是 abandon 旧记录后从自定义组合或自动组保存新记录。
-- 成员回读以 `decided_action` 为主，历史值为空才回退 `suggested_action`。`cancel` / `open_cancellation_workbench` 只判断 VPS 是否进入 `to_cancel|cancelled|archived` 且无 active subscription、无 running monitoring、无 running target；`migrate` 只判断是否进入迁移链路（`renewal_decision=migrate|replaced` 或 `lifecycle_status=to_migrate`），不判断新 VPS 是否已替代旧 VPS；`keep` / `observe` 只检查 lifecycle 未取消/归档和 renewal decision 是否相符；`complete_evidence` 只检查当前已有证据缺口。
+- 成员回读以 `decided_action` 为主，历史值为空才回退 `suggested_action`。`cancel` / `open_archive_preview` 检查决定不续费与服务商自动续费核对，不要求结束订阅或归档；`migrate` 只读取当前承载关系是否已结束，迁移是人工计划，不是续费或生命周期枚举；`keep` 检查管理中与继续续费，`observe` 只检查未归档；`complete_evidence` 检查当前已有证据缺口。
 - 回读状态优先级：`record.status=abandoned` 为 `inactive`；成员 `followup_status=blocked` 优先 `blocked`，但 `done` 后关键事实不一致仍为 `drift`；`skipped` 抑制普通 open，但不隐藏关键 drift；存在证据缺口为 `needs_evidence`；事实与动作一致为 `aligned`。记录级聚合优先级为 drift > blocked > needs_evidence > aligned > open。
-- 成员级 `decided_action=cancel` 或 `open_cancellation_workbench` 只能给前端提供跳转到 VPS lifecycle workbench 的入口；后端 records API 不做批量取消、批量退役或批量迁移。
-- 成员级 execution plan 的 cancel / retire lane 只能编排到 `open_cancellation_workbench`；migration lane 只能编排到 VPS detail 复核迁移意向并人工跟进，`step_label` 不得写成“推进迁移”或暗示已有迁移工作台；evidence lane 对缺订阅优先 `open_subscription_context`，其余证据缺口走 VPS detail；`current_fact_missing`、空动作或不能安全归类的成员必须走 `review_record`。
+- 成员级 `decided_action=cancel` 或 `open_archive_preview` 只能给前端提供跳转到 VPS lifecycle workbench 的入口；后端 records API 不做批量取消、批量退役或批量迁移。
+- 成员级 execution plan 的 cancel / retire lane 只能编排到 `open_archive_preview`；migration lane 只能编排到 VPS detail 复核迁移意向并人工跟进，`step_label` 不得写成“推进迁移”或暗示已有迁移工作台；evidence lane 对缺订阅优先 `open_subscription_context`，其余证据缺口走 VPS detail；`current_fact_missing`、空动作或不能安全归类的成员必须走 `review_record`。
 - Group type 固定语义：`renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。
 - `renew_within_days` 默认 30，仅允许产品认可的窗口（当前 `30/60/90`）；非法值在 handler 返回 400。
 - `view` 只筛选返回的自动组，不改变底层事实读取；`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 是列表上下文筛选，只筛出相关组/手工组合/记录，不裁剪 group detail 成员；非法值返回 400。
 - Store 读取现有表后在 Go 中派生组合摘要和成员建议，避免 Dashboard / VPS / Subscription / Provider 页面各自重复 join 后语义漂移。
-- 组级摘要可以聚合成本、续费窗口、取消联动、服务 / 域名 / Target、监控关联、异常和 evidence chips；成员级建议角色 / 建议动作只能作为扫描提示，不执行写操作。
+- 组级摘要可以聚合成本、续费窗口、自动续费待核对、服务 / 域名 / Target、监控关联、异常和 evidence chips；成员级建议角色 / 建议动作只能作为扫描提示，不执行写操作。
 - `evidence_assessment` 是只读、可解释评分层，只消费当前 `GroupMember` / `GroupSummary` 已有事实、source availability 和 evidence chips；它不得新增数据库读取、逐台 runtime facts 调用或执行语义，也不得把评分当成自动 keep / migrate / cancel 写入。
 - `comparison_insight` 是只读、可解释的组合对比层，只消费当前 `evidence_assessment`、`decision_recommendation`、evidence chips、组类型、成员建议角色/动作和已有成员事实计数；它不得新增独立 scoring engine、不得读取新增表、不得逐台调用 runtime facts detail，也不得使用 路由质量、性能衰退、CPU/IO、超售或 HostSample / ProbeObservation 语义。成员 lane / rank 必须稳定可测，用于 UI 的证据矩阵和优先核对顺序，不可触发写操作。
 - 自定义组合详情必须对所有 manual members 返回 comparison insight。成员当前 facts 缺失时不得静默丢成员，必须保留 manual metadata，并生成 `current_fact_missing` evidence / comparison gap，使 UI 能解释“组合成员仍在，但当前事实不可回读”。
 - 证据源不可用时只能降低 `confidence_score` / `readiness_score` 并增加 gap 计数；不得把 `subscription_unavailable`、Monitoring/Target/Service/Domain 查询失败解释为真实 `missing_subscription` / `missing_monitoring` 业务事实。
 - 决策记录回读必须 fail closed：当前事实查询失败时 records list/detail/create/patch 返回 repository error，不得把未知事实伪造成 `aligned`、`needs_evidence` 或 `drift`。成员存在但当前 facts 中找不到对应 VPS 时，成员 readback 为 `drift` 且 issue kind 为 `current_fact_missing`。
 - `RecordSnapshotFromGroup` 与 `RecordSnapshotFromMember` 必须把当时的 `evidence_assessment` 与 `comparison_insight` 写入 `evidence_snapshot`，用于记录详情回看保存时的判断基础；旧记录缺少这些字段时前端必须可降级显示，后端不要求 backfill。
-- archived VPS 不进入普通 region/provider/cost/evidence 组合；cancelled/to_cancel 只能作为取消联动相关证据出现，避免归档资产污染正常组合比较。
+- 只有 active VPS 进入自动组合；archived VPS 保留在历史决策记录中。用途使用自定义多选 `usage_tags[]`，组级 `usage_tag_counts` 按原值计数；用途不改变生命周期、监控控制或续费意向，不再派生固定 idle/standby/in_use/migrate 计数。
 - 订阅、服务、域名、监控或 Target 查询失败必须返回 repository error；不得构造“健康”或“缺证据”假结果。只有查询成功且事实为空时，才生成 `missing_subscription`、`unlinked_monitoring` 等真实 evidence gap。
 - `/api/asset-decisions/*` 不逐台调用 runtime facts detail endpoint，只读 MonitoringInstance / Target 当前摘要字段和关联计数；已有低频 IP 质量摘要可以进入 evidence chips、scoring 和 readback，按 [IP 质量合同](ip-quality.md) 保留来源与时效；CPU / IO / 路由 / 超售判断仍属于后续能力。
 - 执行回读同样只能复用 `loadFacts` 聚合事实，不得逐台请求 runtime facts detail、HostSample、ProbeObservation、agent 性能趋势、路由质量。路由 / 性能衰退 / CPU / IO / 超售判断等待观测语义成熟后再进入模型。
@@ -146,10 +150,10 @@
 
 ### 6. Tests Required
 
-- Domain tests: stable group id、view/window validation、record input validation、snapshot builder、renewal/cancellation/region/provider/cost/evidence group derivation、archived/cancelled 边界、source unavailable 不误报。
-- Domain assessment tests: 完整证据、资料缺口、证据源不可用、取消联动 / 预算压力、record snapshot 均断言 `evidence_assessment` 的 tier / bias / score 方向。
+- Domain tests: stable group id、view/window validation、record input validation、snapshot builder、renewal/cancellation/region/provider/cost/evidence group derivation、active/archived 边界、source unavailable 不误报。
+- Domain assessment tests: 完整证据、资料缺口、证据源不可用、自动续费待核对 / 预算压力、record snapshot 均断言 `evidence_assessment` 的 tier / bias / score 方向。
 - Store tests: member facts 聚合、主订阅选择、服务 / 域名 / Target / 监控计数、成本和 evidence chips，manual groups list/create/get/patch/member add/patch/delete、records list/create/get/patch、成员跟进计数、成员跟进事务更新与未知成员回滚，且不依赖 runtime facts detail。
-- Execution readback domain tests: cancel / cancellation workbench aligned/open/drift、migrate 链路与旧承载 drift、keep / observe 一致性、complete_evidence 只检查当前已有缺口、done drift、blocked 优先、skipped 抑制普通 open、abandoned inactive、current fact missing。
+- Execution readback domain tests: 不续费 / 归档预览 aligned/open/drift、人工迁移与旧承载 drift、keep / observe 建议一致性、complete_evidence 只检查已有缺口、done drift、blocked 优先、skipped 抑制普通 open、abandoned inactive、current fact missing。建议或跟进完成不得直接改 VPS 生命周期。
 - Store tests: records list/detail/create/patch 均返回 `execution_readback`；ListRecords 批量读取成员并聚合，不逐条调用 `GetRecord`；facts 查询失败 fail closed；成员跟进 PATCH 后 readback 随响应刷新；不依赖 runtime facts detail / HostSample / ProbeObservation。
 - Store tests: records list/detail/create/patch 均返回 `execution_plan`；plan 派生沿用 records/facts/members 的批量读取路径，不逐条调用 `GetRecord`；成员跟进 PATCH 后 readback 与 execution plan 同步刷新。
 - Handler tests: overview、groups list、group detail、manual groups list/create/detail/patch/member add/patch/delete、records list/create/detail/patch success 且 records 响应包含 readback、成员跟进 patch；invalid query/input、missing group/manual group/member/record、未知或重复成员、repo failure、method not allowed。
@@ -186,7 +190,7 @@ return FindGroup(groups, groupID)
 ```go
 // 错误：成员跟进完成后隐式修改 VPS 或整条记录状态。
 if member.FollowupStatus == assetdecisions.FollowupDone {
-    _, _ = tx.Exec(ctx, `update vps_assets set lifecycle_status = 'cancelled' where vps_id = $1`, member.VPSID)
+    _, _ = tx.Exec(ctx, `update vps_assets set lifecycle_status = 'archived' where vps_id = $1`, member.VPSID)
 }
 ```
 

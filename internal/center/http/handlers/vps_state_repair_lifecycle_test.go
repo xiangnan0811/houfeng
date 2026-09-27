@@ -21,7 +21,7 @@ func TestVPSStateRepairArchiveConflictReturnsObjectReview(t *testing.T) {
 		},
 	}
 	repository := &fakeAssetLifecycleRepository{archiveErr: &assetlifecycle.ArchiveBlockedError{Review: review}}
-	request := httptest.NewRequest(http.MethodPost, "/api/vps/vps_review/archive", strings.NewReader(`{"confirmation_name":"VPS review","reason":"archive review"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/vps/vps_review/archive", strings.NewReader(`{"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":"VPS review","reason":"archive review"}`))
 	response := httptest.NewRecorder()
 
 	handlers.VPSArchive(repository).ServeHTTP(response, request)
@@ -46,7 +46,7 @@ func TestVPSStateRepairArchiveConflictReturnsObjectReview(t *testing.T) {
 
 func TestVPSStateRepairArchiveAuditFailureReturnsInternalServerError(t *testing.T) {
 	repository := &fakeAssetLifecycleRepository{archiveErr: errors.New("archive completed audit and failed audit persistence both failed")}
-	request := httptest.NewRequest(http.MethodPost, "/api/vps/vps_audit_failure/archive", strings.NewReader(`{"confirmation_name":"VPS audit failure","reason":"preserve audit failure"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/vps/vps_audit_failure/archive", strings.NewReader(`{"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":"VPS audit failure","reason":"preserve audit failure"}`))
 	response := httptest.NewRecorder()
 
 	handlers.VPSArchive(repository).ServeHTTP(response, request)

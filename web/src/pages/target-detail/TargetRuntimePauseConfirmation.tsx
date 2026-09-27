@@ -46,8 +46,8 @@ function actionModalContent(action: TargetRuntimeAction, target: TargetRecord) {
       }
     case 'restore-to-paused':
       return {
-        title: '确认恢复已归档目标',
-        current: '当前：目标处于已归档状态。',
+        title: '确认恢复已退役目标',
+        current: '当前：目标处于已退役状态。',
         result: '操作后：目标运行状态变为暂停，重新纳入工作集。',
         impact: '恢复至暂停状态，便于在重新启用前检查配置与关联关系。',
         unchanged: '不会删除历史事件、观测记录或 ProbeItem 配置。',
@@ -55,12 +55,12 @@ function actionModalContent(action: TargetRuntimeAction, target: TargetRecord) {
       }
     case 'archive':
       return {
-        title: '确认归档目标',
+        title: '确认退役目标',
         current: '当前：目标仍在当前工作集中。',
-        result: '操作后：目标退出当前工作集，运行状态变为已归档。',
-        impact: '归档后不会继续作为活跃目标参与观测、异常判定或通知。',
+        result: '操作后：目标退出当前工作集，生命周期变为已退役，运行控制保持暂停。',
+        impact: '退役后不会继续作为活跃目标参与观测、异常判定或通知。',
         unchanged: '不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。',
-        confirmLabel: '确认归档',
+        confirmLabel: '确认退役',
       }
     case 'pause':
     default:

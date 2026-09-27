@@ -43,7 +43,7 @@ function member(
       current_facts: {
         found: true,
         lifecycle_status: 'active',
-        usage_status: 'in_use',
+        usage_tags: ['in_use'],
         renewal_decision: 'keep',
         active_subscription_count: 1,
         service_count: 0,
@@ -125,10 +125,10 @@ describe('RecordExecutionBoard', () => {
       member('vps_1', {
         execution_plan: {
           lane: 'cancel_retire',
-          step_kind: 'open_cancellation_workbench',
+          step_kind: 'open_archive_preview',
           tone: 'critical',
           summary: '处理取消退役',
-          step_label: '打开取消/退役工作台',
+          step_label: '打开结束使用并归档工作台',
           issue_count: 1,
           blocked: false,
           actionable: true,
@@ -161,7 +161,7 @@ describe('RecordExecutionBoard', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByRole('link', { name: '打开取消/退役工作台' })).toHaveAttribute('href', '/vps/vps_1?workbench=cancellation')
+    expect(screen.getByRole('link', { name: '打开结束使用并归档工作台' })).toHaveAttribute('href', '/vps/vps_1?workbench=archive')
     expect(screen.getByRole('link', { name: '打开订阅上下文' })).toHaveAttribute('href', '/subscriptions?vps_id=vps_2&view=details')
     fireEvent.click(screen.getByRole('button', { name: '复核记录' }))
     expect(onReviewRecord).toHaveBeenCalledWith(rows[2])

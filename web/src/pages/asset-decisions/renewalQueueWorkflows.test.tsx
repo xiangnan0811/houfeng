@@ -21,7 +21,7 @@ describe('Asset Decisions renewal queue workflows', () => {
   it('keeps the single VPS renewal decision PATCH payload unchanged', async () => {
     const updated = {
       ...vps,
-      renewal_decision: 'migrate',
+      renewal_decision: 'keep',
       updated_at: '2026-05-09T09:00:00Z',
     }
     const fetchMock = vi.fn()
@@ -48,11 +48,11 @@ describe('Asset Decisions renewal queue workflows', () => {
     if (!firstQueueAction) throw new Error('single queue must expose a primary action')
     fireEvent.click(firstQueueAction)
     const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
-    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
+    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'keep' } })
     fireEvent.change(within(drawer).getByLabelText('决策理由'), { target: { value: 'move to Osaka' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '保存续费决策' }))
 
-    await waitFor(() => expect(screen.getByText('续费决策已保存：Tokyo Review -> 迁移')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('续费决策已保存：Tokyo Review -> 继续续费')).toBeInTheDocument())
     expect(findFetchCall(fetchMock, '/api/vps/vps_review', 'PATCH')).toEqual([
       '/api/vps/vps_review',
       {
@@ -65,7 +65,7 @@ describe('Asset Decisions renewal queue workflows', () => {
         cache: 'no-store',
         credentials: 'include',
         body: JSON.stringify({
-          renewal_decision: 'migrate',
+          renewal_decision: 'keep',
           renewal_reason: 'move to Osaka',
         }),
       },
@@ -74,7 +74,7 @@ describe('Asset Decisions renewal queue workflows', () => {
   it('replays the compatibility refresh inventory after a renewal decision', async () => {
     const updated = {
       ...vps,
-      renewal_decision: 'migrate',
+      renewal_decision: 'keep',
       updated_at: '2026-05-09T09:00:00Z',
     }
     const fetchMock = vi.fn()
@@ -92,7 +92,7 @@ describe('Asset Decisions renewal queue workflows', () => {
     )
 
     await openSecondaryWorkbench('单台队列')
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(11))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(10))
     const mutationStart = fetchMock.mock.calls.length
     const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
     if (!singleQueue) throw new Error('single queue section must be rendered')
@@ -100,10 +100,10 @@ describe('Asset Decisions renewal queue workflows', () => {
     if (!firstQueueAction) throw new Error('single queue must expose a primary action')
     fireEvent.click(firstQueueAction)
     const drawer = await screen.findByRole('dialog', { name: '续费决策处理' })
-    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'migrate' } })
+    fireEvent.change(within(drawer).getByLabelText('续费决策'), { target: { value: 'keep' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '保存续费决策' }))
 
-    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(mutationStart + 12))
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBe(mutationStart + 11))
     expect(fetchRequestInventory(fetchMock, mutationStart)).toEqual([
       'GET /api/asset-decisions/groups?view=needs_decision&renew_within_days=30',
       'GET /api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30',
@@ -114,7 +114,6 @@ describe('Asset Decisions renewal queue workflows', () => {
       'GET /api/subscriptions?sort=renew_at&order=asc',
       'GET /api/vps',
       'GET /api/vps?renewal_decision=cancel',
-      'GET /api/vps?renewal_decision=migrate',
       'GET /api/vps?renewal_decision=unreviewed',
       'PATCH /api/vps/vps_review',
     ])

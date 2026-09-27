@@ -42,8 +42,8 @@ describe('isVPSAssetReadonly', () => {
 })
 
 describe('isTerminalVPSLifecycle', () => {
-  it('treats cancelled and archived as terminal', () => {
-    expect(isTerminalVPSLifecycle('cancelled')).toBe(true)
+  it('treats only archived as terminal', () => {
+    expect(isTerminalVPSLifecycle('cancelled')).toBe(false)
     expect(isTerminalVPSLifecycle('archived')).toBe(true)
     expect(isTerminalVPSLifecycle('active')).toBe(false)
   })
@@ -63,12 +63,12 @@ describe('isIdempotencyKeyReused', () => {
 
 describe('parseOverviewWorkbench', () => {
   it('allowlists management panels and normalizes both monitoring aliases', () => {
-    expect(parseOverviewWorkbench('cancellation')).toBe('cancellation')
+    expect(parseOverviewWorkbench('cancellation')).toBeNull()
     expect(parseOverviewWorkbench('subscription')).toBe('subscription')
     expect(parseOverviewWorkbench('monitoring')).toBe('monitoring-instance-create')
     expect(parseOverviewWorkbench('monitoring-instance-create')).toBe('monitoring-instance-create')
     expect(parseOverviewWorkbench('decision')).toBeNull()
-    expect(parseOverviewWorkbench('archive')).toBeNull()
+    expect(parseOverviewWorkbench('archive')).toBe('archive')
     expect(parseOverviewWorkbench('facts')).toBeNull()
     expect(parseOverviewWorkbench(' monitoring ')).toBe('monitoring-instance-create')
     expect(parseOverviewWorkbench(null)).toBeNull()
@@ -76,17 +76,13 @@ describe('parseOverviewWorkbench', () => {
 })
 
 describe('subscriptionLinkageAction', () => {
-  it('offers continue-cancel after a cancellation-like renewal even when a subscription exists', () => {
+  it('keeps renewal intent independent of subscription actions', () => {
     expect(subscriptionLinkageAction({
       status: 'subscription_updated',
       message: '已关联订阅',
       subscription_id: 'sub_001',
       candidate_count: 1,
       updated: true,
-    }, 'vps_001', 'cancel')).toEqual({
-      to: '/vps/vps_001?workbench=cancellation',
-      label: '继续取消 / 退役',
-      panel: 'cancellation',
-    })
+    }, 'vps_001', 'cancel')).toBeNull()
   })
 })

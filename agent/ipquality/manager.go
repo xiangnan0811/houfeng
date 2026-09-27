@@ -15,6 +15,7 @@ type Manager struct {
 	mu        sync.Mutex
 	inFlight  bool
 	reports   []agentapi.IPQualityReportPayload
+	cancel    context.CancelFunc
 }
 
 func NewManager(store StateStore, collector Collector) *Manager {
@@ -50,11 +51,23 @@ func (m *Manager) MaybeStart(ctx context.Context, plan *agentapi.IPQualityPlan, 
 		return nil
 	}
 	m.inFlight = true
+	collectCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	m.cancel = cancel
 	m.mu.Unlock()
 
 	planCopy := clonePlan(plan)
-	go m.collect(context.WithoutCancel(ctx), planCopy, observedAt.UTC())
+	go m.collect(collectCtx, planCopy, observedAt.UTC())
 	return nil
+}
+
+// Stop cancels any in-flight collection and discards its eventual output.
+func (m *Manager) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.reports = nil
 }
 
 func (m *Manager) DrainReports() []agentapi.IPQualityReportPayload {
@@ -77,7 +90,13 @@ func (m *Manager) collect(ctx context.Context, plan *agentapi.IPQualityPlan, obs
 	_ = m.store.Save(ctx, state)
 
 	m.mu.Lock()
-	m.reports = append(m.reports, report)
+	if ctx.Err() == nil {
+		m.reports = append(m.reports, report)
+	}
+	if m.cancel != nil {
+		m.cancel()
+		m.cancel = nil
+	}
 	m.inFlight = false
 	m.mu.Unlock()
 }

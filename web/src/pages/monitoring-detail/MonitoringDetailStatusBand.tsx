@@ -41,7 +41,7 @@ export function MonitoringDetailStatusBand({
   snapshotReadAt,
   sample,
 }: Props) {
-  const archived = Boolean(monitoringInstance.archived_at)
+  const archived = Boolean(monitoringInstance.archived_at) || monitoringInstance.vps_lifecycle_status === 'archived'
   const showMonitoringBadge =
     monitoringInstance.monitoring_status === '维护中' || monitoringInstance.monitoring_status === '暂停'
   const showBindingBadge =
@@ -50,8 +50,9 @@ export function MonitoringDetailStatusBand({
 
   return (
     <div className="monitoring-detail-status" aria-label="心跳与采样">
+      <StatusBadge label={monitoringInstance.lifecycle_status} />
       <span className="monitoring-detail-status__heartbeat">
-        心跳 {heartbeatEvidence(heartbeatFreshness, snapshotReadAt, monitoringInstance.last_heartbeat_at)}
+        在线证据 {heartbeatEvidence(heartbeatFreshness, snapshotReadAt, monitoringInstance.last_trusted_online_at ?? undefined)}
       </span>
       {sample ? (
         <span className="monitoring-detail-status__sample">
@@ -69,7 +70,7 @@ export function MonitoringDetailStatusBand({
       )}
       {showMonitoringBadge ? <StatusBadge label={monitoringInstance.monitoring_status} /> : null}
       {showBindingBadge ? <StatusBadge label={monitoringInstance.binding_status} /> : null}
-      {archived ? <StatusBadge label="已归档" /> : null}
+      {archived ? <StatusBadge label="所属 VPS 已归档" /> : null}
     </div>
   )
 }

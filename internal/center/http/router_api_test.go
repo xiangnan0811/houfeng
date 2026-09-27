@@ -263,7 +263,7 @@ func TestRouterKeepsVPSArchiveLifecycleOutOfSPAFallback(t *testing.T) {
 		}),
 		VPSRestoreFromArchiveHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"vps_id":"vps_001","lifecycle_status":"idle"}`))
+			_, _ = w.Write([]byte(`{"vps_id":"vps_001","lifecycle_status":"active"}`))
 		}),
 	})
 
@@ -275,7 +275,7 @@ func TestRouterKeepsVPSArchiveLifecycleOutOfSPAFallback(t *testing.T) {
 	}{
 		{name: "archive review", method: http.MethodGet, path: "/api/vps/vps_001/archive-review", wantBodySnippet: `"eligible":true`},
 		{name: "archive", method: http.MethodPost, path: "/api/vps/vps_001/archive", wantBodySnippet: `"lifecycle_status":"archived"`},
-		{name: "restore", method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", wantBodySnippet: `"lifecycle_status":"idle"`},
+		{name: "restore", method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", wantBodySnippet: `"lifecycle_status":"active"`},
 	}
 
 	for _, tt := range tests {
@@ -455,14 +455,14 @@ func TestRouterKeepsVPSOutOfSPAFallback(t *testing.T) {
 		{name: "item", path: "/api/vps/vps_001", wantStatus: http.StatusOK, wantBodySnippet: `"vps_id":"vps_001"`},
 		{name: "monitoring_instances", path: "/api/vps/vps_001/monitoring-instances", wantStatus: http.StatusOK, wantBodySnippet: `"monitoring_instance_id":"mi_001"`},
 		{name: "subscriptions", path: "/api/vps/vps_001/subscriptions", wantStatus: http.StatusOK, wantBodySnippet: `"subscription_id":"sub_001"`},
-		{name: "link monitoringInstance", path: "/api/vps/vps_001/link-monitoring-instance", wantStatus: http.StatusCreated, wantBodySnippet: `"link_id":"vnl_001"`},
-		{name: "unlink monitoringInstance", path: "/api/vps/vps_001/unlink-monitoring-instance", wantStatus: http.StatusOK, wantBodySnippet: `"link_id":"vnl_001"`},
+		{name: "link monitoringInstance", path: "/api/vps/vps_001/link-monitoring-instance", wantStatus: http.StatusNotFound, wantBodySnippet: `404 page not found`},
+		{name: "unlink monitoringInstance", path: "/api/vps/vps_001/unlink-monitoring-instance", wantStatus: http.StatusNotFound, wantBodySnippet: `404 page not found`},
 		{name: "timeline", path: "/api/vps/vps_001/timeline", wantStatus: http.StatusOK, wantBodySnippet: `"price_history_id":"ph_001"`},
 		{name: "experience logs", path: "/api/vps/vps_001/experience-logs", wantStatus: http.StatusOK, wantBodySnippet: `"experience_log_id":"elog_001"`},
 		{name: "domains", path: "/api/vps/vps_001/domains", wantStatus: http.StatusOK, wantBodySnippet: `"domain_id":"dom_001"`},
 		{name: "services", path: "/api/vps/vps_001/services", wantStatus: http.StatusOK, wantBodySnippet: `"service_id":"svc_001"`},
-		{name: "cancellation preview", path: "/api/vps/vps_001/cancellation-preview", wantStatus: http.StatusOK, wantBodySnippet: `"warnings":[]`},
-		{name: "cancellation", path: "/api/vps/vps_001/cancellation", wantStatus: http.StatusOK, wantBodySnippet: `"action_id":"ala_001"`},
+		{name: "cancellation preview", path: "/api/vps/vps_001/cancellation-preview", wantStatus: http.StatusNotFound, wantBodySnippet: `404 page not found`},
+		{name: "cancellation", path: "/api/vps/vps_001/cancellation", wantStatus: http.StatusNotFound, wantBodySnippet: `404 page not found`},
 		{name: "extend validity", path: "/api/vps/vps_001/extend-validity", wantStatus: http.StatusOK, wantBodySnippet: `"action_id":"ala_extend"`},
 	}
 

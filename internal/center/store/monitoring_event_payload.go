@@ -32,6 +32,9 @@ const (
 // duplicated in JSON, but remains part of the typed input so chronology is
 // validated before any write.
 type task4MonitoringEventPayload struct {
+	ClosureKind                            string                    `json:"closure_kind,omitempty"`
+	ClosureReason                          string                    `json:"closure_reason,omitempty"`
+	NaturalRecovery                        *bool                     `json:"natural_recovery,omitempty"`
 	ObjectType                             incidents.ObjectType      `json:"-"`
 	EventType                              incidents.EventType       `json:"-"`
 	Severity                               incidents.Severity        `json:"-"`
@@ -161,6 +164,9 @@ func validMonitoringEventLegacyFields(payload task4MonitoringEventPayload) bool 
 	case monitoringEventRuntimeRuleVersion:
 		return payload.MonitoringStatus == payload.ResultingState
 	case monitoringEventTargetRuleVersion:
+		if payload.EventType == incidents.EventTargetArchived || payload.EventType == incidents.EventTargetRestoredToPaused {
+			return payload.RunStatus == "暂停"
+		}
 		return payload.RunStatus == payload.ResultingState
 	default:
 		return true

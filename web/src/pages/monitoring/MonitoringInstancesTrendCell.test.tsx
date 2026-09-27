@@ -13,7 +13,7 @@ function monitoringInstanceRecord(): MonitoringInstanceRecord {
     region: 'ap-northeast-1',
     city: 'Tokyo',
     provider: 'Vultr',
-    lifecycle_status: '在用',
+    lifecycle_status: '已接入',
     monitoring_status: '启用',
     binding_status: '已绑定',
     labels: [],

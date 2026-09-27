@@ -56,6 +56,39 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	networkRatesValidAppACLCurrentMigrationFragment(),
 	vpsStateRepairLifecycleAppACLCurrentMigrationFragment(),
 	monitoringStateEnumAppACLCurrentMigrationFragment(),
+	vpsMonitoringLifecycleAppACLCurrentMigrationFragment(),
+}
+
+func vpsMonitoringLifecycleAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	mutable := []string{"monitoring_agent_sessions", "receiver_health", "vps_followups", "asset_service_associations", "asset_domain_associations", "vps_maintenance_actions"}
+	immutable := []string{"agent_live_signals", "vps_archive_requests", "monitoring_instance_lifecycle_receipts", "vps_maintenance_effects"}
+	objects := make([]AppACLManagedObjectR1, 0, len(mutable)+len(immutable)+1)
+	for _, table := range append(append([]string{}, mutable...), immutable...) {
+		objects = append(objects, AppACLManagedObjectR1{ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: table})
+	}
+	const function = "enforce_monitoring_vps_ownership()"
+	objects = append(objects, AppACLManagedObjectR1{ObjectClass: AppACLObjectClassFunction, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: function})
+	const sessionFunction = "enforce_monitoring_session_identity()"
+	objects = append(objects, AppACLManagedObjectR1{ObjectClass: AppACLObjectClassFunction, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: sessionFunction})
+	return AppACLCurrentMigrationFragment{
+		Migration: "0067_refactor_vps_monitoring_lifecycle.sql",
+		Objects:   objects,
+		Functions: []AppACLCurrentFunctionContract{{SchemaName: appACLManagedPublicSchemaR1, Identity: function, Kind: "f", SecurityDefiner: false, Config: []string{"search_path=pg_catalog"}}, {SchemaName: appACLManagedPublicSchemaR1, Identity: sessionFunction, Kind: "f", SecurityDefiner: false, Config: []string{"search_path=pg_catalog"}}},
+		Privileges: func(string) []AppACLPrivilege {
+			var privileges []AppACLPrivilege
+			for _, table := range immutable {
+				for _, kind := range []AppACLPrivilegeKind{AppACLPrivilegeSelect, AppACLPrivilegeInsert} {
+					privileges = append(privileges, AppACLPrivilege{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: table, Privilege: kind})
+				}
+			}
+			for _, table := range mutable {
+				for _, kind := range []AppACLPrivilegeKind{AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate} {
+					privileges = append(privileges, AppACLPrivilege{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: table, Privilege: kind})
+				}
+			}
+			return privileges
+		},
+	}
 }
 
 func heartbeatIncidentPolicyAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {

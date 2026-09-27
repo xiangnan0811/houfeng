@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { VPSAssetDetail } from '../../lib/types'
 import {
   compareDecisionDraft,
+  buildFactEditInput,
   compareFactDraftAgainstLatest,
   decisionDraftAlreadySatisfied,
   detailToFactEditForm,
@@ -30,7 +31,13 @@ function detailFixture(overrides: Partial<VPSAssetDetail> = {}): VPSAssetDetail 
     os_name: 'Debian',
     virtualization: 'KVM',
     lifecycle_status: 'active',
-    usage_status: 'in_use',
+    usage_tags: ['生产'],
+    validity_mode: 'unknown',
+    expires_at: null,
+    auto_renew_check: 'unchecked',
+    auto_renew_checked_at: null,
+    renewal_reason: '',
+    renewal_review_at: null,
     renewal_decision: 'keep',
     importance: 'high',
     labels: ['edge'],
@@ -191,12 +198,34 @@ describe('fact draft 3-way merge', () => {
 describe('compareDecisionDraft', () => {
   it('uses localized renewal labels and detects an already-satisfied decision', () => {
     const latest = detailFixture({ renewal_decision: 'keep' })
-    expect(decisionDraftAlreadySatisfied({ renewalDecision: 'keep', reason: '本地' }, latest)).toBe(true)
+    expect(decisionDraftAlreadySatisfied({ renewalDecision: 'keep', reason: '本地' }, latest)).toBe(false)
     expect(compareDecisionDraft({ renewalDecision: 'keep', reason: '' }, latest)).toEqual([])
     expect(compareDecisionDraft({ renewalDecision: 'cancel', reason: '' }, latest)).toEqual([{
       field: '续费决策',
-      yours: '取消',
-      latest: '保留',
+      yours: '决定不续费',
+      latest: '继续续费',
     }])
+  })
+})
+
+describe('independent VPS facts', () => {
+  it('preserves arbitrary purposes and validity without a subscription', () => {
+    const draft = detailToFactEditForm(detailFixture())
+    const input = buildFactEditInput({ ...draft, usageTags: '应用甲，测试,应用甲', validityMode: 'fixed', expiresAt: '2027-01-01' })
+    expect(input.usage_tags).toEqual(['应用甲', '测试'])
+    expect(input.expires_at).toBe('2027-01-01')
+    expect(input).not.toHaveProperty('usage_status')
+    expect(input).not.toHaveProperty('renewal_decision')
+  })
+
+  it('clears a stale date for unlimited validity and requires a fixed date', () => {
+    const draft = detailToFactEditForm(detailFixture())
+    expect(buildFactEditInput({ ...draft, validityMode: 'unlimited', expiresAt: '2027-01-01' }).expires_at).toBeNull()
+    expect(() => buildFactEditInput({ ...draft, validityMode: 'fixed', expiresAt: '' })).toThrow('固定有效期')
+  })
+
+  it('preserves review-date changes even when the renewal intent is unchanged', () => {
+    const latest = detailFixture({ renewal_decision: 'cancel' })
+    expect(decisionDraftAlreadySatisfied({ renewalDecision: 'cancel', reason: '', reviewAt: '2027-01-01' }, latest)).toBe(false)
   })
 })

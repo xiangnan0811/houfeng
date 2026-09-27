@@ -12,9 +12,9 @@ import (
 
 	"houfeng/internal/center/assetlifecycle"
 	"houfeng/internal/center/http/handlers"
-	"houfeng/internal/center/monitoringinstances"
+
 	"houfeng/internal/center/subscriptions"
-	"houfeng/internal/center/targets"
+
 	"houfeng/internal/center/vpsassets"
 )
 
@@ -95,116 +95,8 @@ func (f *fakeAssetLifecycleRepository) RestoreVPSFromArchive(_ context.Context, 
 	return f.restoreResult, nil
 }
 
-func (f *fakeAssetLifecycleRepository) StartVPSMigration(context.Context, string, assetlifecycle.StartMigrationInput) (assetlifecycle.LifecycleActionResult, error) {
-	return assetlifecycle.LifecycleActionResult{}, nil
-}
-
 func (f *fakeAssetLifecycleRepository) ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error) {
 	return f.targetContexts, f.targetContextsErr
-}
-
-func TestVPSCancellationPreviewReturnsImpactGraph(t *testing.T) {
-	now := time.Date(2026, time.May, 30, 8, 0, 0, 0, time.UTC)
-	repo := &fakeAssetLifecycleRepository{previewResult: assetlifecycle.CancellationPreview{
-		VPS: vpsassets.Record{
-			VPSID:           "vps_001",
-			DisplayName:     "Tokyo Edge",
-			LifecycleStatus: vpsassets.LifecycleActive,
-			UsageStatus:     vpsassets.UsageInUse,
-			RenewalDecision: vpsassets.RenewalUnreviewed,
-			CreatedAt:       now,
-			UpdatedAt:       now,
-		},
-		Subscriptions: []assetlifecycle.SubscriptionImpact{{
-			Record:            subscriptions.Record{SubscriptionID: "sub_001", VPSID: "vps_001", Status: subscriptions.StatusExpired, CreatedAt: now, UpdatedAt: now},
-			Role:              "inactive",
-			RecommendedAction: "keep_inactive",
-			Message:           "订阅账单记录已无续费动作，仍需处理 VPS、MonitoringInstance 与入口探测状态。",
-		}},
-		Warnings: []string{"关联订阅账单记录已无续费动作；这不是“没有关联订阅”，仍需处理 VPS、MonitoringInstance 与入口探测状态。"},
-	}}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/cancellation-preview", nil)
-	recorder := httptest.NewRecorder()
-	handlers.VPSCancellationPreview(repo).ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
-	}
-	if repo.previewVPSID != "vps_001" {
-		t.Fatalf("preview vps id = %q, want vps_001", repo.previewVPSID)
-	}
-	var body assetlifecycle.CancellationPreview
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if body.VPS.VPSID != "vps_001" || len(body.Subscriptions) != 1 || body.Subscriptions[0].Role != "inactive" {
-		t.Fatalf("preview body = %#v, want inactive subscription impact", body)
-	}
-	if len(body.Warnings) != 1 || !strings.Contains(body.Warnings[0], "不是“没有关联订阅”") {
-		t.Fatalf("warnings = %#v, want inactive subscription evidence", body.Warnings)
-	}
-}
-
-func TestVPSCancellationAppliesConfirmedSelection(t *testing.T) {
-	completedAt := time.Date(2026, time.May, 30, 9, 0, 0, 0, time.UTC)
-	repo := &fakeAssetLifecycleRepository{applyResult: assetlifecycle.LifecycleActionResult{
-		Action: assetlifecycle.LifecycleActionRecord{
-			ActionID:    "ala_001",
-			VPSID:       "vps_001",
-			ActionType:  assetlifecycle.ActionTypeCancelVPS,
-			Status:      assetlifecycle.ActionStatusCompleted,
-			Reason:      "expired and will not renew",
-			CompletedAt: &completedAt,
-		},
-		Steps: []assetlifecycle.LifecycleActionStep{{
-			StepID:     "als_001",
-			ActionID:   "ala_001",
-			ObjectType: assetlifecycle.ObjectTypeVPS,
-			ObjectID:   "vps_001",
-			StepType:   assetlifecycle.StepTypeVPSLifecycle,
-			Status:     assetlifecycle.StepStatusCompleted,
-		}},
-	}}
-	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/cancellation", strings.NewReader(`{
-		"reason":" expired and will not renew ",
-		"effective_date":"2026-05-30",
-		"subscription_ids":[" sub_001 "],
-		"vps_lifecycle_status":"cancelled",
-		"monitoring_instance_actions":[{"monitoring_instance_id":" mi_001 ","lifecycle_status":"已退役","monitoring_status":"暂停"}],
-		"target_actions":[{"target_id":" tg_001 ","run_status":"已归档"}],
-		"preview_digest":"preview-digest-test"
-	}`))
-	recorder := httptest.NewRecorder()
-
-	handlers.VPSCancellation(repo).ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
-	}
-	if repo.applyVPSID != "vps_001" {
-		t.Fatalf("apply vps id = %q, want vps_001", repo.applyVPSID)
-	}
-	if repo.applyInput.Reason != "expired and will not renew" {
-		t.Fatalf("reason = %q, want trimmed", repo.applyInput.Reason)
-	}
-	if len(repo.applyInput.SubscriptionIDs) != 1 || repo.applyInput.SubscriptionIDs[0] != "sub_001" {
-		t.Fatalf("subscription ids = %#v, want trimmed explicit selection", repo.applyInput.SubscriptionIDs)
-	}
-	if len(repo.applyInput.MonitoringInstanceActions) != 1 || repo.applyInput.MonitoringInstanceActions[0].MonitoringInstanceID != "mi_001" || repo.applyInput.MonitoringInstanceActions[0].LifecycleStatus != monitoringinstances.LifecycleRetired {
-		t.Fatalf("monitoringInstance actions = %#v, want normalized action", repo.applyInput.MonitoringInstanceActions)
-	}
-	if len(repo.applyInput.TargetActions) != 1 || repo.applyInput.TargetActions[0].TargetID != "tg_001" || repo.applyInput.TargetActions[0].RunStatus != targets.RunStatusArchived {
-		t.Fatalf("target actions = %#v, want normalized action", repo.applyInput.TargetActions)
-	}
-
-	var body assetlifecycle.LifecycleActionResult
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if body.Action.ActionID != "ala_001" || len(body.Steps) != 1 {
-		t.Fatalf("response = %#v, want action and steps", body)
-	}
 }
 
 func TestVPSExtendValidityUpdatesActiveSubscription(t *testing.T) {
@@ -319,7 +211,7 @@ func TestVPSArchiveAppliesStrongConfirmation(t *testing.T) {
 		Blockers: []string{"VPS 已归档，只读保留历史。"},
 	}}
 	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/archive", strings.NewReader(`{
-		"confirmation_name":" Tokyo Edge ", "reason":"账单与运行残留已整理"
+		"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":" Tokyo Edge ", "reason":"账单与运行残留已整理"
 	}`))
 	recorder := httptest.NewRecorder()
 
@@ -383,19 +275,6 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 		body    string
 		want    int
 	}{
-		{name: "preview wrong method", handler: handlers.VPSCancellationPreview(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusMethodNotAllowed},
-		{name: "preview malformed path", handler: handlers.VPSCancellationPreview(&fakeAssetLifecycleRepository{}), method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview/extra", want: http.StatusNotFound},
-		{name: "preview missing vps", handler: handlers.VPSCancellationPreview(&fakeAssetLifecycleRepository{previewErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodGet, path: "/api/vps/vps_missing/cancellation-preview", want: http.StatusNotFound},
-		{name: "apply invalid json", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{`, want: http.StatusBadRequest},
-		{name: "apply missing reason", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"vps_lifecycle_status":"cancelled"}`, want: http.StatusBadRequest},
-		{name: "apply invalid monitoringInstance action", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","preview_digest":"d","monitoring_instance_actions":[{"monitoring_instance_id":"mi_001","lifecycle_status":"online"}]}`, want: http.StatusBadRequest},
-		{name: "apply missing digest", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled"}`, want: http.StatusBadRequest},
-		{name: "apply invalid associated object", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: assetlifecycle.ErrInvalidLifecycleActionInput}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","preview_digest":"d"}`, want: http.StatusBadRequest},
-		{name: "apply blocked lifecycle action", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_archived/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","preview_digest":"d"}`, want: http.StatusConflict},
-		{name: "apply stale preview", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: assetlifecycle.ErrStaleCancellationPreview}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","preview_digest":"d"}`, want: http.StatusConflict},
-		{name: "apply retryable lifecycle conflict", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: assetlifecycle.ErrRetryableLifecycleConflict}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","preview_digest":"d"}`, want: http.StatusConflict},
-		{name: "apply missing vps", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","preview_digest":"d"}`, want: http.StatusNotFound},
-		{name: "apply repo failure", handler: handlers.VPSCancellation(&fakeAssetLifecycleRepository{applyErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/cancellation", body: `{"reason":"done","vps_lifecycle_status":"cancelled","preview_digest":"d"}`, want: http.StatusInternalServerError},
 		{name: "extend invalid json", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{`, want: http.StatusBadRequest},
 		{name: "extend missing date", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{"reason":"outage"}`, want: http.StatusBadRequest},
 		{name: "extend blocked lifecycle action", handler: handlers.VPSExtendValidity(&fakeAssetLifecycleRepository{extendErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", body: `{"extend_to":"2026-12-01","reason":"outage"}`, want: http.StatusConflict},
@@ -404,9 +283,9 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 		{name: "archive review missing vps", handler: handlers.VPSArchiveReview(&fakeAssetLifecycleRepository{archiveReviewErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodGet, path: "/api/vps/vps_missing/archive-review", want: http.StatusNotFound},
 		{name: "archive invalid json", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{`, want: http.StatusBadRequest},
 		{name: "archive missing confirmation", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{}`, want: http.StatusBadRequest},
-		{name: "archive blocked lifecycle action", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusConflict},
-		{name: "archive missing vps", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/archive", body: `{"confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusNotFound},
-		{name: "archive repo failure", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusInternalServerError},
+		{name: "archive blocked lifecycle action", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusConflict},
+		{name: "archive missing vps", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/archive", body: `{"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusNotFound},
+		{name: "archive repo failure", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusInternalServerError},
 		{name: "restore wrong method", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{}), method: http.MethodGet, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusMethodNotAllowed},
 		{name: "restore blocked lifecycle action", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_cancelled/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusConflict},
 		{name: "restore missing vps", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusNotFound},
@@ -448,45 +327,5 @@ func TestAssetContextHandlersReturnBatchContexts(t *testing.T) {
 	}
 	if len(targetBody) != 1 || targetBody[0].TargetID != "tg_001" || !targetBody[0].CancellationAttention {
 		t.Fatalf("target contexts = %#v, want attention context", targetBody)
-	}
-}
-
-func TestAssetLifecycleConflictsReturnStableCodes(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		err  error
-		code string
-	}{
-		{name: "stale preview", err: assetlifecycle.ErrStaleCancellationPreview, code: "cancellation_preview_stale"},
-		{name: "retryable transaction", err: assetlifecycle.ErrRetryableLifecycleConflict, code: "lifecycle_transaction_conflict"},
-		{name: "blocked action", err: assetlifecycle.ErrLifecycleActionBlocked, code: "lifecycle_action_blocked"},
-	}
-	for _, test := range cases {
-		test := test
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-			repo := &fakeAssetLifecycleRepository{applyErr: test.err}
-			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/cancellation", strings.NewReader(`{
-				"reason":"expired",
-				"preview_digest":"digest-1"
-			}`))
-			recorder := httptest.NewRecorder()
-			handlers.VPSCancellation(repo).ServeHTTP(recorder, req)
-			if recorder.Code != http.StatusConflict {
-				t.Fatalf("status = %d, want 409; body=%s", recorder.Code, recorder.Body.String())
-			}
-			var body map[string]string
-			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-				t.Fatalf("unmarshal: %v", err)
-			}
-			if body["code"] != test.code {
-				t.Fatalf("body = %#v, want code %q", body, test.code)
-			}
-			if strings.TrimSpace(body["error"]) == "" {
-				t.Fatalf("body = %#v, want display error text", body)
-			}
-		})
 	}
 }

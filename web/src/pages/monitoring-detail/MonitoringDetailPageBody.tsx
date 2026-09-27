@@ -29,6 +29,7 @@ import { MonitoringDetailNotices } from './MonitoringDetailNotices'
 import { MonitoringDetailObservations } from './MonitoringDetailObservations'
 import { MonitoringDetailRecentEvents } from './MonitoringDetailRecentEvents'
 import { MonitoringDetailStatusBand } from './MonitoringDetailStatusBand'
+import { MonitoringInstancePhases } from './MonitoringInstancePhases'
 import { MonitoringInstanceBindingConflictDialog } from './MonitoringInstanceBindingConflictDialog'
 import { MonitoringInstanceCommandDrawer } from './MonitoringInstanceCommandDrawer'
 import { MonitoringInstanceHistoryDrawer } from './MonitoringInstanceHistoryDrawer'
@@ -114,7 +115,7 @@ type MonitoringDetailPageBodyProps = {
   managementReview: MonitoringInstanceManagementReview | null
   managementLoading: boolean
   managementError: string | null
-  managementSubmittingAction: 'retire' | 'restore-lifecycle' | 'archive' | 'restore-archive' | 'permanent-cleanup' | null
+  managementSubmittingAction: 'retire' | null
   managementActionError: string | null
   pauseConfirmationReset: number
   onRuntimeAction: (action: MonitoringInstanceRuntimeAction, confirmed?: boolean, confirmation?: GlobalActionConfirmation) => void
@@ -128,10 +129,6 @@ type MonitoringDetailPageBodyProps = {
   onMetadataSubmit: (event: FormEvent<HTMLFormElement>) => void
   onManagementLoadReview: (force?: boolean) => void
   onManagementRetire: (reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
-  onManagementRestoreLifecycle: (reason: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
-  onManagementArchive: (reason: string, confirmationName: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
-  onManagementRestoreArchive: (confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
-  onManagementPermanentCleanup: (reason: string, confirmationName: string, confirmation: { preview_digest: string; confirm_shared_impact: boolean }) => void
   incidents: ActiveIncidentRecord[]
   incidentsError: string | null
   events: StateChangeEventRecord[]
@@ -224,10 +221,6 @@ export function MonitoringDetailPageBody({
   onMetadataSubmit,
   onManagementLoadReview,
   onManagementRetire,
-  onManagementRestoreLifecycle,
-  onManagementArchive,
-  onManagementRestoreArchive,
-  onManagementPermanentCleanup,
   incidents,
   incidentsError,
   events,
@@ -292,16 +285,16 @@ export function MonitoringDetailPageBody({
       ? realtimeSamples.map(hostSampleToMetricPoint)
       : runtimeFacts?.host_metric_points ?? []
   const isMaintenance = monitoringInstance.monitoring_status === '维护中'
-  const archived = Boolean(monitoringInstance.archived_at)
-  const showBindingConflict = monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
+  const archived = Boolean(monitoringInstance.archived_at) || monitoringInstance.vps_lifecycle_status === 'archived'
+  const showBindingConflict = !archived && monitoringInstance.lifecycle_status !== '已退役' && monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
   const bindingActionsDisabled = bindingAction !== null || bindingConflictLoading || !bindingConflict
   const isUpgradeOnboarding =
     monitoringInstance.binding_status !== '未绑定' ||
-    Boolean(monitoringInstance.last_heartbeat_at || monitoringInstance.last_sync_at || sample)
+    Boolean(monitoringInstance.ever_connected || monitoringInstance.last_trusted_online_at || monitoringInstance.last_sync_at || sample)
   const readOnly = READ_ONLY_PREVIEW
   // An unbound, unarchived instance gets "接入 agent…" as the header primary action.
   const showOnboardingPrimary =
-    !readOnly && !archived && monitoringInstance.binding_status === '未绑定'
+    !readOnly && !archived && monitoringInstance.lifecycle_status !== '已退役' && monitoringInstance.binding_status === '未绑定'
   const subjectBase = `/monitoring/${encodeURIComponent(monitoringInstance.monitoring_instance_id)}`
   const bindingDialogVisible =
     bindingDialogOpen && showBindingConflict && !pendingBindingConfirmation
@@ -344,10 +337,6 @@ export function MonitoringDetailPageBody({
                 confirmationResetKey={pauseConfirmationReset}
                 onLoadReview={onManagementLoadReview}
                 onRetire={onManagementRetire}
-                onRestoreLifecycle={onManagementRestoreLifecycle}
-                onArchive={onManagementArchive}
-                onRestoreArchive={onManagementRestoreArchive}
-                onPermanentCleanup={onManagementPermanentCleanup}
               />
             )}
             {showOnboardingPrimary ? (
@@ -419,6 +408,8 @@ export function MonitoringDetailPageBody({
         onRetryEvents={onRetryEvents}
         onOpenHistory={() => onOpenHistory('events')}
       />
+
+      <MonitoringInstancePhases key={monitoringInstance.monitoring_instance_id} monitoringInstanceId={monitoringInstance.monitoring_instance_id} refreshKey={monitoringInstance.updated_at} />
 
       {pendingRuntimeConfirmation?.action === 'pause' ? (
         <MonitoringInstanceRuntimePauseConfirmation

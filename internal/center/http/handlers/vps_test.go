@@ -211,7 +211,7 @@ func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
 	}}}
 
 	handler := handlers.VPSCollection(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/vps?provider_id=+pv_001+&lifecycle_status=+active+&usage_status=in_use&renewal_decision=keep&asset_scope=archived", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/vps?provider_id=+pv_001+&lifecycle_status=+active+&usage_tag=production&renewal_decision=keep&asset_scope=archived", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -221,7 +221,7 @@ func TestVPSCollectionListsAssetsWithFilters(t *testing.T) {
 	}
 	if repo.listVPSAssetsFilter.ProviderID != "pv_001" ||
 		repo.listVPSAssetsFilter.LifecycleStatus != vpsassets.LifecycleActive ||
-		repo.listVPSAssetsFilter.UsageStatus != vpsassets.UsageInUse ||
+		repo.listVPSAssetsFilter.UsageTag != "production" ||
 		repo.listVPSAssetsFilter.RenewalDecision != vpsassets.RenewalKeep ||
 		repo.listVPSAssetsFilter.AssetScope != vpsassets.AssetScopeArchived {
 		t.Fatalf("filters = %#v, want normalized query filters", repo.listVPSAssetsFilter)
@@ -281,7 +281,8 @@ func TestVPSCollectionAddsActiveMonitoringInstanceLinkCountsWhenAvailable(t *tes
 	}}}
 	linkRepo := &fakeAssetLinkRepository{listMonitoringInstancesForVPSResult: []assetlinks.MonitoringInstanceSummary{{
 		MonitoringInstanceID: "mi_001",
-		LifecycleStatus:      "在用",
+		LifecycleStatus:      "已接入",
+		IsCurrent:            true,
 		LinkedAt:             now,
 	}, {
 		MonitoringInstanceID: "mi_002",
@@ -305,10 +306,10 @@ func TestVPSCollectionAddsActiveMonitoringInstanceLinkCountsWhenAvailable(t *tes
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if len(body) != 1 || body[0].ActiveMonitoringInstanceLinkCount != 2 {
+	if len(body) != 1 || body[0].ActiveMonitoringInstanceLinkCount != 1 {
 		t.Fatalf("body = %#v, want active_monitoring_instance_link_count 2", body)
 	}
-	if body[0].RunningMonitoringInstanceCount != 0 {
+	if body[0].RunningMonitoringInstanceCount != 1 {
 		t.Fatalf("running_monitoring_instance_count = %d, want 0 for active VPS", body[0].RunningMonitoringInstanceCount)
 	}
 }
@@ -368,13 +369,13 @@ func TestVPSCollectionAddsIPQualitySummariesWhenAvailable(t *testing.T) {
 	}
 }
 
-func TestVPSCollectionCountsOnlyRunningMonitoringInstancesForCancelledAssets(t *testing.T) {
+func TestVPSCollectionCountsOnlyCurrentRunningMonitoringInstances(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
 	repo := &fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{{
 		VPSID:           "vps_001",
 		DisplayName:     "Tokyo Edge",
 		SSHPort:         22,
-		LifecycleStatus: vpsassets.LifecycleCancelled,
+		LifecycleStatus: vpsassets.LifecycleActive,
 		UsageStatus:     vpsassets.UsageInUse,
 		RenewalDecision: vpsassets.RenewalCancel,
 		CreatedAt:       now,
@@ -382,11 +383,12 @@ func TestVPSCollectionCountsOnlyRunningMonitoringInstancesForCancelledAssets(t *
 	}}}
 	linkRepo := &fakeAssetLinkRepository{listMonitoringInstancesForVPSResult: []assetlinks.MonitoringInstanceSummary{{
 		MonitoringInstanceID: "mi_running",
-		LifecycleStatus:      "在用",
+		LifecycleStatus:      "已接入",
+		IsCurrent:            true,
 		LinkedAt:             now,
 	}, {
 		MonitoringInstanceID: "mi_no_renewal",
-		LifecycleStatus:      "不续费",
+		LifecycleStatus:      "已退役",
 		LinkedAt:             now,
 	}, {
 		MonitoringInstanceID: "mi_retired",
@@ -408,7 +410,7 @@ func TestVPSCollectionCountsOnlyRunningMonitoringInstancesForCancelledAssets(t *
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if len(body) != 1 || body[0].ActiveMonitoringInstanceLinkCount != 3 || body[0].RunningMonitoringInstanceCount != 1 {
+	if len(body) != 1 || body[0].ActiveMonitoringInstanceLinkCount != 1 || body[0].RunningMonitoringInstanceCount != 1 {
 		t.Fatalf("body = %#v, want 3 historical active links and 1 running monitoringInstance", body)
 	}
 	if targetCounter.countRunningTargetsForVPSID != "vps_001" {
@@ -443,7 +445,7 @@ func TestVPSCollectionCreatesAsset(t *testing.T) {
 		"provider_id":" pv_001 ",
 		"provider_name":" Hetzner ",
 		"lifecycle_status":"active",
-		"usage_status":"in_use",
+		"usage_tags":["生产"],
 		"labels":[" edge ","","edge"]
 	}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -481,12 +483,12 @@ func TestVPSCollectionRejectsInvalidInput(t *testing.T) {
 		body string
 		path string
 	}{
-		{name: "blank display name", body: `{"display_name":" ","lifecycle_status":"active","usage_status":"in_use"}`, path: "/api/vps"},
-		{name: "invalid lifecycle", body: `{"display_name":"Tokyo","lifecycle_status":"online","usage_status":"in_use"}`, path: "/api/vps"},
+		{name: "blank display name", body: `{"display_name":" ","lifecycle_status":"active","usage_tags":["生产"]}`, path: "/api/vps"},
+		{name: "invalid lifecycle", body: `{"display_name":"Tokyo","lifecycle_status":"online","usage_tags":["生产"]}`, path: "/api/vps"},
 		{name: "invalid usage", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_status":"busy"}`, path: "/api/vps"},
-		{name: "invalid renewal", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_status":"in_use","renewal_decision":"later"}`, path: "/api/vps"},
-		{name: "invalid ssh port", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_status":"in_use","ssh_port":65536}`, path: "/api/vps"},
-		{name: "unknown field", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_status":"in_use","unexpected":true}`, path: "/api/vps"},
+		{name: "invalid renewal", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_tags":["生产"],"renewal_decision":"later"}`, path: "/api/vps"},
+		{name: "invalid ssh port", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_tags":["生产"],"ssh_port":65536}`, path: "/api/vps"},
+		{name: "unknown field", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_tags":["生产"],"unexpected":true}`, path: "/api/vps"},
 		{name: "invalid filter", body: ``, path: "/api/vps?lifecycle_status=online"},
 	}
 
@@ -602,6 +604,7 @@ func TestVPSItemReturnsMonitoringInstanceLinksWhenAvailable(t *testing.T) {
 	linkRepo := &fakeAssetLinkRepository{listMonitoringInstancesForVPSResult: []assetlinks.MonitoringInstanceSummary{{
 		MonitoringInstanceID: "mi_001",
 		DisplayName:          "Tokyo MonitoringInstance",
+		IsCurrent:            true,
 		CurrentHealthStatus:  "正常",
 		LinkedAt:             now,
 	}}}
@@ -629,10 +632,10 @@ func TestVPSItemReturnsMonitoringInstanceLinksWhenAvailable(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body.VPSID != "vps_001" || body.ActiveMonitoringInstanceLinkCount != 1 || body.RunningMonitoringInstanceCount != 0 || body.RunningTargetCount != 0 || len(body.MonitoringInstanceLinks) != 1 || body.MonitoringInstanceLinks[0].MonitoringInstanceID != "mi_001" {
+	if body.VPSID != "vps_001" || body.ActiveMonitoringInstanceLinkCount != 1 || body.RunningMonitoringInstanceCount != 1 || body.RunningTargetCount != 3 || len(body.MonitoringInstanceLinks) != 1 || body.MonitoringInstanceLinks[0].MonitoringInstanceID != "mi_001" {
 		t.Fatalf("body = %#v, want vps detail with monitoringInstance link summary", body)
 	}
-	if targetCounter.countRunningTargetsForVPSID != "" {
+	if targetCounter.countRunningTargetsForVPSID != "vps_001" {
 		t.Fatalf("target counter vps id = %q, want no target count for active VPS", targetCounter.countRunningTargetsForVPSID)
 	}
 }
@@ -658,7 +661,7 @@ func TestVPSItemPatchesAsset(t *testing.T) {
 		"provider_id":null,
 		"ssh_port":2200,
 		"lifecycle_status":"active",
-		"usage_status":"idle",
+		"usage_tags":["闲置"],
 		"renewal_decision":"keep",
 		"labels":[" edge ","backup","edge"]
 	}`, now)
@@ -768,7 +771,7 @@ func TestVPSItemRejectsDirectRestoreFromArchivedPatch(t *testing.T) {
 	}}
 	handler := handlers.VPSItem(repo)
 	req := httptest.NewRequest(http.MethodPatch, "/api/vps/vps_001", strings.NewReader(`{
-		"lifecycle_status":"idle"
+		"lifecycle_status":"active"
 	}`))
 	recorder := httptest.NewRecorder()
 
@@ -861,7 +864,7 @@ func TestVPSItemPatchMapsRepositoryReadonlyRace(t *testing.T) {
 	}
 }
 
-func TestVPSItemPatchesCancellationDecisionWithSubscriptionLinkage(t *testing.T) {
+func TestVPSItemPatchesCancellationDecisionWithoutSubscriptionLinkage(t *testing.T) {
 	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
 	repo := &fakeVPSAssetRenewalLinkageRepository{
 		fakeVPSAssetRepository: fakeVPSAssetRepository{patchVPSAssetResult: vpsassets.Record{
@@ -895,11 +898,11 @@ func TestVPSItemPatchesCancellationDecisionWithSubscriptionLinkage(t *testing.T)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
 	}
-	if repo.linkageVPSID != "vps_001" {
-		t.Fatalf("linkage vps id = %q, want vps_001", repo.linkageVPSID)
+	if repo.linkageVPSID != "" || repo.patchVPSAssetID != "vps_001" {
+		t.Fatalf("must patch only VPS without subscription side effect: linkage=%q patch=%q", repo.linkageVPSID, repo.patchVPSAssetID)
 	}
-	if !repo.linkageInput.RenewalDecision.Set || repo.linkageInput.RenewalDecision.Value != vpsassets.RenewalCancel {
-		t.Fatalf("linkage renewal decision = %#v, want cancel", repo.linkageInput.RenewalDecision)
+	if !repo.patchVPSAssetInput.RenewalDecision.Set || repo.patchVPSAssetInput.RenewalDecision.Value != vpsassets.RenewalCancel {
+		t.Fatalf("renewal decision = %#v, want cancel", repo.patchVPSAssetInput.RenewalDecision)
 	}
 	var body struct {
 		VPSID                      string                               `json:"vps_id"`
@@ -908,8 +911,8 @@ func TestVPSItemPatchesCancellationDecisionWithSubscriptionLinkage(t *testing.T)
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("unmarshal response body: %v", err)
 	}
-	if body.VPSID != "vps_001" || body.RenewalSubscriptionLinkage.Status != vpsassets.RenewalSubscriptionLinkageUpdated || body.RenewalSubscriptionLinkage.SubscriptionID != "sub_001" {
-		t.Fatalf("body = %#v, want vps patch response with linkage summary", body)
+	if body.VPSID != "vps_001" || body.RenewalSubscriptionLinkage.Status != "" {
+		t.Fatalf("body = %#v, want VPS result without fabricated subscription facts", body)
 	}
 }
 
@@ -1439,7 +1442,7 @@ func TestVPSMapsInvalidProviderReferenceToBadRequest(t *testing.T) {
 		path    string
 		body    string
 	}{
-		{name: "create", handler: handlers.VPSCollection(&fakeVPSAssetRepository{createVPSAssetErr: vpsassets.ErrInvalidVPSAssetInput}), method: http.MethodPost, path: "/api/vps", body: `{"display_name":"Tokyo","provider_id":"pv_missing","lifecycle_status":"active","usage_status":"in_use"}`},
+		{name: "create", handler: handlers.VPSCollection(&fakeVPSAssetRepository{createVPSAssetErr: vpsassets.ErrInvalidVPSAssetInput}), method: http.MethodPost, path: "/api/vps", body: `{"display_name":"Tokyo","provider_id":"pv_missing","lifecycle_status":"active","usage_tags":["生产"]}`},
 		{name: "patch", handler: handlers.VPSItem(&fakeVPSAssetRepository{patchVPSAssetErr: vpsassets.ErrInvalidVPSAssetInput}), method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"provider_id":"pv_missing"}`},
 		{name: "list", handler: handlers.VPSCollection(&fakeVPSAssetRepository{listVPSAssetsErr: vpsassets.ErrInvalidVPSAssetInput}), method: http.MethodGet, path: "/api/vps", body: ``},
 	}
@@ -1495,7 +1498,7 @@ func TestVPSMapRepositoryFailures(t *testing.T) {
 		body    string
 	}{
 		{name: "list", handler: handlers.VPSCollection(&fakeVPSAssetRepository{listVPSAssetsErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/vps"},
-		{name: "create", handler: handlers.VPSCollection(&fakeVPSAssetRepository{createVPSAssetErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/vps", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_status":"in_use"}`},
+		{name: "create", handler: handlers.VPSCollection(&fakeVPSAssetRepository{createVPSAssetErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/vps", body: `{"display_name":"Tokyo","lifecycle_status":"active","usage_tags":["生产"]}`},
 		{name: "get", handler: handlers.VPSItem(&fakeVPSAssetRepository{getVPSAssetErr: errors.New("get failed")}), method: http.MethodGet, path: "/api/vps/vps_001"},
 		{name: "patch", handler: handlers.VPSItem(&fakeVPSAssetRepository{patchVPSAssetErr: errors.New("patch failed")}), method: http.MethodPatch, path: "/api/vps/vps_001", body: `{"display_name":"Tokyo"}`},
 	}
@@ -1561,7 +1564,7 @@ func TestVPSMapsLinkRepositoryFailures(t *testing.T) {
 				VPSID:           "vps_001",
 				DisplayName:     "Tokyo Edge",
 				SSHPort:         22,
-				LifecycleStatus: vpsassets.LifecycleCancelled,
+				LifecycleStatus: vpsassets.LifecycleActive,
 				UsageStatus:     vpsassets.UsageInUse,
 				RenewalDecision: vpsassets.RenewalCancel,
 				CreatedAt:       now,

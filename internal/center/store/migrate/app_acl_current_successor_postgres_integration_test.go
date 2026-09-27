@@ -37,10 +37,11 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 				"0064_add_network_rates_valid.sql",
 				"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 				"0066_constrain_monitoring_and_target_state_values.sql",
+				"0067_refactor_vps_monitoring_lifecycle.sql",
 			} {
 				delete(oldFS, name)
 			}
-			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-4]...)
+			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-5]...)
 			oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 			if err != nil {
 				t.Fatalf("compile exact v0.79.4 source: %v", err)
@@ -308,10 +309,11 @@ func seedExactAppACLCurrentPredecessor(t *testing.T, ctx context.Context, global
 		"0064_add_network_rates_valid.sql",
 		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 		"0066_constrain_monitoring_and_target_state_values.sql",
+		"0067_refactor_vps_monitoring_lifecycle.sql",
 	} {
 		delete(oldFS, name)
 	}
-	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-4]...)
+	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-5]...)
 	oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 	if err != nil {
 		t.Fatalf("compile exact v0.79.4 source: %v", err)
@@ -364,6 +366,7 @@ type appACLCurrentTransitionDurableState struct {
 	Base                           appACLCurrentPostgresDurableSnapshot
 	IncidentDefaults               []byte
 	SettingsExceptTransitionDigest [32]byte
+	SettingsRawDigest              [32]byte
 	SettingsUpdated                time.Time
 	ColumnDefault                  string
 	IndexDefinitions               []string
@@ -389,7 +392,12 @@ func readAppACLCurrentTransitionDurableState(
 		`).Scan(&state.IncidentDefaults, &settingsExceptTransition, &state.SettingsUpdated); err != nil {
 		t.Fatalf("read transition settings state: %v", err)
 	}
-	state.SettingsExceptTransitionDigest = sha256.Sum256(settingsExceptTransition)
+	state.SettingsRawDigest = sha256.Sum256(settingsExceptTransition)
+	normalizedSettings, err := appACLCurrentLifecycleSettings(settingsExceptTransition)
+	if err != nil {
+		t.Fatalf("normalize expected lifecycle settings: %v", err)
+	}
+	state.SettingsExceptTransitionDigest = sha256.Sum256(normalizedSettings)
 	var vpsAssetsState string
 	if err := db.QueryRow(ctx, `
 		select coalesce(jsonb_agg(to_jsonb(assets) order by assets.vps_id), '[]'::jsonb)::text
@@ -482,7 +490,11 @@ func readAppACLCurrentSettingsExceptTransitionDigest(t *testing.T, ctx context.C
 	`).Scan(&body); err != nil {
 		t.Fatalf("read center_settings non-transition fields: %v", err)
 	}
-	return sha256.Sum256(body)
+	normalized, err := appACLCurrentLifecycleSettings(body)
+	if err != nil {
+		t.Fatalf("normalize expected lifecycle settings digest: %v", err)
+	}
+	return sha256.Sum256(normalized)
 }
 
 func readAppACLCurrentSuccessorHeartbeatDigest(t *testing.T, ctx context.Context, db *pgxpool.Pool) [32]byte {

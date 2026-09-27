@@ -40,6 +40,7 @@ type IncidentRecord struct {
 }
 
 type StateChangeEventRecord struct {
+	ClosureReason       string        `json:"closure_reason,omitempty"`
 	IncidentID          string        `json:"incident_id"`
 	IncidentClass       IncidentClass `json:"incident_class"`
 	ObjectType          ObjectType    `json:"object_type"`
@@ -120,11 +121,10 @@ type DashboardAssetSummary struct {
 	RenewalDue30dSubscriptionCount int                            `json:"renewal_due_30d_subscription_count"`
 	RenewalDue30dVPSCount          int                            `json:"renewal_due_30d_vps_count"`
 	UnreviewedVPSCount             int                            `json:"unreviewed_vps_count"`
-	ToCancelVPSCount               int                            `json:"to_cancel_vps_count"`
-	CancelledVPSCount              int                            `json:"cancelled_vps_count"`
-	CancellationAttentionVPSCount  int                            `json:"cancellation_attention_vps_count"`
-	RunningCancelledAssetCount     int                            `json:"running_cancelled_asset_count"`
-	ToMigrateVPSCount              int                            `json:"to_migrate_vps_count"`
+	NoRenewalVPSCount              int                            `json:"no_renewal_vps_count"`
+	ArchivedVPSCount               int                            `json:"archived_vps_count"`
+	AutoRenewCheckVPSCount         int                            `json:"auto_renew_check_vps_count"`
+	PendingFollowupCount           int                            `json:"pending_followup_count"`
 	UnlinkedVPSCount               int                            `json:"unlinked_vps_count"`
 	AbnormalLinkedVPSCount         int                            `json:"abnormal_linked_vps_count"`
 	CostByCurrency                 []DashboardAssetCostByCurrency `json:"cost_by_currency"`
@@ -276,6 +276,7 @@ const (
 	EventIncidentStarted                                EventType = "incident_started"
 	EventIncidentEscalated                              EventType = "incident_escalated"
 	EventIncidentRecovered                              EventType = "incident_recovered"
+	EventIncidentClosedByManagement                     EventType = "incident_closed_by_management"
 	EventMonitoringInstanceBindingRebindConfirmed       EventType = "monitoring_instance_binding_rebind_confirmed"
 	EventMonitoringInstanceBindingPendingRejected       EventType = "monitoring_instance_binding_pending_rejected"
 	EventMonitoringInstanceBindingReset                 EventType = "monitoring_instance_binding_reset"
@@ -356,8 +357,8 @@ func ValidMonitoringEventMetadata(
 		if objectType != ObjectTypeMonitoringInstance && objectType != ObjectTypeTarget {
 			return false
 		}
-		validEventType = eventType == EventIncidentStarted || eventType == EventIncidentEscalated || eventType == EventIncidentRecovered || eventType == EventCorrected
-		states = map[string]struct{}{"normal": {}, "notice": {}, "alert": {}, "critical": {}}
+		validEventType = eventType == EventIncidentStarted || eventType == EventIncidentEscalated || eventType == EventIncidentRecovered || eventType == EventIncidentClosedByManagement || eventType == EventCorrected
+		states = map[string]struct{}{"normal": {}, "notice": {}, "alert": {}, "critical": {}, "closed_by_management": {}}
 	case MonitoringEventBindingRuleVersion:
 		if objectType != ObjectTypeMonitoringInstance {
 			return false
@@ -389,7 +390,7 @@ func ValidMonitoringEventMetadata(
 			return false
 		}
 		validEventType = eventType == EventTargetMaintenanceEntered || eventType == EventTargetMaintenanceExited || eventType == EventTargetPaused || eventType == EventTargetResumed || eventType == EventTargetArchived || eventType == EventTargetRestoredToPaused || eventType == EventCorrected
-		states = map[string]struct{}{targets.RunStatusEnabled: {}, targets.RunStatusMaintenance: {}, targets.RunStatusPaused: {}, targets.RunStatusArchived: {}}
+		states = map[string]struct{}{targets.RunStatusEnabled: {}, targets.RunStatusMaintenance: {}, targets.RunStatusPaused: {}, targets.RunStatusArchived: {}, targets.LifecycleActive: {}, targets.LifecycleRetired: {}}
 	default:
 		return false
 	}
@@ -421,6 +422,8 @@ func ValidMonitoringEventMetadata(
 			return priorState == "normal" && resultingState != "normal" && monitoringEventIncidentState(severity) == resultingState
 		case EventIncidentEscalated:
 			return monitoringEventIncidentStateRank(resultingState) > monitoringEventIncidentStateRank(priorState) && monitoringEventIncidentState(severity) == resultingState
+		case EventIncidentClosedByManagement:
+			return priorState != "normal" && priorState != "closed_by_management" && resultingState == "closed_by_management" && monitoringEventIncidentState(severity) == priorState
 		case EventIncidentRecovered:
 			return priorState != "normal" && resultingState == "normal" && monitoringEventIncidentState(severity) == priorState
 		}
@@ -478,9 +481,9 @@ func ValidMonitoringEventMetadata(
 		case EventTargetResumed:
 			return priorState == targets.RunStatusPaused && resultingState == targets.RunStatusEnabled
 		case EventTargetArchived:
-			return priorState != targets.RunStatusArchived && resultingState == targets.RunStatusArchived
+			return priorState == targets.LifecycleActive && resultingState == targets.LifecycleRetired
 		case EventTargetRestoredToPaused:
-			return priorState == targets.RunStatusArchived && resultingState == targets.RunStatusPaused
+			return priorState == targets.LifecycleRetired && resultingState == targets.LifecycleActive
 		}
 	}
 	return false

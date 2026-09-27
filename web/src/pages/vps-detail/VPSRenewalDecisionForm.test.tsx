@@ -24,7 +24,13 @@ function detailFixture(): VPSAssetDetail {
     os_name: 'Debian',
     virtualization: 'KVM',
     lifecycle_status: 'active',
-    usage_status: 'in_use',
+    usage_tags: ['生产'],
+    validity_mode: 'unknown',
+    expires_at: null,
+    auto_renew_check: 'unchecked',
+    auto_renew_checked_at: null,
+    renewal_reason: '',
+    renewal_review_at: null,
     renewal_decision: 'keep',
     importance: 'high',
     labels: [],
@@ -54,6 +60,13 @@ function renderDecision(overrides: {
 }
 
 describe('VPSRenewalDecisionForm', () => {
+  it('prompts for provider verification without a lifecycle precondition', () => {
+    renderDecision()
+    expect(screen.getByRole('status')).toHaveTextContent('请核对服务商自动续费是否已关闭')
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+    expect(screen.getByRole('option', { name: '决定不续费' })).toBeEnabled()
+    expect(screen.queryByText(/已替换要求/)).not.toBeInTheDocument()
+  })
   it('disables decision controls while submitting / loading latest', () => {
     renderDecision({ submitting: true })
 

@@ -55,47 +55,33 @@ func NewPostgresDashboardRepository(db *pgxpool.Pool) *PostgresDashboardReposito
 }
 
 func dashboardCurrentMonitoringInstanceVisibilitySQL(alias string) string {
-	return fmt.Sprintf(`(
-		not exists (
-			select 1
-			from vps_monitoring_instance_links l
-			where l.monitoring_instance_id = %s.monitoring_instance_id
-			  and l.unlinked_at is null
-		)
-		or exists (
-			select 1
-			from vps_monitoring_instance_links l
-			join vps_assets v on v.vps_id = l.vps_id
-			where l.monitoring_instance_id = %s.monitoring_instance_id
-			  and l.unlinked_at is null
-			  and v.lifecycle_status not in ('cancelled', 'archived')
-		)
-	)`, alias, alias)
+	return fmt.Sprintf(`(%s.lifecycle_status <> '已退役' and exists (
+ select 1 from vps_assets v where v.vps_id = %s.vps_id and v.lifecycle_status = 'active'))`, alias, alias)
 }
 
 func dashboardCurrentTargetVisibilitySQL(alias string) string {
-	return fmt.Sprintf(`(
+	return fmt.Sprintf(`(%s.lifecycle_status = 'active' and (
 		not exists (
 			select 1
 			from (
-				select vps_id, target_id from asset_services where target_id is not null
+				select vps_id, target_id from asset_service_associations where ended_at is null and target_id is not null
 				union all
-				select vps_id, target_id from asset_domains where target_id is not null
+				select vps_id, target_id from asset_domain_associations where ended_at is null and target_id is not null
 			) a
 			where a.target_id = %s.target_id
 		)
 		or exists (
 			select 1
 			from (
-				select vps_id, target_id from asset_services where target_id is not null
+				select vps_id, target_id from asset_service_associations where ended_at is null and target_id is not null
 				union all
-				select vps_id, target_id from asset_domains where target_id is not null
+				select vps_id, target_id from asset_domain_associations where ended_at is null and target_id is not null
 			) a
 			join vps_assets v on v.vps_id = a.vps_id
 			where a.target_id = %s.target_id
-			  and v.lifecycle_status not in ('cancelled', 'archived')
+			  and v.lifecycle_status = 'active'
 		)
-	)`, alias, alias)
+	))`, alias, alias, alias)
 }
 
 func dashboardCurrentEventVisibilitySQL(alias string) string {
@@ -172,6 +158,10 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 
 func loadAbnormalMonitoringInstanceSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardMonitoringInstanceSummary, error) {
 	rows, err := queryer.Query(ctx, `
+ with visible_monitoring_instances as (
+ select mi.*, `+monitoringHealthProjectionSQL("mi", "'active'")+` as projected_health_status
+ from monitoring_instances mi where `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
+ )
 		select
 			mi.monitoring_instance_id,
 			mi.display_name,
@@ -181,14 +171,13 @@ func loadAbnormalMonitoringInstanceSummaries(ctx context.Context, queryer dashbo
 			mi.provider,
 			mi.lifecycle_status,
 			mi.monitoring_status,
-			mi.current_health_status,
-			mi.last_heartbeat_at,
+			mi.projected_health_status,
+			mi.last_trusted_online_at,
 			mi.current_active_incident_count,
 			mi.current_primary_issue_summary
-		from monitoring_instances mi
-		where mi.current_health_status <> '正常'
-		  and `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
-		order by case mi.current_health_status
+		from visible_monitoring_instances mi
+		where mi.lifecycle_status = '已接入' and mi.monitoring_status = '启用' and mi.projected_health_status <> '正常'
+		order by case mi.projected_health_status
 			when '严重' then 3
 			when '告警' then 2
 			when '关注' then 1
@@ -246,7 +235,7 @@ func loadAbnormalTargetSummaries(ctx context.Context, queryer dashboardQueryer, 
 			t.current_active_incident_count,
 			t.current_primary_issue_summary
 		from targets t
-		where t.current_health_status <> '正常'
+		where t.run_status = '启用' and t.current_health_status <> '正常'
 		  and `+dashboardCurrentTargetVisibilitySQL("t")+`
 		order by case t.current_health_status
 			when '严重' then 3
@@ -348,7 +337,7 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 	var overview incidents.DashboardOverview
 	if err := queryer.QueryRow(ctx, `
 		with visible_monitoring_instances as (
-			select mi.*
+			select mi.*, `+monitoringHealthProjectionSQL("mi", "'active'")+` as projected_health_status
 			from monitoring_instances mi
 			where `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
 		),
@@ -365,17 +354,17 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 		select
 			(select count(*)::int from visible_monitoring_instances),
 			(select count(*)::int from visible_targets),
-			(select count(*)::int from visible_monitoring_instances where current_health_status <> '正常'),
-			(select count(*)::int from visible_targets where current_health_status <> '正常'),
-			(select count(*)::int from visible_monitoring_instances where current_health_status = '严重'),
-			(select count(*)::int from visible_targets where current_health_status = '严重'),
+			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status <> '正常'),
+			(select count(*)::int from visible_targets where run_status = '启用' and current_health_status <> '正常'),
+			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status = '严重'),
+			(select count(*)::int from visible_targets where run_status = '启用' and current_health_status = '严重'),
 			(select count(*)::int from visible_monitoring_instances where monitoring_status = '维护中'),
 			(select count(*)::int from visible_targets where run_status = '维护中'),
 			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '待接入' or binding_status in ('未绑定', '指纹变更待确认')),
 			(select count(*)::int from visible_monitoring_instances where monitoring_status = '暂停'),
-			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '已退役'),
+			(select count(*)::int from monitoring_instances where lifecycle_status = '已退役'),
 			(select count(*)::int from visible_targets where run_status = '暂停'),
-			(select count(*)::int from visible_targets where run_status = '已归档'),
+			(select count(*)::int from targets where lifecycle_status = 'retired'),
 			(select count(*)::int from visible_events e where event_type = 'incident_started' and `+monitoringEventOccurredAtSQL("e")+` >= now() - interval '24 hours'),
 			(select count(*)::int from visible_events e where event_type = 'incident_recovered' and `+monitoringEventOccurredAtSQL("e")+` >= now() - interval '24 hours')
 	`).Scan(
@@ -403,7 +392,7 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) ([]incidents.DashboardGroupSummary, error) {
 	rows, err := queryer.Query(ctx, `
 		with visible_monitoring_instances as (
-			select mi.*
+			select mi.*, `+monitoringHealthProjectionSQL("mi", "'active'")+` as projected_health_status
 			from monitoring_instances mi
 			where `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
 		),
@@ -416,8 +405,8 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 			select
 				coalesce(nullif(btrim("group"), ''), '未分组') as group_name,
 				count(*)::int as monitoring_instance_count,
-				(count(*) filter (where current_health_status <> '正常'))::int as abnormal_monitoring_instance_count,
-				(count(*) filter (where current_health_status = '严重'))::int as severe_monitoring_instance_count,
+				(count(*) filter (where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status <> '正常'))::int as abnormal_monitoring_instance_count,
+				(count(*) filter (where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status = '严重'))::int as severe_monitoring_instance_count,
 				(count(*) filter (where monitoring_status = '维护中'))::int as maintenance_monitoring_instance_count
 			from visible_monitoring_instances
 			group by 1
@@ -426,8 +415,8 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 			select
 				coalesce(nullif(btrim("group"), ''), '未分组') as group_name,
 				count(*)::int as target_count,
-				(count(*) filter (where current_health_status <> '正常'))::int as abnormal_target_count,
-				(count(*) filter (where current_health_status = '严重'))::int as severe_target_count,
+				(count(*) filter (where run_status = '启用' and current_health_status <> '正常'))::int as abnormal_target_count,
+				(count(*) filter (where run_status = '启用' and current_health_status = '严重'))::int as severe_target_count,
 				(count(*) filter (where run_status = '维护中'))::int as maintenance_target_count
 			from visible_targets
 			group by 1
@@ -505,93 +494,34 @@ func loadDashboardNotificationStatus(ctx context.Context, queryer dashboardQuery
 func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardAssetSummary, error) {
 	var summary incidents.DashboardAssetSummary
 	if err := queryer.QueryRow(ctx, `
-		with inventory_vps as (
-			select vps_id, lifecycle_status, renewal_decision
-			from vps_assets
-			where lifecycle_status not in ('cancelled', 'archived')
-		),
-		active_vps as (
-			select vps_id, lifecycle_status, renewal_decision
-			from inventory_vps
-		),
-		active_links as (
-			select distinct vps_id, monitoring_instance_id
-			from vps_monitoring_instance_links
-			where unlinked_at is null
-		),
-		subscription_rollup as (
-			select
-				v.vps_id,
-				count(*) filter (where s.status = 'active') as active_subscription_count,
-				count(*) filter (where s.status in ('expired', 'cancelled', 'paused')) as inactive_subscription_count
-			from inventory_vps v
-			left join subscriptions s on s.vps_id = v.vps_id
-			group by v.vps_id
-		),
-		cancelled_asset_runtime as (
-			select v.vps_id, l.monitoring_instance_id::text as object_id
-			from inventory_vps v
-			join vps_monitoring_instance_links l on l.vps_id = v.vps_id and l.unlinked_at is null
-			join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
-			where v.lifecycle_status = 'to_cancel'
-			  and n.lifecycle_status not in ('不续费', '已退役')
-			union
-			select distinct v.vps_id, t.target_id::text as object_id
-			from inventory_vps v
-			join (
-				select vps_id, target_id from asset_services where target_id is not null
-				union all
-				select vps_id, target_id from asset_domains where target_id is not null
-			) a on a.vps_id = v.vps_id
-			join targets t on t.target_id = a.target_id
-			where v.lifecycle_status = 'to_cancel'
-			  and t.run_status not in ('已归档', '暂停')
-		),
-		cancellation_attention as (
-			select v.vps_id
-			from inventory_vps v
-			join subscription_rollup sr on sr.vps_id = v.vps_id
-			where
-				(sr.inactive_subscription_count > 0 and v.lifecycle_status <> 'to_cancel')
-				or (sr.active_subscription_count > 0 and v.lifecycle_status = 'to_cancel')
-				or (v.renewal_decision in ('cancel', 'auto_renew_cancelled') and v.lifecycle_status <> 'to_cancel')
-			union
-			select distinct vps_id from cancelled_asset_runtime
-		),
-		renewal_due as (
-			select distinct s.subscription_id, s.vps_id
-			from subscriptions s
-			join active_vps v on v.vps_id = s.vps_id
-			where s.status = 'active'
-				and s.renew_at >= current_date
-				and s.renew_at <= current_date + 30
-		)
-		select
-			(select count(*)::int from renewal_due),
-			(select count(distinct vps_id)::int from renewal_due),
-			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.renewal_decision = 'unreviewed'),
-			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.lifecycle_status = 'to_cancel'),
-			(select count(*)::int from inventory_vps where lifecycle_status = 'cancelled'),
-			(select count(distinct vps_id)::int from cancellation_attention),
-			(select count(*)::int from cancelled_asset_runtime),
-			(select count(*)::int from active_vps v join vps_assets a on a.vps_id = v.vps_id where a.lifecycle_status = 'to_migrate'),
-			(select count(*)::int from active_vps v where not exists (
-				select 1 from active_links l where l.vps_id = v.vps_id
-			)),
-			(select count(distinct l.vps_id)::int
-				from active_links l
-				join active_vps v on v.vps_id = l.vps_id
-				join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
-				where n.current_health_status <> '正常')
+        with active_vps as (
+            select * from vps_assets where lifecycle_status = 'active'
+        ), current_monitoring as (
+            select n.*, `+monitoringHealthProjectionSQL("n", "v.lifecycle_status")+` as projected_health_status from monitoring_instances n join active_vps v on v.vps_id = n.vps_id
+            where n.lifecycle_status <> '已退役'
+        ), renewal_due as (
+            select s.subscription_id, s.vps_id from subscriptions s
+            join active_vps v on v.vps_id = s.vps_id
+            where s.status = 'active' and s.renew_at between current_date and current_date + 30
+        )
+        select
+            (select count(*)::int from renewal_due),
+            (select count(distinct vps_id)::int from renewal_due),
+            (select count(*)::int from active_vps where renewal_decision = 'unreviewed'),
+            (select count(*)::int from active_vps where renewal_decision = 'cancel'),
+            (select count(*)::int from vps_assets where lifecycle_status = 'archived'),
+            (select count(*)::int from vps_assets where renewal_decision = 'cancel' and auto_renew_check in ('unchecked', 'enabled')),
+            (select count(*)::int from vps_followups where status = 'pending'),
+            (select count(*)::int from active_vps v where not exists (select 1 from current_monitoring n where n.vps_id = v.vps_id)),
+            (select count(distinct vps_id)::int from current_monitoring where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status <> '正常')
 	`).Scan(
 		&summary.RenewalDue30dSubscriptionCount,
 		&summary.RenewalDue30dVPSCount,
 		&summary.UnreviewedVPSCount,
-		&summary.ToCancelVPSCount,
-		&summary.CancelledVPSCount,
-		&summary.CancellationAttentionVPSCount,
-		&summary.RunningCancelledAssetCount,
-		&summary.ToMigrateVPSCount,
+		&summary.NoRenewalVPSCount,
+		&summary.ArchivedVPSCount,
+		&summary.AutoRenewCheckVPSCount,
+		&summary.PendingFollowupCount,
 		&summary.UnlinkedVPSCount,
 		&summary.AbnormalLinkedVPSCount,
 	); err != nil {
@@ -615,7 +545,7 @@ func loadDashboardAssetCostByCurrency(ctx context.Context, queryer dashboardQuer
 		from subscriptions
 		join vps_assets v on v.vps_id = subscriptions.vps_id
 		where subscriptions.status = 'active'
-		  and v.lifecycle_status not in ('cancelled', 'archived')
+		  and v.lifecycle_status = 'active'
 		group by currency
 		order by currency asc`)
 	if err != nil {

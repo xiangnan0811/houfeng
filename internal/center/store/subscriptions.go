@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -254,16 +255,14 @@ func (r *PostgresSubscriptionRepository) CreateSubscription(ctx context.Context,
 }
 
 func ensureSubscriptionVPSAllowsCreate(ctx context.Context, tx pgx.Tx, input subscriptions.CreateInput) error {
-	lifecycle, err := lockAssetVPSLifecycle(ctx, tx, input.VPSID)
+	_, err := lockAssetVPSLifecycle(ctx, tx, input.VPSID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return subscriptions.ErrInvalidSubscriptionInput
 	}
 	if err != nil {
 		return fmt.Errorf("query vps asset %q before subscription create: %w", input.VPSID, err)
 	}
-	if input.Status == subscriptions.StatusActive {
-		return ensureVPSAcceptsCurrentAssetRelationship(input.VPSID, lifecycle, "subscription")
-	}
+	// Billing facts may be recorded after archiving; they cannot revive the resource.
 	return nil
 }
 
@@ -531,6 +530,21 @@ func (r *PostgresSubscriptionRepository) patchSubscriptionInTransaction(ctx cont
 			return subscriptions.Record{}, fmt.Errorf("record price history for subscription %q: %w", subscriptionID, err)
 		}
 	}
+	if lifecycle == vpsassets.LifecycleArchived {
+		before, after := current, record
+		before.UpdatedAt, after.UpdatedAt = time.Time{}, time.Time{}
+		beforeJSON, _ := json.Marshal(before)
+		afterJSON, _ := json.Marshal(after)
+		if string(beforeJSON) != string(afterJSON) {
+			details, err := json.Marshal(map[string]any{"subscription_id": subscriptionID, "before": before, "after": after})
+			if err != nil {
+				return subscriptions.Record{}, err
+			}
+			if _, err := createExperienceLog(ctx, tx, renewals.CreateExperienceLogInput{VPSID: vpsID, Category: renewals.ExperienceBilling, Severity: renewals.ExperienceSeverityInfo, Summary: "归档账单补充修订", Details: string(details)}); err != nil {
+				return subscriptions.Record{}, err
+			}
+		}
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return subscriptions.Record{}, fmt.Errorf("commit subscription patch transaction: %w", err)
@@ -539,24 +553,8 @@ func (r *PostgresSubscriptionRepository) patchSubscriptionInTransaction(ctx cont
 }
 
 func ensureTerminalVPSSubscriptionPatchAllowed(lifecycle vpsassets.LifecycleStatus, vpsID, subscriptionID string, current subscriptions.Record, input subscriptions.PatchInput) error {
-	if !isTerminalVPSLifecycle(lifecycle) {
-		return nil
-	}
-
-	nextStatus := current.Status
-	if input.Status.Set {
-		nextStatus = input.Status.Value
-	}
-	if current.Status != subscriptions.StatusActive && nextStatus == subscriptions.StatusActive {
-		return fmt.Errorf("%w: terminal vps %q cannot activate subscription %q", vpsassets.ErrVPSAssetReadonly, vpsID, subscriptionID)
-	}
-	if nextStatus != subscriptions.StatusActive {
-		return nil
-	}
-
-	if subscriptionPatchEnablesAutomaticRenewal(current, input) || subscriptionPatchExtendsEffectivePeriod(current, input) {
-		return fmt.Errorf("%w: terminal vps %q cannot extend the effective period of subscription %q", vpsassets.ErrVPSAssetReadonly, vpsID, subscriptionID)
-	}
+	// Status, dates and payment settings are ledger facts, including possible
+	// residual charges after archival. Their history must remain correctable.
 	return nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"houfeng/internal/center/assetdomains"
+	"houfeng/internal/center/assetrelations"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
@@ -166,7 +167,7 @@ func writeAssetDomainRepositoryError(w http.ResponseWriter, err error) bool {
 		writeError(w, http.StatusNotFound, "asset service not found")
 	case errors.Is(err, assetdomains.ErrDomainTargetNotFound):
 		writeError(w, http.StatusNotFound, "target not found")
-	case errors.Is(err, assetdomains.ErrDomainConflict):
+	case errors.Is(err, assetdomains.ErrDomainConflict), errors.Is(err, assetrelations.ErrConflict):
 		writeError(w, http.StatusConflict, "asset domain conflict")
 	case errors.Is(err, assetdomains.ErrDomainNotFound):
 		writeError(w, http.StatusNotFound, "asset domain not found")

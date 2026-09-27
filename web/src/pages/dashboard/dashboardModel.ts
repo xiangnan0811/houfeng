@@ -203,21 +203,21 @@ function assetSignal(summary: DashboardAssetSummary): {
   action?: DashboardAction
   tone: DashboardTone
 } {
-  if (summary.cancellation_attention_vps_count > 0 || summary.running_cancelled_asset_count > 0) {
+  if (summary.auto_renew_check_vps_count > 0 || summary.pending_followup_count > 0) {
     return {
-      label: '取消联动待处理',
-      detail: `待核对 ${summary.cancellation_attention_vps_count} · 仍运行 ${summary.running_cancelled_asset_count}`,
+      label: '资产跟进待核对',
+      detail: `自动续费待核对 ${summary.auto_renew_check_vps_count} · 跟进事项 ${summary.pending_followup_count}`,
       action: {
-        label: '处理取消联动',
+        label: '核对资产跟进',
         to: DASHBOARD_LINKS.assetDecisionsMigrationRetirement,
       },
       tone: 'alert',
     }
   }
-  if (summary.unreviewed_vps_count > 0 || summary.to_cancel_vps_count > 0 || summary.to_migrate_vps_count > 0) {
+  if (summary.unreviewed_vps_count > 0 || summary.no_renewal_vps_count > 0) {
     return {
       label: '资产决策待核对',
-      detail: `未评估 ${summary.unreviewed_vps_count} · 待取消 ${summary.to_cancel_vps_count} · 迁移意向 ${summary.to_migrate_vps_count}`,
+      detail: `待决定 ${summary.unreviewed_vps_count} · 决定不续费 ${summary.no_renewal_vps_count} · 已归档 ${summary.archived_vps_count}`,
       action: {
         label: '进入资产组合决策',
         to: DASHBOARD_LINKS.assetDecisionsNeedsDecision,

@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
-import type { ProviderRecord, VPSUsageStatus } from '../../lib/types'
+import type { ProviderRecord } from '../../lib/types'
 import { CountryCombo } from './CountryCombo'
 import type { FactEditFormState } from './types'
-import { USAGE_OPTIONS } from './vpsDetailOptions'
+import { AUTO_RENEW_CHECK_OPTIONS, USAGE_SUGGESTIONS } from './vpsDetailOptions'
 
 const IMPORTANCE_OPTIONS: Array<[string, string]> = [
   ['low', '低'],
@@ -12,7 +12,7 @@ const IMPORTANCE_OPTIONS: Array<[string, string]> = [
   ['high', '高'],
 ]
 
-const OPTIONAL_COUNT = 10
+const OPTIONAL_COUNT = 11
 
 type VPSFactsEditFormProps = {
   formId: string
@@ -24,6 +24,7 @@ type VPSFactsEditFormProps = {
   onDraftChange: (draft: FactEditFormState) => void
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   providerExtras?: ReactNode
+  usageSuggestions?: string[]
 }
 
 function hasCustomSSH(draft: FactEditFormState) {
@@ -60,6 +61,7 @@ export function VPSFactsEditForm({
   onDraftChange,
   onSubmit,
   providerExtras,
+  usageSuggestions = [],
 }: VPSFactsEditFormProps) {
   const providerSelectId = useId()
   const countryId = useId()
@@ -206,22 +208,28 @@ export function VPSFactsEditForm({
 
         <div className="row-2">
           <div className="field">
-            <label className="field__label" htmlFor={usageId}>使用状态</label>
-            <select
+            <label className="field__label" htmlFor={usageId}>用途</label>
+            <input
               id={usageId}
               className="input"
-              aria-label="使用状态"
-              value={draft.usageStatus}
+              aria-label="用途"
+              value={draft.usageTags}
               disabled={submitting}
+              placeholder="生产, 自定义用途"
               onChange={(event) => onDraftChange({
                 ...draft,
-                usageStatus: event.target.value as VPSUsageStatus,
+                usageTags: event.target.value,
               })}
-            >
-              {USAGE_OPTIONS.map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+            />
+            <span className="field__hint">可填写多个用途，用逗号分隔。</span>
+            <div className="asset-row__meta">
+              {[...new Set([...USAGE_SUGGESTIONS, ...usageSuggestions, ...draft.usageTags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean)])].map((tag) => (
+                <button key={tag} type="button" className="text-link" disabled={submitting} onClick={() => {
+                  const tags = draft.usageTags.split(/[,，]/).map((value) => value.trim()).filter(Boolean)
+                  onDraftChange({ ...draft, usageTags: [...new Set([...tags, tag])].join(', ') })
+                }}>{tag}</button>
               ))}
-            </select>
+            </div>
           </div>
           <div className="field">
             <label className="field__label" htmlFor={importanceId}>重要性</label>
@@ -242,6 +250,30 @@ export function VPSFactsEditForm({
             </select>
           </div>
         </div>
+
+        <div className="row-2">
+          <label className="field">
+            <span className="field__label">有效期类型</span>
+            <select className="input" value={draft.validityMode} disabled={submitting} onChange={(event) => onDraftChange({ ...draft, validityMode: event.target.value as FactEditFormState['validityMode'] })}>
+              <option value="unknown">未知</option>
+              <option value="fixed">固定到期日</option>
+              <option value="unlimited">无固定期限</option>
+            </select>
+          </label>
+          {draft.validityMode === 'fixed' ? (
+            <label className="field">
+              <span className="field__label">VPS 到期日</span>
+              <input className="input" type="date" value={draft.expiresAt} required disabled={submitting} onChange={(event) => onDraftChange({ ...draft, expiresAt: event.target.value })} />
+            </label>
+          ) : null}
+        </div>
+        <label className="field">
+          <span className="field__label">服务商自动续费</span>
+          <select className="input" value={draft.autoRenewCheck} disabled={submitting} onChange={(event) => onDraftChange({ ...draft, autoRenewCheck: event.target.value as FactEditFormState['autoRenewCheck'], autoRenewCheckedAt: event.target.value === 'unchecked' ? '' : new Date().toISOString() })}>
+            {AUTO_RENEW_CHECK_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <span className="field__hint">按服务商控制台的实际设置填写。续费意向不会修改这一事实。{draft.autoRenewCheckedAt ? ` 核对于 ${new Date(draft.autoRenewCheckedAt).toLocaleString()}` : ''}</span>
+        </label>
 
         <label className="field">
           <span className="field__label">标签</span>
@@ -274,6 +306,11 @@ export function VPSFactsEditForm({
           <span className="opt__count">{OPTIONAL_COUNT} 项</span>
         </summary>
         <div className="opt__body">
+          <label className="field">
+            <span className="field__label">获取来源</span>
+            <input className="input" value={draft.acquisitionSource} disabled={submitting} placeholder="购买、赠送、抽奖或其他来源" onChange={(event) => onDraftChange({ ...draft, acquisitionSource: event.target.value })} />
+            <span className="field__hint">获取来源独立记录，不决定续费方式。</span>
+          </label>
           <div className="switches">
             <label className="tg" htmlFor={ipv6EnabledId}>
               <input

@@ -356,7 +356,7 @@ export function renderMemberDecisionRows(members: ComparisonMatrixMember[], opti
             const intentMismatch = options.showIntent
               && comparison
               && (
-                (member.intendedAction === 'cancel' || member.intendedAction === 'open_cancellation_workbench') !== (lane === 'retire')
+                (member.intendedAction === 'cancel' || member.intendedAction === 'open_archive_preview') !== (lane === 'retire')
                 || (member.intendedAction === 'complete_evidence') !== (lane === 'evidence')
                 || (member.intendedRole === 'primary_candidate') !== (lane === 'primary')
               )
@@ -451,7 +451,7 @@ export function groupMemberComparisonMatrixMember(member: AssetDecisionGroupMemb
     meta: `${formatOptional(member.vps.provider_name)} · ${vpsLocationLabel(member.vps)}`,
     product: `${monthlyCost} · ${member.vps.product_name || member.vps.vps_id}`,
     facts: memberContextLabel(member),
-    statusFacts: `${lifecycleLabel(member.vps.lifecycle_status)} · ${usageLabel(member.vps.usage_status)} · ${renewalLabel(member.vps.renewal_decision)}`,
+    statusFacts: `${lifecycleLabel(member.vps.lifecycle_status)} · ${usageLabel((member.vps.usage_tags ?? []).join('、'))} · ${renewalLabel(member.vps.renewal_decision)}`,
     sourceLabel: sourceAvailabilityLabel(member.source_availability),
     role: member.suggested_role,
     action: member.suggested_action,

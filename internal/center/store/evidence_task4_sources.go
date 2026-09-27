@@ -192,7 +192,7 @@ const subscriptionBudgetEvidenceSQL = `
 		from subscriptions s
 		join vps_assets v on v.vps_id = s.vps_id
 			where s.created_at < $2
-				and v.lifecycle_status not in ('cancelled','archived')
+				and v.lifecycle_status = 'active'
 	), converted as (
 		select st.*,
 			case when st.currency = cfg.base_currency then 1::double precision else er.rate::double precision end as rate

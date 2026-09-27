@@ -114,10 +114,10 @@ describe('Asset Decisions saved record workflows', () => {
           }),
           execution_plan: memberExecutionPlan({
             lane: 'cancel_retire',
-            step_kind: 'open_cancellation_workbench',
+            step_kind: 'open_archive_preview',
             tone: 'critical',
             summary: '当前事实与判断不一致，需要复核闭环',
-            step_label: '打开取消/退役工作台',
+            step_label: '打开结束使用并归档工作台',
             issue_count: 2,
             actionable: true,
           }),
@@ -265,10 +265,10 @@ describe('Asset Decisions saved record workflows', () => {
     expect(within(primaryFollowupRow).getByLabelText('跟进备注')).toHaveValue('等待迁移窗口')
     expect(within(dialog).getAllByText('有漂移').length).toBeGreaterThan(0)
     expect(within(dialog).queryByText('仍有 active 订阅')).not.toBeInTheDocument()
-    expect(within(dialog).queryByRole('link', { name: '打开取消/退役工作台' })).not.toBeInTheDocument()
+    expect(within(dialog).queryByRole('link', { name: '打开结束使用并归档工作台' })).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('tab', { name: /执行/ }))
-    const cancelLinks = within(dialog).getAllByRole('link', { name: '打开取消/退役工作台' })
-    expect(cancelLinks[0]).toHaveAttribute('href', '/vps/vps_primary?workbench=cancellation')
+    const cancelLinks = within(dialog).getAllByRole('link', { name: '打开结束使用并归档工作台' })
+    expect(cancelLinks[0]).toHaveAttribute('href', '/vps/vps_primary?workbench=archive')
     fireEvent.click(within(dialog).getByRole('tab', { name: /成员/ }))
     const hasRawPanel = openSavedRecordRawMembersPanel(dialog)
     if (hasRawPanel) {
@@ -416,8 +416,8 @@ describe('Asset Decisions saved record workflows', () => {
             current_facts: {
               found: true,
               lifecycle_status: 'active',
-              usage_status: 'in_use',
-              renewal_decision: 'migrate',
+              usage_tags: ['in_use'],
+              renewal_decision: 'unreviewed',
               active_subscription_count: 1,
               service_count: 2,
               domain_count: 1,

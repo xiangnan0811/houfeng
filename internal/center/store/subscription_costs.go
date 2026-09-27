@@ -114,14 +114,13 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 			v.country,
 			v.region,
 			v.lifecycle_status,
-			v.renewal_decision
+			v.renewal_decision, v.auto_renew_check
 		from subscriptions s
 		join vps_assets v on v.vps_id = s.vps_id
 		left join providers p on p.provider_id = v.provider_id
 		left join latest_rates lr on lr.quote_currency = s.currency
 		left join next_reminders nr on nr.subscription_id = s.subscription_id
 		where s.status = 'active'
-		  and v.lifecycle_status not in ('cancelled', 'archived')
 		order by s.renew_at asc nulls last, s.subscription_id asc`,
 		settings.ExchangeRateProvider,
 		settings.BaseCurrency,
@@ -168,6 +167,7 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 			&record.Region,
 			&record.LifecycleStatus,
 			&record.RenewalDecision,
+			&record.AutoRenewCheck,
 		); err != nil {
 			return nil, fmt.Errorf("scan subscription cost row: %w", err)
 		}
@@ -261,7 +261,7 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 			from buckets b
 			join subscriptions s on s.created_at < (b.bucket_start + interval '1 month')
 			join vps_assets v on v.vps_id = s.vps_id
-			where v.lifecycle_status not in ('cancelled', 'archived')
+			where v.lifecycle_status = 'active'
 		)
 		select
 			to_char(b.bucket_start, 'YYYY-MM') as bucket,
@@ -390,11 +390,10 @@ func (r *PostgresSubscriptionCostRepository) ListMissingSubscriptionAssets(ctx c
 			coalesce(v.provider_id, ''),
 			coalesce(nullif(v.provider_name, ''), p.name, ''),
 			v.lifecycle_status,
-			v.renewal_decision
+			v.renewal_decision, v.auto_renew_check
 		from vps_assets v
 		left join providers p on p.provider_id = v.provider_id
-		where v.lifecycle_status not in ('archived', 'cancelled')
-		  and not exists (
+		where not exists (
 			select 1
 			from subscriptions s
 			where s.vps_id = v.vps_id
@@ -415,7 +414,7 @@ func (r *PostgresSubscriptionCostRepository) ListMissingSubscriptionAssets(ctx c
 			&record.ProviderID,
 			&record.ProviderName,
 			&record.LifecycleStatus,
-			&record.RenewalDecision,
+			&record.RenewalDecision, &record.AutoRenewCheck,
 		); err != nil {
 			return nil, fmt.Errorf("scan missing subscription asset row: %w", err)
 		}
@@ -830,7 +829,7 @@ func (r *PostgresSubscriptionCostRepository) ListActiveCurrencies(ctx context.Co
 		from subscriptions
 		join vps_assets v on v.vps_id = subscriptions.vps_id
 		where status = 'active'
-		  and v.lifecycle_status not in ('cancelled', 'archived')
+		  and v.lifecycle_status = 'active'
 		order by currency asc`)
 	if err != nil {
 		return nil, fmt.Errorf("query active subscription currencies: %w", err)
@@ -932,9 +931,7 @@ func (r *PostgresSubscriptionCostRepository) ListReminderCandidates(ctx context.
 				s.renew_at,
 				o.offset_days,
 				case
-					when v.renewal_decision in ('cancel', 'auto_renew_cancelled', 'migrate')
-					  or v.lifecycle_status in ('to_cancel', 'to_migrate')
-					  or s.auto_renew_cancelled
+					when v.renewal_decision = 'cancel' and v.auto_renew_check in ('unchecked', 'enabled')
 					then 'decision_attention'
 					else 'renewal'
 				end as reminder_kind,
@@ -952,7 +949,7 @@ func (r *PostgresSubscriptionCostRepository) ListReminderCandidates(ctx context.
 			left join providers p on p.provider_id = v.provider_id
 			left join latest_rates lr on lr.quote_currency = s.currency
 			where s.status = 'active'
-			  and v.lifecycle_status not in ('archived', 'cancelled')
+			  and v.lifecycle_status = 'active'
 		)
 		select
 			subscription_id,

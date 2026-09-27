@@ -1,3 +1,5 @@
+import { VPSLifecycleWorkspace } from './VPSLifecycleWorkspace'
+import { VPSMaintenancePanel } from './VPSMaintenancePanel'
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
@@ -5,9 +7,7 @@ import { ActionConfirmationModal } from '../../components/ActionConfirmationModa
 import { ArchiveBlockerDetails } from '../../components/ArchiveBlockerDetails'
 import { Button, Input, Modal } from '../../components/atoms'
 import { DependencyStatusCorrection } from '../../components/DependencyStatusCorrection'
-import { VPSCancellationWorkbench } from '../../components/VPSCancellationWorkbench'
 import {
-  applyVPSCancellation,
   archiveVPS,
   buildVPSDomainCreateBody,
   buildVPSServiceCreateBody,
@@ -17,7 +17,6 @@ import {
   extendVPSValidity,
   getVPSAsset,
   getVPSArchiveReview,
-  getVPSCancellationPreview,
   startVPSMigration,
   linkVPSMonitoringInstance,
   listMonitoringInstances,
@@ -29,15 +28,12 @@ import {
   updateVPSAsset,
 } from '../../lib/api'
 import type {
-  ApplyCancellationInput,
   ArchiveBlockerDetail,
   ArchiveReview,
   AssetServiceRecord,
-  CancellationPreview,
   CreateAssetDomainInput,
   CreateAssetServiceInput,
   ExtendVPSValidityInput,
-  LifecycleActionResult,
   MonitoringInstanceRecord,
   ProviderRecord,
   SubscriptionRecord,
@@ -89,7 +85,6 @@ import { VPSVersionConflictBanner } from './VPSVersionConflictBanner'
 import { vpsLifecycleConfirmationCopy } from './vpsLifecycleConfirmationCopy'
 import {
   describeManagementError,
-  isCancellationPreviewStale,
   isIdempotencyKeyReused,
   isTerminalVPSLifecycle,
   isVPSAssetReadonly,
@@ -181,15 +176,13 @@ export function VPSOverviewManagementActions({
   const [linkFeedbackIsError, setLinkFeedbackIsError] = useState(false)
   const [relationRevision, setRelationRevision] = useState(0)
 
-  const [cancellationPreview, setCancellationPreview] = useState<CancellationPreview | null>(null)
-  const [cancellationResult, setCancellationResult] = useState<LifecycleActionResult | null>(null)
-  const [cancellationLoading, setCancellationLoading] = useState(false)
-  const [cancellationError, setCancellationError] = useState<string | null>(null)
   const [archiveReview, setArchiveReview] = useState<ArchiveReview | null>(null)
   const [archiveReviewLoading, setArchiveReviewLoading] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [archiveConfirmationName, setArchiveConfirmationName] = useState('')
   const [archiveReason, setArchiveReason] = useState('')
+  const [neverConnectedConfirmed, setNeverConnectedConfirmed] = useState(false)
+  const archiveAttempt = useRef<{ body: string; key: string } | null>(null)
   const [archiveStatusCorrectionTarget, setArchiveStatusCorrectionTarget] = useState<{
     kind: 'service' | 'domain'
     id: string
@@ -239,7 +232,6 @@ export function VPSOverviewManagementActions({
   const domainOpen = panel === 'domain'
   const validityExtensionOpen = panel === 'validity-extension'
   const monitoringLinkOpen = panel === 'monitoring-instance-link'
-  const cancellationOpen = panel === 'cancellation'
   const archiveOpen = panel === 'archive'
   const migrationOpen = panel === 'start-migration'
   const relationPanelOpen = panel === 'monitoring-instance-evidence'
@@ -328,7 +320,7 @@ export function VPSOverviewManagementActions({
           setFactDraftBase(form)
         }
         if (decisionOpen) {
-          setDecisionDraft({ renewalDecision: nextDetail.renewal_decision, reason: '' })
+          setDecisionDraft({ renewalDecision: nextDetail.renewal_decision, reason: nextDetail.renewal_reason ?? '', reviewAt: nextDetail.renewal_review_at?.slice(0, 10) ?? '' })
         }
       })
       .catch((error: unknown) => {
@@ -436,34 +428,6 @@ export function VPSOverviewManagementActions({
   ])
 
   useEffect(() => {
-    if (!cancellationOpen) return
-    const requestId = ++requestIdRef.current
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the workbench must clear any prior authoritative preview before the next server preview is requested
-    setCancellationPreview(null)
-    setCancellationResult(null)
-    setCancellationLoading(true)
-    setCancellationError(null)
-    setMutationError(null)
-
-    void getVPSCancellationPreview(vpsId)
-      .then((preview) => {
-        if (requestId !== requestIdRef.current) return
-        setCancellationPreview(preview)
-      })
-      .catch((error: unknown) => {
-        if (requestId !== requestIdRef.current) return
-        setCancellationError(describeManagementError(error, '加载取消/退役影响预览失败'))
-      })
-      .finally(() => {
-        if (requestId === requestIdRef.current) setCancellationLoading(false)
-      })
-
-    return () => {
-      requestIdRef.current += 1
-    }
-  }, [cancellationOpen, loadRevision, vpsId])
-
-  useEffect(() => {
     if (!archiveOpen) return
     const requestId = ++requestIdRef.current
     // eslint-disable-next-line react-hooks/set-state-in-effect -- every archive opening starts from an empty review so stale eligibility can never enable confirmation
@@ -471,6 +435,7 @@ export function VPSOverviewManagementActions({
     setArchiveReviewLoading(true)
     setArchiveError(null)
     setArchiveConfirmationName('')
+    setNeverConnectedConfirmed(false)
 
     void getVPSArchiveReview(vpsId)
       .then((review) => {
@@ -518,7 +483,7 @@ export function VPSOverviewManagementActions({
         status: detail.current_state,
       })
     } else if (kind === 'residual') {
-      management.openPanel('cancellation')
+      management.openPanel('subscription')
     } else if (kind === 'restore') {
       navigate(`/archive/${encodeURIComponent(vpsId)}`)
     }
@@ -682,7 +647,7 @@ export function VPSOverviewManagementActions({
       setMutationError('请先加载最新版本后再保存')
       return
     }
-    if (decisionDraft.renewalDecision === detail.renewal_decision) {
+    if (decisionDraft.renewalDecision === detail.renewal_decision && decisionDraft.reason === (detail.renewal_reason ?? '') && (decisionDraft.reviewAt ?? '') === (detail.renewal_review_at?.slice(0, 10) ?? '')) {
       setMutationError('请选择一个不同的续费决策')
       return
     }
@@ -694,7 +659,8 @@ export function VPSOverviewManagementActions({
       const reason = decisionDraft.reason.trim()
       const updated = await updateVPSAsset(detail.vps_id, {
         renewal_decision: decisionDraft.renewalDecision,
-        ...(reason ? { renewal_reason: reason } : {}),
+        renewal_reason: reason,
+        renewal_review_at: decisionDraft.reviewAt ? `${decisionDraft.reviewAt}T00:00:00Z` : null,
       }, { expectedUpdatedAt: detail.updated_at })
       if (!submissionIsCurrent(generation)) return
       const refreshed = await onOverviewRefresh()
@@ -971,34 +937,11 @@ export function VPSOverviewManagementActions({
       setMutationError('当前状态不允许修改')
       return
     }
-    if (subscriptionsError) {
-      setMutationError('订阅证据暂不可用，请重试后再延长有效期。')
-      return
-    }
-
-    if (activeSubscriptions.length === 0) {
-      setMutationError('当前 VPS 没有生效中订阅，无法延长有效期。')
-      return
-    }
-    if (activeSubscriptions.length > 1) {
-      setMutationError('当前 VPS 存在多个生效中订阅，无法直接延长有效期。')
-      return
-    }
-    if (!activeSubscription) {
-      setMutationError('当前 VPS 没有唯一的生效中订阅，无法延长有效期。')
-      return
-    }
-
     let input: ExtendVPSValidityInput
     try {
       input = buildValidityExtensionInput(validityExtensionDraft)
     } catch (error: unknown) {
       setMutationError(describeManagementError(error, '有效期延长输入无效'))
-      return
-    }
-
-    if (activeSubscription.renew_at && input.extend_to < activeSubscription.renew_at) {
-      setMutationError('延长至日期不能早于当前生效中订阅续费日。')
       return
     }
 
@@ -1131,53 +1074,6 @@ export function VPSOverviewManagementActions({
     })
   }
 
-  async function submitCancellation(input: ApplyCancellationInput) {
-    if (!cancellationPreview) return
-    const owner = beginSubmission('cancellation')
-    if (!owner) return
-    const { generation } = owner
-    setMutationError(null)
-    setCancellationError(null)
-    try {
-      const result = await applyVPSCancellation(vpsId, input)
-      if (!submissionIsCurrent(generation)) return
-      setCancellationResult(result)
-
-      const [overviewResult, previewResult] = await Promise.allSettled([
-        onOverviewRefresh(),
-        getVPSCancellationPreview(vpsId),
-      ])
-      if (!submissionIsCurrent(generation)) return
-      const overviewRefreshed = overviewResult.status === 'fulfilled' && overviewResult.value
-      const previewRefreshed = previewResult.status === 'fulfilled'
-      if (previewResult.status === 'fulfilled') {
-        setCancellationPreview(previewResult.value)
-      } else {
-        setMutationError('取消/退役动作已执行，但影响预览刷新失败，请关闭后重新打开复核。')
-      }
-      setPageFeedback(overviewRefreshed && previewRefreshed
-        ? { tone: 'success', message: `取消/退役动作已完成，写入 ${result.steps.length} 个审计步骤，概览与影响预览已刷新。` }
-        : { tone: 'warning', message: `取消/退役动作已完成，写入 ${result.steps.length} 个审计步骤，但部分刷新失败，请重新复核。` })
-    } catch (error: unknown) {
-      if (!submissionIsCurrent(generation)) return
-      if (isCancellationPreviewStale(error)) {
-        try {
-          const preview = await getVPSCancellationPreview(vpsId)
-          if (!submissionIsCurrent(generation)) return
-          setCancellationPreview(preview)
-        } catch {
-          if (!submissionIsCurrent(generation)) return
-        }
-        if (!submissionIsCurrent(generation)) return
-        setCancellationError('影响范围已变化，请重新加载预览后再确认')
-        return
-      }
-      setMutationError(describeManagementError(error, '执行取消/退役失败'))
-    } finally {
-      finishSubmission(owner)
-    }
-  }
-
   async function submitArchive() {
     if (archiveReviewLoading || !archiveReview) {
       setArchiveError('归档资格尚未加载完成')
@@ -1203,7 +1099,10 @@ export function VPSOverviewManagementActions({
     const { generation } = owner
     setArchiveError(null)
     try {
-      await archiveVPS(vpsId, { confirmation_name: confirmationName, reason })
+      const body = { confirmation_name: confirmationName, reason, preview_digest: archiveReview.preview_digest ?? '', never_connected_confirmation: neverConnectedConfirmed }
+      const signature = JSON.stringify({ vpsId, ...body })
+      if (archiveAttempt.current?.body !== signature) archiveAttempt.current = { body: signature, key: crypto.randomUUID() }
+      await archiveVPS(vpsId, { ...body, idempotency_key: archiveAttempt.current.key })
       if (!submissionIsCurrent(generation)) return
       navigate(`/archive/${encodeURIComponent(vpsId)}`, { replace: true, state: location.state })
     } catch (error: unknown) {
@@ -1247,7 +1146,7 @@ export function VPSOverviewManagementActions({
       setPageFeedback({
         tone: refreshed ? 'success' : 'warning',
         message: refreshed
-          ? `已记录开始迁移，动作 ${result.action.action_id}。只改流程态，没有迁移服务，也没有停机。`
+          ? `已记录开始迁移，动作 ${result.action.action_id}。已建立跟进事项，请记录来源、目标及结果。`
           : '已记录开始迁移，但概览刷新失败，请稍后手动重试。',
       })
       setMigrationReason('')
@@ -1317,6 +1216,10 @@ export function VPSOverviewManagementActions({
         />
       )}
 
+      <VPSDetailDialog open={!READ_ONLY_PREVIEW && (panel === 'followups' || panel === 'maintenance')} onClose={closePanel} title={panel === 'maintenance' ? 'VPS 维护' : '跟进事项'} ariaLabel={panel === 'maintenance' ? 'VPS 维护' : '跟进事项'} template="form">
+        {panel === 'followups' ? <VPSLifecycleWorkspace vpsId={vpsId} kind="followups" onChanged={() => void onOverviewRefresh()} /> : null}
+        {panel === 'maintenance' ? <VPSMaintenancePanel vpsId={vpsId} onChanged={() => void onOverviewRefresh()} /> : null}
+      </VPSDetailDialog>
       {relationPanelOpen ? (
         <VPSOverviewRelationPanels
           key={`${vpsId}:${panel}:${relationRevision}`}
@@ -1396,7 +1299,7 @@ export function VPSOverviewManagementActions({
         template="decision"
         persistent={submitting}
         footer={detail && decisionDraft ? (
-          <VPSDialogActions formId={formId} onCancel={closePanel} submitting={submitting} error={mutationError} disabled={decisionDraft.renewalDecision === detail.renewal_decision} submitLabel="保存续费决策" />
+          <VPSDialogActions formId={formId} onCancel={closePanel} submitting={submitting} error={mutationError}  submitLabel="保存续费决策" />
         ) : undefined}
       >
         <div className="vps-detail-modal">
@@ -1551,7 +1454,7 @@ export function VPSOverviewManagementActions({
             onCancel={closePanel}
             submitting={submitting}
             error={mutationError}
-            disabled={Boolean(subscriptionsError) || subscriptionsLoading || activeSubscriptions.length !== 1}
+            disabled={detailLoading}
             submitLabel="保存延长记录"
           />
         ) : undefined}
@@ -1561,18 +1464,8 @@ export function VPSOverviewManagementActions({
           {detailError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{detailError}</p> : null}
           {subscriptionsError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{subscriptionsError}</p> : null}
           {detailError || subscriptionsError ? <Button onClick={retryLoad}>重试加载</Button> : null}
-          {detail && !subscriptionsLoading && !subscriptionsError ? (
+          {detail ? (
             <>
-              {activeSubscriptions.length > 1 ? (
-                <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-                  当前 VPS 存在多个生效中订阅，无法直接延长有效期。
-                </p>
-              ) : null}
-              {activeSubscriptions.length === 0 ? (
-                <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
-                  当前 VPS 没有生效中订阅，无法直接延长有效期。
-                </p>
-              ) : null}
               <VPSValidityExtensionForm
                 formId={formId}
                 detail={detail}
@@ -1630,33 +1523,6 @@ export function VPSOverviewManagementActions({
         </div>
       </VPSDetailDialog>
 
-      <Modal
-        open={cancellationOpen}
-        onClose={closePanel}
-        title="取消 / 退役"
-        ariaLabel="取消 / 退役"
-        size="xl"
-        contentClassName="modal-content--asset-cancel"
-        persistent={submitting}
-      >
-        <div className="vps-detail-modal">
-          {cancellationLoading ? <p role="status">正在加载取消/退役影响预览…</p> : null}
-          {cancellationError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{cancellationError}</p> : null}
-          {cancellationError ? <Button onClick={retryLoad}>重试加载</Button> : null}
-          {cancellationPreview ? (
-            <VPSCancellationWorkbench
-              key={vpsId}
-              preview={cancellationPreview}
-              submitting={submitting}
-              error={mutationError}
-              result={cancellationResult}
-              onSubmit={(input) => void submitCancellation(input)}
-              onCancel={closePanel}
-            />
-          ) : null}
-        </div>
-      </Modal>
-
       <ActionConfirmationModal
         open={archiveOpen}
         title={archiveCopy.title}
@@ -1665,7 +1531,7 @@ export function VPSOverviewManagementActions({
         impact={archiveCopy.impact}
         unchanged={archiveCopy.unchanged}
         confirmLabel={submitting ? '归档中…' : archiveCopy.confirmLabel}
-        disabled={submitting || archiveReviewLoading || archiveBlocked || !archiveNameMatches || archiveReason.trim() === ''}
+        disabled={submitting || archiveReviewLoading || archiveBlocked || !archiveNameMatches || archiveReason.trim() === '' || Boolean(archiveReview?.online_evidence?.manual_confirmation_required && !neverConnectedConfirmed)}
         cancelDisabled={submitting}
         error={archiveError}
         onCancel={closePanel}
@@ -1673,6 +1539,19 @@ export function VPSOverviewManagementActions({
       >
         <div className="asset-lifecycle-confirm">
           <p className="asset-lifecycle-confirm__eyebrow">归档审查</p>
+          {archiveReview ? <details>
+            <summary>本次归档影响清单</summary>
+            <p>退役当前监控：{archiveReview.monitoring_instance_links.filter((item) => item.lifecycle_status !== '已退役').map((item) => item.display_name || item.monitoring_instance_id).join('、') || '无当前实例'}</p>
+            <p>结束此 VPS 的服务关联：{archiveReview.services.map((item) => item.name).join('、') || '无'}</p>
+            <p>结束此 VPS 的域名关联：{archiveReview.domains.map((item) => item.domain_name).join('、') || '无'}</p>
+            <p>涉及探测：{archiveReview.target_links.map((item) => item.name).join('、') || '无'}。仅明确专属探测停止，共享或归属不明确的探测保留并生成待核对事项。</p>
+            <p>账单事实继续保留；服务商自动续费需独立核对。运行异常按管理动作关闭，不发送自然恢复通知。</p>
+          </details> : null}
+          {archiveReview?.online_evidence ? <div>
+            <p>接收链路：{archiveReview.online_evidence.receiver_healthy ? '持续健康' : '健康观察不足'} · 健康观察起点：{archiveReview.online_evidence.healthy_since ?? '尚未建立'}</p>
+            <p>最早可归档：{archiveReview.online_evidence.earliest_archive_at ?? '等待安全观察'}</p>
+            {archiveReview.online_evidence.instances.map((instance) => <p key={`${instance.monitoring_instance_id}:${instance.session_id ?? ''}`}>实例 {instance.monitoring_instance_id} · 会话 {instance.session_id ?? '未建立'} · 最后可信在线：{instance.last_trusted_online_at ?? '尚未收到'}</p>)}
+          </div> : null}
           {archiveReviewLoading ? (
             <p className="asset-lifecycle-confirm__callouts" role="status">正在检查归档资格…</p>
           ) : archiveReview?.blocker_details?.length ? (
@@ -1699,7 +1578,10 @@ export function VPSOverviewManagementActions({
               {archiveReview.warnings.map((warning) => (
                 <p key={warning} className="asset-operation-feedback asset-operation-feedback--notice" role="status">{warning}</p>
               ))}
-              <h4>归档只记录历史边界，不会删除关联。需要原因和完整展示名。</h4>
+              <h4>结束使用将退役当前监控、结束当前关联并停止明确专属探测，历史继续保留。</h4>
+              {archiveReview.online_evidence?.healthy_since ? <p>接收链路持续健康起点：{archiveReview.online_evidence?.healthy_since}</p> : null}
+              {archiveReview.online_evidence?.earliest_archive_at ? <p>最早可归档时间：{archiveReview.online_evidence?.earliest_archive_at}</p> : null}
+              {archiveReview.online_evidence?.manual_confirmation_required ? <label><input type="checkbox" checked={neverConnectedConfirmed} onChange={(event) => setNeverConnectedConfirmed(event.target.checked)} />确认此 VPS 从未形成有效 Agent 会话，已人工核实结束使用。</label> : null}
               <Input label="归档原因" value={archiveReason} disabled={submitting} onChange={(event) => { setArchiveReason(event.target.value); setArchiveError(null) }} />
               <label className="input-field">
                 <span className="input-field__label">输入 VPS 名称确认归档</span>
@@ -1734,8 +1616,8 @@ export function VPSOverviewManagementActions({
         persistent={submitting}
       >
         <div className="asset-lifecycle-confirm">
-          <p>只把当前 VPS 记为待迁移，并把续费决策记为迁移。不会迁移服务，也不会停机。</p>
-          <p>来源必须是在用、闲置或测试中。待取消、已取消和已归档要先回到当前态。</p>
+          <p>记录人工迁移计划及后续结果。资源、服务关联和续费意向需分别处理。</p>
+          <p>迁移完成后可结束原关联；结束使用并归档是独立操作。</p>
           <Input label="原因" value={migrationReason} disabled={submitting} onChange={(event) => setMigrationReason(event.target.value)} />
           {mutationError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{mutationError}</p> : null}
           <div className="page-form-actions">

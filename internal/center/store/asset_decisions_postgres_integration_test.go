@@ -9,6 +9,7 @@ import (
 	"houfeng/internal/center/assetdecisions"
 	"houfeng/internal/center/assetdomains"
 	"houfeng/internal/center/assetservices"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsassets"
 )
@@ -29,8 +30,8 @@ func TestVPSStateRepairAssetDecisionReadbackUsesEffectiveReferences(t *testing.T
 		record, err := vpsRepo.CreateVPSAsset(ctx, vpsassets.CreateInput{
 			DisplayName:     name,
 			LifecycleStatus: vpsassets.LifecycleActive,
-			UsageStatus:     vpsassets.UsageIdle,
-			RenewalDecision: vpsassets.RenewalMigrate,
+			UsageTags:       []string{"迁移计划"},
+			RenewalDecision: vpsassets.RenewalUnreviewed,
 		})
 		if err != nil {
 			t.Fatalf("create VPS %q: %v", name, err)
@@ -113,7 +114,9 @@ func TestVPSStateRepairAssetDecisionReadbackUsesEffectiveReferences(t *testing.T
 	addDomain(activeVPS, archivedTarget, assetdomains.DomainStatusActive)
 	updateTargetStatus(maintenanceTarget, targets.RunStatusMaintenance)
 	updateTargetStatus(pausedTarget, targets.RunStatusPaused)
-	updateTargetStatus(archivedTarget, targets.RunStatusArchived)
+	if _, err := pool.Exec(ctx, `update targets set lifecycle_status = 'retired', run_status = '暂停' where target_id = $1`, archivedTarget); err != nil {
+		t.Fatal(err)
+	}
 
 	unknownVPS := createVPS("Migration readback unknown dependencies")
 	unknownTarget := createTarget()
@@ -123,15 +126,15 @@ func TestVPSStateRepairAssetDecisionReadbackUsesEffectiveReferences(t *testing.T
 	archivedVPS := createVPS("Migration readback archived parent")
 	addService(archivedVPS, historyTarget, assetservices.ServiceStatusActive)
 	addDomain(archivedVPS, historyTarget, assetdomains.DomainStatusUnknown)
-	if _, err := pool.Exec(ctx, `update vps_assets set lifecycle_status = 'archived', usage_status = 'unknown', archived_at = now() where vps_id = $1`, archivedVPS); err != nil {
+	if _, err := pool.Exec(ctx, `update vps_assets set lifecycle_status = 'archived', archived_at = now() where vps_id = $1`, archivedVPS); err != nil {
 		t.Fatalf("archive parent VPS %q: %v", archivedVPS, err)
 	}
 
 	if _, err := pool.Exec(ctx, `
 		update vps_assets
 		set archived_state_snapshot = jsonb_build_object(
-			'lifecycle_status', 'cancelled',
-			'usage_status', 'idle',
+			'lifecycle_status', 'active',
+			'usage_tags', jsonb_build_array('迁移计划'),
 			'renewal_decision', 'cancel',
 			'captured_at', now(),
 			'source', 'archive'
@@ -171,7 +174,7 @@ func TestVPSStateRepairAssetDecisionReadbackUsesEffectiveReferences(t *testing.T
 			historyFact.RunningTargetCount)
 	}
 	if snapshot := historyFact.VPS.ArchivedStateSnapshot; snapshot == nil ||
-		snapshot.LifecycleStatus != vpsassets.LifecycleCancelled || snapshot.Source != "archive" {
+		snapshot.LifecycleStatus != vpsassets.LifecycleActive || snapshot.Source != "archive" {
 		t.Fatalf("archived state snapshot = %#v, want scanned prior archive state", snapshot)
 	}
 	historyReadback := assetdecisions.EvaluateMemberExecutionReadback(migrationMember(historyVPS), factsByVPS)
@@ -213,8 +216,26 @@ func TestVPSStateRepairAssetDecisionReadbackUsesEffectiveReferences(t *testing.T
 		t.Fatalf("unknown readback = %#v, want warning that prevents completed status without known-carrier critical", unknownReadback)
 	}
 
-	if _, ok := factsByVPS[archivedVPS]; ok {
-		t.Fatalf("archived parent VPS %q appeared in migration facts", archivedVPS)
+	if archived := factFor(archivedVPS); archived.VPS.LifecycleStatus != vpsassets.LifecycleArchived || archived.RunningMonitoringCount != 0 || archived.RunningTargetCount != 0 || archived.ServiceCount != 0 || archived.DomainCount != 0 {
+		t.Fatalf("archived identity must remain readable without current runtime: %#v", archived)
+	}
+
+	// Exercise the shared projections against the same real schema, including
+	// association ownership and the independent archived billing inventory.
+	dashboard, err := NewPostgresDashboardRepository(pool).GetDashboardOverview(ctx, 10)
+	if err != nil {
+		t.Fatalf("read lifecycle dashboard: %v", err)
+	}
+	if dashboard.AssetSummary.ArchivedVPSCount != 1 || dashboard.AssetSummary.UnlinkedVPSCount != 3 {
+		t.Fatalf("dashboard lifecycle inventory = %#v", dashboard.AssetSummary)
+	}
+	costs := NewPostgresSubscriptionCostRepository(pool)
+	if _, err := costs.ListCostRows(ctx, centersettings.Default().SubscriptionCost); err != nil {
+		t.Fatalf("read lifecycle costs: %v", err)
+	}
+	missing, err := costs.ListMissingSubscriptionAssets(ctx)
+	if err != nil || len(missing) != 4 {
+		t.Fatalf("missing billing facts must retain archived identity: rows=%#v err=%v", missing, err)
 	}
 }
 

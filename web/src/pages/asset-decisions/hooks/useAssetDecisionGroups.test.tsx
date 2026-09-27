@@ -19,7 +19,7 @@ const GROUP_SUMMARY: AssetDecisionGroupSummary = {
   priority: 90,
   member_count: 0,
   lifecycle_counts: {},
-  usage_counts: {},
+  usage_tag_counts: {},
   renewal_decision_counts: {},
   renewal_window_count: 0,
   unreviewed_count: 0,

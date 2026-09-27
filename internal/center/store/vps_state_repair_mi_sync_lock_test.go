@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
+	"houfeng/internal/contracts/agentapi"
 )
 
 func TestVPSStateRepairMISyncWaitsForRetirementGraphAndSuppressesWrites(t *testing.T) {
@@ -19,9 +21,10 @@ func TestVPSStateRepairMISyncWaitsForRetirementGraphAndSuppressesWrites(t *testi
 	defer cancel()
 	pool := openTemporaryAssetLifecyclePostgresSchema(t, ctx)
 	miRepo := NewPostgresMonitoringInstanceRepository(pool)
-	record := createVPSStateRepairSyncMI(t, ctx, miRepo, "MI sync race")
+	record := createVPSStateRepairOwnedMI(t, ctx, pool, miRepo, "vps_sync_race", "MI sync race")
 	syncRepo := NewPostgresSyncRepository(pool)
-	token := "sync-retirement-race-token"
+	token := "mas_retirement_race.secret"
+	seedVPSStateRepairSession(t, ctx, pool, record.MonitoringInstanceID, token, "fingerprint-race")
 	if _, err := pool.Exec(ctx, `
 		update monitoring_instances
 		set binding_status = $2, binding_fingerprint = $3, sync_token_hash = $4
@@ -67,6 +70,9 @@ func TestVPSStateRepairMISyncWaitsForRetirementGraphAndSuppressesWrites(t *testi
 		monitoringinstances.MonitoringPaused); err != nil {
 		t.Fatalf("commit retirement state: %v", err)
 	}
+	if _, err := holder.Exec(ctx, `update monitoring_agent_sessions set capability='evidence_only',ended_at=greatest(started_at,clock_timestamp()) where monitoring_instance_id=$1`, record.MonitoringInstanceID); err != nil {
+		t.Fatal(err)
+	}
 	if err := holder.Commit(ctx); err != nil {
 		t.Fatalf("commit graph holder: %v", err)
 	}
@@ -74,11 +80,12 @@ func TestVPSStateRepairMISyncWaitsForRetirementGraphAndSuppressesWrites(t *testi
 	if result.err != nil {
 		t.Fatalf("sync after retirement graph commit: %v", result.err)
 	}
-	if result.result.Disposition != syncing.ResultDispositionSuppressed {
+	if result.result.Disposition != syncing.ResultDispositionSuppressed || !result.result.StopCollection {
 		t.Fatalf("sync disposition after retirement = %q, want suppressed", result.result.Disposition)
 	}
 	assertVPSStateRepairMIIntValue(t, ctx, pool, `select count(*)::int from monitoring_instance_heartbeats where monitoring_instance_id = $1`, record.MonitoringInstanceID, 0)
 	assertVPSStateRepairMIIntValue(t, ctx, pool, `select count(*)::int from agent_sync_batches where monitoring_instance_id = $1`, record.MonitoringInstanceID, 0)
+	assertVPSStateRepairMIIntValue(t, ctx, pool, `select count(*)::int from monitoring_agent_sessions where monitoring_instance_id=$1 and ever_connected and last_trusted_online_at is not null`, record.MonitoringInstanceID, 1)
 }
 
 func TestVPSStateRepairMIIndependentSyncBatchesShareGraphLock(t *testing.T) {
@@ -95,9 +102,10 @@ func TestVPSStateRepairMIIndependentSyncBatchesShareGraphLock(t *testing.T) {
 	}
 	instances := make([]instance, 2)
 	for index := range instances {
-		record := createVPSStateRepairSyncMI(t, ctx, miRepo, fmt.Sprintf("MI shared sync %d", index))
-		token := fmt.Sprintf("sync-shared-token-%d", index)
+		record := createVPSStateRepairOwnedMI(t, ctx, pool, miRepo, fmt.Sprintf("vps_sync_shared_%d", index), fmt.Sprintf("MI shared sync %d", index))
+		token := fmt.Sprintf("mas_shared_%d.secret", index)
 		fingerprint := fmt.Sprintf("fingerprint-shared-%d", index)
+		seedVPSStateRepairSession(t, ctx, pool, record.MonitoringInstanceID, token, fingerprint)
 		if _, err := pool.Exec(ctx, `
 			update monitoring_instances
 			set binding_status = $2, binding_fingerprint = $3, sync_token_hash = $4
@@ -150,24 +158,19 @@ func TestVPSStateRepairMIIndependentSyncBatchesShareGraphLock(t *testing.T) {
 	}
 }
 
-func createVPSStateRepairSyncMI(t *testing.T, ctx context.Context, repo *PostgresMonitoringInstanceRepository, name string) monitoringinstances.Record {
+func seedVPSStateRepairSession(t *testing.T, ctx context.Context, pool *pgxpool.Pool, id, token, fingerprint string) {
 	t.Helper()
-	record, err := repo.CreateMonitoringInstance(ctx, monitoringinstances.CreateInput{
-		DisplayName:     name,
-		Region:          "ap-northeast-1",
-		City:            "Tokyo",
-		Provider:        "repair-test",
-		LifecycleStatus: monitoringinstances.LifecycleInUse,
-		Labels:          []string{},
-	})
-	if err != nil {
-		t.Fatalf("CreateMonitoringInstance: %v", err)
+	session, _, _ := strings.Cut(token, ".")
+	if _, err := pool.Exec(ctx, `insert into monitoring_agent_sessions(session_id,monitoring_instance_id,token_hash,fingerprint_hash) values($1,$2,$3,$4)`, session, id, hashSyncToken(token), fingerprint); err != nil {
+		t.Fatal(err)
 	}
-	return record
 }
 
 func vpsStateRepairSyncBatch(monitoringInstanceID, token, fingerprint, batchID string) syncing.Batch {
+	session, _, _ := strings.Cut(token, ".")
 	return syncing.Batch{
+		SessionID:            session,
+		LiveSignal:           &agentapi.LiveSignal{ID: "live-" + batchID, Fingerprint: fingerprint},
 		MonitoringInstanceID: monitoringInstanceID,
 		SyncToken:            token,
 		Heartbeats: []syncing.HeartbeatPayload{{

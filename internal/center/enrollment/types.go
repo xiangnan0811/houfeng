@@ -8,6 +8,8 @@ type EnrollInput struct {
 }
 
 type EnrollResult struct {
+	SessionID            string
+	Capability           string
 	MonitoringInstanceID string
 	BindingStatus        string
 	SyncToken            string

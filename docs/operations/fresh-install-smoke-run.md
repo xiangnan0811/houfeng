@@ -24,6 +24,25 @@ The primary onboarding path starts at the VPS detail page: create or open the VP
 - **Linux systemd agent required:** full one-command installer path on a Linux `amd64` or `arm64` host running systemd.
 - **Manual / notification-provider required:** optional Telegram/Feishu delivery evidence or operator-captured UI screenshots.
 
+## Lifecycle acceptance on an isolated fresh database
+
+Use a new database and matching Center/Agent binaries. The lifecycle migration refuses old business data requiring conversion; this procedure does not authorize deleting an existing environment.
+
+After onboarding, verify these actions from the VPS detail page and API readback:
+
+1. Save arbitrary usage tags and a fixed resource expiry without a subscription. Set the renewal intent to not renew, verify the provider auto-renew check is still independent, and retain that intent after a one-time renewal.
+2. Pause monitoring: collection stops but fresh online evidence continues. Retire once: the default monitoring list and running abnormal counts exclude it, history remains accessible, and a new repeated transition is rejected. Retry the original idempotent request and verify no duplicate audit.
+3. Reinstall through explicit reenrollment: the instance ID stays the same, a new session appears in phase history, and the old session never regains collection or command permissions.
+4. Link one service and domain to two VPS assets. End one association and verify its snapshot/history plus the other current association. Exercise overlapping shared maintenance and manual pause before ending one maintenance action.
+5. Check archive preview with a running, paused and retired Agent. All live sessions block archival. After stopping all agents, previously enrolled resources require a continuously healthy 180-minute reception window. A restart or known database/reception failure restarts the window. Inspect the structured reason, last trusted online time, healthy observation start and earliest archive time. Deterministic boundary and fault injection belong in the PostgreSQL regression tests; do not falsify a live environment's clock or safety rows.
+6. For a truly never-enrolled VPS, explicitly confirm that exception with name/reason and the current preview digest. Submit with one idempotency key and retry after simulated response loss. Verify current relations end, exclusive probes stop, shared objects remain, and historical records survive.
+7. Start an old Agent after archive: the VPS remains archived and one follow-up records its online evidence. Restore the VPS and verify idle usage, retired monitoring, closed associations, and no replay of old commands.
+8. Repeat desktop/mobile and dark/light browser checks. Verify a late response after switching VPS cannot change the new object's dialog or qualification, and a stale preview never automatically resubmits.
+
+Capture local process, API, PostgreSQL and browser evidence separately. These checks do not establish release, signed-installer or production acceptance.
+
+For a repeatable isolated protocol regression, run `bash scripts/test-vps-lifecycle-live.sh` from the repository root. It builds matching binaries, starts disposable PostgreSQL, and checks live enrollment, pause, retirement, reenrollment, replay rejection, shared relations, restoration and archived-agent follow-ups. `--keep` retains that disposable environment for browser checks; create the reported workspace's `STOP` file to clean up. Its archive-reappearance case deliberately ages safety timestamps inside the disposable fixture: this proves transaction behavior, not an elapsed 180-minute observation in a real deployment. The fixture uses the core profile with Records disabled and does not verify signed release installation or Records deployment.
+
 ## Prerequisites
 
 ```bash
@@ -139,7 +158,7 @@ curl -fsS -b "$COOKIE_JAR" -X POST 'http://127.0.0.1:8080/api/vps/<vps_id>/monit
   -d '{}'
 ```
 
-Record the returned `monitoring_instance_id`. The old independent `/api/monitoring-instances` creation path remains an advanced/no-VPS observability path; it is not the normal server onboarding smoke path.
+Record the returned `monitoring_instance_id`. It permanently belongs to this VPS. A second current instance, independent collection POST, cross-VPS relinking and unlinking are rejected. Retired instances remain in VPS history.
 
 ## Step 2: Generate the one-command install command
 
@@ -169,6 +188,8 @@ Expected response fields:
 
 The generated command downloads the center-served `/api/agent/install.sh`, passes a 30-minute one-time enrollment token, and tells the installer which GitHub Release repository/version to use for the Linux agent binary. Regenerating the command invalidates the previous active token for that MonitoringInstance.
 
+For explicit reset/reenrollment with prior sessions, verify the generated command includes `--reenroll`. It stops the service and atomically replaces the credential file with the new bootstrap token; subsequent enrollment creates a new session on the same instance. A normal binary-upgrade rerun preserves credentials. Verify the old session remains evidence-only and cannot keep collecting simply because its old file existed.
+
 Treat the full command as secret material. Do not paste it into public issues, screenshots, shared shell transcripts, or long-lived logs.
 
 If this step returns `public base URL is not configured`, set `HOUFENG_PUBLIC_BASE_URL` and restart the center. If it returns `agent release version is not configured`, rebuild the center with a real version such as `make build-center VERSION=v1.2.3` and ensure matching release assets exist.
@@ -190,7 +211,7 @@ Expected runtime behavior:
 
 - agent enrolls through `/api/agent/enroll`;
 - subsequent syncs call `/api/agent/sync`;
-- monitoring instance onboarding state changes from `未绑定` toward `已绑定` / `接入完成` after accepted observations.
+- enrollment returns session-scoped credentials; identity confirmation and the first accepted real-time signal change the lifecycle from `待接入` to `已接入`, even before performance samples arrive.
 
 Check from the center machine:
 
@@ -329,7 +350,7 @@ That command is missing `--install-missing-deps`, and the `v0.55.0` script serve
 Use this recovery path:
 
 1. Discard the old generated command. Do not paste the old enrollment token into a hand-edited command.
-2. Upgrade the center to `v0.55.1` or newer, preferably the latest published patch release, and restart it.
+2. Use the matching Center/Agent candidate from this fresh-install run. The historical `v0.55.1` installer fix is not a supported mixed-version upgrade or permission to convert the old environment.
 3. Verify the center now serves a fixed installer:
 
    ```bash
@@ -373,7 +394,7 @@ AGENT_PID=$!
 
 After stopping this smoke's center and any local agent, remove its private cookie/token/buffer directory with `rm -rf -- "$HOUFENG_SMOKE_DIR"`. Do not delete another installation's state.
 
-After the first successful enrollment, the agent replaces the enrollment token file with post-enrollment sync credentials for that MonitoringInstance. Do not reuse a consumed token for another host.
+After successful enrollment, the agent replaces the enrollment token file with session-scoped credentials for that MonitoringInstance. Explicit reenrollment creates a new session; previous credentials remain evidence-only and cannot regain collection or command permissions. Do not reuse a consumed token for another host or VPS.
 
 ## Historical evidence snapshot
 

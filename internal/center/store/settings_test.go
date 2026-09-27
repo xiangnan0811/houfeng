@@ -77,10 +77,8 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 			},
 		},
 		RetentionPolicy: centersettings.RetentionPolicy{
-			RawLayerDays:          30,
-			AggregateLayerDays:    60,
-			EventLayerDays:        180,
-			NotificationLayerDays: 365,
+			RawLayerDays:       30,
+			AggregateLayerDays: 60,
 		},
 		SubscriptionCost: centersettings.SubscriptionCostSettings{
 			BaseCurrency:                "USD",
@@ -91,13 +89,11 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 			ExchangeRateStaleAfterHours: 24,
 		},
 		IPQuality: centersettings.IPQualitySettings{
-			Enabled:              true,
-			FrequencySeconds:     86400,
-			StaleAfterSeconds:    604800,
-			TimeoutSeconds:       20,
-			RawRetentionDays:     45,
-			HistoryRetentionDays: 180,
-			Services:             []string{"netflix", "chatgpt"},
+			Enabled:           true,
+			FrequencySeconds:  86400,
+			StaleAfterSeconds: 604800,
+			TimeoutSeconds:    20,
+			Services:          []string{"netflix", "chatgpt"},
 		},
 	}
 
@@ -121,8 +117,8 @@ func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *test
 	if err != nil {
 		t.Fatalf("PutSettings() error = %v", err)
 	}
-	if got.RetentionPolicy.NotificationLayerDays != 365 {
-		t.Fatalf("NotificationLayerDays = %d, want 365", got.RetentionPolicy.NotificationLayerDays)
+	if got.RetentionPolicy.AggregateLayerDays != 60 {
+		t.Fatalf("AggregateLayerDays = %d, want 60", got.RetentionPolicy.AggregateLayerDays)
 	}
 	if got.SubscriptionCost.BaseCurrency != "USD" || got.SubscriptionCost.ExchangeRateProvider != string(centersettings.SubscriptionExchangeRateProviderFixer) {
 		t.Fatalf("SubscriptionCost = %#v, want USD/fixer", got.SubscriptionCost)

@@ -2,6 +2,12 @@
 
 具体页面、状态、请求与回归要求在本文件维护；通用组件与数据层约定见 [Web 规范](../web/README.md)。
 
+### 全新安装的真实生命周期验收
+
+- `scripts/test-vps-lifecycle-live.sh` 构建匹配的 Center/Agent，在独立 PostgreSQL 中验证首次接入、暂停后最小在线证据、退役、同实例新会话、共享关联、归档恢复及归档后上线跟进。受控时钟夹具与真实经过 180 分钟的验收必须分别报告。
+- `scripts/test-vps-state-local-live.sh` 构建当前 Web/Center 并创建独立数据库运行 `web/e2e/local-live/vps-state-live.spec.ts`。浏览器真实登录，验证不可转移监控归属、续费意向不改账单、共享服务/域名关联、失效归档摘要、详情页人工例外归档、历史恢复、显式重新接入，并保存桌面/移动与暗亮主题截图。该入口不安装依赖，不模拟 Agent sync，也不能替代上述真实 Agent 验收。
+- 已运行的独立 loopback Center 可通过 `LOCAL_LIVE_CENTER_URL`、`LOCAL_LIVE_USERNAME`、`LOCAL_LIVE_PASSWORD` 环境变量传给浏览器脚本；只允许专用可写验收环境，不复用其他正在验收的实例。凭据不写入证据。脚本默认启动自己的隔离环境；常规 Chromium 配置继续排除此真实后端测试。
+
 ### Incident threshold settings contract
 
 #### 1. Scope / Trigger
@@ -76,7 +82,7 @@ assertThreeLevelThresholdOrder('CPU', cpuWarning, cpuAlert, cpuCritical)
 
 - Frontend type: `MonitoringInstanceInstallCommandIssue` fields mirror center JSON snake_case: `command`, `issued_at`, `expires_at`, `installer_url`, `public_base_url`, `agent_version`, `release_repo`。
 - Frontend API: `issueMonitoringInstanceInstallCommand(monitoringInstanceId)` -> `POST /api/monitoring-instances/{monitoring_instance_id}/install-command`。
-- Page flow: `MonitoringPage` 创建 MonitoringInstance 后跳转 onboarding；`MonitoringDetailPage` 按用户操作生成/重新生成 center command，不再依赖 create flow 预发 plaintext token。
+- Page flow: VPS 详情创建其专属 MonitoringInstance 后跳转 onboarding；`MonitoringDetailPage` 按用户操作生成/重新生成 center command，不再依赖 create flow 预发 plaintext token。
 
 #### 3. Contracts
 
@@ -303,79 +309,19 @@ listCommandAudits({ ...appliedFilters, cursor: nextCursor })
 listCommandAudits({ cursor: nextCursor })
 ```
 
-### MonitoringInstance 管理入口与归档工作集
+### MonitoringInstance 归属、生命周期与当前工作集
 
-#### 1. Scope / Trigger
-
-- Trigger: 修改 `MonitoringPage` 列表范围、监控实例批量操作、`MonitoringDetailPage` 详情管理入口、归档实例详情行为、或 `lib/api.ts` 中 MonitoringInstance 管理接口。
-- 目标：前端必须把 MonitoringInstance 作为可管理对象展示，不再只有“创建并接入 agent”路径；归档和永久清理这类危险操作必须通过统一管理审查入口承载。
-
-#### 2. Signatures
-
-- Frontend list API: `listMonitoringInstances(scope?: 'active'|'archived'|'all')`；`active` 不拼 query，`archived/all` 使用 `scope` query。
-- Frontend review API: `getMonitoringInstanceManagementReview(monitoringInstanceId)`。
-- Frontend action APIs: `retireMonitoringInstance`、`restoreMonitoringInstanceLifecycle`、`archiveMonitoringInstance`、`restoreMonitoringInstanceFromArchive`、`permanentCleanupMonitoringInstance`。
-- Types: `MonitoringInstanceRecord.archived_at?`、`archived_reason?`、`MonitoringInstanceManagementReview`、`MonitoringInstanceManagementCounts`、`MonitoringInstanceManagementActions`、`MonitoringInstancePermanentCleanupResult`。
-- 页面只展示 active 工作集；旧 `scope=archived|all` URL 不改变 active 请求。API 的 scope 能力仍保留给需要的调用方。
-
-#### 3. Contracts
-
-- `MonitoringPage` 始终读取默认 active 列表 `/api/monitoring-instances`，不渲染已归档/全部范围切换；旧 scope 参数不扩大工作集。
-- 列表筛选变化时裁剪可见 eligible 选择，批量操作不得携带不可见或已归档对象。
-- 批量运行控制只作用于未归档实例：`batchEligibleMonitoringInstances = sortedFilteredMonitoringInstances.filter(!archived_at)`。即使 API 调用方提供包含归档记录的集合，也只把 eligible IDs 发给 batch/action API。
-- 如果筛选变化导致 eligible 数量变成 0，批量动作不得发送空请求，也不得让 `batchSubmitting` 停留为 true；应关闭/重置批量面板或保持可恢复状态。
-- 详情页的管理审查必须懒加载：用户打开“管理实例”入口时再请求 review，避免破坏详情页既有轮询 / runtime / onboarding 请求顺序。
-- 管理动作成功后必须刷新当前 record 和 review；永久清理成功后通过 `resolveMonitoringListHref` 返回经过校验的列表地址，并保留筛选、选择和来源 VPS 的 location state。
-- 归档实例详情仍可浏览历史和管理入口，但必须隐藏或禁用 onboarding、runtime action、command action 和 metadata edit。metadata section 应显示只读原因。
-- 管理危险操作必须复用 `ActionConfirmationModal` 风格；退役 / 恢复需要 reason，归档 / 永久清理需要 reason + 实例显示名确认。
-
-#### 4. Validation & Error Matrix
-
-| Condition | Expected behavior |
-| --- | --- |
-| `/monitoring` without scope | Fetch `/api/monitoring-instances` |
-| 旧 URL scope=archived/all | 仍读取 active 列表，不渲染 scope switch |
-
-
-| all selected rows are archived | No batch/action request; no stuck `批量操作中…` state |
-| archived detail page | Management visible; runtime/onboarding/metadata edit hidden |
-| management review load failure | Show management error in the management section only |
-| permanent cleanup success | Return to the validated monitoring list URL with navigation provenance preserved |
-
-#### 5. Good/Base/Bad Cases
-
-- Good: 用户在 active 工作集中筛选并选择实例，批量动作只提交可见且 eligible 的对象。
-- Good: 用户打开归档实例详情，只能查看历史和进入管理，不会看到生成安装命令、恢复监控或编辑资料入口。
-- Base: 用户从详情打开管理入口，review 加载失败；页面保留详情主体，只在管理区域显示错误。
-- Bad: 默认列表请求 `scope=all`，把归档实例重新混入日常工作集。
-- Bad: 列表里只按 UI 隐藏归档行，但批量 API payload 仍包含 archived IDs。
-- Bad: 管理动作成功后只更新详情 record 不更新 review，导致 blockers/actions 仍显示旧状态。
-
-#### 6. Tests Required
-
-- `api.test.ts`: list scope query、review endpoint、retire/restore/archive/restore archive/permanent cleanup body。
-- `MonitoringPage.test.tsx`：默认 active、忽略旧 scope 参数、即时筛选且没有 Apply 步骤、archived 从批量操作中排除、eligible 为空不提交。
-- `MonitoringDetailPage.test.tsx`: 管理 review 展示、阻塞项/计数/VPS link、确认名、每个管理动作后刷新、归档详情隐藏 runtime/onboarding/metadata edit、cleanup 后导航。
-- `monitoringDetailHelpers` tests or page assertions: archived / retired runtime actions 返回空。
-
-#### 7. Wrong vs Correct
-
-```tsx
-// 错误：全量视图下把归档实例也提交给批量运行控制。
-const ids = sortedFilteredMonitoringInstances.map((record) => record.monitoring_instance_id)
-await postMonitoringInstanceBatch(ids, action)
-```
-
-```tsx
-// 正确：批量动作只提交未归档实例，并在空目标时提前恢复 UI 状态。
-const ids = batchEligibleMonitoringInstances.map((record) => record.monitoring_instance_id)
-if (ids.length === 0) {
-  setSelectAll(false)
-  setBatchPanelOpen(false)
-  return
-}
-await postMonitoringInstanceBatch(ids, action)
-```
+- 实例永久归属于一台 VPS，生命周期仅为 `待接入 / 已接入 / 已退役`。运行控制 `启用 / 维护中 / 暂停`、在线证据、绑定确认、页面数据新鲜度分别展示。维护、暂停、待接入和数据不可用不得显示为健康。
+- 创建入口仅从 VPS 详情发起 `POST /api/vps/{id}/monitoring-instances`。监控列表接入入口导航到 VPS 库存；不提供独立实例创建、共享或跨 VPS 转绑。
+- `MonitoringPage` 默认只读取管理中 VPS 的当前实例；前端也排除 `已退役`、`is_current=false` 和所属 VPS 已归档的记录。计数、筛选及批量操作使用同一工作集。历史实例从 VPS 监控历史访问。
+- VPS 接入面板在操作前重新读取归属与当前实例数量。历史实例不计入当前数量；归属不匹配、数量证据不一致或多个当前实例时阻止创建。已有当前实例直接进入该实例接入页；仅有历史实例时允许显式重新接入或创建新实例。
+- 退役入口只在非退役实例且当前管理审查允许时显示。即使旧审查误称允许，也不得向已退役实例再次提供退役。独立归档、恢复生命周期、恢复归档和永久清理入口全部移除。
+- 退役使用原因、当前预览摘要和稳定 `Idempotency-Key`；网络重试保留同一用户意图的键，失败不关闭确认框，成功刷新对象与操作资格。重复点击不得并发产生新意图。
+- 已接入实例和已退役实例的重新接入均由用户显式生成命令触发：先调用 `binding/reset` 建立新的接入阶段，再签发安装命令；仅打开抽屉不重置。已退役实例要求所属 VPS 管理中，后端同时确认无其他当前实例。旧会话仅保留最小在线证据权限，不恢复采集和命令。
+- 所属 VPS 已归档时只查看监控历史，不提供采集控制、命令、资料修改或接入。恢复 VPS 不自动恢复历史实例；重新接入必须再次显式进行。
+- 详情提供按需加载的接入阶段历史，读取 `/api/monitoring-instances/{id}/phases`，展示会话权限、指纹摘要、起止时间及最后可信在线。旧的仅在线证据会话可在结束后继续产生在线证据，不能将其当成采集恢复；不展示凭据或原始指纹。
+- 管理审查、安装命令和动作响应继续绑定实例 ID、请求代次与当前页面身份；旧对象慢响应不得改变新对象，过期预览不得自动重新提交。关闭接入抽屉后刷新实例与管理审查。
+- 回归覆盖 `MonitoringPage.test.tsx`、`MonitoringDetailPage.test.tsx`、`MonitoringDetailManagementMenu.test.tsx`、`MonitoringInstanceOnboardingDrawer.test.tsx` 与 `VPSOverviewMonitoringOnboarding.test.tsx`：退役入口消失、历史排除、稳定重试键、归档所属对象禁用、显式新阶段、归属异常拒绝与异步请求归属。
 
 ### Monitoring 列表工作台状态
 
@@ -387,7 +333,7 @@ MonitoringPage 是运行证据扫描页。主路径是 attention tabs → 可见
 - 筛选使用可见的 FilterBar 并即时应用；更新 URL 使用 replace，保留无关 query 和 history state。没有 Drawer draft 或 Apply 步骤。
 - 高级筛选计数只统计已应用字段筛选，必须覆盖 lifecycle、health、monitoring/run status、group、region、labels、search 等会改变列表的维度；quick view 本身不混入字段筛选计数。
 - 批量操作区默认隐藏；只有用户显式打开批量操作、已经选择全量/部分监控实例、存在待确认批量动作、提交中或错误需要展示时才出现。批量动作按钮仍必须以明确选择为前提，不因列表有数据而默认高亮。
-- MonitoringPage 不承载资产判断支撑面，也不展示 MonitoringInstance 资产上下文列；Hero 之后应直接进入 toolbar/filter/batch/table。资产侧判断导向资产决策页、VPS 库存 / 详情和取消退役工作台，Monitoring 列表只保留运行观测扫描职责。
+- MonitoringPage 不承载资产判断支撑面，也不展示 MonitoringInstance 资产上下文列；Hero 之后应直接进入 toolbar/filter/batch/table。资产侧判断导向资产决策页、VPS 库存 / 详情和结束使用并归档入口，Monitoring 列表只保留运行观测扫描职责。
 
 #### Validation & Error Matrix
 
@@ -399,16 +345,16 @@ MonitoringPage 是运行证据扫描页。主路径是 attention tabs → 可见
 | 无选择且未打开批量操作 | 批量 bar 不渲染 |
 | 打开批量操作但未全选 | 显示范围/选择入口，不显示实际批量动作按钮 |
 
-- 监控详情默认使用 URL 中的历史窗口（缺省24h）；显式进入实时窗口后才连接同源 runtime-stream WebSocket，退出窗口或实例时关闭。连接状态、agent 心跳与主机采样是不同事实：样本不得覆盖 record.last_heartbeat_at，uptime 不由浏览器递增。命令抽屉在命令待完成时使用有界生命周期的轮询；不要据此给其他页面增加常驻轮询。
+- 监控详情默认使用 URL 中的历史窗口（缺省24h）；显式进入实时窗口后才连接同源 runtime-stream WebSocket，退出窗口或实例时关闭。连接状态、agent 心跳与主机采样是不同事实：在线状态仅使用 Center 持久化的 record.last_trusted_online_at，包含仅在线证据会话；样本与回填不得覆盖此字段，uptime 不由浏览器递增。命令抽屉在命令待完成时使用有界生命周期的轮询；不要据此给其他页面增加常驻轮询。
 - 详情 record、runtime-facts、settings、异常、事件与关联各自维护请求代次和局部错误/重试；新窗口未成功读取前不能把旧窗口数据标成新窗口。runtime-facts.read_at 是快照读取时间；最新样本来自服务端当前绑定投影，历史桶可保留旧观测。空桶及 network_rates_valid 非 true 的网络证据保持缺测，有效零值保留。较新的权威空快照可以清除旧绑定样本；迟到的较旧快照不能覆盖其 read_at 之后已收到的新实时证据。
 
 ## Monitoring detail diagnostics
 
- `/monitoring/:id` answers three questions in order: is it abnormal now, is the evidence fresh, and what changed inside the selected window. It orders a name-first identity header with two actions, one status band, conditional notice rows, a page-level time range, one chart section, recent events, then the header management menu. Metadata and destructive lifecycle moved into that menu; there is no page-bottom disclosure. Keep health/freshness separate from pause, maintenance and binding, and keep `lifecycle_status` inside the management menu instead of promoting MonitoringInstance lifecycle into a second VPS business-state source.
+ `/monitoring/:id` answers three questions in order: is it abnormal now, is the evidence fresh, and what changed inside the selected window. It orders a name-first identity header with two actions, one status band, conditional notice rows, a page-level time range, one chart section, recent events, then the header management menu. Metadata and destructive lifecycle moved into that menu; there is no page-bottom disclosure. Keep health/freshness separate from pause, maintenance and binding, and show `待接入 / 已接入 / 已退役` independently of the owning VPS lifecycle; monitoring control and online evidence are separate facts.
 
- The header title is the display name only, with a read-only-preview badge when the build is read-only. The identity list renders only rows that have a value, in the fixed order link / provider / location / group / labels / note / ID; labels stop at three plus a count, and the note clamps to two lines with the full text in `title`. Omit cloud region codes but keep the city, and never write a "location unconfirmed" or "provider unconfirmed" sentence. Default actions are refresh and management; an unbound, unarchived instance gets onboarding as the header primary action, and archived instances hide the runtime group.
+ The header title is the display name only, with a read-only-preview badge when the build is read-only. The identity list renders only rows that have a value, in the fixed order link / provider / location / group / labels / note / ID; labels stop at three plus a count, and the note clamps to two lines with the full text in `title`. Omit cloud region codes but keep the city, and never write a "location unconfirmed" or "provider unconfirmed" sentence. Default actions are refresh and management; an unbound current instance owned by a managed VPS gets onboarding as the header primary action. Retired instances and instances whose owning VPS is archived hide the runtime group.
 
- The status band does not repeat the health word (正常/关注/告警/严重). It combines heartbeat, sample age, and sampled uptime on one line. Only badges that mean something appear: maintenance or pause, unbound or pending-fingerprint, archived. Enabled and bound states need no badge. Omit agent version. Heartbeat age is its own evidence and never inherits the sample time, and `last_sync` stays unrendered because batch arrival is not evidence freshness.
+ The status band does not repeat the health word (正常/关注/告警/严重). It combines heartbeat, sample age, and sampled uptime on one line. Only badges that mean something appear: monitoring lifecycle, maintenance or pause, unbound or pending-fingerprint, and owning VPS archived. Enabled and bound states need no badge. Omit agent version. Heartbeat age is its own evidence and never inherits the sample time, and `last_sync` stays unrendered because batch arrival is not evidence freshness.
 
  Abnormal states use a filled notice well: 4px severity rail, tinted surface, mark + title + detail, and the action inside the well next to the copy (`查看事件`, `处置绑定冲突`). Binding conflict, active incidents, stale-without-incident, missing heartbeat on a bound instance, maintenance, pause, runtime-action error, and runtime-metric error share that surface. Never-bound stays the header CTA and does not add a missing-heartbeat well. Incident duration reads 已持续 N, not 持续 N 前. Provider-relation failures belong in the identity row, not here.
 
@@ -424,7 +370,7 @@ Percentage plots mark their warning level with a 1px dashed warning line and no 
 
  Recent events show at most three rows without object ids, and the history / activity / records / evidence entries are always present, so the history drawer stays reachable with zero events. Empty, loading and failed event states are one quiet line beside those entries, not a zero-count card.
 
- Dangerous confirmations freeze the subject, display name, action and record version, and require renewed review if that version changes; review counts, blockers and warnings appear above the reason field inside the confirmation. Preserve metadata If-Match protection, center-issued installation commands and token secrecy. Detail, comparison, history and permanent-cleanup returns retain validated list query/selection and source-VPS navigation state.
+ Dangerous confirmations freeze the subject, display name, action and record version, and require renewed review if that version changes; review counts, blockers and warnings appear above the reason field inside the confirmation. Preserve metadata If-Match protection, center-issued installation commands and token secrecy. Detail, comparison and history returns retain validated list query/selection and source-VPS navigation state.
 
 ## Monitoring list workbench
 
@@ -432,16 +378,16 @@ Percentage plots mark their warning level with a 1px dashed warning line and no 
 
 The health column is an attention cell, not a reassuring status. Do not render 正常. Show 关注/告警/严重 with the issue summary and incident count. Maintenance, pause, unbound, and pending-fingerprint occupy that cell and must not stack with 正常. Missing heartbeat on a bound instance is 未知; never-bound is 未绑定, not a second 未知. Fresh heartbeats need no extra copy. The list header action “从未关联 VPS 接入” creates a monitoring instance from an unlinked VPS; the detail header “接入 agent…” issues a command for an existing instance — do not merge the two. 24h trends stay three sparklines (CPU / memory / disk); do not put eight detail tiles in a row. Preserve resizing for data columns and a named keyboard-focusable narrow-window table scroller rather than shrinking text.
 
-The list is a manually refreshed snapshot, not the detail page's live stream. Relative heartbeat age and freshness use the same successful list-read instant. Only validated, successfully read global incident defaults provide the heartbeat threshold; settings failure leaves timestamps readable without an invented policy. A heartbeat timestamp is not proof of a live connection and can include accepted backfill. Missing or invalid heartbeat evidence is unknown consistently across cells, health filters, abnormal counts, and ordering. Pause, maintenance, and binding remain independent. List, trend, and policy failures have local retry paths; an in-place list refresh failure retains explicitly labelled prior data.
+The list is a manually refreshed snapshot, not the detail page's live stream. Relative heartbeat age and freshness use the same successful list-read instant. Only validated, successfully read global incident defaults provide the heartbeat threshold; settings failure leaves timestamps readable without an invented policy. Online freshness uses only Center-persisted `last_trusted_online_at`; accepted backfill and sample timestamps cannot refresh it. Evidence-only sessions can refresh online evidence while collection remains stopped. Missing or invalid heartbeat evidence is unknown consistently across cells, health filters, abnormal counts, and ordering. Pause, maintenance, and binding remain independent. List, trend, and policy failures have local retry paths; an in-place list refresh failure retains explicitly labelled prior data.
 Uptime and two-line upload/download network rates follow heartbeat, before **24h 资源趋势**. They come from one authenticated batch of latest host observations, not per-row detail fetches or trend averages. Display the actual sample age and timestamp; uptime is the sampled system uptime and never advances in the browser. Host sampling cadence is independent of heartbeat freshness, so do not invent a shared stale cutoff or describe these values as live. Missing samples and unknown/invalid rates display an em dash; an explicitly valid zero rate remains zero. Runtime-summary refresh failures retain a labelled previous snapshot with their own retry. Keep these two columns bounded and preserve enough trend width through local horizontal scrolling on narrow screens. Cycle traffic and country information are not part of this list.
 
 The 24-hour resource values are downsampled history, not instantaneous metrics. Empty buckets are missing evidence, not zero utilization; genuine zero remains a value. Gaps retain their time position and all segments share one vertical scale. A missing source and a failed source are not the same empty state.
 
-Search, quick view, filters, sort, and row selection are URL-backed. View navigation pushes history; filter edits apply immediately, replace history, and preserve unrelated query fields and history state. Selection is limited to visible eligible instances, with no two-row cap on batch selection. Detail and comparison return through the validated `monitoringListHref`; the existing source-VPS navigation remains independent. Batch confirmation uses frozen selected IDs and the same frozen count, excludes archived records, and keeps failures visible after submission.
+Search, quick view, filters, sort, and row selection are URL-backed. View navigation pushes history; filter edits apply immediately, replace history, and preserve unrelated query fields and history state. Selection is limited to visible eligible instances, with no two-row cap on batch selection. Detail and comparison return through the validated `monitoringListHref`; the existing source-VPS navigation remains independent. Batch confirmation uses frozen selected IDs and the same frozen count, excludes retired records, historical instances and instances whose owning VPS is archived, and keeps failures visible after submission.
 
 Monitoring and entrypoint detail pages lead with compact identity and current observations. Keep management and history subordinate, incident/event failures independently retryable, and missing or disabled probes distinct from failed observations. An empty incident list is not evidence that every runtime source is healthy. Onboarding names its monitoring instance, obtains installation commands only after an explicit request to the center, and keeps sensitive copy/reveal controls inside the authenticated dialog. Pending issuance or copying prevents dismissal; a closed, replaced, or unmounted dialog must not start copying a late response or restore its command. An already-started clipboard write cannot be cancelled. Probe and onboarding dialogs keep their action footer outside the scrolling body.
 
-VPS-to-monitoring navigation retains `return_vps` and inventory history state independently of the one-shot `onboarding` flag. This is source navigation, not proof of a current association: keep actual association results truthful and provide an explicit source-VPS return when that destination is otherwise unavailable, including relation failures and unavailable monitoring details. Install-command errors use the center’s stable error code: an archived-instance rejection is not a configuration failure, and an unclassified conflict must not be guessed to be one. Existing configuration preflight remains before token issuance; these codes do not change eligibility-check precedence.
+VPS-to-monitoring navigation retains `return_vps` and inventory history state independently of the one-shot `onboarding` flag. This is source navigation, not proof of a current association: keep actual association results truthful and provide an explicit source-VPS return when that destination is otherwise unavailable, including relation failures and unavailable monitoring details. Install-command errors use the center’s stable error code: an owning-VPS-archived rejection is not a configuration failure, and an unclassified conflict must not be guessed to be one. Existing configuration preflight remains before token issuance; these codes do not change eligibility-check precedence.
 
 VPS monitoring freshness uses the center’s existing persisted heartbeat interval and stale-interval threshold. An old observation is stale evidence, not a new business state or an instruction to notify; a missing first heartbeat remains distinct from a previously observed instance becoming stale. Keep known historical health visible with its freshness qualifier, and do not summarize incomplete observations as currently healthy.
 

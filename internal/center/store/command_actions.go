@@ -160,7 +160,7 @@ func validateCommandActionAuditEvent(event commandActionAuditEvent) error {
 		if event.Source != monitoringinstances.CommandActionSourceWeb {
 			return fmt.Errorf("rejected command action audit must have web source")
 		}
-	case "queued", "dispatched", "completed":
+	case "queued", "dispatched", "completed", "cancelled":
 		if event.ActionID == "" {
 			return fmt.Errorf("%s command action audit must have an action id", event.EventType)
 		}
@@ -178,6 +178,8 @@ func commandActionAuditEventSQL(eventType string) (string, error) {
 		return commandActionAuditInsertSQL("dispatched"), nil
 	case "completed":
 		return commandActionAuditInsertSQL("completed"), nil
+	case "cancelled":
+		return commandActionAuditInsertSQL("cancelled"), nil
 	case "rejected":
 		return commandActionAuditInsertSQL("rejected"), nil
 	default:
@@ -192,6 +194,8 @@ func commandActionAuditInsertSQL(eventType string) string {
 		detailsSQL = "jsonb_build_object('reason', 'sensitive_confirmation_required')"
 		instanceStateSQL = `
 			and mi.archived_at is null
+			and mi.lifecycle_status='已接入'
+			and exists(select 1 from vps_assets v where v.vps_id=mi.vps_id and v.lifecycle_status='active')
 			and mi.binding_status = '` + monitoringinstances.BindingBound + `'
 			and mi.monitoring_status <> '` + monitoringinstances.MonitoringPaused + `'`
 	}

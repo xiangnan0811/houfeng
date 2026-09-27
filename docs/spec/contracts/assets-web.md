@@ -2,18 +2,18 @@
 
 具体页面、状态、请求与回归要求在本文件维护；通用组件与数据层约定见 [Web 规范](../web/README.md)。
 
-- Legacy VPS 详情页（`LegacyVPSDetail.tsx`）所有会在 await 之后改 notice / draft / drawer / navigate 的写操作都必须走现有 `beginVpsWrite` + `mutationIsCurrent`。不得只给 facts/decision 加归属。晚到的 VPS A 结果不得关闭 B 的抽屉或导航离开 B。服务端请求不必取消；`finishVpsWrite` 仍在 `finally` 释放同 VPS 锁。
-- Asset Ledger 共享枚举必须跟后端机器值同步：`AssetScope = 'current'|'historical'|'archived'|'all'`，其中 `archived` 是旧 API 兼容别名；`RenewalMode = 'auto'|'manual'|'auto_cancelled'|'lottery'|'gift'|'bonus'|'other'`，其中 `lottery` 展示为“抽奖”，`gift` 展示为“赠送”。选项和标签集中在 `web/src/lib/assetOptions.ts`，页面不得散落 `抽奖/赠送` 这种混合标签。
+- VPS 详情页所有 await 后更改 notice/draft/dialog/navigation 的写操作都必须受 VPS identity、view generation 和 transport owner 保护。不得只给 facts/decision 加归属。晚到的 A 结果不得关闭 B 的界面或导航离开 B；服务端请求不必取消，但 finally 仅释放自身 token。
+- Asset Ledger 共享值必须跟后端同步：`AssetScope = 'current'|'archived'|'all'`；VPS 生命周期仅 active/archived，用途使用自由多选 `usage_tags[]`，续费意向仅 unreviewed/keep/cancel。`RenewalMode = 'auto'|'manual'|'auto_cancelled'`；抽奖、赠送等获取来源使用 VPS `acquisition_source`，不能作为续费方式。
 
 ## 生命周期处理与恢复入口
 
-- cancelled 展示“已取消，未归档”，提供受控归档和同态处理残留；archived 展示归档历史及带原因恢复，不能重复显示归档资格。操作成功反馈与当前动作能力分开。归档/恢复原因必填，恢复后用途 unknown，显示最近快照和整理入口，不自动恢复任何 MI/token/监控。
-- 取消工作台逐条确认 active 订阅处理或保留；保留可提交但说明计费及归档阻塞。未选对象不进请求。选 MI 退役必须展示暂停/撤销后果而不自动选择其他对象；全局影响逐对象列明父 VPS 与依赖来源，显式确认后提交 confirmed_shared_objects。另一 VPS 上状态待确认的依赖同样列为需要确认的共享对象。
-- stale preview 保留原因、日期与选择草稿，刷新事实、清空共享确认；不自动重提，不扩选新增对象。已删除/不可操作对象剔出提交并提示。
-- 归档409优先使用响应 review/blocker_details；没有 review 才刷新，刷新失败明确未知。按 object_type/ID 构造受控本地路由，不接受服务端任意链接。active 账单、MI、Target 和 unknown 服务/域名均有对象级处理入口。
-- 恢复后提供用途/续费整理、当前 MI 及归档原因、专用恢复/解除旧 link/重新关联或创建。unlink 后创建失败显示未关联，可重试，不自动复活旧关系。整理面板在同页 MI 创建、关联、更换或解除成功后重新读取当前关联，迟到回包不覆盖较新结果。
+- 管理中 VPS 始终提供“结束使用并归档”，不受续费意向控制；归档资产展示历史与带原因恢复，不能重复显示归档资格。恢复默认用途为闲置，不恢复历史监控、会话权限、关联、探测或命令。
+- 单次归档确认展示影响、告警、在线证据和阻止原因；带确认名称、原因、预览摘要、幂等键提交。无订阅或未解决跟进不阻止归档；潜在扣费保留提醒，共享对象不能随此 VPS 结束。没有强制归档或自动预约。
+- stale preview 保留确认名称与原因草稿，刷新事实与摘要；不自动重提，最新条件必须重新确认。
+- 归档 409 优先使用响应 review/blocker_details；没有 review 才刷新，刷新失败明确未知。按 object_type/ID 构造受控本地路由，不接受服务端任意链接。在线证据展示涉及实例、最后可信在线、连续健康起点和最早归档时间。
+- 恢复后提供用途/续费整理和显式重新接入；历史监控仍退役。接入失败明确显示尚未接入，可重试；不会复活旧关系。操作完成后刷新当前事实与资格，迟到回包不覆盖较新结果。
 - 开始迁移提交非空原因到 start-migration，不把普通 PATCH 包装为迁移审计。服务/域名状态纠正必须显式选择 active/paused/retired 并填写原因。
-- replaced 选择在 active 或 in_use 时禁用并解释先调整事实；后端 field_errors 附三轴冲突。Legacy 表单使用精确英文机器值及当前值，禁止用中文展示词回写或把未编辑的既有状态降为默认值。
+- 表单使用精确机器值及当前值，禁止用中文展示词回写、把用途当作主生命周期，或把未编辑状态降为默认值。
 - MI 管理按 action_reviews 分别展示能力/阻塞/警告；Target lifecycle-review 和 MI review 的共享确认不能被列表或批量入口绕过。所有请求复用既有 mutation/read owner 与 generation，迟到回包不覆盖其他路由。
 - MI/Target 详情危险动作（含运行暂停）只要已读取 review，就必须随请求发送该 preview_digest；confirm_shared_impact 仅在需要共享确认时反映勾选，是否要求勾选与是否发送摘要独立判断，review 未加载或失败时禁止提交。确认参数须经各层回调完整转发。摘要过期或共享确认冲突时重新读取 review、清空旧共享确认、保留原因等草稿并提示，不重用旧缓存或自动重提。
 
@@ -29,15 +29,15 @@
 - Frontend deep link: `/vps/{vps_id}?workbench=monitoring` and `/vps/{vps_id}?workbench=monitoring-instance-create`。
 - Frontend upgrade target: `/monitoring/{monitoring_instance_id}?onboarding=1&return_vps={vps_id}`。
 - Backend create API: `POST /api/vps/{vps_id}/monitoring-instances`。
-- Backend link API: `POST /api/vps/{vps_id}/link-monitoring-instance`。
+- MonitoringInstance 永久归属创建时 VPS；普通孤立创建、跨 VPS 转绑和共享实例入口已移除。
 - Backend domain error: `assetlinks.ErrVPSActiveMonitoringInstanceExists` maps to HTTP 409.
 
 #### 3. Contracts
 
 - 0 active links: VPS detail may show `创建并接入 agent`; submit may call `createVPSMonitoringInstance`, then navigate to MonitoringInstance onboarding.
 - 1 active link: VPS detail must show `升级/重新接入 agent`; clicking or opening either monitoring workbench deep link must navigate to the existing MonitoringInstance onboarding and must not call the create API.
-- More than 1 active link: do not auto-clean historical data; hide create/link entry, show a duplicate-active-link warning, and keep per-row `升级/重新接入 agent` plus `解除关联`.
-- Backend create/link write paths must lock/check active links before inserting and return 409 on existing active links. The create path must not insert an orphan `monitoring_instances` row on conflict.
+- Each VPS has at most one current instance, enforced by a database unique constraint. Inconsistent duplicate facts show an error without offering transfer, sharing or historical deletion.
+- Backend create write paths must lock/check the current instance before inserting and return 409 on conflicts. The create path must not insert an orphan `monitoring_instances` row on conflict.
 - Monitoring detail onboarding keeps using `issueMonitoringInstanceInstallCommand`; only copy/title changes between `接入 agent` and `升级/重新接入 agent` based on bound/observed state.
 
 #### 4. Validation & Error Matrix
@@ -47,7 +47,7 @@
 | VPS has 0 active links and user opens monitoring workbench | Open create drawer; create API allowed |
 | VPS has 1 active link and user opens monitoring workbench | Navigate to existing `/monitoring/{id}?onboarding=1&return_vps={vps_id}` |
 | VPS has >1 active links | Show manual duplicate review warning; no create/link CTA |
-| Create/link API sees existing active link | 409 `vps active monitoring instance exists` |
+| Create API sees existing current instance | 409 `vps active monitoring instance exists` |
 | Create API sees existing active link | No `monitoring_instances` insert before returning error |
 
 #### 5. Good/Base/Bad Cases
@@ -55,13 +55,13 @@
 - Good: already-connected VPS upgrades agent by reusing its existing MonitoringInstance and generating a fresh install command there.
 - Base: brand-new VPS without active link creates one MonitoringInstance and enters onboarding.
 - Bad: a button labeled `创建并接入 agent` on an already-linked VPS calls `POST /api/vps/{id}/monitoring-instances` and creates a second active monitoring instance.
-- Bad: only the frontend blocks duplicate creation while backend link/create endpoints still allow another active link.
+- Bad: only the frontend blocks duplicate creation while backend creation still allows another current instance.
 
 #### 6. Tests Required
 
 - `VPSDetailPage.test.tsx`: 0/1/multiple active-link behavior, monitoring workbench deep-link branching, and no create API call when reusing an active link.
 - `MonitoringDetailPage.test.tsx`: bound or already-observed instances use `升级/重新接入 agent` wording while still issuing install commands through the existing API.
-- Handler/store Go tests: create/link return 409 for existing active links; store create checks active links before inserting MonitoringInstance.
+- Handler/store Go tests: creation returns 409 for an existing current instance; no orphan is inserted; cross-VPS ownership changes are rejected.
 
 #### 7. Wrong vs Correct
 
@@ -87,6 +87,8 @@ if (activeLinks.length === 1) {
 ### Asset service 数据流
 
 VPS 服务资产是 VPS 详情页内的独立手工记录区块，前端必须把它当作 `asset_services` contract 消费，而不是从 timeline、Dashboard 或 Target probe 状态推导。
+
+服务和域名身份可由多台 VPS 共同关联。对象状态与某台 VPS 的关联起止状态分别展示；不能把 scoped 投影的 vps_id 当作对象的永久单一所有权。关联 DTO 包含 association_id/object_id/vps_id、target_id/service_id、address/port、started_at/ended_at、end_reason/ended_by 和结束时 snapshot。结束指定关联后保留历史，不删除共享对象；详情支持创建及选择已有对象，关联 Target 归属不明确时仅产生核对事项。
 
 #### 1. Scope / Trigger
 
@@ -229,10 +231,10 @@ VPS 详情页可以把 VPS detail、timeline、VPS scoped subscriptions、VPS sc
 - `VPSDetailPage` 初始加载必须包括 `getVPSAsset(vpsId)`、`getVPSTimeline(vpsId)`、`listVPSServices(vpsId)`、`listVPSDomains(vpsId)` 和 `listSubscriptions({ vps_id: vpsId, sort: 'renew_at', order: 'asc' })`。Provider/MonitoringInstance/Target selector 数据可在对应 对话框 打开时懒加载，避免主详情首屏为选择器阻塞。
 - VPS scoped subscription 只作为续费/成本 evidence。订阅请求失败时显示请求错误和未知状态，不得把 failure 当成真实 `缺订阅`。
 - VPS Detail 是普通补录入口；草稿字段与调用方幂等键生命周期见 [订阅 Web 合同](subscriptions-web.md)，请求与错误协议见 [订阅合同](subscriptions.md)。`createVPSMonitoringInstance(vpsId, input?)` 默认空 body，由后端派生身份并自动 link。
-- VPS 详情页必须可加载 `getVPSCancellationPreview(vpsId)` 并在资产判断 workbench 显示取消 / 过期影响范围；URL `?workbench=cancellation` 应直接打开统一取消 / 退役工作台。
-- 如果 preview 显示 subscription 已非活跃但 VPS 仍未取消，页面不得引导“创建订阅”作为主路径，而应引导用户处理 VPS、MonitoringInstance 与 Target/实例的 lifecycle action。
+- VPS 详情可加载 `getVPSArchiveReview(vpsId)` 展示结束使用影响与在线安全条件；`?workbench=archive` 打开同一预览确认。
+- 订阅非活跃不代表 VPS 已结束；页面展示独立账单事实、有效期和跟进事项，由用户显式决定是否结束使用。
 - `VPSAssetDetail.monitoring_instance_links` 可以在 Detail 页展示 health、heartbeat、active incident count 和 issue summary，因为后端 detail contract 已返回这些字段；这不改变 `VPSAssetRecord.active_monitoring_instance_link_count` 在列表页只能代表数量的限制。
-- 决策、facts、MonitoringInstance link、experience log、service create、domain create、取消 / 退役 action 的复杂输入使用受控 Modal；其余表单使用各自当前对话框。关闭 对话框 后，保存成功 notice 必须留在主页面可见 surface 内。
+- 决策、facts、experience、service/domain 创建与关联、归档及监控退役的复杂输入使用受控 Modal。关闭对话框后保存成功 notice 保留在主页面；状态和资格重新读取。
 - Facts 对话框 只编辑基础事实和用途状态；不得包含 lifecycle status，也不得在 facts PATCH payload 中发送 `lifecycle_status`。
 - Archive/restore 仍是 lifecycle 危险操作，使用独立 confirmation，不放入 routine edit 对话框。
 
@@ -275,6 +277,7 @@ The switch is labeled 表格视图 / 目录视图; persisted `workbench` / `ledg
 - Service, domain, validity, monitoring-link, monitoring-create, and legacy experience forms reuse `.vps-form` / `VPSFormSection` and Modal title+fixed footer; do not repeat the task title in an inner `asset-operation-form__header`. Keep current subscription facts and prerequisite warnings. Do not delete shared `.vps-create-form*` or decision-work `asset-operation-form__header` styles still used outside VPS dialogs. Inventory list and inspector status use `LifecycleBadge` / `UsageBadge` / `RenewalBadge`; ledger directory may omit usage for density.
 - Match width to content: decision 380px, facts 680px, services 520px, domains 560px, and subscription/monitoring reading 780px. Facts and service/domain reading become full-viewport sheets on narrow screens; other dialogs retain their existing gutters. Keep a fixed header, an independently scrolling body, and fixed actions only for actual forms. Subscription facts remain a new record, not an edit; preserve their existing fields and behavior.
 - Service/domain reading keeps complete collections, neutral record status (not observed health), names, notes, labels and subordinate IDs. Show service URLs as full monospaced text with adjacent copy and HTTP(S)-only open actions on the following row; neither read panel has a save/cancel footer or a pretend edit action. Domains may enrich service IDs from the scoped service API; missing optional metadata must not block reading or reuse another VPS’s data. Existing legacy create actions remain separate. Monitoring reading and all ownership/focus/scroll safeguards are unchanged.
+- VPS overview and lifecycle management remain available when Records is disabled. Only the activity section becomes unavailable; the core profile must not query Records projections or report an existing VPS as missing because that optional capability is off.
 - Freshness belongs beside each object's own source timestamp, not inside its conclusion. Adjacent view and refresh actions share a wide-screen row without changing ordinary single-action columns. Overview refresh/retry rereads the overview; it does not request agent sync or a probe. Activity source time denotes latest visible recorded intake, independently of event time.
 - Empty navigation retains the current VPS: a subscription collection is not an existing subscription object, zero monitoring opens association status rather than a fabricated instance, and a report route remains available when its real capability permits reading empty/history/error states. Label historical report entry only from known historical evidence. A lone unlinked-monitoring notice states its reason once, its observation impact, and the existing action or read-only explanation.
 - Cancellation plans are not supplier cancellation confirmations. Keep registered renewal/billing dates separate from the VPS plan. Preserve the center's overall conclusion and name a pending cancellation plan as an additional attention basis when applicable, rather than attributing the difference from incomplete observations solely to missing IP evidence.
@@ -286,14 +289,14 @@ The switch is labeled 表格视图 / 目录视图; persisted `workbench` / `ledg
 
 ## VPS facts editor
 
-The shared editor is the create (添加 VPS) and edit facts form. It shows common identity/provider, country, city/IPv4, usage status, importance, labels and notes first. Put all lower-frequency facts in one default-collapsed 可选设置 without nested categories. IPv6 and custom SSH host/port are hidden until shown; existing configuration initializes them visible, and hiding or collapsing never erases values. Editing IPv4 still derives an automatic SSH host but must preserve a hidden custom host. The country field is one editable in-flow combo: 17 common locations grouped by geography, 232 remaining ISO locations behind one expansion, full Chinese/English/code search and custom values. Reopening a committed value returns to browsing. Usage status remains the existing five-value business enum, not free-text purpose; importance remains a native select. Keep the header and feedback/save/cancel footer fixed while the body scrolls. Create keeps inline provider creation, reset/error/pending/submit and navigation, and must not duplicate these fields. Facts dialog chrome (680px desktop, fullscreen on narrow screens) lives only in the registered VPS style owner in `web/css-owners.json`. Both overview and legacy retain the same real PATCH, provider snapshots, conflict recovery and write ownership. Service/domain update APIs are not part of this frontend change.
+The shared editor is the create (添加 VPS) and edit facts form. It shows identity/provider, country, city/IPv4, free-form multi-select usage tags, importance, independent ordinary labels and notes first. Suggestions and existing usage tags remain reusable; a new purpose can be entered directly. Usage never changes lifecycle or monitoring control. Put lower-frequency facts in one default-collapsed 可选设置 without nested categories. IPv6 and custom SSH host/port are hidden until shown; existing configuration initializes them visible, and hiding never erases values. Editing IPv4 derives an automatic SSH host while preserving a custom host. The country field retains its editable in-flow combo, grouped common locations, full Chinese/English/code search and custom values. Importance remains a native select. Keep header and feedback/save/cancel footer fixed while the body scrolls. Preserve inline provider creation, reset/error/pending/submit, real PATCH, snapshots, conflict recovery and write ownership. Facts dialog chrome (680px desktop, fullscreen on narrow screens) lives only in the registered VPS style owner in `web/css-owners.json`.
 
-Archive remains a read-only historical VPS ledger with a compact identity/status/time/cost scanning table and an independent detail workspace. Distinguish missing archive time from the record update time. Organize detail evidence by identity, billing, runtime links, services/domains, and dated records; order history by absolute event time, not timestamp-string order. Subscription and timeline failures stay local with source-specific retries. A successful archive review can retain its known billing records while the separate subscription read fails; a successful empty list replaces that retained evidence. Wide tables have uniquely named, keyboard-focusable local scroll regions, and narrow headers/actions wrap without clipping. Only archived assets offer an explicit restore-to-idle confirmation; cancelled assets remain read-only. Pending restoration cannot be dismissed or submitted twice, failures remain retryable, and successful restoration returns to the existing VPS detail route without rewriting associations/history. Requests from an obsolete visit must not overwrite data or navigate a later visit.
+Archive is a historical VPS ledger with a compact identity/status/time/cost scanning table and an independent detail workspace. Distinguish missing archive time from update time. Organize evidence by identity, billing, monitoring sessions, service/domain associations and dated records; sort by absolute event time. Show snapshots at archive separately from current shared-object facts. Subscription and timeline failures stay local with source-specific retries. Known billing evidence may remain while a separate subscription read fails; a successful empty list replaces it. Wide tables have uniquely named keyboard-focusable local scroll regions; narrow headers/actions wrap without clipping. Archived assets offer explicit restore-to-idle confirmation, supplemental bills/refunds/notes/migration outcomes/evidence and follow-up resolution with reasons and audit. Pending restoration cannot be dismissed or duplicated; success returns to VPS detail without reopening associations, commands or old session permissions. Obsolete requests must not overwrite or navigate a later visit.
 
-Domain reading retains its domain records and service IDs when optional service-name enrichment fails. Announce that auxiliary failure locally and retry only the scoped service read; ignore responses belonging to a closed panel or another VPS. Cancellation/retirement uses a compact impact summary and one confirmation heading without changing the authoritative preview, explicit object selections, or audited execution contract.
+Domain reading retains its records and association service IDs when optional service-name enrichment fails. Announce that failure locally and retry only the scoped service read; ignore responses belonging to a closed panel or another VPS. Archive/retirement uses a compact impact summary and one confirmation heading without bypassing authoritative preview or audit.
 
-- **危险联动流程使用状态驱动入口，不做常驻菜单项**：取消 / 退役 / 迁移这类会影响订阅、监控实例、探测对象或其它关联对象的流程，不能作为普通 `…` 菜单项常驻展示，也不能在详情页中部单独铺一个“待处理”工作区。它应由顶部决策 / 当前判断模型按状态暴露 action，例如 VPS 详情页的 `judgement.primaryAction = { label: '处理取消/退役', mode: 'cancellation' }`；稳定状态返回 `null`。点击后打开居中 `Modal` 加载 preview，让用户显式选择影响对象并确认执行，不得直接提交危险操作。测试必须覆盖：相关状态显示入口、稳定状态隐藏入口、更多菜单没有该危险项、deep link 仍可打开既有 modal。
-- **迁移在工作台完成前只能表达为意向**：VPS 页面、资产决策页和 execution plan 不得写“推进迁移”“迁移流程”“迁移工作台”这类暗示已有受控迁移闭环的文案。当前只能写“标记迁移意向”“人工跟进”“复核迁移意向”等，并继续把真实取消/退役动作引导到既有 workbench。
+- **生命周期入口稳定可达**：每台管理中 VPS 的详情管理菜单始终提供“结束使用并归档”，不能因续费意向或当前判断稳定而隐藏。点击后打开预览确认，提交前重新校验。测试覆盖稳定资产、决定不续费、暂停/退役监控及 deep link；VPS 列表继续只读。
+- **迁移仅人工计划和跟进**：记录来源、目标与结果，不自动迁移服务或结束旧 VPS，不暗示存在自动执行工作台。迁移表达为新增目标关联、结束来源关联；结束旧资源须独立确认归档。
 - **当前关注状态归入顶部判断，不铺中部提醒条**：VPS 详情页里的“运行观测需要核对”、缺订阅、缺运行观测、订阅读取失败、IP 质量暂不可用、续费临期 / 自动续费取消等当前需要用户处理或核对的状态，必须进入顶部 `VPSDetailOverviewPanel` 的“当前判断”模型，例如 `judgement.attentionItems`。页面中段的“关联概览”“单机台账”“IP 质量概况”只承载详情摘要和管理入口，不再渲染 `VPSContextActionPanel` / `vps-detail-context-action` 这类横条。多个关注状态必须可并列展示，不能被单个 `primaryAction` 覆盖；稳定状态下不展示额外列表。
 
 ### VPS workspace visual language
@@ -322,22 +325,22 @@ Use concise labels and factual loading/error/empty states. Do not add instructio
 
 ## 库存与归档数据流
 
-- VPS inventory data: `VPSPage` 拉取 current `listVPSAssets()`、`listProviders()` 和 current `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views；已 `cancelled` / `archived` VPS 不在主库存页展示，只通过 `/archive` 只读入口查看。
-- Archive data: `/archive` 是列表页，只显式请求 `listVPSAssets({asset_scope:'historical'})` 和 `listSubscriptions({asset_scope:'historical', sort:'renew_at', order:'asc'})` 形成摘要，不自动拉单台 detail、services、domains 或 timeline。点击行 / 操作进入 `/archive/:vpsId`。`/archive/:vpsId` 先读取 `getVPSArchiveReview(vpsId)`，只有 review 返回 `cancelled` / `archived` 才继续读取 `getVPSTimeline(vpsId)` 与 `listSubscriptions({vps_id, asset_scope:'all', sort:'renew_at', order:'asc'})`；其他 lifecycle 必须 `replace` 跳回 `/vps/:vpsId`。详情页从 archive review 读取 services、domains、monitoring links 和 target links，不依赖普通 `/api/targets` 列表。详情页只读展示身份说明、上方摘要卡、用户记录、续费/价格/规格/IP 历史、订阅/服务/域名明细、底部全宽监控与 Target 历史；用户记录必须排在订阅/服务/域名明细之前。`archived` 可显示受控恢复入口，`cancelled` 不显示恢复入口；不得出现编辑、取消、添加、创建或关联按钮。多币种订阅摘要必须按币种分开显示（例如 `USD 24.00/月 + EUR 9.00/月`），不得把不同币种相加后套用单一币种。
-- URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|cancellation_attention`，并继续支持 `provider_id`、`lifecycle_status`、`usage_status`、`renewal_decision`；lifecycle filter 只提供 current 生命周期，不提供 `cancelled` / `archived` 选项。Target inventory 支持 `coverage_gap=1` 表达执行监控实例覆盖缺口，供 TargetsSupportSurface 快捷入口和 Dashboard/资产证据支撑场景承接。
+- VPS inventory data: `VPSPage` 拉取 current `listVPSAssets()`、`listProviders()` 和 current `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views；归档 VPS 不在主库存页展示，通过 `/archive` 查看历史。
+- Archive data: `/archive` 显式请求 `asset_scope:'archived'` 的 VPS 和订阅形成摘要，不自动拉单台 detail/services/domains/timeline。点击进入 `/archive/:vpsId`，只有 review 返回 archived 才读取 timeline 与 `asset_scope:'all'` 订阅历史；管理中资源 replace 回 `/vps/:vpsId`。详情读取历史关联、历次监控、Target、业务记录和跟进事项，不依赖当前 Target 列表。用户记录排在订阅/服务/域名明细之前；提供明确的历史补录、跟进及恢复操作，不允许普通当前资源编辑或自动重开关联。多币种摘要分币种显示，不跨币种求和。
+- URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|cancellation_attention`，及 `provider_id`、`lifecycle_status`、`usage_tag`、`renewal_decision`；旧 usage_status 不再是合法筛选。Target inventory 支持 `coverage_gap=1` 表达执行监控实例覆盖缺口。
 - `VPSAssetRecord.active_monitoring_instance_link_count` 只能展示 MonitoringInstance 关联数量或未关联状态，**不得**展示 linked monitoring instance health、最近心跳或异常，除非后端 contract 新增并同步类型/测试。
 - VPS inventory quick views 中 derived filters 在前端执行即可；40+ VPS 量级不引入新缓存/状态库，不新增 API 字段。
 - Dashboard 深链进入 VPS 页时，query 必须被页面首屏可见的 tab/chip/drawer 状态承接；不能静默丢弃。
-- 常规业务对象关联输入不得要求用户复制内部 ID：VPS facts 的 Provider、VPS↔MonitoringInstance link 的 MonitoringInstance、VPS service/domain 的 Target、domain 的 Service 都应使用页面加载的数据选择器，并保留“未关联/不关联”选项。选择器为空或加载失败时必须给出明确说明和到对应列表/创建流程的入口；选择监控实例/Target 只创建资产引用或链接，不隐式修改 MonitoringInstance/Target/Agent/ProbeItem 语义。
+- 常规关联输入不得要求用户复制内部 ID：Provider、已有服务/域名、关联的 Target/Service 使用可读选择器；空候选或加载失败有明确说明和合法创建入口。监控实例不提供跨 VPS 选择器；新实例只能在所属 VPS 下创建。
 - VPS inventory subscriptions empty：行级展示 `缺订阅`，quick view `缺订阅` 可筛出对应 VPS
 - VPS inventory URL has unsupported `view`：降级为 `all`，下次用户操作时写回合法 query
 - `/archive` loads archived subscriptions in multiple currencies：订阅历史行逐条展示原币种价格；摘要按币种分组，不跨币种求和
-- `/archive` renders archive list：请求 `asset_scope=historical` 只读展示已取消 / 已归档 VPS 摘要，不自动请求单台 services/domains/timeline；行级入口进入 `/archive/:vpsId`
-- `/archive/:vpsId` renders detail context：只读展示 archive review、timeline、全量订阅历史、services、domains、monitoring links 和 Target links；用户记录排在订阅/服务/域名明细之前；archived 才显示受控恢复，cancelled 不显示恢复；不得出现编辑、取消、添加、创建或关联按钮
+- `/archive` renders archive list：请求 `asset_scope=archived` 展示归档摘要，不自动请求单台 services/domains/timeline；行级入口进入 `/archive/:vpsId`
+- `/archive/:vpsId` renders detail context：历史事实与共享对象当前事实分开；支持明确的历史补录、跟进处理和受控恢复，不恢复旧关联或监控权限
 - selector candidate list is empty：表单保留空值能力，显示去对应列表/创建流程的 Link/action，不要求手输内部 ID
 - selector list request fails：表单显示局部错误/提示，已保存主页面数据仍可查看；不得把加载失败当成真实“无候选”
 - Good: `/vps?view=unlinked&renewal_decision=unreviewed` 首屏显示 `视图: 未关联` 和 `续费: 未评估` chips，列表只显示同时满足条件的 rows。
-- Good: VPS 详情打开 MonitoringInstance link 对话框 时懒加载 `listMonitoringInstances()`，用 `选择监控实例` selector 展示名称、ID、provider、生命周期和健康状态。
+- Good: VPS 当前实例在详情直接可达；历史退役实例留在历史区，显式重新接入保持永久 VPS 归属。
 - Good: VPS 详情无订阅时显示“快速创建订阅”，调用 `/api/vps/{vps_id}/subscriptions`，表单只收账单事实，不出现订阅状态。
 - Good: VPS 详情无监控实例时显示“创建并接入 agent”，调用 `/api/vps/{vps_id}/monitoring-instances`，后端从 VPS 派生身份字段，成功后跳转 MonitoringInstance onboarding。
 - Bad: Dashboard 或 VPSPage 从 `abnormal_linked_vps_count` 反推单台 VPS linked monitoring instance health。

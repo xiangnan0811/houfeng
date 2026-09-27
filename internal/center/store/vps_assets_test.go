@@ -226,8 +226,8 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	if created.DisplayName != "Tokyo Edge" {
 		t.Fatalf("created.DisplayName = %q, want Tokyo Edge", created.DisplayName)
 	}
-	if len(rowArgs[0]) != 23 {
-		t.Fatalf("create args len = %d, want 23", len(rowArgs[0]))
+	if len(rowArgs[0]) != 31 {
+		t.Fatalf("create args len = %d, want 31", len(rowArgs[0]))
 	}
 	if rowArgs[0][2] != "pv_001" || rowArgs[0][13] != 22 || rowArgs[0][19] != string(vpsassets.RenewalUnreviewed) {
 		t.Fatalf("create normalized args = %#v", rowArgs[0])
@@ -277,7 +277,7 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	patched, err := repo.PatchVPSAsset(context.Background(), "vps_001", vpsassets.PatchInput{
 		DisplayName:     vpsassets.PatchString(" Akamai Edge Idle "),
 		ProviderID:      vpsassets.PatchNullableString(nil),
-		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleIdle),
+		LifecycleStatus: vpsassets.PatchLifecycle(vpsassets.LifecycleActive),
 		UsageStatus:     vpsassets.PatchUsage(vpsassets.UsageIdle),
 		Importance:      vpsassets.PatchString(" critical "),
 		Labels:          vpsassets.PatchLabels([]string{" edge ", "backup", "edge"}),
@@ -292,8 +292,8 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 		t.Fatalf("QueryRow calls = %d, want create/get/pre-read/patch", len(rowCalls))
 	}
 	patchArgs := rowArgs[3]
-	if len(patchArgs) != 47 {
-		t.Fatalf("patch args len = %d, want 47", len(patchArgs))
+	if len(patchArgs) != 63 {
+		t.Fatalf("patch args len = %d, want 63", len(patchArgs))
 	}
 	if patchArgs[0] != "vps_001" || patchArgs[1] != true || patchArgs[2] != "Akamai Edge Idle" {
 		t.Fatalf("patch name args = %#v, want vps id and trimmed name", patchArgs[:3])
@@ -304,7 +304,7 @@ func TestPostgresVPSAssetCreateListGetAndPatch(t *testing.T) {
 	if patchArgs[25] != false {
 		t.Fatalf("patch ssh port set arg = %#v, want false in non-history patch", patchArgs[25])
 	}
-	if patchArgs[33] != true || patchArgs[34] != string(vpsassets.LifecycleIdle) {
+	if patchArgs[33] != true || patchArgs[34] != string(vpsassets.LifecycleActive) {
 		t.Fatalf("patch lifecycle args = set:%#v value:%#v, want idle", patchArgs[33], patchArgs[34])
 	}
 	if patchArgs[46] != true {
@@ -1191,6 +1191,21 @@ func scanVPSAssetRecordDestinations(dest []any, record vpsassets.Record) {
 	*(dest[26].(*time.Time)) = record.CreatedAt
 	*(dest[27].(*time.Time)) = record.UpdatedAt
 	*(dest[28].(**time.Time)) = cloneTimePtr(record.ArchivedAt)
+	*(dest[29].(**vpsassets.ArchivedStateSnapshot)) = record.ArchivedStateSnapshot
+	*(dest[30].(*[]string)) = append([]string{}, record.UsageTags...)
+	if record.ValidityMode == "" {
+		record.ValidityMode = "unknown"
+	}
+	if record.AutoRenewCheck == "" {
+		record.AutoRenewCheck = "unchecked"
+	}
+	*(dest[31].(*string)) = record.ValidityMode
+	*(dest[32].(**string)) = cloneStringPtr(record.ExpiresAt)
+	*(dest[33].(*string)) = record.AutoRenewCheck
+	*(dest[34].(**time.Time)) = cloneTimePtr(record.AutoRenewCheckedAt)
+	*(dest[35].(*string)) = record.RenewalReason
+	*(dest[36].(**time.Time)) = cloneTimePtr(record.RenewalReviewAt)
+	*(dest[37].(*string)) = record.AcquisitionSource
 }
 
 func scanIPHistoryRecordDestinations(dest []any, id string, now time.Time) {

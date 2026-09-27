@@ -38,6 +38,9 @@ type AgentEndpointOptions struct {
 	TrustedProxies []string
 	RateLimit      AgentRateLimitOptions
 	Now            func() time.Time
+	// ReceptionFailure invalidates archive observation when the receiver cannot
+	// accept traffic. Rejected traffic is never evidence that any Agent is online.
+	ReceptionFailure func(context.Context, string)
 }
 
 type AgentRateLimitOptions struct {
@@ -236,6 +239,8 @@ func AgentEnrollWithOptions(svc AgentEnrollService, opts AgentEndpointOptions) h
 		}
 
 		writeJSON(w, http.StatusOK, agentapi.EnrollmentResponse{
+			SessionID:            result.SessionID,
+			Capability:           result.Capability,
 			MonitoringInstanceID: result.MonitoringInstanceID,
 			BindingStatus:        result.BindingStatus,
 			Status:               "accepted",
@@ -251,12 +256,18 @@ func AgentSync(svc AgentSyncService) http.Handler {
 func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.Handler {
 	limiter := newAgentRequestLimiter(opts)
 	inflight := newAgentSyncInflightGate(opts.RateLimit.MaxSyncInflight)
+	receptionFailure := func(ctx context.Context, reason string) {
+		if opts.ReceptionFailure != nil {
+			opts.ReceptionFailure(ctx, reason)
+		}
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeAgentAPIError(w, http.StatusMethodNotAllowed, agentapi.ErrorCodeMethodNotAllowed, "method not allowed")
 			return
 		}
 		if !limiter.allow(r) {
+			receptionFailure(r.Context(), "sync_rate_limited")
 			rejectAgentRateLimited(w)
 			return
 		}
@@ -266,6 +277,7 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			return
 		}
 		if !inflight.acquire() {
+			receptionFailure(r.Context(), "sync_capacity_exhausted")
 			rejectAgentUnavailable(w)
 			return
 		}
@@ -294,15 +306,17 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			case errors.Is(err, observations.ErrInvalidProbeObservation):
 				writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
 			default:
+				receptionFailure(r.Context(), "sync_internal_error")
 				writeAgentAPIError(w, http.StatusInternalServerError, agentapi.ErrorCodeInternalError, "internal server error")
 			}
 			return
 		}
 
 		writeJSON(w, http.StatusOK, agentapi.SyncResponse{
-			AcceptedAt: result.AcceptedAt,
-			Status:     "accepted",
-			Plan:       syncPlanToAPI(result.Plan),
+			StopCollection: result.StopCollection,
+			AcceptedAt:     result.AcceptedAt,
+			Status:         "accepted",
+			Plan:           syncPlanToAPI(result.Plan),
 		})
 	})
 }
@@ -338,16 +352,28 @@ func isValidEnrollmentRequest(req agentapi.EnrollmentRequest) bool {
 }
 
 func isValidSyncRequest(req agentapi.SyncRequest) bool {
+	if !requiredMax(req.SessionID, agentIdentityMaxBytes) {
+		return false
+	}
+	if req.LiveSignal != nil && (!requiredMax(req.LiveSignal.ID, agentIdentityMaxBytes) || !requiredMax(req.LiveSignal.Fingerprint, agentIdentityMaxBytes)) {
+		return false
+	}
 	if !requiredMax(req.MonitoringInstanceID, agentIdentityMaxBytes) ||
 		!requiredMax(req.SyncToken, agentSecretMaxBytes) ||
-		len(req.Heartbeats) == 0 {
+		(len(req.Heartbeats) == 0 && req.LiveSignal == nil) {
 		return false
 	}
 	if exceedsAgentBatchLimit(len(req.Heartbeats), len(req.HostSamples), len(req.ProbeObservations), len(req.IPQualityReports), len(req.CommandResults)) {
 		return false
 	}
 
-	heartbeatSyncBatchID := req.Heartbeats[0].SyncBatchID
+	heartbeatSyncBatchID := ""
+	if len(req.Heartbeats) > 0 {
+		heartbeatSyncBatchID = req.Heartbeats[0].SyncBatchID
+	}
+	if len(req.Heartbeats) == 0 && (len(req.HostSamples)+len(req.ProbeObservations)+len(req.IPQualityReports)+len(req.CommandResults) > 0) {
+		return false
+	}
 	for _, heartbeat := range req.Heartbeats {
 		if heartbeat.SyncBatchID != heartbeatSyncBatchID ||
 			!isValidAgentCarrier(heartbeat.ObservedAt, heartbeat.AgentVersion, heartbeat.Fingerprint, heartbeat.SyncBatchID) {
@@ -599,6 +625,8 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 	}
 
 	batch := syncing.Batch{
+		SessionID:            req.SessionID,
+		LiveSignal:           req.LiveSignal,
 		MonitoringInstanceID: req.MonitoringInstanceID,
 		SyncToken:            req.SyncToken,
 		Heartbeats:           heartbeats,

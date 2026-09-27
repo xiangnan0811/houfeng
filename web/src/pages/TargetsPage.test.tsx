@@ -67,7 +67,7 @@ function renderTargets(path = '/targets') {
 function listFetch(records: ReturnType<typeof targetRecord>[]) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url === '/api/targets' && init?.method !== 'POST') {
+    if (url === '/api/targets?scope=all' && init?.method !== 'POST') {
       return mockJSONResponse(records)
     }
     if (url.includes('/runtime/')) {
@@ -547,21 +547,21 @@ describe('TargetsPage', () => {
     expect(screen.queryByText('Enabled API')).not.toBeInTheDocument()
   })
 
-  it('uses run_status=已归档 from Dashboard deep links as the initial target filter', async () => {
+  it('uses lifecycle_status=retired from Dashboard deep links as the initial target filter', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       mockJSONResponse([
         targetRecord({ target_id: 'tg_enabled', name: 'Enabled API' }),
         targetRecord({
           target_id: 'tg_archived',
           name: 'Archived API',
-          run_status: '已归档',
+          lifecycle_status: 'retired', run_status: '暂停',
         }),
       ]),
     )
     vi.stubGlobal('fetch', fetchMock)
 
     render(
-      <MemoryRouter initialEntries={['/targets?run_status=已归档']}>
+      <MemoryRouter initialEntries={['/targets?lifecycle_status=retired']}>
         <Routes>
           <Route path="/targets" element={<TargetsPage />} />
         </Routes>
@@ -789,7 +789,7 @@ describe('TargetsPage', () => {
     expect(within(actions).getByRole('button', { name: '退出维护' })).toBeInTheDocument()
     expect(within(actions).getByRole('button', { name: '暂停' })).toBeInTheDocument()
     expect(within(actions).getByRole('button', { name: '恢复' })).toBeInTheDocument()
-    expect(within(actions).getByRole('button', { name: '归档' })).toBeInTheDocument()
+    expect(within(actions).getByRole('button', { name: '退役' })).toBeInTheDocument()
     expect(within(actions).queryByRole('button', { name: '恢复到暂停' })).not.toBeInTheDocument()
     expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
   })
@@ -816,7 +816,7 @@ describe('TargetsPage', () => {
   it('rejects batch 进入维护 on shared targets with error directing to detail page', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url === '/api/targets' && init?.method !== 'POST') {
+      if (url === '/api/targets?scope=all' && init?.method !== 'POST') {
         return mockJSONResponse([targetRecord({ target_id: 'tg_shared_batch', name: 'Shared Target' })])
       }
       if (url.includes('/lifecycle-review')) {
@@ -880,10 +880,10 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByLabelText('选择 Blog'))
     fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
-    fireEvent.click(screen.getByRole('button', { name: '归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
 
-    expect(screen.getByRole('alertdialog', { name: '确认批量归档目标' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '确认批量归档' }))
+    expect(screen.getByRole('alertdialog', { name: '确认批量退役目标' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '确认批量退役' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1026,7 +1026,7 @@ describe('TargetsPage', () => {
     expect(screen.queryByRole('group', { name: '批量操作' })).not.toBeInTheDocument()
   })
 
-  it('filters 异常, 暂停, 归档, and 覆盖缺口 from the quick-view tabs', async () => {
+  it('filters 异常, 暂停, 退役, and 覆盖缺口 from the quick-view tabs', async () => {
     vi.stubGlobal('fetch', listFetch([
       targetRecord({ target_id: 'tg_ok', name: 'Healthy API' }),
       targetRecord({
@@ -1042,7 +1042,7 @@ describe('TargetsPage', () => {
       targetRecord({
         target_id: 'tg_archived',
         name: 'Archived API',
-        run_status: '已归档',
+        lifecycle_status: 'retired', run_status: '暂停',
       }),
       targetRecord({
         target_id: 'tg_gap',
@@ -1068,7 +1068,7 @@ describe('TargetsPage', () => {
     expect(screen.queryByText('Failing API')).not.toBeInTheDocument()
     expect(screen.queryByText('Archived API')).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('tab', { name: /归档/ }))
+    fireEvent.click(screen.getByRole('tab', { name: /退役/ }))
     await waitFor(() => expect(screen.getByText('Archived API')).toBeInTheDocument())
     expect(screen.queryByText('Paused API')).not.toBeInTheDocument()
 

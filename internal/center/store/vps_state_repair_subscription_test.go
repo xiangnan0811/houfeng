@@ -22,16 +22,16 @@ func TestVPSStateRepairSubscriptionOwnershipCannotMoveOrReplayAcrossVPS(t *testi
 
 	owner, err := vpsRepo.CreateVPSAsset(ctx, vpsassets.CreateInput{
 		DisplayName:     "Subscription owner",
-		LifecycleStatus: vpsassets.LifecycleIdle,
-		UsageStatus:     vpsassets.UsageIdle,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageTags:       []string{"闲置", "自定义用途"},
 	})
 	if err != nil {
 		t.Fatalf("create owner VPS: %v", err)
 	}
 	other, err := vpsRepo.CreateVPSAsset(ctx, vpsassets.CreateInput{
 		DisplayName:     "Other subscription owner",
-		LifecycleStatus: vpsassets.LifecycleIdle,
-		UsageStatus:     vpsassets.UsageIdle,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageTags:       []string{"闲置", "自定义用途"},
 	})
 	if err != nil {
 		t.Fatalf("create other VPS: %v", err)
@@ -120,43 +120,52 @@ func TestVPSStateRepairSubscriptionOwnershipCannotMoveOrReplayAcrossVPS(t *testi
 	}
 }
 
-func TestVPSStateRepairSubscriptionLegacyRenewalPatchPreservesSources(t *testing.T) {
+func TestVPSStateRepairSubscriptionRenewalPatchKeepsAcquisitionSourceIndependent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	pool := openTemporaryAssetLifecyclePostgresSchema(t, ctx)
 	vpsRepo := NewPostgresVPSAssetRepository(pool)
 	subRepo := NewPostgresSubscriptionRepository(pool)
-	vps, err := vpsRepo.CreateVPSAsset(ctx, vpsassets.CreateInput{
-		DisplayName:     "Subscription renewal normalization",
-		LifecycleStatus: vpsassets.LifecycleIdle,
-		UsageStatus:     vpsassets.UsageIdle,
-	})
-	if err != nil {
-		t.Fatalf("create VPS: %v", err)
-	}
-
-	for _, mode := range []string{"gift", "lottery", "bonus", "other"} {
-		t.Run("preserve_"+mode, func(t *testing.T) {
+	for _, source := range []string{"gift", "lottery", "bonus", "other"} {
+		t.Run("preserve_"+source, func(t *testing.T) {
+			vps, err := vpsRepo.CreateVPSAsset(ctx, vpsassets.CreateInput{DisplayName: "Subscription source " + source, AcquisitionSource: source, RenewalDecision: vpsassets.RenewalCancel})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := subRepo.CreateSubscription(ctx, subscriptions.CreateInput{VPSID: vps.VPSID, Price: 12, Currency: "USD", BillingMonths: 1, RenewalMode: source}); !errors.Is(err, subscriptions.ErrInvalidSubscriptionInput) {
+				t.Fatalf("source %q as renewal mode: %v", source, err)
+			}
 			created, err := subRepo.CreateSubscription(ctx, subscriptions.CreateInput{
 				VPSID:         vps.VPSID,
 				Price:         12,
 				Currency:      "USD",
 				BillingMonths: 1,
-				RenewalMode:   mode,
+				RenewalMode:   "auto",
 				PaymentMethod: "card",
 			})
 			if err != nil {
-				t.Fatalf("create %s subscription: %v", mode, err)
+				t.Fatalf("create %s subscription: %v", source, err)
 			}
 			updated, err := subRepo.PatchSubscription(ctx, created.SubscriptionID, subscriptions.PatchInput{
 				AutoRenew:          subscriptions.PatchBool(false),
 				AutoRenewCancelled: subscriptions.PatchBool(true),
 			})
 			if err != nil {
-				t.Fatalf("apply legacy cancellation flags to %s source: %v", mode, err)
+				t.Fatalf("apply billing cancellation flags to %s source: %v", source, err)
 			}
-			if updated.RenewalMode != mode || updated.AutoRenew || updated.AutoRenewCancelled {
-				t.Fatalf("%s source after cancellation flags = mode %q, legacy %t/%t; want preserved source and false/false", mode, updated.RenewalMode, updated.AutoRenew, updated.AutoRenewCancelled)
+			if updated.RenewalMode != "auto_cancelled" || updated.AutoRenew || !updated.AutoRenewCancelled {
+				t.Fatalf("renewal after cancellation flags = %q, %t/%t", updated.RenewalMode, updated.AutoRenew, updated.AutoRenewCancelled)
+			}
+			stored, err := vpsRepo.GetVPSAsset(ctx, vps.VPSID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.AcquisitionSource != source || stored.RenewalDecision != vpsassets.RenewalCancel || stored.LifecycleStatus != vpsassets.LifecycleActive {
+				t.Fatalf("subscription changed VPS independent facts: %+v", stored)
+			}
+			var histories int
+			if err := pool.QueryRow(ctx, `select count(*) from price_histories where subscription_id=$1 and from_renewal_mode='auto' and to_renewal_mode='auto_cancelled'`, created.SubscriptionID).Scan(&histories); err != nil || histories != 1 {
+				t.Fatalf("billing history count=%d err=%v", histories, err)
 			}
 		})
 	}
@@ -170,8 +179,8 @@ func TestVPSStateRepairSubscriptionPartialLegacyFlagsUseLockedRecord(t *testing.
 	subRepo := NewPostgresSubscriptionRepository(pool)
 	vps, err := vpsRepo.CreateVPSAsset(ctx, vpsassets.CreateInput{
 		DisplayName:     "Subscription partial renewal flags",
-		LifecycleStatus: vpsassets.LifecycleIdle,
-		UsageStatus:     vpsassets.UsageIdle,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageTags:       []string{"闲置", "自定义用途"},
 	})
 	if err != nil {
 		t.Fatalf("create VPS: %v", err)
@@ -238,8 +247,8 @@ func TestVPSStateRepairSubscriptionCancelledStatusCanBeCorrectedToActive(t *test
 	subRepo := NewPostgresSubscriptionRepository(pool)
 	vps, err := vpsRepo.CreateVPSAsset(ctx, vpsassets.CreateInput{
 		DisplayName:     "Subscription status correction",
-		LifecycleStatus: vpsassets.LifecycleIdle,
-		UsageStatus:     vpsassets.UsageIdle,
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageTags:       []string{"闲置", "自定义用途"},
 	})
 	if err != nil {
 		t.Fatalf("create VPS: %v", err)

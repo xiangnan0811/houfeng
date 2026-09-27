@@ -678,7 +678,7 @@ func IsValidBillingPeriodUnit(value string) bool {
 
 func IsValidRenewalMode(value string) bool {
 	switch RenewalMode(NormalizeRenewalMode(value)) {
-	case RenewalModeAuto, RenewalModeManual, RenewalModeAutoCancelled, RenewalModeLottery, RenewalModeGift, RenewalModeBonus, RenewalModeOther:
+	case RenewalModeAuto, RenewalModeManual, RenewalModeAutoCancelled:
 		return true
 	default:
 		return false

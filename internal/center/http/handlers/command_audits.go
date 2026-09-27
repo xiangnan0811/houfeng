@@ -239,7 +239,7 @@ func parseInitialCommandAuditFilters(values url.Values) (commandAuditCursorFilte
 		return commandAuditCursorFilters{}, strconv.ErrSyntax
 	}
 	switch filters.Outcome {
-	case "", "rejected", "queued", "dispatched", "succeeded", "failed":
+	case "", "rejected", "queued", "dispatched", "succeeded", "failed", "cancelled":
 	default:
 		return commandAuditCursorFilters{}, strconv.ErrSyntax
 	}
