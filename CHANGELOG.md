@@ -27,6 +27,14 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.0.1](https://github.com/xiangnan0811/houfeng/compare/v1.0.0...v1.0.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **migrate:** accept released v0.80.3/v0.80.4 APP ACL predecessors ([892599b](https://github.com/xiangnan0811/houfeng/commit/892599b36c8bfb14e2384894a604e14205f8ac41))
+* **migrate:** accept released v0.80.3/v0.80.4 APP ACL predecessors ([effb128](https://github.com/xiangnan0811/houfeng/commit/effb128d10bfe2a904fa39f913528c23ddfc42e0))
+
 ## [1.0.0](https://github.com/xiangnan0811/houfeng/compare/v0.80.4...v1.0.0) (2026-09-27)
 
 
