@@ -1,3 +1,4 @@
+import type { VPSAssociationRecord, VPSFollowupRecord } from './types'
 import type {
   AssetDomainListFilter,
   AssetDomainRecord,
@@ -15,11 +16,9 @@ import type {
   AssetServiceListFilter,
   AssetServiceRecord,
   ApplyArchiveInput,
-  ApplyCancellationInput,
   ArchiveReview,
   BulkUpsertSubscriptionMonthlyBudgetInput,
   BulkUpsertSubscriptionMonthlyBudgetResult,
-  CancellationPreview,
   CreateAssetDomainInput,
   DependencyStatusCorrectionInput,
   GlobalActionConfirmation,
@@ -45,13 +44,10 @@ import type {
   UpdateProbeItemInput,
   ExtendVPSValidityInput,
   MonitoringInstanceInstallCommandIssue,
-  MonitoringInstanceArchiveInput,
   MonitoringInstanceLifecycleManagementInput,
   MonitoringInstanceListScope,
   MonitoringInstanceManagementReview,
   MonitoringInstanceOnboardingState,
-  MonitoringInstancePermanentCleanupInput,
-  MonitoringInstancePermanentCleanupResult,
   RestoreArchiveInput,
   StartMigrationInput,
   TargetLifecycleReview,
@@ -231,47 +227,21 @@ export function getMonitoringInstanceManagementReview(monitoringInstanceId: stri
   )
 }
 
+export function listMonitoringInstancePhases(monitoringInstanceId: string) {
+  return requestJSON<import('./types').MonitoringInstancePhase[]>(
+    `/api/monitoring-instances/${encodeURIComponent(monitoringInstanceId)}/phases`,
+  )
+}
+
 export function retireMonitoringInstance(
   monitoringInstanceId: string,
   input: MonitoringInstanceLifecycleManagementInput,
+  idempotencyKey: string = crypto.randomUUID(),
 ) {
-  return postAssetAction<MonitoringInstanceRecord>(
+  return requestJSON<MonitoringInstanceRecord>(
     `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/retire`,
-    input,
-  )
-}
-
-export function restoreMonitoringInstanceLifecycle(
-  monitoringInstanceId: string,
-  input: MonitoringInstanceLifecycleManagementInput,
-) {
-  return postAssetAction<MonitoringInstanceRecord>(
-    `/api/monitoring-instances/${monitoringInstanceId}/lifecycle/restore`,
-    input,
-  )
-}
-
-export function archiveMonitoringInstance(monitoringInstanceId: string, input: MonitoringInstanceArchiveInput) {
-  return postAssetAction<MonitoringInstanceRecord>(`/api/monitoring-instances/${monitoringInstanceId}/archive`, input)
-}
-
-export function restoreMonitoringInstanceFromArchive(
-  monitoringInstanceId: string,
-  confirmation?: GlobalActionConfirmation,
-) {
-  return postAssetAction<MonitoringInstanceRecord>(
-    `/api/monitoring-instances/${monitoringInstanceId}/restore-from-archive`,
-    confirmation,
-  )
-}
-
-export function permanentCleanupMonitoringInstance(
-  monitoringInstanceId: string,
-  input: MonitoringInstancePermanentCleanupInput,
-) {
-  return postAssetAction<MonitoringInstancePermanentCleanupResult>(
-    `/api/monitoring-instances/${monitoringInstanceId}/permanent-cleanup`,
-    input,
+    jsonBodyInit('POST', input, { 'Idempotency-Key': idempotencyKey }),
+    decodeAssetActionError,
   )
 }
 
@@ -305,8 +275,8 @@ export function resetMonitoringInstanceBinding(monitoringInstanceId: string) {
   )
 }
 
-export function listTargets() {
-  return requestJSON<TargetRecord[]>('/api/targets')
+export function listTargets(scope: 'current' | 'retired' | 'all' = 'current') {
+  return requestJSON<TargetRecord[]>(scope === 'current' ? '/api/targets' : `/api/targets?scope=${scope}`)
 }
 
 export function listTargetSparklines() {
@@ -508,7 +478,7 @@ export function listVPSAssets(filter?: VPSAssetListFilter) {
     withQuery('/api/vps', {
       provider_id: filter?.provider_id,
       lifecycle_status: filter?.lifecycle_status,
-      usage_status: filter?.usage_status,
+      usage_tag: filter?.usage_tag,
       renewal_decision: filter?.renewal_decision,
       asset_scope: filter?.asset_scope,
     }),
@@ -689,16 +659,8 @@ function assetDecisionFilterQuery(filter?: AssetDecisionGroupListFilter) {
   }
 }
 
-export function getVPSCancellationPreview(vpsId: string) {
-  return requestJSON<CancellationPreview>(`/api/vps/${vpsId}/cancellation-preview`)
-}
-
 export function getVPSArchiveReview(vpsId: string) {
   return requestJSON<ArchiveReview>(`/api/vps/${vpsId}/archive-review`)
-}
-
-export function applyVPSCancellation(vpsId: string, input: ApplyCancellationInput): Promise<LifecycleActionResult> {
-  return postAssetAction<LifecycleActionResult>(`/api/vps/${vpsId}/cancellation`, input)
 }
 
 export function archiveVPS(vpsId: string, input: ApplyArchiveInput): Promise<ArchiveReview> {
@@ -801,8 +763,8 @@ export function createVPSDomain(
   )
 }
 
-export function listVPSMonitoringInstances(vpsId: string) {
-  return requestJSON<VPSMonitoringInstanceSummary[]>(`/api/vps/${vpsId}/monitoring-instances`)
+export function listVPSMonitoringInstances(vpsId: string, scope: 'current' | 'retired' | 'all' = 'current') {
+  return requestJSON<VPSMonitoringInstanceSummary[]>(`/api/vps/${vpsId}/monitoring-instances?scope=${scope}`)
 }
 
 export function createVPSMonitoringInstance(
@@ -937,4 +899,23 @@ export function getSubscription(subscriptionId: string) {
 
 export function updateSubscription(subscriptionId: string, input: UpdateSubscriptionInput): Promise<SubscriptionRecord> {
   return patchJSONBody<SubscriptionRecord>(`/api/subscriptions/${subscriptionId}`, input)
+}
+
+export function listVPSAssociations(vpsId: string, kind: 'service' | 'domain') {
+  return requestJSON<VPSAssociationRecord[]>(`/api/vps/${encodeURIComponent(vpsId)}/${kind}-associations`)
+}
+export function linkVPSAssociation(vpsId: string, kind: 'service' | 'domain', input: { object_id: string; address: string; port?: number; target_id?: string; service_id?: string }) {
+  return postAssetAction<VPSAssociationRecord>(`/api/vps/${encodeURIComponent(vpsId)}/${kind}-associations`, input)
+}
+export function endVPSAssociation(vpsId: string, kind: 'service' | 'domain', id: string, reason: string) {
+  return requestJSON<VPSAssociationRecord>(`/api/vps/${encodeURIComponent(vpsId)}/${kind}-associations/${encodeURIComponent(id)}/end`, jsonBodyInit('PATCH', { reason }))
+}
+export function listVPSFollowups(vpsId: string) {
+  return requestJSON<VPSFollowupRecord[]>(`/api/vps/${encodeURIComponent(vpsId)}/followups`)
+}
+export function createVPSFollowup(vpsId: string, input: { kind: string; summary: string; details: Record<string, unknown> }) {
+  return postAssetAction<VPSFollowupRecord>(`/api/vps/${encodeURIComponent(vpsId)}/followups`, input)
+}
+export function resolveVPSFollowup(vpsId: string, id: string, status: 'resolved' | 'ignored', reason: string) {
+  return requestJSON<VPSFollowupRecord>(`/api/vps/${encodeURIComponent(vpsId)}/followups/${encodeURIComponent(id)}`, jsonBodyInit('PATCH', { status, reason }))
 }

@@ -44,7 +44,22 @@ func VPSMonitoringInstances(repo assetlinks.Repository, creator linkedMonitoring
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
-			writeJSON(w, http.StatusOK, records)
+			scope := r.URL.Query().Get("scope")
+			if scope == "" {
+				scope = "current"
+			}
+			if scope != "current" && scope != "retired" && scope != "all" {
+				writeError(w, http.StatusBadRequest, "invalid scope")
+				return
+			}
+			filtered := make([]assetlinks.MonitoringInstanceSummary, 0, len(records))
+			for _, record := range records {
+				retired := record.LifecycleStatus == monitoringinstances.LifecycleRetired
+				if scope == "all" || (scope == "retired" && retired) || (scope == "current" && !retired) {
+					filtered = append(filtered, record)
+				}
+			}
+			writeJSON(w, http.StatusOK, filtered)
 		case http.MethodPost:
 			if creator == nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")

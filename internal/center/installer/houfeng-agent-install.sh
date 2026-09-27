@@ -3,13 +3,16 @@ set -eu
 
 usage() {
   cat >&2 <<'USAGE'
-Usage: sh houfeng-agent-install.sh --server-url URL (--enrollment-token TOKEN | --enrollment-token-file PATH | --enrollment-token-stdin) --version VERSION [--release-repo OWNER/REPO] [--insecure-allow-http] [--install-missing-deps | --no-install-missing-deps]
+Usage: sh houfeng-agent-install.sh --server-url URL (--enrollment-token TOKEN | --enrollment-token-file PATH | --enrollment-token-stdin) --version VERSION [--release-repo OWNER/REPO] [--insecure-allow-http] [--reenroll] [--install-missing-deps | --no-install-missing-deps]
 
 Installs houfeng-agent on Linux systemd hosts. The enrollment token is sensitive
 and will be written to /etc/houfeng-agent/token with restrictive permissions.
 Prefer --enrollment-token-file or --enrollment-token-stdin. Passing
 --enrollment-token can expose the secret through shell history and process list
 inspection while the installer is running.
+
+Normal upgrades preserve existing session credentials. --reenroll explicitly
+stops the agent and replaces those credentials with the supplied enrollment token.
 
 If minisign is missing, --install-missing-deps allows this installer to install
 a pinned upstream minisign verifier into /usr/local/bin after checking its
@@ -35,6 +38,8 @@ AGENT_VERSION=""
 RELEASE_REPO="xiangnan0811/houfeng"
 INSECURE_ALLOW_HTTP=0
 INSTALL_MISSING_DEPS=""
+REENROLL=0
+TEMP_TOKEN=""
 HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY="RWS4uZTCLx9cUtaBrFBtbPxBmqIcEPiKAcQcAD4M63rnLndpdC/KvYNz"
 HOUFENG_MINISIGN_BOOTSTRAP_VERSION="0.12"
 HOUFENG_MINISIGN_BOOTSTRAP_SHA256="9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73"
@@ -73,6 +78,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --insecure-allow-http)
       INSECURE_ALLOW_HTTP=1
+      shift
+      ;;
+    --reenroll)
+      REENROLL=1
       shift
       ;;
     --install-missing-deps)
@@ -141,7 +150,7 @@ esac
 
 command -v systemctl >/dev/null 2>&1 || fail "systemctl not found; systemd is required"
 [ -d /run/systemd/system ] || fail "systemd does not appear to be running on this host"
-for required_cmd in awk grep getent groupadd useradd install chown chmod mktemp; do
+for required_cmd in awk grep getent groupadd useradd install chown chmod mktemp mv; do
   command -v "$required_cmd" >/dev/null 2>&1 || fail "$required_cmd is required"
 done
 
@@ -166,6 +175,7 @@ ASSET="houfeng-agent_${AGENT_VERSION}_linux_${ASSET_ARCH}"
 BASE_URL="https://github.com/${RELEASE_REPO}/releases/download/${AGENT_VERSION}"
 TMPDIR="$(mktemp -d)"
 cleanup() {
+  [ -z "$TEMP_TOKEN" ] || rm -f "$TEMP_TOKEN"
   rm -rf "$TMPDIR"
 }
 trap cleanup EXIT INT TERM
@@ -246,6 +256,12 @@ ACTUAL_SUM="$($SHA256 "${TMPDIR}/${ASSET}" | awk '{print $1}')"
 
 info "checksum verified"
 
+# Stop before replacing the credential inode. An old process must not overwrite
+# the new bootstrap token, and systemd must bind the new writable token inode.
+if [ "$REENROLL" = "1" ] && systemctl is-active --quiet houfeng-agent; then
+  systemctl stop houfeng-agent
+fi
+
 if ! getent group houfeng-agent >/dev/null 2>&1; then
   groupadd --system houfeng-agent
 fi
@@ -268,15 +284,18 @@ EOF_ENV
 chown root:houfeng-agent /etc/houfeng-agent/agent.env
 chmod 0640 /etc/houfeng-agent/agent.env
 
-if [ -f /etc/houfeng-agent/token ] && grep -Eq '"(monitoring_instance_id|node_id)"' /etc/houfeng-agent/token 2>/dev/null && grep -q '"sync_token"' /etc/houfeng-agent/token 2>/dev/null; then
+if [ "$REENROLL" != "1" ] && [ -f /etc/houfeng-agent/token ] && grep -Eq '"(monitoring_instance_id|node_id)"' /etc/houfeng-agent/token 2>/dev/null && grep -q '"sync_token"' /etc/houfeng-agent/token 2>/dev/null; then
   info "preserving existing post-enrollment token file"
   chown houfeng-agent:houfeng-agent /etc/houfeng-agent/token
   chmod 0600 /etc/houfeng-agent/token
 else
   umask 077
-  printf '%s' "$ENROLLMENT_TOKEN" > /etc/houfeng-agent/token
-  chown houfeng-agent:houfeng-agent /etc/houfeng-agent/token
-  chmod 0600 /etc/houfeng-agent/token
+  TEMP_TOKEN="$(mktemp /etc/houfeng-agent/token.XXXXXX)"
+  printf '%s' "$ENROLLMENT_TOKEN" > "$TEMP_TOKEN"
+  chown houfeng-agent:houfeng-agent "$TEMP_TOKEN"
+  chmod 0600 "$TEMP_TOKEN"
+  mv -f "$TEMP_TOKEN" /etc/houfeng-agent/token
+  TEMP_TOKEN=""
 fi
 
 cat > /etc/systemd/system/houfeng-agent.service <<'EOF_UNIT'

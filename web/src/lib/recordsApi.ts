@@ -682,7 +682,7 @@ function decodeOverviewSummaryCell(value: unknown): VPSOverview['summary']['over
 
 function decodeOverviewIdentity(value: unknown): VPSOverview['identity'] {
   const identity = overviewObject(value)
-  return {
+  const decoded: VPSOverview['identity'] = {
     vps_id: overviewString(identity.vps_id),
     display_name: overviewString(identity.display_name),
     provider_name: overviewString(identity.provider_name),
@@ -694,12 +694,26 @@ function decodeOverviewIdentity(value: unknown): VPSOverview['identity'] {
     ipv4: overviewString(identity.ipv4),
     ipv6: overviewString(identity.ipv6),
     lifecycle_status: overviewString(identity.lifecycle_status),
-    usage_status: overviewString(identity.usage_status),
+    usage_tags: Array.isArray(identity.usage_tags) ? identity.usage_tags.filter((tag): tag is string => typeof tag === 'string') : [],
     renewal_decision: overviewString(identity.renewal_decision),
     importance: overviewString(identity.importance),
     labels: overviewStringArray(identity.labels),
     updated_at: overviewTimestamp(identity.updated_at),
   }
+  for (const key of ['acquisition_source', 'validity_mode', 'auto_renew_check', 'renewal_reason'] as const) {
+    const field = optionalOverviewString(identity, key)
+    if (field !== undefined) decoded[key] = field
+  }
+  if (identity.expires_at === null) decoded.expires_at = null
+  else {
+    const expiresAt = optionalOverviewString(identity, 'expires_at')
+    if (expiresAt !== undefined) decoded.expires_at = expiresAt
+  }
+  for (const key of ['auto_renew_checked_at', 'renewal_review_at'] as const) {
+    const field = optionalNullableOverviewTimestamp(identity, key)
+    if (field !== undefined) decoded[key] = field
+  }
+  return decoded
 }
 
 function decodeOverviewAction(value: unknown): VPSOverview['anomalies'][number]['secondary_actions'][number] {

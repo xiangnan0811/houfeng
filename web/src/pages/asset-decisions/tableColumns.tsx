@@ -20,7 +20,7 @@ import {
   SubscriptionStatusBadge,
   UsageBadge,
 } from '../assetPageBadges'
-import { daysUntilDate, usageLabel, vpsLocationLabel } from '../assetPageUtils'
+import { daysUntilDate, vpsLocationLabel } from '../assetPageUtils'
 import {
   ACTION_LABELS,
   MANUAL_GROUP_SCENARIO_LABELS,
@@ -86,8 +86,8 @@ export function createManualGroupColumns(options: {
       render: (group) => (
         <div className="asset-table__stack">
           <strong><MonoDigits>{group.member_count}</MonoDigits> 台 VPS</strong>
-          <span>{countSummary(group.usage_counts, ['in_use', 'standby', 'idle'], usageLabel)}</span>
-          <span>{countSummary(group.renewal_decision_counts, ['unreviewed', 'keep', 'observe', 'migrate', 'cancel', 'auto_renew_cancelled', 'replaced'], (value) => value)}</span>
+          <span>{countSummary(group.usage_tag_counts ?? {}, Object.keys(group.usage_tag_counts ?? {}), (value) => value)}</span>
+          <span>{countSummary(group.renewal_decision_counts, ['unreviewed', 'keep', 'cancel'], (value) => value)}</span>
         </div>
       ),
     },
@@ -270,7 +270,7 @@ export function createMemberColumns(options: {
           <span>{member.vps.product_name || member.vps.vps_id}</span>
           <span className="asset-decision-chip-row">
             <LifecycleBadge value={member.vps.lifecycle_status} />
-            <UsageBadge value={member.vps.usage_status} />
+            <UsageBadge value={(member.vps.usage_tags ?? []).join('、')} />
             <RenewalBadge value={member.vps.renewal_decision} />
           </span>
         </div>
@@ -351,9 +351,9 @@ export function createMemberColumns(options: {
           <button className="btn sm primary" type="button" onClick={() => options.onSelect(member)}>
             处理
           </button>
-          {member.suggested_action === 'open_cancellation_workbench' ? (
-            <Link className="btn sm secondary" to={vpsWorkbenchPath(member.vps.vps_id, 'cancellation')}>
-              取消/退役
+          {member.suggested_action === 'open_archive_preview' ? (
+            <Link className="btn sm secondary" to={vpsWorkbenchPath(member.vps.vps_id, 'archive')}>
+              结束使用并归档
             </Link>
           ) : (
             <Link className="btn sm secondary" to={vpsDetailPath(member.vps.vps_id)}>
@@ -420,7 +420,7 @@ export function createManualMemberColumns(options: {
           {member.current_fact_found ? (
             <>
               <LifecycleBadge value={member.vps.lifecycle_status} />
-              <UsageBadge value={member.vps.usage_status} />
+              <UsageBadge value={(member.vps.usage_tags ?? []).join('、')} />
               <RenewalBadge value={member.vps.renewal_decision} />
             </>
           ) : (

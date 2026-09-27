@@ -33,7 +33,7 @@ func goldenMachineEnumOverview() Overview {
 		Identity: Identity{
 			VPSID: "vps_001", DisplayName: "Tokyo Edge", ProviderName: "Example Cloud",
 			ProductName: "VPS", Country: "JP", Region: "Tokyo", City: "Tokyo", Datacenter: "TK1",
-			IPv4: "192.0.2.10", LifecycleStatus: "active", UsageStatus: "in_use",
+			IPv4: "192.0.2.10", LifecycleStatus: "active", UsageTags: []string{"业务"},
 			RenewalDecision: "keep", Importance: "high", Labels: []string{"edge"},
 			UpdatedAt: updated,
 		},

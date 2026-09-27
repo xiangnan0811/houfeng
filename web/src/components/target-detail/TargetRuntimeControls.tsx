@@ -21,23 +21,23 @@ const RUNTIME_ACTION_BUTTONS_BY_RUN_STATUS: Record<
   启用: [
     { action: 'enter-maintenance', label: '进入维护' },
     { action: 'pause', label: '暂停' },
-    { action: 'archive', label: '归档' },
+    { action: 'archive', label: '退役' },
   ],
   维护中: [
     { action: 'exit-maintenance', label: '退出维护' },
     { action: 'pause', label: '暂停' },
-    { action: 'archive', label: '归档' },
+    { action: 'archive', label: '退役' },
   ],
   暂停: [
     { action: 'resume', label: '恢复' },
-    { action: 'archive', label: '归档' },
+    { action: 'archive', label: '退役' },
   ],
-  已归档: [{ action: 'restore-to-paused', label: '恢复到暂停' }],
 }
 
 function targetRuntimeActions(
   target: TargetRecord,
 ): Array<{ action: TargetRuntimeAction; label: string }> {
+  if (target.lifecycle_status === 'retired') return [{ action: 'restore-to-paused', label: '恢复到暂停' }]
   return RUNTIME_ACTION_BUTTONS_BY_RUN_STATUS[target.run_status] ?? []
 }
 
@@ -71,7 +71,7 @@ export function TargetRuntimeControls({
     <DetailSection eyebrow="运行控制" title="运行控制">
       <div className="page-stack">
         <p>
-          维护会继续采集，但不解释结果。暂停会停止采集并产生数据空档。归档会退出当前工作集并保留历史。
+          维护会继续采集，但不解释结果。暂停会停止采集并产生数据空档。退役会退出当前工作集并保留历史。
         </p>
         <div className="badge-row badge-row--wrap">
           {targetRuntimeActions(target).map(({ action, label }) => (
@@ -94,7 +94,7 @@ export function TargetRuntimeControls({
             title={
               pendingConfirmation.action === 'pause'
                 ? '确认暂停目标监控'
-                : '确认归档目标'
+                : '确认退役目标'
             }
             current={
               pendingConfirmation.action === 'pause'
@@ -104,12 +104,12 @@ export function TargetRuntimeControls({
             result={
               pendingConfirmation.action === 'pause'
                 ? '操作后：目标运行状态变为暂停。'
-                : '操作后：目标退出当前工作集，运行状态变为已归档。'
+                : '操作后：目标退出当前工作集，生命周期变为已退役，运行控制保持暂停。'
             }
             impact={
               pendingConfirmation.action === 'pause'
                 ? '会停止该目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。'
-                : '归档后不会继续作为活跃目标参与观测、异常判定或通知。'
+                : '退役后不会继续作为活跃目标参与观测、异常判定或通知。'
             }
             unchanged={
               pendingConfirmation.action === 'pause'
@@ -117,7 +117,7 @@ export function TargetRuntimeControls({
                 : '不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'
             }
             confirmLabel={
-              pendingConfirmation.action === 'pause' ? '确认暂停目标' : '确认归档'
+              pendingConfirmation.action === 'pause' ? '确认暂停目标' : '确认退役'
             }
             disabled={submitting}
             onConfirm={() => onConfirm(pendingConfirmation.action)}

@@ -108,7 +108,7 @@ esac
 	env.writeFakeSHA256Sum(t)
 	env.writeFakeTar(t)
 
-	for _, name := range []string{"awk", "cat", "chmod", "cp", "grep", "mkdir", "mktemp", "rm", "touch", "tr"} {
+	for _, name := range []string{"awk", "cat", "chmod", "cp", "grep", "mkdir", "mktemp", "mv", "rm", "touch", "tr"} {
 		env.symlinkHostCommand(t, name)
 	}
 

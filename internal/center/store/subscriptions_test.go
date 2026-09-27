@@ -544,7 +544,7 @@ func TestPostgresSubscriptionPatchRecordsPriceHistory(t *testing.T) {
 	}
 }
 
-func TestVPSStateRepairTerminalSubscriptionPatchCannotReactivateOrExtend(t *testing.T) {
+func TestVPSArchivedSubscriptionPatchPreservesBillingFactsWithRevision(t *testing.T) {
 	t.Parallel()
 
 	endsAt := subscriptions.NewDate(time.Date(2026, time.May, 20, 0, 0, 0, 0, time.UTC))
@@ -619,8 +619,21 @@ func TestVPSStateRepairTerminalSubscriptionPatchCannotReactivateOrExtend(t *test
 		t.Run(test.name, func(t *testing.T) {
 			var calls []string
 			updated := false
+			audited := false
+			current := test.current
+			current.SubscriptionID = "sub_001"
+			current.VPSID = "vps_001"
+			current.Price = 120
+			current.Currency = "USD"
+			current.BillingMonths = 1
+			current.MonthlyPrice = 120
+			current.CreatedAt = now
+			current.UpdatedAt = now
+			if current.RenewalMode == "" {
+				current.RenewalMode = "manual"
+			}
 			tx := &fakeSubscriptionTx{}
-			tx.queryRow = func(_ context.Context, sql string, _ ...any) pgx.Row {
+			tx.queryRow = func(_ context.Context, sql string, args ...any) pgx.Row {
 				calls = append(calls, sql)
 				switch {
 				case strings.Contains(sql, "from subscriptions") && !strings.Contains(sql, "for update"):
@@ -630,25 +643,31 @@ func TestVPSStateRepairTerminalSubscriptionPatchCannotReactivateOrExtend(t *test
 					}}
 				case strings.Contains(sql, "from vps_assets"):
 					return fakeSubscriptionRow{scan: func(dest ...any) error {
-						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleCancelled
+						*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleArchived
 						return nil
 					}}
 				case strings.Contains(sql, "from subscriptions") && strings.Contains(sql, "for update"):
 					return fakeSubscriptionRow{scan: func(dest ...any) error {
-						current := test.current
-						current.SubscriptionID = "sub_001"
-						current.VPSID = "vps_001"
-						current.Price = 120
-						current.Currency = "USD"
-						current.BillingMonths = 1
-						current.MonthlyPrice = 120
-						current.CreatedAt = now
-						current.UpdatedAt = now
 						scanSubscriptionRecordDestinations(dest, current)
 						return nil
 					}}
 				case strings.Contains(sql, "update subscriptions"):
 					updated = true
+					return fakeSubscriptionRow{scan: func(dest ...any) error {
+						record := applySubscriptionPatchPreview(current, subscriptions.NormalizePatchAgainstRecord(current, test.patch))
+						if test.patch.EndsAt.Set {
+							record.EndsAt = test.patch.EndsAt.Value
+						}
+						scanSubscriptionRecordDestinations(dest, record)
+						return nil
+					}}
+				case strings.Contains(sql, "insert into price_histories"):
+					return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
+				case strings.Contains(sql, "insert into experience_logs"):
+					audited = true
+					if args[1] != "vps_001" || !strings.Contains(args[5].(string), `"before"`) || !strings.Contains(args[5].(string), `"after"`) {
+						t.Fatalf("missing archived billing revision: %#v", args)
+					}
 					return fakeSubscriptionRow{scan: func(dest ...any) error { return nil }}
 				default:
 					t.Fatalf("unexpected QueryRow SQL %q", sql)
@@ -663,11 +682,16 @@ func TestVPSStateRepairTerminalSubscriptionPatchCannotReactivateOrExtend(t *test
 			}
 
 			_, err := repo.PatchSubscription(context.Background(), "sub_001", test.patch)
-			if !errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
-				t.Fatalf("PatchSubscription() error = %v, want ErrVPSAssetReadonly", err)
+			if err != nil {
+				t.Fatalf("PatchSubscription() error = %v, want independent archived billing update", err)
 			}
-			if updated || tx.committed || len(calls) != 3 {
-				t.Fatalf("updated=%t committed=%t queryRows=%#v; want current state rejected before update", updated, tx.committed, calls)
+			if !updated || !audited || !tx.committed {
+				t.Fatalf("updated=%t audited=%t committed=%t queryRows=%#v; want atomic billing revision", updated, audited, tx.committed, calls)
+			}
+			for _, sql := range calls {
+				if strings.Contains(sql, "update vps_assets") || strings.Contains(sql, "update monitoring_instances") || strings.Contains(sql, "agent_commands") {
+					t.Fatalf("ledger update must not revive runtime: %s", sql)
+				}
 			}
 		})
 	}

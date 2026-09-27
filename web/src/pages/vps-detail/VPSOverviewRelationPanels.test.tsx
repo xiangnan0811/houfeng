@@ -13,6 +13,8 @@ import type {
 import { useVPSManagementController } from './hooks/useVPSManagementController'
 import { VPSOverviewRelationPanels } from './VPSOverviewRelationPanels'
 
+vi.mock('./VPSLifecycleWorkspace', () => ({ VPSLifecycleWorkspace: () => null }))
+
 const MONITORING: VPSMonitoringInstanceSummary = {
   monitoring_instance_id: 'mi_001',
   display_name: '东京监控',
@@ -20,9 +22,9 @@ const MONITORING: VPSMonitoringInstanceSummary = {
   region: 'Tokyo',
   city: 'Tokyo',
   provider: 'Example',
-  lifecycle_status: 'active',
+  lifecycle_status: '已接入',
   monitoring_status: '启用',
-  binding_status: 'bound',
+  binding_status: '已绑定',
   current_health_status: '正常',
   last_heartbeat_at: '2026-08-24T00:00:00Z',
   current_active_incident_count: 0,
@@ -132,7 +134,7 @@ describe('VPSOverviewRelationPanels', () => {
     expect(screen.getByText('观测健康').tagName).not.toBe('DT')
     expect(screen.queryByRole('heading', { name: '监控观测' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看监控实例' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
-    expect(api.listVPSMonitoringInstances).toHaveBeenCalledWith('vps_001')
+    expect(api.listVPSMonitoringInstances).toHaveBeenCalledWith('vps_001', 'all')
     expect(screen.queryByRole('button', { name: /接入\/升级 agent/ })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '解除关联' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '关闭' }))

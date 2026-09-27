@@ -56,7 +56,7 @@ function monitoringInstanceRecord(overrides: Partial<Record<string, unknown>> = 
     region: 'ap-northeast-1',
     city: 'Tokyo',
     provider: 'Vultr',
-    lifecycle_status: '在用',
+    lifecycle_status: '已接入',
     monitoring_status: '启用',
     binding_status: '已绑定',
     labels: [],
@@ -145,6 +145,18 @@ describe('MonitoringPage', () => {
     window.sessionStorage.clear()
   })
 
+  it('excludes retired, historical, and archived-owner instances from the working list', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      monitoringInstanceRecord(),
+      monitoringInstanceRecord({ monitoring_instance_id: 'mi_retired', display_name: 'Retired', lifecycle_status: '已退役', current_health_status: '严重' }),
+      monitoringInstanceRecord({ monitoring_instance_id: 'mi_history', display_name: 'Historical', is_current: false }),
+      monitoringInstanceRecord({ monitoring_instance_id: 'mi_archived', display_name: 'Archived owner', vps_lifecycle_status: 'archived' }),
+    ]))
+    renderMonitoring()
+    await screen.findByText('Tokyo Edge')
+    for (const name of ['Retired', 'Historical', 'Archived owner']) expect(screen.queryByText(name)).not.toBeInTheDocument()
+  })
+
   it('routes the monitoring page onboarding CTA to VPS inventory without opening a standalone create form', async () => {
     vi.stubGlobal('fetch', listFetch([]))
     renderMonitoring()
@@ -190,7 +202,7 @@ describe('MonitoringPage', () => {
   it('surfaces trend and settings failures without silent defaults', async () => {
     vi.mocked(listMonitoringInstanceSparklines).mockRejectedValueOnce(new Error('spark down'))
     vi.mocked(getSettings).mockRejectedValueOnce(new Error('settings down'))
-    vi.stubGlobal('fetch', listFetch([monitoringInstanceRecord({ last_heartbeat_at: '2026-04-26T09:00:00Z' })]))
+    vi.stubGlobal('fetch', listFetch([monitoringInstanceRecord({ last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' })]))
     renderMonitoring()
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     expect(await screen.findByText(/24小时历史趋势不可用/)).toBeInTheDocument()
@@ -207,7 +219,7 @@ describe('MonitoringPage', () => {
         monitoring_instance_id: 'mi_alert',
         display_name: 'Alerting Edge',
         current_health_status: '告警',
-        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
       }),
     ]))
     renderMonitoring()
@@ -220,7 +232,7 @@ describe('MonitoringPage', () => {
   it('shows unknown health instead of green when there is no heartbeat, with pause independent', async () => {
     vi.stubGlobal('fetch', listFetch([
       monitoringInstanceRecord({
-        last_heartbeat_at: undefined,
+        last_heartbeat_at: undefined, last_trusted_online_at: undefined,
         current_health_status: '正常',
         monitoring_status: '暂停',
       }),
@@ -229,7 +241,7 @@ describe('MonitoringPage', () => {
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
     const row = screen.getByText('Tokyo Edge').closest('tr')
     expect(row).not.toBeNull()
-    expect(within(row!).getByText('未知')).toBeInTheDocument()
+    expect(within(row!).queryByText('正常')).not.toBeInTheDocument()
     expect(within(row!).getAllByText('未收到心跳')).toHaveLength(1)
     expect(row!.querySelector('.monitoring-table__id')).toBeNull()
     expect(row!.querySelector('.monitoring-table__location')).toBeNull()
@@ -242,14 +254,14 @@ describe('MonitoringPage', () => {
     vi.stubGlobal('fetch', listFetch([
       monitoringInstanceRecord({
         display_name: 'Paused Edge',
-        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
         current_health_status: '正常',
         monitoring_status: '暂停',
       }),
       monitoringInstanceRecord({
         monitoring_instance_id: 'mi_maint',
         display_name: 'Maint Edge',
-        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
         current_health_status: '正常',
         monitoring_status: '维护中',
       }),
@@ -267,7 +279,7 @@ describe('MonitoringPage', () => {
   it('hides zero incident counts and empty explanations on healthy rows', async () => {
     vi.stubGlobal('fetch', listFetch([
       monitoringInstanceRecord({
-        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
         current_health_status: '正常',
         current_active_incident_count: 0,
         current_primary_issue_summary: '',
@@ -284,7 +296,7 @@ describe('MonitoringPage', () => {
 
   it('persists quick view, search and sort in the URL and preserves unrelated params', async () => {
     vi.stubGlobal('fetch', listFetch([
-      monitoringInstanceRecord({ monitoring_instance_id: 'mi_001', display_name: 'Tokyo Edge', current_health_status: '告警', last_heartbeat_at: '2026-04-26T09:00:00Z' }),
+      monitoringInstanceRecord({ monitoring_instance_id: 'mi_001', display_name: 'Tokyo Edge', current_health_status: '告警', last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' }),
       monitoringInstanceRecord({ monitoring_instance_id: 'mi_002', display_name: 'Seoul Edge', region: 'ap-northeast-2', city: 'Seoul' }),
     ]))
     render(
@@ -309,7 +321,7 @@ describe('MonitoringPage', () => {
 
   it('applies lifecycle filters immediately through the shared filter bar', async () => {
     vi.stubGlobal('fetch', listFetch([
-      monitoringInstanceRecord({ display_name: 'Tokyo Edge', lifecycle_status: '在用' }),
+      monitoringInstanceRecord({ display_name: 'Tokyo Edge', lifecycle_status: '已接入' }),
       monitoringInstanceRecord({ monitoring_instance_id: 'mi_pending', display_name: 'Seoul Edge', lifecycle_status: '待接入' }),
     ]))
     render(
@@ -320,7 +332,7 @@ describe('MonitoringPage', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText('接入阶段'), { target: { value: '在用' } })
+    fireEvent.change(screen.getByLabelText('接入阶段'), { target: { value: '已接入' } })
     await waitFor(() => expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument())
     expect(screen.getByText('Tokyo Edge')).toBeInTheDocument()
     expect(screen.getByTestId('location')).toHaveTextContent('lifecycle=')
@@ -334,7 +346,7 @@ describe('MonitoringPage', () => {
         display_name: 'Tokyo Edge',
         current_health_status: '告警',
         monitoring_status: '启用',
-        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
         group: 'prod',
       }),
       monitoringInstanceRecord({
@@ -342,7 +354,7 @@ describe('MonitoringPage', () => {
         display_name: 'Seoul Edge',
         current_health_status: '正常',
         monitoring_status: '暂停',
-        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
         group: 'staging',
       }),
     ]))
@@ -407,7 +419,7 @@ describe('MonitoringPage', () => {
       monitoringInstanceRecord({ monitoring_instance_id: 'mi_002', display_name: 'Seoul Edge', lifecycle_status: '待接入' }),
     ]))
     render(
-      <MemoryRouter initialEntries={['/monitoring?from=dashboard&lifecycle=在用']}>
+      <MemoryRouter initialEntries={['/monitoring?from=dashboard&lifecycle=已接入']}>
         <Routes>
           <Route path="/monitoring" element={<><MonitoringPage /><LocationProbe /></>} />
         </Routes>
@@ -477,7 +489,7 @@ describe('MonitoringPage', () => {
 
   it('prunes hidden selections when filters change and supports header select-all', async () => {
     vi.stubGlobal('fetch', listFetch([
-      monitoringInstanceRecord({ monitoring_instance_id: 'mi_001', display_name: 'Tokyo Edge', lifecycle_status: '在用' }),
+      monitoringInstanceRecord({ monitoring_instance_id: 'mi_001', display_name: 'Tokyo Edge', lifecycle_status: '已接入' }),
       monitoringInstanceRecord({ monitoring_instance_id: 'mi_002', display_name: 'Seoul Edge', lifecycle_status: '待接入' }),
     ]))
     renderMonitoring()
@@ -488,7 +500,7 @@ describe('MonitoringPage', () => {
     const selectAll = screen.getByLabelText('全选可见监控实例') as HTMLInputElement
     expect(selectAll.checked).toBe(true)
     expect(selectAll.indeterminate).toBe(false)
-    fireEvent.change(screen.getByLabelText('接入阶段'), { target: { value: '在用' } })
+    fireEvent.change(screen.getByLabelText('接入阶段'), { target: { value: '已接入' } })
     await waitFor(() => expect(screen.queryByText('Seoul Edge')).not.toBeInTheDocument())
     expect(screen.getByLabelText('选择 Tokyo Edge')).toBeChecked()
     expect((screen.getByLabelText('全选可见监控实例') as HTMLInputElement).checked).toBe(true)
@@ -562,7 +574,7 @@ describe('MonitoringPage', () => {
     expect(screen.getByLabelText('选择 Seoul Edge')).toBeChecked()
     expect(screen.getByLabelText('选择 Osaka Edge')).toBeChecked()
 
-    fireEvent.change(screen.getByLabelText('接入阶段'), { target: { value: '在用' } })
+    fireEvent.change(screen.getByLabelText('接入阶段'), { target: { value: '已接入' } })
     await waitFor(() => expect(screen.queryByText('Osaka Edge')).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: '批量操作' })).toHaveTextContent('(2)')
     fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
@@ -749,7 +761,7 @@ describe('MonitoringPage', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
     vi.setSystemTime(new Date('2026-04-26T09:00:50Z'))
     vi.stubGlobal('fetch', listFetch([
-      monitoringInstanceRecord({ last_heartbeat_at: '2026-04-26T09:00:00Z' }),
+      monitoringInstanceRecord({ last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' }),
     ]))
     renderMonitoring()
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
@@ -804,7 +816,7 @@ describe('MonitoringPage', () => {
 
   it('marks stale heartbeat with the notice badge', async () => {
     vi.stubGlobal('fetch', listFetch([
-      monitoringInstanceRecord({ last_heartbeat_at: '2026-04-26T09:00:00Z' }),
+      monitoringInstanceRecord({ last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' }),
     ]))
     renderMonitoring()
     await waitFor(() => expect(screen.getByText('Tokyo Edge')).toBeInTheDocument())
@@ -997,7 +1009,7 @@ describe('MonitoringPage', () => {
       monitoringInstanceRecord({
         monitoring_instance_id: 'mi_001',
         display_name: 'Tokyo Edge',
-        last_heartbeat_at: '2026-04-26T09:00:00Z',
+        last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
       }),
     ]))
     renderMonitoring()

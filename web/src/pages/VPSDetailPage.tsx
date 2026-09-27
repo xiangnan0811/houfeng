@@ -1,11 +1,10 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Navigate, useLocation, useParams, useSearchParams } from 'react-router-dom'
 
 import { PageState } from '../components/PageState'
 import { ApiError } from '../lib/apiRequest'
 import { getVPSOverview, overviewHasRecordsV2Read } from '../lib/recordsApi'
 import type { VPSOverview } from '../lib/types'
-import { RouteModuleFallback } from '../app/RouteModuleFallback'
 import { VPSOverviewPageView } from './vps-detail/VPSOverviewPageView'
 import { RestoreReorganizationPanel } from '../components/RestoreReorganizationPanel'
 import { VPSOverviewManagementActions } from './vps-detail/VPSOverviewManagementActions'
@@ -18,11 +17,7 @@ import { READ_ONLY_PREVIEW } from '../lib/readOnlyPreview'
 
 import './vps-detail/VPSDetailWorkspace.css'
 
-const LegacyVPSDetailPage = lazy(() =>
-  import('./vps-detail/LegacyVPSDetail').then((module) => ({ default: module.LegacyVPSDetail })),
-)
-
-type GateMode = 'probing' | 'overview' | 'legacy' | 'archive' | 'not_found' | 'error'
+type GateMode = 'probing' | 'overview' | 'archive' | 'not_found' | 'error'
 type SettledGate = {
   vpsId: string
   revision: number
@@ -39,19 +34,10 @@ const SAFE_OVERVIEW_FAILURE = 'VPS 概览请求或响应校验失败，请重试
 const SAFE_VPS_NOT_FOUND = '该 VPS 不存在，或当前账号无权查看。'
 
 function isReadonlyArchiveLifecycle(status: string | undefined): boolean {
-  return status === 'cancelled' || status === 'archived'
+  return status === 'archived'
 }
 
-/**
- * Canonical `/vps/:id` entry. Capability-off or an explicitly unavailable overview
- * falls back to the legacy composition. Identity 404 (VPS missing/unauthorized) stays
- * on the overview empty state — it must not open the legacy workbench. Overview
- * load failures after the gate selects overview are surfaced — they do not
- * silently fall back.
- *
- * Legacy is a separate async chunk so overview e2e / production first paint do
- * not pay for the full workbench graph.
- */
+/** Canonical fresh-install overview route; failed authority reads never open a second write surface. */
 export function VPSDetailPage() {
   const { pathname, hash } = useLocation()
 
@@ -82,30 +68,7 @@ function VPSDetailRoute() {
     writeOwnerStore.getSnapshot,
     writeOwnerStore.getSnapshot,
   )
-  const currentVPSIdRef = useRef(normalizedVPSId)
-  const currentViewTokenRef = useRef('')
   const [viewTokenNamespace] = useState(() => crypto.randomUUID())
-  const mountedRef = useRef(false)
-
-  useLayoutEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
-  useLayoutEffect(() => {
-    currentVPSIdRef.current = normalizedVPSId
-  }, [normalizedVPSId])
-
-  function revalidateInvalidatedLegacyWrite(vpsId: string, settledViewToken: string) {
-    if (
-      !mountedRef.current
-      || currentVPSIdRef.current !== vpsId
-      || currentViewTokenRef.current !== settledViewToken
-    ) return
-    setProbeRevision((revision) => revision + 1)
-  }
 
   useEffect(() => {
     let cancelled = false
@@ -152,8 +115,8 @@ function VPSDetailRoute() {
           setSettledGate({
             vpsId: normalizedVPSId,
             revision: probeRevision,
-            mode: 'legacy',
-            error: null,
+            mode: 'error',
+            error: SAFE_OVERVIEW_FAILURE,
             overview: null,
           })
         }
@@ -175,7 +138,7 @@ function VPSDetailRoute() {
             setSettledGate({
               vpsId: normalizedVPSId,
               revision: probeRevision,
-              mode: 'legacy',
+              mode: 'error',
               error: null,
               overview: null,
             })
@@ -207,10 +170,6 @@ function VPSDetailRoute() {
   const viewToken = `${viewTokenNamespace}:${viewIdentity}`
   const inheritedOwnerRef = useRef<{ vpsId: string; token: string } | null>(null)
   const currentWriteOwner = writeOwners.get(normalizedVPSId)
-
-  useLayoutEffect(() => {
-    currentViewTokenRef.current = viewToken
-  }, [viewToken])
 
   useEffect(() => {
     if (currentWriteOwner && currentWriteOwner.viewToken !== viewToken) {
@@ -262,18 +221,6 @@ function VPSDetailRoute() {
 
   if (gate === 'archive') {
     return <Navigate to={`/archive/${encodeURIComponent(normalizedVPSId)}`} replace state={location.state} />
-  }
-
-  if (gate === 'legacy') {
-    return (
-      <Suspense fallback={<RouteModuleFallback label="正在加载 VPS 详情" />}>
-        <LegacyVPSDetailPage
-          writeOwnerStore={writeOwnerStore}
-          viewToken={viewToken}
-          onViewAuthorityInvalidatedWriteSettled={revalidateInvalidatedLegacyWrite}
-        />
-      </Suspense>
-    )
   }
 
   return (
@@ -351,7 +298,7 @@ function VPSOverviewRoute({
   }
 
   const lifecycleStatus = state.overview.identity.lifecycle_status
-  if (lifecycleStatus === 'cancelled' || lifecycleStatus === 'archived') {
+  if (lifecycleStatus === 'archived') {
     return <Navigate to={`/archive/${encodeURIComponent(vpsId ?? '')}`} replace state={location.state} />
   }
 
@@ -364,9 +311,7 @@ function VPSOverviewRoute({
           refreshGeneration={associationRefreshGeneration}
           onEditUsage={() => management.openPanel('facts')}
           onEditDecision={() => management.openPanel('decision')}
-          onRelink={() => management.openPanel('monitoring-instance-link')}
           onCreateMonitoring={() => management.openPanel('monitoring-instance-create')}
-          onChanged={() => void commands.refresh()}
         />
       ) : null}
       <VPSOverviewPageView

@@ -34,13 +34,24 @@ Agents run on monitored hosts, read local credentials, fingerprint the host, sam
 
 These names describe the current codebase. They can evolve, but changes must be reflected through code, contracts, migrations, tests, and docs together.
 
-- `MonitoringInstance`: an agent-backed runtime observation object.
+- `VPSAsset`: an actual resource instance, managed (`active`) or archived. Reinstallation keeps its identity; purchasing another instance after reclamation creates a new identity. Free-form `usage_tags` describe uses independently of lifecycle and monitoring controls.
+- `MonitoringInstance`: an agent-backed runtime observation object permanently owned by one VPS. Each VPS has at most one current instance and may retain retired instances. Reinstallation starts another enrollment session on the same instance; old sessions retain only online-evidence permission.
 - `Target`: a service or entrypoint that can be probed.
 - `ProbeItem`: one concrete TCP, HTTP/HTTPS, or TLS observation method under a target.
 - `HostSample` and `ProbeObservation`: raw observation facts.
 - `Provider`, `VPSAsset`, `Subscription`, lifecycle/history records, and service/domain records: Asset Ledger facts.
 
 Asset Ledger facts are manual, API, or imported records. They are not provider-account truth unless a task adds and verifies that integration.
+
+VPS validity (fixed expiry, unlimited, or unknown), renewal intent, and the manually checked provider auto-renew setting are independent facts. A subscription describes billing periods, prices, payment and renewal dates. Changing intent or recording one renewal does not infer provider account changes.
+
+Services and domains keep their identities across VPS moves. Time-bounded associations describe current and historical deployment details. A migration is an operator follow-up with source, destination and outcome; it never moves services or ends a VPS automatically.
+
+Ending use is one explicit archive transaction from the VPS detail page. Previously enrolled resources require 180 uninterrupted minutes of healthy Center reception and no trusted live signal from any owned instance or session. Backfill and replay do not advance live evidence. Only resources that never formed a valid Agent session may use the documented manual-confirmation exception. There is no force-archive or scheduled archive action.
+
+Archival ends current associations and exclusive runtime work while retaining shared identities and historical evidence. A subsequently online Agent creates one deduplicated follow-up and leaves the VPS archived. Restoring returns the VPS to management with the idle usage tag; monitoring, associations, commands and renewal intent require separate explicit actions.
+
+This model is a fresh-install boundary. A database containing business data that requires old-state conversion is rejected; it is never automatically cleared or mapped. Matching Center and Agent versions are required for the new session and online-evidence protocol.
 
 ## Durable safety boundaries
 

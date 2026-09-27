@@ -3,12 +3,19 @@ package app
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"time"
 )
 
 type Worker interface {
 	Run(context.Context) error
+}
+
+// ReadyAwareWorker observes whether the HTTP receiver can accept requests.
+// Database reachability alone must never count as receiver availability.
+type ReadyAwareWorker interface {
+	SetReady(bool)
 }
 
 type App struct {
@@ -36,11 +43,26 @@ func (a *App) ServerForTest() *http.Server {
 }
 
 func (a *App) Run(ctx context.Context) error {
+	listener, err := net.Listen("tcp", a.server.Addr)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+	setReady := func(ready bool) {
+		for _, worker := range a.workers {
+			if observer, ok := worker.(ReadyAwareWorker); ok {
+				observer.SetReady(ready)
+			}
+		}
+	}
+	setReady(true)
+	defer setReady(false)
 	total := 1 + len(a.workers)
 	errCh := make(chan error, total)
 
 	go func() {
-		err := a.server.ListenAndServe()
+		err := a.server.Serve(listener)
+		setReady(false)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
 			return
@@ -70,6 +92,7 @@ func (a *App) Run(ctx context.Context) error {
 				return nil
 			}
 		case <-ctx.Done():
+			setReady(false)
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			err := a.server.Shutdown(shutdownCtx)
 			cancel()

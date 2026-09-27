@@ -139,11 +139,8 @@
 
 .vps-detail-overview__attention-actions .btn{min-height:24px;padding-inline:var(--space-2);font-size:var(--type-small-size)}
 
-.vps-detail-feedback-stack{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
 
-.vps-detail-feedback-stack .asset-operation-feedback{margin:0;border:var(--border-w) solid color-mix(in srgb,var(--color-state-normal) 20%,transparent);border-left:var(--border-w-strong) solid color-mix(in srgb,var(--color-state-normal) 46%,transparent);border-radius:var(--radius-2)}
 
-.vps-detail-feedback-stack .asset-operation-feedback--error{border-color:color-mix(in srgb,var(--color-state-critical) 24%,transparent);border-left-color:color-mix(in srgb,var(--color-state-critical) 52%,transparent)}
 
 .vps-detail-modal{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
 

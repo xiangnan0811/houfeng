@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 
 import { Modal, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
-import { ApiError, issueMonitoringInstanceInstallCommand } from '../../lib/api'
+import { ApiError, issueMonitoringInstanceInstallCommand, resetMonitoringInstanceBinding } from '../../lib/api'
 import { useCopyToClipboard } from '../../lib/useCopyToClipboard'
 import type { MonitoringInstanceInstallCommandIssue, MonitoringInstanceRecord } from '../../lib/types'
 
@@ -33,7 +33,7 @@ function describeInstallCommandError(error: unknown) {
         : '中心一键安装配置不完整。请检查 HOUFENG_PUBLIC_BASE_URL 与发布版本配置后重新生成。'
     }
     if (error.code === 'monitoring_instance_archived') {
-      return '监控实例已归档，无法生成安装命令。'
+      return '所属 VPS 已归档，无法生成安装命令。'
     }
     return error.message
   }
@@ -91,6 +91,10 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
   const openRef = useRef(open)
   const subjectRef = useRef(monitoringInstance.monitoring_instance_id)
   const subjectId = monitoringInstance.monitoring_instance_id
+  const retired = monitoringInstance.lifecycle_status === '已退役'
+  const requiresNewSession = retired || monitoringInstance.lifecycle_status === '已接入'
+  const enrollmentBlocked = Boolean(monitoringInstance.archived_at) || monitoringInstance.vps_lifecycle_status === 'archived' || (retired && monitoringInstance.vps_lifecycle_status !== 'active')
+  const resetSubjectRef = useRef<string | null>(null)
   const [seenIdentity, setSeenIdentity] = useState({ open, subjectId })
 
   if (openRef.current !== open) {
@@ -98,12 +102,14 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
     if (!open) {
       issueRequestRef.current += 1
       busyRef.current = false
+      resetSubjectRef.current = null
     }
   }
   if (subjectRef.current !== subjectId) {
     subjectRef.current = subjectId
     issueRequestRef.current += 1
     busyRef.current = false
+    resetSubjectRef.current = null
   }
   if (seenIdentity.open !== open || seenIdentity.subjectId !== subjectId) {
     setSeenIdentity({ open, subjectId })
@@ -137,10 +143,10 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
 
   async function handleIssue() {
     if (busyRef.current) return
-    if (monitoringInstance.lifecycle_status === '已退役' || monitoringInstance.archived_at) {
+    if (enrollmentBlocked) {
       setState((current) => ({
         ...current,
-        error: '已退役的监控实例不能签发接入或同步凭据。请先恢复到观察中，再显式恢复监控或重新接入。',
+        error: '所属 VPS 未处于管理中，不能重新接入。请从 VPS 详情核对生命周期。',
       }))
       return
     }
@@ -150,6 +156,11 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
     busyRef.current = true
     setState((current) => ({ ...current, busy: true, error: null }))
     try {
+      if (requiresNewSession && resetSubjectRef.current !== subjectId) {
+        await resetMonitoringInstanceBinding(subjectId)
+        if (!isLiveIssue(requestId, subjectId)) return
+        resetSubjectRef.current = subjectId
+      }
       const issue = await issueMonitoringInstanceInstallCommand(subjectId)
       if (!isLiveIssue(requestId, subjectId)) return
       const copied = await copy(issue.command)
@@ -206,7 +217,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
           <button
             type="button"
             className="btn md primary"
-            disabled={busy || monitoringInstance.lifecycle_status === '已退役' || Boolean(monitoringInstance.archived_at)}
+            disabled={busy || enrollmentBlocked}
             onClick={() => void handleIssue()}
           >
             {busy ? '正在生成…' : primaryLabel}
@@ -220,6 +231,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
       }
     >
       <div className="monitoring-detail-onboarding">
+        {requiresNewSession ? <p>生成重新接入命令将开始新的接入阶段。已有会话仅保留在线证据权限；采集与命令需要新凭据。</p> : null}
         <p className="monitoring-detail-dialog__subject">
           <Hostname>{monitoringInstance.monitoring_instance_id}</Hostname>
           {returnVPSId ? (
@@ -229,8 +241,8 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
             </>
           ) : null}
         </p>
-        {monitoringInstance.lifecycle_status === '已退役' || monitoringInstance.archived_at ? (
-          <p role="alert">已退役的监控实例不能签发接入或同步凭据。请先恢复到观察中，再显式恢复监控或重新接入。</p>
+        {enrollmentBlocked ? (
+          <p role="alert">所属 VPS 未处于管理中，不能重新接入。请从 VPS 详情核对生命周期。</p>
         ) : null}
         <ol className="monitoring-detail-onboarding__steps">
           {installSteps.map((step, index) => (

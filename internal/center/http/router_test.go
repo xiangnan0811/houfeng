@@ -389,17 +389,18 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 	}{
 		{method: http.MethodGet, path: "/api/vps/vps_001/monitoring-instances", want: http.StatusOK, called: "monitoring-instances"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/subscriptions", want: http.StatusCreated, called: "subscriptions"},
-		{method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", want: http.StatusCreated, called: "link-monitoring-instance"},
-		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", want: http.StatusOK, called: "unlink-monitoring-instance"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/link-monitoring-instance", want: http.StatusNotFound, called: ""},
+		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", want: http.StatusNotFound, called: ""},
 		{method: http.MethodGet, path: "/api/vps/vps_001/ip-quality", want: http.StatusOK, called: "ip-quality"},
 		{method: http.MethodGet, path: "/api/vps/vps_001/ip-quality/reports/ipq_001", want: http.StatusOK, called: "ip-quality"},
-		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusOK, called: "cancellation-preview"},
-		{method: http.MethodPost, path: "/api/vps/vps_001/cancellation", want: http.StatusOK, called: "cancellation"},
+		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusNotFound, called: ""},
+		{method: http.MethodPost, path: "/api/vps/vps_001/cancellation", want: http.StatusNotFound, called: ""},
 		{method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", want: http.StatusOK, called: "extend-validity"},
 		{method: http.MethodGet, path: "/api/vps/vps_001/archive-review", want: http.StatusOK, called: "archive-review"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/archive", want: http.StatusOK, called: "archive"},
 		{method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusOK, called: "restore-from-archive"},
 	} {
+		called = ""
 		req = httptest.NewRequest(tt.method, tt.path, nil)
 		recorder = httptest.NewRecorder()
 		handler.ServeHTTP(recorder, req)
@@ -684,6 +685,12 @@ func TestRouterDispatchesMonitoringInstanceManagementAPIs(t *testing.T) {
 
 			handler.ServeHTTP(recorder, req)
 
+			if tt.want != "management-review" && tt.want != "lifecycle-retire" {
+				if recorder.Code != http.StatusNotFound || called != "" {
+					t.Fatalf("removed route %s status=%d called=%q", tt.path, recorder.Code, called)
+				}
+				return
+			}
 			if recorder.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
 			}

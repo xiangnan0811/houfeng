@@ -66,7 +66,7 @@ const (
 	ActionObserve                   SuggestedAction = "observe"
 	ActionMigrate                   SuggestedAction = "migrate"
 	ActionCancel                    SuggestedAction = "cancel"
-	ActionOpenCancellationWorkbench SuggestedAction = "open_cancellation_workbench"
+	ActionOpenCancellationWorkbench SuggestedAction = "open_archive_preview"
 	ActionCompleteEvidence          SuggestedAction = "complete_evidence"
 )
 
@@ -176,16 +176,16 @@ type GroupSummary struct {
 	Priority                   int                               `json:"priority"`
 	MemberCount                int                               `json:"member_count"`
 	LifecycleCounts            map[vpsassets.LifecycleStatus]int `json:"lifecycle_counts"`
-	UsageCounts                map[vpsassets.UsageStatus]int     `json:"usage_counts"`
+	UsageCounts                map[string]int                    `json:"usage_tag_counts"`
 	RenewalDecisionCounts      map[vpsassets.RenewalDecision]int `json:"renewal_decision_counts"`
 	RenewalWindowCount         int                               `json:"renewal_window_count"`
 	UnreviewedCount            int                               `json:"unreviewed_count"`
-	MigrateCount               int                               `json:"migrate_count"`
+	MigrateCount               int                               `json:"-"`
 	CancelCount                int                               `json:"cancel_count"`
 	CancellationAttentionCount int                               `json:"cancellation_attention_count"`
-	IdleCount                  int                               `json:"idle_count"`
-	StandbyCount               int                               `json:"standby_count"`
-	InUseCount                 int                               `json:"in_use_count"`
+	IdleCount                  int                               `json:"-"`
+	StandbyCount               int                               `json:"-"`
+	InUseCount                 int                               `json:"-"`
 	ServiceCount               int                               `json:"service_count"`
 	DomainCount                int                               `json:"domain_count"`
 	TargetCount                int                               `json:"target_count"`
@@ -599,14 +599,11 @@ func RecordSnapshotFromGroup(group GroupDetail) EvidenceSnapshot {
 		"scope_key":                    group.ScopeKey,
 		"scope_label":                  group.ScopeLabel,
 		"member_count":                 group.MemberCount,
+		"usage_tag_counts":             stringifyUsageCounts(group.UsageCounts),
 		"renewal_window_count":         group.RenewalWindowCount,
 		"unreviewed_count":             group.UnreviewedCount,
-		"migrate_count":                group.MigrateCount,
 		"cancel_count":                 group.CancelCount,
 		"cancellation_attention_count": group.CancellationAttentionCount,
-		"idle_count":                   group.IdleCount,
-		"standby_count":                group.StandbyCount,
-		"in_use_count":                 group.InUseCount,
 		"service_count":                group.ServiceCount,
 		"domain_count":                 group.DomainCount,
 		"target_count":                 group.TargetCount,
@@ -645,7 +642,7 @@ func RecordSnapshotFromMember(member GroupMember) EvidenceSnapshot {
 		"region":                        member.VPS.Region,
 		"city":                          member.VPS.City,
 		"lifecycle_status":              string(member.VPS.LifecycleStatus),
-		"usage_status":                  string(member.VPS.UsageStatus),
+		"usage_tags":                    append([]string{}, member.VPS.UsageTags...),
 		"renewal_decision":              string(member.VPS.RenewalDecision),
 		"subscription_count":            member.SubscriptionCount,
 		"active_subscription_count":     member.ActiveSubscriptionCount,
@@ -945,7 +942,7 @@ func buildGroup(groupType GroupType, view View, scopeKey, title, scopeLabel stri
 		Priority:              priority,
 		MemberCount:           len(members),
 		LifecycleCounts:       map[vpsassets.LifecycleStatus]int{},
-		UsageCounts:           map[vpsassets.UsageStatus]int{},
+		UsageCounts:           map[string]int{},
 		RenewalDecisionCounts: map[vpsassets.RenewalDecision]int{},
 	}
 	currencyTotals := map[string]float64{}
@@ -957,7 +954,9 @@ func buildGroup(groupType GroupType, view View, scopeKey, title, scopeLabel stri
 	for _, member := range members {
 		vps := member.VPS
 		summary.LifecycleCounts[vps.LifecycleStatus]++
-		summary.UsageCounts[vps.UsageStatus]++
+		for _, tag := range vps.UsageTags {
+			summary.UsageCounts[tag]++
+		}
 		summary.RenewalDecisionCounts[vps.RenewalDecision]++
 		if member.RenewalWithinWindow {
 			summary.RenewalWindowCount++
@@ -965,23 +964,11 @@ func buildGroup(groupType GroupType, view View, scopeKey, title, scopeLabel stri
 		if vps.RenewalDecision == vpsassets.RenewalUnreviewed {
 			summary.UnreviewedCount++
 		}
-		if vps.RenewalDecision == vpsassets.RenewalMigrate || vps.LifecycleStatus == vpsassets.LifecycleToMigrate {
-			summary.MigrateCount++
-		}
-		if vps.RenewalDecision == vpsassets.RenewalCancel || vps.RenewalDecision == vpsassets.RenewalAutoRenewCancelled || vps.LifecycleStatus == vpsassets.LifecycleToCancel || vps.LifecycleStatus == vpsassets.LifecycleCancelled {
+		if vps.RenewalDecision == vpsassets.RenewalCancel {
 			summary.CancelCount++
 		}
 		if member.CancellationAttentionReason != "" {
 			summary.CancellationAttentionCount++
-		}
-		if vps.UsageStatus == vpsassets.UsageIdle {
-			summary.IdleCount++
-		}
-		if vps.UsageStatus == vpsassets.UsageStandby {
-			summary.StandbyCount++
-		}
-		if vps.UsageStatus == vpsassets.UsageInUse {
-			summary.InUseCount++
 		}
 		summary.ServiceCount += member.ServiceCount
 		summary.DomainCount += member.DomainCount
@@ -1075,8 +1062,8 @@ func buildEvidenceChips(fact Fact, renewalWindow bool) []EvidenceChip {
 	if renewalWindow {
 		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceRenewalDue, Label: "续费临近", Tone: "alert"})
 	}
-	if fact.PrimarySubscription != nil && fact.PrimarySubscription.Status == subscriptions.StatusActive && fact.VPS.UsageStatus == vpsassets.UsageIdle {
-		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceIdlePaid, Label: "闲置付费", Tone: "alert"})
+	if fact.PrimarySubscription != nil && fact.PrimarySubscription.Status == subscriptions.StatusActive && fact.ServiceCount+fact.DomainCount+fact.TargetCount == 0 {
+		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceIdlePaid, Label: "付费但无承载记录", Tone: "alert"})
 	}
 	if !fact.SourceAvailability.Subscriptions {
 		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceSubscriptionUnavailable, Label: "订阅证据不可用", Tone: "notice"})
@@ -1088,11 +1075,11 @@ func buildEvidenceChips(fact Fact, renewalWindow bool) []EvidenceChip {
 	}
 	if fact.ServiceCount > 0 || fact.DomainCount > 0 || fact.TargetCount > 0 {
 		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceCarriesService, Label: "承载服务", Tone: "normal"})
-	} else if fact.SourceAvailability.Services && fact.SourceAvailability.Domains && fact.VPS.UsageStatus == vpsassets.UsageInUse {
+	} else if fact.SourceAvailability.Services && fact.SourceAvailability.Domains && len(fact.VPS.UsageTags) > 0 {
 		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceNoServiceContext, Label: "缺服务上下文", Tone: "notice"})
 	}
 	if cancellationReason(fact) != "" {
-		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceCancellationLinkage, Label: "取消联动", Tone: "critical", Details: cancellationReason(fact)})
+		appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceCancellationLinkage, Label: "自动续费待核对", Tone: "critical", Details: cancellationReason(fact)})
 	}
 	if fact.PrimarySubscription != nil {
 		if fact.PrimarySubscription.BudgetStatus == "warning" || fact.PrimarySubscription.BudgetStatus == "over" {
@@ -1119,7 +1106,7 @@ func buildEvidenceChips(fact Fact, renewalWindow bool) []EvidenceChip {
 }
 
 func suggestMember(member GroupMember) (SuggestedRole, SuggestedAction) {
-	if member.CancellationAttentionReason != "" || member.VPS.LifecycleStatus == vpsassets.LifecycleToCancel || member.VPS.LifecycleStatus == vpsassets.LifecycleCancelled || member.VPS.RenewalDecision == vpsassets.RenewalCancel || member.VPS.RenewalDecision == vpsassets.RenewalAutoRenewCancelled {
+	if member.CancellationAttentionReason != "" || member.VPS.RenewalDecision == vpsassets.RenewalCancel {
 		return RoleRetireCandidate, ActionOpenCancellationWorkbench
 	}
 	if hasAnyEvidence(member, EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceSubscriptionUnavailable, EvidenceIPQualityMissing, EvidenceIPQualityStale) {
@@ -1128,42 +1115,28 @@ func suggestMember(member GroupMember) (SuggestedRole, SuggestedAction) {
 	if hasAnyEvidence(member, EvidenceIPQualityRisk, EvidenceIPEgressMismatch, EvidenceMediaUnlockBlocked) {
 		return RoleObserveCandidate, ActionReview
 	}
-	if member.VPS.UsageStatus == vpsassets.UsageIdle && member.ActiveSubscriptionCount > 0 {
+	if member.ServiceCount+member.DomainCount+member.TargetCount == 0 && member.ActiveSubscriptionCount > 0 {
 		return RoleRetireCandidate, ActionCancel
 	}
-	if member.VPS.RenewalDecision == vpsassets.RenewalMigrate || member.VPS.LifecycleStatus == vpsassets.LifecycleToMigrate {
-		return RoleObserveCandidate, ActionMigrate
-	}
-	if member.VPS.UsageStatus == vpsassets.UsageInUse && member.AbnormalMonitoringCount == 0 {
+	if member.ServiceCount+member.DomainCount+member.RunningTargetCount > 0 && member.RunningMonitoringCount > 0 && member.AbnormalMonitoringCount == 0 {
 		return RolePrimaryCandidate, ActionKeep
-	}
-	if member.VPS.UsageStatus == vpsassets.UsageStandby {
-		return RoleStandbyCandidate, ActionObserve
 	}
 	return RoleObserveCandidate, ActionReview
 }
 
 func cancellationReason(fact Fact) string {
-	if fact.VPS.LifecycleStatus == vpsassets.LifecycleToCancel || fact.VPS.LifecycleStatus == vpsassets.LifecycleCancelled {
-		if fact.RunningMonitoringCount > 0 || fact.RunningTargetCount > 0 {
-			return "VPS 已进入取消链路但仍有关联运行对象"
+	if fact.VPS.RenewalDecision == vpsassets.RenewalCancel {
+		switch fact.VPS.AutoRenewCheck {
+		case "disabled", "never_enabled", "unsupported":
+		default:
+			return "决定不续费，仍需核对服务商自动续费"
 		}
-		if fact.ActiveSubscriptionCount > 0 {
-			return "VPS 已取消或待取消但仍存在 active 订阅"
-		}
-	}
-	if fact.InactiveSubscriptionCount > 0 && fact.VPS.LifecycleStatus != vpsassets.LifecycleToCancel && fact.VPS.LifecycleStatus != vpsassets.LifecycleCancelled {
-		return "订阅已取消/过期/暂停但 VPS 仍未进入取消链路"
-	}
-	if (fact.VPS.RenewalDecision == vpsassets.RenewalCancel || fact.VPS.RenewalDecision == vpsassets.RenewalAutoRenewCancelled) &&
-		fact.VPS.LifecycleStatus != vpsassets.LifecycleToCancel && fact.VPS.LifecycleStatus != vpsassets.LifecycleCancelled {
-		return "续费决策为取消但 lifecycle 尚未同步"
 	}
 	return ""
 }
 
 func ordinaryPortfolioCandidate(fact Fact) bool {
-	return fact.VPS.LifecycleStatus != vpsassets.LifecycleArchived && fact.VPS.LifecycleStatus != vpsassets.LifecycleCancelled
+	return fact.VPS.LifecycleStatus == vpsassets.LifecycleActive
 }
 
 func renewalWithinWindow(sub *subscriptions.Record, days int) bool {
@@ -1273,7 +1246,7 @@ func memberPriority(member GroupMember) int {
 	if member.VPS.RenewalDecision == vpsassets.RenewalUnreviewed {
 		score += 12
 	}
-	if member.VPS.UsageStatus == vpsassets.UsageIdle && member.ActiveSubscriptionCount > 0 {
+	if member.ServiceCount+member.DomainCount+member.TargetCount == 0 && member.ActiveSubscriptionCount > 0 {
 		score += 18
 	}
 	if hasAnyEvidence(member, EvidenceIPQualityRisk, EvidenceIPEgressMismatch, EvidenceMediaUnlockBlocked) {

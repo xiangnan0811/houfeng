@@ -31,6 +31,14 @@ function readyModel(input: {
 }
 
 describe('buildDashboardModel', () => {
+  it('surfaces provider verification and followups without inventing a cancelled lifecycle', () => {
+    const overview = dashboardOverviewFixture()
+    overview.asset_summary = { ...overview.asset_summary, auto_renew_check_vps_count: 2, pending_followup_count: 3, archived_vps_count: 1 }
+    const model = readyModel({ overview: remoteSuccess(overview, DASHBOARD_FIXTURE_LOADED_AT) })
+    expect(model.judgements.find((item) => item.id === 'assets')).toMatchObject({
+      detail: '自动续费待核对 2 · 跟进事项 3', tone: 'alert',
+    })
+  })
   it('treats severe monitoring instances as a subset of abnormal instances', () => {
     const model = readyModel({
       overview: remoteSuccess(

@@ -104,12 +104,12 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
 					return nil
 				}}
-			case strings.Contains(sql, "from asset_services"):
-				if len(args) != 1 || args[0] != "svc_001" {
-					t.Fatalf("service ownership args = %#v, want service id", args)
+			case strings.Contains(sql, "from asset_service_associations"):
+				if len(args) != 2 || args[0] != "svc_001" || args[1] != "vps_001" {
+					t.Fatalf("service association args = %#v", args)
 				}
 				return fakeAssetDomainRow{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "vps_001"
+					*(dest[0].(*bool)) = true
 					return nil
 				}}
 			case strings.Contains(sql, "from targets"):
@@ -117,6 +117,13 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 					*(dest[0].(*string)) = "启用"
 					return nil
 				}}
+			case strings.Contains(sql, "select to_jsonb(o)"):
+				return fakeAssetDomainRow{scan: func(dest ...any) error { return nil }}
+			case strings.Contains(sql, "insert into asset_domain_associations"):
+				if args[1] == "" || args[2] != "vps_001" {
+					t.Fatalf("association args = %#v", args)
+				}
+				return fakeAssetDomainRow{scan: func(dest ...any) error { return nil }}
 			}
 			if !strings.Contains(sql, "insert into asset_domains") {
 				t.Fatalf("unexpected QueryRow SQL %q", sql)
@@ -179,7 +186,7 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 		t.Fatalf("create args = %#v, want one 13-argument insert", rowArgs)
 	}
 	insertArgs := rowArgs[insertIndex]
-	if insertArgs[1] != "vps_001" || insertArgs[2] != "svc_001" || insertArgs[3] != "tg_001" || insertArgs[4] != "www.example.com" {
+	if insertArgs[1] != nil || insertArgs[2] != nil || insertArgs[3] != nil || insertArgs[4] != "www.example.com" {
 		t.Fatalf("create normalized args = %#v", insertArgs)
 	}
 	if insertArgs[8] != expiresAt.Time {
@@ -215,7 +222,8 @@ func TestPostgresAssetDomainCreateAndList(t *testing.T) {
 		"service_id = $2",
 		"target_id = $3",
 		"status = $4",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"v.lifecycle_status <> 'archived'",
+		"a.ended_at is null",
 		"order by lower(asset_domains.domain_name), asset_domains.domain_id",
 	} {
 		if !strings.Contains(queryCalls[0], snippet) {
@@ -241,7 +249,7 @@ func TestPostgresAssetDomainRejectsActiveReferenceToArchivedTarget(t *testing.T)
 				}}
 			case strings.Contains(sql, "from targets"):
 				return fakeAssetDomainRow{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = targets.RunStatusArchived
+					*(dest[0].(*string)) = targets.LifecycleRetired
 					return nil
 				}}
 			case strings.Contains(sql, "insert into asset_domains"):
@@ -311,8 +319,8 @@ func TestPostgresAssetDomainListForVPS(t *testing.T) {
 	if len(queryArgs) != 1 || queryArgs[0] != "vps_001" {
 		t.Fatalf("query args = %#v, want vps filter", queryArgs)
 	}
-	if strings.Contains(querySQL, "lifecycle_status not in ('cancelled', 'archived')") {
-		t.Fatalf("ListAssetDomainsForVPS SQL = %q, want history read without current asset scope filter", querySQL)
+	if !strings.Contains(querySQL, "a.ended_at is null") || !strings.Contains(querySQL, "v.lifecycle_status <> 'archived'") {
+		t.Fatalf("ListAssetDomainsForVPS SQL = %q, want current associations of managed VPS only", querySQL)
 	}
 }
 
@@ -351,12 +359,12 @@ func TestPostgresAssetDomainRejectsServiceFromAnotherVPS(t *testing.T) {
 					*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
 					return nil
 				}}
-			case strings.Contains(sql, "from asset_services"):
-				if len(args) != 1 || args[0] != "svc_other" {
+			case strings.Contains(sql, "from asset_service_associations"):
+				if len(args) != 2 || args[0] != "svc_other" || args[1] != "vps_001" {
 					t.Fatalf("service lock args = %#v, want service id", args)
 				}
 				return fakeAssetDomainRow{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = "vps_other"
+					*(dest[0].(*bool)) = false
 					return nil
 				}}
 			default:
@@ -457,12 +465,12 @@ func TestPostgresAssetDomainMapsForeignKeyUniqueAndCheckViolations(t *testing.T)
 							*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
 							return nil
 						}}
-					case strings.Contains(sql, "from asset_services"):
+					case strings.Contains(sql, "from asset_service_associations"):
 						if tt.name == "missing service" {
 							return fakeAssetDomainRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
 						}
 						return fakeAssetDomainRow{scan: func(dest ...any) error {
-							*(dest[0].(*string)) = "vps_001"
+							*(dest[0].(*bool)) = true
 							return nil
 						}}
 					case strings.Contains(sql, "from targets"):

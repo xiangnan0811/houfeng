@@ -164,7 +164,7 @@ func TestSyncBatchSourceUsesConstantTimeSyncTokenHashCompare(t *testing.T) {
 	}
 }
 
-func TestPostgresSyncRepositoryMigratesLegacySyncTokenHashAfterSuccessfulValidation(t *testing.T) {
+func TestPostgresSyncRepositoryRejectsLegacySessionTokenHash(t *testing.T) {
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
@@ -179,20 +179,8 @@ func TestPostgresSyncRepositoryMigratesLegacySyncTokenHashAfterSuccessfulValidat
 		},
 	}
 
-	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
-		t.Fatalf("ApplyBatch() error = %v", err)
-	}
-
-	args := tx.argsForSQL("sync_token_hash = $2")
-	if len(args) != 2 || args[0] != "mi_001" {
-		t.Fatalf("sync token migration args = %#v, want monitoring instance id and hash", args)
-	}
-	migratedHash, ok := args[1].(string)
-	if !ok || !isHMACAgentTokenHash(migratedHash) {
-		t.Fatalf("sync token migration hash = %#v, want versioned hmac hash", args[1])
-	}
-	if migratedHash != hashSyncToken("sync-token-001") {
-		t.Fatalf("sync token migration hash = %q, want current sync token hash", migratedHash)
+	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); !errors.Is(err, syncing.ErrInvalidSyncToken) {
+		t.Fatalf("legacy hash error = %v", err)
 	}
 }
 
@@ -316,7 +304,7 @@ func TestPostgresSyncRepositoryDuplicateBatchCommitsWithoutRewritingFacts(t *tes
 	}
 }
 
-func TestSyncBatchPromotesPendingEnrollmentLifecycleAfterHostSample(t *testing.T) {
+func TestSyncBatchPromotesPendingEnrollmentLifecycleAfterLiveSignal(t *testing.T) {
 	t.Parallel()
 
 	tx := &fakeSyncBatchTx{
@@ -332,7 +320,9 @@ func TestSyncBatchPromotesPendingEnrollmentLifecycleAfterHostSample(t *testing.T
 		},
 	}
 
-	if _, err := repo.ApplyBatch(context.Background(), testSyncBatchWithHostSample()); err != nil {
+	batch := testSyncBatch()
+	batch.LiveSignal = &agentapi.LiveSignal{ID: "live-1", Fingerprint: "fp-001"}
+	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -604,6 +594,9 @@ type fakeSyncBatchTx struct {
 	monitoringInstanceLifecycle     string
 	monitoringInstanceMonitoring    string
 	monitoringInstanceArchived      bool
+	sessionCapability               string
+	duplicateLiveSignal             bool
+	receiverClock                   time.Time
 	monitoringInstanceLabels        []string
 	pendingActionID                 string
 	pendingCommandID                string
@@ -630,6 +623,12 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 		return pgconn.CommandTag{}, f.execErr
 	}
 	lowerSQL := strings.ToLower(sql)
+	if strings.Contains(lowerSQL, "insert into agent_live_signals") {
+		if f.duplicateLiveSignal {
+			return pgconn.NewCommandTag("INSERT 0 0"), nil
+		}
+		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	}
 	if strings.Contains(lowerSQL, "insert into agent_sync_batches") {
 		if f.duplicateSyncBatch {
 			return pgconn.NewCommandTag("INSERT 0 0"), nil
@@ -653,6 +652,15 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 
 func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	switch {
+	case strings.Contains(sql, "select clock_timestamp()"):
+		return fakeRow{scan: func(dest ...any) error {
+			now := f.receiverClock
+			if now.IsZero() {
+				now = time.Now().UTC()
+			}
+			*(dest[0].(*time.Time)) = now
+			return nil
+		}}
 	case strings.Contains(sql, "select labels"):
 		return fakeRow{scan: func(dest ...any) error {
 			*(dest[0].(*[]string)) = append([]string(nil), f.monitoringInstanceLabels...)
@@ -692,6 +700,13 @@ func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) p
 			}
 			if len(dest) > 5 {
 				*(dest[5].(*bool)) = f.monitoringInstanceArchived
+			}
+			if len(dest) > 6 {
+				*(dest[6].(*string)) = f.sessionCapability
+				if f.sessionCapability == "" {
+					*(dest[6].(*string)) = "full"
+				}
+				*(dest[7].(*string)) = "vps-1"
 			}
 			return nil
 		}}

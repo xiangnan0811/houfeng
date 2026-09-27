@@ -33,21 +33,14 @@ describe('VPSManagementMenu', () => {
     expect(items[items.length - 1]).toHaveFocus()
   })
 
-  it('shows cancellation after a cancel-like renewal and keeps archive on to_cancel only', () => {
+  it('offers end-and-archive regardless of renewal intent and hides removed operations', () => {
     const { rerender } = render(<VPSManagementMenu lifecycleStatus="active" controller={controller()} />)
+    expect(screen.getByRole('menuitem', { name: '结束使用并归档' })).toBeInTheDocument()
     expect(screen.queryByRole('menuitem', { name: '取消 / 退役' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: '编辑事实' })).toBeInTheDocument()
-
+    expect(screen.queryByRole('menuitem', { name: '关联监控' })).not.toBeInTheDocument()
     rerender(<VPSManagementMenu lifecycleStatus="active" renewalDecision="cancel" controller={controller()} />)
-    expect(screen.getByRole('menuitem', { name: '取消 / 退役' })).toBeInTheDocument()
-    expect(screen.queryByRole('menuitem', { name: '归档' })).not.toBeInTheDocument()
-
-    rerender(<VPSManagementMenu lifecycleStatus="to_cancel" controller={controller()} />)
-    expect(screen.getByRole('menuitem', { name: '取消 / 退役' })).toBeInTheDocument()
-    expect(screen.getByRole('menuitem', { name: '归档' })).toBeInTheDocument()
-
-    rerender(<VPSManagementMenu lifecycleStatus="cancelled" controller={controller()} />)
+    expect(screen.getByRole('menuitem', { name: '结束使用并归档' })).toBeInTheDocument()
+    rerender(<VPSManagementMenu lifecycleStatus="archived" controller={controller()} />)
     expect(screen.queryByRole('menuitem')).not.toBeInTheDocument()
   })
 

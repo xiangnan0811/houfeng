@@ -23,7 +23,7 @@ function record(overrides: Partial<MonitoringInstanceRecord> = {}): MonitoringIn
     region: 'ap-northeast-1',
     city: 'Tokyo',
     provider: 'Vultr',
-    lifecycle_status: '在用',
+    lifecycle_status: '已接入',
     monitoring_status: '启用',
     binding_status: '已绑定',
     labels: [],
@@ -38,13 +38,28 @@ function record(overrides: Partial<MonitoringInstanceRecord> = {}): MonitoringIn
 }
 
 describe('monitoring list health helpers', () => {
+  it('does not treat collection history as trusted online evidence', () => {
+    const value = record({ current_health_status: '正常', last_heartbeat_at: '2026-09-26T00:00:00Z' })
+    expect(monitoringInstanceEffectiveHealth(value)).toBe('未知')
+    expect(monitoringInstanceGlyphState(value)).toBe('offline')
+  })
+  it('never reports pending, maintenance, paused or retired lifecycle as healthy', () => {
+    for (const override of [
+      { lifecycle_status: '待接入' }, { lifecycle_status: '已退役' },
+      { monitoring_status: '维护中' }, { monitoring_status: '暂停' },
+    ]) {
+      const value = record({ ...override, current_health_status: '正常', last_heartbeat_at: '2026-09-26T00:00:00Z', last_trusted_online_at: '2026-09-26T00:00:00Z' })
+      expect(monitoringInstanceEffectiveHealth(value)).not.toBe('正常')
+      expect(monitoringInstanceGlyphState(value)).not.toBe('normal')
+    }
+  })
   it('counts only known abnormal health 关注/告警/严重 with heartbeat evidence', () => {
     expect(countAbnormalMonitoringInstances([
-      record({ current_health_status: '正常', last_heartbeat_at: '2026-04-26T09:00:00Z' }),
-      record({ monitoring_instance_id: 'mi_002', current_health_status: '关注', last_heartbeat_at: '2026-04-26T09:00:00Z' }),
-      record({ monitoring_instance_id: 'mi_003', current_health_status: '告警', last_heartbeat_at: '2026-04-26T09:00:00Z' }),
-      record({ monitoring_instance_id: 'mi_004', current_health_status: '严重', last_heartbeat_at: '2026-04-26T09:00:00Z' }),
-      record({ monitoring_instance_id: 'mi_005', current_health_status: '未知', last_heartbeat_at: '2026-04-26T09:00:00Z' }),
+      record({ current_health_status: '正常', last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' }),
+      record({ monitoring_instance_id: 'mi_002', current_health_status: '关注', last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' }),
+      record({ monitoring_instance_id: 'mi_003', current_health_status: '告警', last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' }),
+      record({ monitoring_instance_id: 'mi_004', current_health_status: '严重', last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' }),
+      record({ monitoring_instance_id: 'mi_005', current_health_status: '未知', last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z' }),
       record({ monitoring_instance_id: 'mi_006', current_health_status: '' }),
     ])).toBe(3)
   })
@@ -54,12 +69,12 @@ describe('monitoring list health helpers', () => {
     const liveAlert = record({
       monitoring_instance_id: 'mi_live',
       current_health_status: '告警',
-      last_heartbeat_at: '2026-04-26T09:00:00Z',
+      last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
     })
     const invalid = record({
       monitoring_instance_id: 'mi_bad',
       current_health_status: '严重',
-      last_heartbeat_at: 'not-a-time',
+      last_heartbeat_at: 'not-a-time', last_trusted_online_at: 'not-a-time',
     })
     expect(monitoringInstanceEffectiveHealth(rawAlert)).toBe('未知')
     expect(countAbnormalMonitoringInstances([rawAlert, liveAlert, invalid])).toBe(1)
@@ -71,10 +86,10 @@ describe('monitoring list health helpers', () => {
     expect(compareMonitoringHealth(rawAlert, liveAlert)).toBeLessThan(0)
   })
 
-  it('does not let pause override health glyph when a heartbeat exists', () => {
+  it('keeps paused collection distinct from historical health despite live evidence', () => {
     const paused = record({ monitoring_status: '暂停', current_health_status: '告警' })
-    expect(monitoringInstanceGlyphState(paused, true)).toBe('alert')
-    expect(monitoringInstanceHealthLabel(paused, true)).toBe('告警')
+    expect(monitoringInstanceGlyphState(paused, true)).toBe('offline')
+    expect(monitoringInstanceHealthLabel(paused, true)).toBe('暂停')
   })
 
   it('shows unknown rather than historical normal when there is no heartbeat', () => {
@@ -86,20 +101,19 @@ describe('monitoring list health helpers', () => {
   it('keeps list attention badges silent on 正常 and unstacked on control states', () => {
     expect(monitoringInstanceAttentionBadges(record({
       current_health_status: '正常',
-      last_heartbeat_at: '2026-04-26T09:00:00Z',
+      last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
     }), true)).toEqual([])
     expect(monitoringInstanceAttentionBadges(record({
       current_health_status: '正常',
       monitoring_status: '维护中',
-      last_heartbeat_at: '2026-04-26T09:00:00Z',
+      last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
     }), true)).toEqual([{ label: '维护中', tone: 'maintenance' }])
     expect(monitoringInstanceAttentionBadges(record({
       current_health_status: '告警',
       monitoring_status: '暂停',
-      last_heartbeat_at: '2026-04-26T09:00:00Z',
+      last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
     }), true)).toEqual([
       { label: '暂停', tone: 'offline' },
-      { label: '告警', tone: 'alert' },
     ])
     expect(monitoringInstanceAttentionBadges(record({
       current_health_status: '正常',
@@ -110,14 +124,13 @@ describe('monitoring list health helpers', () => {
       monitoring_status: '暂停',
     }), false)).toEqual([
       { label: '暂停', tone: 'offline' },
-      { label: '未知', tone: 'offline' },
     ])
   })
 
   it('does not invent empty issue copy for healthy heartbeat rows', () => {
     expect(monitoringIssueSummary(record({ current_health_status: '正常' }))).toBe('')
     expect(monitoringIssueSummary(record({
-      last_heartbeat_at: '2026-04-26T09:00:00Z',
+      last_heartbeat_at: '2026-04-26T09:00:00Z', last_trusted_online_at: '2026-04-26T09:00:00Z',
     }))).toBe('')
   })
 })

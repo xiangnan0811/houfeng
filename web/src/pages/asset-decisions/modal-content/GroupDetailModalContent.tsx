@@ -171,10 +171,10 @@ export function GroupDetailModal({
                 action: (member) => {
                   const sourceMember = detailState.detail?.members.find((item) => item.vps.vps_id === member.key)
                   if (!sourceMember) return null
-                  if (sourceMember.suggested_action === 'open_cancellation_workbench') {
+                  if (sourceMember.suggested_action === 'open_archive_preview') {
                     return (
-                      <Link className="btn sm primary" to={vpsWorkbenchPath(sourceMember.vps.vps_id, 'cancellation')}>
-                        取消/退役
+                      <Link className="btn sm primary" to={vpsWorkbenchPath(sourceMember.vps.vps_id, 'archive')}>
+                        结束使用并归档
                       </Link>
                     )
                   }

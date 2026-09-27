@@ -488,65 +488,42 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 			from subscriptions s
 			group by s.vps_id
 		),
-		-- Mirrors assetlinks.ClassifyDependency for service/domain rows: an
-		-- archived parent or retired relation is historical; paused is paused;
-		-- active on an unarchived parent is effective; unknown needs confirmation.
-		service_rollup as (
-			select
-				s.vps_id,
-				count(*)::int as service_count,
-				(count(*) filter (where v.lifecycle_status <> 'archived' and s.status = 'active'))::int as effective_service_count,
-				(count(*) filter (where v.lifecycle_status <> 'archived' and s.status = 'unknown'))::int as unknown_service_count
-			from asset_services s
-			join vps_assets v on v.vps_id = s.vps_id
-			group by s.vps_id
-		),
-		domain_rollup as (
-			select
-				d.vps_id,
-				count(*)::int as domain_count,
-				(count(*) filter (where v.lifecycle_status <> 'archived' and d.status = 'active'))::int as effective_domain_count,
-				(count(*) filter (where v.lifecycle_status <> 'archived' and d.status = 'unknown'))::int as unknown_domain_count
-			from asset_domains d
-			join vps_assets v on v.vps_id = d.vps_id
-			group by d.vps_id
-		),
-		target_rollup as (
-			select
-				a.vps_id,
-				count(distinct a.target_id)::int as target_count,
-				(count(distinct a.target_id) filter (
-					where a.relation_status = 'active'
-						and a.vps_lifecycle_status <> 'archived'
-						and t.run_status in ('启用', '维护中')
-				))::int as running_target_count
-			from (
-				select s.vps_id, s.target_id, s.status as relation_status, v.lifecycle_status as vps_lifecycle_status
-				from asset_services s
-				join vps_assets v on v.vps_id = s.vps_id
-				where s.target_id is not null
-				union all
-				select d.vps_id, d.target_id, d.status as relation_status, v.lifecycle_status as vps_lifecycle_status
-				from asset_domains d
-				join vps_assets v on v.vps_id = d.vps_id
-				where d.target_id is not null
-			) a
-			left join targets t on t.target_id = a.target_id
-			group by a.vps_id
-		),
-		monitoring_rollup as (
-			select
-				l.vps_id,
-				count(*)::int as monitoring_link_count,
-				(count(*) filter (where n.lifecycle_status not in ('不续费', '已退役')))::int as running_monitoring_count,
-				(count(*) filter (where n.current_health_status <> '正常'))::int as abnormal_monitoring_count,
-				coalesce(sum(n.current_active_incident_count), 0)::int as active_incident_count,
-				coalesce((array_remove(array_agg(nullif(n.current_primary_issue_summary, '') order by n.current_active_incident_count desc, n.updated_at desc), null))[1], '') as primary_issue_summary
-				from vps_monitoring_instance_links l
-				left join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
-				where l.unlinked_at is null
-				group by l.vps_id
-			),
+        service_rollup as (
+            select a.vps_id, count(*)::int as service_count,
+                (count(*) filter (where s.status = 'active'))::int as effective_service_count,
+                (count(*) filter (where s.status = 'unknown'))::int as unknown_service_count
+            from asset_service_associations a
+            join asset_services s on s.service_id = a.service_id
+            where a.ended_at is null group by a.vps_id
+        ),
+        domain_rollup as (
+            select a.vps_id, count(*)::int as domain_count,
+                (count(*) filter (where d.status = 'active'))::int as effective_domain_count,
+                (count(*) filter (where d.status = 'unknown'))::int as unknown_domain_count
+            from asset_domain_associations a
+            join asset_domains d on d.domain_id = a.domain_id
+            where a.ended_at is null group by a.vps_id
+        ),
+        target_rollup as (
+            select a.vps_id, count(distinct a.target_id)::int as target_count,
+                (count(distinct a.target_id) filter (where a.object_status = 'active' and t.lifecycle_status = 'active' and t.run_status in ('启用', '维护中')))::int as running_target_count
+            from (
+                select a.vps_id, a.target_id, s.status as object_status from asset_service_associations a join asset_services s on s.service_id = a.service_id where a.ended_at is null and a.target_id is not null
+                union all
+                select a.vps_id, a.target_id, d.status as object_status from asset_domain_associations a join asset_domains d on d.domain_id = a.domain_id where a.ended_at is null and a.target_id is not null
+            ) a join targets t on t.target_id = a.target_id group by a.vps_id
+        ),
+        projected_monitoring as (
+ select n.*, `+monitoringHealthProjectionSQL("n", "'active'")+` as projected_health_status from monitoring_instances n
+ ),
+        monitoring_rollup as (
+            select n.vps_id, count(*)::int as monitoring_link_count,
+                (count(*) filter (where n.lifecycle_status = '已接入' and n.monitoring_status = '启用' and n.binding_status = '已绑定' and n.last_trusted_online_at is not null))::int as running_monitoring_count,
+                (count(*) filter (where n.lifecycle_status = '已接入' and n.monitoring_status = '启用' and n.projected_health_status <> '正常'))::int as abnormal_monitoring_count,
+                coalesce(sum(n.current_active_incident_count) filter (where n.lifecycle_status = '已接入' and n.monitoring_status = '启用'), 0)::int as active_incident_count,
+                coalesce((array_remove(array_agg(nullif(n.current_primary_issue_summary, '') order by n.current_active_incident_count desc, n.updated_at desc) filter (where n.lifecycle_status = '已接入' and n.monitoring_status = '启用'), null))[1], '') as primary_issue_summary
+            from projected_monitoring n where n.lifecycle_status <> '已退役' group by n.vps_id
+        ),
 			ip_quality_latest as (
 				select distinct on (assigned.vps_id)
 					assigned.*
@@ -612,7 +589,9 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 			v.os_name,
 			v.virtualization,
 			v.lifecycle_status,
-			v.usage_status,
+			v.usage_tags,
+            v.validity_mode, v.expires_at::text, v.auto_renew_check, v.auto_renew_checked_at,
+            v.renewal_reason, v.renewal_review_at, v.acquisition_source,
 			v.renewal_decision,
 			v.importance,
 			v.labels,
@@ -689,14 +668,13 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 		left join providers p on p.provider_id = v.provider_id
 		left join subscription_rollup sr on sr.vps_id = v.vps_id
 		left join primary_subscriptions ps on ps.vps_id = v.vps_id
-		left join service_rollup svr on svr.vps_id = v.vps_id
-			left join domain_rollup dr on dr.vps_id = v.vps_id
-			left join target_rollup tr on tr.vps_id = v.vps_id
-			left join monitoring_rollup mr on mr.vps_id = v.vps_id
+		left join service_rollup svr on svr.vps_id = v.vps_id and v.lifecycle_status = 'active'
+			left join domain_rollup dr on dr.vps_id = v.vps_id and v.lifecycle_status = 'active'
+			left join target_rollup tr on tr.vps_id = v.vps_id and v.lifecycle_status = 'active'
+			left join monitoring_rollup mr on mr.vps_id = v.vps_id and v.lifecycle_status = 'active'
 			left join ip_quality_latest ipq on ipq.vps_id = v.vps_id
 		left join ip_quality_provider_risk_rollup ipqr on ipqr.report_id = ipq.report_id
 		left join ip_quality_unlock_rollup ipqu on ipqu.report_id = ipq.report_id
-		where v.lifecycle_status not in ('cancelled', 'archived')
 		order by lower(v.display_name), v.vps_id`)
 	if err != nil {
 		return nil, fmt.Errorf("query asset decision facts: %w", err)
@@ -843,7 +821,9 @@ func scanAssetDecisionFact(row assetDecisionFactScanner) (assetdecisions.Fact, e
 		&fact.VPS.OSName,
 		&fact.VPS.Virtualization,
 		&fact.VPS.LifecycleStatus,
-		&fact.VPS.UsageStatus,
+		&fact.VPS.UsageTags,
+		&fact.VPS.ValidityMode, &fact.VPS.ExpiresAt, &fact.VPS.AutoRenewCheck, &fact.VPS.AutoRenewCheckedAt,
+		&fact.VPS.RenewalReason, &fact.VPS.RenewalReviewAt, &fact.VPS.AcquisitionSource,
 		&fact.VPS.RenewalDecision,
 		&fact.VPS.Importance,
 		&fact.VPS.Labels,

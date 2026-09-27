@@ -31,48 +31,29 @@ const ITEMS: Array<{
   { panel: 'subscription', label: '订阅事实', group: 'business' },
   { panel: 'validity-extension', label: '延长有效期', group: 'business' },
   { panel: 'monitoring-instance-evidence', label: '监控实例', group: 'runtime' },
-  { panel: 'monitoring-instance-link', label: '关联监控', group: 'runtime' },
   { panel: 'services-detail', label: '服务', group: 'relations' },
   { panel: 'service', label: '新增服务', group: 'relations' },
   { panel: 'domains-detail', label: '域名', group: 'relations' },
   { panel: 'domain', label: '新增域名', group: 'relations' },
-  { panel: 'cancellation', label: '取消 / 退役', group: 'lifecycle' },
-  { panel: 'archive', label: '归档', group: 'lifecycle' },
-  { panel: 'start-migration', label: '开始迁移', group: 'lifecycle' },
+  { panel: 'followups', label: '跟进事项 / 迁移', group: 'lifecycle' },
+  { panel: 'maintenance', label: 'VPS 维护', group: 'runtime' },
+  { panel: 'archive', label: '结束使用并归档', group: 'lifecycle' },
 ]
 
-const WRITEABLE_LIFECYCLES = new Set(['active', 'idle', 'testing'])
-const CANCELLATION_RENEWALS = new Set(['cancel', 'auto_renew_cancelled', 'migrate'])
-
-function visibleManagementPanels(lifecycleStatus: string, renewalDecision = ''): MenuPanel[] {
-  return ITEMS.filter((item) => {
-    if (lifecycleStatus === 'archived' || lifecycleStatus === 'cancelled') {
-      return false
-    }
-    if (item.panel === 'cancellation') {
-      if (lifecycleStatus === 'to_cancel' || lifecycleStatus === 'to_migrate') return true
-      return WRITEABLE_LIFECYCLES.has(lifecycleStatus) && CANCELLATION_RENEWALS.has(renewalDecision)
-    }
-    if (item.panel === 'archive') {
-      return lifecycleStatus === 'to_cancel'
-    }
-    if (item.panel === 'start-migration') {
-      return lifecycleStatus === 'active' || lifecycleStatus === 'idle' || lifecycleStatus === 'testing'
-    }
-    return true
-  }).map((item) => item.panel)
+function visibleManagementPanels(lifecycleStatus: string): MenuPanel[] {
+  return lifecycleStatus === 'active' ? ITEMS.map((item) => item.panel) : []
 }
 
 function menuItems(root: HTMLElement | null): HTMLButtonElement[] {
   return Array.from(root?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [])
 }
 
-export function VPSManagementMenu({ lifecycleStatus, renewalDecision, controller, returnFocusRef, menuId }: Props) {
+export function VPSManagementMenu({ lifecycleStatus, controller, returnFocusRef, menuId }: Props) {
   const generatedId = useId()
   const resolvedMenuId = menuId ?? generatedId
   const rootRef = useRef<HTMLDivElement>(null)
   const { closeMenu, menuOpen } = controller
-  const items = ITEMS.filter((item) => visibleManagementPanels(lifecycleStatus, renewalDecision).includes(item.panel))
+  const items = ITEMS.filter((item) => visibleManagementPanels(lifecycleStatus).includes(item.panel))
 
   useEffect(() => {
     if (!menuOpen) return

@@ -23,6 +23,11 @@ type Record struct {
 }
 
 type MonitoringInstanceSummary struct {
+	VPSID                      string     `json:"vps_id"`
+	VPSLifecycleStatus         string     `json:"vps_lifecycle_status"`
+	IsCurrent                  bool       `json:"is_current"`
+	EverConnected              bool       `json:"ever_connected"`
+	LastTrustedOnlineAt        *time.Time `json:"last_trusted_online_at,omitempty"`
 	MonitoringInstanceID       string     `json:"monitoring_instance_id"`
 	DisplayName                string     `json:"display_name"`
 	Group                      string     `json:"group"`

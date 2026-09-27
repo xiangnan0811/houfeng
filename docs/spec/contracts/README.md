@@ -12,6 +12,7 @@
 | Agent 安装和同步 | [Agent](agent-sync.md) | 接入交互见监控与资产 Web |
 | 入口探测 | 探测事实与 incident 投影见监控合同 | [入口探测 Web](targets-web.md) |
 | 事件与补传 | [事件](events.md) | [事件 Web](events-web.md) |
+| 保留与聚合 | [保留策略](retention.md) | 设置页仅调整高频原始数据与日聚合期限 |
 | Dashboard | [Dashboard](dashboard.md) | [Dashboard Web](dashboard-web.md) |
 | IP 质量 | [IP 质量](ip-quality.md) | [IP 质量 Web](ip-quality-web.md) |
 | 证据快照 | [证据快照](evidence-snapshot.md) | [证据 Web](evidence-web.md) |

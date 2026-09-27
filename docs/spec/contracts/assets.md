@@ -1,12 +1,26 @@
 # 资产合同
 
-## VPS 资产状态组合不变量
+## VPS 维护的作用范围
 
-- 三轴分别表达业务生命周期、当前用途、续费决策，但必须合成校验：`cancelled` 必须使用取消类决策且不能 `in_use`；`archived` 不能 `in_use`；`to_cancel` 必须使用取消类决策；`to_migrate` 必须使用 `migrate`；`replaced` 不能仍是 `active` 或 `in_use`。其余枚举组合不额外收紧，`active+idle`、`testing+in_use` 均可表达真实情况。
-- PATCH 入口不能只校验请求体内出现的字段。仓库写入边界必须读取当前行，应用 patch preview 后调用 `vpsassets.ValidateVPSStateCombination`，再执行 `update vps_assets`；受控生命周期 action 若直接调用底层 update helper，也必须先做同样的合成状态校验。
-- DB 必须有跨列 check constraint 作为最后兜底。新增或调整这类约束是破坏性数据完整性收口：迁移必须先用幂等 backfill 处理可确定归一化的历史组合，再添加 validated constraint；无法安全推导的脏数据才应 fail fast。不得用 `not valid` 静默放过。
-- 已发布迁移保持不变；新增迁移通过真实 PostgreSQL 回归证明历史数据回填、约束及审计行为，不以 SQL 文本断言替代数据库证据。
-- JSON 导入的 `subscription` 对象必须同步订阅创建合同。`subscription.renewal_mode` 是合法字段，支持 `auto|manual|auto_cancelled|lottery|gift|bonus|other`；`gift` 和 `lottery` 归一后 legacy `auto_renew` / `auto_renew_cancelled` 必须为 `false,false`。`DecodeRecords` 继续 `DisallowUnknownFields`，新增可导入字段时必须同时改 DTO、dry-run report、create input 传递和测试。
+`GET /api/vps/{id}/maintenance-review` 返回当前监控、明确专属探测和共享探测及预览摘要。
+`POST /api/vps/{id}/maintenance` 使用摘要、原因和明确选中的共享 Target ID 开始维护；
+`DELETE /api/vps/{id}/maintenance` 带原因结束本次维护。所有变更在资产关系锁下同事务记账。
+
+- 默认覆盖当前监控和明确专属探测；共享探测必须逐个确认。原有暂停或独立维护不被改写。
+- 每次直接监控控制操作递增控制版本，即便重复设置同一个值。维护保存原控制及自己产生的版本。
+- 多台 VPS 可以共同持有同一共享探测的维护作用，只有最后一个作用结束且控制版本没有被后续操作取代时才恢复原控制。
+- 结束维护不覆盖期间的人工暂停或维护；归档结束本 VPS 的维护作用但不恢复采集或探测。
+
+## VPS 独立事实与全新部署边界
+
+- VPS 对应实际资源实例，重装沿用身份，回收后重新购买新建；生命周期只有 `active`（管理中）和 `archived`。临时关机、维护和暂停不改变生命周期。
+- 用途使用任意多选 `usage_tags[]`，trim、去空、按原始大小写去重；普通 `labels[]` 独立。用途不联动生命周期、采集、告警或续费。
+- `renewal_decision` 只有 `unreviewed|keep|cancel`；`renewal_reason` 与 `renewal_review_at` 保存原因和复核时间。更改意向不得改写订阅或服务商自动续费事实。
+- `validity_mode=fixed|unlimited|unknown` 独立于订阅；只有 fixed 必须有 `expires_at`（YYYY-MM-DD），其他模式必须为 null。合并 PATCH 后校验完整状态，避免只改一半。
+- `auto_renew_check=unchecked|enabled|disabled|never_enabled|unsupported` 是人工核对服务商事实；unchecked 的 `auto_renew_checked_at` 必须为空，其余必须保存核对时间。不续费且尚未核对仍需提示；不能推断服务商已关闭。
+- `acquisition_source` 独立记录购买、抽奖、赠送等来源，不将来源解释为续费方式。
+- 新模型仅保证全新安装；追加迁移保持已发布迁移和冻结权限基线不变。遇到需要转换的业务数据明确拒绝，不做状态映射、自动删除或线上重建。
+- JSON 创建、更新和导入拒绝旧生命周期、旧续费决策和 `usage_status` 字段，不提供兼容别名。导入复用同一 Normalize/Validate 规则。
 
 ## Asset Ledger providers
 
@@ -26,197 +40,51 @@
 - `provider_id` 可为 `null`；存在时必须引用 `providers(provider_id)`，并在 provider 删除时 `on delete set null`。
 - `provider_name` 是导入 / 展示兼容字符串，不能创建、更新或回填 `providers`。
 - `display_name` 必须由数据库 `vps_assets_display_name_not_blank` 约束保证 trim 后非空；领域层 create / patch 也必须校验。
-- `lifecycle_status`、`usage_status`、`renewal_decision` 使用稳定英文机器值，并分别由数据库 check 约束和领域校验共同保护。
-- VPS 列表查询支持 `AssetScope`：未显式传入时 handler 默认 `current`，排除 `lifecycle_status in ('cancelled','archived')`；`historical` 返回这两个历史不可访问状态；`archived` 是保留给旧客户端的兼容别名，语义与 `historical` 完全相同；`all` 不按生命周期裁剪。显式 `lifecycle_status` 精确筛选优先于 scope，避免旧状态筛选与归档入口互相冲突。
-- VPS 是业务状态主体：人工生命周期、用途、续费 / 迁移 / 取消决策只写在 `vps_assets`。Subscription 和 MonitoringInstance 只能提供账单事实与运行观测事实，不得在普通创建 / 编辑流程里要求用户重复选择业务状态。
-- VPS create/import 只能创建当前事实：`lifecycle_status` 允许 `active`、`idle`、`testing`；`to_migrate`、`to_cancel`、`cancelled`、`archived` 必须来自 lifecycle action、archive API 或底层 store fixture。不得创建缺少 lifecycle action 审计的历史/流程态资产。
-- `ssh_port` 默认为 `22`，数据库约束为 `1..65535`；领域 create 中 `0` 表示省略并默认，patch 中显式 `0` 必须拒绝。
-- `archived_at` 是派生字段：生命周期切到 `archived` 时补时间，从 `archived` 切出时清空；API 输入不得任意写入 `archived_at`。
-- VPS 资产 CRUD 不得改写 `monitoring_instances.provider`，也不得改变 MonitoringInstance / Target / Agent 的既有语义。
-- 普通 VPS CRUD 只维护 VPS 自身账本；跨订阅、MonitoringInstance、Target 的取消 / 退役协调必须通过 `assetlifecycle` 显式 preview + confirm + audit action 完成。
-- subscription summary 属于 subscriptions 查询；active monitoring instance link count / monitoring instance summary 由 `assetlinks.Repository` 在 HTTP 展示层补充，不得让 `store/vps_assets.go` 直接耦合 MonitoringInstance 表或 link 表细节。
+- `lifecycle_status`、`renewal_decision` 使用上述机器值；数据库约束与领域校验共同保护。创建和普通 PATCH 仅可写 active，归档/恢复由专用动作执行。
+- 列表默认 `asset_scope=current`，只返回管理中资源；`archived` 返回归档资源，`all` 返回全部。可按 `usage_tag` 精确匹配任意一个用途；旧 `usage_status` 查询参数返回 400。
+- VPS 是业务状态主体，Subscription 是账单事实，MonitoringInstance 是运行观测。普通 CRUD 不得改变监控、命令、探测或订阅。
+- `ssh_port` 默认为 22，范围 1..65535。`archived_at` 只能由生命周期动作派生。
+- `PATCH /api/vps/{id}` 对实际变更要求 `If-Match`；读取当前行后合并输入，校验有效期与核对时间成对事实，避免部分更新产生矛盾。
+- 归档后允许窄范围补充 `auto_renew_check/auto_renew_checked_at`、`renewal_reason/renewal_review_at` 和 note；名称、用途、生命周期等仍不可普通修改。核对与补充修订同事务写入 `experience_logs` 的 before/after，不能借补录恢复资源。
+- 续费意向变更保留 `renewal_decisions` 历史。保存 cancel 不调用订阅自动续费更新，也不改变用途。
+- subscription summary 属于订阅查询；运行摘要在 HTTP 展示层补充，不成为生命周期权威。
 
-### Scenario: VPS lifecycle / usage / renewal matrix
+### Scenario: 独立有效期、用途与续费
 
-#### 1. Scope / Trigger
-
-- Trigger: 修改 `internal/center/vpsassets/types.go`、`PATCH /api/vps/{vps_id}`、VPS create/import、archive/lifecycle action、或任何会写 `vps_assets.lifecycle_status`、`usage_status`、`renewal_decision` 的路径。
-- 目标：防止页面和决策模型读到互相矛盾的 VPS 当前事实，例如“已取消但仍在用”或“迁移流程态但续费决策是取消”。
-
-#### 2. Signatures
-
-- Domain helpers: `ValidateCreateInput(input CreateInput) error`、`ValidateOrdinaryPatchInput(input PatchInput) error`、`ValidateVPSStateCombination(lifecycle, usage, renewal) error`、`ValidateVPSPatchStateCombination(input PatchInput) error`。
-- Machine values:
-  - `lifecycle_status`: `active|idle|testing|to_migrate|to_cancel|cancelled|archived`
-  - `usage_status`: `in_use|idle|standby|testing|unknown`
-  - `renewal_decision`: `unreviewed|keep|observe|migrate|cancel|auto_renew_cancelled|replaced`
-
-#### 3. Contracts
-
-- `ValidateCreateInput` must reject `to_migrate`、`to_cancel`、`cancelled`、`archived`; create/import is not an audit-less lifecycle action path.
-- Ordinary PATCH remains current-fact only for lifecycle: `active|idle|testing`。流程态/终态只能由 lifecycle action/archive API 或 store-level historical fixtures 写入。
-- Full combination hard failures:
-  - `cancelled` requires `renewal_decision in (cancel, auto_renew_cancelled)`。
-  - `cancelled` 和 `archived` cannot pair with `usage_status=in_use`。
-  - `to_cancel` requires `renewal_decision in (cancel, auto_renew_cancelled)`。
-  - `to_migrate` requires `renewal_decision=migrate`。
-  - `renewal_decision=replaced` cannot pair with `lifecycle_status=active` or `usage_status=in_use`。
-- Patch delta validation only rejects contradictions among fields present in the same request. It must not infer omitted current values, because archive/lifecycle action paths may call lower-level store helpers after doing their own review.
-- Warning-only or transitional readback combinations can remain visible for historical explanation, but new create/import and ordinary PATCH must fail closed for the hard failures above.
-
-#### 4. Validation & Error Matrix
-
-| Condition | Expected behavior |
-| --- | --- |
-| create `lifecycle_status=cancelled` / `archived` / `to_cancel` / `to_migrate` | 400 invalid VPS asset input |
-| create `lifecycle_status=active, usage_status=in_use, renewal_decision=keep` | allowed |
-| full combination `cancelled + keep` | invalid VPS asset input |
-| full combination `cancelled + in_use` | invalid VPS asset input |
-| full combination `to_migrate + cancel` | invalid VPS asset input |
-| full combination `replaced + active/in_use` | invalid VPS asset input |
-| ordinary PATCH `lifecycle_status=to_cancel` | invalid VPS asset input |
-| PATCH delta `usage_status=in_use, renewal_decision=replaced` | invalid VPS asset input |
-
-#### 5. Good/Base/Bad Cases
-
-- Good: 新导入 VPS 默认 `active/unknown/unreviewed` 或用户明确填 `idle/idle/observe`，后续再通过决策或 lifecycle action 改状态。
-- Base: 旧历史资产在 archive 视图读到 `cancelled/idle/cancel`，作为历史 readback 展示。
-- Bad: 导入 JSON 直接写 `cancelled/in_use/keep`，用户在列表看到“已取消但仍在用且保留”的矛盾资产。
-- Bad: 普通 PATCH 把 VPS 改成 `to_migrate`，但没有 lifecycle action step 或迁移 workbench 审计。
-
-#### 6. Tests Required
-
-- Domain tests: create lifecycle boundary、full combination hard failures、allowed coherent states、PATCH delta hard failures。
-- Handler/store tests: ordinary PATCH 合成状态冲突返回 400 和 `field_errors`（lifecycle_status/usage_status/renewal_decision）；专用动作保持独立资格校验。
-- Import tests: dry-run/import reuse `vpsassets.NormalizeCreateInput` + `ValidateCreateInput` and reject workflow/terminal lifecycle creation.
-
-#### 7. Wrong vs Correct
-
-```go
-// 错误：create 只检查枚举合法，让流程态直接落库。
-if !IsValidLifecycleStatus(input.LifecycleStatus) {
-	return ErrInvalidVPSAssetInput
-}
-```
-
-```go
-// 正确：create 先限制当前事实边界，再检查跨字段组合。
-if !IsValidCreateLifecycleStatus(input.LifecycleStatus) {
-	return ErrInvalidVPSAssetInput
-}
-if err := ValidateVPSStateCombination(input.LifecycleStatus, input.UsageStatus, input.RenewalDecision); err != nil {
-	return err
-}
-```
+- 无订阅的 VPS 可直接设置 fixed + expires_at；unlimited / unknown 必须清除 expires_at。
+- `active + cancel`、`archived + keep` 均可表达真实事实；用途任意，不设跨轴隐式规则。
+- 服务商 enabled 与决定不续费可以并存，应提示人工核对；禁用事实必须带核对时间。
+- 创建旧 idle/testing/to_migrate/to_cancel/cancelled 或 PATCH 旧 observe/migrate/auto_renew_cancelled/replaced 返回 400。
+- 回归覆盖日期合法性、部分 PATCH 合并后校验、任意用途去重、无订阅有效期、旧字段拒绝及意向不修改订阅。
 
 ## Asset lifecycle actions
 
-`assetlifecycle` 是唯一允许跨 Subscription、VPS、MonitoringInstance、Target/实例做取消或退役联动的领域服务。它不是普通 CRUD 的旁路，而是一个显式的 lifecycle action 工作流：先预览影响范围，再由用户确认要执行的步骤，最后以审计记录落库。
+- 生命周期仅 `active`（管理中）、`archived`（已归档）。`POST /api/vps/{vps_id}/archive` 直接结束使用并归档，不要求先取消或改变续费意向；旧取消入口已移除。
+- `GET /api/vps/{vps_id}/archive-review` 返回关系影响、warnings、结构化 `blocker_details`、`online_evidence`、`eligible` 和 `preview_digest`。没有订阅、服务或域名、潜在扣费以及共享探测核对事项只产生说明或跟进，不阻止归档。
+- 提交字段为 `confirmation_name`、非空 `reason`、`preview_digest`、`idempotency_key`；从未形成有效 Agent 会话时，另要求 `never_connected_confirmation=true`，并用原因记录人工确认依据。
+- 提交取得资产图独占事务锁后重新读取所有依赖、持久在线证据与健康观察记录。条件变化返回 HTTP 409 及最新 review；预览有效期为 5 分钟，`preview_expires_at` 明确返回截止时间，过期提交返回 `archive_preview_stale`；不同请求复用幂等键返回 `archive_idempotency_conflict`。同一请求重试返回原始结果，不能重复写成功生命周期事件。
+- 归档事务将 VPS 置为 archived，保存归档快照，退役当前监控、将所有历史会话降为 evidence_only、审计清除待执行命令、结束当前服务/域名关联、停止明确专属 Target，并写生命周期审计及跟进事项。任何一步失败均回滚业务变化。
+- 共享服务、域名和 Target 保留；归档仅结束该 VPS 的关联。共享 Target 保持当前控制并留下核对事项。常规异常以 `incident_closed_by_management` 及原因结束，不发送自然恢复通知。
+- `POST /api/vps/{vps_id}/restore-from-archive` 要求非空 reason，仅恢复 VPS 为 active、用途为 `['闲置']`；保留归档快照和续费意向，不恢复历史监控、凭据权限、关联、探测或待执行命令。重新接入必须显式操作。
 
-- 后端 API：
-  - `GET /api/vps/{vps_id}/cancellation-preview` 从 VPS 出发返回 VPS 当前生命周期、所有关联订阅候选（包括 active、expired、cancelled、paused、unknown/latest）、活跃 `vps_monitoring_instance_links`、通过 asset service / domain 关联的 Target、推荐步骤、风险提示和阻塞项。
-  - `POST /api/vps/{vps_id}/cancellation` 接受用户显式选择的 `subscription_ids`、`vps_lifecycle_status`、`monitoring_instance_actions`、`target_actions`、`reason`、`effective_date`，在一个事务内写入状态变化与审计步骤。
-  - `GET /api/asset-context/targets` 是 Target 批量上下文接口，供 Target 列表 / 详情显示关联 VPS 的取消 / 过期 / 不一致状态，避免前端逐行请求。Monitoring 列表不再暴露批量 asset-context 接口；Monitoring 详情使用 `/api/monitoring-instances/{id}/vps` 返回所属 VPS。
-- 审计表：`asset_lifecycle_actions` 保存一次操作的发起对象、确认时间、原因、执行摘要和最终状态；`asset_lifecycle_action_steps` 保存每个 subscription / VPS / MonitoringInstance / Target 步骤的前后状态、状态码、错误和摘要。
-- 普通 CRUD 不得静默调用 lifecycle action；只有工作台或等价的显式确认入口可以调用 `POST /api/vps/{vps_id}/cancellation`。
-- 历史 `expired/cancelled/paused` 和待确认 `unknown` 订阅必须展示，不能误称为“没有关联订阅”。账单 status、`auto_renew`、`auto_renew_cancelled` 和 renewal_mode 分别读回；历史状态但 `auto_renew=true` 必须警告并提供显式处理候选，不能推断已经停止续费。Target 批量上下文检查任一历史/待确认订阅的实际自动续费，不得被优先展示的 active/expired 记录或 VPS 待取消/不续费决策遮蔽。
-- 取消建议使用一次注入的 UTC 日期，等于当天视为到期；`cancelled` 保持同态，`to_cancel` 每次重算。当前权益证据包括 active 订阅，以及 status=cancelled、auto_renew=false 且能按下一条规则确定权益终点的订阅（ends_at；非来源模式缺 ends_at 时用 renew_at）；expired、paused、unknown 与无法确定终点的 cancelled（含只有 renew_at 的来源模式）仅作历史。只有全部当前权益证据的终点明确到期，且没有实际自动续费、未知或矛盾事实，才建议 cancelled。任一未来权益仍建议 to_cancel；确定未来权益且自动续费事实与模式一致时不额外提示证据矛盾。没有当前权益证据、缺日期或矛盾事实时建议 to_cancel 并提示人工确认，所有模式的续费标志一致性都须检查，顺序不影响结果。建议只预选取消工作台状态，不自动改变 VPS。
-- `ends_at` 为权益终点；缺省时只有非来源模式可用 `renew_at`。`gift/lottery/bonus/other` 不能仅用续费日期推定权益结束，`trial_ends_at` 不替代付费权益终点；开始日晚于终点或续费日晚于显式终点均需确认。用户仍可在完整确认后主动选择 cancelled，不新增定时取消。
-- 订阅推荐步骤不等于必选范围；未选择的账单保持不变，保留 active 订阅仍会阻止最终归档。
-- 取消工作台只提交用户选中的对象。MI 仅允许不续费、退役及暂停；退役必然暂停并撤销凭据和 pending 残留。已退役 MI 不能借改为不续费退出退役，须先详情专用恢复；同态退役仍可整理残留。Target 仅允许暂停或归档，不得把归档对象以 pause 隐式恢复。恢复由详情专用动作完成。
-- 取消 / 退役不自动 unlink；显式解除只设置 `unlinked_at`，历史关联保留。MI 退役本身不改变关联身份。
-- 执行事务先获取下述 graph 锁，再锁定 VPS、写 action 与各步骤；失败整体回滚后独立保存 failed action/step。失败审计不能吞错；业务与审计同时失败按内部错误返回，保留两项原因。
-- preview 的 blocker 必须在 POST 执行路径重新校验：`archived` 拒绝全部 cancellation；`cancelled` 仅可同态处理明确选择的残留，不可借 cancellation 改回 `to_cancel`。重新使用须先归档再专用恢复。普通 PATCH 仍允许 `to_cancel/to_migrate` 调整回合法当前态。
-- 归档 API：GET `archive-review` 返回对象及 `warnings/blockers/blocker_details/eligible`；POST `archive` 必须提供匹配名称和非空 `reason`，仅 to_cancel/cancelled 且最新 review 无阻塞可归档。原三轴保存为只读 `archived_state_snapshot {lifecycle_status,usage_status,renewal_decision,captured_at,source}`，当前写 archived+unknown。POST `restore-from-archive {reason}` 仅 archived→idle+unknown，续费决策及全部关联保持不变，最近快照继续保留。两者同事务写原因与完整前后状态审计。旧归档行在0065保存 `source=migration_observation`（非当年快照）后置当前用途 unknown；新归档 source=archive。
-- 归档阻塞：全部 active 订阅；未解除 MI 不满足不续费/已退役且暂停；有效 active 服务/域名引用的 Target 未暂停/归档；unknown 服务/域名待确认。paused/retired 历史引用不要求再停止其 Target。409 `lifecycle_action_blocked` 附最新 `review`，`blocker_details` 含 code/object_type/object_id/display_name/current_state/blocked_action/resolution_action。
-- Dashboard asset summary 只返回聚合计数；成本只统计 active subscriptions，取消待处理 / 已取消 VPS、状态割裂 VPS、仍运行的关联 MonitoringInstance/Target 进入告警计数。
+### 连续 180 分钟归档安全观察
 
-### 共享依赖与并发确认
+- 安全事实来自 `monitoring_instances.ever_connected/last_trusted_online_at` 及永久保留的 `monitoring_agent_sessions`，包含同一 VPS 下所有历史实例和所有接入阶段；原始心跳清理不能清除安全事实。
+- 每 5 秒由 Center 同一运行角色执行接收就绪检查及 PostgreSQL 读写；`receiver_health` 最新健康记录有效期为 15 秒。启动时同步使旧观察失效；重启、接收/持久化故障、记录超时及异常时钟跳变均重置连续健康起点。健康观察不获取资产图锁；归档先读取健康快照，完成业务写入后才短暂锁定健康记录、重新检查连续性和有效期并提交，避免业务事务阻塞观察。查询发现时钟异常会立即锁存故障，时钟在下一次观察前恢复也不能沿用原健康窗口。
+- 只有接收链路连续健康且所有实例/会话连续 180 分钟无可信实时在线信号，才可归档。180 分钟整允许，179 分 59 秒阻止；Center 接收时间是唯一时间权威。会话新签发时同样重新开始该阶段观察，不能以无性能样本冒充未接入。
+- 真正从未形成有效会话的对象可使用人工确认例外。曾接入后重装成为“待接入”的对象不得使用例外。暂停、维护、退役的 Agent 仍可提交最小在线证据，并继续阻止归档。
+- `online_evidence` 返回健康代次、健康起点、最新检查时间、所有实例/会话最后可信在线时间和最早可归档时间；接收链路不健康时最早时间为空。没有强制归档或自动预约归档。
+- 归档后 Agent 再上线只更新持久在线事实并去重创建待核对跟进；不能恢复 VPS 或常规监控。
 
-- `assetlinks.DependencyImpact` 是共同 DTO（避免 assetlifecycle 与 MI/Target 的导入环）：object_type/object_id/vps_id/vps_lifecycle_status/relation_type/relation_id/relation_status/classification。服务/域名 active=current，paused=paused，retired=historical，unknown=needs_confirmation；cancelled 父的有效关联=residual；archived 父及已解除 MI link=historical。全部历史仍展示，不当作当前承载。
-- Preview 带 dependency_impacts、evaluated_on 和 preview_digest；摘要对排序的结构化 JSON 做 SHA256，覆盖三轴、订阅权益/模式/标志、关系身份及状态、MI 生命周期/监控/绑定/归档、Target 状态及建议。普通 UpdatedAt、心跳、健康和秘密不入摘要。执行重读后先校验摘要，再校验 confirmed_shared_objects。过期返回现有 `cancellation_preview_stale`；缺跨 VPS 全局影响确认返回 `shared_impact_confirmation_required`，均409，不能自动重提。
-- 所有管理写入和 preview/review 使用 READ COMMITTED，第一条 SQL 获取双 int advisory exclusive `(1213154899,1)`；agent enrollment、accepted heartbeat、sync 整个事务第一条 SQL 获取同键 shared 锁。后续独立语句读最新快照，禁止锁升级。锁序 graph→receipt→按ID的VPS→订阅→MI/link→service/domain→Target；不能在事务内调用另开事务的 public 方法。
-- 终态 VPS 拒绝新增当前资源、重新激活依赖和延长权益；历史状态纠正/显式 unlink 可保留。已退役/已归档 MI 不能新增当前关联，active 服务/域名不能指向已归档 Target；暂停 Target 可保留配置依赖。
-- Target 专用 GET `/api/targets/{id}/lifecycle-review` 返回 dependency_impacts/preview_digest；MI management-review 使用相同保护。危险动作带 preview_digest/confirm_shared_impact，跨两个以上有效父必须确认；Target unknown 依赖也需明确确认。批量 MI 按 ID 的 confirmations 逐项校验，不以批量绕过。取消工作台选中的 Target 若另一 VPS 存在 needs_confirmation 依赖，同样必须在 confirmed_shared_objects 中逐对象确认；本 VPS 自身的待确认依赖由归档阻塞处理，不作为跨 VPS 确认。
-- 迁移读回保留 service_count/domain_count 历史总数，另报 effective_service_count/effective_domain_count/unknown_service_count/unknown_domain_count；running_target_count 仅有效引用的启用/维护 Target。old_carrier_remaining 只由已知有效承载产生；unknown 发 carrier_needs_confirmation，不能显示全部完成。
+### 人工迁移与续费事实
 
-### 受控迁移与依赖状态纠正
+- 迁移通过 VPS 跟进事项记录来源、目标及结果，不改变 VPS 生命周期、续费意向、服务关联或 Agent 状态；迁移结果通过显式关联结束/新增及跟进结果表达。旧 `start-migration` 生命周期入口已移除。
+- 决定不续费、续费记录和服务商自动续费核对是独立事实。用户确认新的资源有效期时独立写 VPS 有效期，不由账单日期自动覆盖；归档也不代表服务商已停止扣费。
 
-- POST `/api/vps/{id}/start-migration {reason}` 仅 active/idle/testing→to_migrate+migrate，保留用途且不自动改关系或停机；已有同态不重复审计，其他流程/终态409。普通 PATCH 仍可将 to_cancel/to_migrate 调整回合法当前态。
-- PATCH `/api/services/{id}/status` 与 `/api/domains/{id}/status` 接受 `{status,reason}`，只写 `status` 与 `updated_at`，不改父、Target 或其他元数据；显式目标 active/paused/retired。同事务写 correct_dependency_status action 与 dependency_status step；同态无重复记录。terminal 父不得激活，暂停/退役历史纠正允许。runtime 的两表表级 UPDATE 是数据库权限，不是数据库层两列限制；接口继续遵循以上写入边界。
-- 0065/0066 增加动作/快照与 MI/Target 枚举约束；未知旧值 fail fast，不猜测权益来源或生命周期。部署须按只读 preflight、备份、停止旧 Center 写者后整体切换，不能混跑旧写协议，见 [部署流程](../../deploy/local-and-systemd.md)。
+### 验证入口
 
-### Scenario: VPS renewal decision links subscription auto-renew
-
-#### 1. Scope / Trigger
-
-- Trigger: 修改 `PATCH /api/vps/{vps_id}`、`internal/center/store/vps_assets.go` 的 history transaction path、`subscriptions` 自动续费字段，或前端续费决策保存 flow。
-
-#### 2. Signatures
-
-- Backend API: `PATCH /api/vps/{vps_id}` with body containing `renewal_decision` and optional `renewal_reason`.
-- Response: VPS record fields plus optional `renewal_subscription_linkage` object when a cancellation-class decision path was evaluated.
-- Linkage response fields: `status`, `candidate_count`, optional `subscription_id`, `updated`, `message`.
-- Store method: `PatchVPSAssetWithSubscriptionRenewalLinkage(ctx, vpsID, input) (vpsassets.Record, vpsassets.RenewalSubscriptionLinkage, error)`.
-- DB writes: `vps_assets`, `renewal_decisions`, optional one `subscriptions` row, optional one `price_histories` row, all in one transaction.
-
-#### 3. Contracts
-
-- Cancellation-class decisions are currently `cancel` and `auto_renew_cancelled` only; `migrate`, `observe`, `keep`, `replaced`, and `unreviewed` must not modify subscriptions.
-- The transaction must `select ... for update` the VPS row before patching and must lock active subscription candidates before deciding whether to write.
-- Exactly one `subscriptions.status = 'active'` row for the VPS is the only unambiguous write case.
-- In the write case, `auto|manual|auto_cancelled` become `auto_renew=false, auto_renew_cancelled=true`; `gift|lottery|bonus|other` retain their source mode and `false,false`. Cancellation never erases entitlement provenance. Normalization merges the locked current record with explicitly supplied fields.
-- The linkage write must reuse the existing subscription patch/history semantics: when automatic-renewal fields change, insert `price_histories` in the same transaction.
-- The response `message` is user-facing Chinese copy; frontend may display it directly but must not infer extra writes from it.
-- This path must not create/update `vps_monitoring_instance_links`, Provider, MonitoringInstance, Target, ProbeItem, Agent plans, runtime controls, Dashboard summary rows, or import state.
-
-#### 4. Validation & Error Matrix
-
-| Condition | Expected behavior |
-| --- | --- |
-| VPS not found | Return existing `vps asset not found` behavior; no subscription write |
-| invalid VPS patch input | Return invalid VPS input; no subscription write |
-| renewal decision unchanged | Do not insert renewal history and do not evaluate subscription linkage |
-| cancellation-class decision with 0 active subscriptions | Save VPS decision/history, return `status=no_active_subscription`, no subscription write |
-| cancellation-class decision with >1 active subscriptions | Save VPS decision/history, return `status=multiple_active_subscriptions`, no subscription write |
-| exactly 1 active subscription already cancelled | Save VPS decision/history, return `status=subscription_already_cancelled`, do not add no-op price history |
-| exactly 1 active subscription needing cancellation | Save VPS decision/history, update subscription, insert price history, return `status=subscription_updated` |
-
-#### 5. Good/Base/Bad Cases
-
-- Good: 用户在 VPS 详情把 `renewal_decision` 从 `keep` 改为 `cancel`，该 VPS 只有一条 active 订阅；响应包含 `subscription_updated`，VPS timeline 有 renewal decision，subscription timeline 有 auto-renew price history。
-- Base: 用户把 `renewal_decision` 改为 `migrate`；只更新 VPS 决策和 history，不返回联动写入结果。
-- Bad: 因为某 VPS 有两条 active 订阅而批量把两条都取消自动续费。
-- Bad: 从 subscription PATCH 反向把 VPS renewal decision 改成 `auto_renew_cancelled`。
-
-#### 6. Tests Required
-
-- Store tests: exactly-one active subscription update, no active subscription, multiple active subscriptions, already-cancelled subscription, non-cancellation decision no write, unchanged decision no history/no write.
-- Handler tests: cancellation-class PATCH returns `renewal_subscription_linkage`; ordinary PATCH still returns the plain VPS record contract used by existing clients.
-- Frontend tests: decision save displays linkage message/action for `no_active_subscription` and keeps normal decision-save notice for non-linkage decisions.
-
-#### 7. Wrong vs Correct
-
-```go
-// 错误：取消类决策后单独再 patch subscription，两个事务可能漂移。
-record, _ := repo.PatchVPSAsset(ctx, vpsID, input)
-_, _ = subscriptionRepo.PatchSubscription(ctx, subID, subscriptions.PatchInput{AutoRenewCancelled: subscriptions.PatchBool(true)})
-```
-
-```go
-// 正确：VPS 当前状态、renewal history、subscription 当前状态和 price history 同事务完成。
-record, linkage, err := repo.PatchVPSAssetWithSubscriptionRenewalLinkage(ctx, vpsID, input)
-```
-
-```go
-// 错误：跨观测边界自动改 MonitoringInstance 运行态。
-_, _ = tx.Exec(ctx, `update monitoring_instances set lifecycle_status = '不续费' where monitoring_instance_id = $1`, monitoringInstanceID)
-```
-
-```go
-// 正确：只返回 linkage status，让 UI 引导用户显式处理 MonitoringInstance/Target/Agent 相关动作。
-return vpsassets.RenewalSubscriptionLinkage{Status: vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription}
-```
+- `archive_safety_test.go` 覆盖精确 180 分钟、未接入例外、会话无样本、健康超时及预览摘要。
+- `asset_lifecycle_archive_safety_postgres_test.go` 使用真实 PostgreSQL 覆盖持久信号、归档/心跳锁竞争、并发重试、末步失败完整回滚与恢复边界。
 
 ## Asset Ledger VPS MonitoringInstance links
 
@@ -318,7 +186,7 @@ record, link, replayed, err := repo.CreateLinkedMonitoringInstanceIdempotent(ctx
 - `PATCH /api/vps/{vps_id}` 只有在显式设置 `renewal_decision` 且最终值发生变化时才插入历史；只改其他字段或设置为原值不得插入历史。
 - VPS 当前状态更新与 history insert 必须在同一个事务中完成，并先 `select ... for update` 锁定 VPS 行，避免当前状态和历史漂移。
 - `GET /api/vps/{vps_id}/timeline` 返回真实表驱动的 `renewal_decisions[]`、`price_histories[]`、`ip_histories[]`、`spec_snapshots[]`、`experience_logs[]`，不得返回占位假数据。
-- 续费决策历史本身不得创建 `vps_monitoring_instance_links`，不得改写 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target 或 Agent。唯一可同时改写 subscription 的路径是上一节定义的 `PATCH /api/vps/{vps_id}` 取消类续费决策受控联动例外；该路径必须同时保留 renewal decision history 与 subscription price history。
+- 续费决策历史本身不得创建 `vps_monitoring_instance_links`，不得改写 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target 或 Agent。`PATCH /api/vps/{vps_id}` 保存续费意向不改写 subscription 或服务商自动续费核对事实；订阅账单事实必须通过独立订阅入口修改并保留 price history。
 
 `db/migrations/0021_create_asset_histories.sql` 添加 `price_histories`、`ip_histories`、`vps_spec_snapshots`，用于补齐资产层价格、IP、规格变化历史。三张表补充当前状态字段，不替代 `subscriptions` 或 `vps_assets` 当前状态。
 
@@ -410,11 +278,11 @@ occurred_at: form.occurredAt ? new Date(form.occurredAt).toISOString() : null
 
 ## Asset Ledger service assets
 
-`db/migrations/0023_create_asset_services.sql` 添加 `asset_services`，用于记录一台 VPS 上人工维护的服务资产。它是 VPS-scoped 资产备注和可选 Target 关联，不是完整服务注册中心、服务发现、域名管理或 Agent 自动采集入口。
+`asset_services` 保存独立服务身份；0067 的 `asset_service_associations` 保存该服务在不同 VPS 上的承载事实。它不是自动服务发现或 Agent 采集入口。
 
 - `asset_services.service_id` 使用 `ids.New("svc")` 生成。
-- `vps_id` 必须引用已存在的 `vps_assets(vps_id)`，命名外键为 `asset_services_vps_fk`，并在 VPS 删除时级联清理服务记录。
-- `target_id` 可为 `null`，存在时必须引用 `targets(target_id)`，命名外键为 `asset_services_target_fk`，并在 Target 删除时置空；创建或列出服务不得修改 Target / ProbeItem。
+- 服务名称、类型、对象状态、标签与备注属于对象；VPS、地址、端口和 Target 引用属于关联。新写入不再填充对象表的历史 placement 列；这些列不能作为归属或依赖权威。
+- 一个服务可同时关联多台 VPS；同一服务与 VPS 最多一条未结束关联。结束某一关联不改变服务状态及其他 VPS 的关联。
 - `name` 必须 trim 后非空；数据库约束为 `asset_services_name_not_blank`，领域 create 也必须校验。
 - `service_type` 使用稳定英文机器值：`web`、`api`、`database`、`worker`、`proxy`、`other`；空输入默认 `other`。
 - `status` 使用稳定英文机器值：`active`、`paused`、`retired`、`unknown`；空输入默认 `active`。
@@ -430,7 +298,7 @@ occurred_at: form.occurredAt ? new Date(form.occurredAt).toISOString() : null
 
 #### 2. Signatures
 
-- DB table: `asset_services(service_id text primary key, vps_id text not null, target_id text null, name text, service_type text, status text, url text, port integer null, labels text[], note text, created_at timestamptz, updated_at timestamptz)`。
+- DB identity: `asset_services(service_id, name, service_type, status, labels, note, created_at, updated_at)`；placement authority: `asset_service_associations(id, service_id, vps_id, target_id, address, port, started_at, ended_at, end_reason, ended_by, snapshot)`。
 - Backend API: `GET /api/services?vps_id=&target_id=&service_type=&status=` -> `[]assetservices.Record`。
 - Backend API: `POST /api/services` with JSON body `{vps_id, target_id?, name, service_type?, status?, url?, port?, labels?, note?}` -> `assetservices.Record`。
 - Backend API: `GET /api/vps/{vps_id}/services` -> `[]assetservices.Record`。
@@ -441,8 +309,8 @@ occurred_at: form.occurredAt ? new Date(form.occurredAt).toISOString() : null
 
 - `POST /api/vps/{vps_id}/services` 的 path `vps_id` 是唯一 VPS 来源；body 中的 `vps_id` 必须被忽略，不能覆盖 path。
 - `GET /api/vps/{vps_id}/services` 必须先确认 VPS 存在；VPS 不存在时返回 not-found 语义，不把缺失 VPS 静默表现为空列表。
-- `target_id` 是可选关联，只做引用校验和展示跳转；不得创建 Target、改写 Target、改 ProbeItem 或改变观测语义。
-- 全局 `GET /api/services` 可以按 VPS、Target、类型和状态过滤；非法枚举必须在进入 store 查询前返回 400。
+- `target_id` 是可选关联，必须引用存在且未退役的 Target；只做引用校验和展示跳转，不得创建 Target、改写 Target、改 ProbeItem 或改变观测语义。
+- 全局无 placement 过滤的 `GET /api/services` 列出独立身份，包括只剩历史关联的对象。VPS/Target 过滤读取当前关联；非法枚举必须在进入 store 查询前返回 400。
 - service asset 不进入 `/api/dashboard` 的资产摘要，也不进入 `GET /api/vps/{vps_id}/timeline`；它在 VPS 详情页作为独立服务区块加载。
 
 #### 4. Validation & Error Matrix
@@ -453,6 +321,7 @@ occurred_at: form.occurredAt ? new Date(form.occurredAt).toISOString() : null
 | body `vps_id` conflicts with path VPS | path VPS wins; write to path VPS only |
 | missing VPS on path GET/POST or collection POST FK | 404 `vps asset not found` |
 | missing Target FK | 404 `target not found` |
+| create with retired Target, including idempotent create | 409 `target metadata conflict`; no object, association or receipt is committed |
 | blank `name` | 400 `invalid input` |
 | invalid `service_type` / `status` | 400 `invalid input` |
 | `port < 1` or `port > 65535` | 400 `invalid input` |
@@ -493,12 +362,11 @@ postJSONBody(`/api/vps/${vpsId}/services`, input)
 postJSONBody(`/api/vps/${vpsId}/services`, { name, service_type, status, target_id, url, port, labels, note })
 ```
 
-`db/migrations/0024_create_asset_domains.sql` 添加 `asset_domains`，用于记录一台 VPS 关联或承载的手工维护域名资产。它是 VPS-scoped 资产记录，不是 DNS provider、注册商同步、解析记录管理或服务发现入口。
+`asset_domains` 保存独立域名身份；0067 的 `asset_domain_associations` 保存域名与 VPS 的当前和历史关联。它不是 DNS provider、注册商同步或解析记录管理入口。
 
 - `asset_domains.domain_id` 使用 `ids.New("dom")` 生成。
-- `vps_id` 必须引用已存在的 `vps_assets(vps_id)`，命名外键为 `asset_domains_vps_fk`，并在 VPS 删除时级联清理域名记录。
-- `service_id` 可为 `null`，存在时必须引用 `asset_services(service_id)`，命名外键为 `asset_domains_service_fk`，并在 Service 删除时置空。写入前仓库还必须确认该 `service_id` 属于同一个 `vps_id`，避免跨 VPS 误关联。
-- `target_id` 可为 `null`，存在时必须引用 `targets(target_id)`，命名外键为 `asset_domains_target_fk`，并在 Target 删除时置空；创建或列出域名不得修改 Target / ProbeItem。
+- 域名名称、用途、注册商、有效期、对象状态及标签属于对象；VPS、地址、该 VPS 的服务与 Target 引用属于关联。新写入不再填充对象表的历史 placement 列。
+- 关联的可选 `service_id` 必须在同一 VPS 上存在未结束服务关联。可选 `target_id` 必须存在且未退役；创建或列出域名不得修改 Target / ProbeItem。
 - `domain_name` 必须是归一化的小写 ASCII 域名，不含协议、路径、空白或尾随点；数据库用 `asset_domains_name_unique` 保证全局唯一，领域层负责 trim/lower/remove trailing dot 和 label 校验。
 - `status` 使用稳定英文机器值：`active`、`paused`、`retired`、`unknown`；空输入默认 `active`。
 - `expires_at` 是 nullable `date`，未知日期用 `null`，API 复用 subscription `Date` 的 `YYYY-MM-DD` JSON 语义。
@@ -513,7 +381,7 @@ postJSONBody(`/api/vps/${vpsId}/services`, { name, service_type, status, target_
 
 #### 2. Signatures
 
-- DB table: `asset_domains(domain_id text primary key, vps_id text not null, service_id text null, target_id text null, domain_name text, purpose text, status text, registrar text, expires_at date null, auto_renew boolean, https_enabled boolean, labels text[], note text, created_at timestamptz, updated_at timestamptz)`。
+- DB identity: `asset_domains(domain_id, domain_name, purpose, status, registrar, expires_at, auto_renew, https_enabled, labels, note, created_at, updated_at)`；placement authority: `asset_domain_associations(id, domain_id, vps_id, service_id, target_id, address, started_at, ended_at, end_reason, ended_by, snapshot)`。
 - Backend API: `GET /api/domains?vps_id=&service_id=&target_id=&status=` -> `[]assetdomains.Record`。
 - Backend API: `POST /api/domains` with JSON body `{vps_id, service_id?, target_id?, domain_name, purpose?, status?, registrar?, expires_at?, auto_renew?, https_enabled?, labels?, note?}` -> `assetdomains.Record`。
 - Backend API: `GET /api/vps/{vps_id}/domains` -> `[]assetdomains.Record`。
@@ -525,8 +393,8 @@ postJSONBody(`/api/vps/${vpsId}/services`, { name, service_type, status, target_
 - `POST /api/vps/{vps_id}/domains` 的 path `vps_id` 是唯一 VPS 来源；body 中的 `vps_id` 必须被忽略，不能覆盖 path。
 - `GET /api/vps/{vps_id}/domains` 必须先确认 VPS 存在；VPS 不存在时返回 not-found 语义，不把缺失 VPS 静默表现为空列表。
 - `service_id` 和 `target_id` 都是可选关联，只做引用校验和展示跳转；不得创建或修改 Service、Target、ProbeItem 或观测语义。
-- `service_id` 若存在，必须属于同一 VPS；跨 VPS service 关联应返回 `asset service not found` 语义。
-- 全局 `GET /api/domains` 可以按 VPS、Service、Target 和状态过滤；非法枚举必须在进入 store 查询前返回 400。
+- `service_id` 若存在，必须有同一 VPS 上的当前服务关联；仅在另一 VPS 有关联应返回 `asset service not found` 语义。
+- 全局无 placement 过滤的 `GET /api/domains` 列出独立身份，包括只剩历史关联的对象。VPS/Service/Target 过滤读取当前关联；非法枚举必须在进入 store 查询前返回 400。
 - domain asset 不进入 `/api/dashboard` 的资产摘要，也不进入 `GET /api/vps/{vps_id}/timeline`；它在 VPS 详情页作为独立域名区块加载。
 
 #### 4. Validation & Error Matrix
@@ -538,6 +406,7 @@ postJSONBody(`/api/vps/${vpsId}/services`, { name, service_type, status, target_
 | missing VPS on path GET/POST or collection POST FK | 404 `vps asset not found` |
 | missing / cross-VPS Service FK | 404 `asset service not found` |
 | missing Target FK | 404 `target not found` |
+| create with retired Target, including idempotent create | 409 `target metadata conflict`; no object, association or receipt is committed |
 | duplicate `domain_name` | 409 `asset domain conflict` |
 | invalid `domain_name` | 400 `invalid input` |
 | invalid `status` | 400 `invalid input` |
@@ -565,8 +434,8 @@ postJSONBody(`/api/vps/${vpsId}/services`, { name, service_type, status, target_
 // 错误：只靠 FK，允许 dom(vps_a) 关联 svc(vps_b)。
 insert into asset_domains (vps_id, service_id, domain_name) values (...)
 
-// 正确：写入前确认 service 属于同一个 VPS。
-select exists (select 1 from asset_services where service_id = $1 and vps_id = $2)
+// 正确：写入前确认同一个 VPS 上存在当前服务关联。
+select exists (select 1 from asset_service_associations where service_id = $1 and vps_id = $2 and ended_at is null)
 ```
 
 ```tsx
@@ -576,6 +445,20 @@ postJSONBody(`/api/vps/${vpsId}/domains`, input)
 // 正确：path scoped create 去掉 vps_id，只传域名字段。
 postJSONBody(`/api/vps/${vpsId}/domains`, { domain_name, service_id, target_id, status, expires_at, labels, note })
 ```
+
+### 关联历史与 VPS 跟进事项
+
+- 创建服务/域名及首条关联在同一 graph 事务完成，任一步失败全部回滚。已归档 VPS 不接受新关联。
+- `GET /api/vps/{id}/services`、`domains` 和 canonical overview 只投影管理中 VPS 的未结束关联。恢复 VPS 不重新显示已结束服务或域名为当前承载；历史统一从下述关联历史接口读取。
+- `GET /api/vps/{id}/service-associations` 与 `domain-associations` 返回完整关联历史；`?current=true` 只返回未结束关联。响应使用 `association_id/object_id/vps_id/target_id/service_id/address/port/started_at/ended_at/end_reason/ended_by/snapshot`。
+- 同路径 `POST {object_id,target_id?,service_id?,address?,port?}` 关联已有对象；service_id 仅用于域名，port 仅用于服务且范围 1..65535。当前重复关联返回 409。
+- 关联已有对象时若 `target_id` 指向已退役 Target，返回 409 `association conflict`，不写入关联；对象自身状态不影响此限制。普通/幂等创建对象时同类拒绝为 409 `target metadata conflict`，整个创建事务回滚。
+- `PATCH /api/vps/{id}/{service|domain}-associations/{association_id}/end {reason}` 结束指定关联并冻结对象快照、原因、操作者及结束时间。必须同时匹配 VPS 与关联 ID，重复结束返回 409。历史快照不可被后续对象修改覆盖。
+- 归档事务只结束该 VPS 的当前关联；其他 VPS 及共享服务、域名身份继续存在。对象状态修改独立于单个 VPS 生命周期，并在所有关联 VPS 的生命周期历史中留痕。迁移以新增目标关联、结束来源关联表达，不自动执行搬迁或结束旧 VPS。
+- `GET/POST /api/vps/{id}/followups` 查询或创建事项；创建输入为 `{kind,summary,details}`，kind 为 migration、potential_charge、archived_online、review、annotation。迁移来源、目标、结果、证据引用保存在 details；创建操作者由可信会话写入，归档 VPS 仍可追加事项。
+- `PATCH /api/vps/{id}/followups/{followup_id} {status,reason}` 仅允许 pending→resolved/ignored，非空原因及可信操作者必填，保存 resolution_reason/resolved_by/resolved_at。关闭后不可覆写，新修订通过追加事项关联原 followup_id 留痕。
+- 系统提醒按 `(vps_id,kind,dedupe_key)` 合并一条 pending 事项；同一归档周期以 VPS ID 与 archived_at 标识。已解决/忽略的同周期事项保持关闭，后续每次心跳不能重建提醒；恢复后重新归档构成新周期，可形成新事项。
+- 验收须覆盖同一对象跨两个 VPS、归档单侧、关联重复与结束、快照不变、对象状态独立、跟进事项去重及关闭留痕，并在真实 PostgreSQL 上验证事务回滚和约束。
 
 ## Asset Ledger JSON import
 

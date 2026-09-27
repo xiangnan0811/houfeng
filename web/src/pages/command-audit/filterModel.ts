@@ -13,6 +13,7 @@ const ALLOWED_OUTCOMES = new Set<CommandAuditOutcome>([
   'dispatched',
   'succeeded',
   'failed',
+  'cancelled',
 ])
 const ALLOWED_COMMANDS = new Set(COMMAND_LIST.map((command) => command.id))
 const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})?$/

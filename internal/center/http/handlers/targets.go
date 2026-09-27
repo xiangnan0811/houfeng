@@ -45,7 +45,21 @@ func TargetsCollection(repo targets.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			records, err := repo.ListTargets(r.Context())
+			scope, ok := targets.NormalizeListScope(targets.ListScope(r.URL.Query().Get("scope")))
+			if !ok {
+				writeError(w, http.StatusBadRequest, "invalid scope")
+				return
+			}
+			var records []targets.TargetRecord
+			var err error
+			if scoped, ok := repo.(targets.ScopedRepository); ok {
+				records, err = scoped.ListTargetsByScope(r.Context(), scope)
+			} else if scope == targets.ListScopeCurrent {
+				records, err = repo.ListTargets(r.Context())
+			} else {
+				writeError(w, http.StatusInternalServerError, "target history unavailable")
+				return
+			}
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return

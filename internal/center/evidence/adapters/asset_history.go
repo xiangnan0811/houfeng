@@ -187,7 +187,7 @@ func validateAssetHistoryCapture(capture AssetHistoryCapture, vpsID string, wind
 
 func validRenewalDecision(value string) bool {
 	switch value {
-	case "unreviewed", "keep", "observe", "migrate", "cancel", "auto_renew_cancelled", "replaced":
+	case "unreviewed", "keep", "cancel":
 		return true
 	default:
 		return false

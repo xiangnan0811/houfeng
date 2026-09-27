@@ -19,6 +19,7 @@ const appACLCurrentHeartbeatDefault = `{"heartbeat_interval_seconds":5,"stale_th
 
 type appACLCurrentTransitionPreflight struct {
 	heartbeatPolicyMigrationPending bool
+	lifecycleMigrationPending       bool
 	incidentDefaults                []byte
 	settingsSnapshot                []byte
 	settingsExceptTransition        []byte
@@ -59,6 +60,7 @@ func preflightAppACLCurrentTransitionInTx(
 	}
 	snapshot := appACLCurrentTransitionPreflight{
 		heartbeatPolicyMigrationPending: heartbeatPolicyMigrationPending,
+		lifecycleMigrationPending:       len(transition.successor.names) > 0 && transition.successor.names[len(transition.successor.names)-1] == "0067_refactor_vps_monitoring_lifecycle.sql",
 	}
 	if err := tx.QueryRow(ctx, `
 			select incident_defaults,
@@ -108,6 +110,17 @@ func verifyAppliedAppACLCurrentTransitionSettings(
 	incidentDefaults, settingsSnapshot, settingsExceptTransition []byte,
 	updatedAt time.Time,
 ) error {
+	if before.lifecycleMigrationPending {
+		var err error
+		before.settingsSnapshot, err = appACLCurrentLifecycleSettings(before.settingsSnapshot)
+		if err != nil {
+			return err
+		}
+		before.settingsExceptTransition, err = appACLCurrentLifecycleSettings(before.settingsExceptTransition)
+		if err != nil {
+			return err
+		}
+	}
 	if !before.heartbeatPolicyMigrationPending {
 		if !appACLCurrentJSONEqual(settingsSnapshot, before.settingsSnapshot) {
 			return fmt.Errorf("registered APP transition changed settings without a heartbeat policy migration")
@@ -134,6 +147,39 @@ func verifyAppliedAppACLCurrentTransitionSettings(
 		return fmt.Errorf("registered APP transition changed custom incident defaults")
 	}
 	return nil
+}
+
+// Match only the exact settings transformation performed by 0067. Other
+// settings remain part of the fail-closed predecessor/successor comparison.
+func appACLCurrentLifecycleSettings(payload []byte) ([]byte, error) {
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &settings); err != nil {
+		return nil, fmt.Errorf("decode lifecycle transition settings: %w", err)
+	}
+	for _, name := range []string{"retention_policy", "ip_quality_settings"} {
+		var values map[string]json.RawMessage
+		if err := json.Unmarshal(settings[name], &values); err != nil {
+			return nil, fmt.Errorf("decode lifecycle transition %s: %w", name, err)
+		}
+		if values == nil {
+			return nil, fmt.Errorf("lifecycle transition %s must be an object", name)
+		}
+		if name == "retention_policy" {
+			delete(values, "event_layer_days")
+			delete(values, "notification_layer_days")
+			values["raw_layer_days"] = json.RawMessage("30")
+			values["aggregate_layer_days"] = json.RawMessage("365")
+		} else {
+			delete(values, "raw_retention_days")
+			delete(values, "history_retention_days")
+		}
+		encoded, err := json.Marshal(values)
+		if err != nil {
+			return nil, err
+		}
+		settings[name] = encoded
+	}
+	return json.Marshal(settings)
 }
 
 func verifyCurrentAppACLCurrentTransitionInTx(
@@ -177,6 +223,10 @@ func validateHeartbeatAppACLCurrentTransition(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
+	// 0067 changes the fresh-install lifecycle contract, not the heartbeat policy.
+	if n := len(transition.successor.names); n > 0 && transition.successor.names[n-1] == "0067_refactor_vps_monitoring_lifecycle.sql" {
+		transition.successor.names = transition.successor.names[:n-1]
+	}
 	switch {
 	case len(transition.successor.names) == 4 &&
 		transition.successor.names[0] == "0063_tune_heartbeat_incident_policy.sql" &&

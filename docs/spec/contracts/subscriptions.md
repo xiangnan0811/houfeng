@@ -11,71 +11,25 @@
 - `monthly_price` 是后端派生字段，由 `CalculateMonthlyPriceForPeriod` 按 day/week/month/year 周期与长度折算并四舍五入到 4 位小数；legacy `billing_months` 经归一化进入同一周期合同。create / patch JSON 不接受 `monthly_price`，修改价格或周期时必须重新计算。
 - `started_at` 与 `renew_at` 是 nullable `date`：未知日期用 `null`，不要写假日期。
 - `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。新用户流程不得把它暴露为必填业务状态；VPS-scoped create 默认只收 price / currency / billing cycle / dates / auto-renew / payment / note 等账单事实，内部可保留 legacy status 作为兼容和历史解释字段。
-- 订阅列表查询同样支持 `AssetScope`，通过关联 `vps_assets.lifecycle_status` 裁剪；默认 `current` 排除归档/已取消 VPS 的订阅，`asset_scope=historical` 供只读归档页查看已取消/已归档 VPS 的历史订阅；`asset_scope=archived` 是兼容别名。订阅自身 `status='cancelled'|'expired'` 不能让 VPS 自动进入归档范围，归档边界只能来自 VPS lifecycle。
-- `renewal_mode` 允许 `auto`、`manual`、`auto_cancelled`、`lottery`、`gift`、`bonus`、`other`。`lottery` 只表达抽奖，`gift` 只表达赠送；两者都不是 legacy 自动续费标记。`LegacyRenewalFlags(gift)` 与 `LegacyRenewalFlags(lottery)` 必须返回 `false,false`。
+- 订阅列表通过所属 VPS 生命周期裁剪：默认 `asset_scope=current` 只返回管理中 VPS，`archived` 返回已归档 VPS 的账单，`all` 返回全部。订阅自身 `status='cancelled'|'expired'` 不能让 VPS 自动归档。
+- `renewal_mode` 只允许 `auto|manual|auto_cancelled`。获取来源在 VPS `acquisition_source` 独立记录。
 - 订阅 CRUD 不得创建 `vps_monitoring_instance_links`、不得改写 `monitoring_instances.provider`、不得增加 Dashboard / import / currency exchange 行为。
 - 订阅 CRUD 仍不得反向改写 VPS、MonitoringInstance 或 Target；订阅取消 / 过期后如资产状态不一致，前端必须暴露 lifecycle action 入口，而不是在订阅 PATCH 中隐式停机或退役。
-- 受控例外：用户显式在 `PATCH /api/vps/{vps_id}` 将 VPS `renewal_decision` 改成取消类决策（当前为 `cancel` 或 `auto_renew_cancelled`）时，VPS patch 事务可以同步处理该 VPS 的明确订阅事实。只有恰好一条 `status='active'` 的订阅候选时，才能在同一事务里把该订阅 `auto_renew=false`、`auto_renew_cancelled=true`，并按既有 `price_histories` 机制记录自动续费字段变化；无 active 订阅或多 active 订阅时只返回 linkage status/message，不批量写订阅。
-- 上述例外仍属于 Asset Ledger 内部 VPS↔Subscription 用户决策流：不得创建或修改 `vps_monitoring_instance_links`、Provider、MonitoringInstance、Target、ProbeItem、Agent 计划或运行时控制；subscription 自己的 CRUD 仍不得反向改写 VPS renewal decision。
+- 续费意向与服务商自动续费独立：保存 VPS `renewal_decision=cancel` 只记录意向、原因、复核时间和历史，不更改任何订阅自动续费事实。界面提示核对 VPS `auto_renew_check`。
+- 记录一次续费不得将 cancel 自动改为 keep；用户明确确认新的 VPS `validity_mode/expires_at`，账单 `renew_at` 不自动覆盖资源有效期，二者不一致仅提示。
+- 已归档 VPS 仍可补录和修订订阅账单事实，保留价格历史，不改变 VPS 生命周期、有效期、监控或命令。账单仍可能显示 active / 自动续费开启，以如实记录潜在扣费。
+- 已归档订阅的所有实际变更（包括备注、退款说明、证据引用）同事务追加账单修订体验记录，保存 before/after；金额退款使用说明与已有证据能力记录，不以负订阅价格构造完整会计系统。
+- 成本概览 `vps_costs` 和当前预计月/年成本只统计管理中 VPS；`current_unknown_amount_count` 表示已知成本合计不完整。已归档对象单独返回 `archived_potential_costs`、`archived_missing_subscription_assets`、`archived_unknown_amount_count` 与 nullable `archived_potential_monthly_cost`，未知金额不按零处理。
+- 归档潜在扣费仅纳入服务商自动续费核对为 unchecked/enabled 的对象（空值防御同未知）；disabled/never_enabled/unsupported 已完成核对，不计潜在续费。缺账单或缺汇率时归档总额为 null；预算覆盖的当前金额未知且已知合计未超限时状态为 unknown，不能宣称预算正常。成本行查询保留归档对象以供核对。
+- 来源在 VPS `acquisition_source` 记录；新流程的续费方式只表达付款安排。历史账单字段不构成 VPS 生命周期或有效期权威。
 
-### Scenario: Subscription renewal mode gift and historical scope
+### Scenario: 续费方式与获取来源分离
 
-#### 1. Scope / Trigger
-
-- Trigger: 修改 `subscriptions.renewal_mode`、`price_histories.from_renewal_mode/to_renewal_mode`、订阅列表 scope、订阅表单选项或续费方式展示标签。
-- 目标：让账单行为、抽奖来源、赠送来源和历史资产范围在 DB、Go 和 UI 中保持同义。
-
-#### 2. Signatures
-
-- DB constraints: `subscriptions_renewal_mode_allowed` and `price_histories_renewal_mode_allowed` must include `gift` alongside `auto|manual|auto_cancelled|lottery|bonus|other`。
-- Domain constant: `subscriptions.RenewalModeGift = "gift"`。
-- List API: `GET /api/subscriptions?asset_scope=current|historical|archived|all`。
-- Store behavior: `historical` and legacy `archived` both query related VPS `lifecycle_status in ('cancelled','archived')`。
-
-#### 3. Contracts
-
-- New migrations must not edit old applied migrations. To add a renewal mode, append a migration that drops/re-adds the two allowed constraints.
-- `NormalizeRenewalMode` must trim and lowercase `gift` like all other machine values.
-- `IsValidRenewalMode("gift")` and renewal history validation must both accept `gift`。
-- `RenewalModeFromLegacyFlags` remains only `auto` / `auto_cancelled` / default `manual`; `gift` is not inferable from legacy booleans.
-- Existing `lottery` rows stay `lottery` and display as 抽奖; there is no automatic backfill to `gift` without historical evidence.
-
-#### 4. Validation & Error Matrix
-
-| Condition | Expected behavior |
-| --- | --- |
-| subscription create `renewal_mode=gift` | accepted; legacy booleans normalized to false/false |
-| price history `from_renewal_mode=gift` or `to_renewal_mode=gift` | accepted |
-| renewal mode `抽奖/赠送` or unknown string | invalid subscription input |
-| `asset_scope=historical` | same SQL predicate as compatibility `archived` |
-| `asset_scope=archived` | still accepted for old clients |
-
-#### 5. Good/Base/Bad Cases
-
-- Good: 用户录入赠送订阅，API 保存 `renewal_mode=gift`，前端显示“赠送”，不勾自动续费。
-- Base: 旧抽奖订阅仍是 `lottery`，前端显示“抽奖”。
-- Bad: 把 `lottery` 标签写成“抽奖/赠送”，导致用户无法区分权益来源。
-- Bad: 只改 `subscriptions` constraint，忘记 `price_histories`，导致修改订阅时历史写入失败。
-
-#### 6. Tests Required
-
-- Migration tests: new migration contains both subscription and price history constraints with `gift`。
-- Domain tests: `gift` normalize / validate / create / price history validation / legacy flags。
-- Store/handler tests: subscriptions historical scope query parsing and SQL predicate。
-- Frontend tests: `RenewalMode` union、option label、normalizer、legacy flags、Archive page historical query。
-
-#### 7. Wrong vs Correct
-
-```sql
--- 错误：只放松当前订阅表，历史表仍不能记录 gift。
-alter table subscriptions add constraint subscriptions_renewal_mode_allowed check (renewal_mode in (..., 'gift'));
-```
-
-```sql
--- 正确：当前事实与价格历史的续费方式约束一起放松。
-alter table subscriptions add constraint subscriptions_renewal_mode_allowed check (...);
-alter table price_histories add constraint price_histories_renewal_mode_allowed check (...);
-```
+- `subscriptions.renewal_mode` 只允许 `auto|manual|auto_cancelled`，价格历史使用相同约束。
+- `gift|lottery|bonus|other` 等来源只写 VPS `acquisition_source`，不能作为 renewal_mode 创建、更新或导入；没有自动转换和兼容别名。
+- `NormalizeRenewalMode` 只去空白与规范大小写，不把未知或来源值猜成手动续费；校验返回 invalid subscription input。
+- 账单日期、资源有效期、自动续费核对与续费意向互不覆盖；补录账单和续费历史不能隐式恢复监控或 VPS。
+- 回归覆盖来源模式拒绝、合法模式读写、取消意向不写订阅，以及无订阅的有效期修改。
 
 ## VPS-scoped Subscription creation
 
@@ -163,8 +117,8 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 - `CreateSubscriptionIdempotent` 在匹配 receipt digest 后，必须在提交重放事务前读回 subscription 并验证其当前 `vps_id` 等于本次规范化输入的 `vps_id`。不一致时返回 HTTP 409 `subscription_replay_ownership_conflict`，不得返回他属记录或创建替代对象。
 - 同 key 的不同规范化请求仍返回 HTTP 409 `idempotency_key_reused`。Receipt 指向不存在的 subscription 是内部一致性错误，不能当作 ownership conflict 或自动重建。
 - `NormalizePatchInput` 只做与当前记录无关的存在字段规范化；缺失的 legacy bool 不得当作 `false` 推导 `renewal_mode`。生产 PATCH 在锁定并读取当前订阅后调用 `NormalizePatchAgainstRecord(current, input)`。
-- 显式 PATCH `renewal_mode` 可切换来源并按该 mode 生成两个 legacy flags。仅 PATCH legacy flags 时，`auto` / `manual` / `auto_cancelled` 必须将未提供的另一 flag 与当前记录合成后再映射 mode。
-- `gift`、`lottery`、`bonus`、`other` 是独立来源，不从 legacy flags 推断或覆盖；取消/归一这类账单时保留当前来源并持久化 `auto_renew=false`、`auto_renew_cancelled=false`。
+- 显式 PATCH `renewal_mode` 只切换续费方式并按该 mode 生成两个 flags。仅 PATCH flags 时，`auto` / `manual` / `auto_cancelled` 必须将未提供的另一 flag 与当前记录合成后再映射 mode。
+- 来源只属于 VPS `acquisition_source`，订阅 PATCH 不接受 gift/lottery/bonus/other 模式，也不改写来源。
 - 订阅 `status` 与续费字段没有新增互斥约束。正常 PATCH 允许把 `cancelled` 修正回 `active`，也允许独立纠正自动续费事实。
 
 ### 3. Validation & Error Matrix
@@ -184,8 +138,8 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 
 - Good: 对同一订阅提交当前 VPS ID，不改变归属或追加历史；对不同 VPS ID 的 PATCH 整体拒绝。
 - Good: 历史上经受控数据修复改过归属的 receipt 被原始创建请求重放时，返回专用冲突，不把已改挂记录交给旧 VPS 请求方。
-- Good: `auto` 订阅只 PATCH `auto_renew_cancelled=true` 时，读取锁定记录中的 `auto_renew=true` 并得到 `auto_cancelled`；`gift` 等来源在取消路径仍保留原 mode 与 false/false flags。
-- Bad: PATCH 单独一个 bool 时把另一个缺失 bool 当作 false，再误写 `manual` 或覆盖 `gift` / `lottery` 来源。
+- Good: `auto` 订阅只 PATCH `auto_renew_cancelled=true` 时，读取锁定记录中的 `auto_renew=true` 并得到 `auto_cancelled`；VPS 来源不变。
+- Bad: PATCH 单独一个 bool 时把另一个缺失 bool 当作 false，再误写 `manual` 或更改 VPS 来源。
 - Bad: receipt digest 匹配便直接返回记录，不检查该记录当前是否仍归属于请求中的 VPS。
 
 ### 5. Tests Required
@@ -229,7 +183,7 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 - 月度预算继承取 `budget_month <= bucket_start` 的最近历史月配置，不取未来月份，也不将“无当月行”误判为没有预算；统计与 evidence adapter 必须沿用同一继承规则。
 - `next_reminder_at` is the next future pending reminder window calculated from settings and existing delivery rows. It must not report an already-delivered or past reminder as pending.
 - Reminder dedupe is keyed by `subscription_id + renew_at + offset_days` independent of notification channel. The worker must reserve the dedupe row before dispatching notifications, then update delivery status after dispatch. This prevents duplicate sends on repeated scans.
-- Ordinary renewal reminders skip cancelled/expired subscriptions and archived/cancelled VPS. Decision-attention reminders are allowed for cancellation/migration/auto-renew-cancelled decisions when a near-term renewal risk still exists.
+- Ordinary renewal reminders skip cancelled/expired subscriptions and archived VPS. A cancel renewal intention with near-term billing risk remains actionable; archived potential charges use follow-up review rather than ordinary renewal reminders.
 - Dashboard may show only high-signal subscription summary: total base cost, future renewal count, budget risk, and exchange anomaly. Full filtering, budget CRUD, settings, and refresh actions stay in `/subscriptions`.
 
 ### 4. Validation & Error Matrix

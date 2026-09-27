@@ -37,6 +37,7 @@ func NewPostgresTargetRepository(db *pgxpool.Pool) *PostgresTargetRepository {
 var ErrInvalidTargetRuntimeTransition = errors.New("invalid target runtime transition")
 
 var targetSelectColumnNames = []string{
+	"lifecycle_status",
 	"target_id",
 	"name",
 	"target_type",
@@ -57,6 +58,7 @@ var targetSelectColumnNames = []string{
 }
 
 const targetSelectColumns = `
+	lifecycle_status,
 	target_id,
 	name,
 	target_type,
@@ -98,6 +100,7 @@ var _ targets.LifecycleReviewRepository = (*PostgresTargetRepository)(nil)
 func scanTarget(row targetScanner) (targets.TargetRecord, error) {
 	var record targets.TargetRecord
 	if err := row.Scan(
+		&record.LifecycleStatus,
 		&record.TargetID,
 		&record.Name,
 		&record.TargetType,
@@ -117,6 +120,16 @@ func scanTarget(row targetScanner) (targets.TargetRecord, error) {
 		&record.UpdatedAt,
 	); err != nil {
 		return targets.TargetRecord{}, err
+	}
+	switch {
+	case record.LifecycleStatus == targets.LifecycleRetired:
+		record.CurrentHealthStatus = "已退役"
+	case record.RunStatus == targets.RunStatusPaused:
+		record.CurrentHealthStatus = "暂停"
+	case record.RunStatus == targets.RunStatusMaintenance:
+		record.CurrentHealthStatus = "维护中"
+	case record.LastSuccessAt == nil && record.LastFailureAt == nil:
+		record.CurrentHealthStatus = "数据不可用"
 	}
 	return record, nil
 }
@@ -150,30 +163,43 @@ func scanProbeItem(row targetScanner) (targets.ProbeItemRecord, error) {
 }
 
 func (r *PostgresTargetRepository) ListTargets(ctx context.Context) ([]targets.TargetRecord, error) {
-	rows, err := r.db.Query(ctx, `
-		select `+targetSelectColumns+`
-		from targets
-		where not exists (
+	return r.ListTargetsByScope(ctx, targets.ListScopeCurrent)
+}
+
+func (r *PostgresTargetRepository) ListTargetsByScope(ctx context.Context, scope targets.ListScope) ([]targets.TargetRecord, error) {
+	var ok bool
+	scope, ok = targets.NormalizeListScope(scope)
+	if !ok {
+		return nil, fmt.Errorf("invalid target list scope")
+	}
+	filter := `lifecycle_status = 'active' and (not exists (
 			select 1
 			from (
-				select vps_id, target_id from asset_services where target_id is not null
+				select vps_id, target_id from asset_service_associations where target_id is not null and ended_at is null
 				union all
-				select vps_id, target_id from asset_domains where target_id is not null
+				select vps_id, target_id from asset_domain_associations where target_id is not null and ended_at is null
 			) a
 			where a.target_id = targets.target_id
 		)
 		or exists (
 			select 1
 			from (
-				select vps_id, target_id from asset_services where target_id is not null
+				select vps_id, target_id from asset_service_associations where target_id is not null and ended_at is null
 				union all
-				select vps_id, target_id from asset_domains where target_id is not null
+				select vps_id, target_id from asset_domain_associations where target_id is not null and ended_at is null
 			) a
 			join vps_assets v on v.vps_id = a.vps_id
 			where a.target_id = targets.target_id
-			  and v.lifecycle_status not in ('cancelled', 'archived')
+			  and v.lifecycle_status = 'active'
 		)
-		order by created_at desc`)
+		)`
+	switch scope {
+	case targets.ListScopeRetired:
+		filter = "lifecycle_status = 'retired'"
+	case targets.ListScopeAll:
+		filter = "true"
+	}
+	rows, err := r.db.Query(ctx, `select `+targetSelectColumns+` from targets where `+filter+` order by created_at desc`)
 	if err != nil {
 		return nil, fmt.Errorf("query targets: %w", err)
 	}
@@ -372,6 +398,15 @@ func insertTargetRuntimeEvent(
 		return fmt.Errorf("generate target runtime event id: %w", err)
 	}
 
+	resultingState := record.RunStatus
+	if eventType == incidents.EventTargetArchived {
+		priorState = targets.LifecycleActive
+		resultingState = targets.LifecycleRetired
+	}
+	if eventType == incidents.EventTargetRestoredToPaused {
+		priorState = targets.LifecycleRetired
+		resultingState = targets.LifecycleActive
+	}
 	eventAt := canonicalTask4MonitoringEventTimestamp(record.UpdatedAt)
 	payload, err := marshalTask4MonitoringEventPayload(task4MonitoringEventPayload{
 		ObjectType:          incidents.ObjectTypeTarget,
@@ -383,7 +418,7 @@ func insertTargetRuntimeEvent(
 		ProducerVersion:     monitoringEventProducerVersion,
 		RuleVersion:         monitoringEventTargetRuleVersion,
 		PriorState:          priorState,
-		ResultingState:      record.RunStatus,
+		ResultingState:      resultingState,
 		CorrectionOfEventID: "",
 		RunStatus:           record.RunStatus,
 	})
@@ -419,10 +454,11 @@ func insertTargetRuntimeEvent(
 var ErrInvalidTargetRuntimeAction = errors.New("invalid target runtime action")
 
 type targetTransitionSpec struct {
-	runStatus string
-	eventType incidents.EventType
-	summary   string
-	noChange  bool
+	lifecycleStatus string
+	runStatus       string
+	eventType       incidents.EventType
+	summary         string
+	noChange        bool
 }
 
 func validTargetRuntimeAction(action string) bool {
@@ -432,6 +468,34 @@ func validTargetRuntimeAction(action string) bool {
 	default:
 		return false
 	}
+}
+
+func targetTransitionForRecord(current targets.TargetRecord, action string) (targetTransitionSpec, error) {
+	lifecycle := current.LifecycleStatus
+	if lifecycle == "" {
+		lifecycle = targets.LifecycleActive
+	}
+	if action == "archive" {
+		if lifecycle == targets.LifecycleRetired {
+			return targetTransitionSpec{}, ErrInvalidTargetRuntimeTransition
+		}
+		return targetTransitionSpec{runStatus: targets.RunStatusPaused, lifecycleStatus: targets.LifecycleRetired, eventType: incidents.EventTargetArchived, summary: "目标已退役"}, nil
+	}
+	if action == "restore_to_paused" {
+		if lifecycle != targets.LifecycleRetired {
+			return targetTransitionSpec{}, ErrInvalidTargetRuntimeTransition
+		}
+		return targetTransitionSpec{runStatus: targets.RunStatusPaused, lifecycleStatus: targets.LifecycleActive, eventType: incidents.EventTargetRestoredToPaused, summary: "目标已恢复到暂停"}, nil
+	}
+	if lifecycle != targets.LifecycleActive {
+		return targetTransitionSpec{}, ErrInvalidTargetRuntimeTransition
+	}
+	if (action == "maintenance" && current.RunStatus == targets.RunStatusMaintenance) || (action == "resume" && current.RunStatus == targets.RunStatusEnabled) {
+		return targetTransitionSpec{runStatus: current.RunStatus, lifecycleStatus: lifecycle, noChange: true}, nil
+	}
+	spec, err := targetTransitionFor(current.RunStatus, action)
+	spec.lifecycleStatus = lifecycle
+	return spec, err
 }
 
 func targetTransitionFor(currentStatus, action string) (targetTransitionSpec, error) {
@@ -498,6 +562,7 @@ func targetTransitionFor(currentStatus, action string) (targetTransitionSpec, er
 
 func targetLifecycleDigestState(record targets.TargetRecord) []string {
 	state, _ := json.Marshal(struct {
+		LifecycleStatus                   string   `json:"lifecycle_status"`
 		Name                              string   `json:"name"`
 		TargetType                        string   `json:"target_type"`
 		Host                              string   `json:"host"`
@@ -508,6 +573,7 @@ func targetLifecycleDigestState(record targets.TargetRecord) []string {
 		Labels                            []string `json:"labels"`
 		Note                              string   `json:"note"`
 	}{
+		LifecycleStatus:                   record.LifecycleStatus,
 		Name:                              record.Name,
 		TargetType:                        record.TargetType,
 		Host:                              record.Host,
@@ -574,7 +640,7 @@ func (r *PostgresTargetRepository) runTargetLifecycleAction(ctx context.Context,
 	if err != nil {
 		return targets.TargetRecord{}, err
 	}
-	spec, err := targetTransitionFor(current.RunStatus, action)
+	spec, err := targetTransitionForRecord(current, action)
 	if err != nil {
 		return targets.TargetRecord{}, err
 	}
@@ -617,17 +683,19 @@ func transitionTargetTx(ctx context.Context, tx pgx.Tx, targetID, action string)
 		return targets.TargetRecord{}, false, fmt.Errorf("lock target %q for %s: %w", targetID, action, err)
 	}
 
-	spec, err := targetTransitionFor(current.RunStatus, action)
+	spec, err := targetTransitionForRecord(current, action)
 	if err != nil {
 		return targets.TargetRecord{}, false, err
 	}
 	if spec.noChange {
-		return current, false, nil
+		record, err := scanTarget(tx.QueryRow(ctx, `update targets set control_revision=control_revision+1,updated_at=now() where target_id=$1 returning `+targetSelectColumns, targetID))
+		return record, false, err
 	}
 
 	record, err := scanTarget(tx.QueryRow(ctx, `
 		update targets
-		set run_status = $2,
+		set control_revision=control_revision+1, run_status = $2,
+			lifecycle_status = $4,
 			updated_at = now()
 		where target_id = $1
 			and run_status = $3
@@ -635,6 +703,7 @@ func transitionTargetTx(ctx context.Context, tx pgx.Tx, targetID, action string)
 		targetID,
 		spec.runStatus,
 		current.RunStatus,
+		spec.lifecycleStatus,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return targets.TargetRecord{}, false, fmt.Errorf("%w: target %q changed run status during %s", ErrInvalidTargetRuntimeTransition, targetID, action)

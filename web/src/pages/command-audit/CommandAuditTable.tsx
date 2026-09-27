@@ -11,6 +11,7 @@ const OUTCOME_PRESENTATION: Record<CommandAuditOutcome, { label: string; tone: '
   dispatched: { label: '已派发', tone: 'notice' },
   succeeded: { label: '成功', tone: 'normal' },
   failed: { label: '失败', tone: 'critical' },
+  cancelled: { label: '已取消', tone: 'neutral' },
 }
 
 function actorName(row: CommandAuditAction): string {

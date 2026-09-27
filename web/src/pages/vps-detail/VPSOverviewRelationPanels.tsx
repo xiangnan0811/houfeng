@@ -1,3 +1,4 @@
+import { VPSLifecycleWorkspace } from './VPSLifecycleWorkspace'
 import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
@@ -296,6 +297,7 @@ export function VPSOverviewRelationPanels({
       template="objects"
       contentClassName={panel === 'services-detail' ? 'vps-dialog--services' : panel === 'domains-detail' ? 'vps-dialog--domains' : ''}
     >
+      {panel === 'services-detail' || panel === 'domains-detail' ? <VPSLifecycleWorkspace vpsId={vpsId} kind={panel === 'services-detail' ? 'service' : 'domain'} archived={readOnly} onChanged={() => setLoadRevision((value) => value + 1)} /> : null}
       {!stateIsCurrent || loadState.status === 'loading' ? (
         <p role="status">正在加载{copy.subject}…</p>
       ) : null}
@@ -358,7 +360,7 @@ function relationPanel(panel: VPSManagementPanel): RelationPanel | null {
 async function loadPanel(panel: RelationPanel, vpsId: string): Promise<RelationData> {
   switch (panel) {
     case 'monitoring-instance-evidence':
-      return { panel, vpsId, records: await listVPSMonitoringInstances(vpsId) }
+      return { panel, vpsId, records: await listVPSMonitoringInstances(vpsId, 'all') }
     case 'services-detail':
       return { panel, vpsId, records: await listVPSServices(vpsId) }
     case 'domains-detail':

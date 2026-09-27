@@ -65,6 +65,8 @@ func (c *Client) Sync(ctx context.Context, request agentapi.SyncRequest) (*agent
 }
 
 type syncRequestPayload struct {
+	SessionID            string                                 `json:"session_id"`
+	LiveSignal           *agentapi.LiveSignal                   `json:"live_signal,omitempty"`
 	MonitoringInstanceID string                                 `json:"monitoring_instance_id"`
 	Heartbeats           []agentapi.MonitoringInstanceHeartbeat `json:"heartbeats,omitempty"`
 	HostSamples          []agentapi.HostSamplePayload           `json:"host_samples,omitempty"`
@@ -75,6 +77,8 @@ type syncRequestPayload struct {
 
 func syncRequestPayloadFrom(request agentapi.SyncRequest) syncRequestPayload {
 	return syncRequestPayload{
+		SessionID:            request.SessionID,
+		LiveSignal:           request.LiveSignal,
 		MonitoringInstanceID: request.MonitoringInstanceID,
 		Heartbeats:           request.Heartbeats,
 		HostSamples:          request.HostSamples,

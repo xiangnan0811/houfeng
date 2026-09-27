@@ -83,6 +83,40 @@ function stubInstallCommand(handler: (id: string) => Promise<Response> | Respons
   return fetchMock
 }
 
+describe('retired monitoring reenrollment', () => {
+  afterEach(() => {
+    copyMock.mockReset()
+    copyMock.mockResolvedValue(true)
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+  it.each(['已接入', '已退役'])('creates a new binding session for %s only after explicit command generation', async (lifecycle_status) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/binding/reset')) return mockJSONResponse({})
+      if (String(input).endsWith('/install-command')) return mockJSONResponse(installIssue())
+      throw new Error(`unexpected ${String(input)}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<MemoryRouter><MonitoringInstanceOnboardingDrawer open onClose={vi.fn()} mode="upgrade"
+      monitoringInstance={{ ...instance(), lifecycle_status, vps_lifecycle_status: 'active' }} /></MemoryRouter>)
+    expect(fetchMock).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: '生成升级/重新接入命令' }))
+    await screen.findByText('安装命令已自动复制到剪贴板。')
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      '/api/monitoring-instances/mi_001/binding/reset', '/api/monitoring-instances/mi_001/install-command',
+    ])
+  })
+
+  it('blocks install command generation for an archived owner', () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    render(<MemoryRouter><MonitoringInstanceOnboardingDrawer open onClose={vi.fn()}
+      monitoringInstance={{ ...instance(), lifecycle_status: '已退役', vps_lifecycle_status: 'archived' }} /></MemoryRouter>)
+    expect(screen.getByRole('button', { name: '生成一键安装命令' })).toBeDisabled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
 function DrawerHarness({
   monitoringInstance,
   open,

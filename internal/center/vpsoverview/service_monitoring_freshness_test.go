@@ -62,8 +62,8 @@ func TestServiceMonitoringFirstHeartbeatIsReadyUnknownWithoutRetryAnomaly(t *tes
 					t.Fatalf("anomalies = %#v, must not treat missing heartbeat as an actionable monitoring failure", overview.Anomalies)
 				}
 			}
-			if overview.Summary.Overall.Status != "healthy" {
-				t.Fatalf("overall status = %q, want healthy for missing first heartbeat", overview.Summary.Overall.Status)
+			if overview.Summary.Overall.Status == "healthy" {
+				t.Fatalf("overall status = %q, missing first heartbeat must not be healthy", overview.Summary.Overall.Status)
 			}
 			if overview.Summary.Monitoring.Status != "unknown" {
 				t.Fatalf("monitoring summary status = %q, want unknown", overview.Summary.Monitoring.Status)

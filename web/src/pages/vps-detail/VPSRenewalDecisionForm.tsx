@@ -1,7 +1,6 @@
 import type { FormEvent } from 'react'
 
 import { Button, Select } from '../../components/atoms'
-import { replacedDecisionBlocked } from '../../lib/assetLifecycle'
 import type { ApiFieldError } from '../../lib/apiRequest'
 import { VPS_RENEWAL_DECISION_LABELS, type VPSAssetDetail, type VPSRenewalDecision } from '../../lib/types'
 import type { DecisionDraftState } from './types'
@@ -33,10 +32,8 @@ export function VPSRenewalDecisionForm({
   const savedLabel = VPS_RENEWAL_DECISION_LABELS[detail.renewal_decision]
   const pendingLabel = VPS_RENEWAL_DECISION_LABELS[draft.renewalDecision]
   const decisionChanged = draft.renewalDecision !== detail.renewal_decision
-  const replacedBlocked = replacedDecisionBlocked(detail.lifecycle_status, detail.usage_status)
   const renewalError = fieldErrors.find((item) => item.field === 'renewal_decision')?.message
-  const lifecycleError = fieldErrors.find((item) => item.field === 'lifecycle_status')?.message
-  const usageError = fieldErrors.find((item) => item.field === 'usage_status')?.message
+  const autoRenewVerified = ['disabled', 'never_enabled', 'unsupported'].includes(detail.auto_renew_check ?? 'unchecked')
 
   return (
     <form id={formId} className="vps-form" onSubmit={onSubmit}>
@@ -59,19 +56,17 @@ export function VPSRenewalDecisionForm({
         }}
       >
         {RENEWAL_DECISION_OPTIONS.map(([value, label]) => (
-          <option key={value} value={value} disabled={value === 'replaced' && replacedBlocked}>
-            {label}{value === 'replaced' && replacedBlocked ? '（先调整为非 active、用途非 in_use）' : ''}
+          <option key={value} value={value}>
+            {label}
           </option>
         ))}
       </Select>
-      {replacedBlocked ? (
+      {draft.renewalDecision === 'cancel' ? (
         <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
-          已替换要求生命周期不是 active，且用途不是 in_use。先调整这两项，再选择已替换。
-          {onEditFacts ? <Button type="button" variant="ghost" size="sm" onClick={onEditFacts}>编辑事实</Button> : null}
+          {autoRenewVerified ? '已核对服务商不会自动续费。' : '请核对服务商自动续费是否已关闭；保存不续费意向不会代替服务商操作，未完成核对时将保留提醒。'}
+          {onEditFacts ? <Button type="button" variant="ghost" size="sm" disabled={submitting} onClick={onEditFacts}>核对自动续费</Button> : null}
         </p>
       ) : null}
-      {lifecycleError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">生命周期：{lifecycleError}</p> : null}
-      {usageError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">用途：{usageError}</p> : null}
       <label className="input-field vps-wide">
         <span className="input-field__label">决策理由</span>
         <textarea
@@ -86,6 +81,13 @@ export function VPSRenewalDecisionForm({
           }}
           placeholder="例如：价格上涨，迁移到首尔监控实例"
         />
+      </label>
+      <label className="input-field">
+        <span className="input-field__label">复核日期</span>
+        <input className="input" type="date" value={draft.reviewAt ?? ''} disabled={submitting} onChange={(event) => {
+          onDraftChange({ ...draft, reviewAt: event.target.value })
+          onFeedbackClear()
+        }} />
       </label>
     </form>
   )

@@ -86,7 +86,7 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 			return
 		}
 
-		if record.ArchivedAt != nil {
+		if record.ArchivedAt != nil || record.VPSLifecycleStatus == "archived" {
 			writeError(w, http.StatusConflict, "archived monitoring instance")
 			return
 		}
@@ -94,7 +94,7 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 			writeError(w, http.StatusConflict, "retired monitoring instance")
 			return
 		}
-		if record.BindingStatus != monitoringinstances.BindingBound {
+		if record.LifecycleStatus == monitoringinstances.LifecyclePendingEnrollment || record.BindingStatus != monitoringinstances.BindingBound {
 			writeError(w, http.StatusConflict, "monitoring instance agent not bound")
 			return
 		}
@@ -143,7 +143,8 @@ func MonitoringInstanceActions(repo monitoringInstanceActionRepository) http.Han
 }
 
 func commandActionExecutable(record monitoringinstances.Record) bool {
-	return record.ArchivedAt == nil &&
+	return record.ArchivedAt == nil && record.VPSLifecycleStatus != "archived" &&
+		record.LifecycleStatus != monitoringinstances.LifecyclePendingEnrollment &&
 		record.LifecycleStatus != monitoringinstances.LifecycleRetired &&
 		record.BindingStatus == monitoringinstances.BindingBound &&
 		record.MonitoringStatus != monitoringinstances.MonitoringPaused

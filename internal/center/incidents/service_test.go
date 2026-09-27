@@ -904,7 +904,7 @@ func TestServiceInactiveObjectsUseTokenFirstAdministrativeRecoveryCAS(t *testing
 		if mutation.ObjectType != expected.objectType || mutation.ObjectID != expected.objectID || mutation.ExpectedObjectRowVersion != expected.version {
 			t.Fatalf("mutation[%d] = %#v, want token-guarded %s recovery", i, mutation, expected.objectType)
 		}
-		if len(mutation.Active) != 0 || len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentRecovered {
+		if len(mutation.Active) != 0 || len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentClosedByManagement {
 			t.Fatalf("mutation[%d] = %#v, want administrative recovery", i, mutation)
 		}
 	}
@@ -928,8 +928,8 @@ func TestServiceInactiveObjectsWithoutIncidentsDoNotChurnSummaryOrRowVersion(t *
 		LifecycleStatus:      monitoringinstances.LifecycleInUse,
 	}}}
 	targetRepo := &fakeTargetRepo{listTargetsResult: []targets.TargetRecord{{
-		TargetID:  "tg_inactive_empty",
-		RunStatus: targets.RunStatusArchived,
+		TargetID:        "tg_inactive_empty",
+		LifecycleStatus: targets.LifecycleRetired, RunStatus: targets.RunStatusPaused,
 	}}}
 	snapshots := &fakeSnapshotReader{}
 	writer := &fakeMutationWriter{}
@@ -2847,8 +2847,8 @@ func TestServiceEvaluateStaleMonitoringInstancesRecoversNonRunningMonitoringInst
 		if len(mutation.Active) != 0 {
 			t.Fatalf("mutation.Active = %#v, want no active incidents after administrative recovery", mutation.Active)
 		}
-		if len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentRecovered {
-			t.Fatalf("mutation.Events = %#v, want one recovered event", mutation.Events)
+		if len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentClosedByManagement {
+			t.Fatalf("mutation.Events = %#v, want one management closure event", mutation.Events)
 		}
 	}
 	if len(writer.notifications) != 0 {
@@ -2890,7 +2890,7 @@ func TestServiceEvaluateStaleMonitoringInstancesRecoversArchivedMonitoringInstan
 	if len(mutation.Active) != 0 {
 		t.Fatalf("mutation.Active = %#v, want no active incidents after archived administrative recovery", mutation.Active)
 	}
-	if len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentRecovered || mutation.Events[0].Summary != "监控实例已归档，当前异常按行政下线收敛" {
+	if len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentClosedByManagement || mutation.Events[0].Summary != "监控实例已归档，当前异常按行政下线收敛" {
 		t.Fatalf("mutation.Events = %#v, want archived recovered event", mutation.Events)
 	}
 	if len(writer.notifications) != 0 {
@@ -2934,7 +2934,7 @@ func TestServiceAfterSuccessfulSyncRecoversInactiveMonitoringInstanceWithoutMetr
 	if len(mutation.Active) != 0 {
 		t.Fatalf("Active = %#v, want no active incidents for paused monitoring instance", mutation.Active)
 	}
-	if len(mutation.Events) != 1 || mutation.Events[0].IncidentClass != IncidentMonitoringInstanceDiskPressure || mutation.Events[0].EventType != EventIncidentRecovered {
+	if len(mutation.Events) != 1 || mutation.Events[0].IncidentClass != IncidentMonitoringInstanceDiskPressure || mutation.Events[0].EventType != EventIncidentClosedByManagement {
 		t.Fatalf("Events = %#v, want disk incident recovered", mutation.Events)
 	}
 	if len(writer.notifications) != 0 || len(notifier.messages) != 0 {
@@ -2947,7 +2947,7 @@ func TestServiceEvaluatePeriodicStateRecoversInactiveTargets(t *testing.T) {
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{listMonitoringInstancesResult: nil}
 	targetRepo := &fakeTargetRepo{listTargetsResult: []targets.TargetRecord{
 		{TargetID: "tg_paused", RunStatus: targets.RunStatusPaused},
-		{TargetID: "tg_archived", RunStatus: targets.RunStatusArchived},
+		{TargetID: "tg_archived", LifecycleStatus: targets.LifecycleRetired, RunStatus: targets.RunStatusPaused},
 	}}
 	snapshots := &fakeSnapshotReader{
 		activeByObject: map[string][]IncidentRecord{
@@ -2982,8 +2982,8 @@ func TestServiceEvaluatePeriodicStateRecoversInactiveTargets(t *testing.T) {
 		if len(mutation.Active) != 0 {
 			t.Fatalf("mutation.Active = %#v, want no active target incidents after inactive convergence", mutation.Active)
 		}
-		if len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentRecovered {
-			t.Fatalf("mutation.Events = %#v, want one recovered event", mutation.Events)
+		if len(mutation.Events) != 1 || mutation.Events[0].EventType != EventIncidentClosedByManagement {
+			t.Fatalf("mutation.Events = %#v, want one management closure event", mutation.Events)
 		}
 	}
 	if len(writer.notifications) != 0 {
@@ -3039,8 +3039,8 @@ func TestServiceAfterSuccessfulSyncRecoversInactiveTouchedTargets(t *testing.T) 
 	if len(targetMutation.Active) != 0 {
 		t.Fatalf("target Active = %#v, want no active incidents for paused touched target", targetMutation.Active)
 	}
-	if len(targetMutation.Events) != 1 || targetMutation.Events[0].EventType != EventIncidentRecovered {
-		t.Fatalf("target Events = %#v, want recovered event", targetMutation.Events)
+	if len(targetMutation.Events) != 1 || targetMutation.Events[0].EventType != EventIncidentClosedByManagement {
+		t.Fatalf("target Events = %#v, want management closure event", targetMutation.Events)
 	}
 	if len(writer.notifications) != 0 || len(notifier.messages) != 0 {
 		t.Fatalf("notifications = %#v messages = %#v, want no administrative notifications", writer.notifications, notifier.messages)

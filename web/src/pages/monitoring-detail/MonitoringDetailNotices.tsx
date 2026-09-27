@@ -107,11 +107,12 @@ export function MonitoringDetailNotices({
   snapshotReadAt,
   sample,
 }: Props) {
+  const retired = monitoringInstance.lifecycle_status === '已退役' || monitoringInstance.vps_lifecycle_status === 'archived'
   const showBindingConflict =
-    monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
+    !retired && monitoringInstance.binding_status === MONITORING_INSTANCE_BINDING_CONFLICT_STATUS
   const unbound = monitoringInstance.binding_status === '未绑定'
   const activeIncidentCount = monitoringInstance.current_active_incident_count
-  const showActiveIncidents = activeIncidentCount > 0 || incidents.length > 0
+  const showActiveIncidents = !retired && (activeIncidentCount > 0 || incidents.length > 0)
   const firstIncident = earliestIncident(incidents)
   const incidentSummary =
     monitoringInstance.current_primary_issue_summary ||
@@ -123,8 +124,8 @@ export function MonitoringDetailNotices({
     firstIncident?.severity,
   )
   const heartbeatCovered = showActiveIncidents && coversHeartbeat(incidentSummary, incidents)
-  const showStale = !unbound && heartbeatFreshness?.kind === 'stale' && !heartbeatCovered
-  const showMissingHeartbeat = !unbound && heartbeatFreshness?.kind === 'missing' && !heartbeatCovered
+  const showStale = !retired && !unbound && heartbeatFreshness?.kind === 'stale' && !heartbeatCovered
+  const showMissingHeartbeat = !retired && !unbound && heartbeatFreshness?.kind === 'missing' && !heartbeatCovered
   const showMaintenance = monitoringInstance.monitoring_status === '维护中'
   const showPause = monitoringInstance.monitoring_status === '暂停'
   const hasAnyNotice =
@@ -140,7 +141,7 @@ export function MonitoringDetailNotices({
 
   if (!hasAnyNotice) return null
 
-  const heartbeatAt = heartbeatFreshness && 'at' in heartbeatFreshness ? heartbeatFreshness.at : monitoringInstance.last_heartbeat_at
+  const heartbeatAt = heartbeatFreshness && 'at' in heartbeatFreshness ? heartbeatFreshness.at : monitoringInstance.last_trusted_online_at ?? undefined
 
   return (
     <div className="observability-notices">

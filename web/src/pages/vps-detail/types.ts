@@ -18,7 +18,6 @@ import type {
   RenewalMode,
   VPSRenewalDecision,
   VPSTimeline,
-  VPSUsageStatus,
 } from '../../lib/types'
 
 export type VPSDetailPageState = {
@@ -75,6 +74,7 @@ export type FactEditFormState = {
   providerName: string
   productName: string
   orderRef: string
+  acquisitionSource: string
   country: string
   region: string
   city: string
@@ -86,7 +86,11 @@ export type FactEditFormState = {
   sshUser: string
   osName: string
   virtualization: string
-  usageStatus: VPSUsageStatus
+  usageTags: string
+  validityMode: 'fixed' | 'unlimited' | 'unknown'
+  expiresAt: string
+  autoRenewCheck: 'unchecked' | 'enabled' | 'disabled' | 'never_enabled' | 'unsupported'
+  autoRenewCheckedAt: string
   importance: string
   labels: string
   note: string
@@ -95,6 +99,7 @@ export type FactEditFormState = {
 export type DecisionDraftState = {
   renewalDecision: VPSRenewalDecision
   reason: string
+  reviewAt?: string
 }
 
 export type LinkDraftState = {

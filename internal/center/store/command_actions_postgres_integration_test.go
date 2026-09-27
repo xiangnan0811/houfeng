@@ -14,8 +14,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/commandaudits"
+	"houfeng/internal/center/enrollment"
+	"houfeng/internal/center/ids"
 	"houfeng/internal/center/monitoringinstances"
 	storemigrate "houfeng/internal/center/store/migrate"
+	"houfeng/internal/center/syncing"
+	"houfeng/internal/contracts/agentapi"
 )
 
 func TestPostgresIntegrationCommandActionAuditWritePathsAndCleanup(t *testing.T) {
@@ -33,13 +37,13 @@ func TestPostgresIntegrationCommandActionAuditWritePathsAndCleanup(t *testing.T)
 	}
 
 	repo := NewPostgresMonitoringInstanceRepository(db)
-	record, err := repo.CreateMonitoringInstance(ctx, monitoringinstances.CreateInput{
+	record, err := createCommandAuditMonitoringInstance(t, ctx, db, repo, monitoringinstances.CreateInput{
 		DisplayName:     "Tokyo Audit",
 		Group:           "production",
 		Region:          "ap-northeast",
 		City:            "Tokyo",
 		Provider:        "test",
-		LifecycleStatus: monitoringinstances.LifecycleInUse,
+		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
 		Labels:          []string{"audit"},
 	})
 	if err != nil {
@@ -128,33 +132,27 @@ func TestPostgresIntegrationCommandActionAuditWritePathsAndCleanup(t *testing.T)
 		t.Fatalf("RecordRejectedCommandAction() missing instance error = %v, want integrity error", err)
 	}
 
-	if _, err := db.Exec(ctx, `
-		update monitoring_instances
-		set archived_at = now(), archived_reason = 'integration cleanup'
-		where monitoring_instance_id = $1
-	`, record.MonitoringInstanceID); err != nil {
-		t.Fatalf("archive monitoring instance: %v", err)
-	}
-	cleanup, err := repo.PermanentCleanupMonitoringInstance(ctx, record.MonitoringInstanceID, monitoringinstances.PermanentCleanupInput{
-		Reason:           "integration cleanup",
-		ConfirmationName: "Tokyo Audit",
-	})
+	retired, err := repo.RetireMonitoringInstance(ctx, record.MonitoringInstanceID, monitoringinstances.LifecycleActionInput{Reason: "integration retirement", IdempotencyKey: "command-audit-retirement"})
 	if err != nil {
-		t.Fatalf("PermanentCleanupMonitoringInstance() error = %v", err)
+		t.Fatalf("RetireMonitoringInstance() error=%v", err)
 	}
-	if !cleanup.Deleted || cleanup.Counts.CommandActionAuditCount != 2 || cleanup.DeletedReferenceCount != 0 {
-		t.Fatalf("cleanup result = %#v, want two preserved audits excluded from deleted references", cleanup)
+	if retired.LifecycleStatus != monitoringinstances.LifecycleRetired {
+		t.Fatalf("retired=%+v", retired)
 	}
-	if err := db.QueryRow(ctx, `
-		select count(*)::int
-		from monitoring_instance_command_action_audit
-		where monitoring_instance_id = $1
-	`, record.MonitoringInstanceID).Scan(&auditCount); err != nil {
-		t.Fatalf("count command audits after cleanup: %v", err)
+	if err := db.QueryRow(ctx, `select count(*) from monitoring_instance_command_action_audit where monitoring_instance_id=$1`, record.MonitoringInstanceID).Scan(&auditCount); err != nil {
+		t.Fatal(err)
 	}
-	if auditCount != 2 {
-		t.Fatalf("audit count after cleanup = %d, want 2", auditCount)
+	if auditCount != 3 {
+		t.Fatalf("audit count after retirement=%d want original 2 plus cancellation", auditCount)
 	}
+	var cancelled int
+	if err := db.QueryRow(ctx, `select count(*) from monitoring_instance_command_action_audit where monitoring_instance_id=$1 and event_type='cancelled'`, record.MonitoringInstanceID).Scan(&cancelled); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled != 1 {
+		t.Fatalf("cancelled audit count=%d", cancelled)
+	}
+
 }
 
 func TestPostgresIntegrationRejectedAuditRequiresCurrentlyExecutableInstance(t *testing.T) {
@@ -171,13 +169,13 @@ func TestPostgresIntegrationRejectedAuditRequiresCurrentlyExecutableInstance(t *
 	}
 
 	repo := NewPostgresMonitoringInstanceRepository(db)
-	record, err := repo.CreateMonitoringInstance(ctx, monitoringinstances.CreateInput{
+	record, err := createCommandAuditMonitoringInstance(t, ctx, db, repo, monitoringinstances.CreateInput{
 		DisplayName:     "Rejection Gate",
 		Group:           "review",
 		Region:          "test",
 		City:            "test",
 		Provider:        "test",
-		LifecycleStatus: monitoringinstances.LifecycleInUse,
+		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
 		Labels:          []string{"review"},
 	})
 	if err != nil {
@@ -190,11 +188,18 @@ func TestPostgresIntegrationRejectedAuditRequiresCurrentlyExecutableInstance(t *
 			update monitoring_instances
 			set binding_status = $2,
 			    monitoring_status = $3,
-			    archived_at = $4,
-			    archived_reason = case when $4::timestamptz is null then '' else 'review gate' end
+			    archived_at = null,
+			    archived_reason = ''
 			where monitoring_instance_id = $1
-		`, record.MonitoringInstanceID, bindingStatus, monitoringStatus, archivedAt); err != nil {
+		`, record.MonitoringInstanceID, bindingStatus, monitoringStatus); err != nil {
 			t.Fatalf("set rejection gate state: %v", err)
+		}
+		lifecycle := "active"
+		if archivedAt != nil {
+			lifecycle = "archived"
+		}
+		if _, err := db.Exec(ctx, `update vps_assets set lifecycle_status=$2 where vps_id=$1`, record.VPSID, lifecycle); err != nil {
+			t.Fatal(err)
 		}
 	}
 	input := monitoringinstances.RejectedCommandActionInput{
@@ -257,25 +262,25 @@ func TestPostgresIntegrationCommandAuditReadModelFiltersOutcomesAndKeyset(t *tes
 	}
 
 	monitoringRepo := NewPostgresMonitoringInstanceRepository(db)
-	active, err := monitoringRepo.CreateMonitoringInstance(ctx, monitoringinstances.CreateInput{
+	active, err := createCommandAuditMonitoringInstance(t, ctx, db, monitoringRepo, monitoringinstances.CreateInput{
 		DisplayName:     "Tokyo Active",
 		Group:           "production",
 		Region:          "ap-northeast",
 		City:            "Tokyo",
 		Provider:        "test",
-		LifecycleStatus: monitoringinstances.LifecycleInUse,
+		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
 		Labels:          []string{"audit"},
 	})
 	if err != nil {
 		t.Fatalf("create active monitoring instance: %v", err)
 	}
-	deleted, err := monitoringRepo.CreateMonitoringInstance(ctx, monitoringinstances.CreateInput{
+	deleted, err := createCommandAuditMonitoringInstance(t, ctx, db, monitoringRepo, monitoringinstances.CreateInput{
 		DisplayName:     "Literal %_ Edge",
 		Group:           "retired",
 		Region:          "eu-west",
 		City:            "Paris",
 		Provider:        "test",
-		LifecycleStatus: monitoringinstances.LifecycleInUse,
+		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
 		Labels:          []string{"audit"},
 	})
 	if err != nil {
@@ -322,6 +327,13 @@ func TestPostgresIntegrationCommandAuditReadModelFiltersOutcomesAndKeyset(t *tes
 		OccurredAt:  rejectedAt,
 	}); err != nil {
 		t.Fatalf("record rejected command audit: %v", err)
+	}
+	// Simulate loss of a source identity with owner privileges in this disposable
+	// database. Product lifecycle APIs retain these rows and expose no cleanup.
+	for _, sql := range []string{`delete from agent_live_signals where session_id in (select session_id from monitoring_agent_sessions where monitoring_instance_id=$1)`, `delete from monitoring_agent_sessions where monitoring_instance_id=$1`, `delete from vps_monitoring_instance_links where monitoring_instance_id=$1`} {
+		if _, err := db.Exec(ctx, sql, deleted.MonitoringInstanceID); err != nil {
+			t.Fatalf("prepare deleted-identity audit fixture: %v", err)
+		}
 	}
 	if _, err := db.Exec(ctx, `delete from monitoring_instances where monitoring_instance_id = $1`, deleted.MonitoringInstanceID); err != nil {
 		t.Fatalf("delete monitoring instance after snapshot: %v", err)
@@ -412,13 +424,13 @@ func TestPostgresIntegrationCommandAuditQueryPlanIsWindowAndLimitBounded(t *test
 	}
 
 	monitoringRepo := NewPostgresMonitoringInstanceRepository(db)
-	record, err := monitoringRepo.CreateMonitoringInstance(ctx, monitoringinstances.CreateInput{
+	record, err := createCommandAuditMonitoringInstance(t, ctx, db, monitoringRepo, monitoringinstances.CreateInput{
 		DisplayName:     "Command Audit Explain",
 		Group:           "performance",
 		Region:          "test",
 		City:            "test",
 		Provider:        "test",
-		LifecycleStatus: monitoringinstances.LifecycleInUse,
+		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
 		Labels:          []string{"command-audit-explain"},
 	})
 	if err != nil {
@@ -627,6 +639,39 @@ func seedQueuedCommandAudit(t *testing.T, ctx context.Context, repo *PostgresMon
 	}); err != nil {
 		t.Fatalf("queue command audit %q: %v", actionID, err)
 	}
+}
+
+func createCommandAuditMonitoringInstance(t *testing.T, ctx context.Context, db *pgxpool.Pool, repo *PostgresMonitoringInstanceRepository, input monitoringinstances.CreateInput) (monitoringinstances.Record, error) {
+	t.Helper()
+	vpsID, err := ids.New("vps")
+	if err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	if _, err := db.Exec(ctx, `insert into vps_assets(vps_id,display_name,lifecycle_status) values($1,$2,'active')`, vpsID, input.DisplayName); err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	input.LifecycleStatus = monitoringinstances.LifecyclePendingEnrollment
+	record, _, err := repo.CreateLinkedMonitoringInstance(ctx, vpsID, input, "command audit fixture")
+	if err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	token, err := repo.IssueEnrollmentToken(ctx, record.MonitoringInstanceID)
+	if err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	fingerprint := "fp_" + record.MonitoringInstanceID
+	_, credential, err := repo.ApplyEnrollment(ctx, enrollment.EnrollInput{Token: token, Fingerprint: fingerprint})
+	if err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	sessionID, _, ok := strings.Cut(credential, ".")
+	if !ok {
+		return monitoringinstances.Record{}, fmt.Errorf("enrollment did not create a session")
+	}
+	if _, err := NewPostgresSyncRepository(db).ApplyBatch(ctx, syncing.Batch{SessionID: sessionID, MonitoringInstanceID: record.MonitoringInstanceID, SyncToken: credential, LiveSignal: &agentapi.LiveSignal{ID: "command-audit-enrollment", Fingerprint: fingerprint}}); err != nil {
+		return monitoringinstances.Record{}, err
+	}
+	return repo.GetMonitoringInstance(ctx, record.MonitoringInstanceID)
 }
 
 func setCommandAuditMonitoringInstanceExecutable(t *testing.T, ctx context.Context, db *pgxpool.Pool, monitoringInstanceID string) {

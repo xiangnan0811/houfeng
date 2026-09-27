@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/assetdomains"
+	"houfeng/internal/center/assetrelations"
 	"houfeng/internal/center/assetservices"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/renewals"
@@ -30,7 +31,7 @@ func TestVPSCreateIdempotencyLostResponsePostgres(t *testing.T) {
 		City:            "Initial VPS city",
 		Datacenter:      "Initial VPS datacenter",
 		LifecycleStatus: vpsassets.LifecycleActive,
-		UsageStatus:     vpsassets.UsageInUse,
+		UsageTags:       []string{"in_use"},
 		Labels:          initialVPSLabels,
 		Note:            "Initial VPS note",
 	})
@@ -84,6 +85,11 @@ func TestVPSCreateIdempotencyLostResponsePostgres(t *testing.T) {
 		if replayed {
 			t.Fatal("first service create unexpectedly replayed")
 		}
+		relations := NewPostgresAssetRelationRepository(pool)
+		before, err := relations.List(ctx, vps.VPSID, assetrelations.Service, false)
+		if err != nil || len(before) != 1 || before[0].ObjectID != first.ServiceID || before[0].EndedAt != nil {
+			t.Fatalf("first service association invariant failed: count=%d error type=%T", len(before), err)
+		}
 		second, replayed, err := repo.CreateAssetServiceIdempotent(ctx, input, "lost-response-service-001")
 		if err != nil {
 			t.Fatalf("service replay error type = %T", err)
@@ -93,9 +99,13 @@ func TestVPSCreateIdempotencyLostResponsePostgres(t *testing.T) {
 		}
 		serviceID = first.ServiceID
 		assertIdempotentRowCounts(t, ctx, pool,
-			`select count(*) from asset_services where vps_id = $1`, vps.VPSID,
+			`select count(*) from asset_services where name = $1`, input.Name,
 			`select count(*) from asset_service_create_idempotency where idempotency_key = $1`, "lost-response-service-001",
 		)
+		after, err := relations.List(ctx, vps.VPSID, assetrelations.Service, false)
+		if err != nil || len(after) != 1 || !reflect.DeepEqual(after, before) {
+			t.Fatalf("service replay association invariant failed: before count=%d after count=%d unchanged=%t error type=%T", len(before), len(after), reflect.DeepEqual(after, before), err)
+		}
 	})
 
 	t.Run("asset domain", func(t *testing.T) {
@@ -114,6 +124,11 @@ func TestVPSCreateIdempotencyLostResponsePostgres(t *testing.T) {
 		if replayed {
 			t.Fatal("first domain create unexpectedly replayed")
 		}
+		relations := NewPostgresAssetRelationRepository(pool)
+		before, err := relations.List(ctx, vps.VPSID, assetrelations.Domain, false)
+		if err != nil || len(before) != 1 || before[0].ObjectID != first.DomainID || before[0].EndedAt != nil || before[0].ServiceID == nil || *before[0].ServiceID != serviceID {
+			t.Fatalf("first domain association invariant failed: count=%d error type=%T", len(before), err)
+		}
 		second, replayed, err := repo.CreateAssetDomainIdempotent(ctx, input, "lost-response-domain-001")
 		if err != nil {
 			t.Fatalf("domain replay error type = %T", err)
@@ -122,9 +137,13 @@ func TestVPSCreateIdempotencyLostResponsePostgres(t *testing.T) {
 			t.Fatalf("domain replayed = %t, result ID match = %t", replayed, second.DomainID == first.DomainID)
 		}
 		assertIdempotentRowCounts(t, ctx, pool,
-			`select count(*) from asset_domains where vps_id = $1`, vps.VPSID,
+			`select count(*) from asset_domains where domain_name = $1`, input.DomainName,
 			`select count(*) from asset_domain_create_idempotency where idempotency_key = $1`, "lost-response-domain-001",
 		)
+		after, err := relations.List(ctx, vps.VPSID, assetrelations.Domain, false)
+		if err != nil || len(after) != 1 || !reflect.DeepEqual(after, before) {
+			t.Fatalf("domain replay association invariant failed: before count=%d after count=%d unchanged=%t error type=%T", len(before), len(after), reflect.DeepEqual(after, before), err)
+		}
 	})
 
 	t.Run("linked monitoring instance", func(t *testing.T) {

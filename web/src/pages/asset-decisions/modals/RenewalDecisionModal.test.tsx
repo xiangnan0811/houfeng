@@ -23,7 +23,7 @@ const VPS: VPSAssetRecord = {
   os_name: 'Debian',
   virtualization: 'kvm',
   lifecycle_status: 'active',
-  usage_status: 'in_use',
+  usage_tags: ['in_use'],
   renewal_decision: 'unreviewed',
   importance: 'normal',
   labels: [],

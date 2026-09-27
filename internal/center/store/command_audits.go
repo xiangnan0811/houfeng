@@ -61,6 +61,7 @@ with ranked_starters as (
 		s.occurred_at as started_at,
 		case
 			when s.event_type = 'rejected' then 'rejected'
+			when action_state.has_cancelled then 'cancelled'
 			when action_state.has_completed and action_state.completed_exit_code = 0 then 'succeeded'
 			when action_state.has_completed then 'failed'
 			when action_state.has_dispatched then 'dispatched'
@@ -69,6 +70,7 @@ with ranked_starters as (
 	from starters s
 	left join lateral (
 		select
+			coalesce(bool_or(e.event_type = 'cancelled'), false) as has_cancelled,
 			coalesce(bool_or(e.event_type = 'completed'), false) as has_completed,
 			coalesce(bool_or(e.event_type = 'dispatched'), false) as has_dispatched,
 			(array_agg(e.exit_code order by e.occurred_at desc, e.audit_id desc)
@@ -129,7 +131,7 @@ select
 	end as rejection_reason
 from monitoring_instance_command_action_audit
 where occurred_at <= $3
-	and event_type in ('queued', 'dispatched', 'completed', 'rejected')
+	and event_type in ('queued', 'dispatched', 'completed', 'rejected', 'cancelled')
 	and (
 		action_id = any($1::text[]) or
 		(event_type = 'rejected' and audit_id = any($2::text[]))

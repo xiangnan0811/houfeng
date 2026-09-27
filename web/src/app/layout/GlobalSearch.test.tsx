@@ -80,6 +80,7 @@ const mockTargets = [
     host: 'blog.example.com',
     base_port: 443,
     execution_monitoring_instance_labels: ['edge'],
+    lifecycle_status: 'active',
     run_status: '启用',
     group: 'prod-group',
     labels: [],

@@ -100,6 +100,13 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 					*(dest[0].(*string)) = "启用"
 					return nil
 				}}
+			case strings.Contains(sql, "select to_jsonb(o)"):
+				return fakeAssetServiceRow{scan: func(dest ...any) error { return nil }}
+			case strings.Contains(sql, "insert into asset_service_associations"):
+				if args[1] == "" || args[2] != "vps_001" || args[4] != "https://example.com" {
+					t.Fatalf("association args = %#v", args)
+				}
+				return fakeAssetServiceRow{scan: func(dest ...any) error { return nil }}
 			case !strings.Contains(sql, "insert into asset_services"):
 				t.Fatalf("unexpected QueryRow SQL %q", sql)
 				return fakeAssetServiceRow{scan: func(dest ...any) error { return nil }}
@@ -156,7 +163,7 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 		t.Fatalf("create args = %#v, want one 10-argument insert", rowArgs)
 	}
 	insertArgs := rowArgs[insertIndex]
-	if insertArgs[1] != "vps_001" || insertArgs[2] != "tg_001" || insertArgs[3] != "Blog" || insertArgs[7] != 443 {
+	if insertArgs[1] != nil || insertArgs[2] != nil || insertArgs[3] != "Blog" || insertArgs[7] != nil {
 		t.Fatalf("create normalized args = %#v", insertArgs)
 	}
 	labels, ok := insertArgs[8].([]string)
@@ -189,7 +196,8 @@ func TestPostgresAssetServiceCreateAndList(t *testing.T) {
 		"target_id = $2",
 		"service_type = $3",
 		"status = $4",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"v.lifecycle_status <> 'archived'",
+		"a.ended_at is null",
 		"order by lower(asset_services.name), asset_services.service_id",
 	} {
 		if !strings.Contains(queryCalls[0], snippet) {
@@ -215,7 +223,7 @@ func TestPostgresAssetServiceRejectsActiveReferenceToArchivedTarget(t *testing.T
 				}}
 			case strings.Contains(sql, "from targets"):
 				return fakeAssetServiceRow{scan: func(dest ...any) error {
-					*(dest[0].(*string)) = targets.RunStatusArchived
+					*(dest[0].(*string)) = targets.LifecycleRetired
 					return nil
 				}}
 			case strings.Contains(sql, "insert into asset_services"):
@@ -286,8 +294,8 @@ func TestPostgresAssetServiceListForVPS(t *testing.T) {
 	if len(queryArgs) != 1 || queryArgs[0] != "vps_001" {
 		t.Fatalf("query args = %#v, want vps filter", queryArgs)
 	}
-	if strings.Contains(querySQL, "lifecycle_status not in ('cancelled', 'archived')") {
-		t.Fatalf("ListAssetServicesForVPS SQL = %q, want history read without current asset scope filter", querySQL)
+	if !strings.Contains(querySQL, "a.ended_at is null") || !strings.Contains(querySQL, "v.lifecycle_status <> 'archived'") {
+		t.Fatalf("ListAssetServicesForVPS SQL = %q, want current associations of managed VPS only", querySQL)
 	}
 }
 

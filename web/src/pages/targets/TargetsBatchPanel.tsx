@@ -42,7 +42,7 @@ export function TargetsBatchPanel({
     { key: 'exit-maintenance', label: '退出维护', onSelect: () => onBatchAction('exit-maintenance') },
     { key: 'pause', label: '暂停', onSelect: () => onBatchAction('pause') },
     { key: 'resume', label: '恢复', onSelect: () => onBatchAction('resume') },
-    { key: 'archive', label: '归档', onSelect: () => onBatchAction('archive') },
+    { key: 'archive', label: '退役', onSelect: () => onBatchAction('archive') },
   ]
 
   if (selectedCount === 0 && open) setOpen(false)
@@ -122,12 +122,12 @@ export function TargetsBatchPanel({
       {pendingBatchAction === 'archive' ? (
         <ActionConfirmationModal
           open
-          title="确认批量归档目标"
-          current={`将对已选的 ${selectedCount} 个目标执行归档。`}
-          result="操作后：已选目标退出默认工作集，变为归档对象。"
-          impact="归档后不再作为活跃入口探测，需要恢复后才能继续观测。"
+          title="确认批量退役目标"
+          current={`将对已选的 ${selectedCount} 个目标执行退役。`}
+          result="操作后：已选目标退出默认工作集，变为退役对象。"
+          impact="退役后不再作为活跃入口探测，需要恢复后才能继续观测。"
           unchanged="不会删除历史观测、事件或 ProbeItem 配置。"
-          confirmLabel="确认批量归档"
+          confirmLabel="确认批量退役"
           disabled={batchSubmitting}
           onConfirm={onConfirmBatchArchive}
           onCancel={onCancelBatchConfirm}

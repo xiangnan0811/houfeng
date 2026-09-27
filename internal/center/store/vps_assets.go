@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -71,7 +72,9 @@ const vpsAssetSelectColumns = `
 		created_at,
 		updated_at,
 		archived_at,
-		archived_state_snapshot`
+		archived_state_snapshot,
+		usage_tags, validity_mode, expires_at::text, auto_renew_check, auto_renew_checked_at,
+		renewal_reason, renewal_review_at, acquisition_source`
 
 type vpsAssetScanner interface {
 	Scan(dest ...any) error
@@ -110,6 +113,8 @@ func scanVPSAsset(row vpsAssetScanner) (vpsassets.Record, error) {
 		&record.UpdatedAt,
 		&record.ArchivedAt,
 		&record.ArchivedStateSnapshot,
+		&record.UsageTags, &record.ValidityMode, &record.ExpiresAt, &record.AutoRenewCheck, &record.AutoRenewCheckedAt,
+		&record.RenewalReason, &record.RenewalReviewAt, &record.AcquisitionSource,
 	); err != nil {
 		return vpsassets.Record{}, err
 	}
@@ -124,6 +129,10 @@ func (r *PostgresVPSAssetRepository) ListVPSAssets(ctx context.Context, filters 
 
 	args := []any{}
 	conditions := []string{}
+	if filters.UsageTag != "" {
+		args = append(args, filters.UsageTag)
+		conditions = append(conditions, fmt.Sprintf("$%d = any(usage_tags)", len(args)))
+	}
 	if filters.ProviderID != "" {
 		args = append(args, filters.ProviderID)
 		conditions = append(conditions, fmt.Sprintf("provider_id = $%d", len(args)))
@@ -255,7 +264,7 @@ func (r *PostgresVPSAssetRepository) CreateVPSAsset(ctx context.Context, input v
 			importance,
 			labels,
 			note,
-			archived_at
+				archived_at, usage_tags, validity_mode, expires_at, auto_renew_check, auto_renew_checked_at, renewal_reason, renewal_review_at, acquisition_source
 		) values (
 			$1,
 			$2,
@@ -280,7 +289,8 @@ func (r *PostgresVPSAssetRepository) CreateVPSAsset(ctx context.Context, input v
 			$21,
 			$22,
 			$23,
-			case when $18::text = 'archived' then now() else null end
+			case when $18::text = 'archived' then now() else null end,
+			$24::text[], $25, $26::date, $27, $28::timestamptz, $29, $30::timestamptz, $31
 		)
 		returning `+vpsAssetSelectColumns,
 		vpsID,
@@ -306,6 +316,7 @@ func (r *PostgresVPSAssetRepository) CreateVPSAsset(ctx context.Context, input v
 		input.Importance,
 		input.Labels,
 		input.Note,
+		input.UsageTags, input.ValidityMode, nullableStringArg(input.ExpiresAt), input.AutoRenewCheck, nullableTimeArg(input.AutoRenewCheckedAt), input.RenewalReason, nullableTimeArg(input.RenewalReviewAt), input.AcquisitionSource,
 	))
 	if err != nil {
 		if isVPSAssetInvalidPostgresError(err) {
@@ -352,7 +363,7 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 	if err != nil {
 		return vpsassets.Record{}, fmt.Errorf("query vps asset %q before ordinary patch: %w", vpsID, err)
 	}
-	if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+	if err := ensureVPSAssetPatchAllowed(current, input); err != nil {
 		return vpsassets.Record{}, err
 	}
 	if err := validateMergedVPSAssetPatch(current, input); err != nil {
@@ -364,7 +375,7 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 
 	record, err := patchOrdinaryVPSAssetRow(ctx, tx, vpsID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+		if err := ensureVPSAssetPatchAllowed(current, input); err != nil {
 			return vpsassets.Record{}, err
 		}
 		if input.ExpectedUpdatedAt != nil {
@@ -427,7 +438,7 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 	if err != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("query vps asset %q before history patch: %w", vpsID, err)
 	}
-	if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+	if err := ensureVPSAssetPatchAllowed(current, input); err != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
 	}
 	if err := validateMergedVPSAssetPatch(current, input); err != nil {
@@ -439,7 +450,7 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 
 	record, err := patchOrdinaryVPSAssetRow(ctx, tx, vpsID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
-		if err := ensureVPSAssetOrdinaryPatchAllowed(current); err != nil {
+		if err := ensureVPSAssetPatchAllowed(current, input); err != nil {
 			return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
 		}
 		if input.ExpectedUpdatedAt != nil {
@@ -459,12 +470,6 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 	}
 
 	linkage := noRenewalSubscriptionLinkage()
-	if linkSubscription && current.RenewalDecision != record.RenewalDecision && vpsassets.IsCancellationRenewalDecision(record.RenewalDecision) {
-		linkage, err = cancelSingleActiveSubscriptionAutoRenew(ctx, tx, record.VPSID)
-		if err != nil {
-			return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
-		}
-	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("commit vps asset history transaction: %w", err)
@@ -473,6 +478,20 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 }
 
 func recordVPSAssetHistoryChanges(ctx context.Context, tx pgx.Tx, current, record vpsassets.Record, input vpsassets.PatchInput) error {
+	if input.AutoRenewCheck.Set || input.AutoRenewCheckedAt.Set || input.RenewalReviewAt.Set || input.RenewalReason.Set || input.ValidityMode.Set || input.ExpiresAt.Set || (current.LifecycleStatus == vpsassets.LifecycleArchived && input.Note.Set) {
+		before, after := vpsIndependentFactsSnapshot(current), vpsIndependentFactsSnapshot(record)
+		beforeJSON, _ := json.Marshal(before)
+		afterJSON, _ := json.Marshal(after)
+		if string(beforeJSON) != string(afterJSON) {
+			details, err := json.Marshal(map[string]any{"before": before, "after": after})
+			if err != nil {
+				return err
+			}
+			if _, err := createExperienceLog(ctx, tx, renewals.CreateExperienceLogInput{VPSID: record.VPSID, Category: renewals.ExperienceBilling, Severity: "info", Summary: "资源有效期、续费核对或归档补充修订", Details: string(details)}); err != nil {
+				return err
+			}
+		}
+	}
 	if current.RenewalDecision != record.RenewalDecision {
 		fromDecision := current.RenewalDecision
 		if _, err := createRenewalDecision(ctx, tx, renewals.CreateDecisionInput{
@@ -527,84 +546,6 @@ func noRenewalSubscriptionLinkage() vpsassets.RenewalSubscriptionLinkage {
 		Status:  vpsassets.RenewalSubscriptionLinkageNone,
 		Message: "续费决策不需要联动订阅自动续费。",
 	}
-}
-
-func cancelSingleActiveSubscriptionAutoRenew(ctx context.Context, tx pgx.Tx, vpsID string) (vpsassets.RenewalSubscriptionLinkage, error) {
-	records, err := listSubscriptionsForVPSForUpdate(ctx, tx, vpsID)
-	if err != nil {
-		return vpsassets.RenewalSubscriptionLinkage{}, err
-	}
-	activeRecords := make([]subscriptions.Record, 0, len(records))
-	for _, record := range records {
-		if record.Status == subscriptions.StatusActive {
-			activeRecords = append(activeRecords, record)
-		}
-	}
-	if len(activeRecords) == 0 {
-		message := "缺少生效中的订阅记录，续费决策已保存但没有自动取消订阅自动续费。"
-		if len(records) > 0 {
-			message = "仍有关联历史或待确认订阅；本次未改写账单，不能由账单状态推断自动续费已停止。请在取消/退役工作台逐条核对处理。"
-		}
-		return vpsassets.RenewalSubscriptionLinkage{
-			Status:         vpsassets.RenewalSubscriptionLinkageNoActiveSubscription,
-			CandidateCount: len(records),
-			Message:        message,
-		}, nil
-	}
-	if len(activeRecords) > 1 {
-		return vpsassets.RenewalSubscriptionLinkage{
-			Status:         vpsassets.RenewalSubscriptionLinkageMultipleActiveSubscription,
-			CandidateCount: len(activeRecords),
-			Message:        "存在多条 active 订阅账单，续费决策已保存但未自动批量修改；请逐条核对并确认处理范围。",
-		}, nil
-	}
-
-	current := activeRecords[0]
-	input := subscriptions.NormalizePatchAgainstRecord(current, subscriptions.PatchInput{
-		AutoRenew:          subscriptions.PatchBool(false),
-		AutoRenewCancelled: subscriptions.PatchBool(true),
-	})
-	if err := subscriptions.ValidatePatchInput(input); err != nil {
-		return vpsassets.RenewalSubscriptionLinkage{}, err
-	}
-	if !subscriptionPriceHistoryChanged(current, applySubscriptionPatchPreview(current, input)) {
-		return vpsassets.RenewalSubscriptionLinkage{
-			Status:         vpsassets.RenewalSubscriptionLinkageAlreadyCancelled,
-			CandidateCount: 1,
-			SubscriptionID: current.SubscriptionID,
-			Message:        "关联订阅已处于取消自动续费状态。",
-		}, nil
-	}
-
-	updated, err := patchSubscriptionRow(ctx, tx, current.SubscriptionID, input)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return vpsassets.RenewalSubscriptionLinkage{}, subscriptions.ErrSubscriptionNotFound
-	}
-	if err != nil {
-		if isSubscriptionInvalidPostgresError(err) {
-			return vpsassets.RenewalSubscriptionLinkage{}, subscriptions.ErrInvalidSubscriptionInput
-		}
-		return vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("patch subscription %q for vps renewal linkage: %w", current.SubscriptionID, err)
-	}
-	if subscriptionPriceHistoryChanged(current, updated) {
-		if _, err := createPriceHistory(ctx, tx, renewals.CreatePriceHistoryInput{
-			From: current,
-			To:   updated,
-		}); err != nil {
-			if errors.Is(err, renewals.ErrInvalidAssetHistoryInput) || errors.Is(err, renewals.ErrAssetTimelineNotFound) {
-				return vpsassets.RenewalSubscriptionLinkage{}, subscriptions.ErrInvalidSubscriptionInput
-			}
-			return vpsassets.RenewalSubscriptionLinkage{}, fmt.Errorf("record price history for subscription %q: %w", current.SubscriptionID, err)
-		}
-	}
-
-	return vpsassets.RenewalSubscriptionLinkage{
-		Status:         vpsassets.RenewalSubscriptionLinkageUpdated,
-		CandidateCount: 1,
-		SubscriptionID: updated.SubscriptionID,
-		Updated:        true,
-		Message:        "已同步取消关联订阅的自动续费。",
-	}, nil
 }
 
 func listSubscriptionsForVPSForUpdate(ctx context.Context, tx pgx.Tx, vpsID string) ([]subscriptions.Record, error) {
@@ -703,7 +644,7 @@ func cloneSubscriptionDate(value *subscriptions.Date) *subscriptions.Date {
 }
 
 func patchRequiresVPSAssetHistory(input vpsassets.PatchInput) bool {
-	return input.RenewalDecision.Set ||
+	return input.AutoRenewCheck.Set || input.AutoRenewCheckedAt.Set || input.RenewalReviewAt.Set || input.RenewalReason.Set || input.ValidityMode.Set || input.ExpiresAt.Set || input.Note.Set || input.RenewalDecision.Set ||
 		input.IPv4.Set ||
 		input.IPv6.Set ||
 		input.ProductName.Set ||
@@ -716,7 +657,10 @@ func patchRequiresVPSAssetHistory(input vpsassets.PatchInput) bool {
 
 func validateMergedVPSAssetPatch(current vpsassets.Record, input vpsassets.PatchInput) error {
 	merged := applyVPSAssetPatchPreview(current, input)
-	return vpsassets.ValidateVPSStateCombination(merged.LifecycleStatus, merged.UsageStatus, merged.RenewalDecision)
+	if err := vpsassets.ValidateVPSStateCombination(merged.LifecycleStatus, merged.UsageStatus, merged.RenewalDecision); err != nil {
+		return err
+	}
+	return vpsassets.ValidateIndependentFacts(merged.ValidityMode, merged.ExpiresAt, merged.AutoRenewCheck, merged.AutoRenewCheckedAt)
 }
 
 func ensureVPSAssetOrdinaryPatchAllowed(current vpsassets.Record) error {
@@ -728,7 +672,42 @@ func ensureVPSAssetOrdinaryPatchAllowed(current vpsassets.Record) error {
 	}
 }
 
+func ensureVPSAssetPatchAllowed(current vpsassets.Record, input vpsassets.PatchInput) error {
+	if current.LifecycleStatus == vpsassets.LifecycleArchived && input.IsArchivedSupplement() {
+		return nil
+	}
+	return ensureVPSAssetOrdinaryPatchAllowed(current)
+}
+
+func vpsIndependentFactsSnapshot(record vpsassets.Record) map[string]any {
+	return map[string]any{"validity_mode": record.ValidityMode, "expires_at": record.ExpiresAt, "auto_renew_check": record.AutoRenewCheck, "auto_renew_checked_at": record.AutoRenewCheckedAt, "renewal_reason": record.RenewalReason, "renewal_review_at": record.RenewalReviewAt, "note": record.Note}
+}
+
 func applyVPSAssetPatchPreview(record vpsassets.Record, input vpsassets.PatchInput) vpsassets.Record {
+	if input.UsageTags.Set {
+		record.UsageTags = append([]string{}, input.UsageTags.Values...)
+	}
+	if input.ValidityMode.Set {
+		record.ValidityMode = input.ValidityMode.Value
+	}
+	if input.ExpiresAt.Set {
+		record.ExpiresAt = cloneVPSAssetStringPtr(input.ExpiresAt.Value)
+	}
+	if input.AutoRenewCheck.Set {
+		record.AutoRenewCheck = input.AutoRenewCheck.Value
+	}
+	if input.AutoRenewCheckedAt.Set {
+		record.AutoRenewCheckedAt = input.AutoRenewCheckedAt.Value
+	}
+	if input.RenewalReason.Set {
+		record.RenewalReason = input.RenewalReason.Value
+	}
+	if input.RenewalReviewAt.Set {
+		record.RenewalReviewAt = input.RenewalReviewAt.Value
+	}
+	if input.AcquisitionSource.Set {
+		record.AcquisitionSource = input.AcquisitionSource.Value
+	}
 	if input.DisplayName.Set {
 		record.DisplayName = input.DisplayName.Value
 	}
@@ -836,6 +815,14 @@ func patchVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, inp
 		    importance = case when $40::boolean then $41 else importance end,
 		    labels = case when $42::boolean then $43::text[] else labels end,
 		    note = case when $44::boolean then $45 else note end,
+		    usage_tags = case when $48::boolean then $49::text[] else usage_tags end,
+		    validity_mode = case when $50::boolean then $51 else validity_mode end,
+		    expires_at = case when $52::boolean then $53::date else expires_at end,
+		    auto_renew_check = case when $54::boolean then $55 else auto_renew_check end,
+		    auto_renew_checked_at = case when $56::boolean then $57::timestamptz else auto_renew_checked_at end,
+		    renewal_reason = case when $58::boolean then $59 else renewal_reason end,
+		    renewal_review_at = case when $60::boolean then $61::timestamptz else renewal_review_at end,
+		    acquisition_source = case when $62::boolean then $63 else acquisition_source end,
 		    archived_at = case
 		        when $34::boolean and $35::text = 'archived' then coalesce(archived_at, now())
 		        when $34::boolean and $35::text <> 'archived' then null
@@ -892,7 +879,15 @@ func patchVPSAssetRow(ctx context.Context, db vpsAssetQueryer, vpsID string, inp
 		input.Note.Set,
 		input.Note.Value,
 		nullableTimeArg(input.ExpectedUpdatedAt),
-		ordinary,
+		ordinary && !input.IsArchivedSupplement(),
+		input.UsageTags.Set, input.UsageTags.Values,
+		input.ValidityMode.Set, input.ValidityMode.Value,
+		input.ExpiresAt.Set, nullableStringArg(input.ExpiresAt.Value),
+		input.AutoRenewCheck.Set, input.AutoRenewCheck.Value,
+		input.AutoRenewCheckedAt.Set, nullableTimeArg(input.AutoRenewCheckedAt.Value),
+		input.RenewalReason.Set, input.RenewalReason.Value,
+		input.RenewalReviewAt.Set, nullableTimeArg(input.RenewalReviewAt.Value),
+		input.AcquisitionSource.Set, input.AcquisitionSource.Value,
 	))
 }
 

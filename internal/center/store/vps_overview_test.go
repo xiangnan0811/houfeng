@@ -133,7 +133,7 @@ func TestVPSOverviewRepositoryLoadsGranularSourcesWithTruthfulFreshness(t *testi
 		}},
 		&fakeMonitoringLinks{links: []assetlinks.MonitoringInstanceSummary{{
 			MonitoringInstanceID: "mi_1", CurrentHealthStatus: "正常", MonitoringStatus: "启用",
-			LifecycleStatus: "在用", LastHeartbeatAt: &now,
+			LifecycleStatus: "已接入", LastTrustedOnlineAt: &now,
 		}}},
 		&fakeIPQuality{report: ipquality.VPSReport{Summary: &ipquality.Summary{
 			Status: "success", RiskLevel: "low", ObservedAt: now,

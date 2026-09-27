@@ -3,6 +3,7 @@ package enrollment
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"houfeng/internal/center/monitoringinstances"
@@ -42,7 +43,13 @@ func (s *Service) EnrollMonitoringInstance(ctx context.Context, input EnrollInpu
 		return EnrollResult{}, err
 	}
 
+	capability := ""
+	if syncToken != "" {
+		capability = "full"
+	}
 	return EnrollResult{
+		SessionID:            strings.SplitN(syncToken, ".", 2)[0],
+		Capability:           capability,
 		MonitoringInstanceID: record.MonitoringInstanceID,
 		BindingStatus:        record.BindingStatus,
 		SyncToken:            syncToken,

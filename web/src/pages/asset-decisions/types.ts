@@ -52,7 +52,6 @@ export type DecisionQueueView =
   | 'all'
   | 'unreviewed'
   | 'renewal'
-  | 'migrate'
   | 'cancel'
   | 'cancellation_attention'
   | 'unlinked'
@@ -193,7 +192,6 @@ export type QueueState = {
   renewals: SubscriptionRecord[]
   subscriptions: SubscriptionRecord[]
   unreviewed: VPSAssetRecord[]
-  migrate: VPSAssetRecord[]
   cancel: VPSAssetRecord[]
 }
 

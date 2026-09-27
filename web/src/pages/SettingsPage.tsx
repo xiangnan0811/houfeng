@@ -95,16 +95,12 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
     retentionPolicy: {
       rawLayerDays: String(settings.retention_policy.raw_layer_days),
       aggregateLayerDays: String(settings.retention_policy.aggregate_layer_days),
-      eventLayerDays: String(settings.retention_policy.event_layer_days),
-      notificationLayerDays: String(settings.retention_policy.notification_layer_days),
     },
     ipQuality: {
       enabled: settings.ip_quality_settings.enabled,
       frequencySeconds: String(settings.ip_quality_settings.frequency_seconds),
       staleAfterSeconds: String(settings.ip_quality_settings.stale_after_seconds),
       timeoutSeconds: String(settings.ip_quality_settings.timeout_seconds),
-      rawRetentionDays: String(settings.ip_quality_settings.raw_retention_days),
-      historyRetentionDays: String(settings.ip_quality_settings.history_retention_days),
       servicesText: settings.ip_quality_settings.services.join(', '),
     },
   }
@@ -126,6 +122,7 @@ function parsePositiveInteger(value: string, label: string) {
 function parseRawRetentionDays(value: string) {
   const days = parsePositiveInteger(value, '原始层天数')
   if (days < 30) throw new Error('原始层天数必须至少为 30 天。')
+  if (days > 365) throw new Error('原始层天数不能超过 365 天。')
   return days
 }
 
@@ -207,18 +204,12 @@ function buildIPQualitySettings(f: SettingsFormState) {
   if (staleAfterSeconds < frequencySeconds) throw new Error('IP 质量过期窗口必须大于或等于采集周期。')
   const timeoutSeconds = parsePositiveInteger(f.ipQuality.timeoutSeconds, 'IP 质量请求超时')
   if (timeoutSeconds > 300) throw new Error('IP 质量请求超时必须不超过 300 秒。')
-  const rawRetentionDays = parsePositiveInteger(f.ipQuality.rawRetentionDays, 'IP 质量原始 JSON 保留天数')
-  if (rawRetentionDays < 7) throw new Error('IP 质量原始 JSON 保留天数必须至少为 7 天。')
-  const historyRetentionDays = parsePositiveInteger(f.ipQuality.historyRetentionDays, 'IP 质量历史保留天数')
-  if (historyRetentionDays < rawRetentionDays) throw new Error('IP 质量历史保留天数必须大于或等于原始 JSON 保留天数。')
 
   return {
     enabled: f.ipQuality.enabled,
     frequency_seconds: frequencySeconds,
     stale_after_seconds: staleAfterSeconds,
     timeout_seconds: timeoutSeconds,
-    raw_retention_days: rawRetentionDays,
-    history_retention_days: historyRetentionDays,
     services: parseCommaList(f.ipQuality.servicesText, 'IP 质量采集服务集合'),
   }
 }
@@ -254,8 +245,6 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
     retention_policy: {
       raw_layer_days: parseRawRetentionDays(form.retentionPolicy.rawLayerDays),
       aggregate_layer_days: parsePositiveInteger(form.retentionPolicy.aggregateLayerDays, '聚合层天数'),
-      event_layer_days: parsePositiveInteger(form.retentionPolicy.eventLayerDays, '事件层天数'),
-      notification_layer_days: parsePositiveInteger(form.retentionPolicy.notificationLayerDays, '通知层天数'),
     },
     ip_quality_settings: buildIPQualitySettings(form),
   }

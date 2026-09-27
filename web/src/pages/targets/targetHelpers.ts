@@ -18,7 +18,6 @@ export const TARGET_RUN_STATUS_FILTER_OPTIONS = [
   { value: '启用', label: '启用' },
   { value: '维护中', label: '维护中' },
   { value: '暂停', label: '暂停' },
-  { value: '已归档', label: '已归档' },
 ] as const
 
 export const TARGET_HEALTH_STATUS_FILTER_OPTIONS = [
@@ -61,7 +60,7 @@ export function distinctSorted(values: string[]): string[] {
 }
 
 export function isCoverageGapTarget(target: TargetRecord) {
-  return target.execution_monitoring_instance_labels.length === 0
+  return target.lifecycle_status !== 'retired' && target.execution_monitoring_instance_labels.length === 0
 }
 
 const ABNORMAL_HEALTH: Record<string, BadgeTone> = {
@@ -74,13 +73,12 @@ export type TargetAttentionBadge = { label: string; tone: BadgeTone }
 
 /** List attention cell: never 正常; control states occupy the cell. */
 export function targetAttentionBadges(target: TargetRecord): TargetAttentionBadge[] {
+  if (target.lifecycle_status === 'retired') return [{ label: '已退役', tone: 'offline' }]
   const badges: TargetAttentionBadge[] = []
   if (target.run_status === '维护中') {
     badges.push({ label: '维护中', tone: 'maintenance' })
   } else if (target.run_status === '暂停') {
     badges.push({ label: '暂停', tone: 'offline' })
-  } else if (target.run_status === '已归档') {
-    badges.push({ label: '已归档', tone: 'offline' })
   }
   const healthTone = ABNORMAL_HEALTH[target.current_health_status]
   if (healthTone) {
@@ -92,6 +90,7 @@ export function targetAttentionBadges(target: TargetRecord): TargetAttentionBadg
 }
 
 export function targetIssueSummary(target: TargetRecord): string {
+  if (target.lifecycle_status === 'retired') return ''
   const summary = target.current_primary_issue_summary.trim()
   if (summary) return summary
   if (isCoverageGapTarget(target) && !ABNORMAL_HEALTH[target.current_health_status]) {
@@ -101,15 +100,15 @@ export function targetIssueSummary(target: TargetRecord): string {
 }
 
 export function countAbnormalTargets(targets: TargetRecord[]) {
-  return targets.filter((target) => target.current_health_status !== '正常').length
+  return targets.filter((target) => target.lifecycle_status !== 'retired' && target.current_health_status !== '正常').length
 }
 
 export function countPausedTargets(targets: TargetRecord[]) {
-  return targets.filter((target) => target.run_status === '暂停').length
+  return targets.filter((target) => target.lifecycle_status !== 'retired' && target.run_status === '暂停').length
 }
 
 export function countArchivedTargets(targets: TargetRecord[]) {
-  return targets.filter((target) => target.run_status === '已归档').length
+  return targets.filter((target) => target.lifecycle_status === 'retired').length
 }
 
 export function countCoverageGapTargets(targets: TargetRecord[]) {

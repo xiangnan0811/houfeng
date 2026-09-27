@@ -59,6 +59,9 @@ func TestVPSStateRepairCreateTarget(t *testing.T) {
 	if got.RunStatus != input.RunStatus {
 		t.Errorf("readback run status = %q, want %q", got.RunStatus, input.RunStatus)
 	}
+	if got.LifecycleStatus != targets.LifecycleActive {
+		t.Errorf("new target lifecycle = %q, want active", got.LifecycleStatus)
+	}
 	if got.Group != input.Group {
 		t.Errorf("readback group = %q, want %q", got.Group, input.Group)
 	}
@@ -68,8 +71,8 @@ func TestVPSStateRepairCreateTarget(t *testing.T) {
 	if got.Note != input.Note {
 		t.Errorf("readback note = %q, want %q", got.Note, input.Note)
 	}
-	if got.CurrentHealthStatus != targets.HealthNormal {
-		t.Errorf("readback health status = %q, want %q", got.CurrentHealthStatus, targets.HealthNormal)
+	if got.CurrentHealthStatus != "数据不可用" {
+		t.Errorf("new target without observations has health %q, want 数据不可用", got.CurrentHealthStatus)
 	}
 	if got.CurrentActiveIncidentCount != 0 {
 		t.Errorf("readback active incident count = %d, want 0", got.CurrentActiveIncidentCount)

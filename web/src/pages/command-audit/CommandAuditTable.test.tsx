@@ -22,6 +22,14 @@ function action(outcome: CommandAuditAction['outcome'], id: string): CommandAudi
 }
 
 describe('CommandAuditTable', () => {
+  it('presents a lifecycle cancellation event without pretending the command completed', () => {
+    const row = action('cancelled', 'act_cancelled')
+    row.events = [{ audit_id: 'audit_cancelled', event_type: 'cancelled', source: 'web', occurred_at: '2026-09-26T00:00:00Z' }]
+    render(<MemoryRouter><CommandAuditTable rows={[row]} expandedIDs={new Set([row.id])} onToggle={vi.fn()} /></MemoryRouter>)
+    const timeline = screen.getByRole('region', { name: 'act_cancelled 原始审计事件' })
+    expect(within(timeline).getByText('已取消')).toBeInTheDocument()
+    expect(within(timeline).queryByText('已完成')).not.toBeInTheDocument()
+  })
   it('expresses the wide-table minimum width through the shared spacing scale', () => {
     const styles = readFileSync('src/styles/partials/legacy-events.css', 'utf8')
 
@@ -30,13 +38,14 @@ describe('CommandAuditTable', () => {
     expect(styles).not.toContain('overflow-y:hidden')
   })
 
-  it('renders five outcomes, shared command labels, and current/deleted identities', () => {
+  it('renders all outcomes including lifecycle cancellation and current/deleted identities', () => {
     const rows = [
       action('rejected', 'cmd_aud_rejected'),
       action('queued', 'act_queued'),
       action('dispatched', 'act_dispatched'),
       action('succeeded', 'act_succeeded'),
       action('failed', 'act_failed'),
+      action('cancelled', 'act_cancelled'),
     ]
     rows[0]!.monitoring_instance = { id: 'mi_deleted', name: 'Osaka Relay', deleted: true }
     rows[0]!.actor = { user_id: 'usr_deleted', username: '', display_name: '' }
@@ -49,7 +58,7 @@ describe('CommandAuditTable', () => {
       </MemoryRouter>,
     )
 
-    for (const label of ['已拒绝', '已排队', '已派发', '成功', '失败']) {
+    for (const label of ['已拒绝', '已排队', '已派发', '成功', '失败', '已取消']) {
       expect(screen.getByText(label)).toBeInTheDocument()
     }
     expect(screen.getAllByText('uptime').length).toBeGreaterThan(0)

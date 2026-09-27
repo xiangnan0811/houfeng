@@ -141,10 +141,8 @@ type IncidentDefaultsOverride struct {
 }
 
 type RetentionPolicy struct {
-	RawLayerDays          int `json:"raw_layer_days"`
-	AggregateLayerDays    int `json:"aggregate_layer_days"`
-	EventLayerDays        int `json:"event_layer_days"`
-	NotificationLayerDays int `json:"notification_layer_days"`
+	RawLayerDays       int `json:"raw_layer_days"`
+	AggregateLayerDays int `json:"aggregate_layer_days"`
 }
 
 type SubscriptionExchangeRateProvider string
@@ -164,13 +162,11 @@ type SubscriptionCostSettings struct {
 }
 
 type IPQualitySettings struct {
-	Enabled              bool     `json:"enabled"`
-	FrequencySeconds     int      `json:"frequency_seconds"`
-	StaleAfterSeconds    int      `json:"stale_after_seconds"`
-	TimeoutSeconds       int      `json:"timeout_seconds"`
-	RawRetentionDays     int      `json:"raw_retention_days"`
-	HistoryRetentionDays int      `json:"history_retention_days"`
-	Services             []string `json:"services"`
+	Enabled           bool     `json:"enabled"`
+	FrequencySeconds  int      `json:"frequency_seconds"`
+	StaleAfterSeconds int      `json:"stale_after_seconds"`
+	TimeoutSeconds    int      `json:"timeout_seconds"`
+	Services          []string `json:"services"`
 }
 
 var defaultIPQualityServices = []string{
@@ -221,10 +217,8 @@ func Default() CenterSettings {
 			TargetLabels:             []TargetLabelOverrideRule{},
 		},
 		RetentionPolicy: RetentionPolicy{
-			RawLayerDays:          30,
-			AggregateLayerDays:    30,
-			EventLayerDays:        90,
-			NotificationLayerDays: 180,
+			RawLayerDays:       30,
+			AggregateLayerDays: 365,
 		},
 		SubscriptionCost: SubscriptionCostSettings{
 			BaseCurrency:                "CNY",
@@ -235,13 +229,11 @@ func Default() CenterSettings {
 			ExchangeRateStaleAfterHours: 36,
 		},
 		IPQuality: IPQualitySettings{
-			Enabled:              false,
-			FrequencySeconds:     24 * 60 * 60,
-			StaleAfterSeconds:    7 * 24 * 60 * 60,
-			TimeoutSeconds:       15,
-			RawRetentionDays:     90,
-			HistoryRetentionDays: 365,
-			Services:             append([]string(nil), defaultIPQualityServices...),
+			Enabled:           false,
+			FrequencySeconds:  24 * 60 * 60,
+			StaleAfterSeconds: 7 * 24 * 60 * 60,
+			TimeoutSeconds:    15,
+			Services:          append([]string(nil), defaultIPQualityServices...),
 		},
 	}
 }
@@ -694,17 +686,11 @@ func validateIncidentThresholdOrder(prefix string, input IncidentDefaults) error
 }
 
 func validateRetentionPolicy(input RetentionPolicy) (RetentionPolicy, error) {
-	if input.RawLayerDays < 30 {
-		return RetentionPolicy{}, invalidSettings("raw retention days must be at least 30")
+	if input.RawLayerDays < 30 || input.RawLayerDays > 365 {
+		return RetentionPolicy{}, invalidSettings("raw retention days must be between 30 and 365")
 	}
 	if input.AggregateLayerDays <= 0 {
 		return RetentionPolicy{}, invalidSettings("aggregate retention days must be positive")
-	}
-	if input.EventLayerDays <= 0 {
-		return RetentionPolicy{}, invalidSettings("event retention days must be positive")
-	}
-	if input.NotificationLayerDays <= 0 {
-		return RetentionPolicy{}, invalidSettings("notification retention days must be positive")
 	}
 	return input, nil
 }
@@ -778,12 +764,6 @@ func validateIPQualitySettings(input IPQualitySettings) (IPQualitySettings, erro
 	if input.TimeoutSeconds < 1 || input.TimeoutSeconds > 300 {
 		return IPQualitySettings{}, invalidSettings("ip quality timeout seconds must be between 1 and 300")
 	}
-	if input.RawRetentionDays < 7 {
-		return IPQualitySettings{}, invalidSettings("ip quality raw retention days must be at least 7")
-	}
-	if input.HistoryRetentionDays < input.RawRetentionDays {
-		return IPQualitySettings{}, invalidSettings("ip quality history retention days must be at least raw retention days")
-	}
 	if input.Services == nil {
 		input.Services = append([]string(nil), defaults.Services...)
 	} else {
@@ -804,8 +784,6 @@ func isZeroIPQualitySettings(input IPQualitySettings) bool {
 		input.FrequencySeconds == 0 &&
 		input.StaleAfterSeconds == 0 &&
 		input.TimeoutSeconds == 0 &&
-		input.RawRetentionDays == 0 &&
-		input.HistoryRetentionDays == 0 &&
 		len(input.Services) == 0
 }
 

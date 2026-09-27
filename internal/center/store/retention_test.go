@@ -20,12 +20,8 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 	now := time.Date(2026, time.April, 28, 12, 30, 0, 0, time.UTC)
 
 	result, err := repo.ApplyRetention(context.Background(), retention.Policy{
-		RawLayerDays:                  7,
-		AggregateLayerDays:            30,
-		EventLayerDays:                90,
-		NotificationLayerDays:         180,
-		IPQualityRawRetentionDays:     45,
-		IPQualityHistoryRetentionDays: 180,
+		RawLayerDays:       30,
+		AggregateLayerDays: 365,
 	}, now)
 	if err != nil {
 		t.Fatalf("ApplyRetention() error = %v", err)
@@ -38,19 +34,17 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 		"delete from probe_observations",
 		"delete from monitoring_instance_host_sample_daily_aggregates",
 		"delete from target_probe_daily_aggregates",
-		"delete from state_change_events",
-		"delete from notification_records",
 		"update monitoring_instances",
 		"output_expired",
-		"update ip_quality_reports",
-		"delete from ip_quality_reports",
 	} {
 		if !containsSQL(tx.execSQL, want) {
 			t.Fatalf("execSQL = %#v, want %q", tx.execSQL, want)
 		}
 	}
-	if containsSQL(tx.execSQL, "delete from active_incidents") {
-		t.Fatalf("execSQL = %#v, must not delete active_incidents", tx.execSQL)
+	for _, forbidden := range []string{"delete from active_incidents", "state_change_events", "notification_records", "ip_quality_reports", "agent_live_signals", "agent_sessions"} {
+		if containsSQL(tx.execSQL, forbidden) {
+			t.Fatalf("execSQL = %#v, must retain %s", tx.execSQL, forbidden)
+		}
 	}
 	if tx.commitCalls != 1 || tx.rollbackCalls == 0 {
 		t.Fatalf("commitCalls=%d rollbackCalls=%d, want commit and deferred rollback", tx.commitCalls, tx.rollbackCalls)
@@ -58,10 +52,7 @@ func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *
 	if result.MonitoringInstanceAggregateRows != 1 ||
 		result.TargetAggregateRows != 1 ||
 		result.DeletedHeartbeats != 1 ||
-		result.DeletedNotifications != 1 ||
-		result.ClearedCommandActionOutputs != 1 ||
-		result.ClearedIPQualityRawJSON != 1 ||
-		result.DeletedIPQualityReports != 1 {
+		result.ClearedCommandActionOutputs != 1 {
 		t.Fatalf("result = %#v, want command-tag counts", result)
 	}
 }
@@ -77,7 +68,7 @@ func TestPostgresRetentionRepositoryUsesRepeatableReadTransaction(t *testing.T) 
 		},
 	}
 
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180, IPQualityRawRetentionDays: 45, IPQualityHistoryRetentionDays: 180}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
+	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("ApplyRetention() error = %v", err)
 	}
@@ -93,27 +84,21 @@ func TestPostgresRetentionRepositoryUsesExpectedCutoffs(t *testing.T) {
 	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
 	now := time.Date(2026, time.April, 28, 12, 30, 0, 0, time.UTC)
 
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180, IPQualityRawRetentionDays: 45, IPQualityHistoryRetentionDays: 180}, now)
+	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, now)
 	if err != nil {
 		t.Fatalf("ApplyRetention() error = %v", err)
 	}
 	if got := tx.argsForSQL("insert into monitoring_instance_host_sample_daily_aggregates")[0].(time.Time); !got.Equal(time.Date(2026, time.April, 28, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("aggregate stable cutoff = %s, want start of current UTC day", got)
 	}
-	if got := tx.argsForSQL("delete from monitoring_instance_heartbeats")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -7)) {
-		t.Fatalf("raw cutoff = %s, want %s", got, now.AddDate(0, 0, -7))
+	if got := tx.argsForSQL("delete from monitoring_instance_heartbeats")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -30)) {
+		t.Fatalf("raw cutoff = %s, want %s", got, now.AddDate(0, 0, -30))
 	}
-	if got := tx.argsForSQL("delete from state_change_events")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -90)) {
-		t.Fatalf("event cutoff = %s, want %s", got, now.AddDate(0, 0, -90))
+	if got := tx.argsForSQL("insert into monitoring_instance_host_sample_daily_aggregates")[1].(time.Time); !got.Equal(now.AddDate(0, 0, -30)) {
+		t.Fatalf("aggregate finalization cutoff = %s, want raw cutoff", got)
 	}
 	if got := tx.argsForSQL("update monitoring_instances")[0].(time.Time); !got.Equal(now) {
 		t.Fatalf("command output expiry cutoff = %s, want %s", got, now)
-	}
-	if got := tx.argsForSQL("update ip_quality_reports")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -45)) {
-		t.Fatalf("ip quality raw cutoff = %s, want %s", got, now.AddDate(0, 0, -45))
-	}
-	if got := tx.argsForSQL("delete from ip_quality_reports")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -180)) {
-		t.Fatalf("ip quality history cutoff = %s, want %s", got, now.AddDate(0, 0, -180))
 	}
 }
 
@@ -122,7 +107,7 @@ func TestPostgresRetentionRepositoryRollsBackOnFailure(t *testing.T) {
 	tx := &fakeRetentionTx{execErrForSQLSubstring: "delete from host_samples", execErr: errors.New("delete boom")}
 	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
 
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 7, AggregateLayerDays: 30, EventLayerDays: 90, NotificationLayerDays: 180, IPQualityRawRetentionDays: 45, IPQualityHistoryRetentionDays: 180}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
+	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
 	if err == nil || !strings.Contains(err.Error(), "delete expired host samples") {
 		t.Fatalf("ApplyRetention() error = %v, want host sample context", err)
 	}

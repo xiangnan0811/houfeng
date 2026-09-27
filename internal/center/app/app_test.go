@@ -2,7 +2,9 @@ package app_test
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -11,6 +13,63 @@ import (
 
 type fakeWorker struct {
 	exited chan struct{}
+}
+
+type readinessWorker struct {
+	ready   atomic.Bool
+	started chan struct{}
+}
+
+func (w *readinessWorker) SetReady(ready bool) { w.ready.Store(ready) }
+func (w *readinessWorker) Run(ctx context.Context) error {
+	close(w.started)
+	<-ctx.Done()
+	return nil
+}
+
+func TestReceiverReadinessRequiresListenerAndEndsOnShutdown(t *testing.T) {
+	worker := &readinessWorker{started: make(chan struct{})}
+	app := centerapp.New("127.0.0.1:0", http.NewServeMux(), worker)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- app.Run(ctx) }()
+	select {
+	case <-worker.started:
+	case <-time.After(time.Second):
+		t.Fatal("receiver did not start")
+	}
+	if !worker.ready.Load() {
+		t.Fatal("listening receiver is not ready")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if worker.ready.Load() {
+		t.Fatal("stopped receiver remains ready")
+	}
+}
+
+func TestListenerFailureCannotStartHealthyObservation(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	worker := &readinessWorker{started: make(chan struct{})}
+	app := centerapp.New(listener.Addr().String(), http.NewServeMux(), worker)
+	if err := app.Run(context.Background()); err == nil {
+		t.Fatal("expected occupied listener error")
+	}
+	if worker.ready.Load() {
+		t.Fatal("unavailable receiver is ready")
+	}
+	select {
+	case <-worker.started:
+		t.Fatal("worker started without receiver")
+	default:
+	}
 }
 
 func (f *fakeWorker) Run(ctx context.Context) error {

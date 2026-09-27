@@ -79,6 +79,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0064_add_network_rates_valid.sql",
 			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 			"0066_constrain_monitoring_and_target_state_values.sql",
+			"0067_refactor_vps_monitoring_lifecycle.sql",
 		},
 		predecessorMigrationGolden:      appACLCurrentV0794MigrationGolden,
 		predecessorPrivilegeGolden:      appACLCurrentV0794PrivilegeGolden,
@@ -90,6 +91,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 		successorMigrations: []string{
 			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 			"0066_constrain_monitoring_and_target_state_values.sql",
+			"0067_refactor_vps_monitoring_lifecycle.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV0802MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0802PrivilegeGolden,
@@ -101,6 +103,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0064_add_network_rates_valid.sql",
 			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 			"0066_constrain_monitoring_and_target_state_values.sql",
+			"0067_refactor_vps_monitoring_lifecycle.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV0796MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0796PrivilegeGolden,
@@ -290,12 +293,15 @@ func validateAppACLCurrentTransitionPrivilegeDelta(predecessorPrivilegeBody []by
 			Privilege:      AppACLPrivilegeUpdate,
 		}: {},
 	}
+	for _, privilege := range vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
+		expectedAdditions[privilege] = struct{}{}
+	}
 	if len(additions) != len(expectedAdditions) {
-		return fmt.Errorf("registered APP transition privilege delta is not exactly the two approved table UPDATE tuples")
+		return fmt.Errorf("registered APP transition privilege delta is not exactly the approved current fragments")
 	}
 	for privilege := range expectedAdditions {
 		if _, present := additions[privilege]; !present {
-			return fmt.Errorf("registered APP transition privilege delta is not exactly the two approved table UPDATE tuples")
+			return fmt.Errorf("registered APP transition privilege delta is not exactly the approved current fragments")
 		}
 	}
 	return nil

@@ -5,13 +5,14 @@
 `internal/center/store/dashboard.go` 可以读取资产层表来生成 `/api/dashboard` 的少量决策摘要，但它仍是 Dashboard read model，不是资产 CRUD 仓库。
 
 - `incidents.DashboardOverview.AssetSummary` 的 JSON contract 是 `asset_summary`，只允许返回聚合计数和按币种成本分组，不返回 VPS、subscription、MonitoringInstance 或 provider 明细数组。
-- `asset_summary` 的 30 天续费口径：`subscriptions.status = 'active'`，`renew_at >= current_date` 且 `renew_at <= current_date + 30`，并只统计未取消/未归档的 VPS。
-- active VPS 口径：`vps_assets.lifecycle_status not in ('cancelled', 'archived')`。
-- VPS 普通资料 PATCH 只能维护低风险事实 lifecycle：`active`、`idle`、`testing`。`to_cancel`、`cancelled`、`to_migrate`、`archived` 是受控流程/终态，不得通过普通 PATCH 写入；取消/退役走 lifecycle workbench 或专用 endpoint，归档走 archive endpoint，迁移在完整 workbench 存在前只能作为 `renewal_decision=migrate` 的人工意向。
-- active link 口径：`vps_monitoring_instance_links.unlinked_at is null`。
-- 异常关联 VPS 口径：active link 关联到 `monitoring_instances.current_health_status <> '正常'` 的 MonitoringInstance；只读 MonitoringInstance 派生状态，不改写 MonitoringInstance。
-- 成本口径：`sum(active subscriptions monthly_price)` 按 `currency` 分组，`yearly_total = monthly_total * 12`；第一阶段不做汇率换算。
-- 取消联动口径：Dashboard 只处理 current VPS，最终 `cancelled` / `archived` 不进入 `asset_summary`；`to_cancel_vps_count` 统计仍需处理的 `lifecycle_status='to_cancel'`，`cancelled_vps_count` 当前为 0 兼容字段；`cancellation_attention_vps_count` 统计 current VPS 中订阅非活跃但 lifecycle 未进入 `to_cancel`、`to_cancel` 但订阅仍 active、`to_cancel` 但 MonitoringInstance/Target 仍运行，或取消类续费决策与 lifecycle 未对齐的 VPS；`running_cancelled_asset_count` 只统计 `to_cancel` VPS 下仍运行的 active MonitoringInstance link 与未归档/未暂停 Target。
+- `asset_summary` 的 30 天续费口径：`subscriptions.status = 'active'`，`renew_at >= current_date` 且 `renew_at <= current_date + 30`，并只统计管理中的 VPS。
+- 管理中 VPS 口径：`vps_assets.lifecycle_status = 'active'`；其余唯一生命周期是 `archived`。
+- 当前监控以 `monitoring_instances.vps_id` 的永久所有权和 `lifecycle_status <> '已退役'` 派生；不再允许孤立或共享实例。
+- 异常与严重运行统计只计管理中 VPS 的已接入、启用实例；维护、暂停、待接入、退役不作为运行异常。
+- 运行关注队列、全局/分组计数及异常关联 VPS 计数先按绑定和可信在线证据投影健康：绑定非「已绑定」为「绑定待确认」，缺少可信在线时间或健康证据为「数据不可用」。即使 incident 存储摘要仍为「正常」，也必须进入关注集合；原始或回填心跳不能替代可信在线证据。
+- Target 当前可见性要求其生命周期为 `active`，通过未结束的服务/域名关联判断 VPS 归属。共享探测只要仍有管理中的承载关联就保留。
+- 成本口径：管理中 VPS 的 active subscriptions `monthly_price` 按币种求和；已归档潜在扣费在成本页单列，不进入当前资产预计成本。
+- `no_renewal_vps_count` 统计决定不续费的管理中 VPS；`archived_vps_count` 统计归档资产；`auto_renew_check_vps_count` 统计决定不续费但服务商自动续费仍为 unchecked/enabled 的资产；`pending_followup_count` 统计待核对事项。续费意向与生命周期、服务商核对事实彼此独立。
 - 该查询不得改变 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target、Agent、VPS、subscription 或 link 记录。
 - `limit` 只限制异常队列和 recent events；不得限制 `asset_summary`。
 
@@ -38,8 +39,9 @@
 - `abnormal_monitoring_instance_count` / `abnormal_target_count` 分别是对应 severe 集合的超集；`severe_*_count` 不能被前端再次加到 abnormal 总数。相同集合关系也适用于 `group_summaries` 中的 abnormal/severe 字段。
 - `group_summaries` 必须由后端基于全量 `monitoring_instances` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce。
 - `notification_status` 只能包含配置布尔摘要，不包含 Telegram token/chat id 或 Feishu webhook URL。
-- `asset_summary` 只能包含聚合摘要：`renewal_due_30d_subscription_count`、`renewal_due_30d_vps_count`、`unreviewed_vps_count`、`to_cancel_vps_count`、`to_migrate_vps_count`、`unlinked_vps_count`、`abnormal_linked_vps_count`、`cost_by_currency[]`。`cost_by_currency[]` 只包含 `currency`、`monthly_total`、`yearly_total`。
+- `asset_summary` 只能包含聚合摘要：`renewal_due_30d_subscription_count`、`renewal_due_30d_vps_count`、`unreviewed_vps_count`、`no_renewal_vps_count`、`archived_vps_count`、`auto_renew_check_vps_count`、`pending_followup_count`、`unlinked_vps_count`、`abnormal_linked_vps_count`、`cost_by_currency[]`。`cost_by_currency[]` 只包含 `currency`、`monthly_total`、`yearly_total`。
 - 库存完整度计数必须来自后端 contract：待接入监控实例、暂停监控实例、退役监控实例、暂停目标、归档目标。
+- 退役监控与归档 Target 是历史库存计数，分别直接按 `monitoring_instances.lifecycle_status='已退役'` 和 `targets.lifecycle_status='retired'` 统计；不从已排除历史对象的当前运行集合计数，也不读取旧 Target `run_status='已归档'`。
 
 #### 4. Validation & Error Matrix
 

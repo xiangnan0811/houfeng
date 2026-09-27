@@ -265,7 +265,15 @@ func insertStateChangeEvents(ctx context.Context, tx incidentStoreTx, events []i
 			return fmt.Errorf("generate event id: %w", err)
 		}
 		recordedAt := time.Now().UTC().Truncate(time.Microsecond)
+		var naturalRecovery *bool
+		closureKind := ""
+		if event.EventType == incidents.EventIncidentClosedByManagement {
+			v := false
+			naturalRecovery = &v
+			closureKind = "management"
+		}
 		payload, err := marshalTask4MonitoringEventPayload(task4MonitoringEventPayload{
+			ClosureKind: closureKind, ClosureReason: event.ClosureReason, NaturalRecovery: naturalRecovery,
 			ObjectType:          event.ObjectType,
 			EventType:           event.EventType,
 			Severity:            event.Severity,
@@ -387,7 +395,7 @@ func projectObjectSummary(ctx context.Context, tx incidentStoreTx, objectType in
 	case incidents.ObjectTypeMonitoringInstance:
 		tag, err := tx.Exec(ctx, `
 			update monitoring_instances
-			set current_health_status = $2,
+			set current_health_status = case when lifecycle_status<>'已接入' or binding_status<>'已绑定' or monitoring_status<>'启用' or last_trusted_online_at is null or not exists(select 1 from host_samples hs where hs.monitoring_instance_id=monitoring_instances.monitoring_instance_id and hs.fingerprint=monitoring_instances.binding_fingerprint and hs.received_at >= monitoring_instances.binding_epoch_started_at) then 'unknown' else $2 end,
 				current_active_incident_count = $3,
 				current_primary_issue_summary = $4,
 				updated_at = now()
@@ -406,7 +414,7 @@ func projectObjectSummary(ctx context.Context, tx incidentStoreTx, objectType in
 	case incidents.ObjectTypeTarget:
 		tag, err := tx.Exec(ctx, `
 			update targets
-			set current_health_status = $2,
+			set current_health_status = case when lifecycle_status<>'active' or run_status<>'启用' then 'unknown' else $2 end,
 				current_active_incident_count = $3,
 				current_primary_issue_summary = $4,
 				updated_at = now()

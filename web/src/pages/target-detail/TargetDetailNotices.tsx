@@ -60,7 +60,7 @@ export function TargetDetailNotices({
     (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
   )[0]
   const health = target.current_health_status
-  if (target.current_active_incident_count > 0) {
+  if (target.lifecycle_status !== 'retired' && target.current_active_incident_count > 0) {
     const tone: NoticeTone = health === '严重' ? 'critical' : health === '关注' ? 'notice' : 'alert'
     const mark = health === '严重' || health === '关注' || health === '告警' ? health : '告警'
     rows.push({
@@ -87,7 +87,9 @@ export function TargetDetailNotices({
       ),
     })
   }
-  if (target.run_status === '维护中') {
+  if (target.lifecycle_status === 'retired') {
+    rows.push({ key: 'retired', node: <NoticeRow tone="offline" mark="已退役" title="目标已退出当前工作集" detail="历史观测保留；恢复到暂停后才可显式启用探测" /> })
+  } else if (target.run_status === '维护中') {
     rows.push({
       key: 'maintenance',
       node: (

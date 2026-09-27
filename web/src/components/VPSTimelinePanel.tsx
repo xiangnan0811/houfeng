@@ -94,9 +94,8 @@ type TimelineTone = 'normal' | 'notice' | 'maintenance' | 'critical' | 'neutral'
 
 function decisionTone(value: VPSRenewalDecision): TimelineTone {
   if (value === 'keep') return 'normal'
-  if (value === 'unreviewed' || value === 'observe') return 'notice'
-  if (value === 'migrate') return 'maintenance'
-  if (value === 'cancel' || value === 'auto_renew_cancelled' || value === 'replaced') return 'critical'
+  if (value === 'unreviewed') return 'notice'
+  if (value === 'cancel') return 'critical'
   return 'neutral'
 }
 

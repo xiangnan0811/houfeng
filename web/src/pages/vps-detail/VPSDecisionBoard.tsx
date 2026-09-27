@@ -123,9 +123,9 @@ function latestHistorySummary(timeline: VPSTimeline): string {
 
 function isCancellationRelevant(detail: VPSAssetDetail, preview: CancellationPreview | null): boolean {
   return detail.renewal_decision === 'cancel' ||
-    detail.renewal_decision === 'auto_renew_cancelled' ||
-    detail.lifecycle_status === 'to_cancel' ||
-    detail.lifecycle_status === 'cancelled' ||
+    false ||
+    false ||
+    false ||
     Boolean(preview && ((preview.warnings ?? []).length > 0 || (preview.blockers ?? []).length > 0))
 }
 

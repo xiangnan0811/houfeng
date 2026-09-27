@@ -30,10 +30,19 @@ function completeObservation(): VPSOverview['summary'] {
 }
 
 describe('vpsOverviewPresentation', () => {
+  it.each(['待接入', '已退役', '维护中', '暂停', 'unavailable', '未启用'])('does not promote %s monitoring to healthy', (status) => {
+    const summary = completeObservation()
+    summary.monitoring.status = status
+    expect(overviewOverallPresentation(summary)).toMatchObject({ label: '观测不完整', tone: 'unknown' })
+  })
+
+  it('shows archived lifecycle instead of historical healthy runtime', () => {
+    expect(overviewOverallPresentation(completeObservation(), 'archived')).toMatchObject({ label: '已归档', tone: 'unknown' })
+  })
   it('maps real overview wire enums to Chinese labels', () => {
-    expect(overviewLifecycleLabel('active')).toBe('在用')
-    expect(overviewUsageLabel('in_use')).toBe('承载业务')
-    expect(overviewSummaryCellLabel('renewal', 'keep')).toBe('保留')
+    expect(overviewLifecycleLabel('active')).toBe('管理中')
+    expect(overviewUsageLabel('承载业务')).toBe('承载业务')
+    expect(overviewSummaryCellLabel('renewal', 'keep')).toBe('继续续费')
     expect(overviewOverallLabel('healthy')).toBe('总体正常')
     expect(overviewSummaryCellLabel('ip_quality', 'low')).toBe('低风险')
     expect(overviewSummaryCellLabel('monitoring', 'unlinked')).toBe('未关联')
@@ -47,8 +56,8 @@ describe('vpsOverviewPresentation', () => {
     expect(overviewSummaryDetailLabel('ip_quality', 'partial')).toBe('采集不完整')
     expect(overviewSummaryDetailLabel('ip_quality', 'high')).toBe('高风险')
     expect(overviewSummaryDetailLabel('renewal', 'to_cancel')).toBe('to_cancel')
-    expect(overviewLifecycleLabel('to_cancel')).toBe('待取消')
-    expect(overviewAnomalyDetailLabel('lifecycle.blocker.v1', 'to_cancel')).toBe('待取消')
+    expect(overviewLifecycleLabel('archived')).toBe('已归档')
+    expect(overviewAnomalyDetailLabel('lifecycle.blocker.v1', 'archived')).toBe('已归档')
     expect(overviewAnomalyDetailLabel('ip_quality.risk.elevated.v1', 'high')).toBe('高风险')
     expect(overviewAnomalyDetailLabel('source.unavailable.v1', 'ip_quality, monitoring, renewal'))
       .toBe('IP 质量、监控、续费')
@@ -98,33 +107,6 @@ describe('vpsOverviewPresentation', () => {
     expect(overviewOverallPresentation(summary)).toMatchObject({ label: '观测不完整', tone: 'unknown' })
   })
 
-  it('names a pending cancellation plan as extra attention basis without claiming completion', () => {
-    const ready = { state: 'ready' as const, observed_at: null, last_success_at: null, reason_code: '' }
-    const presented = overviewOverallPresentation({
-      overall: { status: 'attention', section: ready },
-      monitoring: { status: '正常', section: ready },
-      ip_quality: {
-        status: 'unknown',
-        section: { state: 'unavailable', observed_at: null, last_success_at: null, reason_code: 'ip_quality_unavailable' },
-      },
-      renewal: { status: 'keep', section: ready },
-    }, 'to_cancel')
-    expect(presented.label).toBe('需要关注')
-    expect(presented.tone).toBe('notice')
-    expect(presented.explanation).toContain('IP 质量暂不可用')
-    expect(presented.explanation).toContain('取消计划待处理')
-
-    expect(presented.explanation).not.toContain('已取消')
-    expect(overviewOverallPresentation({
-      overall: { status: 'attention', section: ready },
-      monitoring: { status: '正常', section: ready },
-      ip_quality: {
-        status: 'unknown',
-        section: { state: 'unavailable', observed_at: null, last_success_at: null, reason_code: 'ip_quality_unavailable' },
-      },
-      renewal: { status: 'keep', section: ready },
-    }).explanation).toBe('IP 质量暂不可用。')
-  })
 
   it('strips an exact current-asset prefix only when the remainder is a same-object action', () => {
     const asset = '东京边缘生产节点 · Tokyo Edge Node 01'

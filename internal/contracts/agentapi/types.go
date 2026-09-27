@@ -60,6 +60,8 @@ type EnrollmentRequest struct {
 }
 
 type EnrollmentResponse struct {
+	SessionID            string `json:"session_id"`
+	Capability           string `json:"capability"`
 	MonitoringInstanceID string `json:"monitoring_instance_id"`
 	Status               string `json:"status"`
 	BindingStatus        string `json:"binding_status"`
@@ -221,6 +223,8 @@ type IPQualityReportPayload struct {
 // CommandResults carries back outputs from pending actions that were executed
 // since the last sync.
 type SyncRequest struct {
+	SessionID            string                        `json:"session_id"`
+	LiveSignal           *LiveSignal                   `json:"live_signal,omitempty"`
 	MonitoringInstanceID string                        `json:"monitoring_instance_id"`
 	SyncToken            string                        `json:"sync_token"`
 	Heartbeats           []MonitoringInstanceHeartbeat `json:"heartbeats,omitempty"`
@@ -228,6 +232,13 @@ type SyncRequest struct {
 	ProbeObservations    []ProbeObservationPayload     `json:"probe_observations,omitempty"`
 	IPQualityReports     []IPQualityReportPayload      `json:"ip_quality_reports,omitempty"`
 	CommandResults       []CommandResult               `json:"command_results,omitempty"`
+}
+
+// LiveSignal is generated immediately before transmission. It is never queued,
+// replayed, or interpreted using an agent supplied timestamp.
+type LiveSignal struct {
+	ID          string `json:"id"`
+	Fingerprint string `json:"fingerprint"`
 }
 
 type ProbeAssignment struct {
@@ -277,7 +288,8 @@ type CommandResult struct {
 }
 
 type SyncResponse struct {
-	AcceptedAt time.Time `json:"accepted_at"`
-	Status     string    `json:"status"`
-	Plan       *SyncPlan `json:"plan,omitempty"`
+	StopCollection bool      `json:"stop_collection"`
+	AcceptedAt     time.Time `json:"accepted_at"`
+	Status         string    `json:"status"`
+	Plan           *SyncPlan `json:"plan,omitempty"`
 }

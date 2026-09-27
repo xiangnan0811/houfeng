@@ -36,18 +36,27 @@ func SeedAuthority(ctx context.Context, pool *pgxpool.Pool, vpsID string) error 
 			name: "vps",
 			sql: `insert into public.vps_assets (
 				vps_id, display_name, provider_name, product_name, country, region, city,
-				datacenter, ipv4, lifecycle_status, usage_status, renewal_decision, labels, updated_at
+				datacenter, ipv4, lifecycle_status, usage_tags, renewal_decision, labels, updated_at
 			) values ($1, 'perf-vps', 'Performance Provider', 'Performance VPS', 'JP', 'Tokyo', 'Tokyo',
-				'perf-dc', '192.0.2.10', 'active', 'in_use', 'keep', '{}', now() - interval '6 minutes')`,
+				'perf-dc', '192.0.2.10', 'active', array['业务'], 'keep', '{}', now() - interval '6 minutes')`,
 			args: []any{vpsID},
 		},
 		{
 			name: "monitoring instance",
 			sql: `insert into public.monitoring_instances (
-				monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
-				monitoring_status, binding_status, current_health_status, last_heartbeat_at, updated_at
-			) values ('mi_overview_perf', 'perf-monitor', 'Tokyo', 'Tokyo', 'Performance Provider', '在用',
-				'启用', '已绑定', '正常', now(), now() - interval '1 minute')`,
+				monitoring_instance_id, vps_id, display_name, region, city, provider, lifecycle_status,
+				monitoring_status, binding_status, binding_fingerprint, current_health_status,
+				last_heartbeat_at, last_trusted_online_at, ever_connected, updated_at
+			) values ('mi_overview_perf', $1, 'perf-monitor', 'Tokyo', 'Tokyo', 'Performance Provider', '已接入',
+				'启用', '已绑定', 'perf-fingerprint', '正常', now(), now(), true, now() - interval '1 minute')`,
+			args: []any{vpsID},
+		},
+		{
+			name: "monitoring session",
+			sql: `insert into public.monitoring_agent_sessions (
+				session_id, monitoring_instance_id, token_hash, capability, fingerprint_hash,
+				started_at, last_trusted_online_at, ever_connected
+			) values ('mas_overview_perf','mi_overview_perf',repeat('a',64),'full','perf-fingerprint',now()-interval '1 day',now(),true)`,
 		},
 		{
 			name: "monitoring link",
@@ -77,16 +86,26 @@ func SeedAuthority(ctx context.Context, pool *pgxpool.Pool, vpsID string) error 
 		{
 			name: "service",
 			sql: `insert into public.asset_services (
-				service_id, vps_id, name, service_type, status, updated_at
-			) values ('svc_overview_perf', $1, 'perf-api', 'api', 'active', now() - interval '4 minutes')`,
+				service_id, name, service_type, status, updated_at
+			) values ('svc_overview_perf', 'perf-api', 'api', 'active', now() - interval '4 minutes')`,
+		},
+		{
+			name: "service association",
+			sql: `insert into public.asset_service_associations(id,service_id,vps_id,started_at)
+			values ('asa_overview_perf','svc_overview_perf',$1,now()-interval '4 minutes')`,
 			args: []any{vpsID},
 		},
 		{
 			name: "domain",
 			sql: `insert into public.asset_domains (
-				domain_id, vps_id, service_id, domain_name, status, updated_at
-			) values ('dom_overview_perf', $1, 'svc_overview_perf', 'perf-overview.example',
+				domain_id, domain_name, status, updated_at
+			) values ('dom_overview_perf', 'perf-overview.example',
 				'active', now() - interval '5 minutes')`,
+		},
+		{
+			name: "domain association",
+			sql: `insert into public.asset_domain_associations(id,domain_id,vps_id,service_id,started_at)
+			values ('ada_overview_perf','dom_overview_perf',$1,'svc_overview_perf',now()-interval '5 minutes')`,
 			args: []any{vpsID},
 		},
 	}
@@ -110,11 +129,14 @@ func PrepareMeasurement(ctx context.Context, pool *pgxpool.Pool) error {
 			analyze public.record_activity_projection;
 		analyze public.vps_assets;
 		analyze public.monitoring_instances;
+		analyze public.monitoring_agent_sessions;
 		analyze public.vps_monitoring_instance_links;
 		analyze public.ip_quality_reports;
 			analyze public.subscriptions;
 			analyze public.asset_services;
 			analyze public.asset_domains;
+			analyze public.asset_service_associations;
+			analyze public.asset_domain_associations;
 			checkpoint`)
 	return err
 }

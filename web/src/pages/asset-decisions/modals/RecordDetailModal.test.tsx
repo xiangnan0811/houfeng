@@ -64,7 +64,7 @@ function recordDetail(): AssetDecisionRecordDetail {
         current_facts: {
           found: true,
           lifecycle_status: 'active',
-          usage_status: 'in_use',
+          usage_tags: ['in_use'],
           renewal_decision: 'keep',
           active_subscription_count: 1,
           service_count: 0,

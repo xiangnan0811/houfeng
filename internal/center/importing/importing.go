@@ -335,7 +335,10 @@ func prepareInputRecord(row int, input InputRecord, state existingState, report 
 		OSName:          input.OSName,
 		Virtualization:  input.Virtualization,
 		LifecycleStatus: input.LifecycleStatus,
-		UsageStatus:     input.UsageStatus,
+		UsageTags:       input.UsageTags,
+		ValidityMode:    input.ValidityMode, ExpiresAt: input.ExpiresAt,
+		AutoRenewCheck: input.AutoRenewCheck, AutoRenewCheckedAt: input.AutoRenewCheckedAt,
+		RenewalReason: input.RenewalReason, RenewalReviewAt: input.RenewalReviewAt, AcquisitionSource: input.AcquisitionSource,
 		RenewalDecision: input.RenewalDecision,
 		Importance:      input.Importance,
 		Labels:          input.Labels,
@@ -460,7 +463,7 @@ func appendRenewalAndIdleCandidates(report *Report, record preparedRecord, now t
 			})
 		}
 	}
-	if record.VPSInput.UsageStatus == vpsassets.UsageIdle && input.Status == subscriptions.StatusActive && input.Price > 0 {
+	if hasUsageTag(record.VPSInput.UsageTags, "闲置") && input.Status == subscriptions.StatusActive && input.Price > 0 {
 		candidate := IdlePaidCandidate{
 			Row:          record.Row,
 			DisplayName:  record.VPSInput.DisplayName,
@@ -474,6 +477,15 @@ func appendRenewalAndIdleCandidates(report *Report, record preparedRecord, now t
 		}
 		report.IdlePaidCandidates = append(report.IdlePaidCandidates, candidate)
 	}
+}
+
+func hasUsageTag(tags []string, wanted string) bool {
+	for _, tag := range tags {
+		if tag == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 func appendMonitoringInstanceCandidate(report *Report, record preparedRecord, state existingState) {

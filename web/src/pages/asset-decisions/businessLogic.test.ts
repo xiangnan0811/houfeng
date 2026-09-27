@@ -90,7 +90,6 @@ function emptyQueueState(overrides: Partial<QueueState> = {}): QueueState {
     renewals: [],
     subscriptions: [],
     unreviewed: [],
-    migrate: [],
     cancel: [],
     ...overrides,
   }
@@ -153,19 +152,18 @@ describe('Asset Decisions decision queue model', () => {
       30,
     )
 
-    expect(rows.map((row) => row.vps.vps_id)).toEqual(['vps_review', 'vps_missing', 'vps_migrate'])
+    expect(rows.map((row) => row.vps.vps_id)).toEqual(['vps_review', 'vps_migrate', 'vps_missing'])
     const firstRow = rows[0]
     if (!firstRow) throw new Error('decision queue must include the reviewed VPS')
     expect(firstRow).toMatchObject({ renewalDue: true, qualityIssues: [] })
     expect(firstRow.vps.display_name).toBe('Tokyo Review Latest')
     expect(filterDecisionQueue(rows, 'renewal').map((row) => row.vps.vps_id)).toEqual(['vps_review'])
-    expect(filterDecisionQueue(rows, 'unreviewed').map((row) => row.vps.vps_id)).toEqual(['vps_review'])
+    expect(filterDecisionQueue(rows, 'unreviewed').map((row) => row.vps.vps_id)).toEqual(['vps_review', 'vps_migrate'])
     expect(filterDecisionQueue(rows, 'missing_subscription').map((row) => row.vps.vps_id)).toEqual(['vps_missing'])
     expect(filterDecisionQueue(rows, 'unlinked').map((row) => row.vps.vps_id)).toEqual(['vps_missing'])
-    expect(filterDecisionQueue(rows, 'migrate').map((row) => row.vps.vps_id)).toEqual(['vps_migrate'])
   })
 
-  it('identifies cancellation mismatches without treating cancelled VPS as attention', () => {
+  it('uses provider verification independently of lifecycle and subscription', () => {
     const cancellationDecision = queueItem(assetVPS({ ...cancelVPS } as Partial<VPSAssetRecord>))
     const inactiveSubscription = queueItem(
       assetVPS({ vps_id: 'vps_inactive_subscription', renewal_decision: 'keep' }),
@@ -173,23 +171,23 @@ describe('Asset Decisions decision queue model', () => {
     )
     const alreadyCancelling = queueItem(assetVPS({
       vps_id: 'vps_to_cancel',
-      lifecycle_status: 'to_cancel',
+      lifecycle_status: 'archived',
       renewal_decision: 'cancel',
+      auto_renew_check: 'disabled',
     }))
 
     expect(hasCancellationAttention(cancellationDecision)).toBe(true)
-    expect(hasCancellationAttention(inactiveSubscription)).toBe(true)
+    expect(hasCancellationAttention(inactiveSubscription)).toBe(false)
     expect(hasCancellationAttention(alreadyCancelling)).toBe(false)
     expect(filterDecisionQueue(
       [alreadyCancelling, inactiveSubscription, cancellationDecision],
       'cancellation_attention',
-    )).toEqual([inactiveSubscription, cancellationDecision])
+    )).toEqual([cancellationDecision])
   })
 
   it('moves an updated VPS between decision slices without mutating the source state', () => {
     const original = emptyQueueState({
       unreviewed: [assetVPS()],
-      migrate: [assetVPS({ ...migrateVPS } as Partial<VPSAssetRecord>)],
       cancel: [assetVPS({ ...cancelVPS } as Partial<VPSAssetRecord>)],
     })
     const updated = assetVPS({ renewal_decision: 'cancel', display_name: 'Tokyo Cancelled' })
@@ -197,7 +195,6 @@ describe('Asset Decisions decision queue model', () => {
     const next = updateDecisionQueues(original, updated)
 
     expect(next.unreviewed).toEqual([])
-    expect(next.migrate.map((row) => row.vps_id)).toEqual(['vps_migrate'])
     expect(next.cancel.map((row) => row.vps_id)).toEqual(['vps_review', 'vps_cancel'])
     expect(original.unreviewed.map((row) => row.vps_id)).toEqual(['vps_review'])
   })
@@ -364,7 +361,7 @@ describe('Asset Decisions composed page model', () => {
       templatesState: emptyTemplatesState({ error: '模板失败' }),
       queueState: emptyQueueState({
         renewals: [assetSubscription()],
-        migrate: [assetVPS({ ...migrateVPS } as Partial<VPSAssetRecord>)],
+        unreviewed: [assetVPS({ ...migrateVPS } as Partial<VPSAssetRecord>)],
         cancel: [assetVPS({ ...cancelVPS } as Partial<VPSAssetRecord>)],
       }),
       recordDetail,

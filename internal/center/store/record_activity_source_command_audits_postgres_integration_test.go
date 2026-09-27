@@ -21,10 +21,14 @@ func seedCommandAuditFixture(t *testing.T, ctx context.Context, pool *pgxpool.Po
 		arguments []any
 	}{
 		{
+			sql:       `insert into vps_assets(vps_id, display_name, lifecycle_status) values ($1, 'timeline owner', 'active')`,
+			arguments: []any{monitoringEventFixtureVPSID},
+		},
+		{
 			sql: `insert into monitoring_instances (
-				monitoring_instance_id, display_name, region, city, provider, lifecycle_status
-			) values ($1, 'hk-edge-01-renamed', 'HK', 'Hong Kong', 'Test Provider', '在用')`,
-			arguments: []any{monitoringEventFixtureInstanceID},
+				monitoring_instance_id, vps_id, display_name, region, city, provider, lifecycle_status
+			) values ($1, $2, 'hk-edge-01-renamed', 'HK', 'Hong Kong', 'Test Provider', '已接入')`,
+			arguments: []any{monitoringEventFixtureInstanceID, monitoringEventFixtureVPSID},
 		},
 		{
 			sql: `insert into users (user_id, username, password_hash, display_name)

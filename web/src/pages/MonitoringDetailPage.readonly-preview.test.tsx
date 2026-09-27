@@ -50,7 +50,7 @@ describe('MonitoringDetailPage read-only preview', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
-            last_heartbeat_at: null,
+            last_heartbeat_at: null, last_trusted_online_at: null,
             last_sync_at: null,
             current_active_incident_count: 0,
             current_primary_issue_summary: '',

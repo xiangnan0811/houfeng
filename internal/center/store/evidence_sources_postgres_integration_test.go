@@ -19,7 +19,7 @@ import (
 
 func TestPostgresIntegrationEvidenceSources(t *testing.T) {
 	ctx := context.Background()
-	fixture := newRecordPlatformPostgresFixture(t, ctx)
+	fixture := newRecordsPostgresFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-sources", 2)
 
 	now := time.Now().UTC().Truncate(time.Second)
@@ -247,17 +247,17 @@ func TestPostgresIntegrationEvidenceSources(t *testing.T) {
 func seedEvidenceSourceFixtures(t *testing.T, ctx context.Context, db, writerDB *pgxpool.Pool, now, partialDay, completeDay time.Time) {
 	t.Helper()
 	execEvidenceSQL(t, ctx, db, `
-		insert into monitoring_instances (monitoring_instance_id, display_name, region, city, provider, lifecycle_status)
-		values ('mi_0123456789abcdef', 'Evidence Sources MI', 'Tokyo', 'Tokyo', 'Evidence Provider', '在用')`)
+		insert into vps_assets (vps_id, display_name, lifecycle_status, usage_tags)
+		values ('vps_0123456789abcdef', 'Evidence Sources VPS', 'active', array['业务'])`)
 	execEvidenceSQL(t, ctx, db, `
-		insert into vps_assets (vps_id, display_name, lifecycle_status, usage_status)
-		values ('vps_0123456789abcdef', 'Evidence Sources VPS', 'active', 'in_use')`)
+		insert into monitoring_instances (monitoring_instance_id, vps_id, display_name, region, city, provider, lifecycle_status, binding_status, ever_connected, last_trusted_online_at)
+		values ('mi_0123456789abcdef', 'vps_0123456789abcdef', 'Evidence Sources MI', 'Tokyo', 'Tokyo', 'Evidence Provider', '已接入', '已绑定', true, $1)`, now)
 	execEvidenceSQL(t, ctx, db, `
 		insert into vps_monitoring_instance_links (link_id, vps_id, monitoring_instance_id, note)
 		values ('vnl_evidence_sources', 'vps_0123456789abcdef', 'mi_0123456789abcdef', '')`)
 	execEvidenceSQL(t, ctx, db, `
 		insert into targets (target_id, name, target_type, host, run_status)
-		values ('tg_evidence_sources', 'Evidence Target', 'hostname', 'example.com', 'enabled')`)
+		values ('tg_evidence_sources', 'Evidence Target', 'hostname', 'example.com', '启用')`)
 	execEvidenceSQL(t, ctx, db, `
 		insert into probe_items (probe_item_id, target_id, probe_kind, frequency_tier, timeout_seconds)
 		values ('pb_evidence_sources', 'tg_evidence_sources', 'http', '5m', 10)`)
@@ -361,8 +361,8 @@ func seedTask4EvidenceSources(t *testing.T, ctx context.Context, db, writerDB *p
 		) values ('sub_evidence_sources', 'vps_0123456789abcdef', 20, 'USD', 'monthly', 1,
 			20, 'month', 1, $1::date + 1, $1::date + interval '2 months', 'active', $1, $1)`, costStart)
 	execEvidenceSQL(t, ctx, db, `
-		insert into vps_assets (vps_id, display_name, lifecycle_status, usage_status)
-		values ('vps_evidence_budget_peer', 'Evidence Budget Peer', 'active', 'idle')`)
+		insert into vps_assets (vps_id, display_name, lifecycle_status, usage_tags)
+		values ('vps_evidence_budget_peer', 'Evidence Budget Peer', 'active', array['闲置'])`)
 	execEvidenceSQL(t, ctx, db, `
 		insert into subscriptions (
 			subscription_id, vps_id, price, currency, billing_cycle, billing_months,
@@ -420,14 +420,18 @@ func readEvidenceFixtureMonitoringInstanceRowVersion(t *testing.T, ctx context.C
 
 func seedTask4StateControlWriterFixtures(t *testing.T, ctx context.Context, db, writerDB *pgxpool.Pool, now time.Time) {
 	t.Helper()
+	execEvidenceSQL(t, ctx, db, `insert into vps_assets(vps_id,display_name,lifecycle_status) values
+		('vps_evidence_binding','Evidence Binding Owner','active'),
+		('vps_evidence_lifecycle','Evidence Lifecycle Owner','active'),
+		('vps_evidence_runtime','Evidence Runtime Owner','active')`)
 	execEvidenceSQL(t, ctx, db, `
 		insert into monitoring_instances (
-			monitoring_instance_id, display_name, region, city, provider,
-			lifecycle_status, monitoring_status, binding_status, binding_fingerprint
+			monitoring_instance_id, vps_id, display_name, region, city, provider,
+			lifecycle_status, monitoring_status, binding_status, binding_fingerprint, ever_connected, last_trusted_online_at
 		) values
-			('mi_evidence_binding', 'Evidence Binding Writer', 'Tokyo', 'Tokyo', 'Evidence Provider', '在用', '启用', '已绑定', 'fp-evidence-binding'),
-			('mi_evidence_lifecycle', 'Evidence Lifecycle Writer', 'Tokyo', 'Tokyo', 'Evidence Provider', '在用', '启用', '已绑定', 'fp-evidence-lifecycle'),
-			('mi_evidence_runtime', 'Evidence Runtime Writer', 'Tokyo', 'Tokyo', 'Evidence Provider', '在用', '启用', '已绑定', 'fp-evidence-runtime')`)
+			('mi_evidence_binding', 'vps_evidence_binding', 'Evidence Binding Writer', 'Tokyo', 'Tokyo', 'Evidence Provider', '已接入', '启用', '已绑定', 'fp-evidence-binding', true, $1),
+			('mi_evidence_lifecycle', 'vps_evidence_lifecycle', 'Evidence Lifecycle Writer', 'Tokyo', 'Tokyo', 'Evidence Provider', '已接入', '启用', '已绑定', 'fp-evidence-lifecycle', true, $1),
+			('mi_evidence_runtime', 'vps_evidence_runtime', 'Evidence Runtime Writer', 'Tokyo', 'Tokyo', 'Evidence Provider', '已接入', '启用', '已绑定', 'fp-evidence-runtime', true, $1)`, now)
 	execEvidenceSQL(t, ctx, db, `
 		insert into targets (target_id, name, target_type, host, run_status)
 		values ('tg_evidence_runtime', 'Evidence Runtime Target', 'service', 'runtime.example.com', '启用')`)
@@ -436,7 +440,7 @@ func seedTask4StateControlWriterFixtures(t *testing.T, ctx context.Context, db, 
 	if _, err := monitoringRepository.ResetMonitoringInstanceBinding(ctx, "mi_evidence_binding"); err != nil {
 		t.Fatalf("ResetMonitoringInstanceBinding() Task 4 PostgreSQL writer path: %v", err)
 	}
-	if _, err := monitoringRepository.RetireMonitoringInstance(ctx, "mi_evidence_lifecycle", monitoringinstances.LifecycleActionInput{Reason: "Task 4 evidence writer acceptance"}); err != nil {
+	if _, err := monitoringRepository.RetireMonitoringInstance(ctx, "mi_evidence_lifecycle", monitoringinstances.LifecycleActionInput{IdempotencyKey: "evidence-lifecycle-retire", Reason: "Task 4 evidence writer acceptance"}); err != nil {
 		t.Fatalf("RetireMonitoringInstance() Task 4 PostgreSQL writer path: %v", err)
 	}
 	if _, err := monitoringRepository.SetMonitoringInstanceMonitoringMaintenance(ctx, "mi_evidence_runtime"); err != nil {

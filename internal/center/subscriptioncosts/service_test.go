@@ -129,8 +129,8 @@ func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
 	if len(overview.ProviderBreakdown) != 2 || overview.ProviderBreakdown[0].Label != "Hetzner" {
 		t.Fatalf("provider breakdown = %#v, want Hetzner first by monthly cost", overview.ProviderBreakdown)
 	}
-	if repo.rows[0].BudgetStatus != BudgetStatusOver || repo.rows[1].BudgetStatus != BudgetStatusOver {
-		t.Fatalf("row budget statuses = %q/%q, want over/over", repo.rows[0].BudgetStatus, repo.rows[1].BudgetStatus)
+	if overview.VPSCosts[0].BudgetStatus != BudgetStatusOver || overview.VPSCosts[1].BudgetStatus != BudgetStatusOver {
+		t.Fatalf("row budget statuses = %q/%q, want over/over", overview.VPSCosts[0].BudgetStatus, overview.VPSCosts[1].BudgetStatus)
 	}
 }
 

@@ -7,10 +7,9 @@ export type ManagementFeedbackAction = {
   panel?: 'subscription' | 'cancellation'
 }
 
-const CANCELLATION_LIKE_RENEWAL = new Set(['cancel', 'auto_renew_cancelled', 'migrate'])
 
 export type OverviewWorkbenchPanel =
-  | 'cancellation'
+  | 'archive'
   | 'subscription'
   | 'monitoring-instance-create'
 
@@ -19,7 +18,7 @@ export function parseOverviewWorkbench(value: string | null | undefined): Overvi
   if (normalized === 'monitoring' || normalized === 'monitoring-instance-create') {
     return 'monitoring-instance-create'
   }
-  if (normalized === 'cancellation' || normalized === 'subscription') return normalized
+  if (normalized === 'archive' || normalized === 'subscription') return normalized
   return null
 }
 
@@ -36,7 +35,7 @@ export function isVPSAssetReadonly(error: unknown): boolean {
 }
 
 export function isTerminalVPSLifecycle(status: string | null | undefined): boolean {
-  return status === 'cancelled' || status === 'archived'
+  return status === 'archived'
 }
 
 export type VPSVersionConflictState = {
@@ -86,37 +85,12 @@ export function subscriptionLinkageNotice(
 }
 
 export function subscriptionLinkageAction(
-  linkage: RenewalSubscriptionLinkage | null | undefined,
-  vpsId: string,
-  renewalDecision?: string,
+  _linkage: RenewalSubscriptionLinkage | null | undefined,
+  _vpsId: string,
+  _renewalDecision?: string,
 ): ManagementFeedbackAction | null {
-  if (!linkage) return null
-  if (renewalDecision && CANCELLATION_LIKE_RENEWAL.has(renewalDecision)) {
-    return {
-      to: `/vps/${encodeURIComponent(vpsId)}?workbench=cancellation`,
-      label: '继续取消 / 退役',
-      panel: 'cancellation',
-    }
-  }
-  if (linkage.status === 'no_active_subscription') {
-    if (linkage.candidate_count > 0) {
-      return {
-        to: `/vps/${encodeURIComponent(vpsId)}?workbench=cancellation`,
-        label: '打开取消/退役',
-        panel: 'cancellation',
-      }
-    }
-    return {
-      to: `/vps/${encodeURIComponent(vpsId)}?workbench=subscription`,
-      label: '新增订阅事实',
-      panel: 'subscription',
-    }
-  }
-  if (linkage.status === 'multiple_active_subscriptions') {
-    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsId)}&view=details`, label: '去订阅页选择处理' }
-  }
-  if (linkage.subscription_id) {
-    return { to: `/subscriptions?vps_id=${encodeURIComponent(vpsId)}&view=details`, label: '查看关联订阅' }
-  }
+  void _linkage
+  void _vpsId
+  void _renewalDecision
   return null
 }

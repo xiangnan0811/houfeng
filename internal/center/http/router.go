@@ -58,6 +58,10 @@ type RouterOptions struct {
 	VPSExperienceLogsHandler                      stdhttp.Handler
 	VPSDomainsHandler                             stdhttp.Handler
 	VPSServicesHandler                            stdhttp.Handler
+	VPSServiceAssociationsHandler                 stdhttp.Handler
+	VPSDomainAssociationsHandler                  stdhttp.Handler
+	VPSFollowupsHandler                           stdhttp.Handler
+	VPSMaintenanceHandler                         stdhttp.Handler
 	VPSIPQualityHandler                           stdhttp.Handler
 	VPSCancellationPreviewHandler                 stdhttp.Handler
 	VPSCancellationHandler                        stdhttp.Handler
@@ -82,6 +86,7 @@ type RouterOptions struct {
 	MonitoringInstanceRuntimeStreamHandler        stdhttp.Handler
 	MonitoringInstanceRuntimeControlHandler       stdhttp.Handler
 	MonitoringInstanceManagementReviewHandler     stdhttp.Handler
+	MonitoringInstancePhasesHandler               stdhttp.Handler
 	MonitoringInstanceLifecycleRetireHandler      stdhttp.Handler
 	MonitoringInstanceLifecycleRestoreHandler     stdhttp.Handler
 	MonitoringInstanceArchiveHandler              stdhttp.Handler
@@ -284,6 +289,26 @@ func New(opts RouterOptions) stdhttp.Handler {
 	if opts.VPSCollectionHandler != nil {
 		mux.Handle("/api/vps", protect(opts.VPSCollectionHandler))
 	}
+	if opts.VPSServiceAssociationsHandler != nil {
+		handler := protect(opts.VPSServiceAssociationsHandler)
+		mux.Handle("/api/vps/{vps_id}/service-associations", handler)
+		mux.Handle("/api/vps/{vps_id}/service-associations/{association_id}/end", handler)
+	}
+	if opts.VPSDomainAssociationsHandler != nil {
+		handler := protect(opts.VPSDomainAssociationsHandler)
+		mux.Handle("/api/vps/{vps_id}/domain-associations", handler)
+		mux.Handle("/api/vps/{vps_id}/domain-associations/{association_id}/end", handler)
+	}
+	if opts.VPSFollowupsHandler != nil {
+		handler := protect(opts.VPSFollowupsHandler)
+		mux.Handle("/api/vps/{vps_id}/followups", handler)
+		mux.Handle("/api/vps/{vps_id}/followups/{followup_id}", handler)
+	}
+	if opts.VPSMaintenanceHandler != nil {
+		handler := protect(opts.VPSMaintenanceHandler)
+		mux.Handle("/api/vps/{vps_id}/maintenance-review", handler)
+		mux.Handle("/api/vps/{vps_id}/maintenance", handler)
+	}
 	if opts.VPSStartMigrationHandler != nil || opts.VPSItemHandler != nil || opts.VPSOverviewHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSIPQualityHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil || opts.VPSArchiveReviewHandler != nil || opts.VPSArchiveHandler != nil || opts.VPSRestoreFromArchiveHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
@@ -432,10 +457,20 @@ func New(opts RouterOptions) stdhttp.Handler {
 		mux.Handle("/api/subscriptions/", protect(opts.SubscriptionItemHandler))
 	}
 	if opts.MonitoringInstancesCollectionHandler != nil {
-		mux.Handle("/api/monitoring-instances", protect(opts.MonitoringInstancesCollectionHandler))
+		mux.Handle("/api/monitoring-instances", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			if r.Method != stdhttp.MethodGet {
+				w.Header().Set("Allow", stdhttp.MethodGet)
+				w.WriteHeader(stdhttp.StatusMethodNotAllowed)
+				return
+			}
+			opts.MonitoringInstancesCollectionHandler.ServeHTTP(w, r)
+		})))
 	}
 	if opts.MonitoringInstanceRuntimeSummariesHandler != nil {
 		mux.Handle("/api/monitoring-instances/runtime-summaries", protect(opts.MonitoringInstanceRuntimeSummariesHandler))
+	}
+	if opts.MonitoringInstancePhasesHandler != nil {
+		mux.Handle("/api/monitoring-instances/{monitoring_instance_id}/phases", protect(opts.MonitoringInstancePhasesHandler))
 	}
 	if opts.MonitoringInstanceBatchHandler != nil {
 		mux.Handle("/api/monitoring-instances/batch", protect(opts.MonitoringInstanceBatchHandler))
@@ -686,10 +721,6 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeOverview
 	case "subscriptions":
 		return segments[0], vpsSubtreeSubscriptions
-	case "link-monitoring-instance":
-		return segments[0], vpsSubtreeLinkMonitoringInstance
-	case "unlink-monitoring-instance":
-		return segments[0], vpsSubtreeUnlinkMonitoringInstance
 	case "timeline":
 		return segments[0], vpsSubtreeTimeline
 	case "experience-logs":
@@ -700,10 +731,6 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeServices
 	case "ip-quality":
 		return segments[0], vpsSubtreeIPQuality
-	case "cancellation-preview":
-		return segments[0], vpsSubtreeCancellationPreview
-	case "cancellation":
-		return segments[0], vpsSubtreeCancellation
 	case "extend-validity":
 		return segments[0], vpsSubtreeExtendValidity
 	case "archive-review":
@@ -712,8 +739,6 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 		return segments[0], vpsSubtreeArchive
 	case "restore-from-archive":
 		return segments[0], vpsSubtreeRestoreFromArchive
-	case "start-migration":
-		return segments[0], vpsSubtreeStartMigration
 	default:
 		return segments[0], vpsSubtreeUnknown
 	}
@@ -779,18 +804,7 @@ func monitoringInstanceSubtreePath(path string) (monitoringInstanceID string, su
 		switch segments[2] {
 		case "retire":
 			return segments[0], monitoringInstanceSubtreeLifecycleRetire
-		case "restore":
-			return segments[0], monitoringInstanceSubtreeLifecycleRestore
 		}
-	}
-	if segments[1] == "archive" && len(segments) == 2 {
-		return segments[0], monitoringInstanceSubtreeArchive
-	}
-	if segments[1] == "restore-from-archive" && len(segments) == 2 {
-		return segments[0], monitoringInstanceSubtreeRestoreFromArchive
-	}
-	if segments[1] == "permanent-cleanup" && len(segments) == 2 {
-		return segments[0], monitoringInstanceSubtreePermanentCleanup
 	}
 	if segments[1] == "onboarding" && len(segments) == 2 {
 		return segments[0], monitoringInstanceSubtreeOnboarding

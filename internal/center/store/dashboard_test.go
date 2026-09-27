@@ -37,9 +37,8 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					*(dest[4].(*int)) = 2
 					*(dest[5].(*int)) = 3
 					*(dest[6].(*int)) = 4
-					*(dest[7].(*int)) = 2
-					*(dest[8].(*int)) = 5
-					*(dest[9].(*int)) = 1
+					*(dest[7].(*int)) = 5
+					*(dest[8].(*int)) = 1
 					return nil
 				}}
 			}
@@ -191,7 +190,7 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if overview.AssetSummary.UnreviewedVPSCount != 4 || overview.AssetSummary.UnlinkedVPSCount != 5 || overview.AssetSummary.AbnormalLinkedVPSCount != 1 {
 		t.Fatalf("AssetSummary counts = %#v, want decision/link counts", overview.AssetSummary)
 	}
-	if overview.AssetSummary.CancelledVPSCount != 2 || overview.AssetSummary.CancellationAttentionVPSCount != 3 || overview.AssetSummary.RunningCancelledAssetCount != 4 {
+	if overview.AssetSummary.ArchivedVPSCount != 2 || overview.AssetSummary.AutoRenewCheckVPSCount != 3 || overview.AssetSummary.PendingFollowupCount != 4 {
 		t.Fatalf("AssetSummary cancellation counts = %#v, want cancelled/attention/runtime counts", overview.AssetSummary)
 	}
 	if len(overview.AssetSummary.CostByCurrency) != 1 || overview.AssetSummary.CostByCurrency[0].Currency != "USD" {
@@ -246,10 +245,12 @@ func TestPostgresDashboardRepositoryBuildsAbnormalSummaryQueries(t *testing.T) {
 		t.Fatalf("capturedSQL = %#v, want monitoring instance abnormal summary query", capturedSQL)
 	}
 	for _, want := range []string{
-		"mi.current_health_status <> '正常'",
-		"from vps_monitoring_instance_links l",
-		"l.unlinked_at is null",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"mi.projected_health_status <> '正常'",
+		"mi.binding_status <> '已绑定'",
+		"mi.last_trusted_online_at is null",
+		"from vps_assets v",
+		"lifecycle_status <> '已退役'",
+		"v.lifecycle_status = 'active'",
 		"when '严重' then 3",
 		"mi.current_active_incident_count desc",
 	} {
@@ -264,9 +265,9 @@ func TestPostgresDashboardRepositoryBuildsAbnormalSummaryQueries(t *testing.T) {
 	}
 	for _, want := range []string{
 		"t.current_health_status <> '正常'",
-		"from asset_services",
-		"from asset_domains",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"from asset_service_associations",
+		"from asset_domain_associations",
+		"v.lifecycle_status = 'active'",
 		"current_health_status <> '正常'",
 		"when '严重' then 3",
 		"t.current_active_incident_count desc",
@@ -296,15 +297,17 @@ func TestPostgresDashboardRepositoryBuildsVisibleCurrentRuntimeCountQuery(t *tes
 		"visible_monitoring_instances as",
 		"visible_targets as",
 		"visible_events as",
-		"from vps_monitoring_instance_links l",
-		"from asset_services",
-		"from asset_domains",
-		"l.unlinked_at is null",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
-		"from visible_monitoring_instances where current_health_status <> '正常'",
-		"from visible_targets where current_health_status <> '正常'",
+		"from vps_assets v",
+		"from asset_service_associations",
+		"from asset_domain_associations",
+		"lifecycle_status <> '已退役'",
+		"v.lifecycle_status = 'active'",
+		"from visible_monitoring_instances where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status <> '正常'",
+		"from visible_targets where run_status = '启用' and current_health_status <> '正常'",
 		"from visible_monitoring_instances where monitoring_status = '维护中'",
 		"from visible_targets where run_status = '维护中'",
+		"from monitoring_instances where lifecycle_status = '已退役'",
+		"from targets where lifecycle_status = 'retired'",
 		"from visible_events e where event_type = 'incident_started'",
 		"from visible_events e where event_type = 'incident_recovered'",
 		"e.payload ->> 'event_at'",
@@ -336,12 +339,12 @@ func TestLoadDashboardTrends24hDefaultsToCurrentAssetVisibility(t *testing.T) {
 		"from visible_events e",
 		"e.object_type = 'monitoring_instance'",
 		"from monitoring_instances mi",
-		"from vps_monitoring_instance_links l",
+		"from vps_assets v",
 		"e.object_type = 'target'",
 		"from targets t",
-		"from asset_services",
-		"from asset_domains",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"from asset_service_associations",
+		"from asset_domain_associations",
+		"v.lifecycle_status = 'active'",
 		"date_trunc('hour', case when jsonb_typeof(e.payload -> 'event_at') = 'string' then (e.payload ->> 'event_at')::timestamptz else e.created_at end)",
 	} {
 		if !strings.Contains(capturedSQL, want) {
@@ -376,15 +379,15 @@ func TestPostgresDashboardRepositoryBuildsFullGroupSummaryQuery(t *testing.T) {
 		"visible_targets as",
 		"from monitoring_instances mi",
 		"from targets t",
-		"from vps_monitoring_instance_links l",
-		"from asset_services",
-		"from asset_domains",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"from vps_assets v",
+		"from asset_service_associations",
+		"from asset_domain_associations",
+		"v.lifecycle_status = 'active'",
 		"from visible_monitoring_instances",
 		"from visible_targets",
 		"full outer join target_groups",
 		`coalesce(nullif(btrim("group"), ''), '未分组')`,
-		"count(*) filter (where current_health_status <> '正常')",
+		"current_health_status <> '正常'",
 		"order by",
 	} {
 		if !strings.Contains(groupSQL, want) {
@@ -410,9 +413,8 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 				*(dest[4].(*int)) = 1
 				*(dest[5].(*int)) = 3
 				*(dest[6].(*int)) = 2
-				*(dest[7].(*int)) = 7
-				*(dest[8].(*int)) = 8
-				*(dest[9].(*int)) = 9
+				*(dest[7].(*int)) = 8
+				*(dest[8].(*int)) = 9
 				return nil
 			}}
 		},
@@ -440,7 +442,7 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 	if summary.RenewalDue30dSubscriptionCount != 6 || summary.RenewalDue30dVPSCount != 4 {
 		t.Fatalf("summary renewal = %#v, want 6 subscriptions / 4 VPS", summary)
 	}
-	if summary.ToCancelVPSCount != 2 || summary.CancelledVPSCount != 1 || summary.CancellationAttentionVPSCount != 3 || summary.RunningCancelledAssetCount != 2 || summary.ToMigrateVPSCount != 7 || summary.AbnormalLinkedVPSCount != 9 {
+	if summary.NoRenewalVPSCount != 2 || summary.ArchivedVPSCount != 1 || summary.AutoRenewCheckVPSCount != 3 || summary.PendingFollowupCount != 2 || summary.AbnormalLinkedVPSCount != 9 {
 		t.Fatalf("summary decisions = %#v, want cancel/migrate/abnormal counts", summary)
 	}
 	if len(summary.CostByCurrency) != 2 || summary.CostByCurrency[0].Currency != "EUR" || summary.CostByCurrency[1].Currency != "USD" {
@@ -453,18 +455,18 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 	}
 	for _, want := range []string{
 		"from vps_assets",
-		"lifecycle_status not in ('cancelled', 'archived')",
-		"cancellation_attention",
-		"cancelled_asset_runtime",
-		"from vps_monitoring_instance_links",
-		"unlinked_at is null",
+		"lifecycle_status = 'active'",
+		"auto_renew_check",
+		"vps_followups",
+		"from monitoring_instances n",
+		"lifecycle_status <> '已退役'",
 		"from subscriptions",
 		"status = 'active'",
-		"renew_at <= current_date + 30",
+		"current_date + 30",
 		"renewal_decision = 'unreviewed'",
-		"lifecycle_status = 'to_cancel'",
-		"lifecycle_status = 'to_migrate'",
-		"current_health_status <> '正常'",
+		"renewal_decision = 'cancel'",
+		"status = 'pending'",
+		"projected_health_status <> '正常'",
 	} {
 		if !strings.Contains(countSQL, want) {
 			t.Fatalf("countSQL = %q, want %q", countSQL, want)
@@ -479,7 +481,7 @@ func TestLoadDashboardAssetSummaryBuildsDecisionQueries(t *testing.T) {
 		"sum(monthly_price)",
 		"join vps_assets v on v.vps_id = subscriptions.vps_id",
 		"where subscriptions.status = 'active'",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"v.lifecycle_status = 'active'",
 		"group by currency",
 		"order by currency asc",
 	} {
@@ -589,13 +591,13 @@ func TestPostgresDashboardRepositoryListEventsDefaultsToCurrentAssetVisibility(t
 		"from state_change_events e",
 		"e.object_type = 'monitoring_instance'",
 		"from monitoring_instances mi",
-		"from vps_monitoring_instance_links l",
-		"l.unlinked_at is null",
+		"from vps_assets v",
+		"lifecycle_status <> '已退役'",
 		"e.object_type = 'target'",
 		"from targets t",
-		"from asset_services",
-		"from asset_domains",
-		"v.lifecycle_status not in ('cancelled', 'archived')",
+		"from asset_service_associations",
+		"from asset_domain_associations",
+		"v.lifecycle_status = 'active'",
 	} {
 		if !strings.Contains(capturedSQL, want) {
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)

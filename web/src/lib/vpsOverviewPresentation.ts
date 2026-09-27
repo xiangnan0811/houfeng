@@ -1,11 +1,9 @@
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
-  VPS_USAGE_STATUS_LABELS,
   type VPSLifecycleStatus,
   type VPSOverview,
   type VPSRenewalDecision,
-  type VPSUsageStatus,
   type SubjectActivitySubjectSnapshot,
 } from './types'
 
@@ -67,7 +65,7 @@ export function overviewLifecycleLabel(value: string): string {
 }
 
 export function overviewUsageLabel(value: string): string {
-  return VPS_USAGE_STATUS_LABELS[value as VPSUsageStatus] ?? value
+  return value
 }
 
 export function overviewRenewalLabel(value: string): string {
@@ -100,6 +98,17 @@ const INCOMPLETE_MONITORING: Record<string, true> = {
   unknown: true,
   未知: true,
   未关联: true,
+  待接入: true,
+  已退役: true,
+  维护中: true,
+  暂停: true,
+  未启用: true,
+  unavailable: true,
+  暂不可用: true,
+  pending: true,
+  maintenance: true,
+  paused: true,
+  retired: true,
 }
 const INCOMPLETE_IP: Record<string, true> = {
   unknown: true,
@@ -123,6 +132,8 @@ export type OverallObservationPresentation = {
 
 function runningEvidenceGaps(summary: VPSOverview['summary']): string[] {
   const gaps: string[] = []
+  if (summary.overall.section.state === 'unavailable') gaps.push('总体观测暂不可用')
+  else if (summary.overall.section.state === 'stale') gaps.push('总体观测数据陈旧')
   const monitoring = summary.monitoring
   if (monitoring.section.state === 'stale') gaps.push('监控数据陈旧')
   else if (monitoring.section.state === 'unavailable') gaps.push('监控暂不可用')
@@ -141,17 +152,14 @@ export function overviewOverallPresentation(
   lifecycleStatus?: string,
 ): OverallObservationPresentation {
   const rawLabel = overviewOverallLabel(summary.overall.status) || '—'
+  if (lifecycleStatus === 'archived') {
+    return { label: '已归档', tone: 'unknown', explanation: '当前运行观测已结束；历史事实保留。', rawLabel }
+  }
   const gaps = runningEvidenceGaps(summary)
   const adverse = ADVERSE_OVERALL[summary.overall.status]
   if (adverse) {
     const parts: string[] = []
     if (gaps.length > 0) parts.push(`${gaps.join('，')}。`)
-    if (
-      (summary.overall.status === 'attention' || summary.overall.status === '需要关注')
-      && lifecycleStatus === 'to_cancel'
-    ) {
-      parts.push('取消计划待处理。')
-    }
     return {
       label: rawLabel,
       tone: adverse,
@@ -377,5 +385,3 @@ export function overviewIPQualityActionLabel(cell: {
   if (empty || unavailable) return '查看 IP 质量结果'
   return '查看 IP 质量报告'
 }
-
-

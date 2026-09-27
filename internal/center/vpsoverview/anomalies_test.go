@@ -176,14 +176,6 @@ func TestEvaluateAnomaliesTable(t *testing.T) {
 			want: RuleRenewalOverdue,
 		},
 		{
-			name: "lifecycle blocker",
-			in: Snapshot{
-				GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
-				LifecycleStatus: "to_cancel",
-			},
-			want: RuleLifecycleBlocker,
-		},
-		{
 			name: "source unavailable",
 			in: Snapshot{
 				GeneratedAt: now, VPSID: "vps_7c2a4e18b09d5f31",
@@ -304,12 +296,6 @@ func TestEvaluateAnomaliesActionDestinations(t *testing.T) {
 			},
 			ruleID: RuleRenewalDueSoon, actionID: "open_renewal_decision",
 			actionLabel: "查看续费",
-		},
-		{
-			name:     "lifecycle blocker is a page-owned management command",
-			snapshot: Snapshot{GeneratedAt: now, VPSID: vpsID, LifecycleStatus: "to_cancel"},
-			ruleID:   RuleLifecycleBlocker, actionID: "open_management",
-			actionLabel: "打开管理",
 		},
 		{
 			name: "source unavailable is a page-owned refresh command",

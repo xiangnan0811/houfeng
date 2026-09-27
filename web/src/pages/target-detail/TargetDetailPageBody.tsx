@@ -201,7 +201,7 @@ export function TargetDetailPageBody({
   const probeActionsDisabled =
     probeCreateSubmitting || probeRowMutationBusy || runtimeConfirmationActive || probeConfirmationActive
   const readOnly = READ_ONLY_PREVIEW
-  const isArchived = target.run_status === '已归档'
+  const isArchived = target.lifecycle_status === 'retired'
   const archiveRuntimeError =
     pendingRuntimeConfirmation?.action === 'archive' ? runtimeError : null
   const latestRuntimeObservationAt = latestObservationAt([
@@ -297,7 +297,7 @@ export function TargetDetailPageBody({
         probeMutationError={probeMutationError}
         addDisabled={probeCreateSubmitting || runtimeConfirmationActive || probeConfirmationActive}
         onOpenCreate={onOpenProbeCreate}
-        readOnly={readOnly}
+        readOnly={readOnly || isArchived}
       />
 
       <TargetDetailRecentEvents

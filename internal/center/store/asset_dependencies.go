@@ -18,13 +18,15 @@ func loadAssetDependencyImpacts(ctx context.Context, db assetLifecycleQueryer, m
 		from vps_monitoring_instance_links l join vps_assets v using (vps_id)
 		where l.monitoring_instance_id = any($1::text[])
 		union all
-		select 'target', s.target_id, v.vps_id, v.lifecycle_status, 'service', s.service_id, s.status
-		from asset_services s join vps_assets v using (vps_id)
-		where s.target_id = any($2::text[])
+		select 'target', a.target_id, v.vps_id, v.lifecycle_status, 'service', a.id,
+			case when a.ended_at is null then 'current' else 'ended' end
+		from asset_service_associations a join vps_assets v using (vps_id)
+		where a.target_id = any($2::text[])
 		union all
-		select 'target', d.target_id, v.vps_id, v.lifecycle_status, 'domain', d.domain_id, d.status
-		from asset_domains d join vps_assets v using (vps_id)
-		where d.target_id = any($2::text[])
+		select 'target', a.target_id, v.vps_id, v.lifecycle_status, 'domain', a.id,
+			case when a.ended_at is null then 'current' else 'ended' end
+		from asset_domain_associations a join vps_assets v using (vps_id)
+		where a.target_id = any($2::text[])
 		order by 1, 2, 3, 5, 6`, monitoringIDs, targetIDs)
 	if err != nil {
 		return nil, fmt.Errorf("load asset dependency impacts: %w", err)

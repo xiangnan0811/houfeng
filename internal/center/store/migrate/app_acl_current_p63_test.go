@@ -48,7 +48,7 @@ func TestPostgresIntegrationAppACLCurrentP63ReleaseProfiles(t *testing.T) {
 				migratorDB = fixture.openRolePool(t, ctx, fixture.migratorRole)
 				predecessor, _, _ = seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
 			}
-			seedAppACLCurrentSuccessorArchivedVPS(t, ctx, migratorDB)
+			assertAppACLCurrentSuccessorRejectsLegacyVPS(t, ctx, migratorDB)
 			_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 			before := readAppACLCurrentTransitionDurableState(t, ctx, migratorDB, input)
 			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)

@@ -461,14 +461,19 @@ func TestCreateAssetServiceIdempotentCreateReplayAndReuse(t *testing.T) {
 					resultInserts++
 					fallthrough
 				case strings.Contains(sql, "from asset_services"):
+					if strings.Contains(sql, "select to_jsonb(o)") {
+						return fakeCreateIdempotencyRow{scan: func(...any) error { return nil }}
+					}
 					if strings.Contains(sql, "from asset_services") &&
-						(!strings.Contains(sql, "and vps_id = $2") || len(args) != 2 || args[0] != record.ServiceID || args[1] != "vps_001") {
+						(!strings.Contains(sql, "where service_id = $1") || len(args) != 1 || args[0] != record.ServiceID) {
 						t.Fatalf("asset service replay scope SQL/argument contract valid = false")
 					}
 					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
 						scanAssetServiceRecordDestinations(dest, record)
 						return nil
 					}}
+				case strings.Contains(sql, "insert into asset_service_associations"):
+					return fakeCreateIdempotencyRow{scan: func(...any) error { return nil }}
 				default:
 					t.Fatal("unexpected QueryRow call")
 					return fakeCreateIdempotencyRow{scan: func(...any) error { return errCreateIdempotencyCutPoint }}
@@ -688,14 +693,19 @@ func TestCreateAssetDomainIdempotentCreateReplayAndReuse(t *testing.T) {
 					resultInserts++
 					fallthrough
 				case strings.Contains(sql, "from asset_domains"):
+					if strings.Contains(sql, "select to_jsonb(o)") {
+						return fakeCreateIdempotencyRow{scan: func(...any) error { return nil }}
+					}
 					if strings.Contains(sql, "from asset_domains") &&
-						(!strings.Contains(sql, "and vps_id = $2") || len(args) != 2 || args[0] != record.DomainID || args[1] != "vps_001") {
+						(!strings.Contains(sql, "where domain_id = $1") || len(args) != 1 || args[0] != record.DomainID) {
 						t.Fatalf("asset domain replay scope SQL/argument contract valid = false")
 					}
 					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
 						scanAssetDomainRecordDestinations(dest, record)
 						return nil
 					}}
+				case strings.Contains(sql, "insert into asset_domain_associations"):
+					return fakeCreateIdempotencyRow{scan: func(...any) error { return nil }}
 				default:
 					t.Fatal("unexpected QueryRow call")
 					return fakeCreateIdempotencyRow{scan: func(...any) error { return errCreateIdempotencyCutPoint }}
@@ -836,9 +846,9 @@ func TestCreateAssetDomainIdempotentChecksServiceScopeInsideTransaction(t *testi
 				*(dest[0].(*vpsassets.LifecycleStatus)) = vpsassets.LifecycleActive
 				return nil
 			}}
-		case strings.Contains(sql, "from asset_services"):
+		case strings.Contains(sql, "from asset_service_associations"):
 			return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
-				*(dest[0].(*string)) = "vps_other"
+				*(dest[0].(*bool)) = false
 				return nil
 			}}
 		default:
@@ -963,7 +973,7 @@ func TestCreateLinkedMonitoringInstanceIdempotentCreateReplayAndReuse(t *testing
 						*(dest[8].(*string)) = "asset note"
 						return nil
 					}}
-				case strings.Contains(sql, "select count(*)") && strings.Contains(sql, "vps_monitoring_instance_links"):
+				case strings.Contains(sql, "select count(*)") && strings.Contains(sql, "monitoring_instances"):
 					return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
 						*(dest[0].(*int)) = test.activeLinks
 						return nil
@@ -1095,7 +1105,7 @@ func TestCreateLinkedMonitoringInstanceIdempotentReplayIgnoresChangedDerivedPers
 				})
 				return nil
 			}}
-		case strings.Contains(sql, "select count(*)") && strings.Contains(sql, "vps_monitoring_instance_links"):
+		case strings.Contains(sql, "select count(*)") && strings.Contains(sql, "monitoring_instances"):
 			return fakeCreateIdempotencyRow{scan: func(dest ...any) error {
 				*(dest[0].(*int)) = 0
 				return nil
@@ -1255,7 +1265,7 @@ func TestCreateLinkedMonitoringInstanceIdempotentRejectsInvalidDerivedMetadataBe
 						})
 						return nil
 					}}
-				case strings.Contains(sql, "select count(*)") && strings.Contains(sql, "vps_monitoring_instance_links"):
+				case strings.Contains(sql, "select count(*)") && strings.Contains(sql, "monitoring_instances"):
 					activeLinkQueryCount++
 					return fakeCreateIdempotencyRow{scan: func(...any) error { return errCreateIdempotencyCutPoint }}
 				case strings.Contains(sql, "insert into monitoring_instances"), strings.Contains(sql, "insert into vps_monitoring_instance_links"):
@@ -1357,7 +1367,7 @@ func TestCreateLinkedMonitoringInstanceIdempotentFailsClosedAtEveryCutPoint(t *t
 						})
 						return nil
 					}}
-				case strings.Contains(sql, "select count(*)") && strings.Contains(sql, "vps_monitoring_instance_links"):
+				case strings.Contains(sql, "select count(*)") && strings.Contains(sql, "monitoring_instances"):
 					if cutPoint == "active link guard" {
 						return fakeCreateIdempotencyRow{scan: func(...any) error { return errCreateIdempotencyCutPoint }}
 					}

@@ -141,9 +141,7 @@ export function buildVPSDecisionModel(input: BuildDecisionModelInput) {
 
 function decisionTone(detail: VPSAssetDetail): Exclude<WorkbenchTone, 'neutral'> {
   if (detail.renewal_decision === 'unreviewed') return 'alert'
-  if (detail.renewal_decision === 'migrate' || detail.renewal_decision === 'cancel') return 'notice'
-  if (detail.renewal_decision === 'auto_renew_cancelled' || detail.renewal_decision === 'replaced') return 'notice'
-  if (detail.renewal_decision === 'observe') return 'notice'
+  if (detail.renewal_decision === 'cancel') return 'notice'
   return 'normal'
 }
 
@@ -257,7 +255,7 @@ function buildNextAction(
       onAction: onFactEdit,
     }
   }
-  if (detail.renewal_decision === 'migrate' || detail.renewal_decision === 'cancel') {
+  if (detail.renewal_decision === 'cancel') {
     return {
       title: '推进生命周期收尾',
       summary: `当前决策是${renewalLabel(detail.renewal_decision)}。继续记录迁移、取消或替换过程中的关键经验。`,
@@ -266,15 +264,7 @@ function buildNextAction(
       onAction: onExperienceLog,
     }
   }
-  if (detail.renewal_decision === 'observe') {
-    return {
-      title: '保持观察并记录经验',
-      summary: '核心证据已可读，后续重点是把稳定性、网络和账单经验写入历史。',
-      tone: 'notice',
-      buttonLabel: '补充经验',
-      onAction: onExperienceLog,
-    }
-  }
+
   return {
     title: '保持当前决策',
     summary: '续费、监控实例和资料证据都可读。可继续补充经验记录，方便下一次续费复盘。',

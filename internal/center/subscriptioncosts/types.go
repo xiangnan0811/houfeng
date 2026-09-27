@@ -96,10 +96,12 @@ type CostRow struct {
 	Region            string              `json:"region"`
 	LifecycleStatus   string              `json:"lifecycle_status"`
 	RenewalDecision   string              `json:"renewal_decision"`
+	AutoRenewCheck    string              `json:"auto_renew_check"`
 	BudgetStatus      BudgetStatus        `json:"budget_status"`
 }
 
 type MissingSubscriptionAsset struct {
+	AutoRenewCheck  string `json:"auto_renew_check"`
 	VPSID           string `json:"vps_id"`
 	DisplayName     string `json:"display_name"`
 	ProviderID      string `json:"provider_id,omitempty"`
@@ -109,24 +111,29 @@ type MissingSubscriptionAsset struct {
 }
 
 type Overview struct {
-	SnapshotGeneratedAt         time.Time                  `json:"snapshot_generated_at"`
-	BaseCurrency                string                     `json:"base_currency"`
-	TotalMonthlyCost            float64                    `json:"total_monthly_cost"`
-	TotalYearlyCost             float64                    `json:"total_yearly_cost"`
-	ActiveSubscriptionCount     int                        `json:"active_subscription_count"`
-	RenewalDue14dCount          int                        `json:"renewal_due_14d_count"`
-	RenewalDue30dCount          int                        `json:"renewal_due_30d_count"`
-	BudgetRiskCount             int                        `json:"budget_risk_count"`
-	ExchangeRateStaleCount      int                        `json:"exchange_rate_stale_count"`
-	DecisionAttentionCount      int                        `json:"decision_attention_count"`
-	MissingSubscriptionVPSCount int                        `json:"missing_subscription_vps_count"`
-	UpcomingRenewals            []RenewalQueueItem         `json:"upcoming_renewals"`
-	ProviderBreakdown           []BreakdownItem            `json:"provider_breakdown"`
-	CurrencyBreakdown           []BreakdownItem            `json:"currency_breakdown"`
-	CategoryBreakdown           []BreakdownItem            `json:"category_breakdown"`
-	BudgetRisks                 []BudgetRecord             `json:"budget_risks"`
-	VPSCosts                    []CostRow                  `json:"vps_costs"`
-	MissingSubscriptionAssets   []MissingSubscriptionAsset `json:"missing_subscription_assets"`
+	CurrentUnknownAmountCount         int                        `json:"current_unknown_amount_count"`
+	ArchivedPotentialCosts            []CostRow                  `json:"archived_potential_costs"`
+	ArchivedMissingSubscriptionAssets []MissingSubscriptionAsset `json:"archived_missing_subscription_assets"`
+	ArchivedUnknownAmountCount        int                        `json:"archived_unknown_amount_count"`
+	ArchivedPotentialMonthlyCost      *float64                   `json:"archived_potential_monthly_cost"`
+	SnapshotGeneratedAt               time.Time                  `json:"snapshot_generated_at"`
+	BaseCurrency                      string                     `json:"base_currency"`
+	TotalMonthlyCost                  float64                    `json:"total_monthly_cost"`
+	TotalYearlyCost                   float64                    `json:"total_yearly_cost"`
+	ActiveSubscriptionCount           int                        `json:"active_subscription_count"`
+	RenewalDue14dCount                int                        `json:"renewal_due_14d_count"`
+	RenewalDue30dCount                int                        `json:"renewal_due_30d_count"`
+	BudgetRiskCount                   int                        `json:"budget_risk_count"`
+	ExchangeRateStaleCount            int                        `json:"exchange_rate_stale_count"`
+	DecisionAttentionCount            int                        `json:"decision_attention_count"`
+	MissingSubscriptionVPSCount       int                        `json:"missing_subscription_vps_count"`
+	UpcomingRenewals                  []RenewalQueueItem         `json:"upcoming_renewals"`
+	ProviderBreakdown                 []BreakdownItem            `json:"provider_breakdown"`
+	CurrencyBreakdown                 []BreakdownItem            `json:"currency_breakdown"`
+	CategoryBreakdown                 []BreakdownItem            `json:"category_breakdown"`
+	BudgetRisks                       []BudgetRecord             `json:"budget_risks"`
+	VPSCosts                          []CostRow                  `json:"vps_costs"`
+	MissingSubscriptionAssets         []MissingSubscriptionAsset `json:"missing_subscription_assets"`
 }
 
 type Statistics struct {

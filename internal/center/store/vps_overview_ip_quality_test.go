@@ -49,7 +49,7 @@ func testOverviewRepository(
 	availability *fakeIPQualityAvailability,
 ) *VPSOverviewRepository {
 	t.Helper()
-	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
 	repo, err := NewVPSOverviewRepository(
 		&fakeVPSRepo{record: vpsassets.Record{
 			VPSID: "vps_7c2a4e18b09d5f31", DisplayName: "Alpha", ProviderName: "Example",
@@ -58,7 +58,7 @@ func testOverviewRepository(
 		}},
 		&fakeMonitoringLinks{links: []assetlinks.MonitoringInstanceSummary{{
 			MonitoringInstanceID: "mi_1", CurrentHealthStatus: "正常", MonitoringStatus: "启用",
-			LifecycleStatus: "在用", LastHeartbeatAt: &now,
+			LifecycleStatus: "已接入", LastTrustedOnlineAt: &now,
 		}}},
 		ip,
 		availability,
@@ -71,6 +71,7 @@ func testOverviewRepository(
 	if err != nil {
 		t.Fatalf("NewVPSOverviewRepository: %v", err)
 	}
+	repo.now = func() time.Time { return now }
 	return repo
 }
 

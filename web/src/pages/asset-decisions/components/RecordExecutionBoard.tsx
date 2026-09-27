@@ -30,8 +30,8 @@ type RecordExecutionBoardProps = {
 }
 
 function actionHrefForMember(member: AssetDecisionRecordMember): string {
-  if (member.execution_plan?.step_kind === 'open_cancellation_workbench') {
-    return vpsWorkbenchPath(member.vps_id, 'cancellation')
+  if (member.execution_plan?.step_kind === 'open_archive_preview') {
+    return vpsWorkbenchPath(member.vps_id, 'archive')
   }
   if (member.execution_plan?.step_kind === 'open_subscription_context') {
     return `/subscriptions?vps_id=${encodeURIComponent(member.vps_id)}&view=details`

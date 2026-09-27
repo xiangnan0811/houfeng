@@ -32,6 +32,7 @@ type PostgresSyncRepository struct {
 	newIPQualityReportID func() (string, error)
 	tokenHasher          agentTokenHasher
 	now                  func() time.Time
+	receptionFault       func(context.Context, error)
 }
 
 func NewPostgresSyncRepository(db *pgxpool.Pool) *PostgresSyncRepository {
@@ -48,6 +49,11 @@ func NewPostgresSyncRepositoryWithTokenHMACKey(db *pgxpool.Pool, hmacKey []byte)
 		},
 		tokenHasher: newAgentTokenHasher(hmacKey),
 		now:         func() time.Time { return time.Now().UTC() },
+		receptionFault: func(ctx context.Context, err error) {
+			faultCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer cancel()
+			_ = MarkReceiverHealthFault(faultCtx, db, "sync_persistence_failure")
+		},
 	}
 }
 
@@ -61,7 +67,15 @@ func (r *PostgresSyncRepository) nowUTC() time.Time {
 }
 
 func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.Batch) (syncing.Result, error) {
-	if len(batch.Heartbeats) == 0 {
+	result, err := r.applyBatch(ctx, batch)
+	if err != nil && r.receptionFault != nil && !errors.Is(err, syncing.ErrInvalidSyncToken) && !errors.Is(err, syncing.ErrBindingNotAccepted) && !errors.Is(err, syncing.ErrHeartbeatRequired) && !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) && !errors.Is(err, observations.ErrInvalidProbeObservation) {
+		r.receptionFault(ctx, err)
+	}
+	return result, err
+}
+
+func (r *PostgresSyncRepository) applyBatch(ctx context.Context, batch syncing.Batch) (syncing.Result, error) {
+	if len(batch.Heartbeats) == 0 && batch.LiveSignal == nil {
 		if len(batch.Observations.HostSamples) == 0 && len(batch.Observations.ProbeObservations) == 0 {
 			return syncing.Result{}, nil
 		}
@@ -86,16 +100,30 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 	}
 
 	receivedAt := r.nowUTC()
+	if err := recordTrustedLiveSignal(ctx, tx, batch, syncState, receivedAt); err != nil {
+		return syncing.Result{}, err
+	}
 	if syncState.SuppressWritesAndPlan() {
 		plan := agentplan.SyncPlan{ProbeAssignments: make([]agentplan.ProbeAssignment, 0)}
 		if err := tx.Commit(ctx); err != nil {
 			return syncing.Result{}, fmt.Errorf("commit suppressed sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 		}
 		return syncing.Result{
-			Disposition: syncing.ResultDispositionSuppressed,
-			AcceptedAt:  receivedAt,
-			Plan:        plan,
+			StopCollection: true,
+			Disposition:    syncing.ResultDispositionSuppressed,
+			AcceptedAt:     receivedAt,
+			Plan:           plan,
 		}, nil
+	}
+	if len(batch.Heartbeats) == 0 {
+		plan, err := buildSyncPlan(ctx, tx, batch.MonitoringInstanceID)
+		if err != nil {
+			return syncing.Result{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return syncing.Result{}, err
+		}
+		return syncing.Result{Disposition: syncing.ResultDispositionSuppressed, AcceptedAt: receivedAt, Plan: plan}, nil
 	}
 
 	observationBatch := batchWithReceivedAt(batch.Observations, receivedAt)
@@ -128,7 +156,7 @@ func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.B
 	if err := recordIPQualityReports(ctx, tx, r.newIPQualityReportID, batch.IPQualityReports, receivedAt); err != nil {
 		return syncing.Result{}, err
 	}
-	nextLifecycleStatus := lifecycleStatusAfterAcceptedSync(syncState.LifecycleStatus, len(batch.Observations.HostSamples) > 0)
+	nextLifecycleStatus := lifecycleStatusAfterAcceptedSync(syncState.LifecycleStatus, batch.LiveSignal != nil)
 	if err := advanceMonitoringInstanceSyncState(ctx, tx, batch.MonitoringInstanceID, lastHeartbeatAt, receivedAt, nextLifecycleStatus); err != nil {
 		return syncing.Result{}, err
 	}
@@ -337,14 +365,17 @@ func recordIPQualityReports(ctx context.Context, tx syncBatchTx, newReportID fun
 }
 
 type acceptedSyncBatchState struct {
+	Capability         string
+	VPSID              string
 	BindingFingerprint string
 	LifecycleStatus    string
 	MonitoringStatus   string
 	Archived           bool
+	VPSArchivedAt      *time.Time
 }
 
 func (s acceptedSyncBatchState) SuppressWritesAndPlan() bool {
-	return s.Archived ||
+	return s.Capability == "evidence_only" || s.Archived ||
 		s.LifecycleStatus == monitoringinstances.LifecycleRetired ||
 		s.MonitoringStatus == monitoringinstances.MonitoringPaused
 }
@@ -357,40 +388,35 @@ func (r *PostgresSyncRepository) validateAcceptedSyncBatch(ctx context.Context, 
 		lifecycleStatus     string
 		monitoringStatus    string
 		archived            bool
+		capability          string
+		vpsID               string
+		vpsArchivedAt       *time.Time
 	)
 	if err := tx.QueryRow(ctx, `
-		select binding_status,
-			coalesce(binding_fingerprint, ''),
-			coalesce(sync_token_hash, ''),
-			lifecycle_status,
-			monitoring_status,
-			archived_at is not null
-		from monitoring_instances
-		where monitoring_instance_id = $1
-		for update`,
-		batch.MonitoringInstanceID,
-	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash, &lifecycleStatus, &monitoringStatus, &archived); errors.Is(err, pgx.ErrNoRows) {
-		return acceptedSyncBatchState{}, monitoringinstances.ErrMonitoringInstanceNotFound
+		select mi.binding_status, s.fingerprint_hash, s.token_hash,
+			mi.lifecycle_status, mi.monitoring_status, v.lifecycle_status = 'archived', s.capability, mi.vps_id, v.archived_at
+		from monitoring_instances mi
+		join monitoring_agent_sessions s on s.monitoring_instance_id=mi.monitoring_instance_id
+		join vps_assets v on v.vps_id=mi.vps_id
+		where mi.monitoring_instance_id = $1 and s.session_id=$2
+		for update of mi,s`,
+		batch.MonitoringInstanceID, batch.SessionID,
+	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash, &lifecycleStatus, &monitoringStatus, &archived, &capability, &vpsID, &vpsArchivedAt); errors.Is(err, pgx.ErrNoRows) {
+		return acceptedSyncBatchState{}, syncing.ErrInvalidSyncToken
 	} else if err != nil {
 		return acceptedSyncBatchState{}, fmt.Errorf("query sync batch state for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
 	}
-	if bindingStatus != monitoringinstances.BindingBound {
-		return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
-	}
-	if storedSyncTokenHash == "" || !r.tokenHasher.syncTokenMatches(storedSyncTokenHash, batch.SyncToken) {
+	if !isHMACAgentTokenHash(storedSyncTokenHash) || !r.tokenHasher.syncTokenMatches(storedSyncTokenHash, batch.SyncToken) {
 		return acceptedSyncBatchState{}, syncing.ErrInvalidSyncToken
 	}
-	if isLegacySHA256TokenHash(storedSyncTokenHash) {
-		if _, err := tx.Exec(ctx, `
-			update monitoring_instances
-			set sync_token_hash = $2,
-				updated_at = now()
-			where monitoring_instance_id = $1`,
-			batch.MonitoringInstanceID,
-			r.tokenHasher.hashSyncToken(batch.SyncToken),
-		); err != nil {
-			return acceptedSyncBatchState{}, fmt.Errorf("migrate sync token hash for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
-		}
+	// A binding transition cannot hide an already issued session's online
+	// evidence. Its own fingerprint still authenticates it; collection remains
+	// stopped until a newly accepted enrollment grants a new full session.
+	if bindingStatus != monitoringinstances.BindingBound {
+		capability = "evidence_only"
+	}
+	if batch.LiveSignal != nil && batch.LiveSignal.Fingerprint != bindingFingerprint {
+		return acceptedSyncBatchState{}, syncing.ErrBindingNotAccepted
 	}
 
 	for _, heartbeat := range batch.Heartbeats {
@@ -415,6 +441,9 @@ func (r *PostgresSyncRepository) validateAcceptedSyncBatch(ctx context.Context, 
 	}
 
 	return acceptedSyncBatchState{
+		Capability:         capability,
+		VPSID:              vpsID,
+		VPSArchivedAt:      vpsArchivedAt,
 		BindingFingerprint: bindingFingerprint,
 		LifecycleStatus:    lifecycleStatus,
 		MonitoringStatus:   monitoringStatus,

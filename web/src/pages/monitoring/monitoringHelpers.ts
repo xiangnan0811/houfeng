@@ -6,10 +6,7 @@ import type { HeartbeatFreshness, MonitoringInstanceFilterState, MonitoringInsta
 
 export const MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS = [
   { value: '待接入', label: '待接入' },
-  { value: '在用', label: '在用' },
-  { value: '观察中', label: '观察中' },
-  { value: '不续费', label: '不续费' },
-  { value: '已退役', label: '已退役' },
+  { value: '已接入', label: '已接入' },
 ] as const
 
 export const MONITORING_INSTANCE_RUN_STATUS_FILTER_OPTIONS = [
@@ -77,15 +74,19 @@ export function isKnownHealthStatus(status: string): boolean {
   return KNOWN_HEALTH[status] !== undefined
 }
 
-/** Health glyph is independent of pause/maintenance. No heartbeat is unknown, not historical 正常. */
+/** Online evidence is distinct from lifecycle, collection control and health. */
 export function monitoringInstanceHasHeartbeatEvidence(monitoringInstance: MonitoringInstanceRecord): boolean {
-  return parseHeartbeatTimestamp(monitoringInstance.last_heartbeat_at ?? undefined) != null
+  return parseHeartbeatTimestamp(monitoringInstance.last_trusted_online_at ?? undefined) != null
 }
 
 export function monitoringInstanceEffectiveHealth(
   monitoringInstance: MonitoringInstanceRecord,
   hasHeartbeat = monitoringInstanceHasHeartbeatEvidence(monitoringInstance),
 ): string {
+  if (monitoringInstance.archived_at || monitoringInstance.lifecycle_status === '已退役') return '已退役'
+  if (monitoringInstance.lifecycle_status === '待接入' || monitoringInstance.binding_status === '未绑定') return '待接入'
+  if (monitoringInstance.monitoring_status === '维护中') return '维护中'
+  if (monitoringInstance.monitoring_status === '暂停') return '暂停'
   if (!hasHeartbeat) return '未知'
   if (isKnownHealthStatus(monitoringInstance.current_health_status)) {
     return monitoringInstance.current_health_status

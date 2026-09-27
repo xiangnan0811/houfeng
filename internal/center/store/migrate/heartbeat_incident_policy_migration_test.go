@@ -113,10 +113,13 @@ func TestPostgresIntegrationHeartbeatRecoveryReceipts(t *testing.T) {
 	}
 
 	monitoringInstanceID := "mi_heartbeat_recovery"
+	if _, err := migrator.Exec(ctx, `insert into vps_assets(vps_id,display_name,lifecycle_status) values ('vps_heartbeat_recovery','Heartbeat Recovery','active')`); err != nil {
+		t.Fatalf("seed monitoring VPS: %v", err)
+	}
 	if _, err := migrator.Exec(ctx, `
 		insert into monitoring_instances (
-			monitoring_instance_id, display_name, region, city, provider, lifecycle_status
-		) values ($1, 'Heartbeat Recovery', 'HK', 'Hong Kong', 'Test Provider', '在用')`, monitoringInstanceID); err != nil {
+			monitoring_instance_id, vps_id, display_name, region, city, provider, lifecycle_status
+		) values ($1, 'vps_heartbeat_recovery', 'Heartbeat Recovery', 'HK', 'Hong Kong', 'Test Provider', '已接入')`, monitoringInstanceID); err != nil {
 		t.Fatalf("seed monitoring instance: %v", err)
 	}
 	startedAt := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)

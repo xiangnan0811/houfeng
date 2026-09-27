@@ -68,7 +68,7 @@ export function VPSOverviewIdentityHeader({
               <LifecycleBadge value={identity.lifecycle_status} />
             </span>
             <span className="vps-overview-identity__status vps-overview-identity__status--usage">
-              <UsageBadge value={identity.usage_status} />
+              <UsageBadge value={(identity.usage_tags ?? []).join('、')} />
             </span>
             <span className="vps-overview-identity__status vps-overview-identity__status--decision">
               <RenewalBadge value={identity.renewal_decision} />

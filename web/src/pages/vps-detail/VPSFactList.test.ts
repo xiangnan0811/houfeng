@@ -23,6 +23,13 @@ const identity: VPSOverviewIdentity = {
 }
 
 describe('modernOverviewFactRows', () => {
+  it('shows independent resource validity and checked billing facts without a subscription', () => {
+    const rows = modernOverviewFactRows([], { ...identity, validity_mode: 'fixed', expires_at: '2027-01-31', auto_renew_check: 'disabled', auto_renew_checked_at: '2026-09-26T00:00:00Z', renewal_reason: '迁移后结束使用', renewal_review_at: '2026-10-01T00:00:00Z' })
+    expect(rows.find((row) => row.key === 'validity_mode')?.value).toBe('2027-01-31')
+    expect(rows.find((row) => row.key === 'auto_renew_check')?.value).toBe('已关闭')
+    expect(rows.find((row) => row.key === 'renewal_reason')?.value).toBe('迁移后结束使用')
+    expect(modernOverviewFactRows([], { ...identity, validity_mode: 'unlimited' }).find((row) => row.key === 'validity_mode')?.value).toBe('无固定期限')
+  })
   it('adds identity product, importance, and labels without inventing a note', () => {
     const facts: VPSOverviewFact[] = [
       { key: 'ipv4', label: 'IPv4', value: '192.0.2.1' },

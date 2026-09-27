@@ -27,7 +27,7 @@ const CANDIDATE: VPSAssetRecord = {
   os_name: 'Debian',
   virtualization: 'kvm',
   lifecycle_status: 'active',
-  usage_status: 'standby',
+  usage_tags: ['standby'],
   renewal_decision: 'unreviewed',
   importance: 'normal',
   labels: [],

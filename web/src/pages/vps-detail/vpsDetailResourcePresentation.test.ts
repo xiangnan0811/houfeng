@@ -6,6 +6,7 @@ import {
   subscriptionDueLabel,
   subscriptionResourceName,
   subscriptionResourceSummary,
+  monitoringObservedHealthLabel,
 } from './vpsDetailResourcePresentation'
 
 
@@ -36,6 +37,16 @@ function subscription(overrides: Partial<SubscriptionRecord> = {}): Subscription
 }
 
 describe('vpsDetailResourcePresentation', () => {
+  it.each([
+    ['待接入', '启用', '待接入'], ['已退役', '暂停', '已退役'],
+    ['已接入', '维护中', '维护中'], ['已接入', '暂停', '暂停'],
+  ])('keeps %s / %s distinct from healthy', (lifecycle_status, monitoring_status, expected) => {
+    expect(monitoringObservedHealthLabel('正常', { lifecycle_status, monitoring_status, binding_status: '已绑定', last_trusted_online_at: '2026-09-26T00:00:00Z' })).toBe(expected)
+  })
+
+  it('requires online evidence before showing a historical healthy result', () => {
+    expect(monitoringObservedHealthLabel('正常', { lifecycle_status: '已接入', monitoring_status: '启用', binding_status: '已绑定', last_trusted_online_at: null })).toBe('观测数据不可用')
+  })
   it.each([
     {
       name: 'non-auto-renewing ends-only subscription',

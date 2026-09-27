@@ -29,7 +29,7 @@ const selectAgentPlanMonitoringInstanceLabelsSQL = `
 		n.archived_at is not null as archived,
 		coalesce(
 			cs.ip_quality_settings,
-			'{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"raw_retention_days":90,"history_retention_days":365,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}'::jsonb
+			'{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}'::jsonb
 		) as ip_quality_settings
 	from monitoring_instances n
 	left join center_settings cs on cs.settings_id = $2
@@ -51,6 +51,7 @@ const selectAgentPlanAssignmentsSQL = `
 	from targets t
 	join probe_items p on p.target_id = t.target_id
 	where p.enabled = true
+		and t.lifecycle_status = 'active'
 		and t.run_status = any($1)
 		and t.execution_monitoring_instance_labels && $2
 	order by t.target_id, p.probe_item_id`

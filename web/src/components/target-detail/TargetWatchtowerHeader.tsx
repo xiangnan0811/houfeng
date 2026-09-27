@@ -17,12 +17,12 @@ const RUNTIME_ACTION_BUTTONS_BY_RUN_STATUS: Record<
     { action: 'pause', label: '暂停' },
   ],
   暂停: [{ action: 'resume', label: '恢复' }],
-  已归档: [],
 }
 
 function targetRuntimeActions(
   target: TargetRecord,
 ): Array<{ action: TargetRuntimeAction; label: string }> {
+  if (target.lifecycle_status === 'retired') return []
   return RUNTIME_ACTION_BUTTONS_BY_RUN_STATUS[target.run_status] ?? []
 }
 
@@ -57,13 +57,13 @@ export function TargetWatchtowerHeader({
   const execLabelText = formatLabelList(target.execution_monitoring_instance_labels)
   const runtimeActions = targetRuntimeActions(target)
   const controlBadge =
-    target.run_status === '维护中'
+    target.lifecycle_status === 'retired'
+      ? { label: '已退役', tone: 'offline' as const }
+      : target.run_status === '维护中'
       ? { label: '维护中', tone: 'maintenance' as const }
       : target.run_status === '暂停'
         ? { label: '暂停', tone: 'offline' as const }
-        : target.run_status === '已归档'
-          ? { label: '已归档', tone: 'offline' as const }
-          : null
+        : null
 
   return (
     <header className="target-detail-header" role="banner" aria-label="目标身份与操作">

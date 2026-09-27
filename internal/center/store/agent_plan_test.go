@@ -146,12 +146,10 @@ func TestBuildSyncPlanIncludesIPQualityPlanFromSettings(t *testing.T) {
 				*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{})
 				*(dest[5].(*bool)) = true
 				*(dest[7].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.IPQualitySettings{
-					Enabled:              true,
-					FrequencySeconds:     259200,
-					TimeoutSeconds:       20,
-					RawRetentionDays:     45,
-					HistoryRetentionDays: 180,
-					Services:             []string{"netflix", "chatgpt"},
+					Enabled:          true,
+					FrequencySeconds: 259200,
+					TimeoutSeconds:   20,
+					Services:         []string{"netflix", "chatgpt"},
 				})
 				return nil
 			}}
@@ -662,7 +660,7 @@ func fillDefaultAgentPlanScanFields(dest []any) {
 	}
 	if len(dest) > 7 {
 		if value, ok := dest[7].(*[]byte); ok && len(*value) == 0 {
-			*value = []byte(`{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"raw_retention_days":90,"history_retention_days":365,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}`)
+			*value = []byte(`{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}`)
 		}
 	}
 }

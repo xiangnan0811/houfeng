@@ -60,7 +60,7 @@ export function VPSDetailHero({
               <LifecycleBadge value={detail.lifecycle_status} />
             </span>
             <span className="vps-overview-identity__status vps-overview-identity__status--usage">
-              <UsageBadge value={detail.usage_status} />
+              <UsageBadge value={(detail.usage_tags ?? []).join('、')} />
             </span>
             <span className="vps-overview-identity__status vps-overview-identity__status--decision">
               <RenewalBadge value={detail.renewal_decision} />

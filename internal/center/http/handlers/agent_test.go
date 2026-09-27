@@ -297,7 +297,7 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","is_backfilled":true}],"command_results":[{"action_id":"act_001","command_id":"uptime","stdout":"up 1 day","stderr":"","exit_code":0}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","is_backfilled":true}],"command_results":[{"action_id":"act_001","command_id":"uptime","stdout":"up 1 day","stderr":"","exit_code":0}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -381,7 +381,7 @@ func TestAgentSyncHandlerAcceptsHeaderTokenWithoutJSONSyncToken(t *testing.T) {
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	req.Header.Set("Authorization", "Bearer sync-token-001")
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -423,7 +423,7 @@ func TestAgentSyncHandlerRejectsJSONOnlySyncToken(t *testing.T) {
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -446,7 +446,7 @@ func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
-		"monitoring_instance_id":"mi_001",
+		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
 		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
 		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","cpu_usage_pct":12.5,"load_1":0.2,"load_5":0.3,"load_15":0.4,"mem_used_pct":55.5,"mem_available_bytes":1024,"mem_total_bytes":2048,"swap_used_pct":1.5,"disk_used_pct":45.5,"disk_total_bytes":4096,"inode_used_pct":5.5,"net_in_bytes_per_sec":120,"net_out_bytes_per_sec":220,"network_rates_valid":true,"cpu_iowait_pct":0.5,"cpu_steal_pct":0.1,"disk_read_bytes_per_sec":320,"disk_write_bytes_per_sec":420,"disk_busy_pct":3.5,"uptime_seconds":3600}],
@@ -527,7 +527,7 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
-		"monitoring_instance_id":"mi_001",
+		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
 		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
 		"ip_quality_reports":[{
@@ -613,7 +613,7 @@ func TestAgentSyncHandlerRejectsInvalidIPQualityReport(t *testing.T) {
 
 	handler := handlers.AgentSync(&fakeAgentSyncService{})
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
-		"monitoring_instance_id":"mi_001",
+		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
 		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
 		"ip_quality_reports":[{"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","ip_address":"","ip_version":4,"status":"success"}]
@@ -665,7 +665,7 @@ func TestAgentSyncHandlerRejectsInvalidIPQualityReportEnums(t *testing.T) {
 
 			handler := handlers.AgentSync(&fakeAgentSyncService{})
 			body := `{
-				"monitoring_instance_id":"mi_001",
+				"session_id":"mas_001","monitoring_instance_id":"mi_001",
 				"sync_token":"sync-token-001",
 				"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
 				"ip_quality_reports":[{
@@ -700,7 +700,7 @@ func TestAgentSyncHandlerDoesNotReturn200WhenObservationIngestFails(t *testing.T
 
 	handler := handlers.AgentSync(svc)
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
-		"monitoring_instance_id":"mi_001",
+		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
 		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
 		"probe_observations":[{"target_id":"tg_bad","probe_item_id":"pb_001","probe_kind":"http","observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","result_kind":"success","latency_ms":83,"http_status":200}]
@@ -724,7 +724,7 @@ func TestAgentSyncHandlerReturnsInvalidSyncTokenError(t *testing.T) {
 	svc := &fakeAgentSyncService{syncErr: syncing.ErrInvalidSyncToken}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"bad-token","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"bad-token","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	req.Header.Set("Authorization", "Bearer bad-token")
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -744,7 +744,7 @@ func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 	svc := &fakeAgentSyncService{syncErr: syncing.ErrBindingNotAccepted}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -764,7 +764,7 @@ func TestAgentSyncHandlerReturnsStableInternalErrorWithoutStoreDetails(t *testin
 	const privateStoreDetail = "permission denied for table agent_sync_batches; sync-token-fixture; raw-fingerprint-fixture"
 	svc := &fakeAgentSyncService{syncErr: errors.New(privateStoreDetail)}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -823,7 +823,7 @@ func TestAgentSyncHandlerRejectsOversizedBodyBeforeService(t *testing.T) {
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	body := `{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"` + strings.Repeat("x", handlers.AgentSyncBodyLimit) + `","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`
+	body := `{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"` + strings.Repeat("x", handlers.AgentSyncBodyLimit) + `","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -844,14 +844,16 @@ func TestAgentSyncHandlerRateLimitsByClientIP(t *testing.T) {
 	t.Parallel()
 
 	svc := &fakeAgentSyncService{}
+	var receptionFailures []string
 	handler := handlers.AgentSyncWithOptions(svc, handlers.AgentEndpointOptions{
+		ReceptionFailure: func(_ context.Context, reason string) { receptionFailures = append(receptionFailures, reason) },
 		RateLimit: handlers.AgentRateLimitOptions{
 			MaxRequestsByIP: 1,
 			Window:          time.Minute,
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	req.RemoteAddr = "198.51.100.20:12345"
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -861,7 +863,7 @@ func TestAgentSyncHandlerRateLimitsByClientIP(t *testing.T) {
 		t.Fatalf("first attempt status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:31:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_002"}]}`))
+	req = httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:31:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_002"}]}`))
 	req.RemoteAddr = "198.51.100.20:12345"
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -871,6 +873,9 @@ func TestAgentSyncHandlerRateLimitsByClientIP(t *testing.T) {
 		t.Fatalf("second attempt status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
 	}
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "too many requests")
+	if len(receptionFailures) != 1 || receptionFailures[0] != "sync_rate_limited" {
+		t.Fatalf("rejected reception did not invalidate safety observation: %v", receptionFailures)
+	}
 }
 
 func TestAgentSyncHandlerRejectsMalformedHeaderTokenBeforeBodyRead(t *testing.T) {
@@ -913,7 +918,9 @@ func TestAgentSyncHandlerLimitsInflightRequestsBeforeBodyRead(t *testing.T) {
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}
+	var receptionFailures []string
 	handler := handlers.AgentSyncWithOptions(svc, handlers.AgentEndpointOptions{
+		ReceptionFailure: func(_ context.Context, reason string) { receptionFailures = append(receptionFailures, reason) },
 		RateLimit: handlers.AgentRateLimitOptions{
 			MaxRequestsByIP:   100,
 			MaxRequestsGlobal: 100,
@@ -921,7 +928,7 @@ func TestAgentSyncHandlerLimitsInflightRequestsBeforeBodyRead(t *testing.T) {
 			Window:            time.Minute,
 		},
 	})
-	firstReq := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	firstReq := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	setSyncAuth(firstReq)
 	firstReq.Header.Set("Content-Type", "application/json")
 	firstRecorder := httptest.NewRecorder()
@@ -945,6 +952,9 @@ func TestAgentSyncHandlerLimitsInflightRequestsBeforeBodyRead(t *testing.T) {
 		t.Fatalf("status = %d, want %d", secondRecorder.Code, http.StatusServiceUnavailable)
 	}
 	assertErrorResponse(t, secondRecorder, agentapi.ErrorCodeInvalidRequest, "service unavailable")
+	if len(receptionFailures) != 1 || receptionFailures[0] != "sync_capacity_exhausted" {
+		t.Fatalf("capacity rejection did not invalidate safety observation: %v", receptionFailures)
+	}
 }
 
 func TestAgentSyncHandlerRejectsTooManyHeartbeatsBeforeService(t *testing.T) {
@@ -956,7 +966,7 @@ func TestAgentSyncHandlerRejectsTooManyHeartbeatsBeforeService(t *testing.T) {
 	for i := 0; i < 257; i++ {
 		heartbeats = append(heartbeats, `{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}`)
 	}
-	body := `{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[` + strings.Join(heartbeats, ",") + `]}`
+	body := `{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[` + strings.Join(heartbeats, ",") + `]}`
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -978,7 +988,7 @@ func TestAgentSyncHandlerRejectsMixedHeartbeatSyncBatchIDsBeforeService(t *testi
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	body := `{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"},{"observed_at":"2026-04-23T08:30:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_002"}]}`
+	body := `{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"},{"observed_at":"2026-04-23T08:30:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_002"}]}`
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -1000,7 +1010,7 @@ func TestAgentSyncHandlerRejectsOverlongIdentityStringBeforeService(t *testing.T
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	body := `{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"` + strings.Repeat("x", 257) + `","sync_batch_id":"sync_001"}]}`
+	body := `{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"` + strings.Repeat("x", 257) + `","sync_batch_id":"sync_001"}]}`
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -1039,7 +1049,7 @@ func TestAgentSyncHandlerRejectsHeartbeatMissingSyncBatchID(t *testing.T) {
 	t.Parallel()
 
 	handler := handlers.AgentSync(&fakeAgentSyncService{})
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":""}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":""}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -1057,7 +1067,7 @@ func TestAgentSyncHandlerRejectsHeartbeatWithZeroObservedAt(t *testing.T) {
 	t.Parallel()
 
 	handler := handlers.AgentSync(&fakeAgentSyncService{})
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"0001-01-01T00:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"0001-01-01T00:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()

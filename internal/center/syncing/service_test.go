@@ -72,8 +72,12 @@ func TestServiceNonDuplicateDispositionRunsPostSync(t *testing.T) {
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("SyncBatch() result = %#v, want original repository result", got)
 			}
-			if postSync.calls != 1 {
-				t.Fatalf("postSync calls = %d, want 1", postSync.calls)
+			wantCalls := 0
+			if tt.disposition == ResultDispositionRecorded {
+				wantCalls = 1
+			}
+			if postSync.calls != wantCalls {
+				t.Fatalf("postSync calls = %d, want %d", postSync.calls, wantCalls)
 			}
 		})
 	}

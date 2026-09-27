@@ -288,7 +288,10 @@ func identityFromVPS(record vpsassets.Record) vpsoverview.Identity {
 		IPv4:            record.IPv4,
 		IPv6:            record.IPv6,
 		LifecycleStatus: string(record.LifecycleStatus),
-		UsageStatus:     string(record.UsageStatus),
+		UsageTags:       append([]string{}, record.UsageTags...),
+		ValidityMode:    record.ValidityMode, ExpiresAt: record.ExpiresAt,
+		AutoRenewCheck: record.AutoRenewCheck, AutoRenewCheckedAt: record.AutoRenewCheckedAt,
+		RenewalReason: record.RenewalReason, RenewalReviewAt: record.RenewalReviewAt,
 		RenewalDecision: string(record.RenewalDecision),
 		Importance:      record.Importance,
 		Labels:          labels,
@@ -327,12 +330,13 @@ func monitoringFromLinksAt(
 	now time.Time,
 	settings centersettings.CenterSettings,
 ) (vpsoverview.MonitoringSource, error) {
+	links = currentMonitoringLinks(links)
 	result := monitoringSourceFromLinks(links)
 	if len(links) == 0 {
 		return result, nil
 	}
 	primary := primaryMonitoringLink(links)
-	if primary.LastHeartbeatAt == nil || primary.LastHeartbeatAt.IsZero() {
+	if primary.LastTrustedOnlineAt == nil || primary.LastTrustedOnlineAt.IsZero() {
 		result.Health = "unknown"
 		result.Detail = "等待首次心跳"
 		result.Section.State = vpsoverview.SectionReady
@@ -344,14 +348,25 @@ func monitoringFromLinksAt(
 	if err != nil {
 		return vpsoverview.MonitoringSource{}, err
 	}
-	if incidents.HeartbeatIsStale(now, *primary.LastHeartbeatAt, policy) {
+	if incidents.HeartbeatIsStale(now, *primary.LastTrustedOnlineAt, policy) {
 		result.Section.State = vpsoverview.SectionStale
 		result.Section.ReasonCode = "monitoring_heartbeat_stale"
 	}
 	return result, nil
 }
 
+func currentMonitoringLinks(links []assetlinks.MonitoringInstanceSummary) []assetlinks.MonitoringInstanceSummary {
+	current := make([]assetlinks.MonitoringInstanceSummary, 0, len(links))
+	for _, link := range links {
+		if link.LifecycleStatus != "已退役" {
+			current = append(current, link)
+		}
+	}
+	return current
+}
+
 func monitoringSourceFromLinks(links []assetlinks.MonitoringInstanceSummary) vpsoverview.MonitoringSource {
+	links = currentMonitoringLinks(links)
 	result := vpsoverview.MonitoringSource{
 		Section: vpsoverview.SectionState{State: vpsoverview.SectionReady},
 		Count:   len(links),
@@ -367,8 +382,15 @@ func monitoringSourceFromLinks(links []assetlinks.MonitoringInstanceSummary) vps
 	result.Status = primary.MonitoringStatus
 	result.Detail = primary.CurrentPrimaryIssueSummary
 	result.ActiveIncidents = primary.CurrentActiveIncidentCount
-	if primary.LastHeartbeatAt != nil && !primary.LastHeartbeatAt.IsZero() {
-		observed := primary.LastHeartbeatAt.UTC()
+	if primary.LifecycleStatus != "已接入" || primary.MonitoringStatus != "启用" {
+		result.Health = "unknown"
+		result.ActiveIncidents = 0
+		if primary.LifecycleStatus == "待接入" {
+			result.Status = "待接入"
+		}
+	}
+	if primary.LastTrustedOnlineAt != nil && !primary.LastTrustedOnlineAt.IsZero() {
+		observed := primary.LastTrustedOnlineAt.UTC()
 		result.Section.ObservedAt = &observed
 		result.Section.LastSuccessAt = &observed
 	}

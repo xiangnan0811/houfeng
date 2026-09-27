@@ -18,7 +18,7 @@ const (
 type ExecutionPlanStepKind string
 
 const (
-	PlanStepOpenCancellationWorkbench ExecutionPlanStepKind = "open_cancellation_workbench"
+	PlanStepOpenCancellationWorkbench ExecutionPlanStepKind = "open_archive_preview"
 	PlanStepOpenVPSDetail             ExecutionPlanStepKind = "open_vps_detail"
 	PlanStepOpenSubscriptionContext   ExecutionPlanStepKind = "open_subscription_context"
 	PlanStepReviewRecord              ExecutionPlanStepKind = "review_record"
@@ -229,7 +229,7 @@ func stepLabelForPlan(stepKind ExecutionPlanStepKind, action SuggestedAction) st
 	case PlanStepOpenVPSDetail:
 		switch action {
 		case ActionMigrate:
-			return "标记迁移意向并人工跟进"
+			return "记录迁移计划并人工跟进"
 		case ActionKeep, ActionObserve:
 			return "打开 VPS 详情核对判断"
 		case ActionCompleteEvidence:

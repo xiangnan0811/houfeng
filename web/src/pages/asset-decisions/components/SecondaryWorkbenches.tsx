@@ -201,9 +201,8 @@ export function SecondaryWorkbenches({
     { value: 'all', label: '全部', count: totalDecisionQueue },
     { value: 'unreviewed', label: '待评估', count: queueState.unreviewed.length },
     { value: 'renewal', label: `${renewalWindow}天续费`, count: renewalDueQueueCount },
-    { value: 'migrate', label: '迁移', count: queueState.migrate.length },
-    { value: 'cancel', label: '取消', count: queueState.cancel.length },
-    { value: 'cancellation_attention', label: '取消联动', count: cancellationAttentionCount },
+    { value: 'cancel', label: '决定不续费', count: queueState.cancel.length },
+    { value: 'cancellation_attention', label: '自动续费待核对', count: cancellationAttentionCount },
     { value: 'unlinked', label: '未关联', count: unlinkedCount },
     { value: 'missing_subscription', label: '缺订阅', count: missingSubscriptionCount },
   ] satisfies Array<{ value: DecisionQueueView; label: string; count: number }>
@@ -551,8 +550,8 @@ export function SecondaryWorkbenches({
                           处理
                         </button>
                         {item.vps.renewal_decision === 'cancel' || hasCancellationAttention(item) ? (
-                          <Link className="btn sm secondary" to={vpsWorkbenchPath(item.vps.vps_id, 'cancellation')}>
-                            取消/退役
+                          <Link className="btn sm secondary" to={vpsWorkbenchPath(item.vps.vps_id, 'archive')}>
+                            结束使用并归档
                           </Link>
                         ) : null}
                       </div>

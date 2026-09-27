@@ -405,7 +405,7 @@ describe('vpsDetailOverviewModel', () => {
     const model = buildModel({
       detail: {
         ...baseDetail,
-        lifecycle_status: 'to_cancel',
+        lifecycle_status: 'active',
         renewal_decision: 'cancel',
         monitoring_instance_links: [{
           ...baseMonitoringInstance(),

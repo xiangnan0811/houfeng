@@ -8,7 +8,6 @@ import { ApiError } from '../../lib/apiRequest'
 import type {
   AssetDomainRecord,
   AssetServiceRecord,
-  CancellationPreview,
   LifecycleActionResult,
   MonitoringInstanceRecord,
   SubscriptionRecord,
@@ -53,23 +52,6 @@ function detailFixture(vpsId: string, displayName: string): VPSAssetDetail {
   }
 }
 
-function emptyPreview(vpsId: string, warning = ''): CancellationPreview {
-  return {
-    vps: detailFixture(vpsId, vpsId),
-    subscriptions: [],
-    monitoring_instance_links: [],
-    services: [],
-    domains: [],
-    target_links: [],
-    recommended_steps: [],
-    warnings: warning ? [warning] : [],
-    blockers: [],
-    preview_digest: `digest-${vpsId}`,
-    dependency_impacts: [],
-    evaluated_on: '2026-09-24',
-  }
-}
-
 function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
   return {
     target_id: 'tgt_1',
@@ -78,6 +60,7 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
     host: '192.0.2.1',
     base_port: 80,
     execution_monitoring_instance_labels: [],
+    lifecycle_status: 'active',
     run_status: '启用',
     group: '',
     labels: [],
@@ -280,6 +263,58 @@ describe('VPSOverviewManagementActions', () => {
     vi.restoreAllMocks()
   })
 
+  function archiveReview(vpsId = 'vps_a', displayName = '东京边缘') {
+    return { vps: detailFixture(vpsId, displayName), subscriptions: [], monitoring_instance_links: [], services: [], domains: [], target_links: [], warnings: [], blockers: [], blocker_details: [], eligible: true, preview_digest: `digest-${vpsId}` }
+  }
+
+  it('ignores a late archive preview after switching VPS and blocks confirmation during the next read', async () => {
+    const old = deferred<ReturnType<typeof archiveReview>>()
+    const next = deferred<ReturnType<typeof archiveReview>>()
+    vi.spyOn(api, 'getVPSArchiveReview').mockImplementation((id) => id === 'vps_a' ? old.promise : next.promise)
+    render(<MemoryRouter><Harness onRefresh={vi.fn()} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '切换 VPS' }))
+    await act(async () => old.resolve(archiveReview()))
+    expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
+    expect(screen.queryByLabelText('输入 VPS 名称确认归档')).not.toBeInTheDocument()
+    await act(async () => next.resolve(archiveReview('vps_b', '大阪边缘')))
+    expect(screen.getByLabelText('输入 VPS 名称确认归档')).toHaveAttribute('placeholder', '大阪边缘')
+  })
+
+  it('retains the archive idempotency key after network failure and locks repeated clicks', async () => {
+    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(archiveReview())
+    const pending = deferred<ReturnType<typeof archiveReview>>()
+    const submit = vi.spyOn(api, 'archiveVPS').mockRejectedValueOnce(new Error('response lost')).mockReturnValueOnce(pending.promise)
+    render(<MemoryRouter><Harness onRefresh={vi.fn()} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
+    fireEvent.change(await screen.findByLabelText('输入 VPS 名称确认归档'), { target: { value: '东京边缘' } })
+    fireEvent.change(screen.getByLabelText('归档原因'), { target: { value: '结束使用' } })
+    fireEvent.click(screen.getByRole('button', { name: '结束使用并归档' }))
+    await screen.findByText('response lost')
+    fireEvent.click(screen.getByRole('button', { name: '结束使用并归档' }))
+    fireEvent.click(screen.getByRole('button', { name: '归档中…' }))
+    expect(submit).toHaveBeenCalledTimes(2)
+    expect(submit.mock.calls[0]?.[1].idempotency_key).toBe(submit.mock.calls[1]?.[1].idempotency_key)
+    expect(submit.mock.calls[1]?.[1].preview_digest).toBe('digest-vps_a')
+    await act(async () => pending.reject(new Error('still offline')))
+  })
+
+  it('requires an explicit never-connected confirmation and displays fresh server blockers', async () => {
+    const review = { ...archiveReview(), online_evidence: { observed_at: '2026-09-26', receiver_generation: 'boot', receiver_healthy: true, healthy_since: null, last_health_check_at: null, earliest_archive_at: null, never_connected: true, manual_confirmation_required: true, instances: [] } }
+    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(review)
+    const submit = vi.spyOn(api, 'archiveVPS').mockRejectedValue(new ApiError(409, 'preview changed', { code: 'archive_preview_stale', review: { ...review, eligible: false, blockers: ['收到新的实时在线信号'] } }))
+    render(<MemoryRouter><Harness onRefresh={vi.fn()} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
+    fireEvent.change(await screen.findByLabelText('输入 VPS 名称确认归档'), { target: { value: '东京边缘' } })
+    fireEvent.change(screen.getByLabelText('归档原因'), { target: { value: '人工确认' } })
+    expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByRole('button', { name: '结束使用并归档' }))
+    expect(submit).toHaveBeenCalledWith('vps_a', expect.objectContaining({ never_connected_confirmation: true }))
+    expect(await screen.findByText('收到新的实时在线信号')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
+  })
+
   it('ignores a completed mutation after the route switches to another VPS', async () => {
     const mutation = deferred<ReturnType<typeof detailFixture>>()
     vi.spyOn(api, 'getVPSAsset').mockImplementation(async (vpsId) => (
@@ -414,98 +449,7 @@ describe('VPSOverviewManagementActions', () => {
     expect(create).toHaveBeenCalledTimes(1)
   })
 
-  it('does not write a stale cancellation preview onto a newly selected VPS', async () => {
-    const stalePreview = deferred<CancellationPreview>()
-    vi.spyOn(api, 'applyVPSCancellation').mockRejectedValue(new ApiError(409, 'cancellation preview stale', {
-      code: 'cancellation_preview_stale',
-    }))
-    const getPreview = vi.spyOn(api, 'getVPSCancellationPreview').mockImplementation(async (id) => {
-      if (id === 'vps_a') {
-        if (getPreview.mock.calls.filter((call) => call[0] === 'vps_a').length === 1) {
-          return emptyPreview('vps_a')
-        }
-        return stalePreview.promise
-      }
-      return emptyPreview(id)
-    })
-    const refresh = vi.fn().mockResolvedValue(true)
 
-    function CancellationHarness() {
-      const [vpsId, setVpsId] = useState('vps_a')
-      const management = useVPSManagementController()
-      const triggerRef = useRef<HTMLButtonElement>(null)
-      return (
-        <>
-          <button type="button" onClick={() => management.openPanel('cancellation')}>打开取消</button>
-          <button type="button" onClick={() => setVpsId('vps_b')}>切换 VPS</button>
-          <VPSOverviewManagementActions
-            vpsId={vpsId}
-            displayName={vpsId === 'vps_a' ? '东京边缘' : '大阪边缘'}
-            management={management}
-            managementTriggerRef={triggerRef}
-            onOverviewRefresh={refresh}
-          />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter>
-        <CancellationHarness />
-      </MemoryRouter>,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '打开取消' }))
-    fireEvent.change(await screen.findByRole('textbox', { name: '原因' }), { target: { value: '退役' } })
-    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
-    await waitFor(() => {
-      expect(getPreview.mock.calls.filter((call) => call[0] === 'vps_a').length).toBeGreaterThanOrEqual(2)
-    })
-    fireEvent.click(screen.getByRole('button', { name: '切换 VPS' }))
-    await act(async () => stalePreview.resolve(emptyPreview('vps_a', '旧 VPS 预览')))
-
-    expect(screen.queryByText('旧 VPS 预览')).not.toBeInTheDocument()
-    expect(screen.queryByText('影响范围已变化，请重新加载预览后再确认')).not.toBeInTheDocument()
-  })
-
-  it('rebuilds the production cancellation workbench when preview digest changes', async () => {
-    vi.spyOn(api, 'applyVPSCancellation').mockRejectedValue(new ApiError(409, 'cancellation preview stale', {
-      code: 'cancellation_preview_stale',
-    }))
-    const getPreview = vi.spyOn(api, 'getVPSCancellationPreview')
-      .mockResolvedValueOnce(emptyPreview('vps_a'))
-      .mockResolvedValue({ ...emptyPreview('vps_a'), preview_digest: 'digest-vps_a-next' })
-    const refresh = vi.fn().mockResolvedValue(true)
-
-    function DigestHarness() {
-      const management = useVPSManagementController()
-      const triggerRef = useRef<HTMLButtonElement>(null)
-      return (
-        <>
-          <button type="button" onClick={() => management.openPanel('cancellation')}>打开取消</button>
-          <VPSOverviewManagementActions
-            vpsId="vps_a"
-            displayName="东京边缘"
-            management={management}
-            managementTriggerRef={triggerRef}
-            onOverviewRefresh={refresh}
-          />
-        </>
-      )
-    }
-
-    render(
-      <MemoryRouter>
-        <DigestHarness />
-      </MemoryRouter>,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '打开取消' }))
-    fireEvent.change(await screen.findByRole('textbox', { name: '原因' }), { target: { value: '旧确认' } })
-    fireEvent.click(screen.getByRole('button', { name: '确认取消/退役' }))
-    await waitFor(() => expect(getPreview).toHaveBeenCalledTimes(2))
-    expect(screen.getByRole('textbox', { name: '原因' })).toHaveValue('旧确认')
-  })
 
   it('requires loading the latest VPS version after a CAS conflict before another write', async () => {
     const stale = detailFixture('vps_a', '东京边缘')
@@ -827,85 +771,14 @@ describe('VPSOverviewManagementActions', () => {
     expect(keys[0]).toBe(keys[1])
   })
 
-  it('keeps the continue-cancel action after a cancel renewal write even when overview refresh fails', async () => {
-    const detail = detailFixture('vps_a', '东京边缘')
-    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
-    vi.spyOn(api, 'updateVPSAsset').mockResolvedValue({
-      ...detail,
-      renewal_decision: 'cancel',
-      renewal_subscription_linkage: {
-        status: 'subscription_updated',
-        message: '已关联订阅',
-        subscription_id: 'sub_001',
-        candidate_count: 1,
-        updated: true,
-      },
-    })
-    const refresh = vi.fn().mockResolvedValue(false)
 
-    render(
-      <MemoryRouter>
-        <Harness onRefresh={refresh} />
-      </MemoryRouter>,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '打开续费' }))
-    fireEvent.change(await screen.findByRole('combobox', { name: '续费决策' }), {
-      target: { value: 'cancel' },
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: '决策理由' }), {
-      target: { value: '准备取消' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
-
-    expect(await screen.findByRole('link', { name: '继续取消 / 退役' })).toHaveAttribute(
-      'href',
-      '/vps/vps_a?workbench=cancellation',
-    )
-  })
-
-  it('offers continue-cancel after a cancel renewal write when overview refresh succeeds', async () => {
-    const detail = detailFixture('vps_a', '东京边缘')
-    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
-    vi.spyOn(api, 'updateVPSAsset').mockResolvedValue({
-      ...detail,
-      renewal_decision: 'cancel',
-      renewal_subscription_linkage: {
-        status: 'subscription_updated',
-        message: '已关联订阅',
-        subscription_id: 'sub_001',
-        candidate_count: 1,
-        updated: true,
-      },
-    })
-    const refresh = vi.fn().mockResolvedValue(true)
-
-    render(
-      <MemoryRouter>
-        <Harness onRefresh={refresh} />
-      </MemoryRouter>,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '打开续费' }))
-    fireEvent.change(await screen.findByRole('combobox', { name: '续费决策' }), {
-      target: { value: 'cancel' },
-    })
-    fireEvent.change(screen.getByRole('textbox', { name: '决策理由' }), {
-      target: { value: '准备取消' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存续费决策' }))
-
-    expect(await screen.findByRole('link', { name: '继续取消 / 退役' })).toHaveAttribute(
-      'href',
-      '/vps/vps_a?workbench=cancellation',
-    )
-  })
 
   it('localizes renewal compare rows and treats an already-satisfied latest decision as done', async () => {
     const stale = detailFixture('vps_a', '东京边缘')
     const latest = {
       ...stale,
       renewal_decision: 'cancel' as const,
+      renewal_reason: '准备取消',
       updated_at: '2026-08-21T00:00:00Z',
     }
     vi.spyOn(api, 'getVPSAsset')
@@ -944,7 +817,7 @@ describe('VPSOverviewManagementActions', () => {
     const stale = detailFixture('vps_a', '东京边缘')
     const latest = {
       ...stale,
-      renewal_decision: 'observe' as const,
+      renewal_decision: 'cancel' as const,
       updated_at: '2026-08-21T00:00:00Z',
     }
     vi.spyOn(api, 'getVPSAsset')
@@ -974,7 +847,7 @@ describe('VPSOverviewManagementActions', () => {
     const stale = detailFixture('vps_a', '东京边缘')
     const archived = {
       ...stale,
-      lifecycle_status: 'cancelled' as const,
+      lifecycle_status: 'archived' as const,
       updated_at: '2026-08-21T00:00:00Z',
     }
     vi.spyOn(api, 'getVPSAsset')
@@ -1056,7 +929,7 @@ describe('VPSOverviewManagementActions', () => {
     expect(await screen.findByRole('textbox', { name: 'VPS 名称' })).toHaveValue('大阪边缘')
 
     await act(async () => {
-      identity.resolve({ ...stale, lifecycle_status: 'cancelled' })
+      identity.resolve({ ...stale, lifecycle_status: 'archived' })
     })
 
     expect(screen.getByRole('textbox', { name: 'VPS 名称' })).toHaveValue('大阪边缘')
@@ -1128,7 +1001,7 @@ describe('VPSOverviewManagementActions', () => {
     expect(screen.getByText('域名记录已创建，概览已刷新。')).toBeInTheDocument()
   })
 
-  it('rejects validity extension when no active subscription exists', async () => {
+  it('allows independent validity even when no active subscription exists', async () => {
     const detail = detailFixture('vps_a', '东京边缘')
     vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
     vi.spyOn(api, 'listSubscriptions').mockResolvedValue([
@@ -1143,11 +1016,11 @@ describe('VPSOverviewManagementActions', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '打开延长有效期' }))
-    expect(await screen.findByText('当前 VPS 没有生效中订阅，无法直接延长有效期。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存延长记录' })).toBeDisabled()
+    expect(await screen.findByLabelText(/延长至日期/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存延长记录' })).toBeEnabled()
   })
 
-  it('rejects validity extension when multiple active subscriptions exist', async () => {
+  it('allows independent validity when several subscriptions exist', async () => {
     const detail = detailFixture('vps_a', '东京边缘')
     vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
     vi.spyOn(api, 'listSubscriptions').mockResolvedValue([
@@ -1163,11 +1036,11 @@ describe('VPSOverviewManagementActions', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '打开延长有效期' }))
-    expect(await screen.findByText('当前 VPS 存在多个生效中订阅，无法直接延长有效期。')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存延长记录' })).toBeDisabled()
+    expect(await screen.findByLabelText(/延长至日期/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存延长记录' })).toBeEnabled()
   })
 
-  it('rejects backwards extend_to date and extends validity when valid', async () => {
+  it('records an independently confirmed VPS validity date', async () => {
     const detail = detailFixture('vps_a', '东京边缘')
     vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
     vi.spyOn(api, 'listSubscriptions').mockResolvedValue([
@@ -1187,12 +1060,6 @@ describe('VPSOverviewManagementActions', () => {
     const reasonInput = screen.getByLabelText(/延长原因/)
     expect(screen.getByRole('button', { name: '保存延长记录' })).not.toBeDisabled()
     fireEvent.change(reasonInput, { target: { value: '机房故障补偿 7 天' } })
-    fireEvent.change(extendInput, { target: { value: '2026-09-10' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存延长记录' }))
-
-    expect(await screen.findByText('延长至日期不能早于当前生效中订阅续费日。')).toBeInTheDocument()
-    expect(extendValidity).not.toHaveBeenCalled()
-
     fireEvent.change(extendInput, { target: { value: '2026-10-15' } })
     fireEvent.click(screen.getByRole('button', { name: '保存延长记录' }))
 
@@ -1234,40 +1101,6 @@ describe('VPSOverviewManagementActions', () => {
     expect(screen.getByText('监控实例关联已更新，概览已刷新。')).toBeInTheDocument()
   })
 
-  it('confirms unlinking a monitoring instance from relation panel and refreshes overview', async () => {
-    const detail = detailFixture('vps_a', '东京边缘')
-    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
-    vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([linkedMonitoring()])
-    const unlinkInstance = vi.spyOn(api, 'unlinkVPSMonitoringInstance').mockResolvedValue(linkRecord({
-      monitoring_instance_id: 'mon_linked',
-      note: 'primary monitoring',
-    }))
-    const refresh = vi.fn().mockResolvedValue(true)
-
-    render(
-      <MemoryRouter>
-        <Harness onRefresh={refresh} />
-      </MemoryRouter>,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '打开已关联监控' }))
-    expect(await screen.findByRole('dialog', { name: '已关联监控实例' })).toBeInTheDocument()
-
-    // Request unlink
-    fireEvent.click(await screen.findByRole('button', { name: '解除关联' }))
-    expect(screen.getByRole('alertdialog', { name: '确认解除监控实例关联' })).toBeInTheDocument()
-
-    // Confirm unlink
-    fireEvent.click(screen.getByRole('button', { name: '确认解除关联' }))
-
-    await waitFor(() => expect(unlinkInstance).toHaveBeenCalledTimes(1))
-    expect(unlinkInstance).toHaveBeenCalledWith('vps_a', {
-      monitoring_instance_id: 'mon_linked',
-      note: 'primary monitoring',
-    })
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
-    expect(screen.getByText('监控实例关联已解除')).toBeInTheDocument()
-  })
 
   it('keeps the same service idempotency key after a transport failure and rotates on 409', async () => {
     const detail = detailFixture('vps_a', '东京边缘')
@@ -1377,11 +1210,11 @@ describe('VPSOverviewManagementActions', () => {
 
     vi.mocked(api.getVPSAsset).mockResolvedValue({
       ...detailFixture('vps_a', '东京边缘'),
-      lifecycle_status: 'cancelled',
+      lifecycle_status: 'archived',
     })
     fireEvent.click(screen.getByRole('button', { name: '创建服务记录' }))
 
-    await waitFor(() => expect(screen.getByTestId('archive-location')).toHaveTextContent('/archive/vps_a'))
+    expect(await screen.findByTestId('archive-location')).toHaveTextContent('/archive/vps_a')
     expect(createService).not.toHaveBeenCalled()
     expect(screen.getByTestId('archive-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
   })
@@ -1389,7 +1222,7 @@ describe('VPSOverviewManagementActions', () => {
   it('keeps relation reads visible but blocks unlink until non-terminal authority is ready', async () => {
     vi.spyOn(api, 'getVPSAsset').mockResolvedValue({
       ...detailFixture('vps_a', '东京边缘'),
-      lifecycle_status: 'cancelled',
+      lifecycle_status: 'archived',
     })
     vi.spyOn(api, 'listVPSMonitoringInstances').mockResolvedValue([linkedMonitoring()])
     const unlinkInstance = vi.spyOn(api, 'unlinkVPSMonitoringInstance')
@@ -1515,17 +1348,17 @@ describe('VPSOverviewManagementActions', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
     fireEvent.change(within(dialog).getByRole('textbox', { name: '归档原因' }), {
       target: { value: '订阅已结束' },
     })
     fireEvent.change(within(dialog).getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
       target: { value: '东京边缘' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '结束使用并归档' }))
 
-    await waitFor(() => expect(archive).toHaveBeenCalledWith('vps_a', { confirmation_name: '东京边缘', reason: '订阅已结束' }))
-    expect(screen.getByTestId('archive-location')).toHaveTextContent('/archive/vps_a')
+    await waitFor(() => expect(archive).toHaveBeenCalledWith('vps_a', { confirmation_name: '东京边缘', reason: '订阅已结束', preview_digest: '', never_connected_confirmation: false, idempotency_key: expect.any(String) }))
+    expect(await screen.findByTestId('archive-location')).toHaveTextContent('/archive/vps_a')
     expect(screen.getByTestId('archive-location')).toHaveAttribute('data-state', JSON.stringify(inventoryState))
   })
 
@@ -1569,14 +1402,14 @@ describe('VPSOverviewManagementActions', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
+    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
     fireEvent.change(within(dialog).getByRole('textbox', { name: '归档原因' }), {
       target: { value: '订阅已结束' },
     })
     fireEvent.change(within(dialog).getByRole('textbox', { name: '输入 VPS 名称确认归档' }), {
       target: { value: '东京边缘' },
     })
-    fireEvent.click(within(dialog).getByRole('button', { name: '确认归档' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '结束使用并归档' }))
 
     expect(await within(dialog).findByText('archive conflict')).toBeInTheDocument()
     expect(screen.getByTestId('location-path')).toHaveTextContent('/')
@@ -1584,49 +1417,5 @@ describe('VPSOverviewManagementActions', () => {
     expect(screen.queryByText('archived')).not.toBeInTheDocument()
   })
 
-  it('wires inline blocker action in archive modal to scoped dependency status correction', async () => {
-    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue({
-      vps: detailFixture('vps_a', '东京边缘'),
-      subscriptions: [],
-      monitoring_instance_links: [],
-      services: [],
-      domains: [],
-      target_links: [],
-      warnings: [],
-      blockers: ['服务状态待确认'],
-      eligible: false,
-      blocker_details: [
-        {
-          code: 'service_status_needs_confirmation',
-          object_type: 'service',
-          object_id: 'svc_blocker_01',
-          display_name: 'Auth API',
-          current_state: 'unknown',
-          blocked_action: 'archive_vps',
-          resolution_action: 'correct_dependency_status',
-        },
-      ],
-    })
-
-    render(
-      <MemoryRouter initialEntries={['/']}>
-        <Routes>
-          <Route path="/" element={<Harness onRefresh={vi.fn().mockResolvedValue(true)} />} />
-        </Routes>
-      </MemoryRouter>,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '确认归档 VPS' })
-    expect(dialog).toBeInTheDocument()
-
-    const correctBtn = within(dialog).getByRole('button', { name: '纠正服务状态' })
-    expect(correctBtn).toBeInTheDocument()
-
-    fireEvent.click(correctBtn)
-
-    // DependencyStatusCorrection modal must open
-    expect(await screen.findByRole('dialog', { name: '纠正服务状态' })).toBeInTheDocument()
-  })
 
 })

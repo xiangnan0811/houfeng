@@ -14,71 +14,11 @@ import (
 )
 
 type AssetLifecycleRepository interface {
-	GetVPSCancellationPreview(context.Context, string) (assetlifecycle.CancellationPreview, error)
-	ApplyVPSCancellation(context.Context, string, assetlifecycle.ApplyCancellationInput) (assetlifecycle.LifecycleActionResult, error)
 	ExtendVPSValidity(context.Context, string, assetlifecycle.ExtendValidityInput) (assetlifecycle.LifecycleActionResult, error)
 	GetVPSArchiveReview(context.Context, string) (assetlifecycle.ArchiveReview, error)
 	ApplyVPSArchive(context.Context, string, assetlifecycle.ApplyArchiveInput) (assetlifecycle.ArchiveReview, error)
 	RestoreVPSFromArchive(context.Context, string, assetlifecycle.RestoreArchiveInput) (vpsassets.Record, error)
-	StartVPSMigration(context.Context, string, assetlifecycle.StartMigrationInput) (assetlifecycle.LifecycleActionResult, error)
 	ListTargetAssetContexts(context.Context) ([]assetlifecycle.AssetContextForTarget, error)
-}
-
-func VPSCancellationPreview(repo AssetLifecycleRepository) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "cancellation-preview")
-		if !ok {
-			writeError(w, http.StatusNotFound, "vps asset not found")
-			return
-		}
-		if r.Method != http.MethodGet {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
-		preview, err := repo.GetVPSCancellationPreview(r.Context(), vpsID)
-		if handled := writeAssetLifecycleError(w, err); handled {
-			return
-		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-		writeJSON(w, http.StatusOK, preview)
-	})
-}
-
-func VPSCancellation(repo AssetLifecycleRepository) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "cancellation")
-		if !ok {
-			writeError(w, http.StatusNotFound, "vps asset not found")
-			return
-		}
-		if r.Method != http.MethodPost {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-
-		var input assetlifecycle.ApplyCancellationInput
-		if err := decodeJSON(r, &input); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid json")
-			return
-		}
-		input = assetlifecycle.NormalizeApplyCancellationInput(input)
-		if err := assetlifecycle.ValidateApplyCancellationInput(input); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid input")
-			return
-		}
-
-		result, err := repo.ApplyVPSCancellation(r.Context(), vpsID, input)
-		if handled := writeAssetLifecycleError(w, err); handled {
-			return
-		} else if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-		writeJSON(w, http.StatusOK, result)
-	})
 }
 
 func VPSExtendValidity(repo AssetLifecycleRepository) http.Handler {
@@ -204,39 +144,6 @@ func VPSRestoreFromArchive(repo AssetLifecycleRepository) http.Handler {
 	})
 }
 
-func VPSStartMigration(repo AssetLifecycleRepository) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "start-migration")
-		if !ok {
-			writeError(w, http.StatusNotFound, "vps asset not found")
-			return
-		}
-		if r.Method != http.MethodPost {
-			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
-			return
-		}
-		var input assetlifecycle.StartMigrationInput
-		if err := decodeJSON(r, &input); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid json body")
-			return
-		}
-		input.Reason = strings.TrimSpace(input.Reason)
-		if err := assetlifecycle.ValidateLifecycleReason(input.Reason); err != nil {
-			writeAssetLifecycleError(w, err)
-			return
-		}
-		result, err := repo.StartVPSMigration(r.Context(), vpsID, input)
-		if writeAssetLifecycleError(w, err) {
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-		writeJSON(w, http.StatusOK, result)
-	})
-}
-
 func AssetContextTargets(repo AssetLifecycleRepository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Trim(r.URL.Path, "/") != "api/asset-context/targets" {
@@ -258,6 +165,11 @@ func AssetContextTargets(repo AssetLifecycleRepository) http.Handler {
 }
 
 func writeAssetLifecycleError(w http.ResponseWriter, err error) bool {
+	var stale *assetlifecycle.StaleArchivePreviewError
+	if errors.As(err, &stale) {
+		writeJSON(w, http.StatusConflict, map[string]any{"error": "archive preview stale", "code": "archive_preview_stale", "review": stale.Review})
+		return true
+	}
 	var archiveBlocked *assetlifecycle.ArchiveBlockedError
 	if errors.As(err, &archiveBlocked) {
 		writeJSON(w, http.StatusConflict, map[string]any{"error": "lifecycle action blocked", "code": "lifecycle_action_blocked", "review": archiveBlocked.Review})
@@ -266,6 +178,8 @@ func writeAssetLifecycleError(w http.ResponseWriter, err error) bool {
 	switch {
 	case err == nil:
 		return false
+	case errors.Is(err, assetlifecycle.ErrArchiveIdempotencyConflict):
+		writeCodedError(w, http.StatusConflict, "archive idempotency key reused", "archive_idempotency_conflict")
 	case errors.Is(err, assetlifecycle.ErrInvalidLifecycleActionInput):
 		writeError(w, http.StatusBadRequest, "invalid input")
 	case errors.Is(err, assetlifecycle.ErrLifecycleActionBlocked):

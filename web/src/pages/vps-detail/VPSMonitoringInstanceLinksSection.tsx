@@ -36,20 +36,13 @@ export function VPSMonitoringInstanceLinksSection({
   readOnly = false,
   writeBlocked = false,
   unlinkingMonitoringInstanceId,
-  pendingUnlinkMonitoringInstance,
   linkFeedback,
   linkFeedbackIsError,
   onCreateMonitoringInstance,
-  onOpenLink,
   onUpgradeMonitoringInstance,
-  onRequestUnlinkMonitoringInstance,
-  onCancelUnlinkMonitoringInstance,
-  onConfirmUnlinkMonitoringInstance,
 }: VPSMonitoringInstanceLinksSectionProps) {
   const location = useLocation()
-  const pendingUnlinkName = pendingUnlinkMonitoringInstance?.display_name ?? pendingUnlinkMonitoringInstance?.monitoring_instance_id ?? ''
-  const hasNoActiveLinks = monitoring.length === 0
-  const hasDuplicateActiveLinks = monitoring.length > 1
+  const hasNoActiveLinks = !monitoring.some((item) => item.lifecycle_status !== '已退役')
 
   return (
     <div className="vps-objects">
@@ -59,13 +52,7 @@ export function VPSMonitoringInstanceLinksSection({
       {!readOnly && hasNoActiveLinks ? (
         <div>
           <Button variant="primary" size="sm" disabled={writeBlocked} onClick={onCreateMonitoringInstance}>接入/升级 agent</Button>
-          <Button variant="secondary" size="sm" disabled={writeBlocked} onClick={onOpenLink}>关联已有监控实例</Button>
         </div>
-      ) : null}
-      {hasDuplicateActiveLinks ? (
-        <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-          检测到 <MonoDigits>{monitoring.length}</MonoDigits> 个 active 监控实例关联。请人工核对要保留的实例，逐个接入/升级或解除多余关联。
-        </p>
       ) : null}
       {!readOnly && linkFeedback ? (
         <p
@@ -78,43 +65,11 @@ export function VPSMonitoringInstanceLinksSection({
           {linkFeedback}
         </p>
       ) : null}
-      {!readOnly && pendingUnlinkMonitoringInstance ? (
-        <section className="asset-lifecycle-confirm" role="alertdialog" aria-label="确认解除监控实例关联">
-          <p className="asset-lifecycle-confirm__eyebrow">操作确认</p>
-          <h4>确认解除监控实例关联</h4>
-          <div className="asset-lifecycle-confirm__flow">
-            <span>当前：{pendingUnlinkName} 正作为该 VPS 的监控证据。</span>
-            <span>操作后：该监控实例不再关联到这个 VPS。</span>
-          </div>
-          <div className="asset-lifecycle-confirm__callouts">
-            <p>会移除 VPS 台账中的监控关联，后续不再把它计入该 VPS。</p>
-            <p>不会删除监控实例、历史事件、agent 绑定或观测数据。</p>
-          </div>
-          <div className="asset-operation-actions">
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={writeBlocked || unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id}
-              onClick={onCancelUnlinkMonitoringInstance}
-            >
-              取消
-            </Button>
-            <Button
-              type="button"
-              variant="danger"
-              disabled={writeBlocked || unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id}
-              onClick={() => onConfirmUnlinkMonitoringInstance(pendingUnlinkMonitoringInstance)}
-            >
-              {unlinkingMonitoringInstanceId === pendingUnlinkMonitoringInstance.monitoring_instance_id ? '解除中…' : '确认解除关联'}
-            </Button>
-          </div>
-        </section>
-      ) : null}
       {monitoring.length > 0 ? (
         <ul className="vps-object-list">
           {monitoring.map((monitoringInstance) => {
             const name = monitoringInstanceName(monitoringInstance)
-            const health = monitoringObservedHealthLabel(monitoringInstance.current_health_status)
+            const health = monitoringObservedHealthLabel(monitoringInstance.current_health_status, monitoringInstance)
             const healthRecorded = health !== '观测健康未记录'
             const heartbeat = monitoringInstance.last_heartbeat_at?.trim() ?? ''
             return (
@@ -146,14 +101,7 @@ export function VPSMonitoringInstanceLinksSection({
                         >
                           接入/升级 agent
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={writeBlocked || unlinkingMonitoringInstanceId !== null}
-                          onClick={() => onRequestUnlinkMonitoringInstance(monitoringInstance)}
-                        >
-                          {unlinkingMonitoringInstanceId === monitoringInstance.monitoring_instance_id ? '解除中…' : '解除关联'}
-                        </Button>
+
                       </>
                     ) : null}
                   </div>

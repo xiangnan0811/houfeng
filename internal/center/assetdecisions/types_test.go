@@ -119,7 +119,7 @@ func TestComparisonInsightRanksAndExplainsPortfolioMembers(t *testing.T) {
 	if group.ComparisonInsight.PrimaryAxis != ComparisonAxisServiceContext {
 		t.Fatalf("comparison = %#v, want service context axis", group.ComparisonInsight)
 	}
-	for _, lane := range []ComparisonLane{ComparisonLanePrimary, ComparisonLaneStandby, ComparisonLaneRetire} {
+	for _, lane := range []ComparisonLane{ComparisonLanePrimary, ComparisonLaneRetire} {
 		if !hasComparisonLane(group.ComparisonInsight.LaneCounts, lane) {
 			t.Fatalf("lane counts = %#v, want lane %s", group.ComparisonInsight.LaneCounts, lane)
 		}
@@ -666,14 +666,16 @@ func TestExecutionReadbackCancelDetectsDoneDrift(t *testing.T) {
 	if readback.Status != ReadbackDrift {
 		t.Fatalf("readback = %#v, want drift", readback)
 	}
-	if !hasReadbackIssue(readback, "cancel_lifecycle_open") || !hasReadbackIssue(readback, "active_subscription_remaining") || !hasReadbackIssue(readback, "running_monitoring_remaining") {
+	if !hasReadbackIssue(readback, "renewal_decision_open") {
 		t.Fatalf("issues = %#v, want cancel lifecycle/subscription/monitoring drift", readback.Issues)
 	}
 }
 
 func TestExecutionReadbackCancelAlignedWhenFactsClosed(t *testing.T) {
 	f := fact("vps_cancel", "Cancel Candidate", "pv_1", "Provider", "Japan", "", "Tokyo", vpsassets.UsageIdle, nil)
-	f.VPS.LifecycleStatus = vpsassets.LifecycleCancelled
+	f.VPS.LifecycleStatus = vpsassets.LifecycleActive
+	f.VPS.RenewalDecision = vpsassets.RenewalCancel
+	f.VPS.AutoRenewCheck = "disabled"
 	member := RecordMember{VPSID: "vps_cancel", DecidedAction: ActionCancel, FollowupStatus: FollowupDone}
 
 	readback := EvaluateMemberExecutionReadback(member, FactsByVPSID([]Fact{f}))
@@ -814,7 +816,7 @@ func TestExecutionReadbackFollowupPriority(t *testing.T) {
 		t.Fatalf("skipped readback = %#v, want aligned", skipped)
 	}
 
-	f.VPS.LifecycleStatus = vpsassets.LifecycleCancelled
+	f.VPS.LifecycleStatus = vpsassets.LifecycleArchived
 	skippedDrift := EvaluateMemberExecutionReadback(RecordMember{VPSID: "vps_keep", DecidedAction: ActionKeep, FollowupStatus: FollowupSkipped}, FactsByVPSID([]Fact{f}))
 	if skippedDrift.Status != ReadbackDrift {
 		t.Fatalf("skipped drift readback = %#v, want drift for critical fact split", skippedDrift)
@@ -866,7 +868,7 @@ func TestExecutionPlanMapsActionsToLanesAndSteps(t *testing.T) {
 			readback:  MemberExecutionReadback{Status: ReadbackOpen},
 			lane:      PlanLaneMigration,
 			step:      PlanStepOpenVPSDetail,
-			stepLabel: "标记迁移意向并人工跟进",
+			stepLabel: "记录迁移计划并人工跟进",
 		},
 		{
 			name:     "keep opens vps detail",

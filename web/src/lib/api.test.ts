@@ -1,12 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { matchRoutes } from 'react-router-dom'
 
-import type { ApplyArchiveInput, ApplyCancellationInput } from './types'
+import type { ApplyArchiveInput } from './types'
 import {
   addAssetDecisionManualGroupMember,
-  archiveMonitoringInstance,
   archiveVPS,
-  applyVPSCancellation,
   archiveTarget,
   bulkUpsertSubscriptionMonthlyBudgets,
   createAssetDomain,
@@ -38,7 +36,6 @@ import {
   getSubscription,
   getVPSAsset,
   getVPSArchiveReview,
-  getVPSCancellationPreview,
   getVPSIPQuality,
   getVPSIPQualityReport,
   getVPSTimeline,
@@ -58,11 +55,8 @@ import {
   listTargetAssetContexts,
   pauseMonitoringInstanceMonitoring,
   pauseTarget,
-  permanentCleanupMonitoringInstance,
   rejectPendingMonitoringInstanceBinding,
   resetMonitoringInstanceBinding,
-  restoreMonitoringInstanceFromArchive,
-  restoreMonitoringInstanceLifecycle,
   restoreTargetToPaused,
   restoreVPSFromArchive,
   resumeMonitoringInstanceMonitoring,
@@ -218,16 +212,12 @@ const settingsResponseBody = {
   retention_policy: {
     raw_layer_days: 30,
     aggregate_layer_days: 30,
-    event_layer_days: 90,
-    notification_layer_days: 180,
   },
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86400,
     stale_after_seconds: 604800,
     timeout_seconds: 15,
-    raw_retention_days: 90,
-    history_retention_days: 365,
     services: ['netflix', 'chatgpt'],
   },
   subscription_cost_settings: {
@@ -309,16 +299,12 @@ const settingsUpdateBody = {
   retention_policy: {
     raw_layer_days: 30,
     aggregate_layer_days: 30,
-    event_layer_days: 90,
-    notification_layer_days: 180,
   },
   ip_quality_settings: {
     enabled: true,
     frequency_seconds: 86400,
     stale_after_seconds: 604800,
     timeout_seconds: 15,
-    raw_retention_days: 90,
-    history_retention_days: 365,
     services: ['netflix', 'chatgpt'],
   },
 } satisfies SettingsUpdateInput
@@ -362,7 +348,7 @@ describe('api helpers', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(listMonitoringInstances()).resolves.toEqual([])
-    await expect(listMonitoringInstances('archived')).resolves.toEqual([])
+    await expect(listMonitoringInstances('retired')).resolves.toEqual([])
     await expect(listMonitoringInstances('all')).resolves.toEqual([])
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances', {
@@ -370,7 +356,7 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances?scope=archived', {
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances?scope=retired', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -423,11 +409,10 @@ describe('api helpers', () => {
         renewal_due_30d_subscription_count: 3,
         renewal_due_30d_vps_count: 2,
         unreviewed_vps_count: 4,
-        to_cancel_vps_count: 1,
-        cancelled_vps_count: 2,
-        cancellation_attention_vps_count: 3,
-        running_cancelled_asset_count: 4,
-        to_migrate_vps_count: 2,
+        no_renewal_vps_count: 1,
+        archived_vps_count: 2,
+        auto_renew_check_vps_count: 3,
+        pending_followup_count: 4,
         unlinked_vps_count: 5,
         abnormal_linked_vps_count: 1,
         cost_by_currency: [
@@ -548,7 +533,7 @@ describe('api helpers', () => {
       os_name: '',
       virtualization: '',
       lifecycle_status: 'active',
-      usage_status: 'in_use',
+      usage_tags: ['in_use'],
       renewal_decision: 'keep',
       importance: 'normal',
       labels: ['edge'],
@@ -576,7 +561,7 @@ describe('api helpers', () => {
       os_name: '',
       virtualization: '',
       lifecycle_status: 'active',
-      usage_status: 'in_use',
+      usage_tags: ['in_use'],
       renewal_decision: 'keep',
       importance: 'normal',
       labels: ['edge'],
@@ -637,7 +622,7 @@ describe('api helpers', () => {
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(vps)))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_status: 'in_use', renewal_decision: 'keep', asset_scope: 'historical' })).resolves.toEqual([vps])
+    await expect(listVPSAssets({ provider_id: 'pv_001', lifecycle_status: 'active', usage_tag: '自定义用途', renewal_decision: 'keep', asset_scope: 'historical' })).resolves.toEqual([vps])
     await expect(getVPSAsset('vps_001')).resolves.toEqual(detail)
     await expect(getVPSIPQuality('vps_001')).resolves.toEqual(ipQuality)
     await expect(getVPSIPQualityReport('vps_001', 'ipq_001')).resolves.toEqual(ipQualityDetail)
@@ -646,7 +631,7 @@ describe('api helpers', () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      '/api/vps?provider_id=pv_001&lifecycle_status=active&usage_status=in_use&renewal_decision=keep&asset_scope=historical',
+      '/api/vps?provider_id=pv_001&lifecycle_status=active&usage_tag=%E8%87%AA%E5%AE%9A%E4%B9%89%E7%94%A8%E9%80%94&renewal_decision=keep&asset_scope=historical',
       {
         headers: { Accept: 'application/json' },
         cache: 'no-store',
@@ -763,7 +748,7 @@ describe('api helpers', () => {
       priority: 90,
       member_count: 2,
       lifecycle_counts: { active: 2 },
-      usage_counts: { in_use: 1, standby: 1 },
+      usage_tag_counts: { in_use: 1, standby: 1 },
       renewal_decision_counts: { unreviewed: 2 },
       renewal_window_count: 2,
       unreviewed_count: 2,
@@ -924,7 +909,7 @@ describe('api helpers', () => {
       renew_within_days: 60,
       member_count: 2,
       lifecycle_counts: { active: 2 },
-      usage_counts: { in_use: 1, standby: 1 },
+      usage_tag_counts: { in_use: 1, standby: 1 },
       renewal_decision_counts: { unreviewed: 2 },
       renewal_window_count: 1,
       unreviewed_count: 2,
@@ -1287,7 +1272,7 @@ describe('api helpers', () => {
     await listVPSMonitoringInstances('vps_001')
     await listVPSForMonitoringInstance('mi_001')
 
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/monitoring-instances', {
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/monitoring-instances?scope=current', {
       headers: { Accept: 'application/json' },
       cache: 'no-store',
       credentials: 'include',
@@ -1342,100 +1327,11 @@ describe('api helpers', () => {
     })
   })
 
-  it('serializes VPS cancellation preview, confirmed action, and target asset contexts', async () => {
-    const preview = {
-      vps: {
-        vps_id: 'vps_001',
-        display_name: 'Tokyo Edge',
-        provider_name: 'Hetzner',
-        lifecycle_status: 'active',
-        usage_status: 'in_use',
-        renewal_decision: 'cancel',
-        active_monitoring_instance_link_count: 1,
-        ssh_port: 22,
-        labels: [],
-        created_at: '2026-05-30T08:00:00Z',
-        updated_at: '2026-05-30T08:00:00Z',
-      },
-      subscriptions: [],
-      monitoring_instance_links: [],
-      services: [],
-      domains: [],
-      target_links: [],
-      recommended_steps: [],
-      warnings: ['订阅账单记录已无续费动作，但 VPS 尚未进入 to_cancel/cancelled，存在状态割裂。'],
-      blockers: [],
-      preview_digest: 'preview-digest-test',
-    }
-    const actionResult = {
-      action: {
-        action_id: 'ala_001',
-        vps_id: 'vps_001',
-        action_type: 'cancel_vps',
-        status: 'completed',
-        reason: 'expired',
-        created_at: '2026-05-30T08:01:00Z',
-      },
-      steps: [],
-    }
-    const linkedVPSSummaries = [{
-      vps_id: 'vps_001',
-      display_name: 'Tokyo Edge',
-      lifecycle_status: 'cancelled',
-      renewal_decision: 'cancel',
-      subscription_state: 'expired',
-      message: '关联 VPS 已取消，Target 仍需确认状态。',
-    }]
-    const targetContexts = [{
-      target_id: 'tg_001',
-      linked_vps_count: 1,
-      cancellation_attention: true,
-      summaries: linkedVPSSummaries,
-      service_ids: ['svc_001'],
-      domain_ids: ['dom_001'],
-    }]
-    const input = {
-      reason: 'expired',
-      effective_date: '2026-05-30',
-      subscription_ids: ['sub_001'],
-      vps_lifecycle_status: 'cancelled',
-      monitoring_instance_actions: [{ monitoring_instance_id: 'mi_001', lifecycle_status: '已退役', monitoring_status: '暂停' }],
-      target_actions: [{ target_id: 'tg_001', run_status: '已归档' }],
-      preview_digest: 'preview-digest-test',
-      confirmed_shared_objects: [],
-    } satisfies ApplyCancellationInput
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(preview)))
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(actionResult)))
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(targetContexts)))
+  it('loads target asset contexts without the removed cancellation workflow', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, '[]'))
     vi.stubGlobal('fetch', fetchMock)
-
-    await expect(getVPSCancellationPreview('vps_001')).resolves.toEqual(preview)
-    await expect(applyVPSCancellation('vps_001', input)).resolves.toEqual(actionResult)
-    await expect(listTargetAssetContexts()).resolves.toEqual(targetContexts)
-
-    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps_001/cancellation-preview', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps_001/cancellation', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify(input),
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/asset-context/targets', {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).not.toHaveBeenCalledWith('/api/asset-context/monitoring-instances', expect.anything())
+    await expect(listTargetAssetContexts()).resolves.toEqual([])
+    expect(fetchMock).toHaveBeenCalledWith('/api/asset-context/targets', expect.objectContaining({ credentials: 'include' }))
   })
 
   it('serializes VPS archive review, archive confirmation, and restore endpoints', async () => {
@@ -1446,7 +1342,7 @@ describe('api helpers', () => {
         provider_name: 'Hetzner',
         product_name: 'cx22',
         lifecycle_status: 'active',
-        usage_status: 'in_use',
+        usage_tags: ['in_use'],
         renewal_decision: 'cancel',
         active_monitoring_instance_link_count: 0,
         ssh_port: 22,
@@ -1475,10 +1371,11 @@ describe('api helpers', () => {
     }
     const restored = {
       ...review.vps,
-      lifecycle_status: 'idle',
+      lifecycle_status: 'active',
+      usage_tags: ['闲置'],
       archived_at: null,
     }
-    const input = { confirmation_name: 'Tokyo Edge', reason: '归档历史' } satisfies ApplyArchiveInput
+    const input = { confirmation_name: 'Tokyo Edge', reason: '归档历史', preview_digest: 'preview-digest', idempotency_key: 'archive-request-001', never_connected_confirmation: true } satisfies ApplyArchiveInput
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockResponse(200, JSON.stringify(review)))
@@ -1537,7 +1434,7 @@ describe('api helpers', () => {
       os_name: '',
       virtualization: '',
       lifecycle_status: 'active',
-      usage_status: 'in_use',
+      usage_tags: ['in_use'],
       renewal_decision: 'cancel',
       importance: 'normal',
       labels: ['edge'],
@@ -2017,6 +1914,7 @@ describe('api helpers', () => {
     } satisfies UpdateTargetMetadataInput
     const responseBody = {
       target_id: 'tg_001',
+      lifecycle_status: 'active',
       name: 'Blog',
       target_type: 'service',
       host: 'blog.example.com',
@@ -2055,6 +1953,7 @@ describe('api helpers', () => {
     } satisfies UpdateTargetMetadataInput
     const responseBody = {
       target_id: 'tg_001',
+      lifecycle_status: 'active',
       name: 'Blog',
       target_type: 'service',
       host: 'blog.example.com',
@@ -2104,6 +2003,7 @@ describe('api helpers', () => {
     } satisfies CreateTargetInput
     const responseBody = {
       target_id: 'tg_new',
+      lifecycle_status: 'active',
       ...requestBody,
       current_health_status: '正常',
       current_active_incident_count: 0,
@@ -2542,7 +2442,7 @@ describe('api helpers', () => {
           vps_id: 'vps_001',
           display_name: 'Tokyo VPS',
           lifecycle_status: 'active',
-          usage_status: 'in_use',
+          usage_tags: ['in_use'],
           linked_at: '2026-04-26T09:00:00Z',
           note: 'primary',
         },
@@ -2582,7 +2482,7 @@ describe('api helpers', () => {
     })
   })
 
-  it('posts monitoring instance lifecycle and cleanup management actions', async () => {
+  it('retires monitoring instances with explicit request idempotency', async () => {
     const responseBody = {
       monitoring_instance_id: 'mi_001',
       display_name: 'Tokyo Edge',
@@ -2601,87 +2501,22 @@ describe('api helpers', () => {
       created_at: '2026-04-26T09:00:00Z',
       updated_at: '2026-04-26T09:15:00Z',
     } satisfies MonitoringInstanceRecord
-    const cleanupResult = {
-      monitoring_instance_id: 'mi_001',
-      counts: {
-        heartbeat_count: 0,
-        host_sample_count: 0,
-        probe_observation_count: 0,
-        host_sample_daily_aggregate_count: 0,
-        ip_quality_report_count: 0,
-        active_incident_count: 0,
-        state_change_event_count: 0,
-        notification_record_count: 0,
-        asset_lifecycle_action_step_count: 0,
-        active_vps_link_count: 0,
-      },
-      deleted_reference_count: 0,
-      deleted: true,
-    }
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(responseBody)))
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(responseBody)))
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify({ ...responseBody, archived_at: '2026-04-26T09:20:00Z', archived_reason: '重复创建' })))
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(responseBody)))
-      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(cleanupResult)))
+    const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
-
-    const confirmation = { preview_digest: 'review-digest', confirm_shared_impact: false }
-    await expect(retireMonitoringInstance('mi_001', { reason: '停止观测', ...confirmation })).resolves.toEqual(responseBody)
-    await expect(restoreMonitoringInstanceLifecycle('mi_001', { reason: '重新观察', ...confirmation })).resolves.toEqual(responseBody)
-    await expect(archiveMonitoringInstance('mi_001', { reason: '重复创建', confirmation_name: 'Tokyo Edge', ...confirmation })).resolves.toMatchObject({
-      archived_at: '2026-04-26T09:20:00Z',
-    })
-    await expect(restoreMonitoringInstanceFromArchive('mi_001')).resolves.toEqual(responseBody)
-    await expect(permanentCleanupMonitoringInstance('mi_001', { reason: '误创建空实例', confirmation_name: 'Tokyo Edge', ...confirmation })).resolves.toEqual(cleanupResult)
+    await expect(retireMonitoringInstance('mi_001', { reason: '停止观测', preview_digest: 'review-digest', confirm_shared_impact: false })).resolves.toEqual(responseBody)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/monitoring-instances/mi_001/lifecycle/retire', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
+        'Idempotency-Key': expect.any(String),
       },
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify({ reason: '停止观测', preview_digest: 'review-digest', confirm_shared_impact: false }),
     })
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/monitoring-instances/mi_001/lifecycle/restore', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({ reason: '重新观察', preview_digest: 'review-digest', confirm_shared_impact: false }),
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/monitoring-instances/mi_001/archive', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({ reason: '重复创建', confirmation_name: 'Tokyo Edge', preview_digest: 'review-digest', confirm_shared_impact: false }),
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/monitoring-instances/mi_001/restore-from-archive', {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      credentials: 'include',
-    })
-    expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/monitoring-instances/mi_001/permanent-cleanup', {
-      method: 'POST',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      cache: 'no-store',
-      credentials: 'include',
-      body: JSON.stringify({ reason: '误创建空实例', confirmation_name: 'Tokyo Edge', preview_digest: 'review-digest', confirm_shared_impact: false }),
-    })
+
   })
 
   it('posts monitoring instance command actions and preserves command identity', async () => {
@@ -2735,6 +2570,7 @@ describe('api helpers', () => {
   it('posts target runtime control actions to the explicit endpoints', async () => {
     const responseBody = {
       target_id: 'tg_001',
+      lifecycle_status: 'active',
       name: 'Blog',
       target_type: 'service',
       host: 'blog.example.com',

@@ -204,20 +204,6 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 		}
 	}
 
-	switch snapshot.LifecycleStatus {
-	case "to_cancel", "to_migrate":
-		anomalies = append(anomalies, Anomaly{
-			RuleID:   RuleLifecycleBlocker,
-			Severity: SeverityWarning,
-			Title:    "生命周期待处理",
-			Detail:   snapshot.LifecycleStatus,
-			Source:   "lifecycle",
-			Primary: &AnomalyAction{
-				ID: "open_management", Label: "打开管理",
-			},
-		})
-	}
-
 	if len(snapshot.JudgementSourcesUnavailable) > 0 {
 		sources := append([]string(nil), snapshot.JudgementSourcesUnavailable...)
 		sort.Strings(sources)

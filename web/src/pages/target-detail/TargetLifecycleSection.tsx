@@ -52,7 +52,7 @@ export function TargetLifecycleSection({
           <div className="watchtower-property-item__main">
             <span className="watchtower-property-item__title">生命周期</span>
             <span className="watchtower-property-item__desc">
-              {isArchived ? '目标处于已归档状态，可恢复至暂停以重新纳入工作集。' : '归档会退出当前工作集并保留历史。这不是删除，也不会清空事件、观测记录或 ProbeItem 配置。'}
+              {isArchived ? '目标处于已退役状态，可恢复至暂停以重新纳入工作集。' : '退役会退出当前工作集并保留历史。这不是删除，也不会清空事件、观测记录或 ProbeItem 配置。'}
             </span>
           </div>
           <div className="watchtower-property-item__actions">
@@ -76,7 +76,7 @@ export function TargetLifecycleSection({
                 disabled={runtimeSubmitting || probeConfirmationActive}
                 onClick={onStartArchive}
               >
-                归档
+                退役
               </Button>
             )}
           </div>
@@ -84,12 +84,12 @@ export function TargetLifecycleSection({
         {!isArchived && showArchiveConfirmation ? (
           <ActionConfirmationModal
             open
-            title="确认归档目标"
+            title="确认退役目标"
             current="当前：目标仍在当前工作集中。"
-            result="操作后：目标退出当前工作集，运行状态变为已归档。"
-            impact="归档后不会继续作为活跃目标参与观测、异常判定或通知。"
+            result="操作后：目标退出当前工作集，生命周期变为已退役，运行控制保持暂停。"
+            impact="退役后不会继续作为活跃目标参与观测、异常判定或通知。"
             unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。"
-            confirmLabel="确认归档"
+            confirmLabel="确认退役"
             error={error}
             disabled={runtimeSubmitting || blocked}
             cancelDisabled={runtimeSubmitting}

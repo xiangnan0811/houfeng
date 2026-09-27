@@ -4,6 +4,7 @@ export type TargetFilterState = {
   group: string | null
   type: string | null
   runStatus: string | null
+  lifecycle: string | null
   health: string | null
   labels: string[]
   executionLabels: string[]

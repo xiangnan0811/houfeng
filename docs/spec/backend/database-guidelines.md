@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`monitoring_instances.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current root 已扩展到 `0066_constrain_monitoring_and_target_state_values.sql`，共 67 个 source。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator收敛 current exact set 或一个明确注册、完整 golden 匹配的 predecessor，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。
+- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current root 已扩展到 `0067_refactor_vps_monitoring_lifecycle.sql`，共 68 个 source。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator收敛 current exact set 或一个明确注册、完整 golden 匹配的 predecessor，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。0067 不转换旧业务数据；存在 VPS、监控实例、服务、域名、Target 或订阅时明确拒绝，必须另行授权环境重建。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（MonitoringInstance/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -74,7 +74,7 @@
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号的文件。冻结 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，current root 已到 `0066_constrain_monitoring_and_target_state_values.sql`，因此若没有并发新增文件，下一个候选是 `0067_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须在同一 PR 注册 exact current fragment，不能由 records-on 启动路径补跑。
+2. 在 `db/migrations/` 新建下一个未占用序号的文件。冻结 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，current root 已到 `0067_refactor_vps_monitoring_lifecycle.sql`，因此若没有并发新增文件，下一个候选是 `0068_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须在同一 PR 注册 exact current fragment，不能由 records-on 启动路径补跑。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/fresh-install-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
@@ -83,7 +83,7 @@
 
 - 如果业务主表新增用户可见合同字段，且该字段会被历史、审计或决策表记录（如订阅价格历史、生命周期动作），同一个迁移必须同步补齐历史表列、backfill、约束与仓库 scan/insert 逻辑。不要只改源表导致后续审计丢失新字段。
 - 兼容旧字段时，迁移需要给出可重复的推导规则和约束收口：例如订阅以 `billing_period_unit` + `billing_period_length` + `renewal_mode` 为新合同，同时从 `billing_months`、`billing_cycle`、`auto_renew`、`auto_renew_cancelled` 回填，并短期保留旧字段供下游兼容。
-- 会同时更新业务事实和审计记录的动作必须在一个事务内完成。VPS 有效期延长这类操作应锁定目标 VPS，确认唯一 active subscription，写生命周期 action / step，更新 subscription `renew_at`，并在必要时写 price history。
+- 会同时更新业务事实和审计记录的动作必须在一个事务内完成。VPS 有效期更新应锁定目标 VPS，写生命周期 action / step，并更新 VPS 自身 `validity_mode/expires_at`；不要求存在订阅，不自动覆盖 subscription `renew_at`。账单续费和资源有效期分别显式确认。
 
 ### 不要做
 
@@ -92,9 +92,20 @@
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
-> ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义。legacy `migrate.Apply` 按文件名字典序排序，scoped r1 migrator 也把它们作为固定 52-source 清单中的两个独立 checksum source；二者顺序均由后缀决定，并不冲突。序号撞车仍违反“序号唯一”的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（current root 已到 `0064_add_network_rates_valid.sql`，若没有并发新增文件，下一个候选为 `0065_*`）。
+> ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义。legacy `migrate.Apply` 按文件名字典序排序，scoped r1 migrator 也把它们作为固定 52-source 清单中的两个独立 checksum source；二者顺序均由后缀决定，并不冲突。序号撞车仍违反“序号唯一”的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（current root 已到 `0067_refactor_vps_monitoring_lifecycle.sql`，若没有并发新增文件，下一个候选为 `0068_*`）。
 
 ## Naming Conventions
+
+### VPS 与监控生命周期持久化
+
+- `vps_assets.lifecycle_status` 仅允许 `active/archived`，`renewal_decision` 仅允许 `unreviewed/keep/cancel`。自定义用途写入 `usage_tags[]`，与普通 `labels[]` 分离；旧 `usage_status` 暂保留用于内部 SQL，不能成为公开状态权威。
+- 有效期由 `validity_mode=fixed/unlimited/unknown` 与 `expires_at` 共同约束；仅 fixed 必须有日期，其余必须为空。服务商核对事实 `auto_renew_check/auto_renew_checked_at` 与续费意向、订阅账期独立。
+- `monitoring_instances.vps_id` 为必填外键，数据库触发器拒绝转移所有权；旧关联表通过复合外键禁止写入与实例所有权不符的 VPS。当前实例通过 `lifecycle_status <> '已退役'` 的部分唯一索引保证每 VPS 最多一个；阶段 `monitoring_agent_sessions` 保存独立凭据、指纹摘要、权限与持续在线事实，不能随原始观测清理。
+- `agent_live_signals(session_id,signal_id)` 去重且不可由运行角色修改或删除；在线证据时间由 Center 接收时间产生。`receiver_health` 只维护当前进程连续健康窗口，空表不代表健康。
+- `asset_service_associations/asset_domain_associations` 保存关联起止、承载信息及结束快照；对象身份独立于关联，未结束关联由部分唯一索引限制同对象同 VPS 重复创建。
+- `vps_followups` 保留解决或忽略原因、操作者和时间；未解决项按 `(vps_id,kind,dedupe_key)` 去重。`vps_archive_requests`、`monitoring_instance_lifecycle_receipts` 为不可更新的幂等结果凭据。
+- 新表运行权限由 0067 current fragment 明确注册；仅接入阶段、健康窗口、跟进项与关联记录允许 UPDATE。冻结 R1 和已发布 SQL 不变。
+- 日聚合 `finalized` 在原始数据清理时冻结 UTC 日桶，避免后续残缺原始数据覆盖完整聚合。默认原始保留 30 天，日聚合 365 天；事件、通知和低频 IP 报告不按天自动删除。
 
 参考 `db/migrations/0001_initial_schema.sql`、`0010_add_users_and_sessions.sql` 的实际风格：
 

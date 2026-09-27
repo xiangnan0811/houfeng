@@ -16,6 +16,7 @@ const OUTCOME_OPTIONS = [
   { value: 'dispatched', label: '已派发' },
   { value: 'succeeded', label: '成功' },
   { value: 'failed', label: '失败' },
+  { value: 'cancelled', label: '已取消' },
 ]
 
 type CommandAuditFilterPanelProps = {

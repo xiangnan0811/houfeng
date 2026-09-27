@@ -85,13 +85,17 @@ func TestVPSStateRepairGraphWritersRecheckTerminalVPSAfterGraphWait(t *testing.T
 			},
 		},
 	}
-	createDone := make(chan error, len(writers))
+	type writerResult struct {
+		name string
+		err  error
+	}
+	createDone := make(chan writerResult, len(writers))
 	for _, writer := range writers {
 		writer := writer
 		go func() {
 			createCtx, createCancel := context.WithTimeout(context.Background(), 12*time.Second)
 			defer createCancel()
-			createDone <- writer.create(createCtx)
+			createDone <- writerResult{name: writer.name, err: writer.create(createCtx)}
 		}()
 	}
 
@@ -104,16 +108,21 @@ func TestVPSStateRepairGraphWritersRecheckTerminalVPSAfterGraphWait(t *testing.T
 	default:
 	}
 
-	if _, err := holder.Exec(ctx, `update vps_assets set lifecycle_status = 'cancelled', usage_status = 'idle', renewal_decision = 'cancel', updated_at = now() where vps_id = $1`, vps.VPSID); err != nil {
-		t.Fatalf("cancel vps under graph lock: %v", err)
+	if _, err := holder.Exec(ctx, `update vps_assets set lifecycle_status = 'archived', archived_at=now(), renewal_decision = 'cancel', updated_at = now() where vps_id = $1`, vps.VPSID); err != nil {
+		t.Fatalf("archive vps under graph lock: %v", err)
 	}
 	if err := holder.Commit(ctx); err != nil {
 		t.Fatalf("commit terminal vps state: %v", err)
 	}
 
-	for _, writer := range writers {
-		if err := <-createDone; !errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
-			t.Errorf("%s create after graph wait error = %v, want ErrVPSAssetReadonly", writer.name, err)
+	for range writers {
+		result := <-createDone
+		if result.name == "subscription" {
+			if result.err != nil {
+				t.Errorf("supplemental archived billing after graph wait: %v", result.err)
+			}
+		} else if !errors.Is(result.err, vpsassets.ErrVPSAssetReadonly) {
+			t.Errorf("%s current relationship after graph wait error=%v, want readonly", result.name, result.err)
 		}
 	}
 
@@ -122,8 +131,16 @@ func TestVPSStateRepairGraphWritersRecheckTerminalVPSAfterGraphWait(t *testing.T
 		if err := pool.QueryRow(ctx, `select count(*) from `+table+` where vps_id = $1`, vps.VPSID).Scan(&count); err != nil {
 			t.Fatalf("count %s rows: %v", table, err)
 		}
-		if count != 0 {
-			t.Errorf("%s rows for terminal VPS = %d, want 0", table, count)
+		want := 0
+		if table == "subscriptions" {
+			want = 1
 		}
+		if count != want {
+			t.Errorf("%s rows for archived VPS = %d, want %d", table, count, want)
+		}
+	}
+	stored, err := vpsRepo.GetVPSAsset(ctx, vps.VPSID)
+	if err != nil || stored.LifecycleStatus != vpsassets.LifecycleArchived {
+		t.Fatalf("billing revived archived VPS: %+v error=%v", stored, err)
 	}
 }

@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 	"time"
 
@@ -62,14 +61,14 @@ func TestVPSStateRepairDependencyStatusCorrectionWritesAuditAndSkipsNoOp(t *test
 	if err != nil {
 		t.Fatalf("correct unknown service status: %v", err)
 	}
-	if correctedService.Status != assetservices.ServiceStatusActive || correctedService.Name != service.Name || correctedService.TargetID == nil || *correctedService.TargetID != target.TargetID || correctedService.URL != service.URL || correctedService.Note != service.Note {
+	if correctedService.Status != assetservices.ServiceStatusActive || correctedService.Name != service.Name || correctedService.TargetID != nil || correctedService.URL != "" || correctedService.Note != service.Note {
 		t.Fatalf("corrected service = %#v; status should change while its other fields remain unchanged", correctedService)
 	}
 	correctedDomain, err := domainRepo.UpdateStatus(ctx, domain.DomainID, assetdomains.DomainStatusPaused, "paused after domain review")
 	if err != nil {
 		t.Fatalf("correct unknown domain status: %v", err)
 	}
-	if correctedDomain.Status != assetdomains.DomainStatusPaused || correctedDomain.DomainName != domain.DomainName || correctedDomain.ServiceID == nil || *correctedDomain.ServiceID != service.ServiceID || correctedDomain.TargetID == nil || *correctedDomain.TargetID != target.TargetID || correctedDomain.Purpose != domain.Purpose || correctedDomain.Registrar != domain.Registrar || !correctedDomain.HTTPSEnabled || correctedDomain.Note != domain.Note {
+	if correctedDomain.Status != assetdomains.DomainStatusPaused || correctedDomain.DomainName != domain.DomainName || correctedDomain.ServiceID != nil || correctedDomain.TargetID != nil || correctedDomain.Purpose != domain.Purpose || correctedDomain.Registrar != domain.Registrar || !correctedDomain.HTTPSEnabled || correctedDomain.Note != domain.Note {
 		t.Fatalf("corrected domain = %#v; status should change while its other fields remain unchanged", correctedDomain)
 	}
 
@@ -150,7 +149,7 @@ func TestVPSStateRepairDependencyStatusCorrectionWritesAuditAndSkipsNoOp(t *test
 	}
 }
 
-func TestVPSStateRepairDependencyStatusCorrectionRespectsVPSAndTargetGuards(t *testing.T) {
+func TestDependencyStatusIndependentOfVPSAndTargetLifecycle(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
@@ -168,14 +167,14 @@ func TestVPSStateRepairDependencyStatusCorrectionRespectsVPSAndTargetGuards(t *t
 	if err != nil {
 		t.Fatalf("create paused domain: %v", err)
 	}
-	if _, err := pool.Exec(ctx, `update vps_assets set lifecycle_status = 'cancelled', usage_status = 'idle', renewal_decision = 'cancel' where vps_id = $1`, terminalVPS.VPSID); err != nil {
+	if _, err := pool.Exec(ctx, `update vps_assets set lifecycle_status = 'archived', archived_at=now() where vps_id = $1`, terminalVPS.VPSID); err != nil {
 		t.Fatalf("make parent VPS terminal: %v", err)
 	}
-	if _, err := serviceRepo.UpdateStatus(ctx, service.ServiceID, assetservices.ServiceStatusActive, "reactivate"); !errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
-		t.Fatalf("activate dependency on terminal VPS error = %v, want ErrVPSAssetReadonly", err)
+	if _, err := serviceRepo.UpdateStatus(ctx, service.ServiceID, assetservices.ServiceStatusActive, "reactivate"); err != nil {
+		t.Fatalf("independent service blocked by archived VPS: %v", err)
 	}
-	if _, err := domainRepo.UpdateStatus(ctx, domain.DomainID, assetdomains.DomainStatusActive, "reactivate"); !errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
-		t.Fatalf("activate domain on terminal VPS error = %v, want ErrVPSAssetReadonly", err)
+	if _, err := domainRepo.UpdateStatus(ctx, domain.DomainID, assetdomains.DomainStatusActive, "reactivate"); err != nil {
+		t.Fatalf("independent domain blocked by archived VPS: %v", err)
 	}
 	if record, err := serviceRepo.UpdateStatus(ctx, service.ServiceID, assetservices.ServiceStatusRetired, "retire historical service"); err != nil || record.Status != assetservices.ServiceStatusRetired {
 		t.Fatalf("retire service on terminal VPS = %#v, %v; want success", record, err)
@@ -185,7 +184,7 @@ func TestVPSStateRepairDependencyStatusCorrectionRespectsVPSAndTargetGuards(t *t
 	}
 
 	activeVPS := createVPSStateRepairDependencyStatusVPS(t, ctx, pool, "archived target dependency correction")
-	archivedTarget := createVPSStateRepairDependencyStatusTarget(t, ctx, pool, targets.RunStatusArchived)
+	archivedTarget := createVPSStateRepairDependencyStatusTarget(t, ctx, pool, targets.RunStatusEnabled)
 	service, err = serviceRepo.CreateAssetService(ctx, assetservices.CreateInput{VPSID: activeVPS.VPSID, TargetID: &archivedTarget.TargetID, Name: "Paused target service", Status: assetservices.ServiceStatusPaused})
 	if err != nil {
 		t.Fatalf("create paused service for archived target: %v", err)
@@ -194,11 +193,14 @@ func TestVPSStateRepairDependencyStatusCorrectionRespectsVPSAndTargetGuards(t *t
 	if err != nil {
 		t.Fatalf("create paused domain for archived target: %v", err)
 	}
-	if _, err := serviceRepo.UpdateStatus(ctx, service.ServiceID, assetservices.ServiceStatusActive, "activate archived target"); !errors.Is(err, targets.ErrTargetMetadataConflict) {
-		t.Fatalf("activate dependency on archived target error = %v, want ErrTargetMetadataConflict", err)
+	if _, err := pool.Exec(ctx, `update targets set lifecycle_status='retired',run_status='暂停' where target_id=$1`, archivedTarget.TargetID); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := domainRepo.UpdateStatus(ctx, domain.DomainID, assetdomains.DomainStatusActive, "activate archived target"); !errors.Is(err, targets.ErrTargetMetadataConflict) {
-		t.Fatalf("activate domain on archived target error = %v, want ErrTargetMetadataConflict", err)
+	if _, err := serviceRepo.UpdateStatus(ctx, service.ServiceID, assetservices.ServiceStatusActive, "activate service only"); err != nil {
+		t.Fatalf("independent service blocked by retired target: %v", err)
+	}
+	if _, err := domainRepo.UpdateStatus(ctx, domain.DomainID, assetdomains.DomainStatusActive, "activate domain only"); err != nil {
+		t.Fatalf("independent domain blocked by retired target: %v", err)
 	}
 	if record, err := serviceRepo.UpdateStatus(ctx, service.ServiceID, assetservices.ServiceStatusRetired, "retire archived target service"); err != nil || record.Status != assetservices.ServiceStatusRetired {
 		t.Fatalf("retire service on archived target = %#v, %v; want success", record, err)
@@ -208,7 +210,7 @@ func TestVPSStateRepairDependencyStatusCorrectionRespectsVPSAndTargetGuards(t *t
 	}
 }
 
-func TestVPSStateRepairDependencyStatusCorrectionRechecksParentAfterGraphWait(t *testing.T) {
+func TestDependencyStatusWaitsForGraphAndDoesNotReopenArchivedRelations(t *testing.T) {
 	t.Parallel()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -240,29 +242,39 @@ func TestVPSStateRepairDependencyStatusCorrectionRechecksParentAfterGraphWait(t 
 	if err := waitForBlockedLifecycleSessions(ctx, pool, 1); err != nil {
 		t.Fatalf("status correction did not wait for the graph lock: %v", err)
 	}
-	if _, err := holder.Exec(ctx, `update vps_assets set lifecycle_status = 'cancelled', usage_status = 'idle', renewal_decision = 'cancel' where vps_id = $1`, vps.VPSID); err != nil {
+	if err := archiveVPSRelations(ctx, holder, vps.VPSID, "end resource"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := holder.Exec(ctx, `update vps_assets set lifecycle_status = 'archived',archived_at=now() where vps_id = $1`, vps.VPSID); err != nil {
 		t.Fatalf("make parent VPS terminal under graph lock: %v", err)
 	}
 	if err := holder.Commit(ctx); err != nil {
 		t.Fatalf("commit terminal parent VPS: %v", err)
 	}
-	if err := <-updateDone; !errors.Is(err, vpsassets.ErrVPSAssetReadonly) {
-		t.Fatalf("status correction after graph wait error = %v, want ErrVPSAssetReadonly", err)
+	if err := <-updateDone; err != nil {
+		t.Fatalf("independent status correction after graph wait: %v", err)
 	}
 
 	var status string
 	if err := pool.QueryRow(ctx, `select status from asset_services where service_id = $1`, service.ServiceID).Scan(&status); err != nil {
 		t.Fatalf("read service status after rejected correction: %v", err)
 	}
-	if status != string(assetservices.ServiceStatusPaused) {
-		t.Fatalf("service status after rejected correction = %q, want paused", status)
+	if status != string(assetservices.ServiceStatusActive) {
+		t.Fatalf("independent service status = %q, want active", status)
 	}
 	var actions int
 	if err := pool.QueryRow(ctx, `select count(*) from asset_lifecycle_actions where vps_id = $1 and action_type = $2`, vps.VPSID, assetlifecycle.ActionTypeCorrectDependencyStatus).Scan(&actions); err != nil {
 		t.Fatalf("count correction actions: %v", err)
 	}
-	if actions != 0 {
-		t.Fatalf("correction audit actions = %d, want none for rejected activation", actions)
+	if actions != 1 {
+		t.Fatalf("correction audit actions = %d, want one", actions)
+	}
+	var currentAssociations int
+	if err := pool.QueryRow(ctx, `select count(*) from asset_service_associations where vps_id=$1 and ended_at is null`, vps.VPSID).Scan(&currentAssociations); err != nil {
+		t.Fatal(err)
+	}
+	if currentAssociations != 0 {
+		t.Fatal("object status reopened archived association")
 	}
 }
 
@@ -325,7 +337,7 @@ func createVPSStateRepairDependencyStatusVPS(t *testing.T, ctx context.Context, 
 	vps, err := NewPostgresVPSAssetRepository(pool).CreateVPSAsset(ctx, vpsassets.CreateInput{
 		DisplayName:     name,
 		LifecycleStatus: vpsassets.LifecycleActive,
-		UsageStatus:     vpsassets.UsageIdle,
+		UsageTags:       []string{"闲置"},
 	})
 	if err != nil {
 		t.Fatalf("create VPS %q: %v", name, err)

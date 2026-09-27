@@ -57,32 +57,7 @@ export function IPQualitySettingsSection({ value, onChange }: IPQualitySettingsS
           </span>
         </div>
       </div>
-      <div className="settings-row-group settings-row-group--2">
-        <div className="settings-row">
-          <span className="sr-label">Raw JSON 保留</span>
-          <span className="sr-value">
-            <input
-              className="input input--compact"
-              aria-label="IP 质量原始 JSON 保留天数"
-              inputMode="numeric"
-              value={value.rawRetentionDays}
-              onChange={(e) => onChange({ rawRetentionDays: e.target.value })}
-            /> 天
-          </span>
-        </div>
-        <div className="settings-row">
-          <span className="sr-label">历史保留</span>
-          <span className="sr-value">
-            <input
-              className="input input--compact"
-              aria-label="IP 质量历史保留天数"
-              inputMode="numeric"
-              value={value.historyRetentionDays}
-              onChange={(e) => onChange({ historyRetentionDays: e.target.value })}
-            /> 天
-          </span>
-        </div>
-      </div>
+      <div className="ss-desc">IP 质量报告及脱敏后的原始结果长期保留。</div>
       <div className="settings-row settings-row--block">
         <div className="sr-label-row">
           <span className="sr-label">服务集合</span>

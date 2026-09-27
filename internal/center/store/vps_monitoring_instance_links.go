@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/assetlinks"
-	"houfeng/internal/center/ids"
+	"houfeng/internal/center/monitoringinstances"
 )
 
 var _ assetlinks.Repository = (*PostgresVPSMonitoringInstanceLinkRepository)(nil)
@@ -85,9 +85,9 @@ func rejectActiveMonitoringLink(ctx context.Context, tx pgx.Tx, vpsID string) er
 	var activeLinkCount int
 	if err := tx.QueryRow(ctx, `
 		select count(*)
-		from vps_monitoring_instance_links
+		from monitoring_instances
 		where vps_id = $1
-		  and unlinked_at is null`,
+		  and lifecycle_status <> '已退役'`,
 		vpsID,
 	).Scan(&activeLinkCount); err != nil {
 		return fmt.Errorf("count active monitoring instance links for vps %q: %w", vpsID, err)
@@ -99,93 +99,10 @@ func rejectActiveMonitoringLink(ctx context.Context, tx pgx.Tx, vpsID string) er
 }
 
 func (r *PostgresVPSMonitoringInstanceLinkRepository) LinkMonitoringInstance(ctx context.Context, vpsID string, input assetlinks.LinkInput) (assetlinks.Record, error) {
-	input = assetlinks.NormalizeLinkInput(input)
-	if err := assetlinks.ValidateLinkInput(input); err != nil {
-		return assetlinks.Record{}, err
-	}
-
-	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
-	if err != nil {
-		return assetlinks.Record{}, fmt.Errorf("begin vps monitoring instance link transaction for vps %q: %w", vpsID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := lockVPSAndRejectActiveMonitoringLink(ctx, tx, vpsID, input.MonitoringInstanceID); err != nil {
-		return assetlinks.Record{}, err
-	}
-
-	linkID, err := ids.New("vnl")
-	if err != nil {
-		return assetlinks.Record{}, fmt.Errorf("generate vps monitoring instance link id: %w", err)
-	}
-
-	record, err := scanVPSMonitoringInstanceLink(tx.QueryRow(ctx, `
-		insert into vps_monitoring_instance_links (
-			link_id,
-			vps_id,
-			monitoring_instance_id,
-			note
-		) values (
-			$1,
-			$2,
-			$3,
-			$4
-		)
-		returning `+vpsMonitoringInstanceLinkSelectColumns,
-		linkID,
-		vpsID,
-		input.MonitoringInstanceID,
-		input.Note,
-	))
-	if err != nil {
-		return assetlinks.Record{}, mapVPSMonitoringInstanceLinkWriteError(err, "link vps %q to monitoring instance %q", vpsID, input.MonitoringInstanceID)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return assetlinks.Record{}, fmt.Errorf("commit vps monitoring instance link transaction for vps %q: %w", vpsID, err)
-	}
-	return record, nil
+	return assetlinks.Record{}, fmt.Errorf("%w: monitoring ownership is immutable", assetlinks.ErrVPSMonitoringInstanceLinkConflict)
 }
-
 func (r *PostgresVPSMonitoringInstanceLinkRepository) UnlinkMonitoringInstance(ctx context.Context, vpsID string, input assetlinks.UnlinkInput) (assetlinks.Record, error) {
-	input = assetlinks.NormalizeUnlinkInput(input)
-	if err := assetlinks.ValidateUnlinkInput(input); err != nil {
-		return assetlinks.Record{}, err
-	}
-
-	tx, err := beginAssetGraphTx(ctx, r.db.BeginTx)
-	if err != nil {
-		return assetlinks.Record{}, fmt.Errorf("begin vps monitoring instance unlink transaction for vps %q: %w", vpsID, err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := lockAssetVPSLifecycle(ctx, tx, vpsID); errors.Is(err, pgx.ErrNoRows) {
-		return assetlinks.Record{}, assetlinks.ErrVPSMonitoringInstanceLinkNotFound
-	} else if err != nil {
-		return assetlinks.Record{}, fmt.Errorf("lock vps %q before monitoring instance unlink: %w", vpsID, err)
-	}
-
-	record, err := scanVPSMonitoringInstanceLink(tx.QueryRow(ctx, `
-		update vps_monitoring_instance_links
-		set unlinked_at = now(),
-		    note = case when $3 <> '' then $3 else note end
-		where vps_id = $1
-		  and monitoring_instance_id = $2
-		  and unlinked_at is null
-		returning `+vpsMonitoringInstanceLinkSelectColumns,
-		vpsID,
-		input.MonitoringInstanceID,
-		input.Note,
-	))
-	if errors.Is(err, pgx.ErrNoRows) {
-		return assetlinks.Record{}, assetlinks.ErrVPSMonitoringInstanceLinkNotFound
-	}
-	if err != nil {
-		return assetlinks.Record{}, fmt.Errorf("unlink vps %q from monitoring instance %q: %w", vpsID, input.MonitoringInstanceID, err)
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return assetlinks.Record{}, fmt.Errorf("commit vps monitoring instance unlink transaction for vps %q: %w", vpsID, err)
-	}
-	return record, nil
+	return assetlinks.Record{}, fmt.Errorf("%w: retire monitoring instead of unlinking", assetlinks.ErrVPSMonitoringInstanceLinkConflict)
 }
 
 func (r *PostgresVPSMonitoringInstanceLinkRepository) ListMonitoringInstancesForVPS(ctx context.Context, vpsID string) ([]assetlinks.MonitoringInstanceSummary, error) {
@@ -207,11 +124,11 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) ListMonitoringInstancesFor
 			n.current_active_incident_count,
 			n.current_primary_issue_summary,
 			l.linked_at,
-			l.note
+			l.note, n.vps_id, v.lifecycle_status, n.lifecycle_status <> '已退役',n.ever_connected,n.last_trusted_online_at
 		from vps_monitoring_instance_links l
 		join monitoring_instances n on n.monitoring_instance_id = l.monitoring_instance_id
-		where l.vps_id = $1
-		  and l.unlinked_at is null
+		join vps_assets v on v.vps_id=n.vps_id
+		where n.vps_id = $1
 		order by l.linked_at desc, n.display_name, n.monitoring_instance_id`, vpsID)
 	if err != nil {
 		return nil, fmt.Errorf("query active monitoring instances for vps %q: %w", vpsID, err)
@@ -238,10 +155,13 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) ListMonitoringInstancesFor
 			&summary.CurrentActiveIncidentCount,
 			&summary.CurrentPrimaryIssueSummary,
 			&summary.LinkedAt,
-			&summary.Note,
+			&summary.Note, &summary.VPSID, &summary.VPSLifecycleStatus, &summary.IsCurrent, &summary.EverConnected, &summary.LastTrustedOnlineAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan active monitoring instance for vps %q: %w", vpsID, err)
 		}
+		projection := monitoringinstances.Record{VPSLifecycleStatus: summary.VPSLifecycleStatus, LifecycleStatus: summary.LifecycleStatus, MonitoringStatus: summary.MonitoringStatus, BindingStatus: summary.BindingStatus, LastTrustedOnlineAt: summary.LastTrustedOnlineAt, CurrentHealthStatus: summary.CurrentHealthStatus}
+		projectMonitoringHealth(&projection)
+		summary.CurrentHealthStatus = projection.CurrentHealthStatus
 		summaries = append(summaries, summary)
 	}
 	if err := rows.Err(); err != nil {
@@ -271,8 +191,6 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) ListVPSForMonitoringInstan
 		from vps_monitoring_instance_links l
 		join vps_assets v on v.vps_id = l.vps_id
 		where l.monitoring_instance_id = $1
-		  and l.unlinked_at is null
-		  and v.lifecycle_status not in ('cancelled', 'archived')
 		order by l.linked_at desc, lower(v.display_name), v.vps_id`, monitoringInstanceID)
 	if err != nil {
 		return nil, fmt.Errorf("query active vps assets for monitoring instance %q: %w", monitoringInstanceID, err)
@@ -313,9 +231,9 @@ func (r *PostgresVPSMonitoringInstanceLinkRepository) CountActiveLinksForVPS(ctx
 	var count int
 	if err := r.db.QueryRow(ctx, `
 		select count(*)
-		from vps_monitoring_instance_links
+		from monitoring_instances
 		where vps_id = $1
-		  and unlinked_at is null`, vpsID).Scan(&count); err != nil {
+		  and lifecycle_status <> '已退役'`, vpsID).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count active links for vps %q: %w", vpsID, err)
 	}
 	return count, nil

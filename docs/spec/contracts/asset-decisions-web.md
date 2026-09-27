@@ -12,7 +12,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 #### 2. Signatures
 
-- Frontend API: `getAssetDecisionOverview(filter?)`, `listAssetDecisionGroups(filter?)`, `getAssetDecisionGroup(groupId, filter?)`, `listAssetDecisionManualGroups(filter?)`, `createAssetDecisionManualGroup(input)`, `getAssetDecisionManualGroup(manualGroupId)`, `patchAssetDecisionManualGroup(manualGroupId, input)`, `addAssetDecisionManualGroupMember(manualGroupId, input)`, `patchAssetDecisionManualGroupMember(manualGroupId, vpsId, input)`, `deleteAssetDecisionManualGroupMember(manualGroupId, vpsId)`, `listAssetDecisionScenarioTemplates()`, `createAssetDecisionScenarioTemplate(input)`, `getAssetDecisionScenarioTemplate(templateId)`, `patchAssetDecisionScenarioTemplate(templateId, input)`, `createManualGroupFromScenarioTemplate(templateId, input)`, `listAssetDecisionRecords(filter?)`, `createAssetDecisionRecord(input)`, `getAssetDecisionRecord(recordId)`, `patchAssetDecisionRecord(recordId, input)`, `listVPSAssets(filter?)`, `listSubscriptions(filter?)`, `listProviders()`, `updateVPSAsset(vpsId, input)`。`listVPSAssets` / `listSubscriptions` 支持 `asset_scope='current'|'historical'|'archived'|'all'`；普通页面不传 scope，使用后端默认 current；归档列表页显式传 `historical`；`archived` 只作为旧客户端兼容别名；归档详情订阅历史使用 `all`。`updateVPSAsset` 仍返回 VPS record 字段，并可在取消类续费决策响应中附带 `renewal_subscription_linkage` 状态摘要。取消 / 退役协同使用 `getVPSCancellationPreview(vpsId)`、`applyVPSCancellation(vpsId, input)`、`listTargetAssetContexts()`；归档 / 恢复使用 `getVPSArchiveReview(vpsId)`、`archiveVPS(vpsId, input)`、`restoreVPSFromArchive(vpsId)`。页面不得直接 `fetch()`。
+- Frontend API：overview/groups/manual-groups/scenario-templates/records 使用现行 typed API；资产事实使用 `listVPSAssets`、`listSubscriptions`、`listProviders`、`updateVPSAsset`。`asset_scope` 仅 current/archived/all；普通页面默认 current，归档列表显式 archived，订阅历史 all。归档使用 `getVPSArchiveReview`、`archiveVPS` 和 `restoreVPSFromArchive`，不调用已移除取消 API 或返回自动修改订阅的 linkage。页面不得直接 `fetch()`。
 - Route-scoped controller signatures: `useAssetDecisionRouteState`、`useAssetDecisionPortfolio`、`useAssetDecisionGroups`、`useAssetDecisionManualGroups`、`useAssetDecisionTemplates`、`useAssetDecisionRecords`、`useAssetDecisionRenewalQueue` 均只返回 `{state, commands}`。`useAssetDecisionRouteState` 是唯一 `useSearchParams` / `useNavigate` owner；六个数据 controller 按各自 API 白名单拥有读取、mutation、错误与局部 UI state。
 - Revalidation identity: `assetDecisionFilterKey(filter)` 是判断 filtered UI 是否仍代表同一语义查询的唯一 owner。route 的完整 `searchParams` identity 仍作为 effect dependency，以保留 open key 变化时 overview / groups / manual groups / records 四个 GET；UI currency 不得使用对象引用相等判断。
 - Cross-domain invalidation: `renewal-decision-saved` 是唯一语义事件，`applyAssetDecisionInvalidation` 把它映射到 portfolio / groups / manualGroups / templates / records / renewalQueue 六个 revision；controller 不直接调用另一个 controller。
@@ -25,7 +25,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Evidence assessment data: `AssetDecisionGroupSummary` 与 `AssetDecisionGroupMember` 必须包含 `evidence_assessment`；字段为 `confidence_score`、`pressure_score`、`readiness_score`、`quality_tier`、`decision_bias`、`support_signal_count`、`risk_signal_count`、`gap_signal_count`、`summary`。记录详情从 `evidence_snapshot.evidence_assessment` 读取保存时快照；历史记录缺失该字段时只显示降级文案。
 - Decision recommendation data: `AssetDecisionGroupSummary`、`AssetDecisionGroupMember`、`AssetDecisionManualGroupSummary` 和 manual members 可以包含 `decision_recommendation`；UI 只展示短摘要、下一步、理由/阻塞 chips 和优先 VPS，不在前端重新评分，不把 recommendation 当作自动执行承诺。
 - Comparison insight data: `AssetDecisionGroupSummary`、`AssetDecisionGroupMember`、`AssetDecisionManualGroupSummary` 和 manual members 可以包含只读 `comparison_insight`。组级字段为 `summary`、`primary_axis`、`lane_counts[]`、`priority_vps_ids[]`、`tradeoffs[]`；成员级字段为 `rank`、`lane`、`summary`、`strengths[]`、`risks[]`、`gaps[]`、`tradeoffs[]`。前端只展示后端 lane / rank / signals，不在浏览器重新分类或评分。记录详情从 `evidence_snapshot.comparison_insight` 读取保存时快照；历史记录缺失时显示“保存时未记录对比洞察”降级，不影响 readback / execution plan / followup。
-- Single queue data: `AssetDecisionsPage` 底部辅助队列继续拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|migrate|cancel` 三个 VPS 切片。
+- Single queue data: `AssetDecisionsPage` 底部辅助队列拉取续费窗口 subscriptions、全量 subscriptions（按 `renew_at asc`）、以及 `renewal_decision=unreviewed|keep|cancel` 的 VPS 事实；迁移通过跟进事项表达，不是续费意向。
 - Asset Decisions URL-state: `view=needs_decision|renewal|region|provider|cost|evidence|single_queue`，`renew_within_days=30|60|90`，上下文筛选 `provider_id`、`vps_id`、`country`、`region`、`city`、`scenario`，打开对象 `group_id`、`manual_group_id`、`record_id`、`template_id`。非法 view 在前端降级为 `needs_decision`，后端 API 对非法 view/window/scenario 返回 400。筛选 chips 必须首屏可见并可单个移除/全部清空；打开对象只触发读取和展示，不触发创建或 PATCH。
 
 #### 3. Contracts
@@ -48,25 +48,25 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - 组详情可以把当前自动组创建为自定义组合，也可以直接保存当前自动组为决策记录。默认层只展示短判断和主动作；保存表单只在 `save` 面板出现，并允许编辑标题、组合目标、状态，以及逐个展开成员的决定角色、决定动作和理由。保存成功后展示记录详情，而不是继续停留在只读组详情中。
 - 组详情的场景推进分岔只能作为短入口表达：`直接保存记录` 适用于当前自动组已经就是本次判断范围，`先创建自定义组合` 适用于还需要补成员、目标或人工语境。分岔不得带长解释块，不新增执行路径，不写业务对象。
 - 自定义组合详情必须隔离 `members` / `edit` / `add` / `save` / `raw` 面板：成员扫描只展示当前 facts 回读后的短判断和成员意图对照；组合属性表单、VPS 选择器新增成员、成员意图编辑和保存为决策记录入口各自在对应面板出现，不得混排。完整 comparison lane、facts、evidence gap 和 current fact missing 只能在 raw/底稿面板兜底；保存记录必须发送 `source_type=manual_group`，并使用当前成员 intended role/action/reason 作为默认决定值。
-- 记录详情默认必须先展示保存记录短封面；`查看详情` 进入目录后，`execution` 只做记录状态推进和可执行成员预览，`members` 只做成员跟进状态/备注维护，`source` 只做来源复核入口，`raw` / `成员底稿` 才展示成员判断、证据快照、当前事实和完整宽表。复核来源只能打开已有来源 detail，不能自动恢复缺失来源、创建组合或执行业务写入。成员动作里的 `cancel` / `open_cancellation_workbench` 只能渲染到 `/vps/{id}?workbench=cancellation` 的跳转入口。
+- 记录详情默认必须先展示保存记录短封面；`查看详情` 进入目录后，`execution` 只做记录状态推进和可执行成员预览，`members` 只做成员跟进状态/备注维护，`source` 只做来源复核入口，`raw` / `成员底稿` 才展示成员判断、证据快照、当前事实和完整宽表。复核来源只能打开已有来源 detail，不能自动恢复缺失来源、创建组合或执行业务写入。成员动作里的 `cancel` / `open_archive_preview` 只能渲染到 `/vps/{id}?workbench=archive` 的跳转入口。
 - 记录详情必须展示成员级跟进状态、备注与最后更新时间；单个成员保存跟进时只 PATCH 该成员 `vps_id`、`followup_status`、`followup_note`，成功后刷新当前记录详情与已保存记录列表的跟进计数。成员跟进状态只表达“组合判断后的执行记忆”，不能隐式修改记录级状态，也不能触发 VPS、Subscription、MonitoringInstance 或 Target 写操作。
 - 已保存记录列表可以低权重展示 `execution_plan` 摘要、lane 计数、actionable / blocked 计数；点击仍只打开记录详情，不直接跳业务页。
 - 记录详情的执行编排只能出现在 `execution` 面板，按 `cancel_retire / migration / keep_observe / evidence / review` lane 分组展示少量预览成员、lane summary、readback badge、issue chips、下一步 CTA 和快速跟进按钮。当前事实块和完整成员底稿只能在 `raw` / `成员底稿` 查看；board 不取代自动组主 surface，也不批量执行。
-- 执行编排 CTA 的 URL 映射只能在前端本地完成：`open_cancellation_workbench -> /vps/{id}?workbench=cancellation`，`open_subscription_context -> /subscriptions?vps_id={id}`，`open_vps_detail -> /vps/{id}`，`review_record` 留在当前记录详情复核或提供普通 VPS 详情入口。
+- 执行编排 CTA 的 URL 映射只能在前端本地完成：`open_archive_preview -> /vps/{id}?workbench=archive`，`open_subscription_context -> /subscriptions?vps_id={id}`，`open_vps_detail -> /vps/{id}`，`review_record` 留在当前记录详情复核或提供普通 VPS 详情入口。
 - 快速跟进按钮只能调用 `PATCH /api/asset-decisions/records/{record_id}` 更新成员 followup；不得自动 PATCH record status，也不得调用 VPS、Subscription、MonitoringInstance、Target 写接口。`completed` 记录若当前 facts drift，仍必须展示 drift/readback/plan，不能因为人工状态完成而隐藏问题。
-- 单台决策编辑必须在 group detail drawer 或底部单台辅助队列中完成，仍使用 `AssetDecisionWorkPanel` 与 `PATCH /api/vps/{id}`。保存成功 notice 应留在页面可见 surface 内。取消类续费决策保存后，若 API 返回 `renewal_subscription_linkage`，页面必须展示联动结果；`no_active_subscription` 提供创建/跳转订阅入口，`multiple_active_subscriptions` 提供到订阅页筛选当前 VPS 的处理入口，不静默吞掉。
-- 取消 / 退役不是 Phase 1 的组合页写动作；任何取消 / 退役执行入口必须跳到 `/vps/{id}?workbench=cancellation`，由 VPS 详情生命周期工作台加载 preview 并提交用户确认步骤。
+- 单台决策编辑在 group detail drawer 或底部单台辅助队列中完成，使用 `AssetDecisionWorkPanel` 与 `PATCH /api/vps/{id}`。成功 notice 留在页面可见 surface 内；决定不续费提示独立核对服务商自动续费，不修改订阅自动续费事实。无订阅仍可保存资源有效期和续费意向。
+- 组合页不直接结束 VPS；下一步只能打开 VPS 详情归档预览，由用户检查在线证据与影响后确认归档。
 - Asset Decisions、Dashboard 和 VPS 列表只能把 Subscription / MonitoringInstance / Target / Service / Domain 作为 VPS 的证据和缺口展示；主处理入口必须回到 `/vps/{id}`、VPS 筛选视图或组合决策组。不要把订阅或监控实例作为与 VPS 同级的“待处理主体”。
-- 已取消 / 已归档 VPS 是归档资产：普通 VPS、订阅、Dashboard、Monitoring/Target 资产上下文和 Asset Decisions 都不应默认展示或统计这些资产；VPS 页和侧边栏可以提供 `/archive` 入口。归档页是 read-only readback，不复用 VPS 详情里的写操作菜单或 lifecycle workbench。
+- 已归档 VPS 不进入当前资产预计成本或默认运行列表；潜在扣费单独显示，未知金额不能作为零。`/archive` 展示历史，并允许带审计的账单/退款/备注/迁移结果/证据补录、跟进处理及显式恢复。
 - Dashboard 资产 lane 应深链到 `/asset-decisions?view=...` 承接组合判断。VPS 页可以提供 `进入组合决策` 入口但不改变库存主路径，并应携带当前 `provider_id` 或证据缺口 scenario；VPS 详情入口应携带 `vps_id`；订阅页只展示 `需要资产判断` 链接并携带行内 `vps_id`，不在订阅页修改 VPS 决策；服务商页入口指向 `view=provider&provider_id=<id>`；Target 资产上下文入口应带 `vps_id` 和适当 scenario。Monitoring 列表不提供资产上下文入口，监控详情只保留所属 VPS 返回路径。
-- 当订阅为 `expired` / `cancelled` / `paused` 而 VPS、MonitoringInstance 或 Target 仍表现为 active/running，页面必须把它归入 `cancellation_attention` 或等价的联动处理入口；入口应打开 `/vps/{id}?workbench=cancellation`，由统一工作台提交用户确认的步骤。
-- 统一取消 / 退役工作台必须展示 preview 返回的 subscription、VPS、MonitoringInstance、Target 影响范围；MonitoringInstance/Target 默认只展示为待确认项，只有用户在工作台勾选并提交的 `monitoring_instance_actions` / `target_actions` 才能修改运行状态。
+- 订阅到期/暂停/取消与资源、监控的事实分开显示。需要核对的计费或状态差异指向 VPS 详情跟进；不能由订阅状态推断资源生命周期或自动退役。
+- 归档预览展示所属监控/会话、当前关联和 Target 影响；原子归档结束当前关联、退役当前实例并停止明确专属 Target，共享或不明确对象保留并生成核对事项。
 - Target 列表 / 详情必须消费批量 asset-context API 显示关联 VPS 的取消 / 过期 / 状态割裂上下文；Monitoring 列表不消费批量 asset-context API，Monitoring 详情通过 `/api/monitoring-instances/{id}/vps` 展示所属 VPS 并提供回到 VPS 详情 / 取消退役工作台的路径。
 - 资料质量提示只能来自已有字段：缺订阅、`active_monitoring_instance_link_count <= 0`、缺 provider、缺 location、缺 SSH/IP access。不要从 provider 名称、region 文案或标签推断风险。
 - `/subscriptions?vps_id=<id>&create=1` 只作为次级账单事实入口保留；普通补录从 VPS 详情页的 `createVPSSubscription(vpsId, input)` 发起，且不要求用户选择订阅状态。
-- 订阅表单和 API contract 以 `billing_period_unit` + `billing_period_length` + `renewal_mode` 为用户可见主字段；`billing_cycle`、`billing_months`、`auto_renew`、`auto_renew_cancelled` 仅作为兼容旧数据和下游月化成本计算的辅助字段。币种和支付方式继续保存字符串，但 UI 必须通过共享常用选项 + 自定义入口标准化。`renewal_mode=gift` 与 `lottery` 都应让 legacy auto-renew flags 为 `false,false`；前端保存时不得把“赠送”误写成 `lottery` 或自动续费。
-- `scripts/visual_evidence.py` 的 asset workflow mock 是 browser sanity 的状态展示夹具，必须至少覆盖 `renewal_mode=lottery` 和 `renewal_mode=gift` 的可见订阅行，确保 `/subscriptions` 与资产决策相关页面能实际展示“抽奖”和“赠送”标签；不要只在纯函数测试里覆盖这些标签。
-- VPS 有效期延长必须走 `extendVPSValidity(vpsId, input)`，由后端更新当前 active subscription 的 `renew_at` 并写生命周期/价格历史；前端成功后刷新 detail、timeline、subscriptions 并关闭弹层。不要在浏览器里只改本地订阅日期，也不要在无 active subscription 时伪造延长成功。
+- 订阅表单以 `billing_period_unit` + `billing_period_length` + `renewal_mode` 表达账单事实；续费方式只允许 auto/manual/auto_cancelled。币种与支付方式使用常用选项及自定义输入。获取来源在 VPS acquisition_source 中独立保存。
+- browser sanity 夹具覆盖抽奖/赠送来源与人工/自动续费方式的独立组合，不把来源写进 renewal_mode。
+- VPS 有效期可不依赖订阅独立修改；记录续费明确确认新有效期，账单日期与资源到期不一致时提示，不能相互覆盖。成功后刷新 detail、timeline、subscriptions，保留原续费意向。
 - 从 VPS 补齐监控接入时，主路径是 VPS 详情内的“创建并接入监控实例”：表单按 VPS 资料预填并允许微调，成功后导航到 `/monitoring/{id}?onboarding=1&return_vps={vps_id}`。不要再增加“继承字段确认”前置弹窗；Monitoring detail 消费 onboarding 参数后必须清理 URL，生成命令后自动复制，复制失败时保留手动复制。
 
 #### 4. Validation & Error Matrix
@@ -108,9 +108,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | open/close `group_id` / `manual_group_id` / `record_id`，业务 filter 值不变 | overview / groups / manual groups / records 四个 GET 重发；settled 列表不切 loading，Modal 关闭后焦点回对应入口 |
 | `view` / window / context filter key 改变 | 新语义查询进入 loading；旧响应不得覆盖新 filter 的 state |
 | renewal decision 保存成功 | 六个 revision 各加一；默认 11 GET 与可选当前 detail GET 各重发一次，不扩大或缩小 inventory |
-| subscription form/display sees `renewal_mode=lottery` | 显示“抽奖”，legacy auto-renew flags 为 false/false |
-| subscription form/display sees `renewal_mode=gift` | 显示“赠送”，legacy auto-renew flags 为 false/false |
-| UI copy contains `抽奖/赠送` | 错误；必须拆成 lottery=抽奖、gift=赠送 |
+| VPS acquisition source is lottery or gift | 分别展示抽奖/赠送来源，不改变续费方式 |
+| subscription form submits a source value in renewal_mode | 拒绝；续费方式与获取来源独立 |
 | `/subscriptions?vps_id=<id>&create=1` | 显示当前 VPS context panel，创建表单打开并预填该 VPS；关闭创建表单时移除 `create=1` 但保留 `vps_id` |
 
 #### 5. Good/Base/Bad Cases
@@ -131,10 +130,10 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: 打开已保存记录后，把单台 VPS 成员跟进从 `todo` 改为 `blocked` 并保存备注；记录详情显示更新时间，记录列表的阻塞 / 未关闭计数同步更新，业务动作入口仍只是跳到 VPS 详情或取消工作台。
 - Good: 已保存记录列表低权重展示执行回读；`drift` / `blocked` / `needs_evidence` 只作为复核证据，不抢走组合工作台主 surface。
 - Good: 记录详情成员表展示“当前回读”，包括 lifecycle / usage / renewal decision、active subscription、服务 / 域名 / Target / 监控计数和 issue chips；成员跟进 PATCH 成功后刷新记录详情和记录列表，readback 随 API 响应更新。
-- Good: 记录详情 execution board 将取消退役成员导向 `/vps/{id}?workbench=cancellation`，将缺订阅证据导向 `/subscriptions?vps_id={id}`，同时快速跟进只 PATCH 当前 record member。
+- Good: 记录详情 execution board 将取消退役成员导向 `/vps/{id}?workbench=archive`，将缺订阅证据导向 `/subscriptions?vps_id={id}`，同时快速跟进只 PATCH 当前 record member。
 - Good: 组列表和记录详情展示 `evidence_assessment` 的 tier、bias、可信 / 压力 / 准备刻度；旧记录没有该字段时不崩溃。
-- Good: 资产决策保存 `migrate` 后，VPS 从 `待评估` tab 消失并出现在 `迁移` tab，notice 留在队列 surface。
-- Good: 资产决策保存 `cancel` 后，notice 继续展示 `VPS -> 取消`，并追加 API 返回的订阅联动消息 / 订阅页 action。
+- Good: 记录迁移跟进包含来源、目标和结果，但不自动执行迁移或结束原 VPS。
+- Good: 资产决策保存 `cancel` 后显示决定不续费及自动续费核对提示，订阅事实保持独立。
 - Base: 订阅为空、Provider 为空时，页面仍能展示 VPS identity、状态、缺订阅、未关联/缺字段提示。
 - Bad: 订阅 evidence 请求失败后，前端把所有 VPS 标成 `缺订阅`，导致用户做出错误取消判断。
 - Bad: 默认 `/asset-decisions` 同时铺开记录表、场景模板、自定义组合、续费 evidence 和单台队列，让次级任务与自动组扫描同权。

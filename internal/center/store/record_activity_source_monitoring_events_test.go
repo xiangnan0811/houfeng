@@ -41,6 +41,7 @@ func TestMonitoringEventSourceCoversTheWriterContract(t *testing.T) {
 		incidents.EventIncidentStarted,
 		incidents.EventIncidentEscalated,
 		incidents.EventIncidentRecovered,
+		incidents.EventIncidentClosedByManagement,
 		incidents.EventMonitoringInstanceBindingRebindConfirmed,
 		incidents.EventMonitoringInstanceBindingPendingRejected,
 		incidents.EventMonitoringInstanceBindingReset,
@@ -65,7 +66,7 @@ func TestMonitoringEventSourceCoversTheWriterContract(t *testing.T) {
 			t.Errorf("writers emit %q but the source has no label for it", eventType)
 		}
 	}
-	if got, want := len(MonitoringEventActivityTypes()), 22; got != want {
+	if got, want := len(MonitoringEventActivityTypes()), 23; got != want {
 		t.Fatalf("source projects %d event types, want the contract's %d", got, want)
 	}
 

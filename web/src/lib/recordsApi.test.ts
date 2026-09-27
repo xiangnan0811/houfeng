@@ -262,7 +262,7 @@ function vpsOverviewResponse(): VPSOverview {
       ipv4: '192.0.2.10',
       ipv6: '',
       lifecycle_status: 'active',
-      usage_status: 'in_use',
+      usage_tags: ['业务'],
       renewal_decision: 'keep',
       importance: 'high',
       labels: ['edge'],
@@ -374,6 +374,12 @@ afterEach(() => {
 })
 
 describe('Records API transport', () => {
+  it('preserves independent validity and provider renewal review fields in overview identity', async () => {
+    const fields = { validity_mode: 'fixed', expires_at: '2027-01-31', auto_renew_check: 'disabled', auto_renew_checked_at: '2026-09-26T00:00:00Z', renewal_reason: '迁移后结束使用', renewal_review_at: '2026-10-01T00:00:00Z', acquisition_source: 'gift' }
+    const wire = mutateVPSOverview((value) => Object.assign(fixtureObject(value.identity), fields))
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+    expect((await getVPSOverview('vps_001')).identity).toMatchObject(fields)
+  })
   it('rejects an empty successful VPS overview instead of synthesizing a DTO', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, {}))
 
@@ -544,7 +550,7 @@ describe('Records API transport', () => {
 
     const overview = await getVPSOverview('vps_001')
     expect(overview.identity.lifecycle_status).toBe('active')
-    expect(overview.identity.usage_status).toBe('in_use')
+    expect(overview.identity.usage_tags).toEqual(['业务'])
     expect(overview.identity.renewal_decision).toBe('keep')
     expect(overview.summary.overall.status).toBe('notice')
     expect(overview.summary.monitoring.status).toBe('unlinked')

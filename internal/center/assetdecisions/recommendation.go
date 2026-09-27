@@ -127,7 +127,7 @@ func memberRecommendationNextStep(member GroupMember) string {
 	case ActionMigrate:
 		return "进入迁移计划核对，确认旧服务和 Target 清理"
 	case ActionCancel:
-		return "确认闲置成本和承载对象后进入取消链路"
+		return "核对服务商自动续费与承载关系，再按需结束使用并归档"
 	case ActionOpenCancellationWorkbench:
 		return "打开 VPS 详情生命周期工作台核对取消影响"
 	case ActionCompleteEvidence:
@@ -170,7 +170,7 @@ func groupRecommendationNextStep(group GroupDetail) string {
 	case GroupRenewalAttention:
 		return "先处理续费窗口内的未评估、迁移和取消候选"
 	case GroupCancellationAttention:
-		return "逐台打开取消工作台，核对订阅、Target 和监控是否闭环"
+		return "逐台查看归档预览，核对在线证据、承载关系和服务商自动续费"
 	case GroupRegionPortfolio:
 		return "比较同区成本、承载、备用关系，选出主力与备用"
 	case GroupProviderPortfolio:

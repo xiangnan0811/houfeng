@@ -165,7 +165,7 @@ export function buildVPSDetailOverviewModel(input: VPSDetailOverviewModelInput):
     monitoringFreshness,
     badges: [
       lifecycleLabel(input.detail.lifecycle_status),
-      usageLabel(input.detail.usage_status),
+      usageLabel((input.detail.usage_tags ?? []).join('、')),
       renewalLabel(input.detail.renewal_decision),
       `${input.detail.active_monitoring_instance_link_count} 个监控实例`,
     ],
@@ -399,12 +399,7 @@ function buildAttentionItems(
 }
 
 function needsCancellationWork(detail: VPSAssetDetail): boolean {
-  return detail.renewal_decision === 'migrate' ||
-    detail.renewal_decision === 'cancel' ||
-    detail.renewal_decision === 'auto_renew_cancelled' ||
-    detail.lifecycle_status === 'to_migrate' ||
-    detail.lifecycle_status === 'to_cancel' ||
-    detail.lifecycle_status === 'cancelled'
+  return detail.renewal_decision === 'cancel'
 }
 
 

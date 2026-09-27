@@ -9,6 +9,12 @@ import {
 } from './filterModel'
 
 describe('command audit filter model', () => {
+  it('round-trips lifecycle cancellation as a distinct audit outcome', () => {
+    const filters = commandAuditFiltersFromSearchParams(new URLSearchParams('outcome=cancelled'))
+    expect(filters.outcome).toBe('cancelled')
+    expect(commandAuditSearchParamsFromFilters(filters).toString()).toBe('outcome=cancelled')
+    expect(commandAuditToAPIQuery(filters)).toEqual({ outcome: 'cancelled' })
+  })
   it('omits the default 30 day window from the URL and API query', () => {
     const filters = commandAuditFiltersFromSearchParams(new URLSearchParams())
     expect(filters).toEqual(DEFAULT_COMMAND_AUDIT_FILTERS)

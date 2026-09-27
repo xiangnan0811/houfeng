@@ -1,4 +1,5 @@
 import { type KeyboardEvent, useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { StatusGlyph, TabPanel, Tabs } from '../../components/atoms'
 import { formatDate, formatMoney } from '../../lib/format'
@@ -207,7 +208,7 @@ export function SubscriptionInsights({
             <span className="subscription-panel-meta">
               {statisticsLoading
                 ? '加载中'
-                : `全量订阅 · 最近 ${costBuckets.length} 个月`}
+                : `管理中资产 · 最近 ${costBuckets.length} 个月`}
             </span>
           </div>
           {statisticsError ? (
@@ -417,6 +418,30 @@ export function SubscriptionInsights({
           )}
         </div>
       </div>
+      {overviewReady && overview ? (
+        <section className="subscription-insight-panel" aria-label="已归档资产潜在扣费">
+          <div className="subscription-panel-header">
+            <h3 className="subscription-panel-title">已归档资产潜在扣费</h3>
+            <span className="subscription-panel-meta">{(overview.archived_unknown_amount_count ?? 0) > 0 ? '金额待核对' : `${money(overview.archived_potential_monthly_cost, baseCurrency)}/月`}</span>
+          </div>
+          <p>归档不代表服务商已停止扣费。请核对自动续费与账单；此处金额不计入当前预计成本。</p>
+          {(overview.archived_unknown_amount_count ?? 0) > 0 ? <p role="status">{overview.archived_unknown_amount_count} 项金额未知，未按零费用处理。</p> : null}
+          {(overview.archived_potential_costs ?? []).map((row) => (
+            <div className="subscription-breakdown-row" key={row.subscription_id}>
+              <div><strong>{row.vps_display_name || row.vps_id}</strong><small>{row.auto_renew_check === 'enabled' ? '服务商自动续费已开启' : '服务商自动续费待核对'}</small></div>
+              <span className="mono">{row.monthly_price_base == null ? '金额待核对' : `${money(row.monthly_price_base, baseCurrency)}/月`}</span>
+              <Link className="text-link" to={`/vps/${encodeURIComponent(row.vps_id)}`}>核对扣费</Link>
+            </div>
+          ))}
+          {(overview.archived_missing_subscription_assets ?? []).map((asset) => (
+            <div className="subscription-breakdown-row" key={asset.vps_id}>
+              <strong>{asset.display_name || asset.vps_id}</strong><span>缺少账单 · 金额待核对</span>
+              <Link className="text-link" to={`/vps/${encodeURIComponent(asset.vps_id)}`}>核对扣费</Link>
+            </div>
+          ))}
+          {(overview.archived_potential_costs?.length ?? 0) === 0 && (overview.archived_missing_subscription_assets?.length ?? 0) === 0 ? <p>暂无待核对的归档扣费。</p> : null}
+        </section>
+      ) : null}
     </section>
   )
 }

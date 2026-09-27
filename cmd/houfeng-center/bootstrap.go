@@ -68,6 +68,7 @@ type bootstrapDeps struct {
 	ensureSearchGeneration      func(context.Context, postgresDB) error
 	ensureActivityGeneration    func(context.Context, postgresDB) error
 	newActivityProjectionWorker func(*pgxpool.Pool, string) (centerapp.Worker, error)
+	newReceiverHealthObserver   func(context.Context, *pgxpool.Pool) (centerapp.Worker, error)
 	newSubjectActivityHandler   func(
 		*pgxpool.Pool,
 		*store.PostgresVPSAssetRepository,
@@ -87,6 +88,7 @@ type bootstrapDeps struct {
 		*store.PostgresMonitoringInstanceRepository,
 		*store.PostgresTargetRepository,
 		[]byte,
+		bool,
 	) (http.Handler, error)
 	seedInitialUser               func(context.Context, auth.UserRepository, config.CenterConfig) error
 	newSessionRepository          func(*pgxpool.Pool, []byte) (auth.SessionRepository, error)
@@ -167,6 +169,9 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	vpsAssetRepo := store.NewPostgresVPSAssetRepository(db.Pool())
 	assetDomainRepo := store.NewPostgresAssetDomainRepository(db.Pool())
 	assetServiceRepo := store.NewPostgresAssetServiceRepository(db.Pool())
+	assetRelationRepo := store.NewPostgresAssetRelationRepository(db.Pool())
+	vpsFollowupRepo := store.NewPostgresVPSFollowupRepository(db.Pool())
+	vpsMaintenanceRepo := store.NewPostgresVPSMaintenanceRepository(db.Pool())
 	assetLifecycleRepo := store.NewPostgresAssetLifecycleRepository(db.Pool())
 	ipQualityRepo := store.NewPostgresIPQualityRepository(db.Pool())
 	subscriptionRepo := store.NewPostgresSubscriptionRepository(db.Pool())
@@ -181,6 +186,11 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	settingsRepo := store.NewPostgresSettingsRepository(db.Pool())
 	retentionRepo := store.NewPostgresRetentionRepository(db.Pool())
 	retentionWorker := retention.NewWorker(retentionRepo, settingsRepo, slog.Default(), retention.DefaultWorkerInterval)
+	receiverHealthObserver, err := deps.newReceiverHealthObserver(ctx, db.Pool())
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("initialize receiver health: %w", err)
+	}
 	sparklinesRepo := store.NewPostgresMonitoringInstanceSparklinesRepository(db.Pool())
 	runtimeSummariesRepo := store.NewPostgresMonitoringInstanceRuntimeSummariesRepository(db.Pool())
 	targetSparklinesRepo := store.NewPostgresTargetSparklinesRepository(db.Pool())
@@ -305,106 +315,103 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			db.Close()
 			return nil, nil, fmt.Errorf("create subject activity handler: %w", err)
 		}
-		vpsOverviewHandler, err = deps.newVPSOverviewHandler(
-			db.Pool(),
-			vpsAssetRepo,
-			vpsMonitoringInstanceLinkRepo,
-			ipQualityRepo,
-			settingsRepo,
-			subscriptionRepo,
-			assetServiceRepo,
-			assetDomainRepo,
-			monitoringInstanceRepo,
-			targetRepo,
-			cfg.SessionHMACKey,
-		)
-		if err != nil {
-			db.Close()
-			return nil, nil, fmt.Errorf("create vps overview handler: %w", err)
-		}
+	}
+	vpsOverviewHandler, err = deps.newVPSOverviewHandler(
+		db.Pool(),
+		vpsAssetRepo,
+		vpsMonitoringInstanceLinkRepo,
+		ipQualityRepo,
+		settingsRepo,
+		subscriptionRepo,
+		assetServiceRepo,
+		assetDomainRepo,
+		monitoringInstanceRepo,
+		targetRepo,
+		cfg.SessionHMACKey,
+		recordsEnabled,
+	)
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("create vps overview handler: %w", err)
 	}
 
 	router := deps.newRouter(centerhttp.RouterOptions{
-		Version:                                     version,
-		WebDistDir:                                  cfg.WebDistDir,
-		DashboardHandler:                            handlers.Dashboard(dashboardRepo),
-		EventsHandler:                               handlers.Events(dashboardRepo),
-		CommandAuditsHandler:                        handlers.CommandAudits(commandAuditRepo),
-		IncidentsHandler:                            handlers.Incidents(incidentRepo),
-		SettingsHandler:                             handlers.Settings(settingsHandlerRepo),
-		RecordsEnabled:                              recordsEnabled,
-		ComparisonEnabled:                           recordsEnabled && cfg.ComparisonEnabled,
-		PortabilityEnabled:                          recordsEnabled && cfg.PortabilityEnabled,
-		RecordsHandler:                              recordsHandler,
-		RecordSearchHandler:                         recordSearchHandler,
-		SubjectActivityHandler:                      subjectActivityHandler,
-		RecordActionsHandler:                        recordActionsHandler,
-		RecordCommentsHandler:                       recordCommentsHandler,
-		RecordWatchesHandler:                        collaborationRuntime.watchesHandler,
-		RecordInboxHandler:                          collaborationRuntime.inboxHandler,
-		RecordDraftsHandler:                         recordDraftsHandler,
-		RecordDeletionsHandler:                      recordDeletionsHandler,
-		RecordPortabilityHandler:                    collaborationRuntime.portabilityHandler,
-		EvidenceHandler:                             evidenceHandler,
-		AttachmentUploadsHandler:                    attachmentUploadsHandler,
-		AttachmentsHandler:                          attachmentsHandler,
-		AssetDomainsCollectionHandler:               handlers.AssetDomainsCollection(assetDomainRepo),
-		AssetServicesCollectionHandler:              handlers.AssetServicesCollection(assetServiceRepo),
-		AssetServiceStatusHandler:                   handlers.AssetServiceStatus(assetServiceRepo),
-		AssetDomainStatusHandler:                    handlers.AssetDomainStatus(assetDomainRepo),
-		AssetDecisionOverviewHandler:                handlers.AssetDecisionOverview(assetDecisionRepo),
-		AssetDecisionGroupsHandler:                  handlers.AssetDecisionGroups(assetDecisionRepo),
-		AssetDecisionGroupHandler:                   handlers.AssetDecisionGroup(assetDecisionRepo),
-		AssetDecisionManualGroupsHandler:            handlers.AssetDecisionManualGroups(assetDecisionRepo),
-		AssetDecisionManualGroupHandler:             handlers.AssetDecisionManualGroup(assetDecisionRepo),
-		AssetDecisionScenarioTemplatesHandler:       handlers.AssetDecisionScenarioTemplates(assetDecisionRepo),
-		AssetDecisionScenarioTemplateHandler:        handlers.AssetDecisionScenarioTemplate(assetDecisionRepo),
-		AssetDecisionRecordsHandler:                 handlers.AssetDecisionRecords(assetDecisionRepo),
-		AssetDecisionRecordHandler:                  handlers.AssetDecisionRecord(assetDecisionRepo),
-		ProvidersCollectionHandler:                  handlers.ProvidersCollection(providerRepo),
-		ProviderItemHandler:                         handlers.ProviderItem(providerRepo),
-		VPSCollectionHandler:                        handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
-		VPSItemHandler:                              handlers.VPSItem(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
-		VPSOverviewHandler:                          vpsOverviewHandler,
-		VPSMonitoringInstancesHandler:               handlers.VPSMonitoringInstances(vpsMonitoringInstanceLinkRepo, monitoringInstanceRepo),
-		VPSSubscriptionsHandler:                     handlers.VPSSubscriptions(subscriptionRepo),
-		VPSLinkMonitoringInstanceHandler:            handlers.VPSLinkMonitoringInstance(vpsMonitoringInstanceLinkRepo),
-		VPSUnlinkMonitoringInstanceHandler:          handlers.VPSUnlinkMonitoringInstance(vpsMonitoringInstanceLinkRepo),
-		VPSTimelineHandler:                          handlers.VPSTimeline(renewalDecisionRepo),
-		VPSExperienceLogsHandler:                    handlers.VPSExperienceLogs(renewalDecisionRepo),
-		VPSDomainsHandler:                           handlers.VPSDomains(assetDomainRepo),
-		VPSServicesHandler:                          handlers.VPSServices(assetServiceRepo),
-		VPSIPQualityHandler:                         handlers.VPSIPQuality(ipQualityRepo),
-		VPSCancellationPreviewHandler:               handlers.VPSCancellationPreview(assetLifecycleRepo),
-		VPSCancellationHandler:                      handlers.VPSCancellation(assetLifecycleRepo),
-		VPSExtendValidityHandler:                    handlers.VPSExtendValidity(assetLifecycleRepo),
-		VPSArchiveReviewHandler:                     handlers.VPSArchiveReview(assetLifecycleRepo),
-		VPSArchiveHandler:                           handlers.VPSArchive(assetLifecycleRepo),
-		VPSRestoreFromArchiveHandler:                handlers.VPSRestoreFromArchive(assetLifecycleRepo),
-		VPSStartMigrationHandler:                    handlers.VPSStartMigration(assetLifecycleRepo),
-		AssetContextTargetsHandler:                  handlers.AssetContextTargets(assetLifecycleRepo),
-		SubscriptionsCollectionHandler:              handlers.SubscriptionsCollection(subscriptionRepo, subscriptionCostSvc),
-		SubscriptionItemHandler:                     handlers.SubscriptionItem(subscriptionRepo),
-		SubscriptionOverviewHandler:                 handlers.SubscriptionOverview(subscriptionCostSvc),
-		SubscriptionStatisticsHandler:               handlers.SubscriptionStatistics(subscriptionCostSvc),
-		SubscriptionSettingsHandler:                 handlers.SubscriptionSettings(subscriptionCostSvc),
-		SubscriptionExchangeRateRefreshHandler:      handlers.SubscriptionExchangeRateRefresh(subscriptionCostSvc),
-		SubscriptionBudgetsHandler:                  handlers.SubscriptionBudgets(subscriptionCostSvc),
-		SubscriptionMonthlyBudgetsHandler:           handlers.SubscriptionMonthlyBudgets(subscriptionCostSvc),
-		MonitoringInstancesCollectionHandler:        handlers.MonitoringInstancesCollection(monitoringInstanceRepo),
-		MonitoringInstanceItemHandler:               handlers.MonitoringInstanceItem(monitoringInstanceRepo),
-		MonitoringInstanceVPSHandler:                handlers.MonitoringInstanceVPS(vpsMonitoringInstanceLinkRepo),
-		MonitoringInstanceRuntimeFactsHandler:       handlers.MonitoringInstanceRuntimeFacts(runtimeFactsRepo),
-		MonitoringInstanceRuntimeStreamHandler:      handlers.MonitoringInstanceRuntimeStream(monitoringInstanceRepo, streamHub),
-		MonitoringInstanceRuntimeControlHandler:     handlers.MonitoringInstanceRuntimeControls(monitoringInstanceRepo),
-		MonitoringInstanceManagementReviewHandler:   handlers.MonitoringInstanceManagementReview(monitoringInstanceRepo),
-		MonitoringInstanceLifecycleRetireHandler:    handlers.MonitoringInstanceLifecycleRetire(monitoringInstanceRepo),
-		MonitoringInstanceLifecycleRestoreHandler:   handlers.MonitoringInstanceLifecycleRestore(monitoringInstanceRepo),
-		MonitoringInstanceArchiveHandler:            handlers.MonitoringInstanceArchive(monitoringInstanceRepo),
-		MonitoringInstanceRestoreFromArchiveHandler: handlers.MonitoringInstanceRestoreFromArchive(monitoringInstanceRepo),
-		MonitoringInstancePermanentCleanupHandler:   handlers.MonitoringInstancePermanentCleanup(monitoringInstanceRepo),
-		MonitoringInstanceOnboardingHandler:         handlers.MonitoringInstanceOnboarding(monitoringInstanceRepo),
-		MonitoringInstanceEnrollmentTokenHandler:    handlers.MonitoringInstanceEnrollmentToken(monitoringInstanceRepo),
+		Version:                                   version,
+		WebDistDir:                                cfg.WebDistDir,
+		DashboardHandler:                          handlers.Dashboard(dashboardRepo),
+		EventsHandler:                             handlers.Events(dashboardRepo),
+		CommandAuditsHandler:                      handlers.CommandAudits(commandAuditRepo),
+		IncidentsHandler:                          handlers.Incidents(incidentRepo),
+		SettingsHandler:                           handlers.Settings(settingsHandlerRepo),
+		RecordsEnabled:                            recordsEnabled,
+		ComparisonEnabled:                         recordsEnabled && cfg.ComparisonEnabled,
+		PortabilityEnabled:                        recordsEnabled && cfg.PortabilityEnabled,
+		RecordsHandler:                            recordsHandler,
+		RecordSearchHandler:                       recordSearchHandler,
+		SubjectActivityHandler:                    subjectActivityHandler,
+		RecordActionsHandler:                      recordActionsHandler,
+		RecordCommentsHandler:                     recordCommentsHandler,
+		RecordWatchesHandler:                      collaborationRuntime.watchesHandler,
+		RecordInboxHandler:                        collaborationRuntime.inboxHandler,
+		RecordDraftsHandler:                       recordDraftsHandler,
+		RecordDeletionsHandler:                    recordDeletionsHandler,
+		RecordPortabilityHandler:                  collaborationRuntime.portabilityHandler,
+		EvidenceHandler:                           evidenceHandler,
+		AttachmentUploadsHandler:                  attachmentUploadsHandler,
+		AttachmentsHandler:                        attachmentsHandler,
+		AssetDomainsCollectionHandler:             handlers.AssetDomainsCollection(assetDomainRepo),
+		AssetServicesCollectionHandler:            handlers.AssetServicesCollection(assetServiceRepo),
+		AssetServiceStatusHandler:                 handlers.AssetServiceStatus(assetServiceRepo),
+		AssetDomainStatusHandler:                  handlers.AssetDomainStatus(assetDomainRepo),
+		AssetDecisionOverviewHandler:              handlers.AssetDecisionOverview(assetDecisionRepo),
+		AssetDecisionGroupsHandler:                handlers.AssetDecisionGroups(assetDecisionRepo),
+		AssetDecisionGroupHandler:                 handlers.AssetDecisionGroup(assetDecisionRepo),
+		AssetDecisionManualGroupsHandler:          handlers.AssetDecisionManualGroups(assetDecisionRepo),
+		AssetDecisionManualGroupHandler:           handlers.AssetDecisionManualGroup(assetDecisionRepo),
+		AssetDecisionScenarioTemplatesHandler:     handlers.AssetDecisionScenarioTemplates(assetDecisionRepo),
+		AssetDecisionScenarioTemplateHandler:      handlers.AssetDecisionScenarioTemplate(assetDecisionRepo),
+		AssetDecisionRecordsHandler:               handlers.AssetDecisionRecords(assetDecisionRepo),
+		AssetDecisionRecordHandler:                handlers.AssetDecisionRecord(assetDecisionRepo),
+		ProvidersCollectionHandler:                handlers.ProvidersCollection(providerRepo),
+		ProviderItemHandler:                       handlers.ProviderItem(providerRepo),
+		VPSCollectionHandler:                      handlers.VPSCollection(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
+		VPSItemHandler:                            handlers.VPSItem(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
+		VPSOverviewHandler:                        vpsOverviewHandler,
+		VPSMonitoringInstancesHandler:             handlers.VPSMonitoringInstances(vpsMonitoringInstanceLinkRepo, monitoringInstanceRepo),
+		VPSSubscriptionsHandler:                   handlers.VPSSubscriptions(subscriptionRepo),
+		VPSTimelineHandler:                        handlers.VPSTimeline(renewalDecisionRepo),
+		VPSExperienceLogsHandler:                  handlers.VPSExperienceLogs(renewalDecisionRepo),
+		VPSDomainsHandler:                         handlers.VPSDomains(assetDomainRepo),
+		VPSServicesHandler:                        handlers.VPSServices(assetServiceRepo),
+		VPSServiceAssociationsHandler:             handlers.VPSAssetAssociations(assetRelationRepo, "service"),
+		VPSDomainAssociationsHandler:              handlers.VPSAssetAssociations(assetRelationRepo, "domain"),
+		VPSFollowupsHandler:                       handlers.VPSFollowups(vpsFollowupRepo),
+		VPSMaintenanceHandler:                     handlers.VPSMaintenance(vpsMaintenanceRepo),
+		VPSIPQualityHandler:                       handlers.VPSIPQuality(ipQualityRepo),
+		VPSExtendValidityHandler:                  handlers.VPSExtendValidity(assetLifecycleRepo),
+		VPSArchiveReviewHandler:                   handlers.VPSArchiveReview(assetLifecycleRepo),
+		VPSArchiveHandler:                         handlers.VPSArchive(assetLifecycleRepo),
+		VPSRestoreFromArchiveHandler:              handlers.VPSRestoreFromArchive(assetLifecycleRepo),
+		AssetContextTargetsHandler:                handlers.AssetContextTargets(assetLifecycleRepo),
+		SubscriptionsCollectionHandler:            handlers.SubscriptionsCollection(subscriptionRepo, subscriptionCostSvc),
+		SubscriptionItemHandler:                   handlers.SubscriptionItem(subscriptionRepo),
+		SubscriptionOverviewHandler:               handlers.SubscriptionOverview(subscriptionCostSvc),
+		SubscriptionStatisticsHandler:             handlers.SubscriptionStatistics(subscriptionCostSvc),
+		SubscriptionSettingsHandler:               handlers.SubscriptionSettings(subscriptionCostSvc),
+		SubscriptionExchangeRateRefreshHandler:    handlers.SubscriptionExchangeRateRefresh(subscriptionCostSvc),
+		SubscriptionBudgetsHandler:                handlers.SubscriptionBudgets(subscriptionCostSvc),
+		SubscriptionMonthlyBudgetsHandler:         handlers.SubscriptionMonthlyBudgets(subscriptionCostSvc),
+		MonitoringInstancesCollectionHandler:      handlers.MonitoringInstancesCollection(monitoringInstanceRepo),
+		MonitoringInstanceItemHandler:             handlers.MonitoringInstanceItem(monitoringInstanceRepo),
+		MonitoringInstanceVPSHandler:              handlers.MonitoringInstanceVPS(vpsMonitoringInstanceLinkRepo),
+		MonitoringInstanceRuntimeFactsHandler:     handlers.MonitoringInstanceRuntimeFacts(runtimeFactsRepo),
+		MonitoringInstanceRuntimeStreamHandler:    handlers.MonitoringInstanceRuntimeStream(monitoringInstanceRepo, streamHub),
+		MonitoringInstanceRuntimeControlHandler:   handlers.MonitoringInstanceRuntimeControls(monitoringInstanceRepo),
+		MonitoringInstanceManagementReviewHandler: handlers.MonitoringInstanceManagementReview(monitoringInstanceRepo),
+		MonitoringInstancePhasesHandler:           handlers.MonitoringInstancePhases(monitoringInstanceRepo),
+		MonitoringInstanceLifecycleRetireHandler:  handlers.MonitoringInstanceLifecycleRetire(monitoringInstanceRepo),
+		MonitoringInstanceOnboardingHandler:       handlers.MonitoringInstanceOnboarding(monitoringInstanceRepo),
+		MonitoringInstanceEnrollmentTokenHandler:  handlers.MonitoringInstanceEnrollmentToken(monitoringInstanceRepo),
 		MonitoringInstanceInstallCommandHandler: handlers.MonitoringInstanceInstallCommand(monitoringInstanceRepo, handlers.InstallCommandOptions{
 			PublicBaseURL: cfg.PublicBaseURL,
 			AgentVersion:  version,
@@ -424,8 +431,17 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		TargetLifecycleReviewHandler:                  handlers.TargetLifecycleReview(targetRepo),
 		TargetSparklinesHandler:                       handlers.TargetSparklines(targetSparklinesRepo),
 		AgentEnrollHandler:                            handlers.AgentEnrollWithOptions(enrollmentSvc, handlers.AgentEndpointOptions{TrustedProxies: cfg.TrustedProxies}),
-		AgentSyncHandler:                              handlers.AgentSyncWithOptions(syncSvc, handlers.AgentEndpointOptions{TrustedProxies: cfg.TrustedProxies}),
-		InstallerScriptHandler:                        handlers.InstallerScript(installer.Script),
+		AgentSyncHandler: handlers.AgentSyncWithOptions(syncSvc, handlers.AgentEndpointOptions{
+			TrustedProxies: cfg.TrustedProxies,
+			ReceptionFailure: func(ctx context.Context, reason string) {
+				faultCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 4*time.Second)
+				defer cancel()
+				if err := store.MarkReceiverHealthFault(faultCtx, db.Pool(), reason); err != nil {
+					slog.Error("persist receiver admission failure", "reason", reason, "error", err)
+				}
+			},
+		}),
+		InstallerScriptHandler: handlers.InstallerScript(installer.Script),
 		AuthLoginHandler: handlers.LoginWithOptions(authSvc, handlers.LoginOptions{
 			TrustedProxies: cfg.TrustedProxies,
 		}),
@@ -440,6 +456,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	workers := []centerapp.Worker{
 		incidentSvc,
 		retentionWorker,
+		receiverHealthObserver,
 		sessionCleanup,
 		exchangeRateWorker,
 		subscriptionReminderWorker,
@@ -630,6 +647,7 @@ func newVPSOverviewHandler(
 	monitoringInstanceRepository *store.PostgresMonitoringInstanceRepository,
 	targetRepository *store.PostgresTargetRepository,
 	sessionHMACKey []byte,
+	recordsEnabled bool,
 ) (http.Handler, error) {
 	sources, err := store.NewVPSOverviewRepository(
 		vpsRepository, monitoringLinks, ipQuality, settingsRepository, subscriptionRepository,
@@ -637,6 +655,13 @@ func newVPSOverviewHandler(
 	)
 	if err != nil {
 		return nil, err
+	}
+	if !recordsEnabled {
+		service, err := vpsoverview.NewService(sources, unavailableOverviewActivity{})
+		if err != nil {
+			return nil, err
+		}
+		return handlers.VPSOverview(service), nil
 	}
 	subjects, err := centerrecords.NewSubjectAdapterRegistry([]centerrecords.SubjectSourceAdapter{
 		store.NewVPSRecordSubjectAdapter(vpsRepository),
@@ -665,6 +690,14 @@ func newVPSOverviewHandler(
 		return nil, err
 	}
 	return handlers.VPSOverview(overviewService), nil
+}
+
+// Core VPS management does not depend on Records admission. An explicitly
+// unavailable activity section preserves that boundary without hiding the VPS.
+type unavailableOverviewActivity struct{}
+
+func (unavailableOverviewActivity) List(context.Context, activity.ListRequest) (activity.ListResult, error) {
+	return activity.ListResult{}, errors.New("record activity is not enabled")
 }
 
 func newProductionWitnessedRecordSubjectTombstoneSource(
@@ -1273,6 +1306,11 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 	if d.newApp == nil {
 		d.newApp = func(addr string, handler http.Handler, workers ...centerapp.Worker) appRunner {
 			return centerapp.New(addr, handler, workers...)
+		}
+	}
+	if d.newReceiverHealthObserver == nil {
+		d.newReceiverHealthObserver = func(ctx context.Context, pool *pgxpool.Pool) (centerapp.Worker, error) {
+			return store.NewReceiverHealthObserver(ctx, pool)
 		}
 	}
 	return d

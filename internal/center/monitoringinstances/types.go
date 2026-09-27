@@ -17,7 +17,8 @@ const (
 	EnrollmentTokenTTL = 30 * time.Minute
 
 	LifecyclePendingEnrollment = "待接入"
-	LifecycleInUse             = "在用"
+	LifecycleInUse             = "已接入"
+	LifecycleEnrolled          = LifecycleInUse
 	LifecycleObserving         = "观察中"
 	LifecycleNoRenewal         = "不续费"
 	LifecycleRetired           = "已退役"
@@ -55,8 +56,6 @@ var ErrIdempotencyKeyReused = createidempotency.ErrIdempotencyKeyReused
 var allowedLifecycleStatuses = map[string]struct{}{
 	LifecyclePendingEnrollment: {},
 	LifecycleInUse:             {},
-	LifecycleObserving:         {},
-	LifecycleNoRenewal:         {},
 	LifecycleRetired:           {},
 }
 
@@ -64,7 +63,7 @@ type ListScope string
 
 const (
 	ListScopeActive   ListScope = "active"
-	ListScopeArchived ListScope = "archived"
+	ListScopeArchived ListScope = "retired"
 	ListScopeAll      ListScope = "all"
 )
 
@@ -85,6 +84,11 @@ type LastAction struct {
 }
 
 type Record struct {
+	VPSID                      string          `json:"vps_id"`
+	VPSLifecycleStatus         string          `json:"vps_lifecycle_status"`
+	IsCurrent                  bool            `json:"is_current"`
+	EverConnected              bool            `json:"ever_connected"`
+	LastTrustedOnlineAt        *time.Time      `json:"last_trusted_online_at,omitempty"`
 	MonitoringInstanceID       string          `json:"monitoring_instance_id"`
 	DisplayName                string          `json:"display_name"`
 	Group                      string          `json:"group"`
@@ -215,7 +219,8 @@ type ManagementReview struct {
 }
 
 type LifecycleActionInput struct {
-	Reason string `json:"reason"`
+	IdempotencyKey string `json:"-"`
+	Reason         string `json:"reason"`
 	assetlinks.GlobalActionConfirmation
 }
 
@@ -428,11 +433,15 @@ func DeriveOnboardingPhase(record Record, hasHostSample, hasAcceptedObservation 
 	case BindingPendingConfirmation:
 		return OnboardingPhaseBindingConflict
 	case BindingBound:
-		if record.LastHeartbeatAt != nil && (hasHostSample || hasAcceptedObservation) {
+		if record.LifecycleStatus == LifecycleEnrolled && (record.EverConnected || record.LastTrustedOnlineAt != nil) {
 			return OnboardingPhaseCompleted
 		}
 		return OnboardingPhaseBoundAwaitingObservation
 	default:
 		return OnboardingPhaseNotStarted
 	}
+}
+
+func NormalizeLifecycleIdempotencyKey(key string) (string, error) {
+	return createidempotency.NormalizeKey(key)
 }

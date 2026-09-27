@@ -74,7 +74,7 @@ export const vps = {
   os_name: 'Debian',
   virtualization: 'kvm',
   lifecycle_status: 'active',
-  usage_status: 'in_use',
+  usage_tags: ['in_use'],
   renewal_decision: 'unreviewed',
   importance: 'normal',
   labels: ['edge'],
@@ -94,7 +94,7 @@ export const migrateVPS = {
   country: 'DE',
   region: 'Hesse',
   city: 'Frankfurt',
-  renewal_decision: 'migrate',
+  renewal_decision: 'unreviewed',
 }
 
 export const cancelVPS = {
@@ -168,7 +168,7 @@ export function groupSummary(overrides: Record<string, unknown> = {}) {
     priority: 90,
     member_count: 2,
     lifecycle_counts: { active: 2 },
-    usage_counts: { in_use: 1, standby: 1 },
+    usage_tag_counts: { in_use: 1, standby: 1 },
     renewal_decision_counts: { unreviewed: 2 },
     renewal_window_count: 2,
     unreviewed_count: 1,
@@ -262,8 +262,8 @@ export function groupDetail() {
           country: 'DE',
           region: 'Hesse',
           city: 'Frankfurt',
-          usage_status: 'standby',
-          renewal_decision: 'observe',
+          usage_tags: ['standby'],
+          renewal_decision: 'unreviewed',
         },
         primary_subscription: null,
         subscription_count: 0,
@@ -331,7 +331,7 @@ export function memberReadback(overrides: Record<string, unknown> = {}) {
     current_facts: {
       found: true,
       lifecycle_status: 'active',
-      usage_status: 'in_use',
+      usage_tags: ['in_use'],
       renewal_decision: 'keep',
       active_subscription_count: 1,
       service_count: 2,
@@ -478,7 +478,7 @@ export function manualGroupDetail(overrides: Record<string, unknown> = {}) {
     renew_within_days: 30,
     member_count: 1,
     lifecycle_counts: { active: 1 },
-    usage_counts: { in_use: 1 },
+    usage_tag_counts: { in_use: 1 },
     renewal_decision_counts: { keep: 1 },
     renewal_window_count: 1,
     unreviewed_count: 0,
@@ -599,7 +599,7 @@ export function cloneRecordMember(index: number) {
   const baseMember = decisionRecord().members[0]
   const lane = index % 3 === 0 ? 'cancel_retire' : index % 3 === 1 ? 'evidence' : 'keep_observe'
   const stepKind = lane === 'cancel_retire'
-    ? 'open_cancellation_workbench'
+    ? 'open_archive_preview'
     : lane === 'evidence'
       ? 'open_subscription_context'
       : 'open_vps_detail'
@@ -607,7 +607,7 @@ export function cloneRecordMember(index: number) {
     ...baseMember,
     vps_id: `vps_record_bulk_${index}`,
     display_name: `Record Bulk ${index}`,
-    decided_action: lane === 'cancel_retire' ? 'open_cancellation_workbench' : lane === 'evidence' ? 'complete_evidence' : 'keep',
+    decided_action: lane === 'cancel_retire' ? 'open_archive_preview' : lane === 'evidence' ? 'complete_evidence' : 'keep',
     followup_status: 'todo',
     execution_readback: memberReadback({
       status: lane === 'evidence' ? 'needs_evidence' : 'aligned',
@@ -619,7 +619,7 @@ export function cloneRecordMember(index: number) {
       step_kind: stepKind,
       tone: lane === 'cancel_retire' ? 'critical' : lane === 'evidence' ? 'alert' : 'normal',
       summary: `Record Bulk ${index} 的执行下一步`,
-      step_label: lane === 'cancel_retire' ? '打开取消/退役工作台' : lane === 'evidence' ? '核对订阅上下文' : '打开 VPS 详情核对判断',
+      step_label: lane === 'cancel_retire' ? '打开结束使用并归档工作台' : lane === 'evidence' ? '核对订阅上下文' : '打开 VPS 详情核对判断',
       issue_count: lane === 'evidence' ? 1 : 0,
       blocked: false,
       actionable: true,

@@ -64,22 +64,28 @@ func (overview Overview) MarshalJSON() ([]byte, error) {
 // Identity is the fatal section: missing or unauthorized VPS collapses the whole
 // response to 404 rather than a partial shell.
 type Identity struct {
-	VPSID           string    `json:"vps_id"`
-	DisplayName     string    `json:"display_name"`
-	ProviderName    string    `json:"provider_name"`
-	ProductName     string    `json:"product_name"`
-	Country         string    `json:"country"`
-	Region          string    `json:"region"`
-	City            string    `json:"city"`
-	Datacenter      string    `json:"datacenter"`
-	IPv4            string    `json:"ipv4"`
-	IPv6            string    `json:"ipv6"`
-	LifecycleStatus string    `json:"lifecycle_status"`
-	UsageStatus     string    `json:"usage_status"`
-	RenewalDecision string    `json:"renewal_decision"`
-	Importance      string    `json:"importance"`
-	Labels          []string  `json:"labels"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	VPSID              string     `json:"vps_id"`
+	DisplayName        string     `json:"display_name"`
+	ProviderName       string     `json:"provider_name"`
+	ProductName        string     `json:"product_name"`
+	Country            string     `json:"country"`
+	Region             string     `json:"region"`
+	City               string     `json:"city"`
+	Datacenter         string     `json:"datacenter"`
+	IPv4               string     `json:"ipv4"`
+	IPv6               string     `json:"ipv6"`
+	LifecycleStatus    string     `json:"lifecycle_status"`
+	UsageTags          []string   `json:"usage_tags"`
+	ValidityMode       string     `json:"validity_mode"`
+	ExpiresAt          *string    `json:"expires_at"`
+	AutoRenewCheck     string     `json:"auto_renew_check"`
+	AutoRenewCheckedAt *time.Time `json:"auto_renew_checked_at"`
+	RenewalReason      string     `json:"renewal_reason"`
+	RenewalReviewAt    *time.Time `json:"renewal_review_at"`
+	RenewalDecision    string     `json:"renewal_decision"`
+	Importance         string     `json:"importance"`
+	Labels             []string   `json:"labels"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 // SectionState is the safe per-section freshness envelope. It never carries

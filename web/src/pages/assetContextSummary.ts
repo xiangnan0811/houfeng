@@ -14,7 +14,7 @@ export function assetContextHasAttention(context: AssetContextLike | null | unde
 
 export function assetContextPrimarySummary(context: AssetContextLike | null | undefined): LinkedVPSContext | null {
   if (!context || context.summaries.length === 0) return null
-  return context.summaries.find((summary) => summary.lifecycle_status === 'to_cancel' || summary.lifecycle_status === 'cancelled') ??
+  return context.summaries.find((summary) => summary.lifecycle_status === 'archived') ??
     context.summaries.find((summary) => summary.subscription_state !== 'active' && summary.subscription_state !== 'missing') ??
     context.summaries[0] ??
     null

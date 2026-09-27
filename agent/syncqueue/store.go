@@ -118,6 +118,7 @@ func (s *FileStore) SetNowForTest(now func() time.Time) {
 }
 
 func (s *FileStore) Enqueue(ctx context.Context, request agentapi.SyncRequest) (string, error) {
+	request.LiveSignal = nil
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
@@ -290,6 +291,7 @@ func (s *FileStore) Prune(ctx context.Context) error {
 
 func WithBackfilledFacts(request agentapi.SyncRequest, backfilled bool) agentapi.SyncRequest {
 	cloned := cloneRequest(request)
+	cloned.LiveSignal = nil
 	for i := range cloned.Heartbeats {
 		cloned.Heartbeats[i].IsBackfilled = backfilled
 	}

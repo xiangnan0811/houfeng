@@ -30,14 +30,14 @@ const (
 // ClassifyDependency separates retained evidence from current carrying facts.
 // MI retirement does not implicitly unlink a relationship.
 func ClassifyDependency(vpsLifecycle, relationType, relationStatus string) string {
-	if vpsLifecycle == "archived" || relationStatus == "unlinked" || relationStatus == "retired" {
+	if vpsLifecycle == "archived" || relationStatus == "unlinked" || relationStatus == "retired" || relationStatus == "ended" {
 		return DependencyHistorical
 	}
 	if relationType != "monitoring_instance_link" {
 		switch relationStatus {
 		case "paused":
 			return DependencyPaused
-		case "active":
+		case "active", "current":
 		default:
 			return DependencyNeedsConfirmation
 		}

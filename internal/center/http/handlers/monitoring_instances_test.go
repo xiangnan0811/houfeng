@@ -220,7 +220,7 @@ func TestListMonitoringInstancesHandlerPassesScope(t *testing.T) {
 	repo := &fakeMonitoringInstanceRepository{}
 
 	handler := handlers.MonitoringInstancesCollection(repo)
-	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances?scope=archived", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances?scope=retired", nil)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, req)
@@ -251,77 +251,28 @@ func TestListMonitoringInstancesHandlerRejectsInvalidScope(t *testing.T) {
 }
 
 func TestCreateMonitoringInstanceHandlerReturnsCreatedRecord(t *testing.T) {
-	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
-	repo := &fakeMonitoringInstanceRepository{
-		createMonitoringInstanceResult: monitoringinstances.Record{
-			MonitoringInstanceID: "mi_001",
-			DisplayName:          "Tokyo Edge",
-			Region:               "ap-northeast-1",
-			City:                 "Tokyo",
-			Provider:             "Vultr",
-			LifecycleStatus:      "待接入",
-			MonitoringStatus:     "启用",
-			BindingStatus:        "未绑定",
-			CurrentHealthStatus:  "正常",
-			CreatedAt:            now,
-			UpdatedAt:            now,
-		},
+	repo := &fakeMonitoringInstanceRepository{}
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances", strings.NewReader(`{"display_name":"unowned"}`))
+	w := httptest.NewRecorder()
+	handlers.MonitoringInstancesCollection(repo).ServeHTTP(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status=%d", w.Code)
 	}
-
-	handler := handlers.MonitoringInstancesCollection(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances", strings.NewReader(`{"display_name":"Tokyo Edge","region":"ap-northeast-1","city":"Tokyo","provider":"Vultr","lifecycle_status":"待接入"}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, recorder.Code)
-	}
-
-	var body monitoringinstances.Record
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
-	}
-
-	if body.MonitoringInstanceID != "mi_001" {
-		t.Fatalf("expected monitoring_instance_id %q, got %q", "mi_001", body.MonitoringInstanceID)
-	}
-	if repo.createMonitoringInstanceInput.DisplayName != "Tokyo Edge" {
-		t.Fatalf("expected create input display_name %q, got %q", "Tokyo Edge", repo.createMonitoringInstanceInput.DisplayName)
+	if repo.createMonitoringInstanceInput.DisplayName != "" {
+		t.Fatal("orphan create reached repository")
 	}
 }
 
 func TestCreateMonitoringInstanceHandlerForcesPendingLifecycleStatus(t *testing.T) {
-	now := time.Date(2026, time.April, 23, 9, 0, 0, 0, time.UTC)
-	repo := &fakeMonitoringInstanceRepository{
-		createMonitoringInstanceResult: monitoringinstances.Record{
-			MonitoringInstanceID: "mi_001",
-			DisplayName:          "Tokyo Edge",
-			Region:               "ap-northeast-1",
-			City:                 "Tokyo",
-			Provider:             "Vultr",
-			LifecycleStatus:      "待接入",
-			MonitoringStatus:     "启用",
-			BindingStatus:        "未绑定",
-			CurrentHealthStatus:  "正常",
-			CreatedAt:            now,
-			UpdatedAt:            now,
-		},
+	repo := &fakeMonitoringInstanceRepository{}
+	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances", strings.NewReader(`{"display_name":"unowned"}`))
+	w := httptest.NewRecorder()
+	handlers.MonitoringInstancesCollection(repo).ServeHTTP(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status=%d", w.Code)
 	}
-
-	handler := handlers.MonitoringInstancesCollection(repo)
-	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances", strings.NewReader(`{"display_name":"Tokyo Edge","region":"ap-northeast-1","city":"Tokyo","provider":"Vultr","lifecycle_status":"在用"}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, recorder.Code)
-	}
-	if repo.createMonitoringInstanceInput.LifecycleStatus != monitoringinstances.LifecyclePendingEnrollment {
-		t.Fatalf("create lifecycle_status = %q, want %q", repo.createMonitoringInstanceInput.LifecycleStatus, monitoringinstances.LifecyclePendingEnrollment)
+	if repo.createMonitoringInstanceInput.DisplayName != "" {
+		t.Fatal("orphan create reached repository")
 	}
 }
 
@@ -508,6 +459,7 @@ func TestMonitoringInstanceManagementActionsCallRepository(t *testing.T) {
 			}
 			handler := tt.handler(repo)
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Idempotency-Key", "test-monitoring-retire")
 			recorder := httptest.NewRecorder()
 
 			handler.ServeHTTP(recorder, req)
@@ -547,6 +499,7 @@ func TestMonitoringInstanceManagementHandlersValidateInputAndMapErrors(t *testin
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Idempotency-Key", "test-monitoring-retire")
 			recorder := httptest.NewRecorder()
 
 			tt.handler.ServeHTTP(recorder, req)

@@ -17,7 +17,7 @@ import (
 )
 
 const frozenR1RootSourceCount = 52
-const currentRootSourceCount = frozenR1RootSourceCount + 15
+const currentRootSourceCount = frozenR1RootSourceCount + 16
 
 func TestNamesIncludesBaselineAndFollowupMigrations(t *testing.T) {
 	names, err := Names()

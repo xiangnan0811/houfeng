@@ -56,23 +56,8 @@ const getMonitoringInstanceRuntimeSummariesSQL = `
 			coalesce(mi.binding_fingerprint, '') as binding_fingerprint,
 			mi.binding_epoch_started_at
 		from monitoring_instances mi
-		where mi.archived_at is null
-			and (
-				not exists (
-					select 1
-					from vps_monitoring_instance_links l
-					where l.monitoring_instance_id = mi.monitoring_instance_id
-						and l.unlinked_at is null
-				)
-				or exists (
-					select 1
-					from vps_monitoring_instance_links l
-					join vps_assets v on v.vps_id = l.vps_id
-					where l.monitoring_instance_id = mi.monitoring_instance_id
-						and l.unlinked_at is null
-						and v.lifecycle_status not in ('cancelled', 'archived')
-				)
-			)
+		where mi.lifecycle_status in ('待接入','已接入')
+			and exists (select 1 from vps_assets v where v.vps_id=mi.vps_id and v.lifecycle_status='active')
 	), latest_samples as (
 		select distinct on (hs.monitoring_instance_id)
 			hs.monitoring_instance_id,

@@ -1,5 +1,39 @@
 # Agent 安装、同步与兼容合同
 
+## 接入会话、最小在线证据与采集权限
+
+本协议面向匹配版本 Center/Agent 的全新部署，不提供旧 Agent 混跑或旧凭据转换。
+
+- Enrollment 成功返回 `session_id`、`capability: full` 及 `sync_token`。令牌使用
+  `session_id.secret` 格式；Agent 持久化现有凭据文件并从令牌中恢复会话身份。
+  数据库仅保存 HMAC 哈希。接入会话永久属于同一 MonitoringInstance，实例永久属于 VPS。
+- 每次成功重新接入新建 `monitoring_agent_sessions` 阶段；保留原阶段指纹摘要、起止时间和
+  最后可信在线时间。所有旧阶段变为 `evidence_only`，不得恢复其采集或命令权限。
+- 安装器普通升级保留现有会话凭据；通过详情接入入口显式生成的所有安装命令附带 `--reenroll`，
+  包括同一 VPS 退役旧实例后新建实例。不能从新实例没有历史会话推断目标主机没有旧凭据。
+  安装器先验证签名发行物，再停止旧进程，以 0600 权限原子替换 bootstrap token，启动后签发新会话。
+- Sync 必须携带 `session_id`。当前请求在实际发送前产生随机 `live_signal.id` 和
+  `live_signal.fingerprint`；实时信号不含 Agent 时间，不写离线队列，不附加到历史回填。
+  仅实时信号的 `(session_id, signal_id)` 首次插入会更新 Center 接收时间，使用事务内
+  PostgreSQL `clock_timestamp()` 与归档检查保持同一时钟域，不能采用 Agent 或 Center 进程墙钟。
+  相同请求重试、原始心跳回填及 Agent 自报时间均不能刷新归档安全计时。
+- `monitoring_agent_sessions.last_trusted_online_at/ever_connected` 与实例同名字段保存长期事实，
+  不依赖原始心跳保留任务。身份验证后首个有效实时心跳即进入“已接入”，无需性能样本。
+- 启用正常采集；维护继续采集并带维护上下文。暂停、退役、VPS 已归档及旧会话仍接收
+  最小在线证据，但返回 `stop_collection: true` 和空计划，性能及探测不进入正常观测链路。
+  Agent 清空待发送采集、命令结果，取消运行中的 IP 质量任务，继续发送最小心跳。
+- `evidence_only` 按自身会话指纹验证，不使用新阶段指纹拒绝仍在运行的旧 Agent。
+  所属 VPS 已归档时保持归档，只更新去重的 `archived_online` 待核对事项。
+- 实时信号事务先取资产关系共享锁，再锁实例与会话；归档取同一资产关系独占锁。
+  持久化故障在回滚后标记接收链路故障，重启连续健康观察窗口。
+- 原始事实批次继续通过 `agent_sync_batches` INSERT-only 去重。实时证据与批次分别去重；
+  空实时信号请求可领取计划，但不会执行常规事件派生。被抑制批次也不执行事件派生。
+
+验收覆盖旧会话降权、暂停继续在线、接收时间权威、重复实时信号不刷新、回填不刷新、
+无性能样本首次接入、归档后在线去重和采集队列清理。对应测试在
+`store/agent_live_signals_test.go`、`agent/runtime/live_signal_test.go` 和
+`agent/syncqueue/live_signal_test.go`。
+
 ## MonitoringInstance enrollment token one-time consumption
 
 ### 1. Scope / Trigger
@@ -78,7 +112,7 @@ where enrollment_token_hash = $1
 - PostgreSQL 16 对显式 conflict target（例如 `(monitoring_instance_id, sync_batch_id)`）要求读取 target columns，因此会让 INSERT-only runtime 以 SQLSTATE `42501` 失败；生产查询必须使用 targetless `ON CONFLICT DO NOTHING`。
 - 当前 schema 的唯一性前提只有 `PRIMARY KEY (monitoring_instance_id, sync_batch_id)`，所以 targetless 形式保持首次写入和原样重复的既有语义；首次 insert 的 `RowsAffected()` 必须为 1 并继续写事实，重复 insert 必须为 0、提交空 plan，且不得重写 heartbeat、observation 或 `last_heartbeat_at` / `last_sync_at`。
 - 给 `agent_sync_batches` 新增任何 primary key 或 unique constraint 前，必须重审 targetless “忽略任意冲突”的语义、ACL 和 direct-runtime 回归；schema 变更不得默认沿用当前前提。
-- 验证 binding / token / fingerprint 和写入抑制状态后，batch marker 仍必须在 heartbeat / observation facts 之前写入；不得调整事务顺序、参数或错误包装来修复 ACL。
+- 验证会话 / token / fingerprint 后先处理独立实时在线证据。未抑制的 batch marker 必须在 heartbeat / observation facts 之前写入；不得通过扩张 ACL 修复生产 SQL。
 
 ### 4. Validation & Error Matrix
 

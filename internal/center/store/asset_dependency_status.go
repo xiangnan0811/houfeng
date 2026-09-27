@@ -11,7 +11,6 @@ import (
 	"houfeng/internal/center/assetdomains"
 	"houfeng/internal/center/assetlifecycle"
 	"houfeng/internal/center/assetservices"
-	"houfeng/internal/center/vpsassets"
 )
 
 func (r *PostgresAssetServiceRepository) UpdateStatus(ctx context.Context, serviceID string, status assetservices.ServiceStatus, reason string) (assetservices.Record, error) {
@@ -33,20 +32,6 @@ func (r *PostgresAssetServiceRepository) UpdateStatus(ctx context.Context, servi
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var vpsID string
-	var lifecycle vpsassets.LifecycleStatus
-	if err := tx.QueryRow(ctx, `
-		select v.vps_id, v.lifecycle_status
-		from asset_services s
-		join vps_assets v on v.vps_id = s.vps_id
-		where s.service_id = $1
-		for update of v`, serviceID).Scan(&vpsID, &lifecycle); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return assetservices.Record{}, assetservices.ErrServiceNotFound
-		}
-		return assetservices.Record{}, fmt.Errorf("lock asset service owner %q: %w", serviceID, err)
-	}
-
 	current, err := scanAssetService(tx.QueryRow(ctx, `
 		select `+assetServiceSelectColumns+`
 		from asset_services
@@ -58,22 +43,8 @@ func (r *PostgresAssetServiceRepository) UpdateStatus(ctx context.Context, servi
 	if err != nil {
 		return assetservices.Record{}, fmt.Errorf("lock asset service %q: %w", serviceID, err)
 	}
-	if current.VPSID != vpsID {
-		return assetservices.Record{}, assetservices.ErrServiceStatusConflict
-	}
 	if !assetservices.IsValidServiceStatus(current.Status) {
 		return assetservices.Record{}, fmt.Errorf("%w: existing status is unsupported", assetservices.ErrServiceStatusConflict)
-	}
-
-	var targetStatus string
-	if current.TargetID != nil {
-		targetStatus, err = lockAssetTargetRunStatus(ctx, tx, *current.TargetID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return assetservices.Record{}, assetservices.ErrServiceTargetNotFound
-		}
-		if err != nil {
-			return assetservices.Record{}, fmt.Errorf("lock target %q for asset service status correction: %w", *current.TargetID, err)
-		}
 	}
 
 	if current.Status == input.Status {
@@ -82,17 +53,6 @@ func (r *PostgresAssetServiceRepository) UpdateStatus(ctx context.Context, servi
 		}
 		return current, nil
 	}
-	if input.Status == assetservices.ServiceStatusActive {
-		if isTerminalVPSLifecycle(lifecycle) {
-			return assetservices.Record{}, fmt.Errorf("%w: terminal %s VPS cannot activate an asset service", vpsassets.ErrVPSAssetReadonly, lifecycle)
-		}
-		if current.TargetID != nil {
-			if err := ensureTargetAllowsAssetRelationship(*current.TargetID, targetStatus, string(input.Status), "service"); err != nil {
-				return assetservices.Record{}, err
-			}
-		}
-	}
-
 	updated, err := scanAssetService(tx.QueryRow(ctx, `
 		update asset_services
 		set status = $2,
@@ -109,35 +69,7 @@ func (r *PostgresAssetServiceRepository) UpdateStatus(ctx context.Context, servi
 		return assetservices.Record{}, fmt.Errorf("update asset service status %q: %w", serviceID, err)
 	}
 
-	action, err := insertAssetLifecycleAudit(
-		ctx,
-		tx,
-		vpsID,
-		assetlifecycle.ActionTypeCorrectDependencyStatus,
-		assetlifecycle.ActionStatusCompleted,
-		input.Reason,
-		map[string]any{
-			"object_type":   "service",
-			"object_id":     serviceID,
-			"before_status": string(current.Status),
-			"after_status":  string(updated.Status),
-		},
-	)
-	if err != nil {
-		return assetservices.Record{}, fmt.Errorf("audit asset service status correction %q: %w", serviceID, err)
-	}
-	if _, err := insertLifecycleStep(
-		ctx,
-		tx,
-		action.ActionID,
-		"service",
-		serviceID,
-		"dependency_status",
-		assetlifecycle.StepStatusCompleted,
-		map[string]any{"status": string(current.Status)},
-		map[string]any{"status": string(updated.Status)},
-		input.Reason,
-	); err != nil {
+	if err := auditAssociatedObjectStatus(ctx, tx, "service", serviceID, string(current.Status), string(updated.Status), input.Reason); err != nil {
 		return assetservices.Record{}, fmt.Errorf("record asset service status correction %q: %w", serviceID, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -165,20 +97,6 @@ func (r *PostgresAssetDomainRepository) UpdateStatus(ctx context.Context, domain
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var vpsID string
-	var lifecycle vpsassets.LifecycleStatus
-	if err := tx.QueryRow(ctx, `
-		select v.vps_id, v.lifecycle_status
-		from asset_domains d
-		join vps_assets v on v.vps_id = d.vps_id
-		where d.domain_id = $1
-		for update of v`, domainID).Scan(&vpsID, &lifecycle); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return assetdomains.Record{}, assetdomains.ErrDomainNotFound
-		}
-		return assetdomains.Record{}, fmt.Errorf("lock asset domain owner %q: %w", domainID, err)
-	}
-
 	current, err := scanAssetDomain(tx.QueryRow(ctx, `
 		select `+assetDomainSelectColumns+`
 		from asset_domains
@@ -190,22 +108,8 @@ func (r *PostgresAssetDomainRepository) UpdateStatus(ctx context.Context, domain
 	if err != nil {
 		return assetdomains.Record{}, fmt.Errorf("lock asset domain %q: %w", domainID, err)
 	}
-	if current.VPSID != vpsID {
-		return assetdomains.Record{}, assetdomains.ErrDomainStatusConflict
-	}
 	if !assetdomains.IsValidDomainStatus(current.Status) {
 		return assetdomains.Record{}, fmt.Errorf("%w: existing status is unsupported", assetdomains.ErrDomainStatusConflict)
-	}
-
-	var targetStatus string
-	if current.TargetID != nil {
-		targetStatus, err = lockAssetTargetRunStatus(ctx, tx, *current.TargetID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return assetdomains.Record{}, assetdomains.ErrDomainTargetNotFound
-		}
-		if err != nil {
-			return assetdomains.Record{}, fmt.Errorf("lock target %q for asset domain status correction: %w", *current.TargetID, err)
-		}
 	}
 
 	if current.Status == input.Status {
@@ -214,17 +118,6 @@ func (r *PostgresAssetDomainRepository) UpdateStatus(ctx context.Context, domain
 		}
 		return current, nil
 	}
-	if input.Status == assetdomains.DomainStatusActive {
-		if isTerminalVPSLifecycle(lifecycle) {
-			return assetdomains.Record{}, fmt.Errorf("%w: terminal %s VPS cannot activate an asset domain", vpsassets.ErrVPSAssetReadonly, lifecycle)
-		}
-		if current.TargetID != nil {
-			if err := ensureTargetAllowsAssetRelationship(*current.TargetID, targetStatus, string(input.Status), "domain"); err != nil {
-				return assetdomains.Record{}, err
-			}
-		}
-	}
-
 	updated, err := scanAssetDomain(tx.QueryRow(ctx, `
 		update asset_domains
 		set status = $2,
@@ -241,39 +134,46 @@ func (r *PostgresAssetDomainRepository) UpdateStatus(ctx context.Context, domain
 		return assetdomains.Record{}, fmt.Errorf("update asset domain status %q: %w", domainID, err)
 	}
 
-	action, err := insertAssetLifecycleAudit(
-		ctx,
-		tx,
-		vpsID,
-		assetlifecycle.ActionTypeCorrectDependencyStatus,
-		assetlifecycle.ActionStatusCompleted,
-		input.Reason,
-		map[string]any{
-			"object_type":   "domain",
-			"object_id":     domainID,
-			"before_status": string(current.Status),
-			"after_status":  string(updated.Status),
-		},
-	)
-	if err != nil {
-		return assetdomains.Record{}, fmt.Errorf("audit asset domain status correction %q: %w", domainID, err)
-	}
-	if _, err := insertLifecycleStep(
-		ctx,
-		tx,
-		action.ActionID,
-		"domain",
-		domainID,
-		"dependency_status",
-		assetlifecycle.StepStatusCompleted,
-		map[string]any{"status": string(current.Status)},
-		map[string]any{"status": string(updated.Status)},
-		input.Reason,
-	); err != nil {
+	if err := auditAssociatedObjectStatus(ctx, tx, "domain", domainID, string(current.Status), string(updated.Status), input.Reason); err != nil {
 		return assetdomains.Record{}, fmt.Errorf("record asset domain status correction %q: %w", domainID, err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return assetdomains.Record{}, fmt.Errorf("commit asset domain status correction %q: %w", domainID, err)
 	}
 	return updated, nil
+}
+
+func auditAssociatedObjectStatus(ctx context.Context, tx pgx.Tx, kind, objectID, before, after, reason string) error {
+	table, _, idColumn, err := relationTables(kind)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `select distinct vps_id from `+table+` where `+idColumn+`=$1 order by vps_id`, objectID)
+	if err != nil {
+		return err
+	}
+	var vpsIDs []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		vpsIDs = append(vpsIDs, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for _, vpsID := range vpsIDs {
+		action, err := insertAssetLifecycleAudit(ctx, tx, vpsID, assetlifecycle.ActionTypeCorrectDependencyStatus, assetlifecycle.ActionStatusCompleted, reason, map[string]any{"object_type": kind, "object_id": objectID, "before_status": before, "after_status": after})
+		if err != nil {
+			return err
+		}
+		if _, err = insertLifecycleStep(ctx, tx, action.ActionID, kind, objectID, "dependency_status", assetlifecycle.StepStatusCompleted, map[string]any{"status": before}, map[string]any{"status": after}, reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }

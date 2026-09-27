@@ -54,7 +54,7 @@ const vps = {
   os_name: 'Debian',
   virtualization: 'kvm',
   lifecycle_status: 'active',
-  usage_status: 'in_use',
+  usage_tags: ['自定义应用'],
   renewal_decision: 'keep',
   importance: 'normal',
   labels: ['edge'],
@@ -96,7 +96,7 @@ const missingFactsVPS = {
   city: '',
   ipv4: '',
   ssh_host: '',
-  usage_status: 'unknown',
+  usage_tags: ['unknown'],
   renewal_decision: 'unreviewed',
   active_monitoring_instance_link_count: 0,
   running_monitoring_instance_count: 0,
@@ -200,7 +200,7 @@ describe('VPSPage', () => {
     expect(currentQuery().get('provider_id')).toBe('pv_001')
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     const drawer = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
-    fireEvent.change(within(drawer).getByLabelText('用途状态'), { target: { value: 'in_use' } })
+    fireEvent.change(within(drawer).getByLabelText('用途'), { target: { value: '自定义应用' } })
     fireEvent.click(within(drawer).getByRole('button', { name: '应用筛选' }))
     expect(currentQuery().get('q')).toBe('Tokyo')
     expect(currentQuery().get('workspace')).toBe('ledger')
@@ -208,7 +208,7 @@ describe('VPSPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '表格视图' }))
     expect(screen.getByRole('button', { name: '选择 Tokyo Edge' })).toHaveAttribute('aria-pressed', 'true')
     expect(currentQuery().get('selected')).toBe('vps_001')
-    expect(currentQuery().get('usage_status')).toBe('in_use')
+    expect(currentQuery().get('usage_tag')).toBe('自定义应用')
   })
 
   it('remembers the workspace on a later visit while an explicit URL wins over the preference', async () => {
@@ -290,10 +290,10 @@ describe('VPSPage', () => {
     expect(screen.getByRole('button', { name: '缺订阅 1' })).toBeInTheDocument()
   })
 
-  it('keeps cancellation attention based on running links and excludes final lifecycle assets', async () => {
-    const retiring = { ...vps, lifecycle_status: 'to_cancel', renewal_decision: 'cancel', active_monitoring_instance_link_count: 2 }
-    const running = { ...retiring, vps_id: 'running', display_name: 'Running Target', running_target_count: 1 }
-    const cancelled = { ...running, vps_id: 'cancelled', display_name: 'Cancelled Target', lifecycle_status: 'cancelled' }
+  it('bases no-renewal attention on provider verification and excludes archived assets', async () => {
+    const retiring = { ...vps, lifecycle_status: 'active', renewal_decision: 'cancel', auto_renew_check: 'disabled', active_monitoring_instance_link_count: 2 }
+    const running = { ...retiring, vps_id: 'running', display_name: 'Running Target', auto_renew_check: 'unchecked', running_target_count: 1 }
+    const cancelled = { ...running, vps_id: 'verified', display_name: 'Verified Target', auto_renew_check: 'never_enabled' }
     const archived = { ...running, vps_id: 'archived', display_name: 'Archived Target', lifecycle_status: 'archived' }
     mockInventory([retiring, running, cancelled, archived], [
       { ...subscription, status: 'cancelled', auto_renew: false, auto_renew_cancelled: true },
@@ -302,11 +302,11 @@ describe('VPSPage', () => {
     mount('/vps?workspace=ledger&view=cancellation_attention')
     expect(await screen.findByRole('button', { name: '选择 Running Target' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '选择 Tokyo Edge' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '选择 Cancelled Target' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Verified Target' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '选择 Archived Target' })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '表格视图' }))
     expect(screen.getByRole('button', { name: '选择 Running Target' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '选择 Cancelled Target' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '选择 Verified Target' })).not.toBeInTheDocument()
   })
 
   it('does not apply draft filters when the dialog is dismissed', async () => {
@@ -484,6 +484,15 @@ describe('VPSPage', () => {
     expect(currentQuery().get('source')).toBe('review')
   })
 
+  it('searches arbitrary purposes and displays validity without a subscription', async () => {
+    mockInventory([{ ...vps, usage_tags: ['专用构建服务'], validity_mode: 'unlimited' }], [])
+    mount('/vps?workspace=ledger&selected=vps_001&q=专用构建服务')
+    expect(await screen.findByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
+    const inspector = screen.getByRole('region', { name: 'VPS 检查器' })
+    expect(within(inspector).getByText('VPS 有效期')).toBeInTheDocument()
+    expect(within(inspector).getByText('无固定期限')).toBeInTheDocument()
+  })
+
   it('respects hidden selection state in workbench without displaying stale facts', async () => {
     mockInventory()
     mount('/vps?workspace=workbench&selected=vps_001')
@@ -495,8 +504,8 @@ describe('VPSPage', () => {
     expect(screen.queryByRole('button', { name: '选择 Tokyo Edge' })).not.toBeInTheDocument()
     expect(currentQuery().get('selected')).toBe('vps_001')
   })
-  it('includes an active VPS with inactive billing in cancellation attention', async () => {
-    mockInventory([vps], [{ ...subscription, status: 'expired', auto_renew: false, auto_renew_cancelled: true }])
+  it('includes unverified no-renewal intent regardless of subscription billing state', async () => {
+    mockInventory([{ ...vps, renewal_decision: 'cancel', auto_renew_check: 'unchecked' }], [{ ...subscription, status: 'expired', auto_renew: false, auto_renew_cancelled: true }])
     mount('/vps?workspace=ledger&view=cancellation_attention')
     expect(await screen.findByRole('button', { name: '选择 Tokyo Edge' })).toBeInTheDocument()
   })

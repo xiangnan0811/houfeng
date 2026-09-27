@@ -97,7 +97,7 @@ describe('Asset Decisions route and composition workflows', () => {
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/scenario-templates')
     expectFetchCalledWith(fetchMock, '/api/subscriptions?renew_within_days=30&sort=renew_at&order=asc')
   })
-  it('issues the exact eleven-request initial inventory once', async () => {
+  it('issues the exact initial inventory without the removed migration renewal slice', async () => {
     const fetchMock = vi.fn()
     mockInitialWorkbench(fetchMock)
     vi.stubGlobal('fetch', fetchMock)
@@ -108,7 +108,7 @@ describe('Asset Decisions route and composition workflows', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(11))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(10))
     expect(fetchRequestInventory(fetchMock)).toEqual([
       'GET /api/asset-decisions/groups?view=needs_decision&renew_within_days=30',
       'GET /api/asset-decisions/manual-groups?view=needs_decision&renew_within_days=30',
@@ -119,7 +119,6 @@ describe('Asset Decisions route and composition workflows', () => {
       'GET /api/subscriptions?sort=renew_at&order=asc',
       'GET /api/vps',
       'GET /api/vps?renewal_decision=cancel',
-      'GET /api/vps?renewal_decision=migrate',
       'GET /api/vps?renewal_decision=unreviewed',
     ])
   })

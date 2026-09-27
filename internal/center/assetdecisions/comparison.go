@@ -147,10 +147,7 @@ func memberComparisonLane(member GroupMember) ComparisonLane {
 		hasEvidence(member, EvidenceIdlePaid) ||
 		member.SuggestedAction == ActionCancel ||
 		member.SuggestedAction == ActionOpenCancellationWorkbench ||
-		member.VPS.RenewalDecision == vpsassets.RenewalCancel ||
-		member.VPS.RenewalDecision == vpsassets.RenewalAutoRenewCancelled ||
-		member.VPS.LifecycleStatus == vpsassets.LifecycleToCancel ||
-		member.VPS.LifecycleStatus == vpsassets.LifecycleCancelled {
+		member.VPS.RenewalDecision == vpsassets.RenewalCancel {
 		return ComparisonLaneRetire
 	}
 	if member.SuggestedAction == ActionCompleteEvidence || hasAnyEvidence(member, EvidenceMissingSubscription, EvidenceMissingMonitoring, EvidenceMissingProvider, EvidenceMissingLocation, EvidenceMissingAccess, EvidenceNoServiceContext, EvidenceIPQualityMissing, EvidenceIPQualityStale) {
@@ -159,13 +156,13 @@ func memberComparisonLane(member GroupMember) ComparisonLane {
 	if hasAnyEvidence(member, EvidenceIPQualityRisk, EvidenceIPEgressMismatch, EvidenceMediaUnlockBlocked) {
 		return ComparisonLaneReview
 	}
-	if member.SuggestedAction == ActionMigrate || member.VPS.RenewalDecision == vpsassets.RenewalMigrate || member.VPS.LifecycleStatus == vpsassets.LifecycleToMigrate {
+	if member.SuggestedAction == ActionMigrate {
 		return ComparisonLaneObserve
 	}
-	if member.SuggestedRole == RolePrimaryCandidate || (member.VPS.UsageStatus == vpsassets.UsageInUse && member.ServiceCount+member.DomainCount+member.RunningTargetCount > 0 && member.EvidenceAssessment.QualityTier != EvidenceTierBlocked) {
+	if member.SuggestedRole == RolePrimaryCandidate || (member.ServiceCount+member.DomainCount+member.RunningTargetCount > 0 && member.EvidenceAssessment.QualityTier != EvidenceTierBlocked) {
 		return ComparisonLanePrimary
 	}
-	if member.SuggestedRole == RoleStandbyCandidate || member.VPS.UsageStatus == vpsassets.UsageStandby || member.SuggestedAction == ActionObserve {
+	if member.SuggestedRole == RoleStandbyCandidate || member.SuggestedAction == ActionObserve {
 		return ComparisonLaneStandby
 	}
 	if member.SuggestedRole == RoleObserveCandidate {
@@ -203,12 +200,6 @@ func memberComparisonStrengths(member GroupMember) []ComparisonSignal {
 			Details: member.EvidenceAssessment.Summary,
 		})
 	}
-	if member.VPS.UsageStatus == vpsassets.UsageInUse {
-		signals = append(signals, ComparisonSignal{Kind: "usage_in_use", Label: "承载业务", Tone: "normal"})
-	}
-	if member.VPS.UsageStatus == vpsassets.UsageStandby {
-		signals = append(signals, ComparisonSignal{Kind: "usage_standby", Label: "备用角色", Tone: "notice"})
-	}
 	return signals
 }
 
@@ -220,13 +211,10 @@ func memberComparisonRisks(member GroupMember) []ComparisonSignal {
 	if member.VPS.RenewalDecision == vpsassets.RenewalUnreviewed {
 		signals = append(signals, ComparisonSignal{Kind: "renewal_unreviewed", Label: "续费未评估", Tone: "alert"})
 	}
-	if member.VPS.RenewalDecision == vpsassets.RenewalMigrate || member.VPS.LifecycleStatus == vpsassets.LifecycleToMigrate {
-		signals = append(signals, ComparisonSignal{Kind: "migration_pending", Label: "迁移信号", Tone: "alert"})
-	}
 	if member.CancellationAttentionReason != "" {
 		signals = append(signals, ComparisonSignal{
 			Kind:    string(EvidenceCancellationLinkage),
-			Label:   "取消联动",
+			Label:   "自动续费待核对",
 			Tone:    "critical",
 			Details: member.CancellationAttentionReason,
 		})

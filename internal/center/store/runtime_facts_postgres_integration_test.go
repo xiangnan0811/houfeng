@@ -128,14 +128,17 @@ func (r runtimeFactsReceiptCutoffRow) Scan(dest ...any) error {
 
 func insertRuntimeFactsMonitoringInstance(t *testing.T, ctx context.Context, db *pgxpool.Pool, id, fingerprint string, bindingEpoch time.Time) {
 	t.Helper()
+	if _, err := db.Exec(ctx, `insert into vps_assets(vps_id,display_name,lifecycle_status) values($1,$1,'active')`, "vps_"+id); err != nil {
+		t.Fatalf("insert runtime facts VPS owner: %v", err)
+	}
 	if _, err := db.Exec(ctx, `
 		insert into monitoring_instances (
 			monitoring_instance_id, display_name, "group", region, city, provider,
 			lifecycle_status, monitoring_status, binding_status, binding_fingerprint,
-			binding_epoch_started_at
+			binding_epoch_started_at, vps_id, ever_connected, last_trusted_online_at
 		) values ($1, $2, 'test', 'test-region', 'test-city', 'test-provider',
-			'在用', '启用', '已绑定', $3, $4)
-	`, id, id, fingerprint, bindingEpoch); err != nil {
+			'已接入', '启用', '已绑定', $3, $4, $5, true, $4)
+	`, id, id, fingerprint, bindingEpoch, "vps_"+id); err != nil {
 		t.Fatalf("insert monitoring instance %q: %v", id, err)
 	}
 }

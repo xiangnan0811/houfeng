@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"houfeng/internal/center/assetrelations"
 	"houfeng/internal/center/assetservices"
 	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/ids"
@@ -39,7 +40,7 @@ const assetServiceCreateOperation = "asset-service.create"
 
 const assetServiceSelectColumns = `
 	service_id,
-	vps_id,
+	coalesce(vps_id, '') as vps_id,
 	target_id,
 	name,
 	service_type,
@@ -104,11 +105,11 @@ func (r *PostgresAssetServiceRepository) listAssetServices(ctx context.Context, 
 	conditions := []string{}
 	if filters.VPSID != "" {
 		args = append(args, filters.VPSID)
-		conditions = append(conditions, fmt.Sprintf("asset_services.vps_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("a.vps_id = $%d", len(args)))
 	}
 	if filters.TargetID != "" {
 		args = append(args, filters.TargetID)
-		conditions = append(conditions, fmt.Sprintf("asset_services.target_id = $%d", len(args)))
+		conditions = append(conditions, fmt.Sprintf("a.target_id = $%d", len(args)))
 	}
 	if filters.ServiceType != "" {
 		args = append(args, string(filters.ServiceType))
@@ -118,20 +119,20 @@ func (r *PostgresAssetServiceRepository) listAssetServices(ctx context.Context, 
 		args = append(args, string(filters.Status))
 		conditions = append(conditions, fmt.Sprintf("asset_services.status = $%d", len(args)))
 	}
-	if currentAssetScope {
-		conditions = append(conditions, "v.lifecycle_status not in ('cancelled', 'archived')")
+	placementScope := filters.VPSID != "" || filters.TargetID != ""
+	if currentAssetScope && placementScope {
+		conditions = append(conditions, "v.lifecycle_status <> 'archived'", "a.ended_at is null")
 	}
 
-	selectColumns := assetServiceSelectColumns
-	if currentAssetScope {
-		selectColumns = assetServiceQualifiedSelectColumns
-	}
+	selectColumns := strings.NewReplacer("asset_services.vps_id", "a.vps_id", "asset_services.target_id", "a.target_id", "asset_services.url", "a.address", "asset_services.port", "a.port").Replace(assetServiceQualifiedSelectColumns)
 	query := `
 		select ` + selectColumns + `
-		from asset_services`
-	if currentAssetScope {
-		query += `
-		join vps_assets v on v.vps_id = asset_services.vps_id`
+		from asset_services
+		join asset_service_associations a on a.service_id = asset_services.service_id
+		join vps_assets v on v.vps_id = a.vps_id`
+	if !placementScope {
+		selectColumns = strings.Replace(assetServiceQualifiedSelectColumns, "asset_services.vps_id", "coalesce(asset_services.vps_id, '')", 1)
+		query = `select ` + selectColumns + ` from asset_services`
 	}
 	if len(conditions) > 0 {
 		query += " where " + strings.Join(conditions, " and ")
@@ -170,7 +171,9 @@ func (r *PostgresAssetServiceRepository) ListAssetServicesForVPS(ctx context.Con
 	if !exists {
 		return nil, assetservices.ErrServiceOwnerNotFound
 	}
-	return r.listAssetServices(ctx, assetservices.ListFilters{VPSID: vpsID}, false)
+	// This projection feeds the current VPS overview and service panel. Dated
+	// history is exposed by the association repository, never as current service.
+	return r.listAssetServices(ctx, assetservices.ListFilters{VPSID: vpsID}, true)
 }
 
 func (r *PostgresAssetServiceRepository) CreateAssetService(ctx context.Context, input assetservices.CreateInput) (assetservices.Record, error) {
@@ -215,14 +218,14 @@ func ensureAssetServiceCreateAllowed(ctx context.Context, tx pgx.Tx, input asset
 	if input.TargetID == nil {
 		return nil
 	}
-	targetStatus, err := lockAssetTargetRunStatus(ctx, tx, *input.TargetID)
+	targetStatus, err := lockAssetTargetLifecycle(ctx, tx, *input.TargetID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return assetservices.ErrServiceTargetNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("query target %q before service create: %w", *input.TargetID, err)
 	}
-	return ensureTargetAllowsAssetRelationship(*input.TargetID, targetStatus, string(input.Status), "service")
+	return ensureTargetAllowsAssetRelationship(*input.TargetID, targetStatus, "service")
 }
 
 func (r *PostgresAssetServiceRepository) CreateAssetServiceIdempotent(
@@ -270,14 +273,14 @@ func (r *PostgresAssetServiceRepository) CreateAssetServiceIdempotent(
 		record, err := scanAssetService(tx.QueryRow(ctx, `
 			select `+assetServiceSelectColumns+`
 			from asset_services
-			where service_id = $1
-			  and vps_id = $2`, serviceID, input.VPSID))
+			where service_id = $1`, serviceID))
 		if err != nil {
 			return assetservices.Record{}, false, fmt.Errorf("load replayed asset service: %w", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return assetservices.Record{}, false, fmt.Errorf("commit asset service create replay: %w", err)
 		}
+		record.VPSID, record.TargetID, record.URL, record.Port = input.VPSID, input.TargetID, input.URL, input.Port
 		return record, true, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -343,13 +346,13 @@ func insertAssetService(ctx context.Context, db assetServiceQueryer, input asset
 		)
 		returning `+assetServiceSelectColumns,
 		serviceID,
-		input.VPSID,
-		nullableStringArg(input.TargetID),
+		nil,
+		nil,
 		input.Name,
 		string(input.ServiceType),
 		string(input.Status),
-		input.URL,
-		assetServicePortArg(input.Port),
+		"",
+		nil,
 		input.Labels,
 		input.Note,
 	))
@@ -359,6 +362,10 @@ func insertAssetService(ctx context.Context, db assetServiceQueryer, input asset
 		}
 		return assetservices.Record{}, fmt.Errorf("create asset service: %w", err)
 	}
+	if _, err := insertAssetRelation(ctx, db, input.VPSID, assetrelations.Service, assetrelations.LinkInput{ObjectID: serviceID, TargetID: input.TargetID, Address: input.URL, Port: input.Port}); err != nil {
+		return assetservices.Record{}, err
+	}
+	record.VPSID, record.TargetID, record.URL, record.Port = input.VPSID, input.TargetID, input.URL, input.Port
 	return record, nil
 }
 

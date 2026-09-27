@@ -504,26 +504,26 @@ func appACLCurrentCatalogTestExtension() (
 	AppACLCurrentFunctionContract,
 ) {
 	return AppACLManagedObjectR1{
-			ObjectClass:    AppACLObjectClassTable,
-			SchemaName:     "public",
-			ObjectIdentity: "future_records",
-		}, AppACLManagedObjectR1{
-			ObjectClass:    AppACLObjectClassFunction,
-			SchemaName:     "public",
-			ObjectIdentity: "future_function()",
-		}, AppACLPrivilege{
-			Subject:        AppACLSubjectCenterRuntime,
-			ObjectClass:    AppACLObjectClassTable,
-			SchemaName:     "public",
-			ObjectIdentity: "future_records",
-			Privilege:      AppACLPrivilegeSelect,
-		}, AppACLCurrentFunctionContract{
-			SchemaName:      "public",
-			Identity:        "future_function()",
-			Kind:            "f",
-			SecurityDefiner: true,
-			Config:          []string{"search_path=pg_catalog"},
-		}
+		ObjectClass:    AppACLObjectClassTable,
+		SchemaName:     "public",
+		ObjectIdentity: "future_records",
+	}, AppACLManagedObjectR1{
+		ObjectClass:    AppACLObjectClassFunction,
+		SchemaName:     "public",
+		ObjectIdentity: "future_function()",
+	}, AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassTable,
+		SchemaName:     "public",
+		ObjectIdentity: "future_records",
+		Privilege:      AppACLPrivilegeSelect,
+	}, AppACLCurrentFunctionContract{
+		SchemaName:      "public",
+		Identity:        "future_function()",
+		Kind:            "f",
+		SecurityDefiner: true,
+		Config:          []string{"search_path=pg_catalog"},
+	}
 }
 
 func appACLCurrentTestSourceContract(t *testing.T, fragments []AppACLCurrentMigrationFragment) appACLCurrentSourceContract {

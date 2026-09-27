@@ -93,7 +93,15 @@ type Record struct {
 	OSName                            string                 `json:"os_name"`
 	Virtualization                    string                 `json:"virtualization"`
 	LifecycleStatus                   LifecycleStatus        `json:"lifecycle_status"`
-	UsageStatus                       UsageStatus            `json:"usage_status"`
+	UsageStatus                       UsageStatus            `json:"-"`
+	UsageTags                         []string               `json:"usage_tags"`
+	ValidityMode                      string                 `json:"validity_mode"`
+	ExpiresAt                         *string                `json:"expires_at"`
+	AutoRenewCheck                    string                 `json:"auto_renew_check"`
+	AutoRenewCheckedAt                *time.Time             `json:"auto_renew_checked_at"`
+	RenewalReason                     string                 `json:"renewal_reason"`
+	RenewalReviewAt                   *time.Time             `json:"renewal_review_at"`
+	AcquisitionSource                 string                 `json:"acquisition_source"`
 	RenewalDecision                   RenewalDecision        `json:"renewal_decision"`
 	Importance                        string                 `json:"importance"`
 	Labels                            []string               `json:"labels"`
@@ -110,7 +118,8 @@ type Record struct {
 
 type ArchivedStateSnapshot struct {
 	LifecycleStatus LifecycleStatus `json:"lifecycle_status"`
-	UsageStatus     UsageStatus     `json:"usage_status"`
+	UsageStatus     UsageStatus     `json:"-"`
+	UsageTags       []string        `json:"usage_tags"`
 	RenewalDecision RenewalDecision `json:"renewal_decision"`
 	CapturedAt      time.Time       `json:"captured_at"`
 	Source          string          `json:"source"`
@@ -125,58 +134,74 @@ type RenewalSubscriptionLinkage struct {
 }
 
 type CreateInput struct {
-	DisplayName     string          `json:"display_name"`
-	ProviderID      *string         `json:"provider_id"`
-	ProviderName    string          `json:"provider_name"`
-	ProductName     string          `json:"product_name"`
-	OrderRef        string          `json:"order_ref"`
-	Country         string          `json:"country"`
-	Region          string          `json:"region"`
-	City            string          `json:"city"`
-	Datacenter      string          `json:"datacenter"`
-	IPv4            string          `json:"ipv4"`
-	IPv6            string          `json:"ipv6"`
-	SSHHost         string          `json:"ssh_host"`
-	SSHPort         int             `json:"ssh_port"`
-	SSHUser         string          `json:"ssh_user"`
-	OSName          string          `json:"os_name"`
-	Virtualization  string          `json:"virtualization"`
-	LifecycleStatus LifecycleStatus `json:"lifecycle_status"`
-	UsageStatus     UsageStatus     `json:"usage_status"`
-	RenewalDecision RenewalDecision `json:"renewal_decision"`
-	Importance      string          `json:"importance"`
-	Labels          []string        `json:"labels"`
-	Note            string          `json:"note"`
+	DisplayName        string          `json:"display_name"`
+	ProviderID         *string         `json:"provider_id"`
+	ProviderName       string          `json:"provider_name"`
+	ProductName        string          `json:"product_name"`
+	OrderRef           string          `json:"order_ref"`
+	Country            string          `json:"country"`
+	Region             string          `json:"region"`
+	City               string          `json:"city"`
+	Datacenter         string          `json:"datacenter"`
+	IPv4               string          `json:"ipv4"`
+	IPv6               string          `json:"ipv6"`
+	SSHHost            string          `json:"ssh_host"`
+	SSHPort            int             `json:"ssh_port"`
+	SSHUser            string          `json:"ssh_user"`
+	OSName             string          `json:"os_name"`
+	Virtualization     string          `json:"virtualization"`
+	LifecycleStatus    LifecycleStatus `json:"lifecycle_status"`
+	UsageStatus        UsageStatus     `json:"-"`
+	UsageTags          []string        `json:"usage_tags"`
+	ValidityMode       string          `json:"validity_mode"`
+	ExpiresAt          *string         `json:"expires_at"`
+	AutoRenewCheck     string          `json:"auto_renew_check"`
+	AutoRenewCheckedAt *time.Time      `json:"auto_renew_checked_at"`
+	RenewalReason      string          `json:"renewal_reason"`
+	RenewalReviewAt    *time.Time      `json:"renewal_review_at"`
+	AcquisitionSource  string          `json:"acquisition_source"`
+	RenewalDecision    RenewalDecision `json:"renewal_decision"`
+	Importance         string          `json:"importance"`
+	Labels             []string        `json:"labels"`
+	Note               string          `json:"note"`
 }
 
 type PatchInput struct {
-	DisplayName       OptionalString         `json:"display_name"`
-	ProviderID        OptionalNullableString `json:"provider_id"`
-	ProviderName      OptionalString         `json:"provider_name"`
-	ProductName       OptionalString         `json:"product_name"`
-	OrderRef          OptionalString         `json:"order_ref"`
-	Country           OptionalString         `json:"country"`
-	Region            OptionalString         `json:"region"`
-	City              OptionalString         `json:"city"`
-	Datacenter        OptionalString         `json:"datacenter"`
-	IPv4              OptionalString         `json:"ipv4"`
-	IPv6              OptionalString         `json:"ipv6"`
-	SSHHost           OptionalString         `json:"ssh_host"`
-	SSHPort           OptionalInt            `json:"ssh_port"`
-	SSHUser           OptionalString         `json:"ssh_user"`
-	OSName            OptionalString         `json:"os_name"`
-	Virtualization    OptionalString         `json:"virtualization"`
-	LifecycleStatus   OptionalLifecycle      `json:"lifecycle_status"`
-	UsageStatus       OptionalUsage          `json:"usage_status"`
-	RenewalDecision   OptionalRenewal        `json:"renewal_decision"`
-	RenewalReason     OptionalString         `json:"renewal_reason"`
-	Importance        OptionalString         `json:"importance"`
-	Labels            OptionalLabels         `json:"labels"`
-	Note              OptionalString         `json:"note"`
-	ExpectedUpdatedAt *time.Time             `json:"-"`
+	DisplayName        OptionalString         `json:"display_name"`
+	ProviderID         OptionalNullableString `json:"provider_id"`
+	ProviderName       OptionalString         `json:"provider_name"`
+	ProductName        OptionalString         `json:"product_name"`
+	OrderRef           OptionalString         `json:"order_ref"`
+	Country            OptionalString         `json:"country"`
+	Region             OptionalString         `json:"region"`
+	City               OptionalString         `json:"city"`
+	Datacenter         OptionalString         `json:"datacenter"`
+	IPv4               OptionalString         `json:"ipv4"`
+	IPv6               OptionalString         `json:"ipv6"`
+	SSHHost            OptionalString         `json:"ssh_host"`
+	SSHPort            OptionalInt            `json:"ssh_port"`
+	SSHUser            OptionalString         `json:"ssh_user"`
+	OSName             OptionalString         `json:"os_name"`
+	Virtualization     OptionalString         `json:"virtualization"`
+	LifecycleStatus    OptionalLifecycle      `json:"lifecycle_status"`
+	UsageStatus        OptionalUsage          `json:"-"`
+	UsageTags          OptionalLabels         `json:"usage_tags"`
+	ValidityMode       OptionalString         `json:"validity_mode"`
+	ExpiresAt          OptionalNullableString `json:"expires_at"`
+	AutoRenewCheck     OptionalString         `json:"auto_renew_check"`
+	AutoRenewCheckedAt OptionalTime           `json:"auto_renew_checked_at"`
+	RenewalReviewAt    OptionalTime           `json:"renewal_review_at"`
+	AcquisitionSource  OptionalString         `json:"acquisition_source"`
+	RenewalDecision    OptionalRenewal        `json:"renewal_decision"`
+	RenewalReason      OptionalString         `json:"renewal_reason"`
+	Importance         OptionalString         `json:"importance"`
+	Labels             OptionalLabels         `json:"labels"`
+	Note               OptionalString         `json:"note"`
+	ExpectedUpdatedAt  *time.Time             `json:"-"`
 }
 
 type ListFilters struct {
+	UsageTag        string
 	ProviderID      string
 	LifecycleStatus LifecycleStatus
 	UsageStatus     UsageStatus
@@ -187,6 +212,16 @@ type ListFilters struct {
 type OptionalString struct {
 	Set   bool
 	Value string
+}
+
+type OptionalTime struct {
+	Set   bool
+	Value *time.Time
+}
+
+func (v *OptionalTime) UnmarshalJSON(data []byte) error {
+	v.Set = true
+	return json.Unmarshal(data, &v.Value)
 }
 
 type OptionalNullableString struct {
@@ -389,6 +424,18 @@ func NormalizeCreateInput(input CreateInput) CreateInput {
 		input.SSHPort = DefaultSSHPort
 	}
 	input.Labels = NormalizeLabels(input.Labels)
+	input.UsageTags = NormalizeLabels(input.UsageTags)
+	input.ValidityMode = strings.TrimSpace(input.ValidityMode)
+	if input.ValidityMode == "" {
+		input.ValidityMode = "unknown"
+	}
+	input.AutoRenewCheck = strings.TrimSpace(input.AutoRenewCheck)
+	if input.AutoRenewCheck == "" {
+		input.AutoRenewCheck = "unchecked"
+	}
+	input.ExpiresAt = normalizeNullableString(input.ExpiresAt)
+	input.RenewalReason = strings.TrimSpace(input.RenewalReason)
+	input.AcquisitionSource = strings.TrimSpace(input.AcquisitionSource)
 	input.Note = strings.TrimSpace(input.Note)
 	return input
 }
@@ -407,7 +454,7 @@ func ValidateCreateInput(input CreateInput) error {
 		return fmt.Errorf("%w: invalid renewal_decision", ErrInvalidVPSAssetInput)
 	}
 	if !IsValidCreateLifecycleStatus(input.LifecycleStatus) {
-		return fmt.Errorf("%w: lifecycle_status must be active, idle, or testing on create", ErrInvalidVPSAssetInput)
+		return fmt.Errorf("%w: lifecycle_status must be active on create", ErrInvalidVPSAssetInput)
 	}
 	if err := ValidateVPSStateCombination(input.LifecycleStatus, input.UsageStatus, input.RenewalDecision); err != nil {
 		return err
@@ -415,7 +462,7 @@ func ValidateCreateInput(input CreateInput) error {
 	if !IsValidSSHPort(input.SSHPort) {
 		return fmt.Errorf("%w: ssh_port must be between 1 and 65535", ErrInvalidVPSAssetInput)
 	}
-	return nil
+	return ValidateIndependentFacts(input.ValidityMode, input.ExpiresAt, input.AutoRenewCheck, input.AutoRenewCheckedAt)
 }
 
 func NormalizePatchInput(input PatchInput) PatchInput {
@@ -444,6 +491,13 @@ func NormalizePatchInput(input PatchInput) PatchInput {
 		input.RenewalDecision.Value = RenewalDecision(strings.TrimSpace(string(input.RenewalDecision.Value)))
 	}
 	input.RenewalReason = normalizeOptionalString(input.RenewalReason)
+	input.ValidityMode = normalizeOptionalString(input.ValidityMode)
+	input.ExpiresAt = normalizeOptionalNullableString(input.ExpiresAt)
+	input.AutoRenewCheck = normalizeOptionalString(input.AutoRenewCheck)
+	input.AcquisitionSource = normalizeOptionalString(input.AcquisitionSource)
+	if input.UsageTags.Set {
+		input.UsageTags.Values = NormalizeLabels(input.UsageTags.Values)
+	}
 	input.Importance = normalizeOptionalString(input.Importance)
 	if input.Labels.Set {
 		input.Labels.Values = NormalizeLabels(input.Labels.Values)
@@ -468,8 +522,16 @@ func ValidatePatchInput(input PatchInput) error {
 	if err := ValidateVPSPatchStateCombination(input); err != nil {
 		return err
 	}
-	if input.RenewalReason.Set && !input.RenewalDecision.Set {
-		return fmt.Errorf("%w: renewal_reason requires renewal_decision", ErrInvalidVPSAssetInput)
+	if input.ValidityMode.Set && !IsValidValidityMode(input.ValidityMode.Value) {
+		return fmt.Errorf("%w: invalid validity_mode", ErrInvalidVPSAssetInput)
+	}
+	if input.ExpiresAt.Set && input.ExpiresAt.Value != nil {
+		if _, err := time.Parse("2006-01-02", *input.ExpiresAt.Value); err != nil {
+			return fmt.Errorf("%w: invalid expires_at", ErrInvalidVPSAssetInput)
+		}
+	}
+	if input.AutoRenewCheck.Set && !IsValidAutoRenewCheck(input.AutoRenewCheck.Value) {
+		return fmt.Errorf("%w: invalid auto_renew_check", ErrInvalidVPSAssetInput)
 	}
 	if input.SSHPort.Set && !IsValidSSHPort(input.SSHPort.Value) {
 		return fmt.Errorf("%w: ssh_port must be between 1 and 65535", ErrInvalidVPSAssetInput)
@@ -488,7 +550,7 @@ func ValidateOrdinaryPatchInput(input PatchInput) error {
 }
 
 func (input PatchInput) HasChanges() bool {
-	return input.DisplayName.Set ||
+	return input.UsageTags.Set || input.ValidityMode.Set || input.ExpiresAt.Set || input.AutoRenewCheck.Set || input.AutoRenewCheckedAt.Set || input.RenewalReason.Set || input.RenewalReviewAt.Set || input.AcquisitionSource.Set || input.DisplayName.Set ||
 		input.ProviderID.Set ||
 		input.ProviderName.Set ||
 		input.ProductName.Set ||
@@ -512,7 +574,21 @@ func (input PatchInput) HasChanges() bool {
 		input.Note.Set
 }
 
+// IsArchivedSupplement permits financial review and historical annotations without reopening resources.
+func (input PatchInput) IsArchivedSupplement() bool {
+	if !input.HasChanges() {
+		return false
+	}
+	input.AutoRenewCheck = OptionalString{}
+	input.AutoRenewCheckedAt = OptionalTime{}
+	input.RenewalReason = OptionalString{}
+	input.RenewalReviewAt = OptionalTime{}
+	input.Note = OptionalString{}
+	return !input.HasChanges()
+}
+
 func NormalizeListFilters(filters ListFilters) ListFilters {
+	filters.UsageTag = strings.TrimSpace(filters.UsageTag)
 	filters.ProviderID = strings.TrimSpace(filters.ProviderID)
 	filters.LifecycleStatus = LifecycleStatus(strings.TrimSpace(string(filters.LifecycleStatus)))
 	filters.UsageStatus = UsageStatus(strings.TrimSpace(string(filters.UsageStatus)))
@@ -556,7 +632,7 @@ func NormalizeLabels(labels []string) []string {
 
 func IsValidLifecycleStatus(status LifecycleStatus) bool {
 	switch status {
-	case LifecycleActive, LifecycleIdle, LifecycleTesting, LifecycleToMigrate, LifecycleToCancel, LifecycleCancelled, LifecycleArchived:
+	case LifecycleActive, LifecycleArchived:
 		return true
 	default:
 		return false
@@ -565,7 +641,7 @@ func IsValidLifecycleStatus(status LifecycleStatus) bool {
 
 func IsValidOrdinaryPatchLifecycleStatus(status LifecycleStatus) bool {
 	switch status {
-	case LifecycleActive, LifecycleIdle, LifecycleTesting:
+	case LifecycleActive:
 		return true
 	default:
 		return false
@@ -602,60 +678,18 @@ func invalidStateCombination(message string) error {
 	return &StateCombinationError{FieldErrors: map[string]string{"lifecycle_status": message, "usage_status": message, "renewal_decision": message}}
 }
 
-func ValidateVPSStateCombination(lifecycle LifecycleStatus, usage UsageStatus, renewal RenewalDecision) error {
-	if lifecycle == LifecycleArchived && usage == UsageInUse {
-		return invalidStateCombination("已归档资产不能标记为在用，请先恢复并重新评估用途。")
-	}
-	if lifecycle == LifecycleCancelled {
-		if !IsCancellationRenewalDecision(renewal) {
-			return invalidStateCombination("cancelled lifecycle requires cancellation renewal_decision")
-		}
-		if usage == UsageInUse {
-			return invalidStateCombination("cancelled lifecycle cannot be in_use")
-		}
-	}
-	if lifecycle == LifecycleToCancel && !IsCancellationRenewalDecision(renewal) {
-		return invalidStateCombination("to_cancel lifecycle requires cancellation renewal_decision")
-	}
-	if lifecycle == LifecycleToMigrate && renewal != RenewalMigrate {
-		return invalidStateCombination("to_migrate lifecycle requires migrate renewal_decision")
-	}
-	if renewal == RenewalReplaced && (lifecycle == LifecycleActive || usage == UsageInUse) {
-		return invalidStateCombination("replaced renewal_decision cannot remain active or in_use")
+func ValidateVPSStateCombination(lifecycle LifecycleStatus, _ UsageStatus, renewal RenewalDecision) error {
+	if !IsValidLifecycleStatus(lifecycle) || !IsValidRenewalDecision(renewal) {
+		return invalidStateCombination("invalid lifecycle or renewal decision")
 	}
 	return nil
 }
 
-func ValidateVPSPatchStateCombination(input PatchInput) error {
-	if input.LifecycleStatus.Set {
-		lifecycle := input.LifecycleStatus.Value
-		if lifecycle == LifecycleCancelled {
-			if input.RenewalDecision.Set && !IsCancellationRenewalDecision(input.RenewalDecision.Value) {
-				return invalidStateCombination("cancelled lifecycle requires cancellation renewal_decision")
-			}
-			if input.UsageStatus.Set && input.UsageStatus.Value == UsageInUse {
-				return invalidStateCombination("cancelled lifecycle cannot be in_use")
-			}
-		}
-		if lifecycle == LifecycleToCancel && input.RenewalDecision.Set && !IsCancellationRenewalDecision(input.RenewalDecision.Value) {
-			return invalidStateCombination("to_cancel lifecycle requires cancellation renewal_decision")
-		}
-		if lifecycle == LifecycleToMigrate && input.RenewalDecision.Set && input.RenewalDecision.Value != RenewalMigrate {
-			return invalidStateCombination("to_migrate lifecycle requires migrate renewal_decision")
-		}
-		if lifecycle == LifecycleActive && input.RenewalDecision.Set && input.RenewalDecision.Value == RenewalReplaced {
-			return invalidStateCombination("replaced renewal_decision cannot remain active")
-		}
-	}
-	if input.UsageStatus.Set && input.RenewalDecision.Set && input.UsageStatus.Value == UsageInUse && input.RenewalDecision.Value == RenewalReplaced {
-		return invalidStateCombination("replaced renewal_decision cannot remain in_use")
-	}
-	return nil
-}
+func ValidateVPSPatchStateCombination(input PatchInput) error { return nil }
 
 func IsValidRenewalDecision(decision RenewalDecision) bool {
 	switch decision {
-	case RenewalUnreviewed, RenewalKeep, RenewalObserve, RenewalMigrate, RenewalCancel, RenewalAutoRenewCancelled, RenewalReplaced:
+	case RenewalUnreviewed, RenewalKeep, RenewalCancel:
 		return true
 	default:
 		return false
@@ -673,6 +707,40 @@ func IsCancellationRenewalDecision(decision RenewalDecision) bool {
 
 func IsValidSSHPort(port int) bool {
 	return port >= 1 && port <= 65535
+}
+
+func IsValidValidityMode(value string) bool {
+	return value == "fixed" || value == "unlimited" || value == "unknown"
+}
+
+func IsValidAutoRenewCheck(value string) bool {
+	switch value {
+	case "unchecked", "enabled", "disabled", "never_enabled", "unsupported":
+		return true
+	}
+	return false
+}
+
+// ValidateIndependentFacts never infers resource validity or provider settings from billing intent.
+func ValidateIndependentFacts(mode string, expiresAt *string, check string, checkedAt *time.Time) error {
+	if !IsValidValidityMode(mode) {
+		return fmt.Errorf("%w: invalid validity_mode", ErrInvalidVPSAssetInput)
+	}
+	if (mode == "fixed") != (expiresAt != nil) {
+		return fmt.Errorf("%w: fixed validity requires expires_at; other modes must not have expires_at", ErrInvalidVPSAssetInput)
+	}
+	if expiresAt != nil {
+		if _, err := time.Parse("2006-01-02", *expiresAt); err != nil {
+			return fmt.Errorf("%w: invalid expires_at", ErrInvalidVPSAssetInput)
+		}
+	}
+	if !IsValidAutoRenewCheck(check) {
+		return fmt.Errorf("%w: invalid auto_renew_check", ErrInvalidVPSAssetInput)
+	}
+	if (check == "unchecked") != (checkedAt == nil) {
+		return fmt.Errorf("%w: a provider auto-renew check requires its observation time", ErrInvalidVPSAssetInput)
+	}
+	return nil
 }
 
 func DeriveArchivedAt(lifecycle LifecycleStatus, current *time.Time, now time.Time) *time.Time {

@@ -62,7 +62,11 @@ func TestPostgresIntegrationSyncBatchLiveBackfillInterleaving(t *testing.T) {
 				}
 				firstProjection := readSyncInterleavingProjectionState(t, ctx, fixture, prefix)
 				firstMonitoring := readSyncInterleavingMonitoringState(t, ctx, fixture, prefix)
-				if firstMonitoring.lifecycle != monitoringinstances.LifecycleInUse ||
+				wantFirstLifecycle := initialLifecycle
+				if ordered[0].LiveSignal != nil {
+					wantFirstLifecycle = monitoringinstances.LifecycleInUse
+				}
+				if firstMonitoring.lifecycle != wantFirstLifecycle ||
 					!firstMonitoring.heartbeatAt.Equal(ordered[0].Heartbeats[0].ObservedAt) ||
 					!firstMonitoring.syncAt.Equal(receivedAt) {
 					t.Fatal("first recorded batch did not advance lifecycle and timestamps monotonically")
@@ -173,13 +177,16 @@ func seedSyncInterleavingFixture(t *testing.T, ctx context.Context, fixture reco
 	targetID := "tg_" + prefix
 	probeItemID := "pb_" + prefix
 	vpsID := "vps_" + prefix
+	if _, err := fixture.db.Exec(ctx, `insert into vps_assets(vps_id,display_name,ipv4,lifecycle_status) values($1,$2,$3,'active')`, vpsID, prefix, syncInterleavingIPAddress(prefix)); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.monitoring_instances (
-			monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
+			vps_id, monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
 			monitoring_status, binding_status, binding_fingerprint, binding_epoch_started_at, sync_token_hash
-		) values ($1,$2,'','','',$3,$4,$5,$6,$7,$8)`,
+		) values ($9,$1,$2,'','','',$3,$4,$5,$6,$7,$8)`,
 		monitoringInstanceID, prefix, lifecycle, monitoringinstances.MonitoringEnabled,
-		monitoringinstances.BindingBound, "fp_"+prefix, syncInterleavingT1.Add(-time.Hour), hashSyncToken("token_"+prefix),
+		monitoringinstances.BindingBound, "fp_"+prefix, syncInterleavingT1.Add(-time.Hour), hashSyncToken("token_"+prefix), vpsID,
 	); err != nil {
 		t.Fatal("seed interleaving monitoring instance")
 	}
@@ -193,10 +200,8 @@ func seedSyncInterleavingFixture(t *testing.T, ctx context.Context, fixture reco
 		values ($1,$2,$3,$4,10)`, probeItemID, targetID, agentapi.ProbeKindHTTP, agentapi.FrequencyTier5m); err != nil {
 		t.Fatal("seed interleaving probe item")
 	}
-	if _, err := fixture.db.Exec(ctx, `
-		insert into public.vps_assets (vps_id, display_name, ipv4, lifecycle_status, usage_status)
-		values ($1,$2,$3,'active','in_use')`, vpsID, prefix, syncInterleavingIPAddress(prefix)); err != nil {
-		t.Fatal("seed interleaving VPS")
+	if _, err := fixture.db.Exec(ctx, `insert into monitoring_agent_sessions(session_id,monitoring_instance_id,token_hash,fingerprint_hash) values($1,$2,$3,$4)`, "mas_"+prefix, monitoringInstanceID, hashSyncToken("token_"+prefix), "fp_"+prefix); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.vps_monitoring_instance_links (link_id, vps_id, monitoring_instance_id, note)
@@ -230,6 +235,8 @@ func syncInterleavingBatches(prefix string) (syncing.Batch, syncing.Batch) {
 		})
 	}
 	live := syncing.Batch{
+		SessionID:            "mas_" + prefix,
+		LiveSignal:           &agentapi.LiveSignal{ID: "live_" + prefix, Fingerprint: fingerprint},
 		MonitoringInstanceID: monitoringInstanceID,
 		SyncToken:            "token_" + prefix,
 		Heartbeats: []syncing.HeartbeatPayload{{
@@ -253,6 +260,7 @@ func syncInterleavingBatches(prefix string) (syncing.Batch, syncing.Batch) {
 		}},
 	}
 	backfill := syncing.Batch{
+		SessionID:            "mas_" + prefix,
 		MonitoringInstanceID: monitoringInstanceID,
 		SyncToken:            "token_" + prefix,
 		Heartbeats: []syncing.HeartbeatPayload{{
@@ -539,18 +547,12 @@ func seedReplaySafeLatestFixture(t *testing.T, ctx context.Context, fixture reco
 	}
 
 	if _, err := fixture.db.Exec(ctx, `
-		insert into public.monitoring_instances (
-			monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
-			binding_status, binding_fingerprint, binding_epoch_started_at
-		) values ($1, $2, '', '', '', '在用', '已绑定', 'fixture', $3)`,
-		monitoringInstanceID, prefix, observedAt.Add(-time.Hour),
-	); err != nil {
-		t.Fatalf("seed monitoring instance: %v", err)
-	}
-	if _, err := fixture.db.Exec(ctx, `
 		insert into public.vps_assets (vps_id, display_name, ipv4, lifecycle_status, usage_status)
 		values ($1, $2, '203.0.113.5', 'active', 'in_use')`, vpsID, prefix); err != nil {
 		t.Fatalf("seed VPS: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `insert into monitoring_instances(vps_id,monitoring_instance_id,display_name,region,city,provider,lifecycle_status,binding_status,binding_fingerprint,binding_epoch_started_at) values($1,$2,$3,'','','','已接入','已绑定','fixture',$4)`, vpsID, monitoringInstanceID, prefix, observedAt.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.vps_monitoring_instance_links (link_id, vps_id, monitoring_instance_id, note)
@@ -694,10 +696,13 @@ func TestPostgresIntegrationAgentSyncBatchRuntimeACL(t *testing.T) {
 	firstReceivedAt := time.Date(2026, time.August, 30, 3, 30, 0, 0, time.UTC)
 	duplicateReceivedAt := firstReceivedAt.Add(time.Minute)
 	heartbeatAt := firstReceivedAt.Add(-time.Minute)
+	if _, err := fixture.db.Exec(ctx, `insert into vps_assets(vps_id,display_name,lifecycle_status) values('vps_sync_acl','Sync ACL','active')`); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := fixture.db.Exec(ctx, `
 		insert into public.monitoring_instances (
-			monitoring_instance_id,
+			vps_id,monitoring_instance_id,
 			display_name,
 			region,
 			city,
@@ -707,7 +712,7 @@ func TestPostgresIntegrationAgentSyncBatchRuntimeACL(t *testing.T) {
 			binding_status,
 			binding_fingerprint,
 			sync_token_hash
-		) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+		) values ('vps_sync_acl',$1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
 		monitoringInstanceID,
 		"Sync batch ACL fixture",
 		"",
@@ -721,6 +726,9 @@ func TestPostgresIntegrationAgentSyncBatchRuntimeACL(t *testing.T) {
 	); err != nil {
 		t.Fatal("seed bound monitoring instance")
 	}
+	if _, err := fixture.db.Exec(ctx, `insert into monitoring_agent_sessions(session_id,monitoring_instance_id,token_hash,fingerprint_hash) values('mas_sync_acl',$1,$2,$3)`, monitoringInstanceID, hashSyncToken(syncToken), fingerprint); err != nil {
+		t.Fatal(err)
+	}
 
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "sync-batch-runtime-acl", 1)
 	assertExplicitAgentSyncBatchConflictTargetRejected(t, ctx, runtimePool, monitoringInstanceID)
@@ -728,6 +736,7 @@ func TestPostgresIntegrationAgentSyncBatchRuntimeACL(t *testing.T) {
 	receivedAt := firstReceivedAt
 	repository.now = func() time.Time { return receivedAt }
 	batch := syncing.Batch{
+		SessionID:            "mas_sync_acl",
 		MonitoringInstanceID: monitoringInstanceID,
 		SyncToken:            syncToken,
 		Heartbeats: []syncing.HeartbeatPayload{{

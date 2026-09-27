@@ -40,7 +40,13 @@ const created: VPSAssetRecord = {
   os_name: '',
   virtualization: '',
   lifecycle_status: 'active',
-  usage_status: 'unknown',
+  usage_tags: [],
+  validity_mode: 'unknown',
+  expires_at: null,
+  auto_renew_check: 'unchecked',
+  auto_renew_checked_at: null,
+  renewal_reason: '',
+  renewal_review_at: null,
   renewal_decision: 'unreviewed',
   importance: 'normal',
   labels: [],
@@ -86,7 +92,7 @@ afterEach(() => {
 })
 
 describe('VPSCreateModal', () => {
-  it('submits authored facts including usage enum and constrained importance', async () => {
+  it('submits authored purposes and independent validity facts', async () => {
     const create = vi.spyOn(api, 'createVPSAsset').mockResolvedValue(created)
     renderModal()
     const modal = screen.getByRole('dialog', { name: '添加 VPS' })
@@ -95,7 +101,7 @@ describe('VPSCreateModal', () => {
     fireEvent.change(within(modal).getByRole('combobox', { name: '国家 / 地区' }), { target: { value: 'JP' } })
     fireEvent.change(within(modal).getByLabelText('城市'), { target: { value: 'Osaka' } })
     fireEvent.change(within(modal).getByLabelText('IPv4'), { target: { value: '203.0.113.8' } })
-    fireEvent.change(within(modal).getByRole('combobox', { name: '使用状态' }), { target: { value: 'standby' } })
+    fireEvent.change(within(modal).getByRole('textbox', { name: '用途' }), { target: { value: '备用, 自定义应用' } })
     fireEvent.change(within(modal).getByRole('combobox', { name: '重要性' }), { target: { value: 'high' } })
     fireEvent.change(within(modal).getByPlaceholderText('prod, edge'), { target: { value: 'edge, prod' } })
     fireEvent.click(within(modal).getByRole('button', { name: '创建 VPS' }))
@@ -107,6 +113,7 @@ describe('VPSCreateModal', () => {
       provider_name: 'Hetzner',
       product_name: '',
       order_ref: '',
+      acquisition_source: '',
       country: 'JP',
       region: '',
       city: 'Osaka',
@@ -119,7 +126,11 @@ describe('VPSCreateModal', () => {
       os_name: '',
       virtualization: '',
       lifecycle_status: 'active',
-      usage_status: 'standby',
+      usage_tags: ['备用', '自定义应用'],
+      validity_mode: 'unknown',
+      expires_at: null,
+      auto_renew_check: 'unchecked',
+      auto_renew_checked_at: null,
       renewal_decision: 'unreviewed',
       importance: 'high',
       labels: ['edge', 'prod'],

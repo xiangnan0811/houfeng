@@ -12,14 +12,11 @@ const EFFECTIVE_DEPENDENCY_CLASSIFICATIONS: Record<string, true> = {
 }
 
 const TERMINAL_VPS_LIFECYCLES: Record<string, true> = {
-  cancelled: true,
   archived: true,
 }
 
 const MIGRATION_SOURCE_LIFECYCLES: Record<string, true> = {
   active: true,
-  idle: true,
-  testing: true,
 }
 
 export function dependencyClassificationLabel(value: string): string {
@@ -89,7 +86,7 @@ export function sharedObjectKey(objectType: string, objectId: string): string {
 }
 
 export function vpsCanArchive(lifecycleStatus: string): boolean {
-  return lifecycleStatus === 'to_cancel' || lifecycleStatus === 'cancelled'
+  return lifecycleStatus === 'active'
 }
 
 export function vpsCanRestore(lifecycleStatus: string): boolean {
@@ -143,7 +140,7 @@ export function blockerHandling(detail: ArchiveBlockerDetail, vpsId: string): Bl
       if (detail.resolution_action === 'restore_from_archive') {
         return { label: '恢复归档', inline: 'restore' }
       }
-      return { label: '处理取消', href: `/vps/${encodedVPS}?workbench=cancellation` }
+      return { label: '查看归档检查', href: `/vps/${encodedVPS}?workbench=archive` }
     case 'subscription':
       return { label: '处理账单', inline: 'residual' }
     case 'monitoring_instance':

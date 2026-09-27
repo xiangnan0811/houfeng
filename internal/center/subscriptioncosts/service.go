@@ -81,6 +81,20 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 	if err != nil {
 		return Overview{}, fmt.Errorf("list vps assets missing subscriptions: %w", err)
 	}
+	currentRows, archivedRows := splitCostRows(rows)
+	rows = currentRows
+	currentMissing := make([]MissingSubscriptionAsset, 0)
+	archivedMissing := make([]MissingSubscriptionAsset, 0)
+	for _, asset := range missing {
+		if asset.LifecycleStatus == "archived" {
+			if potentialProviderCharge(asset.AutoRenewCheck) {
+				archivedMissing = append(archivedMissing, asset)
+			}
+		} else {
+			currentMissing = append(currentMissing, asset)
+		}
+	}
+	missing = currentMissing
 	budgets, err := s.repo.ListBudgets(ctx, BudgetListFilters{})
 	if err != nil {
 		return Overview{}, fmt.Errorf("list subscription budgets: %w", err)
@@ -94,12 +108,16 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 
 	today := subscriptionDay(s.now())
 	overview := Overview{
-		SnapshotGeneratedAt:         s.now().UTC(),
-		BaseCurrency:                settings.BaseCurrency,
-		ActiveSubscriptionCount:     len(rows),
-		MissingSubscriptionVPSCount: len(missing),
-		MissingSubscriptionAssets:   missing,
-		UpcomingRenewals:            make([]RenewalQueueItem, 0),
+		ArchivedPotentialCosts:            archivedRows,
+		ArchivedMissingSubscriptionAssets: archivedMissing,
+		ArchivedUnknownAmountCount:        len(archivedMissing),
+		CurrentUnknownAmountCount:         len(missing),
+		SnapshotGeneratedAt:               s.now().UTC(),
+		BaseCurrency:                      settings.BaseCurrency,
+		ActiveSubscriptionCount:           len(rows),
+		MissingSubscriptionVPSCount:       len(missing),
+		MissingSubscriptionAssets:         missing,
+		UpcomingRenewals:                  make([]RenewalQueueItem, 0),
 		ProviderBreakdown: breakdown(rows, func(row CostRow) (string, string) {
 			return emptyAs(row.ProviderID, row.ProviderName, "未记录服务商"), emptyAs(row.ProviderName, row.ProviderID, "未记录服务商")
 		}),
@@ -110,10 +128,29 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 		VPSCosts: rows,
 	}
 
+	var archivedTotal float64
+	for _, row := range archivedRows {
+		if row.MonthlyPriceBase == nil {
+			overview.ArchivedUnknownAmountCount++
+		} else {
+			archivedTotal += *row.MonthlyPriceBase
+		}
+	}
+	if overview.ArchivedUnknownAmountCount == 0 {
+		overview.ArchivedPotentialMonthlyCost = &archivedTotal
+	}
+
 	for _, row := range rows {
 		if row.MonthlyPriceBase != nil {
 			overview.TotalMonthlyCost += *row.MonthlyPriceBase
-			overview.TotalYearlyCost += *row.YearlyPriceBase
+			if row.YearlyPriceBase != nil {
+				overview.TotalYearlyCost += *row.YearlyPriceBase
+			} else {
+				overview.TotalYearlyCost += *row.MonthlyPriceBase * 12
+			}
+		}
+		if row.MonthlyPriceBase == nil {
+			overview.CurrentUnknownAmountCount++
 		}
 		if row.ExchangeRateStale {
 			overview.ExchangeRateStaleCount++
@@ -163,6 +200,7 @@ func (s *Service) GetStatistics(ctx context.Context, window string) (Statistics,
 	if err != nil {
 		return Statistics{}, fmt.Errorf("list subscription costs: %w", err)
 	}
+	rows, _ = splitCostRows(rows)
 	costMonthBuckets, err := s.repo.ListCostMonthBuckets(ctx, settings, statisticsWindowMonths(window), s.now())
 	if err != nil {
 		return Statistics{}, fmt.Errorf("list subscription cost month buckets: %w", err)
@@ -210,7 +248,11 @@ func (s *Service) GetStatistics(ctx context.Context, window string) (Statistics,
 			continue
 		}
 		stats.TotalMonthlyCost += *row.MonthlyPriceBase
-		stats.TotalYearlyCost += *row.YearlyPriceBase
+		if row.YearlyPriceBase != nil {
+			stats.TotalYearlyCost += *row.YearlyPriceBase
+		} else {
+			stats.TotalYearlyCost += *row.MonthlyPriceBase * 12
+		}
 	}
 	return stats, nil
 }
@@ -418,10 +460,16 @@ func monthsInRange(start, end subscriptions.Date) []subscriptions.Date {
 }
 
 func applyBudgetSpend(rows []CostRow, budgets []BudgetRecord) []BudgetRecord {
+	rows, _ = splitCostRows(rows)
 	for i := range budgets {
 		budgets[i].CurrentMonthlySpend = 0
+		incomplete := false
 		for _, row := range rows {
-			if !budgetMatchesRow(budgets[i], row) || row.MonthlyPriceBase == nil {
+			if !budgetMatchesRow(budgets[i], row) {
+				continue
+			}
+			if row.MonthlyPriceBase == nil {
+				incomplete = true
 				continue
 			}
 			budgets[i].CurrentMonthlySpend += *row.MonthlyPriceBase
@@ -434,12 +482,19 @@ func applyBudgetSpend(rows []CostRow, budgets []BudgetRecord) []BudgetRecord {
 			budgets[i].YearlyLimit,
 			budgets[i].WarningPct,
 		)
+		if incomplete && budgets[i].Enabled && budgets[i].Status != BudgetStatusOver {
+			budgets[i].Status = BudgetStatusUnknown
+		}
 	}
 	return budgets
 }
 
 func applyRowBudgetStatus(rows []CostRow, budgets []BudgetRecord) {
 	for i := range rows {
+		if rows[i].LifecycleStatus == "archived" || rows[i].MonthlyPriceBase == nil {
+			rows[i].BudgetStatus = BudgetStatusUnknown
+			continue
+		}
 		status := BudgetStatusOK
 		matched := false
 		for _, budget := range budgets {
@@ -514,7 +569,11 @@ func breakdown(rows []CostRow, keyFn func(CostRow) (string, string)) []Breakdown
 		item.Label = label
 		item.SubscriptionCount++
 		item.MonthlyCost += *row.MonthlyPriceBase
-		item.YearlyCost += *row.YearlyPriceBase
+		if row.YearlyPriceBase != nil {
+			item.YearlyCost += *row.YearlyPriceBase
+		} else {
+			item.YearlyCost += *row.MonthlyPriceBase * 12
+		}
 		items[key] = item
 	}
 	result := make([]BreakdownItem, 0, len(items))
@@ -658,12 +717,22 @@ func sortRenewalQueue(items []RenewalQueueItem) {
 }
 
 func isDecisionAttention(row CostRow) bool {
-	return row.RenewalDecision == "cancel" ||
-		row.RenewalDecision == "auto_renew_cancelled" ||
-		row.RenewalDecision == "migrate" ||
-		row.LifecycleStatus == "to_cancel" ||
-		row.LifecycleStatus == "to_migrate" ||
-		row.LifecycleStatus == "cancelled"
+	return row.RenewalDecision == "cancel" && row.AutoRenewCheck != "disabled" && row.AutoRenewCheck != "never_enabled" && row.AutoRenewCheck != "unsupported"
+}
+
+func splitCostRows(rows []CostRow) (current, archived []CostRow) {
+	current = make([]CostRow, 0)
+	archived = make([]CostRow, 0)
+	for _, row := range rows {
+		if row.LifecycleStatus == "archived" {
+			if potentialProviderCharge(row.AutoRenewCheck) {
+				archived = append(archived, row)
+			}
+		} else {
+			current = append(current, row)
+		}
+	}
+	return current, archived
 }
 
 func emptyAs(primary, secondary, fallback string) string {
@@ -696,4 +765,8 @@ func MapSettingsError(err error) error {
 		return ErrInvalidInput
 	}
 	return err
+}
+
+func potentialProviderCharge(check string) bool {
+	return check != "disabled" && check != "never_enabled" && check != "unsupported"
 }
