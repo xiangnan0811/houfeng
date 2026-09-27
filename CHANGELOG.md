@@ -27,6 +27,17 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.0.0](https://github.com/xiangnan0811/houfeng/compare/v0.80.4...v1.0.0) (2026-09-27)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lifecycle:** The data model and Agent protocol require a fresh deployment and matching Center/Agent versions. Existing business data that would need conversion is rejected; obsolete lifecycle and standalone monitoring archive/restore/cleanup interfaces are removed without compatibility aliases.
+
+### Features
+
+* **lifecycle:** separate VPS ownership and monitoring control ([cd64c5d](https://github.com/xiangnan0811/houfeng/commit/cd64c5d9df0d81dfa77df2c14446825e863a71ac))
+
 ## [0.80.4](https://github.com/xiangnan0811/houfeng/compare/v0.80.3...v0.80.4) (2026-09-25)
 
 
