@@ -857,6 +857,14 @@ export type VPSLifecycleStatus = 'active' | 'archived'
 export type VPSUsageStatus = string
 export type VPSValidityMode = 'fixed' | 'unlimited' | 'unknown'
 export type VPSAutoRenewCheck = 'unchecked' | 'enabled' | 'disabled' | 'never_enabled' | 'unsupported'
+
+export const VPS_AUTO_RENEW_CHECK_LABELS: Record<VPSAutoRenewCheck, string> = {
+  unchecked: '尚未核对',
+  enabled: '仍然开启',
+  disabled: '已关闭',
+  never_enabled: '从未开启',
+  unsupported: '服务商不支持',
+}
 export type VPSRenewalDecision = 'unreviewed' | 'keep' | 'cancel'
 
 export type RenewalSubscriptionLinkageStatus =

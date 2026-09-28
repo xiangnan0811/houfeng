@@ -623,8 +623,7 @@
 
 @media (max-width:1180px){.modal-content--asset-cancel{max-width:min(900px,94vw)}}
 
-@media (max-width:920px){.asset-page .page-panel__actions{justify-content:flex-start}.asset-cancel-workbench__section-head{grid-template-columns:1fr}.asset-cancel-workbench__section-head > .badge{justify-self:start}.asset-decision-focus{grid-template-columns:repeat(3,minmax(0,1fr))}.asset-decision-board__tools{align-items:flex-start;max-width:none}.asset-decision-board__tools > p{text-align:left}.archive-detail-two-col,
-.archive-detail-history-grid{grid-template-columns:1fr}.asset-decision-panel{position:static}.asset-timeline-grid{grid-template-columns:1fr}.asset-page .page-panel--inline,.asset-decision-board__header,.archive-detail-history-item > header,.asset-timeline-card__header{flex-direction:column}}
+@media (max-width:920px){.asset-page .page-panel__actions{justify-content:flex-start}.asset-cancel-workbench__section-head{grid-template-columns:1fr}.asset-cancel-workbench__section-head > .badge{justify-self:start}.asset-decision-focus{grid-template-columns:repeat(3,minmax(0,1fr))}.asset-decision-board__tools{align-items:flex-start;max-width:none}.asset-decision-board__tools > p{text-align:left}.archive-detail-two-col{grid-template-columns:1fr}.asset-decision-panel{position:static}.asset-timeline-grid{grid-template-columns:1fr}.asset-page .page-panel--inline,.asset-decision-board__header,.asset-timeline-card__header{flex-direction:column}}
 
 @media (max-width:920px){.asset-decision-workbench .asset-decision-command-summary{grid-template-columns:1fr}}
 
@@ -672,8 +671,6 @@
 
 @media (max-width:640px){.modal-content--asset-cancel{width:100%;max-width:none;max-height:100vh;border-radius:0}.modal-content--asset-cancel .modal-body{padding:var(--space-3)}.asset-cancel-workbench__section{padding:var(--space-2)}.asset-cancel-workbench__inline-check{align-self:stretch}}
 
-@media (max-width:640px){.archive-detail-list > div{grid-template-columns:1fr;gap:calc(var(--space-1) / 2)}.archive-detail-history-item,
-.archive-detail-history-group{padding:var(--space-2)}}
 
 @media (max-width:760px){.asset-operation-form__header,
 .asset-operation-form>.input-field,

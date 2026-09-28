@@ -20,11 +20,21 @@ describe('VPS lifecycle workspace', () => {
   it('allows archived followups to resolve with a required reason', async () => {
     vi.mocked(api.listVPSFollowups).mockResolvedValue([{ followup_id: 'f1', vps_id: 'v1', kind: 'archived_online', dedupe_key: 's1', status: 'pending', summary: '归档后再次在线', details: {}, resolution_reason: '', resolved_by: '', created_at: '2026-09-01', updated_at: '2026-09-01' }])
     render(<VPSLifecycleWorkspace vpsId="v1" archived kind="followups" />)
-    const resolve = await screen.findByRole('button', { name: '解决' })
+    fireEvent.click(await screen.findByRole('button', { name: '处理' }))
+    const resolve = screen.getByRole('button', { name: '解决' })
     expect(resolve).toBeDisabled()
-    fireEvent.change(screen.getByLabelText('处理原因 / 迁移来源、目标及结果'), { target: { value: '已关闭旧 Agent' } })
+    fireEvent.change(screen.getByLabelText('处理原因'), { target: { value: '已关闭旧 Agent' } })
     fireEvent.click(resolve)
     await waitFor(() => expect(api.resolveVPSFollowup).toHaveBeenCalledWith('v1', 'f1', 'resolved', '已关闭旧 Agent'))
+  })
+  it('records a migration followup with target and result kept separate from resolution reasons', async () => {
+    render(<VPSLifecycleWorkspace vpsId="v1" archived kind="followups" />)
+    fireEvent.click(await screen.findByText('新增迁移跟进'))
+    fireEvent.change(screen.getByLabelText('新增跟进事项'), { target: { value: '迁移代理' } })
+    fireEvent.change(screen.getByLabelText('迁移目标 VPS（名称或标识）'), { target: { value: 'Osaka Edge' } })
+    fireEvent.change(screen.getByLabelText('迁移结果'), { target: { value: '流量已切换' } })
+    fireEvent.click(screen.getByRole('button', { name: '记录迁移跟进' }))
+    await waitFor(() => expect(api.createVPSFollowup).toHaveBeenCalledWith('v1', { kind: 'migration', summary: '迁移代理', details: { source_vps_id: 'v1', target_vps: 'Osaka Edge', result: '流量已切换' } }))
   })
   it('links an existing shared object without replacing its identity', async () => {
     vi.mocked(api.listAssetServices).mockResolvedValue([{ service_id: 'shared', name: '公共 API' } as never])

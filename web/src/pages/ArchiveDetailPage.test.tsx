@@ -261,13 +261,26 @@ describe('ArchiveDetailPage', () => {
     const userRecords = screen.getByRole('region', { name: '用户记录' })
     expect(within(userRecords).getByText('晚高峰网络质量明显下降')).toBeInTheDocument()
     expect(within(userRecords).getByText('连续三周 TCP probe 抖动，最终决定不再续费。')).toBeInTheDocument()
+    const summary = screen.getByLabelText('归档摘要')
+    expect(within(summary).getByText(/^4 个月 \d+ 天$/)).toBeInTheDocument()
+    expect(within(summary).getByText('USD 24.00/月')).toBeInTheDocument()
+    expect(within(summary).getByText('可能仍在扣费')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: /服务与域名/ }))
     expect(screen.getByRole('heading', { name: '服务资产' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '域名资产' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '续费、价格、规格与 IP 历史' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '监控历史' })).toBeInTheDocument()
-    expect(screen.getByRole('region', { name: '入口探测历史' })).toBeInTheDocument()
-    expect(screen.getByText('Tokyo Agent History')).toBeInTheDocument()
-    expect(screen.getByText('Legacy API Target')).toBeInTheDocument()
+    expect(screen.getByText('Legacy API')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: /监控与探测/ }))
+    expect(within(screen.getByRole('region', { name: '监控历史' })).getByText('Tokyo Agent History')).toBeInTheDocument()
+    expect(within(screen.getByRole('region', { name: '入口探测历史' })).getByText('Legacy API Target')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: /变更时间线/ }))
+    const lifetime = screen.getByRole('region', { name: '变更时间线' })
+    const entries = within(lifetime).getAllByRole('listitem').map((item) => item.textContent ?? '')
+    expect(entries).toHaveLength(4)
+    expect(entries[0]).toContain('network quality regression')
+    expect(entries[3]).toContain('192.0.2.1')
     expect(screen.getByRole('button', { name: '恢复管理' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /取消\/退役工作台|处理残留|受控归档/ })).not.toBeInTheDocument()
 
@@ -383,12 +396,14 @@ describe('ArchiveDetailPage', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: /Tokyo Retired/ })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: '重试加载变更历史' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: /服务与域名/ }))
     expect(screen.getByText('Legacy API')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /监控与探测/ }))
     expect(screen.getByText('Tokyo Agent History')).toBeInTheDocument()
 
+    fireEvent.click(screen.getByRole('tab', { name: /账单与订阅/ }))
     expect(screen.getByRole('button', { name: '重试加载订阅' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '重试加载变更历史' })).toBeInTheDocument()
 
     fetchMock.mockResolvedValueOnce(mockJSONResponse([subscription]))
     fireEvent.click(screen.getByRole('button', { name: '重试加载订阅' }))
@@ -420,6 +435,7 @@ describe('ArchiveDetailPage', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /Tokyo Retired/ })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: /账单与订阅/ }))
     // Retains snapshot data
     const subRegion = screen.getByRole('region', { name: '订阅明细' })
     expect(within(subRegion).getByText('USD 24.00/月')).toBeInTheDocument()
