@@ -1,7 +1,7 @@
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { GlobalSearch } from './GlobalSearch'
-import { useThemeOptional } from '../../lib/theme-context'
+import { useThemeOptional, type Mode, type Preset } from '../../lib/theme-context'
 import { SyncStatus, type SyncStatusProps } from './SyncStatus'
 import type { User } from '../../lib/auth-client'
 import {
@@ -83,12 +83,15 @@ export function TopBar({ sync, user }: TopBarProps) {
 
 /* --- Theme Switcher --- */
 
+// preset 为 null 的“跟随系统”只切换明暗，保留当前风格。
 const THEME_OPTIONS = [
-  { preset: 'houfeng' as const, mode: 'dark' as const, icon: '☾', label: '氛围暗色' },
-  { preset: 'classic' as const, mode: 'dark' as const, icon: '◐', label: '克制工程' },
-  { preset: 'houfeng' as const, mode: 'light' as const, icon: '☀', label: '精致亮色' },
-  { preset: 'houfeng' as const, mode: 'system' as const, icon: '⚙', label: '跟随系统' },
-] as const
+  { preset: 'houfeng', mode: 'dark', icon: '☾', label: '候风 深色' },
+  { preset: 'houfeng', mode: 'light', icon: '☀', label: '候风 浅色' },
+  { preset: 'precision', mode: 'dark', icon: '◆', label: '精密 深色' },
+  { preset: 'precision', mode: 'light', icon: '◇', label: '精密 浅色' },
+  { preset: 'observatory', mode: 'dark', icon: '▦', label: '观测台' },
+  { preset: null, mode: 'system', icon: '⚙', label: '跟随系统' },
+] as const satisfies ReadonlyArray<{ preset: Preset | null; mode: Mode; icon: string; label: string }>
 
 function ThemeSwitcher() {
   const theme = useThemeOptional()
@@ -116,9 +119,11 @@ function ThemeSwitcher() {
   if (!theme) return null
 
   const { preset, mode, setPreset, setMode } = theme
+  // 只认精确匹配：观测台 + 浅色没有对应项，此时不勾选任何项，避免误标并在激活时覆盖已保存的预设。
   const current = THEME_OPTIONS.find(
-    (o) => o.preset === preset && o.mode === mode
-  ) ?? THEME_OPTIONS[0]
+    (o) => o.mode === mode && (o.preset === null || o.preset === preset)
+  )
+  const triggerIcon = current?.icon ?? (mode === 'light' ? '☀' : '☾')
 
   function openMenu(index: number) {
     pendingFocusIndex.current = index
@@ -131,7 +136,7 @@ function ThemeSwitcher() {
   }
 
   function selectTheme(option: (typeof THEME_OPTIONS)[number]) {
-    setPreset(option.preset)
+    if (option.preset) setPreset(option.preset)
     setMode(option.mode)
     closeAndRestoreFocus()
   }
@@ -197,7 +202,7 @@ function ThemeSwitcher() {
         }}
         onKeyDown={handleTriggerKeyDown}
       >
-        {current.icon}
+        {triggerIcon}
       </button>
       {open && (
         <div id={menuId} className="theme-menu open" role="menu" aria-label="主题选项">

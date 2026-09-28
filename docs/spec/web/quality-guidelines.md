@@ -453,8 +453,8 @@ export default defineConfig([
 | 修改 Asset Decisions controller / route composition | 运行 `AssetDecisionsPage.test.tsx`、全部 `asset-decisions/` domain workflow/controller tests 与 `assetDecisionArchitectureContract.test.ts`；核对四个 filtered GET、11 GET renewal inventory、group/manual/record focus restore 和结构预算 |
 | 新增 page | `web/src/app/router.tsx` 注册路由 + colocate `<Page>.test.tsx`（至少 1 个 happy-path test） |
 | 新增 atom | `web/src/components/atoms/<Name>.tsx` + 同名 `.test.tsx` + `atoms/index.ts` 加 barrel export + `web/src/styles/partials/atoms.css` 加样式（用令牌） |
-| 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步检查 3 套运行时主题（`:root` / `theme-houfeng-light` / `theme-classic-dark`）；`classic-light` 复用 `houfeng-light`，见 `docs/spec/web/styling-guidelines.md` |
-| 改首屏防闪烁脚本 | `web/public/theme-bootstrap.js` 与 `web/src/lib/theme.ts` 的 preset/mode allowlist、system scheme 和 `classic-light` 回退必须保持一致；`web/index.html` 只同步加载同源脚本，不得恢复 inline script |
+| 新增 / 改 CSS 令牌 | `web/src/styles/tokens.css` 同步检查 5 个运行时主题（`:root`=`theme-houfeng-dark` / `theme-houfeng-light` / `theme-precision-dark` / `theme-precision-light` / `theme-observatory-dark`）；`observatory-light` 复用 `houfeng-light`；跑 `web/e2e/accessibility.spec.ts` 的逐主题 axe，见 `docs/spec/web/styling-guidelines.md` |
+| 改首屏防闪烁脚本 | `web/public/theme-bootstrap.js` 与 `web/src/lib/theme.ts` 的 preset/mode allowlist、system scheme 和 `themeClass` 映射（含 `observatory-light` 回退）必须保持一致；`web/index.html` 只同步加载同源脚本，不得恢复 inline script |
 | 改路由注册 / 页面加载边界 | 保持 `appRoutes` 可被 `matchRoutes` 测试；路由页用 `React.lazy` + `RouteModuleFallback`；fresh build 后运行 `bundle:check` 并报告 entry/async 测量与超限提示；不得把 Records transport 打进 entry，也不得为编辑器放宽 `style-src` |
 
 ---

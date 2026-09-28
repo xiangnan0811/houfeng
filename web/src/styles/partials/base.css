@@ -5,7 +5,6 @@
 .main-wrap{display:flex;flex-direction:column;overflow:hidden}
 .main{flex:1;overflow-y:auto;padding:var(--shell-main-inline-padding)}
 .sidebar{background:var(--bg-side);border-right:1px solid var(--border);padding:18px 0;display:flex;flex-direction:column;transition:color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm),border-color var(--dur-micro) var(--ease-calm);position:relative;overflow:visible}
-.theme-houfeng-dark .sidebar::after,.theme-classic-dark .sidebar::after{content:none}
 .logo{padding:0 16px 20px;font-size:16px;font-weight:700;letter-spacing:-0.5px;display:flex;align-items:center;gap:10px}
 .sidebar-collapsed .logo{padding:0 0 18px;justify-content:center}
 .sidebar-collapsed .logo-text{display:none}

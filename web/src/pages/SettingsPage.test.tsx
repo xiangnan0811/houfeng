@@ -561,12 +561,17 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
     const presetGroup = screen.getByRole('group', { name: '主题风格' })
     const modeGroup = screen.getByRole('group', { name: '主题明暗' })
-    expect(within(presetGroup).getByRole('button', { name: '候风原色' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(presetGroup).getByRole('button', { name: '候风' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(modeGroup).getByRole('button', { name: '深色' })).toHaveAttribute('aria-pressed', 'true')
     expect(within(presetGroup).queryByRole('tab')).not.toBeInTheDocument()
+    expect(screen.queryByText(/观测台仅提供深色/)).not.toBeInTheDocument()
 
-    fireEvent.click(within(presetGroup).getByRole('button', { name: '经典' }))
-    expect(within(presetGroup).getByRole('button', { name: '经典' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(within(presetGroup).getByRole('button', { name: '精密' }))
+    expect(within(presetGroup).getByRole('button', { name: '精密' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(within(presetGroup).getByRole('button', { name: '观测台' }))
+    expect(within(presetGroup).getByRole('button', { name: '观测台' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(/观测台仅提供深色/)).toBeInTheDocument()
   })
 
   it('saves updated settings with a replacement Telegram token and refreshed defaults', async () => {

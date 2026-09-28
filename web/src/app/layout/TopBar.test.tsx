@@ -85,7 +85,7 @@ describe('TopBar theme menu', () => {
     const menu = screen.getByRole('menu', { name: '主题选项' })
     expect(menu).toHaveAttribute('id', trigger.getAttribute('aria-controls'))
     const options = screen.getAllByRole('menuitemradio')
-    expect(options).toHaveLength(4)
+    expect(options).toHaveLength(6)
     expect(options.filter((option) => option.getAttribute('aria-checked') === 'true')).toHaveLength(1)
     const firstOption = options[0]
     if (!firstOption) throw new Error('theme menu must expose a first option')
@@ -97,9 +97,10 @@ describe('TopBar theme menu', () => {
     fireEvent.click(screen.getByRole('button', { name: '切换主题' }))
     const options = screen.getAllByRole('menuitemradio')
     const initiallyChecked = options.find((option) => option.getAttribute('aria-checked') === 'true')
-    const [firstOption, secondOption, , lastOption] = options
+    const [firstOption, secondOption] = options
+    const lastOption = options.at(-1)
     if (!firstOption || !secondOption || !lastOption) {
-      throw new Error('theme menu must expose four options')
+      throw new Error('theme menu must expose its options')
     }
 
     fireEvent.keyDown(firstOption, { key: 'ArrowDown' })
@@ -117,14 +118,44 @@ describe('TopBar theme menu', () => {
     renderTopBar()
     const trigger = screen.getByRole('button', { name: '切换主题' })
     fireEvent.click(trigger)
-    const classic = screen.getByRole('menuitemradio', { name: /克制工程/ })
+    const precision = screen.getByRole('menuitemradio', { name: '精密 深色' })
 
-    fireEvent.keyDown(classic, { key: 'Enter' })
+    fireEvent.keyDown(precision, { key: 'Enter' })
 
     expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
+    expect(document.documentElement.className).toBe('theme-precision-dark')
     fireEvent.click(trigger)
-    expect(screen.getByRole('menuitemradio', { name: /克制工程/ })).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('menuitemradio', { name: '精密 深色' })).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('does not mark a houfeng item for the dark-only observatory preset in light mode', () => {
+    localStorage.setItem('houfeng.theme.preset', 'observatory')
+    localStorage.setItem('houfeng.theme.mode', 'light')
+    renderTopBar()
+    expect(document.documentElement.className).toBe('theme-houfeng-light')
+    const trigger = screen.getByRole('button', { name: '切换主题' })
+    expect(trigger).toHaveTextContent('☀')
+    fireEvent.click(trigger)
+
+    const options = screen.getAllByRole('menuitemradio')
+    expect(options.filter((option) => option.getAttribute('aria-checked') === 'true')).toHaveLength(0)
+    fireEvent.keyDown(options[0]!, { key: 'Escape' })
+    expect(localStorage.getItem('houfeng.theme.preset')).toBe('observatory')
+  })
+
+  it('follows the system scheme without dropping the chosen preset', () => {
+    renderTopBar()
+    const trigger = screen.getByRole('button', { name: '切换主题' })
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '观测台' }))
+    fireEvent.click(trigger)
+    fireEvent.click(screen.getByRole('menuitemradio', { name: '跟随系统' }))
+
+    expect(localStorage.getItem('houfeng.theme.preset')).toBe('observatory')
+    expect(localStorage.getItem('houfeng.theme.mode')).toBe('system')
+    fireEvent.click(trigger)
+    expect(screen.getByRole('menuitemradio', { name: '跟随系统' })).toHaveAttribute('aria-checked', 'true')
   })
 
   it('closes on Escape, Tab, and outside pointer press', () => {

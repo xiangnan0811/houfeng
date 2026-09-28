@@ -18,6 +18,9 @@ Avoid cheap "Chinese style" decoration, large empty SaaS panels, neon monitoring
 Current UI defaults:
 
 - dark-first theme with an equally usable light theme;
+- three operator-selectable presets that share one layout, component set, and interaction model and differ only in palette, elevation, corner radius, and background texture: 候风 (default; sage instrument panel, dark and light), 精密 (cool slate with indigo accent, dark and light), and 观测台 (terminal teal/amber with tighter 2–5px token radii and a faint grid, dark only — light falls back to 候风 light; a few legacy shell rules still use fixed radii). Presets are a local browser preference, not a per-page choice;
+- layered surfaces with soft card elevation and short, calm transitions (roughly 120–240ms) instead of flat, instant panels; severity changes stay immediate;
+- eyebrow labels (`--type-eyebrow-size`) are 12px so Chinese text stays legible at high density; some older 10–11px badge and hint rules remain and are not yet part of this guarantee;
 - CSS custom properties in `web/src/styles/tokens.css`;
 - the shared shell and workspaces consume the same semantic theme tokens; layout choices must not introduce independent palettes or overwrite the global theme preference;
 - compact spacing based on the existing token scale;

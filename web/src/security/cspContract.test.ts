@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { extname, join, resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { resolveScheme, themeClass } from '../lib/theme'
+
 const WEB_ROOT = process.cwd()
 const REPOSITORY_ROOT = resolve(WEB_ROOT, '..')
 const CSP_POLICY = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
@@ -9,7 +11,9 @@ const EXPECTED_PUBLIC_RESOURCES = [
   'theme-bootstrap.js',
   'select-caret-houfeng-dark.svg',
   'select-caret-houfeng-light.svg',
-  'select-caret-classic-dark.svg',
+  'select-caret-precision-dark.svg',
+  'select-caret-precision-light.svg',
+  'select-caret-observatory-dark.svg',
   'fonts/ibm-plex-sans-400.woff2',
   'fonts/ibm-plex-sans-500.woff2',
   'fonts/ibm-plex-sans-600.woff2',
@@ -111,7 +115,9 @@ describe('strict CSP source contract', () => {
     }
     expect(tokens).toContain("url('/select-caret-houfeng-dark.svg')")
     expect(tokens).toContain("url('/select-caret-houfeng-light.svg')")
-    expect(tokens).toContain("url('/select-caret-classic-dark.svg')")
+    expect(tokens).toContain("url('/select-caret-precision-dark.svg')")
+    expect(tokens).toContain("url('/select-caret-precision-light.svg')")
+    expect(tokens).toContain("url('/select-caret-observatory-dark.svg')")
   })
 
   it('routes custom select arrows through the shared same-origin caret token', () => {
@@ -145,7 +151,42 @@ describe('theme bootstrap allowlist', () => {
     expect(document.documentElement.className).toBe('theme-houfeng-dark')
   })
 
-  it('keeps classic light aligned with the runtime houfeng-light fallback', () => {
+  it('matches the runtime themeClass for every allowed preset and scheme', () => {
+    for (const preset of ['houfeng', 'precision', 'observatory'] as const) {
+      for (const scheme of ['dark', 'light'] as const) {
+        document.documentElement.className = ''
+        localStorage.setItem('houfeng.theme.preset', preset)
+        localStorage.setItem('houfeng.theme.mode', scheme)
+
+        window.eval(publicSource('theme-bootstrap.js'))
+
+        expect(document.documentElement.className).toBe(themeClass(preset, scheme))
+      }
+    }
+  })
+
+  it('resolves system mode like the runtime, including when matchMedia is unavailable', () => {
+    const environments = [
+      { name: 'prefers dark', matchMedia: vi.fn().mockReturnValue({ matches: true }) },
+      { name: 'prefers light', matchMedia: vi.fn().mockReturnValue({ matches: false }) },
+      { name: 'no matchMedia', matchMedia: undefined },
+    ]
+    for (const environment of environments) {
+      vi.stubGlobal('matchMedia', environment.matchMedia)
+      for (const preset of ['houfeng', 'precision', 'observatory'] as const) {
+        document.documentElement.className = ''
+        localStorage.setItem('houfeng.theme.preset', preset)
+        localStorage.setItem('houfeng.theme.mode', 'system')
+
+        window.eval(publicSource('theme-bootstrap.js'))
+
+        expect(document.documentElement.className, `${environment.name} ${preset}`)
+          .toBe(themeClass(preset, resolveScheme('system')))
+      }
+    }
+  })
+
+  it('migrates the retired classic preset to the default houfeng theme', () => {
     localStorage.setItem('houfeng.theme.preset', 'classic')
     localStorage.setItem('houfeng.theme.mode', 'light')
 

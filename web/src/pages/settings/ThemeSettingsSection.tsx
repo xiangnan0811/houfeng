@@ -1,9 +1,11 @@
 import { SegmentedControl } from '../../components/atoms'
+import { isDarkOnlyPreset } from '../../lib/theme'
 import { useThemeOptional, type Mode, type Preset } from '../../lib/theme-context'
 
 const PRESET_TABS = [
-  { value: 'houfeng' as const, label: '候风原色' },
-  { value: 'classic' as const, label: '经典' },
+  { value: 'houfeng' as const, label: '候风' },
+  { value: 'precision' as const, label: '精密' },
+  { value: 'observatory' as const, label: '观测台' },
 ]
 
 const MODE_TABS = [
@@ -38,6 +40,9 @@ export function ThemeSettingsSection() {
           items={MODE_TABS}
         />
       </div>
+      {isDarkOnlyPreset(preset) ? (
+        <p className="ss-desc">观测台仅提供深色；浅色或跟随系统为浅色时使用候风浅色。</p>
+      ) : null}
     </>
   )
 }

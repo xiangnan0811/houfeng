@@ -125,7 +125,7 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 - 唯一批准策略是：`default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'`。
 - Go runtime 与 Vite 不得各维护策略副本；运行时唯一来源是 `csp-policy.txt`。测试中的 expected literal 只用于发现 policy 漂移，不能成为第二个运行时来源。
 - Docker web stage 不能只复制 `web/`：它必须复制原始 `csp-policy.txt` 到 Vite 解析的 `/src/internal/center/http/` 路径；禁止在 `web/` 下生成或维护第二份 policy。
-- HTML 不得含 inline script 或远程 font；主题 bootstrap 必须在 React 入口前同步加载同源文件，并只接受 `houfeng|classic` 与 `dark|light|system` allowlist。
+- HTML 不得含 inline script 或远程 font；主题 bootstrap 必须在 React 入口前同步加载同源文件，并只接受 `houfeng|precision|observatory` 与 `dark|light|system` allowlist；其他持久值（含已下线的 `classic`）回落到 `houfeng`。
 - CSS 不得引用 remote font 或 `data:` image。IBM Plex Sans 400/500/600/700、Mono 400/500/600、OFL 和三套主题 caret 必须作为受跟踪的 `web/public/` 资源存在。
 - 所有生产 `.tsx` 禁止 JSX `style=`。静态视觉使用 BEM/令牌，SVG 动态几何使用 attributes，比例与列宽优先使用 `<progress>` 与 `<col width>`。Modal scroll lock / clipboard fallback 的窄范围 CSSOM 写入必须保留行为测试与真实 Chromium CSP 证据，不得扩展成业务样式通道。
 - CSP 合格需要三层证据同时成立：source contract、Go exact-header/Vite shared-header tests、真实 production build 浏览器 violation gate；只通过其中一层不能宣称兼容。
@@ -155,7 +155,7 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 
 - `internal/center/http/middleware_test.go`: `TestSecurityHeadersSetsBaselineHeaders` 必须断言完整、精确 CSP header。
 - `web/vite.config.test.ts`: 断言 dev 与 preview headers 等于批准 policy。
-- `web/src/security/cspContract.test.ts`: 断言唯一 policy 文件、无 remote/inline/data/JSX style、所有同源资源与 license 存在、font/caret wiring 完整、theme allowlist 与 `classic-light` 回退一致。
+- `web/src/security/cspContract.test.ts`: 断言唯一 policy 文件、无 remote/inline/data/JSX style、所有同源资源与 license 存在、font/caret wiring 完整、theme allowlist 与运行时 `themeClass` 映射（含 `observatory-light` 回退）逐项一致。
 - `web/src/security/cspContract.test.ts`: 同时断言 Docker `web-build` stage 在 `npm run build` 前把原始 policy 复制到 `/src/internal/center/http/csp-policy.txt`。
 - 改到的 chart/table/progress/component 必须有 focused unit test，断言不再生成 `style` prop 且运行时值仍进入对应 attribute/value。
 - production build 后用真实 Chromium 覆盖 login 与核心路由、`1440x1000` / `1024x768` / `390x900`，捕获 `securitypolicyviolation`、console/runtime、network、Document header、字体、caret、主题切换与动态图表交互；持久化 CI browser gate 由前端质量 ratchet 任务维护。

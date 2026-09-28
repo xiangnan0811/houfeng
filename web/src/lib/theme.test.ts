@@ -3,6 +3,7 @@ import {
   applyTheme,
   detectInitialTheme,
   preferredScheme,
+  themeClass,
   type Preset,
   type Mode,
   THEME_STORAGE_KEYS,
@@ -25,10 +26,24 @@ describe('theme runtime', () => {
     applyTheme('houfeng', 'dark')
     expect(document.documentElement.classList.contains('theme-houfeng-dark')).toBe(true)
 
-    applyTheme('classic', 'light')
-    // classic + light falls back to houfeng-light since we only have 3 themes
-    expect(document.documentElement.classList.contains('theme-houfeng-light')).toBe(true)
-    expect(document.documentElement.classList.contains('theme-houfeng-dark')).toBe(false)
+    applyTheme('precision', 'light')
+    expect(document.documentElement.className).toBe('theme-precision-light')
+
+    applyTheme('observatory', 'dark')
+    expect(document.documentElement.className).toBe('theme-observatory-dark')
+
+    // 观测台仅深色：浅色回退候风浅色，且只保留一个 theme 类
+    applyTheme('observatory', 'light')
+    expect(document.documentElement.className).toBe('theme-houfeng-light')
+  })
+
+  it('themeClass maps every preset and scheme to a defined runtime theme', () => {
+    expect(themeClass('houfeng', 'dark')).toBe('theme-houfeng-dark')
+    expect(themeClass('houfeng', 'light')).toBe('theme-houfeng-light')
+    expect(themeClass('precision', 'dark')).toBe('theme-precision-dark')
+    expect(themeClass('precision', 'light')).toBe('theme-precision-light')
+    expect(themeClass('observatory', 'dark')).toBe('theme-observatory-dark')
+    expect(themeClass('observatory', 'light')).toBe('theme-houfeng-light')
   })
 
   it('detectInitialTheme defaults to houfeng + dark', () => {
@@ -38,9 +53,17 @@ describe('theme runtime', () => {
   })
 
   it('detectInitialTheme reads localStorage', () => {
-    setLS('classic', 'dark')
+    setLS('precision', 'light')
     const t = detectInitialTheme()
-    expect(t.preset).toBe('classic')
+    expect(t.preset).toBe('precision')
+    expect(t.mode).toBe('light')
+  })
+
+  it('detectInitialTheme migrates the retired classic preset to houfeng', () => {
+    localStorage.setItem(THEME_STORAGE_KEYS.preset, 'classic')
+    localStorage.setItem(THEME_STORAGE_KEYS.mode, 'dark')
+    const t = detectInitialTheme()
+    expect(t.preset).toBe('houfeng')
     expect(t.mode).toBe('dark')
   })
 
