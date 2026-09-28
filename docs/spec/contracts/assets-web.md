@@ -327,7 +327,8 @@ Use concise labels and factual loading/error/empty states. Do not add instructio
 ## 库存与归档数据流
 
 - VPS inventory data: `VPSPage` 拉取 current `listVPSAssets()`、`listProviders()` 和 current `listSubscriptions({ sort: 'renew_at', order: 'asc' })`，在前端按 URL-state 做 derived quick views；归档 VPS 不在主库存页展示，通过 `/archive` 查看历史。
-- Archive data: `/archive` 显式请求 `asset_scope:'archived'` 的 VPS 和订阅形成摘要，不自动拉单台 detail/services/domains/timeline。点击进入 `/archive/:vpsId`，只有 review 返回 archived 才读取 timeline 与 `asset_scope:'all'` 订阅历史；管理中资源 replace 回 `/vps/:vpsId`。详情读取历史关联、历次监控、Target、业务记录和跟进事项，不依赖当前 Target 列表。用户记录排在订阅/服务/域名明细之前；提供明确的历史补录、跟进及恢复操作，不允许普通当前资源编辑或自动重开关联。多币种摘要分币种显示，不跨币种求和。
+- Archive data: `/archive` 显式请求 `asset_scope:'archived'` 的 VPS 和订阅形成摘要，不自动拉单台 detail/services/domains/timeline。点击进入 `/archive/:vpsId`，只有 review 返回 archived 才读取 timeline 与 `asset_scope:'all'` 订阅历史；管理中资源 replace 回 `/vps/:vpsId`。详情读取历史关联、历次监控、Target、业务记录和跟进事项，不依赖当前 Target 列表。提供明确的历史补录、跟进及恢复操作，不允许普通当前资源编辑或自动重开关联。多币种摘要分币种显示，不跨币种求和。
+- Archive detail layout: 首屏依次为身份与归档时间、归档摘要（服役时长、末期月费、续费决策、服务商自动续费核对、留存资产），以及回看标签与侧栏。回看标签按「用户记录」（默认）→ 账单与订阅 → 服务与域名 → 监控与探测 → 变更时间线排列，计数来自已加载事实；时间线合并续费决策、价格、规格和 IP 变化并按时间倒序。侧栏「归档后待办」承载自动续费核对、归档后备注与跟进事项（逐条处理原因；迁移跟进的目标与结果独立填写），「访问与规格」只读展示服务商、位置、IP 与 SSH。自动续费核对为 unchecked/enabled 时摘要以提醒色提示可能仍在扣费。空分组显示一行说明，不渲染大面积空表；timeline/订阅加载失败只在所属标签内报错并可独立重试。不重复显示归档资格。
 - URL-state: VPS inventory 支持 `view=all|renewal|unreviewed|unlinked|missing_subscription|missing_facts|cancellation_attention`，及 `provider_id`、`lifecycle_status`、`usage_tag`、`renewal_decision`；旧 usage_status 不再是合法筛选。Target inventory 支持 `coverage_gap=1` 表达执行监控实例覆盖缺口。
 - `VPSAssetRecord.active_monitoring_instance_link_count` 只能展示 MonitoringInstance 关联数量或未关联状态，**不得**展示 linked monitoring instance health、最近心跳或异常，除非后端 contract 新增并同步类型/测试。
 - VPS inventory quick views 中 derived filters 在前端执行即可；40+ VPS 量级不引入新缓存/状态库，不新增 API 字段。

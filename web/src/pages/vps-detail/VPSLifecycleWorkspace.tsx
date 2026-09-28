@@ -3,7 +3,10 @@ import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import { useEffect, useRef, useState } from 'react'
 import { Button, Input } from '../../components/atoms'
 import { createVPSFollowup, endVPSAssociation, linkVPSAssociation, listAssetDomains, listAssetServices, listVPSAssociations, listVPSFollowups, listTargets, resolveVPSFollowup } from '../../lib/api'
+import { formatDateTime } from '../../lib/format'
 import type { VPSAssociationRecord, VPSFollowupRecord } from '../../lib/types'
+
+const FOLLOWUP_STATUS_LABELS: Record<VPSFollowupRecord['status'], string> = { pending: '待核对', resolved: '已解决', ignored: '已忽略' }
 
 type Props = { vpsId: string; archived?: boolean; kind: 'service' | 'domain' | 'followups'; onChanged?: () => void }
 
@@ -26,6 +29,8 @@ function OwnedWorkspace({ vpsId, archived = false, kind, onChanged }: Props) {
   const [reason, setReason] = useState('')
   const [summary, setSummary] = useState('')
   const [migrationTarget, setMigrationTarget] = useState('')
+  const [migrationResult, setMigrationResult] = useState('')
+  const [handlingId, setHandlingId] = useState('')
   const [error, setError] = useState('')
   const [catalogWarning, setCatalogWarning] = useState('')
   const [loading, setLoading] = useState(true)
@@ -78,6 +83,7 @@ function OwnedWorkspace({ vpsId, archived = false, kind, onChanged }: Props) {
       await action()
       if (!live.current) return
       setReason(''); setSummary(''); setSelected(''); setAddress(''); setPort(''); setTargetId(''); setServiceId('')
+      setMigrationTarget(''); setMigrationResult(''); setHandlingId('')
       setRevision((value) => value + 1)
       onChanged?.()
     } catch (err) { if (live.current) setError(err instanceof Error ? err.message : '操作失败') }
@@ -89,24 +95,37 @@ function OwnedWorkspace({ vpsId, archived = false, kind, onChanged }: Props) {
     {catalogWarning ? <p role="status">{catalogWarning}<Button onClick={() => setRevision((value) => value + 1)}>重试目录</Button></p> : null}
     {error ? <p role="alert">{error}<Button onClick={() => setRevision((value) => value + 1)}>重试</Button></p> : null}
     {kind === 'followups' ? <>
-      <p>待核对事项可在归档后继续处理。解决和忽略均保留原因、操作者及时间。</p>
-      {followups.length === 0 ? <p>暂无跟进事项。</p> : followups.map((item) => <article key={item.followup_id}>
-        <h4>{item.summary}</h4>{item.kind === 'migration' ? <p>来源：{String(item.details.source_vps_id ?? vpsId)} · 目标：{String(item.details.target_vps ?? '待记录')} · 结果：{String(item.details.result ?? '待跟进')}</p> : null}<p>{item.status === 'pending' ? '待核对' : item.status === 'resolved' ? '已解决' : '已忽略'} · {item.created_at}</p>
-        {item.resolution_reason ? <p>{item.resolution_reason} · {item.resolved_by} · {item.resolved_at}</p> : null}
-        {item.status === 'pending' && !READ_ONLY_PREVIEW ? <><Button disabled={busy || !reason.trim()} onClick={() => void mutate(() => resolveVPSFollowup(vpsId, item.followup_id, 'resolved', reason.trim()))}>解决</Button><Button disabled={busy || !reason.trim()} onClick={() => void mutate(() => resolveVPSFollowup(vpsId, item.followup_id, 'ignored', reason.trim()))}>忽略</Button></> : null}
-      </article>)}
-      {!READ_ONLY_PREVIEW ? <>
-      <Input label="处理原因 / 迁移来源、目标及结果" value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} />
-      <Input label="迁移目标 VPS（名称或标识）" value={migrationTarget} disabled={busy} onChange={(event) => setMigrationTarget(event.target.value)} />
-      <Input label="新增跟进事项" value={summary} disabled={busy} onChange={(event) => setSummary(event.target.value)} />
-      <Button disabled={busy || !summary.trim()} onClick={() => void mutate(() => createVPSFollowup(vpsId, { kind: 'migration', summary: summary.trim(), details: { source_vps_id: vpsId, target_vps: migrationTarget.trim(), result: reason.trim() } }))}>记录迁移跟进</Button>
-      </> : null}
+      {followups.length === 0 ? <p className="lifecycle-empty">暂无跟进事项。</p> : <ul className="lifecycle-followups">{followups.map((item) => <li key={item.followup_id} className={`lifecycle-followup lifecycle-followup--${item.status}`}>
+        <div className="lifecycle-followup__head">
+          <span className="lifecycle-followup__status">{FOLLOWUP_STATUS_LABELS[item.status] ?? item.status}</span>
+          <span className="lifecycle-followup__time mono tnum">{formatDateTime(item.created_at)}</span>
+        </div>
+        <h4 className="lifecycle-followup__summary">{item.summary}</h4>
+        {item.kind === 'migration' ? <p className="lifecycle-followup__meta">来源：{String(item.details.source_vps_id ?? vpsId)} · 目标：{String(item.details.target_vps || '待记录')} · 结果：{String(item.details.result || '待跟进')}</p> : null}
+        {item.resolution_reason ? <p className="lifecycle-followup__meta">{item.resolution_reason} · {item.resolved_by}{item.resolved_at ? ` · ${formatDateTime(item.resolved_at)}` : ''}</p> : null}
+        {item.status === 'pending' && !READ_ONLY_PREVIEW ? handlingId === item.followup_id ? <div className="lifecycle-followup__resolve">
+          <Input label="处理原因" value={reason} disabled={busy} autoFocus onChange={(event) => setReason(event.target.value)} />
+          <div className="lifecycle-actions">
+            <Button size="sm" disabled={busy || !reason.trim()} onClick={() => void mutate(() => resolveVPSFollowup(vpsId, item.followup_id, 'resolved', reason.trim()))}>解决</Button>
+            <Button size="sm" variant="secondary" disabled={busy || !reason.trim()} onClick={() => void mutate(() => resolveVPSFollowup(vpsId, item.followup_id, 'ignored', reason.trim()))}>忽略</Button>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setHandlingId(''); setReason('') }}>取消</Button>
+          </div>
+        </div> : <div className="lifecycle-actions"><Button size="sm" variant="secondary" disabled={busy} onClick={() => { setHandlingId(item.followup_id); setReason('') }}>处理</Button></div> : null}
+      </li>)}</ul>}
+      {!READ_ONLY_PREVIEW ? <details className="lifecycle-followup-create">
+        <summary>新增迁移跟进</summary>
+        <p className="lifecycle-hint">解决和忽略均保留原因、操作者及时间；记录迁移不会自动执行迁移。</p>
+        <Input label="新增跟进事项" value={summary} disabled={busy} onChange={(event) => setSummary(event.target.value)} />
+        <Input label="迁移目标 VPS（名称或标识）" value={migrationTarget} disabled={busy} onChange={(event) => setMigrationTarget(event.target.value)} />
+        <Input label="迁移结果" value={migrationResult} disabled={busy} onChange={(event) => setMigrationResult(event.target.value)} />
+        <div className="lifecycle-actions"><Button size="sm" disabled={busy || !summary.trim()} onClick={() => void mutate(() => createVPSFollowup(vpsId, { kind: 'migration', summary: summary.trim(), details: { source_vps_id: vpsId, target_vps: migrationTarget.trim(), result: migrationResult.trim() } }))}>记录迁移跟进</Button></div>
+      </details> : null}
     </> : <>
-      <p>对象身份独立于 VPS。结束关联保留历史快照，共享对象及其他 VPS 的关联继续存在。</p>
-      {rows.length === 0 ? <p>暂无关联。</p> : rows.map((item) => <article key={item.association_id}>
+      {archived ? null : <p>对象身份独立于 VPS。结束关联保留历史快照，共享对象及其他 VPS 的关联继续存在。</p>}
+      {rows.length === 0 ? <p className="lifecycle-empty">暂无关联。</p> : rows.map((item) => <article key={item.association_id}>
         <h4>{options.find((option) => option.id === item.object_id)?.name ?? item.object_id}</h4>
-        <p>{item.address}{item.port ? `:${item.port}` : ''} · {item.started_at} — {item.ended_at ?? '当前'}</p>
-        {item.ended_at ? <><p>{item.end_reason} · {item.ended_by}</p><details><summary>关联结束时的事实</summary><pre>{JSON.stringify(item.snapshot, null, 2)}</pre></details></> : !archived && !READ_ONLY_PREVIEW ? <Button disabled={busy || !reason.trim()} onClick={() => void mutate(() => endVPSAssociation(vpsId, kind, item.association_id, reason.trim()))}>结束此关联</Button> : null}
+        <p className="lifecycle-followup__meta">{item.address}{item.port ? `:${item.port}` : ''} · <span className="mono tnum">{formatDateTime(item.started_at)} — {item.ended_at ? formatDateTime(item.ended_at) : '当前'}</span></p>
+        {item.ended_at ? <><p className="lifecycle-followup__meta">{item.end_reason} · {item.ended_by}</p><details><summary>关联结束时的事实</summary><dl className="lifecycle-snapshot">{Object.entries(item.snapshot ?? {}).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' ? String(value) : JSON.stringify(value)}</dd></div>)}</dl></details></> : !archived && !READ_ONLY_PREVIEW ? <Button disabled={busy || !reason.trim()} onClick={() => void mutate(() => endVPSAssociation(vpsId, kind, item.association_id, reason.trim()))}>结束此关联</Button> : null}
       </article>)}
       {!archived && !READ_ONLY_PREVIEW ? <>
         <Input label="结束关联原因" value={reason} disabled={busy} onChange={(event) => setReason(event.target.value)} />
