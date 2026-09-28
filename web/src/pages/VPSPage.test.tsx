@@ -413,6 +413,14 @@ describe('VPSPage', () => {
     expect(screen.getAllByRole('region', { name: 'VPS 快速查看' })).toHaveLength(1)
   })
 
+  it('labels VPS without usage tags instead of rendering an empty usage badge', async () => {
+    mockInventory([{ ...vps, usage_tags: [] }], [])
+    mount('/vps?workspace=workbench&selected=vps_001')
+    fireEvent.click(await screen.findByRole('button', { name: '选择 Tokyo Edge' }))
+    const accordion = screen.getByRole('region', { name: 'VPS 快速查看' })
+    expect(within(accordion).getByText('未标注用途')).toBeInTheDocument()
+  })
+
   it('opens one inline accordion after the selected workbench row and keeps the selected URL when closed', async () => {
     mockInventory()
     mount('/vps?workspace=workbench&selected=vps_001&source=inventory-flow')

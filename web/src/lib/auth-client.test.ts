@@ -6,21 +6,44 @@ beforeEach(() => {
 })
 
 describe('auth-client', () => {
-  it('login posts JSON and returns user', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(
-        JSON.stringify({ user_id: 'u1', username: 'admin', role: 'admin', display_name: '管理员' }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
-    )
+  it('login posts JSON and returns the complete identity from /me', async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ user_id: 'u1', username: '', role: '', display_name: '' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ user_id: 'u1', username: 'admin', role: 'admin', display_name: '管理员' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
     const u = await login('admin', 'pw')
-    expect(u.username).toBe('admin')
+    expect(u).toEqual({ user_id: 'u1', username: 'admin', role: 'admin', display_name: '管理员' })
     const loginCall = fetchSpy.mock.calls[0]
     if (!loginCall) throw new Error('login must call fetch')
+    expect(loginCall[0]).toBe('/api/auth/login')
     const init = loginCall[1]
     if (!init) throw new Error('login must pass request options')
     expect(init.method).toBe('POST')
     expect(JSON.parse(String(init.body))).toEqual({ username: 'admin', password: 'pw' })
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe('/api/auth/me')
+  })
+
+  it.each([
+    { name: 'service failure', me: new Response(JSON.stringify({ error: 'auth service unavailable' }), { status: 503 }), error: { status: 503 } },
+    { name: 'incomplete identity', me: new Response(JSON.stringify({ user_id: 'u1' }), { status: 200, headers: { 'Content-Type': 'application/json' } }), error: { message: '登录成功但无法读取当前用户' } },
+  ])('login revokes the new session when the identity read fails with $name', async ({ me: meResponse, error }) => {
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ user_id: 'u1' }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockResolvedValueOnce(meResponse)
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+    await expect(login('admin', 'pw')).rejects.toMatchObject(error)
+    expect(fetchSpy.mock.calls.map((call) => call[0])).toEqual(['/api/auth/login', '/api/auth/me', '/api/auth/logout'])
   })
 
   it('logout posts to /api/auth/logout', async () => {
