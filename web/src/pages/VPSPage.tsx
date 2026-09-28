@@ -522,16 +522,18 @@ function VPSQuickFacts({ row }: { row: InventoryRow }) {
       </div>
       <div className="vps-accordion__fact">
         <div className="vps-accordion__fact-label">经营与续费</div>
-        <div className="vps-accordion__fact-value">
-          <LifecycleBadge value={row.vps.lifecycle_status} />
-          {' · '}
-          <UsageBadge value={(row.vps.usage_tags ?? []).join('、')} />
-          {' · '}
-          <RenewalBadge value={row.vps.renewal_decision} />
-          {' · VPS 有效期 '}{validityLabel(row.vps)}
-          {' · '}
-          {renderRenewalDate(row)}
-          {attention ? <span className="vps-tone-warn"> · {attention}</span> : null}
+        <div className="vps-accordion__fact-value vps-accordion__fact-stack">
+          <span className="vps-accordion__badges">
+            <LifecycleBadge value={row.vps.lifecycle_status} />
+            <UsageBadge value={(row.vps.usage_tags ?? []).join('、')} />
+            <RenewalBadge value={row.vps.renewal_decision} />
+          </span>
+          <span>
+            {'VPS 有效期 '}{validityLabel(row.vps)}
+            {' · '}
+            {renderRenewalDate(row)}
+          </span>
+          {attention ? <span className="vps-tone-warn">{attention}</span> : null}
         </div>
       </div>
       <div className="vps-accordion__fact">

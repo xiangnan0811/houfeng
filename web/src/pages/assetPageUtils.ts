@@ -38,7 +38,7 @@ export function lifecycleLabel(value: VPSLifecycleStatus | string): string {
 }
 
 export function usageLabel(value: VPSUsageStatus | string): string {
-  return VPS_USAGE_STATUS_LABELS[value as VPSUsageStatus] ?? value
+  return (VPS_USAGE_STATUS_LABELS[value as VPSUsageStatus] ?? value).trim() || '未标注用途'
 }
 
 export function renewalLabel(value: VPSRenewalDecision | string): string {
