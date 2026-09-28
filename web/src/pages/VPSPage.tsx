@@ -595,8 +595,7 @@ function VPSWorkbenchAccordionRow({
           role="region"
           aria-label="VPS 快速查看"
         >
-          <VPSQuickFacts row={row} subscriptionsError={subscriptionsError} />
-          <div className="vps-accordion__footer">
+          <div className="vps-accordion__bar">
             {attention ? <p className="vps-accordion__notice">{attention}</p> : <span />}
             <Link
               className="btn sm secondary"
@@ -606,6 +605,7 @@ function VPSWorkbenchAccordionRow({
               打开 VPS 详情
             </Link>
           </div>
+          <VPSQuickFacts row={row} subscriptionsError={subscriptionsError} />
         </div>
       </td>
     </tr>
