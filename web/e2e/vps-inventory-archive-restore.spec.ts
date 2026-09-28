@@ -173,7 +173,7 @@ async function confirmArchive(page: Page) {
   await dialog.getByRole('textbox', { name: '归档原因' }).fill('订阅已结束')
   await dialog.getByRole('textbox', { name: '输入 VPS 名称确认归档' }).fill('Tokyo Edge')
   await expect(dialog.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
-  await dialog.getByRole('checkbox', { name: /确认此 VPS 从未形成有效 Agent 会话/ }).check()
+  await dialog.getByRole('checkbox', { name: /这台 VPS 从未接入过 Agent/ }).check()
   await dialog.getByRole('button', { name: '结束使用并归档' }).click()
 }
 

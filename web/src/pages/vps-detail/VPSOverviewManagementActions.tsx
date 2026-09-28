@@ -3,8 +3,6 @@ import { VPSMaintenancePanel } from './VPSMaintenancePanel'
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent, type RefObject } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 
-import { ActionConfirmationModal } from '../../components/ActionConfirmationModal'
-import { ArchiveBlockerDetails } from '../../components/ArchiveBlockerDetails'
 import { Button, Input, Modal } from '../../components/atoms'
 import { DependencyStatusCorrection } from '../../components/DependencyStatusCorrection'
 import {
@@ -81,6 +79,7 @@ import {
   INITIAL_VALIDITY_EXTENSION_DRAFT,
   mergeFactDraftWithLatest,
 } from './vpsDetailHelpers'
+import { VPSArchiveConfirmDialog } from './VPSArchiveConfirmDialog'
 import { VPSVersionConflictBanner } from './VPSVersionConflictBanner'
 import { vpsLifecycleConfirmationCopy } from './vpsLifecycleConfirmationCopy'
 import {
@@ -1523,90 +1522,28 @@ export function VPSOverviewManagementActions({
         </div>
       </VPSDetailDialog>
 
-      <ActionConfirmationModal
+      <VPSArchiveConfirmDialog
         open={archiveOpen}
         title={archiveCopy.title}
-        current={archiveCopy.current}
-        result={archiveCopy.result}
-        impact={archiveCopy.impact}
-        unchanged={archiveCopy.unchanged}
         confirmLabel={submitting ? '归档中…' : archiveCopy.confirmLabel}
-        disabled={submitting || archiveReviewLoading || archiveBlocked || !archiveNameMatches || archiveReason.trim() === '' || Boolean(archiveReview?.online_evidence?.manual_confirmation_required && !neverConnectedConfirmed)}
-        cancelDisabled={submitting}
+        submitting={submitting}
+        displayName={displayName}
+        review={archiveReview}
+        loading={archiveReviewLoading}
         error={archiveError}
-        onCancel={closePanel}
+        reason={archiveReason}
+        confirmationName={archiveConfirmationName}
+        neverConnectedConfirmed={neverConnectedConfirmed}
+        confirmDisabled={submitting || archiveReviewLoading || archiveBlocked || !archiveNameMatches || archiveReason.trim() === '' || Boolean(archiveReview?.online_evidence?.manual_confirmation_required && !neverConnectedConfirmed)}
+        onReasonChange={(value) => { setArchiveReason(value); setArchiveError(null) }}
+        onConfirmationNameChange={(value) => { setArchiveConfirmationName(value); setArchiveError(null) }}
+        onNeverConnectedChange={setNeverConnectedConfirmed}
         onConfirm={() => void submitArchive()}
-      >
-        <div className="asset-lifecycle-confirm">
-          <p className="asset-lifecycle-confirm__eyebrow">归档审查</p>
-          {archiveReview ? <details>
-            <summary>本次归档影响清单</summary>
-            <p>退役当前监控：{archiveReview.monitoring_instance_links.filter((item) => item.lifecycle_status !== '已退役').map((item) => item.display_name || item.monitoring_instance_id).join('、') || '无当前实例'}</p>
-            <p>结束此 VPS 的服务关联：{archiveReview.services.map((item) => item.name).join('、') || '无'}</p>
-            <p>结束此 VPS 的域名关联：{archiveReview.domains.map((item) => item.domain_name).join('、') || '无'}</p>
-            <p>涉及探测：{archiveReview.target_links.map((item) => item.name).join('、') || '无'}。仅明确专属探测停止，共享或归属不明确的探测保留并生成待核对事项。</p>
-            <p>账单事实继续保留；服务商自动续费需独立核对。运行异常按管理动作关闭，不发送自然恢复通知。</p>
-          </details> : null}
-          {archiveReview?.online_evidence ? <div>
-            <p>接收链路：{archiveReview.online_evidence.receiver_healthy ? '持续健康' : '健康观察不足'} · 健康观察起点：{archiveReview.online_evidence.healthy_since ?? '尚未建立'}</p>
-            <p>最早可归档：{archiveReview.online_evidence.earliest_archive_at ?? '等待安全观察'}</p>
-            {archiveReview.online_evidence.instances.map((instance) => <p key={`${instance.monitoring_instance_id}:${instance.session_id ?? ''}`}>实例 {instance.monitoring_instance_id} · 会话 {instance.session_id ?? '未建立'} · 最后可信在线：{instance.last_trusted_online_at ?? '尚未收到'}</p>)}
-          </div> : null}
-          {archiveReviewLoading ? (
-            <p className="asset-lifecycle-confirm__callouts" role="status">正在检查归档资格…</p>
-          ) : archiveReview?.blocker_details?.length ? (
-            <>
-              <h4>归档前仍有需要处理的事项。</h4>
-              <ArchiveBlockerDetails details={archiveReview.blocker_details} vpsId={vpsId} onInline={handleArchiveBlockerInline} />
-              {archiveReview.warnings.map((warning) => (
-                <p key={warning} className="asset-operation-feedback asset-operation-feedback--notice" role="status">{warning}</p>
-              ))}
-            </>
-          ) : archiveReview?.blockers.length ? (
-            <>
-              <h4>归档前仍有需要处理的事项。</h4>
-              <ul className="asset-lifecycle-confirm__blockers">
-                {archiveReview.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}
-              </ul>
-            </>
-          ) : archiveReview && !archiveReview.eligible ? (
-            <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
-              当前不能归档。请根据审查处理对象，不要把这次拒绝理解成归档已经失败。
-            </p>
-          ) : archiveReview ? (
-            <>
-              {archiveReview.warnings.map((warning) => (
-                <p key={warning} className="asset-operation-feedback asset-operation-feedback--notice" role="status">{warning}</p>
-              ))}
-              <h4>结束使用将退役当前监控、结束当前关联并停止明确专属探测，历史继续保留。</h4>
-              {archiveReview.online_evidence?.healthy_since ? <p>接收链路持续健康起点：{archiveReview.online_evidence?.healthy_since}</p> : null}
-              {archiveReview.online_evidence?.earliest_archive_at ? <p>最早可归档时间：{archiveReview.online_evidence?.earliest_archive_at}</p> : null}
-              {archiveReview.online_evidence?.manual_confirmation_required ? <label><input type="checkbox" checked={neverConnectedConfirmed} onChange={(event) => setNeverConnectedConfirmed(event.target.checked)} />确认此 VPS 从未形成有效 Agent 会话，已人工核实结束使用。</label> : null}
-              <Input label="归档原因" value={archiveReason} disabled={submitting} onChange={(event) => { setArchiveReason(event.target.value); setArchiveError(null) }} />
-              <label className="input-field">
-                <span className="input-field__label">输入 VPS 名称确认归档</span>
-                <input
-                  className="input"
-                  aria-label="输入 VPS 名称确认归档"
-                  value={archiveConfirmationName}
-                  onChange={(event) => {
-                    setArchiveConfirmationName(event.target.value)
-                    setArchiveError(null)
-                  }}
-                  placeholder={archiveReview.vps.display_name}
-                  disabled={submitting}
-                />
-                <span className="input-field__hint">需要完整匹配：{archiveReview.vps.display_name}</span>
-              </label>
-            </>
-          ) : (
-            <>
-              <p className="asset-lifecycle-confirm__callouts">归档资格暂未加载成功，请重试或关闭。</p>
-              <Button onClick={retryLoad}>重试加载</Button>
-            </>
-          )}
-        </div>
-      </ActionConfirmationModal>
+        onCancel={closePanel}
+        onRetry={retryLoad}
+        vpsId={vpsId}
+        onInlineBlocker={handleArchiveBlockerInline}
+      />
       <Modal
         open={migrationOpen}
         onClose={closePanel}
