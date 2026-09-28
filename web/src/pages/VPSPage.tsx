@@ -5,7 +5,9 @@ import {
   Button,
   Modal,
   SegmentedControl,
+  StatusGlyph,
   isInteractiveRowTarget,
+  type HealthState,
 } from '../components/atoms'
 import { FilterChip, FilterSelect, type FilterSelectOption } from '../components/filters'
 import { PageState as PageStateView } from '../components/PageState'
@@ -315,16 +317,43 @@ function quickViewLabel(value: VPSQuickView): string {
   return '全部'
 }
 
+function renewalGlyphState(value: string): HealthState {
+  if (value === 'keep') return 'normal'
+  if (value === 'unreviewed') return 'notice'
+  if (value === 'cancel') return 'offline'
+  return 'offline'
+}
+
+function RenewalMark({ value }: { value: string }) {
+  return (
+    <span className="vps-lifecycle">
+      <span aria-hidden="true"><StatusGlyph state={renewalGlyphState(value)} size="sm" /></span>
+      {renewalLabel(value)}
+    </span>
+  )
+}
+
+function quietText(value: string, quiet: boolean) {
+  return quiet ? <span className="vps-quiet-fact">{value}</span> : value
+}
+
 function renderRenewalDate(row: InventoryRow) {
-  if (row.subscriptionEvidence === 'loading') return '订阅加载中'
-  if (row.subscriptionEvidence === 'error') return '订阅加载失败'
-  if (!row.subscription) return '无订阅'
-  if (!row.subscription.renew_at) return '无续费日'
+  if (row.subscriptionEvidence === 'loading') return <span className="vps-workbench__pending">订阅加载中</span>
+  if (row.subscriptionEvidence === 'error') return <span className="vps-workbench__pending">订阅加载失败</span>
+  if (!row.subscription) return <span className="vps-quiet-fact">无订阅</span>
+  if (!row.subscription.renew_at) return <span className="vps-quiet-fact">无续费日</span>
   const days = daysUntilDate(row.subscription.renew_at)
+  const date = formatDate(row.subscription.renew_at)
   if (days != null && days <= 30) {
-    return <span className="vps-tone-warn">{formatDate(row.subscription.renew_at)}</span>
+    const dueLabel = days < 0 ? '续费已过期' : '30天内续费'
+    return (
+      <span className="vps-workbench__due" title={dueLabel}>
+        <StatusGlyph state="notice" size="sm" ariaLabel={dueLabel} />
+        <span className="vps-mono">{date}</span>
+      </span>
+    )
   }
-  return formatDate(row.subscription.renew_at)
+  return <span className="vps-mono">{date}</span>
 }
 
 function providerName(providerID: string | null, providers: ProviderRecord[]): string {
@@ -357,8 +386,40 @@ function validityLabel(vps: VPSAssetRecord): string {
   return '未知'
 }
 
+function compactParts(parts: Array<string | null | undefined>): string[] {
+  return parts.map((part) => (part ?? '').trim()).filter(Boolean)
+}
+
 function compactLine(parts: Array<string | null | undefined>): string {
-  return parts.map((part) => (part ?? '').trim()).filter(Boolean).join(' · ')
+  return compactParts(parts).join(' · ')
+}
+
+function DottedLine({ parts }: { parts: Array<string | null | undefined> }) {
+  const items = compactParts(parts)
+  return (
+    <span className="vps-dotted">
+      {items.map((item, index) => (
+        <span key={index} className="vps-dotted__item">
+          {item}
+          {index < items.length - 1 ? <span className="vps-dotted__sep" aria-hidden="true">·</span> : null}
+        </span>
+      ))}
+    </span>
+  )
+}
+
+function vpsPlaceParts(vps: VPSAssetRecord): string[] {
+  const location = [vps.country, vps.region, vps.city].map((part) => part.trim()).filter(Boolean)
+  const datacenter = vps.datacenter.trim()
+  if (location.length === 0 && !datacenter) return ['位置缺失']
+  if (location.length === 0) return [datacenter]
+  if (!datacenter) return location
+  return [...location, datacenter]
+}
+
+function vpsSpecParts(vps: VPSAssetRecord): string[] {
+  const parts = [vps.product_name, vps.os_name, vps.virtualization].map((part) => part.trim()).filter(Boolean)
+  return parts.length > 0 ? parts : ['规格未填写']
 }
 
 function vpsSpecLabel(vps: VPSAssetRecord): string {
@@ -381,22 +442,24 @@ function vpsPrimaryAddress(vps: VPSAssetRecord): string {
 }
 
 
-function subscriptionFact(row: InventoryRow, subscriptionsError: string | null): string {
-  if (row.subscriptionEvidence === 'loading') return '加载中…'
+function subscriptionParts(row: InventoryRow, subscriptionsError: string | null): string[] {
+  if (row.subscriptionEvidence === 'loading') return ['加载中…']
   if (row.subscriptionEvidence === 'error') {
-    return subscriptionsError
-      ? '加载失败：' + subscriptionsError
-      : '加载失败'
+    return [subscriptionsError ? '加载失败：' + subscriptionsError : '加载失败']
   }
-  if (!row.subscription) return '无订阅'
+  if (!row.subscription) return ['无订阅']
   const subscription = row.subscription
-  return compactLine([
+  return compactParts([
     formatMoney(subscription.price, subscription.currency),
     periodLabel(subscription.billing_period_unit, subscription.billing_period_length, subscription.billing_months),
-    subscription.renew_at ? `续费日 ${formatDate(subscription.renew_at)}` : '无续费日',
+    subscription.renew_at ? '续费日 ' + formatDate(subscription.renew_at) : '无续费日',
     subscriptionStatusLabel(subscription.status),
     renewalModeLabel(renewalModeFromLegacy(subscription)),
   ])
+}
+
+function subscriptionFact(row: InventoryRow, subscriptionsError: string | null): string {
+  return subscriptionParts(row, subscriptionsError).join(' · ')
 }
 
 function inspectorEmptyMessage(selectedID: string | null, visibleCount: number): string {
@@ -511,14 +574,20 @@ function accordionPanelId(vpsID: string) {
 function VPSQuickFacts({ row, subscriptionsError }: { row: InventoryRow; subscriptionsError: string | null }) {
   const vps = row.vps
   const sshHost = vps.ssh_host.trim()
-  const usageTags = vps.usage_tags ?? []
+  const usage = usageLabel((vps.usage_tags ?? []).join('、'))
+  const placeParts = vpsPlaceParts(vps)
+  const provider = formatOptional(vps.provider_name)
+  const ipv4 = vps.ipv4.trim()
+  const validity = validityLabel(vps)
+  const monitoringLinked = vps.active_monitoring_instance_link_count > 0
+  const subscriptionEmpty = row.subscriptionEvidence === 'ready' && !row.subscription
   return (
     <div className="vps-accordion__groups">
       <section className="vps-accordion__group">
         <h2 className="vps-accordion__group-title">资产身份</h2>
         <dl className="vps-accordion__dl">
           <dt>IPv4</dt>
-          <dd className="vps-mono">{vps.ipv4.trim() || '—'}</dd>
+          <dd className="vps-mono">{quietText(ipv4 || '—', !ipv4)}</dd>
           {vps.ipv6.trim() ? (
             <>
               <dt>IPv6</dt>
@@ -529,27 +598,31 @@ function VPSQuickFacts({ row, subscriptionsError }: { row: InventoryRow; subscri
             <>
               <dt>SSH</dt>
               <dd className="vps-mono">
-                {compactLine([vps.ssh_user.trim() ? `${vps.ssh_user.trim()}@${sshHost}` : sshHost, String(vps.ssh_port || '')])}
+                {(vps.ssh_user.trim() ? vps.ssh_user.trim() + '@' + sshHost : sshHost) + (vps.ssh_port ? ':' + vps.ssh_port : '')}
               </dd>
             </>
           ) : null}
           <dt>服务商</dt>
-          <dd>{formatOptional(vps.provider_name)}</dd>
+          <dd>{quietText(provider, provider === '—')}</dd>
           <dt>位置</dt>
-          <dd>{vpsPlaceLabel(vps)}</dd>
+          <dd className={placeParts.length === 1 && placeParts[0] === '位置缺失' ? 'vps-quiet-fact' : undefined}>
+            <DottedLine parts={placeParts} />
+          </dd>
         </dl>
       </section>
       <section className="vps-accordion__group">
         <h2 className="vps-accordion__group-title">经营与续费</h2>
         <dl className="vps-accordion__dl">
           <dt>用途</dt>
-          <dd>{usageLabel(usageTags.join('、'))}</dd>
+          <dd>{quietText(usage, usage === '未标注用途')}</dd>
           <dt>续费意向</dt>
-          <dd><RenewalBadge value={vps.renewal_decision} /></dd>
+          <dd><RenewalMark value={vps.renewal_decision} /></dd>
           <dt>VPS 有效期</dt>
-          <dd>{validityLabel(vps)}</dd>
+          <dd>{quietText(validity, validity === '未知')}</dd>
           <dt>订阅</dt>
-          <dd>{subscriptionFact(row, subscriptionsError)}</dd>
+          <dd className={subscriptionEmpty ? 'vps-quiet-fact' : undefined}>
+            <DottedLine parts={subscriptionParts(row, subscriptionsError)} />
+          </dd>
         </dl>
       </section>
       <section className="vps-accordion__group">
@@ -557,16 +630,23 @@ function VPSQuickFacts({ row, subscriptionsError }: { row: InventoryRow; subscri
         <dl className="vps-accordion__dl">
           <dt>监控实例</dt>
           <dd>
-            {vps.active_monitoring_instance_link_count > 0
-              ? `已关联 ${vps.active_monitoring_instance_link_count} 个`
-              : '未关联'}
-            {typeof vps.running_monitoring_instance_count === 'number' && vps.running_monitoring_instance_count > 0
-              ? ` · 运行中 ${vps.running_monitoring_instance_count}`
-              : ''}
+            {monitoringLinked ? (
+              <DottedLine parts={[
+                '已关联 ' + vps.active_monitoring_instance_link_count + ' 个',
+                typeof vps.running_monitoring_instance_count === 'number' && vps.running_monitoring_instance_count > 0
+                  ? '运行中 ' + vps.running_monitoring_instance_count
+                  : '',
+              ]} />
+            ) : (
+              <span className="vps-quiet-fact">未关联</span>
+            )}
           </dd>
           <dt>IP 质量</dt>
           <dd>
-            <IPQualityBadge {...(vps.ip_quality_summary === undefined ? {} : { summary: vps.ip_quality_summary })} />
+            <IPQualityBadge
+              appearance="text"
+              {...(vps.ip_quality_summary === undefined ? {} : { summary: vps.ip_quality_summary })}
+            />
           </dd>
         </dl>
       </section>
@@ -596,13 +676,21 @@ function VPSWorkbenchAccordionRow({
           aria-label="VPS 快速查看"
         >
           <div className="vps-accordion__bar">
-            {attention ? <p className="vps-accordion__notice">{attention}</p> : <span />}
+            {attention ? (
+              <p className="vps-accordion__notice">
+                <span aria-hidden="true"><StatusGlyph state="notice" size="sm" /></span>
+                <span>{attention}</span>
+              </p>
+            ) : <span />}
             <Link
-              className="btn sm secondary"
+              className="vps-accordion__detail"
               to={detailHref}
               state={{ vpsInventoryHref: currentInventoryHref }}
             >
               打开 VPS 详情
+              <svg className="vps-accordion__detail-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                <path d="M3.5 8h9M9 4.5 12.5 8 9 11.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
             </Link>
           </div>
           <VPSQuickFacts row={row} subscriptionsError={subscriptionsError} />
@@ -975,6 +1063,13 @@ export function VPSPage() {
                       const expanded = selected && accordionOpen
                       const attention = cancellationAttentionReason(row)
                       const detailHref = vpsDetailHref(row.vps.vps_id, filters.view)
+                      const address = vpsPrimaryAddress(row.vps)
+                      const placeParts = vpsPlaceParts(row.vps)
+                      const specParts = vpsSpecParts(row.vps)
+                      const placeMissing = placeParts.length === 1 && placeParts[0] === '位置缺失'
+                      const specMissing = specParts.length === 1 && specParts[0] === '规格未填写' 
+                      const usage = usageLabel((row.vps.usage_tags ?? []).join('、'))
+                      const linked = row.vps.active_monitoring_instance_link_count > 0
                       return (
                         <Fragment key={row.vps.vps_id}>
                           {/* a11y-allow-nonsemantic-click: primary-link-row-enhancement */}
@@ -991,46 +1086,57 @@ export function VPSPage() {
                                 <button
                                   type="button"
                                   className="vps-workbench__name"
-                                  aria-label={`选择 ${row.vps.display_name}`}
+                                  aria-label={'选择 ' + row.vps.display_name}
                                   aria-pressed={selected}
                                   aria-expanded={expanded}
                                   aria-controls={expanded ? accordionPanelId(row.vps.vps_id) : undefined}
                                   onClick={() => selectOrToggle(row.vps.vps_id)}
                                 >
-                                  {row.vps.display_name}
+                                  <svg className="vps-workbench__chevron" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+                                    <path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                                  </svg>
+                                  <span className="vps-workbench__name-text">{row.vps.display_name}</span>
                                 </button>
                               </div>
                               <div className="vps-workbench__meta">
-                                <span className="vps-mono">{vpsPrimaryAddress(row.vps)}</span>
-                                {row.vps.provider_name.trim() ? ` · ${row.vps.provider_name}` : ''}
+                                <span className={address === '—' ? 'vps-mono vps-quiet-fact' : 'vps-mono'}>{address}</span>
+                                {row.vps.provider_name.trim() ? ' · ' + row.vps.provider_name : ''}
                               </div>
                             </td>
                             <td>
-                              <div>{vpsPlaceLabel(row.vps)}</div>
-                              <div className="vps-workbench__meta">{vpsSpecLabel(row.vps)}</div>
+                              <div className="vps-workbench__kicker">位置与规格</div>
+                              <div className={placeMissing ? 'vps-workbench__line vps-workbench__line--quiet' : 'vps-workbench__line'}><DottedLine parts={placeParts} /></div>
+                              <div className={specMissing ? 'vps-workbench__meta vps-workbench__meta--quiet' : 'vps-workbench__meta'}><DottedLine parts={specParts} /></div>
                             </td>
                             <td>
-                              <LifecycleBadge value={row.vps.lifecycle_status} />
-                              <div className="vps-workbench__meta">{usageLabel((row.vps.usage_tags ?? []).join('、'))}</div>
+                              <div className="vps-workbench__kicker">状态与用途</div>
+                              <div className="vps-workbench__line"><span className="vps-lifecycle"><span aria-hidden="true"><StatusGlyph state={row.vps.lifecycle_status === 'active' ? 'normal' : 'offline'} size="sm" /></span>{lifecycleLabel(row.vps.lifecycle_status)}</span></div>
+                              <div className={usage === '未标注用途' ? 'vps-workbench__meta vps-workbench__meta--quiet' : 'vps-workbench__meta'}>{usage}</div>
                             </td>
                             <td>
-                              <RenewalBadge value={row.vps.renewal_decision} />
+                              <div className="vps-workbench__kicker">续费</div>
+                              <div className="vps-workbench__line"><RenewalMark value={row.vps.renewal_decision} /></div>
                               <div className="vps-workbench__meta">
                                 {renderRenewalDate(row)}
-                                {attention ? <span className="vps-tone-warn" title={attention}> · 自动续费待核对</span> : null}
+                                {attention ? (
+                                  <span className="vps-workbench__follow">
+                                    <span className="vps-workbench__attention" title={attention}>
+                                      <span aria-hidden="true"><StatusGlyph state="notice" size="sm" /></span>
+                                      自动续费待核对
+                                    </span>
+                                  </span>
+                                ) : null}
                               </div>
                             </td>
                             <td>
-                              <div>
-                                {row.vps.active_monitoring_instance_link_count > 0
-                                  ? `监控 ${row.vps.active_monitoring_instance_link_count}`
-                                  : '未关联监控'}
+                              <div className="vps-workbench__kicker">监控与证据</div>
+                              <div className={linked ? 'vps-workbench__line' : 'vps-workbench__line vps-workbench__line--quiet'}>
+                                {linked ? '监控 ' + row.vps.active_monitoring_instance_link_count : '未关联监控'}
                               </div>
                               <div className="vps-workbench__meta">
                                 <IPQualityBadge
-                                  {...(row.vps.ip_quality_summary === undefined
-                                    ? {}
-                                    : { summary: row.vps.ip_quality_summary })}
+                                  appearance="text"
+                                  {...(row.vps.ip_quality_summary === undefined ? {} : { summary: row.vps.ip_quality_summary })}
                                 />
                               </div>
                             </td>

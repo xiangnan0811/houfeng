@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '../../lib/api'
+import { formatDateTime } from '../../lib/format'
 import { ApiError } from '../../lib/apiRequest'
 import type {
   AssetDomainRecord,
@@ -278,7 +279,8 @@ describe('VPSOverviewManagementActions', () => {
     expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
     expect(screen.queryByLabelText('输入 VPS 名称确认归档')).not.toBeInTheDocument()
     await act(async () => next.resolve(archiveReview('vps_b', '大阪边缘')))
-    expect(screen.getByLabelText('输入 VPS 名称确认归档')).toHaveAttribute('placeholder', '大阪边缘')
+    expect(screen.getByLabelText('输入 VPS 名称确认归档')).not.toHaveAttribute('placeholder')
+    expect(screen.getByText('需要完整匹配：大阪边缘')).toBeInTheDocument()
   })
 
   it('retains the archive idempotency key after network failure and locks repeated clicks', async () => {
@@ -300,19 +302,106 @@ describe('VPSOverviewManagementActions', () => {
   })
 
   it('requires an explicit never-connected confirmation and displays fresh server blockers', async () => {
-    const review = { ...archiveReview(), online_evidence: { observed_at: '2026-09-26', receiver_generation: 'boot', receiver_healthy: true, healthy_since: null, last_health_check_at: null, earliest_archive_at: null, never_connected: true, manual_confirmation_required: true, instances: [] } }
+    const healthySince = '2026-09-28T03:31:47.362882Z'
+    const review = {
+      ...archiveReview(),
+      warnings: [
+        '没有订阅记录；资源有效期与服务商扣费请独立核对。',
+        '没有服务关联。',
+        '没有域名关联。',
+        '此 VPS 从未形成有效 Agent 会话，归档须人工确认并说明原因。',
+      ],
+      online_evidence: {
+        observed_at: healthySince,
+        receiver_generation: 'boot',
+        receiver_healthy: true,
+        healthy_since: healthySince,
+        last_health_check_at: healthySince,
+        earliest_archive_at: null,
+        never_connected: true,
+        manual_confirmation_required: true,
+        instances: [],
+      },
+    }
     vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(review)
     const submit = vi.spyOn(api, 'archiveVPS').mockRejectedValue(new ApiError(409, 'preview changed', { code: 'archive_preview_stale', review: { ...review, eligible: false, blockers: ['收到新的实时在线信号'] } }))
     render(<MemoryRouter><Harness onRefresh={vi.fn()} /></MemoryRouter>)
     fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
-    fireEvent.change(await screen.findByLabelText('输入 VPS 名称确认归档'), { target: { value: '东京边缘' } })
+    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
+    expect(dialog.querySelector('.page-stack')).toBeNull()
+    expect(screen.queryByText('操作确认')).not.toBeInTheDocument()
+    expect(screen.queryByText('等待安全观察')).not.toBeInTheDocument()
+    expect(dialog.textContent ?? '').not.toContain('接收链路')
+    expect(dialog.textContent ?? '').not.toContain(healthySince)
+    expect(dialog.textContent ?? '').not.toContain(formatDateTime(healthySince))
+    expect(screen.queryByText('此 VPS 从未形成有效 Agent 会话，归档须人工确认并说明原因。')).not.toBeInTheDocument()
+    expect(screen.getByText('这台 VPS 从未接入过 Agent，不用等待 180 分钟安全观察。')).toBeInTheDocument()
+    expect(screen.getByText('没有订阅记录；资源有效期与服务商扣费请独立核对。')).toBeInTheDocument()
+    expect(screen.queryByText('没有服务关联。')).not.toBeInTheDocument()
+    expect(screen.queryByText('没有域名关联。')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('输入 VPS 名称确认归档'), { target: { value: '东京边缘' } })
     fireEvent.change(screen.getByLabelText('归档原因'), { target: { value: '人工确认' } })
     expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
-    fireEvent.click(screen.getByRole('checkbox'))
+    const checkbox = screen.getByRole('checkbox', { name: '这台 VPS 从未接入过 Agent。我已确认它不再使用。' })
+    expect(checkbox.closest('label')).toHaveClass('asset-archive-dialog__check')
+    fireEvent.click(checkbox)
     fireEvent.click(screen.getByRole('button', { name: '结束使用并归档' }))
     expect(submit).toHaveBeenCalledWith('vps_a', expect.objectContaining({ never_connected_confirmation: true }))
     expect(await screen.findByText('收到新的实时在线信号')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '结束使用并归档' })).toBeDisabled()
+  })
+
+  it('states connected archive evidence once with human timestamps', async () => {
+    const healthySince = '2026-09-28T00:31:47.362882Z'
+    const earliest = '2026-09-28T03:31:47.362882Z'
+    const lastOnline = '2026-09-28T00:01:47.362882Z'
+    vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue({
+      ...archiveReview(),
+      warnings: [
+        '没有订阅记录；资源有效期与服务商扣费请独立核对。',
+        '没有服务关联。',
+        '订阅仍可能产生费用，归档不会更改服务商续费事实。',
+      ],
+      services: [serviceRecord({ name: '边缘网关' })],
+      domains: [domainRecord({ domain_name: 'edge.example.com' })],
+      monitoring_instance_links: [linkedMonitoring({ monitoring_instance_id: 'mi_1', display_name: '东京探针', lifecycle_status: '在用' })],
+      target_links: [{ target_id: 'tgt_1', name: '专属探测', run_status: '启用', service_ids: [], domain_ids: [] }],
+      online_evidence: {
+        observed_at: '2026-09-28T03:31:47.362882Z',
+        receiver_generation: 'boot',
+        receiver_healthy: true,
+        healthy_since: healthySince,
+        last_health_check_at: '2026-09-28T03:31:47.362882Z',
+        earliest_archive_at: earliest,
+        never_connected: false,
+        manual_confirmation_required: false,
+        instances: [{
+          monitoring_instance_id: 'mi_1',
+          session_id: 'sess_1',
+          ever_connected: true,
+          last_trusted_online_at: lastOnline,
+        }],
+      },
+    })
+    render(<MemoryRouter><Harness onRefresh={vi.fn()} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
+    const text = dialog.textContent ?? ''
+    expect(text.split('接收链路').length - 1).toBe(1)
+    expect(text.split('最早可').length - 1).toBe(1)
+    expect(text.split(formatDateTime(healthySince)).length - 1).toBe(1)
+    expect(text.split(formatDateTime(earliest)).length - 1).toBe(1)
+    expect(text.split(formatDateTime(lastOnline)).length - 1).toBe(1)
+    expect(text).toContain(`东京探针，会话 sess_1，最后可信在线 ${formatDateTime(lastOnline)}`)
+    expect(text).not.toContain('2026-09-28T')
+    expect(text).not.toContain('等待安全观察')
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(text).toContain('边缘网关')
+    expect(text).toContain('edge.example.com')
+    expect(text).toContain('专属探测')
+    expect(text).toContain('没有订阅记录；资源有效期与服务商扣费请独立核对。')
+    expect(text).toContain('订阅仍可能产生费用，归档不会更改服务商续费事实。')
+    expect(text).not.toContain('没有服务关联。')
   })
 
   it('ignores a completed mutation after the route switches to another VPS', async () => {

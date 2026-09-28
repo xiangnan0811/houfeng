@@ -99,7 +99,7 @@ test('fresh VPS ownership, shared associations, independent renewal, archive and
     await archiveDialog.getByLabel('归档原因', { exact: true }).fill('从未接入，人工核实结束使用')
     await archiveDialog.getByLabel('输入 VPS 名称确认归档').fill(field(a, 'display_name'))
     await expect(archiveDialog.getByRole('button', { name: '结束使用并归档', exact: true })).toBeDisabled()
-    await archiveDialog.getByRole('checkbox', { name: '确认此 VPS 从未形成有效 Agent 会话，已人工核实结束使用。' }).check()
+    await archiveDialog.getByRole('checkbox', { name: '这台 VPS 从未接入过 Agent。我已确认它不再使用。' }).check()
     const archiveResponse = pageA.waitForResponse((response) => response.url().endsWith(aPath + '/archive') && response.request().method() === 'POST')
     await archiveDialog.getByRole('button', { name: '结束使用并归档', exact: true }).click()
     expect((await archiveResponse).status()).toBe(200)

@@ -413,6 +413,15 @@ describe('VPSPage', () => {
     expect(screen.getAllByRole('region', { name: 'VPS 快速查看' })).toHaveLength(1)
   })
 
+  it('does not announce lifecycle or renewal status dots as health states', async () => {
+    mockInventory([{ ...vps, renewal_decision: 'cancel' }], [])
+    mount('/vps?workspace=workbench&selected=vps_001')
+    fireEvent.click(await screen.findByRole('button', { name: '选择 Tokyo Edge' }))
+    const list = screen.getByRole('region', { name: 'VPS 清单' })
+    expect(within(list).getByText('管理中')).toBeInTheDocument()
+    expect(within(list).queryByRole('img', { name: /正常|离线|关注|告警|严重/ })).not.toBeInTheDocument()
+  })
+
   it('labels VPS without usage tags instead of rendering an empty usage badge', async () => {
     mockInventory([{ ...vps, usage_tags: [] }], [])
     mount('/vps?workspace=workbench&selected=vps_001')

@@ -14,7 +14,7 @@ import {
 } from './assetPageUtils'
 
 function badgeToneForLabel(label: string): BadgeTone {
-  if (['在用', '承载业务', '保留', '生效中', '正常'].includes(label)) return 'normal'
+  if (['管理中', '在用', '承载业务', '保留', '生效中', '正常'].includes(label)) return 'normal'
   if (['测试中', '观察', '测试用途', '未评估', '未确认'].includes(label)) return 'notice'
   if (['待迁移', '迁移', '备用', '维护中', '关注'].includes(label)) return 'maintenance'
   if (
@@ -67,20 +67,40 @@ function lifecycleGlyphState(tone: BadgeTone): HealthState {
   return tone
 }
 
-export function IPQualityBadge({ summary }: { summary?: IPQualitySummary | null }) {
+function ipQualityLabel(summary: IPQualitySummary): string {
+  if (summary.ambiguous) return 'IP 归属不唯一'
+  if (summary.status !== 'success') return 'IP 未完成'
+  const suffix = summary.use_region_code || summary.use_region_name
+  return `IP ${normalizeRiskLevel(summary.risk_level)}${summary.stale ? ' · 过期' : suffix ? ` · ${suffix}` : ''}`
+}
+
+function IPQualityText({ tone, label }: { tone: BadgeTone; label: string }) {
+  if (tone === 'neutral') return <span>{label}</span>
+  const toneClass = tone === 'critical' || tone === 'alert' ? 'vps-lifecycle--critical' : tone === 'normal' ? '' : 'vps-lifecycle--warn'
+  return (
+    <span className={`vps-lifecycle ${toneClass}`}>
+      <span aria-hidden="true"><StatusGlyph state={lifecycleGlyphState(tone)} size="sm" /></span>
+      {label}
+    </span>
+  )
+}
+
+export function IPQualityBadge({
+  summary,
+  appearance = 'badge',
+}: {
+  summary?: IPQualitySummary | null
+  appearance?: 'badge' | 'text'
+}) {
   if (!summary) {
     return <span className="vps-quiet-fact">未采集</span>
   }
-  if (summary.ambiguous) {
-    return <Badge variant="state" tone="notice">IP 归属不唯一</Badge>
-  }
-  if (summary.status !== 'success') {
-    return <Badge variant="state" tone="notice">IP 未完成</Badge>
-  }
-  const suffix = summary.use_region_code || summary.use_region_name
+  const label = ipQualityLabel(summary)
+  const tone = ipQualityTone(summary)
+  if (appearance === 'text') return <IPQualityText tone={tone} label={label} />
   return (
-    <Badge variant="state" tone={ipQualityTone(summary)}>
-      {`IP ${normalizeRiskLevel(summary.risk_level)}${summary.stale ? ' · 过期' : suffix ? ` · ${suffix}` : ''}`}
+    <Badge variant="state" tone={tone}>
+      {label}
     </Badge>
   )
 }
@@ -90,7 +110,7 @@ export function LifecycleBadge({ value }: { value: VPSLifecycleStatus | string }
   const tone = badgeToneForLabel(label)
   return (
     <span className="vps-lifecycle">
-      <StatusGlyph state={lifecycleGlyphState(tone)} size="sm" />
+      <span aria-hidden="true"><StatusGlyph state={lifecycleGlyphState(tone)} size="sm" /></span>
       {label}
     </span>
   )
