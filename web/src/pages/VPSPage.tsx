@@ -508,55 +508,68 @@ function accordionPanelId(vpsID: string) {
   return `vps-accordion-${vpsID}`
 }
 
-function VPSQuickFacts({ row }: { row: InventoryRow }) {
-  const attention = cancellationAttentionReason(row)
+function VPSQuickFacts({ row, subscriptionsError }: { row: InventoryRow; subscriptionsError: string | null }) {
+  const vps = row.vps
+  const sshHost = vps.ssh_host.trim()
+  const usageTags = vps.usage_tags ?? []
   return (
-    <div className="vps-accordion__facts">
-      <div className="vps-accordion__fact">
-        <div className="vps-accordion__fact-label">资产身份</div>
-        <div className="vps-accordion__fact-value">
-          <span className="vps-mono">{vpsPrimaryAddress(row.vps)}</span>
-          {row.vps.provider_name.trim() ? ` · ${row.vps.provider_name}` : ''}
-          {` · ${vpsPlaceLabel(row.vps)}`}
-        </div>
-      </div>
-      <div className="vps-accordion__fact">
-        <div className="vps-accordion__fact-label">经营与续费</div>
-        <div className="vps-accordion__fact-value vps-accordion__fact-stack">
-          <span className="vps-accordion__badges">
-            <LifecycleBadge value={row.vps.lifecycle_status} />
-            <UsageBadge value={(row.vps.usage_tags ?? []).join('、')} />
-            <RenewalBadge value={row.vps.renewal_decision} />
-          </span>
-          <span>
-            {'VPS 有效期 '}{validityLabel(row.vps)}
-            {' · '}
-            {renderRenewalDate(row)}
-          </span>
-          {attention ? <span className="vps-tone-warn">{attention}</span> : null}
-        </div>
-      </div>
-      <div className="vps-accordion__fact">
-        <div className="vps-accordion__fact-label">监控关联</div>
-        <div className="vps-accordion__fact-value">
-          {row.vps.active_monitoring_instance_link_count > 0
-            ? `已关联 ${row.vps.active_monitoring_instance_link_count} 个监控实例`
-            : '未关联监控实例'}
-          {typeof row.vps.running_monitoring_instance_count === 'number' && row.vps.running_monitoring_instance_count > 0
-            ? ` · 运行中 ${row.vps.running_monitoring_instance_count}`
-            : ''}
-        </div>
-      </div>
-      <div className="vps-accordion__fact">
-        <div className="vps-accordion__fact-label">观察证据</div>
-        <div className="vps-accordion__fact-value">
-          <IPQualityBadge
-            {...(row.vps.ip_quality_summary === undefined
-              ? {}
-              : { summary: row.vps.ip_quality_summary })}
-          />
-        </div>
-      </div>
+    <div className="vps-accordion__groups">
+      <section className="vps-accordion__group">
+        <h2 className="vps-accordion__group-title">资产身份</h2>
+        <dl className="vps-accordion__dl">
+          <dt>IPv4</dt>
+          <dd className="vps-mono">{vps.ipv4.trim() || '—'}</dd>
+          {vps.ipv6.trim() ? (
+            <>
+              <dt>IPv6</dt>
+              <dd className="vps-mono">{vps.ipv6.trim()}</dd>
+            </>
+          ) : null}
+          {sshHost ? (
+            <>
+              <dt>SSH</dt>
+              <dd className="vps-mono">
+                {compactLine([vps.ssh_user.trim() ? `${vps.ssh_user.trim()}@${sshHost}` : sshHost, String(vps.ssh_port || '')])}
+              </dd>
+            </>
+          ) : null}
+          <dt>服务商</dt>
+          <dd>{formatOptional(vps.provider_name)}</dd>
+          <dt>位置</dt>
+          <dd>{vpsPlaceLabel(vps)}</dd>
+        </dl>
+      </section>
+      <section className="vps-accordion__group">
+        <h2 className="vps-accordion__group-title">经营与续费</h2>
+        <dl className="vps-accordion__dl">
+          <dt>用途</dt>
+          <dd>{usageLabel(usageTags.join('、'))}</dd>
+          <dt>续费意向</dt>
+          <dd><RenewalBadge value={vps.renewal_decision} /></dd>
+          <dt>VPS 有效期</dt>
+          <dd>{validityLabel(vps)}</dd>
+          <dt>订阅</dt>
+          <dd>{subscriptionFact(row, subscriptionsError)}</dd>
+        </dl>
+      </section>
+      <section className="vps-accordion__group">
+        <h2 className="vps-accordion__group-title">监控与证据</h2>
+        <dl className="vps-accordion__dl">
+          <dt>监控实例</dt>
+          <dd>
+            {vps.active_monitoring_instance_link_count > 0
+              ? `已关联 ${vps.active_monitoring_instance_link_count} 个`
+              : '未关联'}
+            {typeof vps.running_monitoring_instance_count === 'number' && vps.running_monitoring_instance_count > 0
+              ? ` · 运行中 ${vps.running_monitoring_instance_count}`
+              : ''}
+          </dd>
+          <dt>IP 质量</dt>
+          <dd>
+            <IPQualityBadge {...(vps.ip_quality_summary === undefined ? {} : { summary: vps.ip_quality_summary })} />
+          </dd>
+        </dl>
+      </section>
     </div>
   )
 }
@@ -565,28 +578,34 @@ function VPSWorkbenchAccordionRow({
   row,
   detailHref,
   currentInventoryHref,
+  subscriptionsError,
 }: {
   row: InventoryRow
   detailHref: string
   currentInventoryHref: string
+  subscriptionsError: string | null
 }) {
+  const attention = cancellationAttentionReason(row)
   return (
     <tr className="vps-workbench__accordion">
-      <td colSpan={4}>
+      <td colSpan={5}>
         <div
           className="vps-accordion"
           id={accordionPanelId(row.vps.vps_id)}
           role="region"
           aria-label="VPS 快速查看"
         >
-          <Link
-            className="vps-accordion__action"
-            to={detailHref}
-            state={{ vpsInventoryHref: currentInventoryHref }}
-          >
-            打开 VPS 详情
-          </Link>
-          <VPSQuickFacts row={row} />
+          <VPSQuickFacts row={row} subscriptionsError={subscriptionsError} />
+          <div className="vps-accordion__footer">
+            {attention ? <p className="vps-accordion__notice">{attention}</p> : <span />}
+            <Link
+              className="btn sm secondary"
+              to={detailHref}
+              state={{ vpsInventoryHref: currentInventoryHref }}
+            >
+              打开 VPS 详情
+            </Link>
+          </div>
         </div>
       </td>
     </tr>
@@ -934,12 +953,20 @@ export function VPSPage() {
                 </div>
               ) : (
                 <table className="vps-workbench__table">
+                  <colgroup>
+                    <col className="vps-workbench__col--identity" />
+                    <col className="vps-workbench__col--place" />
+                    <col className="vps-workbench__col--status" />
+                    <col className="vps-workbench__col--renewal" />
+                    <col className="vps-workbench__col--evidence" />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th scope="col">机器</th>
                       <th scope="col">位置与规格</th>
-                      <th scope="col">经营与续费</th>
-                      <th scope="col">证据</th>
+                      <th scope="col">状态与用途</th>
+                      <th scope="col">续费</th>
+                      <th scope="col">监控与证据</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -983,27 +1010,28 @@ export function VPSPage() {
                               <div className="vps-workbench__meta">{vpsSpecLabel(row.vps)}</div>
                             </td>
                             <td>
-                              <div className="badge-row">
-                                <LifecycleBadge value={row.vps.lifecycle_status} />
-                                <UsageBadge value={(row.vps.usage_tags ?? []).join('、')} />
-                              </div>
+                              <LifecycleBadge value={row.vps.lifecycle_status} />
+                              <div className="vps-workbench__meta">{usageLabel((row.vps.usage_tags ?? []).join('、'))}</div>
+                            </td>
+                            <td>
+                              <RenewalBadge value={row.vps.renewal_decision} />
                               <div className="vps-workbench__meta">
-                                <RenewalBadge value={row.vps.renewal_decision} />
-                                {' · '}
                                 {renderRenewalDate(row)}
+                                {attention ? <span className="vps-tone-warn" title={attention}> · 自动续费待核对</span> : null}
                               </div>
                             </td>
                             <td>
-                              <IPQualityBadge
-                                {...(row.vps.ip_quality_summary === undefined
-                                  ? {}
-                                  : { summary: row.vps.ip_quality_summary })}
-                              />
-                              <div className={attention ? 'vps-workbench__meta vps-tone-warn' : 'vps-workbench__meta'}>
+                              <div>
                                 {row.vps.active_monitoring_instance_link_count > 0
                                   ? `监控 ${row.vps.active_monitoring_instance_link_count}`
                                   : '未关联监控'}
-                                {attention ? ` · ${attention}` : ''}
+                              </div>
+                              <div className="vps-workbench__meta">
+                                <IPQualityBadge
+                                  {...(row.vps.ip_quality_summary === undefined
+                                    ? {}
+                                    : { summary: row.vps.ip_quality_summary })}
+                                />
                               </div>
                             </td>
                           </tr>
@@ -1012,6 +1040,7 @@ export function VPSPage() {
                               row={row}
                               detailHref={detailHref}
                               currentInventoryHref={currentInventoryHref}
+                              subscriptionsError={state.subscriptionsError}
                             />
                           ) : null}
                         </Fragment>

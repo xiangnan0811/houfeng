@@ -401,13 +401,13 @@ describe('VPSPage', () => {
     mount('/vps?workspace=workbench')
     fireEvent.click(await screen.findByRole('button', { name: '选择 Tokyo Edge' }))
     const first = screen.getByRole('region', { name: 'VPS 快速查看' })
-    const firstEvidence = within(first).getByText('观察证据').parentElement!
+    const firstEvidence = within(first).getByRole('heading', { level: 2, name: '监控与证据' }).closest('section')!
     expect(firstEvidence).toHaveTextContent('未采集')
     expect(firstEvidence).not.toHaveTextContent('正常')
 
     fireEvent.click(screen.getByRole('button', { name: '选择 Risky Edge' }))
     const second = screen.getByRole('region', { name: 'VPS 快速查看' })
-    const secondEvidence = within(second).getByText('观察证据').parentElement!
+    const secondEvidence = within(second).getByRole('heading', { level: 2, name: '监控与证据' }).closest('section')!
     expect(secondEvidence).toHaveTextContent('高风险')
     expect(secondEvidence).not.toHaveTextContent('正常')
     expect(screen.getAllByRole('region', { name: 'VPS 快速查看' })).toHaveLength(1)
@@ -435,10 +435,10 @@ describe('VPSPage', () => {
     expect(pick).toHaveAttribute('aria-controls', 'vps-accordion-vps_001')
     expect(accordion).toHaveAttribute('id', 'vps-accordion-vps_001')
     expect(accordion.compareDocumentPosition(pick.closest('tr')!)).toBe(Node.DOCUMENT_POSITION_PRECEDING)
-    expect(within(accordion).getByText('资产身份')).toBeInTheDocument()
-    expect(within(accordion).getByText('经营与续费')).toBeInTheDocument()
-    expect(within(accordion).getByText('监控关联')).toBeInTheDocument()
-    expect(within(accordion).getByText('观察证据')).toBeInTheDocument()
+    expect(within(accordion).getByRole('heading', { level: 2, name: '资产身份' }).closest('section')!).toHaveTextContent('192.0.2.1')
+    expect(within(accordion).getByRole('heading', { level: 2, name: '经营与续费' }).closest('section')!).toHaveTextContent('自定义应用')
+    expect(within(accordion).getByRole('heading', { level: 2, name: '监控与证据' }).closest('section')!).toHaveTextContent('已关联 1 个')
+    expect(within(accordion).getByRole('link', { name: '打开 VPS 详情' })).toBeInTheDocument()
 
     fireEvent.click(pick)
     expect(screen.queryByRole('region', { name: 'VPS 快速查看' })).not.toBeInTheDocument()
