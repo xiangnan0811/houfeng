@@ -27,6 +27,20 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.2.0](https://github.com/xiangnan0811/houfeng/compare/v1.1.0...v1.2.0) (2026-09-29)
+
+
+### Features
+
+* **web:** 提供候风、精密、观测台三套可切换配色并加强界面层次 ([be0869e](https://github.com/xiangnan0811/houfeng/commit/be0869e41f1af205607fc055355ef909d3dffd92))
+* **web:** 提供候风、精密、观测台三套可切换配色并加强界面层次 ([93785fd](https://github.com/xiangnan0811/houfeng/commit/93785fdbe0b00d06132588fb45b61e16016f1117))
+
+
+### Bug Fixes
+
+* **web:** 修复订阅成本洞察在矮桌面视口下续费面板被归档面板覆盖 ([ce9de09](https://github.com/xiangnan0811/houfeng/commit/ce9de095ade8fc00c15955b97464d01fa112705e))
+* **web:** 修复订阅成本洞察在矮桌面视口下续费面板被归档面板覆盖 ([2c583f8](https://github.com/xiangnan0811/houfeng/commit/2c583f84da608a87e4b7b9b96457cd8ce9b58975))
+
 ## [1.1.0](https://github.com/xiangnan0811/houfeng/compare/v1.0.4...v1.1.0) (2026-09-28)
 
 
