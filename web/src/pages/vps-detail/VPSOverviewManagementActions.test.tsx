@@ -53,6 +53,15 @@ function detailFixture(vpsId: string, displayName: string): VPSAssetDetail {
   }
 }
 
+// 归档弹窗先以加载态出现；等审查结果渲染（“会影响”区块）后再断言，
+// 避免 CI 负载下查不到审查文案，也避免否定断言在加载态下空转通过。
+async function openArchiveDialog() {
+  fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
+  const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
+  await within(dialog).findByRole('heading', { name: '会影响' })
+  return dialog
+}
+
 function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
   return {
     target_id: 'tgt_1',
@@ -326,8 +335,7 @@ describe('VPSOverviewManagementActions', () => {
     vi.spyOn(api, 'getVPSArchiveReview').mockResolvedValue(review)
     const submit = vi.spyOn(api, 'archiveVPS').mockRejectedValue(new ApiError(409, 'preview changed', { code: 'archive_preview_stale', review: { ...review, eligible: false, blockers: ['收到新的实时在线信号'] } }))
     render(<MemoryRouter><Harness onRefresh={vi.fn()} /></MemoryRouter>)
-    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
+    const dialog = await openArchiveDialog()
     expect(dialog.querySelector('.page-stack')).toBeNull()
     expect(screen.queryByText('操作确认')).not.toBeInTheDocument()
     expect(screen.queryByText('等待安全观察')).not.toBeInTheDocument()
@@ -384,8 +392,7 @@ describe('VPSOverviewManagementActions', () => {
       },
     })
     render(<MemoryRouter><Harness onRefresh={vi.fn()} /></MemoryRouter>)
-    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
+    const dialog = await openArchiveDialog()
     const text = dialog.textContent ?? ''
     expect(text.split('接收链路').length - 1).toBe(1)
     expect(text.split('最早可').length - 1).toBe(1)
@@ -1436,8 +1443,7 @@ describe('VPSOverviewManagementActions', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
+    const dialog = await openArchiveDialog()
     fireEvent.change(within(dialog).getByRole('textbox', { name: '归档原因' }), {
       target: { value: '订阅已结束' },
     })
@@ -1490,8 +1496,7 @@ describe('VPSOverviewManagementActions', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '打开归档' }))
-    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
+    const dialog = await openArchiveDialog()
     fireEvent.change(within(dialog).getByRole('textbox', { name: '归档原因' }), {
       target: { value: '订阅已结束' },
     })
