@@ -1,4 +1,5 @@
-import { vpsAssetFixture } from '../src/pages/dashboard/dashboardTestFixtures'
+import { subscriptionOverviewFixture, vpsAssetFixture } from '../src/pages/dashboard/dashboardTestFixtures'
+import { apiRouteKey } from './fixtures/contracts'
 import { coreRouteProfile } from './fixtures/profiles'
 import { expect, test } from './fixtures'
 import { expectMainDocumentCsp } from './support/diagnostics'
@@ -115,3 +116,159 @@ test('VPS retains the latest workspace preference through same-page sidebar navi
 
 
 
+
+function subscriptionInsightsPopulatedProfile() {
+  const costRows = Array.from({ length: 30 }, (_, index) => ({
+    subscription_id: `sub_${index}`,
+    vps_id: `vps_${index}`,
+    vps_display_name: `Edge ${index}`,
+    provider_id: `pv_${index % 25}`,
+    provider_name: `Provider ${index % 25}`,
+    display_name: `Edge ${index} plan`,
+    cost_category: index % 3 === 0 ? 'compute' : 'network',
+    labels: [],
+    price: 10 + index,
+    currency: 'CNY',
+    monthly_price: 10 + index,
+    monthly_price_base: 10 + index,
+    yearly_price_base: (10 + index) * 12,
+    base_currency: 'CNY',
+    exchange_rate_stale: false,
+    renew_at: '2026-10-01T00:00:00Z',
+    status: 'active',
+    payment_method: 'card',
+    country: 'JP',
+    region: 'Kanto',
+    lifecycle_status: 'active',
+    renewal_decision: 'keep',
+    budget_status: 'ok',
+  }))
+  const breakdown = (count: number, prefix: string) => Array.from({ length: count }, (_, index) => ({
+    key: `${prefix}_${index}`,
+    label: `${prefix} ${index}`,
+    monthly_cost: 100 - index,
+    yearly_cost: (100 - index) * 12,
+    subscription_count: 1,
+  }))
+  const profile = coreRouteProfile('/subscriptions')
+  return {
+    ...profile,
+    [apiRouteKey('GET', '/api/subscriptions/overview')]: {
+      status: 200,
+      body: subscriptionOverviewFixture({
+        active_subscription_count: costRows.length,
+        vps_costs: costRows,
+        upcoming_renewals: costRows.slice(0, 12).map((row) => ({
+          subscription_id: row.subscription_id,
+          vps_id: row.vps_id,
+          vps_display_name: row.vps_display_name,
+          display_name: row.display_name,
+          provider_name: row.provider_name,
+          renew_at: row.renew_at,
+          monthly_price_base: row.monthly_price_base,
+          yearly_price_base: row.yearly_price_base,
+          base_currency: 'CNY',
+          currency: 'CNY',
+          renewal_decision: 'keep',
+          lifecycle_status: 'active',
+          exchange_rate_stale: false,
+        })),
+        archived_potential_costs: costRows.slice(0, 2),
+        archived_potential_monthly_cost: 21,
+      }),
+    },
+    [apiRouteKey('GET', '/api/subscriptions/statistics?window=year')]: {
+      status: 200,
+      body: {
+        window: 'year',
+        base_currency: 'CNY',
+        total_monthly_cost: 735,
+        total_yearly_cost: 8820,
+        provider_breakdown: breakdown(25, 'Provider'),
+        currency_breakdown: breakdown(1, 'CNY'),
+        category_breakdown: breakdown(3, 'Category'),
+        payment_breakdown: breakdown(2, 'Payment'),
+        region_breakdown: breakdown(4, 'Region'),
+        cost_month_buckets: Array.from({ length: 12 }, (_, index) => ({
+          bucket: `2025-${String(index + 1).padStart(2, '0')}`,
+          monthly_cost: 600 + index * 12,
+          renewal_count: 2,
+          budget_limit: 800,
+          budget_currency: 'CNY',
+          data_insufficient: false,
+        })),
+        renewal_month_buckets: [],
+        budget_statuses: [],
+      },
+    },
+  }
+}
+
+test('Subscription insights keep a stable grid above the archived panel across desktop heights', async ({ api, page }) => {
+  api.useProfile(subscriptionInsightsPopulatedProfile())
+  for (const viewport of [
+    { width: 1440, height: 1000 },
+    { width: 1024, height: 768 },
+    { width: 861, height: 900 },
+    { width: 1440, height: 1600 },
+  ]) {
+    await page.setViewportSize(viewport)
+    await page.goto('/subscriptions')
+    const insights = page.getByRole('region', { name: '订阅成本洞察' })
+    const archived = insights.getByRole('region', { name: '已归档资产潜在扣费' })
+    const month = insights.locator('.subscription-insight-panel--month')
+    const renewal = insights.locator('.subscription-insight-panel--renewal')
+    const plot = insights.locator('.subscription-trend-chart-plot')
+    await expect(archived).toBeVisible()
+    await expect(insights.getByRole('region', { name: '成本构成' })).toContainText('Provider 24')
+    await expect(plot).toBeVisible()
+    await page.evaluate(() => document.fonts.ready)
+
+    const measure = () => page.evaluate(() => {
+      const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect()
+      const main = document.querySelector('main#main-content')!.closest('.main') ?? document.querySelector('main#main-content')!
+      return {
+        monthHeight: Math.round(box('.subscription-insight-panel--month').height),
+        compositionHeight: Math.round(box('.subscription-insight-panel--composition').height),
+        renewalTop: Math.round(box('.subscription-insight-panel--renewal').top - box('.subscription-insights__grid').top),
+        renewalBottom: box('.subscription-insight-panel--renewal').bottom,
+        archivedTop: box('section[aria-label="已归档资产潜在扣费"]').top,
+        plotHeight: box('.subscription-trend-chart-plot').height,
+        trendBottom: box('.subscription-insight-panel--trend').bottom,
+        trendContentBottom: Math.max(box('.subscription-trend-readout').bottom, box('.subscription-trend-legend').bottom),
+        mainOverflow: main.scrollHeight - main.clientHeight,
+      }
+    })
+    const label = `${viewport.width}x${viewport.height}`
+    const before = await measure()
+    expect(before.renewalBottom, label).toBeLessThanOrEqual(before.archivedTop + 1)
+    expect(before.plotHeight, label).toBeGreaterThanOrEqual(160)
+    // 矮桌面钉在网格下限时，换行的读数与图例也必须留在趋势面板内。
+    expect(before.trendContentBottom, label).toBeLessThanOrEqual(before.trendBottom)
+    if (viewport.height >= 1600) expect(before.mainOverflow, label).toBeLessThanOrEqual(1)
+    if (viewport.height <= 900) {
+      // 网格下限必须体现为主区域的自然滚动，而不是被中间层裁掉。
+      expect(before.mainOverflow, label).toBeGreaterThan(0)
+      await archived.scrollIntoViewIfNeeded()
+      await expect(archived).toBeInViewport()
+    }
+
+    const composition = insights.getByRole('region', { name: '成本构成' })
+    expect(await composition.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    const renewalQueue = renewal.getByRole('region', { name: '续费队列' })
+    expect(await renewalQueue.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+
+    await insights.getByRole('tab', { name: '排行', exact: true }).click()
+    const ranking = insights.getByRole('region', { name: '月成本排行' })
+    await expect(ranking).toBeVisible()
+    expect(await ranking.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    await insights.getByLabel('构成维度').selectOption('category')
+    await expect(composition).toContainText('Category 2')
+    await expect.poll(measure).toMatchObject({
+      monthHeight: before.monthHeight,
+      compositionHeight: before.compositionHeight,
+      renewalTop: before.renewalTop,
+    })
+    await expect(month).toBeVisible()
+  }
+})

@@ -1,6 +1,6 @@
 /* partial: legacy-subscriptions.css (semantic split of the legacy index.css block) */
 .subscription-page{gap:var(--space-3)}
-.subscription-page[data-view="insights"]{--subscription-insights-trend-min:280px;--subscription-insights-middle-min:264px;--subscription-insights-renewal-min:160px;--subscription-insights-plot-min:160px;--subscription-insights-month-mobile:400px;height:100%;min-height:100%}
+.subscription-page[data-view="insights"]{--subscription-insights-trend-min:320px;--subscription-insights-middle-min:264px;--subscription-insights-renewal-min:160px;--subscription-insights-plot-min:160px;--subscription-insights-month-mobile:400px;--subscription-insights-gap:12px;height:100%;min-height:100%}
 .subscription-page[data-view="insights"]>.subscription-page__view:not([hidden]){display:flex;flex:1 1 0%;flex-direction:column;min-width:0;min-height:0}
 .subscription-page[data-view="insights"] .subscription-view-panel{flex:1 1 0%;min-width:0;min-height:0}
 .subscription-page .page__title{font-size:22px;line-height:1.25}
@@ -50,7 +50,9 @@
 .subscription-budget-coverage small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
 .subscription-insights{display:flex;flex:1 1 0%;flex-direction:column;gap:8px;min-width:0;min-height:0}
 .subscription-panel-title{margin:0;font-family:var(--font-sans);font-size:14px;font-weight:600;line-height:1.3;color:var(--text-primary)}
-.subscription-insights__grid{display:grid;flex:1 1 0%;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(var(--subscription-insights-trend-min),1.15fr) minmax(var(--subscription-insights-middle-min),1fr) minmax(var(--subscription-insights-renewal-min),1fr);gap:12px;align-items:stretch;min-width:0;min-height:0}
+.subscription-insights__grid{display:grid;flex:1 1 0%;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(var(--subscription-insights-trend-min),1.15fr) minmax(var(--subscription-insights-middle-min),1fr) minmax(var(--subscription-insights-renewal-min),1fr);gap:var(--subscription-insights-gap);align-items:stretch;min-width:0;min-height:calc(var(--subscription-insights-trend-min) + var(--subscription-insights-middle-min) + var(--subscription-insights-renewal-min) + 2 * var(--subscription-insights-gap))}
+/* 网格外的归档面板不参与收缩；矮视口由网格下限撑出主区域滚动，而不是压到网格上。 */
+.subscription-insights>.subscription-insight-panel{flex:none}
 .subscription-insight-panel{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;padding:12px;border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-2);background:var(--panel-bg)}
 .subscription-insight-panel--trend{grid-column:1/-1;grid-row:1;order:1}
 .subscription-insight-panel--month{grid-row:2;order:2}
