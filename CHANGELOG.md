@@ -27,6 +27,20 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.3.0](https://github.com/xiangnan0811/houfeng/compare/v1.2.0...v1.3.0) (2026-09-29)
+
+
+### Features
+
+* **web:** 侧栏分组常驻展开并补齐搜索快捷键提示与窄屏外壳 ([c3a9397](https://github.com/xiangnan0811/houfeng/commit/c3a9397ed0b95981ad20944cd8d08037c5f61c3f))
+* **web:** 侧栏分组常驻展开并补齐搜索快捷键提示与窄屏外壳 ([8bf10aa](https://github.com/xiangnan0811/houfeng/commit/8bf10aa89cabc3c5cd0d16ab9a9d96e5d4ab1d50))
+
+
+### Bug Fixes
+
+* **web:** 统一分段控件、标题区按钮、空状态与文字链接的组件视觉 ([a9b7c29](https://github.com/xiangnan0811/houfeng/commit/a9b7c293d0fe078d9204c015e99364b46ff29eb5))
+* **web:** 统一分段控件、标题区按钮、空状态与文字链接的组件视觉 ([ddbaf8b](https://github.com/xiangnan0811/houfeng/commit/ddbaf8bab2562df24c8c4bd17fbd91e8e8d02105))
+
 ## [1.2.0](https://github.com/xiangnan0811/houfeng/compare/v1.1.0...v1.2.0) (2026-09-29)
 
 
