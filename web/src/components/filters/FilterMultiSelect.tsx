@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 export type FilterMultiSelectOption = {
   value: string
@@ -27,6 +27,9 @@ export function FilterMultiSelect({
 }: FilterMultiSelectProps) {
   const [open, setOpen] = useState(false)
   const wrapperRef = useRef<HTMLDivElement | null>(null)
+  const baseId = useId()
+  const labelId = `${baseId}-label`
+  const summaryId = `${baseId}-summary`
 
   useEffect(() => {
     if (!open) return
@@ -50,21 +53,23 @@ export function FilterMultiSelect({
     }
   }
 
-  const classes = ['filter-multiselect', open && 'is-open', className].filter(Boolean).join(' ')
+  const classes = ['filter-multiselect', open && 'is-open', values.length > 0 && 'is-filtered', className].filter(Boolean).join(' ')
   const summary = values.length === 0 ? '全部' : `已选 ${values.length}`
 
+  // 与 FilterSearchSelect 一致：按钮名称同时包含可见维度名与当前摘要（如“标签 全部”）。
   return (
     <div className={classes} ref={wrapperRef}>
-      <span className="filter-multiselect__label">{label}</span>
+      <span className="filter-multiselect__label" id={labelId}>{label}</span>
       <button
         type="button"
         className="filter-multiselect__trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-labelledby={`${labelId} ${summaryId}`}
         disabled={disabled}
         onClick={() => setOpen((current) => !current)}
       >
-        {summary}
+        <span id={summaryId}>{summary}</span>
       </button>
       {open ? (
         <div className="filter-multiselect__popover" role="listbox">

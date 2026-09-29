@@ -114,7 +114,6 @@ export function MonitoringInstancesFilterPanel({
         label="健康"
         value={filterState.health}
         options={MONITORING_INSTANCE_HEALTH_STATUS_FILTER_OPTIONS}
-        placeholder="全部健康"
         disabled={disabled}
         onChange={(value) => onSingleFilterChange('health', value)}
       />
@@ -122,7 +121,6 @@ export function MonitoringInstancesFilterPanel({
         label="运行"
         value={filterState.runStatus}
         options={MONITORING_INSTANCE_RUN_STATUS_FILTER_OPTIONS}
-        placeholder="全部运行"
         disabled={disabled}
         onChange={(value) => onSingleFilterChange('run_status', value)}
       />
@@ -130,7 +128,6 @@ export function MonitoringInstancesFilterPanel({
         label="分组"
         value={filterState.group}
         options={groupOptions}
-        placeholder="全部分组"
         disabled={disabled}
         onChange={(value) => onSingleFilterChange('group', value)}
       />
@@ -138,7 +135,6 @@ export function MonitoringInstancesFilterPanel({
         label="地区"
         value={filterState.region}
         options={regionOptions}
-        placeholder="全部地区"
         disabled={disabled}
         onChange={(value) => onSingleFilterChange('region', value)}
       />
@@ -146,7 +142,6 @@ export function MonitoringInstancesFilterPanel({
         label="城市"
         value={filterState.city}
         options={cityOptions}
-        placeholder="全部城市"
         disabled={disabled}
         onChange={(value) => onSingleFilterChange('city', value)}
       />
@@ -154,7 +149,6 @@ export function MonitoringInstancesFilterPanel({
         label="供应商"
         value={filterState.provider}
         options={providerOptions}
-        placeholder="全部供应商"
         disabled={disabled}
         onChange={(value) => onSingleFilterChange('provider', value)}
       />
@@ -162,7 +156,6 @@ export function MonitoringInstancesFilterPanel({
         label="接入阶段"
         value={filterState.lifecycle}
         options={MONITORING_INSTANCE_LIFECYCLE_FILTER_OPTIONS}
-        placeholder="全部阶段"
         disabled={disabled}
         onChange={(value) => onSingleFilterChange('lifecycle', value)}
       />
@@ -174,7 +167,7 @@ export function MonitoringInstancesFilterPanel({
         onChange={(values) => onMultiFilterChange('labels', values)}
       />
       <div className="monitoring-page__trailing-controls">
-        <label className="filter-select monitoring-page__search-field">
+        <label className={`filter-select monitoring-page__search-field${searchQuery ? ' is-filtered' : ''}`}>
           <span className="filter-select__label">搜索</span>
           <input
             className="filter-select__control filter-select__control--text monitoring-page__search"

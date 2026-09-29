@@ -35,4 +35,13 @@ describe('FilterSelect', () => {
     fireEvent.change(screen.getByLabelText('类型'), { target: { value: '' } })
     expect(onChange).toHaveBeenCalledWith(null)
   })
+
+  it('marks the wrapper as filtered only when a value is applied', () => {
+    const { container, rerender } = render(
+      <FilterSelect label="类型" value={null} options={OPTIONS} onChange={() => {}} />,
+    )
+    expect(container.querySelector('.filter-select')).not.toHaveClass('is-filtered')
+    rerender(<FilterSelect label="类型" value="service" options={OPTIONS} onChange={() => {}} />)
+    expect(container.querySelector('.filter-select')).toHaveClass('is-filtered')
+  })
 })

@@ -199,6 +199,24 @@
 .filter-searchselect__option-hint{color:var(--text-muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .filter-searchselect__empty{margin:0;padding:var(--space-2);color:var(--text-muted);font-size:12px}
 .filter-select__control--text{background-image:none;padding-right:10px;min-height:var(--control-min-height);cursor:text;width:10rem;max-width:100%}
+.filter-select__control--text[type="datetime-local"]{width:auto}
+/* 筛选栏里的筛选项是“维度前缀 + 取值”的紧凑胶囊：标签与控件共用一个边框，有取值时高亮。
+   只作用于控件行的直接子项（及其直接 div 包装层里的一层，如监控搜索框），
+   抽屉、表单与弹层内部不受影响，仍保持标签在上。 */
+.filter-bar__controls-row:has(>:is(.filter-select,.filter-multiselect,.filter-searchselect)){align-items:center;gap:var(--space-2)}
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>:is(.filter-select,.filter-multiselect,.filter-searchselect){flex-direction:row;align-items:center;gap:0;min-width:0;padding-left:10px;border:var(--border-w) solid var(--control-border);border-radius:var(--radius-2);background:var(--control-bg);transition:border-color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm)}
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>:is(.filter-select,.filter-multiselect,.filter-searchselect):hover{border-color:var(--border-strong)}
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>:is(.filter-select,.filter-multiselect,.filter-searchselect):focus-within{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 12%,transparent)}
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>.is-filtered{border-color:var(--accent-border);background:var(--accent-soft)}
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>*>:is(.filter-select__label,.filter-multiselect__label,.filter-searchselect__label){flex:0 0 auto;color:var(--text-muted);font-size:12px;font-weight:500;letter-spacing:0;text-transform:none;white-space:nowrap}
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>.is-filtered>:is(.filter-select__label,.filter-multiselect__label,.filter-searchselect__label){color:var(--text-secondary)}
+/* 下拉宽度随当前取值（field-sizing 不支持时退回原生宽度）；文本与日期输入保持固定宽度。 */
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>*>:is(.filter-select__control,.filter-multiselect__trigger,.filter-searchselect__trigger){min-height:32px;max-width:16em;border:0;border-radius:0 var(--radius-2) var(--radius-2) 0;background-color:transparent;box-shadow:none;padding-left:6px;field-sizing:content}
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>*>.filter-select__control--text{max-width:100%;padding-right:10px;field-sizing:fixed}
+/* 打开态由胶囊外层 :focus-within 画唯一的焦点环，触发器自身不再叠一圈。 */
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>.is-open>:is(.filter-multiselect__trigger,.filter-searchselect__trigger){border:0;box-shadow:none}
+/* 胶囊按内容定宽后，弹层不能跟着缩到胶囊宽度。 */
+:is(.filter-bar__controls-row,.filter-bar__controls-row>div)>*>:is(.filter-multiselect__popover,.filter-searchselect__popover){min-width:max(100%,16rem)}
 /* shared-atoms-page owner migration from legacy-misc.css */
 .page-state--empty .page-state__mark{color:var(--text-muted)}
 .detail-section--ribbon-normal{border-top:2px solid var(--color-state-normal)}

@@ -13,7 +13,7 @@ describe('FilterMultiSelect', () => {
     render(
       <FilterMultiSelect label="标签" values={[]} options={OPTIONS} onChange={() => {}} />,
     )
-    expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '标签 全部' })).toBeInTheDocument()
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
@@ -26,7 +26,7 @@ describe('FilterMultiSelect', () => {
         onChange={() => {}}
       />,
     )
-    expect(screen.getByRole('button', { name: '已选 1' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '标签 已选 1' })).toBeInTheDocument()
   })
 
   it('opens popover and toggles a value', () => {
@@ -39,7 +39,7 @@ describe('FilterMultiSelect', () => {
         onChange={onChange}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '全部' }))
+    fireEvent.click(screen.getByRole('button', { name: '标签 全部' }))
     expect(screen.getByRole('listbox')).toBeInTheDocument()
     fireEvent.click(screen.getByLabelText('edge'))
     expect(onChange).toHaveBeenCalledWith(['edge'])
@@ -55,7 +55,7 @@ describe('FilterMultiSelect', () => {
         onChange={onChange}
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '已选 2' }))
+    fireEvent.click(screen.getByRole('button', { name: '标签 已选 2' }))
     fireEvent.click(screen.getByLabelText('edge'))
     expect(onChange).toHaveBeenCalledWith(['core'])
   })
@@ -70,7 +70,16 @@ describe('FilterMultiSelect', () => {
         emptyLabel="尚无标签"
       />,
     )
-    fireEvent.click(screen.getByRole('button', { name: '全部' }))
+    fireEvent.click(screen.getByRole('button', { name: '标签 全部' }))
     expect(screen.getByText('尚无标签')).toBeInTheDocument()
+  })
+
+  it('marks the wrapper as filtered only when values are selected', () => {
+    const { container, rerender } = render(
+      <FilterMultiSelect label="标签" values={[]} options={OPTIONS} onChange={() => {}} />,
+    )
+    expect(container.querySelector('.filter-multiselect')).not.toHaveClass('is-filtered')
+    rerender(<FilterMultiSelect label="标签" values={['edge']} options={OPTIONS} onChange={() => {}} />)
+    expect(container.querySelector('.filter-multiselect')).toHaveClass('is-filtered')
   })
 })

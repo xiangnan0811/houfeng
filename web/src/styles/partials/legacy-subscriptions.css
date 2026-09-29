@@ -188,6 +188,7 @@
 @media (max-width:700px){
 .subscription-page__head{flex-direction:column;align-items:flex-start}
 .subscription-page .filter-bar__controls-row>.filter-select,.subscription-page .filter-bar__controls-row>.filter-searchselect{flex:1 1 100%;min-width:0;max-width:100%}
+.subscription-page .filter-bar__controls-row>*>:is(.filter-select__control,.filter-searchselect__trigger){flex:1 1 auto;max-width:100%}
 .subscription-budget-coverage{grid-column:1}
 .subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-budget-row{grid-template-columns:1fr;align-items:start}
 .subscription-page .filter-select__control,.subscription-page .filter-searchselect__trigger,.subscription-breakdown-bar{width:100%}

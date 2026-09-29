@@ -168,7 +168,7 @@ export function FilterSearchSelect({
   }
 
 
-  const classes = ['filter-searchselect', open && 'is-open', className].filter(Boolean).join(' ')
+  const classes = ['filter-searchselect', open && 'is-open', value != null && 'is-filtered', className].filter(Boolean).join(' ')
   const activeOption = rows[safeHighlight]
   const activeOptionId = `${listId}-opt-${activeOption?.value ?? 'all'}`
 

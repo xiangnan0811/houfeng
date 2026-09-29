@@ -28,10 +28,12 @@ describe('FilterSearchSelect', () => {
       <FilterSearchSelect label="VPS" value={null} options={OPTIONS} onChange={() => {}} />,
     )
     expect(screen.getByRole('button', { name: 'VPS 全部' })).toBeInTheDocument()
+    expect(document.querySelector('.filter-searchselect')).not.toHaveClass('is-filtered')
     rerender(
       <FilterSearchSelect label="VPS" value="vps_001" options={OPTIONS} onChange={() => {}} />,
     )
     expect(screen.getByRole('button', { name: 'VPS Tokyo Edge' })).toBeInTheDocument()
+    expect(document.querySelector('.filter-searchselect')).toHaveClass('is-filtered')
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 

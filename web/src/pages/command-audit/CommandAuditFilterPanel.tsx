@@ -65,10 +65,10 @@ export function CommandAuditFilterPanel({
               }
             }}
           />
-          <label className="filter-select">
+          <label className={`filter-select${filters.monitoring_instance ? ' is-filtered' : ''}`}>
             <span className="filter-select__label">监控实例</span>
             <input
-              className="filter-select__control"
+              className="filter-select__control filter-select__control--text"
               placeholder="名称或稳定 ID"
               value={filters.monitoring_instance}
               onChange={(event) => onChange('monitoring_instance', event.target.value)}
@@ -78,14 +78,12 @@ export function CommandAuditFilterPanel({
             label="命令"
             value={filters.command_id || null}
             options={commandOptions}
-            placeholder="全部命令"
             onChange={(value) => onChange('command_id', value ?? '')}
           />
           <FilterSelect
             label="结果"
             value={filters.outcome || null}
             options={OUTCOME_OPTIONS}
-            placeholder="全部结果"
             onChange={(value) => onChange('outcome', (value ?? '') as CommandAuditFilters['outcome'])}
           />
           <div className="monitoring-page__trailing-controls command-audit-filter__actions">
@@ -98,19 +96,19 @@ export function CommandAuditFilterPanel({
       </div>
       {filters.window === 'custom' ? (
         <div className="filter-bar__controls-row command-audit-filter__custom">
-          <label className="filter-select">
+          <label className={`filter-select${filters.started_from ? ' is-filtered' : ''}`}>
             <span className="filter-select__label">开始时间</span>
             <input
-              className="filter-select__control"
+              className="filter-select__control filter-select__control--text"
               type="datetime-local"
               value={filters.started_from}
               onChange={(event) => onChange('started_from', event.target.value)}
             />
           </label>
-          <label className="filter-select">
+          <label className={`filter-select${filters.started_to ? ' is-filtered' : ''}`}>
             <span className="filter-select__label">结束时间</span>
             <input
-              className="filter-select__control"
+              className="filter-select__control filter-select__control--text"
               type="datetime-local"
               value={filters.started_to}
               onChange={(event) => onChange('started_to', event.target.value)}

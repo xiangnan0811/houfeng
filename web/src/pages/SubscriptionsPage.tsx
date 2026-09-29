@@ -893,7 +893,7 @@ export function SubscriptionsPage() {
               options={availableCurrencies.map((currency) => ({ value: currency, label: currency }))}
               onChange={(value) => setFilter('currency', value)}
             />
-            <label className="filter-select">
+            <label className={`filter-select${filters.label ? ' is-filtered' : ''}`}>
               <span className="filter-select__label">标签</span>
               <input
                 className="filter-select__control filter-select__control--text"

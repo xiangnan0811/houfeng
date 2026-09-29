@@ -112,7 +112,6 @@ export function EventsFilterPanel({
         label="对象类型"
         value={filters.object_type || null}
         options={OBJECT_TYPE_OPTIONS}
-        placeholder="全部对象"
         onChange={(value) =>
           onFilterChange('object_type', value === 'monitoring_instance' || value === 'target' ? value : '')
         }
@@ -121,7 +120,6 @@ export function EventsFilterPanel({
         label="严重度"
         value={filters.severity || null}
         options={SEVERITY_OPTIONS}
-        placeholder="全部严重度"
         onChange={(value) =>
           onFilterChange('severity', value === '关注' || value === '告警' || value === '严重' ? value : '')
         }
@@ -130,20 +128,18 @@ export function EventsFilterPanel({
         label="事件类型"
         value={filters.event_type || null}
         options={EVENT_TYPE_SELECT_OPTIONS}
-        placeholder="全部类型"
         onChange={(value) => onFilterChange('event_type', value as FilterState['event_type'])}
       />
       <FilterSelect
         label="异常类别"
         value={filters.incident_class || null}
         options={INCIDENT_CLASS_OPTIONS}
-        placeholder="全部类别"
         onChange={(value) => onFilterChange('incident_class', value ?? '')}
       />
-      <div className="filter-select">
+      <div className={`filter-select${filters.keyword ? ' is-filtered' : ''}`}>
         <span className="filter-select__label">关键词</span>
         <input
-          className="filter-select__control"
+          className="filter-select__control filter-select__control--text"
           type="text"
           placeholder="搜索摘要…"
           value={filters.keyword}
