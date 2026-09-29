@@ -295,9 +295,6 @@
 .subject-local-nav__link:hover{color:var(--text-primary)}
 .subject-local-nav__link--active{color:var(--text-primary);border-bottom-color:var(--accent);font-weight:600}
 .subject-activity-page__work{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
-.subject-activity-filters{display:flex;flex-wrap:wrap;gap:var(--space-3)}
-.subject-activity-filters__field{display:flex;flex-direction:column;gap:var(--space-1);font-size:var(--type-small-size);color:var(--text-muted)}
-.subject-activity-filters__field select{min-width:160px;padding:var(--space-2) var(--space-3);border:var(--border-w) solid var(--border);border-radius:var(--radius-2);background:var(--surface);color:var(--text-primary)}
 .subject-activity-page__source-note{color:var(--text-secondary);font-size:var(--type-small-size)}
 .subject-activity-page__more{display:flex;justify-content:center}
 .unified-timeline{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
@@ -345,6 +342,8 @@
 .record-search-page .page__title,
 .record-drafts-page .page__title{font-size:22px;line-height:1.25;overflow-wrap:anywhere}
 .record-search-filter,.record-search-results,.record-drafts-results{min-width:0}
+/* 加载完毕是安静的状态说明，不与结果争夺注意力。 */
+.record-search-results__footer>span{color:var(--text-muted);font-size:var(--type-small-size)}
 .record-search-results__title,.record-drafts__title{overflow-wrap:anywhere}
 .record-workspace__facts{margin:0}
 .record-workspace__evidence-links{display:flex;flex-wrap:wrap;gap:var(--space-3)}
@@ -371,10 +370,9 @@
 @media (max-width:640px){
 .record-inbox-item{grid-template-columns:8px minmax(0,1fr)}
 .record-inbox-item__commands{grid-column:2;justify-content:flex-start}
-.subject-identity-bar,.subject-activity-filters{flex-direction:column}
+.subject-identity-bar{flex-direction:column}
 .subject-identity-bar__actions{justify-content:flex-start;width:100%}
 
-.subject-activity-filters__field select{min-width:0;width:100%}
 .unified-timeline__header{flex-direction:column;align-items:flex-start}
 .unified-timeline__time{align-items:flex-start}
 .record-workspace .archive-detail-two-col{display:flex;flex-direction:column}

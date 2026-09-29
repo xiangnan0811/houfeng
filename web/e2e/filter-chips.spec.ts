@@ -1,4 +1,4 @@
-import { coreRouteProfile } from './fixtures/profiles'
+import { coreRouteProfile, recordSearchProfile, subjectActivityProfile } from './fixtures/profiles'
 import { expect, test } from './fixtures'
 import { expectNoDocumentOverflow } from './support/geometry'
 
@@ -79,4 +79,42 @@ test('Filter drawers keep the stacked label layout outside the filter bar', asyn
   const drawerSelect = page.locator('.drawer .filter-select, [role="dialog"] .filter-select').first()
   await expect(drawerSelect).toBeVisible()
   expect(await drawerSelect.evaluate((element) => getComputedStyle(element).flexDirection)).toBe('column')
+})
+
+test('Record search and subject activity filters use the same single-row chips', async ({ api, page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  api.useProfile(recordSearchProfile())
+  await page.goto('/records')
+  const recordRow = page.getByRole('form', { name: '记录搜索筛选' }).locator('.filter-bar__controls-row')
+  const recordChips = recordRow.locator(':scope > .filter-select')
+  await expect(recordChips).toHaveCount(5)
+  const recordTops = await recordChips.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)))
+  expect(new Set(recordTops).size).toBe(1)
+  expect(await recordChips.first().evaluate(chipStyle).then((style) => style.direction)).toBe('row')
+
+  // 追加式类型筛选：选中后下拉复位，胶囊如实显示已选数量并高亮。
+  const typeChip = recordRow.locator(':scope > .filter-select', { has: page.locator('.filter-select__label', { hasText: /^记录类型$/ }) })
+  const idle = await typeChip.evaluate(chipStyle)
+  await typeChip.locator('select').selectOption({ label: '排障' })
+  await expect(typeChip).toHaveClass(/is-filtered/)
+  await expect(typeChip.locator('select option:checked')).toHaveText('已选 1')
+  await expect.poll(async () => (await typeChip.evaluate(chipStyle)).background).not.toBe(idle.background)
+  await expectNoDocumentOverflow(page)
+
+  api.useProfile(subjectActivityProfile({}))
+  await page.goto('/vps/vps_001/activity')
+  const activityChips = page.locator('.subject-activity-filters > .filter-select')
+  await expect(activityChips).toHaveCount(3)
+  const activityTops = await activityChips.evaluateAll((elements) => elements.map((element) => Math.round(element.getBoundingClientRect().top)))
+  expect(new Set(activityTops).size).toBe(1)
+  expect(await activityChips.first().evaluate(chipStyle).then((style) => style.direction)).toBe('row')
+  await expectNoDocumentOverflow(page)
+
+  // 窄屏不再强制纵向：胶囊按共享规则换行，全部可见且不产生横向溢出。
+  await page.setViewportSize({ width: 390, height: 900 })
+  for (const chip of await activityChips.all()) await expect(chip).toBeVisible()
+  const overflow = await page.locator('.subject-activity-filters').evaluate((element) => element.scrollWidth - element.clientWidth)
+  expect(overflow).toBeLessThanOrEqual(1)
+  await expectNoDocumentOverflow(page)
 })
