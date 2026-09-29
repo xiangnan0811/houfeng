@@ -27,6 +27,16 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.6.0](https://github.com/xiangnan0811/houfeng/compare/v1.5.0...v1.6.0) (2026-09-29)
+
+
+### Features
+
+* **web:** 服务商、命令审计与记录收件箱页面整理，宽表滚动提示改为按需显示 ([a10b8ad](https://github.com/xiangnan0811/houfeng/commit/a10b8ad621220c7928add250857a720f78673730))
+* **web:** 服务商、命令审计与记录收件箱页面整理，宽表滚动提示改为按需显示 ([ca2765b](https://github.com/xiangnan0811/houfeng/commit/ca2765b104aee116ebced56e701a1bcf66df7d64))
+* **web:** 设置页主题色板预览，资产决策无待办时保持安静并统一辅助入口样式 ([233c43f](https://github.com/xiangnan0811/houfeng/commit/233c43f456c48429f1a4e8663cbd6298379cd4c8))
+* **web:** 设置页主题色板预览，资产决策无待办时保持安静并统一辅助入口样式 ([da6a9ee](https://github.com/xiangnan0811/houfeng/commit/da6a9ee819df87217d592b2c6c25c8a7a683310b))
+
 ## [1.5.0](https://github.com/xiangnan0811/houfeng/compare/v1.4.0...v1.5.0) (2026-09-29)
 
 
