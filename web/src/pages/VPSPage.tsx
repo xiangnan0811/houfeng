@@ -45,6 +45,8 @@ import {
   vpsLocationLabel,
   type AssetQualityIssue,
 } from './assetPageUtils'
+import { buildInventoryOverview } from './vps-inventory/inventoryOverview'
+import { VPSInventoryOverview } from './vps-inventory/VPSInventoryOverview'
 import './vps-detail/VPSDetailWorkspace.css'
 
 const WORKSPACE_STORAGE_KEY = 'houfeng.vps.workspace'
@@ -462,105 +464,151 @@ function subscriptionFact(row: InventoryRow, subscriptionsError: string | null):
   return subscriptionParts(row, subscriptionsError).join(' · ')
 }
 
-function inspectorEmptyMessage(selectedID: string | null, visibleCount: number): string {
-  if (visibleCount === 0) return '暂无匹配的 VPS'
-  if (selectedID) return '选中项不在当前筛选结果中'
-  return '选择 VPS'
+function inspectorNotice(selectedID: string | null): string | null {
+  return selectedID ? '选中项不在当前筛选结果中' : null
+}
+
+function VPSInspectorFacts({ row, subscriptionsError }: { row: InventoryRow; subscriptionsError: string | null }) {
+  const vps = row.vps
+  return (
+    <div className="vps-inspector__groups">
+      <section className="vps-inspector__group" aria-labelledby="vps-inspector-identity">
+        <h3 id="vps-inspector-identity" className="vps-inspector__group-title">资产身份</h3>
+        <dl className="vps-inspector__dl">
+          <dt>IPv4</dt>
+          <dd className="vps-mono">{vps.ipv4.trim() || '—'}</dd>
+          {vps.ipv6.trim() ? (
+            <>
+              <dt>IPv6</dt>
+              <dd className="vps-mono">{vps.ipv6.trim()}</dd>
+            </>
+          ) : null}
+          {vps.ssh_host.trim() ? (
+            <>
+              <dt>SSH</dt>
+              <dd className="vps-mono">
+                {compactLine([
+                  vps.ssh_user.trim() ? `${vps.ssh_user.trim()}@${vps.ssh_host.trim()}` : vps.ssh_host.trim(),
+                  String(vps.ssh_port || ''),
+                ])}
+              </dd>
+            </>
+          ) : null}
+          <dt>服务商</dt>
+          <dd>{formatOptional(vps.provider_name)}</dd>
+          <dt>位置</dt>
+          <dd>{vpsPlaceLabel(vps)}</dd>
+          <dt>规格</dt>
+          <dd>{vpsSpecLabel(vps)}</dd>
+        </dl>
+      </section>
+      <section className="vps-inspector__group vps-inspector__group--tall" aria-labelledby="vps-inspector-business">
+        <h3 id="vps-inspector-business" className="vps-inspector__group-title">经营与续费</h3>
+        <dl className="vps-inspector__dl">
+          <dt>用途</dt>
+          <dd><UsageBadge value={(vps.usage_tags ?? []).join('、')} /></dd>
+          <dt>VPS 有效期</dt>
+          <dd>{validityLabel(vps)}</dd>
+          <dt>订阅</dt>
+          <dd>{subscriptionFact(row, subscriptionsError)}</dd>
+          {vps.importance.trim() ? (
+            <>
+              <dt>重要性</dt>
+              <dd>{overviewImportanceLabel(vps.importance)}</dd>
+            </>
+          ) : null}
+          {vps.labels.length > 0 ? (
+            <>
+              <dt>标签</dt>
+              <dd>{vps.labels.join('、')}</dd>
+            </>
+          ) : null}
+        </dl>
+      </section>
+      <section className="vps-inspector__group" aria-labelledby="vps-inspector-evidence">
+        <h3 id="vps-inspector-evidence" className="vps-inspector__group-title">监控与证据</h3>
+        <dl className="vps-inspector__dl">
+          <dt>关联</dt>
+          <dd>
+            {`监控实例 ${vps.active_monitoring_instance_link_count}`}
+            {typeof vps.running_monitoring_instance_count === 'number' ? ` · 运行中监控 ${vps.running_monitoring_instance_count}` : ''}
+            {typeof vps.running_target_count === 'number' ? ` · 运行中探测 ${vps.running_target_count}` : ''}
+          </dd>
+          <dt>IP 质量</dt>
+          <dd><IPQualityBadge {...(vps.ip_quality_summary === undefined ? {} : { summary: vps.ip_quality_summary })} /></dd>
+        </dl>
+      </section>
+      {vps.note.trim() ? (
+        <section className="vps-inspector__group vps-inspector__group--wide" aria-labelledby="vps-inspector-note">
+          <h3 id="vps-inspector-note" className="vps-inspector__group-title">备注</h3>
+          <p className="vps-inspector__note">{vps.note}</p>
+        </section>
+      ) : null}
+    </div>
+  )
 }
 
 function VPSInspector({
   row,
+  visibleRows,
+  subscriptionEvidence,
   detailHref,
   currentInventoryHref,
   subscriptionsError,
-  emptyMessage,
+  notice,
+  onSelect,
 }: {
   row: InventoryRow | null
+  visibleRows: InventoryRow[]
+  subscriptionEvidence: SubscriptionEvidenceStatus
   detailHref: string | null
   currentInventoryHref: string
   subscriptionsError: string | null
-  emptyMessage: string
+  notice: string | null
+  onSelect: (vpsID: string) => void
 }) {
+  const attention = row ? cancellationAttentionReason(row) : null
+  const overview = useMemo(
+    () => buildInventoryOverview(visibleRows, subscriptionEvidence),
+    [visibleRows, subscriptionEvidence],
+  )
   return (
     <section className="vps-inspector" aria-label="VPS 检查器">
       <div className="vps-inspector__inner">
-        {!row || !detailHref ? (
-          <p className="vps-inspector__empty">{emptyMessage}</p>
-        ) : (
+        {row && detailHref ? (
           <>
-            <h2 className="vps-inspector__title">{row.vps.display_name}</h2>
-            <dl className="vps-inspector__dl">
-              <dt>位置</dt>
-              <dd>{vpsPlaceLabel(row.vps)}</dd>
-              <dt>服务商</dt>
-              <dd>{formatOptional(row.vps.provider_name)}</dd>
-              <dt>IPv4</dt>
-              <dd className="vps-mono">{row.vps.ipv4.trim() || '—'}</dd>
-              {row.vps.ipv6.trim() ? (
-                <>
-                  <dt>IPv6</dt>
-                  <dd className="vps-mono">{row.vps.ipv6.trim()}</dd>
-                </>
-              ) : null}
-              {row.vps.ssh_host.trim() ? (
-                <>
-                  <dt>SSH</dt>
-                  <dd className="vps-mono">
-                    {compactLine([
-                      row.vps.ssh_user.trim() ? `${row.vps.ssh_user.trim()}@${row.vps.ssh_host.trim()}` : row.vps.ssh_host.trim(),
-                      String(row.vps.ssh_port || ''),
-                    ])}
-                  </dd>
-                </>
-              ) : null}
-              <dt>规格</dt>
-              <dd>{vpsSpecLabel(row.vps)}</dd>
-              <dt>生命周期</dt>
-              <dd><LifecycleBadge value={row.vps.lifecycle_status} /></dd>
-              <dt>用途</dt>
-              <dd><UsageBadge value={(row.vps.usage_tags ?? []).join('、')} /></dd>
-              <dt>续费</dt>
-              <dd><RenewalBadge value={row.vps.renewal_decision} /> · {row.subscriptionEvidence === 'ready' ? (row.subscription?.renew_at ? formatDate(row.subscription.renew_at) : '无续费日') : '续费日未知'}</dd>
-              <dt>VPS 有效期</dt>
-              <dd>{validityLabel(row.vps)}</dd>
-              <dt>订阅</dt>
-              <dd>{subscriptionFact(row, subscriptionsError)}</dd>
-              <dt>关联</dt>
-              <dd>
-                {`监控实例 ${row.vps.active_monitoring_instance_link_count}`}
-                {typeof row.vps.running_monitoring_instance_count === 'number' ? ` · 运行中监控 ${row.vps.running_monitoring_instance_count}` : ''}
-                {typeof row.vps.running_target_count === 'number' ? ` · 运行中探测 ${row.vps.running_target_count}` : ''}
-              </dd>
-              <dt>IP 质量</dt>
-              <dd><IPQualityBadge {...(row.vps.ip_quality_summary === undefined ? {} : { summary: row.vps.ip_quality_summary })} /></dd>
-              {row.vps.importance.trim() ? (
-                <>
-                  <dt>重要性</dt>
-                  <dd>{overviewImportanceLabel(row.vps.importance)}</dd>
-                </>
-              ) : null}
-              {row.vps.labels.length > 0 ? (
-                <>
-                  <dt>标签</dt>
-                  <dd>{row.vps.labels.join('、')}</dd>
-                </>
-              ) : null}
-            </dl>
-            {row.vps.note.trim() ? (
-              <>
-                <hr className="vps-inspector__rule" />
-                <p className="vps-inspector__kicker">备注</p>
-                <p className="vps-inspector__note">{row.vps.note}</p>
-              </>
+            <header className="vps-inspector__head">
+              <div className="vps-inspector__identity">
+                <h2 className="vps-inspector__title">{row.vps.display_name}</h2>
+                <p className="vps-inspector__status">
+                  <LifecycleBadge value={row.vps.lifecycle_status} />
+                  <span className="vps-dotted__sep" aria-hidden="true">·</span>
+                  <RenewalBadge value={row.vps.renewal_decision} />
+                </p>
+              </div>
+              <Link
+                className="btn sm secondary vps-inspector__action"
+                to={detailHref}
+                state={{ vpsInventoryHref: currentInventoryHref }}
+              >
+                打开 VPS 详情
+              </Link>
+            </header>
+            {attention ? (
+              <p className="vps-accordion__notice vps-inspector__notice">
+                <span aria-hidden="true"><StatusGlyph state="notice" size="sm" /></span>
+                <span>{attention}</span>
+              </p>
             ) : null}
-            <Link
-              className="vps-inspector__action"
-              to={detailHref}
-              state={{ vpsInventoryHref: currentInventoryHref }}
-            >
-              打开 VPS 详情
-            </Link>
+            <VPSInspectorFacts row={row} subscriptionsError={subscriptionsError} />
           </>
+        ) : visibleRows.length === 0 ? (
+          <>
+            {notice ? <p className="vps-overview__notice">{notice}</p> : null}
+            <p className="vps-inspector__empty">暂无匹配的 VPS</p>
+          </>
+        ) : (
+          <VPSInventoryOverview overview={overview} notice={notice} onSelect={onSelect} />
         )}
       </div>
     </section>
@@ -923,7 +971,7 @@ export function VPSPage() {
   const listEmptyMessage = state.vps.length === 0
     ? { title: '还没有录入 VPS 资产', detail: '先录入 VPS。' }
     : { title: '当前筛选没有匹配 VPS', detail: searchQuery.trim() ? '改搜索或清空筛选。' : '清空筛选或新建 VPS。' }
-  const inspectorEmpty = inspectorEmptyMessage(selectedID, visibleRows.length)
+  const inspectorNoticeText = inspectorNotice(selectedID)
   const selectedDetailHref = selectedRow ? vpsDetailHref(selectedRow.vps.vps_id, filters.view) : null
 
   return (
@@ -1198,10 +1246,13 @@ export function VPSPage() {
             </aside>
             <VPSInspector
               row={selectedRow}
+              visibleRows={visibleRows}
+              subscriptionEvidence={subscriptionEvidence}
               detailHref={selectedDetailHref}
               currentInventoryHref={currentInventoryHref}
               subscriptionsError={state.subscriptionsError}
-              emptyMessage={inspectorEmpty}
+              notice={inspectorNoticeText}
+              onSelect={setSelected}
             />
           </div>
         )}
