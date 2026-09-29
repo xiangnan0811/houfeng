@@ -131,7 +131,7 @@ test('fresh VPS ownership, shared associations, independent renewal, archive and
     await pageA.goto('/archive/' + aID)
     await expect(pageA.getByRole('button', { name: '恢复管理' })).toBeVisible()
     for (const [themeLabel, themeClass, themeName] of [
-      ['氛围暗色', 'theme-houfeng-dark', 'dark'], ['精致亮色', 'theme-houfeng-light', 'light'],
+      ['候风 深色', 'theme-houfeng-dark', 'dark'], ['候风 浅色', 'theme-houfeng-light', 'light'],
     ] as const) {
       await pageA.getByRole('button', { name: '切换主题' }).click()
       await pageA.getByRole('menuitemradio', { name: themeLabel }).click()

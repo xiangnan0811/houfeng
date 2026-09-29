@@ -38,8 +38,8 @@
 .monitoring-page__head-actions{flex:1 1 auto;justify-content:flex-end}
 .monitoring-page__snapshot{margin:0;color:var(--text-muted);font-size:var(--type-small-size);line-height:1.4;white-space:nowrap}
 .monitoring-page__tools,.monitoring-page__controls{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
-.monitoring-page__views{position:sticky;top:0;z-index:6;margin:0 calc(-1 * var(--shell-main-inline-padding));padding:0 var(--shell-main-inline-padding);background:var(--bg)}
-.monitoring-page__views .tabs{background:var(--bg)}
+.monitoring-page__views{position:sticky;top:0;z-index:6;margin:0 calc(-1 * var(--shell-main-inline-padding));padding:0 var(--shell-main-inline-padding);background-color:var(--bg);background-image:var(--bg-texture);background-size:var(--bg-texture-size);background-attachment:fixed}
+.monitoring-page__views .tabs{background:transparent}
 .monitoring-page__controls{width:100%}
 .monitoring-page__filters.filter-bar{width:100%;min-width:0;margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:var(--space-2)}
 .monitoring-page__filters .filter-bar__controls-row{flex:1 1 100%;gap:var(--space-2)}

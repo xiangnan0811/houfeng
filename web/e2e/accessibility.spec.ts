@@ -23,11 +23,25 @@ const AXE_SURFACES = [
   { name: 'Record Inbox', path: '/record-inbox', heading: /^记录协作收件箱$/ },
 ] as const
 
-for (const surface of AXE_SURFACES) {
-  test(`${surface.name} has no serious or critical axe violations`, async ({ api, page }) => {
+// 每个运行时主题类都要过同一套对比度门禁（观测台浅色回退候风浅色，已被覆盖）。
+const AXE_THEMES = [
+  { preset: 'houfeng', mode: 'dark' },
+  { preset: 'houfeng', mode: 'light' },
+  { preset: 'precision', mode: 'dark' },
+  { preset: 'precision', mode: 'light' },
+  { preset: 'observatory', mode: 'dark' },
+] as const
+
+for (const theme of AXE_THEMES) for (const surface of AXE_SURFACES) {
+  test(`${surface.name} has no serious or critical axe violations in ${theme.preset}-${theme.mode}`, async ({ api, page }) => {
     api.useProfile(coreRouteProfile(surface.path))
     await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.addInitScript(({ preset, mode }) => {
+      localStorage.setItem('houfeng.theme.preset', preset)
+      localStorage.setItem('houfeng.theme.mode', mode)
+    }, theme)
     await page.goto(surface.path)
+    await expect(page.locator('html')).toHaveClass(`theme-${theme.preset}-${theme.mode}`)
     await expect(page.getByRole('heading', { name: surface.heading })).toBeVisible()
     await page.evaluate(() => document.fonts.ready)
 
@@ -42,6 +56,61 @@ for (const surface of AXE_SURFACES) {
       }))
 
     expect(blocking, JSON.stringify(blocking, null, 2)).toEqual([])
+  })
+}
+
+for (const theme of AXE_THEMES) {
+  test(`primary and danger buttons keep AA contrast at rest and on hover in ${theme.preset}-${theme.mode}`, async ({ api, page }) => {
+    api.useProfile(coreRouteProfile('/settings'))
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.addInitScript(({ preset, mode }) => {
+      localStorage.setItem('houfeng.theme.preset', preset)
+      localStorage.setItem('houfeng.theme.mode', mode)
+    }, theme)
+    await page.goto('/settings')
+    await expect(page.locator('html')).toHaveClass(`theme-${theme.preset}-${theme.mode}`)
+    await expect(page.getByRole('heading', { name: /^系统设置$/ })).toBeVisible()
+    await page.evaluate(() => document.fonts.ready)
+
+    // 顶栏头像同样是强调色底 + var(--bg) 字，直接检查真实元素的静止与悬停态。
+    const avatar = page.locator('.topbar .tp-avatar')
+    for (const state of ['rest', 'hover'] as const) {
+      if (state === 'hover') await avatar.hover()
+      else await page.mouse.move(0, 0)
+      const result = await new AxeBuilder({ page }).include('.topbar .tp-avatar').withRules(['color-contrast']).analyze()
+      expect(result.violations.map((violation) => violation.id), `avatar ${state}`).toEqual([])
+      expect(result.passes.map((rule) => rule.id), `avatar ${state}`).toContain('color-contrast')
+    }
+
+    // 危险按钮只出现在少数详情流程里，这里在真实页面面板上挂载共享按钮类，直接验证主题令牌组合。
+    await page.locator('main#main-content').evaluate((main) => {
+      const probe = document.createElement('div')
+      probe.className = 'card'
+      probe.dataset.contrastProbe = 'true'
+      for (const variant of ['primary', 'danger']) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = `btn md ${variant}`
+        button.dataset.variant = variant
+        button.textContent = variant === 'primary' ? '保存设置' : '删除目标'
+        probe.append(button)
+      }
+      main.prepend(probe)
+    })
+
+    for (const variant of ['primary', 'danger'] as const) {
+      const button = page.locator(`[data-contrast-probe] [data-variant="${variant}"]`)
+      for (const state of ['rest', 'hover'] as const) {
+        if (state === 'hover') await button.hover()
+        else await page.mouse.move(0, 0)
+        const result = await new AxeBuilder({ page })
+          .include(`[data-contrast-probe] [data-variant="${variant}"]`)
+          .withRules(['color-contrast'])
+          .analyze()
+        expect(result.violations.map((violation) => violation.id), `${variant} ${state}`).toEqual([])
+        expect(result.passes.map((rule) => rule.id), `${variant} ${state}`).toContain('color-contrast')
+      }
+    }
   })
 }
 

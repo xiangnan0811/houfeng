@@ -1,4 +1,4 @@
-export type Preset = 'houfeng' | 'classic'
+export type Preset = 'houfeng' | 'precision' | 'observatory'
 export type Mode = 'dark' | 'light' | 'system'
 export type Scheme = 'dark' | 'light'
 
@@ -12,7 +12,10 @@ export interface ThemeChoice {
   mode: Mode
 }
 
-const PRESET_VALUES: ReadonlySet<Preset> = new Set(['houfeng', 'classic'])
+// 已下线的 'classic' 等旧值不在白名单内，读取时回落到默认预设。
+const PRESET_VALUES: ReadonlySet<Preset> = new Set(['houfeng', 'precision', 'observatory'])
+// 观测台只有深色版本；浅色时回退候风浅色。
+const DARK_ONLY_PRESETS: ReadonlySet<Preset> = new Set(['observatory'])
 const MODE_VALUES: ReadonlySet<Mode> = new Set(['dark', 'light', 'system'])
 
 export function detectInitialTheme(): ThemeChoice {
@@ -33,12 +36,19 @@ export function resolveScheme(mode: Mode): Scheme {
   return mode === 'system' ? preferredScheme() : mode
 }
 
-export function applyTheme(preset: Preset, mode: Mode | Scheme): void {
-  const scheme: Scheme = mode === 'system' ? preferredScheme() : mode
-  // classic-light falls back to houfeng-light since we only have 3 themes
-  const cls = preset === 'classic' && scheme === 'light'
+export function isDarkOnlyPreset(preset: Preset): boolean {
+  return DARK_ONLY_PRESETS.has(preset)
+}
+
+export function themeClass(preset: Preset, scheme: Scheme): string {
+  return scheme === 'light' && isDarkOnlyPreset(preset)
     ? 'theme-houfeng-light'
     : `theme-${preset}-${scheme}`
+}
+
+export function applyTheme(preset: Preset, mode: Mode | Scheme): void {
+  const scheme: Scheme = mode === 'system' ? preferredScheme() : mode
+  const cls = themeClass(preset, scheme)
   const html = document.documentElement
   for (const c of Array.from(html.classList)) {
     if (c.startsWith('theme-')) html.classList.remove(c)

@@ -1,7 +1,7 @@
 *, *::before, *::after{box-sizing:border-box}
 html, body, #root{height:100%}
 html{scroll-behavior:smooth}
-body{margin:0;background:var(--bg);color:var(--text-primary);transition:background-color var(--dur-micro) var(--ease-calm), color var(--dur-micro) var(--ease-calm);font-family:var(--font-sans);font-size:var(--type-body-size);line-height:var(--type-body-leading);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;position:relative;overflow-x:hidden}
+body{margin:0;background-color:var(--bg);background-image:var(--bg-texture);background-size:var(--bg-texture-size);background-attachment:fixed;color:var(--text-primary);transition:background-color var(--dur-micro) var(--ease-calm), color var(--dur-micro) var(--ease-calm);font-family:var(--font-sans);font-size:var(--type-body-size);line-height:var(--type-body-leading);-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;position:relative;overflow-x:hidden}
 #root{position:relative;z-index:1;display:flex;flex-direction:column;height:100%}
 h1, h2, h3, h4, h5, h6{margin:0;padding:0;color:var(--text-primary)}
 h1{font-family:var(--font-sans);font-weight:var(--type-display-weight);letter-spacing:0}

@@ -59,11 +59,11 @@
 
 ### 状态前景与主按钮对比度合同
 
-- 带文字的 `.tone--*` badge、状态文本和 `.btn.primary` 必须在三套运行时主题上达到 WCAG AA 普通文本对比度；不能因为 dark-first 就把 500 色阶原样用于 light surface。
-- light 主题使用对比度安全的状态 owner tokens：normal `#047857`、notice/alert/warn `#92400e`、critical/error `#b91c1c`、maintenance/offline `#475569`。`--badge-*-c` 与 `--color-state-*` 引用这些 owner，不在组件规则重新硬编码第二套颜色。
-- `.btn.primary` 使用 `background: var(--accent); color: var(--bg)`：暗色主题得到深色前景配亮蓝，亮色主题得到白色前景配深蓝。不要恢复 `#fff`，默认/经典暗色的 `#3b82f6` 对白色小字只有约 3.68:1。
+- 带文字的 `.tone--*` badge、状态文本和 `.btn.primary` 必须在全部五个运行时主题上达到 WCAG AA 普通文本对比度（`web/e2e/accessibility.spec.ts` 对每个主题跑 settled axe）；不能因为 dark-first 就把 500 色阶原样用于 light surface。
+- light 主题使用对比度安全的状态 owner tokens：候风浅色为 ok `#2F5A46`、warn `#8A5A12`、err `#9B3B30`、muted `#5B605C`；精密浅色为 normal `#047857`、notice/alert/warn `#92400E`、critical/error `#B91C1C`、maintenance/offline `#475569`。`--badge-*-c` 与 `--color-state-*` 引用这些 owner，不在组件规则重新硬编码第二套颜色。
+- `.btn.primary` 使用 `background: var(--accent); color: var(--bg)`：暗色主题得到深色前景配亮强调色（鼠尾草绿 / 靛蓝 / 青绿），亮色主题得到浅色前景配深强调色。不要恢复 `#fff`，暗色主题的亮强调色配白色小字达不到 AA。`.btn.danger` 同理使用 `color: var(--bg)`。主/危险按钮悬停只换底色（主按钮 `--accent-strong`，危险按钮 `--err` 向 `--text-primary` 混合），不要用整体 `opacity` 降低，否则文字会一起被冲淡到 AA 以下；`accessibility.spec.ts` 在每个主题下对真实 hover 态做 color-contrast 检查。
 - `.badge--info.tone--critical` 的 11px 文字不能直接使用 critical token；`#ef4444` 在自身 10% tint 背景上只有约 4.0:1。共享 atom 使用 `color-mix(in srgb, var(--color-state-critical) 78%, var(--text-primary))` 提升暗色前景，同时让亮色 critical 继续向深色文本收束；border/background 仍由原 critical token 驱动。
-- 11.5px 的 `--text-secondary` 不能直接放在 alert/critical tint 上并假设基础 surface 对比度仍成立；例如亮色 Asset group card 的 alert 4% 背景上只有 4.46:1。该 card 的 context owner 使用 `color-mix(in srgb, var(--text-secondary) 90%, var(--text-primary))`，修改后必须在三主题 settled axe 中复验真实复合背景。
+- 11.5px 的 `--text-secondary` 不能直接放在 alert/critical tint 上并假设基础 surface 对比度仍成立；例如亮色 Asset group card 的 alert 4% 背景上只有 4.46:1。该 card 的 context owner 使用 `color-mix(in srgb, var(--text-secondary) 90%, var(--text-primary))`，修改后必须在五个运行时主题的 settled axe 中复验真实复合背景。
 - 修改任一状态/背景 token 后，先跑相关组件/页面测试，再运行 `web/e2e/accessibility.spec.ts` 的 settled axe 与三视口 browser contracts；serious/critical 必须为 0。额外主题人工/CDP 检查可以补充，但不能替代 repository gate。
 
 ```css
@@ -80,20 +80,21 @@
 
 ## 主题与暗色优先
 
-候风是 **dark-first**，默认主题在 `tokens.css:51-89` 的 `:root` 块（即 `houfeng-dark`），CSS 在 `<html>` 没有 `theme-*` 类时就直接用它。
+候风是 **dark-first**，默认主题在 `tokens.css` 的 `:root, .theme-houfeng-dark` 块（即 `houfeng-dark`），CSS 在 `<html>` 没有 `theme-*` 类时就直接用它。
 
 **主题切换实现**：
 
-- 主题状态由 `web/src/lib/theme-context.tsx` 管理（`Preset = 'houfeng' | 'classic'`、`Mode = 'dark' | 'light' | 'system'`）。
-- `web/src/lib/theme.ts` 的 `applyTheme(preset, mode)` 根据 preset + 解析后的 scheme 在 `<html>` 上加 `theme-houfeng-dark` / `theme-houfeng-light` / `theme-classic-dark` 三个 class 之一；`classic-light` 明确回退到 `theme-houfeng-light`。
-- 首屏防闪烁逻辑位于同源静态资源 `web/public/theme-bootstrap.js`，由 `web/index.html` 在 React 入口前以 `<script src="/theme-bootstrap.js"></script>` 同步加载。脚本只接受已知 preset/mode allowlist，并与 `web/src/lib/theme.ts` 保持相同的 `classic-light` 回退；禁止改回 inline script 或把预热延后到 React。
+- 主题状态由 `web/src/lib/theme-context.tsx` 管理（`Preset = 'houfeng' | 'precision' | 'observatory'`，界面名“候风 / 精密 / 观测台”；`Mode = 'dark' | 'light' | 'system'`）。三套预设只改变颜色、阴影、圆角与背景纹理令牌，不改变布局、组件或交互。
+- `web/src/lib/theme.ts` 的 `themeClass(preset, scheme)` 决定 `<html>` 上唯一的主题类：`theme-houfeng-dark` / `theme-houfeng-light` / `theme-precision-dark` / `theme-precision-light` / `theme-observatory-dark` 五个运行时主题之一。观测台仅深色（`isDarkOnlyPreset`），`observatory-light` 明确回退到 `theme-houfeng-light`，设置页对此给出提示。已下线的 `classic` 等未知持久值回落到默认 `houfeng`。
+- 首屏防闪烁逻辑位于同源静态资源 `web/public/theme-bootstrap.js`，由 `web/index.html` 在 React 入口前以 `<script src="/theme-bootstrap.js"></script>` 同步加载。脚本只接受已知 preset/mode allowlist，并与 `themeClass` 保持相同映射与 `observatory-light` 回退（`cspContract.test.ts` 逐一对照）；禁止改回 inline script 或把预热延后到 React。
+- 背景纹理走 `--bg-texture` / `--bg-texture-size`，由 `reset.css` 的 body 长写背景属性消费（多图层纹理不能放进 `background` 简写）；贴主区域的吸顶条（如订阅、监控视图切换）用同样的长写属性加 `background-attachment:fixed`，不要用 `background:var(--bg)` 盖掉纹理。观测台的圆角通过覆盖 `--radius-*` 实现。原生控件的明暗用每个主题块的 `--color-scheme`（`dark`/`light`）驱动，不要按单个主题类写 `color-scheme`。
 - 持久化 key 由 `THEME_STORAGE_KEYS` 集中（`web/src/lib/theme.ts:5-8`）：`houfeng.theme.preset` / `houfeng.theme.mode`。
 
 **新组件准备暗色**：
 
 - 直接用 `var(--surface)` / `var(--text-primary)` / `var(--border)` 等令牌，**不要**写"`.foo--dark { ... }`"派生类。
 - 不要写 `@media (prefers-color-scheme: dark)` —— 主题切换走显式 `theme-*` class，让用户在偏好之外可以强切。
-- `@media (prefers-reduced-motion: reduce)` 已在 `tokens.css:216-223` 全局生效，组件自定义动画**不要**单独再禁。
+- `@media (prefers-reduced-motion: reduce)` 已在 `web/src/styles/partials/motion.css` 全局生效（`!important` 压过 120–240ms 的动效令牌），组件自定义动画**不要**单独再禁。
 
 ---
 
@@ -273,7 +274,7 @@ spawnSync(process.execPath, [analyzerPath, '--dist', emptyDist, '--format', 'jso
 **Why**：原生箭头在暗色主题下突兀，且颜色不随主题切换；`url(data:image/svg+xml,...)` 又会被严格 `img-src 'self'` 拒绝。箭头因此必须是同源静态 SVG，并由主题令牌选择资源。
 
 **约定**：
-- `--select-caret` 在 `web/src/styles/tokens.css` 的 `:root`、`.theme-houfeng-light`、`.theme-classic-dark` 分别指向 `/select-caret-houfeng-dark.svg`、`/select-caret-houfeng-light.svg`、`/select-caret-classic-dark.svg`；`classic-light` 使用既定的 `houfeng-light` 回退。三个 SVG 必须保存在 `web/public/` 并纳入 CSP source contract。
+- `--select-caret` 在 `web/src/styles/tokens.css` 的每个运行时主题块中指向 `/select-caret-<preset>-<scheme>.svg`（`houfeng-dark`、`houfeng-light`、`precision-dark`、`precision-light`、`observatory-dark`）；`observatory-light` 使用既定的 `houfeng-light` 回退。五个 SVG 必须保存在 `web/public/` 并纳入 CSP source contract。
 - 新增 form select 时**复用现有带 caret 的规则**（`select.input` / `.filter-select__control` / `.page-stack select` / `.asset-operation-field select` / `.target-create-drawer__form select` / `.filter-panel select.filter-select` 等），优先走 `Select` 原子（`web/src/components/atoms/Select.tsx`）或 `FilterSelect`，不要新造裸 select。
 - 紧凑型 select：`padding-right` ≈ 24-26px、`background-position:right 8px center`；标准型：`padding-right` ≈ 30px、`right 12px center`。padding-right 必须够大,否则箭头压字。
 
@@ -294,7 +295,7 @@ import { Select } from '../components/atoms'
 ```css
 :root{ --select-caret:url('/select-caret-houfeng-dark.svg'); }
 .theme-houfeng-light{ --select-caret:url('/select-caret-houfeng-light.svg'); }
-.theme-classic-dark{ --select-caret:url('/select-caret-classic-dark.svg'); }
+.theme-precision-dark{ --select-caret:url('/select-caret-precision-dark.svg'); }
 select.input{appearance:none;-webkit-appearance:none;background-image:var(--select-caret);padding-right:36px;background-position:right 14px center}
 ```
 
@@ -343,7 +344,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 - ❌ **新建 `.css` 文件给单个组件 / page 用**：LoginPage 是历史例外；新增样式落真实 owner 的 `styles/partials/page.css` / `atoms.css` / 业务文件，靠 BEM 隔离。
 - ❌ **CSS-in-JS / Tailwind / styled-components**：当前不用；要引入需独立技术决策与整体迁移。
 - ❌ **类名简写 / 工具类滥用**（`mt-2`、`flex`、`text-red`）：`reset.css` 仅留 `.tnum` `.mono` 两个工具类，其余走 BEM 表达语义。
-- ❌ **令牌只改一份主题**：`tokens.css` 改了 `:root` 的主题令牌，必须同步检查 `.theme-houfeng-light` / `.theme-classic-dark`；`classic-light` 明确复用 `houfeng-light`，不要私自新增第四套漂移值。
+- ❌ **令牌只改一份主题**：`tokens.css` 改了 `:root` 的主题令牌，必须同步检查全部五个主题块（`houfeng-dark` 即 `:root`、`houfeng-light`、`precision-dark`、`precision-light`、`observatory-dark`）。`<html>` 同时匹配 `:root` 与主题类，某主题块漏写的令牌会静默继承候风深色值（例如浅色主题继承暗色阴影或纹理）；`observatory-light` 明确复用 `houfeng-light`，不要私自新增漂移值。
 - ❌ **在组件文件 `import './x.css'`**（除 `LoginPage.tsx` 这个历史例外）：全局样式由 `main.tsx` 固定入口与 `index.css` owner manifest 集中管理。
 - ❌ **DataTable 可排序表头双 padding**：`.data-table__th--sortable` 自身必须清零 padding，实际间距由 `.data-table__sort-btn` 承担；若密度规则用 `.data-table--compact .data-table__head th` 这类更高特异性选择器，清零规则也必须带上同等上下文（如 `th.data-table__th--sortable`），否则 sortable 表头会比普通表头更宽。
 
@@ -364,6 +365,6 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 
 - **设计系统原子（BEM + 令牌 + 复合 modifier）**：`web/src/components/atoms/Button.tsx` 的 `['btn', 'btn--' + variant, 'btn--' + size, className].filter(Boolean).join(' ')`，配 `web/src/styles/partials/atoms.css` 的 `.btn` / `.btn--primary` / `.btn--sm` 等。
 - **状态色派生（`color-mix` + 状态令牌）**：`web/src/styles/partials/atoms.css` 的 `.tone--normal` / `.tone--alert` / `.tone--critical` 系列。
-- **多主题令牌覆盖**：`web/src/styles/tokens.css` 的 `:root` / `.theme-houfeng-light` / `.theme-classic-dark` 为三套运行时主题赋值，`classic-light` 由运行时回退到 `houfeng-light`，组件代码无感知。
-- **严格 CSP 下的首屏主题预热**：`web/index.html` 同步加载同源 `web/public/theme-bootstrap.js`，其 allowlist 与 `web/src/lib/theme.ts` 的 `applyTheme` 保持一致。
+- **多主题令牌覆盖**：`web/src/styles/tokens.css` 的 `:root, .theme-houfeng-dark` / `.theme-houfeng-light` / `.theme-precision-dark` / `.theme-precision-light` / `.theme-observatory-dark` 为五个运行时主题赋值，`observatory-light` 由运行时回退到 `houfeng-light`，组件代码无感知。
+- **严格 CSP 下的首屏主题预热**：`web/index.html` 同步加载同源 `web/public/theme-bootstrap.js`，其 allowlist 与映射与 `web/src/lib/theme.ts` 的 `themeClass` 保持一致。
 - **chart 调色板使用**：`web/src/components/atoms/Sparkline.tsx:23-33` 的 `TONE_VAR` 把状态色 / accent 映射到 `var(--color-state-*)` / `var(--accent*)`，没有任何 hex。

@@ -9,7 +9,7 @@ function Probe() {
       <span data-testid="state">
         {preset}/{mode}
       </span>
-      <button onClick={() => setPreset('classic')}>classic</button>
+      <button onClick={() => setPreset('precision')}>precision</button>
       <button onClick={() => setMode('light')}>light</button>
       <button onClick={() => setMode('dark')}>dark</button>
     </div>
@@ -38,9 +38,9 @@ describe('ThemeProvider', () => {
         <Probe />
       </ThemeProvider>,
     )
-    fireEvent.click(screen.getByText('classic'))
-    expect(localStorage.getItem('houfeng.theme.preset')).toBe('classic')
-    expect(document.documentElement.className).toMatch(/^theme-classic-/)
+    fireEvent.click(screen.getByText('precision'))
+    expect(localStorage.getItem('houfeng.theme.preset')).toBe('precision')
+    expect(document.documentElement.className).toBe('theme-precision-dark')
   })
 
   it('switching mode to light overrides system', () => {

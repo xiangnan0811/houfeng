@@ -32,13 +32,14 @@ body.is-col-resizing{cursor:col-resize;user-select:none}
 .topbar .tp-spacer{flex:1}
 .topbar .tp-divider{width:1px;height:20px;background:var(--border)}
 .topbar .tp-theme{position:relative}
-.skip-link{position:fixed;z-index:1000;top:var(--space-2);left:var(--space-2);transform:translateY(calc(-100% - var(--space-4)));padding:var(--space-2) var(--space-3);border:var(--border-w) solid var(--accent-border);border-radius:var(--radius-2);box-shadow:var(--shadow-overlay);background:var(--surface-elevated);color:var(--text-primary)}
-.skip-link:focus-visible{transform:translateY(0)}
+.skip-link{position:fixed;z-index:1000;top:var(--space-2);left:var(--space-2);transform:translateY(calc(-100% - var(--space-4)));padding:var(--space-2) var(--space-3);border:var(--border-w) solid var(--accent-border);border-radius:var(--radius-2);background:var(--surface-elevated);color:var(--text-primary)}
+/* 阴影只在显示时出现，否则隐藏态的大阴影会漏进视口左上角。 */
+.skip-link:focus-visible{transform:translateY(0);box-shadow:var(--shadow-overlay)}
 .topbar .tp-icon-btn{position:relative;width:var(--control-min-height);height:var(--control-min-height);border-radius:var(--radius-2);border:none;background:transparent;color:var(--t3);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
 .topbar .tp-icon-btn:hover{background:var(--item-bg);color:var(--t1)}
 .topbar .tp-sync{width:6px;height:6px;border-radius:50%;background:var(--text-muted);flex-shrink:0}
 .topbar .tp-avatar{width:26px;height:26px;border-radius:6px;background:var(--accent);color:var(--bg);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;cursor:pointer}
-.topbar .tp-avatar:hover{opacity:0.85}
+.topbar .tp-avatar:hover{background:var(--accent-strong)}
 .theme-menu{position:absolute;top:100%;right:0;margin-top:6px;background:var(--surface-elevated);border:1px solid var(--border);border-radius:var(--radius-3);box-shadow:var(--shadow-overlay);padding:4px;min-width:160px;z-index:200;display:none}
 .theme-menu.open{display:block}
 .theme-menu .tm-item{display:flex;width:100%;align-items:center;gap:8px;padding:7px 10px;min-height:var(--control-min-height);border:0;border-radius:var(--radius-2);background:transparent;font:inherit;font-size:var(--type-small-size);color:var(--t2);text-align:left;cursor:pointer;transition:background-color var(--dur-micro) var(--ease-calm)}
@@ -55,8 +56,10 @@ body.is-col-resizing{cursor:col-resize;user-select:none}
 .btn.secondary:hover{border-color:var(--border-h);background:var(--control-bg-hover)}
 .btn.ghost{background:transparent;color:var(--t2)}
 .btn.ghost:hover{background:var(--item-bg);color:var(--t1)}
-.btn.danger{background:var(--err);color:#fff}
-.btn.primary:hover,.btn.danger:hover{opacity:0.88}
+.btn.danger{background:var(--err);color:var(--bg)}
+/* 悬停只朝提高对比度的方向换底色；整体降透明度会把文字一起冲淡到 AA 以下。 */
+.btn.primary:hover{background:var(--accent-strong)}
+.btn.danger:hover{background:color-mix(in srgb,var(--err) 85%,var(--text-primary))}
 .btn:disabled{opacity:0.4;cursor:not-allowed;transform:none!important}
 .btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .btn-text{display:inline-flex;align-items:center;justify-content:center;gap:6px;background:transparent;border:none;border-radius:var(--radius-2);font-size:var(--type-body-size);font-weight:500;cursor:pointer;transition:color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm);font-family:inherit;line-height:1;min-height:var(--control-min-height);padding:0 10px}

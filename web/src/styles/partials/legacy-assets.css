@@ -69,9 +69,7 @@
 .asset-archive-dialog label.asset-archive-dialog__check{display:flex;flex-direction:row;align-items:flex-start;gap:var(--space-2);min-width:0;margin:0;padding:var(--space-2) var(--space-3);border:var(--border-w) solid var(--border);border-left:3px solid var(--accent);border-radius:var(--radius-2);background:var(--surface);color:var(--text-primary);font-size:var(--type-small-size);line-height:1.45;cursor:pointer}
 .asset-archive-dialog label.asset-archive-dialog__check:has(input:checked){border-color:color-mix(in srgb,var(--accent) 45%,var(--border));border-left-color:var(--accent);background:color-mix(in srgb,var(--accent) 8%,var(--surface))}
 .asset-archive-dialog label.asset-archive-dialog__check:has(input:disabled){cursor:not-allowed;opacity:0.6}
-.asset-archive-dialog label.asset-archive-dialog__check input{width:16px;height:16px;margin:2px 0 0;flex:0 0 auto;accent-color:var(--accent)}
-.theme-houfeng-dark .asset-archive-dialog label.asset-archive-dialog__check input{color-scheme:dark}
-.theme-houfeng-light .asset-archive-dialog label.asset-archive-dialog__check input{color-scheme:light}
+.asset-archive-dialog label.asset-archive-dialog__check input{width:16px;height:16px;margin:2px 0 0;flex:0 0 auto;accent-color:var(--accent);color-scheme:var(--color-scheme)}
 .asset-archive-dialog__check-text{min-width:0}
 .asset-archive-dialog__required{margin-inline-start:var(--space-2);color:var(--text-secondary);font-size:12px;font-weight:600;white-space:nowrap}
 .asset-archive-dialog label.asset-archive-dialog__check:has(input:checked) .asset-archive-dialog__required{color:var(--accent)}
