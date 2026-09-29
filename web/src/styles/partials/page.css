@@ -126,8 +126,14 @@
 .modal__success{font-size:13px;color:var(--color-state-normal)}
 .modal__actions{display:flex;justify-content:flex-end;gap:var(--space-3);margin-top:var(--space-4)}
 .global-search{position:relative;min-width:0}
-.global-search form{min-width:0;width:100%}
-.global-search__input{display:block;box-sizing:border-box;width:100%;min-width:0;background:var(--control-bg);border:var(--border-w) solid var(--control-border);border-radius:var(--radius-2);padding:8px 12px;min-height:var(--control-min-height);color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-small-size);transition:border-color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm)}
+.global-search form{position:relative;min-width:0;width:100%}
+.global-search__icon{position:absolute;left:10px;top:50%;width:14px;height:14px;transform:translateY(-50%);fill:none;stroke:var(--text-muted);stroke-width:1.8;stroke-linecap:round;pointer-events:none}
+/* 快捷键提示只在空闲时出现，输入或聚焦后让出空间。 */
+.global-search__kbd{position:absolute;right:8px;top:50%;transform:translateY(-50%);padding:1px 6px;border:var(--border-w) solid var(--border);border-radius:var(--radius-1);background:var(--surface-elevated);color:var(--text-muted);font-family:var(--font-mono);font-size:11px;line-height:1.5;pointer-events:none}
+.global-search__form:focus-within .global-search__kbd{display:none}
+.global-search__form:has(.global-search__input:not(:placeholder-shown)) .global-search__kbd{display:none}
+/* 右侧留白容纳最宽的“Ctrl K”提示（约 54px + 8px 边距）。 */
+.global-search__input{display:block;box-sizing:border-box;width:100%;min-width:0;background:var(--control-bg);border:var(--border-w) solid var(--control-border);border-radius:var(--radius-2);padding:8px 68px 8px 30px;min-height:var(--control-min-height);color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-small-size);transition:border-color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm)}
 .global-search__input::placeholder{color:var(--text-muted)}
 .global-search__input:hover{border-color:var(--border-strong);background:var(--surface-elevated)}
 .global-search__input:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 10%,transparent)}

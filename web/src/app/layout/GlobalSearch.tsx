@@ -27,6 +27,10 @@ const SEARCH_GROUP_LABELS: Record<SearchResult['kind'], string> = {
 
 const SEARCH_GROUP_ORDER: SearchResult['kind'][] = ['vps', 'monitoring_instance', 'target', 'provider', 'subscription', 'record']
 
+// 快捷键提示按平台显示；两种组合键都由下方 keydown 处理。
+const SEARCH_SHORTCUT_LABEL =
+  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘K' : 'Ctrl K'
+
 /** Global command search with ⌘K / Ctrl+K shortcut. */
 export function GlobalSearch() {
   const navigate = useNavigate()
@@ -188,13 +192,18 @@ export function GlobalSearch() {
 
   return (
     <div className="global-search" ref={containerRef} onBlur={handleContainerBlur}>
-      <form onSubmit={handleSearch} role="search">
+      <form onSubmit={handleSearch} role="search" className="global-search__form">
+        <svg className="global-search__icon" viewBox="0 0 16 16" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5" />
+          <path d="M10.5 10.5L14 14" />
+        </svg>
         <input
           ref={inputRef}
           id={`${baseId}-input`}
           type="search"
           className="global-search__input"
-          placeholder="搜索"
+          placeholder="搜索 VPS、IP、记录…"
+          aria-keyshortcuts="Control+K Meta+K"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value)
@@ -211,6 +220,7 @@ export function GlobalSearch() {
           aria-activedescendant={activeOptionId}
           aria-describedby={describedBy}
         />
+        <kbd className="global-search__kbd" aria-hidden="true">{SEARCH_SHORTCUT_LABEL}</kbd>
       </form>
       {open && (
         <div

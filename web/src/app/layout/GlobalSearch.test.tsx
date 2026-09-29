@@ -141,6 +141,21 @@ describe('GlobalSearch', () => {
     searchRecordsForGlobalSearch.mockResolvedValue([])
   })
 
+  it('advertises the keyboard shortcut and focuses the field on Ctrl+K', async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByLabelText('全局搜索')
+    expect(input).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K')
+    expect(container.querySelector('.global-search__kbd')).toHaveTextContent(/K$/)
+    expect(container.querySelector('.global-search__kbd')).toHaveAttribute('aria-hidden', 'true')
+
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
+    await waitFor(() => expect(input).toHaveFocus())
+  })
+
   it('reveals search capabilities via UI when focused with empty query', () => {
     render(
       <MemoryRouter>

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { describe, it, expect } from 'vitest'
 import { MemoryRouter } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
@@ -6,8 +6,8 @@ import { Sidebar } from './Sidebar'
 const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
 
 describe('Sidebar', () => {
-  it('renders brand and a quiet primary rail with overflow links', () => {
-    render(
+  it('renders brand and every destination in always-open named groups', () => {
+    const { container } = render(
       <MemoryRouter>
         <Sidebar
           user={user}
@@ -20,18 +20,21 @@ describe('Sidebar', () => {
       </MemoryRouter>,
     )
     expect(screen.getByText('候风')).toBeInTheDocument()
-    expect(screen.queryByText('运营')).not.toBeInTheDocument()
-    expect(screen.queryByText('资产')).not.toBeInTheDocument()
-    expect(screen.queryByText('观测')).not.toBeInTheDocument()
-    expect(screen.queryByText('系统')).not.toBeInTheDocument()
-    for (const label of ['工作台', 'VPS', '监控', '入口探测', '设置']) {
+    expect(screen.getByRole('navigation', { name: '主导航' })).toBeInTheDocument()
+    const groups = {
+      资产: ['VPS', '订阅', '服务商', '资产决策', '归档'],
+      观测: ['监控', '入口探测', '事件'],
+      记录: ['运维记录', '命令审计'],
+    }
+    for (const [groupName, labels] of Object.entries(groups)) {
+      const group = screen.getByRole('group', { name: groupName })
+      expect(within(group).getAllByRole('link').map((link) => link.getAttribute('aria-label'))).toEqual(labels)
+    }
+    for (const label of ['工作台', '设置']) {
       expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
     }
-    for (const label of ['运维记录', '归档', '服务商', '订阅', '资产决策', '事件', '命令审计']) {
-      expect(screen.getByRole('link', { name: label })).toBeInTheDocument()
-    }
-    expect(screen.getByText('更多')).toBeInTheDocument()
-    expect(screen.getByText('更多').closest('summary')).toHaveAttribute('aria-label', '更多')
+    expect(container.querySelector('details, summary')).toBeNull()
+    expect(screen.queryByText('更多')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'VPS' })).toHaveAttribute('aria-label', 'VPS')
     expect(screen.queryByRole('link', { name: '首页' })).not.toBeInTheDocument()
   })
@@ -51,7 +54,7 @@ describe('Sidebar', () => {
     )
     const links = screen.getAllByRole('link')
     const linkText = links.map((link) => link.textContent)
-    expect(linkText).toEqual(['工作台', 'VPS', '监控3', '入口探测1', '资产决策', '订阅', '服务商', '归档', '运维记录', '事件', '命令审计', '设置'])
+    expect(linkText).toEqual(['工作台', 'VPS', '订阅', '服务商', '资产决策', '归档', '监控3', '入口探测1', '事件', '运维记录', '命令审计', '设置'])
     expect(screen.getByRole('link', { name: '运维记录' })).toHaveAttribute('href', '/records')
     expect(screen.getByRole('link', { name: '监控，3 个异常' })).toHaveAttribute('href', '/monitoring')
     expect(screen.getByRole('link', { name: '入口探测，1 个异常' })).toHaveAttribute('href', '/targets')
@@ -94,31 +97,8 @@ describe('Sidebar', () => {
     expect(screen.getByRole('button', { name: 'admin 用户菜单' })).toBeInTheDocument()
   })
 
-  it('provides an accessible name on overflow summary for screen readers and preserves disclosure', () => {
-    const { container } = render(
-      <MemoryRouter>
-        <Sidebar
-          user={user}
-          anomalyCounts={{ monitoring: 0, targets: 0 }}
-          collapsed={false}
-          onToggle={() => {}}
-          onLogout={() => {}}
-          onChangePassword={() => {}}
-        />
-      </MemoryRouter>,
-    )
-    const summary = container.querySelector('summary.sidebar-more__summary')
-    expect(summary).toBeInTheDocument()
-    expect(summary).toHaveAccessibleName('更多')
-    const details = container.querySelector('details.sidebar-more') as HTMLDetailsElement
-    summary!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(details.open).toBe(true)
-    summary!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(details.open).toBe(false)
-  })
-
-  it('auto-expands overflow details when on an overflow route', () => {
-    const { container } = render(
+  it('marks the current destination active inside its group without extra disclosure', () => {
+    render(
       <MemoryRouter initialEntries={['/records']}>
         <Sidebar
           user={user}
@@ -130,8 +110,9 @@ describe('Sidebar', () => {
         />
       </MemoryRouter>,
     )
-    const details = container.querySelector('details.sidebar-more') as HTMLDetailsElement
-    expect(details).toBeInTheDocument()
-    expect(details.open).toBe(true)
+    const records = within(screen.getByRole('group', { name: '记录' })).getByRole('link', { name: '运维记录' })
+    expect(records).toHaveClass('active')
+    expect(records).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: '工作台' })).not.toHaveClass('active')
   })
 })
