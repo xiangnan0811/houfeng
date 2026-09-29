@@ -333,4 +333,125 @@ describe('DashboardPage', () => {
       '/api/subscriptions/overview',
     ]))
   })
+
+  it('previews bounded renewals and recent activity beside the fixed three judgements', async () => {
+    const renewals = Array.from({ length: 7 }, (_, index) => ({
+      subscription_id: `sub_${index}`,
+      vps_id: `vps_${index}`,
+      vps_display_name: `VPS ${index}`,
+      display_name: `Plan ${index}`,
+      provider_name: 'Example Cloud',
+      renew_at: `2099-0${index + 1}-01`,
+      monthly_price_base: 20,
+      base_currency: 'CNY',
+      currency: 'USD',
+      renewal_decision: 'keep',
+      lifecycle_status: 'active',
+      exchange_rate_stale: false,
+    }))
+    renderDashboard({
+      dashboard: {
+        body: dashboardOverviewFixture({
+          recent_events: Array.from({ length: 6 }, (_, index) => ({
+            event_id: `ev_${index}`,
+            incident_id: `inc_${index}`,
+            incident_class: 'heartbeat',
+            object_type: 'monitoring_instance' as const,
+            object_id: 'mi_001',
+            event_type: 'incident_started' as const,
+            severity: '告警' as const,
+            summary: `Tokyo Edge 事件 ${index}`,
+            created_at: `2026-07-10T0${index}:00:00Z`,
+          })),
+        }),
+      },
+      subscription: { body: subscriptionOverviewFixture({ upcoming_renewals: renewals }) },
+    })
+
+    const judgementRail = await screen.findByRole('region', { name: '判断摘要' })
+    expect(within(judgementRail).getAllByRole('link')).toHaveLength(3)
+
+    const renewalList = await screen.findByRole('list', { name: '即将续费的订阅' })
+    const renewalLinks = within(renewalList).getAllByRole('link')
+    expect(renewalLinks).toHaveLength(5)
+    expect(renewalLinks[0]).toHaveAttribute('href', '/vps/vps_0')
+    expect(renewalLinks[0]).toHaveTextContent('Plan 0')
+    expect(screen.getByText('未来 90 天（UTC）· 7 项')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '订阅明细' })).toHaveAttribute('href', '/subscriptions?view=details')
+
+    const activity = screen.getByRole('list', { name: '最近状态变化' })
+    expect(within(activity).getAllByRole('listitem')).toHaveLength(5)
+    expect(within(activity).getAllByRole('listitem')[0]).toHaveTextContent('Tokyo Edge 事件 5')
+    expect(screen.getByRole('link', { name: '事件流' })).toHaveAttribute('href', '/events')
+  })
+
+  it('exposes the 24h incident trend total in the observation judgement name', async () => {
+    renderDashboard({
+      dashboard: {
+        body: dashboardOverviewFixture({
+          new_incident_trend_24h: Array.from({ length: 24 }, (_, index) => (index === 3 || index === 20 ? 1 : 0)),
+        }),
+      },
+    })
+
+    const judgementRail = await screen.findByRole('region', { name: '判断摘要' })
+    expect(within(judgementRail).getByRole('link', { name: /24 小时新增异常 2 次$/ })).toBeInTheDocument()
+  })
+
+  it('labels a renewal queue at the backend cap as a lower bound', async () => {
+    const renewals = Array.from({ length: 12 }, (_, index) => ({
+      subscription_id: `sub_${index}`,
+      vps_id: `vps_${index}`,
+      vps_display_name: `VPS ${index}`,
+      display_name: `Plan ${index}`,
+      provider_name: 'Example Cloud',
+      renew_at: `2099-01-${String(index + 1).padStart(2, '0')}`,
+      monthly_price_base: 20,
+      base_currency: 'CNY',
+      currency: 'USD',
+      renewal_decision: 'keep',
+      lifecycle_status: 'active',
+      exchange_rate_stale: false,
+    }))
+    renderDashboard({ subscription: { body: subscriptionOverviewFixture({ upcoming_renewals: renewals }) } })
+
+    expect(await screen.findByText('未来 90 天（UTC）· 至少 12 项')).toBeInTheDocument()
+    expect(within(screen.getByRole('list', { name: '即将续费的订阅' })).getAllByRole('link')).toHaveLength(5)
+  })
+
+  it('labels renewal days as estimated when the subscription snapshot time is invalid', async () => {
+    renderDashboard({
+      subscription: {
+        body: subscriptionOverviewFixture({
+          snapshot_generated_at: 'invalid',
+          upcoming_renewals: [{
+            subscription_id: 'sub_1',
+            vps_id: 'vps_1',
+            vps_display_name: 'VPS 1',
+            display_name: 'Plan 1',
+            provider_name: 'Example Cloud',
+            renew_at: '2099-01-01',
+            monthly_price_base: 20,
+            base_currency: 'CNY',
+            currency: 'USD',
+            renewal_decision: 'keep',
+            lifecycle_status: 'active',
+            exchange_rate_stale: false,
+          }],
+        }),
+      },
+    })
+
+    expect(await screen.findByText('未来 90 天（UTC）· 1 项 · 天数按接收时间估算')).toBeInTheDocument()
+  })
+
+  it('keeps the renewal preview honest when the subscription overview fails', async () => {
+    renderDashboard({
+      subscription: { body: { error: 'subscription unavailable' }, status: 503 },
+    })
+
+    expect(await screen.findByText(/续费队列暂不可用/)).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: '即将续费的订阅' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/内没有待续费的订阅/)).not.toBeInTheDocument()
+  })
 })

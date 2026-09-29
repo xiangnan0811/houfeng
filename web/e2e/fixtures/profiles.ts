@@ -477,6 +477,99 @@ export function dashboardProfile(options: {
   }, options.dashboard)
 }
 
+/** 带异常对象、趋势、最近事件与续费队列的工作台，用于验证有界面板与桌面布局。 */
+export function dashboardPopulatedProfile(now = Date.now()): ApiFixtureProfile {
+  const hour = 60 * 60 * 1000
+  const day = 24 * hour
+  const iso = (offset: number) => new Date(now + offset).toISOString()
+  const dashboard = dashboardOverviewFixture({
+    snapshot_generated_at: iso(-2 * 60 * 1000),
+    total_monitoring_instance_count: 12,
+    total_target_count: 6,
+    abnormal_monitoring_instance_count: 2,
+    severe_monitoring_instance_count: 1,
+    abnormal_target_count: 1,
+    abnormal_monitoring_instances: [
+      {
+        monitoring_instance_id: 'mi_fra',
+        display_name: 'Frankfurt-02',
+        group: 'edge',
+        region: 'eu-central',
+        city: 'Falkenstein',
+        provider: 'Hetzner',
+        lifecycle_status: '在用',
+        monitoring_status: '启用',
+        current_health_status: '严重',
+        last_heartbeat_at: iso(-18 * 60 * 1000),
+        current_active_incident_count: 1,
+        current_primary_issue_summary: '心跳中断 18 分钟',
+      },
+      {
+        monitoring_instance_id: 'mi_hk',
+        display_name: 'HK-Relay',
+        group: 'relay',
+        region: 'ap-east',
+        city: 'Hong Kong',
+        provider: 'DMIT',
+        lifecycle_status: '在用',
+        monitoring_status: '启用',
+        current_health_status: '告警',
+        last_heartbeat_at: iso(-30 * 1000),
+        current_active_incident_count: 1,
+        current_primary_issue_summary: '磁盘使用率 87%',
+      },
+    ],
+    abnormal_targets: [{
+      target_id: 'tg_edge',
+      name: 'edge.example.com',
+      target_type: 'service',
+      host: 'edge.example.com',
+      base_port: 443,
+      run_status: '启用',
+      group: 'prod',
+      current_health_status: '告警',
+      last_failure_at: iso(-5 * 60 * 1000),
+      current_active_incident_count: 1,
+      current_primary_issue_summary: 'HTTPS 响应超过 2 秒',
+    }],
+    new_incident_trend_24h: [0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 0, 1],
+    recovery_trend_24h: Array.from({ length: 24 }, (_, index) => (index % 7 === 0 ? 1 : 0)),
+    recent_events: Array.from({ length: 7 }, (_, index) => ({
+      event_id: `ev_${index}`,
+      incident_id: `inc_${index}`,
+      incident_class: 'heartbeat',
+      object_type: 'monitoring_instance',
+      object_id: 'mi_fra',
+      event_type: index % 3 === 2 ? 'incident_recovered' : 'incident_started',
+      severity: index === 0 ? '严重' : '告警',
+      summary: index === 0 ? 'Frankfurt-02 心跳超时' : `事件摘要 ${index}`,
+      // 覆盖 24 小时以外的旧事件：最近动态不限时间窗口。
+      created_at: iso(-(index + 1) * 11 * hour),
+    })),
+  })
+  const renewals = Array.from({ length: 7 }, (_, index) => ({
+    subscription_id: `sub_${index}`,
+    vps_id: `vps_${index}`,
+    vps_display_name: `VPS ${index}`,
+    // 第二条是超长且不可断行的名称，验证可操作标题完整换行而不是被省略。
+    display_name: ['LA-Bench', 'tokyo-edge-production-gateway-primary-node-with-a-very-long-unbroken-identifier', 'Frankfurt-02', 'Seoul-Proxy', 'SJC-Build', 'Paris-Git', 'NYC-Monitor'][index] ?? `VPS ${index}`,
+    provider_name: ['RackNerd', 'Vultr', 'Hetzner-Online-GmbH-Falkenstein-Datacenter-Park-Region-EU-Central', 'Vultr', 'DigitalOcean', 'Scaleway', 'Linode'][index] ?? '',
+    // 生产续费日是 YYYY-MM-DD 日历日期。
+    renew_at: iso((index * 6 + 3) * day).slice(0, 10),
+    monthly_price_base: index === 3 ? null : 12 + index * 7,
+    yearly_price_base: null,
+    base_currency: 'CNY',
+    currency: 'USD',
+    renewal_decision: 'keep',
+    lifecycle_status: 'active',
+    exchange_rate_stale: false,
+  }))
+  return dashboardProfile({
+    dashboard,
+    subscription: subscriptionOverviewFixture({ upcoming_renewals: renewals, renewal_due_30d_count: 5 }),
+  })
+}
+
 export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
   const vps = vpsAssetFixture()
   switch (path) {

@@ -8,13 +8,14 @@
 .dashboard-decision-surface--critical{--dashboard-tone:var(--color-state-critical)}
 .dashboard-decision-surface--maintenance{--dashboard-tone:var(--color-state-maintenance)}
 
-.dashboard-decision-surface__header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-4);align-items:end;min-width:0;padding:0 0 var(--space-3);border-bottom:var(--border-w) solid var(--border);border-left:var(--border-w-strong) solid var(--dashboard-tone);padding-left:var(--space-3)}
-.dashboard-decision-surface__intro{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
-.dashboard-decision-surface__meta{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-2);min-width:0;color:var(--text-muted);font-size:var(--type-small-size)}
-.dashboard-decision-surface__signal{display:inline-flex;align-items:center;gap:var(--space-2);min-height:0;padding:0;border:0;border-radius:0;background:transparent;color:var(--text-secondary);font-size:var(--type-small-size);font-weight:500}
+.dashboard-decision-surface__header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--space-4);align-items:end;min-width:0;padding:0 0 var(--space-2)}
+.dashboard-decision-surface__intro{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.dashboard-decision-surface__meta{display:flex;align-items:center;flex-wrap:wrap;gap:var(--space-3);min-width:0;color:var(--text-muted);font-size:var(--type-small-size)}
+/* 状态信号是带状态色的胶囊：颜色 + 图形 + 文案共同表达。 */
+.dashboard-decision-surface__signal{display:inline-flex;align-items:center;gap:var(--space-2);min-height:24px;padding:0 10px;border:var(--border-w) solid color-mix(in srgb,var(--dashboard-tone) 32%,transparent);border-radius:var(--radius-pill);background:color-mix(in srgb,var(--dashboard-tone) 10%,transparent);color:var(--text-primary);font-size:var(--type-small-size);font-weight:500}
 .dashboard-decision-surface__generated{display:inline-flex;align-items:center;gap:var(--space-1);min-width:0;color:var(--text-muted);font-size:var(--type-small-size)}
-.dashboard-decision-surface__intro h1{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-display-size);font-weight:var(--type-display-weight);line-height:var(--type-h1-leading)}
-.dashboard-decision-surface__intro h2{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-h2-size);font-weight:var(--type-h2-weight);line-height:var(--type-h2-leading);text-wrap:balance}
+.dashboard-decision-surface__intro h1{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-page-size);font-weight:var(--type-display-weight);line-height:var(--type-h1-leading)}
+.dashboard-decision-surface__intro h2{margin:0;color:var(--text-secondary);font-family:var(--font-sans);font-size:var(--type-h2-size);font-weight:500;line-height:var(--type-h2-leading);text-wrap:balance}
 
 .dashboard-primary-action{--dashboard-primary-tone:var(--dashboard-tone);display:flex;align-items:center;justify-content:flex-end;min-width:0}
 .dashboard-primary-action--normal{--dashboard-primary-tone:var(--color-state-normal)}
@@ -25,18 +26,22 @@
 .dashboard-primary-action .btn{justify-content:center;min-width:0}
 
 .dashboard-judgement-rail{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-3);min-width:0;padding:0}
-.dashboard-judgement{--dashboard-judgement-tone:var(--accent);display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"glyph label value" "glyph detail detail";gap:var(--space-1) var(--space-2);align-items:center;min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--dashboard-judgement-tone) 22%,var(--border));border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 36%,transparent);color:inherit;text-decoration:none;transition:border-color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm)}
-.dashboard-judgement:hover{border-color:color-mix(in srgb,var(--dashboard-judgement-tone) 44%,var(--border));background:color-mix(in srgb,var(--surface-elevated) 56%,transparent)}
+/* 判断摘要以指标卡呈现：标签、主值、说明与可选趋势；整卡是通往承接工作流的链接。 */
+.dashboard-judgement{--dashboard-judgement-tone:var(--accent);position:relative;display:flex;flex-direction:column;gap:var(--space-2);min-width:0;min-height:128px;padding:var(--space-4);border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-3);background:var(--panel-bg);box-shadow:var(--shadow-soft);color:inherit;text-decoration:none;transition:border-color var(--dur-micro) var(--ease-calm),transform var(--dur-state) var(--ease-calm)}
+.dashboard-judgement:hover{border-color:color-mix(in srgb,var(--dashboard-judgement-tone) 44%,var(--border));transform:translateY(-1px)}
 .dashboard-judgement:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
 .dashboard-judgement--normal{--dashboard-judgement-tone:var(--color-state-normal)}
 .dashboard-judgement--notice{--dashboard-judgement-tone:var(--color-state-notice)}
 .dashboard-judgement--alert{--dashboard-judgement-tone:var(--color-state-alert)}
 .dashboard-judgement--critical{--dashboard-judgement-tone:var(--color-state-critical)}
 .dashboard-judgement--maintenance{--dashboard-judgement-tone:var(--color-state-maintenance)}
-.dashboard-judgement__glyph{grid-area:glyph;display:inline-flex}
-.dashboard-judgement__label{grid-area:label;min-width:0;color:var(--text-muted);font-size:var(--type-small-size);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dashboard-judgement__value{grid-area:value;color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-h2-size);line-height:1;white-space:nowrap}
-.dashboard-judgement__detail{grid-area:detail;min-width:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:var(--type-small-leading);overflow-wrap:anywhere}
+.dashboard-judgement__glyph{display:inline-flex}
+.dashboard-judgement__label{display:inline-flex;align-items:center;gap:var(--space-2);min-width:0;color:var(--text-muted);font-size:var(--type-small-size);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dashboard-judgement__value{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-key-size);font-weight:600;line-height:1.15;letter-spacing:-0.01em;overflow-wrap:anywhere}
+.dashboard-judgement__detail{min-width:0;margin-top:auto;color:var(--text-secondary);font-size:var(--type-small-size);line-height:var(--type-small-leading);overflow-wrap:anywhere}
+.dashboard-judgement:has(.dashboard-judgement__trend) .dashboard-judgement__detail{padding-right:112px}
+.dashboard-judgement__trend{position:absolute;right:var(--space-4);bottom:var(--space-3);display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.dashboard-judgement__trend small{color:var(--text-muted);font-size:11px}
 
 .dashboard-degradation{display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);min-width:0;padding:var(--space-3) var(--space-4);border:var(--border-w) solid color-mix(in srgb,var(--color-state-notice) 38%,var(--border));border-radius:var(--radius-2);background:color-mix(in srgb,var(--color-state-notice) 6%,var(--surface));color:var(--text-primary)}
 .dashboard-degradation>div{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
@@ -44,14 +49,18 @@
 .dashboard-degradation span{color:var(--text-secondary);font-size:var(--type-small-size);line-height:var(--type-small-leading)}
 .dashboard-degradation .btn{flex:0 0 auto}
 
-.dashboard-evidence-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:var(--space-4);min-width:0}
-.dashboard-evidence-lane{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;padding:var(--space-4);border:var(--border-w) solid color-mix(in srgb,var(--border) 82%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 22%,transparent)}
-.dashboard-evidence-lane__header{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-3);min-width:0}
-.dashboard-evidence-lane__header h2{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-h2-size);font-weight:var(--type-h2-weight)}
-.dashboard-evidence-lane__header .text-link{flex:0 0 auto;font-size:var(--type-small-size);white-space:nowrap}
-.dashboard-evidence-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-2)}
-.dashboard-evidence-metrics>span{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-2);min-width:0;padding:var(--space-2) 0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);color:var(--text-secondary);font-size:var(--type-small-size)}
-.dashboard-evidence-metrics .mono-digits{color:var(--text-primary);font-size:var(--type-body-size);font-weight:var(--type-h2-weight)}
+/* 桌面两栏：左侧观测与资产证据，右侧续费与最近动态；窄于 1024px 时单栏堆叠。 */
+.dashboard-workspace{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr);gap:var(--space-4);align-items:start;min-width:0}
+.dashboard-workspace__main,.dashboard-workspace__side{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.dashboard-evidence-lane,.dashboard-panel{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;padding:var(--space-4);border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-3);background:var(--panel-bg);box-shadow:var(--shadow-soft)}
+.dashboard-evidence-lane__header,.dashboard-panel__header{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);min-width:0}
+.dashboard-evidence-lane__header h2,.dashboard-panel__header h2{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-body-size);font-weight:var(--type-h2-weight)}
+.dashboard-evidence-lane__header .text-link,.dashboard-panel__link{flex:0 0 auto;margin-left:auto;font-size:var(--type-small-size);white-space:nowrap}
+.dashboard-panel__meta{color:var(--text-muted);font-size:var(--type-small-size)}
+.dashboard-panel__empty{margin:0;padding:var(--space-4);border-radius:var(--radius-2);background:var(--panel-bg-muted);color:var(--text-muted);font-size:var(--type-small-size);text-align:center}
+.dashboard-evidence-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:var(--space-2)}
+.dashboard-evidence-metrics>span{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-2) var(--space-3);border-radius:var(--radius-2);background:var(--panel-bg-muted);color:var(--text-muted);font-size:var(--type-small-size)}
+.dashboard-evidence-metrics .mono-digits{color:var(--text-primary);font-size:var(--type-key-size);font-weight:600;line-height:1.2}
 .dashboard-evidence-lane__empty{margin:0;color:var(--text-muted);font-size:var(--type-small-size)}
 
 .dashboard-attention-list{display:grid;gap:0;margin:0;padding:0;list-style:none;border:var(--border-w) solid var(--border);border-radius:var(--radius-2);overflow:hidden;background:color-mix(in srgb,var(--surface-elevated) 16%,transparent)}
@@ -74,3 +83,26 @@
 .dashboard-source__header span{flex:0 0 auto;text-align:right}
 .dashboard-source>strong{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-h2-size)}
 .dashboard-source p{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:var(--type-small-leading);overflow-wrap:anywhere}
+
+/* 即将续费：有界预览，完整队列在订阅页。 */
+.dashboard-renewals{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.dashboard-renewals li+li{border-top:var(--border-w) solid var(--border)}
+.dashboard-renewal{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px var(--space-3);align-items:baseline;padding:var(--space-2) var(--space-1);border-radius:var(--radius-2);color:inherit;text-decoration:none;transition:background-color var(--dur-micro) var(--ease-calm)}
+.dashboard-renewal:hover{background:var(--row-bg-hover)}
+/* 名称是可操作标题、服务商是核对续费的依据，二者都完整换行显示，不省略也不撑出右栏。 */
+.dashboard-renewal__name{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dashboard-renewal__name strong{min-width:0;color:var(--text-primary);font-size:var(--type-small-size);font-weight:500;overflow-wrap:anywhere}
+.dashboard-renewal__name small{min-width:0;color:var(--text-muted);font-size:12px;overflow-wrap:anywhere}
+.dashboard-renewal__days{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-small-size);font-weight:600;text-align:right}
+.dashboard-renewal__days--soon{color:var(--color-state-notice)}
+.dashboard-renewal__meta{grid-column:1/-1;color:var(--text-muted);font-size:12px;overflow-wrap:anywhere}
+
+/* 最近动态：纵向时间线，状态色标出异常开始/恢复。 */
+.dashboard-activity{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.dashboard-activity__item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:var(--space-3);align-items:start;padding:var(--space-2) var(--space-1)}
+.dashboard-activity__item+.dashboard-activity__item{border-top:var(--border-w) solid var(--border)}
+.dashboard-activity__glyph{display:inline-flex;margin-top:3px}
+.dashboard-activity__copy{display:flex;flex-direction:column;gap:2px;min-width:0}
+.dashboard-activity__copy strong{color:var(--text-primary);font-size:var(--type-small-size);font-weight:500}
+.dashboard-activity__copy span{color:var(--text-secondary);font-size:12px;line-height:var(--type-small-leading);overflow-wrap:anywhere}
+.dashboard-activity__time{color:var(--text-muted);font-size:12px;white-space:nowrap}
