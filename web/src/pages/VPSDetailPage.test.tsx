@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -604,7 +604,9 @@ describe('VPSDetailPage gate', () => {
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
     fireEvent.click(screen.getByRole('menuitem', { name: '结束使用并归档' }))
 
-    expect(await screen.findByRole('alertdialog', { name: '结束使用并归档' })).toBeInTheDocument()
+    const dialog = await screen.findByRole('alertdialog', { name: '结束使用并归档' })
+    // 弹窗先以加载态出现，等审查结果渲染后再操作确认表单。
+    await within(dialog).findByRole('heading', { name: '会影响' })
     const confirm = screen.getByRole('button', { name: '结束使用并归档' })
     expect(confirm).toBeDisabled()
     fireEvent.change(screen.getByRole('textbox', { name: '归档原因' }), {
