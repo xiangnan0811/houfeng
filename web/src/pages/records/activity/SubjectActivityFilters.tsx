@@ -96,10 +96,11 @@ export function SubjectActivityFilters({
   const sourceKinds = withCurrentOption(allowedSourceKinds, value.source?.[0])
 
   return (
-    <div className="subject-activity-filters">
-      <label className="subject-activity-filters__field">
-        <span>来源</span>
+    <div className="filter-bar__controls-row subject-activity-filters">
+      <label className={`filter-select${value.source?.[0] ? ' is-filtered' : ''}`}>
+        <span className="filter-select__label">来源</span>
         <select
+          className="filter-select__control"
           disabled={disabled}
           value={value.source?.[0] ?? ''}
           onChange={(event) => {
@@ -116,16 +117,17 @@ export function SubjectActivityFilters({
             })
           }}
         >
-          <option value="">全部来源</option>
+          <option value="">全部</option>
           {sourceKinds.map((kind) => (
             <option key={kind} value={kind} disabled={!allowedSourceKinds.includes(kind)}>{SOURCE_KIND_LABELS[kind]}</option>
           ))}
         </select>
       </label>
       {showEventKind ? (
-        <label className="subject-activity-filters__field">
-          <span>事件类型</span>
+        <label className={`filter-select${value.event_kind?.[0] ? ' is-filtered' : ''}`}>
+          <span className="filter-select__label">事件类型</span>
           <select
+            className="filter-select__control"
             disabled={disabled}
             value={value.event_kind?.[0] ?? ''}
             onChange={(event) => {
@@ -142,16 +144,17 @@ export function SubjectActivityFilters({
               })
             }}
           >
-            <option value="">全部类型</option>
+            <option value="">全部</option>
             {eventKinds.map((kind) => (
               <option key={kind} value={kind} disabled={!allowedEventKinds.includes(kind)}>{EVENT_KIND_LABELS[kind]}</option>
             ))}
           </select>
         </label>
       ) : null}
-      <label className="subject-activity-filters__field">
-        <span>版本</span>
+      <label className={`filter-select${value.versions === 'current' ? ' is-filtered' : ''}`}>
+        <span className="filter-select__label">版本</span>
         <select
+          className="filter-select__control"
           disabled={disabled}
           value={value.versions ?? 'history'}
           onChange={(event) => {

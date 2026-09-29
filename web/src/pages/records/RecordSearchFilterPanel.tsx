@@ -1,4 +1,4 @@
-import { Button, Input, Select } from '../../components/atoms'
+import { Button } from '../../components/atoms'
 import {
   labelOptions,
   RECORD_LIFECYCLE_LABELS,
@@ -49,17 +49,26 @@ export function RecordSearchFilterPanel({
 }: RecordSearchFilterPanelProps) {
   const chips = recordSearchFilterChips(filters)
 
-  function appendControl(label: string, placeholder: string, field: ListFilterField, labels: Record<string, string>) {
+  // 追加式筛选：选中的值变成下方的已选条目，下拉随即复位；空选项如实显示“全部”或“已选 N”。
+  function appendControl(label: string, field: ListFilterField, labels: Record<string, string>) {
+    const selected = filters[field]?.length ?? 0
     return (
-      <Select
-        label={label}
-        value=""
-        options={[{ value: '', label: placeholder }, ...labelOptions(labels)]}
-        onChange={(event) => {
-          if (!event.target.value) return
-          onChange(appendListValue(filters, field, event.target.value))
-        }}
-      />
+      <label className={`filter-select${selected > 0 ? ' is-filtered' : ''}`}>
+        <span className="filter-select__label">{label}</span>
+        <select
+          className="filter-select__control"
+          value=""
+          onChange={(event) => {
+            if (!event.target.value) return
+            onChange(appendListValue(filters, field, event.target.value))
+          }}
+        >
+          <option value="">{selected > 0 ? `已选 ${selected}` : '全部'}</option>
+          {labelOptions(labels).map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
+      </label>
     )
   }
 
@@ -74,25 +83,34 @@ export function RecordSearchFilterPanel({
     >
       <div className="filter-bar__controls">
         <div className="filter-bar__controls-row">
-          <Input
-            label="关键词"
-            placeholder="标题或正文"
-            value={filters.q ?? ''}
-            onChange={(event) => onChange(withFilter(filters, 'q', event.target.value || undefined))}
-          />
-          {appendControl('记录类型', '全部类型', 'type', RECORD_TYPE_LABELS)}
-          {appendControl('状态分组', '全部状态分组', 'status_group', RECORD_STATUS_GROUP_LABELS)}
-          {appendControl('生命周期', '全部生命周期', 'lifecycle', RECORD_LIFECYCLE_LABELS)}
-          <Select
-            label="排序"
-            value={filters.sort ?? 'updated_at_desc'}
-            options={labelOptions(RECORD_SORT_LABELS)}
-            onChange={(event) => onChange(withFilter(
-              filters,
-              'sort',
-              event.target.value as RecordSearchFilters['sort'],
-            ))}
-          />
+          <label className={`filter-select${filters.q ? ' is-filtered' : ''}`}>
+            <span className="filter-select__label">关键词</span>
+            <input
+              className="filter-select__control filter-select__control--text"
+              placeholder="标题或正文"
+              value={filters.q ?? ''}
+              onChange={(event) => onChange(withFilter(filters, 'q', event.target.value || undefined))}
+            />
+          </label>
+          {appendControl('记录类型', 'type', RECORD_TYPE_LABELS)}
+          {appendControl('状态分组', 'status_group', RECORD_STATUS_GROUP_LABELS)}
+          {appendControl('生命周期', 'lifecycle', RECORD_LIFECYCLE_LABELS)}
+          <label className="filter-select">
+            <span className="filter-select__label">排序</span>
+            <select
+              className="filter-select__control"
+              value={filters.sort ?? 'updated_at_desc'}
+              onChange={(event) => onChange(withFilter(
+                filters,
+                'sort',
+                event.target.value as RecordSearchFilters['sort'],
+              ))}
+            >
+              {labelOptions(RECORD_SORT_LABELS).map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+          </label>
           <div className="section-heading__actions record-search-filter__actions">
             <Button type="submit" size="sm">搜索</Button>
             <Button type="button" size="sm" variant="secondary" onClick={onOpenAdvanced}>

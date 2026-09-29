@@ -204,8 +204,15 @@ describe('RecordSearchPage', () => {
     renderPage()
     await screen.findByText('没有匹配的记录')
 
+    const typeSelect = screen.getByLabelText('记录类型')
+    expect(within(typeSelect).getByRole('option', { name: '全部' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('关键词'), { target: { value: '  磁盘 IO  ' } })
-    fireEvent.change(screen.getByLabelText('记录类型'), { target: { value: 'troubleshooting' } })
+    fireEvent.change(typeSelect, { target: { value: 'troubleshooting' } })
+    // 追加式筛选：下拉复位，空选项如实显示已选数量并高亮胶囊。
+    expect(typeSelect).toHaveValue('')
+    expect(within(typeSelect).getByRole('option', { name: '已选 1' })).toBeInTheDocument()
+    expect(typeSelect.closest('label')).toHaveClass('is-filtered')
+    expect(screen.getByLabelText('关键词').closest('label')).toHaveClass('is-filtered')
     fireEvent.click(screen.getByRole('button', { name: '搜索' }))
 
     await screen.findByText('东京节点磁盘 IO 抖动')
