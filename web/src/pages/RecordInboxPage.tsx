@@ -192,34 +192,40 @@ export function RecordInboxPage() {
       {state === 'error' ? <PageState kind="error" title="记录通知暂不可用" description="请稍后重试；当前内容未展示。" /> : null}
 
       {state === 'ready' ? (
-        <ol className="record-inbox-list vps-create-form" aria-label="记录通知">
+        <ol className="record-inbox-list" aria-label="记录通知">
           {items.map((item) => {
             const label = eventLabels[item.event_kind]
             const busy = busyIds.has(item.notification_id)
+            const unread = item.read_at === null
             const selectedTarget = target?.notificationId === item.notification_id ? target.value : null
             return (
-              <li key={item.notification_id} className={`record-inbox-item card card--state card--ribbon-left metric-card${item.read_at === null ? ' tone--notice record-inbox-item--unread' : ''}`}>
-                <div className="record-inbox-item__signal" aria-hidden="true" />
-                <div className="record-inbox-item__body vps-create-form__section">
-                  <header>
+              <li key={item.notification_id} className={unread ? 'record-inbox-item is-unread' : 'record-inbox-item'}>
+                <span className="record-inbox-item__signal" aria-hidden="true" />
+                <div className="record-inbox-item__body">
+                  <header className="record-inbox-item__title">
                     <strong>{label}</strong>
                     <span className={`badge badge--info ${item.mandatory ? 'tone--notice record-inbox-item__mandatory' : 'record-inbox-item__optional'}`}>
                       {item.mandatory ? '必要送达' : '关注送达'}
                     </span>
                   </header>
-                  <p><span>{reasonLabels[item.reason]}</span><code>{item.record_id}</code></p>
-                  <div className="record-inbox-item__meta">
+                  <p className="record-inbox-item__reason">
+                    <span>{reasonLabels[item.reason]}</span>
+                    <code>{item.record_id}</code>
+                  </p>
+                  <p className="record-inbox-item__meta">
                     <Timestamp value={item.event_at} mode="both" />
-                    <span>{item.read_at === null ? '未读' : '已读'}</span>
+                    <span className="record-inbox-item__sep" aria-hidden="true">·</span>
+                    <span className={unread ? 'record-inbox-item__state is-unread' : 'record-inbox-item__state'}>{unread ? '未读' : '已读'}</span>
+                    <span className="record-inbox-item__sep" aria-hidden="true">·</span>
                     <span>源版本 <MonoDigits>{item.source_version}</MonoDigits></span>
-                  </div>
+                  </p>
                   {selectedTarget ? (
-                    <p className="record-inbox-item__target inline-alert info" role="status">
+                    <p className="record-inbox-item__target" role="status">
                       目标：{selectedTarget.subject_kind === 'comment' ? '评论' : selectedTarget.subject_kind === 'action' ? '行动' : '记录'} {selectedTarget.subject_id}
                     </p>
                   ) : null}
                 </div>
-                <div className="record-inbox-item__commands page-form-actions">
+                <div className="record-inbox-item__commands">
                   <Button size="sm" variant="secondary" disabled={busy}
                     aria-label={`查看“${label}”的对象`} onClick={() => void resolveTarget(item)}>查看对象</Button>
                   <Link className="btn sm secondary" to={`/records/${item.record_id}`}>打开记录</Link>

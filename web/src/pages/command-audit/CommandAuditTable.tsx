@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 
-import { Badge, DataTable, MonoDigits, Timestamp, type DataTableColumn } from '../../components/atoms'
+import { Badge, DataTable, MonoDigits, ScrollRegion, Timestamp, type DataTableColumn } from '../../components/atoms'
 import { COMMAND_LABELS } from '../../config/commands'
 import type { CommandAuditAction, CommandAuditOutcome } from '../../lib/types'
 import { CommandAuditEventTimeline } from './CommandAuditEventTimeline'
@@ -131,15 +131,12 @@ export function CommandAuditTable({ rows, expandedIDs, onToggle }: CommandAuditT
       <div className="section-heading">
         <h2 className="section-heading__title" id="command-audit-table-heading">审计记录</h2>
       </div>
-      <p className="events-table-scroll-hint" id="command-audit-table-scroll-hint">
-        可横向滚动；聚焦表格区域后可使用方向键浏览。
-      </p>
-      <div
+      <ScrollRegion
         className="events-table-scroll command-audit-table-scroll"
-        role="region"
-        aria-labelledby="command-audit-table-heading"
-        aria-describedby="command-audit-table-scroll-hint"
-        tabIndex={0}
+        labelledBy="command-audit-table-heading"
+        hintId="command-audit-table-scroll-hint"
+        hintClassName="events-table-scroll-hint"
+        hint="可横向滚动；聚焦表格区域后可使用方向键浏览。"
       >
         <DataTable
           className="command-audit-table"
@@ -148,7 +145,7 @@ export function CommandAuditTable({ rows, expandedIDs, onToggle }: CommandAuditT
           rowKey={(row) => row.id}
           density="compact"
         />
-      </div>
+      </ScrollRegion>
     </>
   )
 }

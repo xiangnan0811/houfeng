@@ -8,7 +8,8 @@ Current reusable patterns include:
 
 - `Button`, `Badge`, `Card`, `Input`, `Toggle`, and `Tabs` for ordinary controls;
 - `Sparkline`, `MetricChart`, `TrendArrow`, and `StatusGlyph` for compact runtime evidence;
-- `MonoDigits`, `Hostname`, and `Timestamp` for technical facts;
+- `MonoDigits`, `Hostname`, and `Timestamp` for technical facts (`Timestamp mode="both"` shows one date when the relative form has already fallen back to the absolute date);
+- `ScrollRegion` for wide tables: a named, keyboard-focusable region whose scroll hint appears only while the content actually overflows;
 - `DataTable` for dense list scanning;
 - `Drawer` for advanced filters and scoped edit flows;
 - `DetailSection` for titled surfaces;

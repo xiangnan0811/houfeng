@@ -10,19 +10,17 @@
 
 .provider-directory-panel{display:flex;flex-direction:column;gap:var(--space-3)}
 
-.provider-directory-toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-3);min-width:0;flex-wrap:wrap}
+.provider-directory-toolbar{display:flex;align-items:center;gap:var(--space-3);min-width:0;flex-wrap:wrap}
 
-.provider-directory-search{min-width:240px;max-width:360px;flex:1}
+.provider-directory-toolbar .tab:disabled{cursor:not-allowed;opacity:.55}
 
-.provider-directory-quick-views{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;justify-content:flex-end}
+.provider-directory-search{flex:1 1 16rem;min-width:12rem;max-width:28rem;margin-left:auto;background:var(--control-bg);border:var(--border-w) solid var(--control-border);border-radius:var(--radius-2);color:var(--text-primary);font:inherit;font-size:var(--type-body-size);line-height:var(--type-body-leading);padding:8px 12px;transition:border-color var(--dur-micro) var(--ease-calm)}
 
-.provider-directory-view-button{appearance:none;border:var(--border-w) solid var(--border);border-radius:var(--radius-pill);background:var(--surface);color:var(--text-secondary);font-family:var(--font-sans);font-size:var(--type-small-size);line-height:1;padding:7px var(--space-3);cursor:pointer;transition:background-color var(--dur-micro) var(--ease-calm),border-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
+.provider-directory-search::placeholder{color:var(--text-muted)}
 
-.provider-directory-view-button:hover{border-color:color-mix(in srgb,var(--accent) 32%,var(--border));color:var(--text-primary)}
+.provider-directory-search:hover{border-color:var(--border-strong);background:var(--control-bg-hover)}
 
-.provider-directory-view-button--active{border-color:color-mix(in srgb,var(--accent) 46%,var(--border));background:var(--accent-soft);color:var(--accent-strong)}
-
-.provider-directory-view-button:disabled{cursor:not-allowed;opacity:.55}
+.provider-directory-search:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 10%,transparent)}
 
 .provider-directory-table-hint{margin:0;color:var(--text-muted);font-size:var(--type-small-size)}
 
@@ -121,3 +119,6 @@
 .provider-form .create-form__error{margin:0}
 
 .provider-form .page-form-actions{padding-top:var(--space-2);border-top:var(--border-w) solid color-mix(in srgb,var(--border) 58%,transparent)}
+
+/* 窄屏摘要改为两列网格；须位于基础规则之后，否则同特异性的基础 flex 规则会覆盖它。 */
+@media(max-width:700px){.provider-directory-summary-rail{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}.provider-directory-summary-rail span{border-right:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 58%,transparent);white-space:normal}.provider-directory-summary-rail span:nth-last-child(-n+2){border-bottom:0}}

@@ -235,7 +235,7 @@ spawnSync(process.execPath, [analyzerPath, '--dist', emptyDist, '--format', 'jso
 - 可操作标题必须完整可见；不能用 `max-width` + `overflow:hidden` + `text-overflow:ellipsis`，再靠 `aria-label` 或 title tooltip 补救。空间不足时让 badge/标题换行、改变 grid，或让明确 owner 局部滚动。
 - `.tabs--pill` / `.tabs--underline` 均使用 `max-width:100%`、`overflow-x:auto`、`overscroll-behavior-x:contain`；tab 使用 `flex:0 0 auto` 与 `white-space:nowrap`。pill 额外使用 `width:fit-content`，桌面仍按内容收束。
 - Asset Decisions 辅助入口在 `max-width:920px` 只保留一套两列 grid；item 是单列 grid、最小高度 72px，title/badge 可换行。不要在 640px 再重复同一 selector 的 display/grid/min-height。
-- 宽表的 section 不拥有水平滚动；只有带 region/name/hint/focus 合同的 wrapper 使用 `overflow-x:auto`。浏览器中必须同时断言 section `scrollWidth <= clientWidth + 1`、wrapper 确实可滚，以及 document 无横向 overflow。
+- 宽表的 section 不拥有水平滚动；只有带 region/name/focus 合同（溢出时附条件 hint）的 wrapper 使用 `overflow-x:auto`。浏览器中必须同时断言 section `scrollWidth <= clientWidth + 1`、wrapper 确实可滚，以及 document 无横向 overflow。
 
 ```css
 .tabs--pill,.tabs--underline{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
@@ -246,6 +246,8 @@ spawnSync(process.execPath, [analyzerPath, '--dist', emptyDist, '--format', 'jso
 ### 高密度 DataTable 列宽合同
 
 服务商、订阅、资产等事实目录页使用 `DataTable` 时，短状态列和操作列必须有明确宽度与 `white-space: nowrap` 保护；身份 / 名称列不能用大比例宽度挤压右侧列。上线前浏览器核查要同时看桌面与窄屏：桌面不应出现“大量空白 + 短中文状态换行”的组合，窄屏只允许表格容器内部横向滚动，不允许页面整体横向溢出。
+
+带滚动提示的宽表横向滚动容器用 `ScrollRegion` atom：始终是 `role="region"`、以标题 `aria-labelledby` 命名、`tabIndex=0` 可键盘滚动；“横向滚动…”提示只在内容真实溢出（`ResizeObserver` 测得 `scrollWidth > clientWidth`，并随直接子节点替换重新观察）时渲染并挂到 `aria-describedby`，桌面放得下时不常驻说明文字。当前已迁移服务商目录、命令审计和 IP 质量数据库表；订阅列表、监控实例表、归档与资产决策的 `asset-table-scroll` 仍是页面自写 region（无常驻提示），后续改动这些表时一并迁移，不再新增手写常驻提示。
 
 **Wrong**：
 ```tsx

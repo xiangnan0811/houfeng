@@ -129,7 +129,10 @@ describe('IPQualityDashboard', () => {
     expect(heading.closest('section')).not.toHaveClass('page-panel--scroll-x')
     expect(region).toHaveAttribute('tabindex', '0')
     expect(region).toHaveAttribute('aria-labelledby', heading.id)
-    expect(region).toHaveAttribute('aria-describedby', 'ip-quality-provider-table-hint')
+    // 未溢出时不常驻滚动提示；溢出时的提示与描述由 ScrollRegion 单测覆盖，
+    // 浏览器测量链由共用同一 atom 的服务商与命令审计 e2e（directory-polish.spec.ts）覆盖。
+    expect(region).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByText('横向滚动查看完整列')).not.toBeInTheDocument()
   })
 
   it('keeps duplicate service rows distinct by service and source', () => {

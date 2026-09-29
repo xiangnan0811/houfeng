@@ -505,6 +505,7 @@
 .vps-ledger__item-line,
 .vps-ledger__item-st{display:block;margin-top:var(--space-1);color:var(--text-muted);font-size:var(--vps-aux)}
 .vps-ledger__item-st{color:var(--text-secondary)}
+.vps-ledger__item-attention{color:var(--warn);font-weight:500}
 .vps-canvas .vps-quiet-fact{color:var(--text-muted);font-size:var(--vps-aux)}
 .vps-workbench .vps-quiet-fact,
 .vps-accordion .vps-quiet-fact{color:color-mix(in srgb, var(--text-muted) 82%, var(--panel-bg))}
