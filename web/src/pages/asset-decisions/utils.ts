@@ -324,13 +324,23 @@ export function buildVPSQualityIssues(
   return issues
 }
 
-export function sourceAvailabilityLabel(source: AssetDecisionOverview['source_availability'] | AssetDecisionGroupMember['source_availability']): string {
-  const missing = [
+type SourceAvailability = AssetDecisionOverview['source_availability'] | AssetDecisionGroupMember['source_availability']
+
+function missingSources(source: SourceAvailability): string[] {
+  return [
     !source.subscriptions && '订阅',
     !source.services && '服务',
     !source.domains && '域名',
     !source.monitoring && '监控',
     !source.targets && 'Target',
-  ].filter(Boolean)
+  ].filter((label): label is string => Boolean(label))
+}
+
+export function sourceAvailabilityLabel(source: SourceAvailability): string {
+  const missing = missingSources(source)
   return missing.length > 0 ? `${missing.join('、')}证据不可用` : '证据源正常'
+}
+
+export function allSourcesAvailable(source: SourceAvailability): boolean {
+  return missingSources(source).length === 0
 }

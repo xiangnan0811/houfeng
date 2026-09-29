@@ -25,6 +25,7 @@ import {
   groupPressureLabel,
   compactGroupJudgement,
 } from '../formatters'
+import { allSourcesAvailable } from '../utils'
 import { Badge } from '../../../components/atoms'
 
 type PortfolioWorkbenchProps = {
@@ -127,11 +128,12 @@ export function PortfolioWorkbench({
 
   return (
     <>
-      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone}`} aria-label="资产组合决策当前判断">
+      <section className={`asset-decision-focus asset-decision-command-summary asset-decision-command-summary--${portfolioLead.tone}${portfolioLead.kind === 'stable' ? ' asset-decision-command-summary--quiet' : ''}`} aria-label="资产组合决策当前判断">
         <div className="asset-decision-command-summary__lead">
-          <span className="section-heading__eyebrow">{portfolioLead.eyebrow}</span>
+          {/* 无待办时只保留一行稳定提示，不渲染眉题与解释段落。 */}
+          {portfolioLead.kind === 'stable' ? null : <span className="section-heading__eyebrow">{portfolioLead.eyebrow}</span>}
           <h2 className="asset-decision-command-summary__title">{portfolioLead.title}</h2>
-          <p className="asset-decision-command-summary__summary">{portfolioLead.summary}</p>
+          {portfolioLead.kind === 'stable' ? null : <p className="asset-decision-command-summary__summary">{portfolioLead.summary}</p>}
           {portfolioLead.kind === 'work' && portfolioLead.actionLabel && (
             <div className="asset-decision-command-summary__actions">
               <button className="btn lg primary" type="button" onClick={onOpenPortfolioLead}>
@@ -143,25 +145,28 @@ export function PortfolioWorkbench({
             </div>
           )}
         </div>
-        <div className="asset-decision-command-summary__facts" aria-label="资产组合决策当前事实">
-          <div className="asset-decision-focus__item asset-decision-focus__item--notice">
-            <span>组合组数</span>
-            <strong>{portfolioState.overviewLoading ? '...' : overview?.group_count ?? portfolioState.groups.length}</strong>
+        {/* 合同：无待办时只显示一行稳定提示，不渲染统计卡与警示色；有待办时色条只随实际数值表达状态。 */}
+        {portfolioLead.kind === 'stable' ? null : (
+          <div className="asset-decision-command-summary__facts" aria-label="资产组合决策当前事实">
+            <div className="asset-decision-focus__item">
+              <span>组合组数</span>
+              <strong>{portfolioState.overviewLoading ? '...' : overview?.group_count ?? portfolioState.groups.length}</strong>
+            </div>
+            <div className={`asset-decision-focus__item${(overview?.renewal_group_count ?? 0) > 0 ? ' asset-decision-focus__item--notice' : ''}`}>
+              <span>续费组</span>
+              <strong>{portfolioState.overviewLoading ? '...' : overview?.renewal_group_count ?? 0}</strong>
+            </div>
+            <div className={`asset-decision-focus__item${closedLoopAnomalies > 0 ? ' asset-decision-focus__item--critical' : partialErrorCount > 0 ? ' asset-decision-focus__item--alert' : ''}`}>
+              <span>闭环异常</span>
+              <strong>{closedLoopAnomalies}</strong>
+              {(closedLoopAnomalies > 0 || partialErrorCount > 0) && <small>{portfolioLead.riskLabel}</small>}
+            </div>
+            <div className={`asset-decision-focus__item${overview && allSourcesAvailable(overview.source_availability) ? ' asset-decision-focus__item--normal' : ''}`}>
+              <span>证据状态</span>
+              <strong>{overview ? '已聚合' : '等待'}</strong>
+            </div>
           </div>
-          <div className="asset-decision-focus__item asset-decision-focus__item--alert">
-            <span>续费组</span>
-            <strong>{portfolioState.overviewLoading ? '...' : overview?.renewal_group_count ?? 0}</strong>
-          </div>
-          <div className="asset-decision-focus__item asset-decision-focus__item--critical">
-            <span>闭环异常</span>
-            <strong>{closedLoopAnomalies}</strong>
-            {(closedLoopAnomalies > 0 || partialErrorCount > 0) && <small>{portfolioLead.riskLabel}</small>}
-          </div>
-          <div className="asset-decision-focus__item asset-decision-focus__item--normal">
-            <span>证据状态</span>
-            <strong>{overview ? '已聚合' : '等待'}</strong>
-          </div>
-        </div>
+        )}
       </section>
 
       {closedLoopPartialErrors.length > 0 && (
