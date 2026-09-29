@@ -43,11 +43,12 @@
 .monitoring-page__controls{width:100%}
 .monitoring-page__filters.filter-bar{width:100%;min-width:0;margin:0;padding:0;border:0;display:flex;flex-direction:column;gap:var(--space-2)}
 .monitoring-page__filters .filter-bar__controls-row{flex:1 1 100%;gap:var(--space-2)}
+/* 筛选胶囊按内容定宽（维度前缀 + 当前取值），不再强制等宽。 */
 .monitoring-page .monitoring-page__filters .filter-select:not(.monitoring-page__search-field),
-.monitoring-page .monitoring-page__filters .filter-multiselect{flex:0 1 100px;width:100px;min-width:94px;max-width:112px}
+.monitoring-page .monitoring-page__filters .filter-multiselect{flex:0 0 auto;width:auto;min-width:0;max-width:none}
 .monitoring-page__filters .filter-select__control{padding:6px 22px 6px 8px}
 .monitoring-page__filters .filter-multiselect__trigger{padding:6px 8px}
-.monitoring-page__trailing-controls{display:flex;align-items:flex-end;flex:1 0 270px;min-width:0;gap:var(--space-2);margin-left:auto}
+.monitoring-page__trailing-controls{display:flex;align-items:center;flex:1 0 270px;min-width:0;gap:var(--space-2);margin-left:auto}
 .monitoring-page__search-field{flex:0 1 190px;width:190px;min-width:150px;max-width:200px}
 .monitoring-page__search{box-sizing:border-box;width:100%;min-width:0;max-width:none;min-height:var(--control-min-height)}
 .monitoring-batch{position:relative;display:flex;flex:0 0 auto;flex-wrap:wrap;align-items:center;gap:var(--space-2);margin-left:auto}

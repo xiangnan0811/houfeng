@@ -30,7 +30,8 @@ export function FilterSelect({
     onChange(next === '' ? null : next)
   }
 
-  const classes = ['filter-select', className].filter(Boolean).join(' ')
+  // is-filtered 让筛选栏里的胶囊在有取值时高亮。
+  const classes = ['filter-select', value != null && 'is-filtered', className].filter(Boolean).join(' ')
   return (
     <label className={classes}>
       <span className="filter-select__label">{label}</span>
