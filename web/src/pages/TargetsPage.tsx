@@ -416,7 +416,7 @@ export function TargetsPage() {
         <div className="page__actions">
           <button
             type="button"
-            className="btn sm primary"
+            className="btn md primary"
             onClick={createOpen ? closeCreateDrawer : openCreateDrawer}
           >
             新建目标

@@ -177,8 +177,8 @@ export function RecordDraftsPage() {
       <header className="page__head">
         <h1 className="page__title">记录草稿</h1>
         <div className="page__actions">
-          <Link className="btn sm secondary" to="/records">返回记录</Link>
-          <Link className="btn sm primary" to="/records/new">新建记录</Link>
+          <Link className="btn md secondary" to="/records">返回记录</Link>
+          <Link className="btn md primary" to="/records/new">新建记录</Link>
         </div>
       </header>
 

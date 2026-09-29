@@ -134,10 +134,10 @@ export function SubjectActivityWorkspace({ view }: Props) {
           actions={(
             <>
               {view === 'evidence' ? (
-                <Link className="btn sm secondary" to="/records/compare" state={navigationState}>横向比较</Link>
+                <Link className="btn md secondary" to="/records/compare" state={navigationState}>横向比较</Link>
               ) : null}
               <Link
-                className="btn sm primary"
+                className="btn md primary"
                 to={newRecordHref}
                 state={route.kind === 'target' ? undefined : withReturnVPSNavigationState(location.state, returnVPSId)}
               >
@@ -146,7 +146,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
               {state.freshness?.new_items_available ? (
                 <Button
                   type="button"
-                  size="sm"
+                  size="md"
                   variant="secondary"
                   onClick={() => commands.refresh()}
                 >

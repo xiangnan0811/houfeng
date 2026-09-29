@@ -157,7 +157,7 @@ web/
 
 跨页可复用的展示 / 行为组件。**不持有业务路由概念**，不直接调 API client（数据通过 props 进来）。
 
-- `components/atoms/`：设计系统原子（Button、Input、Select、Badge、Card、Modal、Tabs、SegmentedControl、DataTable 等）。组件规则由 `styles/partials/atoms.css` / `forms.css` / `tabs.css` 等 shared owner 持有，不依赖业务类型。`atoms/index.ts` 是 barrel export。
+- `components/atoms/`：设计系统原子（Button、Input、Select、Badge、Card、Modal、Tabs、SegmentedControl、DataTable 等）。组件规则由 `styles/partials/atoms.css` / `forms.css` 等 shared owner 持有（Tabs / SegmentedControl 只用 `atoms.css` 的 `.tabs--underline` / `.tabs--pill` 变体，不再有无变体的 `.tabs .tab` 全局规则），不依赖业务类型。`atoms/index.ts` 是 barrel export。
 - `components/`（atoms 上一层）：领域感知的组合组件（如 `IncidentList`、`EventList`、`StatusBadge`、`DetailSection`、`ActionConfirmationModal`），它们可以引用 `lib/types.ts` 的类型，但仍然是**纯展示 / 受控**——不发请求、不依赖路由。
 
 ### `web/src/lib/`
@@ -220,7 +220,7 @@ web/
 | 变更类型 | 落点 |
 |----------|------|
 | 新增业务路由 / 整页 | 1) 新建 `web/src/pages/<Name>Page.tsx` + 同名 `*.test.tsx`；2) 在 `web/src/app/router.tsx` 用 `React.lazy` 建 lower camelCase 页面模块变量；3) 在 `appRoutes` 内用 `routeElement(<module>, '<中文加载文案>')` 挂到 `<RequireAuth />` 下；4) 如需新数据，在 `lib/types.ts` 加类型并选择 owning `lib/*Api.ts` façade；5) fresh build + bundle gate 验证 lazy 边界 |
-| 新跨页展示原子 | `web/src/components/atoms/<Name>.tsx` + 同名 `*.test.tsx`；在 `atoms/index.ts` 导出；样式放 `styles/partials/atoms.css` / `forms.css` / `tabs.css` 的既有 shared owner |
+| 新跨页展示原子 | `web/src/components/atoms/<Name>.tsx` + 同名 `*.test.tsx`；在 `atoms/index.ts` 导出；样式放 `styles/partials/atoms.css` / `forms.css` 的既有 shared owner |
 | 新跨页业务组合组件 | `web/src/components/<Name>.tsx`（与 IncidentList / EventList 同级），保持纯展示 / 受控 |
 | 新复杂路由私有 controller / presentation | `web/src/pages/<route>/hooks/use<Name>.ts` 与同级 `components/` / `modals/`；route page 是唯一 composition point，controller 不互相 import，展示层不 import controller/API |
 | 新 API 调用 | 默认在 `web/src/lib/api.ts` 加函数；若全部 consumer 都是 lazy route 且 bundle 证据要求隔离，放入已有 domain façade；同步 `lib/types.ts`，不要在 page/component 直接 `fetch()` |

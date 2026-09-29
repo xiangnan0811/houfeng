@@ -133,7 +133,7 @@ export function DashboardCommandSurface({
         <section className="dashboard-evidence-lane" aria-labelledby="dashboard-observation-title">
           <div className="dashboard-evidence-lane__header">
             <h2 id="dashboard-observation-title">观测证据</h2>
-            <Link className="text-link" to={DASHBOARD_LINKS.events24h}>查看事件流</Link>
+            <Link className="text-link text-link--action" to={DASHBOARD_LINKS.events24h}>查看事件流</Link>
           </div>
           <div className="dashboard-evidence-metrics">
             <span aria-label={`异常监控实例 ${observation.abnormalMonitoringCount}`}>
@@ -159,7 +159,7 @@ export function DashboardCommandSurface({
         <section className="dashboard-evidence-lane" aria-labelledby="dashboard-assets-title">
           <div className="dashboard-evidence-lane__header">
             <h2 id="dashboard-assets-title">资产与账单证据</h2>
-            <Link className="text-link" to={DASHBOARD_LINKS.assetDecisionsNeedsDecision}>
+            <Link className="text-link text-link--action" to={DASHBOARD_LINKS.assetDecisionsNeedsDecision}>
               进入资产决策
             </Link>
           </div>

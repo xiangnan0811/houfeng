@@ -45,7 +45,7 @@ export function VPSOverviewRecentActivity({
     <section className="vps-overview-recent" aria-label={heading || '最近活动'}>
       <div className="vps-overview-recent__header">
         {heading ? <h2 id="vps-overview-recent-title">{heading}</h2> : null}
-        <Link className="text-link" to={activityHref} state={location.state}>查看全部</Link>
+        <Link className="text-link text-link--action" to={activityHref} state={location.state}>查看全部</Link>
       </div>
       <VPSOverviewFreshness
         section={section}

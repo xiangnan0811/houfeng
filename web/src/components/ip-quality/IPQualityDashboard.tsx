@@ -157,9 +157,9 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
         </div>
         <div className="page__actions">
           {viewingHistory ? (
-            <Link className="btn sm secondary" to={location.pathname} state={location.state}>查看最新报告</Link>
+            <Link className="btn md secondary" to={location.pathname} state={location.state}>查看最新报告</Link>
           ) : null}
-          <Link className="btn sm secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
+          <Link className="btn md secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
         </div>
       </header>
 
