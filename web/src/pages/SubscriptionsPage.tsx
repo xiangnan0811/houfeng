@@ -827,11 +827,11 @@ export function SubscriptionsPage() {
           </div>
         </div>
         <div className="page__actions">
-          <button type="button" className="btn sm secondary" onClick={handleRefreshRates} disabled={refreshingRates}>
+          <button type="button" className="btn md secondary" onClick={handleRefreshRates} disabled={refreshingRates}>
             {refreshingRates ? '刷新中…' : '刷新汇率'}
           </button>
-          <Link className="btn sm secondary" to="/settings?tab=subscriptions">订阅配置</Link>
-          <button type="button" className="btn sm primary" onClick={openCreate}>新建订阅</button>
+          <Link className="btn md secondary" to="/settings?tab=subscriptions">订阅配置</Link>
+          <button type="button" className="btn md primary" onClick={openCreate}>新建订阅</button>
         </div>
       </header>
 

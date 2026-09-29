@@ -35,8 +35,8 @@ export function AssetDecisionPageView({
       <header className="page__head">
         <h1 className="page__title">资产组合决策</h1>
         <div className="page__actions">
-          <Link className="btn sm secondary" to="/vps">VPS 库存</Link>
-          <Link className="btn sm secondary" to="/subscriptions">订阅列表</Link>
+          <Link className="btn md secondary" to="/vps">VPS 库存</Link>
+          <Link className="btn md secondary" to="/subscriptions">订阅列表</Link>
         </div>
       </header>
 

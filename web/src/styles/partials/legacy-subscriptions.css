@@ -59,8 +59,6 @@
 .subscription-insight-panel--composition{grid-row:2;order:3}
 .subscription-insight-panel--renewal{grid-column:1/-1;grid-row:3;order:4}
 .subscription-panel-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;min-width:0}
-.subscription-panel-header .tabs{margin-bottom:0}
-.subscription-panel-header .tabs--pill .tab{padding:5px 14px;margin-bottom:0}
 .subscription-panel-meta{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.3}
 .subscription-panel-select{display:flex;align-items:center;gap:8px;min-width:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.2;white-space:nowrap}
 .subscription-panel-select select{min-width:108px;height:28px;padding:0 26px 0 8px;border:var(--border-w) solid color-mix(in srgb,var(--border) 86%,transparent);border-radius:var(--radius-2);background-color:var(--surface);background-image:var(--select-caret);background-position:right 8px center;background-size:12px 12px;background-repeat:no-repeat;color:var(--text-primary);font:inherit;appearance:none;cursor:pointer}

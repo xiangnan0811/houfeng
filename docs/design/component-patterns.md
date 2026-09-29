@@ -15,6 +15,13 @@ Current reusable patterns include:
 - `PageState` for route/list loading, error, and empty states;
 - `ActionConfirmationCard` for explicit state transitions.
 
+Shared control conventions:
+
+- Button sizes follow placement, not page: `md` for the page-header action group (`.page__actions`) so it aligns with the 36px search and filter controls; `sm` for actions inside cards, panel headers, tables, and rows; `lg` only for touch-oriented or editor commit actions (for example the record editor's save/publish group).
+- `Tabs variant="pill"` and `SegmentedControl` share one segmented look: a recessed track (`--panel-bg-muted`) with a raised selected segment (`--surface-elevated` plus `--shadow-sm`). Do not add page-local padding/radius overrides; underline tabs remain the page-section navigation.
+- Empty states use a solid panel (`.empty-state`) or, inside an existing card, a recessed fill (`--panel-bg-muted`) without a second dashed frame. `PageState kind="empty"` shows no default eyebrow; pass `eyebrow` only when it adds information.
+- `.text-link` keeps a visible underline by default so links mixed into text (including `dd`/`span` fact rows) are not distinguished by color alone. Only links that stand alone as a section-header action ("查看…" next to a heading) add `text-link--action`, which hides the underline at rest and shows it on hover/focus.
+
 Do not add a new atom because an old design document named one. Add one only when current code has repeated behavior, clear ownership, and tests or usage that justify the abstraction.
 
 ## Page composition

@@ -452,13 +452,13 @@ export function EventsPage() {
         <div className="page__actions">
           <button
             type="button"
-            className="btn sm secondary"
+            className="btn md secondary"
             onClick={() => exportCsv(filteredEvents, nameMap)}
             disabled={filteredEvents.length === 0 || state.loading}
           >
             导出 CSV
           </button>
-          <button type="button" className="btn sm secondary" onClick={openFiltersDrawer}>
+          <button type="button" className="btn md secondary" onClick={openFiltersDrawer}>
             高级筛选
           </button>
         </div>

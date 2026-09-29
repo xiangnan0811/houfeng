@@ -178,7 +178,7 @@ export function VPSOverviewPageView({
         >
           <div className="vps-detail-workspace__section-head">
             <h2 id="vps-section-ops-title">订阅与续费</h2>
-            <Link className="text-link" to={subscriptionsHref} state={location.state}>查看订阅列表</Link>
+            <Link className="text-link text-link--action" to={subscriptionsHref} state={location.state}>查看订阅列表</Link>
           </div>
           <VPSSubscriptionOpsBody
             decisionLabel={overviewSummaryCellLabel('renewal', overview.summary.renewal.status) || '—'}

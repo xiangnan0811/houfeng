@@ -132,7 +132,7 @@
 
 .asset-decision-board__tools{display:flex;flex:0 1 32%;flex-direction:column;align-items:flex-end;gap:var(--space-2);min-width:0}
 
-.asset-decision-tabs{display:flex;flex-direction:column;gap:var(--space-2);min-width:0;padding:var(--space-2) var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 70%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 8%,transparent)}
+.asset-decision-tabs{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
 
 .asset-decision-window{display:inline-flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;color:var(--text-secondary);font-size:var(--type-small-size)}
 

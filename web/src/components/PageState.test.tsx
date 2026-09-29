@@ -51,4 +51,16 @@ describe('PageState', () => {
     expect(state).toHaveClass('empty-state', 'page-state--empty', 'page-state--compact')
     expect(screen.getByRole('button', { name: '重置筛选' })).toBeInTheDocument()
   })
+
+  it('omits the default eyebrow for empty states but keeps an explicit one', () => {
+    const { container, rerender } = render(<PageState kind="empty" surface="empty" title="尚未记录服务商" />)
+    expect(container.querySelector('.page-state__eyebrow')).toBeNull()
+    expect(screen.queryByText('当前为空')).not.toBeInTheDocument()
+
+    rerender(<PageState kind="empty" surface="empty" eyebrow="运维记录" title="没有匹配的记录" />)
+    expect(container.querySelector('.page-state__eyebrow')).toHaveTextContent('运维记录')
+
+    rerender(<PageState kind="loading" title="正在加载 VPS" />)
+    expect(container.querySelector('.page-state__eyebrow')).toHaveTextContent('正在加载')
+  })
 })
