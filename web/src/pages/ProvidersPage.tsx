@@ -1,7 +1,7 @@
 import { type FormEvent, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 
-import { DataTable, Input, Modal, MonoDigits, StatusGlyph, Timestamp } from '../components/atoms'
+import { DataTable, Input, Modal, MonoDigits, ScrollRegion, StatusGlyph, Timestamp } from '../components/atoms'
 import type { DataTableColumn } from '../components/atoms'
 import { PageState as PageStateView } from '../components/PageState'
 import { ApiError, createProvider, listProviders, listSubscriptions, listVPSAssets, updateProvider } from '../lib/api'
@@ -653,19 +653,7 @@ export function ProvidersPage() {
   return (
     <div className="page provider-directory">
       <header className="page__head">
-        <div>
-          <h1 className="page__title">服务商目录</h1>
-          <p className="page-sub">
-            <span>供 VPS 与订阅引用的低频资产事实</span>
-            {' · '}
-            <span>我的评分与外部口碑入口分离</span>
-          </p>
-          <div className="badge-row">
-            <span className="badge badge--state tone--normal"><span className="badge__dot" />{state.providers.length} 个服务商</span>
-            <span className="badge badge--state tone--maintenance"><span className="badge__dot" />{multiAccountCount} 个多账号</span>
-            <span className="badge badge--state tone--notice"><span className="badge__dot" />{missingMetadataCount} 个待补事实</span>
-          </div>
-        </div>
+        <h1 className="page__title">服务商目录</h1>
         <div className="page__actions">
           <button className="btn md primary" onClick={openCreate}>
             <svg viewBox="0 0 16 16"><path d="M8 2v12M2 8h12" /></svg>
@@ -701,8 +689,8 @@ export function ProvidersPage() {
             <span><strong><MonoDigits>{hasAssetsCount == null ? '—' : hasAssetsCount}</MonoDigits></strong> 有资产</span>
             <span><strong><MonoDigits>{multiAccountCount}</MonoDigits></strong> 多账号</span>
             <span><strong><MonoDigits>{missingMetadataCount}</MonoDigits></strong> 待补资料</span>
-            <span><strong><MonoDigits>{unratedCount}</MonoDigits>/<MonoDigits>{lowRatingCount}</MonoDigits></strong> 未评分 / 低评分</span>
-            <span><strong><MonoDigits>{EXTERNAL_REPUTATION_SOURCES.length}</MonoDigits></strong> 外部口碑源入口</span>
+            <span><strong><MonoDigits>{unratedCount}</MonoDigits></strong> 未评分</span>
+            <span><strong><MonoDigits>{lowRatingCount}</MonoDigits></strong> 低评分</span>
           </div>
 
           <section className="page-panel provider-directory-panel">
@@ -712,20 +700,12 @@ export function ProvidersPage() {
             </div>
 
             <div className="provider-directory-toolbar">
-              <div className="provider-directory-search">
-                <Input
-                  label="搜索服务商"
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="名称 / 国家 / 账号 / 标签"
-                />
-              </div>
-              <div className="provider-directory-quick-views" role="group" aria-label="服务商视图">
+              <div className="tabs tabs--pill" role="group" aria-label="服务商视图">
                 {QUICK_VIEW_OPTIONS.map((option) => (
                   <button
                     key={option.value}
                     type="button"
-                    className={`provider-directory-view-button ${effectiveQuickView === option.value ? 'provider-directory-view-button--active' : ''}`}
+                    className={effectiveQuickView === option.value ? 'tab is-active' : 'tab'}
                     onClick={() => setQuickView(option.value)}
                     disabled={state.contextError != null && option.value === 'with-assets'}
                     aria-pressed={effectiveQuickView === option.value}
@@ -734,6 +714,15 @@ export function ProvidersPage() {
                   </button>
                 ))}
               </div>
+              <input
+                className="provider-directory-search"
+                type="search"
+                aria-label="搜索服务商"
+                placeholder="搜索名称、国家、账号、标签"
+                value={searchQuery}
+                autoComplete="off"
+                onChange={(event) => setSearchQuery(event.target.value)}
+              />
             </div>
 
             {state.contextError ? (
@@ -742,15 +731,12 @@ export function ProvidersPage() {
               </p>
             ) : null}
 
-            <p id="provider-directory-table-hint" className="provider-directory-table-hint">
-              横向滚动查看完整列
-            </p>
-            <div
+            <ScrollRegion
               className="provider-directory-table-scroll"
-              role="region"
-              aria-labelledby="provider-directory-table-title"
-              aria-describedby="provider-directory-table-hint"
-              tabIndex={0}
+              labelledBy="provider-directory-table-title"
+              hintId="provider-directory-table-hint"
+              hintClassName="provider-directory-table-hint"
+              hint="横向滚动查看完整列"
             >
               <DataTable<ProviderDirectoryRow>
                 className="provider-directory-table"
@@ -760,7 +746,7 @@ export function ProvidersPage() {
                 rowKey={(row) => row.provider.provider_id}
                 emptyContent={<span className="provider-directory-empty-inline">没有匹配的服务商</span>}
               />
-            </div>
+            </ScrollRegion>
           </section>
         </>
       )}

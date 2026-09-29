@@ -57,6 +57,17 @@ describe('Timestamp', () => {
     expect(span.textContent).toMatch(/分钟前/)
   })
 
+  it('renders both forms for recent times and a single date once relative falls back to absolute', () => {
+    const recent = render(<Timestamp value="2026-04-30T15:33:00Z" mode="both" now={ref} />)
+    expect(recent.container.querySelector('.timestamp--both')!.textContent).toMatch(/^27 分钟前 · 2026\/04\/30/)
+    recent.unmount()
+
+    const old = render(<Timestamp value="2026-01-02T08:00:00Z" mode="both" now={ref} />)
+    const text = old.container.querySelector('.timestamp--both')!.textContent ?? ''
+    expect(text).toMatch(/^2026\/01\/02/)
+    expect(text).not.toContain('·')
+  })
+
   it('renders em-dash for null', () => {
     render(<Timestamp value={null} />)
     expect(screen.getByText('—')).toBeInTheDocument()

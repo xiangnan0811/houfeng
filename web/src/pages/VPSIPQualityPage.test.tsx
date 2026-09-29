@@ -234,7 +234,7 @@ describe('VPSIPQualityPage', () => {
     const providerTable = screen.getByRole('region', { name: '各 IP 数据库判断' })
     expect(providerTable).toHaveAttribute('tabindex', '0')
     expect(providerTable).toHaveAttribute('aria-labelledby', 'ip-quality-provider-table-title')
-    expect(providerTable).toHaveAttribute('aria-describedby', 'ip-quality-provider-table-hint')
+    expect(providerTable).not.toHaveAttribute('aria-describedby')
     expect(within(providerPanel).queryByText(/optional IP quality source requires configuration/)).not.toBeInTheDocument()
     expect(within(providerPanel).queryByText(/http status 429/)).not.toBeInTheDocument()
     expect(within(servicePanel).queryByText(/safe default probe is not available/)).not.toBeInTheDocument()

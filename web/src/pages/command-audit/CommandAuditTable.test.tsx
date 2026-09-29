@@ -138,10 +138,8 @@ describe('CommandAuditTable', () => {
     const region = screen.getByRole('region', { name: '审计记录' })
     expect(region).toHaveAttribute('tabindex', '0')
     expect(region).toHaveAttribute('aria-labelledby', 'command-audit-table-heading')
-    expect(region).toHaveAttribute('aria-describedby', 'command-audit-table-scroll-hint')
-    expect(screen.getByText('可横向滚动；聚焦表格区域后可使用方向键浏览。')).toHaveAttribute(
-      'id',
-      'command-audit-table-scroll-hint',
-    )
+    // 未溢出时不常驻滚动提示；溢出行为由 ScrollRegion 单测与 390px 浏览器用例覆盖。
+    expect(region).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByText('可横向滚动；聚焦表格区域后可使用方向键浏览。')).not.toBeInTheDocument()
   })
 })
