@@ -142,6 +142,8 @@ describe('AppShell', () => {
     delayedRegistryProvider.pending = null
     vi.useRealTimers()
     vi.restoreAllMocks()
+    // 断言中途失败时也拆掉 matchMedia 等全局 stub，避免泄漏到后续用例。
+    vi.unstubAllGlobals()
     Object.defineProperty(document, 'visibilityState', {
       configurable: true,
       value: 'visible',
@@ -162,6 +164,35 @@ describe('AppShell', () => {
     expect(screen.getByRole('link', { name: '设置' })).toBeInTheDocument()
     expect(screen.getByText('admin')).toBeInTheDocument()
     expect(document.title).toBe(PRODUCT_FULL_NAME_ZH)
+  })
+
+  it('starts with the collapsed rail on tablet widths, follows breakpoint changes, and still lets the toggle expand', () => {
+    stubDashboardFetch(vi.fn().mockResolvedValue(mockJSONResponse(baseOverview())))
+    let compact = true
+    const listeners = new Set<(event: MediaQueryListEvent) => void>()
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      get matches() { return query === '(max-width: 1100px)' ? compact : false },
+      media: query,
+      addEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+      removeEventListener: (_: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+    }))
+    const { container } = renderAuthenticatedAppShell()
+    const layout = container.querySelector('.layout')!
+    expect(layout).toHaveClass('sidebar-collapsed')
+    const toggle = screen.getByRole('button', { name: '展开侧边栏' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(toggle)
+    expect(layout).not.toHaveClass('sidebar-collapsed')
+    expect(screen.getByRole('button', { name: '折叠侧边栏' })).toHaveAttribute('aria-expanded', 'true')
+
+    // 跨到桌面宽度：保持展开；再回到平板宽度：回到收起的默认值。
+    compact = false
+    act(() => { for (const listener of listeners) listener({ matches: false } as MediaQueryListEvent) })
+    expect(layout).not.toHaveClass('sidebar-collapsed')
+    compact = true
+    act(() => { for (const listener of listeners) listener({ matches: true } as MediaQueryListEvent) })
+    expect(layout).toHaveClass('sidebar-collapsed')
   })
 
   it('owns one route-persistent VPS write registry and resets it when the authenticated user changes', async () => {

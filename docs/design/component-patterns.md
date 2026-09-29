@@ -46,6 +46,12 @@ This is guidance, not a page freeze. A page may change structure when the curren
 - The sidebar lists every destination in always-open named groups instead of hiding frequently used pages behind a "更多" disclosure: 工作台, then 资产 (VPS, 订阅, 服务商, 资产决策, 归档), 观测 (监控, 入口探测, 事件), 记录 (运维记录, 命令审计), with 设置 pinned to the bottom. Each group is a `role="group"` labelled by its visible heading; collapsed and narrow rails hide the headings and separate groups with a divider.
 - Every destination has a distinct icon; do not reuse one glyph for two destinations.
 - The top-bar global search shows a search icon and its keyboard shortcut (`⌘K` on Apple platforms, `Ctrl K` elsewhere, exposed via `aria-keyshortcuts`). On narrow screens the page title keeps priority over the search field and the shortcut hint is hidden.
+- Viewports up to 1100px (tablets) start with the collapsed icon rail so content keeps its width; crossing that breakpoint resets to the width's default, and the toggle still expands the sidebar. The toggle is named by its action (折叠侧边栏 / 展开侧边栏) with `aria-expanded`. At 760px and below the fixed narrow rail applies.
+
+## Narrow layouts
+
+- At 760px and below, page headers stack: the title keeps its own line and the action group wraps beneath it, left-aligned. Settings rows likewise put the label above the control.
+- Compact tiles and inspectors adapt to their own width with container queries rather than viewport breakpoints: a dashboard judgement tile narrower than 16rem moves its trend below the detail text; a directory inspector narrower than 28rem tightens its padding and splits renewal rows into name, then date and days; the directory column narrows to 280px when the VPS canvas is at most 50rem.
 
 ## Current surface responsibilities
 

@@ -317,7 +317,7 @@ test('Sidebar scrolls on short viewports without squeezing any destination', asy
 
 test('Populated dashboard keeps bounded panels and one primary action on desktop widths', async ({ api, page }) => {
   api.useProfile(dashboardPopulatedProfile())
-  // 1100px 是两栏布局里右栏最窄的档位；1024px 已切换为单栏。
+  // 1100px 是两栏布局的最窄视口（≤1100px 侧栏默认收起为图标栏，右栏随之变宽）；1024px 已切换为单栏。
   for (const viewport of [{ width: 1440, height: 1000 }, { width: 1100, height: 800 }, { width: 1024, height: 768 }]) {
     await page.setViewportSize(viewport)
     await page.goto('/')
