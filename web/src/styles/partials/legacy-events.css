@@ -6,6 +6,14 @@
 
 .events-table-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
 
+/* 命令审计结果尾部：加载完毕是安静的状态说明，不与表格内容争夺注意力。 */
+.command-audit-results__footer{justify-content:flex-end}
+
+/* 结果区已由 page-stack 提供间距，标题分隔线下不再叠加共享 section-heading 的外边距。 */
+.command-audit-results .section-heading{margin-bottom:0;padding-bottom:var(--space-3)}
+
+.command-audit-results__footer>span{color:var(--text-muted);font-size:var(--type-small-size)}
+
 .events-table-scroll table{min-width:calc(var(--space-12)*16)}
 
 .events-stream{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}

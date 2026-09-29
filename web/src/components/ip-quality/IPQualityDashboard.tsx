@@ -1,6 +1,6 @@
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 
-import { Badge, Hostname, Timestamp, type BadgeTone } from '../atoms'
+import { Badge, Hostname, ScrollRegion, Timestamp, type BadgeTone } from '../atoms'
 import { formatLatency, formatNumber, formatOptional, formatPercent } from '../../lib/format'
 import type {
   IPQualityProviderResult,
@@ -271,13 +271,12 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
         </div>
         {visibleProviders.length > 0 ? (
           <>
-            <p id="ip-quality-provider-table-hint" className="vps-ip-quality-dashboard__table-hint">横向滚动查看完整列</p>
-            <div
+            <ScrollRegion
               className="vps-ip-quality-dashboard__table-scroll"
-              role="region"
-              aria-labelledby="ip-quality-provider-table-title"
-              aria-describedby="ip-quality-provider-table-hint"
-              tabIndex={0}
+              labelledBy="ip-quality-provider-table-title"
+              hintId="ip-quality-provider-table-hint"
+              hintClassName="vps-ip-quality-dashboard__table-hint"
+              hint="横向滚动查看完整列"
             >
               <table className="data-table data-table--compact asset-table vps-ip-quality-dashboard__provider-table">
                 <thead className="data-table__head">
@@ -331,7 +330,7 @@ export function IPQualityDashboard({ report, summary, detailPath }: IPQualityDas
                   })}
                 </tbody>
               </table>
-            </div>
+            </ScrollRegion>
           </>
         ) : (
           <p className="asset-table-empty-state">暂无 provider 结果。</p>

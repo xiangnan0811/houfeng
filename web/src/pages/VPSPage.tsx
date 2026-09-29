@@ -1232,11 +1232,16 @@ export function VPSPage() {
                           <span className="vps-mono">{vpsPrimaryAddress(row.vps)}</span>
                           {compactLine(['', row.vps.provider_name, vpsPlaceLabel(row.vps)]) ? ` · ${compactLine([row.vps.provider_name, vpsPlaceLabel(row.vps)])}` : ''}
                         </span>
-                        <span className={attention ? 'vps-ledger__item-st vps-tone-warn' : 'vps-ledger__item-st'}>
+                        <span className="vps-ledger__item-st">
                           <LifecycleBadge value={row.vps.lifecycle_status} />
                           {' · '}
                           <RenewalBadge value={row.vps.renewal_decision} />
-                          {attention ? ` · ${attention}` : ''}
+                          {attention ? (
+                            <>
+                              {' · '}
+                              <span className="vps-ledger__item-attention">{attention}</span>
+                            </>
+                          ) : null}
                         </span>
                       </button>
                     )

@@ -101,7 +101,8 @@ export function Timestamp({ value, mode = 'absolute', className = '', now }: Tim
       </span>
     )
   }
-  if (mode === 'relative') {
+  // 超过相对时间范围时 relative 会退回绝对时间，此时 both 也只显示一次，避免同一日期重复。
+  if (mode === 'relative' || relative === absolute) {
     return (
       <span className={cls} title={absolute}>
         {relative}
