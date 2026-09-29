@@ -365,11 +365,11 @@ function ArchiveDetailPageContent({ vpsId }: { vpsId?: string }) {
           </p>
         </div>
         <div className="page__actions">
-          <Link className="btn sm secondary" to="/archive">归档列表</Link>
+          <Link className="btn md secondary" to="/archive">归档列表</Link>
           {isArchived ? (
             <button
               ref={restoreTriggerRef}
-              className="btn sm primary"
+              className="btn md primary"
               type="button"
               onClick={() => {
                 setRestoreError(null)

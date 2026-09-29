@@ -79,13 +79,13 @@ export function VPSDetailHero({
         </div>
       </div>
       <div className="page__actions">
-            <Button variant="primary" size="sm" onClick={onDecisionEdit}>续费决策</Button>
-            <Link className="btn sm secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&vps_id=${encodeURIComponent(detail.vps_id)}`}>
+            <Button variant="primary" size="md" onClick={onDecisionEdit}>续费决策</Button>
+            <Link className="btn md secondary" to={`/asset-decisions?view=needs_decision&renew_within_days=30&vps_id=${encodeURIComponent(detail.vps_id)}`}>
               组合决策
             </Link>
-            <Button variant="secondary" size="sm" onClick={onSubscriptionCreate}>创建订阅</Button>
-            <Button variant="secondary" size="sm" onClick={onValidityExtend}>延长有效期</Button>
-            <Button variant="secondary" size="sm" onClick={onMonitoringInstanceCreate}>{monitoringAgentActionLabel}</Button>
+            <Button variant="secondary" size="md" onClick={onSubscriptionCreate}>创建订阅</Button>
+            <Button variant="secondary" size="md" onClick={onValidityExtend}>延长有效期</Button>
+            <Button variant="secondary" size="md" onClick={onMonitoringInstanceCreate}>{monitoringAgentActionLabel}</Button>
             <details className="watchtower-actions-menu vps-detail-actions-menu">
               <summary aria-label="VPS 详情操作">…</summary>
               <div className="watchtower-actions-menu__panel">

@@ -931,10 +931,10 @@ export function VPSPage() {
       <header className="page__head">
         <h1 className="page__title">VPS 资产</h1>
         <div className="page__actions">
-          <Link className="btn sm secondary" to={assetDecisionHrefForFilters(filters)}>进入组合决策</Link>
-          <Link className="btn sm secondary" to="/archive">查看归档</Link>
-          <button type="button" className="btn sm secondary" onClick={openFilterDrawer}>筛选</button>
-          <button type="button" className="btn sm primary" onClick={() => setCreateOpen(true)}>
+          <Link className="btn md secondary" to={assetDecisionHrefForFilters(filters)}>进入组合决策</Link>
+          <Link className="btn md secondary" to="/archive">查看归档</Link>
+          <button type="button" className="btn md secondary" onClick={openFilterDrawer}>筛选</button>
+          <button type="button" className="btn md primary" onClick={() => setCreateOpen(true)}>
             {state.vps.length === 0 ? '创建第一台 VPS' : '添加 VPS'}
           </button>
         </div>

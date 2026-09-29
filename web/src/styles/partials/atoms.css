@@ -56,15 +56,16 @@ select.input::-ms-expand{display:none}
 .card--state.card--ribbon-top.tone--maintenance{border-top-color:var(--color-state-maintenance)}
 .card--state.card--ribbon-left.tone--offline,.card--state.card--ribbon-top.tone--offline{border-style:dashed;border-color:var(--border-dashed);opacity:0.85}
 /* ===== ATOM COMPAT: Tabs ===== */
-.tabs--underline{display:flex;max-width:100%;gap:var(--space-6);border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
+.tabs--underline{display:flex;max-width:100%;gap:var(--space-6);margin-bottom:var(--space-5);border-bottom:1px solid color-mix(in srgb,var(--border) 70%,transparent);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
 .tabs--underline .tab{flex:0 0 auto;background:none;border:none;color:var(--text-muted);padding:12px 0;margin-bottom:-1px;font-family:var(--font-sans);font-size:var(--type-body-size);font-weight:500;white-space:nowrap;cursor:pointer;transition:color var(--dur-micro) var(--ease-calm);position:relative}
 .tabs--underline .tab::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--accent);transform:scaleX(0);transform-origin:center}
 .tabs--underline .tab:hover,.tabs--underline .tab.is-active{color:var(--text-primary)}
 .tabs--underline .tab.is-active::after{transform:scaleX(1)}
-.tabs--pill{display:flex;width:fit-content;max-width:100%;padding:3px;background:color-mix(in srgb,var(--surface-elevated) 72%,transparent);border-radius:var(--radius-pill);gap:3px;border:1px solid color-mix(in srgb,var(--border) 80%,transparent);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
-.tabs--pill .tab{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;gap:var(--space-2);padding:5px 14px;color:var(--text-muted);font-size:var(--type-small-size);white-space:nowrap;border-radius:var(--radius-pill);transition:background-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
+/* 分段控件：下沉的底槽 + 抬起的选中项，圆角与按钮一致；Tabs pill 与 SegmentedControl 共用。 */
+.tabs--pill{display:flex;width:fit-content;max-width:100%;padding:3px;background:var(--panel-bg-muted);border-radius:calc(var(--radius-2) + 3px);gap:2px;border:1px solid var(--border);overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain}
+.tabs--pill .tab{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;gap:var(--space-2);min-height:28px;padding:0 12px;color:var(--text-muted);font-size:var(--type-small-size);font-weight:500;white-space:nowrap;cursor:pointer;border-radius:var(--radius-2);transition:background-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm),box-shadow var(--dur-micro) var(--ease-calm)}
 .tabs--pill .tab:hover{color:var(--text-primary)}
-.tabs--pill .tab.is-active{background:color-mix(in srgb,var(--accent) 14%,var(--surface-elevated));color:var(--text-primary);box-shadow:0 1px 0 color-mix(in srgb,var(--text-primary) 6%,transparent) inset}
+.tabs--pill .tab.is-active{background:var(--surface-elevated);color:var(--text-primary);box-shadow:var(--shadow-sm),inset 0 0 0 1px var(--border)}
 /* ===== ATOM COMPAT: DataTable ===== */
 .data-table{width:100%;border-collapse:separate;border-spacing:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-3);overflow:hidden;box-shadow:var(--shadow-soft)}
 .data-table__caption{caption-side:top;text-align:left;padding:var(--space-2) var(--space-4);font-size:var(--type-eyebrow-size);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase;color:var(--text-muted);background:var(--panel-bg-muted)}
@@ -92,7 +93,7 @@ select.input::-ms-expand{display:none}
 .data-table--clickable .data-table__row:focus-within{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
 .data-table__row--selected{background:color-mix(in srgb,var(--accent) 12%,var(--surface))}
 .data-table__cell.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-feature-settings:"tnum";color:var(--text-secondary)}
-.data-table-empty{padding:40px;text-align:center;color:var(--text-muted);background:color-mix(in srgb,var(--surface) 92%,transparent);border:1px dashed color-mix(in srgb,var(--border) 70%,transparent);border-radius:var(--radius-3)}
+.data-table-empty{padding:40px;text-align:center;color:var(--text-muted);background:var(--panel-bg-muted);border:0;border-radius:var(--radius-3)}
 /* ===== ATOM COMPAT: StatusGlyph + Mono + Trend ===== */
 .status-glyph{display:inline-block;vertical-align:middle;border-radius:50%}
 .status-glyph--sm{width:8px;height:8px}
@@ -132,7 +133,8 @@ select.input::-ms-expand{display:none}
 /* ===== ATOM COMPAT: Sparkline ===== */
 .sparkline{display:block;vertical-align:middle;overflow:visible;cursor:default}
 .sparkline--interactive{cursor:crosshair}
-.sparkline--empty{background:var(--surface-elevated);border:1px dashed var(--border-dashed);border-radius:var(--radius-2)}
+/* 卡片内的空图表只用下沉底色，不再叠一层虚线框。 */
+.sparkline--empty{background:var(--panel-bg-muted);border:0;border-radius:var(--radius-2)}
 .sparkline__placeholder{font-family:var(--font-sans);font-size:11px;fill:var(--text-muted);letter-spacing:0.02em}
 .sparkline-shell{position:relative;display:inline-block;line-height:0;vertical-align:middle}
 .sparkline-shell--expand{display:block;width:100%}
@@ -145,7 +147,7 @@ select.input::-ms-expand{display:none}
 /* ===== ATOM COMPAT: MetricChart ===== */
 .metric-chart{display:block;vertical-align:middle;cursor:default}
 .metric-chart--interactive{cursor:crosshair}
-.metric-chart--empty{background:var(--surface-elevated);border:1px dashed var(--border-dashed);border-radius:var(--radius-2)}
+.metric-chart--empty{background:var(--panel-bg-muted);border:0;border-radius:var(--radius-2)}
 .metric-chart__placeholder{font-family:var(--font-sans);font-size:11px;fill:var(--text-muted);letter-spacing:0.02em}
 .metric-chart-shell{position:relative;display:block;width:100%;line-height:0;vertical-align:middle}
 .metric-chart-shell--fixed{display:inline-block;width:max-content}

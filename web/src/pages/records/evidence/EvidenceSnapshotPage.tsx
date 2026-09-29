@@ -157,13 +157,13 @@ export function EvidenceSnapshotPage() {
         </div>
         <div className="page__actions">
           {recordHref ? (
-            <Link className="btn sm secondary" to={recordHref} state={location.state}>打开记录</Link>
+            <Link className="btn md secondary" to={recordHref} state={location.state}>打开记录</Link>
           ) : null}
           {subjectHref ? (
-            <Link className="btn sm secondary" to={subjectHref} state={location.state}>返回主体证据</Link>
+            <Link className="btn md secondary" to={subjectHref} state={location.state}>返回主体证据</Link>
           ) : null}
           <Link
-            className="btn sm secondary"
+            className="btn md secondary"
             to={comparisonEntryHref({ items: [{ snapshot_id: snapshot.snapshot_id }] })}
             state={location.state}
           >

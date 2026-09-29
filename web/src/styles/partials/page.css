@@ -40,10 +40,12 @@
 .section-heading__meta{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.4;overflow-wrap:anywhere}
 .section-heading__actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-2);flex-wrap:wrap;min-width:0}
 /* ===== PAGE COMPAT: Empty state + text-link + badge-row ===== */
-.empty-state{background:var(--panel-bg);border:var(--border-w) dashed var(--border-dashed);border-radius:var(--radius-2);padding:var(--space-6);text-align:center;color:var(--text-muted)}
-.text-link{color:var(--accent);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent) 40%,transparent);text-underline-offset:3px}
+.empty-state{background:var(--panel-bg);border:var(--border-w) solid var(--border);border-radius:var(--radius-3);padding:var(--space-6);text-align:center;color:var(--text-muted)}
+/* 链接默认保留下划线，不单靠颜色区分；只有显式标记为独立操作（区块标题旁的“查看…”）的 --action 在静止时隐藏下划线。 */
+.text-link{color:var(--accent);text-decoration:underline;text-decoration-color:color-mix(in srgb,var(--accent) 40%,transparent);text-underline-offset:3px;transition:color var(--dur-micro) var(--ease-calm),text-decoration-color var(--dur-micro) var(--ease-calm)}
+.text-link--action{text-decoration-color:transparent}
 .button.text-link,button.text-link{background:transparent;border:0;padding:0;font:inherit;cursor:pointer}
-.text-link:hover{color:var(--accent-strong)}
+.text-link:hover,.text-link:focus-visible{color:var(--accent-strong);text-decoration-color:currentColor}
 .badge-row{display:flex;align-items:center;gap:var(--space-2);flex-wrap:nowrap}
 .badge-row--wrap{flex-wrap:wrap}
 .page-form-actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);flex-wrap:wrap;min-width:0}
@@ -146,9 +148,6 @@
 .page-filters select:hover,.filter-bar>select:hover{border-bottom-color:var(--border-strong)}
 .page-filters select:focus,.filter-bar>select:focus{outline:none;border-bottom-color:var(--accent)}
 .page-filters label,.filter-bar>label{display:inline-flex;flex-direction:row;align-items:center;gap:var(--space-1);margin:0;color:var(--text-secondary);font-size:var(--type-small-size);cursor:pointer}
-.page-filters .tabs--pill{padding:0;background:transparent;border:0;border-radius:0;gap:var(--space-4)}
-.page-filters .tabs--pill .tab{padding:4px 0;border-radius:0;box-shadow:none}
-.page-filters .tabs--pill .tab.is-active{background:transparent;box-shadow:inset 0 -2px 0 var(--accent)}
 .page-filters>.filter-select,.page-filters>select{display:inline-block;min-width:0;flex-direction:unset}
 .filter-bar__controls{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--space-3);flex-wrap:wrap;min-width:0}
 .filter-bar__controls-row{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:flex-end;min-width:0}
@@ -278,7 +277,7 @@
 .subject-activity-page__source-note{color:var(--text-secondary);font-size:var(--type-small-size)}
 .subject-activity-page__more{display:flex;justify-content:center}
 .unified-timeline{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
-.unified-timeline--empty{padding:var(--space-6);border:var(--border-w) dashed var(--border-dashed);border-radius:var(--radius-2);text-align:center;color:var(--text-muted)}
+.unified-timeline--empty{padding:var(--space-6);background:var(--panel-bg-muted);border:0;border-radius:var(--radius-2);text-align:center;color:var(--text-muted)}
 .unified-timeline__empty-title{font-size:var(--type-h2-size);color:var(--text-primary);margin-bottom:var(--space-2)}
 .unified-timeline__source-status{margin:0;padding-left:var(--space-4);color:var(--text-secondary);font-size:var(--type-small-size)}
 .unified-timeline__day-title{font-size:var(--type-small-size);color:var(--text-muted);margin-bottom:var(--space-3);text-transform:uppercase;letter-spacing:var(--type-eyebrow-tracking)}

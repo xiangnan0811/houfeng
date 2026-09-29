@@ -251,9 +251,9 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
           ) : null}
         </div>
         <div className="page__actions">
-          {recordId ? <Link className="btn sm secondary" to={withSubjectReturnQuery(`/records/${recordId}`, subjectReturn)} state={location.state}>阅读</Link> : null}
+          {recordId ? <Link className="btn md secondary" to={withSubjectReturnQuery(`/records/${recordId}`, subjectReturn)} state={location.state}>阅读</Link> : null}
           {recordId && mode === 'read' && state.record?.capabilities.update ? (
-            <Link className="btn sm secondary" to={withSubjectReturnQuery(`/records/${recordId}/edit`, subjectReturn)} state={location.state}>编辑</Link>
+            <Link className="btn md secondary" to={withSubjectReturnQuery(`/records/${recordId}/edit`, subjectReturn)} state={location.state}>编辑</Link>
           ) : null}
           {editable ? (
             <>

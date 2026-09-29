@@ -112,7 +112,7 @@ export function ArchivePage() {
           <p className="page-sub">只读历史台账，保留已退役与取消资产的账单、时间线及取消依据。</p>
         </div>
         <div className="page__actions">
-          <Link className="btn sm secondary" to="/vps">返回 VPS</Link>
+          <Link className="btn md secondary" to="/vps">返回 VPS</Link>
         </div>
       </header>
 

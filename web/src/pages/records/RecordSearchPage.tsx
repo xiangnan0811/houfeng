@@ -235,12 +235,12 @@ export function RecordSearchPage() {
       <header className="page__head">
         <h1 className="page__title">运维记录</h1>
         <div className="page__actions">
-          <Link className="btn sm secondary" to={comparisonEntryHref({
+          <Link className="btn md secondary" to={comparisonEntryHref({
             subjects: comparisonSubjectsFromRecords(visibleRecords),
           })}>横向比较</Link>
-          <Link className="btn sm secondary" to="/records/drafts">草稿</Link>
-          <Button type="button" size="sm" variant="secondary" onClick={() => setImportOpen(true)}>导入</Button>
-          <Link className="btn sm primary" to="/records/new">新建记录</Link>
+          <Link className="btn md secondary" to="/records/drafts">草稿</Link>
+          <Button type="button" size="md" variant="secondary" onClick={() => setImportOpen(true)}>导入</Button>
+          <Link className="btn md primary" to="/records/new">新建记录</Link>
         </div>
       </header>
 

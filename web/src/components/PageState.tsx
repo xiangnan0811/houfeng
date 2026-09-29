@@ -24,10 +24,9 @@ function truncateTechnicalSummary(value: string): string {
   return `${normalized.slice(0, 119)}…`
 }
 
-function stateLabel(kind: PageStateKind): string {
+function stateLabel(kind: Exclude<PageStateKind, 'empty'>): string {
   if (kind === 'loading') return '正在加载'
-  if (kind === 'error') return '状态异常'
-  return '当前为空'
+  return '状态异常'
 }
 
 function StateMark() {
@@ -65,12 +64,14 @@ export function PageState({
   ].filter(Boolean).join(' ')
   const role = kind === 'error' ? 'alert' : kind === 'loading' ? 'status' : undefined
   const ariaLive = kind === 'error' ? 'assertive' : 'polite'
+  // 空状态由图标和标题自说明，只在调用方显式提供时显示 eyebrow。
+  const eyebrowText = eyebrow ?? (kind === 'empty' ? null : stateLabel(kind))
 
   return (
     <section className={classes} role={role} aria-live={ariaLive}>
       <StateMark />
       <div className="page-state__content">
-        <p className="page-state__eyebrow">{eyebrow ?? stateLabel(kind)}</p>
+        {eyebrowText ? <p className="page-state__eyebrow">{eyebrowText}</p> : null}
         <h2 className="page-state__title">{title}</h2>
         {description ? <p className="page-state__description">{description}</p> : null}
         {kind === 'loading' ? (
