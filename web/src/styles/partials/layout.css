@@ -100,11 +100,16 @@ body.is-col-resizing{cursor:col-resize;user-select:none}
 @media (max-width:760px){
 .topbar{gap:var(--space-2);min-height:52px;padding:4px var(--space-3)}
 .topbar .tp-spacer,.topbar .tp-divider,.topbar .tp-avatar{display:none}
-.topbar .tp-page{max-width:8em}
+.topbar .tp-page{flex:0 0 auto;max-width:8em}
 .topbar .tp-vps-crumb{max-width:50%;flex:1 1 50%}
 .topbar .tp-vps-crumb .tp-page{max-width:none;min-width:0}
 .topbar .tp-vps-crumb__link{display:inline-flex;align-items:center;min-height:var(--control-min-height-touch)}
 .topbar .tp-icon-btn{width:var(--control-min-height-touch);height:var(--control-min-height-touch)}
 .theme-menu .tm-item,.btn:not(.sm),.btn-text:not(.sm){min-height:var(--control-min-height-touch)}
 .table .btn,.data-table .btn,.table .btn-text,.data-table .btn-text{min-height:0;padding:4px 8px}
+/* 窄屏搜索：放在 page.css 基础规则之后才能生效；让出标题宽度，保留图标、隐藏快捷键提示，保持触控高度。 */
+.global-search{flex:1 1 96px;min-width:0}
+.global-search__input{padding:0 var(--space-2) 0 30px;min-height:var(--control-min-height-touch)}
+.global-search__kbd{display:none}
+.global-search__menu{position:fixed;top:52px;left:var(--shell-sidebar-narrow-width);right:var(--space-3);z-index:200}
 }

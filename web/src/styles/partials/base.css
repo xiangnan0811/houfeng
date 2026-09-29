@@ -1,6 +1,7 @@
 /* partial: base.css (extracted from index.css; do not hand-edit large rules here) */
 *{margin:0;padding:0;box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--border-strong) transparent}
-.layout{display:grid;grid-template-columns:var(--shell-sidebar-width) minmax(0,1fr);height:100vh}
+/* 行轨道限定为视口高度：侧栏不随导航内容撑出屏幕，矮视口由 nav 自身滚动。 */
+.layout{display:grid;grid-template-columns:var(--shell-sidebar-width) minmax(0,1fr);grid-template-rows:minmax(0,1fr);height:100vh}
 .layout.sidebar-collapsed{grid-template-columns:var(--shell-sidebar-collapsed-width) minmax(0,1fr)}
 .main-wrap{display:flex;flex-direction:column;overflow:hidden}
 .main{flex:1;overflow-y:auto;padding:var(--shell-main-inline-padding)}
@@ -11,15 +12,16 @@
 .logo-mark{width:28px;height:28px;border-radius:var(--radius-1);background:var(--accent);display:flex;align-items:center;justify-content:center}
 .logo-mark svg{width:16px;height:16px;fill:none;stroke:var(--bg);stroke-width:2;stroke-linecap:round}
 .logo-text{font-family:var(--font-serif);font-weight:500;letter-spacing:0.04em;color:var(--text-primary)}
-.sidebar-more{margin-top:var(--space-2);border-top:var(--border-w) solid var(--border)}
-.sidebar-more__summary{display:flex;align-items:center;gap:10px;padding:7px 16px;font-size:var(--type-small-size);color:var(--t2);cursor:pointer;list-style:none}
-.sidebar-more__summary::-webkit-details-marker{display:none}
-.sidebar-more__summary:hover{color:var(--t1);background:var(--nav-active)}
-.sidebar-collapsed .sidebar-more__summary{padding:9px 0;justify-content:center}
-.sidebar-collapsed .sidebar-more__summary .nav-text{display:none}
-.sidebar-more .nav-item{padding-left:28px}
-.sidebar-collapsed .sidebar-more .nav-item{padding-left:0}
+/* 导航分组：展开时显示组名，折叠/窄屏时组名隐藏、以细分隔线区分；设置固定在导航底部。 */
+.nav-group{display:flex;flex-direction:column;margin-top:var(--space-3)}
+.nav-group__label{margin:0;padding:0 16px var(--space-1);font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);color:var(--text-muted)}
+.nav-group--end{margin-top:auto;padding-top:var(--space-3)}
+.sidebar-collapsed .nav-group{margin-top:var(--space-2);padding-top:var(--space-2);border-top:var(--border-w) solid var(--border)}
+.sidebar-collapsed .nav-group__label{display:none}
+.sidebar-collapsed .nav-group--end{margin-top:auto}
 .sidebar nav{display:flex;flex-direction:column;flex:1;min-height:0;overflow-y:auto}
+/* 矮视口由 nav 自身滚动，直接子项（工作台链接与各分组）不被纵向压扁。 */
+.sidebar nav>*{flex-shrink:0}
 .nav-item{display:flex;align-items:center;gap:10px;padding:7px 16px;font-size:var(--type-small-size);color:var(--t2);cursor:pointer;transition:color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm),border-color var(--dur-micro) var(--ease-calm);border-left:2.5px solid transparent;white-space:nowrap;overflow:hidden;position:relative}
 .sidebar-collapsed .nav-item{padding:9px 0;justify-content:center;border-left:none}
 .sidebar-collapsed .nav-item.active{background:var(--accent-soft)}
@@ -62,7 +64,9 @@
 .sidebar{padding:var(--space-3) 0}
 .sidebar-toggle,.logo-text,.nav-text,.sidebar-footer .user-info{display:none}
 .logo{justify-content:center;padding:0 0 var(--space-3)}
-
+.nav-group{margin-top:var(--space-2);padding-top:var(--space-2);border-top:var(--border-w) solid var(--border)}
+.nav-group__label{display:none}
+.nav-group--end{margin-top:auto}
 .nav-item{justify-content:center;padding:9px 0;border-left:0}
 .nav-item.active{background:var(--accent-soft)}
 .nav-item.active::before{content:'';position:absolute;left:0;top:6px;bottom:6px;width:2.5px;background:var(--accent);border-radius:0 2px 2px 0}
@@ -72,8 +76,4 @@
 .user-chip__caret{display:none}
 .user-chip__menu{left:calc(100% + var(--space-2));right:auto;bottom:0;min-width:196px}
 .user-chip__menu-item{min-height:var(--control-min-height-touch)}
-.global-search{flex:1 1 auto;min-width:0}
-.global-search form{min-width:0;width:100%}
-.global-search__input{min-width:0;width:100%;padding-inline:var(--space-2);font-size:var(--type-small-size);min-height:var(--control-min-height-touch)}
-.global-search__menu{position:fixed;top:52px;left:var(--shell-sidebar-narrow-width);right:var(--space-3);z-index:200}
 }

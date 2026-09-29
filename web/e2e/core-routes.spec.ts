@@ -272,3 +272,45 @@ test('Subscription insights keep a stable grid above the archived panel across d
     await expect(month).toBeVisible()
   }
 })
+
+test('Shell search keeps usable text width and touch height on narrow screens', async ({ api, page }) => {
+  api.useProfile(coreRouteProfile('/'))
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/')
+  const input = page.getByRole('combobox', { name: '全局搜索' })
+  await expect(input).toBeVisible()
+  const metrics = await input.evaluate((element) => {
+    const style = getComputedStyle(element)
+    const kbd = element.parentElement?.querySelector('.global-search__kbd')
+    return {
+      paddingRight: parseFloat(style.paddingRight),
+      height: element.getBoundingClientRect().height,
+      kbdDisplay: kbd ? getComputedStyle(kbd).display : 'missing',
+    }
+  })
+  expect(metrics.paddingRight).toBeLessThanOrEqual(12)
+  expect(metrics.height).toBeGreaterThanOrEqual(44)
+  expect(metrics.kbdDisplay).toBe('none')
+  const title = page.locator('.topbar .tp-page')
+  await expect(title).toHaveText('工作台')
+  // 标题允许超长时省略，但现行短标题必须完整显示，不被搜索框挤成“工…”。
+  expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+  await expectNoDocumentOverflow(page)
+})
+
+test('Sidebar scrolls on short viewports without squeezing any destination', async ({ api, page }) => {
+  api.useProfile(coreRouteProfile('/'))
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 420 })
+    await page.goto('/')
+    const nav = page.getByRole('navigation', { name: '主导航' })
+    await expect(nav.getByRole('link')).toHaveCount(12)
+    await page.evaluate(() => document.fonts.ready)
+    const heights = await nav.getByRole('link').evaluateAll((links) => links.map((link) => Math.round(link.getBoundingClientRect().height)))
+    expect(Math.min(...heights), `${width}`).toBe(Math.max(...heights))
+    expect(await nav.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    const settings = nav.getByRole('link', { name: '设置' })
+    await settings.focus()
+    await expect(settings).toBeInViewport()
+  }
+})

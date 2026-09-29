@@ -30,6 +30,12 @@ The current product prefers workbench-first pages:
 
 This is guidance, not a page freeze. A page may change structure when the current task has a clearer workflow and updates tests/specs accordingly.
 
+## Shell navigation
+
+- The sidebar lists every destination in always-open named groups instead of hiding frequently used pages behind a "更多" disclosure: 工作台, then 资产 (VPS, 订阅, 服务商, 资产决策, 归档), 观测 (监控, 入口探测, 事件), 记录 (运维记录, 命令审计), with 设置 pinned to the bottom. Each group is a `role="group"` labelled by its visible heading; collapsed and narrow rails hide the headings and separate groups with a divider.
+- Every destination has a distinct icon; do not reuse one glyph for two destinations.
+- The top-bar global search shows a search icon and its keyboard shortcut (`⌘K` on Apple platforms, `Ctrl K` elsewhere, exposed via `aria-keyshortcuts`). On narrow screens the page title keeps priority over the search field and the shortcut hint is hidden.
+
 ## Current surface responsibilities
 
 - Dashboard / workbench: daily entry point and highest-priority next actions, not a dump of every API field.
