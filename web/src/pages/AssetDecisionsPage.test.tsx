@@ -159,6 +159,10 @@ describe('Asset Decisions route and composition workflows', () => {
     const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
     expect(within(commandSummary).getByRole('heading', { name: '当前没有需要处理的组合决策' })).toBeInTheDocument()
     expect(within(commandSummary).queryByRole('button', { name: /处理|使用模板|继续组合|打开决策组/ })).not.toBeInTheDocument()
+    // 合同：无待办时不渲染统计卡与警示色。
+    expect(within(commandSummary).queryByLabelText('资产组合决策当前事实')).not.toBeInTheDocument()
+    expect(commandSummary).toHaveClass('asset-decision-command-summary--quiet')
+    expect(commandSummary.querySelector('[class*="asset-decision-focus__item--"]')).toBeNull()
     expect(within(commandSummary).queryByText(/主备取舍模板|欧洲主备手工组合/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前视图暂无决策组' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '场景工作区' })).not.toBeInTheDocument()
@@ -371,6 +375,9 @@ describe('Asset Decisions route and composition workflows', () => {
     const anomalyItem = within(commandSummary).getByText('闭环异常').closest('.asset-decision-focus__item')
     expect(anomalyItem).not.toBeNull()
     expect(within(anomalyItem as HTMLElement).getByText(/事实漂移/)).toBeInTheDocument()
+    // 有异常时才标红；组合组数本身不带状态色。
+    expect(anomalyItem).toHaveClass('asset-decision-focus__item--critical')
+    expect(within(commandSummary).getByText('组合组数').closest('.asset-decision-focus__item')?.className).toBe('asset-decision-focus__item')
     fireEvent.click(within(commandSummary).getByRole('button', { name: '复核记录' }))
 
     expect(await screen.findByRole('dialog', { name: '德国主备取舍记录' })).toBeInTheDocument()
@@ -498,6 +505,12 @@ describe('Asset Decisions route and composition workflows', () => {
     const currentFacts = screen.getByLabelText('资产组合决策当前事实')
     expect(within(currentFacts).getByText('组合组数')).toBeInTheDocument()
     expect(within(currentFacts).getByText('3')).toBeInTheDocument()
+    // 色条随实际数值：续费组 1 → 提示色；该夹具闭环异常大于 0 → 危险色（优先于局部错误）；证据源均可用 → 正常色。
+    const factClass = (label: string) => within(currentFacts).getByText(label).closest('.asset-decision-focus__item')?.className
+    expect(factClass('组合组数')).toBe('asset-decision-focus__item')
+    expect(factClass('续费组')).toContain('asset-decision-focus__item--notice')
+    expect(factClass('闭环异常')).toContain('asset-decision-focus__item--critical')
+    expect(factClass('证据状态')).toContain('asset-decision-focus__item--normal')
     expect(screen.getByText('自动组暂不可用，当前只展示已成功加载的事实。')).toBeInTheDocument()
   })
   it('does not invent readback next-work items when saved records fail to load', async () => {

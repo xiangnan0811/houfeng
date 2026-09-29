@@ -183,6 +183,9 @@
 
 .asset-decision-workbench .asset-decision-command-summary{grid-template-columns:minmax(320px,0.7fr) minmax(240px,0.3fr)}
 
+/* 无待办的安静状态只有一行判断，不保留统计卡的右栏。 */
+.asset-decision-workbench .asset-decision-command-summary.asset-decision-command-summary--quiet{grid-template-columns:minmax(0,1fr)}
+
 .asset-decision-workbench .tabs--pill{display:flex;overflow-x:auto;scrollbar-width:thin}
 
 .asset-decision-workbench .tabs--pill .tab{flex:0 0 auto;white-space:nowrap}
@@ -211,23 +214,17 @@
 
 .asset-decision-topology{min-width:0}
 
-.asset-decision-support-strip{display:flex;flex-wrap:wrap;gap:var(--space-2);min-width:0}
+/* 辅助入口是一条轨道 + 选中项抬起；状态只由右侧徽章色表达，不再叠加彩色左边框。
+   轨道用面板底色而非凹槽色：状态徽章在各主题下都需保持 AA 对比度（precision-light 的凹槽色会让正常徽章跌破 4.5:1）。 */
+.asset-decision-support-strip{display:flex;flex-wrap:wrap;gap:4px;width:fit-content;max-width:100%;min-width:0;padding:4px;border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-2);background:var(--panel-bg)}
 
-.asset-decision-support-strip__item{display:inline-flex;align-items:center;gap:var(--space-2);min-width:0;padding:var(--space-1) var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-pill);background:color-mix(in srgb,var(--surface-elevated) 6%,var(--surface));color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.3;cursor:pointer;transition:border-color var(--dur-micro) var(--ease-calm),background-color var(--dur-micro) var(--ease-calm)}
+.asset-decision-support-strip__item{display:inline-flex;align-items:center;gap:var(--space-2);min-width:0;min-height:32px;padding:0 var(--space-3);border:0;border-radius:var(--radius-1);background:transparent;color:var(--text-secondary);font:inherit;font-size:var(--type-small-size);line-height:1.3;cursor:pointer;transition:background-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
 
-.asset-decision-support-strip__item:hover{border-color:color-mix(in srgb,var(--accent) 34%,var(--border));background:color-mix(in srgb,var(--accent) 5%,var(--surface))}
+/* 悬停不换底色，只加描边与文字色：徽章始终落在已验证 AA 的面板底色上（e2e 在 precision-light 下逐项悬停跑 axe）。 */
+.asset-decision-support-strip__item:hover{color:var(--text-primary);box-shadow:inset 0 0 0 var(--border-w) var(--border-strong)}
 
-.asset-decision-support-strip__item--active{border-color:color-mix(in srgb,var(--accent) 50%,var(--border));background:color-mix(in srgb,var(--accent) 8%,var(--surface));color:var(--text-primary)}
-
-.asset-decision-support-strip__item--critical{border-left:var(--border-w-strong) solid color-mix(in srgb,var(--color-state-critical) 56%,var(--border))}
-
-.asset-decision-support-strip__item--alert{border-left:var(--border-w-strong) solid color-mix(in srgb,var(--color-state-alert) 50%,var(--border))}
-
-.asset-decision-support-strip__item--notice{border-left:var(--border-w-strong) solid color-mix(in srgb,var(--color-state-notice) 44%,var(--border))}
-
-.asset-decision-support-strip__item--maintenance{border-left:var(--border-w-strong) solid color-mix(in srgb,var(--color-state-maintenance) 46%,var(--border))}
-
-.asset-decision-support-strip__item--normal{border-left:var(--border-w-strong) solid color-mix(in srgb,var(--color-state-normal) 44%,var(--border))}
+.asset-decision-support-strip__item--active,
+.asset-decision-support-strip__item--active:hover{background:var(--surface-elevated);color:var(--text-primary);box-shadow:var(--shadow-sm),inset 0 0 0 var(--border-w) var(--border-strong)}
 
 .asset-decision-support-strip__title{min-width:0;white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 
@@ -626,7 +623,7 @@
 @media (max-width:920px){.asset-decision-workbench .asset-decision-command-summary{grid-template-columns:1fr}}
 
 @media (max-width:920px){.asset-decision-workbench .asset-decision-focus{grid-template-columns:repeat(2,minmax(0,1fr))}.asset-decision-command-summary,
-.asset-decision-scenario-records__grid{grid-template-columns:1fr}.asset-decision-support-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.asset-decision-support-strip__item{display:grid;grid-template-columns:minmax(0,1fr);align-content:space-between;justify-content:stretch;min-height:72px;padding:var(--space-2)}.asset-decision-support-strip__item .badge{justify-self:start;max-width:100%;white-space:normal;text-align:left}.asset-decision-command-summary__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.asset-decision-group-card{grid-template-columns:minmax(48px,0.12fr) minmax(0,1fr);gap:var(--space-2)}.asset-decision-group-card__actions{grid-column:2;justify-content:flex-start}.asset-decision-filter-chips .filter-clear{margin-left:0}.asset-decision-record-form__header{flex-direction:column}.asset-decision-record-form__grid,
+.asset-decision-scenario-records__grid{grid-template-columns:1fr}.asset-decision-support-strip{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:auto}.asset-decision-support-strip__item{display:grid;grid-template-columns:minmax(0,1fr);align-content:space-between;justify-content:stretch;min-height:72px;padding:var(--space-2)}.asset-decision-support-strip__item .badge{justify-self:start;max-width:100%;white-space:normal;text-align:left}.asset-decision-command-summary__facts{grid-template-columns:repeat(2,minmax(0,1fr))}.asset-decision-group-card{grid-template-columns:minmax(48px,0.12fr) minmax(0,1fr);gap:var(--space-2)}.asset-decision-group-card__actions{grid-column:2;justify-content:flex-start}.asset-decision-filter-chips .filter-clear{margin-left:0}.asset-decision-record-form__header{flex-direction:column}.asset-decision-record-form__grid,
 .asset-decision-manual-group-form__grid,
 .asset-decision-manual-add-form__grid,
 .asset-decision-template-form__grid,

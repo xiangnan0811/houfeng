@@ -219,16 +219,16 @@ const isCurrent = settled != null
 
 Decision-heavy pages (asset decisions, detail pages with decision boards) follow a three-tier information architecture instead of stacking every API field on one screen:
 
-1. **Primary tier — one question**: "What should I act on now?" A single judgement plus a single primary action. When there is nothing to decide, show a quiet stable hint — no CTAs, warning colors, or stat cards.
-2. **Scan tier — list**: one row per item: identity + status + single entry point, no explanatory sentences. Auxiliary entries (history, templates, renewal facts, single-VPS queue) collapse into a toolbar by default (one row on desktop, 2×2 on mobile) and expand a single panel on click.
+1. **Primary tier — one question**: "What should I act on now?" A single judgement plus a single primary action. When there is nothing to decide, show a quiet stable hint — one title line spanning the row, with no eyebrow, explanatory paragraph, CTAs, warning colors, or stat cards. When there is work, stat-card accent bars reflect the actual values rather than a fixed per-card colour.
+2. **Scan tier — list**: one row per item: identity + status + single entry point, no explanatory sentences. Auxiliary entries (history, templates, renewal facts, single-VPS queue) collapse into a toolbar by default (one row on desktop, 2×2 on mobile) and expand a single panel on click. The toolbar is a panel-coloured track with a raised selected item; status is carried only by each item's badge (also exposed as the button description), never by coloured borders.
 3. **Bounded edit tier — modal**: at most 3 tabs, each tab one task. Default tab shows object name + one-line judgement + primary action. Long API text is trimmed to a short judgement, never shown verbatim. Raw data (full member lists, wide tables, execution details) lives behind an explicit "view all" entry; write payloads still use full data. This does not replace the independent VPS full-context workspace described above.
 4. **Copy**: no explanatory paragraphs; eyebrows are Chinese or removed; field meaning is conveyed by labels and placeholders.
 
 具体回归以完整用户任务与可达性为主，旧 marker 缺失不能单独证明任务完成；以下安全和完整集合规则继续适用。
 
 - **决策类页面信息层级契约**（适用 `/asset-decisions` 及同类决策/工作台页面）：
-  1. **默认层只回答一个问题**：“现在最该处理什么？”——一个主判断 + 一个主动作。无待办时显示一行稳定提示，不渲染 CTA、警示色、统计卡。
-  2. **次级层是扫描列表**：每项一行，身份 + 状态 + 单一入口，无解释句。辅助入口（历史/模板/续费事实/单台队列）默认收起为工具条，桌面一行、移动端 2×2，点击展开对应单一面板。
+  1. **默认层只回答一个问题**：“现在最该处理什么？”——一个主判断 + 一个主动作。无待办时显示一行稳定提示（只有标题，无眉题与解释段落），不渲染 CTA、警示色、统计卡，判断占满整行。有待办时的统计卡色条只随实际数值表达状态（如闭环异常大于 0 才用危险色、续费组大于 0 才用提示色），不按卡片固定着色。
+  2. **次级层是扫描列表**：每项一行，身份 + 状态 + 单一入口，无解释句。辅助入口（历史/模板/续费事实/单台队列）默认收起为工具条，桌面一行、移动端 2×2，点击展开对应单一面板；工具条是面板底色的一条轨道，选中项抬起（抬起底色 + 阴影 + 描边），状态只由各项徽章表达（同时作为按钮描述），不加彩色边框；证据状态仅在全部证据源可用时用正常色；轨道不用凹槽底色，以保证状态徽章在全部主题下达到 AA 对比度。
   3. **详情层是弹窗**：弹窗内 ≤3 个 Tab，每个 Tab 单一任务。默认 Tab 只含对象名 + 一句判断 + 主动作。API 长文案（`comparison_insight.summary`、`execution_readback.summary` 等）裁成短判断，不原样展示。
   4. **底稿层是原始数据**：成员全量、宽表、执行细节默认折叠，显式进入。成员预览使用明确的“查看全部”入口，完整成员和写入 payload 不得丢失。
   5. **文案零解释**：无说明性段落；eyebrow 全中文或去除（不渲染 `PORTFOLIO`/`RENEWAL`/`WORKBENCH` 等英文噪声）；字段含义靠标签和占位符自解释。内部 ID（`adg_`/`admg_`/`adr_`/`adt_`）、后端 group type 机器值不进入用户可见层。
