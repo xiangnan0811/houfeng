@@ -1,4 +1,5 @@
-import { coreRouteProfile, dashboardPopulatedProfile } from './fixtures/profiles'
+import { apiRouteKey } from './fixtures/contracts'
+import { coreRouteProfile, dashboardPopulatedProfile, vpsOverviewProfile } from './fixtures/profiles'
 import { expect, test } from './fixtures'
 import { expectNoDocumentOverflow } from './support/geometry'
 
@@ -113,4 +114,44 @@ test('narrow page headers and settings rows stack instead of squeezing labels', 
   const monitoringTitle = await page.getByRole('heading', { level: 1, name: '监控' }).boundingBox()
   const headBox = await page.locator('.monitoring-page__head').boundingBox()
   expect(Math.abs(monitoringTitle!.x - headBox!.x)).toBeLessThanOrEqual(2)
+})
+
+test('narrow shell search expands on tap, keeps results tappable, and gives the breadcrumb the freed width', async ({ api, page }) => {
+  api.useProfile({
+    ...coreRouteProfile('/vps'),
+    [apiRouteKey('GET', '/api/monitoring-instances')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/targets')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/records/search?q=Tokyo&limit=4')]: { status: 200, body: { items: [], generation: 1 } },
+    ...vpsOverviewProfile(),
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/vps')
+  const input = page.getByRole('combobox', { name: '全局搜索' })
+  const rest = await input.boundingBox()
+  expect(rest!.width).toBeGreaterThanOrEqual(44)
+  expect(rest!.width).toBeLessThanOrEqual(48)
+
+  // 真实点按展开，输入并提交，结果面板与输入框左右对齐，点结果能导航。
+  await input.click()
+  await expect.poll(async () => (await input.boundingBox())!.width).toBeGreaterThan(300)
+  await input.fill('Tokyo')
+  await input.press('Enter')
+  const option = page.getByRole('option', { name: /Tokyo Edge/ }).first()
+  await expect(option).toBeVisible()
+  const [inputBox, menuBox] = await Promise.all([input.boundingBox(), page.locator('.global-search__menu').boundingBox()])
+  expect(Math.abs(menuBox!.x - inputBox!.x)).toBeLessThanOrEqual(1)
+  expect(Math.abs((menuBox!.x + menuBox!.width) - (inputBox!.x + inputBox!.width))).toBeLessThanOrEqual(1)
+  await option.click()
+  await expect(page).toHaveURL(/\/vps\/vps_001/)
+
+  // 面包屑页：搜索收起后，当前页标题可使用超过一半的顶栏宽度；点空白处收回搜索。
+  const crumb = page.locator('.topbar .tp-vps-crumb')
+  await expect(crumb).toBeVisible()
+  const [crumbBox, topbarBox] = await Promise.all([crumb.boundingBox(), page.locator('.topbar').boundingBox()])
+  expect(crumbBox!.width).toBeGreaterThan(topbarBox!.width * 0.5)
+  await input.click()
+  await expect.poll(async () => (await input.boundingBox())!.width).toBeGreaterThan(300)
+  await page.mouse.click(200, 600)
+  await expect.poll(async () => (await input.boundingBox())!.width).toBeLessThanOrEqual(48)
+  await expectNoDocumentOverflow(page)
 })

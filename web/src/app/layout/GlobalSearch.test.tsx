@@ -442,4 +442,19 @@ describe('GlobalSearch', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
   })
 
+  it('releases focus when the pointer goes down outside the search, but not inside it', () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+        <p>页面空白</p>
+      </MemoryRouter>,
+    )
+    const input = screen.getByLabelText('全局搜索')
+    input.focus()
+    fireEvent.pointerDown(input)
+    expect(input).toHaveFocus()
+    // 触屏点空白处未必移走焦点：组件主动失焦，窄屏展开的搜索框随之收回。
+    fireEvent.pointerDown(screen.getByText('页面空白'))
+    expect(input).not.toHaveFocus()
+  })
 })

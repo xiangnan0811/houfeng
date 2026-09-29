@@ -273,12 +273,24 @@ test('Subscription insights keep a stable grid above the archived panel across d
   }
 })
 
-test('Shell search keeps usable text width and touch height on narrow screens', async ({ api, page }) => {
+test('Shell search collapses to an icon on narrow screens and expands to a usable field on focus', async ({ api, page }) => {
   api.useProfile(coreRouteProfile('/'))
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/')
   const input = page.getByRole('combobox', { name: '全局搜索' })
   await expect(input).toBeVisible()
+  // 静止：收成触控尺寸的放大镜，把宽度让给标题。
+  const rest = await input.boundingBox()
+  expect(rest!.width).toBeLessThanOrEqual(48)
+  expect(rest!.height).toBeGreaterThanOrEqual(44)
+  const title = page.locator('.topbar .tp-page')
+  await expect(title).toHaveText('工作台')
+  // 标题允许超长时省略，但现行短标题必须完整显示，不被搜索框挤成“工…”。
+  expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+
+  // 聚焦：铺满顶栏，保留可用的文字宽度与触控高度。
+  await input.focus()
+  await expect.poll(async () => (await input.boundingBox())!.width).toBeGreaterThan(300)
   const metrics = await input.evaluate((element) => {
     const style = getComputedStyle(element)
     const kbd = element.parentElement?.querySelector('.global-search__kbd')
@@ -291,11 +303,13 @@ test('Shell search keeps usable text width and touch height on narrow screens', 
   expect(metrics.paddingRight).toBeLessThanOrEqual(12)
   expect(metrics.height).toBeGreaterThanOrEqual(44)
   expect(metrics.kbdDisplay).toBe('none')
-  const title = page.locator('.topbar .tp-page')
-  await expect(title).toHaveText('工作台')
-  // 标题允许超长时省略，但现行短标题必须完整显示，不被搜索框挤成“工…”。
-  expect(await title.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
   await expectNoDocumentOverflow(page)
+
+  // 焦点离开：收回放大镜，已输入的查询保留。
+  await input.fill('Tokyo')
+  await page.locator('main#main-content').focus()
+  await expect.poll(async () => (await input.boundingBox())!.width).toBeLessThanOrEqual(48)
+  await expect(input).toHaveValue('Tokyo')
 })
 
 test('Sidebar scrolls on short viewports without squeezing any destination', async ({ api, page }) => {
