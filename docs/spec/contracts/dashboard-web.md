@@ -43,7 +43,7 @@ buildDashboardModel(input: {
 - stable 只表示没有观测异常/维护/首次接入条件，不等于所有来源健康。stable + 资产待办显示 `资产判断等待核对`；stable + 局部请求失败使用 notice tone、标题 `部分事实待确认` 和信号 `局部数据不可用`，不得显示 `摘要无异常` 或 `当前没有紧急处理项`。
 - subscription 请求失败时可使用 `DashboardOverview.asset_summary.cost_by_currency` 作为较低精度 fallback，但必须同时展示来源、失败信息和 `snapshot_generated_at`；不能伪装成 subscription overview 同精度结果。
 - `snapshot_generated_at` 只能表达 `摘要生成`。VPS `loadedAt` 只能表达客户端完成读取的时间；两者都不是 Center health、agent heartbeat 或全链路同步证明。
-- 首屏只保留一个 command surface、一个 `今日第一步`、三项判断摘要和两条证据 lane。异常对象最多展示前三项；完整事件、资产、订阅明细交给对应路由。不得恢复独立 KPI strip、Group 摘要、最近事件列表、系统快捷入口或第二套 Dashboard workbench。
+- 首屏保留一个 command surface、一个 `今日第一步`、三项判断摘要（以指标卡呈现，观测卡可在后端返回 24 个逐小时桶时附 `new_incident_trend_24h` 趋势，否则不画趋势）和两条证据 lane；桌面两栏布局中，右栏另有两块**有界预览**：`即将续费`（来自 subscription overview 的 `upcoming_renewals`，该队列由后端按 UTC 日窗口 `[当天, 当天+90]` 筛选且最多返回 12 条：按续费日升序最多预览 5 项，计数标注“未来 90 天（UTC）· N 项”，达到 12 条上限时写“至少 12 项”而不是总数；剩余天数与窗口同源，按续费日期与订阅摘要 `snapshot_generated_at` 所在 UTC 日期的日历差计算（后端 `subscriptioncosts` 以同一时刻确定窗口与生成时间，不用浏览器接收时间，避免跨 UTC 午夜或客户端时钟偏差；该字段无效时才退回接收时间，并在计数旁标注“天数按接收时间估算”），当天为“今天”，早于当天的兜底显示“已过”；空队列写“未来 90 天（UTC）内没有待续费的订阅”；汇率过期或缺折算金额时显示“金额待核对”，不显示精确金额；链接订阅明细；subscription loading/error 时如实显示读取中/不可用，不得显示为“没有待续费”）和 `最近动态`（来自 `recent_events`，按时间倒序最多 5 项；`recent_events` 无时间下界，入口链接不带 `time_range`，避免旧事件点进后为空）。异常对象最多展示前三项；完整事件、资产、订阅明细仍交给对应路由。不得恢复独立的第四张 KPI、Group 摘要、系统快捷入口、无上限的事件/订阅列表或第二套 Dashboard workbench。
 - `abnormal_monitoring_instances` / `abnormal_targets` 只用于异常对象预览，不能推导全量 group/provider/region。`notification_status` 仍只能包含布尔配置摘要，不得暴露 token/chat id/webhook。
 
 #### 4. Validation & Error Matrix
@@ -67,14 +67,18 @@ buildDashboardModel(input: {
 - Base: subscription 仍在 loading；账单判断显示读取中并暂用 Dashboard 聚合来源，不把 loading 写成真实空数据。
 - Bad: `listVPSAssets().catch(() => [])` 导致请求失败时出现“创建第一台 VPS”。
 - Bad: stable 模式无条件显示“摘要无异常”，同时主行动却是“进入资产组合决策”或页面存在局部失败。
+- Good: 订阅摘要返回 7 条续费，`即将续费` 只列最早 5 条并显示“未来 90 天（UTC）· 7 项”；返回 12 条（后端上限）时显示“至少 12 项”。东八区凌晨与美西傍晚跨日时，剩余天数仍落在 0–90 天内。`最近动态` 只列最新 5 条事件，入口打开不限时间的事件流。
 - Bad: 恢复被删除的第二套 command surface、全量 KPI/Group/recent-events dump，或让多个同权 CTA 竞争 `今日第一步`。
+- Bad: subscription 503 时 `即将续费` 显示“近期没有待续费”，或后端未提供趋势时把观测卡趋势画成一条 0 线。
 
 #### 6. Tests Required
 
 - `dashboardModel.test.ts`: subset 计数、五 mode 优先级、VPS failure-not-onboarding、stable asset signal、fallback 来源、loading/error。
-- `DashboardPage.test.tsx`: 五 mode 唯一主行动及 deep link、禁止旧 surface、VPS 503、supporting retry、订阅 fallback、异常详情链接和可信标题。
+- `DashboardPage.test.tsx`: 五 mode 唯一主行动及 deep link、禁止旧 surface、VPS 503、supporting retry、订阅 fallback、异常详情链接和可信标题；判断摘要固定 3 项，续费/动态预览各最多 5 项，subscription 503 时续费预览显示不可用。
+- `dashboardPanels.test.ts`: 动态倒序与上限、状态色、续费 loading/error/ready、升序、窗口返回数与 12 条上限提示、以 `snapshot_generated_at` 为准的 UTC 日历剩余天数（用例内切换 `TZ` 覆盖东八区凌晨、美西傍晚与接收时间跨日）与日期截取、汇率过期金额、趋势长度校验。
+- `internal/center/subscriptioncosts/service_test.go`: 时钟在 UTC 午夜两侧交替时，续费窗口“今天”与 `snapshot_generated_at` 仍是同一天。
 - `internal/center/store/dashboard_test.go` 与 `internal/center/http/handlers/dashboard_test.go`: abnormal=2/severe=1，并断言 severe 不大于 abnormal。
-- 用户可见结构变化必须更新/运行 repository Playwright：`page-states.spec.ts` 固定五种 Dashboard fixture，`core-routes.spec.ts` 覆盖 `1440x1000`、`1024x768`、`390x900`，统一断言主行动、横向溢出、裁切和 console/page/CSP/network。该证据仍是 fixture frontend rendering，不代表后端或真实资产通过；真实数据只由 staging real lane 证明。
+- 用户可见结构变化必须更新/运行 repository Playwright：`page-states.spec.ts` 固定五种 Dashboard fixture，`core-routes.spec.ts` 覆盖 `1440x1000`、`1024x768`、`390x900`，统一断言主行动、横向溢出、裁切和 console/page/CSP/network；带数据的 `dashboardPopulatedProfile` 在 `1440x1000`、`1100x800`（两栏布局中最窄的右栏）与 `1024x768`（单栏）下断言有界预览、唯一主行动、面板内无横向溢出，以及超长续费名称与服务商不被裁切。该证据仍是 fixture frontend rendering，不代表后端或真实资产通过；真实数据只由 staging real lane 证明。
 
 #### 7. Wrong vs Correct
 

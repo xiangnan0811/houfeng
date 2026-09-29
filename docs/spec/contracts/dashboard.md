@@ -70,7 +70,7 @@
 - Go store test: abnormal=2/severe=1 的集合关系、新计数字段、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary。
 - Go handler test: abnormal/severe snake_case 字段保持 2/1、severe 不大于 abnormal，且不泄露敏感通知字段。
 - Frontend type/API fixture: `DashboardOverview` fixture 覆盖新增字段；新增 `asset_summary` 时必须同步 AppShell、DashboardPage、api test fixtures。
-- DashboardPage test: 生成时间、五 mode 唯一主行动/deep link、abnormal/severe 不重复、VPS false-empty、局部 fallback，以及不展开独立 summary/KPI strip、Group、最近事件、API facts、资产明细 dump。
+- DashboardPage test: 生成时间、五 mode 唯一主行动/deep link、abnormal/severe 不重复、VPS false-empty、局部 fallback，以及不展开第四张 KPI、Group、API facts、资产明细 dump 或无上限事件列表；`recent_events` 只作最多 5 条的有界“最近动态”预览（沿用事件流默认的回填排除，入口链接不加时间过滤），细节见 [Dashboard Web 合同](dashboard-web.md)。
 - AppShell test: 共享 dashboard fixture 与新增 contract 保持兼容。
 
 #### 7. Wrong vs Correct

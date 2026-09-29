@@ -7,6 +7,7 @@ import { getDashboard } from '../lib/observabilityApi'
 import type { DashboardOverview, SubscriptionOverview, VPSAssetRecord } from '../lib/types'
 import { DashboardCommandSurface } from './dashboard/DashboardCommandSurface'
 import { buildDashboardModel } from './dashboard/dashboardModel'
+import { buildRecentActivity, buildRenewalPanel, incidentTrend } from './dashboard/dashboardPanels'
 import {
   remoteError,
   remoteLoading,
@@ -130,11 +131,15 @@ export function DashboardPage() {
 
   const supportingLoading =
     resources.vps.status === 'loading' || resources.subscription.status === 'loading'
+  const overview = resources.overview.status === 'success' ? resources.overview.value : null
 
   return (
     <div className="page dashboard-page">
       <DashboardCommandSurface
         model={model}
+        incidentTrend={overview ? incidentTrend(overview) : null}
+        activity={overview ? buildRecentActivity(overview) : []}
+        renewals={buildRenewalPanel(resources.subscription)}
         supportingLoading={supportingLoading}
         {...(model.degradations.length > 0
           ? { onRetrySupporting: retrySupportingResources }

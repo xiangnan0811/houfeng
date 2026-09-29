@@ -1,15 +1,21 @@
 import { Link } from 'react-router-dom'
 
-import { MonoDigits, StatusGlyph, Timestamp } from '../../components/atoms'
+import { MonoDigits, Sparkline, StatusGlyph, Timestamp } from '../../components/atoms'
 import type {
   DashboardJudgement,
   DashboardReadyModel,
   DashboardTone,
 } from './dashboardModel'
 import { DASHBOARD_LINKS } from './dashboardLinks'
+import { DashboardActivityPanel, DashboardRenewalsPanel } from './DashboardPanels'
+import { trendTotal, type DashboardActivityItem, type DashboardRenewalPanel } from './dashboardPanels'
 
 type DashboardCommandSurfaceProps = {
   model: DashboardReadyModel
+  /** 24h 新增异常逐小时计数；后端未提供时为 null，不绘制趋势。 */
+  incidentTrend: number[] | null
+  activity: DashboardActivityItem[]
+  renewals: DashboardRenewalPanel
   supportingLoading: boolean
   onRetrySupporting?: () => void
 }
@@ -30,25 +36,38 @@ function signalLabel(model: DashboardReadyModel): string {
   return model.title
 }
 
-function JudgementItem({ item }: { item: DashboardJudgement }) {
+function JudgementItem({ item, trend }: { item: DashboardJudgement; trend: number[] | null }) {
+  // 趋势图对辅助技术隐藏，但其信息（24h 新增合计）进入链接的可访问名称。
+  const trendSummary = trend ? `24 小时新增异常 ${trendTotal(trend)} 次` : null
   return (
     <Link
       className={`dashboard-judgement dashboard-judgement--${item.tone}`}
       to={item.to}
-      aria-label={`${item.label}：${item.value}；${item.detail}`}
+      aria-label={`${item.label}：${item.value}；${item.detail}${trendSummary ? `；${trendSummary}` : ''}`}
     >
-      <span className="dashboard-judgement__glyph" aria-hidden="true">
-        <StatusGlyph state={glyphState(item.tone)} size="sm" />
+      <span className="dashboard-judgement__label">
+        <span className="dashboard-judgement__glyph" aria-hidden="true">
+          <StatusGlyph state={glyphState(item.tone)} size="sm" />
+        </span>
+        {item.label}
       </span>
-      <span className="dashboard-judgement__label">{item.label}</span>
       <strong className="dashboard-judgement__value">{item.value}</strong>
       <span className="dashboard-judgement__detail">{item.detail}</span>
+      {trend ? (
+        <span className="dashboard-judgement__trend" aria-hidden="true">
+          <Sparkline values={trend} tone={item.tone === 'critical' || item.tone === 'alert' ? item.tone : 'default'} width={96} height={28} />
+          <small>24h 新增 {trendTotal(trend)}</small>
+        </span>
+      ) : null}
     </Link>
   )
 }
 
 export function DashboardCommandSurface({
   model,
+  incidentTrend,
+  activity,
+  renewals,
   supportingLoading,
   onRetrySupporting,
 }: DashboardCommandSurfaceProps) {
@@ -102,34 +121,14 @@ export function DashboardCommandSurface({
         </div>
       ) : null}
 
-      {observation.attentionItems.length > 0 ? (
-        <ul className="dashboard-attention-list" aria-label="最高优先级异常对象">
-          {observation.attentionItems.map((item) => (
-            <li key={`${item.kind}-${item.id}`}>
-              <Link
-                className={`dashboard-attention-link dashboard-attention-link--${item.tone}`}
-                to={item.to}
-                aria-label={`${item.name}：${item.detail}`}
-              >
-                <StatusGlyph state={glyphState(item.tone)} size="sm" />
-                <span className="dashboard-attention-link__copy">
-                  <strong>{item.name}</strong>
-                  <span>{item.detail}</span>
-                </span>
-                <span className="dashboard-attention-link__meta">{item.meta}</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
       <section className="dashboard-judgement-rail" aria-label="判断摘要">
         {model.judgements.map((item) => (
-          <JudgementItem item={item} key={item.id} />
+          <JudgementItem item={item} key={item.id} trend={item.id === 'observability' ? incidentTrend : null} />
         ))}
       </section>
 
-      <div className="dashboard-evidence-grid">
+      <div className="dashboard-workspace">
+      <div className="dashboard-workspace__main">
         <section className="dashboard-evidence-lane" aria-labelledby="dashboard-observation-title">
           <div className="dashboard-evidence-lane__header">
             <h2 id="dashboard-observation-title">观测证据</h2>
@@ -153,7 +152,26 @@ export function DashboardCommandSurface({
             <p className="dashboard-evidence-lane__empty">
               {model.mode === 'onboarding' ? '尚未建立观测对象。' : '当前摘要没有异常对象。'}
             </p>
-          ) : null}
+          ) : (
+            <ul className="dashboard-attention-list" aria-label="最高优先级异常对象">
+              {observation.attentionItems.map((item) => (
+                <li key={`${item.kind}-${item.id}`}>
+                  <Link
+                    className={`dashboard-attention-link dashboard-attention-link--${item.tone}`}
+                    to={item.to}
+                    aria-label={`${item.name}：${item.detail}`}
+                  >
+                    <StatusGlyph state={glyphState(item.tone)} size="sm" />
+                    <span className="dashboard-attention-link__copy">
+                      <strong>{item.name}</strong>
+                      <span>{item.detail}</span>
+                    </span>
+                    <span className="dashboard-attention-link__meta">{item.meta}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
 
         <section className="dashboard-evidence-lane" aria-labelledby="dashboard-assets-title">
@@ -191,6 +209,11 @@ export function DashboardCommandSurface({
             </article>
           </div>
         </section>
+      </div>
+      <div className="dashboard-workspace__side">
+        <DashboardRenewalsPanel panel={renewals} />
+        <DashboardActivityPanel items={activity} />
+      </div>
       </div>
     </section>
   )
