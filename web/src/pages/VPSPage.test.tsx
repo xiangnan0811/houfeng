@@ -510,6 +510,102 @@ describe('VPSPage', () => {
     expect(within(inspector).getByText('无固定期限')).toBeInTheDocument()
   })
 
+  it('summarizes the visible list without a selection and selects from the renewal schedule', async () => {
+    mockInventory()
+    mount('/vps?workspace=ledger&source=review')
+    await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    const inspector = screen.getByRole('region', { name: 'VPS 检查器' })
+    expect(within(inspector).getByRole('heading', { name: '当前列表' })).toBeInTheDocument()
+    const schedule = within(inspector).getByRole('region', { name: '续费排期' })
+    expect(schedule).toHaveTextContent('2026-05-20')
+    expect(schedule).toHaveTextContent('1 台无续费日')
+    const intent = within(inspector).getByRole('region', { name: '续费意向' })
+    expect(intent).toHaveTextContent('继续续费1')
+    expect(intent).toHaveTextContent('待决定1')
+    expect(within(inspector).getByRole('region', { name: '用途' })).toHaveTextContent('自定义应用')
+    expect(within(inspector).queryByRole('link', { name: '打开 VPS 详情' })).not.toBeInTheDocument()
+
+    fireEvent.click(within(schedule).getByRole('button', { name: /Tokyo Edge/ }))
+    expect(currentQuery().get('selected')).toBe('vps_001')
+    expect(currentQuery().get('source')).toBe('review')
+    expect(within(inspector).getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '选择 Tokyo Edge' })).toHaveAttribute('aria-pressed', 'true')
+    for (const group of ['资产身份', '经营与续费', '监控与证据']) {
+      expect(within(inspector).getByRole('region', { name: group })).toBeInTheDocument()
+    }
+    expect(within(inspector).getByRole('link', { name: '打开 VPS 详情' })).toHaveAttribute('href', '/vps/vps_001')
+  })
+
+  it('keeps an out-of-filter selection explicit instead of inspecting another asset', async () => {
+    mockInventory()
+    mount('/vps?workspace=ledger&selected=vps_001&q=Osaka')
+    await screen.findByRole('button', { name: '选择 Osaka Missing' })
+    const inspector = screen.getByRole('region', { name: 'VPS 检查器' })
+    expect(inspector).toHaveTextContent('选中项不在当前筛选结果中')
+    expect(within(inspector).getByRole('heading', { name: '当前列表' })).toBeInTheDocument()
+    expect(within(inspector).queryByRole('heading', { name: 'Tokyo Edge' })).not.toBeInTheDocument()
+    expect(within(inspector).queryByRole('heading', { name: 'Osaka Missing' })).not.toBeInTheDocument()
+    expect(currentQuery().get('selected')).toBe('vps_001')
+  })
+
+  it('keeps the out-of-filter notice when the filtered list is empty', async () => {
+    mockInventory()
+    mount('/vps?workspace=ledger&selected=vps_001&q=no-match')
+    const inspector = await screen.findByRole('region', { name: 'VPS 检查器' })
+    await waitFor(() => expect(inspector).toHaveTextContent('暂无匹配的 VPS'))
+    expect(inspector).toHaveTextContent('选中项不在当前筛选结果中')
+    expect(within(inspector).queryByRole('heading', { name: 'Tokyo Edge' })).not.toBeInTheDocument()
+  })
+
+  it('schedules only the primary subscription and states an all-undated list once', async () => {
+    const expiredEarlier = { ...subscription, subscription_id: 'sub_old', status: 'expired', renew_at: '2026-01-01' }
+    mockInventory([vps], [expiredEarlier, subscription])
+    const first = mount('/vps?workspace=ledger')
+    await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    let schedule = within(screen.getByRole('region', { name: 'VPS 检查器' })).getByRole('region', { name: '续费排期' })
+    await waitFor(() => expect(schedule).toHaveTextContent('2026-05-20'))
+    expect(schedule).not.toHaveTextContent('2026-01-01')
+    // 汇总只做计数与日期，不解读金额。
+    expect(screen.getByRole('region', { name: 'VPS 检查器' })).not.toHaveTextContent('USD')
+    first.unmount()
+
+    mockInventory([vps, missingFactsVPS], [])
+    mount('/vps?workspace=ledger')
+    await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    schedule = within(screen.getByRole('region', { name: 'VPS 检查器' })).getByRole('region', { name: '续费排期' })
+    await waitFor(() => expect(schedule).toHaveTextContent('2 台均无续费日'))
+    expect(schedule).not.toHaveTextContent('2 台无续费日')
+  })
+
+  it('shows loading subscription evidence as pending rather than undated', async () => {
+    const fetchMock = mockInventory([vps], [])
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((input, init) => String(input).startsWith('/api/subscriptions?')
+      ? new Promise<Response>(() => undefined)
+      : original(input, init))
+    mount('/vps?workspace=ledger')
+    await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    const schedule = within(screen.getByRole('region', { name: 'VPS 检查器' })).getByRole('region', { name: '续费排期' })
+    expect(schedule).toHaveTextContent('订阅加载中…')
+    expect(schedule).not.toHaveTextContent('无续费日')
+  })
+
+  it('does not present failed subscription evidence as missing renewal dates in the list summary', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/vps') return mockJSONResponse([vps])
+      if (url === '/api/providers') return mockJSONResponse([provider])
+      if (url.startsWith('/api/subscriptions?')) return mockJSONResponse({ error: 'subscription backend unavailable' }, 503)
+      throw new Error('Unexpected request: ' + url)
+    }))
+    mount('/vps?workspace=ledger')
+    await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+    const schedule = within(screen.getByRole('region', { name: 'VPS 检查器' })).getByRole('region', { name: '续费排期' })
+    await waitFor(() => expect(schedule).toHaveTextContent('订阅加载失败，续费日未知'))
+    expect(schedule).not.toHaveTextContent('无续费日')
+    expect(within(schedule).queryByRole('button')).not.toBeInTheDocument()
+  })
+
   it('respects hidden selection state in workbench without displaying stale facts', async () => {
     mockInventory()
     mount('/vps?workspace=workbench&selected=vps_001')
