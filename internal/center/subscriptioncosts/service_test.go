@@ -134,6 +134,45 @@ func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
 	}
 }
 
+// 前端以 snapshot_generated_at 的 UTC 日期计算续费剩余天数，窗口“今天”必须与之同源。
+func TestServiceOverviewRenewalWindowSharesSnapshotInstant(t *testing.T) {
+	ctx := context.Background()
+	service, repo := newTestService()
+	monthly := 10.0
+	// 时钟在 UTC 午夜两侧交替：窗口与生成时间只要分两次读取，必然落在不同日期。
+	calls := 0
+	service.now = func() time.Time {
+		calls++
+		if calls%2 == 1 {
+			return time.Date(2026, 6, 2, 23, 59, 59, 0, time.UTC)
+		}
+		return time.Date(2026, 6, 3, 0, 0, 1, 0, time.UTC)
+	}
+	repo.rows = []CostRow{{
+		SubscriptionID:   "sub_today",
+		VPSID:            "vps_today",
+		Currency:         "CNY",
+		MonthlyPriceBase: &monthly,
+		BaseCurrency:     "CNY",
+		RenewAt:          datePtr(t, "2026-06-02"),
+		LifecycleStatus:  "active",
+		RenewalDecision:  "keep",
+	}}
+
+	overview, err := service.GetOverview(ctx)
+	if err != nil {
+		t.Fatalf("GetOverview() error = %v", err)
+	}
+	generatedDay := overview.SnapshotGeneratedAt.UTC().Format("2006-01-02")
+	included := len(overview.UpcomingRenewals) == 1
+	if generatedDay == "2026-06-02" && !included {
+		t.Fatalf("snapshot day %s but renewal due that day was excluded", generatedDay)
+	}
+	if generatedDay == "2026-06-03" && included {
+		t.Fatalf("snapshot day %s but renewal due the previous day was included", generatedDay)
+	}
+}
+
 func TestServiceStatisticsReturnsCostMonthBuckets(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 2, 9, 0, 0, 0, time.UTC)

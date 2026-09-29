@@ -101,18 +101,21 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 	}
 	budgets = applyBudgetSpend(rows, budgets)
 	applyRowBudgetStatus(rows, budgets)
-	budgetMonthBuckets, err := s.repo.ListBudgetMonthBuckets(ctx, settings, 1, s.now())
+	// 预算月桶、续费窗口“今天”与 snapshot_generated_at 取自同一时刻，
+	// 前端据此计算剩余天数时不会跨 UTC 午夜错位，月末也不会混用两个月份。
+	generatedAt := s.now().UTC()
+	budgetMonthBuckets, err := s.repo.ListBudgetMonthBuckets(ctx, settings, 1, generatedAt)
 	if err != nil {
 		return Overview{}, fmt.Errorf("list subscription budget month buckets: %w", err)
 	}
 
-	today := subscriptionDay(s.now())
+	today := subscriptionDay(generatedAt)
 	overview := Overview{
 		ArchivedPotentialCosts:            archivedRows,
 		ArchivedMissingSubscriptionAssets: archivedMissing,
 		ArchivedUnknownAmountCount:        len(archivedMissing),
 		CurrentUnknownAmountCount:         len(missing),
-		SnapshotGeneratedAt:               s.now().UTC(),
+		SnapshotGeneratedAt:               generatedAt,
 		BaseCurrency:                      settings.BaseCurrency,
 		ActiveSubscriptionCount:           len(rows),
 		MissingSubscriptionVPSCount:       len(missing),

@@ -1,6 +1,6 @@
 import { subscriptionOverviewFixture, vpsAssetFixture } from '../src/pages/dashboard/dashboardTestFixtures'
 import { apiRouteKey } from './fixtures/contracts'
-import { coreRouteProfile } from './fixtures/profiles'
+import { coreRouteProfile, dashboardPopulatedProfile } from './fixtures/profiles'
 import { expect, test } from './fixtures'
 import { expectMainDocumentCsp } from './support/diagnostics'
 import { expectLocatorNotClipped, expectNoDocumentOverflow } from './support/geometry'
@@ -312,5 +312,32 @@ test('Sidebar scrolls on short viewports without squeezing any destination', asy
     const settings = nav.getByRole('link', { name: '设置' })
     await settings.focus()
     await expect(settings).toBeInViewport()
+  }
+})
+
+test('Populated dashboard keeps bounded panels and one primary action on desktop widths', async ({ api, page }) => {
+  api.useProfile(dashboardPopulatedProfile())
+  // 1100px 是两栏布局里右栏最窄的档位；1024px 已切换为单栏。
+  for (const viewport of [{ width: 1440, height: 1000 }, { width: 1100, height: 800 }, { width: 1024, height: 768 }]) {
+    await page.setViewportSize(viewport)
+    await page.goto('/')
+    await expect(page.getByRole('heading', { level: 1, name: '工作台' })).toBeVisible()
+    await expect(page.getByRole('list', { name: '即将续费的订阅' }).getByRole('link')).toHaveCount(5)
+    await expect(page.getByRole('list', { name: '最近状态变化' }).getByRole('listitem')).toHaveCount(5)
+    await expect(page.getByRole('region', { name: '判断摘要' }).getByRole('link')).toHaveCount(3)
+    await expect(page.getByRole('link', { name: '事件流', exact: true })).toHaveAttribute('href', '/events')
+    const primary = page.getByRole('region', { name: '今日第一步' }).getByRole('link')
+    await expect(primary).toHaveCount(1)
+    await expect(primary).toHaveAttribute('href', '/events?severity=严重')
+    await page.evaluate(() => document.fonts.ready)
+    await expectLocatorNotClipped(primary)
+    await expectNoDocumentOverflow(page)
+    const label = `${viewport.width}x${viewport.height}`
+    const panelOverflow = await page.locator('.dashboard-panel, .dashboard-evidence-lane, .dashboard-judgement').evaluateAll((elements) =>
+      elements.filter((element) => element.scrollWidth > element.clientWidth + 1).map((element) => element.className))
+    expect(panelOverflow, label).toEqual([])
+    const clippedNames = await page.locator('.dashboard-renewal__name :is(strong, small)').evaluateAll((elements) =>
+      elements.filter((element) => element.scrollWidth > element.clientWidth + 1).map((element) => element.textContent))
+    expect(clippedNames, label).toEqual([])
   }
 })
