@@ -403,8 +403,8 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if got.FeishuWebhookURL != "" {
 		t.Fatalf("FeishuWebhookURL = %q, want empty by default", got.FeishuWebhookURL)
 	}
-	if got.IPQuality.Enabled {
-		t.Fatal("IPQuality.Enabled = true, want false by default")
+	if !got.IPQuality.Enabled {
+		t.Fatal("IPQuality.Enabled = false, want true by default")
 	}
 	if got.IPQuality.FrequencySeconds != 86400 {
 		t.Fatalf("IPQuality.FrequencySeconds = %d, want 86400", got.IPQuality.FrequencySeconds)
@@ -698,3 +698,20 @@ func stringPtr(value string) *string { return &value }
 func intPtr(value int) *int { return &value }
 
 func float64Ptr(value float64) *float64 { return &value }
+
+func TestSettingsValidateTreatsZeroIPQualityAsExplicitDisable(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.IPQuality = IPQualitySettings{}
+	got, err := Validate(input)
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if got.IPQuality.Enabled {
+		t.Fatal("IPQuality.Enabled = true, want an explicit {enabled:false} payload to stay disabled")
+	}
+	if got.IPQuality.FrequencySeconds != 86400 || got.IPQuality.TimeoutSeconds != 15 || len(got.IPQuality.Services) == 0 {
+		t.Fatalf("IPQuality = %#v, want remaining defaults filled in", got.IPQuality)
+	}
+}

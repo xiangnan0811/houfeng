@@ -335,6 +335,10 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 			called = "ip-quality"
 			w.WriteHeader(http.StatusOK)
 		}),
+		VPSIPQualityCollectHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			called = "ip-quality-collect"
+			w.WriteHeader(http.StatusAccepted)
+		}),
 		VPSCancellationPreviewHandler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = "cancellation-preview"
 			w.WriteHeader(http.StatusOK)
@@ -393,6 +397,8 @@ func TestRouterDispatchesVPSAPIs(t *testing.T) {
 		{method: http.MethodPost, path: "/api/vps/vps_001/unlink-monitoring-instance", want: http.StatusNotFound, called: ""},
 		{method: http.MethodGet, path: "/api/vps/vps_001/ip-quality", want: http.StatusOK, called: "ip-quality"},
 		{method: http.MethodGet, path: "/api/vps/vps_001/ip-quality/reports/ipq_001", want: http.StatusOK, called: "ip-quality"},
+		{method: http.MethodPost, path: "/api/vps/vps_001/ip-quality/collect", want: http.StatusAccepted, called: "ip-quality-collect"},
+		{method: http.MethodGet, path: "/api/vps/vps_001/ip-quality/other", want: http.StatusNotFound, called: ""},
 		{method: http.MethodGet, path: "/api/vps/vps_001/cancellation-preview", want: http.StatusNotFound, called: ""},
 		{method: http.MethodPost, path: "/api/vps/vps_001/cancellation", want: http.StatusNotFound, called: ""},
 		{method: http.MethodPost, path: "/api/vps/vps_001/extend-validity", want: http.StatusOK, called: "extend-validity"},

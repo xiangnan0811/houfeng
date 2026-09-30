@@ -36,6 +36,7 @@ type IPQualityPlan struct {
 	FrequencySeconds int
 	TimeoutSeconds   int
 	Services         []string
+	CollectRequestID string
 }
 
 type Repository interface {

@@ -26,12 +26,6 @@ export type RiskSignalCount = {
 
 export type UnlockStatusKind = 'unlocked' | 'partial' | 'blocked' | 'unknown'
 
-export type ProviderEvidenceSignal = {
-  key: RiskFlagKey | 'none' | 'failure' | 'skipped' | 'not_configured'
-  label: string
-  tone: BadgeTone
-}
-
 export type ProviderSourceGap = {
   provider: string
   label: string
@@ -117,20 +111,6 @@ export function visibleProviderResults(results: IPQualityProviderResult[]): IPQu
   })
 }
 
-export function providerSourceGaps(results: IPQualityProviderResult[]): ProviderSourceGap[] {
-  return results
-    .filter((result) => {
-      const sourceType = sourceTypeKind(result)
-      const status = sourceStatusKind(result)
-      return sourceType === 'optional' && (status === 'not_configured' || status === 'skipped')
-    })
-    .map((result) => ({
-      provider: result.provider,
-      label: result.provider,
-      tone: sourceStatusKind(result) === 'skipped' ? 'notice' : 'neutral',
-    }))
-}
-
 export function activeRiskFlags(result: IPQualityProviderResult): RiskFlag[] {
   return riskFlags(result).filter((flag) => flag.active)
 }
@@ -138,7 +118,8 @@ export function activeRiskFlags(result: IPQualityProviderResult): RiskFlag[] {
 export function strongestRiskFlags(report: VPSIPQualityReport, limit = 4): RiskFlag[] {
   const flags: RiskFlag[] = []
   const seen = new Set<RiskFlagKey>()
-  for (const result of report.provider_results) {
+  // 只统计成功返回的数据库；失败/跳过来源的旧字段不能进入风险结论。
+  for (const result of report.provider_results.filter(providerSucceeded)) {
     for (const flag of activeRiskFlags(result)) {
       if (!flag.negative || seen.has(flag.key)) continue
       seen.add(flag.key)
@@ -147,20 +128,6 @@ export function strongestRiskFlags(report: VPSIPQualityReport, limit = 4): RiskF
     }
   }
   return flags
-}
-
-export function providerEvidenceSignals(result: IPQualityProviderResult): ProviderEvidenceSignal[] {
-  const status = sourceStatusKind(result)
-  if (status === 'failure') return [{ key: 'failure', label: '采集失败', tone: 'alert' }]
-  if (status === 'skipped') return [{ key: 'skipped', label: '未检测', tone: 'notice' }]
-  if (status === 'not_configured') return [{ key: 'not_configured', label: '未配置', tone: 'neutral' }]
-  const signals = activeRiskFlags(result).map((flag) => ({
-    key: flag.key,
-    label: flag.label,
-    tone: flag.negative ? 'alert' : 'notice',
-  }) satisfies ProviderEvidenceSignal)
-  if (signals.length > 0) return signals
-  return [{ key: 'none', label: '未发现风险信号', tone: 'normal' }]
 }
 
 export function riskSignalCounts(results: IPQualityProviderResult[]): RiskSignalCount[] {
@@ -249,14 +216,6 @@ function safeUnlockType(value?: string): string | null {
   const normalized = safeDiagnosticText(value)
   if (!normalized || normalized === 'none') return null
   return normalized
-}
-
-export function serviceUnlockMeta(unlock: IPQualityServiceUnlock): string {
-  const parts: string[] = []
-  const unlockType = safeUnlockType(unlock.unlock_type)
-  if (unlock.region) parts.push(`区域 ${unlock.region}`)
-  if (unlockType) parts.push(`类型 ${unlockType}`)
-  return parts.length > 0 ? parts.join(' · ') : '无可展示区域'
 }
 
 export function serviceCardDescription(unlock: IPQualityServiceUnlock): string {
@@ -349,50 +308,75 @@ export function qualityVerdict(score: number | null, summary?: IPQualitySummary 
   return '不建议作为主力节点'
 }
 
-export function topQualityReasons(report: VPSIPQualityReport): Array<{ title: string; detail: string; impact: string }> {
-  const reasons: Array<{ title: string; detail: string; impact: string }> = []
-  const summary = report.summary
-  const negativeSignals = negativeRiskSignalCount(report.provider_results)
-  const serviceCounts = serviceUnlockCounts(report.service_unlocks)
-  const consistency = databaseConsistency(report.provider_results)
+export type ProviderTableRows = {
+  // 成功且至少给出一个判断字段的数据库，按风险相关度排序。
+  rows: IPQualityProviderResult[]
+  // 成功但没有任何可展示判断字段的数据库数量。
+  emptyCount: number
+  // 本轮未返回结果的默认/自定义来源（失败或跳过）；可选来源的未配置行只在诊断中展示。
+  unavailable: ProviderSourceGap[]
+}
 
-  if (!summary) {
-    return [{ title: '采集缺口', detail: '尚无用户侧可展示的真实 IP 质量事实。', impact: '待补证据' }]
-  }
-  if (negativeSignals > 0) {
-    reasons.push({
-      title: '风险信号',
-      detail: `${negativeSignals} 个 provider 风险信号命中或达到高风险等级。`,
-      impact: '影响高',
+function providerHasFacts(result: IPQualityProviderResult): boolean {
+  const text = [result.usage_type, result.company_type, result.risk_level, result.risk_score, result.region_code, result.region_name]
+  if (text.some((value) => (value ?? '').trim() !== '')) return true
+  return riskFlags(result).some((flag) => flag.active != null)
+}
+
+function providerRelevance(result: IPQualityProviderResult): number {
+  const negativeHits = activeRiskFlags(result).filter((flag) => flag.negative).length
+  const risk = (result.risk_level ?? '').trim().toLowerCase()
+  const riskWeight = risk === 'critical' ? 4 : risk === 'high' ? 3 : risk === 'medium' || risk === 'moderate' ? 2 : 0
+  const known = riskFlags(result).filter((flag) => flag.active != null).length
+  return negativeHits * 100 + riskWeight * 10 + known
+}
+
+export function providerTableRows(results: IPQualityProviderResult[]): ProviderTableRows {
+  const successful = results.filter(providerSucceeded)
+  const withFacts = successful.filter(providerHasFacts)
+  const rows = withFacts
+    .map((result, index) => ({ result, index, relevance: providerRelevance(result) }))
+    .sort((a, b) => b.relevance - a.relevance || a.index - b.index)
+    .map((item) => item.result)
+  const unavailable = visibleProviderResults(results)
+    .filter((result) => !providerSucceeded(result))
+    .map((result) => {
+      const status = sourceStatusKind(result)
+      const label = status === 'failure' ? '失败' : status === 'skipped' ? '未检测' : '未配置'
+      return {
+        provider: result.provider,
+        label: `${result.provider} · ${label}`,
+        tone: status === 'failure' ? 'alert' : 'neutral',
+      } satisfies ProviderSourceGap
     })
-  }
-  if (serviceCounts.blocked > 0 || serviceCounts.partial > 0) {
-    reasons.push({
-      title: '解锁阻断',
-      detail: `${serviceCounts.blocked} 个服务受阻，${serviceCounts.partial} 个服务部分解锁。`,
-      impact: '影响中',
-    })
-  }
-  if (report.provider_results.some((result) => result.is_server)) {
-    reasons.push({
-      title: '机房属性',
-      detail: '存在 Datacenter / Hosting 判断，本身不构成负面风险，但会影响解锁预期。',
-      impact: '上下文',
-    })
-  }
-  if (consistency != null) {
-    reasons.push({
-      title: '数据库一致性',
-      detail: `已归一 provider 字段一致性约 ${consistency}%。`,
-      impact: consistency >= 75 ? '加分项' : '需复核',
-    })
-  }
-  if (reasons.length === 0) {
-    reasons.push({
-      title: '质量稳定',
-      detail: '当前归一字段未发现明显 proxy、VPN、Tor、abuse 或服务阻断信号。',
-      impact: '加分项',
-    })
-  }
-  return reasons.slice(0, 4)
+  return { rows, emptyCount: successful.length - withFacts.length, unavailable }
+}
+
+export type RiskSignalHit = {
+  key: RiskFlagKey
+  label: string
+  hits: number
+  total: number
+  negative: boolean
+}
+
+// 只返回至少一个数据库命中的信号，total 为给出该信号判断的数据库数。
+export function riskSignalHits(results: IPQualityProviderResult[]): RiskSignalHit[] {
+  return riskSignalCounts(results)
+    .filter((signal) => signal.yes > 0)
+    .map((signal) => ({
+      key: signal.key,
+      label: signal.label,
+      hits: signal.yes,
+      total: signal.yes + signal.no,
+      negative: signal.negative,
+    }))
+}
+
+// 服务卡片的补充说明：状态和区域已在徽标里，只补解锁类型或“未知”的原因。
+export function serviceTileDetail(unlock: IPQualityServiceUnlock): string | null {
+  const unlockType = safeUnlockType(unlock.unlock_type)
+  if (unlockType) return `类型 ${unlockType}`
+  if (unlockStatusKind(unlock.status) !== 'unknown') return null
+  return serviceCardDescription(unlock)
 }

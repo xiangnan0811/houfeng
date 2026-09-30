@@ -281,6 +281,7 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 					FrequencySeconds: 86400,
 					TimeoutSeconds:   15,
 					Services:         []string{"netflix", "chatgpt"},
+					CollectRequestID: "ipqc_001",
 				},
 				ProbeAssignments: []agentplan.ProbeAssignment{{
 					TargetID:           "tg_001",
@@ -330,6 +331,9 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 	if body.Plan.IPQualityPlan.FrequencySeconds != 86400 || body.Plan.IPQualityPlan.Services[1] != "chatgpt" {
 		t.Fatalf("IPQualityPlan = %#v, want frequency/services preserved", body.Plan.IPQualityPlan)
+	}
+	if body.Plan.IPQualityPlan.CollectRequestID != "ipqc_001" {
+		t.Fatalf("IPQualityPlan.CollectRequestID = %q, want ipqc_001", body.Plan.IPQualityPlan.CollectRequestID)
 	}
 	if !body.Plan.HostSampleMaintenanceContext {
 		t.Fatal("HostSampleMaintenanceContext = false, want true")
@@ -544,7 +548,7 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 			"risk_level":"low",
 			"raw_json":{"Info":{"ASN":"AS64500"},"token":"secret-token"},
 			"coverage":{"expected_provider_count":2,"successful_provider_count":1,"failed_provider_count":1,"expected_service_count":1,"successful_service_count":1},
-			"diagnostics_json":{"source_version":"v2","secret":"diagnostic-secret"},
+			"diagnostics_json":{"source_version":"v2","secret":"diagnostic-secret","collect_request_id":"ipqc_0123abcd"},
 			"provider_results":[{"provider":"ipinfo","status":"success","source_type":"default","latency_ms":73,"usage_type":"hosting","company_type":"hosting","risk_level":"low","is_server":true,"is_vpn":false,"extra_json":{"risk":{"score":12},"api_key":"provider-secret"}}],
 			"service_unlocks":[{"service":"netflix","source":"netflix_title_probe","status":"unlocked","probe_status":"success","latency_ms":211,"region":"US","unlock_type":"full","extra_json":{"title_probe":"full_catalog","token":"service-secret"}}]
 		}]
@@ -567,6 +571,9 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 	}
 	if report.IPAddress != "203.0.113.10" || report.Status != agentapi.IPQualityStatusSuccess {
 		t.Fatalf("report identity = %#v, want ip/status preserved", report)
+	}
+	if report.CollectRequestID != "ipqc_0123abcd" {
+		t.Fatalf("CollectRequestID = %q, want id read from raw diagnostics", report.CollectRequestID)
 	}
 	if len(report.ProviderResults) != 1 || report.ProviderResults[0].Provider != "ipinfo" {
 		t.Fatalf("ProviderResults = %#v, want ipinfo result", report.ProviderResults)

@@ -229,7 +229,7 @@ func Default() CenterSettings {
 			ExchangeRateStaleAfterHours: 36,
 		},
 		IPQuality: IPQualitySettings{
-			Enabled:           false,
+			Enabled:           true,
 			FrequencySeconds:  24 * 60 * 60,
 			StaleAfterSeconds: 7 * 24 * 60 * 60,
 			TimeoutSeconds:    15,
@@ -750,6 +750,8 @@ func validateSubscriptionCostSettings(input SubscriptionCostSettings) (Subscript
 func validateIPQualitySettings(input IPQualitySettings) (IPQualitySettings, error) {
 	defaults := Default().IPQuality
 	if isZeroIPQualitySettings(input) {
+		// 零值对象与只传 {"enabled":false} 无法区分；按显式关闭处理，其余字段补默认值。
+		defaults.Enabled = false
 		return defaults, nil
 	}
 	if input.FrequencySeconds < 60 {

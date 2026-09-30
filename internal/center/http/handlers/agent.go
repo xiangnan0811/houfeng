@@ -682,6 +682,7 @@ func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWri
 			RawJSON:              ipquality.SanitizeRawJSON(report.RawJSON),
 			CoverageJSON:         coveragePayloadJSON(report.Coverage),
 			DiagnosticsJSON:      ipquality.SanitizeExtraJSON(report.DiagnosticsJSON),
+			CollectRequestID:     ipquality.CollectRequestIDFromDiagnostics(report.DiagnosticsJSON),
 			ProviderResults:      make([]ipquality.ProviderResultWrite, 0, len(report.ProviderResults)),
 			ServiceUnlocks:       make([]ipquality.ServiceUnlockWrite, 0, len(report.ServiceUnlocks)),
 		}
@@ -772,6 +773,7 @@ func syncPlanToAPI(plan agentplan.SyncPlan) *agentapi.SyncPlan {
 			FrequencySeconds: plan.IPQualityPlan.FrequencySeconds,
 			TimeoutSeconds:   plan.IPQualityPlan.TimeoutSeconds,
 			Services:         append([]string(nil), plan.IPQualityPlan.Services...),
+			CollectRequestID: plan.IPQualityPlan.CollectRequestID,
 		}
 	}
 

@@ -1026,6 +1026,7 @@ func cloneSyncPlan(plan *agentapi.SyncPlan) *agentapi.SyncPlan {
 			FrequencySeconds: plan.IPQualityPlan.FrequencySeconds,
 			TimeoutSeconds:   plan.IPQualityPlan.TimeoutSeconds,
 			Services:         append([]string(nil), plan.IPQualityPlan.Services...),
+			CollectRequestID: plan.IPQualityPlan.CollectRequestID,
 		}
 	}
 	for _, assignment := range plan.ProbeAssignments {

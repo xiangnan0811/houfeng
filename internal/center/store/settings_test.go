@@ -246,3 +246,40 @@ func assertJSONArgContains(t *testing.T, value any, snippet string) {
 }
 
 func settingsStringPtr(value string) *string { return &value }
+
+func TestCenterSettingsRepositoryGetSettingsReadsIPQualityEnabledLikeSyncPlan(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		raw  string
+		want bool
+	}{
+		"missing enabled defaults on": {raw: `{"frequency_seconds":86400,"timeout_seconds":15,"stale_after_seconds":604800,"services":["netflix"]}`, want: true},
+		"explicit disabled stays off": {raw: `{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"stale_after_seconds":604800,"services":["netflix"]}`, want: false},
+		"empty object defaults on":    {raw: `{}`, want: true},
+	} {
+		tc := tc
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			repo := &PostgresSettingsRepository{db: fakeSettingsQueryer{
+				queryRow: func(context.Context, string, ...any) pgx.Row {
+					return fakeSettingsRow{scan: func(dest ...any) error {
+						scanCenterSettingsRow(dest, centersettings.Default())
+						*(dest[12].(*[]byte)) = []byte(tc.raw)
+						return nil
+					}}
+				},
+			}}
+			got, err := repo.GetSettings(context.Background())
+			if err != nil {
+				t.Fatalf("GetSettings() error = %v", err)
+			}
+			if got.IPQuality.Enabled != tc.want {
+				t.Fatalf("IPQuality.Enabled = %v, want %v", got.IPQuality.Enabled, tc.want)
+			}
+			if got.IPQuality.FrequencySeconds != 86400 || len(got.IPQuality.Services) == 0 {
+				t.Fatalf("IPQuality = %#v, want defaults filled in", got.IPQuality)
+			}
+		})
+	}
+}

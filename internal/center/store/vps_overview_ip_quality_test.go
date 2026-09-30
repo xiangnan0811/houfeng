@@ -358,7 +358,7 @@ func TestPostgresSettingsRepositoryIPQualityEnabledIsCheapExtract(t *testing.T) 
 		t.Fatalf("IPQualityEnabled: %v", err)
 	}
 	if enabled {
-		t.Fatal("default/disabled extract must be false")
+		t.Fatal("disabled extract must be false")
 	}
 	if len(sqls) != 1 {
 		t.Fatalf("queries = %#v, want exactly one cheap extract", sqls)
