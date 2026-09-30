@@ -6,6 +6,11 @@
 .page__head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-3);min-width:0}
 .page__title{margin:0;font-family:var(--font-sans);font-size:var(--type-page-size);font-weight:var(--type-display-weight);line-height:1.2;color:var(--text-primary)}
 .page__actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--space-2);min-width:0}
+/* 窄屏：标题独占一行，操作按钮换到下一行左对齐，避免标题被按钮挤成多行。 */
+@media (max-width:760px){
+.page__head{flex-direction:column;align-items:stretch}
+.page__actions{justify-content:flex-start}
+}
 .page__work{min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain}
 .page__work:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
 .page-state{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:var(--space-4)}

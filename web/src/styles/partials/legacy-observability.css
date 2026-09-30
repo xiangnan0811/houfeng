@@ -66,7 +66,8 @@
 @media (max-width:1024px){
 .monitoring-page__head-actions{justify-content:flex-start}
 }
-@media (max-width:640px){
+/* 与全局窄屏页头断点（760px）一致：标题独占一行、操作换行左对齐。 */
+@media (max-width:760px){
 .monitoring-page__head{flex-direction:column;align-items:stretch}
 .monitoring-page__head-actions{justify-content:flex-start}
 .monitoring-page__snapshot{white-space:normal}

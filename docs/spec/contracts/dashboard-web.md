@@ -78,7 +78,7 @@ buildDashboardModel(input: {
 - `dashboardPanels.test.ts`: 动态倒序与上限、状态色、续费 loading/error/ready、升序、窗口返回数与 12 条上限提示、以 `snapshot_generated_at` 为准的 UTC 日历剩余天数（用例内切换 `TZ` 覆盖东八区凌晨、美西傍晚与接收时间跨日）与日期截取、汇率过期金额、趋势长度校验。
 - `internal/center/subscriptioncosts/service_test.go`: 时钟在 UTC 午夜两侧交替时，续费窗口“今天”与 `snapshot_generated_at` 仍是同一天。
 - `internal/center/store/dashboard_test.go` 与 `internal/center/http/handlers/dashboard_test.go`: abnormal=2/severe=1，并断言 severe 不大于 abnormal。
-- 用户可见结构变化必须更新/运行 repository Playwright：`page-states.spec.ts` 固定五种 Dashboard fixture，`core-routes.spec.ts` 覆盖 `1440x1000`、`1024x768`、`390x900`，统一断言主行动、横向溢出、裁切和 console/page/CSP/network；带数据的 `dashboardPopulatedProfile` 在 `1440x1000`、`1100x800`（两栏布局中最窄的右栏）与 `1024x768`（单栏）下断言有界预览、唯一主行动、面板内无横向溢出，以及超长续费名称与服务商不被裁切。该证据仍是 fixture frontend rendering，不代表后端或真实资产通过；真实数据只由 staging real lane 证明。
+- 用户可见结构变化必须更新/运行 repository Playwright：`page-states.spec.ts` 固定五种 Dashboard fixture，`core-routes.spec.ts` 覆盖 `1440x1000`、`1024x768`、`390x900`，统一断言主行动、横向溢出、裁切和 console/page/CSP/network；带数据的 `dashboardPopulatedProfile` 在 `1440x1000`、`1100x800`（两栏布局的最窄视口；≤1100px 默认收起为图标栏，右栏随之变宽）与 `1024x768`（单栏）下断言有界预览、唯一主行动、面板内无横向溢出，以及超长续费名称与服务商不被裁切。该证据仍是 fixture frontend rendering，不代表后端或真实资产通过；真实数据只由 staging real lane 证明。
 
 #### 7. Wrong vs Correct
 

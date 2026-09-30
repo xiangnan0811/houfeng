@@ -66,6 +66,19 @@ export function GlobalSearch() {
     return () => document.removeEventListener('mousedown', close)
   }, [open])
 
+  // 触屏浏览器（如 iOS Safari）点空白处未必移走焦点；点搜索区以外时主动失焦，
+  // 让窄屏展开的搜索框按 :focus-within 收回，不再盖住标题与顶栏按钮。
+  useEffect(() => {
+    const blurOutside = (e: PointerEvent) => {
+      const input = inputRef.current
+      if (input && document.activeElement === input && !containerRef.current?.contains(e.target as Node)) {
+        input.blur()
+      }
+    }
+    document.addEventListener('pointerdown', blurOutside)
+    return () => document.removeEventListener('pointerdown', blurOutside)
+  }, [])
+
   useEffect(() => {
     function onKeyDown(e: globalThis.KeyboardEvent) {
       const mod = e.metaKey || e.ctrlKey

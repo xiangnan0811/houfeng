@@ -15,6 +15,15 @@ import {
   type DashboardSummaryState,
 } from './shellSummaryModel'
 
+// 平板及以下宽度默认把侧栏收成图标栏，给内容让出宽度；跨过断点时回到该宽度的默认值，
+// 折叠按钮仍可手动展开。≤760px 的窄栏由 CSS 固定，不受这里影响。
+const COMPACT_SHELL_QUERY = '(max-width: 1100px)'
+
+function compactShellQuery(): MediaQueryList | null {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return null
+  return window.matchMedia(COMPACT_SHELL_QUERY)
+}
+
 const LazyVPSWriteRegistryProvider = lazy(async () => {
   const { VPSWriteRegistryProvider } = await import('../../lib/vpsWriteRegistry-context')
   return { default: VPSWriteRegistryProvider }
@@ -38,8 +47,16 @@ type AuthenticatedAppShellProps = {
 }
 
 function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => compactShellQuery()?.matches ?? false)
   const [changePwOpen, setChangePwOpen] = useState(false)
+
+  useEffect(() => {
+    const query = compactShellQuery()
+    if (!query) return undefined
+    const onChange = (event: MediaQueryListEvent) => setCollapsed(event.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
   const [dashboardSummary, setDashboardSummary] =
     useState<DashboardSummaryState>(INITIAL_DASHBOARD_SUMMARY)
   const [summaryNow, setSummaryNow] = useState(() => Date.now())

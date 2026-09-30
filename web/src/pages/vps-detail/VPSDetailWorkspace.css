@@ -545,6 +545,12 @@
 .vps-overview__renewal-days{color:var(--text-secondary);font-size:12px;text-align:right}
 .vps-overview__renewal-days.vps-tone-warn{color:var(--warn);font-weight:500}
 .vps-overview__footnote{margin:var(--space-2) 0 0;color:var(--text-muted);font-size:12px;line-height:1.4}
+/* 窄检查器：收小内边距；续费排期改两行（名称独占一行，日期与天数在下），避免名称被挤成竖排。 */
+@container vps-inspector (max-width: 28rem){
+.vps-canvas[data-workspace='ledger'] .vps-inspector__inner{padding:var(--space-4) var(--space-4) var(--space-6)}
+.vps-overview__renewal{grid-template-columns:minmax(0, 1fr) auto;row-gap:2px}
+.vps-overview__renewal-name{grid-column:1 / -1}
+}
 @container vps-inspector (min-width: 28rem){
 .vps-overview__grid{grid-template-columns:repeat(2, minmax(0, 1fr))}
 .vps-overview__group--wide{grid-column:1 / -1}
@@ -587,6 +593,8 @@
 .vps-accordion__bar{flex-wrap:wrap}
 .vps-accordion__notice{flex:1 1 12rem}
 .vps-accordion__detail{min-height:44px}
+/* 平板宽度的目录视图：目录列收窄，把宽度让给检查器。 */
+.vps-ledger__dir{flex-basis:280px;width:280px}
 }
 @container vps-canvas (max-width: 24rem){
 .vps-workbench__row{grid-template-columns:minmax(0,1fr);grid-template-areas:'id' 'place' 'status' 'renewal' 'evidence'}

@@ -15,16 +15,19 @@ export interface SidebarProps {
 export function Sidebar({
   user,
   anomalyCounts,
-  collapsed: _collapsed,
+  collapsed,
   onToggle,
   onLogout,
   onChangePassword,
 }: SidebarProps) {
-  void _collapsed
-
   return (
     <aside className="sidebar">
-      <button className="sidebar-toggle" onClick={onToggle} aria-label="折叠侧边栏">
+      <button
+        className="sidebar-toggle"
+        onClick={onToggle}
+        aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}
+        aria-expanded={!collapsed}
+      >
         <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6" /></svg>
       </button>
       <div className="logo">

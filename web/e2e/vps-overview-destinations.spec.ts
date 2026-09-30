@@ -230,7 +230,8 @@ for (const contract of ROUTE_ACTIONS) {
     }
     if (contract.owner === 'events') {
       await expect(page.getByRole('heading', { name: '事件流' })).toBeVisible()
-      expect(api.requestCount(
+      // 标题可能先于事件列表请求出现：轮询等待请求发生，再确认只请求一次。
+      await expect.poll(() => api.requestCount(
         'GET',
         '/api/events?object_type=monitoring_instance&object_id=mi_001&limit=200',
       )).toBe(1)

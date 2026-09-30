@@ -98,18 +98,29 @@ body.is-col-resizing{cursor:col-resize;user-select:none}
 .user-chip__account-role{color:var(--t2)}
 .sidebar-collapsed .user-chip__menu{left:0;right:auto;min-width:180px}
 @media (max-width:760px){
-.topbar{gap:var(--space-2);min-height:52px;padding:4px var(--space-3)}
+.topbar{position:relative;gap:var(--space-2);min-height:52px;padding:4px var(--space-3)}
 .topbar .tp-spacer,.topbar .tp-divider,.topbar .tp-avatar{display:none}
-.topbar .tp-page{flex:0 0 auto;max-width:8em}
-.topbar .tp-vps-crumb{max-width:50%;flex:1 1 50%}
+/* 搜索收成图标后，标题占据剩余宽度（超长时省略）。 */
+.topbar .tp-page{flex:1 1 auto;max-width:none}
+.topbar .tp-vps-crumb{max-width:none;flex:1 1 auto}
 .topbar .tp-vps-crumb .tp-page{max-width:none;min-width:0}
 .topbar .tp-vps-crumb__link{display:inline-flex;align-items:center;min-height:var(--control-min-height-touch)}
 .topbar .tp-icon-btn{width:var(--control-min-height-touch);height:var(--control-min-height-touch)}
 .theme-menu .tm-item,.btn:not(.sm),.btn-text:not(.sm){min-height:var(--control-min-height-touch)}
 .table .btn,.data-table .btn,.table .btn-text,.data-table .btn-text{min-height:0;padding:4px 8px}
-/* 窄屏搜索：放在 page.css 基础规则之后才能生效；让出标题宽度，保留图标、隐藏快捷键提示，保持触控高度。 */
-.global-search{flex:1 1 96px;min-width:0}
+/* 窄屏搜索：放在 page.css 基础规则之后才能生效。静止时收成 44px 的放大镜，把宽度让给标题；
+   输入框获得焦点（点击、Tab、⌘K/Ctrl K）时铺满顶栏，焦点在结果列表内时保持展开。隐藏快捷键提示，保持触控高度。 */
+.global-search{flex:0 0 var(--control-min-height-touch);min-width:0}
 .global-search__input{padding:0 var(--space-2) 0 30px;min-height:var(--control-min-height-touch)}
+.global-search:not(:focus-within) .global-search__input{padding:0;color:transparent;cursor:pointer}
+.global-search:not(:focus-within) .global-search__input::placeholder{color:transparent}
+/* 收起时隐藏原生清除钮，避免它与放大镜叠在同一触控目标里误清查询；展开后照常提供。 */
+.global-search:not(:focus-within) .global-search__input::-webkit-search-cancel-button{display:none}
+.global-search:not(:focus-within) .global-search__icon{left:15px}
+/* 收起时保留已输入的查询，用强调色边框提示它仍然生效。 */
+.global-search:not(:focus-within) .global-search__input:not(:placeholder-shown){border-color:var(--accent)}
+.global-search:focus-within{position:absolute;top:4px;bottom:4px;left:var(--space-3);right:var(--space-3);z-index:150;display:flex;align-items:center}
 .global-search__kbd{display:none}
-.global-search__menu{position:fixed;top:52px;left:var(--shell-sidebar-narrow-width);right:var(--space-3);z-index:200}
+/* 与展开的输入框左右对齐（窄栏宽度 + 顶栏内边距）。 */
+.global-search__menu{position:fixed;top:52px;left:calc(var(--shell-sidebar-narrow-width) + var(--space-3));right:var(--space-3);z-index:200}
 }
