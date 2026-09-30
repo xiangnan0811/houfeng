@@ -13,7 +13,7 @@
 - `web/src/main.tsx` 固定按 reset → tokens → `index.css` owner manifest → `modernize.css` 顺序导入；tokens 必须在所有 `var(--...)` 消费方之前。
 - `web/src/index.css` 只承载七个显式 owner section 与本地 `@import`，不承载规则。owner 顺序为 shared-atoms-page → app-shell → dashboard → assets → vps → observability → settings-subscriptions。
 - 规则落点位于 `web/src/styles/partials/`；`web/css-owners.json` 对 `web/src/**/*.css`（包括 reset、tokens、modernize、Login route CSS）做唯一且穷尽的 owner 映射。
-- 路由 CSS 按 `web/css-owners.json` 登记：Login、VPS 和 Monitoring 的路由/共享工作区样式已有实际消费者。引入或调整 CSS 必须验证实际 import graph、owner 和加载边界；不能假定其他路由已加载该样式。
+- 路由 CSS 按 `web/css-owners.json` 登记：Login、VPS、Monitoring 与 Records（`pages/records/RecordWorkspace.css`，由记录工作区与横向比较两个懒加载路由导入，登记在 shared-atoms-page）的路由/共享工作区样式已有实际消费者。引入或调整 CSS 必须验证实际 import graph、owner 和加载边界；不能假定其他路由已加载该样式。
 
 > **未来留余地**：如果团队后续决定引入 Tailwind / CSS Modules / Vanilla-Extract 之类的方案，需要做独立技术决策并整体迁移，**不要**让两套体系并存。
 
@@ -125,13 +125,15 @@
 | `web/src/styles/partials/layout.css` | AppShell 子树（Sidebar / TopBar / Breadcrumb / GlobalSearch / SyncStatus / UserChip） | `.sidebar { ... }` |
 | `web/src/styles/partials/{dashboard,legacy-assets,legacy-vps,legacy-observability,legacy-subscriptions,...}.css` | `web/css-owners.json` 指定的业务 owner；新规则按真实 BEM/domain 归属进入现有 owner 文件 | `.asset-decision-*` / `.vps-*` / `.monitoring-*` |
 | `web/src/styles/modernize.css` | 已有全站兼容覆盖；不是新规则的默认 catch-all | `.settings-save-footer { ... }` |
-| `web/src/pages/LoginPage.css` | 唯一 page 局部样式例外（首屏前缺壳） | `.login-page__card { ... }` |
+| `web/src/pages/LoginPage.css` | 首屏前缺壳的 Login 页面样式 | `.login-page__card { ... }` |
+| 已在 `css-owners.json` 登记的路由工作区 CSS（`pages/vps-detail/*.css`、`pages/monitoring-detail/MonitoringDetailWorkspace.css`、`pages/records/RecordWorkspace.css`） | 懒加载工作区版式，由使用它的路由模块或其共享工作区组件导入：VPS 工作区 CSS 由 VPS 列表 / 详情 / IP 质量页与生命周期工作区导入，监控工作区 CSS 另由 `ObservabilityNotice*` 与监控批量面板导入，记录工作区 CSS 只由记录工作区、横向比较页及 test-only harness 导入 | `.vps-detail-workspace__section` / `.record-section` |
 
 **原则**：
 
 - 跨页复用样式 → `styles/partials/page.css`（业务级版式）或 `styles/partials/atoms.css`（原子）。
 - 仅 AppShell 子树用 → `styles/partials/layout.css`；业务规则按 `css-owners.json` 进入其现有 owner 文件。
-- **不要**为某个 page 单独建 `.css` 文件（LoginPage 是历史例外），也不要新建 `misc.css` / `legacy-misc.css` / “final overrides” bucket。无法归属的规则先作为删除候选。
+- **不要**为单个组件或普通 page 单独建 `.css` 文件，也不要新建 `misc.css` / `legacy-misc.css` / “final overrides” bucket。例外只有 Login 与上表已登记的路由工作区 CSS：它们服务整个懒加载工作区、在 owner map 登记，并按下文 route CSS 合同验证加载边界。无法归属的规则先作为删除候选。
+- 路由工作区 CSS 可以像 VPS 详情一样在工作区根上定义局部尺寸变量（如 `--record-pad`）；被 portal 到 `body` 的弹窗或 harness 中复用这些规则时，消费处必须带回退值（`var(--record-pad,18px)`），不能依赖页面祖先。
 - loading / error / empty 的共享页面状态样式统一用 `.page-state` 系列，落在 `styles/partials/page.css`。页面不要复制 `.page-panel` + 裸文本；空态如果需要当前装饰和 CTA，使用 `PageState surface="empty"` 复用 `.empty-state.page-state`。
 
 ## Scenario: CSS owner manifest 与 AST budget policy
@@ -343,11 +345,11 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 - ❌ **任何生产 JSX `style=`**：严格 CSP 下静态视觉走 BEM/令牌，动态 SVG 几何走 attributes，比例和列宽分别用 `<progress>` / `<col width>`。
 - ❌ **回归早期 concept 屏 / `stitch/` 子目录视觉**：当前 UI 指导在 `docs/design/`；历史素材不能直接成为实现目标。
 - ❌ **`@media (prefers-color-scheme: dark)`**：主题切换走 `theme-*` class，不监听系统偏好分支（用户可在 system / dark / light 三档显式选）。
-- ❌ **新建 `.css` 文件给单个组件 / page 用**：LoginPage 是历史例外；新增样式落真实 owner 的 `styles/partials/page.css` / `atoms.css` / 业务文件，靠 BEM 隔离。
+- ❌ **新建 `.css` 文件给单个组件 / page 用**：Login 与已登记的路由工作区 CSS 是例外；其余新增样式落真实 owner 的 `styles/partials/page.css` / `atoms.css` / 业务文件，靠 BEM 隔离。
 - ❌ **CSS-in-JS / Tailwind / styled-components**：当前不用；要引入需独立技术决策与整体迁移。
 - ❌ **类名简写 / 工具类滥用**（`mt-2`、`flex`、`text-red`）：`reset.css` 仅留 `.tnum` `.mono` 两个工具类，其余走 BEM 表达语义。
 - ❌ **令牌只改一份主题**：`tokens.css` 改了 `:root` 的主题令牌，必须同步检查全部五个主题块（`houfeng-dark` 即 `:root`、`houfeng-light`、`precision-dark`、`precision-light`、`observatory-dark`）。`<html>` 同时匹配 `:root` 与主题类，某主题块漏写的令牌会静默继承候风深色值（例如浅色主题继承暗色阴影或纹理）；`observatory-light` 明确复用 `houfeng-light`，不要私自新增漂移值。
-- ❌ **在组件文件 `import './x.css'`**（除 `LoginPage.tsx` 这个历史例外）：全局样式由 `main.tsx` 固定入口与 `index.css` owner manifest 集中管理。
+- ❌ **在组件文件 `import './x.css'`**（除 `LoginPage.tsx` 与上表列出的、导入已登记路由工作区 CSS 的路由模块和共享工作区组件）：全局样式由 `main.tsx` 固定入口与 `index.css` owner manifest 集中管理。
 - ❌ **DataTable 可排序表头双 padding**：`.data-table__th--sortable` 自身必须清零 padding，实际间距由 `.data-table__sort-btn` 承担；若密度规则用 `.data-table--compact .data-table__head th` 这类更高特异性选择器，清零规则也必须带上同等上下文（如 `th.data-table__th--sortable`），否则 sortable 表头会比普通表头更宽。
 
 ---
@@ -356,7 +358,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 
 > 用于后续代码评审；若形成可复用规则，更新 `docs/spec/` 或 `docs/design/`。
 
-1. **`web/src/pages/LoginPage.css` 是 page 局部 CSS 唯一例外**，与"组件文件不 import css"的规则冲突。当前合理（首屏前 AppShell 未挂），不打算回头消除。
+1. **`web/src/pages/LoginPage.css` 与已登记的路由工作区 CSS 是局部 CSS 例外**，与"组件文件不 import css"的规则冲突。当前合理（Login 首屏前 AppShell 未挂；工作区 CSS 只随懒加载路由下载），不打算回头消除。工作区 CSS 的字号 / 间距目前沿用 VPS 详情的局部像素刻度，统一迁移到令牌需要单独整合任务。
 2. **`atoms.css` 内某些渐变 / 阴影直接用 `rgba(255,255,255,0.x)`**（如 `atoms.css:149` `background: rgba(255, 255, 255, 0.08);`），未走令牌——这是为高光 / 镜面层效果保留的允许例外，写新原子时如果需要类似效果可参考。
 
 ---

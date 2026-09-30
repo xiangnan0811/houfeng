@@ -10,6 +10,8 @@ import { ComparisonSaveRecord } from './records/compare/ComparisonSaveRecord'
 import { ComparisonSelectionBasket } from './records/compare/ComparisonSelectionBasket'
 import { ComparisonTrendChart } from './records/compare/ComparisonTrendChart'
 import { useComparisonWorkbench } from './records/compare/useComparisonWorkbench'
+import { formatDateTime } from '../lib/format'
+import './records/RecordWorkspace.css'
 
 function pairwiseLabel(comparison: NonNullable<ReturnType<typeof useComparisonWorkbench>['state']['comparison']>): string {
   if (comparison.pairwise.length === 0) return '当前类型用精确比较结果展示，不绘制趋势。'
@@ -44,6 +46,21 @@ function numberish(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+function ComparisonMark() {
+  return (
+    <span className="record-identity__mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" focusable="false">
+        <path d="M4 19V9M10 19V5M16 19v-7M22 19H2" />
+      </svg>
+    </span>
+  )
+}
+
+function windowLabel(from: string, to: string): string {
+  const valid = Number.isFinite(Date.parse(from)) && Number.isFinite(Date.parse(to))
+  return valid ? `${formatDateTime(from)} → ${formatDateTime(to)}` : `${from} → ${to}`
+}
+
 export function RecordComparisonPage() {
   const { user } = useAuth()
   const { state, commands } = useComparisonWorkbench({ userId: user?.user_id ?? '' })
@@ -51,110 +68,165 @@ export function RecordComparisonPage() {
   const activeKind = query?.kind
   const activeMetric = query?.metric
   const showSeries = Boolean(activeKind?.startsWith('monitoring.host') || activeKind?.startsWith('monitoring.probe'))
+  const itemCount = query?.mode === 'fixed' ? query.items?.length ?? 0 : 0
+  const comparison = state.comparison
 
   return (
-    <div className="page">
-      <header className="page__head">
-        <h1 className="page__title">横向比较工作台</h1>
+    <div className="page record-page record-compare">
+      <header className="page__head record-identity">
+        <div className="record-identity__lead">
+          <ComparisonMark />
+          <div className="record-identity__copy">
+            <div className="record-identity__title-row">
+              <h1 className="page__title">横向比较</h1>
+            </div>
+            {query ? (
+              <dl className="record-identity__meta record-identity__facts" aria-label="比较范围">
+                {query.mode === 'fixed' ? (
+                  <div className="record-identity__meta-item"><dt>对象</dt><dd>{itemCount} 项</dd></div>
+                ) : (
+                  <div className="record-identity__meta-item"><dt>主体</dt><dd>{query.subjects?.length ?? 0} 个</dd></div>
+                )}
+                {query.mode === 'fixed' && itemCount > 1 ? (
+                  <div className="record-identity__meta-item"><dt>基准</dt><dd>第 {(query.baseline ?? 0) + 1} 项</dd></div>
+                ) : null}
+                <div className="record-identity__meta-item">
+                  <dt>窗口</dt>
+                  <dd className="mono">{windowLabel(query.requested_from, query.requested_to)}</dd>
+                </div>
+              </dl>
+            ) : null}
+          </div>
+        </div>
       </header>
 
       {!state.query.ok ? (
         <PageState
           kind="empty"
           title="从选择篮开始"
-          description="分享链接损坏或版本未知时，可以重新选择 2–6 项修订或快照。"
+          description="链接已损坏或版本未知，请从记录或证据重新选择 2–6 项。"
         />
       ) : null}
 
-      {state.loading ? (
-        <PageState
-          kind="loading"
-          title="正在加载比较"
-          action={(
-            <div className="page-state__actions">
-              <Button size="lg" variant="secondary" onClick={commands.cancel}>取消比较</Button>
-            </div>
-          )}
-        />
-      ) : null}
-      {state.cancelled ? <p role="status">已取消比较。条件已更新，旧结果不会继续展示。</p> : null}
-      {state.error ? (
-        <PageState
-          kind="error"
-          title="比较不可用"
-          description={state.error}
-          {...(state.errorCode ? { technicalSummary: state.errorCode } : {})}
-        />
-      ) : null}
-
-      <ComparisonSelectionBasket
-        query={query}
-        candidates={state.candidates}
-        onConfirm={commands.confirmCandidates}
-      />
-
-      {query ? (
-        <ComparisonConditions
-          query={query}
-          onBaseline={commands.setBaseline}
-          onAlignment={commands.setAlignment}
-          onWindow={commands.setWindow}
-          onTolerance={commands.setToleranceSeconds}
-          onBucket={commands.setBucketSeconds}
-        />
-      ) : null}
-
-      {state.loading ? null : <ComparabilityReview comparison={state.comparison} />}
-
-      {state.comparison ? (
-        <>
-          <ComparisonKindPanel
-            comparison={state.comparison}
-            {...(activeKind ? { activeKind } : {})}
-            {...(activeMetric ? { metric: activeMetric } : {})}
-            onSelect={(kind, metric) => commands.selectKind(kind, metric)}
+      <div className="record-compare__layout">
+        <div className="record-compare__side">
+          <ComparisonSelectionBasket
+            query={query}
+            candidates={state.candidates}
+            onConfirm={commands.confirmCandidates}
           />
-          {showSeries ? (
-            <>
-              <ComparisonTrendChart
-                {...(activeKind ? { kind: activeKind } : {})}
-                {...(activeMetric ? { metric: activeMetric } : {})}
-                series={state.comparison.series}
-              />
-              <ComparisonMatrix
-                {...(activeKind ? { kind: activeKind } : {})}
-                {...(activeMetric ? { metric: activeMetric } : {})}
-                comparison={state.comparison}
-              />
-            </>
-          ) : (
-            <section aria-labelledby="comparison-pairwise-heading">
-              <h2 className="section-heading__title" id="comparison-pairwise-heading">系统差异</h2>
-              <p>{pairwiseLabel(state.comparison)}</p>
-            </section>
-          )}
-          {state.comparison.pairwise.length > 0 && showSeries ? (
-            <section aria-labelledby="comparison-diff-heading">
-              <h2 className="section-heading__title" id="comparison-diff-heading">系统差异</h2>
-              <p>{pairwiseLabel(state.comparison)}</p>
+          {query ? (
+            <ComparisonConditions
+              query={query}
+              onBaseline={commands.setBaseline}
+              onAlignment={commands.setAlignment}
+              onWindow={commands.setWindow}
+              onTolerance={commands.setToleranceSeconds}
+              onBucket={commands.setBucketSeconds}
+            />
+          ) : null}
+        </div>
+
+        <div className="record-compare__main">
+          {state.loading ? (
+            <PageState
+              kind="loading"
+              title="正在加载比较"
+              action={(
+                <div className="page-state__actions">
+                  <Button size="lg" variant="secondary" onClick={commands.cancel}>取消比较</Button>
+                </div>
+              )}
+            />
+          ) : null}
+          {state.cancelled ? <p className="record-compare__notice" role="status">已取消比较。条件已更新，旧结果不会继续展示。</p> : null}
+          {state.error ? (
+            <PageState
+              kind="error"
+              title="比较不可用"
+              description={state.error}
+              {...(state.errorCode ? { technicalSummary: state.errorCode } : {})}
+            />
+          ) : null}
+
+          {state.loading ? null : <ComparabilityReview comparison={comparison} />}
+
+          {comparison ? (
+            <section className="record-section record-compare__result" aria-labelledby="comparison-result-heading">
+              <div className="record-section__head">
+                <h2 className="record-section__title" id="comparison-result-heading">比较结果</h2>
+                <ComparisonKindPanel
+                  comparison={comparison}
+                  {...(activeKind ? { activeKind } : {})}
+                  {...(activeMetric ? { metric: activeMetric } : {})}
+                  onSelect={(kind, metric) => commands.selectKind(kind, metric)}
+                />
+              </div>
+              {showSeries ? (
+                <>
+                  <ComparisonTrendChart
+                    {...(activeKind ? { kind: activeKind } : {})}
+                    {...(activeMetric ? { metric: activeMetric } : {})}
+                    series={comparison.series}
+                  />
+                  {comparison.pairwise.length > 0 ? <PairwiseSummary comparison={comparison} /> : null}
+                  <ComparisonMatrix
+                    {...(activeKind ? { kind: activeKind } : {})}
+                    {...(activeMetric ? { metric: activeMetric } : {})}
+                    {...(query?.baseline != null ? { baseline: query.baseline } : {})}
+                    comparison={comparison}
+                  />
+                </>
+              ) : (
+                <PairwiseSummary comparison={comparison} />
+              )}
+              <details className="record-disclosure record-compare__tech">
+                <summary>技术细节</summary>
+                <dl className="record-compare__tech-list">
+                  {comparison.items.map((item, index) => (
+                    <div key={`${item.snapshot_id}-${index}`}>
+                      <dt>第 {index + 1} 项</dt>
+                      <dd>
+                        <code>{item.snapshot_id}</code>
+                        <code>{item.canonical_hash}</code>
+                      </dd>
+                    </div>
+                  ))}
+                  <div>
+                    <dt>比较摘要</dt>
+                    <dd><code>{comparison.digest}</code></dd>
+                  </div>
+                </dl>
+              </details>
             </section>
           ) : null}
-        </>
-      ) : null}
 
-      <ComparisonSaveRecord
-        blocked={state.saveBlocked}
-        {...(state.saveBlocked ? {
-          blockers: state.comparison?.save_eligibility.blockers ?? [],
-        } : {})}
-        title={state.title}
-        conclusion={state.conclusion}
-        saving={state.saving}
-        savedRecordId={state.savedRecordId}
-        onTitle={commands.setTitle}
-        onConclusion={commands.setConclusion}
-        onSave={() => { void commands.save() }}
-      />
+          <ComparisonSaveRecord
+            blocked={state.saveBlocked}
+            {...(state.saveBlocked ? {
+              blockers: comparison?.save_eligibility.blockers ?? [],
+            } : {})}
+            title={state.title}
+            conclusion={state.conclusion}
+            saving={state.saving}
+            savedRecordId={state.savedRecordId}
+            onTitle={commands.setTitle}
+            onConclusion={commands.setConclusion}
+            onSave={() => { void commands.save() }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function PairwiseSummary({ comparison }: { comparison: NonNullable<ReturnType<typeof useComparisonWorkbench>['state']['comparison']> }) {
+  return (
+    <div className="record-compare__block">
+      <div className="record-compare__block-head">
+        <h3 className="record-compare__block-title" id="comparison-diff-heading">系统差异</h3>
+      </div>
+      <p className="record-compare__pairwise">{pairwiseLabel(comparison)}</p>
     </div>
   )
 }

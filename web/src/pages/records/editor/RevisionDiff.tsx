@@ -1,3 +1,4 @@
+import { useId } from 'react'
 import { diffLines } from 'diff'
 
 import type { RecordDraftPayload, RecordRevision } from '../../../lib/types'
@@ -10,47 +11,66 @@ import {
 type RevisionDiffProps = {
   base: RecordDraftPayload | RecordRevision
   local: RecordDraftPayload | RecordRevision
+  title?: string
 }
 
-export function RevisionDiff({ base, local }: RevisionDiffProps) {
+export function RevisionDiff({ base, local, title = '与当前版本的差异' }: RevisionDiffProps) {
+  const titleId = useId()
   const previous = recordComparablePayload(base)
   const next = recordComparablePayload(local)
   const changed = differingRecordFields(previous, next)
   return (
-    <section className="card" aria-label="修订差异">
-      <h2 className="section-heading__title">字段差异</h2>
-      {changed.length === 0 ? <p className="text-muted">没有字段差异。</p> : null}
-      {changed.map(({ field, label }) => (
-        <article key={field}>
-          <h3>{label}</h3>
-          {field === 'body_markdown' ? (
-            <MarkdownHunks previous={recordFieldText(previous, field)} next={recordFieldText(next, field)} />
-          ) : (
-            <p>
-              <span className="text-muted">{recordFieldText(previous, field) || '（空）'}</span>
-              {' → '}
-              <strong>{recordFieldText(next, field) || '（空）'}</strong>
-            </p>
-          )}
-        </article>
-      ))}
+    <section className="record-section record-diff" aria-labelledby={titleId}>
+      <div className="record-section__head">
+        <h2 className="record-section__title" id={titleId}>{title}</h2>
+        <span className="record-muted">{changed.length === 0 ? '无差异' : `${changed.length} 个字段`}</span>
+      </div>
+      {changed.length === 0 ? null : (
+        <dl className="record-diff__fields">
+          {changed.map(({ field, label }) => (
+            <div key={field} className="record-diff__field">
+              <dt>{label}</dt>
+              <dd>
+                {field === 'body_markdown' ? (
+                  <MarkdownHunks previous={recordFieldText(previous, field)} next={recordFieldText(next, field)} />
+                ) : (
+                  <>
+                    <span className="record-diff__before">{recordFieldText(previous, field) || '（空）'}</span>
+                    <span className="record-diff__arrow" aria-hidden="true">→</span>
+                    <span className="record-diff__after">{recordFieldText(next, field) || '（空）'}</span>
+                  </>
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
     </section>
   )
 }
 
 function MarkdownHunks({ previous, next }: { previous: string; next: string }) {
   const parts = diffLines(previous, next)
+  const added = parts.reduce((total, part) => total + (part.added ? part.count ?? 0 : 0), 0)
+  const removed = parts.reduce((total, part) => total + (part.removed ? part.count ?? 0 : 0), 0)
   return (
-    <pre className="card" aria-label="正文差异">
-      {parts.map((part, index) => (
-        <span
-          key={`${part.value}-${index}`}
-          className={part.removed ? 'text-warn' : part.added ? undefined : 'text-muted'}
-          data-diff={part.added ? 'add' : part.removed ? 'remove' : 'same'}
-        >
-          {part.value}
-        </span>
-      ))}
-    </pre>
+    <details className="record-disclosure">
+      <summary>
+        <span className="record-diff__stat record-diff__stat--add">+{added}</span>
+        <span className="record-diff__stat record-diff__stat--remove">−{removed}</span>
+        <span>行</span>
+      </summary>
+      <pre className="record-diff__hunks" role="region" aria-label="正文差异" tabIndex={0}>
+        {parts.map((part, index) => (
+          <span
+            key={`${part.value}-${index}`}
+            className={part.removed ? 'record-diff__line--remove' : part.added ? 'record-diff__line--add' : 'record-diff__line--same'}
+            data-diff={part.added ? 'add' : part.removed ? 'remove' : 'same'}
+          >
+            {part.value}
+          </span>
+        ))}
+      </pre>
+    </details>
   )
 }

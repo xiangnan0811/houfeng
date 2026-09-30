@@ -1,7 +1,6 @@
-import { Link, useLocation } from 'react-router-dom'
-
 import { Button, Modal } from '../../../components/atoms'
 import type { DocumentReference } from '../../../lib/documentMarkdown'
+import { RecordMaterialList } from './RecordMaterialList'
 
 export type RecordMaterialItem = DocumentReference & {
   label: string
@@ -25,34 +24,23 @@ export function RecordMaterialDrawer({
   onInsert,
   onRemove,
 }: RecordMaterialDrawerProps) {
-  const { state } = useLocation()
   return (
     <Modal open={open} onClose={onClose} title="材料与引用" size="lg">
-      {items.length === 0 ? <p className="text-muted">当前修订没有可引用材料</p> : (
-        <ul className="action-confirm__callouts" aria-label="材料清单">
-          {items.map((item) => (
-            <li key={`${item.kind}:${item.id}`} className={item.available ? 'card' : 'card card--dim'}>
-              <strong>{item.kind === 'evidence' ? '系统证据' : '用户附件'}</strong>
-              <span>{item.label}</span>
-              <code>{item.id}</code>
-              {!item.available ? <span>引用已失效</span> : null}
-              {item.kind === 'evidence' ? (
-                <Link className="text-link" to={`/evidence/${encodeURIComponent(item.id)}`} state={state}>
-                  查看证据
-                </Link>
-              ) : null}
-              <div className="page-form-actions">
-                <Button size="sm" variant="secondary" disabled={readOnly || !item.available} onClick={() => onInsert(item)}
-                  aria-label={`插入${item.label}`}>
-                  插入引用
-                </Button>
-                <Button size="sm" variant="ghost" disabled={readOnly} onClick={() => onRemove(item)} aria-label={`移除${item.label}`}>
-                  从当前修订移除
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
+      {items.length === 0 ? <p className="record-muted">当前修订没有可引用材料</p> : (
+        <RecordMaterialList
+          items={items}
+          renderActions={(item) => (
+            <>
+              <Button size="sm" variant="secondary" disabled={readOnly || !item.available} onClick={() => onInsert(item)}
+                aria-label={`插入${item.label}`}>
+                插入引用
+              </Button>
+              <Button size="sm" variant="ghost" disabled={readOnly} onClick={() => onRemove(item)} aria-label={`移除${item.label}`}>
+                移除
+              </Button>
+            </>
+          )}
+        />
       )}
     </Modal>
   )

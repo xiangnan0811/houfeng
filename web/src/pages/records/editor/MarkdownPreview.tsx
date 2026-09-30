@@ -50,19 +50,27 @@ export function MarkdownPreview({ source = '', model, modelStatus, references = 
   const decoded = decodeClosedModel(model)
   if (decoded) {
     return (
-      <div className="card" data-render-contract={decoded.version}>
+      <div className="record-document" data-render-contract={decoded.version}>
         {decoded.nodes.map((node, index) => renderBlock(node, `block-${index}`, references))}
       </div>
     )
   }
   return (
-    <div className="card" data-render-contract="houfeng_markdown/v1-live">
+    <div className="record-document" data-render-contract="houfeng_markdown/v1-live">
       {fallbackNotice(modelStatus, model)}
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkHoufengRefs]}
         rehypePlugins={[[rehypeSanitize, sanitizeSchema]]}
         components={{
           img: () => null,
+          // 净化后只剩 GFM 任务列表的勾选框；只取需要的 DOM 属性，不展开 react-markdown 的 node。
+          input: ({ type, checked, disabled }) => (
+            <input type={type} checked={checked} disabled={disabled} readOnly aria-label={taskStateLabel(Boolean(checked))} />
+          ),
+          table: ({ children }) => <DocumentTable><table>{children}</table></DocumentTable>,
+          ul: ({ className, children }) => (
+            <ul className={className?.includes('contains-task-list') ? `${className} record-task-list` : className}>{children}</ul>
+          ),
           a(props) {
             return renderReferenceOrLink(props.href ?? '', props.children, references, 'live')
           },
@@ -91,6 +99,20 @@ function fallbackNotice(modelStatus: RecordRenderModelStatus | undefined, model:
   return (
     <p className="record-preview__notice" role="status">服务端渲染模型不可用，本页按源码渲染。</p>
   )
+}
+
+// 宽表只在自己的具名、可聚焦区域里横向滚动，两条渲染路径使用同一包装。
+function DocumentTable({ children }: { children: ReactNode }) {
+  return (
+    <div className="record-document__table" role="region" aria-label="正文表格" tabIndex={0}>
+      {children}
+    </div>
+  )
+}
+
+// 只读任务勾选框没有可见 label，用状态作为可访问名称，条目文字紧随其后。
+function taskStateLabel(checked: boolean): string {
+  return checked ? '已完成' : '未完成'
 }
 
 function renderBlock(node: DocumentRenderNodeV1, key: string, references: readonly DocumentReference[]): ReactNode {
@@ -124,7 +146,7 @@ function renderBlock(node: DocumentRenderNodeV1, key: string, references: readon
         <ul key={key} className="record-task-list">
           {node.items.map((item, index) => (
             <li key={`${key}-${index}`}>
-              <input type="checkbox" checked={item.checked} disabled readOnly />
+              <input type="checkbox" checked={item.checked} disabled readOnly aria-label={taskStateLabel(item.checked)} />
               {renderInlines(item.children, `${key}-${index}`)}
             </li>
           ))}
@@ -132,18 +154,20 @@ function renderBlock(node: DocumentRenderNodeV1, key: string, references: readon
       )
     case 'table':
       return (
-        <table key={key}>
-          <thead>
-            <tr>{node.header.map((cell, index) => <th key={`${key}-h-${index}`}>{renderInlines(cell, `${key}-h-${index}`)}</th>)}</tr>
-          </thead>
-          <tbody>
-            {node.rows.map((row, rowIndex) => (
-              <tr key={`${key}-r-${rowIndex}`}>
-                {row.map((cell, cellIndex) => <td key={`${key}-r-${rowIndex}-${cellIndex}`}>{renderInlines(cell, `${key}-r-${rowIndex}-${cellIndex}`)}</td>)}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <DocumentTable key={key}>
+          <table>
+            <thead>
+              <tr>{node.header.map((cell, index) => <th key={`${key}-h-${index}`}>{renderInlines(cell, `${key}-h-${index}`)}</th>)}</tr>
+            </thead>
+            <tbody>
+              {node.rows.map((row, rowIndex) => (
+                <tr key={`${key}-r-${rowIndex}`}>
+                  {row.map((cell, cellIndex) => <td key={`${key}-r-${rowIndex}-${cellIndex}`}>{renderInlines(cell, `${key}-r-${rowIndex}-${cellIndex}`)}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </DocumentTable>
       )
     case 'footnote_def':
       return (
@@ -216,7 +240,7 @@ function renderReferenceMark(
   return (
     <span key={key} className={referenceClass(kind, id, references)} data-ref-kind={kind} data-ref-id={id}>
       {children}
-      {!isAuthorized(kind, id, references) ? <span>引用已失效</span> : null}
+      {!isAuthorized(kind, id, references) ? <span className="record-ref__stale">引用已失效</span> : null}
     </span>
   )
 }
@@ -235,5 +259,5 @@ function isAuthorized(kind: string, id: string, references: readonly DocumentRef
 }
 
 function referenceClass(kind: string, id: string, references: readonly DocumentReference[]): string {
-  return isAuthorized(kind, id, references) ? 'card' : 'card card--dim'
+  return isAuthorized(kind, id, references) ? 'card record-ref' : 'card card--dim record-ref'
 }

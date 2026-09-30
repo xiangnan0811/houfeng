@@ -403,20 +403,141 @@ const RECORD_UNSUPPORTED_REVISION = {
   body_markdown: '# 排查路径\n\n- 排查\n  - 磁盘\n  - 网络',
 }
 
+const RECORD_PEER_ID = 'usr_89abcdef0123456701234567'
+
+const RECORD_RICH_BODY_MARKDOWN = [
+  '## 现象',
+  '',
+  '第三晚 21:40 起，alpha 到上游的 TCP 重传率升高，业务侧出现间歇超时。',
+  '',
+  '## 排查',
+  '',
+  '```sh',
+  '# 复现丢包',
+  'mtr -rw 203.0.113.7',
+  '```',
+  '',
+  '| 主机 | 丢包 | 延迟 | 抖动 | 重传率 | 上游第二跳 | 备注 |',
+  '| --- | --- | --- | --- | --- | --- | --- |',
+  '| alpha | 3% | 182 ms | 41 ms | 2.4% | 198.51.100.17 | 21:40 起持续 |',
+  '| beta | 0% | 41 ms | 3 ms | 0.1% | 198.51.100.29 | 对照组 |',
+  '',
+  '- [x] 确认监控告警时间线',
+  '- [ ] 联系服务商核对上游线路',
+  '',
+  '## 结论',
+  '',
+  '丢包集中在服务商第二跳，已提交工单，等待回复。',
+  '',
+  '<!-- houfeng-ref:v1 evidence evs_e2ethirdnight -->',
+  `[系统证据：第三晚 TCP 观测](houfeng-evidence:${RECORD_EVIDENCE_ID})`,
+].join('\n')
+
+const inlineText = (value: string) => [{ type: 'text', text: value }]
+
+/** A populated record: sectioned body, named participants and a revision to compare against. */
+const RECORD_RICH_REVISION = {
+  ...RECORD_REVISION,
+  revision_id: 'rrv_e2e002',
+  revision_no: 3,
+  body_markdown: RECORD_RICH_BODY_MARKDOWN,
+  render_model: {
+    version: 'houfeng_markdown/v1',
+    nodes: [
+      { type: 'heading', level: 2, children: inlineText('现象') },
+      { type: 'paragraph', children: inlineText('第三晚 21:40 起，alpha 到上游的 TCP 重传率升高，业务侧出现间歇超时。') },
+      { type: 'heading', level: 2, children: inlineText('排查') },
+      { type: 'fenced_code', text: '# 复现丢包\nmtr -rw 203.0.113.7\n' },
+      {
+        type: 'table',
+        header: ['主机', '丢包', '延迟', '抖动', '重传率', '上游第二跳', '备注'].map(inlineText),
+        rows: [
+          ['alpha', '3%', '182 ms', '41 ms', '2.4%', '198.51.100.17', '21:40 起持续'].map(inlineText),
+          ['beta', '0%', '41 ms', '3 ms', '0.1%', '198.51.100.29', '对照组'].map(inlineText),
+        ],
+      },
+      {
+        type: 'task_list',
+        items: [
+          { checked: true, children: inlineText('确认监控告警时间线') },
+          { checked: false, children: inlineText('联系服务商核对上游线路') },
+        ],
+      },
+      { type: 'heading', level: 2, children: inlineText('结论') },
+      { type: 'paragraph', children: inlineText('丢包集中在服务商第二跳，已提交工单，等待回复。') },
+      {
+        type: 'reference',
+        kind: 'evidence',
+        id: RECORD_EVIDENCE_ID,
+        children: inlineText('系统证据：第三晚 TCP 观测'),
+      },
+    ],
+  },
+  status_group: 'in_progress',
+  participants: [
+    { participant_id: RECORD_USER_ID, display_name: '林岚' },
+    { participant_id: RECORD_PEER_ID, display_name: '周衡' },
+  ],
+  save_reason: '补充结论',
+  created_at: '2026-08-18T02:30:00Z',
+}
+
+const RECORD_POPULATED_ACTIONS = [
+  {
+    action_id: 'ract_e2e001', record_id: 'rec_e2e001', version: 2, status: 'open',
+    title: '联系服务商核对上游线路', details: '附上 mtr 结果与告警时间线，要求确认第二跳丢包原因。',
+    assignee_id: RECORD_PEER_ID, due_at: '2026-08-20T09:00:00Z', completed_at: null,
+    subject_revision_id: 'rrv_e2e002', created_at: '2026-08-18T02:40:00Z', updated_at: '2026-08-18T03:00:00Z',
+  },
+  {
+    action_id: 'ract_e2e002', record_id: 'rec_e2e001', version: 3, status: 'completed',
+    title: '确认监控告警时间线', details: '',
+    assignee_id: RECORD_USER_ID, due_at: null, completed_at: '2026-08-18T04:00:00Z',
+    subject_revision_id: '', created_at: '2026-08-18T02:35:00Z', updated_at: '2026-08-18T04:00:00Z',
+  },
+]
+
+function commentModel(value: string) {
+  return { version: 'comment_markdown/v1', nodes: [{ type: 'paragraph', children: inlineText(value) }] }
+}
+
+const RECORD_POPULATED_COMMENTS = [
+  {
+    comment_id: 'rcm_e2e001', record_id: 'rec_e2e001', author_id: RECORD_PEER_ID, version: 1, state: 'active',
+    body_markdown: '服务商回复第二跳在做线路割接，预计今晚结束。',
+    render_model: commentModel('服务商回复第二跳在做线路割接，预计今晚结束。'),
+    reply_to_comment_id: '', mention_user_ids: [], created_at: '2026-08-18T05:00:00Z',
+    updated_at: '2026-08-18T05:00:00Z', redacted_at: null,
+  },
+  {
+    comment_id: 'rcm_e2e002', record_id: 'rec_e2e001', author_id: RECORD_USER_ID, version: 1, state: 'active',
+    body_markdown: '收到，割接后再跑一轮 mtr 对比。',
+    render_model: commentModel('收到，割接后再跑一轮 mtr 对比。'),
+    reply_to_comment_id: 'rcm_e2e001', mention_user_ids: [], created_at: '2026-08-18T05:20:00Z',
+    updated_at: '2026-08-18T05:20:00Z', redacted_at: null,
+  },
+]
+
 /**
  * A published record that actually carries materials, a fenced snippet and a table.
  * The `/records/new` profile cannot exercise reading, layout switching or a populated
  * material drawer, so those paths need their own served record.
  */
-export function recordDetailProfile(options: { renderModel?: 'ready' | 'unsupported' } = {}): ApiFixtureProfile {
-  const revision = options.renderModel === 'unsupported' ? RECORD_UNSUPPORTED_REVISION : RECORD_REVISION
+export function recordDetailProfile(options: {
+  renderModel?: 'ready' | 'unsupported'
+  /** Sectioned body, named participants, actions, comments and an older revision. */
+  populated?: boolean
+} = {}): ApiFixtureProfile {
+  const revision = options.populated
+    ? RECORD_RICH_REVISION
+    : options.renderModel === 'unsupported' ? RECORD_UNSUPPORTED_REVISION : RECORD_REVISION
   return authenticatedProfile({
     [apiRouteKey('GET', '/api/records/rec_e2e001')]: {
       status: 200,
       body: {
         record_id: 'rec_e2e001',
         lifecycle: 'active',
-        current_revision_id: RECORD_REVISION.revision_id,
+        current_revision_id: revision.revision_id,
         lock_version: 4,
         authorization_epoch: 2,
         current: revision,
@@ -434,25 +555,42 @@ export function recordDetailProfile(options: { renderModel?: 'ready' | 'unsuppor
     },
     [apiRouteKey('GET', '/api/records/rec_e2e001/actions?limit=50')]: {
       status: 200,
-      body: { items: [] },
+      body: { items: options.populated ? RECORD_POPULATED_ACTIONS : [] },
     },
     [apiRouteKey('GET', '/api/records/rec_e2e001/comments?limit=100')]: {
       status: 200,
-      body: { comments: [] },
+      body: { comments: options.populated ? RECORD_POPULATED_COMMENTS : [] },
     },
     [apiRouteKey('GET', '/api/records/rec_e2e001/watch')]: {
       status: 200,
-      body: {
-        record_id: 'rec_e2e001',
-        user_id: RECORD_USER_ID,
-        version: 0,
-        preference: 'default',
-        sources: {
-          author: false, owner: false, participant: false, comment: false, mention: false, action: false,
+      body: options.populated
+        ? {
+          record_id: 'rec_e2e001',
+          user_id: RECORD_USER_ID,
+          version: 2,
+          preference: 'default',
+          sources: {
+            author: true, owner: true, participant: false, comment: true, mention: false, action: false,
+          },
+          updated_at: '2026-08-18T05:20:00Z',
+        }
+        : {
+          record_id: 'rec_e2e001',
+          user_id: RECORD_USER_ID,
+          version: 0,
+          preference: 'default',
+          sources: {
+            author: false, owner: false, participant: false, comment: false, mention: false, action: false,
+          },
+          updated_at: null,
         },
-        updated_at: null,
-      },
     },
+    ...(options.populated ? {
+      [apiRouteKey('GET', `/api/records/rec_e2e001/revisions/${RECORD_REVISION.revision_id}`)]: {
+        status: 200,
+        body: RECORD_REVISION,
+      },
+    } : {}),
     [apiRouteKey('GET', '/api/record-drafts?limit=100')]: {
       status: 200,
       body: { items: [] },
@@ -1173,6 +1311,27 @@ const COMPARISON_CANDIDATE: ComparisonCandidateItem = {
   recommendation: 'nearest_window',
 }
 
+/** Hourly buckets per segment; a one-hour hole separates consecutive segments. */
+function comparisonTrendSeries(itemIndex: number, origin: string, segments: number[][]) {
+  const start = Date.parse(origin)
+  let hour = 0
+  return {
+    item_index: itemIndex,
+    metric_id: 'cpu_usage_pct',
+    unit: '%',
+    segments: segments.map((values) => {
+      const points = values.map((value) => {
+        const from = new Date(start + hour * 3_600_000).toISOString().replace('.000Z', 'Z')
+        const to = new Date(start + (hour + 1) * 3_600_000).toISOString().replace('.000Z', 'Z')
+        hour += 1
+        return { start: from, end: to, value }
+      })
+      hour += 1
+      return points
+    }),
+  }
+}
+
 function comparisonEvaluateFixture(
   overrides: Partial<ComparisonEvaluateResponse> = {},
 ): ComparisonEvaluateResponse {
@@ -1238,6 +1397,7 @@ export function comparisonWorkbenchHref(
 export type ComparisonWorkbenchMode =
   | 'candidates'
   | 'host-partial'
+  | 'host-trend'
   | 'metadata-only'
   | 'incompatible'
   | 'revoked'
@@ -1309,6 +1469,27 @@ export function comparisonWorkbenchProfile(options: {
         }],
         series: [],
       })
+      : options.mode === 'host-trend'
+        ? comparisonEvaluateFixture({
+          review: [{
+            item_index: 1,
+            kind: 'monitoring.host',
+            schema_version: 1,
+            reason: 'coverage_partial',
+          }],
+          pairwise: [{
+            item_index: 1,
+            kind: 'monitoring.host',
+            schema_version: 1,
+            compatible: true,
+            reason: '',
+            values: { equal: false, matched: 10, unmatched_baseline: 0, unmatched_item: 2, deltas: [{ delta: 4 }, { delta: 0 }] },
+          }],
+          series: [
+            comparisonTrendSeries(0, '2026-07-01T00:00:00Z', [[12, 14, 13, 18, 22, 19, 17, 15, 16, 14, 13, 12]]),
+            comparisonTrendSeries(1, '2026-07-08T00:00:00Z', [[20, 24, 27, 31], [35, 33, 29, 26, 24, 22]]),
+          ],
+        })
       : comparisonEvaluateFixture({
         review: [{
           item_index: 0,

@@ -5,6 +5,7 @@ import '../../src/styles/reset.css'
 import '../../src/styles/tokens.css'
 import '../../src/index.css'
 import '../../src/styles/modernize.css'
+import '../../src/pages/records/RecordWorkspace.css'
 
 import { RecordActionPanel } from '../../src/components/RecordActionPanel'
 import { RecordCommentThread } from '../../src/components/RecordCommentThread'

@@ -18,7 +18,7 @@ Current reusable patterns include:
 
 Shared control conventions:
 
-- Button sizes follow placement, not page: `md` for the page-header action group (`.page__actions`) so it aligns with the 36px search and filter controls; `sm` for actions inside cards, panel headers, tables, and rows; `lg` only for touch-oriented or editor commit actions (for example the record editor's save/publish group).
+- Button sizes follow placement, not page: `md` for the page-header action group (`.page__actions`, including the record editor's save/publish commands) so it aligns with the 36px search and filter controls; `sm` for actions inside cards, panel headers, tables, and rows; `lg` only for touch-oriented commit actions at the end of a form (for example the comparison workbench's 另存为记录).
 - `Tabs variant="pill"` and `SegmentedControl` share one segmented look: a recessed track (`--panel-bg-muted`) with a raised selected segment (`--surface-elevated` plus `--shadow-sm`). Do not add page-local padding/radius overrides; underline tabs remain the page-section navigation.
 - Settings › 外观 presents the three theme presets as preview cards (`role="group"` 主题风格, each a pressed-state button named by the preset). Each preview is scoped with that preset's own `theme-<preset>-<scheme>` class so it shows the real canvas, panel, accent and state colours for the current light/dark choice; dark-only presets always preview dark and are labelled 仅深色.
 - State colour carries meaning: accent bars, borders and badges reflect the current value (for example a count greater than zero), never a fixed per-card colour.
@@ -60,6 +60,7 @@ This is guidance, not a page freeze. A page may change structure when the curren
 - VPS inventory/detail: asset facts, subscriptions, lifecycle decisions, monitoring linkage, and local asset workbenches.
 - Monitoring list/detail: runtime observation objects, health, sync/heartbeat evidence, trends, incidents, and controlled agent actions.
 - Targets/detail: service entrypoint probing, ProbeItems, coverage, recent observations, and target events.
+- Records workspace / comparison: record reading and editing with a document column plus an attribute/material aside, collaboration below the document; the comparison workbench keeps selection and conditions beside one comparability → result → save column.
 - Events: diagnostic and audit timeline with explicit filters.
 - Settings: runtime configuration, notification settings, frequency defaults, overrides, retention, and theme controls.
 

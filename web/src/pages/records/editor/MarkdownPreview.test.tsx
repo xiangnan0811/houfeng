@@ -82,3 +82,25 @@ describe('MarkdownPreview', () => {
     expect(screen.getByText('系统证据：未知').closest('.card--dim')).not.toBeNull()
   })
 })
+
+describe('MarkdownPreview tables and task lists', () => {
+  it('wraps tables in a named focusable region and names task checkboxes on both render paths', () => {
+    const model = {
+      version: DOCUMENT_MARKDOWN_VERSION_V1,
+      nodes: [
+        { type: 'table', header: [[{ type: 'text', text: '主机' }]], rows: [[[{ type: 'text', text: 'alpha' }]]] },
+        { type: 'task_list', items: [{ checked: true, children: [{ type: 'text', text: '已确认' }] }] },
+      ],
+    }
+    const source = '| 主机 |\n| --- |\n| alpha |\n\n- [x] 已确认'
+    for (const props of [{ model }, { source }]) {
+      const { unmount } = render(<MarkdownPreview {...props} />)
+      const region = screen.getByRole('region', { name: '正文表格' })
+      expect(region).toHaveAttribute('tabindex', '0')
+      expect(region.querySelector('table')).not.toBeNull()
+      expect(screen.getByRole('checkbox', { name: '已完成' })).toBeChecked()
+      expect(screen.getByRole('checkbox', { name: '已完成' }).closest('ul')).toHaveClass('record-task-list')
+      unmount()
+    }
+  })
+})

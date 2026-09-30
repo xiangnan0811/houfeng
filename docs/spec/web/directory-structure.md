@@ -182,7 +182,7 @@ web/
 
 ### `web/src/styles/`
 
-`main.tsx` 只直接 import reset、tokens、`index.css` 与 modernize；`index.css` 以七个 owner section 导入 `styles/partials/`。**不要在组件文件里 `import './foo.css'`**——当前唯一 route-level 例外是 `pages/LoginPage.css`，且仍必须出现在 `css-owners.json`。
+`main.tsx` 只直接 import reset、tokens、`index.css` 与 modernize；`index.css` 以七个 owner section 导入 `styles/partials/`。**不要在组件文件里 `import './foo.css'`**——例外只有 `pages/LoginPage.css` 与已登记的路由工作区 CSS（VPS、Monitoring、Records），其导入方与加载边界见[样式规范](styling-guidelines.md)的样式落点表，且都必须出现在 `css-owners.json`。
 
 ### `web/src/test/`
 

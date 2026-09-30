@@ -1,3 +1,4 @@
+import { ScrollRegion } from '../../../components/atoms'
 import type { ComparisonEvaluateResponse, ComparisonReason } from '../../../lib/types'
 import { isHostOrProbeKind, seriesForKindAndMetric } from './comparisonQueryState'
 
@@ -16,30 +17,27 @@ const REASON_LABELS: Partial<Record<ComparisonReason, string>> = {
 type Props = {
   kind?: string
   metric?: string
+  baseline?: number
   comparison: ComparisonEvaluateResponse
 }
 
-export function ComparisonMatrix({ kind, metric, comparison }: Props) {
+export function ComparisonMatrix({ kind, metric, baseline = 0, comparison }: Props) {
   if (!isHostOrProbeKind(kind)) return null
   const headingId = 'comparison-matrix-heading'
-  const hintId = 'comparison-matrix-hint'
   const series = seriesForKindAndMetric(comparison.series, kind, metric)
   return (
-    <section>
-      <div className="section-heading">
-        <h2 className="section-heading__title" id={headingId}>对齐矩阵</h2>
-        <p className="section-heading__description" id={hintId}>
-          一次只看 {kind}{metric ? ` / ${metric}` : ''}。不可计算的格子用文字说明原因，不只靠颜色。
-        </p>
+    <div className="record-compare__block">
+      <div className="record-compare__block-head">
+        <h3 className="record-compare__block-title" id={headingId}>对齐矩阵</h3>
       </div>
-      <div
-        className="page-panel--scroll-x"
-        role="region"
-        tabIndex={0}
-        aria-labelledby={headingId}
-        aria-describedby={hintId}
+      <ScrollRegion
+        labelledBy={headingId}
+        hintId="comparison-matrix-hint"
+        hint="左右滑动查看全部列"
+        className="record-compare-matrix"
+        hintClassName="record-compare-matrix__hint"
       >
-        <table className="table">
+        <table className="table record-compare-matrix__table">
           <caption className="visually-hidden">比较项矩阵</caption>
           <thead>
             <tr>
@@ -48,8 +46,7 @@ export function ComparisonMatrix({ kind, metric, comparison }: Props) {
               <th scope="col">覆盖</th>
               <th scope="col">桶数</th>
               <th scope="col">质量</th>
-              <th scope="col">规范哈希</th>
-              <th scope="col">修订上下文</th>
+              <th scope="col">修订</th>
               <th scope="col">说明</th>
             </tr>
           </thead>
@@ -60,21 +57,24 @@ export function ComparisonMatrix({ kind, metric, comparison }: Props) {
               const itemSeries = series.find((entry) => entry.item_index === index)
               return (
                 <tr key={`${item.snapshot_id}-${index}`}>
-                  <th scope="row">第 {index + 1} 项</th>
+                  <th scope="row">
+                    第 {index + 1} 项{index === baseline ? <span className="record-compare-baseline">基准</span> : null}
+                  </th>
                   <td>{item.kind}/v{item.schema_version}</td>
                   <td>{coverageLabel(pair?.values, finding?.reason)}</td>
-                  <td className="mono-digits">{bucketCount(itemSeries)}</td>
+                  <td className="mono">{bucketCount(itemSeries)}</td>
                   <td>{qualityLabel(pair?.values, finding?.reason)}</td>
-                  <td className="mono-digits">{item.canonical_hash}</td>
                   <td>{item.revision_context === 'not_applicable' ? '不适用' : '绑定修订'}</td>
-                  <td>{finding ? (REASON_LABELS[finding.reason] ?? finding.reason) : '可比较'}</td>
+                  <td className={finding ? 'record-compare-matrix__note--warn' : undefined}>
+                    {finding ? (REASON_LABELS[finding.reason] ?? finding.reason) : '可比较'}
+                  </td>
                 </tr>
               )
             })}
           </tbody>
         </table>
-      </div>
-    </section>
+      </ScrollRegion>
+    </div>
   )
 }
 

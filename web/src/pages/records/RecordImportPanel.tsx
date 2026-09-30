@@ -75,16 +75,14 @@ export function RecordImportPanel() {
 
   if (surface === 'deleted') {
     return (
-      <section className="card" aria-label="记录导入">
+      <section className="record-tool" aria-label="记录导入">
         <PageState kind="empty" title="导入计划已删除" description="当前预检已失效，请重新选择归档后再预检。" />
       </section>
     )
   }
 
   return (
-    <section className="card" aria-label="记录导入">
-      <h2>导入</h2>
-      <p>先预检机器归档，再确认应用。比较工作台不提供导入。</p>
+    <section className="record-tool" aria-label="记录导入">
       <Input
         label="归档文件"
         type="file"
@@ -96,13 +94,13 @@ export function RecordImportPanel() {
           setMessage('')
         }}
       />
-      <div className="page-form-actions">
-        <Button size="lg" variant="secondary" disabled={busy || !file} onClick={runDryRun}>预检导入</Button>
-        <Button size="lg" disabled={busy || !plan} onClick={runApply}>确认应用</Button>
+      <div className="record-tool__actions">
+        <Button size="md" variant="secondary" disabled={busy || !file} onClick={runDryRun}>预检导入</Button>
+        <Button size="md" disabled={busy || !plan} onClick={runApply}>确认应用</Button>
       </div>
-      {progress ? <p role="status">{progress}</p> : null}
+      {progress ? <p className="record-tool__message" role="status">{progress}</p> : null}
       {plan ? (
-        <ul>
+        <ul className="record-tool__list">
           {plan.remaps.map((remap) => (
             <li key={`${remap.entity_kind}-${remap.source_id}`}>
               {remap.entity_kind} {remap.source_id} → {remap.target_id}
@@ -113,7 +111,7 @@ export function RecordImportPanel() {
           ))}
         </ul>
       ) : null}
-      {message ? <p role="status">{message}</p> : null}
+      {message ? <p className="record-tool__message" role="status">{message}</p> : null}
     </section>
   )
 }

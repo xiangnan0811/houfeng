@@ -13,14 +13,13 @@ const IGNORED_FIELDS = new Set(['save_reason'])
 export function RecordSaveImpact({ baseline, payload }: RecordSaveImpactProps) {
   const changes = describeSaveImpact(baseline, payload)
   return (
-    <section className="card" aria-label="保存影响">
-      <h2 className="section-heading__title">保存影响</h2>
-      {changes.length === 0 ? <p className="text-muted">正式修订字段尚未变化</p> : (
-        <ul>
+    <div className="record-save-impact" role="group" aria-label="保存影响">
+      {changes.length === 0 ? <p className="record-muted">正式修订字段尚未变化</p> : (
+        <ul className="record-save-impact__list">
           {changes.map((change) => <li key={change}>{change}</li>)}
         </ul>
       )}
-    </section>
+    </div>
   )
 }
 

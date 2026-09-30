@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { RecordAction } from '../lib/types'
@@ -19,9 +19,11 @@ describe('RecordActionPanel', () => {
     render(<RecordActionPanel state="ready" actions={[action]} members={[{ id: 'usr_peer', label: '周衡' }]}
       busy={false} onCreate={onCreate} onUpdate={onUpdate} onTransition={onTransition} />)
 
+    expect(screen.queryByLabelText('行动标题')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '新增行动' }))
     fireEvent.change(screen.getByLabelText('行动标题'), { target: { value: '确认修复窗口' } })
     fireEvent.change(screen.getByLabelText('指派给'), { target: { value: 'usr_peer' } })
-    fireEvent.click(screen.getByRole('button', { name: '新增行动' }))
+    fireEvent.click(screen.getByRole('button', { name: '添加行动' }))
     expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ title: '确认修复窗口', assignee_id: 'usr_peer' }))
 
     fireEvent.click(screen.getByRole('button', { name: '完成“复核证据”' }))
@@ -50,7 +52,7 @@ describe('RecordActionPanel', () => {
 		expect(screen.getByText('协作权限已撤销')).toBeInTheDocument()
 		const freshAction = { ...action, version: 3, title: '重新授权后的标题', details: '重新授权后的详情' }
 		view.rerender(<RecordActionPanel state="ready" actions={[freshAction]} members={[]} busy={false} {...callbacks} />)
-		expect(screen.getByLabelText('行动标题')).toHaveValue('')
+		expect(screen.queryByLabelText('行动标题')).not.toBeInTheDocument()
 		expect(screen.queryByRole('button', { name: '保存行动' })).not.toBeInTheDocument()
 		fireEvent.click(screen.getByRole('button', { name: '编辑“重新授权后的标题”' }))
 		expect(screen.getByLabelText('行动标题')).toHaveValue('重新授权后的标题')
@@ -66,5 +68,23 @@ describe('RecordActionPanel', () => {
     render(<RecordActionPanel state={state} actions={[]} members={[]} busy={false}
       onCreate={vi.fn()} onUpdate={vi.fn()} onTransition={vi.fn()} />)
     expect(screen.getByText(label)).toBeInTheDocument()
+  })
+})
+
+describe('RecordActionPanel composer focus', () => {
+  it('moves focus into the title when opened and back to the trigger when cancelled', async () => {
+    render(<RecordActionPanel state="ready" actions={[]} members={[]} busy={false}
+      onCreate={vi.fn()} onUpdate={vi.fn()} onTransition={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '新增行动' }))
+    await waitFor(() => expect(screen.getByLabelText('行动标题')).toHaveFocus())
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '新增行动' })).toHaveFocus())
+  })
+
+  it('moves focus into the title when editing an existing action', async () => {
+    render(<RecordActionPanel state="ready" actions={[action]} members={[]} busy={false}
+      onCreate={vi.fn()} onUpdate={vi.fn()} onTransition={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: '编辑“复核证据”' }))
+    await waitFor(() => expect(screen.getByLabelText('行动标题')).toHaveFocus())
   })
 })

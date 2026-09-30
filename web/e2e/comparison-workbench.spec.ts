@@ -14,6 +14,7 @@ import {
 
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 1000 },
+  { name: 'tablet', width: 1024, height: 768 },
   { name: 'mobile', width: 390, height: 900 },
 ] as const
 
@@ -104,7 +105,8 @@ for (const viewport of VIEWPORTS) {
       if (!reviewHeading || !trendHeading) return false
       return (reviewHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0
     })).toBe(true)
-    await expect(page.getByRole('img', { name: /第 \d+ 项/ }).locator('polyline')).toHaveCount(2)
+    // 两段单桶序列各画一个点，缺口之间不连线。
+    await expect(page.getByRole('img', { name: /第 \d+ 项/ }).locator('[data-segment]')).toHaveCount(2)
 
     const save = page.getByRole('button', { name: '另存为记录' })
     await save.scrollIntoViewIfNeeded()
@@ -264,3 +266,45 @@ test('横向比较工作台 390px folds conditions and scrolls only the named ma
   expect((await heading.boundingBox())?.x).toBe(headingX)
   await expectNoDocumentOverflow(page)
 })
+
+const TREND_HREF = comparisonWorkbenchHref({
+  mode: 'fixed',
+  items: [{ snapshot_id: 'evs_cmpleft' }, { snapshot_id: 'evs_cmpright' }],
+  baseline: 0,
+  alignment: 'actual_coverage',
+  tolerance_seconds: 60,
+  kind: 'monitoring.host/v1',
+  metric: 'cpu_usage_pct',
+})
+
+for (const viewport of VIEWPORTS) {
+  test(`横向比较工作台 overlays every item in one bounded trend at ${viewport.width}x${viewport.height}`, async ({ api, page }) => {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    api.useProfile(comparisonWorkbenchProfile({ mode: 'host-trend' }))
+    await page.goto(TREND_HREF)
+
+    const chart = page.getByRole('img', { name: /cpu_usage_pct 趋势/ })
+    await expect(chart).toBeVisible()
+    // 第 1 项一段连续序列，第 2 项被一个缺口分成两段。
+    await expect(chart.locator('[data-segment]')).toHaveCount(3)
+    await expect(page.getByRole('list', { name: '图例' }).getByRole('listitem')).toHaveCount(2)
+    const chartBox = await chart.boundingBox()
+    expect(chartBox?.height ?? 0).toBeLessThanOrEqual(240)
+
+    // 长哈希只在折叠的技术细节里。
+    const hash = page.getByText('11'.repeat(32))
+    await expect(hash).toBeHidden()
+    await page.getByText('技术细节').click()
+    await expect(hash).toBeVisible()
+
+    const side = page.getByRole('heading', { name: /^比较对象/ })
+    const review = page.getByRole('heading', { name: '可比性审查' })
+    const sideBox = await side.boundingBox()
+    const reviewBox = await review.boundingBox()
+    if (!sideBox || !reviewBox) throw new Error('expected layout boxes')
+    if (viewport.width >= 1200) expect(reviewBox.x).toBeGreaterThan(sideBox.x + 300)
+    else expect(reviewBox.y).toBeGreaterThan(sideBox.y)
+    await expectNoDocumentOverflow(page)
+  })
+}

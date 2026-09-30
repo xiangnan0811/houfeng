@@ -97,7 +97,7 @@ describe('RecordSearchPage', () => {
     expect(screen.getByRole('heading', { name: '运维记录' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '横向比较' })).toHaveAttribute('href', '/records/compare')
     await screen.findByText('东京节点磁盘 IO 抖动')
-    expect(await screen.findByRole('heading', { name: '导出' })).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: '记录导出' })).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledWith('/api/records/search', expect.objectContaining({
       credentials: 'include',
     }))

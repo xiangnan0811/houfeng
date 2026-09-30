@@ -6,6 +6,7 @@ import { expectLocatorNotClipped, expectNoDocumentOverflow } from './support/geo
 
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 1000 },
+  { name: 'tablet', width: 1024, height: 768 },
   { name: 'mobile', width: 390, height: 900 },
 ] as const
 
@@ -52,7 +53,7 @@ for (const viewport of VIEWPORTS) {
     await page.goto('/records/new')
     await expect(page.getByRole('heading', { name: '新建运维记录' })).toBeVisible()
 
-    const openMaterials = page.getByRole('button', { name: '材料与引用' })
+    const openMaterials = page.getByRole('button', { name: '管理材料' })
     await openMaterials.scrollIntoViewIfNeeded()
     await expectLocatorNotClipped(openMaterials)
     await openMaterials.click()
@@ -125,14 +126,14 @@ for (const viewport of VIEWPORTS) {
     await page.goto('/records/rec_e2e001/edit')
     await expect(page.getByLabel('Markdown 源文')).toBeVisible()
 
-    const openMaterials = page.getByRole('button', { name: '材料与引用' })
+    const openMaterials = page.getByRole('button', { name: '管理材料' })
     await openMaterials.scrollIntoViewIfNeeded()
     await openMaterials.click()
 
     const drawer = page.getByRole('dialog', { name: '材料与引用' })
     await expect(drawer).toBeVisible()
-    await expect(drawer.getByText('证据 evs_e2ethirdnight')).toBeVisible()
-    await expect(drawer.getByText('附件 att_e2emtrreport')).toBeVisible()
+    await expect(drawer.getByText('evs_e2ethirdnight', { exact: true })).toBeVisible()
+    await expect(drawer.getByText('att_e2emtrreport', { exact: true })).toBeVisible()
 
     const insertAttachment = drawer.getByRole('button', { name: '插入附件 att_e2emtrreport' })
     await expectLocatorNotClipped(insertAttachment)
@@ -184,7 +185,7 @@ test('record material drawer has no serious or critical accessibility violations
   await page.setViewportSize({ width: 390, height: 900 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/records/new')
-  await page.getByRole('button', { name: '材料与引用' }).click()
+  await page.getByRole('button', { name: '管理材料' }).click()
   await expect(page.getByRole('dialog', { name: '材料与引用' })).toBeVisible()
 
   const result = await new AxeBuilder({ page }).analyze()
@@ -196,3 +197,129 @@ test('record material drawer has no serious or critical accessibility violations
     targets: violation.nodes.map((node) => node.target),
   }))).toEqual([])
 })
+
+for (const viewport of VIEWPORTS) {
+  test(`populated record reading layout keeps document, aside and collaboration ordered at ${viewport.width}x${viewport.height}`, async ({ api, page }) => {
+    api.useProfile(recordDetailProfile({ populated: true }))
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.goto('/records/rec_e2e001')
+
+    const document = page.getByRole('article', { name: '记录正文' })
+    const aside = page.getByRole('complementary', { name: '记录信息' })
+    const actionsHeading = page.getByRole('heading', { name: /^行动项/ })
+    await expect(actionsHeading).toBeVisible()
+    await expect(page.getByRole('navigation', { name: '正文大纲' })).toBeVisible()
+    const table = page.getByRole('region', { name: '正文表格' })
+    await expect(table).toHaveAttribute('tabindex', '0')
+    if (viewport.width < 500) {
+      // 七列宽表在窄屏只在自己的具名区域里横向滚动，键盘可以滚动它。
+      await table.scrollIntoViewIfNeeded()
+      expect(await table.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true)
+      await table.focus()
+      await page.keyboard.press('ArrowRight')
+      await expect.poll(() => table.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0)
+    }
+    await expect(page.getByRole('checkbox', { name: '已完成' })).toBeChecked()
+    // 阅读态不展示草稿同步状态，也不出现指向自身的"阅读"入口。
+    await expect(page.getByText('尚未创建草稿')).toHaveCount(0)
+    await expect(page.getByRole('link', { name: '阅读' })).toHaveCount(0)
+
+    const documentBox = await document.boundingBox()
+    const asideBox = await aside.boundingBox()
+    const actionsBox = await actionsHeading.boundingBox()
+    if (!documentBox || !asideBox || !actionsBox) throw new Error('expected layout boxes')
+    if (viewport.width >= 1200) {
+      expect(asideBox.x).toBeGreaterThan(documentBox.x + documentBox.width)
+      expect(documentBox.width).toBeGreaterThan(viewport.width * 0.45)
+    } else {
+      expect(asideBox.y).toBeGreaterThan(documentBox.y + documentBox.height)
+      expect(actionsBox.y).toBeGreaterThan(asideBox.y + asideBox.height)
+    }
+
+    // 计数是紧凑徽标，不会被拉成整行。
+    const count = actionsHeading.locator('.record-count')
+    await expect(count).toHaveText('2')
+    expect((await count.boundingBox())?.width ?? 999).toBeLessThan(40)
+
+    await expect(page.getByLabel('行动标题')).toHaveCount(0)
+    const addAction = page.getByRole('button', { name: '新增行动' })
+    await addAction.scrollIntoViewIfNeeded()
+    await addAction.click()
+    const actionTitle = page.getByLabel('行动标题')
+    await expect(actionTitle).toBeVisible()
+    const submitAction = page.getByRole('button', { name: '添加行动' })
+    await submitAction.scrollIntoViewIfNeeded()
+    await expectLocatorNotClipped(submitAction)
+    await page.getByRole('button', { name: '取消', exact: true }).click()
+    await expect(actionTitle).toHaveCount(0)
+    await expectNoDocumentOverflow(page)
+  })
+}
+
+test('record export and import open as dialogs from the header', async ({ api, page }) => {
+  api.useProfile(recordDetailProfile({ populated: true }))
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.goto('/records/rec_e2e001')
+
+  await expect(page.getByRole('region', { name: '记录导出' })).toHaveCount(0)
+  const exportButton = page.getByRole('button', { name: '导出', exact: true })
+  await exportButton.click()
+  const dialog = page.getByRole('dialog', { name: '导出记录' })
+  await expect(dialog.getByRole('region', { name: '记录导出' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '预览导出' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(exportButton).toBeFocused()
+
+  await page.getByRole('button', { name: '导入', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '导入记录' }).getByRole('region', { name: '记录导入' })).toBeVisible()
+})
+
+for (const viewport of VIEWPORTS) {
+  test(`historical revision keeps restore and folded body diff reachable at ${viewport.width}x${viewport.height}`, async ({ api, page }) => {
+    api.useProfile(recordDetailProfile({ populated: true }))
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.goto('/records/rec_e2e001/revisions/rrv_e2e001')
+
+    await expect(page.getByText('历史修订 #2')).toBeVisible()
+    await expect(page.getByRole('link', { name: '当前版本' })).toHaveAttribute('href', '/records/rec_e2e001')
+    const diff = page.getByRole('region', { name: '与当前版本的差异' })
+    await expect(diff).toBeVisible()
+    const hunks = diff.getByRole('region', { name: '正文差异' })
+    await expect(hunks).toBeHidden()
+    await diff.locator('summary').click()
+    await expect(hunks).toBeVisible()
+
+    const restore = page.getByRole('button', { name: '恢复为新修订' })
+    await restore.scrollIntoViewIfNeeded()
+    await expectLocatorNotClipped(restore)
+    await expect(page.getByLabel('恢复原因')).toHaveValue('恢复历史修订')
+    await expectNoDocumentOverflow(page)
+  })
+}
+
+for (const viewport of VIEWPORTS) {
+  test(`record editor keeps attributes beside or below the editor at ${viewport.width}x${viewport.height}`, async ({ api, page }) => {
+    api.useProfile(recordDetailProfile({ populated: true }))
+    await page.setViewportSize({ width: viewport.width, height: viewport.height })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.goto('/records/rec_e2e001/edit')
+
+    const editor = page.getByRole('region', { name: '正文编辑' })
+    const aside = page.getByRole('complementary', { name: '记录属性' })
+    await expect(page.getByLabel('Markdown 源文')).toBeVisible()
+    await expect(aside.getByLabel('记录类型')).toHaveValue('troubleshooting')
+    await expect(aside.getByRole('checkbox', { name: '周衡' })).toBeChecked()
+    // 源文代码块里的 "# 复现丢包" 不进入大纲。
+    await expect(aside.getByRole('navigation', { name: '正文大纲' }).getByText('复现丢包')).toHaveCount(0)
+    const editorBox = await editor.boundingBox()
+    const asideBox = await aside.boundingBox()
+    if (!editorBox || !asideBox) throw new Error('expected layout boxes')
+    if (viewport.width >= 1200) expect(asideBox.x).toBeGreaterThan(editorBox.x + editorBox.width)
+    else expect(asideBox.y).toBeGreaterThan(editorBox.y + editorBox.height)
+    await expectLocatorNotClipped(page.getByRole('button', { name: '发布修订' }))
+    await expectNoDocumentOverflow(page)
+  })
+}

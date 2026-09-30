@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -145,12 +145,14 @@ describe('RecordWorkspace', () => {
       </MemoryRouter>,
     )
     expect(await screen.findByRole('heading', { name: 'Database outage' })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: '导出' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: '材料与引用' }))
-    expect(screen.getByText('ev_hist')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '导出' })).toBeInTheDocument()
+    const materials = screen.getByRole('list', { name: '材料清单' })
+    expect(within(materials).getByText('ev_hist')).toBeInTheDocument()
+    expect(within(materials).getByRole('link', { name: '查看证据' })).toHaveAttribute('href', '/evidence/ev_hist')
     expect(screen.queryByText('ev_current')).toBeNull()
-    expect(screen.getByRole('button', { name: '插入证据 ev_hist' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '移除证据 ev_hist' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '管理材料' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '插入证据 ev_hist' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '移除证据 ev_hist' })).toBeNull()
   })
 
   it('navigates to the record after restoring a historical revision', async () => {
@@ -392,7 +394,7 @@ describe('RecordWorkspace', () => {
       </MemoryRouter>,
     )
 
-    expect(await screen.findByRole('link', { name: '阅读' })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: '当前版本' })).toHaveAttribute(
       'href',
       `/records/rec_001?${subjectReturnQuery}`,
     )
