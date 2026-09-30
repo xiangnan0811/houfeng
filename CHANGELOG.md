@@ -27,6 +27,14 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.8.1](https://github.com/xiangnan0811/houfeng/compare/v1.8.0...v1.8.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* 决定不续费的 VPS 不再提示续费临近，改为核对服务商自动续费 ([0dcc289](https://github.com/xiangnan0811/houfeng/commit/0dcc289682a493f49f5fb478bf96b3e841e1134b))
+* 决定不续费的 VPS 不再提示续费临近，改为核对服务商自动续费 ([2b19f2b](https://github.com/xiangnan0811/houfeng/commit/2b19f2bd8ec500da0614a4a0ca02bd2059ffc44b))
+
 ## [1.8.0](https://github.com/xiangnan0811/houfeng/compare/v1.7.0...v1.8.0) (2026-09-30)
 
 
