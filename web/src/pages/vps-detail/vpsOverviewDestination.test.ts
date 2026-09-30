@@ -66,6 +66,11 @@ describe('resolveVPSOverviewAnomalyDestination', () => {
       expected: { kind: 'command', command: 'open_renewal_decision' },
     },
     {
+      ruleId: 'renewal.cancel.auto_renew_unverified.v1',
+      action: { id: 'open_renewal_decision' },
+      expected: { kind: 'command', command: 'open_renewal_decision' },
+    },
+    {
       ruleId: 'monitoring.unlinked.v1',
       action: { id: 'open_monitoring_instances' },
       expected: { kind: 'command', command: 'open_monitoring_onboarding' },

@@ -67,6 +67,7 @@
 - 成员级 `decided_action=cancel` 或 `open_archive_preview` 只能给前端提供跳转到 VPS lifecycle workbench 的入口；后端 records API 不做批量取消、批量退役或批量迁移。
 - 成员级 execution plan 的 cancel / retire lane 只能编排到 `open_archive_preview`；migration lane 只能编排到 VPS detail 复核迁移意向并人工跟进，`step_label` 不得写成“推进迁移”或暗示已有迁移工作台；evidence lane 对缺订阅优先 `open_subscription_context`，其余证据缺口走 VPS detail；`current_fact_missing`、空动作或不能安全归类的成员必须走 `review_record`。
 - Group type 固定语义：`renewal_attention`、`cancellation_attention`、`region_portfolio`、`provider_portfolio`、`cost_pressure`、`evidence_gap`。
+- 成员 `renewal_within_window` 表示仍待取舍的续费落在窗口内：`renewal_decision=cancel` 恒为 false，因此决定不续费的 VPS 不进入 `renewal_attention`、不计入 `renewal_window_count`、不带「续费临近」chip / 对比风险；仍可能扣费的情况只由 `cancellation_attention`（自动续费未核对为关闭）承接。`keep` 仍不进入 `renewal_attention`。
 - `renew_within_days` 默认 30，仅允许产品认可的窗口（当前 `30/60/90`）；非法值在 handler 返回 400。
 - `view` 只筛选返回的自动组，不改变底层事实读取；`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 是列表上下文筛选，只筛出相关组/手工组合/记录，不裁剪 group detail 成员；非法值返回 400。
 - Store 读取现有表后在 Go 中派生组合摘要和成员建议，避免 Dashboard / VPS / Subscription / Provider 页面各自重复 join 后语义漂移。

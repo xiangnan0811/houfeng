@@ -19,6 +19,7 @@ const (
 	RuleRenewalDueSoon             = "renewal.due.soon.v1"
 	RuleRenewalOverdue             = "renewal.overdue.v1"
 	RuleRenewalSubscriptionMissing = "renewal.subscription.missing.v1"
+	RuleRenewalCancelAutoRenew     = "renewal.cancel.auto_renew_unverified.v1"
 	RuleLifecycleBlocker           = "lifecycle.blocker.v1"
 	RuleSourceUnavailable          = "source.unavailable.v1"
 )
@@ -51,6 +52,7 @@ type Snapshot struct {
 	ActiveSubscriptions   int
 	NextRenewAt           *time.Time
 	RenewalDecision       string
+	AutoRenewCheck        string
 	LifecycleStatus       string
 
 	JudgementSourcesUnavailable []string
@@ -174,7 +176,9 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				},
 			})
 		}
-		if snapshot.NextRenewAt != nil {
+		// 决定不续费后，登记续费日只是到期日而非待办；是否仍会扣费由下方的
+		// 自动续费核对规则单独提示，避免与用户已作出的决定相矛盾。
+		if snapshot.NextRenewAt != nil && !cancellationDecided(snapshot.RenewalDecision) {
 			renewDay := calendarDayUTC(*snapshot.NextRenewAt)
 			generatedDay := calendarDayUTC(snapshot.GeneratedAt)
 			dueInDays := int(renewDay.Sub(generatedDay).Hours() / 24)
@@ -202,6 +206,25 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 				})
 			}
 		}
+	}
+
+	// 这是当前待核对状态而非已发生的事件，不带 EventAt：远期续费日不能把它排到实时告警前面。
+	if cancellationDecided(snapshot.RenewalDecision) && !autoRenewVerifiedOff(snapshot.AutoRenewCheck) {
+		anomaly := Anomaly{
+			RuleID:   RuleRenewalCancelAutoRenew,
+			Severity: SeverityNotice,
+			Title:    "决定不续费，自动续费待核对",
+			Detail:   "尚未核对服务商是否已关闭自动续费",
+			Source:   "renewal",
+			Primary: &AnomalyAction{
+				ID: "open_renewal_decision", Label: "核对自动续费",
+			},
+		}
+		if snapshot.AutoRenewCheck == "enabled" {
+			anomaly.Severity = SeverityWarning
+			anomaly.Detail = "服务商自动续费仍开启，到期可能继续扣费"
+		}
+		anomalies = append(anomalies, anomaly)
 	}
 
 	if len(snapshot.JudgementSourcesUnavailable) > 0 {
@@ -253,6 +276,21 @@ func healthSeverity(health string) AnomalySeverity {
 func isAdverseMonitoringHealth(health string) bool {
 	switch health {
 	case "关注", "告警", "严重":
+		return true
+	default:
+		return false
+	}
+}
+
+func cancellationDecided(decision string) bool {
+	return decision == "cancel"
+}
+
+// autoRenewVerifiedOff 与资产决策的取消关注口径一致：只有人工核对为已关闭、
+// 从未开启或不支持时，才视为不会再自动扣费。
+func autoRenewVerifiedOff(check string) bool {
+	switch check {
+	case "disabled", "never_enabled", "unsupported":
 		return true
 	default:
 		return false

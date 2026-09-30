@@ -561,6 +561,20 @@ describe('Records API transport', () => {
     ])
   })
 
+  it('decodes the no-renewal auto-renew verification rule instead of rejecting the overview', async () => {
+    const wire = mutateVPSOverview((value) => {
+      const anomaly = fixtureObject(fixtureArray(value.anomalies)[0])
+      anomaly.rule_id = 'renewal.cancel.auto_renew_unverified.v1'
+      anomaly.source = 'renewal'
+      anomaly.primary_action = { id: 'open_renewal_decision', label: '核对自动续费' }
+    })
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+
+    const overview = await getVPSOverview('vps_001')
+    expect(overview.anomalies[0]?.rule_id).toBe('renewal.cancel.auto_renew_unverified.v1')
+    expect(overview.anomalies[0]?.primary_action?.id).toBe('open_renewal_decision')
+  })
+
   it('rejects a valid overview whose identity belongs to another requested VPS', async () => {
     const wire = vpsOverviewResponse()
     wire.identity.vps_id = 'vps_private_other'

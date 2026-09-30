@@ -55,6 +55,37 @@ func TestDeriveGroupsBuildsPortfolioDecisionGroups(t *testing.T) {
 	}
 }
 
+func TestDeriveGroupsDoesNotChaseRenewalForNoRenewalDecision(t *testing.T) {
+	verified := fact("vps_cancel_verified", "Cancel Verified", "pv_bage", "bage", "United States", "CA", "Los Angeles", vpsassets.UsageIdle, sub("sub_1", 2, 2))
+	verified.VPS.RenewalDecision = vpsassets.RenewalCancel
+	verified.VPS.AutoRenewCheck = "disabled"
+	unverified := fact("vps_cancel_unchecked", "Cancel Unchecked", "pv_bage", "bage", "United States", "CA", "Los Angeles", vpsassets.UsageIdle, sub("sub_2", 2, 2))
+	unverified.VPS.RenewalDecision = vpsassets.RenewalCancel
+	unverified.VPS.AutoRenewCheck = "unchecked"
+
+	groups, err := DeriveGroups([]Fact{verified, unverified}, ListFilters{RenewWithinDays: 30})
+	if err != nil {
+		t.Fatalf("DeriveGroups() error = %v", err)
+	}
+	if hasGroupType(groups, GroupRenewalAttention) {
+		t.Fatalf("groups = %#v, no-renewal VPS must not enter renewal attention", groups)
+	}
+	cancellation := firstGroup(groups, GroupCancellationAttention)
+	if cancellation.MemberCount != 1 || comparisonMemberByID(cancellation.Members, "vps_cancel_unchecked").VPS.VPSID == "" {
+		t.Fatalf("cancellation group = %#v, want only the unverified VPS", cancellation.GroupSummary)
+	}
+	if cancellation.RenewalWindowCount != 0 {
+		t.Fatalf("renewal window count = %d, want 0 for no-renewal members", cancellation.RenewalWindowCount)
+	}
+	for _, member := range cancellation.Members {
+		for _, chip := range member.EvidenceChips {
+			if chip.Kind == EvidenceRenewalDue {
+				t.Fatalf("member chips = %#v, no-renewal VPS must not show 续费临近", member.EvidenceChips)
+			}
+		}
+	}
+}
+
 func TestEvidenceAssessmentRatesCompleteEvidenceAsDecisionReady(t *testing.T) {
 	facts := []Fact{
 		fact("vps_de_1", "DE Primary", "pv_hetzner", "Hetzner", "Germany", "Hesse", "Falkenstein", vpsassets.UsageInUse, sub("sub_1", 12, 120)),

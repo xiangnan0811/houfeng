@@ -504,6 +504,7 @@ const VPS_OVERVIEW_ANOMALY_RULES = [
   'renewal.subscription.missing.v1',
   'renewal.due.soon.v1',
   'renewal.overdue.v1',
+  'renewal.cancel.auto_renew_unverified.v1',
   'lifecycle.blocker.v1',
   'source.unavailable.v1',
 ] as const

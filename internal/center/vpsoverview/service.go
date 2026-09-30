@@ -625,6 +625,7 @@ func snapshotFromSources(
 		Identity:             identity,
 		LifecycleStatus:      identity.LifecycleStatus,
 		RenewalDecision:      identity.RenewalDecision,
+		AutoRenewCheck:       identity.AutoRenewCheck,
 		MonitoringHealth:     monitoring.Health,
 		MonitoringStatus:     monitoring.Status,
 		MonitoringDetail:     monitoring.Detail,
