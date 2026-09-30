@@ -255,7 +255,9 @@ export function buildDecisionQueue(
     .map((vps) => {
       const subscription = selectPrimarySubscription(subscriptionsByVPS, vps.vps_id)
       const qualityIssues = buildVPSQualityIssues(vps, subscription)
-      const renewalDue = isSubscriptionInRenewalWindow(subscription, renewalWindow)
+      // 与后端 renewal_within_window 同口径：决定不续费后登记续费日只是到期日，不再算续费待办
+      const renewalDue = vps.renewal_decision !== 'cancel'
+        && isSubscriptionInRenewalWindow(subscription, renewalWindow)
       return {
         vps,
         subscription,

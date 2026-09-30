@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -175,6 +176,66 @@ func TestServiceGetHealthyOverview(t *testing.T) {
 		if contains(body, forbidden) {
 			t.Fatalf("leaked %s in %s", forbidden, body)
 		}
+	}
+}
+
+func TestServiceGetNoRenewalUsesIdentityAutoRenewCheck(t *testing.T) {
+	now := time.Date(2026, 9, 30, 2, 0, 0, 0, time.UTC)
+	renewAt := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	cases := []struct {
+		check       string
+		wantRules   []string
+		wantOverall string
+	}{
+		{check: "disabled", wantRules: []string{}, wantOverall: "healthy"},
+		{check: "unchecked", wantRules: []string{RuleRenewalCancelAutoRenew}, wantOverall: "notice"},
+		{check: "enabled", wantRules: []string{RuleRenewalCancelAutoRenew}, wantOverall: "attention"},
+	}
+	for _, tt := range cases {
+		t.Run(tt.check, func(t *testing.T) {
+			sources := &fakeSources{bundle: SourceBundle{
+				Identity: Identity{
+					VPSID: "vps_3dd7916ab0738da6", DisplayName: "bage-us",
+					LifecycleStatus: "active", RenewalDecision: "cancel", AutoRenewCheck: tt.check,
+					Labels: []string{}, UpdatedAt: now,
+				},
+				MonitoringSection:   SectionState{State: SectionReady},
+				MonitoringHealth:    "正常",
+				MonitoringStatus:    "启用",
+				IPSection:           SectionState{State: SectionReady},
+				IPStatus:            "success",
+				IPRiskLevel:         "low",
+				RenewalSection:      SectionState{State: SectionReady},
+				ActiveSubscriptions: 1,
+				NextRenewAt:         &renewAt,
+				Facts:               []Fact{},
+				Relations:           []RelationSummary{},
+			}}
+			activityLister := &fakeActivity{result: activity.ListResult{
+				Items:     []activity.Event{},
+				Freshness: activity.Freshness{State: "ready"},
+			}}
+			service, err := NewServiceWithClock(sources, activityLister, func() time.Time { return now }, time.Second)
+			if err != nil {
+				t.Fatalf("NewService: %v", err)
+			}
+			overview, err := service.Get(context.Background(), Request{
+				Actor: testOverviewActor(t), VPSID: "vps_3dd7916ab0738da6",
+			})
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			rules := make([]string, 0, len(overview.Anomalies))
+			for _, anomaly := range overview.Anomalies {
+				rules = append(rules, anomaly.RuleID)
+			}
+			if !reflect.DeepEqual(rules, tt.wantRules) {
+				t.Fatalf("rules = %v, want %v", rules, tt.wantRules)
+			}
+			if overview.Summary.Overall.Status != tt.wantOverall {
+				t.Fatalf("overall = %s, want %s", overview.Summary.Overall.Status, tt.wantOverall)
+			}
+		})
 	}
 }
 

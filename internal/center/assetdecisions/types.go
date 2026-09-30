@@ -1047,7 +1047,9 @@ func buildMember(fact Fact, filters ListFilters) GroupMember {
 		PrimaryIssueSummary:       fact.PrimaryIssueSummary,
 		SourceAvailability:        fact.SourceAvailability,
 	}
-	member.RenewalWithinWindow = renewalWithinWindow(fact.PrimarySubscription, filters.RenewWithinDays)
+	// 决定不续费后登记续费日只是到期日，不再是续费取舍；仍可能扣费的情况由取消关注承接。
+	member.RenewalWithinWindow = fact.VPS.RenewalDecision != vpsassets.RenewalCancel &&
+		renewalWithinWindow(fact.PrimarySubscription, filters.RenewWithinDays)
 	member.CancellationAttentionReason = cancellationReason(fact)
 	member.EvidenceChips = buildEvidenceChips(fact, member.RenewalWithinWindow)
 	member.SuggestedRole, member.SuggestedAction = suggestMember(member)

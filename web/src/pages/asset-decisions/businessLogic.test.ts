@@ -163,6 +163,26 @@ describe('Asset Decisions decision queue model', () => {
     expect(filterDecisionQueue(rows, 'unlinked').map((row) => row.vps.vps_id)).toEqual(['vps_missing'])
   })
 
+  it('does not count a no-renewal VPS as renewal due even inside the window', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-09-30T08:00:00Z'))
+
+    const noRenewal = assetVPS({ vps_id: 'vps_no_renewal', renewal_decision: 'cancel', auto_renew_check: 'disabled' })
+    const keep = assetVPS({ vps_id: 'vps_keep', renewal_decision: 'keep' })
+    const rows = buildDecisionQueue(
+      [noRenewal, keep],
+      new Map<string, SubscriptionRecord[]>([
+        [noRenewal.vps_id, [assetSubscription({ vps_id: noRenewal.vps_id, renew_at: '2026-10-02', status: 'active' })]],
+        [keep.vps_id, [assetSubscription({ subscription_id: 'sub_keep', vps_id: keep.vps_id, renew_at: '2026-10-02', status: 'active' })]],
+      ]),
+      30,
+    )
+
+    expect(rows.find((row) => row.vps.vps_id === 'vps_no_renewal')?.renewalDue).toBe(false)
+    expect(filterDecisionQueue(rows, 'renewal').map((row) => row.vps.vps_id)).toEqual(['vps_keep'])
+    expect(rows[0]?.vps.vps_id).toBe('vps_keep')
+  })
+
   it('uses provider verification independently of lifecycle and subscription', () => {
     const cancellationDecision = queueItem(assetVPS({ ...cancelVPS } as Partial<VPSAssetRecord>))
     const inactiveSubscription = queueItem(

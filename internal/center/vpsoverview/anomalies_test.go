@@ -82,6 +82,87 @@ func TestEvaluateAnomaliesRenewalWindowBoundaries(t *testing.T) {
 	}
 }
 
+func TestEvaluateAnomaliesCancelDecisionReplacesRenewalReminder(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	dueSoon := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	overdue := now.Add(-24 * time.Hour)
+	cases := []struct {
+		name         string
+		renewAt      *time.Time
+		check        string
+		wantRule     string
+		wantSeverity AnomalySeverity
+	}{
+		{name: "verified disabled within window stays quiet", renewAt: &dueSoon, check: "disabled"},
+		{name: "verified disabled overdue stays quiet", renewAt: &overdue, check: "disabled"},
+		{name: "never enabled stays quiet", renewAt: &dueSoon, check: "never_enabled"},
+		{name: "unsupported stays quiet", renewAt: &dueSoon, check: "unsupported"},
+		{name: "unchecked asks for verification", renewAt: &dueSoon, check: "unchecked", wantRule: RuleRenewalCancelAutoRenew, wantSeverity: SeverityNotice},
+		{name: "empty check asks for verification", renewAt: &dueSoon, check: "", wantRule: RuleRenewalCancelAutoRenew, wantSeverity: SeverityNotice},
+		{name: "enabled warns about continued billing", renewAt: &overdue, check: "enabled", wantRule: RuleRenewalCancelAutoRenew, wantSeverity: SeverityWarning},
+		{name: "unchecked without renewal date still asks", check: "unchecked", wantRule: RuleRenewalCancelAutoRenew, wantSeverity: SeverityNotice},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			got := EvaluateAnomalies(Snapshot{
+				GeneratedAt: now, VPSID: "vps_3dd7916ab0738da6",
+				SubscriptionAvailable: true, ActiveSubscriptions: 1, NextRenewAt: tt.renewAt,
+				LifecycleStatus: "active", RenewalDecision: "cancel", AutoRenewCheck: tt.check,
+			})
+			for _, anomaly := range got {
+				if anomaly.RuleID == RuleRenewalDueSoon || anomaly.RuleID == RuleRenewalOverdue {
+					t.Fatalf("cancel decision must not emit renewal reminder: %#v", got)
+				}
+			}
+			if tt.wantRule == "" {
+				if len(got) != 0 {
+					t.Fatalf("anomalies = %#v, want empty", got)
+				}
+				return
+			}
+			if len(got) != 1 || got[0].RuleID != tt.wantRule || got[0].Severity != tt.wantSeverity {
+				t.Fatalf("anomalies = %#v, want single %s/%s", got, tt.wantRule, tt.wantSeverity)
+			}
+		})
+	}
+}
+
+func TestEvaluateAnomaliesAutoRenewCheckDoesNotOutrankLiveWarnings(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	farRenewal := time.Date(2028, 9, 30, 0, 0, 0, 0, time.UTC)
+	observed := now.Add(-time.Hour)
+	got := EvaluateAnomalies(Snapshot{
+		GeneratedAt: now, VPSID: "vps_3dd7916ab0738da6",
+		MonitoringAvailable: true, MonitoringHealth: "告警", MonitoringObserved: &observed,
+		MonitoringInstanceID:  "mi_7c2a4e18b09d5f31",
+		SubscriptionAvailable: true, ActiveSubscriptions: 1, NextRenewAt: &farRenewal,
+		LifecycleStatus: "active", RenewalDecision: "cancel", AutoRenewCheck: "enabled",
+	})
+	if len(got) != 2 || got[0].RuleID != RuleMonitoringHealthAbnormal || got[1].RuleID != RuleRenewalCancelAutoRenew {
+		t.Fatalf("anomalies = %#v, want live monitoring warning before auto renew check", got)
+	}
+	if got[1].EventAt != nil {
+		t.Fatalf("auto renew check event_at = %v, want nil for a current-state item", got[1].EventAt)
+	}
+}
+
+func TestEvaluateAnomaliesNonCancelDecisionsKeepRenewalReminder(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+	dueSoon := time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)
+	for _, decision := range []string{"", "unreviewed", "keep"} {
+		t.Run(decision, func(t *testing.T) {
+			got := EvaluateAnomalies(Snapshot{
+				GeneratedAt: now, VPSID: "vps_3dd7916ab0738da6",
+				SubscriptionAvailable: true, ActiveSubscriptions: 1, NextRenewAt: &dueSoon,
+				LifecycleStatus: "active", RenewalDecision: decision, AutoRenewCheck: "unchecked",
+			})
+			if len(got) != 1 || got[0].RuleID != RuleRenewalDueSoon {
+				t.Fatalf("anomalies = %#v, want only %s", got, RuleRenewalDueSoon)
+			}
+		})
+	}
+}
+
 func TestEvaluateAnomaliesTable(t *testing.T) {
 	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
 	renew := now.Add(3 * 24 * time.Hour)
@@ -296,6 +377,16 @@ func TestEvaluateAnomaliesActionDestinations(t *testing.T) {
 			},
 			ruleID: RuleRenewalDueSoon, actionID: "open_renewal_decision",
 			actionLabel: "查看续费",
+		},
+		{
+			name: "cancel with unverified auto renew opens the decision panel",
+			snapshot: Snapshot{
+				GeneratedAt: now, VPSID: vpsID, SubscriptionAvailable: true,
+				ActiveSubscriptions: 1, NextRenewAt: &renew, LifecycleStatus: "active",
+				RenewalDecision: "cancel", AutoRenewCheck: "unchecked",
+			},
+			ruleID: RuleRenewalCancelAutoRenew, actionID: "open_renewal_decision",
+			actionLabel: "核对自动续费",
 		},
 		{
 			name: "source unavailable is a page-owned refresh command",

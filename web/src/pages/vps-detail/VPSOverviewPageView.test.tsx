@@ -518,6 +518,40 @@ describe('VPSOverviewPageView', () => {
     expect(refresh).toHaveBeenCalledTimes(1)
   })
 
+  it('asks a no-renewal VPS to verify supplier auto renew instead of chasing renewal', () => {
+    const management = managementStub()
+    const overview = healthyOverview()
+    overview.identity = { ...overview.identity, renewal_decision: 'cancel', auto_renew_check: 'unchecked' }
+    overview.anomalies = [
+      {
+        rule_id: 'renewal.cancel.auto_renew_unverified.v1',
+        severity: 'notice',
+        title: '决定不续费，自动续费待核对',
+        detail: '尚未核对服务商是否已关闭自动续费',
+        source: 'renewal',
+        primary_action: { id: 'open_renewal_decision', label: '核对自动续费' },
+        secondary_actions: [],
+      },
+    ]
+
+    render(
+      <MemoryRouter initialEntries={['/vps/vps_001']}>
+        <VPSOverviewPageView
+          overview={overview}
+          management={management}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { name: '决定不续费，自动续费待核对' })).toBeInTheDocument()
+    expect(screen.getByText('尚未核对服务商是否已关闭自动续费')).toBeInTheDocument()
+    expect(screen.queryByText('续费临近')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '核对自动续费' }))
+    expect(management.openPanel).toHaveBeenCalledWith('decision')
+  })
+
   it('shows a refresh failure without clearing last successful overview', () => {
     render(
       <MemoryRouter>

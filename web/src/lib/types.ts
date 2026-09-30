@@ -3531,6 +3531,7 @@ export type VPSOverviewAnomalyRuleID =
   | 'ip_quality.missing.v1'
   | 'renewal.due.soon.v1'
   | 'renewal.overdue.v1'
+  | 'renewal.cancel.auto_renew_unverified.v1'
   | 'renewal.subscription.missing.v1'
   | 'lifecycle.blocker.v1'
   | 'source.unavailable.v1'

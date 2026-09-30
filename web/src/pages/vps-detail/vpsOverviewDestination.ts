@@ -111,6 +111,10 @@ const anomalyDestinations: Readonly<Record<string, ExpectedDestination>> = {
     kind: 'command',
     command: 'open_renewal_decision',
   },
+  'renewal.cancel.auto_renew_unverified.v1\u0000open_renewal_decision': {
+    kind: 'command',
+    command: 'open_renewal_decision',
+  },
   'lifecycle.blocker.v1\u0000open_management': {
     kind: 'command',
     command: 'open_management',
