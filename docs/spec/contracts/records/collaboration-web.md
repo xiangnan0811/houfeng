@@ -104,7 +104,8 @@ RecordInboxPage                       route-owned list/target/transition orchest
   focus hook，覆盖 initial focus、Tab、Escape、close 后 focus restore。不得复制 ad-hoc
   focus trap。
 - 390px 保持 tap target、无 viewport overflow、明确 keyboard focus；桌面/移动都要 Axe。
-- 不为本 slice 新增 CSS source 或抬 budget；复用现有 token/atom/page/card/badge classes。
+- 协作组件样式与记录工作区同属路由 CSS `web/src/pages/records/RecordWorkspace.css`（由记录路由懒加载，test-only harness 同样导入）；不得为组件单独新建 CSS 或抬 budget。
+- 行动项新增表单默认收起，由"新增行动"展开，编辑已有行动时同一表单带入字段；标题计数为零时中性。评论的回复 / 编辑 / 遮盖是紧凑按钮（可访问名称仍为"回复该评论 / 编辑该评论 / 请求遮盖该评论"），提及成员为 chip 复选框。关注偏好是 pressed 按钮组，"必要通知仍会送达"的说明只在静默时显示。
 
 ## 4. Validation & Error Matrix
 

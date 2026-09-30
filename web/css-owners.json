@@ -32,6 +32,7 @@
     "shared-atoms-page": [
       "src/index.css",
       "src/pages/LoginPage.css",
+      "src/pages/records/RecordWorkspace.css",
       "src/styles/modernize.css",
       "src/styles/partials/atoms.css",
       "src/styles/partials/base.css",

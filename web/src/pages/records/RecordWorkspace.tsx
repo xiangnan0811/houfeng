@@ -1,64 +1,33 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { RecordActionPanel } from '../../components/RecordActionPanel'
 import { RecordCommentThread } from '../../components/RecordCommentThread'
-import { RecordRevisionCollaborationControls } from '../../components/RecordRevisionCollaborationControls'
 import { RecordWatchControl } from '../../components/RecordWatchControl'
 import { PageState } from '../../components/PageState'
-import { DetailSection } from '../../components/DetailSection'
-import { Button, Input, Select } from '../../components/atoms'
 import { useAuth } from '../../lib/auth-context'
-import {
-  createRecordAction,
-  createRecordComment,
-  editRecordComment,
-  getRecordWatch,
-  listRecordActions,
-  listRecordComments,
-  redactRecordComment,
-  setRecordWatch,
-  transitionRecordAction,
-  updateRecordAction,
-} from '../../lib/recordCollaborationApi'
-import { ApiError } from '../../lib/apiRequest'
-import type { RecordAction, RecordBusinessStatus, RecordComment, RecordType, RecordWatch } from '../../lib/types'
-import type { RecordCollaborationSurfaceState } from '../../components/RecordCollaborationState'
-import { MarkdownSourceEditor } from './editor/MarkdownSourceEditor'
+import { decodeRenderModelStatusV1, insertMaterialToken } from '../../lib/documentMarkdown'
+import { PromoteChecklistActionDialog } from './editor/PromoteChecklistActionDialog'
+import { RecordConflictResolver } from './editor/RecordConflictResolver'
+import { RecordMaterialDrawer, type RecordMaterialItem } from './editor/RecordMaterialDrawer'
+import { RevisionDiff } from './editor/RevisionDiff'
+import { useRecordDraft, type RecordWorkspaceMode } from './hooks/useRecordDraft'
+import { parseSubjectActivityRoute, type SubjectRouteRef } from './activity/activityQueryState'
+import { returnVPSIdFromNavigationState, withReturnVPSQuery } from '../monitoring-detail/monitoringDetailHelpers'
+import { insertMarkdownSnippet, templateMarkdownForType } from './recordWorkspaceModel'
+import { recordSubjectPrefillFromSearchParams } from './searchFilterModel'
+import { draftBufferRecordId } from './draftBuffer'
+import { RecordEditorAside } from './workspace/RecordEditorAside'
+import { RecordEditorPanel, type RecordEditorLayout } from './workspace/RecordEditorPanel'
+import { RecordReadingAside } from './workspace/RecordReadingAside'
+import { RecordToolDialogs, type RecordTool } from './workspace/RecordToolDialogs'
+import { RecordWorkspaceHeader } from './workspace/RecordWorkspaceHeader'
+import { useRecordCollaboration } from './workspace/useRecordCollaboration'
+import './RecordWorkspace.css'
 
 const MarkdownPreview = lazy(() => import('./editor/MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
 })))
-const RecordExportPanel = lazy(() => import('./RecordExportPanel').then((module) => ({
-  default: module.RecordExportPanel,
-})))
-const RecordImportPanel = lazy(() => import('./RecordImportPanel').then((module) => ({
-  default: module.RecordImportPanel,
-})))
-import { PromoteChecklistActionDialog } from './editor/PromoteChecklistActionDialog'
-import { RecordConflictResolver } from './editor/RecordConflictResolver'
-import { decodeRenderModelStatusV1, insertMaterialToken } from '../../lib/documentMarkdown'
-import { RecordMaterialDrawer, type RecordMaterialItem } from './editor/RecordMaterialDrawer'
-import { RecordOutline } from './editor/RecordOutline'
-import { RecordSaveImpact } from './editor/RecordSaveImpact'
-import { RevisionDiff } from './editor/RevisionDiff'
-import { useRecordDraft, type RecordWorkspaceMode } from './hooks/useRecordDraft'
-import { comparisonEntryHref, comparisonSubjectsFromSources } from './compare/comparisonQueryState'
-import { parseSubjectActivityRoute, type SubjectRouteRef } from './activity/activityQueryState'
-import { returnVPSIdFromNavigationState, withReturnVPSQuery } from '../monitoring-detail/monitoringDetailHelpers'
-import { labelOptions, RECORD_SUBJECT_KIND_LABELS, RECORD_TYPE_LABELS } from './recordLabels'
-import {
-  applyRecordTypeChange,
-  BUSINESS_STATUS_LABELS,
-  businessStatusesForType,
-  insertMarkdownSnippet,
-  patchPrimarySubject,
-  templateMarkdownForType,
-  typeSupportsBusinessStatus,
-} from './recordWorkspaceModel'
-import { recordSubjectPrefillFromSearchParams } from './searchFilterModel'
-import { draftBufferRecordId } from './draftBuffer'
-
 
 type RecordWorkspaceProps = {
   mode: RecordWorkspaceMode
@@ -121,19 +90,13 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
     ...(revisionId ? { revisionId } : {}),
     ...(seedSubjects ? { seedSubjects } : {}),
   })
-  const [layout, setLayout] = useState<'edit' | 'split' | 'preview'>('split')
+  const collaboration = useRecordCollaboration(recordId, mode)
+  const [layout, setLayout] = useState<RecordEditorLayout>('split')
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [promoteOpen, setPromoteOpen] = useState(false)
-  const [restoreReason, setRestoreReason] = useState('restore known good')
-  const [actions, setActions] = useState<RecordAction[]>([])
-  const [comments, setComments] = useState<RecordComment[]>([])
-  const [watch, setWatch] = useState<RecordWatch | null>(null)
-  const [collabState, setCollabState] = useState<RecordCollaborationSurfaceState>(
-    !recordId || mode === 'new' ? 'empty' : 'loading',
-  )
-  const [collabBusy, setCollabBusy] = useState(false)
+  const [tool, setTool] = useState<RecordTool>(null)
+  const [restoreReason, setRestoreReason] = useState('恢复历史修订')
   const editable = mode === 'new' || mode === 'edit'
-  const title = mode === 'new' ? '新建运维记录' : mode === 'edit' ? '编辑运维记录' : mode === 'revision' ? '历史修订' : '运维记录'
 
   const members = (() => {
     const options = new Map<string, string>()
@@ -167,31 +130,6 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
   ]
 
   useEffect(() => {
-    if (!recordId || mode === 'new') {
-      return
-    }
-    let active = true
-    Promise.all([
-      listRecordActions(recordId),
-      listRecordComments(recordId),
-      getRecordWatch(recordId),
-    ]).then(([actionList, commentList, nextWatch]) => {
-      if (!active) return
-      setActions(actionList.items)
-      setComments(commentList.comments)
-      setWatch(nextWatch)
-      setCollabState('ready')
-    }).catch((error: unknown) => {
-      if (!active) return
-      if (error instanceof ApiError && (error.status === 403 || error.status === 404)) setCollabState('revoked')
-      else setCollabState('error')
-    })
-    return () => {
-      active = false
-    }
-  }, [mode, recordId])
-
-  useEffect(() => {
     if (mode === 'new' && state.publishedRecordId) {
       navigate(withSubjectReturnQuery(`/records/${state.publishedRecordId}`, subjectReturn), {
         replace: true,
@@ -214,7 +152,6 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
   if (state.status === 'revoked') return <PageState kind="empty" title="记录访问已撤销" description="当前内容已收起。" />
   if (state.status === 'error') return <PageState kind="error" title="记录工作区暂不可用" description={state.message} />
 
-  const subject = state.payload.subjects[0]
   const showsPublishedRevision = mode === 'read' || mode === 'revision'
   const previewModel = showsPublishedRevision ? state.revision?.render_model : undefined
   // While editing, the body differs from the published revision, so a stale status
@@ -222,313 +159,131 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
   const previewModelStatus = showsPublishedRevision
     ? decodeRenderModelStatusV1(state.revision?.render_model_status)
     : undefined
+  const hasCollaboration = Boolean(recordId) && mode !== 'new'
+  const ownerLabel = state.payload.owner_id
+    ? members.find((member) => member.id === state.payload.owner_id)?.label ?? state.payload.owner_id
+    : ''
 
   return (
-    <div className="page record-workspace">
-      <header className="page__head">
-        <div>
-          {mode === 'revision' ? <p className="page-sub">只读历史修订</p> : null}
-          <h1 className="page__title">{state.payload.title || title}</h1>
-          <p className="page-sub" role="status">
-            {mode === 'revision'
-              ? '历史修订只读，恢复会生成新修订而不是改写原文。'
-              : state.saving ? '正在保存草稿' : state.dirty ? '本地未同步' : state.draft ? '草稿已同步' : '尚未创建草稿'}
-            {state.message ? ` · ${state.message}` : ''}
-          </p>
-          {subjectReturn ? (
-            <p className="page-sub">
-              <Link
-                className="text-link"
-                to={withReturnVPSQuery(
-                  `${subjectReturn.basePath}/${subjectReturn.view}`,
-                  returnVPSIdFromNavigationState(location.state),
-                )}
-                state={subjectReturn.kind === 'target' ? undefined : location.state}
-              >
-                返回主体
-              </Link>
-            </p>
-          ) : null}
-        </div>
-        <div className="page__actions">
-          {recordId ? <Link className="btn md secondary" to={withSubjectReturnQuery(`/records/${recordId}`, subjectReturn)} state={location.state}>阅读</Link> : null}
-          {recordId && mode === 'read' && state.record?.capabilities.update ? (
-            <Link className="btn md secondary" to={withSubjectReturnQuery(`/records/${recordId}/edit`, subjectReturn)} state={location.state}>编辑</Link>
-          ) : null}
+    <div className="page record-page">
+      <RecordWorkspaceHeader
+        state={state}
+        recordId={recordId}
+        revisionId={revisionId}
+        recordHref={(path) => withSubjectReturnQuery(path, subjectReturn)}
+        subjectReturnHref={subjectReturn
+          ? withReturnVPSQuery(`${subjectReturn.basePath}/${subjectReturn.view}`, returnVPSIdFromNavigationState(location.state))
+          : null}
+        subjectReturnState={subjectReturn?.kind === 'target' ? undefined : location.state}
+        ownerLabel={ownerLabel}
+        onSave={() => void commands.saveDraft()}
+        onPublish={() => void commands.publish()}
+        onExport={() => setTool('export')}
+        onImport={() => setTool('import')}
+      />
+
+      <div className="record-layout">
+        <div className="record-layout__main">
           {editable ? (
-            <>
-              <Button size="lg" variant="secondary" disabled={state.saving} onClick={() => void commands.saveDraft()}>保存草稿</Button>
-              <Button size="lg" disabled={state.publishing} onClick={() => void commands.publish()}>发布修订</Button>
-            </>
-          ) : null}
-          {mode === 'revision' && recordId && revisionId ? (
-            <Link className="btn lg secondary" to={comparisonEntryHref({
-              subjects: comparisonSubjectsFromSources(state.payload.subjects),
-              items: [{ record_id: recordId, revision_id: revisionId }],
-            })} state={location.state}>
-              横向比较
-            </Link>
-          ) : null}
-          {mode === 'revision' ? (
-            <Button size="lg" disabled={state.publishing} onClick={() => void commands.restore(restoreReason)}>恢复为新修订</Button>
-          ) : null}
-        </div>
-      </header>
-
-      {editable ? (
-        <form className="vps-create-form" onSubmit={(event) => event.preventDefault()}>
-          <div className="vps-create-form__row">
-            <Input label="标题" value={state.payload.title} onChange={(event) => commands.patchPayload({ title: event.target.value })} />
-            <Select
-              label="记录类型"
-              value={state.payload.record_type}
-              onChange={(event) => commands.patchPayload(applyRecordTypeChange(event.target.value as RecordType))}
-            >
-              {labelOptions(RECORD_TYPE_LABELS).map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+            <RecordEditorPanel
+              title={state.payload.title}
+              body={state.payload.body_markdown}
+              layout={layout}
+              references={materials}
+              onTitle={(title) => commands.patchPayload({ title })}
+              onBody={commands.setBody}
+              onLayout={setLayout}
+              onSave={() => { void commands.saveDraft() }}
+              onInsertTemplate={() => commands.setBody(insertMarkdownSnippet(
+                state.payload.body_markdown,
+                templateMarkdownForType(state.payload.record_type),
               ))}
-            </Select>
-            {typeSupportsBusinessStatus(state.payload.record_type) ? (
-              <Select
-                label="业务状态"
-                value={state.payload.business_status}
-                onChange={(event) => commands.patchPayload({ business_status: event.target.value as RecordBusinessStatus })}
-              >
-                {businessStatusesForType(state.payload.record_type).map((status) => (
-                  <option key={status} value={status}>{BUSINESS_STATUS_LABELS[status]}</option>
-                ))}
-              </Select>
-            ) : (
-              <Input label="影响级别" value={state.payload.impact_level} onChange={(event) => commands.patchPayload({ impact_level: event.target.value })} />
-            )}
-          </div>
-          <div className="vps-create-form__row">
-            {typeSupportsBusinessStatus(state.payload.record_type) ? (
-              <Input label="影响级别" value={state.payload.impact_level} onChange={(event) => commands.patchPayload({ impact_level: event.target.value })} />
-            ) : null}
-            <Input
-              label="主体 ID"
-              value={subject?.source_id ?? ''}
-              onChange={(event) => commands.patchPayload({
-                subjects: patchPrimarySubject(state.payload.subjects, event.target.value),
-              })}
+              onPromote={recordId && mode !== 'new' ? () => setPromoteOpen(true) : undefined}
             />
-            <Select
-              label="可见性"
-              value={state.payload.visibility.kind}
-              onChange={(event) => commands.patchPayload({
-                visibility: { ...state.payload.visibility, kind: event.target.value as 'project' | 'restricted' },
-              })}
-            >
-              <option value="project">项目内</option>
-              <option value="restricted">受限</option>
-            </Select>
-            <Input label="保存原因" value={state.payload.save_reason} onChange={(event) => commands.patchPayload({ save_reason: event.target.value })} />
-          </div>
-          <RecordRevisionCollaborationControls
-            state="ready"
-            members={members}
-            ownerId={state.payload.owner_id}
-            participantIds={state.payload.participant_ids}
-            followUpAt={toDateTimeLocal(state.payload.follow_up_at)}
-            onOwnerChange={(ownerId) => commands.patchPayload({ owner_id: ownerId })}
-            onParticipantToggle={(participantId, selected) => commands.patchPayload({
-              participant_ids: selected
-                ? [...new Set([...state.payload.participant_ids, participantId])]
-                : state.payload.participant_ids.filter((id) => id !== participantId),
-            })}
-            onFollowUpChange={(followUpAt) => commands.patchPayload({ follow_up_at: followUpAt ? new Date(followUpAt).toISOString() : null })}
-          />
-        </form>
-      ) : (
-        <DetailSection
-          eyebrow={mode === 'revision' ? '只读历史修订' : '运维记录'}
-          title="记录摘要"
-        >
-          <dl className="metadata-list record-workspace__facts">
-            <div>
-              <dt>类型</dt>
-              <dd>{RECORD_TYPE_LABELS[state.payload.record_type]}</dd>
-            </div>
-            <div>
-              <dt>影响级别</dt>
-              <dd>{state.payload.impact_level || '—'}</dd>
-            </div>
-            <div>
-              <dt>主体</dt>
-              <dd>
-                {subject
-                  ? `${RECORD_SUBJECT_KIND_LABELS[subject.kind]} · ${subject.source_id}`
-                  : '未指定'}
-              </dd>
-            </div>
-          </dl>
-          {evidenceIds.length > 0 ? (
-            <p className="record-workspace__evidence-links">
-              {evidenceIds.map((id) => (
-                <Link
-                  key={id}
-                  className="text-link"
-                  to={`/evidence/${encodeURIComponent(id)}`}
-                  state={location.state}
-                >
-                  查看证据 {id}
-                </Link>
-              ))}
-            </p>
+          ) : (
+            <article className="record-section record-reading" aria-label="记录正文">
+              <Suspense fallback={<p className="record-muted">正在加载正文</p>}>
+                <MarkdownPreview
+                  source={state.payload.body_markdown}
+                  model={previewModel}
+                  modelStatus={previewModelStatus}
+                  references={materials}
+                />
+              </Suspense>
+            </article>
+          )}
+
+          {mode === 'revision' && state.revision && state.record ? (
+            <RevisionDiff base={state.revision} local={state.record.current} />
           ) : null}
-        </DetailSection>
-      )}
 
-      {editable ? (
-        <div className="page-form-actions" role="toolbar" aria-label="编辑布局">
-          <Button size="sm" variant={layout === 'edit' ? 'secondary' : 'ghost'} onClick={() => setLayout('edit')}>编辑</Button>
-          <Button size="sm" variant={layout === 'split' ? 'secondary' : 'ghost'} onClick={() => setLayout('split')}>分栏</Button>
-          <Button size="sm" variant={layout === 'preview' ? 'secondary' : 'ghost'} onClick={() => setLayout('preview')}>预览</Button>
+          {hasCollaboration ? (
+            <div className="record-layout__collab">
+              <RecordActionPanel
+                state={collaboration.state}
+                actions={collaboration.actions}
+                members={members}
+                busy={collaboration.busy}
+                onCreate={(values) => collaboration.createAction(values)}
+                onUpdate={collaboration.updateAction}
+                onTransition={collaboration.transitionAction}
+              />
+              <RecordCommentThread
+                state={collaboration.state}
+                comments={collaboration.comments}
+                currentUserId={userId}
+                members={members}
+                busy={collaboration.busy}
+                onSubmit={collaboration.submitComment}
+                onRedact={collaboration.redactComment}
+              />
+            </div>
+          ) : null}
         </div>
-      ) : null}
 
-      <div className="archive-detail-two-col record-workspace__body">
-        {editable && layout !== 'preview' ? (
-          <MarkdownSourceEditor
-            value={state.payload.body_markdown}
-            onChange={commands.setBody}
-            onSave={() => { void commands.saveDraft() }}
-            onInsertTemplate={() => commands.setBody(insertMarkdownSnippet(
-              state.payload.body_markdown,
-              templateMarkdownForType(state.payload.record_type),
-            ))}
-          />
-        ) : null}
-        {!editable || layout !== 'edit' ? (
-          <Suspense fallback={<section className="card" aria-label="Markdown 预览">正在加载预览</section>}>
-            <MarkdownPreview
+        <aside className="record-layout__aside" aria-label={editable ? '记录属性' : '记录信息'}>
+          {editable ? (
+            <RecordEditorAside
+              payload={state.payload}
+              baseline={state.record?.current ?? null}
+              members={members}
+              materials={materials}
+              onPatch={commands.patchPayload}
+              onOpenMaterials={() => setMaterialsOpen(true)}
+            />
+          ) : null}
+          {editable && hasCollaboration ? (
+            <RecordWatchControl
+              state={collaboration.state}
+              watch={collaboration.watch}
+              busy={collaboration.busy}
+              onChange={collaboration.setWatchPreference}
+            />
+          ) : null}
+          {editable ? null : (
+            <RecordReadingAside
               source={state.payload.body_markdown}
               model={previewModel}
-              modelStatus={previewModelStatus}
-              references={materials}
+              materials={materials}
+              collaboration={hasCollaboration ? collaboration : null}
+              restore={mode === 'revision' ? {
+                reason: restoreReason,
+                busy: state.publishing,
+                onReason: setRestoreReason,
+                onRestore: () => void commands.restore(restoreReason),
+              } : null}
             />
-          </Suspense>
-        ) : null}
+          )}
+        </aside>
       </div>
 
-      <div className="page-stack record-workspace__aside">
-        <RecordOutline source={state.payload.body_markdown} model={previewModel} />
-        {editable ? <RecordSaveImpact baseline={state.record?.current ?? null} payload={state.payload} /> : null}
-        {mode === 'revision' && state.revision && state.record ? (
-          <RevisionDiff base={state.revision} local={state.record.current} />
-        ) : null}
-        {mode === 'revision' ? (
-          <Input label="恢复原因" value={restoreReason} onChange={(event) => setRestoreReason(event.target.value)} />
-        ) : null}
-        <div className="page-form-actions">
-          <Button size="lg" variant="secondary" onClick={() => setMaterialsOpen(true)}>材料与引用</Button>
-          {editable && recordId && mode !== 'new' ? (
-            <Button size="lg" variant="ghost" onClick={() => setPromoteOpen(true)}>提升勾选为行动</Button>
-          ) : null}
-        </div>
-        {(mode === 'read' || mode === 'revision') && recordId ? (
-          <details className="record-workspace__tool">
-            <summary>导出</summary>
-            <Suspense fallback={<section className="card" aria-label="记录导出">正在加载导出</section>}>
-              <RecordExportPanel
-                recordId={recordId}
-                {...(revisionId ? { revisionId } : {})}
-                snapshotIds={evidenceIds}
-              />
-            </Suspense>
-          </details>
-        ) : null}
-        {mode === 'read' || mode === 'revision' || mode === 'new' ? (
-          <details className="record-workspace__tool">
-            <summary>导入</summary>
-            <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
-              <RecordImportPanel />
-            </Suspense>
-          </details>
-        ) : null}
-      </div>
-
-      {recordId && mode !== 'new' ? (
-        <div className="page-stack">
-          <RecordActionPanel
-            state={collabState}
-            actions={actions}
-            members={members}
-            busy={collabBusy}
-            onCreate={(values) => {
-              setCollabBusy(true)
-              void createRecordAction(recordId, values, crypto.randomUUID())
-                .then(() => listRecordActions(recordId))
-                .then((response) => setActions(response.items))
-                .catch(() => setCollabState('error'))
-                .finally(() => setCollabBusy(false))
-            }}
-            onUpdate={(action, values) => {
-              setCollabBusy(true)
-              void updateRecordAction(recordId, action.action_id, values, values.version, crypto.randomUUID())
-                .then(() => listRecordActions(recordId))
-                .then((response) => setActions(response.items))
-                .catch(() => setCollabState('error'))
-                .finally(() => setCollabBusy(false))
-            }}
-            onTransition={(action, transition) => {
-              setCollabBusy(true)
-              void transitionRecordAction(recordId, action.action_id, transition, action.version, crypto.randomUUID())
-                .then(() => listRecordActions(recordId))
-                .then((response) => setActions(response.items))
-                .catch(() => setCollabState('error'))
-                .finally(() => setCollabBusy(false))
-            }}
-          />
-          <RecordCommentThread
-            state={collabState}
-            comments={comments}
-            currentUserId={userId}
-            members={members}
-            busy={collabBusy}
-            onSubmit={(input) => {
-              setCollabBusy(true)
-              const request = input.mode === 'edit'
-                ? editRecordComment(recordId, input.comment_id, {
-                  body_markdown: input.body_markdown,
-                  mention_user_ids: input.mention_user_ids,
-                }, input.version, crypto.randomUUID())
-                : createRecordComment(recordId, {
-                  body_markdown: input.body_markdown,
-                  reply_to_comment_id: input.reply_to_comment_id,
-                  mention_user_ids: input.mention_user_ids,
-                }, crypto.randomUUID())
-              void request.then(() => listRecordComments(recordId))
-                .then((response) => setComments(response.comments))
-                .catch(() => setCollabState('error'))
-                .finally(() => setCollabBusy(false))
-            }}
-            onRedact={(comment) => {
-              setCollabBusy(true)
-              void redactRecordComment(recordId, comment.comment_id, comment.version, crypto.randomUUID())
-                .then(() => listRecordComments(recordId))
-                .then((response) => setComments(response.comments))
-                .catch(() => setCollabState('error'))
-                .finally(() => setCollabBusy(false))
-            }}
-          />
-          <RecordWatchControl
-            state={collabState}
-            watch={watch}
-            busy={collabBusy}
-            onChange={(preference) => {
-              if (!watch) return
-              setCollabBusy(true)
-              void setRecordWatch(recordId, preference, watch.version, crypto.randomUUID())
-                .then(setWatch)
-                .catch(() => setCollabState('error'))
-                .finally(() => setCollabBusy(false))
-            }}
-          />
-        </div>
-      ) : null}
-
+      <RecordToolDialogs
+        tool={tool}
+        recordId={recordId}
+        revisionId={revisionId}
+        snapshotIds={evidenceIds}
+        onClose={() => setTool(null)}
+      />
       <RecordMaterialDrawer
         open={materialsOpen}
         onClose={() => setMaterialsOpen(false)}
@@ -548,25 +303,17 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
       <PromoteChecklistActionDialog
         open={promoteOpen}
         source={state.payload.body_markdown}
-        busy={collabBusy}
+        busy={collaboration.busy}
         onClose={() => setPromoteOpen(false)}
         onConfirm={(values) => {
           if (!recordId) return
-          setCollabBusy(true)
-          void createRecordAction(recordId, {
+          collaboration.createAction({
             title: values.title,
             details: values.details,
             assignee_id: userId,
             due_at: null,
             subject_revision_id: state.record?.current_revision_id ?? state.revision?.revision_id ?? '',
-          }, crypto.randomUUID())
-            .then(() => listRecordActions(recordId))
-            .then((response) => {
-              setActions(response.items)
-              setPromoteOpen(false)
-            })
-            .catch(() => setCollabState('error'))
-            .finally(() => setCollabBusy(false))
+          }, () => setPromoteOpen(false))
         }}
       />
       <RecordConflictResolver
@@ -578,12 +325,4 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
       />
     </div>
   )
-}
-
-function toDateTimeLocal(value?: string | null): string {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  const pad = (part: number) => String(part).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }

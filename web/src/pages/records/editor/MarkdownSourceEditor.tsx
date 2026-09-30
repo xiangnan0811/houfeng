@@ -51,30 +51,30 @@ export function MarkdownSourceEditor({
   }
 
   return (
-    <section className="card" aria-label="Markdown 编辑器">
+    <div className="record-editor__source">
       {readOnly ? null : (
-        <div className="page-form-actions">
+        <div className="record-editor__format" role="toolbar" aria-label="Markdown 格式">
           <Button size="sm" variant="ghost" onClick={() => wrap('**')}>加粗</Button>
           <Button size="sm" variant="ghost" onClick={() => wrap('*')}>斜体</Button>
           <Button size="sm" variant="ghost" onClick={() => wrap('`')}>代码</Button>
           <Button size="sm" variant="ghost" onClick={() => wrap('\n## ', '')}>标题</Button>
           <Button size="sm" variant="ghost" onClick={() => wrap('\n- [ ] ', '')}>任务</Button>
           {onInsertTemplate ? (
-            <Button size="sm" variant="secondary" onClick={onInsertTemplate}>插入模板</Button>
+            <Button size="sm" variant="ghost" onClick={onInsertTemplate}>插入模板</Button>
           ) : null}
         </div>
       )}
       <textarea
         ref={sourceRef}
-        className="input"
+        className="input record-editor__textarea"
         aria-label="Markdown 源文"
         value={value}
         readOnly={readOnly}
-        rows={16}
+        rows={18}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={onKeyDown}
         spellCheck={false}
       />
-    </section>
+    </div>
   )
 }

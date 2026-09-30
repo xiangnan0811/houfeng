@@ -115,25 +115,23 @@ export function RecordExportPanel({ recordId, revisionId, snapshotIds = [], reco
 
   if (surface === 'revoked') {
     return (
-      <section className="card" aria-label="记录导出">
+      <section className="record-tool" aria-label="记录导出">
         <PageState kind="empty" title="导出访问已撤销" description="下载租约已撤销，停止继续读取。" />
       </section>
     )
   }
   if (surface === 'deleted') {
     return (
-      <section className="card" aria-label="记录导出">
+      <section className="record-tool" aria-label="记录导出">
         <PageState kind="empty" title="导出目标已删除" description="当前预览已失效，记录或导出材料已不存在。" />
       </section>
     )
   }
 
   return (
-    <section className="card" aria-label="记录导出">
-      <h2>导出</h2>
-      <p>从记录中心、详情或修订页下载已授权材料。比较工作台不提供下载。</p>
-      {recordLabel ? <p>当前导出：{recordLabel}</p> : null}
-      <div className="vps-create-form__row">
+    <section className="record-tool" aria-label="记录导出">
+      {recordLabel ? <p className="record-tool__target">当前导出：{recordLabel}</p> : null}
+      <div className="record-tool__fields">
         <Select
           label="导出类型"
           value={kind}
@@ -165,12 +163,12 @@ export function RecordExportPanel({ recordId, revisionId, snapshotIds = [], reco
           </Select>
         ) : null}
       </div>
-      <div className="page-form-actions">
-        <Button size="lg" variant="secondary" disabled={busy} onClick={runPreview}>预览导出</Button>
-        <Button size="lg" disabled={busy || !preview} onClick={runDownload}>下载</Button>
+      <div className="record-tool__actions">
+        <Button size="md" variant="secondary" disabled={busy} onClick={runPreview}>预览导出</Button>
+        <Button size="md" disabled={busy || !preview} onClick={runDownload}>下载</Button>
       </div>
       {preview ? (
-        <ul>
+        <ul className="record-tool__list">
           {preview.expected_files.map((file) => (
             <li key={file.name}>{file.name} · {file.byte_size} 字节</li>
           ))}
@@ -179,7 +177,7 @@ export function RecordExportPanel({ recordId, revisionId, snapshotIds = [], reco
           ))}
         </ul>
       ) : null}
-      {message ? <p role="status">{message}</p> : null}
+      {message ? <p className="record-tool__message" role="status">{message}</p> : null}
     </section>
   )
 }

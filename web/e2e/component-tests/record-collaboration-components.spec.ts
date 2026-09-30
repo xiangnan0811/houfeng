@@ -9,7 +9,7 @@ async function expectNoBlockingAxe(page: Page) {
 
 test('renders and operates all four ready collaboration components in a real browser', async ({ page }) => {
   await page.goto('/?state=ready')
-  for (const heading of ['协作责任', '行动队列', '协作评论', '关注策略']) {
+  for (const heading of [/^协作$/, /^行动项 \d+$/, /^评论 \d+$/, /^关注$/]) {
     await expect(page.getByRole('heading', { name: heading })).toBeVisible()
   }
 

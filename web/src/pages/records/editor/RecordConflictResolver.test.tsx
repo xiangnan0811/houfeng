@@ -74,7 +74,7 @@ describe('RecordConflictResolver', () => {
         onResolve={vi.fn()}
       />,
     )
-    expect(screen.getByLabelText('修订差异')).toBeInTheDocument()
+    expect(screen.getByRole('region', { name: '字段差异' })).toBeInTheDocument()
     expect(screen.getByLabelText('正文差异')).toBeInTheDocument()
   })
 })

@@ -43,6 +43,23 @@
 | deletion token 同时进入 header 和 JSON body | body unknown-field decode 失败；只保留 header token 与 body `reservation_id` |
 | Records error body 含 malformed `code/field_errors` 或未知 debug 字段 | 显式 decoder 保留 status/message，忽略 malformed/未知元数据；`recovery` 仍按 unknown 处理 |
 
+## 记录工作区版式（`/records/:id`、`/new`、`/:id/edit`、`/:id/revisions/:rid`）
+
+- 页头压缩身份：阅读 / 修订态显示标题、类型 / 业务状态 / 影响级别徽标，以及主体、负责人；阅读态另显示修订号与更新时间，修订态显示该修订的创建时间；不显示草稿同步状态，也不提供指向自身的"阅读"入口。编辑 / 新建态标题固定为"编辑运维记录 / 新建运维记录"，只在页头显示草稿同步状态（`role="status"`）。历史修订加"历史修订 #N"徽标，操作为"当前版本""横向比较"。
+- 主栏 + 侧栏：≥1200px 为 `minmax(0,1fr) 320px` 双栏；更窄时单栏，顺序固定为正文 → 侧栏卡片（大纲 / 材料 / 关注或属性 / 协作 / 发布）→ 行动与评论。阅读态正文占满主栏，大纲少于 2 个标题时不显示；编辑态大纲有标题即显示。源文回退解析按 CommonMark 跳过围栏代码块（闭合围栏须同字符、不短于开启围栏且其后只有空白）。正文宽表包在具名（"正文表格"）、可聚焦的滚动区域里，任务列表两条渲染路径共用 `record-task-list` 版式，只读勾选框以"已完成 / 未完成"命名。
+- 编辑态把标题与正文放在同一张编辑卡，`编辑 / 分栏 / 预览` 是 `role="toolbar"` 的 pressed 按钮组，分栏两侧等高；记录类型、业务状态、影响级别、可见性、主体进入侧栏"属性"，负责人 / 跟进 / 参与人进入"协作"，保存原因与保存影响进入"发布"，材料卡的"管理材料"打开材料抽屉。
+- 导出 / 导入是页头按钮打开的 `导出记录 / 导入记录` 弹窗，面板按需懒加载，不再使用原生 `<details>`；面板不重复标题与说明文字。阅读 / 修订态材料直接列在侧栏（证据带"查看证据"），不打开只读抽屉。
+- 历史修订的恢复原因（默认"恢复历史修订"）与"恢复为新修订"在侧栏"恢复此修订"卡；"与当前版本的差异"卡直接列字段差异，正文 diff 默认折叠为 `+N −M 行`，展开后是可聚焦的具名滚动区。
+- 计数徽标为零时保持中性，大于零才用强调色（行动项按未完成数判断），不得拉伸成整行。按需展开的行动表单打开时焦点进入标题，取消后回到"新增行动"。
+
+## 横向比较工作台版式
+
+- 页头只保留"横向比较"与范围摘要（对象数、基准项、UTC 窗口的本地时间），不再使用眉题 + 大标题 + 解释句的分节写法。
+- ≥1200px 左栏 340px 放"比较对象 / 比较条件"，右栏依次为可比性审查 → 比较结果 → 结论与另存；更窄时单栏同序。比较条件仍是默认展开、可折叠的 `<details>`，折叠摘要显示对齐 / 容差 / 桶宽。
+- 比较对象卡在候选模式下，计数、列表与确认都只取前 6 个候选，超出时说明"只比较前 6 个"。
+- 比较结果卡头部放证据类型与指标 `SegmentedControl`；趋势把所有比较项叠加在一张固定高度（约 200px）的图里，按项序使用固定配色加线型（颜色在某些主题相同也能区分）与图例；横轴是相对各自首个桶的时间偏移（任一序列时间不可解析时全部改用桶序），纵轴标签、网格与数据共用同一外扩 8% 的值域；单桶段画成标记点（奇数项圆形、偶数项方形），缺口断线不连线。
+- 对齐矩阵只列项 / 类型 / 覆盖 / 桶数 / 质量 / 修订 / 说明，基准项带"基准"标记，使用 `ScrollRegion`；快照 ID、规范哈希与比较摘要只出现在默认折叠的"技术细节"中。另存阻断原因显示中文说明，不显示原始 reason code。
+
 ## Subject workspace
 
 Activity, records, and evidence for VPS, monitoring instances, and entrypoints remain views of the shared subject workspace. Preserve the existing URL filter codec and location.state return context through record publication, restoration, and evidence links. Interactive filters match each view's server predicate; retained incompatible URL filters stay visible and removable. A scoped new record consumes the same canonical subject reference emitted by its entry link and isolates its unsynced buffer from other subjects and unscoped creation. Reopening the same entry restores its buffer without overwriting newer edits; unscoped draft recovery remains available from /records/new. A valid canonical return_to provides an explicit subject-return link, without changing the post-publication record destination. Record search prioritizes results; import/export remain secondary tools. Evidence reading follows the [evidence Web contract](../evidence-web.md).

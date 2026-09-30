@@ -72,7 +72,8 @@ describe('RecordCommentThread', () => {
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     rerender(<RecordCommentThread state="ready" {...props} />)
     expect(screen.getByLabelText('评论内容')).toHaveValue('')
-    expect(screen.getByText('发布新评论')).toBeInTheDocument()
+    expect(screen.queryByText('编辑评论')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '发布评论' })).toBeInTheDocument()
   })
 
   it('discards stale edit and redaction state when the active comment version advances', () => {
@@ -94,7 +95,7 @@ describe('RecordCommentThread', () => {
     }]} {...props} />)
 
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
-    expect(screen.getByText('发布新评论')).toBeInTheDocument()
+    expect(screen.queryByText('编辑评论')).not.toBeInTheDocument()
     expect(screen.getByLabelText('评论内容')).toHaveValue('')
     fireEvent.click(screen.getByRole('button', { name: '发布评论' }))
     expect(onSubmit).not.toHaveBeenCalled()

@@ -93,7 +93,7 @@ describe('RecordComparisonPage', () => {
 
   it('keeps a recoverable shell for missing or damaged state', () => {
     renderCompare()
-    expect(screen.getByRole('heading', { name: '横向比较工作台' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '横向比较', level: 1 })).toBeInTheDocument()
     expect(screen.getByText(/从选择篮开始/)).toBeInTheDocument()
     expect(screen.getByText(/至少选择 2 项才能比较/)).toBeInTheDocument()
     expect(api.compare).not.toHaveBeenCalled()
@@ -132,7 +132,7 @@ describe('RecordComparisonPage', () => {
     const review = screen.getByRole('heading', { name: '可比性审查' })
     const trend = screen.getByRole('heading', { name: '趋势' })
     expect(review.compareDocumentPosition(trend) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(document.querySelectorAll('polyline')).toHaveLength(2)
+    expect(document.querySelectorAll('polyline[data-segment]')).toHaveLength(2)
     expect(screen.getByRole('button', { name: '另存为记录' })).toBeInTheDocument()
   })
 
@@ -208,7 +208,7 @@ describe('RecordComparisonPage', () => {
       ...WINDOW,
     })
     expect(await screen.findByRole('heading', { name: '系统差异' })).toBeInTheDocument()
-    expect(document.querySelectorAll('polyline')).toHaveLength(0)
+    expect(document.querySelectorAll('polyline[data-segment]')).toHaveLength(0)
     expect(screen.queryByRole('heading', { name: '趋势' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '另存为记录' })).not.toBeInTheDocument()
   })

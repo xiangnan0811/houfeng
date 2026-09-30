@@ -51,7 +51,7 @@ export function RecordConflictResolver({
   return (
     <Modal open={open} onClose={onClose} title="修订冲突" size="lg" dialogRole="alertdialog">
       <p>服务端已推进。请逐字段选择要保留的来源后再保存，未选择不会发送正式修订。</p>
-      <RevisionDiff base={serverPayload} local={localPayload} />
+      <RevisionDiff base={serverPayload} local={localPayload} title="字段差异" />
       {changed.length === 0 ? <p className="text-muted">两侧字段一致，可直接保留本地内容。</p> : (
         <ul className="metadata-list" aria-label="逐字段选择">
           {changed.map(({ field, label }) => {

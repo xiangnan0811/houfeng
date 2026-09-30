@@ -11,13 +11,16 @@ const watch: RecordWatch = {
 }
 
 describe('RecordWatchControl', () => {
-  it('changes explicit preference while preserving mandatory-notification explanation', () => {
+  it('changes explicit preference and explains mandatory notifications only while muted', () => {
     const onChange = vi.fn()
-    render(<RecordWatchControl state="ready" watch={watch} busy={false} onChange={onChange} />)
+    const { rerender } = render(<RecordWatchControl state="ready" watch={watch} busy={false} onChange={onChange} />)
     fireEvent.click(screen.getByRole('button', { name: '关注全部更新' }))
     expect(onChange).toHaveBeenCalledWith('watching')
-    expect(screen.getByText(/直接指派、安全提醒与提及仍会送达/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '跟随自动来源' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByText(/直接指派、安全提醒与提及仍会送达/)).not.toBeInTheDocument()
     expect(screen.getByText('负责人、评论参与')).toBeInTheDocument()
+    rerender(<RecordWatchControl state="ready" watch={{ ...watch, preference: 'muted' }} busy={false} onChange={onChange} />)
+    expect(screen.getByText(/直接指派、安全提醒与提及仍会送达/)).toBeInTheDocument()
   })
 
   it('shows loading without preference controls', () => {
