@@ -95,8 +95,8 @@ export function RecordImportPanel() {
         }}
       />
       <div className="record-tool__actions">
-        <Button size="md" variant="secondary" disabled={busy || !file} onClick={runDryRun}>预检导入</Button>
-        <Button size="md" disabled={busy || !plan} onClick={runApply}>确认应用</Button>
+        <Button size="lg" variant="secondary" disabled={busy || !file} onClick={runDryRun}>预检导入</Button>
+        <Button size="lg" disabled={busy || !plan} onClick={runApply}>确认应用</Button>
       </div>
       {progress ? <p className="record-tool__message" role="status">{progress}</p> : null}
       {plan ? (
