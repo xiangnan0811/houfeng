@@ -46,6 +46,10 @@ const (
 	IPQualityStatusFailure = "failure"
 )
 
+// IPQualityDiagnosticsCollectRequestIDKey 是 report diagnostics_json 中回传立即采集请求 ID 的键。
+// 不作为报告顶层字段，以免旧 center 严格解码拒绝整批 sync。
+const IPQualityDiagnosticsCollectRequestIDKey = "collect_request_id"
+
 const (
 	FrequencyTier5s  = "5s"
 	FrequencyTier1m  = "1m"
@@ -267,6 +271,8 @@ type IPQualityPlan struct {
 	FrequencySeconds int      `json:"frequency_seconds"`
 	TimeoutSeconds   int      `json:"timeout_seconds"`
 	Services         []string `json:"services,omitempty"`
+	// CollectRequestID 非空且与 agent 上次处理的请求不同时，agent 立即采集一次，不等待周期。
+	CollectRequestID string `json:"collect_request_id,omitempty"`
 }
 
 // PendingAction describes a command the center wants the agent to execute.

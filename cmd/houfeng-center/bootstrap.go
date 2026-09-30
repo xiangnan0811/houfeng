@@ -32,6 +32,7 @@ import (
 	"houfeng/internal/center/ids"
 	incidentservice "houfeng/internal/center/incidents"
 	"houfeng/internal/center/installer"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/notify"
 	"houfeng/internal/center/portability"
 	"houfeng/internal/center/recordauth"
@@ -233,7 +234,9 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		5*time.Second,
 		cfg.IncidentSweepInterval,
 	)
-	syncSvc := syncing.NewService(syncRepo, syncing.NewCompositePostSyncProcessor(incidentSvc, streamHub))
+	ipQualityCollectRequests := ipquality.NewCollectRequests(func() (string, error) { return ids.New("ipqc") })
+	syncSvc := syncing.NewService(syncRepo, syncing.NewCompositePostSyncProcessor(incidentSvc, streamHub)).
+		WithIPQualityCollectCoordinator(ipQualityCollectRequests)
 
 	userRepo := store.NewPostgresUserRepository(db.Pool())
 	sessionRepo, err := deps.newSessionRepository(db.Pool(), cfg.SessionHMACKey)
@@ -388,6 +391,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSFollowupsHandler:                       handlers.VPSFollowups(vpsFollowupRepo),
 		VPSMaintenanceHandler:                     handlers.VPSMaintenance(vpsMaintenanceRepo),
 		VPSIPQualityHandler:                       handlers.VPSIPQuality(ipQualityRepo),
+		VPSIPQualityCollectHandler:                handlers.VPSIPQualityCollect(vpsMonitoringInstanceLinkRepo, settingsRepo, ipQualityCollectRequests),
 		VPSExtendValidityHandler:                  handlers.VPSExtendValidity(assetLifecycleRepo),
 		VPSArchiveReviewHandler:                   handlers.VPSArchiveReview(assetLifecycleRepo),
 		VPSArchiveHandler:                         handlers.VPSArchive(assetLifecycleRepo),

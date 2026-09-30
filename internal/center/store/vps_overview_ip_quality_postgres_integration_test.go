@@ -21,12 +21,13 @@ import (
 func TestPostgresOverviewDisabledIPQualityDoesNotJudgeLeftoverOrMissingReport(t *testing.T) {
 	t.Parallel()
 
-	t.Run("default disabled without report", func(t *testing.T) {
+	t.Run("disabled without report", func(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		pool := openTemporaryOverviewIPQualityPostgresSchema(t, ctx)
 		vps := createOverviewIPQualityVPS(t, ctx, pool, "203.0.113.80")
+		seedDisabledCenterSettings(t, ctx, pool)
 		seedHealthyNonIPOverviewSources(t, ctx, pool, vps.VPSID, "mi_overview_ipq_none")
 		assertCheapIPQualityDisabled(t, ctx, pool)
 
@@ -101,7 +102,7 @@ func assertCheapIPQualityDisabled(t *testing.T, ctx context.Context, pool *pgxpo
 		t.Fatalf("IPQualityEnabled: %v", err)
 	}
 	if enabled {
-		t.Fatal("IPQualityEnabled = true, want default/disabled")
+		t.Fatal("IPQualityEnabled = true, want disabled")
 	}
 }
 

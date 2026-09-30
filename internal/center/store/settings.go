@@ -16,7 +16,7 @@ import (
 )
 
 const ipQualityEnabledSQL = `
-		select coalesce((ip_quality_settings->>'enabled')::boolean, false)
+		select coalesce((ip_quality_settings->>'enabled')::boolean, true)
 		from center_settings
 		where settings_id = $1`
 
@@ -110,7 +110,7 @@ func (r *PostgresSettingsRepository) IPQualityEnabled(ctx context.Context) (bool
 	var enabled bool
 	err := r.db.QueryRow(ctx, ipQualityEnabledSQL, centersettings.SingletonID).Scan(&enabled)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
+		return centersettings.Default().IPQuality.Enabled, nil
 	}
 	if err != nil {
 		return false, fmt.Errorf("query ip quality enabled: %w", err)
@@ -289,10 +289,12 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 	} else if err := decodeSettingsJSON(subscriptionCostSettings, &record.SubscriptionCost); err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("decode subscription cost settings: %w", err)
 	}
-	if len(ipQualitySettings) == 0 {
-		record.IPQuality = centersettings.Default().IPQuality
-	} else if err := decodeSettingsJSON(ipQualitySettings, &record.IPQuality); err != nil {
-		return centersettings.CenterSettings{}, fmt.Errorf("decode ip quality settings: %w", err)
+	// 先填默认值再解码：缺少的字段（包括 enabled）与 sync plan、IPQualityEnabled 读取保持一致。
+	record.IPQuality = centersettings.Default().IPQuality
+	if len(ipQualitySettings) > 0 {
+		if err := decodeSettingsJSON(ipQualitySettings, &record.IPQuality); err != nil {
+			return centersettings.CenterSettings{}, fmt.Errorf("decode ip quality settings: %w", err)
+		}
 	}
 
 	validated, err := centersettings.Validate(record)

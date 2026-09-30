@@ -63,6 +63,7 @@ type RouterOptions struct {
 	VPSFollowupsHandler                           stdhttp.Handler
 	VPSMaintenanceHandler                         stdhttp.Handler
 	VPSIPQualityHandler                           stdhttp.Handler
+	VPSIPQualityCollectHandler                    stdhttp.Handler
 	VPSCancellationPreviewHandler                 stdhttp.Handler
 	VPSCancellationHandler                        stdhttp.Handler
 	VPSExtendValidityHandler                      stdhttp.Handler
@@ -309,7 +310,7 @@ func New(opts RouterOptions) stdhttp.Handler {
 		mux.Handle("/api/vps/{vps_id}/maintenance-review", handler)
 		mux.Handle("/api/vps/{vps_id}/maintenance", handler)
 	}
-	if opts.VPSStartMigrationHandler != nil || opts.VPSItemHandler != nil || opts.VPSOverviewHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSIPQualityHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil || opts.VPSArchiveReviewHandler != nil || opts.VPSArchiveHandler != nil || opts.VPSRestoreFromArchiveHandler != nil {
+	if opts.VPSStartMigrationHandler != nil || opts.VPSItemHandler != nil || opts.VPSOverviewHandler != nil || opts.VPSMonitoringInstancesHandler != nil || opts.VPSSubscriptionsHandler != nil || opts.VPSLinkMonitoringInstanceHandler != nil || opts.VPSUnlinkMonitoringInstanceHandler != nil || opts.VPSTimelineHandler != nil || opts.VPSExperienceLogsHandler != nil || opts.VPSDomainsHandler != nil || opts.VPSServicesHandler != nil || opts.VPSIPQualityHandler != nil || opts.VPSIPQualityCollectHandler != nil || opts.VPSCancellationPreviewHandler != nil || opts.VPSCancellationHandler != nil || opts.VPSExtendValidityHandler != nil || opts.VPSArchiveReviewHandler != nil || opts.VPSArchiveHandler != nil || opts.VPSRestoreFromArchiveHandler != nil {
 		mux.Handle("/api/vps/", protect(stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 			vpsID, subtree := vpsSubtreePath(r.URL.Path)
 			if vpsID == "" {
@@ -384,6 +385,12 @@ func New(opts RouterOptions) stdhttp.Handler {
 					return
 				}
 				opts.VPSIPQualityHandler.ServeHTTP(w, r)
+			case vpsSubtreeIPQualityCollect:
+				if opts.VPSIPQualityCollectHandler == nil {
+					stdhttp.NotFound(w, r)
+					return
+				}
+				opts.VPSIPQualityCollectHandler.ServeHTTP(w, r)
 			case vpsSubtreeCancellationPreview:
 				if opts.VPSCancellationPreviewHandler == nil {
 					stdhttp.NotFound(w, r)
@@ -686,6 +693,7 @@ const (
 	vpsSubtreeDomains                  vpsSubtree = "domains"
 	vpsSubtreeServices                 vpsSubtree = "services"
 	vpsSubtreeIPQuality                vpsSubtree = "ip-quality"
+	vpsSubtreeIPQualityCollect         vpsSubtree = "ip-quality-collect"
 	vpsSubtreeCancellationPreview      vpsSubtree = "cancellation-preview"
 	vpsSubtreeCancellation             vpsSubtree = "cancellation"
 	vpsSubtreeExtendValidity           vpsSubtree = "extend-validity"
@@ -710,6 +718,9 @@ func vpsSubtreePath(path string) (vpsID string, subtree vpsSubtree) {
 	}
 	if len(segments) == 4 && segments[1] == "ip-quality" && segments[2] == "reports" && segments[3] != "" {
 		return segments[0], vpsSubtreeIPQuality
+	}
+	if len(segments) == 3 && segments[1] == "ip-quality" && segments[2] == "collect" {
+		return segments[0], vpsSubtreeIPQualityCollect
 	}
 	if len(segments) != 2 {
 		return segments[0], vpsSubtreeUnknown

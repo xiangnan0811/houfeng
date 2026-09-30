@@ -1,9 +1,10 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import type { IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
+import type { IPQualityCollectStatus, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
 import { IPQualityDashboard } from './IPQualityDashboard'
+import type { IPQualityCollectController } from './useIPQualityCollect'
 
 const summary: IPQualitySummary = {
   report_id: 'ipq_001',
@@ -43,43 +44,68 @@ function report(overrides: Partial<VPSIPQualityReport> = {}): VPSIPQualityReport
       monitoring_instance_id: 'mi_001',
       observed_at: '2026-06-08T12:00:00Z',
       received_at: '2026-06-08T12:00:05Z',
-      agent_version: 'dev',
+      agent_version: 'v1.1.0',
       fingerprint: 'fp-001',
       sync_batch_id: 'sync_001',
       ip_address: '192.0.2.1',
       ip_version: 4,
       status: 'success',
+      registered_region_code: 'US',
       is_backfilled: false,
       created_at: '2026-06-08T12:00:06Z',
       ...(summary.coverage != null ? { coverage: summary.coverage } : {}),
       diagnostics_json: { source_version: 'v2' },
+      raw_json: { services: { reddit: { raw: { body_sample: '<!DOCTYPE html><script>alert(1)</script>' } } } },
     },
     provider_results: [
+      { provider: 'clean-db', status: 'success', source_type: 'default', latency_ms: 64, usage_type: 'isp', is_proxy: false, is_vpn: false },
       {
         provider: 'ipinfo',
         status: 'success',
         source_type: 'default',
         latency_ms: 73,
+        risk_level: 'high',
         is_proxy: false,
         is_vpn: true,
+        is_server: true,
         extra_json: { privacy: { vpn: true } },
       },
+      { provider: 'geo-only', status: 'success', source_type: 'default', latency_ms: 20 },
+      { provider: 'fraud-check', status: 'failure', source_type: 'default', latency_ms: 1500, is_proxy: true, error_code: 'http_status', error_summary: 'http status 429' },
+      { provider: 'maxmind', status: 'not_configured', source_type: 'optional', error_code: 'not_configured' },
     ],
     service_unlocks: [
-      { service: 'chatgpt', source: 'openai_status_probe', status: 'unlocked', region: 'JP' },
+      { service: 'chatgpt', source: 'openai_status_probe', status: 'unlocked', probe_status: 'success', region: 'JP', latency_ms: 211 },
+      { service: 'netflix', source: 'netflix_title_probe', status: 'blocked', probe_status: 'success' },
+      { service: 'disney-plus', source: 'disney_default_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe' },
     ],
     history: [summary],
     ...overrides,
   }
 }
 
-function renderDashboard(body: VPSIPQualityReport, initialEntry = '/vps/vps_001/ip-quality') {
+function controller(overrides: Partial<IPQualityCollectController> = {}, status: IPQualityCollectStatus | null = { enabled: true, available: true }): IPQualityCollectController {
+  return {
+    status,
+    watchedRequestId: null,
+    submitting: false,
+    error: null,
+    active: false,
+    start: vi.fn(),
+    ...overrides,
+  }
+}
+
+function renderDashboard(
+  body: VPSIPQualityReport,
+  { collect = controller(), initialEntry = '/vps/vps_001/ip-quality' }: { collect?: IPQualityCollectController, initialEntry?: string } = {},
+) {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route
           path="/vps/:vpsId/ip-quality"
-          element={<IPQualityDashboard report={body} summary={body.summary!} detailPath="/vps/vps_001" />}
+          element={<IPQualityDashboard report={body} summary={body.summary!} detailPath="/vps/vps_001" collect={collect} />}
         />
       </Routes>
     </MemoryRouter>,
@@ -87,52 +113,46 @@ function renderDashboard(body: VPSIPQualityReport, initialEntry = '/vps/vps_001/
 }
 
 describe('IPQualityDashboard', () => {
-  it('keeps every history report reachable instead of silently dropping later rows', () => {
-    const history = Array.from({ length: 7 }, (_, index) => ({
-      ...summary,
-      report_id: `ipq_00${index}`,
-      observed_at: `2026-06-${String(8 - index).padStart(2, '0')}T12:00:00Z`,
-      risk_level: index === 0 ? 'high' : 'medium',
-    }))
-
-    renderDashboard(report({ history }))
-
-    const historyLinks = screen.getAllByRole('link', { name: '查看详情' })
-    expect(historyLinks).toHaveLength(7)
-    expect(historyLinks.map((link) => link.getAttribute('href'))).toEqual([
-      '/vps/vps_001/ip-quality?report_id=ipq_000',
-      '/vps/vps_001/ip-quality?report_id=ipq_001',
-      '/vps/vps_001/ip-quality?report_id=ipq_002',
-      '/vps/vps_001/ip-quality?report_id=ipq_003',
-      '/vps/vps_001/ip-quality?report_id=ipq_004',
-      '/vps/vps_001/ip-quality?report_id=ipq_005',
-      '/vps/vps_001/ip-quality?report_id=ipq_006',
-    ])
-  })
-
-  it('renders identity as a compact definition list and keeps assignment_mode out of ordinary copy', () => {
+  it('summarises identity in the header instead of a separate field grid', () => {
     renderDashboard(report())
 
+    expect(screen.getByRole('heading', { level: 1, name: 'IP 质量报告' })).toBeInTheDocument()
     const identity = screen.getByLabelText('报告身份')
     expect(identity.tagName).toBe('DL')
+    expect(identity).toHaveTextContent('192.0.2.1 · IPv4')
+    expect(identity).toHaveTextContent('AS64500 Example Transit')
+    expect(identity).toHaveTextContent('注册地US')
     expect(within(identity).queryByText('link')).not.toBeInTheDocument()
-    expect(screen.getByText('最新报告')).toBeInTheDocument()
-    expect(screen.getByText('最新报告')).not.toHaveTextContent('192.0.2.1')
-    expect(within(screen.getByLabelText('采集诊断')).getByText('监控关联')).toBeInTheDocument()
-    expect(screen.getAllByText('风险信号').length).toBeGreaterThan(0)
+    expect(within(identity).queryByText('v1.1.0')).not.toBeInTheDocument()
+    expect(within(identity).queryByText('ipq_001')).not.toBeInTheDocument()
+    expect(screen.queryByText(/本身不构成负面风险/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/仅用于排障/)).not.toBeInTheDocument()
   })
-  it('exposes a named focusable scroll region for the provider table', () => {
+
+  it('shows the verdict with score, risk signals and service counts', () => {
     renderDashboard(report())
 
-    const heading = screen.getByRole('heading', { name: '各 IP 数据库判断' })
-    const region = screen.getByRole('region', { name: '各 IP 数据库判断' })
-    expect(heading.closest('section')).not.toHaveClass('page-panel--scroll-x')
-    expect(region).toHaveAttribute('tabindex', '0')
-    expect(region).toHaveAttribute('aria-labelledby', heading.id)
-    // 未溢出时不常驻滚动提示；溢出时的提示与描述由 ScrollRegion 单测覆盖，
-    // 浏览器测量链由共用同一 atom 的服务商与命令审计 e2e（directory-polish.spec.ts）覆盖。
-    expect(region).not.toHaveAttribute('aria-describedby')
-    expect(screen.queryByText('横向滚动查看完整列')).not.toBeInTheDocument()
+    const verdict = screen.getByLabelText('质量结论')
+    expect(within(verdict).getByText('质量分')).toBeInTheDocument()
+    expect(within(verdict).getByText('高风险')).toBeInTheDocument()
+    const metrics = screen.getByLabelText('IP 质量摘要指标')
+    expect(within(metrics).getByText('风险信号').nextElementSibling).toHaveTextContent('2 项')
+    expect(within(metrics).getByText('风险信号').nextElementSibling).toHaveTextContent('VPN')
+    // 失败来源 fraud-check 的 proxy 字段不能进入结论。
+    expect(within(metrics).getByText('风险信号').nextElementSibling).not.toHaveTextContent('Proxy')
+    expect(within(metrics).getByText('服务解锁').nextElementSibling).toHaveTextContent('1/2')
+    expect(within(metrics).getByText('服务解锁').nextElementSibling).toHaveTextContent('1 受阻 · 1 未知')
+  })
+
+  it('shows services with status and region without internal probe fields', () => {
+    renderDashboard(report())
+
+    const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
+    expect(within(services).getByLabelText('服务解锁状态统计')).toHaveTextContent('1 可用1 受阻1 未知')
+    expect(within(services).getByText('解锁 · JP')).toBeInTheDocument()
+    expect(within(services).getByText('受阻')).toBeInTheDocument()
+    expect(within(services).getByText('默认探测暂不支持该服务')).toBeInTheDocument()
+    expect(within(services).queryByText(/openai_status_probe|211|skipped/)).not.toBeInTheDocument()
   })
 
   it('keeps duplicate service rows distinct by service and source', () => {
@@ -143,22 +163,10 @@ describe('IPQualityDashboard', () => {
       ],
     }))
 
-    expect(screen.getAllByRole('heading', { name: 'ChatGPT' })).toHaveLength(2)
-    expect(screen.getByText('解锁 · JP')).toBeInTheDocument()
-    expect(screen.getByText('受阻 · US')).toBeInTheDocument()
-  })
-
-  it('keeps source, latency and extra JSON in collapsed diagnostics', () => {
-    renderDashboard(report())
-
-    const providerPanel = screen.getByRole('heading', { name: '各 IP 数据库判断' }).closest('section') as HTMLElement
-    const diagnostics = screen.getByLabelText('采集诊断')
-    expect(screen.getByRole('heading', { name: '诊断与异常' }).closest('details')).not.toHaveAttribute('open')
-    expect(within(providerPanel).queryByText(/openai_status_probe/)).not.toBeInTheDocument()
-    expect(within(providerPanel).queryByText('73 ms')).not.toBeInTheDocument()
-    expect(within(diagnostics).getByText(/openai_status_probe/)).toBeInTheDocument()
-    expect(within(diagnostics).getByText(/73 ms/)).toBeInTheDocument()
-    expect(within(diagnostics).getByText(/"vpn":true/)).toBeInTheDocument()
+    const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
+    expect(within(services).getAllByText('ChatGPT')).toHaveLength(2)
+    expect(within(services).getByText('解锁 · JP')).toBeInTheDocument()
+    expect(within(services).getByText('受阻 · US')).toBeInTheDocument()
   })
 
   it('does not treat unknown service rows as blocked', () => {
@@ -173,6 +181,117 @@ describe('IPQualityDashboard', () => {
     const stats = screen.getByLabelText('服务解锁状态统计')
     expect(stats).toHaveTextContent('0 受阻')
     expect(stats).toHaveTextContent('2 未知')
-    expect(screen.queryByRole('button', { name: /保存|编辑|删除/ })).not.toBeInTheDocument()
+    expect(screen.getByText('部分采集')).toBeInTheDocument()
+  })
+
+  it('lists databases with facts first and folds empty or failed sources into a footnote', () => {
+    renderDashboard(report())
+
+    const heading = screen.getByRole('heading', { name: 'IP 数据库判断' })
+    const section = heading.closest('section') as HTMLElement
+    const region = within(section).getByRole('region', { name: 'IP 数据库判断' })
+    expect(region).toHaveAttribute('tabindex', '0')
+    expect(region).toHaveAttribute('aria-labelledby', heading.id)
+    expect(region).not.toHaveAttribute('aria-describedby')
+
+    const rows = within(region).getAllByRole('row').slice(1)
+    expect(rows.map((row) => (row as HTMLTableRowElement).cells[0]?.textContent)).toEqual(['ipinfo', 'clean-db'])
+    expect(within(section).getByLabelText('风险信号命中')).toHaveTextContent('VPN 1/2')
+    expect(within(section).getByLabelText('风险信号命中')).toHaveTextContent('机房 1/1')
+    expect(within(section).getByText('另有 1 个数据库未给出风险判断')).toBeInTheDocument()
+    expect(within(section).getByLabelText('未返回结果的数据库')).toHaveTextContent('fraud-check · 失败')
+    expect(within(section).queryByText(/maxmind|http status 429|73 ms/)).not.toBeInTheDocument()
+  })
+
+  it('collapses long history but keeps every report reachable', () => {
+    const history = Array.from({ length: 7 }, (_, index) => ({
+      ...summary,
+      report_id: `ipq_00${index}`,
+      observed_at: `2026-06-${String(8 - index).padStart(2, '0')}T12:00:00Z`,
+      risk_level: index === 0 ? 'high' : 'medium',
+    }))
+
+    renderDashboard(report({ history }))
+
+    const section = screen.getByRole('heading', { name: '历史报告' }).closest('section') as HTMLElement
+    expect(within(section).getAllByRole('listitem')).toHaveLength(5)
+    expect(within(section).getByText('当前查看').closest('li')).toHaveAttribute('aria-current', 'page')
+    fireEvent.click(within(section).getByRole('button', { name: '显示全部 7 份' }))
+    const links = within(section).getAllByRole('link', { name: /^查看 .* 的报告$/ })
+    expect(links.map((link) => link.getAttribute('href'))).toEqual([
+      '/vps/vps_001/ip-quality?report_id=ipq_000',
+      '/vps/vps_001/ip-quality?report_id=ipq_002',
+      '/vps/vps_001/ip-quality?report_id=ipq_003',
+      '/vps/vps_001/ip-quality?report_id=ipq_004',
+      '/vps/vps_001/ip-quality?report_id=ipq_005',
+      '/vps/vps_001/ip-quality?report_id=ipq_006',
+    ])
+    expect(within(section).getByRole('button', { name: '收起' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('keeps diagnostics and raw JSON folded until requested', () => {
+    const { container } = renderDashboard(report())
+
+    const diagnostics = screen.getByLabelText('采集诊断')
+    expect(within(diagnostics).getByRole('heading', { name: '采集诊断' }).closest('details')).not.toHaveAttribute('open')
+    expect(within(diagnostics).getByText('监控关联')).toBeInTheDocument()
+    expect(within(diagnostics).getByText('v1.1.0')).toBeInTheDocument()
+    expect(within(diagnostics).getByText('openai_status_probe')).toBeInTheDocument()
+    expect(within(diagnostics).getByText('73 ms')).toBeInTheDocument()
+    expect(within(diagnostics).getByText('http_status · http status 429')).toBeInTheDocument()
+
+    // 原始 JSON 默认只显示标题和大小，展开后才渲染内容，并且按文本输出。
+    const raw = within(diagnostics).getByText('原始报告 JSON').closest('details') as HTMLDetailsElement
+    expect(raw).not.toHaveAttribute('open')
+    expect(within(raw).queryByLabelText('原始报告 JSON内容')).not.toBeInTheDocument()
+    raw.open = true
+    fireEvent(raw, new Event('toggle'))
+    const code = within(raw).getByLabelText('原始报告 JSON内容')
+    expect(code.tagName).toBe('PRE')
+    expect(code).toHaveTextContent('"body_sample": "<!DOCTYPE html><script>alert(1)</script>"')
+    expect(container.querySelector('script')).toBeNull()
+    expect(within(raw).getByRole('button', { name: '复制原始报告 JSON' })).toBeInTheDocument()
+    expect(within(diagnostics).getByText('来源附加数据')).toBeInTheDocument()
+  })
+
+  it('offers immediate collection from the header', () => {
+    const collect = controller()
+    renderDashboard(report(), { collect })
+
+    const button = screen.getByRole('button', { name: '立即采集' })
+    fireEvent.click(button)
+    expect(collect.start).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('link', { name: '返回 VPS 详情' })).toHaveAttribute('href', '/vps/vps_001')
+  })
+
+  it('shows collection progress and disables the button while collecting', () => {
+    const requestedAt = new Date(Date.now() - 12_000).toISOString()
+    renderDashboard(report(), {
+      collect: controller({ active: true, watchedRequestId: 'ipqc_001' }, {
+        enabled: true,
+        available: true,
+        request: { request_id: 'ipqc_001', monitoring_instance_id: 'mi_001', status: 'dispatched', requested_at: requestedAt, expires_at: requestedAt },
+      }),
+    })
+
+    expect(screen.getByRole('button', { name: /采集中/ })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('正在采集最新 IP 质量')
+    expect(screen.getByRole('status')).toHaveTextContent(/agent 已接收，正在检测 · 已用 1\d 秒/)
+  })
+
+  it('explains why collection is unavailable and links to settings when disabled', () => {
+    renderDashboard(report(), { collect: controller({}, { enabled: false, available: false, unavailable_reason: 'disabled' }) })
+
+    expect(screen.getByRole('button', { name: '立即采集' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('IP 质量采集已在设置中关闭')
+    expect(screen.getByRole('link', { name: '前往设置开启' })).toHaveAttribute('href', '/settings?tab=monitoring')
+  })
+
+  it('switches header actions when viewing a historical report', () => {
+    renderDashboard(report(), { initialEntry: '/vps/vps_001/ip-quality?report_id=ipq_000' })
+
+    expect(screen.getByText('历史报告', { selector: '.badge' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看最新报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality')
+    expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
   })
 })

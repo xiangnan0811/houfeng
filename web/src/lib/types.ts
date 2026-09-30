@@ -1117,6 +1117,35 @@ export type VPSIPQualityReport = {
   history: IPQualitySummary[]
 }
 
+export type IPQualityCollectRequestStatus = 'pending' | 'dispatched' | 'completed' | 'expired'
+
+export type IPQualityCollectUnavailableReason =
+  | 'disabled'
+  | 'no_monitoring_instance'
+  | 'agent_not_bound'
+  | 'monitoring_paused'
+
+export type IPQualityCollectRequest = {
+  request_id: string
+  monitoring_instance_id: string
+  status: IPQualityCollectRequestStatus
+  requested_at: string
+  expires_at: string
+  dispatched_at?: string
+  completed_at?: string
+  report_status?: string
+  error_summary?: string
+}
+
+export type IPQualityCollectStatus = {
+  enabled: boolean
+  available: boolean
+  unavailable_reason?: IPQualityCollectUnavailableReason | string
+  monitoring_instance_id?: string
+  agent_last_sync_at?: string
+  request?: IPQualityCollectRequest | null
+}
+
 export type RenewalSubscriptionLinkage = {
   status: RenewalSubscriptionLinkageStatus
   candidate_count: number

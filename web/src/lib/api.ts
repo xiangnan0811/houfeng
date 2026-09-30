@@ -43,6 +43,7 @@ import type {
   LifecycleActionResult,
   UpdateProbeItemInput,
   ExtendVPSValidityInput,
+  IPQualityCollectStatus,
   MonitoringInstanceInstallCommandIssue,
   MonitoringInstanceLifecycleManagementInput,
   MonitoringInstanceListScope,
@@ -501,6 +502,14 @@ export function getVPSIPQualityReport(vpsId: string, reportId: string) {
   return requestJSON<VPSIPQualityReport>(
     `/api/vps/${encodeURIComponent(vpsId)}/ip-quality/reports/${encodeURIComponent(reportId)}`,
   )
+}
+
+export function getVPSIPQualityCollectStatus(vpsId: string) {
+  return requestJSON<IPQualityCollectStatus>(`/api/vps/${encodeURIComponent(vpsId)}/ip-quality/collect`)
+}
+
+export function requestVPSIPQualityCollect(vpsId: string) {
+  return postJSON<IPQualityCollectStatus>(`/api/vps/${encodeURIComponent(vpsId)}/ip-quality/collect`)
 }
 
 export function updateVPSAsset(

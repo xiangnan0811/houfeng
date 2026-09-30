@@ -23,8 +23,10 @@
   - `frequency_seconds`
   - `timeout_seconds`
   - `services`
+  - `collect_request_id`（可选，立即采集请求 ID）
 - Agent sync payload: `agentapi.SyncRequest.IPQualityReports []IPQualityReportPayload`:
   - report fields: `observed_at`、`agent_version`、`fingerprint`、`sync_batch_id`、`ip_address`、`ip_version`、`status`
+  - 立即采集的报告在 `diagnostics_json.collect_request_id`（`agentapi.IPQualityDiagnosticsCollectRequestIDKey`）回传请求 ID；报告顶层不新增字段
   - optional normalized facts: ASN、organization、coordinates、use/registered region、risk level、error fields、`raw_json`、`coverage`、`diagnostics_json`
   - nested provider rows `provider_results[]`: `provider`、`status`、`source_type`、usage/company/risk/region、proxy/tor/vpn/server/abuser/robot flags、`latency_ms`、`extra_json`、error fields
   - nested service rows `service_unlocks[]`: `service`、`source`、`status`、`probe_status`、`region`、`unlock_type`、`latency_ms`、`extra_json`、error fields
@@ -38,6 +40,9 @@
 - HTTP API:
   - `GET /api/vps/{vps_id}/ip-quality`
   - `GET /api/vps/{vps_id}/ip-quality/reports/{report_id}`
+  - `GET /api/vps/{vps_id}/ip-quality/collect`：`enabled`、`available`、`unavailable_reason`（`disabled` / `no_monitoring_instance` / `agent_not_bound` / `monitoring_paused`）、`monitoring_instance_id`、`agent_last_sync_at`、最近一次 `request`
+  - `POST /api/vps/{vps_id}/ip-quality/collect`：可用时 202 返回同结构并带 `request`；不可用时 409 `{error, reason}`
+  - `request`：`request_id`、`monitoring_instance_id`、`status`（`pending` / `dispatched` / `completed` / `expired`）、`requested_at`、`expires_at`、`dispatched_at`、`completed_at`、`report_status`、`error_summary`
   - VPS list/detail records may include `ip_quality_summary`.
 - Asset decision evidence kinds:
   - `ip_quality_missing`
@@ -57,7 +62,13 @@
 - 默认 service probe registry 必须对 settings 默认服务集合产生逐服务结果或逐服务诊断行；探测不可安全实现的服务要上报 `probe_status=skipped` / `status=unknown`，不能让页面长期显示 `0 / 0`。
 - 每个 provider source 和每个 service probe 必须有独立 timeout，且受总采集 context 约束；一个慢源只能生成该源 failure/timeout 行，不能吃完整体 timeout 或阻塞其他结果。
 - Service probe 的 HTTP 状态语义必须保守：只有明确成功响应和明确阻断响应才能判定 `unlocked` / `blocked`；429、404、5xx、HTML/非 JSON 或无法解析响应应写 `probe_status=failure`、`status=unknown`，不得误判为解锁成功。
-- IP 质量采集默认关闭；默认配置保留 86400 秒周期、15 秒 timeout 和默认服务集合。用户必须在 Settings 显式开启。低频报告与脱敏原始结果长期保留，不再提供 raw/history 按天自动删除配置，见 [数据保留合同](retention.md)。
+- IP 质量采集默认开启；默认配置为 86400 秒周期、15 秒 timeout 和默认服务集合。没有 settings 行、JSON 缺 `enabled` 字段时（`settings.Default()`、sync plan SQL 兜底、`IPQualityEnabled` 读取）都按开启处理；已保存的显式值（包括关闭）原样保留，不做迁移覆盖。只传零值对象或 `{"enabled":false}` 时视为显式关闭，其余字段补默认值。低频报告与脱敏原始结果长期保留，不再提供 raw/history 按天自动删除配置，见 [数据保留合同](retention.md)。
+- 立即采集：`POST /api/vps/{vps_id}/ip-quality/collect` 只为该 VPS 当前监控实例（未退役、未归档、所属 VPS 未归档）登记请求；采集关闭、无当前实例、agent 未绑定或监控暂停时返回 409 与原因，不登记请求。同一实例已有 `pending` / `dispatched` 请求时返回该请求，不重复触发外部查询。
+- 立即采集请求只保存在 center 进程内存（`ipquality.CollectRequests`），TTL 10 分钟，结束后保留 30 分钟供页面展示；center 重启即丢失，用户重新发起即可。该机制假设单 center 进程；多副本部署前必须改为持久化协调。不新增数据库表，不复用命令白名单/pending action，也不写命令审计。
+- `syncing.Service` 在 `ApplyBatch` 成功后，只在 `Disposition=recorded`（报告确已入库）时用本批报告完成进行中的请求；`suppressed`（暂停/退役等未写入）与 `exact_duplicate` 不改变请求。随后在 plan `enabled=true` 且未 `stop_collection` 时把仍待执行的请求 ID 写入 plan 副本并标记 `dispatched`；不得修改仓库返回的 plan。IP 质量关闭或实例暂停时不下发，请求保持原状直到过期。
+- 请求与报告按 ID 精确关联：agent 把请求 ID 写进报告的 `diagnostics_json.collect_request_id`，center 在脱敏前从原始 diagnostics 读取并按 `[A-Za-z0-9_-]{1,64}` 规整，只有带回同一 ID 的已入库报告才能完成请求。周期报告、离线补传或其他请求的报告不论时间多新都不算。不在报告顶层加字段：旧 center 的 sync 解码拒绝未知字段，回滚期间排队的整批数据会被 agent 丢弃；`diagnostics_json` 是旧 center 已接受的自由 JSON，该键不是敏感字段，会随诊断保存。
+- Agent 收到新的 `collect_request_id` 时不看周期立即采集一次；周期采集进行中收到请求时由这一轮认领并在报告中带回该 ID，不再重复采集。已产出报告的请求 ID 只在 agent 内存中去重（center 收到报告前会继续下发同一 ID）；进程重启或 `Stop` 后清空，此时若 center 仍下发同一 ID 会再采一次——宁可多采一次也不漏采。旧 agent 忽略该 plan 字段，请求到期后显示超时。
+- 过期后到达的报告照常入库，但不再改变请求状态；失败报告使请求 `completed` 且 `report_status=failure`，用户侧报告仍按下述 read view 规则只展示有效事实。
 - IP 质量 stale 窗口由 `stale_after_seconds` 控制，默认 604800 秒。该值必须不小于 `frequency_seconds`，避免还没到下一次采集就判过期。API、Settings 页面、Go/TS 类型和迁移默认必须同步该字段。
 - IP 质量采集频率独立于 host sample / probe frequency。Agent 心跳 tick 只 drain 已完成报告，不在同步路径内阻塞外部 HTTP 请求。
 - Agent due 判断必须按 `LastAttemptedAt` 节流；lookup 持续失败时也只能按 `frequency_seconds` 周期重试，不能因为 `LastSucceededAt` 为空而在每个 heartbeat tick 重复采集/上报 failure。
@@ -107,6 +118,16 @@
 | Raw JSON 超过上限 | 存合法 truncation marker，不存无效 JSON |
 | Provider/service `extra_json` 超过上限 | 存合法 extra truncation marker，不存无效 JSON |
 | 历史详情 report 属于其他 VPS 或未被该 VPS assignment 命中 | API 不返回该 report 细节 |
+| 立即采集时采集关闭 / 无当前监控实例 / agent 未绑定 / 监控暂停 | `POST .../ip-quality/collect` 返回 409 与 `reason`，不登记请求 |
+| 已有进行中的立即采集请求 | POST 返回同一请求，不新建 |
+| 请求 10 分钟内未收到回传 | 状态变为 `expired`，不再下发；迟到报告照常入库 |
+| Agent 重复收到同一 `collect_request_id` | 只采集一次 |
+| 周期采集进行中收到立即采集请求 | 当前这一轮认领请求，完成后不再补采 |
+| 立即采集中途或报告取走前被 `Stop`，或 agent 重启 | 请求不再算已处理，再次下发时重新采集 |
+| 请求下发后实例被暂停，报告随 suppressed 批次到达 | 报告未入库，请求不完成，直到过期 |
+| 请求下发后到达的周期报告或离线补传（未带回该请求 ID） | 不完成请求 |
+| 被认领的周期采集在发起前已开始（例如 300 秒超时） | 报告带回请求 ID，照常完成 |
+| diagnostics 中回传的 ID 超长、非字符串或含非法字符 | 忽略该 ID，报告照常入库 |
 | Settings `enabled=false` 且 latest summary 查询超时/失败 | Overview IP Quality 仍为 `not_configured` + `SectionReady`；不得把 `ip_quality` 写入 `JudgementSourcesUnavailable`，也不得发出 `source.unavailable.v1` 或抬升 overall status。历史注释只能 best-effort |
 
 ### 5. Good/Base/Bad Cases
@@ -115,6 +136,7 @@
 - Good: 多个默认 provider 成功/失败混合时，页面展示 provider/source 状态、coverage、失败诊断和 extra details；成功 provider 的风险信号进入风险矩阵，失败/未配置来源只进入采集完整性。
 - Good: Netflix/ChatGPT/YouTube 等服务探测返回逐服务行；429 或 404 只显示 unknown/failure，不显示已解锁或已阻断。
 - Good: 用户从历史列表打开旧 report，API 返回该 report 的 summary、provider rows、service rows、coverage 和 diagnostics。
+- Good: 新接入 agent 的 VPS 在 IP 质量页点击“立即采集”，下一次 sync 收到带 `collect_request_id` 的 plan，agent 不等 86400 秒周期立即采集，回传后页面自动刷新到新报告。
 - Base: IP 质量关闭时 plan 仍可下发 `enabled=false`，agent 不启动外部采集，Overview 判断为 `not_configured` 而不是 missing/risk。关闭后的历史 summary 查询失败不能改变当前健康判断。
 - Base: ChatGPT 和 Netflix service unlock 被阻断时，资产决策显示 `media_unlock_blocked`，但不自动迁移资产。
 - Bad: agent 运行 `bash <(curl -Ls IP.Check.Place)` 或下载远程脚本解析 stdout。
@@ -132,11 +154,16 @@
 
 - `internal/contracts/agentapi`: sync plan 和 sync request JSON round-trip，覆盖 `ip_quality_plan` 与 `ip_quality_reports` 字段。
 - `internal/contracts/agentapi`: provider/service v2 字段、`coverage`、`diagnostics_json` JSON round-trip，并覆盖旧 payload 兼容。
-- `internal/center/settings`: 默认关闭、低频默认值、`stale_after_seconds` 默认值与校验、service normalization、非法频率/timeout/service；不暴露低频 TTL 配置。
+- `internal/center/settings`: 默认开启、零值/仅 `enabled=false` 视为显式关闭、低频默认值、`stale_after_seconds` 默认值与校验、service normalization、非法频率/timeout/service；不暴露低频 TTL 配置。
 - `agent/ipquality`: due 判断、state store、HTTP collector 成功/partial/failure、service bool unlock 映射、raw JSON 脱敏和合法 JSON。
 - `agent/ipquality`: 默认多 provider registry、optional not_configured rows、默认 service probe rows、per-source/per-probe timeout 隔离、ipapi.is 嵌套 JSON 解析、HTML/非 JSON 清洁 failure、失败 attempt 节流。
 - `agent/ipquality`: service probe HTTP status 回归测试，确认 429/404/5xx 不会被当作 unlocked。
 - `agent/runtime`: plan 到后台 collector 的启动/drain 行为，disabled plan 不启动采集。
+- `agent/ipquality`: 立即采集绕过周期且只执行一次、ID 写入 diagnostics 且保留原诊断、周期报告不带 ID、周期采集中认领请求、Stop/重启后可重新执行、disabled plan 忽略请求、失败的立即采集保留上次成功时间。
+- `internal/center/ipquality`: 立即采集请求复用、只按回传 ID 完成（排除周期报告与其他 ID）、diagnostics ID 解析与规整、过期与清理。
+- `internal/center/syncing`: 待执行请求写入 plan 副本、关闭/停止采集时不下发、只有 recorded 批次完成请求，并用真实注册表覆盖“下发—suppressed 不完成—recorded 完成”。
+- `internal/center/store`: 完整 settings 读取与 sync plan 对缺少 `enabled` 的已存 JSON 结论一致。
+- `internal/center/http/handlers`: 立即采集 GET/POST 可用性原因、409、请求复用；agent sync 透传 plan 的 `collect_request_id`，并从原始 diagnostics 读出回传 ID。
 - `agent/syncqueue`: IP 质量报告随 sync request 离线队列 round-trip。
 - `internal/center/http/handlers`: agent sync 写入 IP 质量 DTO、非法报告拒绝、raw/extra/diagnostics JSON 脱敏；VPS IP quality API 返回 report/matrix/history；历史详情 endpoint 返回 selected report summary。
 - `internal/center/store`: sync batch 事务内写三表，repository latest/history 查询、历史详情查询、migration view 使用正确 alias；retention 长期保留报告与脱敏 raw。

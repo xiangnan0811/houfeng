@@ -70,8 +70,10 @@ type ReportWrite struct {
 	RawJSON              json.RawMessage
 	CoverageJSON         json.RawMessage
 	DiagnosticsJSON      json.RawMessage
-	ProviderResults      []ProviderResultWrite
-	ServiceUnlocks       []ServiceUnlockWrite
+	// CollectRequestID 取自 agent 原始 diagnostics_json，只用于完成内存中的立即采集请求，不单独入库。
+	CollectRequestID string
+	ProviderResults  []ProviderResultWrite
+	ServiceUnlocks   []ServiceUnlockWrite
 }
 
 type Repository interface {

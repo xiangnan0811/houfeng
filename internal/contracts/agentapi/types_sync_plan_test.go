@@ -189,6 +189,7 @@ func TestSyncPlan(t *testing.T) {
 			FrequencySeconds: 86400,
 			TimeoutSeconds:   12,
 			Services:         []string{"netflix", "chatgpt"},
+			CollectRequestID: "ipqc_roundtrip",
 		},
 		ProbeAssignments: []agentapi.ProbeAssignment{{
 			TargetID:           "target-nil-port",
@@ -250,6 +251,9 @@ func TestSyncPlan(t *testing.T) {
 	}
 	if roundTrip.IPQualityPlan.FrequencySeconds != 86400 || roundTrip.IPQualityPlan.Services[1] != "chatgpt" {
 		t.Fatalf("IPQualityPlan = %#v, want frequency and services preserved", roundTrip.IPQualityPlan)
+	}
+	if roundTrip.IPQualityPlan.CollectRequestID != "ipqc_roundtrip" {
+		t.Fatalf("IPQualityPlan.CollectRequestID = %q, want ipqc_roundtrip", roundTrip.IPQualityPlan.CollectRequestID)
 	}
 	if len(roundTrip.ProbeAssignments) != 1 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 1", len(roundTrip.ProbeAssignments))

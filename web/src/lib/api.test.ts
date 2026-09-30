@@ -37,6 +37,7 @@ import {
   getVPSAsset,
   getVPSArchiveReview,
   getVPSIPQuality,
+  getVPSIPQualityCollectStatus,
   getVPSIPQualityReport,
   getVPSTimeline,
   issueMonitoringInstanceInstallCommand,
@@ -63,6 +64,7 @@ import {
   resumeTarget,
   retireMonitoringInstance,
   postMonitoringInstanceAction,
+  requestVPSIPQualityCollect,
   patchAssetDecisionManualGroup,
   patchAssetDecisionManualGroupMember,
   patchAssetDecisionRecord,
@@ -667,6 +669,30 @@ describe('api helpers', () => {
       cache: 'no-store',
       credentials: 'include',
       body: JSON.stringify(input),
+    })
+  })
+
+  it('reads and requests immediate IP quality collection', async () => {
+    const status = { enabled: true, available: true, monitoring_instance_id: 'mi_001' }
+    const queued = { ...status, request: { request_id: 'ipqc_001', monitoring_instance_id: 'mi_001', status: 'pending', requested_at: '2026-09-30T08:00:00Z', expires_at: '2026-09-30T08:10:00Z' } }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockResponse(200, JSON.stringify(status)))
+      .mockResolvedValueOnce(mockResponse(202, JSON.stringify(queued)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getVPSIPQualityCollectStatus('vps 001')).resolves.toEqual(status)
+    await expect(requestVPSIPQualityCollect('vps 001')).resolves.toEqual(queued)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps%20001/ip-quality/collect', {
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
+    })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps%20001/ip-quality/collect', {
+      method: 'POST',
+      headers: { Accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'include',
     })
   })
 
