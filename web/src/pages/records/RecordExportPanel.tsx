@@ -164,8 +164,8 @@ export function RecordExportPanel({ recordId, revisionId, snapshotIds = [], reco
         ) : null}
       </div>
       <div className="record-tool__actions">
-        <Button size="md" variant="secondary" disabled={busy} onClick={runPreview}>预览导出</Button>
-        <Button size="md" disabled={busy || !preview} onClick={runDownload}>下载</Button>
+        <Button size="lg" variant="secondary" disabled={busy} onClick={runPreview}>预览导出</Button>
+        <Button size="lg" disabled={busy || !preview} onClick={runDownload}>下载</Button>
       </div>
       {preview ? (
         <ul className="record-tool__list">
