@@ -27,6 +27,15 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.8.0](https://github.com/xiangnan0811/houfeng/compare/v1.7.0...v1.8.0) (2026-09-30)
+
+
+### Features
+
+* **web:** 平板与手机布局：侧栏平板默认收起、窄屏页头/设置堆叠、窄卡片与检查器自适应、手机顶栏搜索收起 ([98cb48c](https://github.com/xiangnan0811/houfeng/commit/98cb48c49d20366a53547cf5abfeb001f2dda148))
+* **web:** 平板与手机布局第一批：侧栏平板默认收起、窄屏页头与设置行堆叠、窄卡片与检查器自适应 ([56a5e41](https://github.com/xiangnan0811/houfeng/commit/56a5e4194e4915213c1f9c2c2c36f49286731416))
+* **web:** 手机顶栏搜索收起为放大镜，聚焦时铺满顶栏 ([a391399](https://github.com/xiangnan0811/houfeng/commit/a3913994ecbf212f689428321aa06b02655fa7e2))
+
 ## [1.7.0](https://github.com/xiangnan0811/houfeng/compare/v1.6.0...v1.7.0) (2026-09-29)
 
 
