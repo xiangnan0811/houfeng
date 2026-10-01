@@ -6,5 +6,5 @@ type Props = {
 }
 
 export function MonitoringProbeEvidenceRenderer({ model }: Props) {
-  return <MonitoringEvidenceRenderer model={model} title="探针监控趋势" />
+  return <MonitoringEvidenceRenderer model={model} title="入口探测趋势" />
 }

@@ -13,7 +13,7 @@
 - `web/src/main.tsx` 固定按 reset → tokens → `index.css` owner manifest → `modernize.css` 顺序导入；tokens 必须在所有 `var(--...)` 消费方之前。
 - `web/src/index.css` 只承载七个显式 owner section 与本地 `@import`，不承载规则。owner 顺序为 shared-atoms-page → app-shell → dashboard → assets → vps → observability → settings-subscriptions。
 - 规则落点位于 `web/src/styles/partials/`；`web/css-owners.json` 对 `web/src/**/*.css`（包括 reset、tokens、modernize、Login route CSS）做唯一且穷尽的 owner 映射。
-- 路由 CSS 按 `web/css-owners.json` 登记：Login、VPS、Monitoring 与 Records（`pages/records/RecordWorkspace.css`，由记录工作区与横向比较两个懒加载路由导入，登记在 shared-atoms-page）的路由/共享工作区样式已有实际消费者。引入或调整 CSS 必须验证实际 import graph、owner 和加载边界；不能假定其他路由已加载该样式。
+- 路由 CSS 按 `web/css-owners.json` 登记：Login、VPS、Monitoring 与 Records（`pages/records/RecordWorkspace.css`，由记录工作区、横向比较与证据快照阅读三个懒加载路由导入，登记在 shared-atoms-page）的路由/共享工作区样式已有实际消费者。引入或调整 CSS 必须验证实际 import graph、owner 和加载边界；不能假定其他路由已加载该样式。
 
 > **未来留余地**：如果团队后续决定引入 Tailwind / CSS Modules / Vanilla-Extract 之类的方案，需要做独立技术决策并整体迁移，**不要**让两套体系并存。
 
@@ -126,7 +126,7 @@
 | `web/src/styles/partials/{dashboard,legacy-assets,legacy-vps,legacy-observability,legacy-subscriptions,...}.css` | `web/css-owners.json` 指定的业务 owner；新规则按真实 BEM/domain 归属进入现有 owner 文件 | `.asset-decision-*` / `.vps-*` / `.monitoring-*` |
 | `web/src/styles/modernize.css` | 已有全站兼容覆盖；不是新规则的默认 catch-all | `.settings-save-footer { ... }` |
 | `web/src/pages/LoginPage.css` | 首屏前缺壳的 Login 页面样式 | `.login-page__card { ... }` |
-| 已在 `css-owners.json` 登记的路由工作区 CSS（`pages/vps-detail/*.css`、`pages/monitoring-detail/MonitoringDetailWorkspace.css`、`pages/records/RecordWorkspace.css`） | 懒加载工作区版式，由使用它的路由模块或其共享工作区组件导入：VPS 工作区 CSS 由 VPS 列表 / 详情 / IP 质量页与生命周期工作区导入，监控工作区 CSS 另由 `ObservabilityNotice*` 与监控批量面板导入，记录工作区 CSS 只由记录工作区、横向比较页及 test-only harness 导入 | `.vps-detail-workspace__section` / `.record-section` |
+| 已在 `css-owners.json` 登记的路由工作区 CSS（`pages/vps-detail/*.css`、`pages/monitoring-detail/MonitoringDetailWorkspace.css`、`pages/records/RecordWorkspace.css`） | 懒加载工作区版式，由使用它的路由模块或其共享工作区组件导入：VPS 工作区 CSS 由 VPS 列表 / 详情 / IP 质量页与生命周期工作区导入，监控工作区 CSS 另由 `ObservabilityNotice*` 与监控批量面板导入，记录工作区 CSS 只由记录工作区、横向比较页、证据快照阅读页及 test-only harness 导入 | `.vps-detail-workspace__section` / `.record-section` |
 
 **原则**：
 

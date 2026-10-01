@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -140,10 +140,14 @@ describe('EvidenceSnapshotPage', () => {
     expect(screen.getByText('正在加载证据快照')).toBeInTheDocument()
     expect(await screen.findByText('IP 质量报告')).toBeInTheDocument()
     expect(getSnapshot).toHaveBeenCalledWith('evs_9', expect.any(AbortSignal))
-    expect(screen.getByText('观测时间')).toBeInTheDocument()
-    expect(screen.getByText('捕获时间')).toBeInTheDocument()
-    expect(screen.getByText('引用时间')).toBeInTheDocument()
-    expect(screen.getAllByText(/完整/).length).toBeGreaterThan(0)
+    const identity = screen.getByLabelText('证据身份')
+    expect(within(identity).getAllByRole('term').map((term) => term.textContent)).toEqual(['主体', '来源', '观测'])
+    expect(screen.getByText('IP 质量', { selector: '.badge' })).toBeInTheDocument()
+    expect(screen.getByText('数据完整')).toHaveClass('tone--normal')
+    // 捕获 / 引用时间与快照 ID 只在默认折叠的技术细节里。
+    for (const label of ['捕获时间', '引用时间']) {
+      expect(screen.getByText(label).closest('details')).not.toHaveAttribute('open')
+    }
     expect(screen.getByRole('link', { name: '打开记录' })).toHaveAttribute('href', '/records/rec_renderer')
     expect(screen.getByRole('link', { name: '返回主体证据' })).toHaveAttribute(
       'href',
@@ -187,10 +191,9 @@ describe('EvidenceSnapshotPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('来源已不可用。以下为快照保留内容，不是实时数据。')).toBeInTheDocument()
-    expect(screen.getByText('质量统计含回填样本，不能当作实时观测。')).toBeInTheDocument()
+    expect(await screen.findByText('来源已不可用')).toBeInTheDocument()
+    expect(screen.getByText('含回填样本')).toBeInTheDocument()
     expect(screen.getByText('IP 质量报告')).toBeInTheDocument()
-    expect(screen.getByText('来源不可用')).toBeInTheDocument()
   })
 
   it('fails closed for an unknown renderer tuple', async () => {

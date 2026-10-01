@@ -1,4 +1,7 @@
-import { MetricChart, type MetricChartSample, MonoDigits, Timestamp } from '../../../../components/atoms'
+import { useId } from 'react'
+
+import { MetricChart, type MetricChartSample, Timestamp } from '../../../../components/atoms'
+import { formatDuration, formatMetricAxisValue, formatMetricValue, METRIC_AXIS_GUTTER, metricLabel } from '../evidencePresentation'
 import type {
   MonitoringBucketReadModel,
   MonitoringEvidenceReadModel,
@@ -79,47 +82,65 @@ function monitoringSeries(model: MonitoringEvidenceReadModel): ChartSeries[] {
   return Array.from(series.values())
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, '0')
+}
+
+// 覆盖窗口按本地日历日判断：同一天只重复时分，跨日写全两端。
+function windowText(start: string, end: string): string {
+  const from = new Date(start)
+  const to = new Date(end)
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return `${start} – ${end}`
+  const full = (date: Date) => `${date.getFullYear()}/${pad2(date.getMonth() + 1)}/${pad2(date.getDate())} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+  return from.toDateString() === to.toDateString()
+    ? `${full(from)} – ${pad2(to.getHours())}:${pad2(to.getMinutes())}`
+    : `${full(from)} – ${full(to)}`
+}
+
 export function MonitoringEvidenceRenderer({ model, title }: Props) {
   const series = monitoringSeries(model)
+  const multipleSeries = new Set(series.map((item) => item.seriesId)).size > 1
+  const titleId = useId()
   return (
-    <section className="page-panel evidence-renderer evidence-renderer--monitoring" aria-label={title}>
-      <header className="evidence-renderer__header">
-        <h3>{title}</h3>
-        <span>{model.quality.status}</span>
-      </header>
-      <dl className="metadata-list evidence-renderer__facts">
-        <div><dt>覆盖开始</dt><dd><Timestamp value={model.coverage_start} /></dd></div>
-        <div><dt>覆盖结束</dt><dd><Timestamp value={model.coverage_end} /></dd></div>
-        <div><dt>实际精度</dt><dd><MonoDigits>{model.actual_precision_seconds} 秒</MonoDigits></dd></div>
-        <div><dt>缺口</dt><dd><MonoDigits>{model.quality.gap_count}</MonoDigits></dd></div>
-        <div><dt>峰值</dt><dd><MonoDigits>{model.quality.peak_count}</MonoDigits></dd></div>
-      </dl>
-      <div className="page-stack evidence-renderer__charts">
-        {series.map((item) => (
-          <section key={item.key} className="page-panel evidence-renderer__chart">
-            <h4>{item.metric}</h4>
-            <p><MonoDigits>{item.seriesId}</MonoDigits> · {item.unit}</p>
-            <MetricChart
-              samples={item.samples}
-              ariaLabel={`${item.seriesId} ${item.metric} 趋势`}
-              formatValue={(value) => `${value} ${item.unit}`}
-            />
-          </section>
-        ))}
+    <section className="record-section record-evidence__body" aria-labelledby={titleId}>
+      <div className="record-section__head">
+        <h2 className="record-section__title" id={titleId}>{title}</h2>
+        <dl className="record-evidence__chips">
+          <div><dt>覆盖</dt><dd className="mono">{windowText(model.coverage_start, model.coverage_end)}</dd></div>
+          <div><dt>精度</dt><dd>{formatDuration(model.actual_precision_seconds)}</dd></div>
+          <div className={model.quality.gap_count > 0 ? 'record-evidence__chip--notice' : undefined}>
+            <dt>缺口</dt><dd className="mono">{model.quality.gap_count}</dd>
+          </div>
+          <div><dt>峰值</dt><dd className="mono">{model.quality.peak_count}</dd></div>
+        </dl>
       </div>
-      {model.peaks.length > 0 ? (
-        <section className="evidence-renderer__peaks" aria-label="峰值">
-          <h4>峰值</h4>
-          <ul className="evidence-renderer__list">
-            {model.peaks.map((peak) => (
-              <li key={`${peak.series_id}-${peak.metric}-${peak.at}`}>
-                <span>{peak.metric}: {peak.value}</span>
-                <Timestamp value={peak.at} />
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
+      <div className="record-evidence__charts">
+        {series.map((item) => {
+          const peak = model.peaks.find((entry) => entry.series_id === item.seriesId && entry.metric === item.metric)
+          return (
+            <figure key={item.key} className="record-evidence__chart">
+              <figcaption className="record-evidence__chart-head">
+                <strong>{metricLabel(item.metric)}</strong>
+                {multipleSeries ? <span className="mono">{item.seriesId}</span> : null}
+                {peak ? (
+                  <span className="record-evidence__peak">
+                    峰值 <span className="mono">{formatMetricValue(peak.value, item.unit)}</span> · <Timestamp value={peak.at} />
+                  </span>
+                ) : null}
+              </figcaption>
+              <MetricChart
+                samples={item.samples}
+                height={140}
+                allowSinglePoint
+                ariaLabel={`${multipleSeries ? `${item.seriesId} ` : ''}${metricLabel(item.metric)}趋势`}
+                formatValue={(value) => formatMetricValue(value, item.unit)}
+                formatAxisValue={(value) => formatMetricAxisValue(value, item.unit)}
+                paddingLeft={METRIC_AXIS_GUTTER}
+              />
+            </figure>
+          )
+        })}
+      </div>
     </section>
   )
 }

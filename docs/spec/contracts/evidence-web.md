@@ -51,3 +51,11 @@ export type EvidenceCaptureReference = {
 ## Protected evidence reader
 
 Evidence links open the protected `/evidence/:evidenceId` reader using the existing exact renderer tuple and validated read model. Unsupported or invalid evidence fails closed without exposing raw payloads; source deletion does not erase an authorized retained snapshot. Subject filter and return context belong to [Records subject workspace](records/web-surfaces.md).
+
+### 阅读页版式
+
+- 页头与记录工作区同一版式（`RecordWorkspace.css`）：标题 + 证据类型徽标（中文）、质量徽标（数据完整 / 部分覆盖 / 质量降级 / 质量未知，按状态着色）、`来源已不可用`、`含回填样本` 徽标，替代原来的整行说明句；身份行只列主体、来源（类型用中文标签）与观测时间。操作保持「打开记录 / 返回主体证据 / 横向比较」。
+- 正文由 renderer registry 输出一张分区卡：主机 / 探测趋势以摘要 chip（覆盖、精度、缺口、峰值）加每指标一张约 140px 高的小图（两列网格，指标中文名，峰值写在图头）；监控事件与命令审计为时间线（严重度 / 结果徽标，恢复事件不沿用告警色，退出码只在非 0 时显示）；IP 质量为摘要 chip 加数据库 / 服务解锁两列；订阅成本为账单、折算、预算（`<progress>`）、覆盖四个瓷砖，预算状态未知或月度额度为 0 时只写「无法判定」及原因，不画进度。图头、提示与峰值用完整单位格式（如 `1.4 MB/s`、`1小时 30分钟`）；纵轴保持同一量纲但用紧凑刻度（至多三位有效数字，速率保留 `/s`；按绝对值、以舍入后的系数选单位：字节到 1000 即按 1024 进位，时长依次为秒 / 分 / 时 / 天 / 年（阈值 60 / 60 / 24 / 365，年按 365 天），负刻度补回负号，如 `999KB/s`、`1.5时`、`-37天`、`2.7年`），刻度槽固定 56px 不裁切。图表可访问名称用中文指标名。服务端枚举只按自有键映射中文（`Object.hasOwn`，`__proto__` 等原样显示），未知值原样显示，不猜测含义；监控事件类型沿用 `STATE_CHANGE_EVENT_TYPE_LABELS`。
+- 快照 ID、类型 / schema / renderer 版本、观测 / 捕获 / 引用时间、请求 / 实际窗口、精度、来源修订与水位、生成版本、敏感级别、保留策略与字段处理明细只在默认折叠的「技术细节」中；折叠摘要显示已处理字段数。
+- 不支持或解码失败仍 fail closed：只显示「不支持的证据类型」，不渲染载荷；技术细节仍可查看信封元数据。
+- 浏览器合同：`web/e2e/evidence-snapshot.spec.ts` 覆盖六种证据在 1440/1024/390 无横向溢出、技术细节折叠、回填 / 来源不可用徽标、fail closed，以及五主题 settled axe。

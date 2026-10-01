@@ -179,7 +179,7 @@ const rendererCases = [
       renderer_version: 'monitoring_host_v1',
       read_model: monitoringReadModel('monitoring_host_read_model/v1'),
     },
-    visible: 'cpu_usage_pct',
+    visible: 'CPU 使用率',
   },
   {
     name: 'monitoring probe',
@@ -190,7 +190,7 @@ const rendererCases = [
       renderer_version: 'monitoring_probe_v2',
       read_model: monitoringReadModel('monitoring_probe_read_model/v1'),
     },
-    visible: 'latency_ms',
+    visible: '延迟',
   },
   {
     name: 'monitoring event',
@@ -263,7 +263,7 @@ const rendererCases = [
         missing_rate_count: 0,
       },
     },
-    visible: 'ok',
+    visible: '正常',
   },
   {
     name: 'command audit',
@@ -428,7 +428,7 @@ describe('EvidenceRendererRegistry', () => {
 
     render(<EvidenceRendererRegistry evidence={evidence} />)
 
-    const chart = screen.getByRole('img', { name: 'series-safe cpu_usage_pct 趋势' })
+    const chart = screen.getByRole('img', { name: 'CPU 使用率趋势' })
     expect(chart.querySelectorAll('polyline')).toHaveLength(2)
   })
 
