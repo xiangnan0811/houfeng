@@ -64,4 +64,10 @@
 
 Activity, records, and evidence for VPS, monitoring instances, and entrypoints remain views of the shared subject workspace. Preserve the existing URL filter codec and location.state return context through record publication, restoration, and evidence links. Interactive filters match each view's server predicate; retained incompatible URL filters stay visible and removable. A scoped new record consumes the same canonical subject reference emitted by its entry link and isolates its unsynced buffer from other subjects and unscoped creation. Reopening the same entry restores its buffer without overwriting newer edits; unscoped draft recovery remains available from /records/new. A valid canonical return_to provides an explicit subject-return link, without changing the post-publication record destination. Record search prioritizes results; import/export remain secondary tools. Evidence reading follows the [evidence Web contract](../evidence-web.md).
 
+主体工作区版式（`SubjectIdentityBar` + `UnifiedTimeline`，样式在全局 `page.css`）：
+
+- 页头与 VPS 概览同一结构：类型图标 + 标题 + 在册 / 已删除主体徽标，一行身份信息（类型、ID，主机名与标题不同时附加）；不再使用眉题。「返回详情」与「新建记录 / 横向比较 / 刷新」同为页头按钮，返回链接仍保留 VPS 的 `return_vps` 与 navigation state，入口探测不带 state。
+- 时间线按本地日历日分组，每天一张面板；每条一行：通道形状标记、本地时分、标题、通道标签、`回填` 标签、与事件时间不同的记入时间、查看 / 加入横向比较动作（右对齐）；摘要或证据覆盖信息另起一行。系统事实只显示通道标签，不再附加"不可编辑"说明。条目链接与页头一致：入口探测不携带 navigation state（`omitLinkState`）。时间与记入时间用 `<time datetime>`，记入跨日时写完整日期。640px 以下标题行移到时间下一行，动作不再右对齐。
+- 部分来源不可用时页面给出一句状态提示，时间线顶部以徽标列出各来源状态。
+
 Source presence 在册 is a neutral identity badge, not a green health state. VPS, monitoring, and 入口探测 activity/records/evidence share `SubjectActivityWorkspace` and `SubjectLocalNavigation`; only VPS exposes an overview hop because only that source has a detail workspace. Do not duplicate those surfaces or invent missing source fields.

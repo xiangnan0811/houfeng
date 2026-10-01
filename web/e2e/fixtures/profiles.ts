@@ -1958,3 +1958,103 @@ export function evidenceSnapshotProfile(options: {
     [apiRouteKey('GET', '/api/evidence/evs_e2eview')]: { status: 200, body },
   })
 }
+
+const SUBJECT_ACTIVITY_SUBJECTS = {
+  vps: { kind: 'vps', source_id: 'vps_001', identity: { display_name: 'Tokyo Edge' }, live_route: '/vps/vps_001', status: 'live' },
+  monitoring_instance: {
+    kind: 'monitoring_instance',
+    source_id: 'mi_001',
+    identity: { display_name: 'alpha 主机监控', hostname: 'alpha.example.net' },
+    live_route: '/monitoring/mi_001',
+    status: 'live',
+  },
+  target: { kind: 'target', source_id: 'tg_001', identity: { display_name: 'API 443 入口' }, live_route: '/targets/tg_001', status: 'live' },
+} satisfies Record<string, SubjectActivityListResponse['subject']>
+
+function subjectActivityItem(
+  id: string,
+  eventKind: SubjectActivityListResponse['items'][number]['event_kind'],
+  sourceKind: SubjectActivityListResponse['items'][number]['source_kind'],
+  eventAt: string,
+  title: string,
+  extra: Partial<SubjectActivityListResponse['items'][number]> = {},
+): SubjectActivityListResponse['items'][number] {
+  return {
+    activity_id: id,
+    event_kind: eventKind,
+    event_at: eventAt,
+    recorded_at: eventAt,
+    source_kind: sourceKind,
+    backfilled: false,
+    subjects: [],
+    presentation: { version: 1, title, ...(extra.presentation ?? {}) },
+    ...extra,
+  }
+}
+
+/** Two local days mixing human, system and evidence items, with summaries, backfill and a lagging source. */
+export function subjectActivityPopulatedProfile(options: {
+  kind?: keyof typeof SUBJECT_ACTIVITY_SUBJECTS
+  view?: 'activity' | 'records' | 'evidence'
+  degraded?: boolean
+} = {}): ApiFixtureProfile {
+  const kind = options.kind ?? 'vps'
+  const view = options.view ?? 'activity'
+  const subject = SUBJECT_ACTIVITY_SUBJECTS[kind]
+  // 记录视图只返回记录生命周期事件（后端谓词排除行动 / 评论），行动完成只出现在活动视图。
+  const records = [
+    subjectActivityItem('act_pop_1', 'record_revised', 'record_domain', '2026-08-19T13:50:00Z', '第三晚 TCP 观测', {
+      presentation: { version: 1, title: '第三晚 TCP 观测', summary: '补充结论：丢包集中在服务商第二跳' },
+      record_id: 'rec_e2e001',
+      revision_id: 'rrv_e2e002',
+    }),
+    subjectActivityItem('act_pop_7', 'record_created', 'record_domain', '2026-08-17T15:30:00Z', '第三晚 TCP 观测', {
+      record_id: 'rec_e2e001',
+    }),
+  ]
+  const actions = [
+    subjectActivityItem('act_pop_5', 'action_completed', 'record_domain', '2026-08-18T09:20:00Z', '确认监控告警时间线', {
+      record_id: 'rec_e2e001',
+    }),
+  ]
+  const evidence = [
+    subjectActivityItem('act_pop_2', 'evidence_captured', 'evidence_snapshot', '2026-08-19T14:00:05Z', '第三晚主机负载', {
+      evidence_snapshot_id: 'evs_e2eview',
+      subjects: [{
+        kind: subject.kind,
+        source_id: subject.source_id,
+        role: 'evidence_source',
+        primary: true,
+        identity: { coverage: '21:00–22:00', bucket: '5 分钟', quality: '部分覆盖' },
+        tombstoned: false,
+      }],
+    }),
+  ]
+  const system = [
+    subjectActivityItem('act_pop_3', 'monitoring_state_changed', 'monitoring_event', '2026-08-19T13:25:00Z', 'TCP 重传率升高', {
+      presentation: { version: 1, title: 'TCP 重传率升高', summary: '告警 · 重传率 2.4%，阈值 2%' },
+      backfilled: true,
+      recorded_at: '2026-08-19T13:40:00Z',
+    }),
+    subjectActivityItem('act_pop_4', 'command_executed', 'command_audit', '2026-08-19T13:46:00Z', '执行 df_h', {
+      presentation: { version: 1, title: '执行 df_h', summary: '失败 · 退出码 2 · 值班员' },
+    }),
+    subjectActivityItem('act_pop_6', 'asset_fact_changed', 'asset_history', '2026-08-18T02:10:00Z', '续费决策改为继续续费'),
+  ]
+  const items = (view === 'records' ? records : view === 'evidence' ? evidence : [...records, ...actions, ...evidence, ...system])
+    .sort((left, right) => right.event_at.localeCompare(left.event_at))
+  const query = view === 'activity' ? '' : `?view=${view}`
+  return authenticatedProfile({
+    [apiRouteKey('GET', `/api/subjects/${kind}/${subject.source_id}/activity${query}`)]: {
+      status: 200,
+      body: subjectActivityFixture({
+        subject,
+        view,
+        items,
+        source_statuses: options.degraded
+          ? [{ source_kind: 'command_audit', state: 'stale', reason_code: 'lagging' }]
+          : [],
+      }),
+    },
+  })
+}

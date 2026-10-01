@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it } from 'vitest'
 
@@ -46,5 +46,29 @@ describe('SubjectIdentityBar', () => {
 
     expect(screen.getByText('已删除主体')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '已删除实例' })).toBeInTheDocument()
+  })
+})
+
+describe('SubjectIdentityBar layout', () => {
+  it('puts kind and id in one identity row with a kind mark and hostname when it differs', () => {
+    const { container } = render(
+      <MemoryRouter>
+        <SubjectIdentityBar
+          subject={{
+            kind: 'monitoring_instance',
+            source_id: 'mi_001',
+            identity: { display_name: 'alpha 主机监控', hostname: 'alpha.example.net' },
+            status: 'live',
+          }}
+          returnHref="/monitoring/mi_001"
+          returnLabel="返回详情"
+        />
+      </MemoryRouter>,
+    )
+    const identity = screen.getByLabelText('主体身份')
+    expect(within(identity).getAllByRole('term').map((term) => term.textContent)).toEqual(['类型', 'ID', '主机名'])
+    expect(within(identity).getByText('监控实例')).toBeInTheDocument()
+    expect(container.querySelector('.subject-identity-bar__mark svg')).not.toBeNull()
+    expect(screen.getByRole('link', { name: '返回详情' })).toHaveClass('btn')
   })
 })
