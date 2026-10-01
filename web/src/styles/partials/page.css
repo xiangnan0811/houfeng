@@ -280,11 +280,40 @@
 /* shared-atoms-page owner migration from misc.css */
 .login-page{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;background:var(--bg)}
 /* Subject activity workspace */
-.subject-identity-bar{display:flex;justify-content:space-between;gap:var(--space-4);align-items:flex-start;min-width:0}
-.subject-identity-bar__main{min-width:0;display:flex;flex-direction:column;gap:var(--space-1)}
-.subject-identity-bar__kind{font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);color:var(--text-muted);text-transform:uppercase;margin:0}
-.subject-identity-bar__meta{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);color:var(--text-secondary);font-size:var(--type-small-size)}
-.subject-identity-bar__actions{justify-content:flex-end}
+.subject-identity-bar{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--space-3) var(--space-4);min-width:0}
+.subject-identity-bar__lead{display:flex;flex:1 1 auto;align-items:flex-start;gap:var(--space-3);min-width:0}
+/* 图标几何与 VPS 概览页头的 .vps-overview-identity__mark 一致，切换概览 / 活动时页头不跳动。 */
+.subject-identity-bar__mark{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;width:24px;height:24px;margin-top:2px;color:var(--accent)}
+.subject-identity-bar__mark svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.subject-identity-bar__copy{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.subject-identity-bar__title-row .page__title{font-weight:600}
+.subject-identity-bar__title-row{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);min-width:0}
+.subject-identity-bar__meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1) var(--space-3);margin:0;color:var(--text-secondary);font-size:var(--type-eyebrow-size);line-height:1.4}
+.subject-identity-bar__meta-item{display:inline-flex;align-items:baseline;gap:var(--space-1);min-width:0}
+.subject-identity-bar__meta dt{color:var(--text-muted)}
+.subject-identity-bar__meta dd{margin:0;overflow-wrap:anywhere}
+/* 单主体时间线：按本地日分组的面板，每条一行（时间、标题、通道、标签、动作），摘要另起一行。 */
+.unified-timeline{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.unified-timeline__source-status{display:flex;flex-wrap:wrap;gap:var(--space-2);margin:0;padding:0;list-style:none}
+.unified-timeline__source-status li{padding:0 var(--space-3);line-height:1.8;border-radius:var(--radius-pill);background:var(--warn-bg);color:var(--badge-warn-c);font-size:var(--type-eyebrow-size)}
+.unified-timeline__day{padding:var(--space-3) var(--space-4);border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-3);background:var(--surface)}
+.unified-timeline__day-title{margin:0 0 var(--space-1);color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-eyebrow-size);font-weight:600}
+.unified-timeline__list{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.unified-timeline__item{display:grid;grid-template-columns:var(--space-3) auto minmax(0,1fr);align-items:baseline;gap:var(--space-1) var(--space-3);padding:var(--space-2) 0;border-top:var(--border-w) solid var(--border-muted)}
+.unified-timeline__item:first-child{border-top:0}
+/* 通道标记是形状几何（圆 / 菱形 / 方块），尺寸与圆角固定，不随主题圆角令牌变化。 */
+.unified-timeline__mark{width:9px;height:9px;border:2px solid currentColor;background:color-mix(in srgb,currentColor 18%,transparent)}
+.unified-timeline__mark--human{border-radius:var(--radius-pill);color:var(--accent)}
+.unified-timeline__mark--system{transform:rotate(45deg);border-radius:2px;color:var(--color-state-notice)}
+.unified-timeline__mark--evidence{border-radius:2px;color:var(--color-state-maintenance)}
+.unified-timeline__clock{color:var(--text-muted);font-size:var(--type-eyebrow-size);white-space:nowrap}
+.unified-timeline__main{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
+.unified-timeline__line{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1) var(--space-3);min-width:0}
+.unified-timeline__title{margin:0;color:var(--text-primary);font-size:var(--type-body-size);font-weight:600;overflow-wrap:anywhere}
+.unified-timeline__channel,.unified-timeline__recorded{color:var(--text-muted);font-size:var(--type-eyebrow-size)}
+.unified-timeline__tag{padding:0 var(--space-2);border-radius:var(--radius-pill);background:var(--panel-bg-muted);color:var(--text-secondary);font-size:var(--type-eyebrow-size)}
+.unified-timeline__actions{display:inline-flex;flex-wrap:wrap;gap:var(--space-1) var(--space-3);margin-left:auto;font-size:var(--type-eyebrow-size)}
+.unified-timeline__summary{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);overflow-wrap:anywhere}
 .subject-local-nav{display:flex;flex-wrap:wrap;gap:var(--space-3);padding-bottom:var(--space-3);border-bottom:var(--border-w) solid var(--panel-border)}
 .subject-local-nav__link{color:var(--text-secondary);font-size:var(--type-body-size);text-decoration:none;padding:var(--space-1) 0;border-bottom:2px solid transparent;min-height:44px;display:inline-flex;align-items:center}
 .subject-local-nav__link:hover{color:var(--text-primary)}
@@ -292,26 +321,8 @@
 .subject-activity-page__work{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
 .subject-activity-page__source-note{color:var(--text-secondary);font-size:var(--type-small-size)}
 .subject-activity-page__more{display:flex;justify-content:center}
-.unified-timeline{display:flex;flex-direction:column;gap:var(--space-5);min-width:0}
 .unified-timeline--empty{padding:var(--space-6);background:var(--panel-bg-muted);border:0;border-radius:var(--radius-2);text-align:center;color:var(--text-muted)}
 .unified-timeline__empty-title{font-size:var(--type-h2-size);color:var(--text-primary);margin-bottom:var(--space-2)}
-.unified-timeline__source-status{margin:0;padding-left:var(--space-4);color:var(--text-secondary);font-size:var(--type-small-size)}
-.unified-timeline__day-title{font-size:var(--type-small-size);color:var(--text-muted);margin-bottom:var(--space-3);text-transform:uppercase;letter-spacing:var(--type-eyebrow-tracking)}
-.unified-timeline__list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--space-3)}
-.unified-timeline__item{display:grid;grid-template-columns:var(--space-5) minmax(0,1fr);gap:var(--space-3);align-items:start}
-.unified-timeline__mark{width:14px;height:14px;margin-top:6px;border:2px solid currentColor;background:color-mix(in srgb,currentColor 18%,transparent)}
-.unified-timeline__mark--human{border-radius:var(--radius-pill);color:var(--accent)}
-.unified-timeline__mark--system{transform:rotate(45deg);border-radius:2px;color:var(--color-state-notice)}
-.unified-timeline__mark--evidence{border-radius:2px;color:var(--color-state-maintenance)}
-.unified-timeline__body{min-width:0;padding:var(--space-3);border:var(--border-w) solid var(--border);border-radius:var(--radius-2);background:var(--surface)}
-.unified-timeline__header{display:flex;justify-content:space-between;gap:var(--space-3);align-items:baseline}
-.unified-timeline__channel{font-size:var(--type-eyebrow-size);font-weight:var(--type-eyebrow-weight);letter-spacing:var(--type-eyebrow-tracking);text-transform:uppercase;color:var(--text-muted)}
-.unified-timeline__time{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
-.unified-timeline__recorded{margin:0;color:var(--text-muted);font-size:var(--type-small-size)}
-.unified-timeline__title{font-size:var(--type-body-size);font-weight:var(--type-h2-weight);color:var(--text-primary);overflow-wrap:anywhere}
-.unified-timeline__summary,.unified-timeline__evidence-meta,.unified-timeline__actions{margin-top:var(--space-2);font-size:var(--type-small-size);color:var(--text-secondary)}
-.unified-timeline__actions{display:flex;flex-wrap:wrap;gap:var(--space-3)}
-.unified-timeline__actions--none{color:var(--text-muted)}
 .record-search-page,.record-drafts-page{min-width:0}
 .subject-activity-page .page__title,
 .subject-identity-bar .page__title,
@@ -351,10 +362,8 @@
 .record-inbox-item{grid-template-columns:8px minmax(0,1fr)}
 .record-inbox-item__commands{grid-column:2;justify-content:flex-start}
 .subject-identity-bar{flex-direction:column}
-.subject-identity-bar__actions{justify-content:flex-start;width:100%}
-
-.unified-timeline__header{flex-direction:column;align-items:flex-start}
-.unified-timeline__time{align-items:flex-start}
+.unified-timeline__main{grid-column:2 / -1}
+.unified-timeline__actions{margin-left:0}
 .record-search-filter .filter-bar__controls-row{flex-direction:column;align-items:stretch}
 .record-page .page__head,
 .record-search-page .page__head,

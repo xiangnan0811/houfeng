@@ -3,7 +3,7 @@ import { Link, useLocation, useSearchParams } from 'react-router-dom'
 
 import { Button } from '../components/atoms'
 import { PageState } from '../components/PageState'
-import { SubjectIdentityBar } from '../components/SubjectIdentityBar'
+import { SubjectIdentityBar, SubjectKindMark } from '../components/SubjectIdentityBar'
 import { SUBJECT_KIND_LABELS } from '../components/timelineChannel'
 import { UnifiedTimeline } from '../components/UnifiedTimeline'
 import type { SubjectActivityView } from '../lib/types'
@@ -158,9 +158,16 @@ export function SubjectActivityWorkspace({ view }: Props) {
         />
       ) : (
         <header className="page__head subject-identity-bar">
-          <div className="subject-identity-bar__main">
-            <p className="subject-identity-bar__kind">{SUBJECT_KIND_LABELS[route.kind]}</p>
-            <h1 className="page__title">{route.sourceId}</h1>
+          <div className="subject-identity-bar__lead">
+            <SubjectKindMark kind={route.kind} />
+            <div className="subject-identity-bar__copy">
+              <div className="subject-identity-bar__title-row">
+                <h1 className="page__title">{route.sourceId}</h1>
+              </div>
+              <dl className="subject-identity-bar__meta" aria-label="主体身份">
+                <div className="subject-identity-bar__meta-item"><dt>类型</dt><dd>{SUBJECT_KIND_LABELS[route.kind]}</dd></div>
+              </dl>
+            </div>
           </div>
         </header>
       )}
@@ -181,9 +188,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
         />
 
         {state.sourceStatuses.some((status) => status.state !== 'ready') ? (
-          <p className="subject-activity-page__source-note" role="status">
-            部分来源暂不可用；时间线只包含已知条目，不代表完整投影。
-          </p>
+          <p className="subject-activity-page__source-note" role="status">部分来源暂不可用，时间线可能不完整</p>
         ) : null}
 
         {state.status === 'loading' && state.items.length === 0 ? (
@@ -237,6 +242,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
             <UnifiedTimeline
               items={state.items}
               sourceStatuses={state.sourceStatuses}
+              omitLinkState={route.kind === 'target'}
               emptyTitle={copy.emptyTitle}
               emptyDescription={copy.emptyDescription}
               {...(view === 'evidence' ? {
