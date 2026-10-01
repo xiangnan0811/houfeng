@@ -1,5 +1,5 @@
-/* 运维记录工作区（阅读 / 新建 / 编辑 / 历史修订）与横向比较工作台的路由样式。
- * 由两个懒加载路由模块导入，版式与 VPS 详情、IP 质量页保持一致：压缩页头、
+/* 运维记录工作区（阅读 / 新建 / 编辑 / 历史修订）、横向比较工作台与证据快照阅读页的路由样式。
+ * 由这三个懒加载路由模块导入，版式与 VPS 详情、IP 质量页保持一致：压缩页头、
  * 主栏 + 侧栏、单一标题的分区卡片、原始 / 诊断内容默认折叠。 */
 .record-page{--record-pad:18px;--record-gap:14px;--record-radius:var(--radius-3);--record-title-size:15px;--record-helper-size:12px;width:min(100%, 1600px);margin-inline:auto;color:var(--text-primary);font-size:14px;line-height:1.45}
 
@@ -32,6 +32,8 @@
 .record-section,.record-collaboration-panel{display:flex;flex-direction:column;gap:12px;min-width:0;padding:var(--record-pad,18px);border:var(--border-w) solid var(--border-muted);border-radius:var(--record-radius,var(--radius-3));background:var(--surface)}
 .record-section__head,.record-collaboration-panel__header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px;min-width:0}
 .record-section__title,.record-collaboration-panel__title{display:inline-flex;align-items:center;gap:8px;margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--record-title-size,15px);font-weight:600;line-height:1.35}
+/* 记录页徽标常落在页面底色或浅色瓷砖上，正常色文字向正文色收一点，保证各主题 AA 对比度。 */
+.record-page .badge--info.tone--normal{color:color-mix(in srgb,var(--color-state-normal) 82%,var(--text-primary))}
 .record-section__actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
 .record-muted,.record-collaboration-panel__empty{margin:0;color:var(--text-muted);font-size:13px}
 .record-count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:var(--radius-pill);background:var(--panel-bg-muted);color:var(--text-secondary);font-family:var(--font-mono);font-size:12px;font-weight:600;line-height:1}
@@ -230,6 +232,52 @@
 .record-compare-save__actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:8px 14px}
 .record-compare-save__saved{margin:0 auto 0 0;color:var(--text-secondary);font-size:13px}
 
+/* 证据快照阅读页 */
+.record-evidence__chips{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:0}
+.record-evidence__chips>div{display:inline-flex;align-items:baseline;gap:6px;padding:3px 10px;border-radius:var(--radius-pill);background:var(--panel-bg-muted);font-size:var(--record-helper-size,12px)}
+.record-evidence__chips dt{color:var(--text-muted)}
+.record-evidence__chips dd{margin:0;color:var(--text-primary)}
+.record-evidence__chips .record-evidence__chip--notice{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--color-state-notice) 45%,transparent)}
+.record-evidence__charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:14px 18px;min-width:0}
+.record-evidence__chart{display:flex;flex-direction:column;gap:6px;min-width:0;margin:0}
+.record-evidence__chart-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:13px}
+.record-evidence__chart-head strong{color:var(--text-primary);font-weight:600}
+.record-evidence__chart-head .mono,.record-evidence__peak{color:var(--text-muted);font-size:var(--record-helper-size,12px)}
+.record-evidence__peak{margin-left:auto}
+.record-evidence__timeline{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.record-evidence__event{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:4px 16px;padding:10px 0;border-top:var(--border-w) solid var(--border-muted)}
+.record-evidence__event:first-child{border-top:0;padding-top:0}
+.record-evidence__event-time{color:var(--text-muted);font-size:var(--record-helper-size,12px);white-space:nowrap}
+/* 命令 / 摘要与状态、来源等信息同一行，空间不足时整体换行。 */
+.record-evidence__event-body{display:flex;flex-wrap:wrap;align-items:center;gap:4px 14px;min-width:0}
+.record-evidence__event-body>strong{color:var(--text-primary);font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.record-evidence__event-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;color:var(--text-secondary);font-size:var(--record-helper-size,12px)}
+.record-evidence__tag{padding:0 6px;border-radius:var(--radius-pill);background:var(--panel-bg-muted);color:var(--text-secondary)}
+.record-evidence__columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:14px 24px;min-width:0}
+.record-evidence__subtitle{margin:0 0 6px;color:var(--text-secondary);font-family:var(--font-sans);font-size:13px;font-weight:600}
+.record-evidence__rows{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.record-evidence__rows li{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 0;border-top:var(--border-w) solid var(--border-muted)}
+.record-evidence__rows li:first-child{border-top:0}
+.record-evidence__row-name{min-width:0;color:var(--text-primary);font-size:13px;overflow-wrap:anywhere}
+.record-evidence__row-value{display:inline-flex;flex:0 0 auto;align-items:center;gap:8px}
+.record-evidence__tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px;margin:0}
+.record-evidence__tile{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px 14px;border-radius:var(--radius-2);background:var(--panel-bg-muted)}
+.record-evidence__tile dt{color:var(--text-muted);font-size:var(--record-helper-size,12px)}
+.record-evidence__tile dd{display:flex;flex-direction:column;gap:6px;min-width:0;margin:0;color:var(--text-secondary);font-size:var(--record-helper-size,12px)}
+.record-evidence__tile strong{color:var(--text-primary);font-size:17px;font-weight:600;overflow-wrap:anywhere}
+.record-evidence__tile-limit{color:var(--text-muted);font-size:13px;font-weight:400}
+.record-evidence__budget{width:100%;height:6px;appearance:none;border:0;border-radius:var(--radius-pill);background:var(--surface);overflow:hidden}
+.record-evidence__budget::-webkit-progress-bar{background:var(--surface);border-radius:var(--radius-pill)}
+.record-evidence__budget::-webkit-progress-value{background:var(--accent);border-radius:var(--radius-pill)}
+.record-evidence__budget::-moz-progress-bar{background:var(--accent);border-radius:var(--radius-pill)}
+.record-evidence__tech-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:6px 24px;margin:12px 0 0}
+.record-evidence__tech-list>div{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;min-width:0}
+.record-evidence__tech-list dt{color:var(--text-muted);font-size:var(--record-helper-size,12px)}
+.record-evidence__tech-list dd{min-width:0;margin:0;color:var(--text-secondary);font-size:var(--record-helper-size,12px);overflow-wrap:anywhere}
+.record-evidence__redaction{display:flex;flex-direction:column;gap:4px;margin:12px 0 0;padding:10px 12px;border-radius:var(--radius-2);background:var(--panel-bg-muted);list-style:none;font-size:var(--record-helper-size,12px)}
+.record-evidence__redaction li{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--text-secondary)}
+.record-evidence__redaction code{color:var(--text-primary);font-family:var(--font-mono);overflow-wrap:anywhere}
+
 @media (min-width:1200px){
 .record-layout{grid-template-columns:minmax(0,1fr) 320px}
 .record-compare__layout{grid-template-columns:340px minmax(0,1fr)}
@@ -249,6 +297,8 @@
 }
 @media (max-width:760px){
 .record-page{--record-pad:14px}
+.record-evidence__event{grid-template-columns:minmax(0,1fr)}
+.record-evidence__peak{margin-left:0}
 .record-reading{padding:16px}
 .record-page .record-editor__textarea{min-height:300px}
 .record-editor__preview{min-height:0}

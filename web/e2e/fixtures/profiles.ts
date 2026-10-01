@@ -1637,3 +1637,324 @@ export function recordSearchProfile(): ApiFixtureProfile {
     },
   })
 }
+
+export type EvidenceSnapshotFixtureKind =
+  | 'monitoring.host'
+  | 'monitoring.probe'
+  | 'monitoring.event'
+  | 'ip_quality.report'
+  | 'subscription.cost'
+  | 'command.audit'
+  | 'unsupported'
+
+const EVIDENCE_QUALITY = {
+  status: 'complete',
+  partial: false,
+  truncated: false,
+  sample_count: 12,
+  maintenance_count: 0,
+  backfilled_count: 0,
+  bucket_count: 12,
+  gap_count: 0,
+  peak_count: 0,
+  data_point_count: 24,
+}
+
+function evidenceMonitoringReadModel(probe: boolean) {
+  const start = Date.parse('2026-08-17T13:00:00Z')
+  const iso = (minutes: number) => new Date(start + minutes * 60_000).toISOString().replace('.000Z', 'Z')
+  const cpu = [18, 21, 24, 35, 52, 71, 64, 48, 39, 33, 29, 26]
+  const mem = [61, 61, 62, 63, 66, 70, 71, 69, 67, 66, 65, 65]
+  const latency = [41, 44, 43, 58, 96, 182, 170, 121, 88, 62, 49, 45]
+  const buckets = cpu.flatMap((value, index) => {
+    if (index === 6) return []
+    const metrics = probe
+      ? [{ name: 'latency_ms', unit: 'ms', average: latency[index], min: latency[index], max: latency[index] }]
+      : [
+        { name: 'cpu_usage_pct', unit: 'percent', average: value, min: value, max: value },
+        { name: 'mem_used_pct', unit: 'percent', average: mem[index], min: mem[index], max: mem[index] },
+      ]
+    return [{
+      series_id: probe ? 'probe-tcp-443' : 'host-alpha',
+      series_kind: probe ? 'tcp' : 'host',
+      start: iso(index * 5),
+      end: iso(index * 5 + 5),
+      source_layer: 'raw',
+      source_granularity_seconds: 300,
+      sample_count: 1,
+      maintenance_count: 0,
+      backfilled_count: 0,
+      metrics,
+    }]
+  })
+  return {
+    version: probe ? 'monitoring_probe_read_model/v1' : 'monitoring_host_read_model/v1',
+    requested_start: iso(0),
+    requested_end: iso(60),
+    coverage_start: iso(0),
+    coverage_end: iso(60),
+    actual_precision_seconds: 300,
+    buckets,
+    gaps: [{ series_id: probe ? 'probe-tcp-443' : 'host-alpha', start: iso(30), end: iso(35) }],
+    peaks: [{
+      series_id: probe ? 'probe-tcp-443' : 'host-alpha',
+      metric: probe ? 'latency_ms' : 'cpu_usage_pct',
+      at: iso(25),
+      value: probe ? 182 : 71,
+      source_layer: 'raw',
+    }],
+    // 质量计数必须与桶逐项一致，否则严格解码器拒绝整个读模型。
+    quality: {
+      ...EVIDENCE_QUALITY,
+      status: 'partial',
+      partial: true,
+      sample_count: buckets.length,
+      bucket_count: buckets.length,
+      data_point_count: buckets.reduce((total, bucket) => total + bucket.metrics.length, 0),
+      gap_count: 1,
+      peak_count: 1,
+    },
+  }
+}
+
+function evidenceReadModelFor(kind: Exclude<EvidenceSnapshotFixtureKind, 'unsupported'>): {
+  schema_version: number
+  renderer_version: string
+  title: string
+  read_model: unknown
+} {
+  switch (kind) {
+    case 'monitoring.host':
+      return { schema_version: 1, renderer_version: 'monitoring_host_v1', title: '第三晚主机负载', read_model: evidenceMonitoringReadModel(false) }
+    case 'monitoring.probe':
+      return { schema_version: 2, renderer_version: 'monitoring_probe_v2', title: '443 端口探测延迟', read_model: evidenceMonitoringReadModel(true) }
+    case 'monitoring.event':
+      return {
+        schema_version: 2,
+        renderer_version: 'monitoring_event_v2',
+        title: '第三晚告警事件',
+        read_model: {
+          version: 'monitoring_event_read_model/v2',
+          quality_status: 'complete',
+          event_count: 3,
+          backfilled_count: 1,
+          events: [
+            ['evt_e2e001', 'incident_started', '告警', 'TCP 重传率升高', '2026-08-17T13:25:00Z', false, 'normal', 'alert'],
+            ['evt_e2e002', 'incident_escalated', '严重', 'TCP 重传率持续高于 2%', '2026-08-17T13:40:00Z', false, 'alert', 'critical'],
+            ['evt_e2e003', 'incident_recovered', '严重', 'TCP 重传率恢复正常', '2026-08-17T14:05:00Z', true, 'critical', 'normal'],
+          ].map(([id, type, severity, summary, at, backfilled, prior, resulting]) => ({
+            event_id: id,
+            object_type: 'monitoring_instance',
+            object_id: 'mi_e2ealpha',
+            event_type: type,
+            severity,
+            summary,
+            event_at: at,
+            recorded_at: at,
+            backfilled,
+            provenance: 'center',
+            producer_version: 'center-monitoring-events/v1',
+            rule_version: 'incident-rules/v1',
+            prior_state: prior,
+            resulting_state: resulting,
+            correction_of_event_id: '',
+            metrics: [],
+          })),
+        },
+      }
+    case 'ip_quality.report': {
+      const provider = (name: string, risk: string, proxy: boolean, status = 'success') => ({
+        provider: name,
+        status,
+        source_type: 'default',
+        latency_ms: 120,
+        usage_type: 'hosting',
+        company_type: 'hosting',
+        risk_level: status === 'success' ? risk : '',
+        risk_score: status === 'success' ? '12' : '',
+        is_proxy: proxy,
+        is_tor: false,
+        is_vpn: false,
+        is_server: true,
+        is_abuser: false,
+        is_robot: false,
+        error_code: status === 'success' ? '' : 'http_status',
+      })
+      const service = (name: string, status: string) => ({
+        service: name,
+        source: 'default',
+        status,
+        probe_status: status === 'unknown' ? 'failure' : 'success',
+        latency_ms: 240,
+        unlock_type: status === 'unlocked' ? 'full' : '',
+        error_code: status === 'unknown' ? 'http_status' : '',
+      })
+      return {
+        schema_version: 1,
+        renderer_version: 'ip_quality_report_v1',
+        title: '出口 IP 质量',
+        read_model: {
+          version: 'ip_quality_report_read_model/v1',
+          report_id: 'ipq_e2ethirdnight',
+          observed_at: '2026-08-17T13:50:00Z',
+          received_at: '2026-08-17T13:50:02Z',
+          ip_version: 4,
+          status: 'partial',
+          stale: false,
+          stale_after_seconds: 604800,
+          risk_level: 'medium',
+          coverage: {
+            expected_provider_count: 4,
+            successful_provider_count: 3,
+            failed_provider_count: 1,
+            skipped_provider_count: 0,
+            not_configured_provider_count: 0,
+            expected_service_count: 4,
+            successful_service_count: 3,
+            failed_service_count: 1,
+            skipped_service_count: 0,
+            not_configured_service_count: 0,
+          },
+          providers: [
+            provider('ipapi.is', 'medium', true),
+            provider('proxycheck.io', 'low', false),
+            provider('ip2location.io', 'low', false),
+            provider('scamalytics', '', false, 'failure'),
+          ],
+          services: [
+            service('Netflix', 'unlocked'),
+            service('ChatGPT', 'unlocked'),
+            service('Disney+', 'blocked'),
+            service('Reddit', 'unknown'),
+          ],
+          quality: { ...EVIDENCE_QUALITY, status: 'partial', partial: true, sample_count: 1, bucket_count: 1, data_point_count: 9 },
+        },
+      }
+    }
+    case 'subscription.cost':
+      return {
+        schema_version: 1,
+        renderer_version: 'subscription_cost_v1',
+        title: '八月订阅成本',
+        read_model: {
+          version: 'subscription_cost_read_model/v1',
+          subscription_id: 'sub_e2ealpha',
+          vps_id: 'vps_0123456789abcdef',
+          original_amount: 18.5,
+          original_currency: 'USD',
+          billing_period_unit: 'month',
+          billing_period_length: 1,
+          conversion_rate: 132.5 / 18.5,
+          conversion_provider: 'fixer',
+          rate_date: '2026-08-01',
+          rate_fetched_at: '2026-08-16T00:00:00Z',
+          rate_stale: false,
+          base_amount: 132.5,
+          base_currency: 'CNY',
+          budget_source: 'subscription_monthly_budgets',
+          budget_currency: 'CNY',
+          budget_month: '2026-08',
+          budget_monthly_limit: 1000,
+          budget_warning_pct: 80,
+          budget_status: 'ok',
+          budget_actual_spend: 612.4,
+          coverage_start: '2026-08-01T00:00:00Z',
+          coverage_end: '2026-09-01T00:00:00Z',
+          coverage_status: 'complete',
+          covered_days: 31,
+          total_days: 31,
+          converted_subscription_count: 1,
+          missing_rate_count: 0,
+        },
+      }
+    case 'command.audit':
+      return {
+        schema_version: 1,
+        renderer_version: 'command_audit_v1',
+        title: '第三晚诊断命令',
+        read_model: {
+          version: 'command_audit_read_model/v1',
+          audit_count: 3,
+          command_result_retention_seconds: 86400,
+          command_result_payload_allowed: false,
+          audits: [
+            ['audit_e2e001', 'uptime', 'completed', 'succeeded', 0, '2026-08-17T13:45:00Z'],
+            ['audit_e2e002', 'df_h', 'completed', 'failed', 2, '2026-08-17T13:46:00Z'],
+            ['audit_e2e003', 'free_m', 'completed', 'succeeded', 0, '2026-08-17T13:48:00Z'],
+          ].map(([id, command, event, outcome, exit, at]) => ({
+            audit_id: id,
+            action_id: `action_${String(id).slice(6)}`,
+            monitoring_instance_id: 'mi_e2ealpha',
+            monitoring_instance_name: 'alpha 主机监控',
+            actor_user_id: 'user_e2e',
+            actor_username: 'operator',
+            actor_display_name: '值班员',
+            command_id: command,
+            sensitivity: 'standard',
+            event_type: event,
+            outcome,
+            source: 'agent_sync',
+            exit_code: exit,
+            occurred_at: at,
+          })),
+        },
+      }
+  }
+}
+
+/** A retained evidence snapshot for `/evidence/evs_e2eview`, one per renderer kind. */
+export function evidenceSnapshotProfile(options: {
+  kind: EvidenceSnapshotFixtureKind
+  sourceUnavailable?: boolean
+  redacted?: boolean
+  backfilled?: boolean
+}): ApiFixtureProfile {
+  const readable = options.kind === 'unsupported' ? evidenceReadModelFor('command.audit') : evidenceReadModelFor(options.kind)
+  const body = {
+    record_id: 'rec_e2e001',
+    snapshot_id: 'evs_e2eview',
+    kind: options.kind === 'unsupported' ? 'command.audit' : options.kind,
+    schema_version: readable.schema_version,
+    subject: { type: 'vps', id: 'vps_0123456789abcdef', display_name: 'VPS Alpha' },
+    source: { type: 'monitoring_instance', id: 'mi_e2ealpha', display_name: 'alpha 主机监控' },
+    requested_window: { start: '2026-08-17T13:00:00Z', end: '2026-08-17T14:00:00Z' },
+    actual_window: { start: '2026-08-17T13:00:00Z', end: '2026-08-17T14:00:00Z' },
+    observed_at: '2026-08-17T14:00:00Z',
+    captured_at: '2026-08-17T14:00:05Z',
+    referenced_at: '2026-08-17T14:10:00Z',
+    source_revision: 'rev-e2e-7',
+    source_watermark: 'wm-e2e-7',
+    producer_version: 'center/1.9.0',
+    calculation_version: 'calc/v2',
+    units: { status: 'not_applicable', values: {}, reason: 'not applicable' },
+    // 信封质量与读模型保持一致，避免页头和正文互相矛盾。
+    quality: {
+      ...((readable.read_model as { quality?: typeof EVIDENCE_QUALITY }).quality ?? EVIDENCE_QUALITY),
+      // 事件读模型自带回填条数，信封必须同步；其它类型按选项模拟回填。
+      ...(options.kind === 'monitoring.event' ? { backfilled_count: 1 } : {}),
+      ...(options.backfilled ? { backfilled_count: 1 } : {}),
+    },
+    sensitivity: 'normal',
+    actual_precision_seconds: 300,
+    bucket_width_seconds: 300,
+    quota: { status: 'allowed' },
+    retention: {
+      immutable: true,
+      scope: 'record_revision',
+      source_deletion: 'snapshot_retained_source_unavailable',
+    },
+    redaction: options.redacted
+      ? [
+        { path: 'payload.stdout', sensitivity: 'forbidden', action: 'stripped' },
+        { path: 'payload.actor_ip', sensitivity: 'sensitive_topology', action: 'masked' },
+      ]
+      : [],
+    source_available: !options.sourceUnavailable,
+    renderer_version: options.kind === 'unsupported' ? 'command_audit_v9' : readable.renderer_version,
+    title: readable.title,
+    read_model: readable.read_model,
+  }
+  return authenticatedProfile({
+    [apiRouteKey('GET', '/api/evidence/evs_e2eview')]: { status: 200, body },
+  })
+}
