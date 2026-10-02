@@ -4,7 +4,6 @@ import type {
   CreateAssetServiceInput,
   CreateVPSMonitoringInstanceInput,
   CreateVPSSubscriptionInput,
-  CreateVPSExperienceLogInput,
   ExtendVPSValidityInput,
   RenewalMode,
   VPSAssetDetail,
@@ -22,7 +21,6 @@ import { parseLabels, renewalLabel } from '../assetPageUtils'
 import type {
   DecisionDraftState,
   DomainDraftState,
-  ExperienceDraftState,
   FactEditFormState,
   MonitoringInstanceCreateDraftState,
   ServiceDraftState,
@@ -58,14 +56,6 @@ export const INITIAL_SELECTOR_STATE: VPSDetailSelectorState = {
   targetsLoading: false,
   targetsError: null,
   targets: [],
-}
-
-export const INITIAL_EXPERIENCE_DRAFT: ExperienceDraftState = {
-  category: 'note',
-  severity: 'info',
-  summary: '',
-  details: '',
-  occurredAt: '',
 }
 
 export const INITIAL_SERVICE_DRAFT: ServiceDraftState = {
@@ -421,23 +411,6 @@ export function buildFactEditInput(form: FactEditFormState) {
     importance: form.importance.trim() || 'normal',
     labels: parseLabels(form.labels),
     note: form.note.trim(),
-  }
-}
-
-export function buildExperienceLogInput(form: ExperienceDraftState): CreateVPSExperienceLogInput {
-  const summary = form.summary.trim()
-  if (!summary) {
-    throw new Error('经验摘要不能为空。')
-  }
-  const occurredAt = form.occurredAt.trim()
-  const occurredAtISO = occurredAt ? new Date(occurredAt).toISOString() : null
-
-  return {
-    category: form.category,
-    severity: form.severity,
-    summary,
-    details: form.details.trim(),
-    occurred_at: occurredAtISO,
   }
 }
 

@@ -3,10 +3,6 @@
 .vps-lifecycle{display:inline-flex;align-items:center;gap:var(--space-2);color:var(--text-primary);font-size:var(--type-small-size);white-space:nowrap}
 .vps-quiet-fact{color:var(--text-muted);font-size:var(--type-small-size)}
 
-.vps-detail-actions-menu .watchtower-actions-menu__danger{color:color-mix(in srgb,var(--color-state-critical) 82%,var(--text-primary))}
-
-.vps-detail-actions-menu .watchtower-actions-menu__panel{z-index:60;min-width:12rem;max-height:min(calc(var(--space-12) * 6),45vh);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
-
 .vps-detail-overview__facts{min-width:0}
 
 .vps-detail-overview__fact small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow-wrap:anywhere}

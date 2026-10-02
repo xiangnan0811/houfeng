@@ -11,8 +11,6 @@ import type {
   SubscriptionRecord,
   TargetRecord,
   VPSAssetDetail,
-  VPSExperienceCategory,
-  VPSExperienceSeverity,
   VPSIPQualityReport,
   BillingPeriodUnit,
   RenewalMode,
@@ -140,14 +138,6 @@ export type ValidityExtensionDraftState = {
   customCurrency: string
   sourceType: string
   customSourceType: string
-}
-
-export type ExperienceDraftState = {
-  category: VPSExperienceCategory
-  severity: VPSExperienceSeverity
-  summary: string
-  details: string
-  occurredAt: string
 }
 
 export type ServiceDraftState = {

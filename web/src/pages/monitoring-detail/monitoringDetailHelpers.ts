@@ -5,7 +5,6 @@ import type {
   MonitoringInstanceOnboardingState,
   MonitoringInstanceRecord,
   PendingBindingMetadata,
-  VPSSummary,
 } from '../../lib/types'
 import { MONITORING_INSTANCE_BINDING_CONFLICT_STATUS } from './monitoringDetailConstants'
 import type { MonitoringDetailPageState } from './types'
@@ -146,11 +145,6 @@ export function applyOnboardingRecordToMonitoringInstance<T extends MonitoringIn
   updated: T,
 ): T | MonitoringInstanceRecord {
   return current ? mergeNonMetadataMonitoringInstanceRecord(current, updated) : updated
-}
-
-export function formatAssetLocation(vps: VPSSummary): string {
-  const parts = [vps.country, vps.region, vps.city].filter(Boolean)
-  return parts.length > 0 ? parts.join(' · ') : '位置未确认'
 }
 
 export function isBindingConflictStatus(status: MonitoringInstanceRecord['binding_status']) {

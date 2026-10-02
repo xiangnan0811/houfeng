@@ -1,5 +1,4 @@
 /* partial: legacy-observability.css (extracted from legacy-misc.css by domain) */
-.monitoring-instance-vps-table__hint{margin:0 0 var(--space-3);color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.5}
 .monitoring-table{min-width:1088px;table-layout:fixed}
 .monitoring-table .data-table__row{background:var(--row-bg)}
 .monitoring-table .data-table__row:hover{background:var(--row-bg-hover)}
@@ -80,7 +79,6 @@
 .watchtower-secondary > summary::before{content:'▸';display:inline-block;margin-right:var(--space-2);color:var(--text-muted)}
 .watchtower-secondary[open] > summary::before{transform:rotate(90deg)}
 .watchtower-secondary__body{margin-top:var(--space-3)}
-.watchtower-container-image{display:inline-block;max-width:100%;font-size:var(--type-small-size);overflow-wrap:anywhere}
 /* observability owner migration from legacy-dashboard.css */
 .events-filter-drawer{display:flex;flex-direction:column;gap:var(--space-4)}
 .events-filter-drawer__group{display:flex;flex-direction:column;gap:var(--space-2)}

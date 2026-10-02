@@ -9,7 +9,7 @@ import { LifecycleBadge, RenewalBadge, UsageBadge } from '../assetPageBadges'
 import { VPSAssetMark } from './VPSAssetMark'
 import { vpsIdentityMetaFields, type VPSIdentityMetaField } from './vpsDetailResourcePresentation'
 
-export function VPSIdentityMeta({ items }: { items: VPSIdentityMetaField[] }) {
+function VPSIdentityMeta({ items }: { items: VPSIdentityMetaField[] }) {
   if (items.length === 0) return null
   return (
     <dl className="vps-overview-identity__meta">

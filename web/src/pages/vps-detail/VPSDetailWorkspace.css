@@ -163,10 +163,6 @@
 .vps-detail-workspace__section-actions .btn,
 .vps-detail-resource-group__error .btn{min-height:var(--vps-detail-action-min)}
 .vps-detail-workspace .page__actions .btn.primary{min-height:var(--control-min-height)}
-.vps-detail-actions-menu .watchtower-actions-menu__panel button{min-height:var(--vps-detail-action-min);font-size:var(--vps-detail-body-size);line-height:1.4}
-@media (max-width: 920px){
-.vps-detail-actions-menu .watchtower-actions-menu__panel{left:0;right:auto}
-}
 @media (max-width: 760px){
 .vps-overview-freshness__retry,
   .vps-overview-freshness__retry.btn,

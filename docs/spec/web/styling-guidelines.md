@@ -102,7 +102,7 @@
 
 实读 `web/src/styles/partials/atoms.css` / `page.css` / `layout.css`，**统一使用 BEM**：`block__element--modifier`。
 
-- **block**：组件 / 区域名小写连字符。例：`btn` / `card` / `input` / `badge` / `sparkline` / `tabs` / `sidebar` / `top-bar` / `breadcrumb` / `sync-status` / `user-chip` / `app-shell` / `page-stack` / `page-panel` / `hero-panel`.
+- **block**：组件 / 区域名小写连字符。例：`btn` / `card` / `input` / `badge` / `sparkline` / `tabs` / `sidebar` / `top-bar` / `sync-status` / `user-chip` / `app-shell` / `page-stack` / `page-panel` / `hero-panel`.
 - **element**：双下划线后跟元素名。例：`sidebar__brand`、`sidebar__brand-zh`、`page-panel__title`、`sync-status__dot`、`modal__actions`。
 - **modifier**：双连字符后跟变体名。例：`btn--primary` / `btn--sm` / `card--accent` / `card--ribbon-left` / `tabs--underline` / `sync-status--ok` / `sync-status--degraded`.
 
@@ -122,7 +122,7 @@
 | `web/src/styles/tokens.css` | 设计令牌 + 主题覆盖 + reduce-motion | `:root { --space-1: 4px; ... }` |
 | `web/src/styles/partials/atoms.css` | 设计系统原子样式（`.btn` / `.card` / `.input` / `.badge` / `.sparkline` / `.tabs` / `.data-table` / `.tone--*`） | `.btn--primary { ... }` |
 | `web/src/styles/partials/page.css` | 页面级共享版式与跨域 workflow primitives（`.page-stack` / `.page-panel` / `.hero-panel` / `.section-heading`） | `.page-panel__title { ... }` |
-| `web/src/styles/partials/layout.css` | AppShell 子树（Sidebar / TopBar / Breadcrumb / GlobalSearch / SyncStatus / UserChip） | `.sidebar { ... }` |
+| `web/src/styles/partials/layout.css` | AppShell 子树（Sidebar / TopBar / GlobalSearch / SyncStatus / UserChip） | `.sidebar { ... }` |
 | `web/src/styles/partials/{dashboard,legacy-assets,legacy-vps,legacy-observability,legacy-subscriptions,...}.css` | `web/css-owners.json` 指定的业务 owner；新规则按真实 BEM/domain 归属进入现有 owner 文件 | `.asset-decision-*` / `.vps-*` / `.monitoring-*` |
 | `web/src/styles/modernize.css` | 已有全站兼容覆盖；不是新规则的默认 catch-all | `.settings-save-footer { ... }` |
 | `web/src/pages/LoginPage.css` | 首屏前缺壳的 Login 页面样式 | `.login-page__card { ... }` |
@@ -227,7 +227,7 @@ spawnSync(process.execPath, [analyzerPath, '--dist', emptyDist, '--format', 'jso
 
 ## 中文为主 + 高密度工程工具感
 
-- UI 文案默认中文（参见 `web/index.html:2` `lang="zh-CN"`、`web/index.html:7` `<title>候风 · 服务器舰队控制面</title>`、`Sidebar.tsx`、`Breadcrumb.tsx` 等所有可见字符串）。必要英文术语原样保留（如 `OBSERVABILITY` / `houfeng-center` / `houfeng-agent`）。
+- UI 文案默认中文（参见 `web/index.html:2` `lang="zh-CN"`、`web/index.html:7` `<title>候风 · 服务器舰队控制面</title>`、`Sidebar.tsx`、`TopBar.tsx` 等所有可见字符串）。必要英文术语原样保留（如 `OBSERVABILITY` / `houfeng-center` / `houfeng-agent`）。
 - 排版按 `tokens.css:10-21` 的 type scale 走（`display` / `h1` / `h2` / `body` / `small` / `eyebrow` / `metric` / `state` / `code` / `link`），**不要**自己造 `font-size: 13.5px` 这种破阶梯。
 - 字体角色固定（`tokens.css:22-27`）：标题 / 强调字段用 `--font-serif`（思源宋体回退栈）；正文 / UI 用 `--font-sans`；ID / 数字 / 代码用 `--font-mono`。`Mono` / `Hostname` / `Timestamp` 原子（`web/src/components/atoms/Mono.tsx`）已封装好，不要在 page 里自己写 `font-family: monospace`。
 - 工程工具感的关键在密度：留白用 `--space-2` / `--space-3` 而非 `--space-6`；表格 / 列表行高用 `--type-body-leading` 默认 1.6（紧凑场景压到 1.4 时显式声明）。
