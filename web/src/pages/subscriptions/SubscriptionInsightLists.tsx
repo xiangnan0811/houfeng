@@ -3,11 +3,8 @@ import { Link } from 'react-router-dom'
 import { Badge, type BadgeTone } from '../../components/atoms'
 import { formatDate } from '../../lib/format'
 import type { SubscriptionOverview, SubscriptionRenewalQueueItem } from '../../lib/types'
-import { daysUntilDate, renewalLabel, renewalTimingLabel } from '../assetPageUtils'
+import { daysUntilDate, renewalLabel, renewalTimingLabel, renewalUrgency } from '../assetPageUtils'
 import { money } from './insightFormat'
-
-/** 两周内的续费需要尽快处理，日期旁的剩余天数高亮。 */
-const RENEWAL_SOON_DAYS = 14
 
 const DECISION_TONES: Readonly<Record<string, BadgeTone>> = {
   keep: 'normal',
@@ -23,12 +20,6 @@ export function InsightEmpty({ title, detail, busy = false }: { title: string; d
       {detail ? <span>{detail}</span> : null}
     </p>
   )
-}
-
-function renewalUrgency(days: number | null): 'overdue' | 'soon' | 'later' {
-  if (days != null && days < 0) return 'overdue'
-  if (days != null && days <= RENEWAL_SOON_DAYS) return 'soon'
-  return 'later'
 }
 
 function decisionTone(value: string): BadgeTone {

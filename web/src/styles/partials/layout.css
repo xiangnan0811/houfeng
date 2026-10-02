@@ -4,7 +4,6 @@
 .btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
 .badge .badge-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;background:currentColor}
 .badge-ok{background:var(--badge-ok-bg);color:var(--badge-ok-c)}
-.badge-warn{background:var(--badge-warn-bg);color:var(--badge-warn-c)}
 .badge-muted{background:var(--badge-muted-bg);color:var(--badge-muted-c)}
 .card:hover{border-color:var(--border-strong);box-shadow:var(--shadow-soft)}
 .table{width:100%;font-size:12.5px;border-collapse:separate;border-spacing:0}

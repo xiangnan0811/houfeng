@@ -85,9 +85,9 @@ describe('Asset Decisions route and composition workflows', () => {
     expect(within(groupQueue).queryByText('证据强')).not.toBeInTheDocument()
     expect(within(groupQueue).queryByText(/服务 2 · 域名 1 · Target 1\/1/)).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '自定义组合' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '已保存组合决策' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '保存记录' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '场景模板' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '续费证据区' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '续费窗口' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '单台待处理队列' })).not.toBeInTheDocument()
 
     expectFetchCalledWith(fetchMock, '/api/asset-decisions/overview?view=needs_decision&renew_within_days=30')
@@ -165,7 +165,7 @@ describe('Asset Decisions route and composition workflows', () => {
     expect(commandSummary.querySelector('[class*="asset-decision-focus__item--"]')).toBeNull()
     expect(within(commandSummary).queryByText(/主备取舍模板|欧洲主备手工组合/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前视图暂无决策组' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '场景工作区' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '场景与组合' })).not.toBeInTheDocument()
     expectNoAssetDecisionPageEnglishNoise()
   })
   it('keeps legacy single_queue URLs on the portfolio workbench and points to the support queue', async () => {
@@ -181,10 +181,10 @@ describe('Asset Decisions route and composition workflows', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument())
     expect(screen.queryByRole('tab', { name: /单台队列/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '单台辅助队列' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '单台队列' })).toBeInTheDocument()
     const singleQueueButton = await findSecondaryWorkbenchButton('单台队列')
     expect(singleQueueButton).toHaveAttribute('aria-pressed', 'true')
-    const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section') as HTMLElement
+    const singleQueue = screen.getByRole('heading', { name: '单台队列' }).closest('section') as HTMLElement
     const firstQueueAction = within(singleQueue).getAllByRole('button', { name: '处理' })[0]
     if (!firstQueueAction) throw new Error('single queue must expose a primary action')
     fireEvent.click(firstQueueAction)
@@ -203,35 +203,35 @@ describe('Asset Decisions route and composition workflows', () => {
       {
         entry: '/asset-decisions?record_id=adr_001',
         activeButton: '保存记录',
-        visibleHeading: '已保存组合决策',
+        visibleHeading: '保存记录',
         expectedDialog: '德国主备取舍记录',
         route: { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
       },
       {
         entry: '/asset-decisions?view=renewal&renew_within_days=30&record_id=adr_001',
         activeButton: '保存记录',
-        visibleHeading: '已保存组合决策',
+        visibleHeading: '保存记录',
         expectedDialog: '德国主备取舍记录',
         route: { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
       },
       {
         entry: '/asset-decisions?manual_group_id=admg_001',
         activeButton: '场景与组合',
-        visibleHeading: '场景工作区',
+        visibleHeading: '场景与组合',
         expectedDialog: '自定义资产组合详情',
         route: { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
       },
       {
         entry: '/asset-decisions?template_id=adt_builtin_primary_standby',
         activeButton: '场景与组合',
-        visibleHeading: '场景工作区',
+        visibleHeading: '场景与组合',
         expectedDialog: '资产决策场景模板详情',
         route: { url: '/api/asset-decisions/scenario-templates/adt_builtin_primary_standby', body: scenarioTemplate() },
       },
       {
         entry: '/asset-decisions?view=renewal&renew_within_days=30',
         activeButton: '续费窗口',
-        visibleHeading: '续费事实',
+        visibleHeading: '续费窗口',
       },
     ] as const
 
@@ -270,13 +270,13 @@ describe('Asset Decisions route and composition workflows', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '续费事实' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '续费窗口' })).toBeInTheDocument())
     fireEvent.click(await findSecondaryWorkbenchButton('保存记录'))
-    await waitFor(() => expect(screen.getByRole('heading', { name: '已保存组合决策' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '保存记录' })).toBeInTheDocument())
     expect(await findSecondaryWorkbenchButton('保存记录')).toHaveAttribute('aria-pressed', 'true')
 
     fireEvent.click(await findSecondaryWorkbenchButton('场景与组合'))
-    await waitFor(() => expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '场景与组合' })).toBeInTheDocument())
     expect(await findSecondaryWorkbenchButton('场景与组合')).toHaveAttribute('aria-pressed', 'true')
   })
   it('carries cross-page context filters into visible chips and asset-decision queries', async () => {

@@ -51,7 +51,7 @@ describe('Asset Decisions scenario template workflows', () => {
     expect(templatesSection).not.toBeNull()
     expect(within(templatesSection!).getAllByRole('button', { name: '使用模板' })).toHaveLength(8)
 
-    const customCard = within(templatesSection!).getByText('Staging 审计模板').closest('article')
+    const customCard = within(templatesSection!).getByText('Staging 审计模板').closest('li')
     expect(customCard).not.toBeNull()
     fireEvent.click(within(customCard!).getByRole('button', { name: '使用模板' }))
 
@@ -96,7 +96,7 @@ describe('Asset Decisions scenario template workflows', () => {
     await waitFor(() => expect(screen.getAllByText('自定义主备模板').length).toBeGreaterThan(0))
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
     expect(templatesSection).not.toBeNull()
-    const templateArticle = within(templatesSection!).getByText("自定义主备模板").closest("article")!; fireEvent.click(within(templateArticle).getByRole("button", { name: "使用模板" }))
+    const templateRow = within(templatesSection!).getByText("自定义主备模板").closest("li")!; fireEvent.click(within(templateRow).getByRole("button", { name: "使用模板" }))
 
     const dialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
     expectTemplateDefaultCover(dialog)
@@ -257,7 +257,7 @@ describe('Asset Decisions scenario template workflows', () => {
     await openSecondaryWorkbench('场景与组合')
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
     if (!templatesSection) throw new Error('scenario template section must exist')
-    const templateCard = within(templatesSection).getByText('资料补齐').closest('article')
+    const templateCard = within(templatesSection).getByText('资料补齐').closest('li')
     if (!templateCard) throw new Error('evidence cleanup template card must exist')
     fireEvent.click(within(templateCard).getByRole('button', { name: '使用模板' }))
 

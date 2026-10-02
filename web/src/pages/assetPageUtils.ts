@@ -67,6 +67,17 @@ export function daysUntilDate(value?: string | null, now: Date = new Date()): nu
   return Math.round((targetDay - today) / MS_PER_DAY)
 }
 
+/** 两周内的续费需要尽快处理，日期旁的剩余天数高亮。 */
+export const RENEWAL_SOON_DAYS = 14
+
+export type RenewalUrgency = 'overdue' | 'soon' | 'later'
+
+export function renewalUrgency(days: number | null, soonDays: number = RENEWAL_SOON_DAYS): RenewalUrgency {
+  if (days != null && days < 0) return 'overdue'
+  if (days != null && days <= soonDays) return 'soon'
+  return 'later'
+}
+
 export function renewalTimingLabel(days: number | null): string {
   if (days == null) return '尚无续费日'
   if (days < 0) return `已过期 ${Math.abs(days)} 天`
