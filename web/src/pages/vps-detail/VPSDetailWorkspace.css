@@ -4,18 +4,14 @@
 .vps-detail-workspace{--vps-detail-title-size:22px;--vps-detail-module-size:15px;--vps-detail-body-size:14px;--vps-detail-helper-size:12px;--vps-detail-helper-size-strong:13px;--vps-detail-amount-size:20px;--vps-detail-leading:1.45;--vps-detail-pad:16px;--vps-detail-gap:14px;--vps-detail-action-min:28px;--vps-detail-topbar-offset:calc(var(--shell-topbar-min-height) + var(--space-3));--vps-detail-radius:var(--radius-3);color:var(--text-primary);font-size:var(--vps-detail-body-size);line-height:var(--vps-detail-leading)}
 .vps-detail-route{width:min(100%, 1600px);margin-inline:auto;display:flex;flex-direction:column;gap:var(--vps-detail-gap);min-width:0}
 .vps-detail-workspace{display:flex;flex-direction:column;gap:var(--vps-detail-gap);min-width:0}
-.vps-overview-page__identity-wrap,
-.vps-detail-workspace .vps-detail-overview{position:relative;min-width:0;padding:0;gap:var(--space-3)}
-.vps-detail-workspace .vps-detail-overview__header,
+.vps-overview-page__identity-wrap{position:relative;min-width:0;padding:0;gap:var(--space-3)}
 .vps-detail-workspace .vps-overview-identity{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-3) var(--space-4);margin:0;padding:0;border:0;min-width:0}
 .vps-overview-identity__lead{display:flex;align-items:flex-start;gap:var(--space-3);min-width:0;flex:1 1 auto}
 .vps-overview-identity__mark{display:inline-flex;flex:0 0 auto;align-items:center;justify-content:center;width:24px;height:24px;margin-top:2px;color:var(--accent)}
 .vps-overview-identity__mark svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-.vps-overview-identity__copy,
-.vps-detail-workspace .vps-detail-overview__identity{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1 1 auto}
+.vps-overview-identity__copy{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1 1 auto}
 .vps-overview-identity__title-row{display:flex;flex-wrap:nowrap;align-items:flex-start;gap:var(--space-2) var(--space-3);min-width:0}
-.vps-detail-workspace .page__title,
-.vps-detail-workspace .vps-detail-overview__identity h1{flex:1 1 auto;min-width:0;margin:0;font-family:var(--font-sans);font-size:var(--vps-detail-title-size);font-weight:600;line-height:1.25;overflow-wrap:break-word}
+.vps-detail-workspace .page__title{flex:1 1 auto;min-width:0;margin:0;font-family:var(--font-sans);font-size:var(--vps-detail-title-size);font-weight:600;line-height:1.25;overflow-wrap:break-word}
 .vps-overview-identity__readonly{flex:0 0 auto}
 .vps-overview-identity__statuses{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;min-width:0}
 .vps-overview-identity__status .badge{min-height:0;padding:1px 8px;font-size:var(--vps-detail-helper-size);line-height:1.35}
@@ -27,8 +23,7 @@
 .vps-overview-identity__meta-item{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:4px;min-width:0}
 .vps-overview-identity__meta dt{color:var(--text-muted);font-weight:400}
 .vps-overview-identity__meta dd{margin:0}
-.vps-detail-workspace .page__actions,
-.vps-detail-workspace .vps-detail-overview__actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--space-2);min-width:0}
+.vps-detail-workspace .page__actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--space-2);min-width:0}
 .vps-detail-route-nav{display:flex;flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:var(--space-3);min-width:0;padding:0;border:0}
 .vps-detail-route-nav .subject-local-nav{flex:1 1 auto;min-width:0}
 .vps-detail-workspace__toc{flex:0 0 auto;display:flex;align-items:center;min-width:0;margin-left:auto;padding:0;border:0}
@@ -57,8 +52,7 @@
 .vps-detail-workspace__section > h2,
 .vps-detail-workspace__section-head h2,
 .vps-overview-recent__header h2,
-.vps-detail-workspace .vps-overview-anomalies__title,
-.vps-detail-workspace .vps-ip-quality-summary .section-heading__title{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--vps-detail-module-size);font-weight:600;line-height:1.35}
+.vps-detail-workspace .vps-overview-anomalies__title{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--vps-detail-module-size);font-weight:600;line-height:1.35}
 .vps-detail-workspace__section-head,
 .vps-overview-recent__header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 14px;width:100%;min-width:0}
 .vps-detail-workspace__section-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
@@ -128,7 +122,6 @@
 .vps-detail-resource{display:flex;flex-direction:column;align-items:stretch;gap:4px;min-width:0;min-height:0;padding:8px 0;border:0;border-bottom:var(--border-w) solid var(--border-muted);border-radius:0;background:transparent}
 .vps-detail-resource:hover{background:var(--row-bg-hover)}
 .vps-detail-workspace .vps-detail-overview__fact::before,.vps-facts-form .opt > summary::marker{content:none}
-.vps-detail-workspace__anchor .vps-detail-overview__attention-item{padding:8px 0 8px 12px;border:0;border-radius:0;background:transparent}
 .vps-detail-resource__primary{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;width:100%;min-width:0}
 .vps-detail-resource__identity{flex:1 1 8rem;min-width:0;display:flex;flex-direction:column;gap:2px}
 .vps-detail-workspace .vps-overview-recent__item-main{display:flex;flex-direction:column;gap:2px;min-width:0}
@@ -151,12 +144,7 @@
 .vps-overview-recent__marker{width:9px;height:9px;margin-top:5px;border-radius:var(--radius-pill);background:var(--accent)}
 .vps-overview-recent__source{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
 .vps-overview-recent__meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong)}
-.vps-detail-workspace .page-panel,
-.vps-detail-workspace .vps-ip-quality-summary{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
-.vps-detail-workspace .vps-ip-quality-summary__facts,
-.vps-detail-workspace .vps-ip-quality-summary__unlock-overview{min-height:0;padding:0;border:0;border-radius:0;background:transparent}
-.vps-detail-workspace .vps-ip-quality-summary__facts{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:8px 14px}
-.vps-detail-workspace .vps-ip-quality-summary__facts div{min-height:0;padding:0;border:0}
+.vps-detail-workspace .page-panel{padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
 .vps-detail-workspace .vps-overview-anomalies{min-width:0;padding:0;border:0;background:transparent}
 .vps-detail-workspace .vps-overview-anomalies__list{display:flex;flex-direction:column;gap:10px;margin:0;padding:0;list-style:none}
 .vps-detail-workspace .vps-overview-anomalies__item{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px 14px;padding:0 0 10px;border-bottom:var(--border-w) solid var(--border-muted)}
@@ -166,11 +154,7 @@
 .vps-detail-workspace .vps-overview-management{position:absolute;right:0;z-index:8}
 .vps-detail-workspace .vps-overview-management__menu{min-width:12rem;margin:var(--space-1) 0 0;padding:var(--space-2);border:var(--border-w) solid var(--border);border-radius:var(--radius-3);background:var(--surface-elevated);box-shadow:var(--shadow-overlay)}
 .vps-overview-management__group + .vps-overview-management__group{margin-top:var(--space-2);padding-top:var(--space-2);border-top:var(--border-w) solid var(--border-muted)}
-.vps-overview-management__group-label,
-.vps-detail-actions-menu__group{margin:0 0 var(--space-1);padding:0 var(--space-3);color:var(--text-muted);font-size:var(--vps-detail-helper-size);font-weight:600}
-.vps-detail-overview__freshness{display:flex;flex-wrap:wrap;gap:6px 14px;margin:0;color:var(--text-secondary);font-size:var(--vps-detail-helper-size);line-height:1.4}
-.vps-detail-overview__freshness > div{display:flex;flex-wrap:wrap;gap:4px}
-.vps-detail-overview__freshness dd{margin:0}
+.vps-overview-management__group-label{margin:0 0 var(--space-1);padding:0 var(--space-3);color:var(--text-muted);font-size:var(--vps-detail-helper-size);font-weight:600}
 .vps-detail-workspace .btn.sm,
 .vps-detail-workspace .vps-copy-value .btn,
 .vps-detail-workspace .vps-overview-freshness__retry,
@@ -178,10 +162,8 @@
 .vps-detail-workspace__jump-trigger,
 .vps-detail-workspace__section-actions .btn,
 .vps-detail-resource-group__error .btn{min-height:var(--vps-detail-action-min)}
-.vps-detail-workspace .page__actions .btn.primary,
-.vps-detail-workspace .vps-detail-overview__actions .btn.primary{min-height:var(--control-min-height)}
-.vps-detail-actions-menu .watchtower-actions-menu__panel button,
-.vps-detail-actions-menu .watchtower-actions-menu__item{min-height:var(--vps-detail-action-min);font-size:var(--vps-detail-body-size);line-height:1.4}
+.vps-detail-workspace .page__actions .btn.primary{min-height:var(--control-min-height)}
+.vps-detail-actions-menu .watchtower-actions-menu__panel button{min-height:var(--vps-detail-action-min);font-size:var(--vps-detail-body-size);line-height:1.4}
 @media (max-width: 920px){
 .vps-detail-actions-menu .watchtower-actions-menu__panel{left:0;right:auto}
 }
@@ -197,11 +179,9 @@
   .vps-detail-route-nav{flex-wrap:wrap;gap:4px 12px}
 .vps-detail-workspace .vps-overview-identity,
   .vps-detail-workspace .page__head,
-  .vps-detail-workspace .vps-detail-overview__header,
   .vps-detail-workspace .section-heading--inline{flex-direction:column}
-.vps-detail-workspace .page__actions,
-  .vps-detail-workspace .vps-detail-overview__actions{justify-content:flex-start;width:100%}
-.vps-detail-workspace .vps-overview-facts__list,.vps-detail-workspace .vps-detail-overview__facts,.vps-detail-workspace .vps-ip-quality-summary__facts,.vps-detail-workspace .vps-overview-facts__row,.vps-detail-workspace .vps-detail-overview__fact{grid-template-columns:minmax(0, 1fr)}
+.vps-detail-workspace .page__actions{justify-content:flex-start;width:100%}
+.vps-detail-workspace .vps-overview-facts__list,.vps-detail-workspace .vps-detail-overview__facts,.vps-detail-workspace .vps-overview-facts__row,.vps-detail-workspace .vps-detail-overview__fact{grid-template-columns:minmax(0, 1fr)}
 }
 @container (max-width: 36.5rem){
 .vps-observation__head{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}

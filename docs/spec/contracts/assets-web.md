@@ -300,7 +300,7 @@ Domain reading retains its records and association service IDs when optional ser
 
 - **生命周期入口稳定可达**：每台管理中 VPS 的详情管理菜单始终提供“结束使用并归档”，不能因续费意向或当前判断稳定而隐藏。点击后打开预览确认，提交前重新校验。测试覆盖稳定资产、决定不续费、暂停/退役监控及 deep link；VPS 列表继续只读。
 - **迁移仅人工计划和跟进**：记录来源、目标与结果，不自动迁移服务或结束旧 VPS，不暗示存在自动执行工作台。迁移表达为新增目标关联、结束来源关联；结束旧资源须独立确认归档。
-- **当前关注状态归入顶部判断，不铺中部提醒条**：VPS 详情页里的“运行观测需要核对”、缺订阅、缺运行观测、订阅读取失败、IP 质量暂不可用、续费临期 / 自动续费取消等当前需要用户处理或核对的状态，必须进入顶部 `VPSDetailOverviewPanel` 的“当前判断”模型，例如 `judgement.attentionItems`。页面中段的“关联概览”“单机台账”“IP 质量概况”只承载详情摘要和管理入口，不再渲染 `VPSContextActionPanel` / `vps-detail-context-action` 这类横条。多个关注状态必须可并列展示，不能被单个 `primaryAction` 覆盖；稳定状态下不展示额外列表。
+- **当前关注状态归入顶部判断，不铺中部提醒条**：VPS 详情页里的“运行观测需要核对”、缺订阅、缺运行观测、订阅读取失败、IP 质量暂不可用、续费临期 / 自动续费取消等当前需要用户处理或核对的状态，必须进入概览顶部的“需要关注”区（`VPSOverviewAnomalies`，数据来自概览接口的 `anomalies`）。页面中段的“资产信息”“订阅与续费”“运行观测”“服务与域名”只承载详情摘要和管理入口，不再渲染 `VPSContextActionPanel` / `vps-detail-context-action` 这类横条。多个关注状态必须可并列展示，不能被单个 `primaryAction` 覆盖；稳定状态下不展示额外列表。
 
 ### VPS workspace visual language
 
