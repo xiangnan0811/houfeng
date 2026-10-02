@@ -17,10 +17,6 @@
 .subscription-summary>:is(button,a):focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px;border-radius:2px}
 .subscription-summary__label{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.3}
 .subscription-summary__value{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-small-size);font-weight:650;line-height:1.3}
-.subscription-budget-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
-.subscription-budget-row>div:first-child{display:flex;flex-direction:column;gap:2px;min-width:0}
-.subscription-budget-row strong{color:var(--text-primary);font-size:var(--type-body-size);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.subscription-budget-row small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* 洞察列表：列表是网格，行用 subgrid 对齐各列，一行排开，窄屏再折成两行。 */
 .subscription-renewal-queue,.subscription-breakdown-list,.subscription-ranking-list,.subscription-archived-list{display:grid;column-gap:var(--space-3);min-width:0;margin:0;padding:0;list-style:none}
 .subscription-renewal-queue{grid-template-columns:auto minmax(0,1fr) auto auto}
@@ -49,21 +45,9 @@
 .subscription-breakdown-bar progress{display:block;width:100%;height:100%;border:0;border-radius:inherit;background:transparent;appearance:none;-webkit-appearance:none}
 .subscription-breakdown-bar progress::-webkit-progress-bar{background:transparent}
 .subscription-breakdown-bar progress::-webkit-progress-value,.subscription-breakdown-bar progress::-moz-progress-bar{min-width:4%;border-radius:var(--radius-pill);background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 76%,var(--color-state-normal)),color-mix(in srgb,var(--color-state-normal) 68%,transparent))}
-.subscription-budget-row{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(160px,auto) auto;gap:var(--space-3);align-items:center;min-width:0;padding:var(--space-2) var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--border) 70%,transparent);border-left:var(--border-w-strong) solid color-mix(in srgb,var(--border-strong) 72%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 16%,transparent)}
-.subscription-budget-row__actions{display:flex;align-items:center;gap:var(--space-2);justify-content:flex-end;min-width:0}
-.subscription-budget-edit{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--space-3);align-items:end;min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--accent) 20%,var(--border));border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 26%,transparent)}
 .settings-system-form,.subscription-settings{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
 .subscription-settings__section{margin-bottom:0}
-.subscription-budget-list--managed{margin-top:var(--space-3)}
-.subscription-inline-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--space-3);align-items:end;margin-top:var(--space-4);padding-top:var(--space-4);border-top:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent)}
-.subscription-inline-form--settings{grid-template-columns:repeat(2,minmax(0,1fr))}
-.subscription-budget-edit .create-form__error,.subscription-budget-edit .page-form-actions,.subscription-inline-form .create-form__error,.subscription-inline-form .asset-operation-feedback,.subscription-inline-form button[type='submit']{grid-column:1 / -1}
-.subscription-inline-form .asset-checkbox-line{min-height:38px;align-items:center}
-.subscription-budget-coverage{grid-column:span 2;align-self:stretch;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 64%,transparent);border-radius:var(--radius-2);background:color-mix(in srgb,var(--surface-elevated) 16%,transparent)}
-.subscription-budget-coverage span{display:flex;flex-direction:column;gap:2px;min-width:0}
 /* partial: legacy-2.css (extracted from index.css; do not hand-edit large rules here) */
-.subscription-budget-coverage strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.35}
-.subscription-budget-coverage small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
 .subscription-insights{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
 .subscription-panel-title{margin:0;font-family:var(--font-sans);font-size:var(--type-body-size);font-weight:600;line-height:1.35;color:var(--text-primary)}
 .subscription-insights__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);align-items:stretch;min-width:0}
@@ -161,7 +145,7 @@
 .subscription-form__renewal legend{padding:0;margin:0 0 6px;color:var(--text-secondary);font-size:13px;font-weight:500}
 .subscription-form__renewal-options{display:flex;flex-wrap:wrap;gap:8px}
 .subscription-form__renewal-options label{display:inline-flex;align-items:center;gap:6px;min-height:28px;color:var(--text-primary);font-size:13px;line-height:1.35;cursor:pointer}
-.subscription-list .asset-table__identity,.subscription-list .subscription-tag-list,.subscription-budget-list--managed .subscription-budget-row small{white-space:normal}
+.subscription-list .asset-table__identity,.subscription-list .subscription-tag-list{white-space:normal}
 /* settings-subscriptions owner migration from legacy-misc.css */
 .settings-channel-option{width:100%;min-height:72px;padding:var(--space-3) var(--space-4);color:var(--text-primary);background:var(--control-bg);border:var(--border-w) solid var(--control-border);border-radius:var(--radius-2);cursor:pointer;text-align:left;transition:background-color var(--dur-micro) var(--ease-calm),border-color var(--dur-micro) var(--ease-calm)}
 .settings-channel-option:hover{border-color:var(--panel-border-strong);background:var(--control-bg-hover)}
@@ -176,9 +160,6 @@
 .settings-channel-manager,
 .settings-channel-modal{display:flex;flex-direction:column;gap:var(--space-4)}
 .settings-section-aside{display:flex;align-items:center;gap:var(--space-3)}
-@media (max-width:1080px){
-.subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
 @media (max-width:860px){
 .subscription-insights__grid{grid-template-columns:1fr}
 .subscription-panel-header .tabs,.subscription-panel-select{justify-self:start}
@@ -192,8 +173,6 @@
 .subscription-page__head{flex-direction:column;align-items:flex-start}
 .subscription-page .filter-bar__controls-row>.filter-select,.subscription-page .filter-bar__controls-row>.filter-searchselect{flex:1 1 100%;min-width:0;max-width:100%}
 .subscription-page .filter-bar__controls-row>*>:is(.filter-select__control,.filter-searchselect__trigger){flex:1 1 auto;max-width:100%}
-.subscription-budget-coverage{grid-column:1}
-.subscription-budget-row{grid-template-columns:1fr;align-items:start}
 /* 窄屏每行折成两行：主信息与金额在上，次要信息与操作在下。 */
 .subscription-renewal-queue,.subscription-breakdown-list,.subscription-ranking-list,.subscription-archived-list{display:flex;flex-direction:column}
 .subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-archived-row{grid-template-columns:minmax(0,1fr) auto;gap:var(--space-1) var(--space-3)}
@@ -212,7 +191,7 @@
 .subscription-archived-row__amount{grid-area:amount}
 .subscription-archived-row>.text-link{grid-area:link;justify-self:end}
 .subscription-page .filter-select__control,.subscription-page .filter-searchselect__trigger,.subscription-breakdown-bar{width:100%}
-.subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit,.subscription-form__grid{grid-template-columns:1fr}
+.subscription-form__grid{grid-template-columns:1fr}
 .subscription-form__span-2,.subscription-form__labels-wide,.subscription-form__note,.subscription-form__renewal{grid-column:1 / -1}
 }
 /* settings-subscriptions owner migration from misc.css */
@@ -260,3 +239,45 @@ select.input--compact{width:auto;text-align:left;padding-right:18px}
 .settings-toggle-item{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--t2);cursor:pointer}
 .sr-label-row{display:flex;align-items:center;justify-content:space-between;width:100%}
 .override-error{font-size:11px;color:var(--color-state-critical);margin-top:4px}
+/* 设置 › 订阅：成本基准沿用监控策略的紧凑字段；月预算一行一条，新增与编辑各自保存。 */
+.subscription-settings__head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2) var(--space-3);min-width:0}
+.subscription-settings__head .ss-title{margin:0;line-height:var(--type-h2-leading)}
+.subscription-settings__head-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--space-2) var(--space-3);min-width:0}
+.subscription-settings__rate-notice{color:var(--text-secondary);font-size:var(--type-small-size);line-height:var(--type-small-leading)}
+.subscription-settings__rate-notice--success{color:var(--color-state-normal)}
+.subscription-settings__rate-notice--error{color:var(--color-state-critical)}
+.subscription-settings__configured{margin-left:var(--space-2);color:var(--text-muted)}
+.subscription-settings__subtitle{margin:0;color:var(--text-secondary);font-family:var(--font-sans);font-size:var(--type-small-size);font-weight:var(--type-h2-weight);line-height:var(--type-small-leading)}
+.settings-row-group .settings-row .input--compact.subscription-settings__currency{text-align:left;text-transform:uppercase}
+.settings-row-group .settings-row .input--compact.subscription-settings__offsets{width:14ch;text-align:left}
+.settings-row-group .settings-row .input--compact.subscription-budget-fields__amount{width:16ch}
+.settings-save-footer.subscription-settings__footer{margin-top:0;padding-top:var(--space-3);border-top:0}
+.subscription-settings .settings-row .input,.subscription-budget-add__scope{font-size:var(--type-small-size)}
+.subscription-budget-empty{margin:var(--space-2) 0 0;color:var(--text-muted);font-size:var(--type-small-size)}
+.subscription-budget-list{display:grid;grid-template-columns:auto auto auto minmax(0,1fr) auto;column-gap:var(--space-4);min-width:0;margin:var(--space-2) 0 0;padding:0;list-style:none}
+.subscription-budget-item{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;min-width:0;padding:var(--space-2) 0;border-bottom:var(--border-w) solid var(--border-muted)}
+.subscription-budget-item:last-child{border-bottom:0}
+.subscription-budget-item--editing{display:block}
+.subscription-budget-item__month{display:inline-flex;align-items:center;gap:var(--space-2);color:var(--text-primary);font-size:var(--type-small-size);font-weight:var(--type-h2-weight);white-space:nowrap}
+.subscription-budget-item__amount{color:var(--text-primary);font-size:var(--type-small-size);text-align:right;white-space:nowrap}
+.subscription-budget-item__muted{color:var(--text-muted);font-size:var(--type-eyebrow-size);white-space:nowrap}
+.subscription-budget-item__note{min-width:0;overflow:hidden;color:var(--text-secondary);font-size:var(--type-small-size);text-overflow:ellipsis;white-space:nowrap}
+.subscription-budget-edit{display:flex;flex-direction:column;gap:var(--space-2);min-width:0;padding:var(--space-3);border:var(--border-w) solid color-mix(in srgb,var(--accent) 24%,var(--border));border-radius:var(--radius-2)}
+.subscription-budget-edit__actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--space-2)}
+.subscription-budget-edit .settings-row-group,.subscription-budget-add .settings-row-group{padding:0;border-bottom:0}
+.subscription-budget-add{display:flex;flex-direction:column;gap:var(--space-3);margin-top:var(--space-3);padding-top:var(--space-3);border-top:var(--border-w) solid var(--border-muted)}
+.subscription-budget-add__footer{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2) var(--space-3);min-width:0}
+.subscription-budget-add__bulk{display:inline-flex;align-items:center;gap:var(--space-2);color:var(--text-secondary);font-size:var(--type-small-size);cursor:pointer}
+.subscription-budget-add__scope{width:auto}
+.subscription-budget-add__messages{flex:1 1 auto;min-width:0}
+@media (max-width:700px){
+.subscription-budget-list{display:flex;flex-direction:column}
+.subscription-budget-item{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-3)}
+/* 窄屏：月份、金额与编辑一行；预警与备注换到第二行。 */
+.subscription-budget-item::after{content:"";flex-basis:100%;order:1}
+.subscription-budget-item__muted{order:2}
+.subscription-budget-item__note{flex:1 1 0%;order:3}
+.subscription-budget-item__note:empty{display:none}
+.subscription-budget-item>.btn{margin-left:auto}
+.subscription-budget-item--editing::after{content:none}
+}

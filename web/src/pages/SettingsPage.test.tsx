@@ -458,19 +458,27 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/settings' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
     await waitFor(() => expect(screen.getByLabelText('月预算 USD')).toBeInTheDocument())
+    const settingsPuts = () => fetchMock.mock.calls.filter(([url, init]) => url === '/api/subscriptions/settings' && (init as RequestInit | undefined)?.method === 'PUT').length
+    expect(settingsPuts()).toBe(1)
 
-    fireEvent.change(screen.getByLabelText('预算月份'), { target: { value: '2026-07' } })
-    fireEvent.change(screen.getByLabelText('月预算 USD'), { target: { value: '120' } })
-    fireEvent.change(screen.getByLabelText('备注'), { target: { value: '增长期' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
+    // 新增月预算有自己的保存按钮，不再触发成本设置 PUT。
+    const addForm = screen.getByRole('form', { name: '新增月预算' })
+    fireEvent.change(within(addForm).getByLabelText('预算月份'), { target: { value: '2026-07' } })
+    fireEvent.change(within(addForm).getByLabelText('月预算 USD'), { target: { value: '120' } })
+    fireEvent.change(within(addForm).getByLabelText('备注'), { target: { value: '增长期' } })
+    fireEvent.click(within(addForm).getByRole('button', { name: '添加预算' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-monthly-budgets/2026-07' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(true))
-    await waitFor(() => expect(screen.getByRole('heading', { name: '月预算时间线' })).toBeInTheDocument())
+    expect(await within(addForm).findByRole('status')).toHaveTextContent('预算已保存')
+    expect(settingsPuts()).toBe(1)
+    expect(screen.getByRole('heading', { name: '月预算' })).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('月预算 USD'), { target: { value: '200' } })
-    fireEvent.change(screen.getByLabelText('备注'), { target: { value: '首次基线' } })
-    fireEvent.click(screen.getByRole('checkbox', { name: /批量覆盖历史月预算/ }))
-    fireEvent.change(screen.getByLabelText('覆盖范围'), { target: { value: 'current_year' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
+    fireEvent.change(within(addForm).getByLabelText('月预算 USD'), { target: { value: '200' } })
+    fireEvent.change(within(addForm).getByLabelText('备注'), { target: { value: '首次基线' } })
+    fireEvent.click(within(addForm).getByRole('checkbox', { name: '批量覆盖历史月份' }))
+    // 批量覆盖按范围写入，不需要单个月份。
+    expect(within(addForm).queryByLabelText('预算月份')).not.toBeInTheDocument()
+    fireEvent.change(within(addForm).getByLabelText('覆盖范围'), { target: { value: 'current_year' } })
+    fireEvent.click(within(addForm).getByRole('button', { name: '添加预算' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscription-monthly-budgets/bulk' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
     const bulkCall = fetchMock.mock.calls.find(([url, init]) => url === '/api/subscription-monthly-budgets/bulk' && (init as RequestInit | undefined)?.method === 'POST')
     expect(JSON.parse(String((bulkCall?.[1] as RequestInit | undefined)?.body))).toEqual({
@@ -480,14 +488,17 @@ describe('SettingsPage', () => {
       warning_pct: 80,
       note: '首次基线',
     })
+    expect(await within(addForm).findByRole('status')).toHaveTextContent('今年月预算已保存，共覆盖 2 个月')
+    expect(settingsPuts()).toBe(1)
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/exchange-rates/refresh' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
-    await waitFor(() => expect(screen.getByRole('heading', { name: '月预算时间线' })).toBeInTheDocument())
+    expect(await screen.findByText('汇率刷新完成：成功 1，失败 0')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '月预算' })).toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/subscription-budgets'))).toBe(false)
   })
 
-  it('validates subscription budget before saving settings to avoid partial updates', async () => {
+  it('validates and saves budgets on their own form without touching cost settings', async () => {
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
       if (url === '/api/subscriptions/settings' && method === 'GET') {
@@ -502,18 +513,26 @@ describe('SettingsPage', () => {
       return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
     })
     vi.stubGlobal('fetch', fetchMock)
+    const writes = () => fetchMock.mock.calls.filter(([, init]) => ((init as RequestInit | undefined)?.method ?? 'GET') !== 'GET').map(([url]) => url)
 
     renderSettingsPage('/settings?tab=subscriptions')
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '成本基准与汇率' })).toBeInTheDocument())
-    fireEvent.change(screen.getByLabelText('月预算 CNY'), { target: { value: '-1' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
+    expect(screen.getByText('尚未配置月预算')).toBeInTheDocument()
+    const addForm = screen.getByRole('form', { name: '新增月预算' })
+    // 负数由原生 min 约束拦截；空金额走页面校验并给出中文提示。
+    fireEvent.click(within(addForm).getByRole('button', { name: '添加预算' }))
+    expect(await within(addForm).findByRole('alert')).toHaveTextContent('月预算不能为空。')
+    expect(writes()).toEqual([])
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('月预算必须为非负数字。')
-    expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/settings' && (init as RequestInit | undefined)?.method === 'PUT')).toBe(false)
+    // 底部保存只提交成本设置，未提交的预算草稿不随之写入。
+    fireEvent.change(within(addForm).getByLabelText('月预算 CNY'), { target: { value: '120' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
+    await waitFor(() => expect(writes()).toEqual(['/api/subscriptions/settings']))
+    expect(await screen.findByText('订阅成本设置已保存')).toBeInTheDocument()
   })
 
-  it('disables subscription save while the combined save is in flight', async () => {
+  it('disables subscription save while the settings save is in flight', async () => {
     const fetchMock = vi.fn((url: string, init?: RequestInit) => {
       const method = init?.method ?? 'GET'
       if (url === '/api/subscriptions/settings' && method === 'GET') {
