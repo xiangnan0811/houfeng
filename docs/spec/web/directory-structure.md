@@ -63,11 +63,10 @@ web/
     │   ├── AppErrorBoundary.tsx # Provider/Router 外层 render error 恢复面
     │   ├── RouteErrorPage.tsx   # route render / lazy chunk error 恢复面
     │   ├── RouteModuleFallback.tsx # 路由模块加载中的 current surface
-    │   └── layout/             # 应用骨架（Sidebar、TopBar、Breadcrumb 等）
+    │   └── layout/             # 应用骨架（Sidebar、TopBar 等；路径面包屑由 TopBar 渲染）
     │       ├── AppShell.tsx    # 业务路由统一外壳；含 <Outlet />
     │       ├── Sidebar.tsx
     │       ├── TopBar.tsx
-    │       ├── Breadcrumb.tsx
     │       ├── GlobalSearch.tsx
     │       ├── SyncStatus.tsx
     │       ├── UserChip.tsx

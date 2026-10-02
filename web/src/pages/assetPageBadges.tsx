@@ -131,18 +131,3 @@ export function SubscriptionStatusBadge({ value }: { value: SubscriptionStatus |
 export function HealthBadge({ value }: { value: string }) {
   return statusBadge(value || '未知')
 }
-
-export function AssetLabels({ labels }: { labels: string[] }) {
-  if (labels.length === 0) {
-    return <span className="empty-inline">无标签</span>
-  }
-  return (
-    <span className="asset-labels">
-      {labels.map((label) => (
-        <Badge key={label} variant="info" tone="neutral">
-          {label}
-        </Badge>
-      ))}
-    </span>
-  )
-}

@@ -156,7 +156,6 @@
 .settings-channel-option__text{display:flex;flex-direction:column;gap:var(--space-1);min-width:0}
 .settings-channel-option__title{display:block;color:var(--text-primary)}
 .settings-channel-option__description{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.4}
-.settings-section-intro{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.5}
 .settings-channel-manager,
 .settings-channel-modal{display:flex;flex-direction:column;gap:var(--space-4)}
 .settings-section-aside{display:flex;align-items:center;gap:var(--space-3)}

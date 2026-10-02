@@ -87,7 +87,6 @@
 .watchtower-actions-menu__panel button:focus-visible,.watchtower-actions-menu>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .watchtower-runtime-error{background:color-mix(in srgb,var(--color-state-critical) 6%,var(--surface));border:1px solid color-mix(in srgb,var(--color-state-critical) 20%,var(--border));border-radius:var(--radius-2);padding:var(--space-3);color:var(--text-primary);font-size:var(--type-small-size)}
 /* ===== PAGE COMPAT: Asset styles ===== */
-.asset-page{display:flex;flex-direction:column;gap:var(--space-4)}
 .asset-table__identity,.asset-table__stack{display:flex;flex-direction:column;gap:2px;min-width:0}
 .asset-table__identity strong,.asset-table__stack strong{font-weight:500;color:var(--text-primary);font-size:var(--type-body-size);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .asset-table__identity .hostname,.asset-table__identity small,.asset-table__stack span,.asset-table__stack small{font-size:var(--type-small-size);color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -104,11 +103,6 @@
 .asset-operation-feedback--error{color:var(--color-state-critical);background:color-mix(in srgb,var(--color-state-critical) 6%,transparent);border-top-color:color-mix(in srgb,var(--color-state-critical) 20%,transparent)}
 .asset-operation-actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);padding:var(--space-4) var(--space-5);border-top:var(--border-w) solid var(--panel-border)}
 /* ===== LAYOUT COMPAT: Breadcrumb + Modal + GlobalSearch ===== */
-.breadcrumb{display:flex;align-items:center;gap:var(--space-2);font-family:var(--font-sans);font-size:13px;min-width:0}
-.breadcrumb__sep{color:var(--text-muted);font-size:12px}
-.breadcrumb__link{color:var(--text-muted);transition:color var(--dur-micro);text-decoration:none}
-.breadcrumb__link:hover{color:var(--text-primary)}
-.breadcrumb__current{color:var(--text-primary);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .modal-backdrop{position:fixed;inset:0;background:color-mix(in srgb,var(--bg-sidebar) 72%,transparent);display:flex;align-items:center;justify-content:center;z-index:1000}
 .modal-backdrop.modal-stack-layer--top{z-index:1001}
 .modal{width:420px;padding:var(--space-6);background:var(--surface-elevated);border:1px solid var(--border);border-radius:var(--radius-4);box-shadow:var(--shadow-overlay);display:flex;flex-direction:column;gap:var(--space-4)}

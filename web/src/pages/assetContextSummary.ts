@@ -1,7 +1,6 @@
 import {
   SUBSCRIPTION_STATUS_LABELS,
   VPS_LIFECYCLE_STATUS_LABELS,
-  VPS_RENEWAL_DECISION_LABELS,
   type AssetContextForTarget,
   type LinkedVPSContext,
 } from '../lib/types'
@@ -28,10 +27,6 @@ export function assetContextMessage(context: AssetContextLike | null | undefined
 
 export function vpsLifecycleLabel(value: string): string {
   return VPS_LIFECYCLE_STATUS_LABELS[value as keyof typeof VPS_LIFECYCLE_STATUS_LABELS] ?? value
-}
-
-export function vpsRenewalDecisionLabel(value: string): string {
-  return VPS_RENEWAL_DECISION_LABELS[value as keyof typeof VPS_RENEWAL_DECISION_LABELS] ?? value
 }
 
 export function subscriptionStateLabel(value: string): string {

@@ -23,7 +23,7 @@
 > **当前分层是这样的；处于初始开发阶段，未来可能简化或合并**。
 
 ```
-app/layout/      ← 应用壳（Sidebar / TopBar / Breadcrumb / GlobalSearch...）
+app/layout/      ← 应用壳（Sidebar / TopBar / GlobalSearch...）
    ↑ 仅被 AppShell 组合，不应被 pages 直接引用
 pages/           ← 路由页装配点（拉数据、编排状态、组合组件）
    ↑ 由 app/router.tsx 唯一注册
