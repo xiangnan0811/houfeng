@@ -27,6 +27,14 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.13.0](https://github.com/xiangnan0811/houfeng/compare/v1.12.0...v1.13.0) (2026-10-02)
+
+
+### Features
+
+* 重构订阅成本洞察并按本地日历计算续费剩余天数 ([7662994](https://github.com/xiangnan0811/houfeng/commit/7662994ee9a4045ff638caf9124cecf702f259dc))
+* 重构订阅成本洞察并按本地日历计算续费剩余天数 ([14040e1](https://github.com/xiangnan0811/houfeng/commit/14040e15a5dfc4a65285eeb96cc7fccf2705d3fb))
+
 ## [1.12.0](https://github.com/xiangnan0811/houfeng/compare/v1.11.0...v1.12.0) (2026-10-01)
 
 
