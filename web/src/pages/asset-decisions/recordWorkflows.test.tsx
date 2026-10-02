@@ -29,7 +29,7 @@ describe('Asset Decisions saved record workflows', () => {
     vi.restoreAllMocks()
   })
 
-  it('restores focus to the opened record trigger after Escape closes the detail', async () => {
+  it.each(['button', 'row'] as const)('restores focus to the record entry after opening from the %s and pressing Escape', async (via) => {
     const fetchMock = vi.fn()
     mockInitialWorkbench(fetchMock, {
       routes: [
@@ -45,10 +45,15 @@ describe('Asset Decisions saved record workflows', () => {
     )
 
     await openSecondaryWorkbench('保存记录')
-    const recordsSection = (await screen.findByRole('heading', { name: '已保存组合决策' })).closest('section')
+    const recordsSection = (await screen.findByRole('heading', { name: '保存记录' })).closest('section')
     const trigger = within(recordsSection!).getByRole('button', { name: '查看' })
-    trigger.focus()
-    fireEvent.click(trigger)
+    if (via === 'button') {
+      trigger.focus()
+      fireEvent.click(trigger)
+    } else {
+      // 鼠标点行内标题（不可聚焦）时，行先把焦点交给“查看”，关闭后焦点仍回到入口而不是 body。
+      fireEvent.click(within(recordsSection!).getByText('德国主备取舍记录'))
+    }
 
     expect(await screen.findByRole('dialog', { name: '德国主备取舍记录' })).toBeInTheDocument()
     fireEvent.keyDown(document, { key: 'Escape' })
@@ -150,7 +155,7 @@ describe('Asset Decisions saved record workflows', () => {
 
     await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
     expect(recordsSection).not.toBeNull()
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
@@ -324,7 +329,7 @@ describe('Asset Decisions saved record workflows', () => {
 
     await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
@@ -382,7 +387,7 @@ describe('Asset Decisions saved record workflows', () => {
 
     await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
@@ -481,7 +486,7 @@ describe('Asset Decisions saved record workflows', () => {
 
     await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
@@ -551,7 +556,7 @@ describe('Asset Decisions saved record workflows', () => {
 
     await openSecondaryWorkbench('保存记录')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })

@@ -268,15 +268,12 @@
 .modal-content--xl{width:100%;max-width:none;max-height:100vh;border-radius:0}
 .modal-body{padding:var(--space-3)}
 }
-.section-count--warn{background:var(--warn-bg);color:var(--warn)}
 .text-warn{color:var(--warn)}
 .text-muted{color:var(--text-muted)}
 .text-secondary{color:var(--t3)}
 .text-sm{font-size:11px}
 .row-clickable{cursor:pointer}
 .filter-select--inline{width:auto;font-size:12px}
-.days-urgent{color:var(--warn);font-weight:600;margin-left:6px}
-.days-normal{color:var(--t3);margin-left:6px}
 /* shared-atoms-page owner migration from misc.css */
 .login-page{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;background:var(--bg)}
 /* Subject activity workspace */

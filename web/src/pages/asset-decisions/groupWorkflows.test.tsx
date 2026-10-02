@@ -491,11 +491,11 @@ describe('Asset Decisions automatic group workflows', () => {
 
     await waitFor(() => expect(screen.getByText('已创建自定义组合：德国主力组合')).toBeInTheDocument())
     const manualDialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
-    expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '场景与组合' })).toBeInTheDocument()
     fireEvent.click(within(manualDialog).getByRole('button', { name: '关闭' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '自定义资产组合详情' })).not.toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '场景与组合' })).toBeInTheDocument()
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     expect(within(manualSection!).getByText('德国主力组合')).toBeInTheDocument()
   })
@@ -572,7 +572,7 @@ describe('Asset Decisions automatic group workflows', () => {
       expect(await screen.findByRole('dialog', { name: '自定义资产组合详情' })).toBeInTheDocument()
       expect(screen.queryByRole('dialog', { name: '资产决策组详情' })).not.toBeInTheDocument()
       expect(screen.queryAllByRole('dialog')).toHaveLength(1)
-      expect(screen.getByRole('heading', { name: '场景工作区' })).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '场景与组合' })).toBeInTheDocument()
 
       unmount()
       vi.unstubAllGlobals()

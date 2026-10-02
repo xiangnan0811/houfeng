@@ -40,7 +40,7 @@ describe('Asset Decisions renewal queue workflows', () => {
 
     await openSecondaryWorkbench('单台队列')
     await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
-    const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
+    const singleQueue = screen.getByRole('heading', { name: '单台队列' }).closest('section')
     expect(singleQueue).not.toBeNull()
     if (!singleQueue) throw new Error('single queue section must be rendered')
     expectTabPanelRelationship(singleQueue, '单台辅助队列视图')
@@ -94,7 +94,7 @@ describe('Asset Decisions renewal queue workflows', () => {
     await openSecondaryWorkbench('单台队列')
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(10))
     const mutationStart = fetchMock.mock.calls.length
-    const singleQueue = screen.getByRole('heading', { name: '单台辅助队列' }).closest('section')
+    const singleQueue = screen.getByRole('heading', { name: '单台队列' }).closest('section')
     if (!singleQueue) throw new Error('single queue section must be rendered')
     const firstQueueAction = within(singleQueue).getAllByRole('button', { name: '处理' })[0]
     if (!firstQueueAction) throw new Error('single queue must expose a primary action')

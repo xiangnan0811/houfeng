@@ -351,8 +351,8 @@ describe('Asset Decisions manual group workflows', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '自定义资产组合详情' })).not.toBeInTheDocument())
 
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
-    const templateArticle = within(templatesSection!).getByText('自定义长目标模板').closest('article')!
-    fireEvent.click(within(templateArticle).getByRole('button', { name: '使用模板' }))
+    const templateRow = within(templatesSection!).getByText('自定义长目标模板').closest('li')!
+    fireEvent.click(within(templateRow).getByRole('button', { name: '使用模板' }))
     const templateDialog = await screen.findByRole('dialog', { name: '资产决策场景模板详情' })
     expectTemplateDefaultCover(templateDialog)
     expect(within(templateDialog).getByLabelText('场景模板当前判断')).not.toHaveTextContent(longTemplateGoal)
@@ -360,7 +360,7 @@ describe('Asset Decisions manual group workflows', () => {
     fireEvent.click(within(templateDialog).getByRole('button', { name: '关闭' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '资产决策场景模板详情' })).not.toBeInTheDocument())
     await openSecondaryWorkbench('保存记录')
-    const recordsSection = screen.getByRole('heading', { name: '已保存组合决策' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
     const recordDialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
     expectSavedRecordDefaultCover(recordDialog)
