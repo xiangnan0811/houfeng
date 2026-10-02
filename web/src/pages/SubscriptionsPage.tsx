@@ -44,6 +44,7 @@ import {
   type SubscriptionStatistics,
   type VPSAssetRecord,
 } from '../lib/types'
+import { daysUntilDate } from './assetPageUtils'
 import { SubscriptionInsights, type SubscriptionBreakdownKind } from './subscriptions/SubscriptionInsights'
 
 type PageState = {
@@ -967,7 +968,9 @@ export function SubscriptionsPage() {
                     </thead>
                     <tbody>
                       {visibleSubscriptions.map((s) => {
-                        const isUrgent = Boolean(s.renew_at && (new Date(s.renew_at).getTime() - now) < 30 * 86400000)
+                        const daysLeft = daysUntilDate(s.renew_at, new Date(now))
+                        // 与 VPS 列表、续费窗口和后端「30 天续费」口径一致：含第 30 天。
+                        const isUrgent = daysLeft != null && daysLeft <= 30
                         return (
                           <tr className="data-table__row" key={s.subscription_id}>
                             <td className="data-table__cell">

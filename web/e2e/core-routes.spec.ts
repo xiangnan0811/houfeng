@@ -204,72 +204,63 @@ function subscriptionInsightsPopulatedProfile() {
   }
 }
 
-test('Subscription insights keep a stable grid above the archived panel across desktop heights', async ({ api, page }) => {
+test('Subscription insights size panels to content and scroll only overlong lists', async ({ api, page }) => {
   api.useProfile(subscriptionInsightsPopulatedProfile())
   for (const viewport of [
     { width: 1440, height: 1000 },
     { width: 1024, height: 768 },
     { width: 861, height: 900 },
     { width: 1440, height: 1600 },
+    // 窄屏两行排版下，超长列表同样只在上限内局部滚动。
+    { width: 390, height: 844 },
   ]) {
     await page.setViewportSize(viewport)
     await page.goto('/subscriptions')
     const insights = page.getByRole('region', { name: '订阅成本洞察' })
     const archived = insights.getByRole('region', { name: '已归档资产潜在扣费' })
-    const month = insights.locator('.subscription-insight-panel--month')
-    const renewal = insights.locator('.subscription-insight-panel--renewal')
-    const plot = insights.locator('.subscription-trend-chart-plot')
+    const composition = insights.getByRole('region', { name: '成本构成' })
     await expect(archived).toBeVisible()
-    await expect(insights.getByRole('region', { name: '成本构成' })).toContainText('Provider 24')
-    await expect(plot).toBeVisible()
+    await expect(composition).toContainText('Provider 24')
+    await expect(insights.locator('.subscription-trend-chart-plot')).toBeVisible()
     await page.evaluate(() => document.fonts.ready)
 
     const measure = () => page.evaluate(() => {
       const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect()
-      const main = document.querySelector('main#main-content')!.closest('.main') ?? document.querySelector('main#main-content')!
       return {
-        monthHeight: Math.round(box('.subscription-insight-panel--month').height),
-        compositionHeight: Math.round(box('.subscription-insight-panel--composition').height),
-        renewalTop: Math.round(box('.subscription-insight-panel--renewal').top - box('.subscription-insights__grid').top),
         renewalBottom: box('.subscription-insight-panel--renewal').bottom,
         archivedTop: box('section[aria-label="已归档资产潜在扣费"]').top,
         plotHeight: box('.subscription-trend-chart-plot').height,
+        trendHeight: Math.round(box('.subscription-insight-panel--trend').height),
         trendBottom: box('.subscription-insight-panel--trend').bottom,
         trendContentBottom: Math.max(box('.subscription-trend-readout').bottom, box('.subscription-trend-legend').bottom),
-        mainOverflow: main.scrollHeight - main.clientHeight,
       }
     })
     const label = `${viewport.width}x${viewport.height}`
     const before = await measure()
     expect(before.renewalBottom, label).toBeLessThanOrEqual(before.archivedTop + 1)
-    expect(before.plotHeight, label).toBeGreaterThanOrEqual(160)
-    // 矮桌面钉在网格下限时，换行的读数与图例也必须留在趋势面板内。
+    expect(before.plotHeight, label).toBeGreaterThanOrEqual(200)
     expect(before.trendContentBottom, label).toBeLessThanOrEqual(before.trendBottom)
-    if (viewport.height >= 1600) expect(before.mainOverflow, label).toBeLessThanOrEqual(1)
-    if (viewport.height <= 900) {
-      // 网格下限必须体现为主区域的自然滚动，而不是被中间层裁掉。
-      expect(before.mainOverflow, label).toBeGreaterThan(0)
-      await archived.scrollIntoViewIfNeeded()
-      await expect(archived).toBeInViewport()
-    }
+    await archived.scrollIntoViewIfNeeded()
+    await expect(archived).toBeInViewport()
 
-    const composition = insights.getByRole('region', { name: '成本构成' })
-    expect(await composition.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
-    const renewalQueue = renewal.getByRole('region', { name: '续费队列' })
-    expect(await renewalQueue.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    // 超出上限的长列表在面板内局部滚动，且可用键盘聚焦。
+    const overflows = (element: HTMLElement | SVGElement) => element.scrollHeight > element.clientHeight
+    expect(await composition.evaluate(overflows), label).toBe(true)
+    await expect(composition).toHaveAttribute('tabindex', '0')
+    const renewalQueue = insights.getByRole('region', { name: '续费队列' })
+    expect(await renewalQueue.evaluate(overflows), label).toBe(true)
+    await expect(renewalQueue).toHaveAttribute('tabindex', '0')
 
     await insights.getByRole('tab', { name: '排行', exact: true }).click()
     const ranking = insights.getByRole('region', { name: '月成本排行' })
     await expect(ranking).toBeVisible()
-    expect(await ranking.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    expect(await ranking.evaluate(overflows), label).toBe(true)
+    // 短列表完整展示，不出现局部滚动。
     await insights.getByLabel('构成维度').selectOption('category')
     await expect(composition).toContainText('Category 2')
-    await expect.poll(measure).toMatchObject({
-      monthHeight: before.monthHeight,
-      compositionHeight: before.compositionHeight,
-      renewalTop: before.renewalTop,
-    })
-    await expect(month).toBeVisible()
+    expect(await composition.evaluate(overflows), label).toBe(false)
+    // 切换只影响下方面板，趋势面板不跳动。
+    await expect.poll(async () => (await measure()).trendHeight).toBe(before.trendHeight)
   }
 })
 

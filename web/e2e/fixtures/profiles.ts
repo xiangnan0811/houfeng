@@ -2058,3 +2058,137 @@ export function subjectActivityPopulatedProfile(options: {
     },
   })
 }
+
+// 续费日用相对固定“今天”的天数。用例须以 page.clock.setFixedTime(SUBSCRIPTION_INSIGHTS_NOW)
+// 固定浏览器时钟（上海 2026-10-02 12:00，playwright.config 的 timezoneId），避免 Node 与浏览器时区或跨午夜导致天数漂移。
+export const SUBSCRIPTION_INSIGHTS_NOW = new Date('2026-10-02T04:00:00Z')
+
+const INSIGHT_VPS = [
+  ['vps_001', 'Tokyo Edge', 'Example Cloud', 'compute', 'JP', 'Tokyo', 84, 38, 'keep'],
+  ['vps_002', 'Osaka Relay', 'Example Cloud', 'compute', 'JP', 'Osaka', 56, 9, 'keep'],
+  ['vps_003', 'Frankfurt Mirror', 'Hetzner Online GmbH Falkenstein', 'storage', 'DE', 'Frankfurt', 128, 4, 'unreviewed'],
+  ['vps_004', 'Singapore Probe', 'Lightnode', 'network', 'SG', 'Singapore', 35, 120, 'keep'],
+  ['vps_005', 'LA Backup', 'RackNerd', 'backup', 'US', 'Los Angeles', 18, 21, 'cancel'],
+] as const
+
+type InsightVPSRow = readonly [string, string, string, string, string, string, number, number, string]
+
+/** 固定“今天”之后第 N 天的日历日；UTC 04:00 与上海同一天，按 UTC 日期取值即可。 */
+export function insightCalendarDate(days: number): string {
+  return new Date(SUBSCRIPTION_INSIGHTS_NOW.getTime() + days * 86_400_000).toISOString().slice(0, 10)
+}
+
+function insightCostRow(row: InsightVPSRow): SubscriptionOverview['vps_costs'][number] {
+  const [vpsId, name, provider, category, country, region, monthly, renewInDays, decision] = row
+  const renewAt = insightCalendarDate(renewInDays)
+  return {
+    subscription_id: `sub_${vpsId.slice(4)}`,
+    vps_id: vpsId,
+    vps_display_name: name,
+    provider_id: `pv_${provider.toLowerCase().replace(/\s+/gu, '_')}`,
+    provider_name: provider,
+    // 一条超长订阅名，验证名称省略时次要信息换行而不是被压成零宽。
+    display_name: vpsId === 'vps_003' ? `${name} 存储扩容年付套餐（含每日快照与异地备份）` : `${name} 月付`,
+    cost_category: category,
+    labels: [],
+    price: monthly / 7,
+    currency: 'USD',
+    monthly_price: monthly / 7,
+    monthly_price_base: monthly,
+    yearly_price_base: monthly * 12,
+    base_currency: 'CNY',
+    exchange_rate: 7,
+    exchange_rate_date: '2026-07-10',
+    exchange_rate_stale: false,
+    renew_at: renewAt,
+    status: 'active',
+    payment_method: 'card',
+    country,
+    region,
+    lifecycle_status: 'active',
+    renewal_decision: decision,
+    budget_status: 'ok',
+  }
+}
+
+function insightBreakdown(entries: ReadonlyArray<readonly [string, string, number, number]>): SubscriptionStatistics['provider_breakdown'] {
+  return entries.map(([key, label, monthly, count]) => ({
+    key, label, monthly_cost: monthly, yearly_cost: monthly * 12, subscription_count: count,
+  }))
+}
+
+/** 成本洞察：五台资产、12 个月成本与预算、四条 90 天内续费（三种决策、一条汇率过期）、一条已归档潜在扣费。 */
+export function subscriptionInsightsProfile(): ApiFixtureProfile {
+  const costs = INSIGHT_VPS.map(insightCostRow)
+  const total = costs.reduce((sum, row) => sum + (row.monthly_price_base ?? 0), 0)
+  const providers = insightBreakdown([
+    ['Example Cloud', 'Example Cloud', 140, 2], ['Hetzner Online GmbH Falkenstein', 'Hetzner Online GmbH Falkenstein', 128, 1],
+    ['Lightnode', 'Lightnode', 35, 1], ['RackNerd', 'RackNerd', 18, 1],
+  ])
+  const monthly = [212, 236, 240, 251, 268, 280, 284, 290, 301, 318, 321, total]
+  const months = ['2025-08', '2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02', '2026-03', '2026-04', '2026-05', '2026-06', '2026-07']
+  const buckets = monthly.map((cost, index) => ({
+    bucket: months[index] ?? '2026-07',
+    monthly_cost: cost,
+    renewal_count: index % 3,
+    budget_limit: 300,
+    budget_currency: 'CNY',
+    budget_warning_pct: 80,
+    data_insufficient: false,
+  }))
+  const statistics: SubscriptionStatistics = {
+    window: 'year',
+    base_currency: 'CNY',
+    total_monthly_cost: total,
+    total_yearly_cost: total * 12,
+    provider_breakdown: providers,
+    currency_breakdown: insightBreakdown([['USD', 'USD', total, 5]]),
+    category_breakdown: insightBreakdown([
+      ['compute', '计算', 140, 2], ['storage', '存储', 128, 1], ['network', '网络', 35, 1], ['backup', '备份', 18, 1],
+    ]),
+    payment_breakdown: insightBreakdown([['card', '信用卡', 285, 4], ['paypal', 'PayPal', 36, 1]]),
+    region_breakdown: insightBreakdown([['JP', '日本', 140, 2], ['DE', '德国', 128, 1], ['SG', '新加坡', 35, 1], ['US', '美国', 18, 1]]),
+    cost_month_buckets: buckets,
+    renewal_month_buckets: buckets,
+    budget_statuses: [],
+  }
+  const renewals = costs.filter((row) => row.vps_id !== 'vps_004').map((row) => ({
+    subscription_id: row.subscription_id,
+    vps_id: row.vps_id,
+    vps_display_name: row.vps_display_name,
+    display_name: row.display_name,
+    provider_name: row.provider_name,
+    renew_at: row.renew_at ?? null,
+    monthly_price_base: row.monthly_price_base ?? null,
+    yearly_price_base: row.yearly_price_base ?? null,
+    base_currency: 'CNY',
+    currency: 'USD',
+    renewal_decision: row.renewal_decision,
+    lifecycle_status: 'active',
+    exchange_rate_stale: row.vps_id === 'vps_002',
+  })).sort((left, right) => String(left.renew_at).localeCompare(String(right.renew_at)))
+  return authenticatedProfile({
+    [apiRouteKey('GET', '/api/subscriptions')]: { status: 200, body: [SUBSCRIPTION] },
+    // 续费队列行下钻到该 VPS 的明细筛选。
+    [apiRouteKey('GET', '/api/subscriptions?vps_id=vps_003')]: { status: 200, body: [] },
+    [apiRouteKey('GET', '/api/vps')]: { status: 200, body: [vpsAssetFixture()] },
+    [apiRouteKey('GET', '/api/subscriptions/overview')]: {
+      status: 200,
+      body: subscriptionOverviewFixture({
+        total_monthly_cost: total,
+        total_yearly_cost: total * 12,
+        active_subscription_count: 5,
+        renewal_due_14d_count: 2,
+        renewal_due_30d_count: 3,
+        budget_risk_count: 1,
+        upcoming_renewals: renewals,
+        provider_breakdown: providers,
+        vps_costs: costs,
+        archived_potential_costs: [{ ...insightCostRow(['vps_009', 'Old Seoul', 'Lightnode', 'compute', 'KR', 'Seoul', 22, 15, 'cancel']), lifecycle_status: 'archived', auto_renew_check: 'enabled' }],
+        archived_potential_monthly_cost: 22,
+        archived_unknown_amount_count: 0,
+      }),
+    },
+    [apiRouteKey('GET', '/api/subscriptions/statistics?window=year')]: { status: 200, body: statistics },
+  })
+}

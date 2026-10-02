@@ -1,4 +1,5 @@
 import { ApiError } from '../../lib/api'
+import { daysUntilDate } from '../assetPageUtils'
 import type {
   AssetDecisionComparisonInsight,
   AssetDecisionComparisonLane,
@@ -237,18 +238,8 @@ export function parseEvidenceAssessment(snapshot?: AssetDecisionEvidenceSnapshot
 
 // VPS 和订阅相关工具函数
 
-const MS_PER_DAY = 86400000
-
-export function daysUntilDate(value?: string | null): number | null {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
-
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const targetDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  return Math.ceil((targetDay - today) / MS_PER_DAY)
-}
+// 剩余天数只保留一份实现，避免两处日历日解析再次分叉。
+export { daysUntilDate }
 
 export function isSubscriptionInRenewalWindow(
   subscription: SubscriptionRecord | null,

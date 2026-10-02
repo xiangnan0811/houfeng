@@ -375,6 +375,32 @@ describe('SubscriptionsPage', () => {
     })
   })
 
+  it('highlights renewals within 30 calendar days, including day 30', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 9, 2, 12, 0))
+    try {
+      setupSubscriptionFetch({
+        subscriptions: [
+          { ...subscription, subscription_id: 'sub_d29', renew_at: '2026-10-31' },
+          { ...subscription, subscription_id: 'sub_d30', renew_at: '2026-11-01' },
+          { ...subscription, subscription_id: 'sub_d31', renew_at: '2026-11-02' },
+        ],
+      })
+      render(
+        <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+          <SubscriptionsPage />
+        </MemoryRouter>,
+      )
+      await waitFor(() => expect(screen.getByText('2026-11-02')).toBeInTheDocument())
+      const cell = (date: string) => screen.getByText(date).closest('td')
+      expect(cell('2026-10-31')).toHaveClass('text-warn')
+      expect(cell('2026-11-01')).toHaveClass('text-warn')
+      expect(cell('2026-11-02')).not.toHaveClass('text-warn')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('shows no-VPS prerequisite with link to VPS page', async () => {
     setupSubscriptionFetch({ subscriptions: [], vpsRows: [] })
 
