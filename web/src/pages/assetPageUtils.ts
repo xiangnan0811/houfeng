@@ -49,15 +49,22 @@ export function subscriptionStatusLabel(value: SubscriptionStatus | string): str
   return SUBSCRIPTION_STATUS_LABELS[value as SubscriptionStatus] ?? value
 }
 
-export function daysUntilDate(value?: string | null): number | null {
+// 续费日等 YYYY-MM-DD 是日历日：按本地日期解析。`new Date('2026-10-14')` 会当作 UTC 零点，
+// 在 UTC 以西的时区落到前一天。
+function parseCalendarDate(value: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(value)
+}
+
+export function daysUntilDate(value?: string | null, now: Date = new Date()): number | null {
   if (!value) return null
-  const date = new Date(value)
+  const date = parseCalendarDate(value)
   if (Number.isNaN(date.getTime())) return null
 
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-  const targetDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
-  return Math.ceil((targetDay - today) / MS_PER_DAY)
+  // 按 UTC 序数比较本地日历日，夏令时 23/25 小时的日子不会多算或少算一天。
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  const targetDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+  return Math.round((targetDay - today) / MS_PER_DAY)
 }
 
 export function renewalTimingLabel(days: number | null): string {

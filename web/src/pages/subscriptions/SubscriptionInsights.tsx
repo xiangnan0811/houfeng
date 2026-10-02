@@ -1,16 +1,15 @@
 import { type KeyboardEvent, useState } from 'react'
-import { Link } from 'react-router-dom'
 
-import { StatusGlyph, TabPanel, Tabs } from '../../components/atoms'
-import { formatDate, formatMoney } from '../../lib/format'
+import { TabPanel, Tabs } from '../../components/atoms'
 import type {
   SubscriptionBreakdownItem,
   SubscriptionCostRow,
   SubscriptionOverview,
-  SubscriptionRenewalQueueItem,
   SubscriptionStatistics,
 } from '../../lib/types'
-import { BudgetCostTrendChart } from './BudgetCostTrendChart'
+import { BudgetCostTrendChart, BudgetCostTrendLegend } from './BudgetCostTrendChart'
+import { money } from './insightFormat'
+import { ArchivedCharges, InsightEmpty, RenewalQueue } from './SubscriptionInsightLists'
 
 export type SubscriptionBreakdownKind = 'provider' | 'category' | 'currency' | 'payment' | 'region'
 
@@ -61,11 +60,6 @@ const MONTH_COST_TABS = [
   { value: 'pie', label: '饼图' },
   { value: 'ranking', label: '排行' },
 ] as const
-
-function money(value?: number | null, currency = 'CNY'): string {
-  if (value == null || Number.isNaN(value)) return '-'
-  return formatMoney(value, currency)
-}
 
 function compactAmount(value: number): string {
   if (!Number.isFinite(value)) return '-'
@@ -126,42 +120,6 @@ function handleKeyActivate(event: KeyboardEvent, run: () => void) {
   run()
 }
 
-function RenewalQueue({
-  items,
-  baseCurrency,
-  onSelectVPS,
-}: {
-  items: SubscriptionRenewalQueueItem[]
-  baseCurrency: string
-  onSelectVPS: (vpsID: string) => void
-}) {
-  if (items.length === 0) {
-    return (
-      <p className="asset-table-empty-state">
-        <strong>暂无临近续费</strong>
-        <span>未来 90 天没有需要处理的订阅续费。</span>
-      </p>
-    )
-  }
-  return (
-    <div className="subscription-renewal-queue subscription-panel-scroll" role="region" tabIndex={0} aria-label="续费队列">
-      {items.map((item) => {
-        const isStale = item.exchange_rate_stale
-        return (
-          <button key={item.subscription_id} type="button" className={`subscription-renewal-row ${isStale ? 'subscription-renewal-row--stale' : ''}`} onClick={() => onSelectVPS(item.vps_id)}>
-            <span>
-              <strong><StatusGlyph state={isStale ? 'notice' : 'normal'} size="sm" />{item.display_name || item.vps_display_name}</strong>
-              <small>{item.provider_name || '未记录服务商'} · {item.currency}</small>
-            </span>
-            <span className="mono">{formatDate(item.renew_at)}</span>
-            <span className="mono">{money(item.monthly_price_base, item.base_currency || baseCurrency)}/月</span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 export function SubscriptionInsights({
   overview,
   overviewLoading,
@@ -201,40 +159,36 @@ export function SubscriptionInsights({
   return (
     <section className="subscription-insights" aria-label="订阅成本洞察">
       <div className="subscription-insights__grid">
-        {/* 1. Primary full-width trend panel first */}
         <div className="subscription-insight-panel subscription-insight-panel--trend">
           <div className="subscription-panel-header">
-            <h3 className="subscription-panel-title">月成本与月预算</h3>
-            <span className="subscription-panel-meta">
-              {statisticsLoading
-                ? '加载中'
-                : `管理中资产 · 最近 ${costBuckets.length} 个月`}
-            </span>
+            <div className="subscription-panel-heading">
+              <h3 className="subscription-panel-title">月成本与月预算</h3>
+              <span className="subscription-panel-meta">
+                {statisticsLoading ? '加载中' : `管理中资产 · 最近 ${costBuckets.length} 个月`}
+              </span>
+            </div>
+            {hasTrend && !statisticsError ? <BudgetCostTrendLegend /> : null}
           </div>
           {statisticsError ? (
             <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">
               {statisticsError}{' '}
               <button type="button" className="btn sm secondary" onClick={onRetryStatistics}>重试统计</button>
             </p>
-          ) : null}
-          {statisticsError ? null : statisticsLoading && !statistics ? (
-            <p className="asset-table-empty-state" role="status">
-              <strong>正在加载年度统计</strong>
-            </p>
+          ) : statisticsLoading && !statistics ? (
+            <InsightEmpty title="正在加载年度统计" busy />
           ) : hasTrend ? (
             <BudgetCostTrendChart
               buckets={costBuckets}
               baseCurrency={baseCurrency}
             />
           ) : statisticsLoading ? null : (
-            <p className="asset-table-empty-state">
-              <strong>历史成本数据不足</strong>
-              <span>{hasInsufficientTrendData ? '部分历史月份缺少可用汇率或预算币种不一致，暂不绘制可能误导的趋势曲线。' : '后端未返回足够的历史月成本与月预算 bucket。'}</span>
-            </p>
+            <InsightEmpty
+              title="历史成本数据不足"
+              detail={hasInsufficientTrendData ? '部分历史月份缺少可用汇率或预算币种不一致，暂不绘制可能误导的趋势曲线。' : '后端未返回足够的历史月成本与月预算 bucket。'}
+            />
           )}
         </div>
 
-        {/* 2. Secondary monthly cost (pie / ranking) */}
         <div className="subscription-insight-panel subscription-insight-panel--month">
           <div className="subscription-panel-header">
             <h3 className="subscription-panel-title">月成本</h3>
@@ -252,24 +206,15 @@ export function SubscriptionInsights({
             value={monthCostView}
             className="subscription-insight-panel__tab-panel"
           >
-            <span className="subscription-panel-total">{overviewReady ? money(donutTotal, baseCurrency) : '—'}</span>
             {overviewLoading ? (
-              <p className="asset-table-empty-state" role="status">
-                <strong>正在加载月成本</strong>
-              </p>
+              <InsightEmpty title="正在加载月成本" busy />
             ) : overviewError ? (
-              <p className="asset-table-empty-state">
-                <strong>月成本不可用</strong>
-                <span>{overviewError}</span>
-              </p>
+              <InsightEmpty title="月成本不可用" detail={overviewError} />
             ) : monthlyRows.length === 0 ? (
-              <p className="asset-table-empty-state">
-                <strong>暂无可展示成本</strong>
-                <span>当前没有可换算为基准货币的 VPS 订阅成本。</span>
-              </p>
+              <InsightEmpty title="暂无可展示成本" detail="当前没有可换算为基准货币的 VPS 订阅成本。" />
             ) : monthCostView === 'pie' ? (
-              <div className="subscription-donut-layout subscription-panel-scroll" role="region" tabIndex={0} aria-label="月成本饼图">
-                <svg className="subscription-donut" viewBox="0 0 140 140" role="img" aria-label={`本月 VPS 成本占用，总计 ${money(donutTotal, baseCurrency)}`}>
+              <div className="subscription-donut-layout" role="region" aria-label="月成本饼图">
+                <svg className="subscription-donut" viewBox="0 0 140 140" role="group" aria-label={`本月 VPS 成本占用，总计 ${money(donutTotal, baseCurrency)}`}>
                   <circle className="subscription-donut__track" cx="70" cy="70" r="52" />
                   {donutSegments.map(({ item, index, length, dashOffset }) => {
                     const activate = () => {
@@ -307,7 +252,8 @@ export function SubscriptionInsights({
                     <li key={item.key} data-tone={String(index % DONUT_COLORS.length)}>
                       <i aria-hidden="true" />
                       <span>{item.label}</span>
-                      <small>{item.share.toFixed(1)}%</small>
+                      <b className="mono tnum">{money(item.cost, baseCurrency)}</b>
+                      <small className="tnum">{item.share.toFixed(1)}%</small>
                     </li>
                   ))}
                 </ul>
@@ -328,18 +274,20 @@ export function SubscriptionInsights({
                   const share = donutTotal > 0 ? (cost / donutTotal) * 100 : 0
                   return (
                     <button key={row.subscription_id} type="button" className="subscription-ranking-row" onClick={() => onSelectVPS(row.vps_id)}>
-                      <div>
+                      <span className="subscription-insight-row__name">
                         <strong>{row.display_name || row.vps_display_name || row.vps_id}</strong>
-                        <small>{money(row.price, row.currency)} · {share.toFixed(1)}%</small>
-                      </div>
-                      <div className="subscription-breakdown-bar">
+                        <small className="mono tnum">{money(row.price, row.currency)}</small>
+                      </span>
+                      <span className="subscription-breakdown-bar">
                         <progress
                           aria-label={`${row.display_name || row.vps_display_name || row.vps_id} 月成本`}
                           max={rankingMax || 1}
                           value={cost}
                         />
-                      </div>
-                      <span className="mono">{money(cost, baseCurrency)}</span>
+                      </span>
+                      <span className="subscription-insight-row__amount mono tnum">
+                        {money(cost, baseCurrency)}<small>{share.toFixed(1)}%</small>
+                      </span>
                     </button>
                   )
                 })}
@@ -348,7 +296,6 @@ export function SubscriptionInsights({
           </TabPanel>
         </div>
 
-        {/* 3. Secondary cost composition */}
         <div className="subscription-insight-panel subscription-insight-panel--composition">
           <div className="subscription-panel-header">
             <h3 className="subscription-panel-title">成本构成</h3>
@@ -364,84 +311,49 @@ export function SubscriptionInsights({
               </select>
             </label>
           </div>
-          <div className="subscription-breakdown-list subscription-panel-scroll" role="region" tabIndex={0} aria-label="成本构成">
-            {statisticsError ? (
-              <p className="asset-table-empty-state">
-                <strong>构成数据不可用</strong>
-                <span>年度统计未加载，成本构成暂不展示。</span>
-              </p>
-            ) : statisticsLoading && currentBreakdown.length === 0 ? (
-              <p className="asset-table-empty-state" role="status">
-                <strong>正在加载构成数据</strong>
-              </p>
-            ) : currentBreakdown.length === 0 ? (
-              <p className="asset-table-empty-state">
-                <strong>暂无构成数据</strong>
-                <span>当前统计窗口没有可展示的成本构成。</span>
-              </p>
-            ) : currentBreakdown.map((item) => (
-              <div key={item.key} className="subscription-breakdown-row">
-                <div>
-                  <strong>{item.label}</strong>
-                  <small>{item.subscription_count} 项订阅</small>
+          {statisticsError ? (
+            <InsightEmpty title="构成数据不可用" detail="年度统计未加载，成本构成暂不展示。" />
+          ) : statisticsLoading && currentBreakdown.length === 0 ? (
+            <InsightEmpty title="正在加载构成数据" busy />
+          ) : currentBreakdown.length === 0 ? (
+            <InsightEmpty title="暂无构成数据" detail="当前统计窗口没有可展示的成本构成。" />
+          ) : (
+            <div className="subscription-breakdown-list subscription-panel-scroll" role="region" tabIndex={0} aria-label="成本构成">
+              {currentBreakdown.map((item) => (
+                <div key={item.key} className="subscription-breakdown-row">
+                  <span className="subscription-insight-row__name">
+                    <strong>{item.label}</strong>
+                    <small>{item.subscription_count} 项订阅</small>
+                  </span>
+                  <span className="subscription-breakdown-bar">
+                    <progress
+                      aria-label={`${item.label} 月成本`}
+                      max={breakdownMax || 1}
+                      value={item.monthly_cost}
+                    />
+                  </span>
+                  <span className="subscription-insight-row__amount mono tnum">{money(item.monthly_cost, baseCurrency)}</span>
                 </div>
-                <div className="subscription-breakdown-bar">
-                  <progress
-                    aria-label={`${item.label} 月成本`}
-                    max={breakdownMax || 1}
-                    value={item.monthly_cost}
-                  />
-                </div>
-                <span className="mono">{money(item.monthly_cost, baseCurrency)}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* 4. Full-width renewal queue */}
         <div className="subscription-insight-panel subscription-insight-panel--renewal">
           <div className="subscription-panel-header">
             <h3 className="subscription-panel-title">续费队列</h3>
             <span className="subscription-panel-meta">{overviewReady ? `${overview?.upcoming_renewals?.length ?? 0} 项` : (overviewLoading ? '加载中' : '不可用')}</span>
           </div>
           {overviewLoading ? (
-            <p className="asset-table-empty-state" role="status">
-              <strong>正在加载续费队列</strong>
-            </p>
+            <InsightEmpty title="正在加载续费队列" busy />
           ) : overviewError ? (
-            <p className="asset-table-empty-state">
-              <strong>续费队列不可用</strong>
-              <span>{overviewError}</span>
-            </p>
+            <InsightEmpty title="续费队列不可用" detail={overviewError} />
           ) : (
             <RenewalQueue items={overview?.upcoming_renewals ?? []} baseCurrency={baseCurrency} onSelectVPS={onSelectVPS} />
           )}
         </div>
       </div>
-      {overviewReady && overview ? (
-        <section className="subscription-insight-panel" aria-label="已归档资产潜在扣费">
-          <div className="subscription-panel-header">
-            <h3 className="subscription-panel-title">已归档资产潜在扣费</h3>
-            <span className="subscription-panel-meta">{(overview.archived_unknown_amount_count ?? 0) > 0 ? '金额待核对' : `${money(overview.archived_potential_monthly_cost, baseCurrency)}/月`}</span>
-          </div>
-          <p>归档不代表服务商已停止扣费。请核对自动续费与账单；此处金额不计入当前预计成本。</p>
-          {(overview.archived_unknown_amount_count ?? 0) > 0 ? <p role="status">{overview.archived_unknown_amount_count} 项金额未知，未按零费用处理。</p> : null}
-          {(overview.archived_potential_costs ?? []).map((row) => (
-            <div className="subscription-breakdown-row" key={row.subscription_id}>
-              <div><strong>{row.vps_display_name || row.vps_id}</strong><small>{row.auto_renew_check === 'enabled' ? '服务商自动续费已开启' : '服务商自动续费待核对'}</small></div>
-              <span className="mono">{row.monthly_price_base == null ? '金额待核对' : `${money(row.monthly_price_base, baseCurrency)}/月`}</span>
-              <Link className="text-link" to={`/vps/${encodeURIComponent(row.vps_id)}`}>核对扣费</Link>
-            </div>
-          ))}
-          {(overview.archived_missing_subscription_assets ?? []).map((asset) => (
-            <div className="subscription-breakdown-row" key={asset.vps_id}>
-              <strong>{asset.display_name || asset.vps_id}</strong><span>缺少账单 · 金额待核对</span>
-              <Link className="text-link" to={`/vps/${encodeURIComponent(asset.vps_id)}`}>核对扣费</Link>
-            </div>
-          ))}
-          {(overview.archived_potential_costs?.length ?? 0) === 0 && (overview.archived_missing_subscription_assets?.length ?? 0) === 0 ? <p>暂无待核对的归档扣费。</p> : null}
-        </section>
-      ) : null}
+      {overviewReady && overview ? <ArchivedCharges overview={overview} baseCurrency={baseCurrency} /> : null}
     </section>
   )
 }

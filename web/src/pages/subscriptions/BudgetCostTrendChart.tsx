@@ -308,31 +308,32 @@ export function BudgetCostTrendChart({
               <span className="subscription-trend-readout__value mono">—</span>
             )}
           </div>
-          <span className="subscription-trend-readout__hint" aria-hidden="true">
-            使用 ← → 切换月份
-          </span>
         </div>
       ) : null}
-
-      {/* Legend */}
-      <div className="subscription-trend-legend" aria-label="趋势图图例">
-        <span>
-          <i className="subscription-trend-legend__line subscription-trend-legend__line--cost" />
-          月成本
-        </span>
-        <span>
-          <i className="subscription-trend-legend__line subscription-trend-legend__line--budget" />
-          月预算
-        </span>
-        <span>
-          <i className="subscription-trend-legend__area subscription-trend-legend__area--over" />
-          超预算区间
-        </span>
-        <span>
-          <i className="subscription-trend-legend__area subscription-trend-legend__area--under" />
-          低于预算区间
-        </span>
-      </div>
     </div>
+  )
+}
+
+/** 图例放在面板标题行，不占图表下方的纵向空间。 */
+export function BudgetCostTrendLegend() {
+  return (
+    <ul className="subscription-trend-legend" aria-label="趋势图图例">
+      <li>
+        <i className="subscription-trend-legend__line subscription-trend-legend__line--cost" aria-hidden="true" />
+        月成本
+      </li>
+      <li>
+        <i className="subscription-trend-legend__line subscription-trend-legend__line--budget" aria-hidden="true" />
+        月预算
+      </li>
+      <li>
+        <i className="subscription-trend-legend__area subscription-trend-legend__area--over" aria-hidden="true" />
+        超预算
+      </li>
+      <li>
+        <i className="subscription-trend-legend__area subscription-trend-legend__area--under" aria-hidden="true" />
+        低于预算
+      </li>
+    </ul>
   )
 }

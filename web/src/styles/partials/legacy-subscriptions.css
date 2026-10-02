@@ -1,8 +1,7 @@
 /* partial: legacy-subscriptions.css (semantic split of the legacy index.css block) */
 .subscription-page{gap:var(--space-3)}
-.subscription-page[data-view="insights"]{--subscription-insights-trend-min:320px;--subscription-insights-middle-min:264px;--subscription-insights-renewal-min:160px;--subscription-insights-plot-min:160px;--subscription-insights-month-mobile:400px;--subscription-insights-gap:12px;height:100%;min-height:100%}
-.subscription-page[data-view="insights"]>.subscription-page__view:not([hidden]){display:flex;flex:1 1 0%;flex-direction:column;min-width:0;min-height:0}
-.subscription-page[data-view="insights"] .subscription-view-panel{flex:1 1 0%;min-width:0;min-height:0}
+/* 洞察面板随内容增高；趋势图给定高度，超长列表在上限内局部滚动。 */
+.subscription-page[data-view="insights"]{--subscription-insights-plot-height:clamp(200px,30vh,280px);--subscription-insights-list-max:360px}
 .subscription-page .page__title{font-size:22px;line-height:1.25}
 .subscription-page__head{align-items:flex-start}
 .subscription-page__identity{display:flex;flex-direction:column;gap:6px;min-width:0}
@@ -18,18 +17,35 @@
 .subscription-summary>:is(button,a):focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px;border-radius:2px}
 .subscription-summary__label{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.3}
 .subscription-summary__value{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-small-size);font-weight:650;line-height:1.3}
-.subscription-renewal-queue,.subscription-breakdown-list,.subscription-budget-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
-.subscription-renewal-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:var(--space-2);align-items:center;min-width:0;width:100%;padding:6px 0;border:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent);border-radius:0;background:transparent;color:inherit;text-align:left;text-decoration:none}
-.subscription-renewal-row:is(button){appearance:none;cursor:pointer}
-.subscription-renewal-row:hover{border-color:color-mix(in srgb,var(--accent) 26%,var(--border))}
-.subscription-renewal-row--stale{border-color:color-mix(in srgb,var(--color-state-notice) 28%,var(--border));background:color-mix(in srgb,var(--color-state-notice) 4%,transparent)}
-.subscription-renewal-row span:first-child,.subscription-breakdown-row>div:first-child,.subscription-budget-row>div:first-child{display:flex;flex-direction:column;gap:2px;min-width:0}
-.subscription-renewal-row strong,.subscription-breakdown-row strong,.subscription-budget-row strong{color:var(--text-primary);font-size:var(--type-body-size);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.subscription-renewal-row strong{display:inline-flex;align-items:center;gap:var(--space-2);min-width:0}
-.subscription-renewal-row small,.subscription-breakdown-row small,.subscription-budget-row small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.subscription-breakdown-row{display:grid;grid-template-columns:minmax(72px,0.56fr) minmax(54px,1fr) minmax(74px,auto);gap:var(--space-2);align-items:center;min-width:0;padding:var(--space-2) 0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent)}
-.subscription-breakdown-row:last-child{border-bottom:0}
-.subscription-breakdown-bar{height:8px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--border) 58%,transparent);overflow:hidden}
+.subscription-budget-list{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.subscription-budget-row>div:first-child{display:flex;flex-direction:column;gap:2px;min-width:0}
+.subscription-budget-row strong{color:var(--text-primary);font-size:var(--type-body-size);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.subscription-budget-row small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 洞察列表：列表是网格，行用 subgrid 对齐各列，一行排开，窄屏再折成两行。 */
+.subscription-renewal-queue,.subscription-breakdown-list,.subscription-ranking-list,.subscription-archived-list{display:grid;column-gap:var(--space-3);min-width:0;margin:0;padding:0;list-style:none}
+.subscription-renewal-queue{grid-template-columns:auto minmax(0,1fr) auto auto}
+.subscription-breakdown-list,.subscription-ranking-list{grid-template-columns:minmax(0,1.2fr) minmax(48px,1fr) auto}
+.subscription-archived-list{grid-template-columns:auto minmax(0,1fr) auto auto}
+.subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-archived-row{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;min-width:0;width:100%;margin:0;padding:var(--space-2) 0;border:0;border-bottom:var(--border-w) solid var(--border-muted);border-radius:0;background:transparent;color:inherit;font:inherit;text-align:left;text-decoration:none}
+.subscription-renewal-row:last-child,.subscription-breakdown-row:last-child,.subscription-ranking-row:last-child,.subscription-archived-row:last-child{border-bottom:0}
+.subscription-renewal-row,.subscription-ranking-row{appearance:none;cursor:pointer}
+.subscription-renewal-row:hover strong,.subscription-ranking-row:hover strong{color:var(--accent)}
+.subscription-renewal-row:focus-visible,.subscription-ranking-row:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:-2px;border-radius:var(--radius-1)}
+.subscription-renewal-row strong,.subscription-breakdown-row strong,.subscription-ranking-row strong,.subscription-archived-row strong{min-width:0;overflow:hidden;color:var(--text-primary);font-size:var(--type-small-size);font-weight:600;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}
+.subscription-renewal-row small,.subscription-breakdown-row small,.subscription-ranking-row small,.subscription-archived-row small{min-width:0;overflow:hidden;color:var(--text-muted);font-size:var(--type-eyebrow-size);line-height:1.35;text-overflow:ellipsis;white-space:nowrap}
+.subscription-renewal-row__when,.subscription-renewal-row__name,.subscription-insight-row__name{display:flex;align-items:baseline;gap:var(--space-2);min-width:0}
+.subscription-renewal-row__when{white-space:nowrap}
+/* 名称与次要信息同行；放不下时次要信息换到下一行，不会被压成零宽。 */
+.subscription-renewal-row__name,.subscription-insight-row__name{flex-wrap:wrap;row-gap:0}
+.subscription-renewal-row__name strong,.subscription-insight-row__name strong{flex:0 1 auto;max-width:100%}
+.subscription-renewal-row__name small,.subscription-insight-row__name small{flex:1 1 auto;min-width:min(100%,6em)}
+.subscription-renewal-row__when time{color:var(--text-primary);font-size:var(--type-small-size)}
+.subscription-renewal-row[data-urgency="soon"] .subscription-renewal-row__when small{color:var(--badge-warn-c);font-weight:600}
+.subscription-renewal-row[data-urgency="overdue"] .subscription-renewal-row__when small{color:var(--badge-err-c);font-weight:600}
+.subscription-renewal-row__amount,.subscription-insight-row__amount,.subscription-archived-row__amount{display:inline-flex;align-items:baseline;justify-content:flex-end;gap:var(--space-2);color:var(--text-primary);font-size:var(--type-small-size);white-space:nowrap}
+.subscription-renewal-row__amount small{color:var(--badge-warn-c)}
+.subscription-insight-row__amount small{min-width:3.5em;text-align:right}
+.subscription-breakdown-bar{display:block;height:8px;border-radius:var(--radius-pill);background:color-mix(in srgb,var(--border) 58%,transparent);overflow:hidden}
 .subscription-breakdown-bar progress{display:block;width:100%;height:100%;border:0;border-radius:inherit;background:transparent;appearance:none;-webkit-appearance:none}
 .subscription-breakdown-bar progress::-webkit-progress-bar{background:transparent}
 .subscription-breakdown-bar progress::-webkit-progress-value,.subscription-breakdown-bar progress::-moz-progress-bar{min-width:4%;border-radius:var(--radius-pill);background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 76%,var(--color-state-normal)),color-mix(in srgb,var(--color-state-normal) 68%,transparent))}
@@ -48,36 +64,35 @@
 /* partial: legacy-2.css (extracted from index.css; do not hand-edit large rules here) */
 .subscription-budget-coverage strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.35}
 .subscription-budget-coverage small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
-.subscription-insights{display:flex;flex:1 1 0%;flex-direction:column;gap:8px;min-width:0;min-height:0}
-.subscription-panel-title{margin:0;font-family:var(--font-sans);font-size:14px;font-weight:600;line-height:1.3;color:var(--text-primary)}
-.subscription-insights__grid{display:grid;flex:1 1 0%;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(var(--subscription-insights-trend-min),1.15fr) minmax(var(--subscription-insights-middle-min),1fr) minmax(var(--subscription-insights-renewal-min),1fr);gap:var(--subscription-insights-gap);align-items:stretch;min-width:0;min-height:calc(var(--subscription-insights-trend-min) + var(--subscription-insights-middle-min) + var(--subscription-insights-renewal-min) + 2 * var(--subscription-insights-gap))}
-/* 网格外的归档面板不参与收缩；矮视口由网格下限撑出主区域滚动，而不是压到网格上。 */
-.subscription-insights>.subscription-insight-panel{flex:none}
-.subscription-insight-panel{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;padding:12px;border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-2);background:var(--panel-bg)}
-.subscription-insight-panel--trend{grid-column:1/-1;grid-row:1;order:1}
-.subscription-insight-panel--month{grid-row:2;order:2}
-.subscription-insight-panel--composition{grid-row:2;order:3}
-.subscription-insight-panel--renewal{grid-column:1/-1;grid-row:3;order:4}
-.subscription-panel-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;min-width:0}
+.subscription-insights{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
+.subscription-panel-title{margin:0;font-family:var(--font-sans);font-size:var(--type-body-size);font-weight:600;line-height:1.35;color:var(--text-primary)}
+.subscription-insights__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-3);align-items:stretch;min-width:0}
+.subscription-insight-panel{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;padding:var(--space-4);border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-3);background:var(--surface)}
+.subscription-insight-panel--trend,.subscription-insight-panel--renewal{grid-column:1/-1}
+.subscription-panel-header{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2) var(--space-3);min-width:0}
+.subscription-panel-heading{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1) var(--space-2);min-width:0}
 .subscription-panel-meta{color:var(--text-muted);font-size:var(--type-small-size);line-height:1.3}
+.subscription-insight-empty{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1) var(--space-2);margin:0;color:var(--text-muted);font-size:var(--type-small-size);line-height:1.45}
+.subscription-insight-empty strong{color:var(--text-secondary);font-weight:600}
+.subscription-insight-note{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.45}
 .subscription-panel-select{display:flex;align-items:center;gap:8px;min-width:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.2;white-space:nowrap}
 .subscription-panel-select select{min-width:108px;height:28px;padding:0 26px 0 8px;border:var(--border-w) solid color-mix(in srgb,var(--border) 86%,transparent);border-radius:var(--radius-2);background-color:var(--surface);background-image:var(--select-caret);background-position:right 8px center;background-size:12px 12px;background-repeat:no-repeat;color:var(--text-primary);font:inherit;appearance:none;cursor:pointer}
 .subscription-panel-select select:hover{border-color:color-mix(in srgb,var(--accent) 42%,var(--border))}
 .subscription-panel-select select:focus-visible{outline:2px solid color-mix(in srgb,var(--accent) 42%,transparent);outline-offset:2px}
-.subscription-panel-total{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--type-small-size)}
-.subscription-insight-panel__tab-panel{display:flex;flex:1 1 0%;flex-direction:column;gap:8px;min-width:0;min-height:0}
-.subscription-panel-scroll{flex:1 1 0%;min-height:0;overflow-x:hidden;overflow-y:auto;padding-right:var(--space-1)}
+.subscription-insight-panel__tab-panel{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.subscription-panel-scroll{max-height:var(--subscription-insights-list-max);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding-right:var(--space-1)}
 .subscription-panel-scroll:focus{outline:none}
 .subscription-panel-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:-2px}
-.subscription-donut-layout{position:relative;display:grid;flex:1 1 0%;grid-template-columns:minmax(120px,148px) minmax(0,1fr);gap:12px;align-items:center;min-width:0;min-height:0}
+.subscription-donut-layout{position:relative;display:grid;grid-template-columns:minmax(120px,148px) minmax(0,1fr);gap:var(--space-4);align-items:center;min-width:0}
 .subscription-donut{width:min(100%,148px);max-width:148px;aspect-ratio:1;overflow:visible}
 .subscription-donut__track{fill:none;stroke:color-mix(in srgb,var(--border) 64%,transparent);stroke-width:16}
 .subscription-donut__segment{fill:none;stroke-width:16;stroke-linecap:butt;transform:rotate(-90deg);transform-origin:70px 70px;cursor:pointer}
 .subscription-donut__segment:hover,.subscription-donut__segment:focus-visible{opacity:.82;stroke-width:18;outline:none}
 .subscription-donut__center-label{fill:var(--text-muted);font-size:10px;text-anchor:middle;pointer-events:none}
 .subscription-donut__center-value{fill:var(--text-primary);font-family:var(--font-mono);font-size:11px;font-weight:700;text-anchor:middle;pointer-events:none}
-.subscription-donut-legend{display:flex;flex-direction:column;gap:4px;min-width:0;margin:0;padding:0;list-style:none}
-.subscription-donut-legend li{display:grid;grid-template-columns:8px minmax(0,1fr) auto;gap:8px;align-items:center;min-width:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.3}
+.subscription-donut-legend{display:grid;grid-template-columns:8px minmax(0,1fr) auto auto;gap:var(--space-2) var(--space-3);align-items:center;min-width:0;margin:0;padding:0;list-style:none}
+.subscription-donut-legend li{display:grid;grid-column:1/-1;grid-template-columns:subgrid;align-items:center;min-width:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.3}
+.subscription-donut-legend b{color:var(--text-primary);font-weight:500;text-align:right;white-space:nowrap}
 .subscription-donut-legend i{width:8px;height:8px;border-radius:50%;background:var(--accent)}
 .subscription-donut-legend li[data-tone="1"] i{background:var(--color-state-normal)}
 .subscription-donut-legend li[data-tone="2"] i{background:var(--color-state-notice)}
@@ -85,19 +100,12 @@
 .subscription-donut-legend li[data-tone="4"] i{background:var(--color-state-maintenance)}
 .subscription-donut-legend li[data-tone="5"] i{background:var(--text-muted)}
 .subscription-donut-legend span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-primary)}
-.subscription-donut-legend small{color:var(--text-muted);font-family:var(--font-mono)}
+.subscription-donut-legend small{min-width:3.5em;color:var(--text-muted);font-family:var(--font-mono);text-align:right}
 .subscription-donut-popover{position:absolute;z-index:3;right:8px;bottom:8px;display:flex;min-width:168px;max-width:min(240px,calc(100% - 16px));flex-direction:column;gap:2px;padding:var(--space-2);border:var(--border-w) solid color-mix(in srgb,var(--border) 72%,transparent);border-radius:var(--radius-2);box-shadow:var(--shadow-md);background:color-mix(in srgb,var(--surface) 96%,var(--surface-elevated));pointer-events:none}
 .subscription-donut-popover strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .subscription-donut-popover span,.subscription-donut-popover small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35}
-.subscription-ranking-list{display:flex;flex-direction:column;gap:2px;min-width:0}
-.subscription-ranking-row{display:grid;grid-template-columns:minmax(0,0.5fr) minmax(70px,1fr) minmax(84px,auto);gap:var(--space-2);align-items:center;width:100%;padding:6px 0;border:0;border-bottom:var(--border-w) solid color-mix(in srgb,var(--border) 50%,transparent);background:transparent;color:inherit;text-align:left;cursor:pointer}
-.subscription-ranking-row:hover strong{color:var(--accent)}
-.subscription-ranking-row div:first-child{display:flex;flex-direction:column;gap:2px;min-width:0}
-.subscription-ranking-row strong{color:var(--text-primary);font-size:var(--type-small-size);line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.subscription-ranking-row small{color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.subscription-trend-chart-container{display:flex;flex:1 1 0%;flex-direction:column;gap:8px;min-width:0;min-height:0}
-.subscription-trend-readout,.subscription-trend-legend{flex-shrink:0}
-.subscription-trend-chart-plot{position:relative;flex:1 1 0%;min-width:0;min-height:var(--subscription-insights-plot-min);height:0}
+.subscription-trend-chart-container{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.subscription-trend-chart-plot{position:relative;min-width:0;height:var(--subscription-insights-plot-height)}
 .subscription-trend-chart{position:absolute;inset:0;display:block;width:100%;height:100%;overflow:visible;touch-action:pan-y}
 .subscription-trend-chart:focus{outline:none}
 .subscription-trend-chart:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
@@ -121,9 +129,8 @@
 .subscription-trend-readout__delta--under{color:var(--color-state-normal)}
 .subscription-trend-readout__delta--equal{color:var(--text-muted)}
 .subscription-trend-readout__status{margin-left:6px;color:var(--text-muted);font-family:var(--font-sans);font-size:12px}
-.subscription-trend-readout__hint{margin-left:auto;color:var(--text-muted);font-size:12px}
-.subscription-trend-legend{display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:center;color:var(--text-secondary);font-size:var(--type-small-size)}
-.subscription-trend-legend span{display:inline-flex;align-items:center;gap:var(--space-1)}
+.subscription-trend-legend{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-3);align-items:center;margin:0;padding:0;list-style:none;color:var(--text-secondary);font-size:var(--type-eyebrow-size)}
+.subscription-trend-legend li{display:inline-flex;align-items:center;gap:var(--space-1)}
 .subscription-trend-legend__line{width:18px;height:0;border-top:2px solid var(--accent)}
 .subscription-trend-legend__line--budget{border-top-style:dashed;border-top-color:var(--text-secondary)}
 .subscription-trend-legend__area{width:14px;height:8px;border-radius:var(--radius-1);background:color-mix(in srgb,var(--color-state-critical) 28%,transparent)}
@@ -173,24 +180,37 @@
 .subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:860px){
-.subscription-page[data-view="insights"]{height:auto;min-height:0}
-.subscription-page[data-view="insights"]>.subscription-page__view:not([hidden]),.subscription-page[data-view="insights"] .subscription-view-panel,.subscription-insights,.subscription-insights__grid{flex:none;min-height:0;height:auto}
-.subscription-trend-chart-container,.subscription-trend-chart-plot{flex:none;height:auto}
-.subscription-insights__grid{grid-template-columns:1fr;grid-template-rows:none}
-.subscription-insight-panel--trend,.subscription-insight-panel--month,.subscription-insight-panel--composition,.subscription-insight-panel--renewal{grid-column:1;grid-row:auto;order:unset}
-.subscription-insight-panel--month{height:var(--subscription-insights-month-mobile)}
+.subscription-insights__grid{grid-template-columns:1fr}
 .subscription-panel-header .tabs,.subscription-panel-select{justify-self:start}
 .subscription-panel-header,.subscription-donut-layout{grid-template-columns:1fr}
+.subscription-donut-layout{justify-items:center}
+.subscription-donut-legend{justify-self:stretch}
 .subscription-donut-popover{right:8px;left:8px;top:auto;bottom:8px;transform:none}
 .subscription-form__grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-.subscription-trend-readout__hint{margin-left:0;width:100%}
 }
 @media (max-width:700px){
 .subscription-page__head{flex-direction:column;align-items:flex-start}
 .subscription-page .filter-bar__controls-row>.filter-select,.subscription-page .filter-bar__controls-row>.filter-searchselect{flex:1 1 100%;min-width:0;max-width:100%}
 .subscription-page .filter-bar__controls-row>*>:is(.filter-select__control,.filter-searchselect__trigger){flex:1 1 auto;max-width:100%}
 .subscription-budget-coverage{grid-column:1}
-.subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-budget-row{grid-template-columns:1fr;align-items:start}
+.subscription-budget-row{grid-template-columns:1fr;align-items:start}
+/* 窄屏每行折成两行：主信息与金额在上，次要信息与操作在下。 */
+.subscription-renewal-queue,.subscription-breakdown-list,.subscription-ranking-list,.subscription-archived-list{display:flex;flex-direction:column}
+.subscription-renewal-row,.subscription-breakdown-row,.subscription-ranking-row,.subscription-archived-row{grid-template-columns:minmax(0,1fr) auto;gap:var(--space-1) var(--space-3)}
+.subscription-renewal-row{grid-template-areas:"when badge" "name amount"}
+.subscription-renewal-row__when{grid-area:when}
+.subscription-renewal-row__name{grid-area:name}
+.subscription-renewal-row>.badge{grid-area:badge;justify-self:end}
+.subscription-renewal-row__amount{grid-area:amount;flex-direction:column;align-items:flex-end;gap:0}
+.subscription-breakdown-row,.subscription-ranking-row{grid-template-areas:"name amount" "bar bar"}
+.subscription-insight-row__name{grid-area:name}
+.subscription-insight-row__amount{grid-area:amount}
+.subscription-breakdown-row .subscription-breakdown-bar,.subscription-ranking-row .subscription-breakdown-bar{grid-area:bar}
+.subscription-archived-row{grid-template-areas:"name amount" "note link"}
+.subscription-archived-row>strong{grid-area:name}
+.subscription-archived-row>small{grid-area:note}
+.subscription-archived-row__amount{grid-area:amount}
+.subscription-archived-row>.text-link{grid-area:link;justify-self:end}
 .subscription-page .filter-select__control,.subscription-page .filter-searchselect__trigger,.subscription-breakdown-bar{width:100%}
 .subscription-inline-form,.subscription-inline-form--settings,.subscription-budget-edit,.subscription-form__grid{grid-template-columns:1fr}
 .subscription-form__span-2,.subscription-form__labels-wide,.subscription-form__note,.subscription-form__renewal{grid-column:1 / -1}

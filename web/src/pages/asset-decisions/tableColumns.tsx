@@ -5,7 +5,7 @@ import {
   type DataTableColumn,
   MonoDigits,
 } from '../../components/atoms'
-import { formatDateTime, formatMoney, formatOptional } from '../../lib/format'
+import { formatDate, formatDateTime, formatMoney, formatOptional } from '../../lib/format'
 import {
   type AssetDecisionEvidenceAssessment,
   type AssetDecisionGroupMember,
@@ -302,7 +302,8 @@ export function createMemberColumns(options: {
         return (
           <div className="asset-subscription-cell">
             <strong>{formatMoney(sub.monthly_price, sub.currency)}/月</strong>
-            <span>{formatDateTime(sub.renew_at)} {daysLeft != null ? `· ${daysLeft}天` : ''}</span>
+            {/* 续费日是日历日，原样显示，与按本地日历计算的剩余天数一致。 */}
+            <span>{formatDate(sub.renew_at)} {daysLeft != null ? `· ${daysLeft}天` : ''}</span>
             <SubscriptionStatusBadge value={sub.status} />
           </div>
         )
