@@ -125,7 +125,6 @@ select.input::-ms-expand{display:none}
 .modal-content--lg{width:min(94vw,780px);max-width:780px}
 .modal-content--xl{width:min(94vw,980px);max-width:980px}
 .modal-content--asset-cancel{width:min(94vw,1040px);max-width:1040px}
-.modal-body .asset-detail-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 .vps-create-form{display:flex;flex-direction:column;gap:var(--space-4)}
 .input-field__label--required::after{content:' *';color:var(--color-state-critical)}
 /* ===== ATOM COMPAT: Sparkline ===== */

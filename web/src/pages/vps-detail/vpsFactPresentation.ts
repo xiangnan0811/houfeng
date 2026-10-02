@@ -1,7 +1,5 @@
 import type { VPSOverviewFact as ModernFact, VPSOverviewIdentity } from '../../lib/types'
 import { overviewImportanceLabel } from '../../lib/vpsOverviewPresentation'
-import type { VPSOverviewFact as LegacyFact } from './vpsDetailOverviewModel'
-
 export type VPSFactDisplay = {
   key: string
   label: string
@@ -107,16 +105,4 @@ export function modernOverviewFactRows(
   }
 
   return rows
-}
-
-export function legacyOverviewFactRows(facts: LegacyFact[]): VPSFactDisplay[] {
-  return facts.map((fact, index) => ({
-    key: `${fact.domain}:${fact.label}:${index}`,
-    label: presentationFactLabel('', fact.label),
-    value: presentationFactValue('', fact.label, fact.value),
-    ...(fact.meta ? { meta: fact.meta } : {}),
-    copyValue: copyableValue('', fact.value, fact.copyValue ?? null),
-    ...(fact.tone ? { tone: fact.tone } : {}),
-    layout: factLayoutFor(fact),
-  }))
 }

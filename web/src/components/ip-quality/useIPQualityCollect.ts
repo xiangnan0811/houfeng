@@ -74,6 +74,13 @@ export function useIPQualityCollect(vpsId: string | undefined, onCompleted: () =
     }
   }, [key])
 
+  // 卸载时作废当前代次：挂起的 POST 之后失败也不再补读状态。
+  // StrictMode 模拟卸载后各 effect 会以新代次重新发起读取，不影响正常挂载。
+  useEffect(() => () => {
+    const session = sessionRef.current
+    sessionRef.current = { ...session, generation: session.generation + 1, applied: 0 }
+  }, [])
+
   // vpsId 变化时丢弃上一台 VPS 的状态（渲染期重置，避免在 effect 里同步 setState）。
   const current = state.vpsId === key ? state : initialState(key)
   if (current !== state) setState(current)

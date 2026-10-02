@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
+import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { IPQualityCollectStatus } from '../../lib/types'
@@ -145,6 +146,35 @@ describe('useIPQualityCollect', () => {
     await act(async () => { post.resolve(status('pending')) })
     expect(result.current.submitting).toBe(false)
     expect(result.current.active).toBe(true)
+  })
+
+  it('does not read status again when a POST pending at unmount fails afterwards', async () => {
+    let rejectPost!: (error: unknown) => void
+    api.getVPSIPQualityCollectStatus.mockResolvedValue(status())
+    api.requestVPSIPQualityCollect.mockReturnValue(new Promise<IPQualityCollectStatus>((_, reject) => { rejectPost = reject }))
+    const { result, unmount } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+    await waitFor(() => expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(1))
+
+    act(() => result.current.start())
+    unmount()
+    await act(async () => {
+      rejectPost(new Error('network down'))
+      await Promise.resolve()
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS * 2) })
+    // 离开页面后失败的 POST 不再补读状态。
+    expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps reading status and applying the POST result under StrictMode remounts', async () => {
+    api.getVPSIPQualityCollectStatus.mockResolvedValue(status())
+    api.requestVPSIPQualityCollect.mockResolvedValue(status('pending'))
+    const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()), { wrapper: StrictMode })
+    await waitFor(() => expect(result.current.status).toEqual(status()))
+    act(() => result.current.start())
+    await waitFor(() => expect(result.current.status?.request?.status).toBe('pending'))
+    expect(result.current.submitting).toBe(false)
+    expect(result.current.watchedRequestId).toBe('ipqc_001')
   })
 
   it('ignores callbacks from the previous VPS after switching pages', async () => {

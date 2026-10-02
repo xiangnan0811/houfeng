@@ -75,7 +75,7 @@ function reportFixture(): VPSIPQualityReport {
       { service: 'amazon-prime-video', source: 'prime_probe', status: 'blocked', probe_status: 'success' },
       { service: 'disney-plus', source: 'disney_default_probe', status: 'blocked', probe_status: 'success' },
       { service: 'tiktok', source: 'tiktok_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe' },
-      { service: 'reddit', source: 'reddit_probe', status: 'unknown', probe_status: 'failure', error_code: 'http_status' },
+      { service: 'reddit', source: 'reddit_probe', status: 'unknown', probe_status: 'failure', error_code: 'http_status', error_summary: 'http status 403' },
     ],
     history: Array.from({ length: 8 }, (_, index) => ({
       ...summary,
@@ -134,6 +134,11 @@ for (const viewport of VIEWPORTS) {
     await expect(page.getByRole('button', { name: '立即采集' })).toBeEnabled()
     await expectNoDocumentOverflow(page)
     await page.screenshot({ path: testInfo.outputPath('report-top.png'), fullPage: true })
+
+    // 服务卡片给出中文原因，原始 agent 文本只留在折叠的采集诊断里。
+    const servicesSection = page.locator('section.ipq-services')
+    await expect(servicesSection).toContainText('服务拒绝了探测请求（HTTP 403）')
+    await expect(servicesSection).not.toContainText('http status 403')
 
     // 空字段数据库折叠成计数，表格只剩给出判断的数据库。
     const providerSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'IP 数据库判断' }) })

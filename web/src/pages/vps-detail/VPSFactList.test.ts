@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { VPSOverviewFact, VPSOverviewIdentity } from '../../lib/types'
-import { factLayoutFor, legacyOverviewFactRows, modernOverviewFactRows } from './vpsFactPresentation'
+import { factLayoutFor, modernOverviewFactRows } from './vpsFactPresentation'
 
 const identity: VPSOverviewIdentity = {
   vps_id: 'vps_001',
@@ -59,18 +59,5 @@ describe('modernOverviewFactRows', () => {
       value: 'operator note',
       layout: 'full',
     })
-  })
-})
-
-describe('legacyOverviewFactRows', () => {
-  it('formats provided importance with the shared display formatter', () => {
-    const rows = legacyOverviewFactRows([
-      { domain: 'identity', label: '重要性', value: 'normal' },
-      { domain: 'identity', label: '规格', value: 'cx22' },
-      { domain: 'identity', label: '系统', value: 'Debian' },
-    ])
-    expect(rows.find((row) => row.label === '重要性')?.value).toBe('普通')
-    expect(rows.find((row) => row.label === '规格')?.value).toBe('cx22')
-    expect(rows.find((row) => row.label === '系统')?.value).toBe('Debian')
   })
 })

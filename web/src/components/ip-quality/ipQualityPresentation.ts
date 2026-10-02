@@ -218,12 +218,48 @@ function safeUnlockType(value?: string): string | null {
   return normalized
 }
 
+// agent 服务探测的 error_code → 中文短句；原始 error_summary 留在折叠的采集诊断里。
+const PROBE_FAILURE_LABELS: Readonly<Record<string, string>> = {
+  timeout: '探测超时',
+  non_json_response: '服务响应无法识别',
+  request_failed: '探测请求失败',
+  read_failed: '读取服务响应失败',
+  invalid_request: '探测请求无法发出',
+  probe_failed: '探测失败，未形成可靠结论',
+  unsupported_service: '默认探测暂不支持该服务',
+  unsupported_default_probe: '默认探测暂不支持该服务',
+}
+
+// 只认 agent 生成的完整格式，避免把其它说明里顺带提到的状态码当作失败原因。
+const HTTP_STATUS_SUMMARY = /^http status (\d{3})$/i
+
+function httpStatusLabel(status?: string): string {
+  if (!status) return '服务返回异常状态'
+  const code = Number(status)
+  if (code === 401 || code === 403) return `服务拒绝了探测请求（HTTP ${status}）`
+  if (code === 404) return `探测地址不存在（HTTP ${status}）`
+  if (code === 429) return `探测请求被限流（HTTP ${status}）`
+  if (code >= 500) return `服务暂时不可用（HTTP ${status}）`
+  return `服务返回异常状态（HTTP ${status}）`
+}
+
+function probeFailureLabel(errorCode: string, summary: string | null): string | null {
+  const httpStatus = summary?.trim().match(HTTP_STATUS_SUMMARY)?.[1]
+  if (errorCode === 'http_status') return httpStatusLabel(httpStatus)
+  if (Object.hasOwn(PROBE_FAILURE_LABELS, errorCode)) return PROBE_FAILURE_LABELS[errorCode] ?? null
+  // 旧数据可能只有 summary 没有 code。
+  if (!errorCode && httpStatus) return httpStatusLabel(httpStatus)
+  return null
+}
+
 export function serviceCardDescription(unlock: IPQualityServiceUnlock): string {
   const unlockType = safeUnlockType(unlock.unlock_type)
   if (unlockType) {
     return `解锁类型 ${unlockType}`
   }
   const safeError = safeDiagnosticText(unlock.error_summary)
+  const failureLabel = probeFailureLabel((unlock.error_code ?? '').trim().toLowerCase(), safeError)
+  if (failureLabel) return failureLabel
   if (safeError) return safeError
   const kind = unlockStatusKind(unlock.status)
   if (kind === 'unlocked') return unlock.region ? `区域 ${unlock.region} 可用` : '服务可用'

@@ -313,7 +313,7 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 
 **约定**：
 - 优先把复杂弹层做成 portal modal；VPS 详情页这类快速管理入口统一使用居中 `Modal`。
-- 如果保留轻量 `details.watchtower-actions-menu` / popover，所在 panel 或局部 section 必须允许外溢，例如 `.vps-detail-overview{overflow:visible}`，并设置合适 `z-index`。
+- 如果保留轻量 `details.watchtower-actions-menu` / popover，所在 panel 或局部 section 必须允许外溢（对该容器设置 `overflow:visible`），并设置合适 `z-index`。
 - 下拉面板必须限制高度并允许内部滚动：`max-height` + `overflow-y:auto` + `overscroll-behavior:contain`。不能只把父级改成 `overflow:visible` 后让菜单无限延伸到视口外。
 - 轻量 `details` / popover 展开后必须有完整关闭路径：点击菜单项关闭，点击页面其它位置也关闭；不要只依赖用户再次点击 summary。
 - 浏览器验收必须点开菜单确认：桌面不被 panel 裁剪，窄屏不产生页面横向溢出，菜单内容可滚动并能点击关闭。
