@@ -127,6 +127,42 @@ func TestPostgresAttachmentRepositoryDownloadAssertionRejectsObjectDrift(t *test
 	}
 }
 
+func TestPostgresAttachmentRepositoryDownloadAssertionRejectsOwnerRouteDrift(t *testing.T) {
+	t.Parallel()
+
+	digest := bytes.Repeat([]byte{0x11}, sha256.Size)
+	row := &attachmentDownloadRow{values: []any{
+		"default", "att_downloadroute", "rdf_downloadroute", "", "usr_0123456789abcdef01234567",
+		"available", "notes.txt", "text/plain", int64(10),
+		"sha256/" + strings.Repeat("11", sha256.Size), "original-v1", digest, int64(10),
+		nil, nil, nil, nil, nil,
+	}}
+	tx := &downloadAttachmentTx{row: row}
+	repository := &PostgresAttachmentRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (attachmentTx, error) { return tx, nil },
+	}
+	var assertionDigest [sha256.Size]byte
+	for index := range assertionDigest {
+		assertionDigest[index] = 0x11
+	}
+	assertion := attachments.ContentAssertion{
+		ProjectID: "default", AttachmentID: "att_downloadroute",
+		RecordID: "rec_downloadroute", AuthorID: "usr_0123456789abcdef01234567",
+		Variant: attachments.ContentVariantOriginal,
+		Object: attachments.ObjectVersion{
+			Key: "sha256/" + strings.Repeat("11", sha256.Size), VersionID: "original-v1",
+			SHA256: assertionDigest, SizeBytes: 10,
+		},
+	}
+	if err := repository.AssertAttachmentContent(context.Background(), assertion); !errors.Is(err, attachments.ErrAttachmentConflict) {
+		t.Fatalf("AssertAttachmentContent(owner route drift) error = %v, want ErrAttachmentConflict", err)
+	}
+	if !tx.committed || tx.rollbackCount != 1 {
+		t.Fatalf("owner route assertion transaction committed=%t rollback=%d, want commit plus deferred rollback",
+			tx.committed, tx.rollbackCount)
+	}
+}
+
 type downloadAttachmentTx struct {
 	pgx.Tx
 	row           pgx.Row

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { IPQualityServiceUnlock } from '../../lib/types'
-import { serviceCardDescription, serviceTileDetail } from './ipQualityPresentation'
+import type { IPQualityProviderResult, IPQualityServiceUnlock, VPSIPQualityReport } from '../../lib/types'
+import { deriveQualityScore, riskEvidenceComplete, serviceCardDescription, serviceTileDetail } from './ipQualityPresentation'
 
 function unlock(patch: Partial<IPQualityServiceUnlock>): IPQualityServiceUnlock {
   return { service: 'reddit', status: 'unknown', probe_status: 'failure', ...patch } as IPQualityServiceUnlock
@@ -42,5 +42,97 @@ describe('serviceCardDescription', () => {
     expect(serviceCardDescription(unlock({ status: 'unlocked', probe_status: 'success', region: 'JP' }))).toBe('区域 JP 可用')
     expect(serviceTileDetail(unlock({ error_code: 'http_status', error_summary: 'http status 403' }))).toBe('服务拒绝了探测请求（HTTP 403）')
     expect(serviceTileDetail(unlock({ status: 'blocked', probe_status: 'success', error_summary: 'http status 403' }))).toBeNull()
+  })
+})
+
+function providerEvidence(patch: Partial<IPQualityProviderResult> = {}): IPQualityProviderResult {
+  return {
+    provider: 'evidence-db',
+    status: 'success',
+    is_proxy: false,
+    is_tor: false,
+    is_vpn: false,
+    is_abuser: false,
+    is_robot: false,
+    ...patch,
+  }
+}
+type NegativeRiskKey = 'is_proxy' | 'is_tor' | 'is_vpn' | 'is_abuser' | 'is_robot'
+
+function withoutRiskField(result: IPQualityProviderResult, key: NegativeRiskKey): IPQualityProviderResult {
+  const copy = { ...result }
+  delete copy[key]
+  return copy
+}
+
+
+function ratingReport(
+  provider_results: IPQualityProviderResult[],
+  service_unlocks: IPQualityServiceUnlock[],
+  summary: VPSIPQualityReport['summary'] = {
+    report_id: 'ipq_evidence',
+    vps_id: 'vps_evidence',
+    observed_at: '2026-06-08T12:00:00Z',
+    ip_address: '192.0.2.1',
+    ip_version: 4,
+    status: 'success',
+    stale: false,
+    ambiguous: false,
+    provider_count: provider_results.length,
+    unlockable_count: service_unlocks.length,
+  },
+): VPSIPQualityReport {
+  return { summary, provider_results, service_unlocks, history: [] }
+}
+
+describe('strict rating evidence', () => {
+  it('requires all five negative risk fields from successful providers', () => {
+    const complete = providerEvidence()
+    expect(riskEvidenceComplete([complete])).toBe(true)
+    for (const key of ['is_proxy', 'is_tor', 'is_vpn', 'is_abuser', 'is_robot'] as const) {
+      expect(riskEvidenceComplete([withoutRiskField(complete, key)])).toBe(false)
+    }
+    expect(riskEvidenceComplete([{ ...complete, status: 'failure', is_proxy: true }])).toBe(false)
+  })
+  it('combines evidence across providers before applying the existing score formula', () => {
+    const providers: IPQualityProviderResult[] = [
+      { provider: 'proxy-db', status: 'success', is_proxy: true },
+      { provider: 'tor-db', status: 'success', is_tor: false },
+      { provider: 'vpn-db', status: 'success', is_vpn: false },
+      { provider: 'abuse-db', status: 'success', is_abuser: false },
+      { provider: 'robot-db', status: 'success', is_robot: false },
+    ]
+    const summary = {
+      ...ratingReport(providers, []).summary!,
+      risk_level: 'medium',
+    }
+    expect(riskEvidenceComplete(providers)).toBe(true)
+    expect(deriveQualityScore(ratingReport(providers, [{ service: 'netflix', status: 'unlocked', probe_status: 'success' }], summary))).toBe(81)
+  })
+
+
+  it.each(['unknown', '', 'challenge'] as const)('does not rate service status %s even with an explicit successful probe', (status) => {
+    expect(deriveQualityScore(ratingReport([providerEvidence()], [{
+      service: 'tiktok',
+      status,
+      probe_status: 'success',
+    }]))).toBeNull()
+  })
+
+  it('requires a known successful service and ignores failed residual status', () => {
+    const providers = [providerEvidence()]
+    expect(deriveQualityScore(ratingReport(providers, [{ service: 'netflix', status: 'blocked', probe_status: 'failure' }]))).toBeNull()
+    expect(deriveQualityScore(ratingReport(providers, [{ service: 'netflix', status: 'blocked', probe_status: '' }]))).toBeNull()
+    expect(deriveQualityScore(ratingReport(providers, [{ service: 'netflix', status: 'blocked', probe_status: 'challenge' }]))).toBeNull()
+    expect(deriveQualityScore(ratingReport(providers, [{ service: 'netflix', status: 'partial', probe_status: 'success' }]))).toBe(98)
+    expect(deriveQualityScore(ratingReport(providers, [{ service: 'netflix', status: 'blocked' }]))).toBe(95)
+  })
+
+  it('returns no score without summary and keeps false distinct from unknown', () => {
+    const complete = providerEvidence({ is_proxy: false })
+    const providers = [complete]
+    expect(riskEvidenceComplete(providers)).toBe(true)
+    expect(deriveQualityScore(ratingReport(providers, [{ service: 'netflix', status: 'unlocked', probe_status: 'success' }], null))).toBeNull()
+    expect(riskEvidenceComplete([{ ...complete, is_proxy: null }])).toBe(false)
   })
 })

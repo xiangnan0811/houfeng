@@ -60,20 +60,17 @@ func (s *Service) Login(ctx context.Context, username, password, userAgent, clie
 	if err != nil {
 		return Session{}, fmt.Errorf("new session id: %w", err)
 	}
-	now := s.now().UTC()
 	sess := Session{
-		SessionID:  id,
-		UserID:     u.UserID,
-		IssuedAt:   now,
-		LastSeenAt: now,
-		ExpiresAt:  now.Add(s.ttl),
-		UserAgent:  userAgent,
-		ClientIP:   clientIP,
+		SessionID: id,
+		UserID:    u.UserID,
+		UserAgent: userAgent,
+		ClientIP:  clientIP,
 	}
-	if err := s.sessions.Create(ctx, sess); err != nil {
+	persisted, err := s.sessions.CreateIfPasswordHash(ctx, u.PasswordHash, sess, s.now, s.ttl)
+	if err != nil {
 		return Session{}, err
 	}
-	return sess, nil
+	return persisted, nil
 }
 
 func (s *Service) Logout(ctx context.Context, sessionID string) error {
@@ -85,30 +82,7 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 
 // Touch validates a session, extends its expiry, and returns the refreshed Session.
 func (s *Service) Touch(ctx context.Context, sessionID string) (Session, error) {
-	sess, err := s.sessions.Find(ctx, sessionID)
-	if err != nil {
-		return Session{}, err
-	}
-	now := s.now().UTC()
-	if sess.ExpiresAt.Before(now) {
-		_ = s.sessions.Delete(ctx, sessionID)
-		return Session{}, ErrSessionExpired
-	}
-	u, err := s.users.FindByID(ctx, sess.UserID)
-	if err != nil {
-		return Session{}, err
-	}
-	if !sess.IssuedAt.IsZero() && sess.IssuedAt.Before(u.PasswordChangedAt) {
-		_ = s.sessions.Delete(ctx, sessionID)
-		return Session{}, ErrSessionExpired
-	}
-	newExp := now.Add(s.ttl)
-	if err := s.sessions.RefreshExpires(ctx, sessionID, now, newExp); err != nil {
-		return Session{}, err
-	}
-	sess.LastSeenAt = now
-	sess.ExpiresAt = newExp
-	return sess, nil
+	return s.sessions.TouchWithUserLock(ctx, sessionID, s.now, s.ttl)
 }
 
 func (s *Service) UserBySession(ctx context.Context, sessionID string) (User, error) {
@@ -131,8 +105,5 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentSessionID, 
 	if err != nil {
 		return err
 	}
-	if err := s.users.UpdatePassword(ctx, userID, hash, s.now().UTC()); err != nil {
-		return err
-	}
-	return s.sessions.DeleteByUserID(ctx, userID, currentSessionID)
+	return s.sessions.ChangePasswordIfHash(ctx, userID, currentSessionID, u.PasswordHash, hash, s.now)
 }

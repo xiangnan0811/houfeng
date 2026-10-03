@@ -119,9 +119,50 @@ func (r *fakeSubscriptionCostSettingsRepository) GetSettings(context.Context) (c
 	return r.settings, nil
 }
 
-func (r *fakeSubscriptionCostSettingsRepository) PutSettings(_ context.Context, settings centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-	r.settings = settings
-	return settings, nil
+func (r *fakeSubscriptionCostSettingsRepository) MutateSettings(_ context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
+	next, err := mutate(r.settings)
+	if err != nil {
+		return centersettings.CenterSettings{}, err
+	}
+	r.settings = next
+	return next, nil
+}
+
+func TestSubscriptionSettingsPutMergesSecretWithinAtomicMutation(t *testing.T) {
+	settings := centersettings.Default()
+	settings.SubscriptionCost.FixerAPIKey = "existing-secret"
+	settingsRepo := &fakeSubscriptionCostSettingsRepository{settings: settings}
+	service := subscriptioncosts.NewService(&fakeSubscriptionCostRepository{}, settingsRepo, nil)
+	handler := handlers.SubscriptionSettings(service)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/subscriptions/settings", strings.NewReader(`{"base_currency":"USD"}`))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("omitted key status = %d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	if settingsRepo.settings.SubscriptionCost.FixerAPIKey != "existing-secret" {
+		t.Fatalf("omitted key persisted = %q, want existing secret", settingsRepo.settings.SubscriptionCost.FixerAPIKey)
+	}
+	if settingsRepo.settings.SubscriptionCost.BaseCurrency != "USD" {
+		t.Fatalf("base currency = %q, want USD", settingsRepo.settings.SubscriptionCost.BaseCurrency)
+	}
+	if strings.Contains(recorder.Body.String(), "existing-secret") || !strings.Contains(recorder.Body.String(), `"fixer_configured":true`) {
+		t.Fatalf("response = %s, want masked configured secret", recorder.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/api/subscriptions/settings", strings.NewReader(`{"fixer_api_key":""}`))
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("empty key status = %d body=%s, want 200", recorder.Code, recorder.Body.String())
+	}
+	if settingsRepo.settings.SubscriptionCost.FixerAPIKey != "" {
+		t.Fatalf("empty key persisted = %q, want cleared", settingsRepo.settings.SubscriptionCost.FixerAPIKey)
+	}
+	if strings.Contains(recorder.Body.String(), `"fixer_configured":true`) {
+		t.Fatalf("response = %s, want fixer_configured false after explicit clear", recorder.Body.String())
+	}
 }
 
 func TestSubscriptionMonthlyBudgetsListsBudgets(t *testing.T) {

@@ -177,6 +177,8 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 - Default base currency is `CNY`; user may change it through settings.
 - Fixer API key is secret material. It may be accepted in settings input or environment-backed config, but must never appear in migrations, source defaults, frontend responses, test snapshots, logs, or provider error summaries. Settings responses expose only `fixer_configured` and masked summary.
 - Frankfurter is the default provider; Fixer is configurable. Provider failures must not block subscription CRUD; failed refresh responses may mark exchange data stale or missing.
+- 订阅成本设置与全局中心设置都必须通过同一 `MutateSettings` 原子入口修改：事务按 `READ COMMITTED` 初始化缺失的 `center` 单例、锁定并读取最新完整行、只调用一次 mutation callback、校验后写回完整设置并提交；提交前的 callback、校验或 SQL 失败整笔回滚。提交返回错误时结果可能未知（例如数据库已提交但响应丢失），必须向调用方返回失败，不得宣称一定回滚，也不得自动重放旧的完整设置。读取缺失行仍只返回默认值，不创建单例。
+- `PUT /api/settings` 与 `PUT /api/subscriptions/settings` 在 callback 内基于锁定后的最新值合并服务端省略字段，禁止先 `GET` 再使用旧快照写回。订阅成本的 `fixer_api_key` 省略时保留已存密钥，显式空字符串才清除；响应只公开 `fixer_configured` 与 masked summary，绝不回显明文。
 - `subscriptions` may hold billing facts such as display name, labels, category, trial/end dates, price, currency, cycle, renewal date, auto-renew, payment, and note. Monthly/yearly base costs, exchange rate metadata, budget status, and next reminder are read-model fields, not writable subscription facts.
 - 订阅创建的 header、错误、事务和 receipt 生命周期统一见 [幂等合同](#scenario-idempotent-vps-scoped-subscription-creation)。成本功能不另建创建或重放路径。
 - Budget scopes are `global`、`provider`、`label`、`category`、`vps`。Disabled budgets must not affect budget status. PATCH must distinguish omitted limits from explicit JSON `null`.

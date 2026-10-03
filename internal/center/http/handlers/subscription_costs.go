@@ -58,18 +58,14 @@ func SubscriptionSettings(service *subscriptioncosts.Service) http.Handler {
 			}
 			writeJSON(w, http.StatusOK, newSubscriptionCostSettingsResponse(record))
 		case http.MethodPut:
-			current, err := service.GetSettings(r.Context())
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
 			var input subscriptionCostSettingsUpdateRequest
 			if err := decodeSettingsJSONBody(r, &input); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
 			}
-			updatedInput := mergeSubscriptionCostSettingsUpdate(current, input)
-			record, err := service.PutSettings(r.Context(), updatedInput)
+			record, err := service.PutSettings(r.Context(), func(current centersettings.SubscriptionCostSettings) (centersettings.SubscriptionCostSettings, error) {
+				return mergeSubscriptionCostSettingsUpdate(current, input), nil
+			})
 			if errors.Is(err, centersettings.ErrInvalidSettings) || errors.Is(subscriptioncosts.MapSettingsError(err), subscriptioncosts.ErrInvalidInput) {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return

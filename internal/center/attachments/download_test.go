@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strings"
@@ -307,6 +308,133 @@ func TestContentDeliveryAllowsOnlyChunkLinearizedBeforeConcurrentFence(t *testin
 	}
 }
 
+func TestContentDeliveryAssertionWaitsForCommittedRenewalToken(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
+	original := recordplatform.ServingLeaseV1{
+		Object: downloadRecordObject(),
+		Owner: recordplatform.OwnerLease{
+			OwnerID: "attachment_delivery_exact_token", Generation: 1,
+			ExpiresAt: base.Add(10 * time.Millisecond),
+		},
+		CapturedEpoch: 3,
+	}
+	renewed := original
+	renewed.Owner.ExpiresAt = base.Add(20 * time.Millisecond)
+	clock := &downloadTestClock{current: base.Add(6 * time.Millisecond)}
+	repository := &assertSignalDownloadRepository{started: make(chan struct{})}
+	leases := &exactTokenRenewalDownloadLease{
+		current:          original,
+		renewed:          renewed,
+		renewStarted:     make(chan struct{}),
+		renewCommitted:   make(chan struct{}),
+		allowRenewReturn: make(chan struct{}),
+	}
+	delivery := newDownloadTestDelivery(t, &ContentDelivery{
+		repository: repository, leases: leases, now: clock.Now,
+		assertion: ContentAssertion{
+			ProjectID: "default", AttachmentID: "att_download1", DraftID: "rdf_download1",
+			AuthorID: downloadAuthorID, Variant: ContentVariantOriginal, Object: downloadOriginalObject(),
+		},
+		serving: &original, expiresAt: original.Owner.ExpiresAt,
+		leaseDuration: 10 * time.Millisecond,
+	}, nil)
+
+	renewResult := make(chan error, 1)
+	go func() { renewResult <- delivery.renewIfNeeded(context.Background()) }()
+	waitForDownloadSignal(t, leases.renewCommitted, "committed serving lease renewal")
+
+	assertContext, cancelAssert := context.WithCancel(context.Background())
+	assertResult := make(chan error, 1)
+	go func() { assertResult <- delivery.assert(assertContext) }()
+	waitForDownloadSignal(t, repository.started, "content assertion before serving lease gate")
+	cancelAssert()
+	assertErr := <-assertResult
+	if !errors.Is(assertErr, context.Canceled) {
+		t.Fatalf("concurrent assert() error = %v, want context cancellation", assertErr)
+	}
+	if tokens := leases.assertedTokens(); len(tokens) != 0 {
+		t.Fatalf("concurrent assert submitted serving tokens %#v while renewal was paused", tokens)
+	}
+
+	close(leases.allowRenewReturn)
+	if err := <-renewResult; err != nil {
+		t.Fatalf("renewIfNeeded() error = %v, want nil", err)
+	}
+	if err := delivery.assert(context.Background()); err != nil {
+		t.Fatalf("assert() after renewal = %v, want nil", err)
+	}
+	tokens := leases.assertedTokens()
+	if len(tokens) != 1 || tokens[0] != renewed {
+		t.Fatalf("serving assertion tokens = %#v, want only renewed token %#v", tokens, renewed)
+	}
+	if err := delivery.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestContentDeliveryCloseWaitsForCommittedRenewalToken(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
+	original := recordplatform.ServingLeaseV1{
+		Object: downloadRecordObject(),
+		Owner: recordplatform.OwnerLease{
+			OwnerID: "attachment_delivery_close_exact_token", Generation: 1,
+			ExpiresAt: base.Add(10 * time.Millisecond),
+		},
+		CapturedEpoch: 3,
+	}
+	renewed := original
+	renewed.Owner.ExpiresAt = base.Add(20 * time.Millisecond)
+	clock := &downloadTestClock{current: base.Add(6 * time.Millisecond)}
+	leases := &exactTokenRenewalDownloadLease{
+		current:          original,
+		renewed:          renewed,
+		renewStarted:     make(chan struct{}),
+		renewCommitted:   make(chan struct{}),
+		allowRenewReturn: make(chan struct{}),
+	}
+	delivery := newDownloadTestDelivery(t, &ContentDelivery{
+		repository: statelessDownloadRepository{}, leases: leases, now: clock.Now,
+		serving: &original, expiresAt: original.Owner.ExpiresAt,
+		leaseDuration: 10 * time.Millisecond,
+	}, nil)
+	closeStarted := make(chan struct{})
+	delivery.mu.Lock()
+	delivery.lifecycleCancel = func() { close(closeStarted) }
+	delivery.mu.Unlock()
+
+	renewResult := make(chan error, 1)
+	go func() { renewResult <- delivery.renewIfNeeded(context.Background()) }()
+	waitForDownloadSignal(t, leases.renewCommitted, "committed serving lease renewal")
+
+	closeResult := make(chan error, 1)
+	go func() { closeResult <- delivery.Close(context.Background()) }()
+	waitForDownloadSignal(t, closeStarted, "delivery Close() transition")
+	close(leases.allowRenewReturn)
+	if err := <-renewResult; err != nil {
+		t.Fatalf("renewIfNeeded() error = %v, want nil", err)
+	}
+	if err := <-closeResult; err != nil {
+		t.Fatalf("Close() error = %v, want nil", err)
+	}
+	released := leases.releasedOwners()
+	if len(released) != 1 || released[0] != renewed.Owner {
+		t.Fatalf("released serving owners = %#v, want only renewed owner %#v", released, renewed.Owner)
+	}
+	if err := delivery.assert(context.Background()); !errors.Is(err, ErrContentDeliveryRevoked) {
+		t.Fatalf("assert() after Close() = %v, want ErrContentDeliveryRevoked", err)
+	}
+	delivery.mu.Lock()
+	serving, pending := delivery.serving, delivery.pendingRelease
+	delivery.mu.Unlock()
+	if serving != nil || pending != nil {
+		t.Fatalf("delivery retained authorization after Close(): serving=%#v pending=%#v", serving, pending)
+	}
+}
+
 func TestContentDeliveryRenewsServingLeaseForSlowReader(t *testing.T) {
 	t.Parallel()
 
@@ -465,39 +593,27 @@ func TestContentDeliveryDoesNotStartWriteAfterBackgroundRenewalRevokes(t *testin
 	base := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
 	clock := &downloadTestClock{current: base}
 	leases := &finalAssertionDownloadLease{
-		clock:                clock,
-		advanceAtAssertion:   4 * time.Millisecond,
-		assertionStarted:     make(chan struct{}),
-		allowAssertionReturn: make(chan struct{}),
-		renewStarted:         make(chan struct{}),
-		renewErr:             recordplatform.ErrLostOwnerLease,
+		clock:        clock,
+		renewStarted: make(chan struct{}),
+		renewErr:     recordplatform.ErrLostOwnerLease,
 	}
 	delivery := newFinalWriteBoundaryDelivery(clock, leases, []byte("0123456789"))
-	writer := &recordingDownloadWriter{}
-	type writeResult struct {
-		written int64
-		err     error
-	}
-	result := make(chan writeResult, 1)
-	go func() {
-		written, err := delivery.WriteTo(context.Background(), writer)
-		result <- writeResult{written: written, err: err}
-	}()
-	waitForDownloadSignal(t, leases.assertionStarted, "final serving assertion")
-
+	clock.mu.Lock()
+	clock.current = base.Add(4 * time.Millisecond)
+	clock.mu.Unlock()
 	renewalDone := make(chan struct{})
 	go delivery.runRenewal(make(chan struct{}), renewalDone)
 	waitForDownloadSignal(t, leases.renewStarted, "background renewal failure")
 	waitForDownloadSignal(t, renewalDone, "background renewal revocation")
-	close(leases.allowAssertionReturn)
 
-	got := <-result
-	if !errors.Is(got.err, ErrContentDeliveryRevoked) || !errors.Is(got.err, recordplatform.ErrLostOwnerLease) {
-		t.Fatalf("WriteTo() error = %v, want revoked lost-owner renewal failure", got.err)
+	writer := &recordingDownloadWriter{}
+	written, err := delivery.WriteTo(context.Background(), writer)
+	if !errors.Is(err, ErrContentDeliveryRevoked) || !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("WriteTo() error = %v, want revoked lost-owner renewal failure", err)
 	}
-	if got.written != 0 || writer.calls != 0 || writer.output.Len() != 0 {
+	if written != 0 || writer.calls != 0 || writer.output.Len() != 0 {
 		t.Fatalf("WriteTo() after renewal revocation = %d bytes, writer calls/bytes %d/%d, want 0/0/0",
-			got.written, writer.calls, writer.output.Len())
+			written, writer.calls, writer.output.Len())
 	}
 	if err := delivery.Close(context.Background()); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -528,10 +644,17 @@ func TestContentDeliveryDoesNotStartWriteAfterCloseLinearizes(t *testing.T) {
 	}()
 	waitForDownloadSignal(t, leases.assertionStarted, "final serving assertion")
 
-	if err := delivery.Close(context.Background()); err != nil {
-		t.Fatalf("Close() error = %v", err)
+	closeResult := make(chan error, 1)
+	go func() { closeResult <- delivery.Close(context.Background()) }()
+	select {
+	case err := <-closeResult:
+		t.Fatalf("Close() returned before in-flight assertion completed: %v", err)
+	case <-time.After(20 * time.Millisecond):
 	}
 	close(leases.allowAssertionReturn)
+	if err := <-closeResult; err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
 	got := <-result
 	if !errors.Is(got.err, ErrContentDeliveryRevoked) {
 		t.Fatalf("WriteTo() error = %v, want ErrContentDeliveryRevoked", got.err)
@@ -697,12 +820,12 @@ func TestContentDeliveryStopsBeforeWritingAfterLeaseRenewalFailure(t *testing.T)
 	clock := &downloadTestClock{current: base}
 	reader := &advancingDownloadReader{
 		content: []byte("0123456789"), clock: clock,
-		advances: []time.Duration{time.Millisecond, 6 * time.Millisecond},
+		advances: []time.Duration{time.Millisecond, 70 * time.Millisecond},
 	}
 	lease := recordplatform.ServingLeaseV1{
 		Object: downloadRecordObject(),
 		Owner: recordplatform.OwnerLease{
-			OwnerID: "attachment_delivery_failure", Generation: 1, ExpiresAt: base.Add(10 * time.Millisecond),
+			OwnerID: "attachment_delivery_failure", Generation: 1, ExpiresAt: base.Add(100 * time.Millisecond),
 		},
 		CapturedEpoch: 3,
 	}
@@ -711,7 +834,7 @@ func TestContentDeliveryStopsBeforeWritingAfterLeaseRenewalFailure(t *testing.T)
 	leases := &downloadLeaseStub{serving: lease, clock: clock, renewErr: recordplatform.ErrLostOwnerLease}
 	blob := &downloadBlobStub{content: []byte("0123456789"), openReader: reader}
 	service, err := NewDownloadService(repository, authorizer, leases, blob, DownloadServiceOptions{
-		Now: clock.Now, LeaseDuration: 10 * time.Millisecond, ChunkBytes: 4,
+		Now: clock.Now, LeaseDuration: 100 * time.Millisecond, ChunkBytes: 4,
 		Limits: DefaultLimits(), NewLeaseOwnerID: func() (string, error) { return lease.Owner.OwnerID, nil },
 	})
 	if err != nil {
@@ -740,12 +863,12 @@ func TestContentDeliveryRejectsRenewedOwnerDriftBeforeWriting(t *testing.T) {
 	clock := &downloadTestClock{current: base}
 	reader := &advancingDownloadReader{
 		content: []byte("0123456789"), clock: clock,
-		advances: []time.Duration{time.Millisecond, 6 * time.Millisecond},
+		advances: []time.Duration{time.Millisecond, 70 * time.Millisecond},
 	}
 	lease := recordplatform.ServingLeaseV1{
 		Object: downloadRecordObject(),
 		Owner: recordplatform.OwnerLease{
-			OwnerID: "attachment_delivery_drift", Generation: 1, ExpiresAt: base.Add(10 * time.Millisecond),
+			OwnerID: "attachment_delivery_drift", Generation: 1, ExpiresAt: base.Add(100 * time.Millisecond),
 		},
 		CapturedEpoch: 3,
 	}
@@ -754,7 +877,7 @@ func TestContentDeliveryRejectsRenewedOwnerDriftBeforeWriting(t *testing.T) {
 	leases := &downloadLeaseStub{serving: lease, clock: clock, renewGeneration: 2}
 	blob := &downloadBlobStub{content: []byte("0123456789"), openReader: reader}
 	service, err := NewDownloadService(repository, authorizer, leases, blob, DownloadServiceOptions{
-		Now: clock.Now, LeaseDuration: 10 * time.Millisecond, ChunkBytes: 4,
+		Now: clock.Now, LeaseDuration: 100 * time.Millisecond, ChunkBytes: 4,
 		Limits: DefaultLimits(), NewLeaseOwnerID: func() (string, error) { return lease.Owner.OwnerID, nil },
 	})
 	if err != nil {
@@ -787,15 +910,15 @@ func TestContentDeliveryAssertionUsesLockedLeaseSnapshot(t *testing.T) {
 		},
 		CapturedEpoch: 3,
 	}
-	delivery := &ContentDelivery{
+	delivery := newDownloadTestDelivery(t, &ContentDelivery{
 		repository: statelessDownloadRepository{}, leases: statelessDownloadLeaseRepository{},
-		now: func() time.Time { return now },
+		now: func() time.Time { return now }, leaseDuration: time.Second,
 		assertion: ContentAssertion{
 			ProjectID: "default", AttachmentID: "att_download1", DraftID: "rdf_download1",
 			AuthorID: downloadAuthorID, Variant: ContentVariantOriginal, Object: downloadOriginalObject(),
 		},
 		serving: &serving, expiresAt: serving.Owner.ExpiresAt,
-	}
+	}, nil)
 
 	started := make(chan struct{})
 	done := make(chan struct{})
@@ -841,10 +964,10 @@ func TestContentDeliveryCloseWaitsForRenewalAndReleasesLatestLease(t *testing.T)
 		renewed: renewed, renewStarted: make(chan struct{}), allowRenew: make(chan struct{}),
 		releaseCalled: make(chan struct{}),
 	}
-	delivery := &ContentDelivery{
+	delivery := newDownloadTestDelivery(t, &ContentDelivery{
 		leases: leases, now: func() time.Time { return base.Add(6 * time.Millisecond) },
 		serving: &original, expiresAt: original.Owner.ExpiresAt, leaseDuration: 10 * time.Millisecond,
-	}
+	}, nil)
 
 	renewResult := make(chan error, 1)
 	go func() { renewResult <- delivery.renewIfNeeded(context.Background()) }()
@@ -870,6 +993,174 @@ func TestContentDeliveryCloseWaitsForRenewalAndReleasesLatestLease(t *testing.T)
 	if leases.released != renewed.Owner {
 		t.Fatalf("Close() released owner %#v, want renewed owner %#v", leases.released, renewed.Owner)
 	}
+}
+
+func TestContentDeliveryRevokeRetainsLateRenewalForExactRelease(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
+	original := recordplatform.ServingLeaseV1{
+		Object: downloadRecordObject(),
+		Owner: recordplatform.OwnerLease{
+			OwnerID: "attachment_delivery_revoke_renewal", Generation: 1,
+			ExpiresAt: base.Add(10 * time.Millisecond),
+		},
+		CapturedEpoch: 3,
+	}
+	renewed := original
+	renewed.Owner.ExpiresAt = base.Add(16 * time.Millisecond)
+	leases := &blockingRenewDownloadLease{
+		renewed: renewed, renewStarted: make(chan struct{}),
+		allowRenew: make(chan struct{}), releaseCalled: make(chan struct{}),
+	}
+	delivery := newDownloadTestDelivery(t, &ContentDelivery{
+		leases: leases, now: func() time.Time { return base.Add(6 * time.Millisecond) },
+		serving: &original, expiresAt: original.Owner.ExpiresAt, leaseDuration: 10 * time.Millisecond,
+	}, nil)
+
+	renewResult := make(chan error, 1)
+	go func() { renewResult <- delivery.renewIfNeeded(context.Background()) }()
+	<-leases.renewStarted
+	delivery.revoke(recordplatform.ErrLostOwnerLease)
+	close(leases.allowRenew)
+	if err := <-renewResult; !errors.Is(err, recordplatform.ErrLostOwnerLease) {
+		t.Fatalf("renewIfNeeded() after revoke error = %v, want lost-owner error", err)
+	}
+	if err := delivery.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if leases.released != renewed.Owner {
+		t.Fatalf("Close() released owner %#v, want late renewed owner %#v",
+			leases.released, renewed.Owner)
+	}
+}
+
+func TestContentDeliveryDraftStopsAfterNextBlockOwnershipFence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		mutate    func(*statefulDraftDownloadRepository)
+		wantCause error
+	}{
+		{
+			name: "deletion",
+			mutate: func(repository *statefulDraftDownloadRepository) {
+				repository.markMissing()
+			},
+			wantCause: ErrAttachmentOwnerNotFound,
+		},
+		{
+			name: "author change",
+			mutate: func(repository *statefulDraftDownloadRepository) {
+				repository.replaceAuthor(downloadOtherID)
+			},
+			wantCause: ErrAttachmentConflict,
+		},
+		{
+			name: "object replacement",
+			mutate: func(repository *statefulDraftDownloadRepository) {
+				repository.replaceOriginal(downloadObject(0x33, 10, "original-v2"))
+			},
+			wantCause: ErrAttachmentConflict,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			repository := &statefulDraftDownloadRepository{attachment: downloadDraftAttachment()}
+			base := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
+			service, err := NewDownloadService(
+				repository, &downloadAuthorizerStub{}, &downloadLeaseStub{},
+				&downloadBlobStub{content: []byte("0123456789")},
+				DownloadServiceOptions{
+					Now: clockValue(base), LeaseDuration: time.Second, ChunkBytes: 4,
+					Limits: DefaultLimits(),
+				},
+			)
+			if err != nil {
+				t.Fatalf("NewDownloadService() error = %v", err)
+			}
+			delivery, err := service.Open(
+				context.Background(),
+				validDownloadRequest(downloadActor(t, downloadAuthorID)),
+			)
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			writer := &mutatingDownloadWriter{
+				mutate: func() { tt.mutate(repository) },
+			}
+			written, err := delivery.WriteTo(context.Background(), writer)
+			if !errors.Is(err, ErrContentDeliveryRevoked) || !errors.Is(err, tt.wantCause) {
+				t.Fatalf("WriteTo() error = %v, want revoked %v", err, tt.wantCause)
+			}
+			if written != 4 || writer.output.String() != "0123" || writer.calls != 1 {
+				t.Fatalf("WriteTo() = %d/%q with %d writer calls, want one 4-byte chunk",
+					written, writer.output.String(), writer.calls)
+			}
+			if calls := repository.assertionCount(); calls != 4 {
+				t.Fatalf("content assertion calls = %d, want Open's 2 plus two write-boundary assertions", calls)
+			}
+			if closeErr := delivery.Close(context.Background()); closeErr != nil {
+				t.Fatalf("Close() error = %v", closeErr)
+			}
+		})
+	}
+}
+
+func TestContentDeliveryPreservesShortWriterAndFinalReaderError(t *testing.T) {
+	t.Parallel()
+
+	t.Run("short writer", func(t *testing.T) {
+		fixture := newDownloadServiceFixture(t, downloadDraftAttachment())
+		delivery, err := fixture.service.Open(
+			context.Background(),
+			validDownloadRequest(downloadActor(t, downloadAuthorID)),
+		)
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		writer := &shortDownloadWriter{}
+		written, err := delivery.WriteTo(context.Background(), writer)
+		if !errors.Is(err, io.ErrShortWrite) {
+			t.Fatalf("WriteTo() error = %v, want io.ErrShortWrite", err)
+		}
+		if written != 3 || writer.output.String() != "012" || writer.calls != 1 {
+			t.Fatalf("short WriteTo() = %d/%q with %d calls, want 3/%q with one call",
+				written, writer.output.String(), writer.calls, "012")
+		}
+		if closeErr := delivery.Close(context.Background()); closeErr != nil {
+			t.Fatalf("Close() error = %v", closeErr)
+		}
+	})
+
+	t.Run("final non-EOF reader error", func(t *testing.T) {
+		readerErr := errors.New("terminal reader failure")
+		fixture := newDownloadServiceFixture(t, downloadDraftAttachment())
+		fixture.blob.openReader = &eofPatternReader{
+			content: []byte("0123456789"), maxChunk: 4, terminalErr: readerErr,
+		}
+		delivery, err := fixture.service.Open(
+			context.Background(),
+			validDownloadRequest(downloadActor(t, downloadAuthorID)),
+		)
+		if err != nil {
+			t.Fatalf("Open() error = %v", err)
+		}
+		writer := &recordingDownloadWriter{}
+		written, err := delivery.WriteTo(context.Background(), writer)
+		if !errors.Is(err, readerErr) {
+			t.Fatalf("WriteTo() error = %v, want terminal reader error", err)
+		}
+		if written != 10 || writer.output.String() != "0123456789" || writer.calls != 3 {
+			t.Fatalf("final reader error WriteTo() = %d/%q with %d calls, want full 10-byte body and three calls",
+				written, writer.output.String(), writer.calls)
+		}
+		if closeErr := delivery.Close(context.Background()); closeErr != nil {
+			t.Fatalf("Close() error = %v", closeErr)
+		}
+	})
 }
 
 func TestContentDeliveryEnforcesDeclaredRangeFraming(t *testing.T) {
@@ -911,15 +1202,295 @@ func TestContentDeliveryEnforcesDeclaredRangeFraming(t *testing.T) {
 	}
 }
 
+func TestDownloadServiceClosesLateReaderAfterInitializationCancellation(t *testing.T) {
+	t.Parallel()
+
+	newService := func(blob BlobStore) *DownloadService {
+		t.Helper()
+		repository := &downloadRepositoryStub{attachment: downloadDraftAttachment()}
+		service, err := NewDownloadService(
+			repository, &downloadAuthorizerStub{}, &downloadLeaseStub{}, blob,
+			DownloadServiceOptions{
+				Now: func() time.Time {
+					return time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
+				},
+				LeaseDuration: time.Second, ChunkBytes: 4, Limits: DefaultLimits(),
+			},
+		)
+		if err != nil {
+			t.Fatalf("NewDownloadService() error = %v", err)
+		}
+		return service
+	}
+
+	t.Run("cancelled stat does not open", func(t *testing.T) {
+		blob := &delayedDownloadBlob{
+			downloadBlobStub: &downloadBlobStub{content: []byte("0123456789")},
+			statStarted:      make(chan struct{}),
+			openStarted:      make(chan struct{}),
+			allowStat:        make(chan struct{}),
+			allowOpen:        make(chan struct{}),
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		result := make(chan error, 1)
+		go func() {
+			_, err := newService(blob).Open(ctx, validDownloadRequest(downloadActor(t, downloadAuthorID)))
+			result <- err
+		}()
+		waitForDownloadSignal(t, blob.statStarted, "delayed Blob.Stat")
+		cancel()
+		close(blob.allowStat)
+		select {
+		case err := <-result:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("Open() error = %v, want context cancellation", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Open() remained blocked after delayed Stat cancellation")
+		}
+		select {
+		case <-blob.openStarted:
+			t.Fatal("Open() called Blob.Open after lifecycle cancellation")
+		default:
+		}
+	})
+
+	t.Run("late open reader is closed", func(t *testing.T) {
+		lateReader := &downloadReadCloser{Reader: bytes.NewReader([]byte("0123456789"))}
+		blob := &delayedDownloadBlob{
+			downloadBlobStub: &downloadBlobStub{content: []byte("0123456789"), openReader: lateReader},
+			statStarted:      make(chan struct{}),
+			openStarted:      make(chan struct{}),
+			allowStat:        make(chan struct{}),
+			allowOpen:        make(chan struct{}),
+		}
+		service := newService(blob)
+		ctx, cancel := context.WithCancel(context.Background())
+		result := make(chan error, 1)
+		go func() {
+			_, err := service.Open(ctx, validDownloadRequest(downloadActor(t, downloadAuthorID)))
+			result <- err
+		}()
+		waitForDownloadSignal(t, blob.statStarted, "delayed Blob.Stat")
+		close(blob.allowStat)
+		waitForDownloadSignal(t, blob.openStarted, "delayed Blob.Open")
+		cancel()
+		close(blob.allowOpen)
+		select {
+		case err := <-result:
+			if !errors.Is(err, ErrContentDeliveryRevoked) && !errors.Is(err, context.Canceled) {
+				t.Fatalf("Open() late reader error = %v, want revoked cancellation", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Open() remained blocked after delayed Open cancellation")
+		}
+		if lateReader.closeCalls != 1 {
+			t.Fatalf("late reader Close() calls = %d, want 1", lateReader.closeCalls)
+		}
+	})
+}
+
+func TestContentDeliveryDraftRefreshesExpiredWindowBeforeWrite(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
+	clock := &downloadTestClock{current: base}
+	repository := &downloadRepositoryStub{attachment: downloadDraftAttachment()}
+	blob := &downloadBlobStub{content: []byte("0123456789")}
+	service, err := NewDownloadService(
+		repository, &downloadAuthorizerStub{}, &downloadLeaseStub{}, blob,
+		DownloadServiceOptions{
+			Now: clock.Now, LeaseDuration: 10 * time.Millisecond, ChunkBytes: 4,
+			Limits: DefaultLimits(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewDownloadService() error = %v", err)
+	}
+	delivery, err := service.Open(context.Background(), validDownloadRequest(downloadActor(t, downloadAuthorID)))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	clock.mu.Lock()
+	clock.current = base.Add(20 * time.Millisecond)
+	clock.mu.Unlock()
+	if err := delivery.(*ContentDelivery).assert(context.Background()); err != nil {
+		t.Fatalf("draft assert after previous window expired = %v, want fresh assertion success", err)
+	}
+	delivery.(*ContentDelivery).mu.Lock()
+	refreshedDeadline := delivery.(*ContentDelivery).expiresAt
+	delivery.(*ContentDelivery).mu.Unlock()
+	if !refreshedDeadline.After(base.Add(20 * time.Millisecond)) {
+		t.Fatalf("draft refreshed deadline = %s, want after fresh assertion start", refreshedDeadline)
+	}
+	if err := delivery.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestContentDeliveryDraftAssertionQueryConsumesWindow(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
+	clock := &downloadTestClock{current: base}
+	repository := &downloadRepositoryStub{attachment: downloadDraftAttachment()}
+	assertStarted := make(chan struct{})
+	allowAssertion := make(chan struct{})
+	repository.assertHook = func(call int) error {
+		if call == 3 {
+			close(assertStarted)
+			<-allowAssertion
+		}
+		return nil
+	}
+	service, err := NewDownloadService(
+		repository, &downloadAuthorizerStub{}, &downloadLeaseStub{},
+		&downloadBlobStub{content: []byte("0123456789")},
+		DownloadServiceOptions{
+			Now: clock.Now, LeaseDuration: 10 * time.Millisecond, ChunkBytes: 4,
+			Limits: DefaultLimits(),
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewDownloadService() error = %v", err)
+	}
+	delivery, err := service.Open(
+		context.Background(),
+		validDownloadRequest(downloadActor(t, downloadAuthorID)),
+	)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	contentDelivery := delivery.(*ContentDelivery)
+	contentDelivery.mu.Lock()
+	deadline := contentDelivery.expiresAt
+	contentDelivery.mu.Unlock()
+
+	writer := &recordingDownloadWriter{}
+	result := make(chan struct {
+		written int64
+		err     error
+	}, 1)
+	go func() {
+		written, writeErr := delivery.WriteTo(context.Background(), writer)
+		result <- struct {
+			written int64
+			err     error
+		}{written: written, err: writeErr}
+	}()
+	waitForDownloadSignal(t, assertStarted, "draft assertion query")
+	clock.mu.Lock()
+	clock.current = deadline
+	clock.mu.Unlock()
+	close(allowAssertion)
+	got := <-result
+	if !errors.Is(got.err, ErrContentDeliveryExpired) {
+		t.Fatalf("WriteTo() error = %v, want ErrContentDeliveryExpired", got.err)
+	}
+	if got.written != 0 || writer.calls != 0 || writer.output.Len() != 0 {
+		t.Fatalf("WriteTo() after consumed assertion window = %d bytes, %d calls/%d body bytes, want 0/0/0",
+			got.written, writer.calls, writer.output.Len())
+	}
+	if err := delivery.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestContentDeliveryDraftExpiryBetweenAssertionAndWrite(t *testing.T) {
+	t.Parallel()
+
+	base := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
+	fixture := newDownloadServiceFixture(t, downloadDraftAttachment())
+	fixture.service.now = clockValue(base)
+	delivery, err := fixture.service.Open(
+		context.Background(),
+		validDownloadRequest(downloadActor(t, downloadAuthorID)),
+	)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	contentDelivery := delivery.(*ContentDelivery)
+	boundaryClock := &writeBoundaryDownloadClock{
+		base:              base,
+		expired:           base.Add(time.Second),
+		assertionComplete: make(chan struct{}),
+		allowExpiry:       make(chan struct{}),
+	}
+	contentDelivery.mu.Lock()
+	contentDelivery.now = boundaryClock.Now
+	contentDelivery.mu.Unlock()
+
+	writer := &recordingDownloadWriter{}
+	result := make(chan struct {
+		written int64
+		err     error
+	}, 1)
+	go func() {
+		written, writeErr := delivery.WriteTo(context.Background(), writer)
+		result <- struct {
+			written int64
+			err     error
+		}{written: written, err: writeErr}
+	}()
+	waitForDownloadSignal(t, boundaryClock.assertionComplete, "successful assertion before write boundary")
+	close(boundaryClock.allowExpiry)
+	got := <-result
+	if !errors.Is(got.err, ErrContentDeliveryExpired) {
+		t.Fatalf("WriteTo() error = %v, want ErrContentDeliveryExpired", got.err)
+	}
+	if got.written != 0 || writer.calls != 0 || writer.output.Len() != 0 {
+		t.Fatalf("WriteTo() after expiry before beginWrite = %d bytes, %d calls/%d body bytes, want 0/0/0",
+			got.written, writer.calls, writer.output.Len())
+	}
+	if err := delivery.Close(context.Background()); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+}
+
+func TestContentDeliveryAcceptsFinalPayloadEOFPatterns(t *testing.T) {
+	t.Parallel()
+
+	for _, finalEOF := range []bool{true, false} {
+		t.Run(fmt.Sprintf("finalEOF=%t", finalEOF), func(t *testing.T) {
+			repository := &downloadRepositoryStub{attachment: downloadDraftAttachment()}
+			blob := &downloadBlobStub{
+				openReader: &eofPatternReader{
+					content: []byte("0123456789"), maxChunk: 4, finalEOF: finalEOF,
+				},
+			}
+			service, err := NewDownloadService(
+				repository, &downloadAuthorizerStub{}, &downloadLeaseStub{}, blob,
+				DownloadServiceOptions{LeaseDuration: time.Second, ChunkBytes: 4, Limits: DefaultLimits()},
+			)
+			if err != nil {
+				t.Fatalf("NewDownloadService() error = %v", err)
+			}
+			delivery, err := service.Open(context.Background(), validDownloadRequest(downloadActor(t, downloadAuthorID)))
+			if err != nil {
+				t.Fatalf("Open() error = %v", err)
+			}
+			var output bytes.Buffer
+			written, err := delivery.WriteTo(context.Background(), &output)
+			if err != nil || written != 10 || output.String() != "0123456789" {
+				t.Fatalf("WriteTo() = %d/%q/%v, want 10/full/nil", written, output.String(), err)
+			}
+			if err := delivery.Close(context.Background()); err != nil {
+				t.Fatalf("Close() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestContentDeliveryCloseUnblocksBlockedReader(t *testing.T) {
 	t.Parallel()
 
 	reader := &blockingDownloadReader{started: make(chan struct{}), released: make(chan struct{})}
 	now := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
 	fixture := newDownloadServiceFixture(t, downloadDraftAttachment())
-	delivery := &ContentDelivery{
+	delivery := newDownloadTestDelivery(t, &ContentDelivery{
 		repository: fixture.repository, authorizer: fixture.authorizer, leases: fixture.leases,
 		actor: downloadActor(t, downloadAuthorID), now: func() time.Time { return now },
+		leaseDuration: time.Minute,
 		assertion: ContentAssertion{
 			ProjectID: "default", AttachmentID: "att_download1", DraftID: "rdf_download1",
 			AuthorID: downloadAuthorID, Variant: ContentVariantOriginal, Object: downloadOriginalObject(),
@@ -929,8 +1500,7 @@ func TestContentDeliveryCloseUnblocksBlockedReader(t *testing.T) {
 			AttachmentID: "att_download1", Variant: ContentVariantOriginal,
 			Object: downloadOriginalObject(), Range: ResolvedContentRange{Length: 1},
 		},
-		reader: reader,
-	}
+	}, reader)
 
 	result := make(chan error, 1)
 	go func() {
@@ -961,9 +1531,10 @@ func TestContentDeliveryContextCancellationUnblocksBlockedReader(t *testing.T) {
 	reader := &blockingDownloadReader{started: make(chan struct{}), released: make(chan struct{})}
 	now := time.Date(2026, time.August, 7, 8, 0, 0, 0, time.UTC)
 	fixture := newDownloadServiceFixture(t, downloadDraftAttachment())
-	delivery := &ContentDelivery{
+	delivery := newDownloadTestDelivery(t, &ContentDelivery{
 		repository: fixture.repository, authorizer: fixture.authorizer, leases: fixture.leases,
 		actor: downloadActor(t, downloadAuthorID), now: func() time.Time { return now },
+		leaseDuration: time.Minute,
 		assertion: ContentAssertion{
 			ProjectID: "default", AttachmentID: "att_download1", DraftID: "rdf_download1",
 			AuthorID: downloadAuthorID, Variant: ContentVariantOriginal, Object: downloadOriginalObject(),
@@ -973,8 +1544,7 @@ func TestContentDeliveryContextCancellationUnblocksBlockedReader(t *testing.T) {
 			AttachmentID: "att_download1", Variant: ContentVariantOriginal,
 			Object: downloadOriginalObject(), Range: ResolvedContentRange{Length: 1},
 		},
-		reader: reader,
-	}
+	}, reader)
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
@@ -1139,6 +1709,7 @@ type downloadRepositoryStub struct {
 	assertCalls   int
 	assertErrAt   int
 	assertErr     error
+	assertHook    func(int) error
 	lastAssertion ContentAssertion
 }
 
@@ -1222,6 +1793,50 @@ type blockingContentDownloadWriter struct {
 	output      bytes.Buffer
 }
 
+type exactTokenRenewalDownloadLease struct {
+	mu               sync.Mutex
+	current          recordplatform.ServingLeaseV1
+	renewed          recordplatform.ServingLeaseV1
+	renewStarted     chan struct{}
+	renewCommitted   chan struct{}
+	allowRenewReturn chan struct{}
+	asserted         []recordplatform.ServingLeaseV1
+	released         []recordplatform.OwnerLease
+}
+
+type assertSignalDownloadRepository struct {
+	started     chan struct{}
+	startedOnce sync.Once
+}
+
+type statefulDraftDownloadRepository struct {
+	mu         sync.Mutex
+	attachment AttachmentContent
+	missing    bool
+	assertions int
+}
+
+type mutatingDownloadWriter struct {
+	output bytes.Buffer
+	calls  int
+	mutate func()
+}
+
+type shortDownloadWriter struct {
+	output bytes.Buffer
+	calls  int
+}
+
+type writeBoundaryDownloadClock struct {
+	mu                sync.Mutex
+	base              time.Time
+	expired           time.Time
+	assertionComplete chan struct{}
+	allowExpiry       chan struct{}
+	calls             int
+	assertionOnce     sync.Once
+}
+
 func newFinalWriteBoundaryDelivery(
 	clock *downloadTestClock,
 	leases ContentLeaseRepository,
@@ -1235,8 +1850,11 @@ func newFinalWriteBoundaryDelivery(
 		},
 		CapturedEpoch: 3,
 	}
-	return &ContentDelivery{
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	delivery := &ContentDelivery{
 		repository: statelessDownloadRepository{}, leases: leases, now: clock.Now,
+		lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
+		closeDone: make(chan struct{}),
 		assertion: ContentAssertion{
 			ProjectID: "default", AttachmentID: "att_download1", DraftID: "rdf_download1",
 			AuthorID: downloadAuthorID, Variant: ContentVariantOriginal, Object: downloadOriginalObject(),
@@ -1246,8 +1864,26 @@ func newFinalWriteBoundaryDelivery(
 			AttachmentID: "att_download1", Variant: ContentVariantOriginal,
 			Object: downloadOriginalObject(), Range: ResolvedContentRange{Length: int64(len(content))},
 		},
-		reader: &downloadReadCloser{Reader: bytes.NewReader(content)},
 	}
+	if err := delivery.installReader(&downloadReadCloser{Reader: bytes.NewReader(content)}); err != nil {
+		panic(err)
+	}
+	return delivery
+}
+func newDownloadTestDelivery(t *testing.T, delivery *ContentDelivery, reader io.ReadCloser) *ContentDelivery {
+	t.Helper()
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	delivery.lifecycleCtx = lifecycleCtx
+	delivery.lifecycleCancel = lifecycleCancel
+	if delivery.closeDone == nil {
+		delivery.closeDone = make(chan struct{})
+	}
+	if reader != nil {
+		if err := delivery.installReader(reader); err != nil {
+			t.Fatalf("installReader() error = %v", err)
+		}
+	}
+	return delivery
 }
 
 func (stub *finalAssertionDownloadLease) AcquireServingLease(context.Context, recordplatform.ObjectRef, recordplatform.LeaseClaimInputV1) (recordplatform.ServingLeaseV1, error) {
@@ -1355,6 +1991,47 @@ func (writer *blockingContentDownloadWriter) snapshot() (int, string) {
 	return writer.calls, writer.output.String()
 }
 
+func (writer *mutatingDownloadWriter) Write(payload []byte) (int, error) {
+	writer.calls++
+	if writer.calls == 1 && writer.mutate != nil {
+		writer.mutate()
+	}
+	return writer.output.Write(payload)
+}
+
+func (writer *shortDownloadWriter) Write(payload []byte) (int, error) {
+	writer.calls++
+	count := len(payload) - 1
+	if count < 0 {
+		count = 0
+	}
+	if _, err := writer.output.Write(payload[:count]); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func (clock *writeBoundaryDownloadClock) Now() time.Time {
+	clock.mu.Lock()
+	clock.calls++
+	call := clock.calls
+	base, expired := clock.base, clock.expired
+	clock.mu.Unlock()
+	if call == 2 {
+		clock.assertionOnce.Do(func() { close(clock.assertionComplete) })
+		return base
+	}
+	if call >= 3 {
+		<-clock.allowExpiry
+		return expired
+	}
+	return base
+}
+
+func clockValue(value time.Time) func() time.Time {
+	return func() time.Time { return value }
+}
+
 type backgroundRenewalDownloadLease struct {
 	mu                      sync.Mutex
 	serving                 recordplatform.ServingLeaseV1
@@ -1449,6 +2126,70 @@ func (stub *blockingRenewDownloadLease) ReleaseObjectContentLease(_ context.Cont
 	return nil
 }
 
+func (stub *exactTokenRenewalDownloadLease) AcquireServingLease(
+	context.Context,
+	recordplatform.ObjectRef,
+	recordplatform.LeaseClaimInputV1,
+) (recordplatform.ServingLeaseV1, error) {
+	return recordplatform.ServingLeaseV1{}, errors.New("unexpected AcquireServingLease")
+}
+
+func (stub *exactTokenRenewalDownloadLease) RenewServingLease(
+	_ context.Context,
+	serving recordplatform.ServingLeaseV1,
+	_ time.Duration,
+) (recordplatform.ServingLeaseV1, error) {
+	close(stub.renewStarted)
+	stub.mu.Lock()
+	if serving != stub.current {
+		stub.mu.Unlock()
+		return recordplatform.ServingLeaseV1{}, recordplatform.ErrLostOwnerLease
+	}
+	stub.current = stub.renewed
+	renewed := stub.renewed
+	stub.mu.Unlock()
+	close(stub.renewCommitted)
+	<-stub.allowRenewReturn
+	return renewed, nil
+}
+
+func (stub *exactTokenRenewalDownloadLease) AssertServingLease(
+	_ context.Context,
+	serving recordplatform.ServingLeaseV1,
+) error {
+	stub.mu.Lock()
+	stub.asserted = append(stub.asserted, serving)
+	current := stub.current
+	stub.mu.Unlock()
+	if serving != current {
+		return recordplatform.ErrLostOwnerLease
+	}
+	return nil
+}
+
+func (stub *exactTokenRenewalDownloadLease) ReleaseObjectContentLease(
+	_ context.Context,
+	_ recordplatform.ObjectRef,
+	owner recordplatform.OwnerLease,
+) error {
+	stub.mu.Lock()
+	stub.released = append(stub.released, owner)
+	stub.mu.Unlock()
+	return nil
+}
+
+func (stub *exactTokenRenewalDownloadLease) assertedTokens() []recordplatform.ServingLeaseV1 {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	return append([]recordplatform.ServingLeaseV1(nil), stub.asserted...)
+}
+
+func (stub *exactTokenRenewalDownloadLease) releasedOwners() []recordplatform.OwnerLease {
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	return append([]recordplatform.OwnerLease(nil), stub.released...)
+}
+
 func (stub *downloadRepositoryStub) GetAttachmentForDownload(context.Context, ContentLookup) (AttachmentContent, error) {
 	return stub.attachment, stub.getErr
 }
@@ -1456,10 +2197,93 @@ func (stub *downloadRepositoryStub) GetAttachmentForDownload(context.Context, Co
 func (stub *downloadRepositoryStub) AssertAttachmentContent(_ context.Context, assertion ContentAssertion) error {
 	stub.assertCalls++
 	stub.lastAssertion = assertion
+	if stub.assertHook != nil {
+		if err := stub.assertHook(stub.assertCalls); err != nil {
+			return err
+		}
+	}
 	if stub.assertErrAt > 0 && stub.assertCalls >= stub.assertErrAt {
 		return stub.assertErr
 	}
 	return nil
+}
+
+func (*assertSignalDownloadRepository) GetAttachmentForDownload(context.Context, ContentLookup) (AttachmentContent, error) {
+	return AttachmentContent{}, errors.New("unexpected GetAttachmentForDownload")
+}
+
+func (repository *assertSignalDownloadRepository) AssertAttachmentContent(context.Context, ContentAssertion) error {
+	repository.startedOnce.Do(func() { close(repository.started) })
+	return nil
+}
+
+func (repository *statefulDraftDownloadRepository) GetAttachmentForDownload(
+	_ context.Context,
+	_ ContentLookup,
+) (AttachmentContent, error) {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	if repository.missing {
+		return AttachmentContent{}, ErrAttachmentOwnerNotFound
+	}
+	return repository.attachment, nil
+}
+
+func (repository *statefulDraftDownloadRepository) AssertAttachmentContent(
+	_ context.Context,
+	assertion ContentAssertion,
+) error {
+	repository.mu.Lock()
+	repository.assertions++
+	if repository.missing {
+		repository.mu.Unlock()
+		return ErrAttachmentOwnerNotFound
+	}
+	current := repository.attachment
+	repository.mu.Unlock()
+	if current.State != UploadStateAvailable ||
+		current.ProjectID != assertion.ProjectID ||
+		current.AttachmentID != assertion.AttachmentID ||
+		current.DraftID != assertion.DraftID ||
+		current.RecordID != assertion.RecordID ||
+		current.AuthorID != assertion.AuthorID {
+		return ErrAttachmentConflict
+	}
+	selected := current.Original
+	if assertion.Variant == ContentVariantPreview {
+		if current.Preview == nil {
+			return ErrContentVariantUnavailable
+		}
+		selected = current.Preview.Object
+	}
+	if selected != assertion.Object {
+		return ErrAttachmentConflict
+	}
+	return nil
+}
+
+func (repository *statefulDraftDownloadRepository) markMissing() {
+	repository.mu.Lock()
+	repository.missing = true
+	repository.mu.Unlock()
+}
+
+func (repository *statefulDraftDownloadRepository) replaceAuthor(authorID string) {
+	repository.mu.Lock()
+	repository.attachment.AuthorID = authorID
+	repository.mu.Unlock()
+}
+
+func (repository *statefulDraftDownloadRepository) replaceOriginal(object ObjectVersion) {
+	repository.mu.Lock()
+	repository.attachment.Original = object
+	repository.mu.Unlock()
+}
+
+func (repository *statefulDraftDownloadRepository) assertionCount() int {
+	repository.mu.Lock()
+	defer repository.mu.Unlock()
+	return repository.assertions
 }
 
 type downloadAuthorizerStub struct {
@@ -1551,6 +2375,71 @@ func (stub *downloadBlobStub) Stat(_ context.Context, version ObjectVersion) (Ob
 
 func (stub *downloadBlobStub) Delete(context.Context, ObjectVersion) (DeletionReceipt, error) {
 	return DeletionReceipt{}, errors.New("unexpected Delete")
+}
+
+type delayedDownloadBlob struct {
+	*downloadBlobStub
+	statStarted chan struct{}
+	openStarted chan struct{}
+	allowStat   chan struct{}
+	allowOpen   chan struct{}
+	statOnce    sync.Once
+	openOnce    sync.Once
+}
+
+func (blob *delayedDownloadBlob) Stat(_ context.Context, version ObjectVersion) (ObjectInfo, error) {
+	blob.statOnce.Do(func() { close(blob.statStarted) })
+	<-blob.allowStat
+	return ObjectInfo{Version: version}, nil
+}
+
+func (blob *delayedDownloadBlob) Open(
+	ctx context.Context,
+	version ObjectVersion,
+	byteRange ByteRange,
+) (io.ReadCloser, error) {
+	blob.openOnce.Do(func() { close(blob.openStarted) })
+	<-blob.allowOpen
+	return blob.downloadBlobStub.Open(ctx, version, byteRange)
+}
+
+type eofPatternReader struct {
+	content     []byte
+	maxChunk    int
+	finalEOF    bool
+	terminalErr error
+	index       int
+	closeCalls  int
+}
+
+func (reader *eofPatternReader) Read(payload []byte) (int, error) {
+	if reader.index >= len(reader.content) {
+		return 0, io.EOF
+	}
+	limit := len(payload)
+	if reader.maxChunk > 0 && limit > reader.maxChunk {
+		limit = reader.maxChunk
+	}
+	remaining := len(reader.content) - reader.index
+	if limit > remaining {
+		limit = remaining
+	}
+	count := copy(payload[:limit], reader.content[reader.index:reader.index+limit])
+	reader.index += count
+	if reader.index == len(reader.content) {
+		if reader.terminalErr != nil {
+			return count, reader.terminalErr
+		}
+		if reader.finalEOF {
+			return count, io.EOF
+		}
+	}
+	return count, nil
+}
+
+func (reader *eofPatternReader) Close() error {
+	reader.closeCalls++
+	return nil
 }
 
 type downloadReadCloser struct {

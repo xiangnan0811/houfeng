@@ -4,23 +4,44 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
+type fakeAuthState struct {
+	mu       sync.Mutex
+	users    map[string]User
+	byUser   map[string]string
+	sessions map[string]Session
+}
+
 type fakeUsers struct {
+	state             *fakeAuthState
 	byID              map[string]User
 	byUser            map[string]string
 	findByUsernameErr error
 }
 
-func newFakeUsers() *fakeUsers {
-	return &fakeUsers{byID: map[string]User{}, byUser: map[string]string{}}
+func newFakeAuthState() *fakeAuthState {
+	return &fakeAuthState{
+		users:    map[string]User{},
+		byUser:   map[string]string{},
+		sessions: map[string]Session{},
+	}
 }
 
+func newFakeUsersWithState(state *fakeAuthState) *fakeUsers {
+	return &fakeUsers{state: state, byID: state.users, byUser: state.byUser}
+}
+
+func newFakeUsers() *fakeUsers { return newFakeUsersWithState(newFakeAuthState()) }
+
 func (f *fakeUsers) Create(_ context.Context, u User) error {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
 	if _, ok := f.byUser[u.Username]; ok {
 		return ErrUsernameTaken
 	}
@@ -29,6 +50,8 @@ func (f *fakeUsers) Create(_ context.Context, u User) error {
 	return nil
 }
 func (f *fakeUsers) FindByUsername(_ context.Context, n string) (User, error) {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
 	if f.findByUsernameErr != nil {
 		return User{}, f.findByUsernameErr
 	}
@@ -39,60 +62,135 @@ func (f *fakeUsers) FindByUsername(_ context.Context, n string) (User, error) {
 	return f.byID[id], nil
 }
 func (f *fakeUsers) FindByID(_ context.Context, id string) (User, error) {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
 	u, ok := f.byID[id]
 	if !ok {
 		return User{}, ErrUserNotFound
 	}
 	return u, nil
 }
-func (f *fakeUsers) UpdatePassword(_ context.Context, id, h string, t time.Time) error {
-	u, ok := f.byID[id]
+func (f *fakeUsers) CountUsers(_ context.Context) (int, error) {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
+	return len(f.byID), nil
+}
+
+type fakeSessions struct {
+	state *fakeAuthState
+	byID  map[string]Session
+}
+
+func newFakeSessionsWithState(state *fakeAuthState) *fakeSessions {
+	return &fakeSessions{state: state, byID: state.sessions}
+}
+
+func newFakeSessions() *fakeSessions { return newFakeSessionsWithState(newFakeAuthState()) }
+
+func newFakeRepositories() (*fakeUsers, *fakeSessions) {
+	state := newFakeAuthState()
+	return newFakeUsersWithState(state), newFakeSessionsWithState(state)
+}
+
+func fakeSessionTimes() (time.Time, time.Time) {
+	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	return now, now.Add(time.Hour)
+}
+
+func (f *fakeSessions) CreateIfPasswordHash(_ context.Context, expectedHash string, s Session, now func() time.Time, ttl time.Duration) (Session, error) {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
+	u, ok := f.state.users[s.UserID]
+	if !ok || u.PasswordHash != expectedHash {
+		return Session{}, ErrInvalidCredentials
+	}
+	issuedAt := now().UTC().Truncate(time.Microsecond)
+	if u.PasswordChangedAt.After(issuedAt) {
+		issuedAt = u.PasswordChangedAt
+	}
+	s.IssuedAt = issuedAt
+	s.LastSeenAt = issuedAt
+	s.ExpiresAt = issuedAt.Add(ttl)
+	f.byID[s.SessionID] = s
+	return s, nil
+}
+
+func (f *fakeSessions) ChangePasswordIfHash(_ context.Context, userID, currentSessionID, expectedHash, newHash string, now func() time.Time) error {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
+	u, ok := f.state.users[userID]
 	if !ok {
 		return ErrUserNotFound
 	}
-	u.PasswordHash = h
-	u.PasswordChangedAt = t
-	f.byID[id] = u
-	return nil
-}
-func (f *fakeUsers) CountUsers(_ context.Context) (int, error) { return len(f.byID), nil }
-
-type fakeSessions struct {
-	byID           map[string]Session
-	deleteByUserID []struct {
-		userID string
-		except string
+	if u.PasswordHash != expectedHash {
+		return ErrInvalidCredentials
 	}
-}
-
-func newFakeSessions() *fakeSessions { return &fakeSessions{byID: map[string]Session{}} }
-
-func (f *fakeSessions) Create(_ context.Context, s Session) error {
-	f.byID[s.SessionID] = s
-	return nil
-}
-func (f *fakeSessions) Find(_ context.Context, id string) (Session, error) {
-	s, ok := f.byID[id]
-	if !ok {
-		return Session{}, ErrSessionNotFound
-	}
-	return s, nil
-}
-func (f *fakeSessions) RefreshExpires(_ context.Context, id string, ls, exp time.Time) error {
-	s, ok := f.byID[id]
+	s, ok := f.byID[currentSessionID]
 	if !ok {
 		return ErrSessionNotFound
 	}
-	s.LastSeenAt = ls
-	s.ExpiresAt = exp
-	f.byID[id] = s
+	if s.UserID != userID {
+		return ErrSessionNotFound
+	}
+	checkedAt := now().UTC().Truncate(time.Microsecond)
+	if !s.ExpiresAt.After(checkedAt) || s.IssuedAt.Before(u.PasswordChangedAt) {
+		return ErrSessionExpired
+	}
+	changedAt := checkedAt
+	if u.PasswordChangedAt.After(changedAt) {
+		changedAt = u.PasswordChangedAt
+	}
+	u.PasswordHash = newHash
+	u.PasswordChangedAt = changedAt
+	f.state.users[userID] = u
+	s.IssuedAt = changedAt
+	f.byID[currentSessionID] = s
+	for id, other := range f.byID {
+		if other.UserID == userID && id != currentSessionID {
+			delete(f.byID, id)
+		}
+	}
 	return nil
 }
+
+func (f *fakeSessions) TouchWithUserLock(_ context.Context, sessionID string, now func() time.Time, ttl time.Duration) (Session, error) {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
+	s, ok := f.byID[sessionID]
+	if !ok {
+		return Session{}, ErrSessionNotFound
+	}
+	u, ok := f.state.users[s.UserID]
+	if !ok {
+		return Session{}, ErrUserNotFound
+	}
+	checkedAt := now().UTC().Truncate(time.Microsecond)
+	if !s.ExpiresAt.After(checkedAt) || s.IssuedAt.Before(u.PasswordChangedAt) {
+		delete(f.byID, sessionID)
+		return Session{}, ErrSessionExpired
+	}
+	baseline := checkedAt
+	if s.LastSeenAt.After(baseline) {
+		baseline = s.LastSeenAt
+	}
+	if u.PasswordChangedAt.After(baseline) {
+		baseline = u.PasswordChangedAt
+	}
+	s.LastSeenAt = baseline
+	s.ExpiresAt = baseline.Add(ttl)
+	f.byID[sessionID] = s
+	return s, nil
+}
+
 func (f *fakeSessions) Delete(_ context.Context, id string) error {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
 	delete(f.byID, id)
 	return nil
 }
 func (f *fakeSessions) DeleteExpiredBefore(_ context.Context, cutoff time.Time) (int, error) {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
 	n := 0
 	for k, s := range f.byID {
 		if s.ExpiresAt.Before(cutoff) {
@@ -102,24 +200,11 @@ func (f *fakeSessions) DeleteExpiredBefore(_ context.Context, cutoff time.Time) 
 	}
 	return n, nil
 }
-func (f *fakeSessions) DeleteByUserID(_ context.Context, userID, exceptSessionID string) error {
-	f.deleteByUserID = append(f.deleteByUserID, struct {
-		userID string
-		except string
-	}{userID: userID, except: exceptSessionID})
-	for id, sess := range f.byID {
-		if sess.UserID == userID && id != exceptSessionID {
-			delete(f.byID, id)
-		}
-	}
-	return nil
-}
 
 func newTestService(t *testing.T) (*Service, *fakeUsers, *fakeSessions) {
 	t.Helper()
-	users := newFakeUsers()
-	sessions := newFakeSessions()
-	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	users, sessions := newFakeRepositories()
+	now, _ := fakeSessionTimes()
 	svc := New(users, sessions, Options{
 		SessionTTL: time.Hour,
 		Now:        func() time.Time { return now },
@@ -145,6 +230,10 @@ func mustSeed(t *testing.T, users *fakeUsers, username, password string) User {
 	return u
 }
 
+func addFakeSession(sessions *fakeSessions, id, userID string, issuedAt, expiresAt time.Time) {
+	sessions.byID[id] = Session{SessionID: id, UserID: userID, IssuedAt: issuedAt, LastSeenAt: issuedAt, ExpiresAt: expiresAt}
+}
+
 func TestServiceLoginSuccess(t *testing.T) {
 	svc, users, _ := newTestService(t)
 	mustSeed(t, users, "admin", "correct-horse-battery")
@@ -161,6 +250,9 @@ func TestServiceLoginSuccess(t *testing.T) {
 	}
 	if sess.UserAgent != "ua" || sess.ClientIP != "1.2.3.4" {
 		t.Fatalf("metadata not stored: ua=%q ip=%q", sess.UserAgent, sess.ClientIP)
+	}
+	if sess.IssuedAt.IsZero() || sess.ExpiresAt.IsZero() {
+		t.Fatalf("repository did not populate timestamps: %+v", sess)
 	}
 }
 
@@ -210,13 +302,16 @@ func TestServiceTouchExtendsExpiry(t *testing.T) {
 	svc, users, _ := newTestService(t)
 	mustSeed(t, users, "admin", "correct-horse-battery")
 
-	sess, _ := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	sess, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
 	got, err := svc.Touch(context.Background(), sess.SessionID)
 	if err != nil {
 		t.Fatalf("Touch: %v", err)
 	}
 	if !got.ExpiresAt.Equal(sess.ExpiresAt) {
-		// Static clock means same expiry — that's fine. We assert no error here.
+		t.Fatalf("static clock changed expiry: got %s want %s", got.ExpiresAt, sess.ExpiresAt)
 	}
 	if got.SessionID != sess.SessionID {
 		t.Fatalf("SessionID changed unexpectedly")
@@ -224,21 +319,13 @@ func TestServiceTouchExtendsExpiry(t *testing.T) {
 }
 
 func TestServiceTouchRejectsSessionIssuedBeforePasswordChange(t *testing.T) {
-	users := newFakeUsers()
-	sessions := newFakeSessions()
-	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	users, sessions := newFakeRepositories()
+	now, _ := fakeSessionTimes()
 	svc := New(users, sessions, Options{SessionTTL: time.Hour, Now: func() time.Time { return now }})
 	user := mustSeed(t, users, "admin", "correct-horse-battery")
 	user.PasswordChangedAt = now.Add(10 * time.Minute)
 	users.byID[user.UserID] = user
-
-	sessions.byID["old-session"] = Session{
-		SessionID:  "old-session",
-		UserID:     user.UserID,
-		IssuedAt:   now,
-		LastSeenAt: now,
-		ExpiresAt:  now.Add(time.Hour),
-	}
+	addFakeSession(sessions, "old-session", user.UserID, now, now.Add(time.Hour))
 
 	_, err := svc.Touch(context.Background(), "old-session")
 	if !errors.Is(err, ErrSessionExpired) {
@@ -250,18 +337,23 @@ func TestServiceTouchRejectsSessionIssuedBeforePasswordChange(t *testing.T) {
 }
 
 func TestServiceTouchExpired(t *testing.T) {
-	users := newFakeUsers()
-	sessions := newFakeSessions()
-	now := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	users, sessions := newFakeRepositories()
+	now, _ := fakeSessionTimes()
 	clock := now
 	svc := New(users, sessions, Options{SessionTTL: time.Hour, Now: func() time.Time { return clock }})
 	mustSeed(t, users, "admin", "correct-horse-battery")
 
-	sess, _ := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
-	clock = now.Add(2 * time.Hour) // jump past expiry
-	_, err := svc.Touch(context.Background(), sess.SessionID)
+	sess, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	clock = sess.ExpiresAt
+	_, err = svc.Touch(context.Background(), sess.SessionID)
 	if !errors.Is(err, ErrSessionExpired) {
-		t.Fatalf("Touch after expiry = %v, want ErrSessionExpired", err)
+		t.Fatalf("Touch at expiry = %v, want ErrSessionExpired", err)
+	}
+	if _, ok := sessions.byID[sess.SessionID]; ok {
+		t.Fatal("expired session was not deleted")
 	}
 }
 
@@ -269,11 +361,14 @@ func TestServiceLogout(t *testing.T) {
 	svc, users, _ := newTestService(t)
 	mustSeed(t, users, "admin", "correct-horse-battery")
 
-	sess, _ := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	sess, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
 	if err := svc.Logout(context.Background(), sess.SessionID); err != nil {
 		t.Fatalf("Logout: %v", err)
 	}
-	_, err := svc.Touch(context.Background(), sess.SessionID)
+	_, err = svc.Touch(context.Background(), sess.SessionID)
 	if !errors.Is(err, ErrSessionNotFound) {
 		t.Fatalf("Touch after logout = %v, want ErrSessionNotFound", err)
 	}
@@ -290,7 +385,10 @@ func TestServiceUserBySessionReturnsUser(t *testing.T) {
 	svc, users, _ := newTestService(t)
 	mustSeed(t, users, "admin", "correct-horse-battery")
 
-	sess, _ := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	sess, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
 	u, err := svc.UserBySession(context.Background(), sess.SessionID)
 	if err != nil {
 		t.Fatalf("UserBySession: %v", err)
@@ -301,8 +399,12 @@ func TestServiceUserBySessionReturnsUser(t *testing.T) {
 }
 
 func TestServiceChangePassword(t *testing.T) {
-	svc, users, _ := newTestService(t)
+	users, sessions := newFakeRepositories()
+	now, later := fakeSessionTimes()
+	svc := New(users, sessions, Options{SessionTTL: time.Hour, Now: func() time.Time { return now }})
 	mustSeed(t, users, "admin", "correct-horse-battery")
+	addFakeSession(sessions, "current-session", "usr_admin", now, later)
+	addFakeSession(sessions, "other-session", "usr_admin", now, later)
 
 	if err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "correct-horse-battery", "new-correct-horse-battery"); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
@@ -317,14 +419,15 @@ func TestServiceChangePassword(t *testing.T) {
 }
 
 func TestServiceChangePasswordUsesConfiguredBcryptCost(t *testing.T) {
-	users := newFakeUsers()
-	sessions := newFakeSessions()
+	users, sessions := newFakeRepositories()
+	now, later := fakeSessionTimes()
 	svc := New(users, sessions, Options{
 		SessionTTL:         time.Hour,
-		Now:                staticNow(),
+		Now:                func() time.Time { return now },
 		PasswordBcryptCost: bcrypt.MinCost,
 	})
 	mustSeed(t, users, "admin", "correct-horse-battery")
+	addFakeSession(sessions, "current-session", "usr_admin", now, later)
 
 	if err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "correct-horse-battery", "new-correct-horse-battery"); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
@@ -353,8 +456,11 @@ func TestServiceChangePasswordWrongOld(t *testing.T) {
 }
 
 func TestServiceChangePasswordRejectsTooShort(t *testing.T) {
-	svc, users, _ := newTestService(t)
+	users, sessions := newFakeRepositories()
+	now, later := fakeSessionTimes()
+	svc := New(users, sessions, Options{SessionTTL: time.Hour, Now: func() time.Time { return now }})
 	mustSeed(t, users, "admin", "correct-horse-battery")
+	addFakeSession(sessions, "current-session", "usr_admin", now, later)
 
 	err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "correct-horse-battery", "abc")
 	if !errors.Is(err, ErrPasswordTooShort) {
@@ -362,22 +468,34 @@ func TestServiceChangePasswordRejectsTooShort(t *testing.T) {
 	}
 }
 
-func TestServiceChangePasswordDeletesOtherSessions(t *testing.T) {
-	svc, users, sessions := newTestService(t)
+func TestServiceChangePasswordRequiresLiveCurrentSession(t *testing.T) {
+	svc, users, _ := newTestService(t)
 	mustSeed(t, users, "admin", "correct-horse-battery")
 
-	sessions.byID["current-session"] = Session{SessionID: "current-session", UserID: "usr_admin"}
-	sessions.byID["other-session"] = Session{SessionID: "other-session", UserID: "usr_admin"}
-	sessions.byID["other-user-session"] = Session{SessionID: "other-user-session", UserID: "usr_other"}
+	err := svc.ChangePassword(context.Background(), "usr_admin", "missing-session", "correct-horse-battery", "new-correct-horse-battery")
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("ChangePassword missing session = %v, want ErrSessionNotFound", err)
+	}
+	user, err := users.FindByID(context.Background(), "usr_admin")
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if VerifyPassword(user.PasswordHash, "correct-horse-battery") != nil {
+		t.Fatal("password changed without a live current session")
+	}
+}
+
+func TestServiceChangePasswordDeletesOtherSessions(t *testing.T) {
+	users, sessions := newFakeRepositories()
+	now, later := fakeSessionTimes()
+	svc := New(users, sessions, Options{SessionTTL: time.Hour, Now: func() time.Time { return now }})
+	mustSeed(t, users, "admin", "correct-horse-battery")
+	addFakeSession(sessions, "current-session", "usr_admin", now, later)
+	addFakeSession(sessions, "other-session", "usr_admin", now, later)
+	addFakeSession(sessions, "other-user-session", "usr_other", now, later)
 
 	if err := svc.ChangePassword(context.Background(), "usr_admin", "current-session", "correct-horse-battery", "new-correct-horse-battery"); err != nil {
 		t.Fatalf("ChangePassword: %v", err)
-	}
-	if len(sessions.deleteByUserID) != 1 {
-		t.Fatalf("DeleteByUserID calls = %d, want 1", len(sessions.deleteByUserID))
-	}
-	if sessions.deleteByUserID[0].userID != "usr_admin" || sessions.deleteByUserID[0].except != "current-session" {
-		t.Fatalf("DeleteByUserID call = %#v, want usr_admin/current-session", sessions.deleteByUserID[0])
 	}
 	if _, ok := sessions.byID["current-session"]; !ok {
 		t.Fatal("current session was deleted")
@@ -387,5 +505,15 @@ func TestServiceChangePasswordDeletesOtherSessions(t *testing.T) {
 	}
 	if _, ok := sessions.byID["other-user-session"]; !ok {
 		t.Fatal("other user's session was deleted")
+	}
+	user, err := users.FindByID(context.Background(), "usr_admin")
+	if err != nil {
+		t.Fatalf("FindByID: %v", err)
+	}
+	if user.PasswordChangedAt != now {
+		t.Fatalf("PasswordChangedAt = %s, want %s", user.PasswordChangedAt, now)
+	}
+	if sessions.byID["current-session"].IssuedAt != now {
+		t.Fatalf("current session issued_at = %s, want %s", sessions.byID["current-session"].IssuedAt, now)
 	}
 }

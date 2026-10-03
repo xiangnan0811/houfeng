@@ -11,7 +11,7 @@ import (
 
 type SettingsRepository interface {
 	GetSettings(ctx context.Context) (centersettings.CenterSettings, error)
-	PutSettings(ctx context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error)
+	MutateSettings(ctx context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error)
 }
 
 type settingsResponse struct {
@@ -95,12 +95,6 @@ func Settings(repo SettingsRepository) http.Handler {
 			}
 			writeJSON(w, http.StatusOK, newSettingsResponse(record))
 		case http.MethodPut:
-			current, err := repo.GetSettings(r.Context())
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "internal server error")
-				return
-			}
-
 			var input settingsUpdateRequest
 			if err := decodeSettingsJSONBody(r, &input); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
@@ -111,7 +105,9 @@ func Settings(repo SettingsRepository) http.Handler {
 				return
 			}
 
-			record, err := repo.PutSettings(r.Context(), mergeSettingsUpdate(current, input))
+			record, err := repo.MutateSettings(r.Context(), func(current centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+				return mergeSettingsUpdate(current, input), nil
+			})
 			if err != nil {
 				if errors.Is(err, centersettings.ErrInvalidSettings) {
 					writeError(w, http.StatusBadRequest, "invalid input")

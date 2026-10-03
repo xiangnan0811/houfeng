@@ -1351,8 +1351,8 @@ func (r settingsPresentationRepository) GetSettings(ctx context.Context) (center
 	return applyEffectiveFreshInstallSettings(record, r.incidentSweepInterval), nil
 }
 
-func (r settingsPresentationRepository) PutSettings(ctx context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-	return r.repo.PutSettings(ctx, input)
+func (r settingsPresentationRepository) MutateSettings(ctx context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
+	return r.repo.MutateSettings(ctx, mutate)
 }
 
 func (r settingsPresentationRepository) hasPersistedSettings(ctx context.Context) (bool, error) {
@@ -1427,8 +1427,8 @@ func (r notifierSettingsRepository) GetSettings(ctx context.Context) (centersett
 	return r.repo.GetSettings(ctx)
 }
 
-func (r notifierSettingsRepository) PutSettings(ctx context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-	return r.repo.PutSettings(ctx, input)
+func (r notifierSettingsRepository) MutateSettings(ctx context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
+	return r.repo.MutateSettings(ctx, mutate)
 }
 
 func (r notifierSettingsRepository) GetPersistedTelegramSettings(ctx context.Context) (centersettings.TelegramSettings, bool, error) {

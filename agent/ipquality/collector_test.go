@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,8 +65,11 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 	t.Parallel()
 
 	requests := map[string]int{}
+	var requestsMu sync.Mutex
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestsMu.Lock()
 		requests[request.URL.Host]++
+		requestsMu.Unlock()
 		body := ""
 		status := http.StatusOK
 		switch request.URL.Host {
@@ -301,8 +305,11 @@ func TestHTTPCollectorDefaultSourcesIsolatesProviderTimeouts(t *testing.T) {
 	t.Parallel()
 
 	requests := map[string]int{}
+	var requestsMu sync.Mutex
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestsMu.Lock()
 		requests[request.URL.Host]++
+		requestsMu.Unlock()
 		switch request.URL.Host {
 		case "api.ipapi.is":
 			<-request.Context().Done()
@@ -363,8 +370,11 @@ func TestHTTPCollectorDefaultSourcesIsolatesServiceProbeTimeouts(t *testing.T) {
 	t.Parallel()
 
 	requests := map[string]int{}
+	var requestsMu sync.Mutex
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestsMu.Lock()
 		requests[request.URL.Host]++
+		requestsMu.Unlock()
 		switch request.URL.Host {
 		case "api.ipapi.is":
 			return jsonResponse(request, `{"ip":"203.0.113.10","version":4,"location":{"country_code":"US","country":"United States"}}`)
@@ -570,6 +580,80 @@ func TestHTTPCollectorParsesIPAPIISNestedLookupPayload(t *testing.T) {
 	}
 	if provider.IsVPN == nil || *provider.IsVPN || provider.IsTor == nil || *provider.IsTor || provider.IsRobot == nil || *provider.IsRobot {
 		t.Fatalf("ProviderResults[0] vpn/tor/robot = (%v,%v,%v), want false pointers", provider.IsVPN, provider.IsTor, provider.IsRobot)
+	}
+}
+
+func TestHTTPCollectorCustomLookupPreservesVersionForFlatAndNestedShapes(t *testing.T) {
+	tests := []struct {
+		name       string
+		body       string
+		wantIP     string
+		wantASN    string
+		wantOrg    string
+		wantRegion string
+		wantLat    float64
+		wantLon    float64
+	}{
+		{
+			name:       "flat anonymous response with version",
+			body:       `{"ip":"2001:db8::1","version":6,"asn":"AS64500 Example Transit","organization":"Example Transit","country_code":"US","country":"United States"}`,
+			wantIP:     "2001:db8::1",
+			wantASN:    "AS64500",
+			wantOrg:    "Example Transit",
+			wantRegion: "US",
+		},
+		{
+			name: "nested ipapi response with ip_version",
+			body: `{
+				"ip":"2001:db8::2",
+				"ip_version":6,
+				"asn":{"asn":64501,"org":"Example Transit","country":"US"},
+				"company":{"name":"Example Hosting","type":"hosting"},
+				"location":{"country_code":"US","country":"United States","latitude":37.751,"longitude":-97.822}
+			}`,
+			wantIP:     "2001:db8::2",
+			wantASN:    "AS64501",
+			wantOrg:    "Example Transit",
+			wantRegion: "US",
+			wantLat:    37.751,
+			wantLon:    -97.822,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer server.Close()
+
+			collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
+				Client:    server.Client(),
+				LookupURL: server.URL,
+			})
+			report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+				Enabled:          true,
+				TimeoutSeconds:   5,
+				FrequencySeconds: 86400,
+			}, time.Date(2026, time.June, 10, 5, 0, 0, 0, time.UTC))
+
+			if report.Status != agentapi.IPQualityStatusSuccess {
+				t.Fatalf("Status = %q, want success, error=%q", report.Status, report.ErrorSummary)
+			}
+			if report.IPAddress != test.wantIP || report.IPVersion != 6 {
+				t.Fatalf("IP facts = (%q,%d), want (%q,6)", report.IPAddress, report.IPVersion, test.wantIP)
+			}
+			if report.ASN != test.wantASN || report.Organization != test.wantOrg || report.UseRegionCode != test.wantRegion {
+				t.Fatalf("metadata = (%q,%q,%q), want (%q,%q,%q)", report.ASN, report.Organization, report.UseRegionCode, test.wantASN, test.wantOrg, test.wantRegion)
+			}
+			if test.wantLat != 0 && (report.Latitude == nil || *report.Latitude != test.wantLat) {
+				t.Fatalf("Latitude = %v, want %v", report.Latitude, test.wantLat)
+			}
+			if test.wantLon != 0 && (report.Longitude == nil || *report.Longitude != test.wantLon) {
+				t.Fatalf("Longitude = %v, want %v", report.Longitude, test.wantLon)
+			}
+		})
 	}
 }
 
@@ -877,6 +961,307 @@ func TestHTTPCollectorReturnsFailureWhenLookupFails(t *testing.T) {
 	}
 	if len(report.ServiceUnlocks) != 0 {
 		t.Fatalf("ServiceUnlocks = %#v, want none when lookup fails", report.ServiceUnlocks)
+	}
+}
+
+func TestHTTPCollectorServiceOutcomesKeepInputOrderWhenProbesFinishOutOfOrder(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Host {
+		case "api.ipapi.is":
+			return jsonResponse(request, `{"ip":"203.0.113.10"}`)
+		case "api.ipquery.io":
+			return jsonResponse(request, `{"ip":"203.0.113.10"}`)
+		case "proxycheck.io":
+			return jsonResponse(request, `{"status":"ok","203.0.113.10":{"proxy":"no"}}`)
+		case "api.ip2location.io":
+			return jsonResponse(request, `{"ip":"203.0.113.10"}`)
+		case "ipwho.is":
+			return jsonResponse(request, `{"success":true,"ip":"203.0.113.10"}`)
+		case "www.netflix.com":
+			time.Sleep(30 * time.Millisecond)
+			return jsonResponse(request, `<html>netflix</html>`)
+		case "chat.openai.com":
+			time.Sleep(5 * time.Millisecond)
+			return jsonResponse(request, `{"status":"normal"}`)
+		case "www.reddit.com":
+			return jsonResponse(request, `<html data-country-code="US"></html>`)
+		default:
+			return jsonResponse(request, `{}`)
+		}
+	})}
+
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled:        true,
+		TimeoutSeconds: 5,
+		Services:       []string{"netflix", "chatgpt", "reddit"},
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+
+	if len(report.ServiceUnlocks) != 3 {
+		t.Fatalf("ServiceUnlocks = %#v, want all indexed outcomes", report.ServiceUnlocks)
+	}
+	for index, want := range []string{"netflix", "chatgpt", "reddit"} {
+		if report.ServiceUnlocks[index].Service != want {
+			t.Fatalf("ServiceUnlocks[%d] = %#v, want service %q", index, report.ServiceUnlocks[index], want)
+		}
+	}
+}
+
+func TestHTTPCollectorSkipsDependentProvidersAndServicesWithoutCanonicalIP(t *testing.T) {
+	var requestsMu sync.Mutex
+	requests := map[string]int{}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestsMu.Lock()
+		requests[request.URL.Host]++
+		requestsMu.Unlock()
+		switch request.URL.Host {
+		case "api.ipapi.is":
+			return jsonResponse(request, `{"error":"denied"}`)
+		case "api.ipquery.io":
+			return jsonResponse(request, `{"error":{"message":"denied"}}`)
+		default:
+			return jsonResponse(request, `{"unexpected":true}`)
+		}
+	})}
+
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled:        true,
+		TimeoutSeconds: 5,
+		Services:       []string{"netflix"},
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+
+	if report.Status != agentapi.IPQualityStatusFailure {
+		t.Fatalf("Status = %q, want failure when canonical providers fail", report.Status)
+	}
+	if len(report.ServiceUnlocks) != 0 {
+		t.Fatalf("ServiceUnlocks = %#v, want no service probes", report.ServiceUnlocks)
+	}
+	providers := providerResultsByName(report.ProviderResults)
+	for _, provider := range []string{"proxycheck.io", "ip2location.io", "ipwho.is"} {
+		if providers[provider].ErrorCode != "missing_target_ip" {
+			t.Fatalf("%s = %#v, want missing_target_ip without dependent request", provider, providers[provider])
+		}
+	}
+	requestsMu.Lock()
+	defer requestsMu.Unlock()
+	if requests["api.ipapi.is"] != 1 || requests["api.ipquery.io"] != 1 || len(requests) != 2 {
+		t.Fatalf("requests = %#v, want only canonical sources", requests)
+	}
+}
+
+func TestHTTPCollectorDefaultSourcesPreCancelledContextDoesNotStartTransport(t *testing.T) {
+	var requestsMu sync.Mutex
+	requests := map[string]int{}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestsMu.Lock()
+		requests[request.URL.Host]++
+		requestsMu.Unlock()
+		return nil, request.Context().Err()
+	})}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	report := collector.Collect(ctx, &agentapi.IPQualityPlan{
+		Enabled:          true,
+		TimeoutSeconds:   5,
+		FrequencySeconds: 86400,
+		Services:         []string{"netflix", "chatgpt"},
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+
+	requestsMu.Lock()
+	requestCount := len(requests)
+	requestsMu.Unlock()
+	if requestCount != 0 {
+		t.Fatalf("requests = %#v, want no transport starts for pre-cancelled context", requests)
+	}
+	providers := providerResultsByName(report.ProviderResults)
+	for _, provider := range []string{"ipapi.is", "ipquery.io"} {
+		if providers[provider].Status != "failure" || providers[provider].ErrorCode == "" {
+			t.Fatalf("%s = %#v, want complete cancellation diagnostic", provider, providers[provider])
+		}
+	}
+	for _, provider := range []string{"proxycheck.io", "ip2location.io", "ipwho.is"} {
+		if providers[provider].ErrorCode != "missing_target_ip" {
+			t.Fatalf("%s = %#v, want missing_target_ip diagnostic", provider, providers[provider])
+		}
+	}
+	if len(report.ServiceUnlocks) != 0 {
+		t.Fatalf("ServiceUnlocks = %#v, want no service probes without canonical IP", report.ServiceUnlocks)
+	}
+}
+
+func TestHTTPCollectorDefaultSourcesParentCancellationJoinsInFlightRequests(t *testing.T) {
+	var requestsMu sync.Mutex
+	requests := map[string]int{}
+	started := make(chan string, 2)
+	returned := false
+	postReturnStarts := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestsMu.Lock()
+		requests[request.URL.Host]++
+		if returned {
+			postReturnStarts++
+		}
+		requestsMu.Unlock()
+		select {
+		case started <- request.URL.Host:
+		default:
+		}
+		if request.URL.Host != "api.ipapi.is" && request.URL.Host != "api.ipquery.io" {
+			return nil, request.Context().Err()
+		}
+		<-request.Context().Done()
+		return nil, request.Context().Err()
+	})}
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan agentapi.IPQualityReportPayload, 1)
+	go func() {
+		done <- collector.Collect(ctx, &agentapi.IPQualityPlan{
+			Enabled:          true,
+			TimeoutSeconds:   5,
+			FrequencySeconds: 86400,
+			Services:         []string{"netflix"},
+		}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}()
+
+	<-started
+	cancel()
+	report := <-done
+
+	requestsMu.Lock()
+	returned = true
+	postReturnCount := postReturnStarts
+	snapshot := make(map[string]int, len(requests))
+	for host, count := range requests {
+		snapshot[host] = count
+	}
+	requestsMu.Unlock()
+	if postReturnCount != 0 {
+		t.Fatalf("transport starts after Collect returned = %d, want none", postReturnCount)
+	}
+	for host := range snapshot {
+		if host != "api.ipapi.is" && host != "api.ipquery.io" {
+			t.Fatalf("requests = %#v, want cancellation before dependent/service stages", snapshot)
+		}
+	}
+	providers := providerResultsByName(report.ProviderResults)
+	for _, provider := range []string{"ipapi.is", "ipquery.io"} {
+		if providers[provider].Status != "failure" || providers[provider].ErrorCode == "" {
+			t.Fatalf("%s = %#v, want in-flight cancellation diagnostic", provider, providers[provider])
+		}
+	}
+	for _, provider := range []string{"proxycheck.io", "ip2location.io", "ipwho.is"} {
+		if providers[provider].ErrorCode != "missing_target_ip" {
+			t.Fatalf("%s = %#v, want missing_target_ip diagnostic", provider, providers[provider])
+		}
+	}
+	if len(report.ServiceUnlocks) != 0 {
+		t.Fatalf("ServiceUnlocks = %#v, want no post-cancellation probes", report.ServiceUnlocks)
+	}
+}
+
+func TestHTTPCollectorDefaultSourcesServiceStageCancellationReturnsEveryServiceDiagnostic(t *testing.T) {
+	serviceHosts := map[string]struct{}{
+		"www.netflix.com": {},
+		"chat.openai.com": {},
+		"www.reddit.com":  {},
+	}
+	var requestsMu sync.Mutex
+	requests := map[string]int{}
+	serviceStarted := make(chan string, len(serviceHosts))
+	returned := false
+	postReturnStarts := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		host := request.URL.Host
+		requestsMu.Lock()
+		requests[host]++
+		if returned {
+			postReturnStarts++
+		}
+		requestsMu.Unlock()
+		if _, ok := serviceHosts[host]; ok {
+			select {
+			case serviceStarted <- host:
+			default:
+			}
+			<-request.Context().Done()
+			return nil, request.Context().Err()
+		}
+		switch host {
+		case "api.ipapi.is":
+			return jsonResponse(request, `{"ip":"203.0.113.10","version":4}`)
+		case "api.ipquery.io":
+			return jsonResponse(request, `{"ip":"203.0.113.10"}`)
+		case "proxycheck.io":
+			return jsonResponse(request, `{"status":"ok","203.0.113.10":{"proxy":"no"}}`)
+		case "api.ip2location.io":
+			return jsonResponse(request, `{"ip":"203.0.113.10","country_code":"US"}`)
+		case "ipwho.is":
+			return jsonResponse(request, `{"success":true,"ip":"203.0.113.10","country_code":"US"}`)
+		default:
+			return nil, request.Context().Err()
+		}
+	})}
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan agentapi.IPQualityReportPayload, 1)
+	go func() {
+		done <- collector.Collect(ctx, &agentapi.IPQualityPlan{
+			Enabled:          true,
+			TimeoutSeconds:   15,
+			FrequencySeconds: 86400,
+			Services:         []string{"netflix", "chatgpt", "reddit"},
+		}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}()
+
+	<-serviceStarted
+	<-serviceStarted
+	cancel()
+	report := <-done
+
+	requestsMu.Lock()
+	returned = true
+	postReturnCount := postReturnStarts
+	requestSnapshot := make(map[string]int, len(requests))
+	for host, count := range requests {
+		requestSnapshot[host] = count
+	}
+	requestsMu.Unlock()
+	if postReturnCount != 0 {
+		t.Fatalf("transport starts after Collect returned = %d, want none", postReturnCount)
+	}
+	providers := providerResultsByName(report.ProviderResults)
+	for _, provider := range []string{"ipapi.is", "ipquery.io", "proxycheck.io", "ip2location.io", "ipwho.is"} {
+		if providers[provider].Status != "success" {
+			t.Fatalf("%s = %#v, want quick valid provider response before service cancellation", provider, providers[provider])
+		}
+	}
+	plannedServices := []string{"netflix", "chatgpt", "reddit"}
+	if len(report.ServiceUnlocks) != len(plannedServices) {
+		t.Fatalf("ServiceUnlocks = %#v, want all planned service diagnostics", report.ServiceUnlocks)
+	}
+	for index, service := range plannedServices {
+		result := report.ServiceUnlocks[index]
+		if result.Service != service {
+			t.Fatalf("ServiceUnlocks[%d] = %#v, want input order service %q", index, result, service)
+		}
+		if result.Status != "unknown" || result.ProbeStatus != "failure" || result.ErrorCode == "" || result.ErrorSummary == "" {
+			t.Fatalf("%s = %#v, want canceled/timeout failure diagnostic", service, result)
+		}
+	}
+	if report.Status != agentapi.IPQualityStatusPartial {
+		t.Fatalf("Status = %q, want partial after service-stage cancellation", report.Status)
+	}
+	for host := range requestSnapshot {
+		if _, ok := serviceHosts[host]; !ok && host != "api.ipapi.is" && host != "api.ipquery.io" &&
+			host != "proxycheck.io" && host != "api.ip2location.io" && host != "ipwho.is" {
+			t.Fatalf("requests = %#v, found unexpected host %q", requestSnapshot, host)
+		}
 	}
 }
 

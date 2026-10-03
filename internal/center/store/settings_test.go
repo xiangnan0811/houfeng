@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	centersettings "houfeng/internal/center/settings"
 )
@@ -19,14 +19,12 @@ func TestCenterSettingsRepositoryGetSettingsReturnsDefaultsWithoutCreatingSingle
 
 	queryCount := 0
 	repo := &PostgresSettingsRepository{db: fakeSettingsQueryer{
-		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			queryCount++
-			switch {
-			case sql == getCenterSettingsSQL && len(args) == 1 && args[0] == centersettings.SingletonID && queryCount == 1:
+			if queryCount == 1 {
 				return fakeSettingsRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
-			default:
-				return fakeSettingsRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
 			}
+			return fakeSettingsRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
 		},
 	}}
 
@@ -42,153 +40,175 @@ func TestCenterSettingsRepositoryGetSettingsReturnsDefaultsWithoutCreatingSingle
 	}
 }
 
-func TestCenterSettingsRepositoryPutSettingsRoundTripsStructuredSections(t *testing.T) {
+func TestCenterSettingsRepositoryMutateSettingsCallsCallbackOnce(t *testing.T) {
 	t.Parallel()
 
-	now := time.Date(2026, time.April, 26, 10, 0, 0, 0, time.UTC)
-	input := centersettings.CenterSettings{
-		Telegram: centersettings.TelegramSettings{
-			BotToken:       "bot-token",
-			ChatID:         "chat-id",
-			RuntimeManaged: true,
-		},
-		HostSampleFrequencyTier: "1m",
-		ProbeFrequencyDefaults: centersettings.ProbeFrequencyDefaults{
-			TCP:  "5m",
-			HTTP: "1m",
-			TLS:  "15m",
-		},
-		IncidentDefaults: centersettings.IncidentDefaults{
-			HeartbeatIntervalSeconds: 60,
-			StaleThresholdIntervals:  5,
-			SweepIntervalSeconds:     180,
-			NotifyOnStarted:          true,
-			NotifyOnEscalated:        false,
-			NotifyOnRecovered:        true,
-		},
-		OverrideRules: centersettings.OverrideRules{
-			MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{
-				{
-					Label: "core",
-					Overrides: centersettings.SettingsOverrideFields{
-						HostSampleFrequencyTier: settingsStringPtr("1m"),
-					},
-				},
-			},
-		},
-		RetentionPolicy: centersettings.RetentionPolicy{
-			RawLayerDays:       30,
-			AggregateLayerDays: 60,
-		},
-		SubscriptionCost: centersettings.SubscriptionCostSettings{
-			BaseCurrency:                "USD",
-			ExchangeRateProvider:        string(centersettings.SubscriptionExchangeRateProviderFixer),
-			FixerAPIKey:                 "fixture-key",
-			DefaultReminderOffsetsDays:  []int{30, 7},
-			MaxReminderLeadDays:         45,
-			ExchangeRateStaleAfterHours: 24,
-		},
-		IPQuality: centersettings.IPQualitySettings{
-			Enabled:           true,
-			FrequencySeconds:  86400,
-			StaleAfterSeconds: 604800,
-			TimeoutSeconds:    20,
-			Services:          []string{"netflix", "chatgpt"},
-		},
-	}
+	current := centersettings.Default()
+	updated := current
+	updated.HostSampleFrequencyTier = "1m"
 
-	var seenArgs []any
-	repo := &PostgresSettingsRepository{db: fakeSettingsQueryer{
-		queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
-			if sql != upsertCenterSettingsSQL {
-				return fakeSettingsRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
-			}
-			seenArgs = append([]any(nil), args...)
+	tx := &fakeSettingsTx{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeSettingsRow{scan: func(dest ...any) error {
-				scanCenterSettingsRow(dest, input)
-				*(dest[13].(*time.Time)) = now
-				*(dest[14].(*time.Time)) = now
+				scanCenterSettingsRow(dest, current)
 				return nil
 			}}
 		},
-	}}
-
-	got, err := repo.PutSettings(context.Background(), input)
-	if err != nil {
-		t.Fatalf("PutSettings() error = %v", err)
 	}
-	if got.RetentionPolicy.AggregateLayerDays != 60 {
-		t.Fatalf("AggregateLayerDays = %d, want 60", got.RetentionPolicy.AggregateLayerDays)
-	}
-	if got.SubscriptionCost.BaseCurrency != "USD" || got.SubscriptionCost.ExchangeRateProvider != string(centersettings.SubscriptionExchangeRateProviderFixer) {
-		t.Fatalf("SubscriptionCost = %#v, want USD/fixer", got.SubscriptionCost)
-	}
-	if got.IPQuality.TimeoutSeconds != 20 || got.IPQuality.StaleAfterSeconds != 604800 || got.IPQuality.Services[1] != "chatgpt" {
-		t.Fatalf("IPQuality = %#v, want timeout/services preserved", got.IPQuality)
-	}
-	if len(got.OverrideRules.MonitoringInstanceLabels) != 1 {
-		t.Fatalf("len(MonitoringInstanceLabels) = %d, want 1", len(got.OverrideRules.MonitoringInstanceLabels))
-	}
-	if len(seenArgs) != 13 {
-		t.Fatalf("len(args) = %d, want 13", len(seenArgs))
-	}
-	if seenArgs[0] != centersettings.SingletonID {
-		t.Fatalf("settings_id = %#v, want %q", seenArgs[0], centersettings.SingletonID)
-	}
-	if got, ok := seenArgs[3].(bool); !ok || !got {
-		t.Fatalf("telegram_runtime_managed = %#v, want true", seenArgs[3])
-	}
-	assertJSONArgContains(t, seenArgs[9], `"monitoring_instance_labels":[{"label":"core"`)
-	assertJSONArgContains(t, seenArgs[10], `"raw_layer_days":30`)
-	assertJSONArgContains(t, seenArgs[11], `"base_currency":"USD"`)
-	assertJSONArgContains(t, seenArgs[12], `"frequency_seconds":86400`)
-}
-
-func TestCenterSettingsRepositoryPutSettingsValidatesBeforeWriting(t *testing.T) {
-	t.Parallel()
-
-	called := false
-	repo := &PostgresSettingsRepository{db: fakeSettingsQueryer{
-		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			called = true
-			return fakeSettingsRow{scan: func(dest ...any) error { return nil }}
+	repo := &PostgresSettingsRepository{
+		db: fakeSettingsQueryer{},
+		beginTx: func(context.Context, pgx.TxOptions) (settingsTx, error) {
+			return tx, nil
 		},
-	}}
-
-	_, err := repo.PutSettings(context.Background(), centersettings.CenterSettings{
-		Telegram: centersettings.TelegramSettings{BotToken: "bot-token"},
-	})
-	if !errors.Is(err, centersettings.ErrInvalidSettings) {
-		t.Fatalf("PutSettings() error = %v, want ErrInvalidSettings", err)
 	}
-	if called {
-		t.Fatal("PutSettings() touched the database for invalid input")
+	callbackCalls := 0
+
+	got, err := repo.MutateSettings(context.Background(), func(input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+		callbackCalls++
+		if !reflect.DeepEqual(input, current) {
+			t.Fatalf("callback current = %#v, want %#v", input, current)
+		}
+		return updated, nil
+	})
+	if err != nil {
+		t.Fatalf("MutateSettings() error = %v", err)
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("callback calls = %d, want 1", callbackCalls)
+	}
+	if !reflect.DeepEqual(got, updated) {
+		t.Fatalf("MutateSettings() = %#v, want %#v", got, updated)
 	}
 }
 
-func TestCenterSettingsRepositorySQLUsesSingletonUpsertAndJSONBSections(t *testing.T) {
+func TestCenterSettingsRepositoryMutateSettingsRejectsNilCallbackBeforeTransaction(t *testing.T) {
 	t.Parallel()
 
-	if !strings.Contains(upsertCenterSettingsSQL, "insert into center_settings") {
-		t.Fatalf("upsertCenterSettingsSQL = %q, want center_settings insert", upsertCenterSettingsSQL)
+	repo := &PostgresSettingsRepository{}
+	_, err := repo.MutateSettings(context.Background(), nil)
+	if !errors.Is(err, centersettings.ErrInvalidSettings) {
+		t.Fatalf("MutateSettings(nil) error = %v, want ErrInvalidSettings", err)
 	}
-	if !strings.Contains(upsertCenterSettingsSQL, "on conflict (settings_id) do update") {
-		t.Fatalf("upsertCenterSettingsSQL = %q, want singleton upsert", upsertCenterSettingsSQL)
+}
+
+func TestCenterSettingsRepositoryMutateSettingsRollsBackCallbackAndValidationFailures(t *testing.T) {
+	t.Parallel()
+	callbackErr := errors.New("callback failed")
+
+	for _, test := range []struct {
+		name    string
+		mutate  centersettings.MutateSettingsFunc
+		wantErr error
+	}{
+		{
+			name: "callback error",
+			mutate: func(centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+				return centersettings.CenterSettings{}, callbackErr
+			},
+			wantErr: callbackErr,
+		},
+		{
+			name: "validation error",
+			mutate: func(current centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+				current.HostSampleFrequencyTier = "invalid-tier"
+				return current, nil
+			},
+			wantErr: centersettings.ErrInvalidSettings,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tx := newSettingsMutationTestTx(centersettings.Default())
+			repo := newSettingsMutationTestRepository(tx)
+			_, err := repo.MutateSettings(context.Background(), test.mutate)
+			if err == nil || !errors.Is(err, test.wantErr) {
+				t.Fatalf("MutateSettings() error = %v, want %v", err, test.wantErr)
+			}
+			if tx.committed {
+				t.Fatal("failed mutation committed")
+			}
+			if tx.rollbackCalls != 1 {
+				t.Fatalf("rollbackCalls = %d, want 1", tx.rollbackCalls)
+			}
+		})
 	}
-	if !strings.Contains(upsertCenterSettingsSQL, "telegram_runtime_managed") {
-		t.Fatalf("upsertCenterSettingsSQL = %q, want telegram_runtime_managed column", upsertCenterSettingsSQL)
+}
+
+func TestCenterSettingsRepositoryMutateSettingsRollsBackSQLFailure(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("forced update failure")
+	tx := newSettingsMutationTestTx(centersettings.Default())
+	execCalls := 0
+	tx.exec = func(context.Context) (pgconn.CommandTag, error) {
+		execCalls++
+		if execCalls == 2 {
+			return pgconn.CommandTag{}, wantErr
+		}
+		return pgconn.CommandTag{}, nil
 	}
-	if !strings.Contains(upsertCenterSettingsSQL, "feishu_enabled") {
-		t.Fatalf("upsertCenterSettingsSQL = %q, want feishu_enabled column", upsertCenterSettingsSQL)
+	repo := newSettingsMutationTestRepository(tx)
+	_, err := repo.MutateSettings(context.Background(), func(current centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+		current.HostSampleFrequencyTier = "1m"
+		return current, nil
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("MutateSettings() error = %v, want %v", err, wantErr)
 	}
-	if !strings.Contains(upsertCenterSettingsSQL, "$8::jsonb") {
-		t.Fatalf("upsertCenterSettingsSQL = %q, want jsonb cast for probe defaults", upsertCenterSettingsSQL)
+	if tx.committed || tx.rollbackCalls != 1 {
+		t.Fatalf("transaction committed=%t rollbackCalls=%d, want rollback only", tx.committed, tx.rollbackCalls)
 	}
-	if !strings.Contains(upsertCenterSettingsSQL, "ip_quality_settings") {
-		t.Fatalf("upsertCenterSettingsSQL = %q, want ip_quality_settings column", upsertCenterSettingsSQL)
+}
+
+func TestCenterSettingsRepositoryMutateSettingsRollsBackCommitFailure(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("forced commit failure")
+	tx := newSettingsMutationTestTx(centersettings.Default())
+	tx.commitErr = wantErr
+	repo := newSettingsMutationTestRepository(tx)
+	_, err := repo.MutateSettings(context.Background(), func(current centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+		current.HostSampleFrequencyTier = "1m"
+		return current, nil
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("MutateSettings() error = %v, want %v", err, wantErr)
 	}
-	if !strings.Contains(getCenterSettingsSQL, "where settings_id = $1") {
-		t.Fatalf("getCenterSettingsSQL = %q, want singleton filter", getCenterSettingsSQL)
+	if tx.committed || tx.rollbackCalls != 1 {
+		t.Fatalf("transaction committed=%t rollbackCalls=%d, want rollback only", tx.committed, tx.rollbackCalls)
+	}
+}
+func TestCenterSettingsRepositoryGetSettingsReadsIPQualityEnabledLikeSyncPlan(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		raw  string
+		want bool
+	}{
+		"missing enabled defaults on": {raw: `{"frequency_seconds":86400,"timeout_seconds":15,"stale_after_seconds":604800,"services":["netflix"]}`, want: true},
+		"explicit disabled stays off": {raw: `{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"stale_after_seconds":604800,"services":["netflix"]}`, want: false},
+		"empty object defaults on":    {raw: `{}`, want: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &PostgresSettingsRepository{db: fakeSettingsQueryer{
+				queryRow: func(context.Context, string, ...any) pgx.Row {
+					return fakeSettingsRow{scan: func(dest ...any) error {
+						scanCenterSettingsRow(dest, centersettings.Default())
+						*(dest[12].(*[]byte)) = []byte(test.raw)
+						return nil
+					}}
+				},
+			}}
+			got, err := repo.GetSettings(context.Background())
+			if err != nil {
+				t.Fatalf("GetSettings() error = %v", err)
+			}
+			if got.IPQuality.Enabled != test.want {
+				t.Fatalf("IPQuality.Enabled = %v, want %v", got.IPQuality.Enabled, test.want)
+			}
+			if got.IPQuality.FrequencySeconds != 86400 || len(got.IPQuality.Services) == 0 {
+				t.Fatalf("IPQuality = %#v, want defaults filled in", got.IPQuality)
+			}
+		})
 	}
 }
 
@@ -198,6 +218,56 @@ type fakeSettingsQueryer struct {
 
 func (f fakeSettingsQueryer) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
 	return f.queryRow(ctx, sql, args...)
+}
+
+type fakeSettingsTx struct {
+	queryRow      func(context.Context, string, ...any) pgx.Row
+	exec          func(context.Context) (pgconn.CommandTag, error)
+	committed     bool
+	rollbackCalls int
+	commitErr     error
+}
+
+func (f *fakeSettingsTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	return f.queryRow(ctx, sql, args...)
+}
+
+func (f *fakeSettingsTx) Exec(ctx context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
+	if f.exec != nil {
+		return f.exec(ctx)
+	}
+	return pgconn.CommandTag{}, nil
+}
+
+func (f *fakeSettingsTx) Commit(context.Context) error {
+	if f.commitErr != nil {
+		return f.commitErr
+	}
+	f.committed = true
+	return nil
+}
+
+func (f *fakeSettingsTx) Rollback(context.Context) error {
+	f.rollbackCalls++
+	return nil
+}
+
+func newSettingsMutationTestTx(current centersettings.CenterSettings) *fakeSettingsTx {
+	return &fakeSettingsTx{
+		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+			return fakeSettingsRow{scan: func(dest ...any) error {
+				scanCenterSettingsRow(dest, current)
+				return nil
+			}}
+		},
+	}
+}
+
+func newSettingsMutationTestRepository(tx *fakeSettingsTx) *PostgresSettingsRepository {
+	return &PostgresSettingsRepository{
+		db:      fakeSettingsQueryer{},
+		beginTx: func(context.Context, pgx.TxOptions) (settingsTx, error) { return tx, nil },
+	}
 }
 
 type fakeSettingsRow struct {
@@ -231,55 +301,4 @@ func scanCenterSettingsRow(dest []any, value centersettings.CenterSettings) {
 	updatedAt := createdAt.Add(time.Minute)
 	*(dest[13].(*time.Time)) = createdAt
 	*(dest[14].(*time.Time)) = updatedAt
-}
-
-func assertJSONArgContains(t *testing.T, value any, snippet string) {
-	t.Helper()
-
-	body, ok := value.([]byte)
-	if !ok {
-		t.Fatalf("value = %#v, want []byte", value)
-	}
-	if !strings.Contains(string(body), snippet) {
-		t.Fatalf("json = %s, want snippet %q", body, snippet)
-	}
-}
-
-func settingsStringPtr(value string) *string { return &value }
-
-func TestCenterSettingsRepositoryGetSettingsReadsIPQualityEnabledLikeSyncPlan(t *testing.T) {
-	t.Parallel()
-
-	for name, tc := range map[string]struct {
-		raw  string
-		want bool
-	}{
-		"missing enabled defaults on": {raw: `{"frequency_seconds":86400,"timeout_seconds":15,"stale_after_seconds":604800,"services":["netflix"]}`, want: true},
-		"explicit disabled stays off": {raw: `{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"stale_after_seconds":604800,"services":["netflix"]}`, want: false},
-		"empty object defaults on":    {raw: `{}`, want: true},
-	} {
-		tc := tc
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			repo := &PostgresSettingsRepository{db: fakeSettingsQueryer{
-				queryRow: func(context.Context, string, ...any) pgx.Row {
-					return fakeSettingsRow{scan: func(dest ...any) error {
-						scanCenterSettingsRow(dest, centersettings.Default())
-						*(dest[12].(*[]byte)) = []byte(tc.raw)
-						return nil
-					}}
-				},
-			}}
-			got, err := repo.GetSettings(context.Background())
-			if err != nil {
-				t.Fatalf("GetSettings() error = %v", err)
-			}
-			if got.IPQuality.Enabled != tc.want {
-				t.Fatalf("IPQuality.Enabled = %v, want %v", got.IPQuality.Enabled, tc.want)
-			}
-			if got.IPQuality.FrequencySeconds != 86400 || len(got.IPQuality.Services) == 0 {
-				t.Fatalf("IPQuality = %#v, want defaults filled in", got.IPQuality)
-			}
-		})
-	}
 }

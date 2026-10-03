@@ -78,6 +78,12 @@ func elapsedMillis(start time.Time) *int {
 }
 
 func sourceFailure(provider, sourceType, code, summary string, latency *int, raw json.RawMessage) providerSourceOutcome {
+	safeSummary := "provider reported failure"
+	if code == "invalid_response" {
+		safeSummary = "invalid provider response"
+	} else if code == "missing_target_ip" {
+		safeSummary = summary
+	}
 	return providerSourceOutcome{
 		Result: agentapi.IPQualityProviderResultPayload{
 			Provider:     provider,
@@ -85,7 +91,7 @@ func sourceFailure(provider, sourceType, code, summary string, latency *int, raw
 			SourceType:   sourceType,
 			LatencyMS:    latency,
 			ErrorCode:    code,
-			ErrorSummary: summary,
+			ErrorSummary: safeSummary,
 		},
 		Raw: raw,
 	}

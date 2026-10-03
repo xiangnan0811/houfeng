@@ -37,13 +37,18 @@ func (s *Service) GetSettings(ctx context.Context) (centersettings.SubscriptionC
 	return settings.SubscriptionCost, nil
 }
 
-func (s *Service) PutSettings(ctx context.Context, input centersettings.SubscriptionCostSettings) (centersettings.SubscriptionCostSettings, error) {
-	settings, err := s.settingsRepo.GetSettings(ctx)
-	if err != nil {
-		return centersettings.SubscriptionCostSettings{}, fmt.Errorf("get center settings: %w", err)
+func (s *Service) PutSettings(ctx context.Context, mutate func(centersettings.SubscriptionCostSettings) (centersettings.SubscriptionCostSettings, error)) (centersettings.SubscriptionCostSettings, error) {
+	if mutate == nil {
+		return centersettings.SubscriptionCostSettings{}, centersettings.ErrInvalidSettings
 	}
-	settings.SubscriptionCost = input
-	updated, err := s.settingsRepo.PutSettings(ctx, settings)
+	updated, err := s.settingsRepo.MutateSettings(ctx, func(current centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+		next, err := mutate(current.SubscriptionCost)
+		if err != nil {
+			return centersettings.CenterSettings{}, err
+		}
+		current.SubscriptionCost = next
+		return current, nil
+	})
 	if err != nil {
 		return centersettings.SubscriptionCostSettings{}, err
 	}

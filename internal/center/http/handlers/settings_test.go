@@ -72,9 +72,13 @@ func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.Ce
 	return f.getSettingsResult, nil
 }
 
-func (f *fakeSettingsRepository) PutSettings(_ context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
+func (f *fakeSettingsRepository) MutateSettings(_ context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
 	f.putSettingsCalls++
-	f.putSettingsInput = input
+	next, err := mutate(f.getSettingsResult)
+	if err != nil {
+		return centersettings.CenterSettings{}, err
+	}
+	f.putSettingsInput = next
 	if f.putSettingsErr != nil {
 		return centersettings.CenterSettings{}, f.putSettingsErr
 	}

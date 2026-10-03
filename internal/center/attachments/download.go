@@ -377,7 +377,7 @@ func (service *DownloadService) Open(
 	}
 
 	var serving *recordplatform.ServingLeaseV1
-	expiresAt := service.now().Add(service.leaseDuration)
+	var expiresAt time.Time
 	if content.RecordID != "" {
 		ownerID, ownerErr := service.newLeaseOwnerID()
 		claim := recordplatform.LeaseClaimInputV1{OwnerID: ownerID, LeaseDuration: service.leaseDuration}
@@ -397,51 +397,79 @@ func (service *DownloadService) Open(
 		expiresAt = acquired.Owner.ExpiresAt
 	}
 
+	lifecycleCtx, lifecycleCancel := context.WithCancel(ctx)
 	delivery := &ContentDelivery{
 		repository: service.repository, authorizer: service.authorizer, leases: service.leases,
 		actor: actor, recordID: content.RecordID, now: service.now,
 		assertion: assertion, serving: serving, expiresAt: expiresAt, chunkBytes: service.chunkBytes,
-		leaseDuration: service.leaseDuration,
-		closeDone:     make(chan struct{}),
+		leaseDuration: service.leaseDuration, lifecycleCtx: lifecycleCtx, lifecycleCancel: lifecycleCancel,
+		closeDone: make(chan struct{}),
 		metadata: DownloadMetadata{
 			AttachmentID: content.AttachmentID, Variant: variant, DisplayName: content.DisplayName,
 			MediaType: AllowlistedContentType(variant, mediaType), Object: selected, Range: resolvedRange,
 		},
 	}
-	if err := delivery.assert(ctx); err != nil {
-		_ = delivery.Close(ctx)
-		return nil, err
+	if serving != nil {
+		// The record lease must be renewed before any initial content or blob
+		// assertion can consume the short serving window.
+		delivery.startRenewal()
 	}
-	info, err := service.blob.Stat(ctx, selected)
-	if err != nil {
+	failOpen := func(openErr error) (ContentStream, error) {
 		_ = delivery.Close(ctx)
-		return nil, err
+		return nil, openErr
+	}
+	if err := delivery.assert(lifecycleCtx); err != nil {
+		return failOpen(err)
+	}
+	if err := lifecycleCtx.Err(); err != nil {
+		return failOpen(fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err))
+	}
+	info, err := service.blob.Stat(lifecycleCtx, selected)
+	if err != nil {
+		return failOpen(err)
+	}
+	if err := lifecycleCtx.Err(); err != nil {
+		return failOpen(fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err))
 	}
 	if info.Version != selected {
-		_ = delivery.Close(ctx)
-		return nil, ErrInvalidDownloadContent
+		return failOpen(ErrInvalidDownloadContent)
 	}
-	reader, err := service.blob.Open(ctx, selected, blobRange)
+	reader, err := service.blob.Open(lifecycleCtx, selected, blobRange)
 	if err != nil {
-		_ = delivery.Close(ctx)
-		return nil, err
+		return failOpen(err)
 	}
 	if nilDownloadDependency(reader) {
-		_ = delivery.Close(ctx)
-		return nil, ErrInvalidDownloadContent
+		return failOpen(ErrInvalidDownloadContent)
+	}
+	if err := delivery.installReader(reader); err != nil {
+		return failOpen(err)
+	}
+	if err := delivery.assert(lifecycleCtx); err != nil {
+		return failOpen(err)
+	}
+	if err := delivery.deliveryError(); err != nil {
+		return failOpen(err)
+	}
+	return delivery, nil
+}
+
+func (delivery *ContentDelivery) installReader(reader io.ReadCloser) error {
+	if delivery == nil || nilDownloadDependency(reader) {
+		return ErrInvalidDownloadRequest
+	}
+	delivery.mu.Lock()
+	if delivery.closed || delivery.terminalErr != nil || delivery.reader != nil || delivery.readerCloseAsked {
+		err := delivery.terminalErr
+		if err == nil {
+			err = ErrContentDeliveryRevoked
+		}
+		delivery.mu.Unlock()
+		_ = reader.Close()
+		return err
 	}
 	delivery.reader = reader
-	if err := delivery.assert(ctx); err != nil {
-		_ = delivery.Close(ctx)
-		return nil, err
-	}
-	delivery.startRenewal()
-	if err := delivery.deliveryError(); err != nil {
-		_ = delivery.Close(ctx)
-		return nil, err
-	}
-	_ = actor
-	return delivery, nil
+	delivery.mu.Unlock()
+	return nil
 }
 
 func (service *DownloadService) loadAuthorized(
@@ -520,33 +548,38 @@ func (service *DownloadService) releaseServingLease(
 }
 
 type ContentDelivery struct {
-	mu              sync.Mutex
-	repository      DownloadRepository
-	authorizer      RecordDownloadAuthorizer
-	leases          ContentLeaseRepository
-	actor           recordauth.ActorScope
-	recordID        string
-	now             func() time.Time
-	assertion       ContentAssertion
-	serving         *recordplatform.ServingLeaseV1
-	expiresAt       time.Time
-	leaseDuration   time.Duration
-	chunkBytes      int
-	metadata        DownloadMetadata
-	reader          io.ReadCloser
-	readerCloseOnce sync.Once
-	readerCloseErr  error
-	renewalStop     chan struct{}
-	renewalDone     chan struct{}
-	renewalCancel   context.CancelFunc
-	renewalSequence uint64
-	activeRenewal   chan struct{}
-	terminalErr     error
-	closeDone       chan struct{}
-	closeErr        error
-	closed          bool
-	streamed        bool
-	writeActive     bool
+	mu               sync.Mutex
+	repository       DownloadRepository
+	authorizer       RecordDownloadAuthorizer
+	leases           ContentLeaseRepository
+	actor            recordauth.ActorScope
+	recordID         string
+	now              func() time.Time
+	assertion        ContentAssertion
+	serving          *recordplatform.ServingLeaseV1
+	pendingRelease   *recordplatform.ServingLeaseV1
+	expiresAt        time.Time
+	leaseDuration    time.Duration
+	chunkBytes       int
+	metadata         DownloadMetadata
+	lifecycleCtx     context.Context
+	lifecycleCancel  context.CancelFunc
+	leaseGate        chan struct{}
+	reader           io.ReadCloser
+	readerCloseAsked bool
+	readerCloseDone  chan struct{}
+	readerCloseErr   error
+	renewalStop      chan struct{}
+	renewalDone      chan struct{}
+	renewalCancel    context.CancelFunc
+	renewalSequence  uint64
+	activeRenewal    chan struct{}
+	terminalErr      error
+	closeDone        chan struct{}
+	closeErr         error
+	closed           bool
+	streamed         bool
+	writeActive      bool
 }
 
 func (delivery *ContentDelivery) Metadata() DownloadMetadata {
@@ -560,8 +593,23 @@ func (delivery *ContentDelivery) WriteTo(ctx context.Context, writer io.Writer) 
 	if ctx == nil || writer == nil || delivery == nil {
 		return 0, ErrInvalidDownloadRequest
 	}
+	lifecycleCtx, cleanup := delivery.contextWithLifecycle(ctx)
+	if lifecycleCtx == nil {
+		return 0, ErrInvalidDownloadRequest
+	}
+	defer cleanup()
+
 	delivery.mu.Lock()
-	if delivery.closed || delivery.streamed || nilDownloadDependency(delivery.reader) {
+	if delivery.terminalErr != nil {
+		err := delivery.terminalErr
+		delivery.mu.Unlock()
+		return 0, err
+	}
+	if delivery.closed {
+		delivery.mu.Unlock()
+		return 0, ErrContentDeliveryRevoked
+	}
+	if delivery.streamed || nilDownloadDependency(delivery.reader) {
 		delivery.mu.Unlock()
 		return 0, ErrInvalidDownloadRequest
 	}
@@ -579,13 +627,13 @@ func (delivery *ContentDelivery) WriteTo(ctx context.Context, writer io.Writer) 
 	var written int64
 	remaining := delivery.metadata.Range.Length
 	for remaining > 0 {
-		if err := ctx.Err(); err != nil {
-			return written, fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
-		}
 		if err := delivery.deliveryError(); err != nil {
 			return written, err
 		}
-		if err := delivery.renewIfNeeded(ctx); err != nil {
+		if err := lifecycleCtx.Err(); err != nil {
+			return written, fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
+		}
+		if err := delivery.renewIfNeeded(lifecycleCtx); err != nil {
 			return written, err
 		}
 		readSize := int64(delivery.chunkBytes)
@@ -597,7 +645,9 @@ func (delivery *ContentDelivery) WriteTo(ctx context.Context, writer io.Writer) 
 		if remaining <= int64(delivery.chunkBytes) {
 			readSize++
 		}
-		read, readErr := readContentWithContext(ctx, reader, buffer[:int(readSize)], delivery.closeReader)
+		read, readErr := readContentWithContext(
+			lifecycleCtx, reader, buffer[:int(readSize)], delivery.closeReader,
+		)
 		if err := delivery.deliveryError(); err != nil {
 			return written, err
 		}
@@ -605,13 +655,13 @@ func (delivery *ContentDelivery) WriteTo(ctx context.Context, writer io.Writer) 
 			return written, ErrInvalidDownloadContent
 		}
 		if read > 0 {
-			if err := delivery.renewIfNeeded(ctx); err != nil {
+			if err := delivery.renewIfNeeded(lifecycleCtx); err != nil {
 				return written, err
 			}
-			if err := delivery.assert(ctx); err != nil {
+			if err := delivery.assert(lifecycleCtx); err != nil {
 				return written, err
 			}
-			count, writeErr := delivery.write(ctx, writer, buffer[:read])
+			count, writeErr := delivery.write(lifecycleCtx, writer, buffer[:read])
 			if count < 0 || count > read {
 				return written, ErrInvalidDownloadContent
 			}
@@ -626,6 +676,9 @@ func (delivery *ContentDelivery) WriteTo(ctx context.Context, writer io.Writer) 
 		}
 		if readErr != nil {
 			if errors.Is(readErr, io.EOF) {
+				if remaining == 0 {
+					return written, nil
+				}
 				return written, io.ErrUnexpectedEOF
 			}
 			return written, readErr
@@ -637,7 +690,7 @@ func (delivery *ContentDelivery) WriteTo(ctx context.Context, writer io.Writer) 
 	// A reader may return the exact final bytes with a nil error. Probe once
 	// more so an extra byte is rejected instead of being silently ignored.
 	var probe [1]byte
-	read, readErr := readContentWithContext(ctx, reader, probe[:], delivery.closeReader)
+	read, readErr := readContentWithContext(lifecycleCtx, reader, probe[:], delivery.closeReader)
 	if err := delivery.deliveryError(); err != nil {
 		return written, err
 	}
@@ -665,6 +718,35 @@ func (delivery *ContentDelivery) write(ctx context.Context, writer io.Writer, pa
 }
 
 func (delivery *ContentDelivery) beginWrite(ctx context.Context) error {
+	if delivery == nil || ctx == nil {
+		return ErrInvalidDownloadRequest
+	}
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
+	}
+	delivery.mu.Lock()
+	if delivery.terminalErr != nil {
+		err := delivery.terminalErr
+		delivery.mu.Unlock()
+		return err
+	}
+	if delivery.closed {
+		delivery.mu.Unlock()
+		return ErrContentDeliveryRevoked
+	}
+	if delivery.writeActive {
+		delivery.mu.Unlock()
+		return ErrInvalidDownloadContent
+	}
+	now := delivery.now
+	expiresAt := delivery.expiresAt
+	delivery.mu.Unlock()
+	if now == nil || expiresAt.IsZero() {
+		return ErrInvalidDownloadContent
+	}
+	if !now().Before(expiresAt) {
+		return ErrContentDeliveryExpired
+	}
 	delivery.mu.Lock()
 	defer delivery.mu.Unlock()
 	if err := ctx.Err(); err != nil {
@@ -678,6 +760,14 @@ func (delivery *ContentDelivery) beginWrite(ctx context.Context) error {
 	}
 	if delivery.writeActive {
 		return ErrInvalidDownloadContent
+	}
+	currentNow := delivery.now
+	currentExpiresAt := delivery.expiresAt
+	if currentNow == nil || currentExpiresAt.IsZero() {
+		return ErrInvalidDownloadContent
+	}
+	if !currentNow().Before(currentExpiresAt) {
+		return ErrContentDeliveryExpired
 	}
 	delivery.writeActive = true
 	return nil
@@ -705,6 +795,24 @@ func readContentWithContext(
 		return read, fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, contextErr)
 	}
 	return read, err
+}
+
+func (delivery *ContentDelivery) contextWithLifecycle(ctx context.Context) (context.Context, func()) {
+	if delivery == nil || ctx == nil {
+		return nil, func() {}
+	}
+	delivery.mu.Lock()
+	lifecycleCtx := delivery.lifecycleCtx
+	delivery.mu.Unlock()
+	if lifecycleCtx == nil {
+		return nil, func() {}
+	}
+	merged, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(lifecycleCtx, cancel)
+	return merged, func() {
+		stop()
+		cancel()
+	}
 }
 
 func (delivery *ContentDelivery) startRenewal() {
@@ -738,12 +846,21 @@ func (delivery *ContentDelivery) runRenewal(stop <-chan struct{}, done chan<- st
 		select {
 		case <-stop:
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			return
 		case <-timer.C:
 		}
-		if err := delivery.renewIfNeeded(context.Background()); err != nil {
+		delivery.mu.Lock()
+		lifecycleCtx := delivery.lifecycleCtx
+		delivery.mu.Unlock()
+		if lifecycleCtx == nil {
+			lifecycleCtx = context.Background()
+		}
+		if err := delivery.renewIfNeeded(lifecycleCtx); err != nil {
 			if !delivery.isClosed() {
 				delivery.revoke(err)
 			}
@@ -754,30 +871,112 @@ func (delivery *ContentDelivery) runRenewal(stop <-chan struct{}, done chan<- st
 
 func (delivery *ContentDelivery) nextRenewalDelay() (time.Duration, error) {
 	delivery.mu.Lock()
-	defer delivery.mu.Unlock()
 	if delivery.closed {
+		delivery.mu.Unlock()
 		return 0, ErrContentDeliveryRevoked
 	}
 	if delivery.terminalErr != nil {
-		return 0, delivery.terminalErr
+		err := delivery.terminalErr
+		delivery.mu.Unlock()
+		return 0, err
 	}
 	if delivery.serving == nil || delivery.now == nil || delivery.leaseDuration < time.Microsecond || delivery.expiresAt.IsZero() {
+		delivery.mu.Unlock()
 		return 0, ErrInvalidDownloadContent
 	}
-	now := delivery.now()
-	if !now.Before(delivery.expiresAt) {
+	now := delivery.now
+	expiresAt := delivery.expiresAt
+	leaseDuration := delivery.leaseDuration
+	delivery.mu.Unlock()
+	current := now()
+	if !current.Before(expiresAt) {
 		return 0, ErrContentDeliveryExpired
 	}
-	delay := delivery.expiresAt.Sub(now) - contentRenewalLead(delivery.leaseDuration)
+	delay := expiresAt.Sub(current) - contentRenewalLead(leaseDuration)
 	if delay < 0 {
 		return 0, nil
 	}
 	return delay, nil
 }
 
+func (delivery *ContentDelivery) acquireLeaseOperation(ctx context.Context) (func(), error) {
+	if delivery == nil || ctx == nil {
+		return nil, ErrInvalidDownloadRequest
+	}
+	delivery.mu.Lock()
+	if delivery.closed {
+		delivery.mu.Unlock()
+		return nil, ErrContentDeliveryRevoked
+	}
+	if delivery.terminalErr != nil {
+		err := delivery.terminalErr
+		delivery.mu.Unlock()
+		return nil, err
+	}
+	if delivery.leaseGate == nil {
+		delivery.leaseGate = make(chan struct{}, 1)
+	}
+	gate := delivery.leaseGate
+	delivery.mu.Unlock()
+
+	select {
+	case gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, ctx.Err())
+	}
+	released := false
+	var releaseMu sync.Mutex
+	release := func() {
+		releaseMu.Lock()
+		if released {
+			releaseMu.Unlock()
+			return
+		}
+		released = true
+		releaseMu.Unlock()
+		<-gate
+	}
+	if err := ctx.Err(); err != nil {
+		release()
+		return nil, fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
+	}
+	delivery.mu.Lock()
+	closed := delivery.closed
+	terminalErr := delivery.terminalErr
+	delivery.mu.Unlock()
+	if closed {
+		release()
+		return nil, ErrContentDeliveryRevoked
+	}
+	if terminalErr != nil {
+		release()
+		return nil, terminalErr
+	}
+	return release, nil
+}
+
+func (delivery *ContentDelivery) waitLeaseOperation(ctx context.Context) error {
+	if delivery == nil || ctx == nil {
+		return ErrInvalidDownloadRequest
+	}
+	delivery.mu.Lock()
+	gate := delivery.leaseGate
+	delivery.mu.Unlock()
+	if gate == nil {
+		return nil
+	}
+	select {
+	case gate <- struct{}{}:
+		<-gate
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // renewIfNeeded extends a record stream only when its database-observed lease
-// is near expiry. State snapshots are taken under the mutex, while database I/O
-// runs outside it so Close can cancel the operation and unblock the reader.
+// is near expiry. The lease gate covers the complete read/renew/publish
+// operation, so Close cannot release an old token after a successful renewal.
 func (delivery *ContentDelivery) renewIfNeeded(ctx context.Context) error {
 	if delivery == nil || ctx == nil {
 		return ErrInvalidDownloadRequest
@@ -785,102 +984,229 @@ func (delivery *ContentDelivery) renewIfNeeded(ctx context.Context) error {
 	for {
 		delivery.mu.Lock()
 		active := delivery.activeRenewal
-		if active == nil {
-			break
+		if active != nil {
+			delivery.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, ctx.Err())
+			case <-active:
+			}
+			continue
 		}
-		delivery.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, ctx.Err())
-		case <-active:
+		if delivery.closed {
+			delivery.mu.Unlock()
+			return ErrContentDeliveryRevoked
 		}
-	}
-	if delivery.closed {
+		if delivery.terminalErr != nil {
+			err := delivery.terminalErr
+			delivery.mu.Unlock()
+			return err
+		}
+		serving := delivery.serving
+		now := delivery.now
+		expiresAt := delivery.expiresAt
+		leaseDuration := delivery.leaseDuration
+		leases := delivery.leases
 		delivery.mu.Unlock()
-		return ErrContentDeliveryRevoked
-	}
-	if delivery.terminalErr != nil {
-		err := delivery.terminalErr
-		delivery.mu.Unlock()
-		return err
-	}
-	if delivery.now == nil {
-		delivery.mu.Unlock()
-		return ErrInvalidDownloadRequest
-	}
-	serving := delivery.serving
-	expiresAt := delivery.expiresAt
-	leaseDuration := delivery.leaseDuration
-	leases := delivery.leases
-	if serving == nil {
-		delivery.mu.Unlock()
-		return nil
-	}
-	if nilDownloadDependency(leases) || leaseDuration < time.Microsecond {
-		delivery.mu.Unlock()
-		return ErrInvalidDownloadContent
-	}
-	now := delivery.now()
-	lead := contentRenewalLead(leaseDuration)
-	if now.Before(expiresAt) && now.Before(expiresAt.Add(-lead)) {
-		delivery.mu.Unlock()
-		return nil
-	}
-	if !now.Before(expiresAt) {
-		delivery.mu.Unlock()
-		delivery.revoke(ErrContentDeliveryExpired)
-		return ErrContentDeliveryExpired
-	}
-	remaining := expiresAt.Sub(now)
-	timeout := renewalTimeout(remaining)
-	if timeout <= 0 {
-		delivery.mu.Unlock()
-		delivery.revoke(ErrContentDeliveryExpired)
-		return ErrContentDeliveryExpired
-	}
-	delivery.renewalSequence++
-	sequence := delivery.renewalSequence
-	active := make(chan struct{})
-	delivery.activeRenewal = active
-	renewContext, cancel := context.WithTimeout(ctx, timeout)
-	delivery.renewalCancel = cancel
-	delivery.mu.Unlock()
+		if serving == nil {
+			return nil
+		}
+		if now == nil || nilDownloadDependency(leases) || leaseDuration < time.Microsecond {
+			return ErrInvalidDownloadContent
+		}
+		current := now()
+		lead := contentRenewalLead(leaseDuration)
+		if current.Before(expiresAt) && current.Before(expiresAt.Add(-lead)) {
+			return nil
+		}
+		if !current.Before(expiresAt) {
+			delivery.revoke(ErrContentDeliveryExpired)
+			return ErrContentDeliveryExpired
+		}
 
-	renewed, err := leases.RenewServingLease(renewContext, *serving, leaseDuration)
-	cancel()
-	delivery.mu.Lock()
-	if delivery.renewalSequence == sequence {
-		delivery.renewalCancel = nil
-	}
-	if delivery.activeRenewal == active {
-		delivery.activeRenewal = nil
-		close(active)
-	}
-	closed := delivery.closed
-	current := delivery.serving
-	if err != nil {
-		delivery.mu.Unlock()
-		renewErr := fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
-		if !closed {
-			delivery.revoke(renewErr)
+		active = make(chan struct{})
+		delivery.mu.Lock()
+		if delivery.activeRenewal != nil {
+			delivery.mu.Unlock()
+			continue
 		}
-		return renewErr
-	}
-	if current == nil || *current != *serving || renewed.Validate() != nil || renewed.Object != serving.Object ||
-		renewed.Owner.OwnerID != serving.Owner.OwnerID ||
-		renewed.Owner.Generation != serving.Owner.Generation ||
-		renewed.CapturedEpoch != serving.CapturedEpoch ||
-		delivery.now == nil || !renewed.Owner.ExpiresAt.After(delivery.now()) {
-		delivery.mu.Unlock()
-		if !closed {
-			delivery.revoke(ErrContentDeliveryRevoked)
+		if delivery.closed {
+			delivery.mu.Unlock()
+			return ErrContentDeliveryRevoked
 		}
-		return ErrContentDeliveryRevoked
+		if delivery.terminalErr != nil {
+			err := delivery.terminalErr
+			delivery.mu.Unlock()
+			return err
+		}
+		delivery.renewalSequence++
+		sequence := delivery.renewalSequence
+		delivery.activeRenewal = active
+		delivery.mu.Unlock()
+
+		release, gateErr := delivery.acquireLeaseOperation(ctx)
+		if gateErr != nil {
+			delivery.mu.Lock()
+			if delivery.activeRenewal == active {
+				delivery.activeRenewal = nil
+				close(active)
+			}
+			closed := delivery.closed
+			terminalErr := delivery.terminalErr
+			delivery.mu.Unlock()
+			if closed {
+				return nil
+			}
+			if terminalErr != nil {
+				return terminalErr
+			}
+			return gateErr
+		}
+
+		delivery.mu.Lock()
+		if delivery.closed {
+			if delivery.activeRenewal == active {
+				delivery.activeRenewal = nil
+				close(active)
+			}
+			delivery.mu.Unlock()
+			release()
+			return nil
+		}
+		if delivery.terminalErr != nil {
+			err := delivery.terminalErr
+			if delivery.activeRenewal == active {
+				delivery.activeRenewal = nil
+				close(active)
+			}
+			delivery.mu.Unlock()
+			release()
+			return err
+		}
+		serving = delivery.serving
+		now = delivery.now
+		expiresAt = delivery.expiresAt
+		leaseDuration = delivery.leaseDuration
+		leases = delivery.leases
+		delivery.mu.Unlock()
+		if serving == nil || now == nil || nilDownloadDependency(leases) {
+			delivery.mu.Lock()
+			if delivery.activeRenewal == active {
+				delivery.activeRenewal = nil
+				close(active)
+			}
+			delivery.mu.Unlock()
+			release()
+			return nil
+		}
+		current = now()
+		if !current.Before(expiresAt) {
+			delivery.mu.Lock()
+			if delivery.activeRenewal == active {
+				delivery.activeRenewal = nil
+				close(active)
+			}
+			delivery.mu.Unlock()
+			release()
+			delivery.revoke(ErrContentDeliveryExpired)
+			return ErrContentDeliveryExpired
+		}
+		remaining := expiresAt.Sub(current)
+		timeout := renewalTimeout(remaining)
+		if timeout <= 0 {
+			delivery.mu.Lock()
+			if delivery.activeRenewal == active {
+				delivery.activeRenewal = nil
+				close(active)
+			}
+			delivery.mu.Unlock()
+			release()
+			delivery.revoke(ErrContentDeliveryExpired)
+			return ErrContentDeliveryExpired
+		}
+
+		renewContext, cancel := context.WithTimeout(ctx, timeout)
+		delivery.mu.Lock()
+		closedBeforeRenew := delivery.closed
+		terminalBeforeRenew := delivery.terminalErr
+		if !closedBeforeRenew && terminalBeforeRenew == nil {
+			delivery.renewalCancel = cancel
+		}
+		delivery.mu.Unlock()
+		if closedBeforeRenew || terminalBeforeRenew != nil {
+			cancel()
+			delivery.mu.Lock()
+			if delivery.activeRenewal == active {
+				delivery.activeRenewal = nil
+				close(active)
+			}
+			delivery.mu.Unlock()
+			release()
+			if closedBeforeRenew {
+				return nil
+			}
+			return terminalBeforeRenew
+		}
+
+		renewed, renewErr := leases.RenewServingLease(renewContext, *serving, leaseDuration)
+		cancel()
+		var validationNow time.Time
+		if renewErr == nil && now != nil {
+			validationNow = now()
+		}
+		delivery.mu.Lock()
+		if delivery.renewalSequence == sequence {
+			delivery.renewalCancel = nil
+		}
+		if delivery.activeRenewal == active {
+			delivery.activeRenewal = nil
+			close(active)
+		}
+		closed := delivery.closed
+		terminalErr := delivery.terminalErr
+		currentServing := delivery.serving
+		validRenewal := renewErr == nil && currentServing != nil &&
+			*currentServing == *serving && renewed.Validate() == nil &&
+			renewed.Object == serving.Object &&
+			renewed.Owner.OwnerID == serving.Owner.OwnerID &&
+			renewed.Owner.Generation == serving.Owner.Generation &&
+			renewed.CapturedEpoch == serving.CapturedEpoch &&
+			!validationNow.IsZero() && renewed.Owner.ExpiresAt.After(validationNow)
+		var resultErr error
+		shouldRevoke := false
+		if renewErr != nil {
+			if closed {
+				resultErr = nil
+			} else if terminalErr != nil {
+				resultErr = terminalErr
+			} else {
+				resultErr = fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, renewErr)
+				shouldRevoke = true
+			}
+		} else if closed || terminalErr != nil {
+			if validRenewal {
+				pending := renewed
+				delivery.pendingRelease = &pending
+			}
+			if closed {
+				resultErr = nil
+			} else {
+				resultErr = terminalErr
+			}
+		} else if !validRenewal {
+			resultErr = ErrContentDeliveryRevoked
+			shouldRevoke = true
+		} else {
+			delivery.serving = &renewed
+			delivery.expiresAt = renewed.Owner.ExpiresAt
+		}
+		delivery.mu.Unlock()
+		if shouldRevoke {
+			delivery.revoke(resultErr)
+		}
+		release()
+		return resultErr
 	}
-	delivery.serving = &renewed
-	delivery.expiresAt = renewed.Owner.ExpiresAt
-	delivery.mu.Unlock()
-	return nil
 }
 
 func contentRenewalLead(duration time.Duration) time.Duration {
@@ -908,7 +1234,11 @@ func (delivery *ContentDelivery) revoke(err error) {
 		return
 	}
 	delivery.terminalErr = err
+	cancel := delivery.lifecycleCancel
 	delivery.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 	_ = delivery.closeReader()
 }
 
@@ -934,22 +1264,43 @@ func (delivery *ContentDelivery) isClosed() bool {
 	delivery.mu.Lock()
 	defer delivery.mu.Unlock()
 	return delivery.closed
-
 }
 
 func (delivery *ContentDelivery) closeReader() error {
 	if delivery == nil {
 		return nil
 	}
-	delivery.readerCloseOnce.Do(func() {
-		delivery.mu.Lock()
-		reader := delivery.reader
+	delivery.mu.Lock()
+	if delivery.readerCloseAsked {
+		done := delivery.readerCloseDone
 		delivery.mu.Unlock()
-		if !nilDownloadDependency(reader) {
-			delivery.readerCloseErr = reader.Close()
+		if done != nil {
+			<-done
 		}
-	})
-	return delivery.readerCloseErr
+		delivery.mu.Lock()
+		err := delivery.readerCloseErr
+		delivery.mu.Unlock()
+		return err
+	}
+	reader := delivery.reader
+	if nilDownloadDependency(reader) {
+		// A close/revoke before Blob.Open returns must not consume the future
+		// reader installation slot. installReader will close a late reader.
+		delivery.mu.Unlock()
+		return nil
+	}
+	delivery.reader = nil
+	delivery.readerCloseAsked = true
+	delivery.readerCloseDone = make(chan struct{})
+	done := delivery.readerCloseDone
+	delivery.mu.Unlock()
+
+	err := reader.Close()
+	delivery.mu.Lock()
+	delivery.readerCloseErr = err
+	close(done)
+	delivery.mu.Unlock()
+	return err
 }
 
 func (delivery *ContentDelivery) assert(ctx context.Context) error {
@@ -960,18 +1311,18 @@ func (delivery *ContentDelivery) assert(ctx context.Context) error {
 	closed := delivery.closed
 	terminalErr := delivery.terminalErr
 	now := delivery.now
-	expiresAt := delivery.expiresAt
-	serving := delivery.serving
 	repository := delivery.repository
 	authorizer := delivery.authorizer
 	leases := delivery.leases
 	recordID := delivery.recordID
+	hasServingLease := delivery.serving != nil
 	actor := delivery.actor
 	assertion := delivery.assertion
+	leaseDuration := delivery.leaseDuration
 	delivery.mu.Unlock()
-	if now == nil || expiresAt.IsZero() || nilDownloadDependency(repository) ||
+	if now == nil || leaseDuration < time.Microsecond || nilDownloadDependency(repository) ||
 		(recordID != "" && nilDownloadDependency(authorizer)) ||
-		(serving != nil && nilDownloadDependency(leases)) {
+		(hasServingLease && nilDownloadDependency(leases)) {
 		return ErrInvalidDownloadRequest
 	}
 	if closed {
@@ -983,50 +1334,98 @@ func (delivery *ContentDelivery) assert(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
 	}
-	if !now().Before(expiresAt) {
-		return ErrContentDeliveryExpired
-	}
+	assertionStarted := now()
 	if err := repository.AssertAttachmentContent(ctx, assertion); err != nil {
-		return fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
+		assertErr := fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
+		delivery.revoke(assertErr)
+		return assertErr
 	}
 	if recordID != "" {
 		if err := authorizer.AuthorizeRecordAttachmentRead(ctx, actor.Clone(), recordID); err != nil {
-			return fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
+			assertErr := fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
+			delivery.revoke(assertErr)
+			return assertErr
 		}
 	}
-	if serving != nil {
-		return delivery.assertServingLease(ctx, leases, *serving)
+	if hasServingLease {
+		return delivery.assertServingLease(ctx, leases)
 	}
+
+	deadline := assertionStarted.Add(leaseDuration)
+	if err := ctx.Err(); err != nil {
+		assertErr := fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
+		delivery.revoke(assertErr)
+		return assertErr
+	}
+	if !now().Before(deadline) {
+		delivery.revoke(ErrContentDeliveryExpired)
+		return ErrContentDeliveryExpired
+	}
+	delivery.mu.Lock()
+	if delivery.closed {
+		delivery.mu.Unlock()
+		return ErrContentDeliveryRevoked
+	}
+	if delivery.terminalErr != nil {
+		err := delivery.terminalErr
+		delivery.mu.Unlock()
+		return err
+	}
+	delivery.expiresAt = deadline
+	delivery.mu.Unlock()
 	return nil
 }
 
 func (delivery *ContentDelivery) assertServingLease(
 	ctx context.Context,
 	leases ContentLeaseRepository,
-	serving recordplatform.ServingLeaseV1,
 ) error {
-	for attempt := 0; attempt < 3; attempt++ {
-		if err := leases.AssertServingLease(ctx, serving); err == nil {
-			return nil
-		} else {
-			delivery.mu.Lock()
-			closed := delivery.closed
-			terminalErr := delivery.terminalErr
-			current := delivery.serving
-			delivery.mu.Unlock()
-			if closed {
-				return ErrContentDeliveryRevoked
-			}
-			if terminalErr != nil {
-				return terminalErr
-			}
-			if current == nil || *current == serving {
-				return fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, err)
-			}
-			serving = *current
-		}
+	release, err := delivery.acquireLeaseOperation(ctx)
+	if err != nil {
+		return err
 	}
-	return ErrContentDeliveryRevoked
+	defer release()
+	delivery.mu.Lock()
+	if delivery.closed {
+		delivery.mu.Unlock()
+		return ErrContentDeliveryRevoked
+	}
+	if delivery.terminalErr != nil {
+		err := delivery.terminalErr
+		delivery.mu.Unlock()
+		return err
+	}
+	serving := delivery.serving
+	delivery.mu.Unlock()
+	if serving == nil || nilDownloadDependency(leases) {
+		return ErrInvalidDownloadContent
+	}
+	leaseErr := leases.AssertServingLease(ctx, *serving)
+	delivery.mu.Lock()
+	closed := delivery.closed
+	terminalErr := delivery.terminalErr
+	delivery.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		leaseErr = err
+	}
+	if leaseErr != nil {
+		if closed {
+			return ErrContentDeliveryRevoked
+		}
+		if terminalErr != nil {
+			return terminalErr
+		}
+		assertErr := fmt.Errorf("%w: %w", ErrContentDeliveryRevoked, leaseErr)
+		delivery.revoke(assertErr)
+		return assertErr
+	}
+	if closed {
+		return ErrContentDeliveryRevoked
+	}
+	if terminalErr != nil {
+		return terminalErr
+	}
+	return nil
 }
 
 func (delivery *ContentDelivery) Close(ctx context.Context) error {
@@ -1051,6 +1450,7 @@ func (delivery *ContentDelivery) Close(ctx context.Context) error {
 	done := delivery.renewalDone
 	activeRenewal := delivery.activeRenewal
 	cancelRenewal := delivery.renewalCancel
+	lifecycleCancel := delivery.lifecycleCancel
 	closeDone := delivery.closeDone
 	if stop != nil {
 		close(stop)
@@ -1058,6 +1458,9 @@ func (delivery *ContentDelivery) Close(ctx context.Context) error {
 	}
 	delivery.mu.Unlock()
 
+	if lifecycleCancel != nil {
+		lifecycleCancel()
+	}
 	if cancelRenewal != nil {
 		cancelRenewal()
 	}
@@ -1068,20 +1471,33 @@ func (delivery *ContentDelivery) Close(ctx context.Context) error {
 	if done != nil {
 		<-done
 	}
-	delivery.mu.Lock()
-	serving := delivery.serving
-	leases := delivery.leases
-	delivery.mu.Unlock()
-	if serving != nil && !nilDownloadDependency(leases) {
-		cleanupCtx, cancel := downloadCleanupContext(ctx)
-		releaseErr := leases.ReleaseObjectContentLease(
-			cleanupCtx, serving.Object, serving.Owner,
-		)
-		cancel()
-		if errors.Is(releaseErr, recordplatform.ErrLostOwnerLease) {
-			releaseErr = nil
+	cleanupCtx, cancel := downloadCleanupContext(ctx)
+	defer cancel()
+	if err := delivery.waitLeaseOperation(cleanupCtx); err != nil {
+		closeErr = errors.Join(closeErr, err)
+	} else {
+		delivery.mu.Lock()
+		var serving *recordplatform.ServingLeaseV1
+		if delivery.pendingRelease != nil {
+			pending := *delivery.pendingRelease
+			serving = &pending
+			delivery.pendingRelease = nil
+		} else if delivery.serving != nil {
+			current := *delivery.serving
+			serving = &current
 		}
-		closeErr = errors.Join(closeErr, releaseErr)
+		delivery.serving = nil
+		leases := delivery.leases
+		delivery.mu.Unlock()
+		if serving != nil && !nilDownloadDependency(leases) {
+			releaseErr := leases.ReleaseObjectContentLease(
+				cleanupCtx, serving.Object, serving.Owner,
+			)
+			if errors.Is(releaseErr, recordplatform.ErrLostOwnerLease) {
+				releaseErr = nil
+			}
+			closeErr = errors.Join(closeErr, releaseErr)
+		}
 	}
 	delivery.mu.Lock()
 	delivery.closeErr = closeErr

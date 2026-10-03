@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"houfeng/internal/contracts/agentapi"
@@ -117,13 +118,14 @@ func (c *HTTPCollector) collectLegacy(ctx context.Context, plan *agentapi.IPQual
 		report.RawJSON = rawEnvelope(lookupRaw, nil)
 		return report
 	}
+	reportedVersion := intFromMap(lookupPayload, "version", "ip_version")
 	applyLookupPayload(&report, lookupPayload)
-	if parsedIP := net.ParseIP(report.IPAddress); parsedIP == nil {
+	parsedIP := net.ParseIP(report.IPAddress)
+	if parsedIP == nil {
 		report.IPAddress = "0.0.0.0"
 		report.IPVersion = 4
-	}
-	if report.IPVersion != 4 && report.IPVersion != 6 {
-		if strings.Contains(report.IPAddress, ":") {
+	} else if reportedVersion != 4 && reportedVersion != 6 {
+		if parsedIP.To4() == nil {
 			report.IPVersion = 6
 		} else {
 			report.IPVersion = 4
@@ -176,23 +178,46 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 	}
 	collectCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	canonicalBudget, dependentBudget, serviceBudget := collectionBudgets(timeout)
+	canonicalSources, targetDependentSources := defaultProviderSources()
+
+	canonicalCtx, canonicalCancel := context.WithTimeout(collectCtx, canonicalBudget)
+	canonicalOutcomes := c.collectProviderSources(canonicalCtx, canonicalSources, "", minDuration(canonicalBudget, 5*time.Second))
+	canonicalCancel()
+	providerOutcomes := append([]providerSourceOutcome(nil), canonicalOutcomes...)
+	targetIP := ""
+	for _, outcome := range canonicalOutcomes {
+		if outcome.Result.Status == sourceStatusSuccess && validIPAddress(outcome.IPAddress) {
+			targetIP = outcome.IPAddress
+			break
+		}
+	}
+
+	if targetIP != "" {
+		dependentCtx, dependentCancel := context.WithTimeout(collectCtx, dependentBudget)
+		dependentOutcomes := c.collectProviderSources(dependentCtx, targetDependentSources, targetIP, minDuration(dependentBudget, 5*time.Second))
+		dependentCancel()
+		providerOutcomes = append(providerOutcomes, dependentOutcomes...)
+	} else {
+		for _, source := range targetDependentSources {
+			providerOutcomes = append(providerOutcomes, sourceFailure(
+				source.Name(),
+				sourceTypeDefault,
+				"missing_target_ip",
+				"source requires a canonical IP from an earlier provider",
+				nil,
+				nil,
+			))
+		}
+	}
 
 	providerRaw := map[string]sourceRawEnvelope{}
-	providerOutcomes := make([]providerSourceOutcome, 0)
 	ipCandidates := map[string]string{}
-	targetIP := ""
-	for _, source := range defaultProviderSources() {
-		sourceCtx, sourceCancel := context.WithTimeout(collectCtx, perSourceTimeout(timeout))
-		outcome := source.Collect(sourceCtx, c, targetIP)
-		sourceCancel()
-		providerOutcomes = append(providerOutcomes, outcome)
+	for _, outcome := range providerOutcomes {
 		report.ProviderResults = append(report.ProviderResults, outcome.Result)
 		providerRaw[outcome.Result.Provider] = sourceRawEnvelopeFromProvider(outcome)
 		if outcome.Result.Status == sourceStatusSuccess && validIPAddress(outcome.IPAddress) {
 			ipCandidates[outcome.Result.Provider] = outcome.IPAddress
-			if targetIP == "" {
-				targetIP = outcome.IPAddress
-			}
 		}
 	}
 	for _, result := range optionalProviderDiagnostics() {
@@ -228,12 +253,12 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 	applyReportFallbacksFromProviders(&report, successfulProviders)
 
 	serviceRaw := map[string]sourceRawEnvelope{}
-	for _, service := range normalizedServices(plan.Services) {
-		serviceCtx, serviceCancel := context.WithTimeout(collectCtx, perSourceTimeout(timeout))
-		outcome := collectDefaultServiceUnlock(serviceCtx, c, service)
-		serviceCancel()
+	serviceCtx, serviceCancel := context.WithTimeout(collectCtx, serviceBudget)
+	services := c.collectDefaultServiceUnlocks(serviceCtx, normalizedServices(plan.Services), minDuration(serviceBudget, 5*time.Second))
+	serviceCancel()
+	for _, outcome := range services {
 		report.ServiceUnlocks = append(report.ServiceUnlocks, outcome.Result)
-		serviceRaw[service] = sourceRawEnvelopeFromService(outcome)
+		serviceRaw[outcome.Result.Service] = sourceRawEnvelopeFromService(outcome)
 	}
 	report.Coverage = coverageFromResults(report.ProviderResults, report.ServiceUnlocks)
 	report.DiagnosticsJSON = diagnosticsJSON(startedAt, ipCandidates)
@@ -243,6 +268,42 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 		report.Status = agentapi.IPQualityStatusPartial
 	}
 	return report
+}
+
+func collectionBudgets(total time.Duration) (time.Duration, time.Duration, time.Duration) {
+	if total <= 0 {
+		return 0, 0, 0
+	}
+	stage := total / 3
+	return stage, stage, total - stage - stage
+}
+
+func minDuration(left, right time.Duration) time.Duration {
+	if left < right {
+		return left
+	}
+	return right
+}
+
+func (c *HTTPCollector) collectProviderSources(ctx context.Context, sources []providerSource, targetIP string, sourceTimeout time.Duration) []providerSourceOutcome {
+	outcomes := make([]providerSourceOutcome, len(sources))
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(len(sources))
+	for index, source := range sources {
+		index, source := index, source
+		go func() {
+			defer waitGroup.Done()
+			if err := ctx.Err(); err != nil {
+				outcomes[index] = sourceFailure(source.Name(), sourceTypeDefault, errorCodeForHTTPError(err), err.Error(), nil, nil)
+				return
+			}
+			sourceCtx, cancel := context.WithTimeout(ctx, sourceTimeout)
+			defer cancel()
+			outcomes[index] = source.Collect(sourceCtx, c, targetIP)
+		}()
+	}
+	waitGroup.Wait()
+	return outcomes
 }
 
 func (c *HTTPCollector) collectServiceUnlock(ctx context.Context, service string) (agentapi.IPQualityServiceUnlockPayload, json.RawMessage, error) {
@@ -311,24 +372,30 @@ func looksLikeJSONObject(body []byte) bool {
 	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
-func perSourceTimeout(total time.Duration) time.Duration {
-	if total <= 0 {
-		return 5 * time.Second
-	}
-	timeout := total / 2
-	if timeout > 5*time.Second {
-		timeout = 5 * time.Second
-	}
-	if timeout < 250*time.Millisecond {
-		timeout = 250 * time.Millisecond
-	}
-	if timeout > total {
-		return total
-	}
-	return timeout
-}
-
 func applyLookupPayload(report *agentapi.IPQualityReportPayload, payload map[string]any) {
+	if version := intFromMap(payload, "version", "ip_version"); version == 4 || version == 6 {
+		report.IPVersion = version
+	}
+	if hasIPAPIShape(payload) {
+		facts := ipapiISFactsFromPayload(payload)
+		report.IPAddress = firstNonEmpty(facts.ip, stringFromMap(payload, "query"))
+		report.ASN = facts.asn
+		report.Organization = facts.organization
+		report.Latitude = facts.latitude
+		report.Longitude = facts.longitude
+		report.UseRegionCode = facts.regionCode
+		report.UseRegionName = facts.regionName
+		report.RegisteredRegionCode = firstNonEmpty(
+			stringFromMap(payload, "registered_region_code", "registered_country_code"),
+			stringFromNestedMap(payload, "asn", "country", "country_code"),
+		)
+		report.RegisteredRegionName = firstNonEmpty(
+			stringFromMap(payload, "registered_region_name", "registered_country_name"),
+		)
+		report.RiskLevel = stringFromMap(payload, "risk_level", "risk")
+		report.ProviderResults = providerResultsFromLookup(payload)
+		return
+	}
 	report.IPAddress = stringFromMap(payload, "ip", "ip_address", "query")
 	report.IPVersion = intFromMap(payload, "version", "ip_version")
 	report.ASN = asnStringFromPayload(payload)
@@ -413,19 +480,29 @@ func providerResultFromMap(payload map[string]any) agentapi.IPQualityProviderRes
 }
 
 func hasIPAPIShape(payload map[string]any) bool {
-	if _, ok := payload["asn"].(map[string]any); ok {
-		return true
-	}
-	if _, ok := payload["company"].(map[string]any); ok {
-		return true
-	}
-	if _, ok := payload["location"].(map[string]any); ok {
-		return true
+	for _, key := range []string{
+		"asn",
+		"company",
+		"location",
+		"is_datacenter",
+		"is_proxy",
+		"is_vpn",
+		"is_tor",
+		"is_abuser",
+		"is_crawler",
+	} {
+		if _, ok := payload[key]; ok {
+			return true
+		}
 	}
 	return false
 }
 
 func asnStringFromPayload(payload map[string]any) string {
+	asn, _ := ipapiASNFromPayload(payload)
+	if asn != "" {
+		return asn
+	}
 	value := firstNonEmpty(
 		stringFromMap(payload, "asn", "as", "as_number"),
 		stringFromNestedMap(payload, "asn", "asn", "as", "as_number"),
