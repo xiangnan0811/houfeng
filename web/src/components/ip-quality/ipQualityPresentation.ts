@@ -257,6 +257,7 @@ const PROBE_FAILURE_LABELS: Readonly<Record<string, string>> = {
   probe_failed: '探测失败，未形成可靠结论',
   unsupported_service: '默认探测暂不支持该服务',
   unsupported_default_probe: '默认探测暂不支持该服务',
+  invalid_response: '响应未形成可靠业务结论',
 }
 
 // 只认 agent 生成的完整格式，避免把其它说明里顺带提到的状态码当作失败原因。
@@ -446,4 +447,54 @@ export function serviceTileDetail(unlock: IPQualityServiceUnlock): string | null
   if (unlockType) return `类型 ${unlockType}`
   if (unlockStatusKind(unlock.status) !== 'unknown') return null
   return serviceCardDescription(unlock)
+}
+
+export const DEFAULT_SERVICE_PROBE_SOURCES: ReadonlySet<string> = new Set([
+  'netflix_title_probe',
+  'openai_status_probe',
+  'youtube_premium_page_probe',
+  'prime_video_page_probe',
+  'disney_default_probe',
+  'tiktok_home_probe',
+  'reddit_home_probe',
+])
+
+export function defaultServiceProbeNotice(report: VPSIPQualityReport): string | null {
+  const serviceRows = report.service_unlocks
+  if (!serviceRows || serviceRows.length === 0) {
+    return null
+  }
+
+  const rawDiagnostics = report.latest_report?.diagnostics_json
+  const diagnostics = (typeof rawDiagnostics === 'object' && rawDiagnostics !== null && !Array.isArray(rawDiagnostics))
+    ? (rawDiagnostics as Record<string, unknown>)
+    : null
+
+  const isDefaultSourceVersion = typeof diagnostics?.source_version === 'string' && diagnostics.source_version.trim() === 'v2'
+  const hasDefaultSourceRow = serviceRows.some((row) => {
+    const source = (row.source ?? '').trim()
+    return DEFAULT_SERVICE_PROBE_SOURCES.has(source)
+  })
+
+  const isDefaultReport = isDefaultSourceVersion || hasDefaultSourceRow
+  if (!isDefaultReport) {
+    return null
+  }
+
+  const revision = diagnostics?.service_probe_revision
+  const isRevision1 = typeof revision === 'number' && revision === 1
+
+  if (isRevision1) {
+    const hasSkippedRow = serviceRows.some((row) => {
+      const probeStatus = (row.probe_status ?? '').trim().toLowerCase()
+      const errorCode = (row.error_code ?? '').trim().toLowerCase()
+      return probeStatus === 'skipped' && errorCode === 'unsupported_default_probe'
+    })
+    if (hasSkippedRow) {
+      return '默认服务解锁探测已停用：缺少可靠业务证据。未知不表示服务受阻，服务覆盖与质量评级可能不足。'
+    }
+    return null
+  }
+
+  return '此报告使用旧版或未识别的服务探测规则，解锁结果及依赖它的质量评分可能不可靠；历史原始结果予以保留。'
 }

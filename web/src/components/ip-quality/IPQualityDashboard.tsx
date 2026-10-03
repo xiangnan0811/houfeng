@@ -11,6 +11,7 @@ import { IPQualityProviderTable } from './IPQualityProviderTable'
 import { IPQualityServiceGrid } from './IPQualityServiceGrid'
 import {
   databaseConsistency,
+  defaultServiceProbeNotice,
   deriveQualityScore,
   negativeRiskSignalCount,
   providerCoverage,
@@ -119,6 +120,7 @@ export function IPQualityDashboard({ report, summary, detailPath, collect }: IPQ
   const selectedReportId = searchParams.get('report_id')?.trim() || ''
   const viewingHistory = selectedReportId !== ''
   const currentReportId = selectedReportId || summary.report_id || report.latest_report?.report_id || ''
+  const probeNotice = defaultServiceProbeNotice(report)
 
   return (
     <div className="page vps-detail-workspace ipq-page">
@@ -130,6 +132,13 @@ export function IPQualityDashboard({ report, summary, detailPath, collect }: IPQ
         viewingHistory={viewingHistory}
       />
       {viewingHistory ? null : <IPQualityCollectNotice collect={collect} />}
+      {probeNotice ? (
+        <aside className="ipq-notice ipq-notice--warning" role="note" aria-label="服务探测可信度">
+          <span className="ipq-notice__dot" aria-hidden="true" />
+          <span className="ipq-notice__title">服务探测可信度</span>
+          <span className="ipq-notice__detail">{probeNotice}</span>
+        </aside>
+      ) : null}
       <IPQualityVerdict report={report} summary={summary} />
       <IPQualityServiceGrid unlocks={report.service_unlocks} />
       <IPQualityProviderTable results={report.provider_results} />

@@ -7,6 +7,18 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
+func serviceProbeSucceeded(result agentapi.IPQualityServiceUnlockPayload) bool {
+	if result.ProbeStatus != sourceStatusSuccess {
+		return false
+	}
+	switch result.Status {
+	case "unlocked", "blocked", "partial":
+		return true
+	default:
+		return false
+	}
+}
+
 func coverageFromResults(providers []agentapi.IPQualityProviderResultPayload, services []agentapi.IPQualityServiceUnlockPayload) *agentapi.IPQualityCoveragePayload {
 	coverage := &agentapi.IPQualityCoveragePayload{
 		ExpectedProviderCount: len(providers),
@@ -26,14 +38,16 @@ func coverageFromResults(providers []agentapi.IPQualityProviderResultPayload, se
 	}
 	for _, service := range services {
 		switch service.ProbeStatus {
-		case sourceStatusSuccess, "":
-			coverage.SuccessfulServiceCount++
-		case sourceStatusFailure:
-			coverage.FailedServiceCount++
 		case sourceStatusSkipped:
 			coverage.SkippedServiceCount++
 		case sourceStatusNotConfigured:
 			coverage.NotConfiguredServiceCount++
+		default:
+			if serviceProbeSucceeded(service) {
+				coverage.SuccessfulServiceCount++
+			} else {
+				coverage.FailedServiceCount++
+			}
 		}
 	}
 	return coverage
@@ -50,8 +64,13 @@ func hasDefaultSourceFailure(providers []agentapi.IPQualityProviderResultPayload
 
 func hasServiceProbeFailure(services []agentapi.IPQualityServiceUnlockPayload) bool {
 	for _, service := range services {
-		if service.ProbeStatus == sourceStatusFailure {
-			return true
+		switch service.ProbeStatus {
+		case sourceStatusSkipped, sourceStatusNotConfigured:
+			continue
+		default:
+			if !serviceProbeSucceeded(service) {
+				return true
+			}
 		}
 	}
 	return false
@@ -73,8 +92,9 @@ func hasIPCandididateConflict(candidates map[string]string) bool {
 
 func diagnosticsJSON(startedAt time.Time, ipCandidates map[string]string) json.RawMessage {
 	payload := map[string]any{
-		"source_version": "v2",
-		"elapsed_ms":     int(time.Since(startedAt).Milliseconds()),
+		"source_version":         "v2",
+		"service_probe_revision": 1,
+		"elapsed_ms":             int(time.Since(startedAt).Milliseconds()),
 	}
 	if len(ipCandidates) > 0 {
 		payload["ip_candidates"] = ipCandidates

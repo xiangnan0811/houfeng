@@ -56,12 +56,16 @@
 - Agent 必须用 Go 原生 HTTP collector；不得执行 `check.unlock.media`、`IP.Check.Place`、`run.NodeQuality.com`、`ecs.sh` 或任何远程 shell 脚本。
 - Agent 默认 provider registry 必须是多源采集，至少覆盖 `ipapi.is`、`ipquery.io`、`proxycheck.io`、`ip2location.io`、`ipwho.is` 这类 Go-native HTTP JSON/稳定响应源；不能退化为只采 `ipapi.is` 一个 provider 后把覆盖率展示为完整。
 - 需要账号、API key、商业授权、临时网页 key、登录 cookie、浏览器挑战或第三方聚合后端的来源必须作为 optional source 上报 `not_configured` / `skipped` 诊断行，不能伪造脚本级覆盖率，也不能隐藏覆盖缺口。
-- `ipapi.is` 请求可返回 JSON 的 `https://api.ipapi.is`，查询当前出口 IP 时不拼接 `?q=self`；`https://ipapi.is/?q=self` 返回 HTML 首页，禁止作为默认采集源。
+- `ipapi.is` 请求可返回 JSON 的 `https://api.ipapi.is`，查询当前出口 IP 时不拼接 `?q=self`；`https://ipapi.is/?q=self` 返回 HTML 首页，禁止作为默认采集源。`ipquery.io` 的当前出口 IP 请求必须使用 `https://api.ipquery.io/?format=json`；纯文本根路径不是有效 JSON 来源，指定 IP 查询继续使用转义后的路径。
 - Agent collector 必须兼容 ipapi.is 当前嵌套 JSON 结构：top-level `ip` / `is_datacenter` / `is_proxy` / `is_vpn` / `is_tor` / `is_abuser` / `is_crawler`，以及 `asn.asn` / `asn.org` / `asn.country` / `asn.type`、`company.name` / `company.type`、`location.country_code` / `location.country` / `location.latitude` / `location.longitude`。
-- Legacy/custom service unlock URL 默认必须为空；默认服务解锁走 agent 内置 service probe registry，不得默认请求 `unlock/{service}` 这类会返回 404/HTML 的 URL。服务解锁失败或禁用不能拖垮已经成功的 IP lookup 事实。
-- 默认 service probe registry 必须对 settings 默认服务集合产生逐服务结果或逐服务诊断行；探测不可安全实现的服务要上报 `probe_status=skipped` / `status=unknown`，不能让页面长期显示 `0 / 0`。
-- 每个 provider source 和每个 service probe 必须有独立 timeout，且受总采集 context 约束；一个慢源只能生成该源 failure/timeout 行，不能吃完整体 timeout 或阻塞其他结果。
-- Service probe 的 HTTP 状态语义必须保守：只有明确成功响应和明确阻断响应才能判定 `unlocked` / `blocked`；429、404、5xx、HTML/非 JSON 或无法解析响应应写 `probe_status=failure`、`status=unknown`，不得误判为解锁成功。
+- Legacy/custom service unlock URL 默认必须为空；保留 `HTTPCollectorOptions.LookupURL` / `ServiceURL` 及其 legacy 分流，只有调用方显式提供 `ServiceURL` 时才请求 custom JSON service adapter；不得自动回退或把内置网站协议当作已验证能力。
+- 默认 service registry 不执行网页/HTTP service probe；它必须对 normalized settings service 集合按输入顺序生成逐服务诊断。当前七个默认服务及其历史 source 身份为：`netflix` → `netflix_title_probe`、`chatgpt` → `openai_status_probe`、`youtube-premium` → `youtube_premium_page_probe`、`amazon-prime-video` → `prime_video_page_probe`、`disney-plus` → `disney_default_probe`、`tiktok` → `tiktok_home_probe`、`reddit` → `reddit_home_probe`。
+- 对上述七个默认服务，诊断固定为 `status=unknown`、`probe_status=skipped`、`error_code=unsupported_default_probe`、`error_summary=safe default probe is not available without verified business evidence`；不得填写 `region`、`unlock_type`、`latency_ms`、虚假的 HTTP raw 或 `extra_json`。默认七项的 coverage 必须为 expected 7、successful 0、failed 0、skipped 7。
+- 默认诊断生成器不得启动 goroutine、timer 或 HTTP 请求；任何默认服务域名都不得被请求。未知服务保留 `source=default_probe_registry`、`status=unknown`、`probe_status=skipped`、`error_code=unsupported_service` 及既有摘要；空输入返回空结果，去空白/小写/去重继续由既有 `normalizedServices` 负责。
+- 显式 custom JSON service adapter 的字段优先级为 `status` → `unlock_status`，只有状态为空才使用 `unlocked` bool 映射（`true` → `unlocked`、`false` → `blocked`）；`region` / `unlock_type` 及其既有别名保持不变。状态经 trim/lower 后仅允许 `unlocked`、`blocked`、`partial`、`unknown`。
+- 字段选择保留既有 `stringFromMap` 行为：若 `status` 是已存在的空字符串（包括 trim 后为空），不继续读取 `unlock_status`，而是进入 `unlocked` bool 回退；例如 `{"status":"","unlock_status":"partial","unlocked":true}` 的结论是 `unlocked`。没有有效 bool 结论时仍按无结论失败处理。
+- custom JSON 的 `unlocked`、`blocked`、`partial` 均写 `probe_status=success`；保留已有业务错误说明（例如 `blocked` 的业务 `error_code` 不是探测失败）。`unknown`、空对象、缺少结论或非法状态写 `status=unknown`、`probe_status=failure`、`error_code=invalid_response`、固定摘要 `service response did not establish a business conclusion`，并清空 region/unlock_type。HTTP/JSON 读取错误（包括 HTML、空 body、JSON 解析失败和所有非 2xx）写 `probe_status=failure`、`status=unknown`，保留 `probe_failed` 语义和安全 raw。
+- custom failure 会在 lookup 成功时使报告为 `partial`；默认 skipped 只是能力诊断，不等于执行失败，也不把成功的 IP lookup 改成 partial。每个 provider source 仍有独立 timeout，且受总采集 context 约束；一个慢源只能生成该源 failure/timeout 行，不能吃完整体 timeout 或阻塞其他结果。
 - IP 质量采集默认开启；默认配置为 86400 秒周期、15 秒 timeout 和默认服务集合。没有 settings 行、JSON 缺 `enabled` 字段时（`settings.Default()`、sync plan SQL 兜底、`IPQualityEnabled` 读取）都按开启处理；已保存的显式值（包括关闭）原样保留，不做迁移覆盖。只传零值对象或 `{"enabled":false}` 时视为显式关闭，其余字段补默认值。低频报告与脱敏原始结果长期保留，不再提供 raw/history 按天自动删除配置，见 [数据保留合同](retention.md)。
 - 立即采集：`POST /api/vps/{vps_id}/ip-quality/collect` 只为该 VPS 当前监控实例（未退役、未归档、所属 VPS 未归档）登记请求；采集关闭、无当前实例、agent 未绑定或监控暂停时返回 409 与原因，不登记请求。同一实例已有 `pending` / `dispatched` 请求时返回该请求，不重复触发外部查询。
 - 立即采集请求只保存在 center 进程内存（`ipquality.CollectRequests`），TTL 10 分钟，结束后保留 30 分钟供页面展示；center 重启即丢失，用户重新发起即可。该机制假设单 center 进程；多副本部署前必须改为持久化协调。不新增数据库表，不复用命令白名单/pending action，也不写命令审计。
@@ -76,6 +80,8 @@
 - `status` 只允许 `success`、`partial`、`failure`。失败报告允许没有 provider/service 细节，但仍必须带合法 `ip_address`、`ip_version`、metadata 和错误摘要。
 - Provider row `status` 只允许 `success`、`failure`、`skipped`、`not_configured`；`source_type` 只允许 `default`、`optional`、`custom`。Service row `probe_status` 只允许 `success`、`failure`、`skipped`、`not_configured`。
 - `coverage` 必须记录 expected/successful/failed/skipped/not_configured provider 与 service 计数；前端完整页优先使用 `coverage` 计算采集完整性，不得用已有行数自我归一成 100%。
+- Service coverage 只有 `probe_status=success` 且 `status` 为 `unlocked`、`blocked` 或 `partial` 才计 successful；`skipped` 与 `not_configured` 各计原分类，其余组合（包括空 probe_status、`unknown/success`、`unlocked/failure`）计 failed。该谓词只约束新报告计数，历史入库/读取的兼容事实不回写。
+- 默认采集路径的新报告在 `diagnostics_json` 中必须保留 `"source_version":"v2"` 并加入数值 `"service_probe_revision":1`；该 revision 只表示默认诊断政策，不表示七项服务已验证成功，不新增报告顶层字段或数据库列。显式 custom/legacy 路径不附加该默认来源标记。历史报告的 rows、coverage、评分事实不回写、不重算。
 - HTTP lookup 返回 HTML、非 JSON、空 body 或 JSON 解析失败时，Agent 必须生成短诊断 failure（如 `non_json_response`），不得把 HTML 原文写入 `error_summary` 或 raw envelope。
 - Center 必须在 sync 事务内保存 IP 质量报告，且先通过 sync token/fingerprint 验证。fingerprint 不匹配的 IP 质量报告不得入库。
 - Raw JSON、provider `extra_json`、service `extra_json` 和 report `diagnostics_json` 必须通过 `ipquality.SanitizeRawJSON` / extra JSON sanitizer 兜底处理：递归替换 token/key/authorization/cookie/password 类字段为 `[redacted]`，并限制到对应最大字节数内；超限时存合法 JSON truncation marker，不做字节截断。
@@ -87,7 +93,7 @@
 - `ip_quality.report/v1`是authoritative evidence source kind；只有生成新的logical evidence snapshot时才按该snapshot的`logical_size_bytes`消耗project evidence capacity。IP质量report/provider/service表大小、raw retention、coverage、风险等级或source availability都不能成为quota counter、capacity fallback或janitor删除依据。
 - evidence capacity/maintenance alert只来自evidence-owned aggregate store state。IP质量source失败/partial/stale/ambiguous仍按本合同产生缺口或复核语义，不能被改写成`capacity_unavailable`、`quota_exceeded`或janitor failure；反向也不能用capacity alert伪造IP质量风险。
 - 失败、partial、ambiguous 的 IP 质量报告只能产生缺口/需复核 evidence，不能产生 `ip_quality_risk` 负面风险；provider `status != success`、service `probe_status != success`、`skipped`、`not_configured`、`unknown` 不得被计入负面风险或服务阻断。
-- `is_server` / datacenter / hosting 本身不构成负面风险；只有 successful provider 的 proxy/vpn/tor/abuser/robot、高风险等级、出口不一致，或 successful probe 的服务解锁阻断等信号才进入风险 evidence。
+- `is_server` / datacenter / hosting 本身不构成负面风险；只有 successful provider 的 proxy/vpn/tor/abuser/robot、高风险等级、出口不一致，或成功的显式 custom service adapter 报告服务解锁阻断等信号才进入风险 evidence；默认 `skipped` 行不产生服务阻断。
 
 ### 4. Validation & Error Matrix
 
@@ -105,9 +111,11 @@
 | Service unlock `probe_status` 非法 | `/api/agent/sync` 返回 400 `invalid_request` |
 | Sync token 或 fingerprint 不匹配 | sync ingest 拒绝，IP 质量报告不入库 |
 | 某个 provider timeout / rate limit / non-json | 该 provider 写 `status=failure`、短错误摘要和 latency；其他 provider 继续采集 |
-| Lookup 成功但某个 service probe 失败 | Agent report `status=partial`，保留成功的 normalized facts，失败 service 写 `probe_status=failure`、`status=unknown` + error |
-| Service probe 返回 429 / 404 / 5xx | 不判定解锁；写 `probe_status=failure`、`status=unknown` |
-| Service 默认不可安全探测 | 写 `probe_status=skipped`、`status=unknown`，页面显示诊断，不计入 blocked |
+| Lookup 成功但显式 custom JSON service adapter 失败 | Agent report `status=partial`，保留成功的 normalized facts，失败 service 写 `probe_status=failure`、`status=unknown` + error；默认 service `skipped` 不使报告 partial |
+| 显式 custom service adapter 返回 429 / 403 / 451 / 404 / 5xx，或 HTML/非 JSON/空 body | 不判定解锁；写 `probe_status=failure`、`status=unknown`，不根据裸 HTTP 状态码形成 blocked |
+| 显式 custom JSON 缺少结论、状态为 unknown 或状态非法 | 写 `probe_status=failure`、`status=unknown`、`error_code=invalid_response`，清空 region/unlock_type；lookup 成功时报告为 partial |
+| 默认服务不可安全探测 | 不发服务网络请求；写 `probe_status=skipped`、`status=unknown`、`error_code=unsupported_default_probe`，页面显示诊断，不计入 blocked 或 successful |
+| 默认七项服务集合 | 逐服务按规范化输入顺序生成 source 连续的诊断行；coverage 为 expected 7 / successful 0 / failed 0 / skipped 7，并写 `diagnostics_json["service_probe_revision"]=1` |
 | Lookup 失败 | Agent report `status=failure`，不采 service unlock，error_code/error_summary 必填 |
 | Lookup 返回 HTML / 非 JSON | Agent report `status=failure` + 短 `non_json_response` 诊断，raw_json 为空或合法 JSON，不保存 HTML |
 | Lookup 持续失败 | Agent 更新 `LastAttemptedAt`，在 `frequency_seconds` 内不因 heartbeat 重复采集 |
@@ -134,16 +142,16 @@
 
 - Good: operator 在 Settings 开启 IP 质量，agent 根据 plan 后台采集，sync 上报后 center 在一个事务里保存主报告、provider 矩阵和 service unlock 矩阵，VPS 详情显示最新报告，资产决策显示风险/缺口 evidence。
 - Good: 多个默认 provider 成功/失败混合时，页面展示 provider/source 状态、coverage、失败诊断和 extra details；成功 provider 的风险信号进入风险矩阵，失败/未配置来源只进入采集完整性。
-- Good: Netflix/ChatGPT/YouTube 等服务探测返回逐服务行；429 或 404 只显示 unknown/failure，不显示已解锁或已阻断。
+- Good: 默认七项服务生成逐服务 `unknown/skipped` 能力诊断、零服务网络请求和 0/7 service coverage；这不改变成功 provider 的 IP 事实，也不把未知显示为 blocked/unlocked。
 - Good: 用户从历史列表打开旧 report，API 返回该 report 的 summary、provider rows、service rows、coverage 和 diagnostics。
 - Good: 新接入 agent 的 VPS 在 IP 质量页点击“立即采集”，下一次 sync 收到带 `collect_request_id` 的 plan，agent 不等 86400 秒周期立即采集，回传后页面自动刷新到新报告。
 - Base: IP 质量关闭时 plan 仍可下发 `enabled=false`，agent 不启动外部采集，Overview 判断为 `not_configured` 而不是 missing/risk。关闭后的历史 summary 查询失败不能改变当前健康判断。
-- Base: ChatGPT 和 Netflix service unlock 被阻断时，资产决策显示 `media_unlock_blocked`，但不自动迁移资产。
+- Base: 调用方显式配置的 custom JSON service adapter 报告 ChatGPT 或 Netflix `blocked` 时，资产决策可显示 `media_unlock_blocked`，但不自动迁移资产；默认诊断的 `skipped/unknown` 不产生该 evidence。
 - Bad: agent 运行 `bash <(curl -Ls IP.Check.Place)` 或下载远程脚本解析 stdout。
 - Bad: 把 `status=failure` 且 `risk_level=high` 的报告当作真实高风险 IP。
 - Bad: raw JSON 直接 `append([]byte(nil), report.RawJSON...)` 入库，导致旧 agent 泄露 token 或写入超大 JSON。
 - Bad: 通过出口 IP 同时匹配多台 VPS 后仍把风险 evidence 归到某一台 VPS。
-- Bad: 默认请求 `https://ipapi.is/unlock/netflix` 或 `https://api.ipapi.is/unlock/netflix`，把 404/HTML 当作服务解锁失败并导致整份报告异常。
+- Bad: 对默认服务发起网页/HTTP 请求，或把页面可达、裸 HTTP 状态码、`unknown`/`skipped` 伪造成 `unlocked` / `blocked`；默认服务必须保持零网络请求和严格未知语义。
 - Bad: VPS 详情/API/history 展示 `status=failure`、`ip_address=0.0.0.0` 的 lookup 占位报告，让用户误以为 VPS 出口 IP 是 `0.0.0.0`。
 - Bad: 只有 `ipapi.is` 一行时把采集完整性展示为 100%，隐藏 optional/default source 缺口。
 - Bad: 历史详情 endpoint 只返回 provider/service rows，不返回 selected report summary，导致前端无法展示历史报告上下文。
@@ -155,9 +163,9 @@
 - `internal/contracts/agentapi`: sync plan 和 sync request JSON round-trip，覆盖 `ip_quality_plan` 与 `ip_quality_reports` 字段。
 - `internal/contracts/agentapi`: provider/service v2 字段、`coverage`、`diagnostics_json` JSON round-trip，并覆盖旧 payload 兼容。
 - `internal/center/settings`: 默认开启、零值/仅 `enabled=false` 视为显式关闭、低频默认值、`stale_after_seconds` 默认值与校验、service normalization、非法频率/timeout/service；不暴露低频 TTL 配置。
-- `agent/ipquality`: due 判断、state store、HTTP collector 成功/partial/failure、service bool unlock 映射、raw JSON 脱敏和合法 JSON。
-- `agent/ipquality`: 默认多 provider registry、optional not_configured rows、默认 service probe rows、per-source/per-probe timeout 隔离、ipapi.is 嵌套 JSON 解析、HTML/非 JSON 清洁 failure、失败 attempt 节流。
-- `agent/ipquality`: service probe HTTP status 回归测试，确认 429/404/5xx 不会被当作 unlocked。
+- `agent/ipquality`: due 判断、state store、HTTP collector 成功/partial/failure、显式 custom JSON service status 映射、raw JSON 脱敏和合法 JSON。
+- `agent/ipquality`: 默认多 provider registry、optional not_configured rows、默认七项零 I/O `skipped` 诊断、provider stage budget/取消回收、ipapi.is 嵌套 JSON 与 IPQuery `format=json` 解析、HTML/非 JSON 清洁 failure、失败 attempt 节流。
+- `agent/ipquality`: custom service 的 `unlocked` / `blocked` / `partial` 成功矩阵、unknown/空对象/非法状态与 HTTP/JSON 异常失败矩阵，以及 429/403/451/404/5xx 不得形成解锁结论；coverage 非法组合与 `service_probe_revision` round-trip。
 - `agent/runtime`: plan 到后台 collector 的启动/drain 行为，disabled plan 不启动采集。
 - `agent/ipquality`: 立即采集绕过周期且只执行一次、ID 写入 diagnostics 且保留原诊断、周期报告不带 ID、周期采集中认领请求、Stop/重启后可重新执行、disabled plan 忽略请求、失败的立即采集保留上次成功时间。
 - `internal/center/ipquality`: 立即采集请求复用、只按回传 ID 完成（排除周期报告与其他 ID）、diagnostics ID 解析与规整、过期与清理。
@@ -213,10 +221,14 @@ if unlocked := boolFromMap(payload, "unlocked"); unlocked != nil && *unlocked {
 默认采集先并发执行 `ipapi.is` 与 `ipquery.io` 这两个 canonical source，并按
 registry 顺序选择第一个返回合法 IP 的成功结果。只有 canonical source 成功后才
 启动 `proxycheck.io`、`ip2location.io` 和 `ipwho.is`；canonical 全部失败时，
-依赖来源只写 `missing_target_ip` 诊断，不发出网络请求。每个阶段有独立预算，
-请求超时取阶段预算与 5 秒中的较小值，结果按 registry 输入顺序归并，服务探测
-使用最多 7 个 worker，取消或超时前未开始的服务仍生成诊断行。父采集 context
-是硬总上限，任何 worker 在返回后都不得继续修改报告或其 maps。
+依赖来源只写 `missing_target_ip` 诊断，不发出网络请求。canonical/dependent 两个
+阶段各自保留原 total budget，请求 timeout 取阶段预算与 5 秒中的较小值，结果按
+registry 输入顺序归并。
+
+默认服务阶段不再执行 HTTP 探测：provider lookup 正常完成后，诊断生成器按
+normalized service 输入顺序一次性填充结果 slice；它不启动 worker、timer 或
+额外网络请求。父采集 context 是硬总上限，provider worker 在取消/超时后必须回收，
+任何 worker 在返回后都不得继续修改报告或其 maps。
 
 provider 的 HTTP/JSON 成功不等于业务成功。`ipapi.is`、`ipquery.io`、
 `ip2location.io` 与 `ipwho.is` 必须返回有效 IP；`proxycheck.io` 只接受

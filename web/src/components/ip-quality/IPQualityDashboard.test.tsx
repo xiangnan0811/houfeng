@@ -351,4 +351,169 @@ describe('IPQualityDashboard', () => {
     expect(within(verdict).getByText('证据不足，暂不评级')).toBeInTheDocument()
   })
 
+  it('renders probe credibility notice for legacy default report without revision', () => {
+    renderDashboard(report({
+      latest_report: {
+        ...report().latest_report!,
+        diagnostics_json: { source_version: 'v2' },
+      },
+    }))
+
+    const notice = screen.getByRole('note', { name: '服务探测可信度' })
+    expect(notice).toHaveClass('ipq-notice', 'ipq-notice--warning')
+    expect(within(notice).getByText('服务探测可信度')).toBeInTheDocument()
+    expect(notice).toHaveTextContent('旧版或未识别')
+    // 保留原服务行与评分
+    const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
+    expect(within(services).getByText('解锁 · JP')).toBeInTheDocument()
+    expect(within(services).getByText('受阻')).toBeInTheDocument()
+    const verdict = screen.getByLabelText('质量结论')
+    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('59')
+  })
+
+  it('renders capability contraction notice, 0% service coverage, and em dash score for revision 1 default report with skipped probes', () => {
+    const skippedReport = report({
+      summary: {
+        ...summary,
+        coverage: {
+          ...summary.coverage!,
+          expected_service_count: 7,
+          successful_service_count: 0,
+          skipped_service_count: 7,
+          failed_service_count: 0,
+        },
+      },
+      latest_report: {
+        ...report().latest_report!,
+        coverage: {
+          ...summary.coverage!,
+          expected_service_count: 7,
+          successful_service_count: 0,
+          skipped_service_count: 7,
+          failed_service_count: 0,
+        },
+        diagnostics_json: { source_version: 'v2', service_probe_revision: 1 },
+      },
+      service_unlocks: [
+        { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
+        { service: 'chatgpt', source: 'openai_status_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
+        { service: 'youtube-premium', source: 'youtube_premium_page_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
+        { service: 'amazon-prime-video', source: 'prime_video_page_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
+        { service: 'disney-plus', source: 'disney_default_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
+        { service: 'tiktok', source: 'tiktok_home_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
+        { service: 'reddit', source: 'reddit_home_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
+      ],
+    })
+
+    renderDashboard(skippedReport)
+
+    const notice = screen.getByRole('note', { name: '服务探测可信度' })
+    expect(notice).toHaveClass('ipq-notice', 'ipq-notice--warning')
+    expect(notice).toHaveTextContent('已停用')
+
+    const verdict = screen.getByLabelText('质量结论')
+    expect(verdict.querySelector('.ipq-verdict__value')).toHaveTextContent('—')
+    const metrics = screen.getByLabelText('IP 质量摘要指标')
+    expect(within(metrics).getByText('采集完整性').nextElementSibling).toHaveTextContent('服务 0%')
+  })
+
+  it.each([
+    '1',
+    2,
+    -1,
+    0,
+    null,
+  ])('renders legacy notice when service_probe_revision is %s', (invalidRevision) => {
+    renderDashboard(report({
+      latest_report: {
+        ...report().latest_report!,
+        diagnostics_json: { source_version: 'v2', service_probe_revision: invalidRevision },
+      },
+    }))
+
+    const notice = screen.getByRole('note', { name: '服务探测可信度' })
+    expect(notice).toHaveTextContent('旧版或未识别')
+  })
+
+  it('does not render probe notice when report has no service rows', () => {
+    renderDashboard(report({
+      service_unlocks: [],
+    }))
+
+    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
+  })
+
+  it('does not render probe notice for custom source report', () => {
+    renderDashboard(report({
+      latest_report: {
+        ...report().latest_report!,
+        diagnostics_json: { source_version: 'custom_v1' },
+      },
+      service_unlocks: [
+        { service: 'internal-api', source: 'internal_custom_probe', status: 'unlocked', probe_status: 'success' },
+      ],
+    }))
+
+    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
+  })
+
+  it('does not render probe notice for revision 1 report without skipped default rows', () => {
+    renderDashboard(report({
+      latest_report: {
+        ...report().latest_report!,
+        diagnostics_json: { source_version: 'v2', service_probe_revision: 1 },
+      },
+      service_unlocks: [
+        { service: 'chatgpt', source: 'openai_status_probe', status: 'unlocked', probe_status: 'success', region: 'JP' },
+        { service: 'netflix', source: 'netflix_title_probe', status: 'blocked', probe_status: 'success' },
+      ],
+    }))
+
+    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { probe_status: 'skipped', error_code: 'unsupported_service' },
+    { probe_status: 'failure', error_code: 'unsupported_default_probe' },
+  ])('does not infer a disabled default probe from mismatched diagnostic %j', (diagnostic) => {
+    renderDashboard(report({
+      latest_report: {
+        ...report().latest_report!,
+        diagnostics_json: { source_version: 'v2', service_probe_revision: 1 },
+      },
+      service_unlocks: [
+        { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', ...diagnostic },
+      ],
+    }))
+    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
+  })
+
+  it('uses selected report diagnostics when viewing historical report and retains actions boundary', () => {
+    const historyReport = report({
+      latest_report: {
+        ...report().latest_report!,
+        report_id: 'ipq_000',
+        diagnostics_json: { source_version: 'v2' },
+      },
+    })
+
+    renderDashboard(historyReport, { initialEntry: '/vps/vps_001/ip-quality?report_id=ipq_000' })
+
+    expect(screen.getByText('历史报告', { selector: '.badge' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
+    const notice = screen.getByRole('note', { name: '服务探测可信度' })
+    expect(notice).toHaveTextContent('旧版或未识别')
+  })
+
+  it('translates invalid_response error code into Chinese in service card', () => {
+    renderDashboard(report({
+      service_unlocks: [
+        { service: 'custom-service', source: 'custom_probe', status: 'unknown', probe_status: 'failure', error_code: 'invalid_response', error_summary: 'service response did not establish a business conclusion' },
+      ],
+    }))
+
+    const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
+    expect(within(services).getByText('响应未形成可靠业务结论')).toBeInTheDocument()
+    expect(within(services).queryByText('service response did not establish a business conclusion')).not.toBeInTheDocument()
+  })
 })

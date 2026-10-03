@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"strings"
 	"time"
 
@@ -162,12 +161,4 @@ func rawFromBytes(body []byte) json.RawMessage {
 
 func httpStatusError(status int) error {
 	return fmt.Errorf("http status %d", status)
-}
-
-func safeHeader(headers http.Header, key string) string {
-	value := strings.TrimSpace(headers.Get(key))
-	if len(value) > 128 {
-		return value[:128]
-	}
-	return value
 }
