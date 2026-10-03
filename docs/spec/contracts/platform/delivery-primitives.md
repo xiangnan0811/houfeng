@@ -95,4 +95,33 @@ logger.Error("record outbox pass failed", "error", err)
 logger.Error("record outbox pass failed")
 ```
 
+## Scenario: Attachment content delivery lifecycle and draft assertion windows
+
+附件下载保持 `BlobStore`、`DownloadRepository`、`ContentLeaseRepository` 与
+`ContentStream` 的导出接口不变。一次 delivery 在初始化阶段必须使用同一
+`lifecycleCtx` 完成 record serving lease 的后台续租、初始内容断言、Blob
+`Stat`、Blob `Open` 和最终内容断言；`Stat` 与 `Open` 都绑定完整的
+`ObjectVersion`（版本、大小和摘要），迟到的 reader 必须在拒绝接管后关闭。
+
+record delivery 的 lease renew 与 serving assertion 共享容量为一的操作门，
+从读取当前 token 到数据库返回并发布成功结果都保持串行。关闭或撤销先发布
+终态、取消 lifecycle context、关闭 reader，再等待在途 lease 操作；清理只能
+释放精确的数据库返回 token。续租结果在终态之后到达时只能进入待释放槽，
+不得恢复本地授权。网络写入一旦开始不可撤回，但终态后不得开始新的写块。
+
+draft delivery 不获取 record serving lease，也不启动伪续租。每次新鲜
+`AssertAttachmentContent` 查询以查询开始时间作为窗口起点；只有查询成功且
+耗时未超过 `LeaseDuration`，才发布新的本地写入窗口。每个块写入前都重新
+断言并在持锁边界确认窗口仍未过期；draft 发布、删除、归属或对象改变会使
+固定 assertion 失败，旧流不得转为 record 流。
+
+### 8. Attachment delivery evidence
+
+- 初始化慢于授权窗口、取消、迟到 reader、续租提交后发布前的 Close/Assert
+  交错、精确 token 清理和 reader 并发关闭必须有 barrier 回归测试。
+- draft 必须覆盖跨多个新鲜窗口的成功传输，以及每个后续窗口前的删除、发布、
+  归属改变和对象改变；在途 writer 已发送的字节不作为可撤回授权证据。
+- reader 在声明长度恰好结束时的 `EOF` 成功、短读 `io.ErrUnexpectedEOF`、
+  越界字节、short write 和最后非 EOF 错误必须保持可观察且 fail closed。
+
 ---

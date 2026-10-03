@@ -25,3 +25,19 @@ IP quality remains a read-only report, not another asset overview. Keep report i
 报告为空时保留页头与状态条，正文是空态卡片“暂无 IP 质量报告”，主操作为“立即采集”（页头不重复按钮）。报告首次加载失败才进入错误页；立即采集完成后的后台刷新失败保留当前报告。错误页不读取采集状态。
 
 立即采集由 `useIPQualityCollect` 管理：报告加载成功后读取一次 `GET .../ip-quality/collect`；有进行中且仍可用的请求时每 3 秒轮询，请求结束、过期或变为不可用即停止，单次轮询失败继续下一轮；所有状态请求使用全局单调序号，每次切换 VPS 与组件卸载都开启新的会话代次（卸载时仍挂起的 POST 之后失败也不再补读状态）；迟到的旧响应、上一台 VPS 或同一 VPS 上一次访问的回调都不得覆盖当前结果；提交中状态只由 POST 自己结束，进行中时重复点击不再发请求；只读预览不显示立即采集按钮；本页发起或接手的请求变为 `completed` 时原地刷新最新报告（不回到加载态）。409 不单独提示错误文案，以随后读取的不可用原因为准。
+
+## 评分证据门槛与风险结论
+
+质量分仍沿用既有风险等级、负面信号、服务状态、过期和归属扣分公式，但只有
+在报告存在 summary、五个负面风险字段（proxy、tor、vpn、abuse、robot）都
+至少由一个成功 provider 明确返回 `true` 或 `false`，且至少有一条已知成功的
+服务探测后才生成分数。服务探测 `probe_status=success` 属于已知成功；历史兼容
+数据仅在 `probe_status` 缺失/null 且 status 为 unlocked、partial 或 blocked
+时视为已知成功，显式空字符串、failure、skipped、not_configured 和 unknown
+均不满足门槛。失败 provider 的残留 flags、失败 service 的残留 blocked/partial
+文本不得参与评分，缺证据显示 `—` 与“证据不足，暂不评级”。
+
+风险事实与评级是两层信息：即使不能形成分数，成功 provider 已明确返回的负面
+事实仍展示。五个必需风险字段均已返回且没有命中时，风险指标显示“已返回的
+风险字段未命中”；任一字段缺失时显示“风险证据不足，未形成完整结论”。机房/
+server 不属于评级门槛，也不作为负面风险。

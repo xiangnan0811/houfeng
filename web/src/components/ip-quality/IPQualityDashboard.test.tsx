@@ -58,7 +58,7 @@ function report(overrides: Partial<VPSIPQualityReport> = {}): VPSIPQualityReport
       raw_json: { services: { reddit: { raw: { body_sample: '<!DOCTYPE html><script>alert(1)</script>' } } } },
     },
     provider_results: [
-      { provider: 'clean-db', status: 'success', source_type: 'default', latency_ms: 64, usage_type: 'isp', is_proxy: false, is_vpn: false },
+      { provider: 'clean-db', status: 'success', source_type: 'default', latency_ms: 64, usage_type: 'isp', is_proxy: false, is_vpn: false, is_tor: false, is_abuser: false, is_robot: false },
       {
         provider: 'ipinfo',
         status: 'success',
@@ -294,4 +294,61 @@ describe('IPQualityDashboard', () => {
     expect(screen.getByRole('link', { name: '查看最新报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality')
     expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
   })
+
+  it('shows an em dash and evidence insufficiency when one required risk field is absent', () => {
+    renderDashboard(report({
+      provider_results: [{
+        provider: 'clean-db',
+        status: 'success',
+        source_type: 'default',
+        is_proxy: false,
+        is_vpn: false,
+        is_abuser: false,
+        is_robot: false,
+      }],
+      service_unlocks: [{ service: 'netflix', status: 'unlocked', probe_status: 'success' }],
+    }))
+
+    const verdict = screen.getByLabelText('质量结论')
+    const scoreValue = verdict.querySelector('.ipq-verdict__value')
+    expect(scoreValue).not.toBeNull()
+    expect(scoreValue).toHaveTextContent('—')
+    expect(within(verdict).getByText('证据不足，暂不评级')).toBeInTheDocument()
+    expect(within(verdict).getByText('风险证据不足，未形成完整结论')).toBeInTheDocument()
+  })
+
+  it('states that returned risk fields did not hit when complete evidence is clean', () => {
+    renderDashboard(report({
+      summary: { ...summary, risk_level: 'low' },
+      provider_results: [{
+        provider: 'clean-db',
+        status: 'success',
+        source_type: 'default',
+        is_proxy: false,
+        is_tor: false,
+        is_vpn: false,
+        is_abuser: false,
+        is_robot: false,
+      }],
+      service_unlocks: [{ service: 'netflix', status: 'unlocked', probe_status: 'success' }],
+    }))
+
+    const metrics = screen.getByLabelText('IP 质量摘要指标')
+    expect(within(metrics).getByText('已返回的风险字段未命中')).toBeInTheDocument()
+    expect(within(metrics).queryByText('风险证据不足，未形成完整结论')).not.toBeInTheDocument()
+  })
+
+  it.each(['unknown', '', 'challenge'] as const)('keeps service status %s unrated even with an explicit successful probe', (status) => {
+    renderDashboard(report({
+      summary: { ...summary, risk_level: 'low' },
+      service_unlocks: [{ service: 'tiktok', status, probe_status: 'success' }],
+    }))
+
+    const verdict = screen.getByLabelText('质量结论')
+    const scoreValue = verdict.querySelector('.ipq-verdict__value')
+    expect(scoreValue).not.toBeNull()
+    expect(scoreValue).toHaveTextContent('—')
+    expect(within(verdict).getByText('证据不足，暂不评级')).toBeInTheDocument()
+  })
+
 })

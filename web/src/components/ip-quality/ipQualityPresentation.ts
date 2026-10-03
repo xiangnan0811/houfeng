@@ -93,11 +93,21 @@ export function providerSucceeded(result: IPQualityProviderResult): boolean {
 }
 
 function sourceStatusKind(result: IPQualityProviderResult): string {
-  return (result.status ?? 'success').trim().toLowerCase()
+  return result.status == null ? 'success' : result.status.trim().toLowerCase()
 }
 
 function sourceTypeKind(result: IPQualityProviderResult): string {
-  return (result.source_type ?? 'default').trim().toLowerCase()
+  return result.source_type == null ? 'default' : result.source_type.trim().toLowerCase()
+}
+
+export function riskEvidenceComplete(results: IPQualityProviderResult[]): boolean {
+  const successful = results.filter(providerSucceeded)
+  return RISK_FLAG_DEFINITIONS
+    .filter((definition) => definition.negative)
+    .every((definition) => successful.some((result) => {
+      const value = definition.read(result)
+      return value === true || value === false
+    }))
 }
 
 export function visibleProviderResults(results: IPQualityProviderResult[]): IPQualityProviderResult[] {
@@ -182,6 +192,25 @@ export function unlockStatusLabel(status: string, region?: string): string {
   const kind = unlockStatusKind(status)
   const label = kind === 'unlocked' ? '解锁' : kind === 'blocked' ? '受阻' : kind === 'partial' ? '部分' : '未知'
   return region ? `${label} · ${region}` : label
+}
+
+function isKnownSuccessfulService(unlock: IPQualityServiceUnlock): boolean {
+  const status = unlockStatusKind(unlock.status)
+  if (status !== 'unlocked' && status !== 'partial' && status !== 'blocked') {
+    return false
+  }
+  if (unlock.probe_status == null) {
+    return true
+  }
+  return unlock.probe_status.trim().toLowerCase() === 'success'
+}
+
+function hasKnownSuccessfulService(unlocks: IPQualityServiceUnlock[]): boolean {
+  return unlocks.some(isKnownSuccessfulService)
+}
+
+function knownSuccessfulServices(unlocks: IPQualityServiceUnlock[]): IPQualityServiceUnlock[] {
+  return unlocks.filter(isKnownSuccessfulService)
 }
 
 export function serviceUnlockCounts(unlocks: IPQualityServiceUnlock[]) {
@@ -314,7 +343,9 @@ function normalizeComparable(value?: string): string {
 }
 
 export function deriveQualityScore(report: VPSIPQualityReport): number | null {
-  if (!report.summary) return null
+  if (!report.summary || !riskEvidenceComplete(report.provider_results) || !hasKnownSuccessfulService(report.service_unlocks)) {
+    return null
+  }
   let score = 100
   const risk = (report.summary.risk_level ?? '').trim().toLowerCase()
   if (risk === 'critical') score -= 34
@@ -324,7 +355,7 @@ export function deriveQualityScore(report: VPSIPQualityReport): number | null {
   const negativeSignals = negativeRiskSignalCount(report.provider_results)
   score -= Math.min(30, negativeSignals * 5)
 
-  const serviceCounts = serviceUnlockCounts(report.service_unlocks)
+  const serviceCounts = serviceUnlockCounts(knownSuccessfulServices(report.service_unlocks))
   score -= Math.min(20, serviceCounts.blocked * 5 + serviceCounts.partial * 2)
 
   if (report.summary.stale) score -= 8
@@ -335,9 +366,9 @@ export function deriveQualityScore(report: VPSIPQualityReport): number | null {
 
 export function qualityVerdict(score: number | null, summary?: IPQualitySummary | null): string {
   if (!summary) return '缺少真实 IP 质量事实'
+  if (score == null) return '证据不足，暂不评级'
   if (summary.ambiguous) return '归属不唯一，需先复核'
   if (summary.stale) return '报告已过期，需等待下次采集'
-  if (score == null) return '证据不足，暂不评级'
   if (score >= 82) return '适合作为主力节点'
   if (score >= 68) return '可接受，建议持续观察'
   if (score >= 50) return '存在明显风险，谨慎使用'

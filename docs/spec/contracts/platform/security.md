@@ -67,7 +67,9 @@
    - `internal/center/auth/password_test.go`: `HashPasswordWithCost` embeds requested cost and rejects invalid cost.
    - `internal/center/auth/service_test.go`: password change stores a hash with configured cost.
    - `internal/center/auth/seed_test.go`: first-user seed stores a hash with configured cost.
-   - `internal/center/store/sessions_test.go`: repository rejects missing HMAC key and stores/queries session IDs only by HMAC hash.
+   - `internal/center/store/sessions_test.go`: repository rejects missing HMAC key; all
+     atomic session operations use only HMAC session-ID predicates and preserve
+     commit/rollback semantics.
    - `internal/center/store/agent_token_hash_test.go` plus monitoring/sync repository tests: new agent token hashes are versioned HMAC values, legacy SHA-256 hashes still verify, and successful use migrates legacy rows.
    - `cmd/houfeng-center/bootstrap_test.go`: default seed dependency and bootstrap auth service wiring pass `cfg.PasswordBcryptCost`; session repository wiring passes `cfg.SessionHMACKey`; source/wiring checks cover agent token repositories receiving `cfg.SessionHMACKey`.
 
@@ -102,6 +104,57 @@ syncRepo := store.NewPostgresSyncRepository(pool)
 // 正确：生产 agent token hash 从启动 secret 派生用途隔离 HMAC key。
 syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMACKey)
 ```
+
+## Scenario: 原子凭据轮换与持续会话授权
+
+### 1. Scope / Trigger
+
+- Trigger: 修改 `internal/center/auth/service.go`、`internal/center/auth/types.go`、
+  `internal/center/store/users.go` 或 `internal/center/store/sessions.go` 的登录、
+  改密、会话续期、退出路径。
+- 目标：凭据校验、会话签发、改密和续期共享数据库定义的线性化边界，不能由
+  应用层锁外读写拼接出可绕过的旧密码或过期会话窗口。
+
+### 2. Contracts
+
+- Session IDs 永不以明文持久化；所有 PostgreSQL 会话查询、更新和删除都使用部署
+  注入的 HMAC-SHA256 摘要。
+- 登录在锁外完成用户名查询、bcrypt 验证和随机 ID 生成；随后在一个
+  `READ COMMITTED` 事务中以 `users` 行锁重新确认 password hash。锁后取得 UTC
+  微秒时钟，只有 hash 仍匹配时才插入会话；返回值以数据库实际写入的时间字段为准。
+- 改密必须先在锁外验证旧密码并生成新 hash，随后在同一事务中按
+  `users → sessions` 顺序加行锁。当前会话必须仍属于该用户、未过期且未被旧密码
+  watermark 淘汰；否则不改密码、不重建会话。密码 hash、`password_changed_at`、
+  当前会话 `issued_at` 和其他会话删除一次性提交。
+- 改密成功保留当前浏览器的 bearer token（其 `issued_at` 与新的密码 watermark
+  相同），撤销同一用户的其他会话。保留当前 token 不宣称能撤回已经线性化并执行的
+  在途业务请求或同一 token 的泄露副本。
+- 续期先以 HMAC ID 无锁读出用户归属，再按 `users → sessions` 顺序锁定并重读；
+  所有过期、旧 watermark 会话必须先成功提交删除再返回 `ErrSessionExpired`。有效
+  续期以锁后取得的时钟与原 `last_seen_at`、密码 watermark 的最大值为新基准，
+  只允许 UPDATE，不能 UPSERT 或复活已过期行。
+- Logout 和过期清理只做 DELETE，不取得用户锁；它们与上述事务交错时不得重新创建
+  会话。任何事务的 commit 错误必须原样作为失败返回，不得重试旧密码、不宣称已回滚。
+
+### 3. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| 锁后用户 hash 与锁外验证 hash 不同 | `ErrInvalidCredentials`，不插入/更新会话 |
+| 当前会话不存在、归属不符或已退出 | `ErrSessionNotFound`，密码不改变 |
+| 当前会话在锁后时钟已过期或旧 watermark 淘汰 | `ErrSessionExpired`，密码不改变 |
+| 续期发现失效会话 | 删除事务先 commit，再返回 `ErrSessionExpired` |
+| 改密事务任一写入或 commit 失败 | 所有同事务状态保持原子，不向调用方承诺回滚结果 |
+| 改密成功 | 当前 Cookie 仍可用，其他用户会话返回未认证 |
+
+### 4. Tests Required
+
+- `internal/center/store/auth_postgres_integration_test.go` 必须用真实
+  PostgreSQL barrier 和故障触发覆盖登录/改密交错、相同旧 hash 的并发 winner、
+  锁等待跨过 expiry、回拨时钟、Logout/Touch 交错、各写入故障点的 rollback
+  状态；`sessions_test.go` 的 DB seam 覆盖各事务 commit 错误语义。
+- `internal/center/http/auth_e2e_test.go` 必须走真实 service/handler，断言改密后原
+  Cookie 的受保护请求仍为 200、其他 Cookie 为 401，且新密码可登录。
 
 ---
 

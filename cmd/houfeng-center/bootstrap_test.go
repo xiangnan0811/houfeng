@@ -1291,27 +1291,6 @@ func TestSettingsPresentationRepositoryReturnsPersistedSettingsUnchanged(t *test
 	}
 }
 
-func TestSettingsPresentationRepositoryDelegatesPutSettings(t *testing.T) {
-	input := centersettings.Default()
-	input.RetentionPolicy.RawLayerDays = 30
-	repo := &fakeCenterSettingsRepository{putSettingsResult: input}
-
-	got, err := (settingsPresentationRepository{repo: repo}).PutSettings(context.Background(), input)
-	if err != nil {
-		t.Fatalf("PutSettings() error = %v", err)
-	}
-	if repo.putSettingsInput.RetentionPolicy.RawLayerDays != 30 {
-		t.Fatalf(
-			"delegated RawLayerDays = %d, want %d",
-			repo.putSettingsInput.RetentionPolicy.RawLayerDays,
-			30,
-		)
-	}
-	if got.RetentionPolicy.RawLayerDays != 30 {
-		t.Fatalf("returned RawLayerDays = %d, want %d", got.RetentionPolicy.RawLayerDays, 30)
-	}
-}
-
 func TestEnsureLegacyCoreHostSampleOverrideAugmentsExistingCoreRule(t *testing.T) {
 	rules := []centersettings.MonitoringInstanceLabelOverrideRule{{
 		Label: "核心",
@@ -1388,9 +1367,6 @@ func (r fakePGXRow) Scan(dest ...any) error {
 type fakeCenterSettingsRepository struct {
 	getSettingsResult centersettings.CenterSettings
 	getSettingsErr    error
-	putSettingsInput  centersettings.CenterSettings
-	putSettingsResult centersettings.CenterSettings
-	putSettingsErr    error
 }
 
 func (f *fakeCenterSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
@@ -1400,12 +1376,8 @@ func (f *fakeCenterSettingsRepository) GetSettings(context.Context) (centersetti
 	return f.getSettingsResult, nil
 }
 
-func (f *fakeCenterSettingsRepository) PutSettings(_ context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-	f.putSettingsInput = input
-	if f.putSettingsErr != nil {
-		return centersettings.CenterSettings{}, f.putSettingsErr
-	}
-	return f.putSettingsResult, nil
+func (f *fakeCenterSettingsRepository) MutateSettings(_ context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
+	return mutate(f.getSettingsResult)
 }
 
 func stringPtr(value string) *string {
@@ -1436,23 +1408,19 @@ func (*fakeIncidentNotifier) Send(context.Context, string) error {
 
 type fakeSessionRepository struct{}
 
-func (fakeSessionRepository) Create(context.Context, auth.Session) error {
+func (fakeSessionRepository) CreateIfPasswordHash(context.Context, string, auth.Session, func() time.Time, time.Duration) (auth.Session, error) {
+	return auth.Session{}, nil
+}
+
+func (fakeSessionRepository) ChangePasswordIfHash(context.Context, string, string, string, string, func() time.Time) error {
 	return nil
 }
 
-func (fakeSessionRepository) Find(context.Context, string) (auth.Session, error) {
-	return auth.Session{}, auth.ErrSessionNotFound
-}
-
-func (fakeSessionRepository) RefreshExpires(context.Context, string, time.Time, time.Time) error {
-	return nil
+func (fakeSessionRepository) TouchWithUserLock(context.Context, string, func() time.Time, time.Duration) (auth.Session, error) {
+	return auth.Session{}, nil
 }
 
 func (fakeSessionRepository) Delete(context.Context, string) error {
-	return nil
-}
-
-func (fakeSessionRepository) DeleteByUserID(context.Context, string, string) error {
 	return nil
 }
 
@@ -1482,18 +1450,6 @@ func (r authTestUserRepository) FindByID(_ context.Context, userID string) (auth
 		}
 	}
 	return auth.User{}, auth.ErrUserNotFound
-}
-
-func (r authTestUserRepository) UpdatePassword(_ context.Context, userID, newHash string, changedAt time.Time) error {
-	for username, user := range r {
-		if user.UserID == userID {
-			user.PasswordHash = newHash
-			user.PasswordChangedAt = changedAt
-			r[username] = user
-			return nil
-		}
-	}
-	return auth.ErrUserNotFound
 }
 
 func (r authTestUserRepository) CountUsers(context.Context) (int, error) {

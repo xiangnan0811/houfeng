@@ -16,6 +16,7 @@ import {
   providerCoverage,
   providerSucceeded,
   qualityVerdict,
+  riskEvidenceComplete,
   riskLevelLabel,
   riskTone,
   serviceCoverage,
@@ -41,6 +42,7 @@ function scoreTone(score: number | null): BadgeTone {
 function IPQualityVerdict({ report, summary }: { report: VPSIPQualityReport, summary: IPQualitySummary }) {
   const score = deriveQualityScore(report)
   const negativeSignals = negativeRiskSignalCount(report.provider_results)
+  const evidenceComplete = riskEvidenceComplete(report.provider_results)
   const flagLabels = strongestRiskFlags(report).map((flag) => flag.label)
   const services = serviceUnlockCounts(report.service_unlocks)
   const determinate = services.unlocked + services.partial + services.blocked
@@ -48,6 +50,19 @@ function IPQualityVerdict({ report, summary }: { report: VPSIPQualityReport, sum
   const successfulProviders = report.provider_results.filter(providerSucceeded).length
   const providerCoveragePct = providerCoverage(report)
   const serviceCoveragePct = serviceCoverage(report)
+  const providerRiskLevel = report.provider_results
+    .filter(providerSucceeded)
+    .map((provider) => (provider.risk_level ?? '').trim().toLowerCase())
+    .find((risk) => risk === 'high' || risk === 'critical')
+  let riskSignalDetail = '风险证据不足，未形成完整结论'
+  if (negativeSignals > 0) {
+    const knownFacts = flagLabels.length > 0
+      ? flagLabels.join(' · ')
+      : `风险等级：${riskLevelLabel(providerRiskLevel ?? summary.risk_level)}`
+    riskSignalDetail = evidenceComplete ? knownFacts : `${knownFacts} · ${riskSignalDetail}`
+  } else if (evidenceComplete) {
+    riskSignalDetail = '已返回的风险字段未命中'
+  }
 
   return (
     <section className={`vps-detail-workspace__section ipq-verdict ipq-verdict--${scoreTone(score)}`} aria-label="质量结论">
@@ -70,7 +85,7 @@ function IPQualityVerdict({ report, summary }: { report: VPSIPQualityReport, sum
           <dt>风险信号</dt>
           <dd>
             <strong className="mono">{negativeSignals > 0 ? `${negativeSignals} 项` : '未命中'}</strong>
-            <span>{flagLabels.length > 0 ? flagLabels.join(' · ') : '无代理 / VPN / 滥用信号'}</span>
+            <span>{riskSignalDetail}</span>
           </dd>
         </div>
         <div className={services.blocked > 0 ? 'ipq-metric ipq-metric--alert' : 'ipq-metric'}>

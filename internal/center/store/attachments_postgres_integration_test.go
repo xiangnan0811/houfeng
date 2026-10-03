@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +23,8 @@ import (
 
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/recordplatform"
+	"houfeng/internal/center/records"
 )
 
 func TestPostgresIntegrationAttachmentUploadPreparationPersistsAndReusesTemporaryIdentity(t *testing.T) {
@@ -3953,6 +3957,619 @@ func TestPostgresIntegrationAttachmentProcessorCompletionProtectsQuotaVersionAnd
 	}
 }
 
+func TestPostgresMinIOIntegrationAttachmentDownloadLifecycle(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "attachment-download-lifecycle", 8)
+	client, bucket := newAttachmentUploadWorkflowMinIO(t)
+	requestCounter := &attachmentDownloadRequestCounter{}
+	countingClient := newAttachmentDownloadCountingMinIO(t, requestCounter)
+	blobStore, err := attachments.NewS3BlobStore(countingClient, bucket)
+	if err != nil {
+		t.Fatalf("NewS3BlobStore() error = %v", err)
+	}
+
+	const contentSize = 16 << 20
+	content := make([]byte, contentSize)
+	for index := range content {
+		content[index] = byte(index % 251)
+	}
+	digest := sha256.Sum256(content)
+	temporaryDigest := sha256.Sum256([]byte(t.Name() + "-download-temporary"))
+	object, err := blobStore.Put(ctx, attachments.PutRequest{
+		ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)),
+		TemporaryKey: "temporary/" + fmt.Sprintf("%x", temporaryDigest),
+	}, bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("S3BlobStore.Put() error = %v", err)
+	}
+
+	recordID := "rec_downloadlifecycle"
+	recordRepository := newRecordsPostgresRepository(t, runtimePool)
+	recordInput := recordsPostgresCompleteRevisionInput(t, "Attachment download lifecycle")
+	record, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
+		recordInput, "attachment-download-lifecycle-record",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision() error = %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.content_delivery_epochs (project_id, object_kind, object_id, delivery_epoch)
+		values ('default', 'record', $1, 0)
+		on conflict (project_id, object_kind, object_id) do nothing
+	`, record.RecordID); err != nil {
+		t.Fatalf("ensure content delivery epoch: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.blob_objects (
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind
+		) values ($1, $2, $3, $4, 's3')`,
+		object.Key, object.SHA256[:], object.VersionID, object.SizeBytes,
+	); err != nil {
+		t.Fatalf("insert S3 Blob metadata: %v", err)
+	}
+
+	actor := attachmentUploadWorkflowActor(t)
+	const recordAttachmentID = "att_downloadlifecycle"
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_attachments (
+			attachment_id, project_id, record_id, attachment_state,
+			display_name, media_type, logical_size_bytes,
+			blob_key, blob_object_version, created_by
+		) values ($1, 'default', $2, 'available', 'download.bin', 'application/octet-stream',
+		          $3, $4, $5, $6)`,
+		recordAttachmentID, record.RecordID, object.SizeBytes, object.Key, object.VersionID, actor.UserID,
+	); err != nil {
+		t.Fatalf("insert record download attachment: %v", err)
+	}
+
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_revision_attachments (
+			record_id, revision_id, ordinal, attachment_id
+		) values ($1, $2, 0, $3)`,
+		record.RecordID, record.RevisionID, recordAttachmentID,
+	); err != nil {
+		t.Fatalf("insert record download revision attachment: %v", err)
+	}
+
+	const draftID = "rdf_downloadlifecycle"
+	const draftAttachmentID = "att_downloadlifecycledraft"
+	seedAttachmentDraft(t, ctx, fixture, draftID, actor.UserID)
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_attachments (
+			attachment_id, project_id, draft_id, origin_draft_id, attachment_state,
+			display_name, media_type, logical_size_bytes,
+			blob_key, blob_object_version, created_by
+		) values ($1, 'default', $2, $2, 'available', 'draft-download.bin',
+		          'application/octet-stream', $3, $4, $5, $6)`,
+		draftAttachmentID, draftID, object.SizeBytes, object.Key, object.VersionID, actor.UserID,
+	); err != nil {
+		t.Fatalf("insert draft download attachment: %v", err)
+	}
+
+	storedSubject := recordInput.Subjects()[0]
+	identity, err := records.NewSubjectIdentitySnapshot(storedSubject.Kind, storedSubject.IdentitySnapshot)
+	if err != nil {
+		t.Fatalf("NewSubjectIdentitySnapshot() error = %v", err)
+	}
+	resolver := &fakeCurrentRecordSubjectResolver{resolved: records.ResolvedSubject{
+		ProjectID: recordauth.ProjectIDDefault, StableID: storedSubject.SourceID,
+		IdentitySnapshot: identity, LiveRoute: "/vps/" + storedSubject.SourceID,
+		CaptureAuthorization: storedSubject.CaptureAuthorization,
+	}}
+	authorizer := newPostgresCurrentRecordAuthorizationSource(
+		runtimePool, resolver, allowRecordPlatformAdmissionGate,
+	)
+	leases := NewPostgresRecordPlatformRepository(runtimePool, allowRecordPlatformAdmissionGate)
+	repository := NewPostgresAttachmentRepository(runtimePool)
+	newService := func(blob attachments.BlobStore) *attachments.DownloadService {
+		t.Helper()
+		service, serviceErr := attachments.NewDownloadService(
+			repository, authorizer, leases, blob,
+			attachments.DownloadServiceOptions{
+				LeaseDuration: time.Second, ChunkBytes: 1 << 20,
+				Limits: attachments.DefaultLimits(),
+			},
+		)
+		if serviceErr != nil {
+			t.Fatalf("NewDownloadService() error = %v", serviceErr)
+		}
+		return service
+	}
+	writeDownload := func(
+		t *testing.T,
+		service *attachments.DownloadService,
+		attachmentID string,
+		httpRange string,
+		want []byte,
+	) {
+		t.Helper()
+		requestCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		stream, openErr := service.Open(requestCtx, attachments.DownloadRequest{
+			Actor: actor, AttachmentID: attachmentID, HTTPRange: httpRange,
+		})
+		if openErr != nil {
+			t.Fatalf("Open(%s,%q) error = %v", attachmentID, httpRange, openErr)
+		}
+		defer func() { _ = stream.Close(context.Background()) }()
+		var output bytes.Buffer
+		written, writeErr := stream.WriteTo(requestCtx, &output)
+		if writeErr != nil {
+			t.Fatalf("WriteTo(%s,%q) error = %v", attachmentID, httpRange, writeErr)
+		}
+		if written != int64(len(want)) || !bytes.Equal(output.Bytes(), want) {
+			t.Fatalf("WriteTo(%s,%q) = %d/%d bytes, want exact %d",
+				attachmentID, httpRange, written, output.Len(), len(want))
+		}
+		if closeErr := stream.Close(context.Background()); closeErr != nil {
+			t.Fatalf("Close(%s,%q) error = %v", attachmentID, httpRange, closeErr)
+		}
+	}
+
+	t.Run("record full and range with slow initialization", func(t *testing.T) {
+		blob := &attachmentDownloadLifecycleBlob{
+			S3BlobStore: blobStore, statDelay: 1100 * time.Millisecond,
+			openDelay: 1100 * time.Millisecond,
+		}
+		service := newService(blob)
+		requestCounter.reset()
+		writeDownload(t, service, recordAttachmentID, "", content)
+		fullGets, fullRangeGets := requestCounter.counts()
+		requestCounter.reset()
+		writeDownload(t, service, recordAttachmentID, "bytes=0-1023", content[:1024])
+		rangeFullGets, rangeGets := requestCounter.counts()
+		stats, opens, fullOpens, rangeOpens := blob.counts()
+		if stats < 2 || opens < 2 || fullOpens < 1 || rangeOpens < 1 {
+			t.Fatalf("slow record Blob calls = stat %d open %d full %d range %d, want full/range exact verification",
+				stats, opens, fullOpens, rangeOpens)
+		}
+		if fullGets < 3 || fullRangeGets != 0 {
+			t.Fatalf("record full GET verification counts = full %d range %d, want at least 3 full and no ranged GETs",
+				fullGets, fullRangeGets)
+		}
+		if rangeFullGets < 2 || rangeGets != 1 {
+			t.Fatalf("record range GET verification counts = full %d range %d, want at least 2 full verification and 1 ranged delivery GET",
+				rangeFullGets, rangeGets)
+		}
+	})
+
+	t.Run("draft refreshes after slow initialization", func(t *testing.T) {
+		blob := &attachmentDownloadLifecycleBlob{
+			S3BlobStore: blobStore, statDelay: 1100 * time.Millisecond,
+			openDelay: 1100 * time.Millisecond,
+		}
+		requestCounter.reset()
+		writeDownload(t, newService(blob), draftAttachmentID, "", content)
+		draftFullGets, draftRangeGets := requestCounter.counts()
+		stats, opens, _, _ := blob.counts()
+		if stats < 1 || opens < 1 {
+			t.Fatalf("slow draft Blob calls = stat %d open %d, want complete initialization verification",
+				stats, opens)
+		}
+		if draftFullGets < 3 || draftRangeGets != 0 {
+			t.Fatalf("draft full GET verification counts = full %d range %d, want at least 3 full and no ranged GETs",
+				draftFullGets, draftRangeGets)
+		}
+	})
+
+	t.Run("draft transfers across fresh assertion windows", func(t *testing.T) {
+		requestCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		stream, openErr := newService(blobStore).Open(requestCtx, attachments.DownloadRequest{
+			Actor: actor, AttachmentID: draftAttachmentID, HTTPRange: "bytes=0-4194303",
+		})
+		if openErr != nil {
+			t.Fatalf("Open(draft multi-window) error = %v", openErr)
+		}
+		writer := &attachmentDownloadWindowedWriter{delay: 700 * time.Millisecond}
+		started := time.Now()
+		written, writeErr := stream.WriteTo(requestCtx, writer)
+		elapsed := time.Since(started)
+		if closeErr := stream.Close(context.Background()); closeErr != nil {
+			t.Fatalf("Close(draft multi-window) error = %v", closeErr)
+		}
+		if writeErr != nil {
+			t.Fatalf("WriteTo(draft multi-window) error = %v", writeErr)
+		}
+		if written != int64(4<<20) || !bytes.Equal(writer.output.Bytes(), content[:4<<20]) {
+			t.Fatalf("WriteTo(draft multi-window) = %d/%d bytes, want exact 4 MiB",
+				written, writer.output.Len())
+		}
+		if writer.writes < 3 || elapsed < 2*time.Second {
+			t.Fatalf("draft multi-window writes/elapsed = %d/%s, want at least 3 chunks across 3 windows",
+				writer.writes, elapsed)
+		}
+	})
+
+	t.Run("draft transition stops before the next chunk", func(t *testing.T) {
+		blob := &attachmentDownloadLifecycleBlob{S3BlobStore: blobStore}
+		service := newService(blob)
+		requestCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		stream, openErr := service.Open(requestCtx, attachments.DownloadRequest{
+			Actor: actor, AttachmentID: draftAttachmentID,
+		})
+		if openErr != nil {
+			t.Fatalf("Open(draft transition) error = %v", openErr)
+		}
+		writer := &attachmentDownloadBlockingWriter{
+			firstWrite: make(chan struct{}), allowWrite: make(chan struct{}),
+		}
+		type result struct {
+			written int64
+			err     error
+		}
+		resultCh := make(chan result, 1)
+		go func() {
+			written, writeErr := stream.WriteTo(requestCtx, writer)
+			resultCh <- result{written: written, err: writeErr}
+		}()
+		select {
+		case <-writer.firstWrite:
+		case <-time.After(10 * time.Second):
+			_ = stream.Close(context.Background())
+			t.Fatal("draft transition writer did not receive the first chunk")
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			update public.record_attachments
+			set draft_id = null, record_id = $1
+			where attachment_id = $2 and draft_id = $3`,
+			record.RecordID, draftAttachmentID, draftID,
+		); err != nil {
+			_ = stream.Close(context.Background())
+			t.Fatalf("publish draft attachment during stream: %v", err)
+		}
+		close(writer.allowWrite)
+		got := <-resultCh
+		payload := writer.Snapshot()
+		validPayload := len(payload) > 0 && len(payload) <= len(content) &&
+			bytes.Equal(payload, content[:len(payload)])
+		if !errors.Is(got.err, attachments.ErrContentDeliveryRevoked) ||
+			got.written != int64(len(payload)) || writer.Writes() != 1 || !validPayload {
+			t.Fatalf("draft transition result = %d/%v writer=%d writes=%d, want one authorized payload and revoked stream",
+				got.written, got.err, len(payload), writer.Writes())
+		}
+		if closeErr := stream.Close(context.Background()); closeErr != nil {
+			t.Fatalf("Close(draft transition) error = %v", closeErr)
+		}
+	})
+
+	t.Run("record deletion fence wins during initialization", func(t *testing.T) {
+		blob := &attachmentDownloadLifecycleBlob{
+			S3BlobStore: blobStore, statStarted: make(chan struct{}), allowStat: make(chan struct{}),
+		}
+		service := newService(blob)
+		requestCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		resultCh := make(chan error, 1)
+		go func() {
+			stream, openErr := service.Open(requestCtx, attachments.DownloadRequest{
+				Actor: actor, AttachmentID: recordAttachmentID,
+			})
+			if stream != nil {
+				_ = stream.Close(context.Background())
+			}
+			resultCh <- openErr
+		}()
+		select {
+		case <-blob.statStarted:
+		case <-time.After(10 * time.Second):
+			t.Fatal("record download did not reach delayed Stat")
+		}
+		fencePool := fixture.openDirectRuntimePool(t, ctx, "attachment-download-fence", 2)
+		fenceRepository := NewPostgresRecordPlatformRepository(fencePool, allowRecordPlatformAdmissionGate)
+		fence, fenceErr := fenceRepository.AcquireDeletionFenceLease(ctx,
+			recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: record.RecordID},
+			recordplatform.LeaseClaimInputV1{OwnerID: "download_lifecycle_fence", LeaseDuration: time.Minute},
+		)
+		if fenceErr != nil {
+			close(blob.allowStat)
+			t.Fatalf("AcquireDeletionFenceLease() error = %v", fenceErr)
+		}
+		close(blob.allowStat)
+		openErr := <-resultCh
+		if openErr == nil {
+			t.Fatal("Open(record during deletion fence) succeeded")
+		}
+		if err := fenceRepository.ReleaseDeletionFenceLease(ctx, fence.Object, fence.Owner); err != nil {
+			t.Fatalf("ReleaseDeletionFenceLease() error = %v", err)
+		}
+	})
+
+	t.Run("exact digest version and delete marker failures", func(t *testing.T) {
+		expectOpenFailure := func(name string) {
+			t.Helper()
+			requestCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			stream, openErr := newService(&attachmentDownloadLifecycleBlob{S3BlobStore: blobStore}).Open(
+				requestCtx, attachments.DownloadRequest{Actor: actor, AttachmentID: recordAttachmentID},
+			)
+			if stream != nil {
+				_ = stream.Close(context.Background())
+			}
+			if openErr == nil {
+				t.Fatalf("Open(%s) unexpectedly succeeded", name)
+			}
+		}
+
+		wrongDigest := sha256.Sum256([]byte("download-lifecycle-wrong-digest"))
+		wrongKey := "sha256/" + fmt.Sprintf("%x", wrongDigest)
+		wrongUpload, err := client.PutObject(ctx, bucket, wrongKey, bytes.NewReader(content),
+			int64(len(content)), minio.PutObjectOptions{ContentType: "application/octet-stream"})
+		if err != nil {
+			t.Fatalf("PutObject(wrong digest fixture) error = %v", err)
+		}
+		if wrongUpload.VersionID == "" {
+			t.Fatal("PutObject(wrong digest fixture) returned empty version")
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			insert into public.blob_objects (
+				blob_key, sha256_digest, object_version, size_bytes, backend_kind
+			) values ($1, $2, $3, $4, 's3')`,
+			wrongKey, wrongDigest[:], wrongUpload.VersionID, int64(len(content))); err != nil {
+			t.Fatalf("insert wrong-digest S3 metadata: %v", err)
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			update public.record_attachments
+			set blob_key = $1, blob_object_version = $2 where attachment_id = $3`,
+			wrongKey, wrongUpload.VersionID, recordAttachmentID); err != nil {
+			t.Fatalf("mutate attachment to wrong digest: %v", err)
+		}
+		expectOpenFailure("wrong digest")
+		if _, err := fixture.db.Exec(ctx, `
+			update public.record_attachments
+			set blob_key = $1, blob_object_version = $2 where attachment_id = $3`,
+			object.Key, object.VersionID, recordAttachmentID); err != nil {
+			t.Fatalf("restore attachment after wrong digest: %v", err)
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			delete from public.blob_objects where blob_key = $1 and object_version = $2`,
+			wrongKey, wrongUpload.VersionID); err != nil {
+			t.Fatalf("delete wrong-digest S3 metadata: %v", err)
+		}
+		if err := client.RemoveObject(ctx, bucket, wrongKey, minio.RemoveObjectOptions{
+			VersionID: wrongUpload.VersionID,
+		}); err != nil {
+			t.Fatalf("RemoveObject(wrong digest fixture) error = %v", err)
+		}
+
+		missingDigest := sha256.Sum256([]byte("download-lifecycle-missing-version"))
+		missingKey := "sha256/" + fmt.Sprintf("%x", missingDigest)
+		const missingVersion = "download-lifecycle-missing-version"
+		if _, err := fixture.db.Exec(ctx, `
+			insert into public.blob_objects (
+				blob_key, sha256_digest, object_version, size_bytes, backend_kind
+			) values ($1, $2, $3, $4, 's3')`,
+			missingKey, missingDigest[:], missingVersion, object.SizeBytes); err != nil {
+			t.Fatalf("insert missing S3 version metadata: %v", err)
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			update public.record_attachments
+			set blob_key = $1, blob_object_version = $2 where attachment_id = $3`,
+			missingKey, missingVersion, recordAttachmentID); err != nil {
+			t.Fatalf("mutate attachment version: %v", err)
+		}
+		expectOpenFailure("wrong version")
+		if _, err := fixture.db.Exec(ctx, `
+			update public.record_attachments
+			set blob_key = $1, blob_object_version = $2 where attachment_id = $3`,
+			object.Key, object.VersionID, recordAttachmentID); err != nil {
+			t.Fatalf("restore attachment version: %v", err)
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			delete from public.blob_objects where blob_key = $1 and object_version = $2`,
+			missingKey, missingVersion); err != nil {
+			t.Fatalf("delete missing S3 version metadata: %v", err)
+		}
+
+		markerPayload := []byte("download-lifecycle-delete-marker")
+		markerDigest := sha256.Sum256(markerPayload)
+		markerKey := "sha256/" + fmt.Sprintf("%x", markerDigest)
+		markerUpload, err := client.PutObject(
+			ctx,
+			bucket,
+			markerKey,
+			bytes.NewReader(markerPayload),
+			int64(len(markerPayload)),
+			minio.PutObjectOptions{ContentType: "application/octet-stream"},
+		)
+		if err != nil {
+			t.Fatalf("PutObject(delete marker fixture) error = %v", err)
+		}
+		if markerUpload.VersionID == "" {
+			t.Fatal("PutObject(delete marker fixture) returned empty version")
+		}
+		if err := client.RemoveObject(ctx, bucket, markerKey, minio.RemoveObjectOptions{}); err != nil {
+			t.Fatalf("RemoveObject(delete marker) error = %v", err)
+		}
+		var markerVersion string
+		for listed := range client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+			Prefix: markerKey, Recursive: true, WithVersions: true,
+		}) {
+			if listed.Err != nil {
+				t.Fatalf("ListObjects(delete marker) error = %v", listed.Err)
+			}
+			if listed.Key == markerKey && listed.IsDeleteMarker {
+				markerVersion = listed.VersionID
+			}
+		}
+		if markerVersion == "" {
+			t.Fatal("delete marker version was not listed")
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			insert into public.blob_objects (
+				blob_key, sha256_digest, object_version, size_bytes, backend_kind
+			) values ($1, $2, $3, $4, 's3')`,
+			markerKey, markerDigest[:], markerVersion, int64(len(markerPayload))); err != nil {
+			t.Fatalf("insert delete-marker metadata: %v", err)
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			update public.record_attachments
+			set blob_key = $1, blob_object_version = $2 where attachment_id = $3`,
+			markerKey, markerVersion, recordAttachmentID); err != nil {
+			t.Fatalf("mutate attachment to delete marker: %v", err)
+		}
+		expectOpenFailure("delete marker")
+		if _, err := fixture.db.Exec(ctx, `
+			update public.record_attachments
+			set blob_key = $1, blob_object_version = $2 where attachment_id = $3`,
+			object.Key, object.VersionID, recordAttachmentID); err != nil {
+			t.Fatalf("restore attachment after delete marker: %v", err)
+		}
+		if _, err := fixture.db.Exec(ctx, `
+			delete from public.blob_objects where blob_key = $1 and object_version = $2`,
+			markerKey, markerVersion); err != nil {
+			t.Fatalf("delete delete-marker metadata: %v", err)
+		}
+		if err := client.RemoveObject(ctx, bucket, markerKey, minio.RemoveObjectOptions{
+			VersionID: markerVersion,
+		}); err != nil {
+			t.Fatalf("RemoveObject(delete marker version) error = %v", err)
+		}
+		if err := client.RemoveObject(ctx, bucket, markerKey, minio.RemoveObjectOptions{
+			VersionID: markerUpload.VersionID,
+		}); err != nil {
+			t.Fatalf("RemoveObject(delete marker payload version) error = %v", err)
+		}
+	})
+}
+
+type attachmentDownloadLifecycleBlob struct {
+	*attachments.S3BlobStore
+	mu          sync.Mutex
+	statCalls   int
+	openCalls   int
+	fullOpens   int
+	rangeOpens  int
+	statDelay   time.Duration
+	openDelay   time.Duration
+	statStarted chan struct{}
+	openStarted chan struct{}
+	allowStat   chan struct{}
+	allowOpen   chan struct{}
+	statOnce    sync.Once
+	openOnce    sync.Once
+}
+
+func (blob *attachmentDownloadLifecycleBlob) wait(
+	ctx context.Context,
+	delay time.Duration,
+	started chan struct{},
+	once *sync.Once,
+	allow chan struct{},
+) error {
+	if started != nil {
+		once.Do(func() { close(started) })
+	}
+	if allow != nil {
+		select {
+		case <-allow:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (blob *attachmentDownloadLifecycleBlob) Stat(
+	ctx context.Context,
+	version attachments.ObjectVersion,
+) (attachments.ObjectInfo, error) {
+	blob.mu.Lock()
+	blob.statCalls++
+	blob.mu.Unlock()
+	if err := blob.wait(ctx, blob.statDelay, blob.statStarted, &blob.statOnce, blob.allowStat); err != nil {
+		return attachments.ObjectInfo{}, err
+	}
+	return blob.S3BlobStore.Stat(ctx, version)
+}
+
+func (blob *attachmentDownloadLifecycleBlob) Open(
+	ctx context.Context,
+	version attachments.ObjectVersion,
+	byteRange attachments.ByteRange,
+) (io.ReadCloser, error) {
+	blob.mu.Lock()
+	blob.openCalls++
+	if byteRange == attachments.FullByteRange() {
+		blob.fullOpens++
+	} else {
+		blob.rangeOpens++
+	}
+	blob.mu.Unlock()
+	if err := blob.wait(ctx, blob.openDelay, blob.openStarted, &blob.openOnce, blob.allowOpen); err != nil {
+		return nil, err
+	}
+	return blob.S3BlobStore.Open(ctx, version, byteRange)
+}
+
+func (blob *attachmentDownloadLifecycleBlob) counts() (int, int, int, int) {
+	blob.mu.Lock()
+	defer blob.mu.Unlock()
+	return blob.statCalls, blob.openCalls, blob.fullOpens, blob.rangeOpens
+}
+
+type attachmentDownloadBlockingWriter struct {
+	mu         sync.Mutex
+	firstWrite chan struct{}
+	allowWrite chan struct{}
+	once       sync.Once
+	writes     int
+	output     bytes.Buffer
+}
+
+func (writer *attachmentDownloadBlockingWriter) Write(payload []byte) (int, error) {
+	writer.once.Do(func() { close(writer.firstWrite) })
+	<-writer.allowWrite
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	writer.writes++
+	return writer.output.Write(payload)
+}
+
+func (writer *attachmentDownloadBlockingWriter) Len() int {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.output.Len()
+}
+func (writer *attachmentDownloadBlockingWriter) Writes() int {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return writer.writes
+}
+
+func (writer *attachmentDownloadBlockingWriter) Snapshot() []byte {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	return append([]byte(nil), writer.output.Bytes()...)
+}
+
+type attachmentDownloadWindowedWriter struct {
+	delay  time.Duration
+	writes int
+	output bytes.Buffer
+}
+
+func (writer *attachmentDownloadWindowedWriter) Write(payload []byte) (int, error) {
+	if writer.delay > 0 {
+		time.Sleep(writer.delay)
+	}
+	writer.writes++
+	return writer.output.Write(payload)
+}
+
 type attachmentUploadWorkflowAuthorizer struct {
 	actor   recordauth.ActorScope
 	draftID string
@@ -4140,6 +4757,72 @@ func assertAttachmentUploadWorkflowReplayConflict(
 	if !errors.Is(err, attachments.ErrAttachmentConflict) {
 		t.Fatalf("CompleteUploadAndEnqueue(mismatched replay) error = %v, want ErrAttachmentConflict", err)
 	}
+}
+
+type attachmentDownloadRequestCounter struct {
+	mu         sync.Mutex
+	fullGETs   int
+	rangedGETs int
+}
+
+func (counter *attachmentDownloadRequestCounter) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.Method == http.MethodGet && request.URL.Query().Get("versionId") != "" {
+		counter.mu.Lock()
+		if request.Header.Get("Range") == "" {
+			counter.fullGETs++
+		} else {
+			counter.rangedGETs++
+		}
+		counter.mu.Unlock()
+	}
+	return http.DefaultTransport.RoundTrip(request)
+}
+
+func (counter *attachmentDownloadRequestCounter) reset() {
+	counter.mu.Lock()
+	counter.fullGETs = 0
+	counter.rangedGETs = 0
+	counter.mu.Unlock()
+}
+
+func (counter *attachmentDownloadRequestCounter) counts() (int, int) {
+	counter.mu.Lock()
+	defer counter.mu.Unlock()
+	return counter.fullGETs, counter.rangedGETs
+}
+
+func newAttachmentDownloadCountingMinIO(
+	t *testing.T,
+	counter *attachmentDownloadRequestCounter,
+) *minio.Client {
+	t.Helper()
+	required := func(name string) string {
+		t.Helper()
+		value := os.Getenv(name)
+		if value == "" {
+			t.Fatalf("%s is required", name)
+		}
+		return value
+	}
+	secure := false
+	if value := os.Getenv("HOUFENG_MINIO_SECURE"); value != "" {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			t.Fatalf("parse HOUFENG_MINIO_SECURE: %v", err)
+		}
+		secure = parsed
+	}
+	client, err := minio.New(required("HOUFENG_MINIO_ENDPOINT"), &minio.Options{
+		Creds: credentials.NewStaticV4(
+			required("HOUFENG_MINIO_ACCESS_KEY"), required("HOUFENG_MINIO_SECRET_KEY"), "",
+		),
+		Secure:    secure,
+		Transport: counter,
+	})
+	if err != nil {
+		t.Fatalf("minio.New(counting transport) error = %v", err)
+	}
+	return client
 }
 
 func newAttachmentUploadWorkflowMinIO(t *testing.T) (*minio.Client, string) {

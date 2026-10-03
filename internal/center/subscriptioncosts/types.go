@@ -48,7 +48,7 @@ const (
 
 type SettingsRepository interface {
 	GetSettings(context.Context) (centersettings.CenterSettings, error)
-	PutSettings(context.Context, centersettings.CenterSettings) (centersettings.CenterSettings, error)
+	MutateSettings(context.Context, centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error)
 }
 
 type Repository interface {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	centersettings "houfeng/internal/center/settings"
@@ -40,7 +41,10 @@ const getCenterSettingsSQL = `
 		from center_settings
 		where settings_id = $1`
 
-const upsertCenterSettingsSQL = `
+const getCenterSettingsForUpdateSQL = getCenterSettingsSQL + `
+		for update`
+
+const insertDefaultCenterSettingsSQL = `
 		insert into center_settings (
 			settings_id,
 			telegram_bot_token,
@@ -56,47 +60,50 @@ const upsertCenterSettingsSQL = `
 			subscription_cost_settings,
 			ip_quality_settings
 		) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb)
-		on conflict (settings_id) do update
-		set telegram_bot_token = excluded.telegram_bot_token,
-			telegram_chat_id = excluded.telegram_chat_id,
-			telegram_runtime_managed = excluded.telegram_runtime_managed,
-			feishu_enabled = excluded.feishu_enabled,
-			feishu_webhook_url = excluded.feishu_webhook_url,
-			host_sample_frequency_tier = excluded.host_sample_frequency_tier,
-			probe_frequency_defaults = excluded.probe_frequency_defaults,
-			incident_defaults = excluded.incident_defaults,
-			override_rules = excluded.override_rules,
-			retention_policy = excluded.retention_policy,
-			subscription_cost_settings = excluded.subscription_cost_settings,
-			ip_quality_settings = excluded.ip_quality_settings,
+		on conflict (settings_id) do nothing`
+
+const updateCenterSettingsSQL = `
+		update center_settings
+		set telegram_bot_token = $2,
+			telegram_chat_id = $3,
+			telegram_runtime_managed = $4,
+			feishu_enabled = $5,
+			feishu_webhook_url = $6,
+			host_sample_frequency_tier = $7,
+			probe_frequency_defaults = $8::jsonb,
+			incident_defaults = $9::jsonb,
+			override_rules = $10::jsonb,
+			retention_policy = $11::jsonb,
+			subscription_cost_settings = $12::jsonb,
+			ip_quality_settings = $13::jsonb,
 			updated_at = now()
-		returning
-			settings_id,
-			telegram_bot_token,
-			telegram_chat_id,
-			telegram_runtime_managed,
-			feishu_enabled,
-			feishu_webhook_url,
-			host_sample_frequency_tier,
-			probe_frequency_defaults,
-			incident_defaults,
-			override_rules,
-			retention_policy,
-			subscription_cost_settings,
-			ip_quality_settings,
-			created_at,
-			updated_at`
+		where settings_id = $1`
 
 type settingsQueryer interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+type settingsTx interface {
+	settingsQueryer
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Commit(context.Context) error
+	Rollback(context.Context) error
+}
+
 type PostgresSettingsRepository struct {
-	db settingsQueryer
+	db      settingsQueryer
+	beginTx func(context.Context, pgx.TxOptions) (settingsTx, error)
 }
 
 func NewPostgresSettingsRepository(db *pgxpool.Pool) *PostgresSettingsRepository {
-	return &PostgresSettingsRepository{db: db}
+	repo := &PostgresSettingsRepository{}
+	if db != nil {
+		repo.db = db
+		repo.beginTx = func(ctx context.Context, options pgx.TxOptions) (settingsTx, error) {
+			return db.BeginTx(ctx, options)
+		}
+	}
+	return repo
 }
 
 var _ centersettings.Repository = (*PostgresSettingsRepository)(nil)
@@ -146,7 +153,10 @@ func (r *PostgresSettingsRepository) GetPersistedIncidentDefaults(ctx context.Co
 }
 
 func (r *PostgresSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
-	record, err := r.scanSettingsRow(ctx, getCenterSettingsSQL, centersettings.SingletonID)
+	if ctx == nil || r == nil || r.db == nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("query center settings: invalid repository")
+	}
+	record, err := scanSettingsRow(ctx, r.db, getCenterSettingsSQL, centersettings.SingletonID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return centersettings.Default(), nil
 	}
@@ -156,69 +166,98 @@ func (r *PostgresSettingsRepository) GetSettings(ctx context.Context) (centerset
 	return record, nil
 }
 
-func (r *PostgresSettingsRepository) PutSettings(ctx context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-	record, err := r.putSettings(ctx, input)
+func (r *PostgresSettingsRepository) MutateSettings(ctx context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
+	if mutate == nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("%w: mutation callback is nil", centersettings.ErrInvalidSettings)
+	}
+	if ctx == nil || r == nil || r.beginTx == nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("mutate center settings: invalid repository")
+	}
+
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("begin center settings mutation: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	defaults, err := settingsWriteArgs(centersettings.Default())
+	if err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("encode default center settings: %w", err)
+	}
+	if _, err := tx.Exec(ctx, insertDefaultCenterSettingsSQL, defaults...); err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("initialize center settings: %w", err)
+	}
+
+	current, err := scanSettingsRow(ctx, tx, getCenterSettingsForUpdateSQL, centersettings.SingletonID)
+	if err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("read center settings for mutation: %w", err)
+	}
+	updated, err := mutate(current)
+	if err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("mutate center settings: %w", err)
+	}
+	normalized, err := centersettings.Validate(updated)
 	if err != nil {
 		return centersettings.CenterSettings{}, err
 	}
-	return record, nil
+	values, err := settingsWriteArgs(normalized)
+	if err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("encode center settings: %w", err)
+	}
+	if _, err := tx.Exec(ctx, updateCenterSettingsSQL, values...); err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("update center settings: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return centersettings.CenterSettings{}, fmt.Errorf("commit center settings mutation: %w", err)
+	}
+	return normalized, nil
 }
 
-func (r *PostgresSettingsRepository) putSettings(ctx context.Context, input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-	normalized, err := centersettings.Validate(input)
+func settingsWriteArgs(input centersettings.CenterSettings) ([]any, error) {
+	probeDefaults, err := json.Marshal(input.ProbeFrequencyDefaults)
 	if err != nil {
-		return centersettings.CenterSettings{}, err
+		return nil, fmt.Errorf("marshal probe frequency defaults: %w", err)
 	}
-
-	probeDefaults, err := json.Marshal(normalized.ProbeFrequencyDefaults)
+	incidentDefaults, err := json.Marshal(input.IncidentDefaults)
 	if err != nil {
-		return centersettings.CenterSettings{}, fmt.Errorf("marshal probe frequency defaults: %w", err)
+		return nil, fmt.Errorf("marshal incident defaults: %w", err)
 	}
-	incidentDefaults, err := json.Marshal(normalized.IncidentDefaults)
+	overrideRules, err := json.Marshal(input.OverrideRules)
 	if err != nil {
-		return centersettings.CenterSettings{}, fmt.Errorf("marshal incident defaults: %w", err)
+		return nil, fmt.Errorf("marshal override rules: %w", err)
 	}
-	overrideRules, err := json.Marshal(normalized.OverrideRules)
+	retentionPolicy, err := json.Marshal(input.RetentionPolicy)
 	if err != nil {
-		return centersettings.CenterSettings{}, fmt.Errorf("marshal override rules: %w", err)
+		return nil, fmt.Errorf("marshal retention policy: %w", err)
 	}
-	retentionPolicy, err := json.Marshal(normalized.RetentionPolicy)
+	subscriptionCostSettings, err := json.Marshal(input.SubscriptionCost)
 	if err != nil {
-		return centersettings.CenterSettings{}, fmt.Errorf("marshal retention policy: %w", err)
+		return nil, fmt.Errorf("marshal subscription cost settings: %w", err)
 	}
-	subscriptionCostSettings, err := json.Marshal(normalized.SubscriptionCost)
+	ipQualitySettings, err := json.Marshal(input.IPQuality)
 	if err != nil {
-		return centersettings.CenterSettings{}, fmt.Errorf("marshal subscription cost settings: %w", err)
+		return nil, fmt.Errorf("marshal ip quality settings: %w", err)
 	}
-	ipQualitySettings, err := json.Marshal(normalized.IPQuality)
-	if err != nil {
-		return centersettings.CenterSettings{}, fmt.Errorf("marshal ip quality settings: %w", err)
-	}
-
-	record, err := r.scanSettingsRow(
-		ctx,
-		upsertCenterSettingsSQL,
+	return []any{
 		centersettings.SingletonID,
-		normalized.Telegram.BotToken,
-		normalized.Telegram.ChatID,
-		normalized.Telegram.RuntimeManaged,
-		normalized.FeishuEnabled,
-		normalized.FeishuWebhookURL,
-		normalized.HostSampleFrequencyTier,
+		input.Telegram.BotToken,
+		input.Telegram.ChatID,
+		input.Telegram.RuntimeManaged,
+		input.FeishuEnabled,
+		input.FeishuWebhookURL,
+		input.HostSampleFrequencyTier,
 		probeDefaults,
 		incidentDefaults,
 		overrideRules,
 		retentionPolicy,
 		subscriptionCostSettings,
 		ipQualitySettings,
-	)
-	if err != nil {
-		return centersettings.CenterSettings{}, fmt.Errorf("upsert center settings: %w", err)
-	}
-	return record, nil
+	}, nil
 }
 
-func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql string, args ...any) (centersettings.CenterSettings, error) {
+func scanSettingsRow(ctx context.Context, queryer settingsQueryer, sql string, args ...any) (centersettings.CenterSettings, error) {
 	var (
 		settingsID               string
 		telegramBotToken         string
@@ -237,7 +276,7 @@ func (r *PostgresSettingsRepository) scanSettingsRow(ctx context.Context, sql st
 		updatedAt                time.Time
 	)
 
-	if err := r.db.QueryRow(ctx, sql, args...).Scan(
+	if err := queryer.QueryRow(ctx, sql, args...).Scan(
 		&settingsID,
 		&telegramBotToken,
 		&telegramChatID,

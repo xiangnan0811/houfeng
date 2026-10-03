@@ -56,15 +56,13 @@ type UserRepository interface {
 	Create(ctx context.Context, u User) error
 	FindByUsername(ctx context.Context, username string) (User, error)
 	FindByID(ctx context.Context, userID string) (User, error)
-	UpdatePassword(ctx context.Context, userID, newHash string, changedAt time.Time) error
 	CountUsers(ctx context.Context) (int, error)
 }
 
 type SessionRepository interface {
-	Create(ctx context.Context, s Session) error
-	Find(ctx context.Context, sessionID string) (Session, error)
-	RefreshExpires(ctx context.Context, sessionID string, lastSeenAt, expiresAt time.Time) error
+	CreateIfPasswordHash(ctx context.Context, expectedHash string, session Session, now func() time.Time, ttl time.Duration) (Session, error)
+	ChangePasswordIfHash(ctx context.Context, userID, currentSessionID, expectedHash, newHash string, now func() time.Time) error
+	TouchWithUserLock(ctx context.Context, sessionID string, now func() time.Time, ttl time.Duration) (Session, error)
 	Delete(ctx context.Context, sessionID string) error
-	DeleteByUserID(ctx context.Context, userID, exceptSessionID string) error
 	DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int, error)
 }

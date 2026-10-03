@@ -15,6 +15,11 @@
 - `make verify-docs`：文档链接、锚点、导航、平台导入和旧路径检查，含检查器回归。
 - `make verify-web`：独立于调用者 NODE_ENV 安装依赖，lint、覆盖率测试、build、bundle 和 CSS 检查。
 - `make verify`：项目完整本地入口，调用 `scripts/verify.sh`。
+- `bash scripts/test-business-postgres.sh`：真实隔离 PostgreSQL 业务门禁，固定执行认证、设置、
+  归档、维护和附件/租约 anchor；每个顶层测试与包必须通过，任何 skip/fail 或遗漏都失败。
+  需要 Docker、bash、jq、ss 和 setsid；临时状态保存在 checkout 的 `tmp/` 下。
+  下载的真实 S3/MinIO 验收另用 `scripts/run-records-integration.sh --profile s3`，
+  不由此 PostgreSQL 门禁代替。
 - `make build-center`、`make build-agent`：本地二进制构建。
 - `npm --prefix web run dev`：前端开发服务（先按锁文件安装依赖）。
 
@@ -29,8 +34,8 @@
 暂存后、推送前再核对内容与验证条件；不能只凭相同 HEAD 复用旧结果。不绕过 hooks。
 清晰的小改动直接完成，无强制任务文档、规划审批或日志。
 
-PR 后持续跟进 required CI；`.github/workflows/ci.yml` 包含 Go、三个 PG16 catalog 版本、
-Web、Chromium 和 Docker build。分支保护实际 required 集合须现场核对。
+PR 后持续监控 required CI；`.github/workflows/ci.yml` 包含 Go、三个 PG16 catalog 版本、
+独立业务 PostgreSQL 门禁、Web、Chromium 和 Docker build。分支保护实际 required 集合须现场核对。
 本地聚焦测试不能代替 CI；数据库测试跳过不能写成真实 PostgreSQL 验收通过。
 
 合并、发布、部署需要对应授权；按 [交付规范](docs/development/branch-workflow-governance.md)

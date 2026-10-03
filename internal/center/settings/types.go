@@ -19,9 +19,11 @@ const (
 
 var ErrInvalidSettings = errors.New("invalid center settings")
 
+type MutateSettingsFunc func(current CenterSettings) (CenterSettings, error)
+
 type Repository interface {
 	GetSettings(context.Context) (CenterSettings, error)
-	PutSettings(context.Context, CenterSettings) (CenterSettings, error)
+	MutateSettings(context.Context, MutateSettingsFunc) (CenterSettings, error)
 }
 
 type CenterSettings struct {

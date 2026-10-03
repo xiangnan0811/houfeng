@@ -1505,10 +1505,6 @@ func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.Ce
 	return f.getSettingsResult, nil
 }
 
-func (f *fakeSettingsRepository) PutSettings(context.Context, centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-	panic("unexpected PutSettings call")
-}
-
 func (f *fakeSettingsRepository) GetPersistedTelegramSettings(context.Context) (centersettings.TelegramSettings, bool, error) {
 	if f.persistedErr != nil {
 		return centersettings.TelegramSettings{}, false, f.persistedErr

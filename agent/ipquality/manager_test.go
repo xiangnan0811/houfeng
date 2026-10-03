@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,17 +37,26 @@ func (s *memoryStateStore) Save(_ context.Context, state agentipquality.State) e
 }
 
 type channelCollector struct {
+	mu     sync.Mutex
 	calls  int
 	report agentapi.IPQualityReportPayload
 	wait   chan struct{}
 }
 
 func (c *channelCollector) Collect(context.Context, *agentapi.IPQualityPlan, time.Time) agentapi.IPQualityReportPayload {
+	c.mu.Lock()
 	c.calls++
+	c.mu.Unlock()
 	if c.wait != nil {
 		<-c.wait
 	}
 	return c.report
+}
+
+func (c *channelCollector) Calls() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.calls
 }
 
 func TestManagerStartsDueCollectionAndDrainsReport(t *testing.T) {
@@ -82,8 +92,8 @@ func TestManagerStartsDueCollectionAndDrainsReport(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	if collector.calls != 1 {
-		t.Fatalf("collector calls = %d, want 1", collector.calls)
+	if collector.Calls() != 1 {
+		t.Fatalf("collector calls = %d, want 1", collector.Calls())
 	}
 	if !store.state.LastAttemptedAt.Equal(now) || !store.state.LastSucceededAt.Equal(now) || store.state.LastStatus != agentapi.IPQualityStatusSuccess {
 		t.Fatalf("state = %#v, want success timestamps", store.state)
@@ -102,8 +112,8 @@ func TestManagerDoesNotStartWhenDisabledOrNotDue(t *testing.T) {
 	if err := manager.MaybeStart(context.Background(), &agentapi.IPQualityPlan{Enabled: true, FrequencySeconds: 86400}, now); err != nil {
 		t.Fatalf("MaybeStart(not due) error = %v", err)
 	}
-	if collector.calls != 0 {
-		t.Fatalf("collector calls = %d, want 0", collector.calls)
+	if collector.Calls() != 0 {
+		t.Fatalf("collector calls = %d, want 0", collector.Calls())
 	}
 }
 
@@ -124,7 +134,7 @@ func TestManagerDoesNotStartSecondCollectionWhileInFlight(t *testing.T) {
 	close(wait)
 
 	deadline := time.After(time.Second)
-	for collector.calls == 0 {
+	for collector.Calls() == 0 {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for collector")
@@ -132,8 +142,8 @@ func TestManagerDoesNotStartSecondCollectionWhileInFlight(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
-	if collector.calls != 1 {
-		t.Fatalf("collector calls = %d, want 1 while in flight", collector.calls)
+	if collector.Calls() != 1 {
+		t.Fatalf("collector calls = %d, want 1 while in flight", collector.Calls())
 	}
 }
 
@@ -152,8 +162,8 @@ func TestManagerThrottlesAfterFailedAttempt(t *testing.T) {
 		t.Fatalf("MaybeStart() error = %v", err)
 	}
 
-	if collector.calls != 0 {
-		t.Fatalf("collector calls = %d, want 0 for recent failed attempt", collector.calls)
+	if collector.Calls() != 0 {
+		t.Fatalf("collector calls = %d, want 0 for recent failed attempt", collector.Calls())
 	}
 	if store.saveCalls != 0 {
 		t.Fatalf("saveCalls = %d, want 0 when throttled", store.saveCalls)
@@ -170,8 +180,8 @@ func TestManagerReturnsStateLoadErrorWithoutCollecting(t *testing.T) {
 	if !errors.Is(err, loadErr) {
 		t.Fatalf("MaybeStart() error = %v, want load error", err)
 	}
-	if collector.calls != 0 {
-		t.Fatalf("collector calls = %d, want 0", collector.calls)
+	if collector.Calls() != 0 {
+		t.Fatalf("collector calls = %d, want 0", collector.Calls())
 	}
 }
 
@@ -237,8 +247,8 @@ func TestManagerCollectRequestBypassesFrequencyOnce(t *testing.T) {
 		t.Fatalf("MaybeStart(repeat) error = %v", err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	if collector.calls != 1 {
-		t.Fatalf("collector calls = %d, want 1 for a repeated request id", collector.calls)
+	if collector.Calls() != 1 {
+		t.Fatalf("collector calls = %d, want 1 for a repeated request id", collector.Calls())
 	}
 
 	// 去重只在内存：重启后的 agent 若仍收到该请求会再采一次，而不是漏采。
@@ -246,8 +256,8 @@ func TestManagerCollectRequestBypassesFrequencyOnce(t *testing.T) {
 	if err := restarted.MaybeStart(context.Background(), plan, now.Add(10*time.Second)); err != nil {
 		t.Fatalf("MaybeStart(after restart) error = %v", err)
 	}
-	if reports := waitForReports(t, restarted); len(reports) != 1 || collector.calls != 2 {
-		t.Fatalf("reports = %#v calls = %d, want a restarted agent to answer the request again", reports, collector.calls)
+	if reports := waitForReports(t, restarted); len(reports) != 1 || collector.Calls() != 2 {
+		t.Fatalf("reports = %#v calls = %d, want a restarted agent to answer the request again", reports, collector.Calls())
 	}
 }
 
@@ -275,8 +285,8 @@ func TestManagerAdoptsCollectRequestDuringScheduledRun(t *testing.T) {
 		t.Fatalf("MaybeStart(after adoption) error = %v", err)
 	}
 	time.Sleep(10 * time.Millisecond)
-	if collector.calls != 1 {
-		t.Fatalf("collector calls = %d, want adopted request not to run again", collector.calls)
+	if collector.Calls() != 1 {
+		t.Fatalf("collector calls = %d, want 1 for adopted request not to run again", collector.Calls())
 	}
 }
 
@@ -302,8 +312,8 @@ func TestManagerIgnoresCollectRequestWhenDisabled(t *testing.T) {
 	if err := manager.MaybeStart(context.Background(), plan, time.Now()); err != nil {
 		t.Fatalf("MaybeStart() error = %v", err)
 	}
-	if collector.calls != 0 || store.saveCalls != 0 {
-		t.Fatalf("calls = %d saves = %d, want disabled plan to ignore requests", collector.calls, store.saveCalls)
+	if collector.Calls() != 0 || store.saveCalls != 0 {
+		t.Fatalf("calls = %d saves = %d, want disabled plan to ignore requests", collector.Calls(), store.saveCalls)
 	}
 }
 
@@ -326,12 +336,12 @@ func TestManagerRetriesCollectRequestAfterStop(t *testing.T) {
 		if err := manager.MaybeStart(context.Background(), plan, now.Add(time.Second)); err != nil {
 			t.Fatalf("MaybeStart(retry) error = %v", err)
 		}
-		if collector.calls >= 2 {
+		if collector.Calls() >= 2 {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("collector calls = %d, want the cancelled request to run again", collector.calls)
+			t.Fatalf("collector calls = %d, want the cancelled request to run again", collector.Calls())
 		default:
 			time.Sleep(time.Millisecond)
 		}
@@ -346,7 +356,7 @@ func TestManagerRetriesCollectRequestAfterStop(t *testing.T) {
 	if err := manager.MaybeStart(context.Background(), plan, now.Add(2*time.Second)); err != nil {
 		t.Fatalf("MaybeStart(after stop) error = %v", err)
 	}
-	if reports := waitForReports(t, manager); len(reports) != 1 || collector.calls != 3 {
-		t.Fatalf("reports = %#v calls = %d, want the request answered again after Stop", reports, collector.calls)
+	if reports := waitForReports(t, manager); len(reports) != 1 || collector.Calls() != 3 {
+		t.Fatalf("reports = %#v calls = %d, want the request answered again after Stop", reports, collector.Calls())
 	}
 }

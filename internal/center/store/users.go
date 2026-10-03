@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -61,20 +60,6 @@ func (r *PostgresUserRepository) queryOne(ctx context.Context, sql, arg string) 
 		return auth.User{}, fmt.Errorf("query user: %w", err)
 	}
 	return u, nil
-}
-
-func (r *PostgresUserRepository) UpdatePassword(ctx context.Context, userID, newHash string, changedAt time.Time) error {
-	tag, err := r.pool.Exec(ctx, `
-		update users set password_hash = $2, password_changed_at = $3 where user_id = $1`,
-		userID, newHash, changedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("update password: %w", err)
-	}
-	if tag.RowsAffected() == 0 {
-		return auth.ErrUserNotFound
-	}
-	return nil
 }
 
 func (r *PostgresUserRepository) CountUsers(ctx context.Context) (int, error) {

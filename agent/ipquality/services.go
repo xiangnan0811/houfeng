@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"houfeng/internal/contracts/agentapi"
@@ -18,6 +19,74 @@ type serviceProbe struct {
 	source  string
 	url     string
 	parse   func([]byte, *http.Response) agentapi.IPQualityServiceUnlockPayload
+}
+
+func (c *HTTPCollector) collectDefaultServiceUnlocks(ctx context.Context, services []string, sourceTimeout time.Duration) []serviceProbeOutcome {
+	outcomes := make([]serviceProbeOutcome, len(services))
+	started := make([]bool, len(services))
+	if len(services) == 0 {
+		return outcomes
+	}
+
+	workerCount := len(services)
+	if workerCount > 7 {
+		workerCount = 7
+	}
+	jobs := make(chan int)
+	var waitGroup sync.WaitGroup
+	waitGroup.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer waitGroup.Done()
+			for index := range jobs {
+				if err := ctx.Err(); err != nil {
+					code := errorCodeForHTTPError(err)
+					if code == "" {
+						code = "request_failed"
+					}
+					outcomes[index] = serviceFailure(services[index], "default_probe_registry", code, err.Error(), nil, nil)
+					continue
+				}
+				probeCtx, cancel := context.WithTimeout(ctx, sourceTimeout)
+				outcomes[index] = collectDefaultServiceUnlock(probeCtx, c, services[index])
+				cancel()
+			}
+		}()
+	}
+
+dispatch:
+	for index := range services {
+		select {
+		case <-ctx.Done():
+			break dispatch
+		default:
+		}
+		started[index] = true
+		select {
+		case jobs <- index:
+		case <-ctx.Done():
+			started[index] = false
+			break dispatch
+		}
+	}
+	close(jobs)
+	waitGroup.Wait()
+
+	for index, service := range services {
+		if started[index] {
+			continue
+		}
+		err := ctx.Err()
+		if err == nil {
+			err = context.DeadlineExceeded
+		}
+		code := errorCodeForHTTPError(err)
+		if code == "" {
+			code = "request_failed"
+		}
+		outcomes[index] = serviceFailure(service, "default_probe_registry", code, err.Error(), nil, nil)
+	}
+	return outcomes
 }
 
 func collectDefaultServiceUnlock(ctx context.Context, collector *HTTPCollector, service string) serviceProbeOutcome {
@@ -44,6 +113,9 @@ func collectDefaultServiceUnlock(ctx context.Context, collector *HTTPCollector, 
 	}
 
 	startedAt := time.Now()
+	if err := ctx.Err(); err != nil {
+		return serviceFailure(probe.service, probe.source, errorCodeForHTTPError(err), err.Error(), elapsedMillis(startedAt), nil)
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, probe.url, nil)
 	if err != nil {
 		return serviceFailure(probe.service, probe.source, "invalid_request", err.Error(), elapsedMillis(startedAt), nil)

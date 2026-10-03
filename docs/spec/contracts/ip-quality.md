@@ -207,3 +207,24 @@ if unlocked := boolFromMap(payload, "unlocked"); unlocked != nil && *unlocked {
 	result.Status = "blocked"
 }
 ```
+
+### 8. Provider outcomes and scheduling evidence
+
+默认采集先并发执行 `ipapi.is` 与 `ipquery.io` 这两个 canonical source，并按
+registry 顺序选择第一个返回合法 IP 的成功结果。只有 canonical source 成功后才
+启动 `proxycheck.io`、`ip2location.io` 和 `ipwho.is`；canonical 全部失败时，
+依赖来源只写 `missing_target_ip` 诊断，不发出网络请求。每个阶段有独立预算，
+请求超时取阶段预算与 5 秒中的较小值，结果按 registry 输入顺序归并，服务探测
+使用最多 7 个 worker，取消或超时前未开始的服务仍生成诊断行。父采集 context
+是硬总上限，任何 worker 在返回后都不得继续修改报告或其 maps。
+
+provider 的 HTTP/JSON 成功不等于业务成功。`ipapi.is`、`ipquery.io`、
+`ip2location.io` 与 `ipwho.is` 必须返回有效 IP；`proxycheck.io` 只接受
+`status=ok|warning` 且必须存在 canonical IP 对应的非空对象。业务错误写
+`provider_error`，协议必需值缺失或类型不正确写 `invalid_response`；普通错误摘要
+使用固定短语，脱敏后的上游细节只保留在 raw/extra JSON。失败 provider 不进入
+canonical 候选、preferred/fallback 或成功 coverage。
+
+`ipapi.is` 的嵌套和匿名扁平响应共用同一事实读取路径。扁平 `asn` 形如
+`AS123 Example Org` 时拆成 ASN 与组织；无法解析时只保留原始 ASN 值，不臆造
+组织、国家代码或风险字段。

@@ -455,6 +455,39 @@ func newTestService() (*Service, *fakeSubscriptionCostRepo) {
 	return service, repo
 }
 
+func TestServicePutSettingsUsesAtomicLatestValueCallback(t *testing.T) {
+	settings := centersettings.Default()
+	settings.SubscriptionCost.FixerAPIKey = "existing-secret"
+	repo := &fakeSettingsRepo{settings: settings}
+	service := NewService(&fakeSubscriptionCostRepo{}, repo, nil)
+	calls := 0
+
+	got, err := service.PutSettings(context.Background(), func(current centersettings.SubscriptionCostSettings) (centersettings.SubscriptionCostSettings, error) {
+		calls++
+		if current.FixerAPIKey != "existing-secret" {
+			t.Fatalf("callback FixerAPIKey = %q, want existing secret", current.FixerAPIKey)
+		}
+		current.BaseCurrency = "USD"
+		return current, nil
+	})
+	if err != nil {
+		t.Fatalf("PutSettings() error = %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("callback calls = %d, want 1", calls)
+	}
+	if got.BaseCurrency != "USD" || got.FixerAPIKey != "existing-secret" {
+		t.Fatalf("PutSettings() = %#v, want updated currency with preserved secret", got)
+	}
+}
+
+func TestServicePutSettingsRejectsNilCallback(t *testing.T) {
+	service, _ := newTestService()
+	if _, err := service.PutSettings(context.Background(), nil); !errors.Is(err, centersettings.ErrInvalidSettings) {
+		t.Fatalf("PutSettings(nil) error = %v, want ErrInvalidSettings", err)
+	}
+}
+
 func defaultCenterSettings() centersettings.CenterSettings {
 	return centersettings.Default()
 }
@@ -476,8 +509,12 @@ func (r *fakeSettingsRepo) GetSettings(context.Context) (centersettings.CenterSe
 	return r.settings, nil
 }
 
-func (r *fakeSettingsRepo) PutSettings(_ context.Context, settings centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-	r.settings = settings
+func (r *fakeSettingsRepo) MutateSettings(_ context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
+	next, err := mutate(r.settings)
+	if err != nil {
+		return centersettings.CenterSettings{}, err
+	}
+	r.settings = next
 	return r.settings, nil
 }
 
