@@ -58,52 +58,52 @@ func (s jsonProviderSource) Collect(ctx context.Context, collector *HTTPCollecto
 
 func defaultProviderSources() (canonical []providerSource, targetDependent []providerSource) {
 	return []providerSource{
-			jsonProviderSource{
-				name:       "ipapi.is",
-				sourceType: sourceTypeDefault,
-				urlForIP:   func(string) string { return defaultLookupURL },
-				parse:      parseIPAPIISProvider,
+		jsonProviderSource{
+			name:       "ipapi.is",
+			sourceType: sourceTypeDefault,
+			urlForIP:   func(string) string { return defaultLookupURL },
+			parse:      parseIPAPIISProvider,
+		},
+		jsonProviderSource{
+			name:       "ipquery.io",
+			sourceType: sourceTypeDefault,
+			urlForIP: func(ip string) string {
+				if strings.TrimSpace(ip) == "" {
+					return "https://api.ipquery.io/?format=json"
+				}
+				return "https://api.ipquery.io/" + url.PathEscape(strings.TrimSpace(ip))
 			},
-			jsonProviderSource{
-				name:       "ipquery.io",
-				sourceType: sourceTypeDefault,
-				urlForIP: func(ip string) string {
-					if strings.TrimSpace(ip) == "" {
-						return "https://api.ipquery.io/"
-					}
-					return "https://api.ipquery.io/" + url.PathEscape(strings.TrimSpace(ip))
-				},
-				parse: parseIPQueryProvider,
+			parse: parseIPQueryProvider,
+		},
+	}, []providerSource{
+		jsonProviderSource{
+			name:       "proxycheck.io",
+			sourceType: sourceTypeDefault,
+			needsIP:    true,
+			urlForIP: func(ip string) string {
+				return "https://proxycheck.io/v2/" + url.PathEscape(strings.TrimSpace(ip)) + "?vpn=1&asn=1&risk=1"
 			},
-		}, []providerSource{
-			jsonProviderSource{
-				name:       "proxycheck.io",
-				sourceType: sourceTypeDefault,
-				needsIP:    true,
-				urlForIP: func(ip string) string {
-					return "https://proxycheck.io/v2/" + url.PathEscape(strings.TrimSpace(ip)) + "?vpn=1&asn=1&risk=1"
-				},
-				parse: parseProxycheckProvider,
+			parse: parseProxycheckProvider,
+		},
+		jsonProviderSource{
+			name:       "ip2location.io",
+			sourceType: sourceTypeDefault,
+			needsIP:    true,
+			urlForIP: func(ip string) string {
+				return "https://api.ip2location.io/?ip=" + url.QueryEscape(strings.TrimSpace(ip))
 			},
-			jsonProviderSource{
-				name:       "ip2location.io",
-				sourceType: sourceTypeDefault,
-				needsIP:    true,
-				urlForIP: func(ip string) string {
-					return "https://api.ip2location.io/?ip=" + url.QueryEscape(strings.TrimSpace(ip))
-				},
-				parse: parseIP2LocationProvider,
+			parse: parseIP2LocationProvider,
+		},
+		jsonProviderSource{
+			name:       "ipwho.is",
+			sourceType: sourceTypeDefault,
+			needsIP:    true,
+			urlForIP: func(ip string) string {
+				return "https://ipwho.is/" + url.PathEscape(strings.TrimSpace(ip))
 			},
-			jsonProviderSource{
-				name:       "ipwho.is",
-				sourceType: sourceTypeDefault,
-				needsIP:    true,
-				urlForIP: func(ip string) string {
-					return "https://ipwho.is/" + url.PathEscape(strings.TrimSpace(ip))
-				},
-				parse: parseIPWhoIsProvider,
-			},
-		}
+			parse: parseIPWhoIsProvider,
+		},
+	}
 }
 
 func optionalProviderDiagnostics() []agentapi.IPQualityProviderResultPayload {

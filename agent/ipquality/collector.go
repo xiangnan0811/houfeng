@@ -145,9 +145,12 @@ func (c *HTTPCollector) collectLegacy(ctx context.Context, plan *agentapi.IPQual
 				unlock = agentapi.IPQualityServiceUnlockPayload{
 					Service:      service,
 					Status:       "unknown",
+					ProbeStatus:  sourceStatusFailure,
 					ErrorCode:    "probe_failed",
 					ErrorSummary: err.Error(),
 				}
+			} else if unlock.ProbeStatus == sourceStatusFailure {
+				report.Status = agentapi.IPQualityStatusPartial
 			}
 			report.ServiceUnlocks = append(report.ServiceUnlocks, unlock)
 		}
@@ -178,7 +181,7 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 	}
 	collectCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	canonicalBudget, dependentBudget, serviceBudget := collectionBudgets(timeout)
+	canonicalBudget, dependentBudget, _ := collectionBudgets(timeout)
 	canonicalSources, targetDependentSources := defaultProviderSources()
 
 	canonicalCtx, canonicalCancel := context.WithTimeout(collectCtx, canonicalBudget)
@@ -253,9 +256,7 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 	applyReportFallbacksFromProviders(&report, successfulProviders)
 
 	serviceRaw := map[string]sourceRawEnvelope{}
-	serviceCtx, serviceCancel := context.WithTimeout(collectCtx, serviceBudget)
-	services := c.collectDefaultServiceUnlocks(serviceCtx, normalizedServices(plan.Services), minDuration(serviceBudget, 5*time.Second))
-	serviceCancel()
+	services := collectDefaultServiceUnlocks(normalizedServices(plan.Services))
 	for _, outcome := range services {
 		report.ServiceUnlocks = append(report.ServiceUnlocks, outcome.Result)
 		serviceRaw[outcome.Result.Service] = sourceRawEnvelopeFromService(outcome)
@@ -320,14 +321,27 @@ func (c *HTTPCollector) collectServiceUnlock(ctx context.Context, service string
 		ErrorCode:    stringFromMap(payload, "error_code"),
 		ErrorSummary: stringFromMap(payload, "error_summary", "message"),
 	}
-	if result.Status == "" {
+	status := strings.ToLower(strings.TrimSpace(result.Status))
+	if status == "" {
 		if unlocked := boolFromMap(payload, "unlocked"); unlocked != nil && *unlocked {
-			result.Status = "unlocked"
+			status = "unlocked"
 		} else if unlocked != nil {
-			result.Status = "blocked"
+			status = "blocked"
 		} else {
-			result.Status = "unknown"
+			status = "unknown"
 		}
+	}
+	switch status {
+	case "unlocked", "blocked", "partial":
+		result.Status = status
+		result.ProbeStatus = sourceStatusSuccess
+	default:
+		result.Status = "unknown"
+		result.ProbeStatus = sourceStatusFailure
+		result.Region = ""
+		result.UnlockType = ""
+		result.ErrorCode = "invalid_response"
+		result.ErrorSummary = "service response did not establish a business conclusion"
 	}
 	return result, raw, nil
 }
