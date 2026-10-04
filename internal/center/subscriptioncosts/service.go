@@ -68,7 +68,7 @@ func (s *Service) ListCostRows(ctx context.Context) ([]CostRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	budgets = applyBudgetSpend(rows, budgets)
+	budgets = applyBudgetSpend(rows, budgets, settings.BaseCurrency)
 	applyRowBudgetStatus(rows, budgets)
 	return rows, nil
 }
@@ -104,7 +104,7 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 	if err != nil {
 		return Overview{}, fmt.Errorf("list subscription budgets: %w", err)
 	}
-	budgets = applyBudgetSpend(rows, budgets)
+	budgets = applyBudgetSpend(rows, budgets, settings.BaseCurrency)
 	applyRowBudgetStatus(rows, budgets)
 	// 预算月桶、续费窗口“今天”与 snapshot_generated_at 取自同一时刻，
 	// 前端据此计算剩余天数时不会跨 UTC 午夜错位，月末也不会混用两个月份。
@@ -222,7 +222,7 @@ func (s *Service) GetStatistics(ctx context.Context, window string) (Statistics,
 	if err != nil {
 		return Statistics{}, fmt.Errorf("list subscription budgets: %w", err)
 	}
-	budgets = applyBudgetSpend(rows, budgets)
+	budgets = applyBudgetSpend(rows, budgets, settings.BaseCurrency)
 
 	stats := Statistics{
 		Window:       window,
@@ -343,7 +343,7 @@ func (s *Service) ListBudgets(ctx context.Context, filters BudgetListFilters) ([
 	if err != nil {
 		return nil, err
 	}
-	return applyBudgetSpend(rows, budgets), nil
+	return applyBudgetSpend(rows, budgets, settings.BaseCurrency), nil
 }
 
 func (s *Service) CreateBudget(ctx context.Context, input CreateBudgetInput) (BudgetRecord, error) {
@@ -379,7 +379,7 @@ func (s *Service) hydrateBudget(ctx context.Context, budget BudgetRecord) (Budge
 	if err != nil {
 		return BudgetRecord{}, err
 	}
-	budgets := applyBudgetSpend(rows, []BudgetRecord{budget})
+	budgets := applyBudgetSpend(rows, []BudgetRecord{budget}, settings.BaseCurrency)
 	return budgets[0], nil
 }
 
@@ -467,32 +467,60 @@ func monthsInRange(start, end subscriptions.Date) []subscriptions.Date {
 	return months
 }
 
-func applyBudgetSpend(rows []CostRow, budgets []BudgetRecord) []BudgetRecord {
+func applyBudgetSpend(rows []CostRow, budgets []BudgetRecord, baseCurrency string) []BudgetRecord {
 	rows, _ = splitCostRows(rows)
 	for i := range budgets {
-		budgets[i].CurrentMonthlySpend = 0
+		if !budgets[i].Enabled {
+			budgets[i].CurrentMonthlySpend = new(0.0)
+			budgets[i].CurrentYearlySpend = new(0.0)
+			budgets[i].Status = BudgetStatusDisabled
+			continue
+		}
+		budgets[i].CurrentMonthlySpend = nil
+		budgets[i].CurrentYearlySpend = nil
+		if budgets[i].BaseCurrency != baseCurrency {
+			budgets[i].Status = BudgetStatusUnknown
+			continue
+		}
+
+		var currentMonthly float64
 		incomplete := false
+		unitMismatch := false
 		for _, row := range rows {
 			if !budgetMatchesRow(budgets[i], row) {
 				continue
+			}
+			if row.BaseCurrency != baseCurrency {
+				unitMismatch = true
+				break
 			}
 			if row.MonthlyPriceBase == nil {
 				incomplete = true
 				continue
 			}
-			budgets[i].CurrentMonthlySpend += *row.MonthlyPriceBase
+			currentMonthly += *row.MonthlyPriceBase
 		}
-		budgets[i].CurrentYearlySpend = budgets[i].CurrentMonthlySpend * 12
-		budgets[i].Status = EvaluateBudgetStatus(
+		if unitMismatch {
+			budgets[i].Status = BudgetStatusUnknown
+			continue
+		}
+
+		status := EvaluateBudgetStatus(
 			budgets[i].Enabled,
-			budgets[i].CurrentMonthlySpend,
+			currentMonthly,
 			budgets[i].MonthlyLimit,
 			budgets[i].YearlyLimit,
 			budgets[i].WarningPct,
 		)
-		if incomplete && budgets[i].Enabled && budgets[i].Status != BudgetStatusOver {
-			budgets[i].Status = BudgetStatusUnknown
+		budgets[i].Status = status
+		if incomplete {
+			if status != BudgetStatusOver {
+				budgets[i].Status = BudgetStatusUnknown
+			}
+			continue
 		}
+		budgets[i].CurrentMonthlySpend = new(currentMonthly)
+		budgets[i].CurrentYearlySpend = new(currentMonthly * 12)
 	}
 	return budgets
 }
@@ -503,13 +531,17 @@ func applyRowBudgetStatus(rows []CostRow, budgets []BudgetRecord) {
 			rows[i].BudgetStatus = BudgetStatusUnknown
 			continue
 		}
-		status := BudgetStatusOK
+		var status BudgetStatus
 		matched := false
 		for _, budget := range budgets {
 			if !budgetMatchesRow(budget, rows[i]) {
 				continue
 			}
-			matched = true
+			if !matched {
+				status = budget.Status
+				matched = true
+				continue
+			}
 			status = worseBudgetStatus(status, budget.Status)
 		}
 		if !matched {
@@ -551,9 +583,9 @@ func worseBudgetStatus(left, right BudgetStatus) BudgetStatus {
 			return 4
 		case BudgetStatusWarning:
 			return 3
-		case BudgetStatusOK:
-			return 2
 		case BudgetStatusUnknown:
+			return 2
+		case BudgetStatusOK:
 			return 1
 		default:
 			return 0
@@ -676,8 +708,8 @@ func monthlyBudgetRisks(monthlyCost float64, budgetBuckets []SeriesPoint) []Budg
 		MonthlyLimit:        budget.BudgetLimit,
 		WarningPct:          budget.BudgetWarningPct,
 		Enabled:             true,
-		CurrentMonthlySpend: monthlyCost,
-		CurrentYearlySpend:  monthlyCost * 12,
+		CurrentMonthlySpend: new(monthlyCost),
+		CurrentYearlySpend:  new(monthlyCost * 12),
 		Status:              status,
 	}}
 }

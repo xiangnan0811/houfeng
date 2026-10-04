@@ -182,6 +182,26 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 - `subscriptions` may hold billing facts such as display name, labels, category, trial/end dates, price, currency, cycle, renewal date, auto-renew, payment, and note. Monthly/yearly base costs, exchange rate metadata, budget status, and next reminder are read-model fields, not writable subscription facts.
 - 订阅创建的 header、错误、事务和 receipt 生命周期统一见 [幂等合同](#scenario-idempotent-vps-scoped-subscription-creation)。成本功能不另建创建或重放路径。
 - Budget scopes are `global`、`provider`、`label`、`category`、`vps`。Disabled budgets must not affect budget status. PATCH must distinguish omitted limits from explicit JSON `null`.
+
+#### Budget derived amount and status
+
+- `current_monthly_spend` and `current_yearly_spend` are required JSON keys on every `SubscriptionBudgetRecord`. Each value is either a number or `null`; the response must not use `omitempty`. A number means the complete comparable amount is known, while `null` means the amount cannot be used as a complete total. No separate completeness field and no zero-valued substitute are introduced.
+- Budget comparison uses the query's `settings.base_currency` and the unit of `MonthlyPriceBase` (`CostRow.BaseCurrency`). It never uses the source billing currency (`CostRow.Currency`) and does not add a second exchange conversion. An enabled budget whose `base_currency` differs from the query base currency is `unknown` with both spend fields `null`, even when it has no matching rows, has zero spend, or happens to match a source billing currency.
+- For an enabled budget with the same currency as the query, only matching current rows are considered. Any matching row whose `BaseCurrency` differs from the query base currency makes the entire budget non-comparable; do not select a subset based on `Currency` or use a partial sum to prove a risk. Missing exchange rate keeps the row amount `null`; an expired but present rate remains numeric and carries its stale marker.
+- A comparable budget is complete when every matching current row has a non-null `MonthlyPriceBase`; no matching rows are a complete zero. Sum non-null monthly base amounts and derive yearly spend as monthly spend multiplied by 12. If the rows are incomplete, both public spend fields are `null`; only an `over` result proven by the known sum reaching the existing threshold is retained, otherwise the budget is `unknown`. Complete amounts remain numeric even when the status is `unknown` because an effective limit is zero; existing `EvaluateBudgetStatus` rules remain authoritative, including `>=` thresholds, monthly-limit precedence, and yearly-limit conversion.
+- Disabled budgets retain `status=disabled` and numeric zero for both spend fields regardless of rows or currency. They are not candidates for row-level status merging. Budget derivation in create/edit responses, listing, statistics, and global base-currency changes never rewrites stored budget currency/limits or billing facts. Explicit budget edits still persist the requested facts; derived amounts and statuses always use the current query currency.
+
+The individual budget status table is:
+
+| Status | Condition |
+| --- | --- |
+| `disabled` | The budget is disabled; it has zero derived spend and is excluded from row-level matching. |
+| `ok` | The enabled budget is comparable and complete, and the complete sum is below the warning threshold. Same-currency zero spend with a positive limit is `ok`. |
+| `warning` | The enabled budget is comparable and complete, and the sum reaches the warning threshold without reaching the over threshold. |
+| `over` | The enabled budget is comparable and the sum reaches the over threshold. An incomplete budget may retain `over` only when its known sum already proves the threshold; its public spend fields remain `null`. |
+| `unknown` | The enabled budget has a currency/unit mismatch, incomplete amounts without a proven over threshold, a zero effective limit, or another effective-limit condition for which the existing evaluator returns unknown. Mismatched or incomplete amounts are `null`; a complete known amount may remain numeric. |
+
+Row-level `budget_status` is merged after all matching work: archived rows and rows with `MonthlyPriceBase == null` remain `unknown`; otherwise only matching enabled budgets participate. With no matching enabled budget the row is `unknown`; with one or more matches, combine statuses by fixed severity `over > warning > unknown > ok`, independent of budget order. The status of each budget record remains independent, so a row-level `warning` or `over` only proves that at least one matching budget has that risk and does not claim that every matching budget is complete.
 - 月度预算继承取 `budget_month <= bucket_start` 的最近历史月配置，不取未来月份，也不将“无当月行”误判为没有预算；统计与 evidence adapter 必须沿用同一继承规则。
 - `next_reminder_at` is the next future pending reminder window calculated from settings and existing delivery rows. It must not report an already-delivered or past reminder as pending.
 - Reminder dedupe is keyed by `subscription_id + renew_at + offset_days` independent of notification channel. The worker must reserve the dedupe row before dispatching notifications, then update delivery status after dispatch. This prevents duplicate sends on repeated scans.

@@ -2503,8 +2503,8 @@ export type SubscriptionBudgetRecord = {
   warning_pct: number
   enabled: boolean
   note: string
-  current_monthly_spend: number
-  current_yearly_spend: number
+  current_monthly_spend: number | null
+  current_yearly_spend: number | null
   status: SubscriptionBudgetStatus
   created_at: string
   updated_at: string
