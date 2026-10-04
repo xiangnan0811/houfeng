@@ -12,6 +12,7 @@ import (
 
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
+	"houfeng/internal/ipidentity"
 )
 
 var ErrAssetDecisionGroupNotFound = errors.New("asset decision group not found")
@@ -1339,16 +1340,19 @@ func ipQualityEgressMismatch(fact Fact) bool {
 	if summary == nil || summary.Ambiguous || !ipQualitySummarySucceeded(summary.Status) {
 		return false
 	}
-	ip := strings.TrimSpace(summary.IPAddress)
-	if ip == "" {
+	reportIP, reportOK := ipidentity.Parse(summary.IPAddress)
+	if !reportOK {
 		return false
 	}
-	vpsIPv4 := strings.TrimSpace(fact.VPS.IPv4)
-	vpsIPv6 := strings.TrimSpace(fact.VPS.IPv6)
-	if vpsIPv4 == "" && vpsIPv6 == "" {
+	vpsIPv4, v4OK := ipidentity.Parse(fact.VPS.IPv4)
+	vpsIPv6, v6OK := ipidentity.Parse(fact.VPS.IPv6)
+	if !v4OK && !v6OK {
 		return false
 	}
-	return ip != vpsIPv4 && ip != vpsIPv6
+	if (v4OK && reportIP == vpsIPv4) || (v6OK && reportIP == vpsIPv6) {
+		return false
+	}
+	return true
 }
 
 func topIssue(counts map[string]int) string {

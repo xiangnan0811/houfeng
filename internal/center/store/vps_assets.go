@@ -16,6 +16,7 @@ import (
 	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
+	"houfeng/internal/ipidentity"
 )
 
 var _ vpsassets.Repository = (*PostgresVPSAssetRepository)(nil)
@@ -507,7 +508,7 @@ func recordVPSAssetHistoryChanges(ctx context.Context, tx pgx.Tx, current, recor
 		}
 	}
 
-	if current.IPv4 != record.IPv4 || current.IPv6 != record.IPv6 {
+	if ipidentity.Changed(current.IPv4, record.IPv4) || ipidentity.Changed(current.IPv6, record.IPv6) {
 		if _, err := createIPHistory(ctx, tx, renewals.CreateIPHistoryInput{
 			VPSID:    record.VPSID,
 			FromIPv4: current.IPv4,

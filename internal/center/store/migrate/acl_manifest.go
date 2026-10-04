@@ -426,8 +426,18 @@ func validRelationACLShape(privilege AppACLPrivilege) bool {
 
 func validFunctionIdentity(identity string) bool {
 	const prefix = "public."
+	if !strings.HasPrefix(identity, prefix) {
+		return false
+	}
+	// Preserve the existing public bytea grammar and admit exactly one approved
+	// current parser identity. Current source/transition contracts still reject
+	// identities outside the compiled surface or approved delta; do not accept
+	// arbitrary overloads here.
+	if identity == "public.houfeng_parse_host_address(text)" {
+		return true
+	}
 	const suffix = "(bytea)"
-	if !strings.HasPrefix(identity, prefix) || !strings.HasSuffix(identity, suffix) {
+	if !strings.HasSuffix(identity, suffix) {
 		return false
 	}
 	return validBareCatalogName(strings.TrimSuffix(strings.TrimPrefix(identity, prefix), suffix))

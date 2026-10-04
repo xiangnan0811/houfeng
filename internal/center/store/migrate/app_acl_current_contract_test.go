@@ -10,6 +10,39 @@ import (
 	"houfeng/db/migrations"
 )
 
+func TestIPQualityHostAddressIdentityAppACLFragment(t *testing.T) {
+	fragment := ipQualityHostAddressIdentityAppACLCurrentMigrationFragment()
+	if fragment.Migration != "0068_normalize_ip_quality_host_address_identity.sql" {
+		t.Fatalf("fragment migration = %q, want 0068", fragment.Migration)
+	}
+	wantObject := AppACLManagedObjectR1{
+		ObjectClass:    AppACLObjectClassFunction,
+		SchemaName:     "public",
+		ObjectIdentity: "houfeng_parse_host_address(text)",
+	}
+	if !reflect.DeepEqual(fragment.Objects, []AppACLManagedObjectR1{wantObject}) {
+		t.Fatalf("fragment managed objects = %#v, want %#v", fragment.Objects, []AppACLManagedObjectR1{wantObject})
+	}
+	wantPrivilege := AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassFunction,
+		ObjectIdentity: "public.houfeng_parse_host_address(text)",
+		Privilege:      AppACLPrivilegeExecute,
+	}
+	if got := fragment.Privileges("houfeng"); !reflect.DeepEqual(got, []AppACLPrivilege{wantPrivilege}) {
+		t.Fatalf("fragment privileges = %#v, want %#v", got, []AppACLPrivilege{wantPrivilege})
+	}
+	wantFunction := AppACLCurrentFunctionContract{
+		SchemaName:      "public",
+		Identity:        "houfeng_parse_host_address(text)",
+		Kind:            "f",
+		SecurityDefiner: false,
+		Config:          []string{"search_path=pg_catalog"},
+	}
+	if !reflect.DeepEqual(fragment.Functions, []AppACLCurrentFunctionContract{wantFunction}) {
+		t.Fatalf("fragment function hardening = %#v, want %#v", fragment.Functions, []AppACLCurrentFunctionContract{wantFunction})
+	}
+}
 func TestCompileAppACLCurrentSourceContractRejectsMissingFutureFragment(t *testing.T) {
 	fsys := appACLCurrentTestMigrationFS(t)
 	fsys["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}

@@ -46,6 +46,75 @@ func TestCanonicalPrivilegeSetBodyV1SortsAndRoundTrips(t *testing.T) {
 	}
 }
 
+func TestCanonicalPrivilegeSetBodyV1AllowsOnlyApprovedTextParserIdentity(t *testing.T) {
+	bindings := []AppACLRoleBinding{
+		{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+	}
+	parser := AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassFunction,
+		ObjectIdentity: "public.houfeng_parse_host_address(text)",
+		Privilege:      AppACLPrivilegeExecute,
+	}
+	byteaProjector := AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassFunction,
+		ObjectIdentity: "public.record_platform_cas_contract_activation_projection(bytea)",
+		Privilege:      AppACLPrivilegeExecute,
+	}
+	if _, err := CanonicalPrivilegeSetBodyV1(bindings, []AppACLPrivilege{parser, byteaProjector}); err != nil {
+		t.Fatalf("CanonicalPrivilegeSetBodyV1() rejected approved parser and existing bytea privileges: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(AppACLPrivilege) AppACLPrivilege
+	}{
+		{
+			name: "arbitrary public text function",
+			mutate: func(value AppACLPrivilege) AppACLPrivilege {
+				value.ObjectIdentity = "public.foo(text)"
+				return value
+			},
+		},
+		{
+			name: "wrong parser name",
+			mutate: func(value AppACLPrivilege) AppACLPrivilege {
+				value.ObjectIdentity = "public.houfeng_parse_host_address_other(text)"
+				return value
+			},
+		},
+		{
+			name: "wrong parser overload",
+			mutate: func(value AppACLPrivilege) AppACLPrivilege {
+				value.ObjectIdentity = "public.houfeng_parse_host_address(integer)"
+				return value
+			},
+		},
+		{
+			name: "qualified function schema field",
+			mutate: func(value AppACLPrivilege) AppACLPrivilege {
+				value.SchemaName = "public"
+				return value
+			},
+		},
+		{
+			name: "grant option",
+			mutate: func(value AppACLPrivilege) AppACLPrivilege {
+				value.GrantOption = true
+				return value
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := CanonicalPrivilegeSetBodyV1(bindings, []AppACLPrivilege{tc.mutate(parser)}); err == nil {
+				t.Fatal("CanonicalPrivilegeSetBodyV1() accepted an unauthorized parser privilege tuple")
+			}
+		})
+	}
+}
+
 func TestCanonicalPrivilegeSetBodyV1RejectsInvalidRoleAndPrivilegeShapes(t *testing.T) {
 	validBindings := []AppACLRoleBinding{
 		{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},

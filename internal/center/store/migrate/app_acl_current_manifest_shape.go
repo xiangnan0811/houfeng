@@ -49,12 +49,13 @@ func classifyAppACLCurrentManifestShape(
 		}
 		return appACLCurrentManifestShape{kind: appACLCurrentManifestShapeGenesis, latest: latest}, nil
 	}
-	if len(transitions) != 4 ||
+	if len(transitions) != 5 ||
 		transitions[0].profile != appACLCurrentProfileP62 ||
 		transitions[1].profile != appACLCurrentProfileP64 ||
 		transitions[2].profile != appACLCurrentProfileP63 ||
-		transitions[3].profile != appACLCurrentProfileP66 {
-		return appACLCurrentManifestShape{}, appACLDevelopmentDatabaseRebuildError("APP transition registry is not the exact P62/P64/P63/P66 profile set")
+		transitions[3].profile != appACLCurrentProfileP66 ||
+		transitions[4].profile != appACLCurrentProfileP67 {
+		return appACLCurrentManifestShape{}, appACLDevelopmentDatabaseRebuildError("APP transition registry is not the exact P62/P64/P63/P66/P67 profile set")
 	}
 	for _, manifest := range manifests[:len(manifests)-1] {
 		if manifest.MigratorCatalogRole != migratorRole {

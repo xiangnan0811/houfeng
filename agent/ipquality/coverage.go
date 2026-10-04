@@ -2,9 +2,11 @@ package ipquality
 
 import (
 	"encoding/json"
+	"net/netip"
 	"time"
 
 	"houfeng/internal/contracts/agentapi"
+	"houfeng/internal/ipidentity"
 )
 
 func serviceProbeSucceeded(result agentapi.IPQualityServiceUnlockPayload) bool {
@@ -77,13 +79,19 @@ func hasServiceProbeFailure(services []agentapi.IPQualityServiceUnlockPayload) b
 }
 
 func hasIPCandididateConflict(candidates map[string]string) bool {
-	seen := map[string]struct{}{}
-	for _, ip := range candidates {
-		if ip == "" {
+	var first netip.Addr
+	haveFirst := false
+	for _, value := range candidates {
+		candidate, ok := ipidentity.Parse(value)
+		if !ok {
 			continue
 		}
-		seen[ip] = struct{}{}
-		if len(seen) > 1 {
+		if !haveFirst {
+			first = candidate
+			haveFirst = true
+			continue
+		}
+		if candidate != first {
 			return true
 		}
 	}

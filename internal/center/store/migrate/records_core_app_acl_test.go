@@ -72,11 +72,11 @@ func TestRecordsCoreAppACLFragmentExtendsCatalogWithPrimaryValidationFunctionAnd
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects())+len(recordSearchExpectedAppACLObjects())+len(recordActivityExpectedAppACLObjects())+len(recordPortabilityExpectedAppACLObjects())+len(recordsAuthorityExpectedAppACLObjects())+len(subscriptionCreateIdempotencyExpectedAppACLObjects())+len(vpsCreateIdempotencyExpectedAppACLObjects())+len(vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Objects); got != want {
+	if got, want := len(contract.ManagedObjects), len(base.Objects)+len(recordsCoreExpectedAppACLObjects())+len(recordAttachmentsExpectedAppACLObjects())+len(recordEvidenceExpectedAppACLObjects())+len(recordCollaborationExpectedAppACLObjects())+len(recordSearchExpectedAppACLObjects())+len(recordActivityExpectedAppACLObjects())+len(recordPortabilityExpectedAppACLObjects())+len(recordsAuthorityExpectedAppACLObjects())+len(subscriptionCreateIdempotencyExpectedAppACLObjects())+len(vpsCreateIdempotencyExpectedAppACLObjects())+len(vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Objects)+len(ipQualityHostAddressIdentityAppACLCurrentMigrationFragment().Objects); got != want {
 		t.Fatalf("production current managed objects = %d, want %d", got, want)
 	}
-	if got, want := len(contract.ExpectedFunctions), len(appACLProjectorFunctionsR1())+1+len(recordCollaborationExpectedFunctionContracts())+len(recordSearchExpectedFunctionContracts())+len(recordActivityExpectedFunctionContracts())+len(recordPortabilityExpectedFunctionContracts())+len(recordsAuthorityExpectedFunctionContracts())+len(vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Functions); got != want {
-		t.Fatalf("production current expected functions = %d, want %d including the authority heartbeat", got, want)
+	if got, want := len(contract.ExpectedFunctions), len(appACLProjectorFunctionsR1())+1+len(recordCollaborationExpectedFunctionContracts())+len(recordSearchExpectedFunctionContracts())+len(recordActivityExpectedFunctionContracts())+len(recordPortabilityExpectedFunctionContracts())+len(recordsAuthorityExpectedFunctionContracts())+len(vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Functions)+len(ipQualityHostAddressIdentityAppACLCurrentMigrationFragment().Functions); got != want {
+		t.Fatalf("production current expected functions = %d, want %d including authority heartbeat and IP quality identity parser", got, want)
 	}
 	for _, object := range contract.ManagedObjects {
 		if object.ObjectClass == AppACLObjectClassSequence && object.SchemaName == "public" &&

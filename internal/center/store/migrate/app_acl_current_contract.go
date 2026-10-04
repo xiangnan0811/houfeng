@@ -57,6 +57,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	vpsStateRepairLifecycleAppACLCurrentMigrationFragment(),
 	monitoringStateEnumAppACLCurrentMigrationFragment(),
 	vpsMonitoringLifecycleAppACLCurrentMigrationFragment(),
+	ipQualityHostAddressIdentityAppACLCurrentMigrationFragment(),
 }
 
 func vpsMonitoringLifecycleAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -88,6 +89,33 @@ func vpsMonitoringLifecycleAppACLCurrentMigrationFragment() AppACLCurrentMigrati
 			}
 			return privileges
 		},
+	}
+}
+
+func ipQualityHostAddressIdentityAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	const identity = "houfeng_parse_host_address(text)"
+	return AppACLCurrentMigrationFragment{
+		Migration: "0068_normalize_ip_quality_host_address_identity.sql",
+		Objects: []AppACLManagedObjectR1{{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: identity,
+		}},
+		Privileges: func(string) []AppACLPrivilege {
+			return []AppACLPrivilege{{
+				Subject:        AppACLSubjectCenterRuntime,
+				ObjectClass:    AppACLObjectClassFunction,
+				ObjectIdentity: appACLManagedPublicSchemaR1 + "." + identity,
+				Privilege:      AppACLPrivilegeExecute,
+			}}
+		},
+		Functions: []AppACLCurrentFunctionContract{{
+			SchemaName:      appACLManagedPublicSchemaR1,
+			Identity:        identity,
+			Kind:            "f",
+			SecurityDefiner: false,
+			Config:          []string{"search_path=pg_catalog"},
+		}},
 	}
 }
 

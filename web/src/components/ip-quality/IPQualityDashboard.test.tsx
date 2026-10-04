@@ -516,4 +516,121 @@ describe('IPQualityDashboard', () => {
     expect(within(services).getByText('响应未形成可靠业务结论')).toBeInTheDocument()
     expect(within(services).queryByText('service response did not establish a business conclusion')).not.toBeInTheDocument()
   })
+
+  it('renders em dashes for provider and service coverage when coverage is missing even with multiple rows', () => {
+    const reportWithoutCoverage = report({
+      summary: { ...summary },
+      latest_report: { ...report().latest_report! },
+    })
+    delete reportWithoutCoverage.summary!.coverage
+    delete reportWithoutCoverage.latest_report!.coverage
+
+    renderDashboard(reportWithoutCoverage)
+
+    const metrics = screen.getByLabelText('IP 质量摘要指标')
+    const integrity = within(metrics).getByText('采集完整性').nextElementSibling as HTMLElement
+    expect(integrity.querySelector('strong')).toHaveTextContent('—')
+    expect(integrity.querySelector('span')).toHaveTextContent('服务 —')
+  })
+
+  it('renders generic notice when report lacks service probe source information', () => {
+    renderDashboard(report({
+      latest_report: {
+        ...report().latest_report!,
+        diagnostics_json: {},
+      },
+      service_unlocks: [
+        { service: 'custom-one', source: '', status: 'unlocked', probe_status: 'success' },
+        { service: 'custom-two', status: 'blocked', probe_status: 'success' },
+      ],
+    }))
+
+    const notice = screen.getByRole('note', { name: '服务探测可信度' })
+    expect(notice).toHaveClass('ipq-notice', 'ipq-notice--warning')
+    expect(notice).toHaveTextContent('此报告缺少服务探测来源信息，无法核验解锁结果及依赖它的质量评分；历史原始结果予以保留。')
+  })
+
+  it('does not render probe notice for custom sources with unversioned diagnostics', () => {
+    renderDashboard(report({
+      latest_report: {
+        ...report().latest_report!,
+        diagnostics_json: {},
+      },
+      service_unlocks: [
+        { service: 'internal-api', source: 'internal_custom_probe', status: 'unlocked', probe_status: 'success' },
+      ],
+    }))
+
+    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    {
+      label: 'score >= 82 as primary node',
+      risk_level: 'low',
+      services: [{ service: 'chatgpt', status: 'unlocked', probe_status: 'success' }],
+      expectedScore: '100',
+      expectedVerdict: '适合作为主力节点',
+      expectedTone: 'normal',
+    },
+    {
+      label: 'score 68-81 as acceptable',
+      risk_level: 'medium',
+      services: [
+        { service: 'chatgpt', status: 'unlocked', probe_status: 'success' },
+        { service: 'netflix', status: 'blocked', probe_status: 'success' },
+      ],
+      expectedScore: '81',
+      expectedVerdict: '可接受，建议持续观察',
+      expectedTone: 'notice',
+    },
+    {
+      label: 'score 50-67 as obvious risk',
+      risk_level: 'high',
+      services: [
+        { service: 'chatgpt', status: 'unlocked', probe_status: 'success' },
+        { service: 'netflix', status: 'blocked', probe_status: 'success' },
+        { service: 'disney-plus', status: 'blocked', probe_status: 'success' },
+        { service: 'youtube-premium', status: 'blocked', probe_status: 'success' },
+      ],
+      expectedScore: '59',
+      expectedVerdict: '存在明显风险，谨慎使用',
+      expectedTone: 'alert',
+    },
+    {
+      label: 'score < 50 as not recommended',
+      risk_level: 'critical',
+      services: [
+        { service: 'chatgpt', status: 'unlocked', probe_status: 'success' },
+        { service: 'netflix', status: 'blocked', probe_status: 'success' },
+        { service: 'disney-plus', status: 'blocked', probe_status: 'success' },
+        { service: 'youtube-premium', status: 'blocked', probe_status: 'success' },
+        { service: 'amazon-prime-video', status: 'blocked', probe_status: 'success' },
+      ],
+      expectedScore: '46',
+      expectedVerdict: '不建议作为主力节点',
+      expectedTone: 'alert',
+    },
+    {
+      label: 'unknown service unlocks remain ungraded',
+      risk_level: 'low',
+      services: [{ service: 'chatgpt', status: 'unknown', probe_status: 'skipped' }],
+      expectedScore: '—',
+      expectedVerdict: '证据不足，暂不评级',
+      expectedTone: 'neutral',
+    },
+  ])('reflects verdict and tone for $label', ({ risk_level, services, expectedScore, expectedVerdict, expectedTone }) => {
+    renderDashboard(report({
+      summary: { ...summary, risk_level },
+      provider_results: [
+        { provider: 'clean-db', status: 'success', source_type: 'default', is_proxy: false, is_vpn: false, is_tor: false, is_abuser: false, is_robot: false },
+      ],
+      service_unlocks: services,
+    }))
+
+    const verdict = screen.getByLabelText('质量结论')
+    expect(verdict).toHaveClass(`ipq-verdict--${expectedTone}`)
+    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent(expectedScore)
+    expect(within(verdict).getByText(expectedVerdict)).toBeInTheDocument()
+  })
 })

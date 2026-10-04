@@ -166,6 +166,78 @@ func TestValidateIPAndSpecHistoryInputsRejectInvalidValues(t *testing.T) {
 	}
 }
 
+func TestValidateCreateIPHistoryInputUsesAddressIdentity(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   CreateIPHistoryInput
+		wantErr bool
+	}{
+		{
+			name: "ipv6 formatting only is unchanged",
+			input: CreateIPHistoryInput{
+				VPSID:    "vps_001",
+				FromIPv6: "2001:0db8:0:0:0:0:0:1",
+				ToIPv6:   "2001:db8::1",
+			},
+			wantErr: true,
+		},
+		{
+			name: "mapped formatting only is unchanged",
+			input: CreateIPHistoryInput{
+				VPSID:    "vps_001",
+				FromIPv6: "::ffff:192.0.2.1",
+				ToIPv6:   "::ffff:c000:201",
+			},
+			wantErr: true,
+		},
+		{
+			name: "mapped ipv6 and ordinary ipv4 are distinct",
+			input: CreateIPHistoryInput{
+				VPSID:    "vps_001",
+				FromIPv4: "192.0.2.1",
+				ToIPv4:   "::ffff:192.0.2.1",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid old address can be cleared",
+			input: CreateIPHistoryInput{
+				VPSID:    "vps_001",
+				FromIPv4: "not-an-address",
+				ToIPv4:   "",
+			},
+			wantErr: false,
+		},
+		{
+			name: "same invalid address is unchanged",
+			input: CreateIPHistoryInput{
+				VPSID:    "vps_001",
+				FromIPv4: "not-an-address",
+				ToIPv4:   " not-an-address ",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid old address can be corrected",
+			input: CreateIPHistoryInput{
+				VPSID:    "vps_001",
+				FromIPv6: "not-an-address",
+				ToIPv6:   "2001:db8::1",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCreateIPHistoryInput(NormalizeCreateIPHistoryInput(tt.input))
+			if (err != nil) != tt.wantErr || (tt.wantErr && !errors.Is(err, ErrInvalidAssetHistoryInput)) {
+				t.Fatalf("ValidateCreateIPHistoryInput() error = %v, wantErr=%t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestNormalizeAndValidateCreateExperienceLogInput(t *testing.T) {
 	occurredAt := time.Date(2026, time.May, 10, 9, 30, 0, 0, time.FixedZone("CST", 8*60*60))
 	input := NormalizeCreateExperienceLogInput(CreateExperienceLogInput{
