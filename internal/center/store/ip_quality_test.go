@@ -172,7 +172,7 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsLatestMatricesAndHisto
 			}}},
 		},
 	}
-	repo := &PostgresIPQualityRepository{db: db}
+	repo := newFakeIPQualityReadRepository(db)
 
 	got, err := repo.GetVPSIPQuality(context.Background(), "vps_001")
 	if err != nil {
@@ -209,6 +209,14 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsLatestMatricesAndHisto
 	if got.History[0].ReportID != "ipq_001" || got.History[0].Coverage == nil ||
 		got.History[0].Coverage.ExpectedProviderCount != 2 {
 		t.Fatalf("History[0] = %#v, want report_id and coverage", got.History[0])
+	}
+	if len(db.beginOptions) != 1 ||
+		db.beginOptions[0].IsoLevel != pgx.RepeatableRead ||
+		db.beginOptions[0].AccessMode != pgx.ReadOnly {
+		t.Fatalf("begin options = %#v, want repeatable-read read-only", db.beginOptions)
+	}
+	if db.readTx == nil || db.readTx.commitCalls != 1 {
+		t.Fatalf("read transaction commitCalls = %#v, want one explicit commit", db.readTx)
 	}
 }
 
@@ -249,7 +257,7 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReportDetailUsesAssignedRepor
 			"from ip_quality_service_unlocks":  &fakeIPQualityRows{},
 		},
 	}
-	repo := &PostgresIPQualityRepository{db: db}
+	repo := newFakeIPQualityReadRepository(db)
 
 	got, err := repo.GetVPSIPQualityReportDetail(context.Background(), "vps_001", "ipq_001")
 	if err != nil {
@@ -266,6 +274,14 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReportDetailUsesAssignedRepor
 	if !strings.Contains(joined, "ip_quality_assigned_vps_reports") || !strings.Contains(joined, "assigned.vps_id = $1") {
 		t.Fatalf("detail query = %s, want assigned VPS report guard", joined)
 	}
+	if len(db.beginOptions) != 1 ||
+		db.beginOptions[0].IsoLevel != pgx.RepeatableRead ||
+		db.beginOptions[0].AccessMode != pgx.ReadOnly {
+		t.Fatalf("begin options = %#v, want repeatable-read read-only", db.beginOptions)
+	}
+	if db.readTx == nil || db.readTx.commitCalls != 1 {
+		t.Fatalf("read transaction commitCalls = %#v, want one explicit commit", db.readTx)
+	}
 }
 
 func TestPostgresIPQualityRepositoryHistoryDoesNotReadLatestOnlyView(t *testing.T) {
@@ -276,9 +292,8 @@ func TestPostgresIPQualityRepositoryHistoryDoesNotReadLatestOnlyView(t *testing.
 			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{},
 		},
 	}
-	repo := &PostgresIPQualityRepository{db: db}
 
-	if _, err := repo.historyForVPS(context.Background(), "vps_001"); err != nil {
+	if _, err := historyForVPS(context.Background(), db, "vps_001"); err != nil {
 		t.Fatalf("historyForVPS() error = %v", err)
 	}
 	if len(db.queries) != 1 {
@@ -298,7 +313,7 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsEmptyWhenFilteredViews
 			"from ip_quality_reports r": &fakeIPQualityRows{},
 		},
 	}
-	repo := &PostgresIPQualityRepository{db: db}
+	repo := newFakeIPQualityReadRepository(db)
 
 	got, err := repo.GetVPSIPQuality(context.Background(), "vps_001")
 	if err != nil {
@@ -310,9 +325,131 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsEmptyWhenFilteredViews
 	if len(got.ProviderResults) != 0 || len(got.ServiceUnlocks) != 0 || len(got.History) != 0 {
 		t.Fatalf("VPSReport matrices/history = %#v/%#v/%#v, want empty slices", got.ProviderResults, got.ServiceUnlocks, got.History)
 	}
-	if len(db.queries) != 2 {
-		t.Fatalf("query count = %d, want summary + latest report checks only", len(db.queries))
+	if len(db.queries) != 1 {
+		t.Fatalf("query count = %d, want latest summary only", len(db.queries))
 	}
+	if db.readTx == nil {
+		t.Fatal("read transaction = nil, want transaction")
+	}
+	if db.readTx.commitCalls != 1 {
+		t.Fatalf("read transaction commitCalls = %d, want 1", db.readTx.commitCalls)
+	}
+}
+func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("missing begin function", func(t *testing.T) {
+		_, err := (&PostgresIPQualityRepository{}).GetVPSIPQuality(ctx, "vps_001")
+		if err == nil || !strings.Contains(err.Error(), "without transaction support") {
+			t.Fatalf("GetVPSIPQuality() error = %v, want transaction support error", err)
+		}
+	})
+
+	t.Run("begin error", func(t *testing.T) {
+		want := errors.New("begin failed")
+		repo := &PostgresIPQualityRepository{
+			beginTx: func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return nil, want },
+		}
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		if !errors.Is(err, want) {
+			t.Fatalf("GetVPSIPQuality() error = %v, want %v", err, want)
+		}
+	})
+
+	t.Run("nil transaction", func(t *testing.T) {
+		repo := &PostgresIPQualityRepository{
+			beginTx: func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return nil, nil },
+		}
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		if err == nil || !strings.Contains(err.Error(), "nil transaction") {
+			t.Fatalf("GetVPSIPQuality() error = %v, want nil transaction error", err)
+		}
+	})
+
+	t.Run("query error", func(t *testing.T) {
+		want := errors.New("summary query failed")
+		db := &fakeIPQualityDB{queryErr: want}
+		repo := newFakeIPQualityReadRepository(db)
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		if !errors.Is(err, want) {
+			t.Fatalf("GetVPSIPQuality() error = %v, want %v", err, want)
+		}
+		if db.readTx.commitCalls != 0 {
+			t.Fatalf("commitCalls = %d, want 0 after query error", db.readTx.commitCalls)
+		}
+	})
+
+	t.Run("commit error", func(t *testing.T) {
+		want := errors.New("commit failed")
+		db := &fakeIPQualityDB{
+			queryRows: map[string]pgx.Rows{"select latest.vps_id": &fakeIPQualityRows{}},
+		}
+		repo := newFakeIPQualityReadRepository(db)
+		db.readTx.commitErr = want
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		if !errors.Is(err, want) {
+			t.Fatalf("GetVPSIPQuality() error = %v, want %v", err, want)
+		}
+		if db.readTx.commitCalls != 1 {
+			t.Fatalf("commitCalls = %d, want 1", db.readTx.commitCalls)
+		}
+	})
+
+	t.Run("latest summary without assigned report", func(t *testing.T) {
+		db := &fakeIPQualityDB{
+			queryRows: map[string]pgx.Rows{
+				"select latest.vps_id": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+					scan: scanIPQualitySummaryRow("vps_001", "ipq_missing", time.Now().UTC(), agentapi.IPQualityStatusSuccess),
+				}}},
+				"from ip_quality_reports r": &fakeIPQualityRows{},
+			},
+		}
+		repo := newFakeIPQualityReadRepository(db)
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		if err == nil || !strings.Contains(err.Error(), "assigned report missing from read snapshot") {
+			t.Fatalf("GetVPSIPQuality() error = %v, want missing assigned report", err)
+		}
+		if db.readTx.commitCalls != 0 {
+			t.Fatalf("commitCalls = %d, want 0 after snapshot association error", db.readTx.commitCalls)
+		}
+	})
+
+	t.Run("missing historical report returns committed empty", func(t *testing.T) {
+		db := &fakeIPQualityDB{
+			queryRows: map[string]pgx.Rows{
+				"join ip_quality_assigned_vps_reports assigned": &fakeIPQualityRows{},
+			},
+		}
+		repo := newFakeIPQualityReadRepository(db)
+		got, err := repo.GetVPSIPQualityReportDetail(ctx, "vps_001", "ipq_missing")
+		if err != nil {
+			t.Fatalf("GetVPSIPQualityReportDetail() error = %v", err)
+		}
+		assertIPQualitySnapshotEmpty(t, got)
+		if db.readTx.commitCalls != 1 {
+			t.Fatalf("commitCalls = %d, want 1 for empty historical response", db.readTx.commitCalls)
+		}
+	})
+
+	t.Run("assigned report without summary", func(t *testing.T) {
+		db := &fakeIPQualityDB{
+			queryRows: map[string]pgx.Rows{
+				"join ip_quality_assigned_vps_reports assigned": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+					scan: scanIPQualityReportRow("ipq_001", "mi_001", time.Now().UTC(), agentapi.IPQualityStatusSuccess),
+				}}},
+				"from ip_quality_assigned_vps_reports assigned": &fakeIPQualityRows{},
+			},
+		}
+		repo := newFakeIPQualityReadRepository(db)
+		_, err := repo.GetVPSIPQualityReportDetail(ctx, "vps_001", "ipq_001")
+		if err == nil || !strings.Contains(err.Error(), "assigned summary missing from read snapshot") {
+			t.Fatalf("GetVPSIPQualityReportDetail() error = %v, want missing assigned summary", err)
+		}
+		if db.readTx.commitCalls != 0 {
+			t.Fatalf("commitCalls = %d, want 0 after snapshot association error", db.readTx.commitCalls)
+		}
+	})
 }
 
 func TestPostgresIPQualityRepositoryGetLatestVPSIPQualitySummaryDoesNotLoadDetailTables(t *testing.T) {
@@ -351,7 +488,7 @@ func TestPostgresIPQualityRepositoryGetLatestVPSIPQualitySummaryDoesNotLoadDetai
 			}}},
 		},
 	}
-	repo := &PostgresIPQualityRepository{db: db}
+	repo := newFakeIPQualityReadRepository(db)
 
 	got, err := repo.GetLatestVPSIPQualitySummary(context.Background(), "vps_001")
 	if err != nil {
@@ -394,7 +531,9 @@ func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredAssignedView
 			}}},
 			"from ip_quality_provider_results": &fakeIPQualityRows{},
 			"from ip_quality_service_unlocks":  &fakeIPQualityRows{},
-			"select latest.vps_id":             &fakeIPQualityRows{},
+			"select latest.vps_id": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+				scan: scanIPQualitySummaryRow("vps_001", "ipq_valid", now, agentapi.IPQualityStatusSuccess),
+			}}},
 			"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 				scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "vps_001"
@@ -421,7 +560,7 @@ func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredAssignedView
 			}}},
 		},
 	}
-	repo := &PostgresIPQualityRepository{db: db}
+	repo := newFakeIPQualityReadRepository(db)
 
 	if _, err := repo.GetVPSIPQuality(context.Background(), "vps_001"); err != nil {
 		t.Fatalf("GetVPSIPQuality() error = %v", err)
@@ -483,9 +622,22 @@ func ipQualityReportWrite() ipquality.ReportWrite {
 }
 
 type fakeIPQualityDB struct {
-	queryRows map[string]pgx.Rows
-	queryErr  error
-	queries   []string
+	queryRows    map[string]pgx.Rows
+	queryErr     error
+	queries      []string
+	readTx       *fakeIPQualityTx
+	beginOptions []pgx.TxOptions
+}
+
+func newFakeIPQualityReadRepository(db *fakeIPQualityDB) *PostgresIPQualityRepository {
+	db.readTx = &fakeIPQualityTx{querySource: db}
+	return &PostgresIPQualityRepository{
+		db: db,
+		beginTx: func(_ context.Context, options pgx.TxOptions) (ipQualityTx, error) {
+			db.beginOptions = append(db.beginOptions, options)
+			return db.readTx, nil
+		},
+	}
 }
 
 func (f *fakeIPQualityDB) Query(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
@@ -505,8 +657,18 @@ func (f *fakeIPQualityDB) Query(_ context.Context, sql string, _ ...any) (pgx.Ro
 }
 
 type fakeIPQualityTx struct {
-	execSQL     []string
-	commitCalls int
+	querySource   *fakeIPQualityDB
+	execSQL       []string
+	commitCalls   int
+	commitErr     error
+	rollbackCalls int
+}
+
+func (f *fakeIPQualityTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if f.querySource == nil {
+		return nil, errors.New("fake IP quality transaction has no query source")
+	}
+	return f.querySource.Query(ctx, sql, args...)
 }
 
 func (f *fakeIPQualityTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
@@ -516,10 +678,13 @@ func (f *fakeIPQualityTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.
 
 func (f *fakeIPQualityTx) Commit(context.Context) error {
 	f.commitCalls++
-	return nil
+	return f.commitErr
 }
 
-func (f *fakeIPQualityTx) Rollback(context.Context) error { return nil }
+func (f *fakeIPQualityTx) Rollback(context.Context) error {
+	f.rollbackCalls++
+	return nil
+}
 
 type fakeIPQualityScan struct{ scan func(dest ...any) error }
 
@@ -543,6 +708,31 @@ func (f *fakeIPQualityRows) Next() bool {
 	return true
 }
 func (f *fakeIPQualityRows) Scan(dest ...any) error { return f.rows[f.idx-1].scan(dest...) }
+
+func scanIPQualitySummaryRow(vpsID, reportID string, observedAt time.Time, status string) func(dest ...any) error {
+	return func(dest ...any) error {
+		*(dest[0].(*string)) = vpsID
+		*(dest[1].(*string)) = reportID
+		*(dest[2].(*time.Time)) = observedAt
+		*(dest[3].(*string)) = "203.0.113.10"
+		*(dest[4].(*int)) = 4
+		*(dest[5].(*string)) = status
+		*(dest[6].(*string)) = "low"
+		*(dest[7].(*string)) = "US"
+		*(dest[8].(*string)) = "United States"
+		*(dest[9].(*string)) = "AS64500"
+		*(dest[10].(*string)) = "Example Network"
+		*(dest[11].(*bool)) = false
+		*(dest[12].(*bool)) = false
+		*(dest[13].(*string)) = "link"
+		*(dest[14].(*string)) = ""
+		*(dest[15].(*string)) = ""
+		*(dest[16].(*int)) = 0
+		*(dest[17].(*int)) = 0
+		*(dest[18].(*[]byte)) = []byte(`{}`)
+		return nil
+	}
+}
 
 func scanIPQualityReportRow(reportID, monitoringInstanceID string, observedAt time.Time, status string) func(dest ...any) error {
 	return func(dest ...any) error {

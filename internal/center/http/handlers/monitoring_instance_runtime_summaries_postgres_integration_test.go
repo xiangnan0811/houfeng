@@ -158,18 +158,25 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeSummariesUseCurrentBindingA
 }
 func insertRuntimeSummaryMonitoringInstance(t *testing.T, ctx context.Context, db *pgxpool.Pool, id, fingerprint string, epoch time.Time, archived bool) {
 	t.Helper()
+	vpsID := "vps_" + id
+	if _, err := db.Exec(ctx, `
+		insert into vps_assets (vps_id, display_name, lifecycle_status)
+		values ($1, $2, 'active')
+	`, vpsID, id); err != nil {
+		t.Fatalf("insert monitoring instance VPS %q: %v", id, err)
+	}
 	var archivedAt any
 	if archived {
 		archivedAt = time.Now().UTC()
 	}
 	if _, err := db.Exec(ctx, `
 		insert into monitoring_instances (
-			monitoring_instance_id, display_name, "group", region, city, provider,
+			monitoring_instance_id, vps_id, display_name, "group", region, city, provider,
 			lifecycle_status, monitoring_status, binding_status, binding_fingerprint,
 			binding_epoch_started_at, archived_at
-		) values ($1, $2, 'test', 'test-region', 'test-city', 'test-provider',
-			'在用', '启用', '已绑定', $3, $4, $5)
-	`, id, id, fingerprint, epoch, archivedAt); err != nil {
+		) values ($1, $2, $1, 'test', 'test-region', 'test-city', 'test-provider',
+			'已接入', '启用', '已绑定', $3, $4, $5)
+	`, id, vpsID, fingerprint, epoch, archivedAt); err != nil {
 		t.Fatalf("insert monitoring instance %q: %v", id, err)
 	}
 }

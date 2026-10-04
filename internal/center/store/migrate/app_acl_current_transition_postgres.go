@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -20,6 +21,7 @@ const appACLCurrentHeartbeatDefault = `{"heartbeat_interval_seconds":5,"stale_th
 type appACLCurrentTransitionPreflight struct {
 	heartbeatPolicyMigrationPending bool
 	lifecycleMigrationPending       bool
+	settingsRowPresent              bool
 	incidentDefaults                []byte
 	settingsSnapshot                []byte
 	settingsExceptTransition        []byte
@@ -62,7 +64,7 @@ func preflightAppACLCurrentTransitionInTx(
 		heartbeatPolicyMigrationPending: heartbeatPolicyMigrationPending,
 		lifecycleMigrationPending:       appACLCurrentTransitionContainsMigration(transition, "0067_refactor_vps_monitoring_lifecycle.sql"),
 	}
-	if err := tx.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 			select incident_defaults,
 			       to_jsonb(settings),
 			       to_jsonb(settings) - array['incident_defaults', 'updated_at']::text[],
@@ -70,7 +72,13 @@ func preflightAppACLCurrentTransitionInTx(
 			from public.center_settings settings
 			where settings_id = 'center'
 			for update
-		`).Scan(&snapshot.incidentDefaults, &snapshot.settingsSnapshot, &snapshot.settingsExceptTransition, &snapshot.updatedAt); err != nil {
+		`).Scan(&snapshot.incidentDefaults, &snapshot.settingsSnapshot, &snapshot.settingsExceptTransition, &snapshot.updatedAt)
+	switch {
+	case err == nil:
+		snapshot.settingsRowPresent = true
+	case errors.Is(err, pgx.ErrNoRows):
+		return snapshot, nil
+	default:
 		return appACLCurrentTransitionPreflight{}, fmt.Errorf("read registered APP transition settings snapshot: %w", err)
 	}
 	threshold, err := appACLCurrentStaleThreshold(snapshot.incidentDefaults)
@@ -92,24 +100,33 @@ func verifyAppliedAppACLCurrentTransitionInTx(
 	}
 	var incidentDefaults, settingsSnapshot, settingsExceptTransition []byte
 	var updatedAt time.Time
-	if err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 			select incident_defaults,
 			       to_jsonb(settings),
 			       to_jsonb(settings) - array['incident_defaults', 'updated_at']::text[],
 			       updated_at
 			from public.center_settings settings
 			where settings_id = 'center'
-		`).Scan(&incidentDefaults, &settingsSnapshot, &settingsExceptTransition, &updatedAt); err != nil {
+		`).Scan(&incidentDefaults, &settingsSnapshot, &settingsExceptTransition, &updatedAt)
+	afterPresent := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return fmt.Errorf("read applied registered APP transition settings: %w", err)
 	}
-	return verifyAppliedAppACLCurrentTransitionSettings(before, incidentDefaults, settingsSnapshot, settingsExceptTransition, updatedAt)
+	return verifyAppliedAppACLCurrentTransitionSettings(before, afterPresent, incidentDefaults, settingsSnapshot, settingsExceptTransition, updatedAt)
 }
 
 func verifyAppliedAppACLCurrentTransitionSettings(
 	before appACLCurrentTransitionPreflight,
+	afterPresent bool,
 	incidentDefaults, settingsSnapshot, settingsExceptTransition []byte,
 	updatedAt time.Time,
 ) error {
+	if before.settingsRowPresent != afterPresent {
+		return fmt.Errorf("registered APP transition changed settings row presence")
+	}
+	if !before.settingsRowPresent {
+		return nil
+	}
 	if before.lifecycleMigrationPending {
 		var err error
 		before.settingsSnapshot, err = appACLCurrentLifecycleSettings(before.settingsSnapshot)
@@ -200,11 +217,15 @@ func verifyCurrentAppACLCurrentTransitionInTx(
 		return err
 	}
 	var incidentDefaults []byte
-	if err := tx.QueryRow(ctx, `
+	err := tx.QueryRow(ctx, `
 		select incident_defaults
 		from public.center_settings
 		where settings_id = 'center'
-	`).Scan(&incidentDefaults); err != nil {
+	`).Scan(&incidentDefaults)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("read current registered APP transition settings: %w", err)
 	}
 	threshold, err := appACLCurrentStaleThreshold(incidentDefaults)

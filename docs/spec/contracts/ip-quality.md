@@ -94,6 +94,8 @@
 - VPS PATCH 仅改变地址表示不新增 IP history；真实地址改变仍记史。任一侧不可解析时按 trim 后原文比较，修正/删除非法旧地址也记史。独立创建 IP history 使用同一无变化判定；四个历史地址字段保留原文。VPS 输入仍 trim-only，不新增 API 拒绝规则，不放宽 evidence 地址族校验。
 - 用户侧 read model（`ip_quality_assigned_vps_reports` / `ip_quality_latest_vps_summaries`）只能包含真实 IP 事实：`status in ('success','partial')`、`ip_address <> '0.0.0.0'`、`ip_version in (4,6)`。原始 failure 报告继续保存在 `ip_quality_reports` 供诊断，但 VPS API、VPS 列表/详情和资产决策不得展示这些 failure 占位事实。
 - 历史详情 API 必须按 VPS assignment 规则读取 selected report，响应中必须同时返回该 report 的 `summary`、`latest_report`、provider rows、service rows；不能只返回 row 细节而让前端历史视图空态或退回 latest summary。
+- 最新与历史详情各自在单个 `REPEATABLE READ READ ONLY` transaction 中读取归属、摘要、报告及 children（最新入口还包含最多 30 条 history）。最新入口以摘要的 ReportID 固定身份，历史入口以请求 ID 固定身份；并发入库、link 或地址/共享地址变化只影响后续请求，不能拼接两个快照。
+- 无归属报告返回 summary/latest 为 null、provider/service/history 为非 nil 空数组。已选摘要缺 assigned report，或已读 assigned report 缺摘要，必须失败；禁止重新选择 latest 或从 report 合成无歧义摘要。begin/query/commit 任一失败均不返回部分响应；公共 summaries 与 Overview 的单查询边界不扩大。
 - VPS Overview 在 IP 质量关闭时只做 availability 检查，立即返回 `not_configured` + `SectionReady`，不得查询 `GetLatestVPSIPQualitySummary`，也不得发出 `ip_quality_disabled_has_history`。历史注释不是当前健康判断的一部分；历史只在 `GET /api/vps/{vps_id}/ip-quality` 详情页展示。关闭路径上的 summary 超时不得把 Overview 标成 `source.unavailable.v1`。
 - 资产决策只能把 IP 质量作为 evidence / scoring / readback 输入，不自动执行迁移、取消或续费动作。
 - `ip_quality.report/v1`是authoritative evidence source kind；只有生成新的logical evidence snapshot时才按该snapshot的`logical_size_bytes`消耗project evidence capacity。IP质量report/provider/service表大小、raw retention、coverage、风险等级或source availability都不能成为quota counter、capacity fallback或janitor删除依据。
@@ -182,6 +184,7 @@
 - `internal/center/http/handlers`: agent sync 写入 IP 质量 DTO、非法报告拒绝、raw/extra/diagnostics JSON 脱敏；VPS IP quality API 返回 report/matrix/history；历史详情 endpoint 返回 selected report summary。
 - `internal/center/store`: sync batch 事务内写三表，repository latest/history 查询、历史详情查询、migration view 使用正确 alias；retention 长期保留报告与脱敏 raw。
 - `internal/center/store` 强制业务 PG anchor：`TestPostgresIntegrationIPQualitySyncMetadataRoundTrip`、`TestPostgresIntegrationIPQualitySyncRollbackAndReplay`、`TestPostgresIntegrationIPQualityAddressIdentity`，验证真实 runtime-role sync/readback、事务回滚/replay、Go/SQL 身份矩阵、link/fallback 及 PATCH history；`scripts/test-business-postgres.sh` 必须观察全部 RUN/PASS，任何 skip/fail 均拒绝。
+- `TestPostgresIntegrationIPQualityReadSnapshot` 同为强制业务 PG anchor：使用真实连接和首个 SELECT barrier 覆盖 A→B、空→首次报告、同时间戳 live/backfill、link 增删、地址与共享地址歧义、历史选择；旧请求返回完整旧快照，新请求返回完整新快照，不用 sleep 猜测提交交错。
 - `internal/center/store/migrate`: IP 质量 read view 重建迁移必须过滤 failure、`0.0.0.0` 和非法 IP version，并保留 partial 真实 IP 报告。
 - `internal/center/assetdecisions`: IP 质量缺失/过期/失败/partial/ambiguous/风险/解锁阻断 evidence 与 readback 语义，确认只统计 successful provider/probe rows。
 - `web`: API client、Settings、VPS list badge、VPS detail section、完整 IP 质量页、历史详情、Asset Decisions evidence/current facts 展示。

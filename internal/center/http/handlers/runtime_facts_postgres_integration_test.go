@@ -12,6 +12,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/store"
@@ -90,10 +91,14 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeFactsAndStreamEligibility(t
 		StreamHub:  runtimefacts.NewStreamHub(),
 		subscribed: make(chan string, 1),
 	}
-	streamServer := httptest.NewServer(MonitoringInstanceRuntimeStream(
+	streamHandler := MonitoringInstanceRuntimeStream(
 		store.NewPostgresMonitoringInstanceRepository(db),
 		streamHub,
-	))
+		runtimeFactsIntegrationSessionValidator{},
+	)
+	streamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		streamHandler.ServeHTTP(w, r.WithContext(sessionctx.WithSessionID(r.Context(), "runtime-integration-session")))
+	}))
 	defer streamServer.Close()
 	streamCtx, streamCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer streamCancel()
@@ -170,4 +175,10 @@ func (h *runtimeFactsIntegrationHostSampleHub) SubscribeHostSamples(monitoringIn
 	default:
 	}
 	return subscription
+}
+
+type runtimeFactsIntegrationSessionValidator struct{}
+
+func (runtimeFactsIntegrationSessionValidator) ValidateSession(context.Context, string) error {
+	return nil
 }

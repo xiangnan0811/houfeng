@@ -135,6 +135,9 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
   只允许 UPDATE，不能 UPSERT 或复活已过期行。
 - Logout 和过期清理只做 DELETE，不取得用户锁；它们与上述事务交错时不得重新创建
   会话。任何事务的 commit 错误必须原样作为失败返回，不得重试旧密码、不宣称已回滚。
+- `ValidateSession` 是不续期的会话权威读取：以 HMAC ID 单条 JOIN 读取最新 `issued_at`、`expires_at` 和密码 watermark，查询完成后取时钟。无行拒绝；`expires_at <= now` 或非零 issued_at 早于 watermark 拒绝。不得加行锁、写入、删除或改变 `last_seen_at` / `expires_at`，不得复用会 Touch 的 `UserBySession`。
+- runtime WebSocket 只接受 RequireSession 成功认证及授权后写入 context 的实际 cookie session ID；header/query/body 不能代替。握手前和每条可发送消息的写入紧前均执行最多 2 秒权威校验；连接另有独立 5 秒 watcher，空闲或慢写不能阻止复核。撤销、过期及数据库错误均 fail closed，取消并强制关闭连接；正常调度下 7 秒内发起关闭，端到端验收上限 10 秒。
+- 被动校验每次读取持久化 expiry，不冻结握手过期时间；正常 HTTP Touch 合法续期后连接可继续。A 改密保留 A 当前会话/连接，撤销 B 不得误关 A。已经通过校验的在途帧不可追回，不承诺撤销和网络发送全局原子，也不得持数据库锁跨网络写。
 
 ### 3. Validation & Error Matrix
 
@@ -155,6 +158,7 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
   状态；`sessions_test.go` 的 DB seam 覆盖各事务 commit 错误语义。
 - `internal/center/http/auth_e2e_test.go` 必须走真实 service/handler，断言改密后原
   Cookie 的受保护请求仍为 200、其他 Cookie 为 401，且新密码可登录。
+- `TestPostgresIntegrationRuntimeStreamSessionRevocation` 必须作为强制业务 PG anchor，通过真实 RequireSession、PostgreSQL auth 与 WebSocket 观察首帧→改密/退出/自然过期→连接关闭及 A 继续收帧；覆盖正常 HTTP 续期、查询故障、慢写/断开与订阅回收，并比较会话行证明被动复核不续期。至少一次执行真实 5 秒 watcher。
 
 ---
 

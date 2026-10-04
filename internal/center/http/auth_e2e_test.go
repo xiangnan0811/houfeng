@@ -183,6 +183,24 @@ func (m *memorySessions) TouchWithUserLock(_ context.Context, sessionID string, 
 	return s, nil
 }
 
+func (m *memorySessions) ValidateSession(_ context.Context, sessionID string, now func() time.Time) error {
+	m.state.mu.Lock()
+	defer m.state.mu.Unlock()
+	s, ok := m.byID[sessionID]
+	if !ok {
+		return auth.ErrSessionNotFound
+	}
+	u, ok := m.state.users[s.UserID]
+	if !ok {
+		return auth.ErrUserNotFound
+	}
+	checkedAt := now().UTC().Truncate(time.Microsecond)
+	if !s.ExpiresAt.After(checkedAt) || (!s.IssuedAt.IsZero() && s.IssuedAt.Before(u.PasswordChangedAt)) {
+		return auth.ErrSessionExpired
+	}
+	return nil
+}
+
 func (m *memorySessions) Delete(_ context.Context, id string) error {
 	m.state.mu.Lock()
 	defer m.state.mu.Unlock()

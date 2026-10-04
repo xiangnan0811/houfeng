@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket/wsjson"
 
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/runtimefacts"
@@ -42,6 +43,26 @@ func (f *fakeRuntimeFactsRepository) GetTargetRuntimeFacts(context.Context, stri
 		return runtimefacts.TargetRuntimeFacts{}, f.getTargetRuntimeFactsErr
 	}
 	return f.getTargetRuntimeFactsResult, nil
+}
+
+type testRuntimeSessionValidator struct {
+	err error
+}
+
+func (v testRuntimeSessionValidator) ValidateSession(context.Context, string) error {
+	return v.err
+}
+
+func runtimeStreamTestHandler(repo interface {
+	GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
+}, hub interface {
+	SubscribeHostSamples(string) runtimefacts.HostSampleSubscription
+}) http.Handler {
+	handler := handlers.MonitoringInstanceRuntimeStream(repo, hub, testRuntimeSessionValidator{})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := sessionctx.WithSessionID(r.Context(), "runtime-test-session")
+		handler.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func TestMonitoringInstanceRuntimeFactsReturnsLatestHostSample(t *testing.T) {
@@ -374,7 +395,7 @@ func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
 			BindingEpochStartedAt: &epoch,
 		},
 	}
-	server := httptest.NewServer(handlers.MonitoringInstanceRuntimeStream(repo, hub))
+	server := httptest.NewServer(runtimeStreamTestHandler(repo, hub))
 	defer server.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -427,7 +448,7 @@ func TestMonitoringInstanceRuntimeStreamWritesAgentShapedSamplesWithZeroReceived
 			BindingEpochStartedAt: &epoch,
 		},
 	}
-	server := httptest.NewServer(handlers.MonitoringInstanceRuntimeStream(repo, hub))
+	server := httptest.NewServer(runtimeStreamTestHandler(repo, hub))
 	defer server.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -492,7 +513,7 @@ func TestMonitoringInstanceRuntimeStreamDropsStaleAndFutureSamplesBeforeWriting(
 			BindingEpochStartedAt: &epoch,
 		},
 	}
-	server := httptest.NewServer(handlers.MonitoringInstanceRuntimeStream(repo, hub))
+	server := httptest.NewServer(runtimeStreamTestHandler(repo, hub))
 	defer server.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -587,7 +608,7 @@ func (h *notifyingHostSampleHub) SubscribeHostSamples(monitoringInstanceID strin
 }
 
 func TestMonitoringInstanceRuntimeStreamMapsMonitoringInstanceNotFound(t *testing.T) {
-	handler := handlers.MonitoringInstanceRuntimeStream(
+	handler := runtimeStreamTestHandler(
 		&fakeMonitoringInstanceRepository{getMonitoringInstanceErr: monitoringinstances.ErrMonitoringInstanceNotFound},
 		runtimefacts.NewStreamHub(),
 	)
@@ -601,8 +622,46 @@ func TestMonitoringInstanceRuntimeStreamMapsMonitoringInstanceNotFound(t *testin
 	}
 }
 
+func TestMonitoringInstanceRuntimeStreamRequiresTrustedSessionContext(t *testing.T) {
+	repo := &fakeMonitoringInstanceRepository{}
+	handler := handlers.MonitoringInstanceRuntimeStream(repo, runtimefacts.NewStreamHub(), testRuntimeSessionValidator{})
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-stream", nil)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusUnauthorized)
+	}
+	if repo.getMonitoringInstanceCalls != 0 {
+		t.Fatalf("instance lookup calls = %d, want 0 before authentication", repo.getMonitoringInstanceCalls)
+	}
+}
+
+func TestMonitoringInstanceRuntimeStreamRejectsValidatorConfigurationAndFailures(t *testing.T) {
+	repo := &fakeMonitoringInstanceRepository{}
+	req := httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-stream", nil)
+	req = req.WithContext(sessionctx.WithSessionID(req.Context(), "runtime-test-session"))
+
+	t.Run("missing validator", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		handlers.MonitoringInstanceRuntimeStream(repo, runtimefacts.NewStreamHub(), nil).ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+		}
+	})
+
+	t.Run("validator failure", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		handlers.MonitoringInstanceRuntimeStream(repo, runtimefacts.NewStreamHub(), testRuntimeSessionValidator{err: errors.New("validator unavailable")}).ServeHTTP(recorder, req)
+		if recorder.Code != http.StatusInternalServerError {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+		}
+	})
+}
+
 func TestMonitoringInstanceRuntimeStreamRejectsUnsupportedMethod(t *testing.T) {
-	handler := handlers.MonitoringInstanceRuntimeStream(&fakeMonitoringInstanceRepository{}, runtimefacts.NewStreamHub())
+	handler := handlers.MonitoringInstanceRuntimeStream(&fakeMonitoringInstanceRepository{}, runtimefacts.NewStreamHub(), testRuntimeSessionValidator{})
 	req := httptest.NewRequest(http.MethodPost, "/api/monitoring-instances/mi_001/runtime-stream", nil)
 	recorder := httptest.NewRecorder()
 

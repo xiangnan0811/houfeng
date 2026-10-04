@@ -182,6 +182,24 @@ func (f *fakeSessions) TouchWithUserLock(_ context.Context, sessionID string, no
 	return s, nil
 }
 
+func (f *fakeSessions) ValidateSession(_ context.Context, sessionID string, now func() time.Time) error {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
+	s, ok := f.byID[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	u, ok := f.state.users[s.UserID]
+	if !ok {
+		return ErrUserNotFound
+	}
+	checkedAt := now().UTC().Truncate(time.Microsecond)
+	if !s.ExpiresAt.After(checkedAt) || (!s.IssuedAt.IsZero() && s.IssuedAt.Before(u.PasswordChangedAt)) {
+		return ErrSessionExpired
+	}
+	return nil
+}
+
 func (f *fakeSessions) Delete(_ context.Context, id string) error {
 	f.state.mu.Lock()
 	defer f.state.mu.Unlock()
@@ -315,6 +333,45 @@ func TestServiceTouchExtendsExpiry(t *testing.T) {
 	}
 	if got.SessionID != sess.SessionID {
 		t.Fatalf("SessionID changed unexpectedly")
+	}
+}
+
+func TestServiceValidateSessionIsReadOnlyAndUsesCurrentAuthority(t *testing.T) {
+	users, sessions := newFakeRepositories()
+	now, _ := fakeSessionTimes()
+	clock := now
+	svc := New(users, sessions, Options{SessionTTL: time.Hour, Now: func() time.Time { return clock }})
+	mustSeed(t, users, "admin", "correct-horse-battery")
+
+	session, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	before := sessions.byID[session.SessionID]
+	if err := svc.ValidateSession(context.Background(), session.SessionID); err != nil {
+		t.Fatalf("ValidateSession(valid) = %v", err)
+	}
+	after := sessions.byID[session.SessionID]
+	if after.LastSeenAt != before.LastSeenAt || after.ExpiresAt != before.ExpiresAt {
+		t.Fatalf("ValidateSession changed session timestamps: before=%+v after=%+v", before, after)
+	}
+
+	clock = session.ExpiresAt
+	if err := svc.ValidateSession(context.Background(), session.SessionID); !errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("ValidateSession(expired) = %v, want ErrSessionExpired", err)
+	}
+	if _, ok := sessions.byID[session.SessionID]; !ok {
+		t.Fatal("ValidateSession removed expired session; it must be side-effect free")
+	}
+
+	if err := svc.Logout(context.Background(), session.SessionID); err != nil {
+		t.Fatalf("Logout: %v", err)
+	}
+	if err := svc.ValidateSession(context.Background(), session.SessionID); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("ValidateSession(revoked) = %v, want ErrSessionNotFound", err)
+	}
+	if err := svc.ValidateSession(context.Background(), ""); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("ValidateSession(empty) = %v, want ErrSessionNotFound", err)
 	}
 }
 

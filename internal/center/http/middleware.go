@@ -71,7 +71,13 @@ func RequireSession(svc handlers.AuthService, scopes recordauth.ScopeRepository)
 				writeAuthorizationUnavailable(w)
 				return
 			}
-			ctx := sessionctx.WithActorScope(sessionctx.WithUserID(r.Context(), u.UserID), actor)
+			ctx := sessionctx.WithActorScope(
+				sessionctx.WithSessionID(
+					sessionctx.WithUserID(r.Context(), u.UserID),
+					id,
+				),
+				actor,
+			)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

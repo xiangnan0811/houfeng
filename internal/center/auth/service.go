@@ -85,6 +85,15 @@ func (s *Service) Touch(ctx context.Context, sessionID string) (Session, error) 
 	return s.sessions.TouchWithUserLock(ctx, sessionID, s.now, s.ttl)
 }
 
+// ValidateSession checks the current persisted session authority without
+// touching its activity timestamps or extending its expiry.
+func (s *Service) ValidateSession(ctx context.Context, sessionID string) error {
+	if sessionID == "" {
+		return ErrSessionNotFound
+	}
+	return s.sessions.ValidateSession(ctx, sessionID, s.now)
+}
+
 func (s *Service) UserBySession(ctx context.Context, sessionID string) (User, error) {
 	sess, err := s.Touch(ctx, sessionID)
 	if err != nil {

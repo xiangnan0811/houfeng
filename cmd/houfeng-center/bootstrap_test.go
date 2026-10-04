@@ -1406,7 +1406,10 @@ func (*fakeIncidentNotifier) Send(context.Context, string) error {
 	return nil
 }
 
-type fakeSessionRepository struct{}
+type fakeSessionRepository struct {
+	sessions          map[string]auth.Session
+	passwordChangedAt map[string]time.Time
+}
 
 func (fakeSessionRepository) CreateIfPasswordHash(context.Context, string, auth.Session, func() time.Time, time.Duration) (auth.Session, error) {
 	return auth.Session{}, nil
@@ -1418,6 +1421,23 @@ func (fakeSessionRepository) ChangePasswordIfHash(context.Context, string, strin
 
 func (fakeSessionRepository) TouchWithUserLock(context.Context, string, func() time.Time, time.Duration) (auth.Session, error) {
 	return auth.Session{}, nil
+}
+
+func (f fakeSessionRepository) ValidateSession(_ context.Context, sessionID string, now func() time.Time) error {
+	if sessionID == "" {
+		return auth.ErrSessionNotFound
+	}
+	session, ok := f.sessions[sessionID]
+	if !ok {
+		return auth.ErrSessionNotFound
+	}
+	if !session.ExpiresAt.After(now().UTC().Truncate(time.Microsecond)) {
+		return auth.ErrSessionExpired
+	}
+	if changedAt := f.passwordChangedAt[session.UserID]; !changedAt.IsZero() && !session.IssuedAt.IsZero() && session.IssuedAt.Before(changedAt) {
+		return auth.ErrSessionExpired
+	}
+	return nil
 }
 
 func (fakeSessionRepository) Delete(context.Context, string) error {

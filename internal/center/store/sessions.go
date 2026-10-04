@@ -90,6 +90,29 @@ func normalizeSessionClock(now func() time.Time) time.Time {
 	return now().UTC().Truncate(time.Microsecond)
 }
 
+// ValidateSession performs a side-effect-free authority check against the
+// latest persisted session and user password watermark.
+func (r *PostgresSessionRepository) ValidateSession(ctx context.Context, sessionID string, now func() time.Time) error {
+	hashedSessionID := r.hashSessionID(sessionID)
+	var issuedAt, expiresAt, passwordChangedAt time.Time
+	if err := r.db.QueryRow(ctx, `
+		select s.issued_at, s.expires_at, u.password_changed_at
+		from sessions s
+		join users u on u.user_id = s.user_id
+		where s.session_id_hash = $1`, hashedSessionID).Scan(&issuedAt, &expiresAt, &passwordChangedAt); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return auth.ErrSessionNotFound
+		}
+		return fmt.Errorf("validate session: %w", err)
+	}
+
+	checkedAt := normalizeSessionClock(now)
+	if !expiresAt.After(checkedAt) || (!issuedAt.IsZero() && issuedAt.Before(passwordChangedAt)) {
+		return auth.ErrSessionExpired
+	}
+	return nil
+}
+
 func laterSessionTime(a, b time.Time) time.Time {
 	if a.Before(b) {
 		return b
