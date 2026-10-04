@@ -10,6 +10,7 @@ import (
 	"houfeng/internal/center/createidempotency"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
+	"houfeng/internal/ipidentity"
 )
 
 var ErrAssetTimelineNotFound = errors.New("asset timeline not found")
@@ -292,7 +293,7 @@ func ValidateCreateIPHistoryInput(input CreateIPHistoryInput) error {
 	if NormalizeVPSID(input.VPSID) == "" {
 		return fmt.Errorf("%w: vps_id is required", ErrInvalidAssetHistoryInput)
 	}
-	if input.FromIPv4 == input.ToIPv4 && input.FromIPv6 == input.ToIPv6 {
+	if !ipidentity.Changed(input.FromIPv4, input.ToIPv4) && !ipidentity.Changed(input.FromIPv6, input.ToIPv6) {
 		return fmt.Errorf("%w: ip address is unchanged", ErrInvalidAssetHistoryInput)
 	}
 	if input.ChangedAt != nil && input.ChangedAt.IsZero() {

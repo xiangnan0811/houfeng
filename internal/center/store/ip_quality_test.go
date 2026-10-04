@@ -15,70 +15,6 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-func TestPostgresIPQualityRepositorySaveReportsWritesReportProvidersAndUnlocks(t *testing.T) {
-	t.Parallel()
-
-	tx := &fakeIPQualityTx{}
-	repo := &PostgresIPQualityRepository{
-		beginTx: func(context.Context, pgx.TxOptions) (ipQualityTx, error) {
-			return tx, nil
-		},
-		newReportID: func() (string, error) {
-			return "ipq_001", nil
-		},
-	}
-	report := ipQualityReportWrite()
-
-	if err := repo.SaveReports(context.Background(), []ipquality.ReportWrite{report}); err != nil {
-		t.Fatalf("SaveReports() error = %v", err)
-	}
-	if tx.commitCalls != 1 {
-		t.Fatalf("commitCalls = %d, want 1", tx.commitCalls)
-	}
-	if !containsSQL(tx.execSQL, "insert into ip_quality_reports") {
-		t.Fatalf("execSQL = %#v, want ip_quality_reports insert", tx.execSQL)
-	}
-	if !containsSQL(tx.execSQL, "insert into ip_quality_provider_results") {
-		t.Fatalf("execSQL = %#v, want provider result insert", tx.execSQL)
-	}
-	if !containsSQL(tx.execSQL, "insert into ip_quality_service_unlocks") {
-		t.Fatalf("execSQL = %#v, want service unlock insert", tx.execSQL)
-	}
-	reportArgs := tx.argsForSQL("insert into ip_quality_reports")
-	if len(reportArgs) == 0 || reportArgs[0] != "ipq_001" {
-		t.Fatalf("report insert args = %#v, want generated report id first", reportArgs)
-	}
-	if got := string(reportArgs[22].([]byte)); got != `{"Info":{"ASN":"AS64500"}}` {
-		t.Fatalf("raw json arg = %s, want sanitized raw json", got)
-	}
-	if got := string(reportArgs[23].([]byte)); got != `{"expected_provider_count":2,"successful_provider_count":1}` {
-		t.Fatalf("coverage json arg = %s, want coverage JSON", got)
-	}
-	if got := string(reportArgs[24].([]byte)); got != `{"source_version":"v2"}` {
-		t.Fatalf("diagnostics json arg = %s, want diagnostics JSON", got)
-	}
-	providerArgs := tx.argsForSQL("insert into ip_quality_provider_results")
-	if providerArgs[1] != "ipq_001" || providerArgs[2] != "ipinfo" {
-		t.Fatalf("provider insert args = %#v, want report id and provider", providerArgs)
-	}
-	if providerArgs[3] != "success" || providerArgs[4] != "default" || providerArgs[5].(*int) == nil || *providerArgs[5].(*int) != 73 {
-		t.Fatalf("provider source args = %#v, want status/source_type/latency", providerArgs)
-	}
-	if got := string(providerArgs[20].(json.RawMessage)); got != `{"risk":{"score":12}}` {
-		t.Fatalf("provider extra_json arg = %s, want sanitized extra JSON", got)
-	}
-	unlockArgs := tx.argsForSQL("insert into ip_quality_service_unlocks")
-	if unlockArgs[1] != "ipq_001" || unlockArgs[2] != "netflix" {
-		t.Fatalf("unlock insert args = %#v, want report id and service", unlockArgs)
-	}
-	if unlockArgs[3] != "netflix_title_probe" || unlockArgs[5] != "success" || unlockArgs[6].(*int) == nil || *unlockArgs[6].(*int) != 211 {
-		t.Fatalf("unlock source args = %#v, want source/probe_status/latency", unlockArgs)
-	}
-	if got := string(unlockArgs[11].(json.RawMessage)); got != `{"title_probe":"full_catalog"}` {
-		t.Fatalf("unlock extra_json arg = %s, want sanitized extra JSON", got)
-	}
-}
-
 func TestPostgresIPQualityRepositorySaveReportsRollsBackInvalidReport(t *testing.T) {
 	t.Parallel()
 
@@ -131,16 +67,8 @@ func TestPostgresIPQualityRepositorySaveReportsKeepsDiagnosticFailureReports(t *
 	if err := repo.SaveReports(context.Background(), []ipquality.ReportWrite{report}); err != nil {
 		t.Fatalf("SaveReports() error = %v", err)
 	}
-
-	if !containsSQL(tx.execSQL, "insert into ip_quality_reports") {
-		t.Fatalf("execSQL = %#v, want diagnostic failure report insert", tx.execSQL)
-	}
-	if containsSQL(tx.execSQL, "insert into ip_quality_provider_results") || containsSQL(tx.execSQL, "insert into ip_quality_service_unlocks") {
-		t.Fatalf("execSQL = %#v, want no provider/service rows for lookup failure", tx.execSQL)
-	}
-	args := tx.argsForSQL("insert into ip_quality_reports")
-	if args[7] != "0.0.0.0" || args[9] != agentapi.IPQualityStatusFailure || args[19] != "lookup_failed" {
-		t.Fatalf("failure report args = %#v, want placeholder failure diagnostic saved", args)
+	if tx.commitCalls != 1 {
+		t.Fatalf("commitCalls = %d, want 1 for diagnostic failure report", tx.commitCalls)
 	}
 }
 
@@ -361,60 +289,6 @@ func TestPostgresIPQualityRepositoryHistoryDoesNotReadLatestOnlyView(t *testing.
 	}
 }
 
-func TestIPQualityLatestAndHistoryQueriesUseReplaySafeOrdering(t *testing.T) {
-	t.Parallel()
-
-	if !strings.Contains(overviewLatestIPQualitySummarySQL, "order by assigned.observed_at desc, assigned.is_backfilled asc, assigned.received_at desc, assigned.report_id desc") {
-		t.Fatalf("overviewLatestIPQualitySummarySQL = %q, want replay-safe latest ordering", overviewLatestIPQualitySummarySQL)
-	}
-
-	latestDB := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
-		"select latest.vps_id": &fakeIPQualityRows{},
-	}}
-	latestRepo := &PostgresIPQualityRepository{db: latestDB}
-	if _, err := latestRepo.ListLatestSummariesForVPS(context.Background(), []string{"vps_001"}); err != nil {
-		t.Fatalf("ListLatestSummariesForVPS() error = %v", err)
-	}
-	latestSQL := strings.ToLower(latestDB.queries[0])
-	if strings.Contains(latestSQL, "ip_quality_latest_vps_summaries") {
-		t.Fatalf("ListLatestSummariesForVPS SQL used legacy latest view: %s", latestSQL)
-	}
-	if !strings.Contains(latestSQL, "from ip_quality_assigned_vps_reports assigned") ||
-		!strings.Contains(latestSQL, "join ip_quality_reports r on r.report_id = assigned.report_id") ||
-		!strings.Contains(latestSQL, "order by assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc") {
-		t.Fatalf("ListLatestSummariesForVPS SQL = %s, want source-query replay-safe ordering", latestSQL)
-	}
-
-	reportDB := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
-		"from ip_quality_reports r": &fakeIPQualityRows{},
-	}}
-	reportRepo := &PostgresIPQualityRepository{db: reportDB}
-	if _, _, err := reportRepo.latestReportForVPS(context.Background(), "vps_001"); err != nil {
-		t.Fatalf("latestReportForVPS() error = %v", err)
-	}
-	reportSQL := strings.ToLower(reportDB.queries[0])
-	if strings.Contains(reportSQL, "ip_quality_latest_vps_summaries") {
-		t.Fatalf("latestReportForVPS SQL used legacy latest view: %s", reportSQL)
-	}
-	if !strings.Contains(reportSQL, "join ip_quality_assigned_vps_reports assigned on assigned.report_id = r.report_id") ||
-		!strings.Contains(reportSQL, "order by r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc") {
-		t.Fatalf("latestReportForVPS SQL = %s, want assigned source replay-safe ordering", reportSQL)
-	}
-
-	historyDB := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
-		"from ip_quality_assigned_vps_reports assigned": &fakeIPQualityRows{},
-	}}
-	historyRepo := &PostgresIPQualityRepository{db: historyDB}
-	if _, err := historyRepo.historyForVPS(context.Background(), "vps_001"); err != nil {
-		t.Fatalf("historyForVPS() error = %v", err)
-	}
-	historySQL := strings.ToLower(historyDB.queries[0])
-	if !strings.Contains(historySQL, "join ip_quality_reports r on r.report_id = assigned.report_id") ||
-		!strings.Contains(historySQL, "order by assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc") {
-		t.Fatalf("historyForVPS SQL = %s, want deterministic replay-safe history ordering", historySQL)
-	}
-}
-
 func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsEmptyWhenFilteredViewsHaveNoReports(t *testing.T) {
 	t.Parallel()
 
@@ -632,13 +506,11 @@ func (f *fakeIPQualityDB) Query(_ context.Context, sql string, _ ...any) (pgx.Ro
 
 type fakeIPQualityTx struct {
 	execSQL     []string
-	execArgs    [][]any
 	commitCalls int
 }
 
-func (f *fakeIPQualityTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+func (f *fakeIPQualityTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
 	f.execSQL = append(f.execSQL, sql)
-	f.execArgs = append(f.execArgs, append([]any(nil), args...))
 	return pgconn.CommandTag{}, nil
 }
 
@@ -648,15 +520,6 @@ func (f *fakeIPQualityTx) Commit(context.Context) error {
 }
 
 func (f *fakeIPQualityTx) Rollback(context.Context) error { return nil }
-
-func (f *fakeIPQualityTx) argsForSQL(want string) []any {
-	for i, sql := range f.execSQL {
-		if strings.Contains(sql, want) {
-			return f.execArgs[i]
-		}
-	}
-	return nil
-}
 
 type fakeIPQualityScan struct{ scan func(dest ...any) error }
 

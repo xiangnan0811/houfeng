@@ -60,7 +60,7 @@ func preflightAppACLCurrentTransitionInTx(
 	}
 	snapshot := appACLCurrentTransitionPreflight{
 		heartbeatPolicyMigrationPending: heartbeatPolicyMigrationPending,
-		lifecycleMigrationPending:       len(transition.successor.names) > 0 && transition.successor.names[len(transition.successor.names)-1] == "0067_refactor_vps_monitoring_lifecycle.sql",
+		lifecycleMigrationPending:       appACLCurrentTransitionContainsMigration(transition, "0067_refactor_vps_monitoring_lifecycle.sql"),
 	}
 	if err := tx.QueryRow(ctx, `
 			select incident_defaults,
@@ -222,31 +222,53 @@ func validateHeartbeatAppACLCurrentTransition(transition appACLCurrentTransition
 	return err
 }
 
+func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition, migration string) bool {
+	for _, name := range transition.successor.names {
+		if name == migration {
+			return true
+		}
+	}
+	return false
+}
+
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
 	// 0067 changes the fresh-install lifecycle contract, not the heartbeat policy.
-	lifecyclePending := false
-	if n := len(transition.successor.names); n > 0 && transition.successor.names[n-1] == "0067_refactor_vps_monitoring_lifecycle.sql" {
-		transition.successor.names = transition.successor.names[:n-1]
-		lifecyclePending = true
+	// 0068 only adds address identity parsing and must not be classified as a
+	// heartbeat or lifecycle transition.
+	successorNames := transition.successor.names
+	addressIdentityMigrationPending := false
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0068_normalize_ip_quality_host_address_identity.sql" {
+		addressIdentityMigrationPending = true
+		successorNames = successorNames[:n-1]
+	}
+	lifecyclePending := appACLCurrentTransitionContainsMigration(transition, "0067_refactor_vps_monitoring_lifecycle.sql")
+	if lifecyclePending {
+		if n := len(successorNames); n == 0 || successorNames[n-1] != "0067_refactor_vps_monitoring_lifecycle.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+		successorNames = successorNames[:len(successorNames)-1]
 	}
 	switch {
-	case len(transition.successor.names) == 0 && lifecyclePending:
-		// P66 already contains 0063 and only has the lifecycle refactor pending.
+	case len(successorNames) == 0:
+		// P66 has only the lifecycle refactor pending; P67 has only 0068.
+		if !addressIdentityMigrationPending {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
 		return false, nil
-	case len(transition.successor.names) == 4 &&
-		transition.successor.names[0] == "0063_tune_heartbeat_incident_policy.sql" &&
-		transition.successor.names[1] == "0064_add_network_rates_valid.sql" &&
-		transition.successor.names[2] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
-		transition.successor.names[3] == "0066_constrain_monitoring_and_target_state_values.sql":
+	case len(successorNames) == 4 &&
+		successorNames[0] == "0063_tune_heartbeat_incident_policy.sql" &&
+		successorNames[1] == "0064_add_network_rates_valid.sql" &&
+		successorNames[2] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
+		successorNames[3] == "0066_constrain_monitoring_and_target_state_values.sql":
 		return true, nil
-	case len(transition.successor.names) == 3 &&
-		transition.successor.names[0] == "0064_add_network_rates_valid.sql" &&
-		transition.successor.names[1] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
-		transition.successor.names[2] == "0066_constrain_monitoring_and_target_state_values.sql":
+	case len(successorNames) == 3 &&
+		successorNames[0] == "0064_add_network_rates_valid.sql" &&
+		successorNames[1] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
+		successorNames[2] == "0066_constrain_monitoring_and_target_state_values.sql":
 		return false, nil
-	case len(transition.successor.names) == 2 &&
-		transition.successor.names[0] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
-		transition.successor.names[1] == "0066_constrain_monitoring_and_target_state_values.sql":
+	case len(successorNames) == 2 &&
+		successorNames[0] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
+		successorNames[1] == "0066_constrain_monitoring_and_target_state_values.sql":
 		return false, nil
 	default:
 		return false, fmt.Errorf("unsupported registered APP transition")

@@ -18,6 +18,10 @@ type ipQualityDB interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
+type ipQualityExecutor interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
 type ipQualityTx interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	Commit(context.Context) error
@@ -72,23 +76,34 @@ func (r *PostgresIPQualityRepository) SaveReports(ctx context.Context, reports [
 		if err != nil {
 			return fmt.Errorf("generate ip quality report id: %w", err)
 		}
-		rawJSON := []byte(nil)
-		if len(report.RawJSON) > 0 {
-			rawJSON = ipquality.SanitizeRawJSON(report.RawJSON)
+		if report.ReceivedAt.IsZero() {
+			report.ReceivedAt = time.Now().UTC()
 		}
-		coverageJSON := []byte(nil)
-		if len(report.CoverageJSON) > 0 {
-			coverageJSON = ipquality.SanitizeExtraJSON(report.CoverageJSON)
+		if err := writeIPQualityReport(ctx, tx, reportID, report, nil); err != nil {
+			return err
 		}
-		diagnosticsJSON := []byte(nil)
-		if len(report.DiagnosticsJSON) > 0 {
-			diagnosticsJSON = ipquality.SanitizeExtraJSON(report.DiagnosticsJSON)
-		}
-		receivedAt := report.ReceivedAt
-		if receivedAt.IsZero() {
-			receivedAt = time.Now().UTC()
-		}
-		if _, err := tx.Exec(ctx, `
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit ip quality reports transaction: %w", err)
+	}
+	return nil
+}
+
+func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID string, report ipquality.ReportWrite, emptyRawJSON json.RawMessage) error {
+	rawJSON := []byte(emptyRawJSON)
+	if len(report.RawJSON) > 0 {
+		rawJSON = ipquality.SanitizeRawJSON(report.RawJSON)
+	}
+	coverageJSON := []byte(nil)
+	if len(report.CoverageJSON) > 0 {
+		coverageJSON = ipquality.SanitizeExtraJSON(report.CoverageJSON)
+	}
+	diagnosticsJSON := []byte(nil)
+	if len(report.DiagnosticsJSON) > 0 {
+		diagnosticsJSON = ipquality.SanitizeExtraJSON(report.DiagnosticsJSON)
+	}
+	receivedAt := report.ReceivedAt
+	if _, err := tx.Exec(ctx, `
 			insert into ip_quality_reports (
 				report_id,
 				monitoring_instance_id,
@@ -116,40 +131,40 @@ func (r *PostgresIPQualityRepository) SaveReports(ctx context.Context, reports [
 				coverage_json,
 				diagnostics_json
 			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,$24::jsonb,$25::jsonb)`,
-			reportID,
-			report.MonitoringInstanceID,
-			report.ObservedAt,
-			receivedAt,
-			report.AgentVersion,
-			report.Fingerprint,
-			report.SyncBatchID,
-			report.IPAddress,
-			report.IPVersion,
-			report.Status,
-			report.ASN,
-			report.Organization,
-			report.Latitude,
-			report.Longitude,
-			report.UseRegionCode,
-			report.UseRegionName,
-			report.RegisteredRegionCode,
-			report.RegisteredRegionName,
-			report.RiskLevel,
-			report.ErrorCode,
-			report.ErrorSummary,
-			report.IsBackfilled,
-			rawJSON,
-			coverageJSON,
-			diagnosticsJSON,
-		); err != nil {
-			return fmt.Errorf("insert ip quality report for monitoring instance %q: %w", report.MonitoringInstanceID, err)
+		reportID,
+		report.MonitoringInstanceID,
+		report.ObservedAt,
+		receivedAt,
+		report.AgentVersion,
+		report.Fingerprint,
+		report.SyncBatchID,
+		report.IPAddress,
+		report.IPVersion,
+		report.Status,
+		report.ASN,
+		report.Organization,
+		report.Latitude,
+		report.Longitude,
+		report.UseRegionCode,
+		report.UseRegionName,
+		report.RegisteredRegionCode,
+		report.RegisteredRegionName,
+		report.RiskLevel,
+		report.ErrorCode,
+		report.ErrorSummary,
+		report.IsBackfilled,
+		rawJSON,
+		coverageJSON,
+		diagnosticsJSON,
+	); err != nil {
+		return fmt.Errorf("insert ip quality report for monitoring instance %q: %w", report.MonitoringInstanceID, err)
+	}
+	for _, provider := range report.ProviderResults {
+		resultID, err := ids.New("ipqp")
+		if err != nil {
+			return fmt.Errorf("generate ip quality provider result id: %w", err)
 		}
-		for _, provider := range report.ProviderResults {
-			resultID, err := ids.New("ipqp")
-			if err != nil {
-				return fmt.Errorf("generate ip quality provider result id: %w", err)
-			}
-			if _, err := tx.Exec(ctx, `
+		if _, err := tx.Exec(ctx, `
 				insert into ip_quality_provider_results (
 					result_id,
 					report_id,
@@ -173,37 +188,37 @@ func (r *PostgresIPQualityRepository) SaveReports(ctx context.Context, reports [
 					error_summary,
 					extra_json
 				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb)`,
-				resultID,
-				reportID,
-				provider.Provider,
-				defaultString(provider.Status, "success"),
-				defaultString(provider.SourceType, "default"),
-				provider.LatencyMS,
-				provider.UsageType,
-				provider.CompanyType,
-				provider.RiskLevel,
-				provider.RiskScore,
-				provider.RegionCode,
-				provider.RegionName,
-				provider.IsProxy,
-				provider.IsTor,
-				provider.IsVPN,
-				provider.IsServer,
-				provider.IsAbuser,
-				provider.IsRobot,
-				provider.ErrorCode,
-				provider.ErrorSummary,
-				ipquality.SanitizeExtraJSON(provider.ExtraJSON),
-			); err != nil {
-				return fmt.Errorf("insert ip quality provider result for report %q: %w", reportID, err)
-			}
+			resultID,
+			reportID,
+			provider.Provider,
+			defaultString(provider.Status, "success"),
+			defaultString(provider.SourceType, "default"),
+			provider.LatencyMS,
+			provider.UsageType,
+			provider.CompanyType,
+			provider.RiskLevel,
+			provider.RiskScore,
+			provider.RegionCode,
+			provider.RegionName,
+			provider.IsProxy,
+			provider.IsTor,
+			provider.IsVPN,
+			provider.IsServer,
+			provider.IsAbuser,
+			provider.IsRobot,
+			provider.ErrorCode,
+			provider.ErrorSummary,
+			ipquality.SanitizeExtraJSON(provider.ExtraJSON),
+		); err != nil {
+			return fmt.Errorf("insert ip quality provider result for report %q: %w", reportID, err)
 		}
-		for _, unlock := range report.ServiceUnlocks {
-			unlockID, err := ids.New("ipqu")
-			if err != nil {
-				return fmt.Errorf("generate ip quality service unlock id: %w", err)
-			}
-			if _, err := tx.Exec(ctx, `
+	}
+	for _, unlock := range report.ServiceUnlocks {
+		unlockID, err := ids.New("ipqu")
+		if err != nil {
+			return fmt.Errorf("generate ip quality service unlock id: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
 				insert into ip_quality_service_unlocks (
 					unlock_id,
 					report_id,
@@ -218,33 +233,30 @@ func (r *PostgresIPQualityRepository) SaveReports(ctx context.Context, reports [
 					error_summary,
 					extra_json
 				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
-				unlockID,
-				reportID,
-				unlock.Service,
-				unlock.Source,
-				unlock.Status,
-				defaultString(unlock.ProbeStatus, "success"),
-				unlock.LatencyMS,
-				unlock.Region,
-				unlock.UnlockType,
-				unlock.ErrorCode,
-				unlock.ErrorSummary,
-				ipquality.SanitizeExtraJSON(unlock.ExtraJSON),
-			); err != nil {
-				return fmt.Errorf("insert ip quality service unlock for report %q: %w", reportID, err)
-			}
+			unlockID,
+			reportID,
+			unlock.Service,
+			unlock.Source,
+			unlock.Status,
+			defaultString(unlock.ProbeStatus, "success"),
+			unlock.LatencyMS,
+			unlock.Region,
+			unlock.UnlockType,
+			unlock.ErrorCode,
+			unlock.ErrorSummary,
+			ipquality.SanitizeExtraJSON(unlock.ExtraJSON),
+		); err != nil {
+			return fmt.Errorf("insert ip quality service unlock for report %q: %w", reportID, err)
 		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit ip quality reports transaction: %w", err)
 	}
 	return nil
 }
 
 const overviewLatestIPQualitySummarySQL = `
 		-- vps overview ip quality summary
-		with valid_reports as (
-			select r.report_id, r.observed_at, r.received_at, r.ip_address, r.status, r.risk_level, r.monitoring_instance_id, r.is_backfilled
+		with valid_reports as materialized (
+			select r.report_id, r.observed_at, r.received_at, r.ip_address, r.status, r.risk_level, r.monitoring_instance_id, r.is_backfilled,
+			       public.houfeng_parse_host_address(r.ip_address) as ip_identity
 			from ip_quality_reports r
 			where r.status in ('success', 'partial')
 				and r.ip_address <> '0.0.0.0'
@@ -266,6 +278,19 @@ const overviewLatestIPQualitySummarySQL = `
 				select 1 from center_settings where settings_id = 'center'
 			)
 		),
+		fallback_asset_identities as materialized (
+			select
+				v.vps_id,
+				public.houfeng_parse_host_address(nullif(v.ipv4, '')) as ipv4_identity,
+				public.houfeng_parse_host_address(nullif(v.ipv6, '')) as ipv6_identity
+			from vps_assets v
+			where not exists (
+				select 1
+				from vps_monitoring_instance_links l
+				where l.vps_id = v.vps_id
+					and l.unlinked_at is null
+			)
+		),
 		assigned as (
 			select
 				l.vps_id,
@@ -274,7 +299,9 @@ const overviewLatestIPQualitySummarySQL = `
 				r.received_at,
 				r.status,
 				r.risk_level,
-				r.is_backfilled
+				r.is_backfilled,
+				r.ip_identity,
+				true as is_linked
 			from vps_monitoring_instance_links l
 			join valid_reports r on r.monitoring_instance_id = l.monitoring_instance_id
 			where l.unlinked_at is null
@@ -287,16 +314,23 @@ const overviewLatestIPQualitySummarySQL = `
 				r.received_at,
 				r.status,
 				r.risk_level,
-				r.is_backfilled
-			from vps_assets v
-			join valid_reports r on r.ip_address in (nullif(v.ipv4, ''), nullif(v.ipv6, ''))
+				r.is_backfilled,
+				r.ip_identity,
+				false as is_linked
+			from fallback_asset_identities v
+			join valid_reports r
+			  on r.ip_identity is not null
+			 and (
+			   r.ip_identity = v.ipv4_identity
+			   or r.ip_identity = v.ipv6_identity
+			 )
 			where v.vps_id = $1
-				and not exists (
-					select 1
-					from vps_monitoring_instance_links l
-					where l.vps_id = v.vps_id
-						and l.unlinked_at is null
-				)
+		),
+		latest_assigned as (
+			select *
+			from assigned
+			order by observed_at desc, is_backfilled asc, received_at desc, report_id desc
+			limit 1
 		)
 		select
 			assigned.vps_id,
@@ -308,9 +342,16 @@ const overviewLatestIPQualitySummarySQL = `
 				limit 1
 			)) as stale,
 			assigned.observed_at
-		from assigned
-		order by assigned.observed_at desc, assigned.is_backfilled asc, assigned.received_at desc, assigned.report_id desc
-		limit 1`
+		from latest_assigned assigned
+		where assigned.is_linked or not exists (
+			select 1
+			from fallback_asset_identities other
+			where other.vps_id <> assigned.vps_id
+				and (
+					assigned.ip_identity = other.ipv4_identity
+					or assigned.ip_identity = other.ipv6_identity
+				)
+		)`
 
 func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.Context, vpsID string) (*ipquality.Summary, error) {
 	rows, err := r.db.Query(ctx, overviewLatestIPQualitySummarySQL, vpsID)

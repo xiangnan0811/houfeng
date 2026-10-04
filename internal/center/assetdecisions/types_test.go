@@ -324,6 +324,87 @@ func TestIPQualityEgressMismatchAndMediaUnlockBlockedEvidence(t *testing.T) {
 	}
 }
 
+func TestIPQualityEgressMismatchUsesAddressIdentityAndEvidencePreconditions(t *testing.T) {
+	tests := []struct {
+		name         string
+		vpsIPv4      string
+		vpsIPv6      string
+		reportIP     string
+		status       string
+		ambiguous    bool
+		wantMismatch bool
+	}{
+		{
+			name:         "equivalent ipv6 spellings",
+			vpsIPv6:      "2001:0db8:0:0:0:0:0:1",
+			reportIP:     "2001:db8::1",
+			status:       agentapi.IPQualityStatusSuccess,
+			wantMismatch: false,
+		},
+		{
+			name:         "different ipv6 address",
+			vpsIPv6:      "2001:db8::1",
+			reportIP:     "2001:db8::2",
+			status:       agentapi.IPQualityStatusSuccess,
+			wantMismatch: true,
+		},
+		{
+			name:         "mapped ipv6 does not equal ipv4",
+			vpsIPv4:      "192.0.2.1",
+			reportIP:     "::ffff:192.0.2.1",
+			status:       agentapi.IPQualityStatusSuccess,
+			wantMismatch: true,
+		},
+		{
+			name:         "invalid report address is inconclusive",
+			vpsIPv4:      "192.0.2.1",
+			reportIP:     "not-an-address",
+			status:       agentapi.IPQualityStatusSuccess,
+			wantMismatch: false,
+		},
+		{
+			name:         "invalid current addresses are inconclusive",
+			vpsIPv4:      "not-an-address",
+			vpsIPv6:      "also-not-an-address",
+			reportIP:     "2001:db8::1",
+			status:       agentapi.IPQualityStatusSuccess,
+			wantMismatch: false,
+		},
+		{
+			name:         "partial report does not create mismatch",
+			vpsIPv4:      "192.0.2.1",
+			reportIP:     "198.51.100.1",
+			status:       agentapi.IPQualityStatusPartial,
+			wantMismatch: false,
+		},
+		{
+			name:         "ambiguous report does not create mismatch",
+			vpsIPv4:      "192.0.2.1",
+			reportIP:     "198.51.100.1",
+			status:       agentapi.IPQualityStatusSuccess,
+			ambiguous:    true,
+			wantMismatch: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := fact("vps_egress_"+tt.name, "Egress", "pv_1", "Provider", "US", "", "New York", vpsassets.UsageInUse, sub("sub_"+tt.name, 10, 120))
+			f.VPS.IPv4 = tt.vpsIPv4
+			f.VPS.IPv6 = tt.vpsIPv6
+			f.VPS.IPQualitySummary.IPAddress = tt.reportIP
+			f.VPS.IPQualitySummary.Status = tt.status
+			f.VPS.IPQualitySummary.Ambiguous = tt.ambiguous
+
+			member := buildMember(f, ListFilters{RenewWithinDays: 30})
+			hasMismatch := hasEvidence(member, EvidenceIPEgressMismatch)
+			if hasMismatch != tt.wantMismatch {
+				t.Fatalf("egress mismatch evidence = %t, want %t; chips = %#v", hasMismatch, tt.wantMismatch, member.EvidenceChips)
+			}
+		})
+	}
+}
+
 func TestFindGroupRecomputesStableGroups(t *testing.T) {
 	facts := []Fact{
 		fact("vps_de_1", "DE 1", "pv_1", "Provider", "Germany", "", "Frankfurt", vpsassets.UsageInUse, sub("sub_1", 12, 30)),

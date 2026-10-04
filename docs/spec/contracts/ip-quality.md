@@ -79,13 +79,19 @@
 - Agent 本地状态通过 `agent/ipquality.StateStore` 记录上次采集时间；sync queue 持久化包含 IP 质量报告的整条 `SyncRequest`。
 - `status` 只允许 `success`、`partial`、`failure`。失败报告允许没有 provider/service 细节，但仍必须带合法 `ip_address`、`ip_version`、metadata 和错误摘要。
 - Provider row `status` 只允许 `success`、`failure`、`skipped`、`not_configured`；`source_type` 只允许 `default`、`optional`、`custom`。Service row `probe_status` 只允许 `success`、`failure`、`skipped`、`not_configured`。
-- `coverage` 必须记录 expected/successful/failed/skipped/not_configured provider 与 service 计数；前端完整页优先使用 `coverage` 计算采集完整性，不得用已有行数自我归一成 100%。
+- `coverage` 必须记录 expected/successful/failed/skipped/not_configured provider 与 service 计数；前端完整页优先使用 summary 的 `coverage`，其次使用 selected report 的 `coverage`。两者均缺失时显示“—”，不得从历史行数或默认 success 重建成功率、归一成 100%。
 - Service coverage 只有 `probe_status=success` 且 `status` 为 `unlocked`、`blocked` 或 `partial` 才计 successful；`skipped` 与 `not_configured` 各计原分类，其余组合（包括空 probe_status、`unknown/success`、`unlocked/failure`）计 failed。该谓词只约束新报告计数，历史入库/读取的兼容事实不回写。
 - 默认采集路径的新报告在 `diagnostics_json` 中必须保留 `"source_version":"v2"` 并加入数值 `"service_probe_revision":1`；该 revision 只表示默认诊断政策，不表示七项服务已验证成功，不新增报告顶层字段或数据库列。显式 custom/legacy 路径不附加该默认来源标记。历史报告的 rows、coverage、评分事实不回写、不重算。
+- selected report 有 service rows，但既无非空 `diagnostics_json.source_version`、也无任何非空 service `source` 时，页面显示来源不可核验提示；不能凭缺失来源把历史结果归类为默认或 custom。已知默认来源继续按 revision 显示停用/旧规则提示，显式 custom 来源不显示默认停用警告；提示使用独立可信度 note，不占用立即采集状态 live region。
 - HTTP lookup 返回 HTML、非 JSON、空 body 或 JSON 解析失败时，Agent 必须生成短诊断 failure（如 `non_json_response`），不得把 HTML 原文写入 `error_summary` 或 raw envelope。
-- Center 必须在 sync 事务内保存 IP 质量报告，且先通过 sync token/fingerprint 验证。fingerprint 不匹配的 IP 质量报告不得入库。
+- Center 必须在 sync 事务内保存完整 IP 质量报告、provider/service 扩展元数据、coverage 与 diagnostics，与心跳、样本、观测和 batch receipt 一起提交或回滚；不得另开 SaveReports 事务。先通过 sync token/fingerprint 验证，fingerprint 不匹配的报告不得入库。相同 service 不同 source 是不同事实，相同 `(service, source)` 重复须失败并回滚整批。exact replay 不增事实、不重复完成立即采集请求。
+- 两个写入入口共享完整 writer 与 sanitizer，但保留入口语义：缺 raw 的 sync 写 JSON null，SaveReports 写 SQL NULL；非空非法 raw 经 sanitizer 得到 SQL NULL。显式 received_at 原样保留，零值分别使用批次 received_at 与 SaveReports 的当前 UTC 时间；缺 coverage/diagnostics/extra 保持 SQL NULL。
 - Raw JSON、provider `extra_json`、service `extra_json` 和 report `diagnostics_json` 必须通过 `ipquality.SanitizeRawJSON` / extra JSON sanitizer 兜底处理：递归替换 token/key/authorization/cookie/password 类字段为 `[redacted]`，并限制到对应最大字节数内；超限时存合法 JSON truncation marker，不做字节截断。
-- VPS 归属优先使用 active `vps_monitoring_instance_links`；没有 active link 时只用当前 `ipv4`/`ipv6` 与报告出口 IP 精确匹配。同一报告匹配多个 VPS 时标记 `ambiguous=true`。
+- VPS 归属优先使用 active `vps_monitoring_instance_links`；有 active link 时即使没有有效报告也禁止地址 fallback。没有 active link 时，当前 `ipv4`/`ipv6` 与报告出口 IP 按解析后的 host address 身份比较：IPv6 展开/压缩/大小写等价，IPv4-mapped IPv6 只与同一 mapped 地址等价，不与普通 IPv4 合并。同一报告匹配多个 VPS 时标记 `ambiguous=true`；unlink 后恢复 fallback。SQL view 与 Overview 使用相同规则，不改原始存储文本或历史报告事实。
+- 地址 fallback 的报告身份与无 active link 资产身份分别在已过滤的 MATERIALIZED CTE 中计算；JOIN 只比较已解析值，避免对每个报告/资产组合重复执行 parser。assigned view 与 Overview 同步这一计算边界，不以新增索引或历史回填替代。
+- Overview 的窄 summary 不新增字段：先按原排序选定最新归属报告，再检查 fallback 是否被另一台无 active link 的 VPS 同址命中。选定报告归属歧义时返回无 summary，沿用 `missing` 缺口提示，不把其 risk/partial/stale 归给该 VPS，也不得跳过它改用更旧的唯一归属报告；最新报告唯一归属与 active-link 分支的既有结果保持不变。
+- Go/SQL host identity 解析均 trim Unicode White_Space，拒绝 CIDR、zone、端口、短 IPv4、前导零及越界十进制 octet；合法 unspecified 可解析，既有业务过滤不变。无效文本不参与 fallback，但不妨碍 active-link 归属。Agent 候选只在存在不同有效地址时确认冲突；出口不一致 evidence 需 success、非 ambiguous、有效报告地址和至少一个有效当前地址。
+- VPS PATCH 仅改变地址表示不新增 IP history；真实地址改变仍记史。任一侧不可解析时按 trim 后原文比较，修正/删除非法旧地址也记史。独立创建 IP history 使用同一无变化判定；四个历史地址字段保留原文。VPS 输入仍 trim-only，不新增 API 拒绝规则，不放宽 evidence 地址族校验。
 - 用户侧 read model（`ip_quality_assigned_vps_reports` / `ip_quality_latest_vps_summaries`）只能包含真实 IP 事实：`status in ('success','partial')`、`ip_address <> '0.0.0.0'`、`ip_version in (4,6)`。原始 failure 报告继续保存在 `ip_quality_reports` 供诊断，但 VPS API、VPS 列表/详情和资产决策不得展示这些 failure 占位事实。
 - 历史详情 API 必须按 VPS assignment 规则读取 selected report，响应中必须同时返回该 report 的 `summary`、`latest_report`、provider rows、service rows；不能只返回 row 细节而让前端历史视图空态或退回 latest summary。
 - VPS Overview 在 IP 质量关闭时只做 availability 检查，立即返回 `not_configured` + `SectionReady`，不得查询 `GetLatestVPSIPQualitySummary`，也不得发出 `ip_quality_disabled_has_history`。历史注释不是当前健康判断的一部分；历史只在 `GET /api/vps/{vps_id}/ip-quality` 详情页展示。关闭路径上的 summary 超时不得把 Overview 标成 `source.unavailable.v1`。
@@ -175,6 +181,7 @@
 - `agent/syncqueue`: IP 质量报告随 sync request 离线队列 round-trip。
 - `internal/center/http/handlers`: agent sync 写入 IP 质量 DTO、非法报告拒绝、raw/extra/diagnostics JSON 脱敏；VPS IP quality API 返回 report/matrix/history；历史详情 endpoint 返回 selected report summary。
 - `internal/center/store`: sync batch 事务内写三表，repository latest/history 查询、历史详情查询、migration view 使用正确 alias；retention 长期保留报告与脱敏 raw。
+- `internal/center/store` 强制业务 PG anchor：`TestPostgresIntegrationIPQualitySyncMetadataRoundTrip`、`TestPostgresIntegrationIPQualitySyncRollbackAndReplay`、`TestPostgresIntegrationIPQualityAddressIdentity`，验证真实 runtime-role sync/readback、事务回滚/replay、Go/SQL 身份矩阵、link/fallback 及 PATCH history；`scripts/test-business-postgres.sh` 必须观察全部 RUN/PASS，任何 skip/fail 均拒绝。
 - `internal/center/store/migrate`: IP 质量 read view 重建迁移必须过滤 failure、`0.0.0.0` 和非法 IP version，并保留 partial 真实 IP 报告。
 - `internal/center/assetdecisions`: IP 质量缺失/过期/失败/partial/ambiguous/风险/解锁阻断 evidence 与 readback 语义，确认只统计 successful provider/probe rows。
 - `web`: API client、Settings、VPS list badge、VPS detail section、完整 IP 质量页、历史详情、Asset Decisions evidence/current facts 展示。

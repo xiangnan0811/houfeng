@@ -310,16 +310,14 @@ export function coveragePercent(observed: number, expected: number): number | nu
 
 export function providerCoverage(report: VPSIPQualityReport): number | null {
   const coverage = report.summary?.coverage ?? report.latest_report?.coverage
-  if (coverage) return coveragePercent(coverage.successful_provider_count, coverage.expected_provider_count)
-  const expected = Math.max(report.summary?.provider_count ?? 0, report.provider_results.length)
-  return coveragePercent(report.provider_results.length, expected)
+  if (!coverage) return null
+  return coveragePercent(coverage.successful_provider_count, coverage.expected_provider_count)
 }
 
 export function serviceCoverage(report: VPSIPQualityReport): number | null {
   const coverage = report.summary?.coverage ?? report.latest_report?.coverage
-  if (coverage) return coveragePercent(coverage.successful_service_count, coverage.expected_service_count)
-  const expected = Math.max(report.summary?.unlockable_count ?? 0, report.service_unlocks.length)
-  return coveragePercent(report.service_unlocks.length, expected)
+  if (!coverage) return null
+  return coveragePercent(coverage.successful_service_count, coverage.expected_service_count)
 }
 
 export function databaseConsistency(results: IPQualityProviderResult[]): number | null {
@@ -477,24 +475,31 @@ export function defaultServiceProbeNotice(report: VPSIPQualityReport): string | 
   })
 
   const isDefaultReport = isDefaultSourceVersion || hasDefaultSourceRow
-  if (!isDefaultReport) {
-    return null
-  }
+  if (isDefaultReport) {
+    const revision = diagnostics?.service_probe_revision
+    const isRevision1 = typeof revision === 'number' && revision === 1
 
-  const revision = diagnostics?.service_probe_revision
-  const isRevision1 = typeof revision === 'number' && revision === 1
-
-  if (isRevision1) {
-    const hasSkippedRow = serviceRows.some((row) => {
-      const probeStatus = (row.probe_status ?? '').trim().toLowerCase()
-      const errorCode = (row.error_code ?? '').trim().toLowerCase()
-      return probeStatus === 'skipped' && errorCode === 'unsupported_default_probe'
-    })
-    if (hasSkippedRow) {
-      return '默认服务解锁探测已停用：缺少可靠业务证据。未知不表示服务受阻，服务覆盖与质量评级可能不足。'
+    if (isRevision1) {
+      const hasSkippedRow = serviceRows.some((row) => {
+        const probeStatus = (row.probe_status ?? '').trim().toLowerCase()
+        const errorCode = (row.error_code ?? '').trim().toLowerCase()
+        return probeStatus === 'skipped' && errorCode === 'unsupported_default_probe'
+      })
+      if (hasSkippedRow) {
+        return '默认服务解锁探测已停用：缺少可靠业务证据。未知不表示服务受阻，服务覆盖与质量评级可能不足。'
+      }
+      return null
     }
-    return null
+
+    return '此报告使用旧版或未识别的服务探测规则，解锁结果及依赖它的质量评分可能不可靠；历史原始结果予以保留。'
   }
 
-  return '此报告使用旧版或未识别的服务探测规则，解锁结果及依赖它的质量评分可能不可靠；历史原始结果予以保留。'
+  const hasSourceVersion = typeof diagnostics?.source_version === 'string' && diagnostics.source_version.trim() !== ''
+  const allSourcesMissing = serviceRows.every((row) => (row.source ?? '').trim() === '')
+
+  if (!hasSourceVersion && allSourcesMissing) {
+    return '此报告缺少服务探测来源信息，无法核验解锁结果及依赖它的质量评分；历史原始结果予以保留。'
+  }
+
+  return null
 }

@@ -421,6 +421,51 @@ func TestHTTPCollectorMarksAmbiguousProviderIPCandidates(t *testing.T) {
 	}
 }
 
+func TestHTTPCollectorEquivalentIPv6CandidatesAreNotAmbiguous(t *testing.T) {
+	t.Parallel()
+
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body string
+		switch request.URL.Host {
+		case "api.ipapi.is":
+			body = `{"ip":"2001:0db8:0:0:0:0:0:1","version":6}`
+		case "api.ipquery.io":
+			body = `{"ip":"2001:db8::1","risk":{"is_proxy":false}}`
+		case "proxycheck.io":
+			body = `{"status":"ok","2001:0db8:0:0:0:0:0:1":{"proxy":"no"}}`
+		case "api.ip2location.io":
+			body = `{"ip":"2001:db8::1","country_code":"US"}`
+		case "ipwho.is":
+			body = `{"success":true,"ip":"2001:db8::1","country_code":"US"}`
+		default:
+			t.Fatalf("unexpected request to %s", request.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    request,
+		}, nil
+	})}
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+
+	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled:          true,
+		TimeoutSeconds:   5,
+		FrequencySeconds: 86400,
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+
+	if report.Status != agentapi.IPQualityStatusSuccess {
+		t.Fatalf("Status = %q, want success for equivalent IPv6 candidates", report.Status)
+	}
+	if report.IPAddress != "2001:0db8:0:0:0:0:0:1" || report.IPVersion != 6 {
+		t.Fatalf("IP facts = (%q,%d), want preferred IPv6 candidate", report.IPAddress, report.IPVersion)
+	}
+	if strings.Contains(string(report.DiagnosticsJSON), `"ip_conflict":true`) {
+		t.Fatalf("DiagnosticsJSON = %s, must not mark equivalent IPv6 candidates as conflicting", report.DiagnosticsJSON)
+	}
+}
+
 func TestHTTPCollectorParsesIPAPIISNestedLookupPayload(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/lookup" {

@@ -13,12 +13,16 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 			"0064_add_network_rates_valid.sql",
 			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 			"0066_constrain_monitoring_and_target_state_values.sql",
+			"0067_refactor_vps_monitoring_lifecycle.sql",
+			"0068_normalize_ip_quality_host_address_identity.sql",
 		}},
 	}
 	p64Transition := appACLCurrentTransition{
 		successor: migrationSourceSnapshot{names: []string{
 			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 			"0066_constrain_monitoring_and_target_state_values.sql",
+			"0067_refactor_vps_monitoring_lifecycle.sql",
+			"0068_normalize_ip_quality_host_address_identity.sql",
 		}},
 	}
 
@@ -34,7 +38,10 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 			successor: migrationSourceSnapshot{names: p62Transition.successor.names[1:]},
 		}, want: false},
 		{name: "P66 lifecycle-only suffix preserves heartbeat policy", transition: appACLCurrentTransition{
-			successor: migrationSourceSnapshot{names: []string{"0067_refactor_vps_monitoring_lifecycle.sql"}},
+			successor: migrationSourceSnapshot{names: []string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql"}},
+		}, want: false},
+		{name: "P67 identity-only suffix preserves heartbeat and lifecycle policy", transition: appACLCurrentTransition{
+			successor: migrationSourceSnapshot{names: []string{"0068_normalize_ip_quality_host_address_identity.sql"}},
 		}, want: false},
 		{name: "empty successor suffix is rejected", transition: appACLCurrentTransition{}, wantError: true},
 		{

@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"reflect"
 	"testing"
@@ -24,6 +25,216 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("registered_successor", testPostgresIntegrationAppACLCurrentRegisteredSuccessor)
 	t.Run("registered_successor_rejections", testPostgresIntegrationAppACLCurrentRegisteredSuccessorRejectsInvalidPredecessor)
 	t.Run("runtime_update_acl_drift", testPostgresIntegrationAppACLCurrentRuntimeUpdateDrift)
+	t.Run("p67_upgrade", testPostgresIntegrationAppACLCurrentP67Upgrade)
+}
+
+func testPostgresIntegrationAppACLCurrentP67Upgrade(t *testing.T) {
+	t.Helper()
+	profiles := map[string]appACLCurrentReleasedPostgresProfileData{
+		"P62": appACLCurrentReleasedPostgresProfile(t, "0062_create_vps_create_idempotency.sql"),
+		"P64": appACLCurrentReleasedPostgresProfile(t, "0064_add_network_rates_valid.sql"),
+		"P63": appACLCurrentReleasedPostgresProfile(t, "0063_tune_heartbeat_incident_policy.sql"),
+		"P66": appACLCurrentReleasedPostgresProfile(t, appACLCurrentP66LastMigration),
+		"P67": appACLCurrentReleasedPostgresProfile(t, "0067_refactor_vps_monitoring_lifecycle.sql"),
+	}
+	chains := [][]string{
+		{"P67"},
+		{"P62", "P67"},
+		{"P64", "P67"},
+		{"P62", "P64", "P67"},
+		{"P63", "P67"},
+		{"P62", "P63", "P67"},
+		{"P66", "P67"},
+		{"P62", "P66", "P67"},
+		{"P64", "P66", "P67"},
+		{"P62", "P64", "P66", "P67"},
+		{"P63", "P66", "P67"},
+		{"P62", "P63", "P66", "P67"},
+	}
+	for index, chain := range chains {
+		chain := append([]string(nil), chain...)
+		t.Run(fmt.Sprintf("%02d_%s", index, chain[len(chain)-1]), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), index)
+			var fixture exactAppACLCurrentSuccessorPostgresFixture
+			if chain[0] == "P62" {
+				// P62's released manifest digest binds the published database
+				// and role identities; use the exact fixture for that profile.
+				fixture = newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
+			} else {
+				roles := appACLEffectiveCatalogTestRoleNames()
+				fixture = newExactAppACLCurrentSuccessorPostgresFixtureWithNames(
+					t,
+					ctx,
+					"houfeng_p67_"+suffix,
+					roles.centerRuntime,
+					roles.platformAdmin,
+					roles.migrator,
+				)
+			}
+			migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+			var predecessor AppACLManifestPersistedV1
+			for chainIndex, profileName := range chain {
+				profile, ok := profiles[profileName]
+				if !ok {
+					t.Fatalf("missing released profile %q", profileName)
+				}
+				if chainIndex == 0 {
+					predecessor, _, _ = seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
+					continue
+				}
+				var err error
+				predecessor, err = appendAppACLCurrentReleasedSuccessor(t, ctx, fixture, migratorDB, profile)
+				if err != nil {
+					t.Fatalf("append released %s successor: %v", profileName, err)
+				}
+			}
+			_, _, currentInput := appACLCurrentPostgresContract(
+				t,
+				fixture.asConvergenceFixture(),
+				migrations.FS,
+				appACLCurrentMigrationFragments,
+			)
+			before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			if len(before.Manifest.Manifests) != len(chain) {
+				t.Fatalf("released %s history length = %d, want %d", chain[len(chain)-1], len(before.Manifest.Manifests), len(chain))
+			}
+			if index == 0 {
+				if _, err := migratorDB.Exec(ctx, `
+					insert into public.vps_assets (
+					  vps_id, display_name, lifecycle_status, usage_status, renewal_decision, archived_at
+					) values (
+					  'vps_acl_p67_existing', 'existing business row', 'archived', 'unknown', 'keep', '2025-01-02 03:04:05+00'::timestamptz
+					)
+				`); err != nil {
+					t.Fatalf("seed existing business row before P67 to current upgrade: %v", err)
+				}
+			}
+			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
+			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
+
+			cutpoint := errors.New("controlled P67 successor rollback cutpoint")
+			dependencies := defaultAppACLCurrentConvergenceDependencies()
+			applyDCL := dependencies.applyDCL
+			dependencies.applyDCL = func(
+				ctx context.Context,
+				tx pgx.Tx,
+				contract appACLEffectiveCatalogContract,
+			) error {
+				if err := applyDCL(ctx, tx, contract); err != nil {
+					return err
+				}
+				return cutpoint
+			}
+			_, err := convergeAppACLCurrentWithDependencies(
+				ctx,
+				func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+					return migratorDB.BeginTx(ctx, options)
+				},
+				fixture.runtimeRole,
+				fixture.adminRole,
+				migrations.FS,
+				appACLCurrentMigrationFragments,
+				dependencies,
+			)
+			if !errors.Is(err, cutpoint) {
+				t.Fatalf("P67 to current rollback error = %v, want controlled cutpoint", err)
+			}
+			afterRollback := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			if !reflect.DeepEqual(before, afterRollback) {
+				t.Fatalf("P67 to current rollback changed durable state\nbefore: %#v\nafter: %#v", before, afterRollback)
+			}
+			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
+			if index == 0 {
+				var businessRows int
+				if err := migratorDB.QueryRow(ctx, `
+					select count(*) from public.vps_assets where vps_id = 'vps_acl_p67_existing'
+				`).Scan(&businessRows); err != nil {
+					t.Fatalf("read existing business row after rollback: %v", err)
+				}
+				if businessRows != 1 {
+					t.Fatalf("existing business rows after rollback = %d, want 1", businessRows)
+				}
+			}
+
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			if err != nil {
+				t.Fatalf("P67 to current upgrade: %v", err)
+			}
+			if successor.ManifestRevision != predecessor.ManifestRevision+1 ||
+				successor.PreviousManifestDigest != predecessor.ManifestDigest {
+				t.Fatalf("P67 to current successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
+			}
+			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+				t.Fatalf("admit P67 to current runtime: %v", err)
+			}
+			var runtimeExecute, publicExecute bool
+			if err := migratorDB.QueryRow(ctx, `
+				select
+				  pg_catalog.has_function_privilege($1::pg_catalog.name, procedure.oid, 'EXECUTE'),
+				  exists (
+				    select 1
+				    from pg_catalog.aclexplode(coalesce(procedure.proacl, pg_catalog.acldefault('f', procedure.proowner))) acl
+				    where acl.grantee = 0
+				      and acl.privilege_type = 'EXECUTE'
+				  )
+				from pg_catalog.pg_proc procedure
+				join pg_catalog.pg_namespace namespace on namespace.oid = procedure.pronamespace
+				where namespace.nspname = 'public'
+				  and procedure.oid = 'public.houfeng_parse_host_address(text)'::pg_catalog.regprocedure
+			`, fixture.runtimeRole).Scan(&runtimeExecute, &publicExecute); err != nil {
+				t.Fatalf("read P67 parser function ACL: %v", err)
+			}
+			if !runtimeExecute || publicExecute {
+				t.Fatalf("P67 parser function ACL runtime=%t public=%t, want runtime only", runtimeExecute, publicExecute)
+			}
+			var parsed bool
+			if err := runtimeDB.QueryRow(ctx, `
+				select public.houfeng_parse_host_address(' 2001:db8::1 ') is not null
+			`).Scan(&parsed); err != nil {
+				t.Fatalf("execute P67 parser as runtime: %v", err)
+			}
+			if !parsed {
+				t.Fatal("P67 parser returned NULL for valid IPv6")
+			}
+			if index == 0 {
+				var businessRows int
+				if err := migratorDB.QueryRow(ctx, `
+					select count(*) from public.vps_assets where vps_id = 'vps_acl_p67_existing'
+				`).Scan(&businessRows); err != nil {
+					t.Fatalf("read existing business row after upgrade: %v", err)
+				}
+				if businessRows != 1 {
+					t.Fatalf("existing business rows after upgrade = %d, want 1", businessRows)
+				}
+			}
+
+			afterUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			if err != nil {
+				t.Fatalf("repeat P67 to current upgrade: %v", err)
+			}
+			afterRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			if repeated.ManifestDigest != successor.ManifestDigest || !reflect.DeepEqual(afterUpgrade, afterRepeat) {
+				t.Fatalf("P67 to current repeat changed durable state\nbefore: %#v\nafter: %#v", afterUpgrade, afterRepeat)
+			}
+
+			runtimeIdentifier := pgx.Identifier{fixture.runtimeRole}.Sanitize()
+			if _, err := migratorDB.Exec(ctx, `revoke execute on function public.houfeng_parse_host_address(text) from `+runtimeIdentifier); err != nil {
+				t.Fatalf("revoke P67 parser runtime EXECUTE: %v", err)
+			}
+			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err == nil || errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+				t.Fatalf("P67 parser runtime ACL drift admission = %v, want concrete rejection", err)
+			}
+			if _, err := migratorDB.Exec(ctx, `grant execute on function public.houfeng_parse_host_address(text) to `+runtimeIdentifier); err != nil {
+				t.Fatalf("restore P67 parser runtime EXECUTE: %v", err)
+			}
+			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+				t.Fatalf("admit P67 parser runtime after ACL restoration: %v", err)
+			}
+		})
+	}
 }
 
 func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {

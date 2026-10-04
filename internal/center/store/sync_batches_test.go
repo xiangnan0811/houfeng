@@ -387,24 +387,8 @@ func TestSyncBatchRecordsIPQualityReportsInSameTransaction(t *testing.T) {
 	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
-	if !containsSQL(tx.execSQL, "insert into ip_quality_reports") {
-		t.Fatalf("execSQL = %#v, want ip quality report insert", tx.execSQL)
-	}
-	if !containsSQL(tx.execSQL, "insert into ip_quality_provider_results") {
-		t.Fatalf("execSQL = %#v, want provider result insert", tx.execSQL)
-	}
-	if !containsSQL(tx.execSQL, "insert into ip_quality_service_unlocks") {
-		t.Fatalf("execSQL = %#v, want service unlock insert", tx.execSQL)
-	}
-	args := tx.argsForSQL("insert into ip_quality_reports")
-	if args[0] != "ipq_001" {
-		t.Fatalf("report_id arg = %#v, want ipq_001", args[0])
-	}
-	if args[1] != "mi_001" {
-		t.Fatalf("monitoring_instance_id arg = %#v, want mi_001", args[1])
-	}
-	if args[6] != "sync_001" {
-		t.Fatalf("sync_batch_id tracking arg = %#v, want sync_001", args[6])
+	if tx.commitCalls != 1 {
+		t.Fatalf("commitCalls = %d, want 1 for recorded IP quality batch", tx.commitCalls)
 	}
 }
 

@@ -420,6 +420,7 @@ func appendAppACLCurrentReleasedSuccessor(
 		return AppACLManifestPersistedV1{}, fmt.Errorf("released APP profile has no migrations")
 	}
 	isP66 := profileLastMigration == appACLCurrentP66LastMigration
+	isP67 := profileLastMigration == "0067_refactor_vps_monitoring_lifecycle.sql"
 	tx, err := migratorDB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("begin released APP profile fixture transaction: %w", err)
@@ -469,6 +470,24 @@ func appendAppACLCurrentReleasedSuccessor(
 				" to " + pgx.Identifier{fixture.runtimeRole}.Sanitize()
 			if _, err := tx.Exec(ctx, statement); err != nil {
 				return AppACLManifestPersistedV1{}, fmt.Errorf("grant released P66 runtime UPDATE on %s: %w", table, err)
+			}
+		}
+	} else if isP67 {
+		added, err := validateAppACLCurrentReleasedP67PrivilegeDelta(previous.CanonicalPrivilegeSet, privileges)
+		if err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("released P67 privilege body delta: %w", err)
+		}
+		for _, privilege := range added {
+			if privilege.Subject != AppACLSubjectCenterRuntime ||
+				privilege.ObjectClass != AppACLObjectClassTable ||
+				privilege.SchemaName != appACLManagedPublicSchemaR1 {
+				return AppACLManifestPersistedV1{}, fmt.Errorf("released P67 added unsupported runtime privilege %#v", privilege)
+			}
+			statement := "grant " + strings.ToLower(string(privilege.Privilege)) + " on table " +
+				pgx.Identifier{privilege.SchemaName, privilege.ObjectIdentity}.Sanitize() +
+				" to " + pgx.Identifier{fixture.runtimeRole}.Sanitize()
+			if _, err := tx.Exec(ctx, statement); err != nil {
+				return AppACLManifestPersistedV1{}, fmt.Errorf("grant released P67 runtime privilege on %s: %w", privilege.ObjectIdentity, err)
 			}
 		}
 	} else if !bytes.Equal(previous.CanonicalPrivilegeSet, privileges) {
@@ -529,6 +548,63 @@ func validateAppACLCurrentReleasedP66PrivilegeDelta(previousBody, p66Body []byte
 		return fmt.Errorf("P66 added privileges %#v, want exactly the two 0065 runtime UPDATE grants %#v", added, want)
 	}
 	return nil
+}
+func validateAppACLCurrentReleasedP67PrivilegeDelta(previousBody, p67Body []byte) ([]AppACLPrivilege, error) {
+	previous, err := ParseCanonicalPrivilegeSetBodyV1(previousBody)
+	if err != nil {
+		return nil, fmt.Errorf("parse predecessor privileges: %w", err)
+	}
+	p67, err := ParseCanonicalPrivilegeSetBodyV1(p67Body)
+	if err != nil {
+		return nil, fmt.Errorf("parse P67 privileges: %w", err)
+	}
+	if !reflect.DeepEqual(previous.RoleBindings, p67.RoleBindings) {
+		return nil, fmt.Errorf("role bindings changed")
+	}
+	oldPrivileges := make(map[AppACLPrivilege]struct{}, len(previous.Privileges))
+	for _, privilege := range previous.Privileges {
+		oldPrivileges[privilege] = struct{}{}
+	}
+	p67Privileges := make(map[AppACLPrivilege]struct{}, len(p67.Privileges))
+	for _, privilege := range p67.Privileges {
+		p67Privileges[privilege] = struct{}{}
+	}
+	for privilege := range oldPrivileges {
+		if _, retained := p67Privileges[privilege]; !retained {
+			return nil, fmt.Errorf("P67 removed predecessor privilege %#v", privilege)
+		}
+	}
+	added := make([]AppACLPrivilege, 0, len(p67.Privileges)-len(previous.Privileges))
+	for _, privilege := range p67.Privileges {
+		if _, existed := oldPrivileges[privilege]; !existed {
+			added = append(added, privilege)
+		}
+	}
+	expected := make(map[AppACLPrivilege]struct{})
+	for _, table := range []string{"asset_services", "asset_domains"} {
+		privilege := AppACLPrivilege{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: table,
+			Privilege:      AppACLPrivilegeUpdate,
+		}
+		if _, alreadyPresent := oldPrivileges[privilege]; !alreadyPresent {
+			expected[privilege] = struct{}{}
+		}
+	}
+	for _, privilege := range vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
+		expected[privilege] = struct{}{}
+	}
+	if len(added) != len(expected) {
+		return nil, fmt.Errorf("P67 added privileges %#v, want exact 0065 and 0067 additions", added)
+	}
+	for _, privilege := range added {
+		if _, wanted := expected[privilege]; !wanted {
+			return nil, fmt.Errorf("P67 added unexpected privilege %#v", privilege)
+		}
+	}
+	return added, nil
 }
 
 func assertAppACLCurrentSuccessorRejectsLegacyVPS(t *testing.T, ctx context.Context, db *pgxpool.Pool) {

@@ -38,10 +38,11 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 				"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 				"0066_constrain_monitoring_and_target_state_values.sql",
 				"0067_refactor_vps_monitoring_lifecycle.sql",
+				"0068_normalize_ip_quality_host_address_identity.sql",
 			} {
 				delete(oldFS, name)
 			}
-			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-5]...)
+			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-6]...)
 			oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 			if err != nil {
 				t.Fatalf("compile exact v0.79.4 source: %v", err)
@@ -310,10 +311,11 @@ func seedExactAppACLCurrentPredecessor(t *testing.T, ctx context.Context, global
 		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 		"0066_constrain_monitoring_and_target_state_values.sql",
 		"0067_refactor_vps_monitoring_lifecycle.sql",
+		"0068_normalize_ip_quality_host_address_identity.sql",
 	} {
 		delete(oldFS, name)
 	}
-	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-5]...)
+	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-6]...)
 	oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 	if err != nil {
 		t.Fatalf("compile exact v0.79.4 source: %v", err)
