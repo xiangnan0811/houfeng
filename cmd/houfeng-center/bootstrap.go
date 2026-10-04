@@ -409,7 +409,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		MonitoringInstanceItemHandler:             handlers.MonitoringInstanceItem(monitoringInstanceRepo),
 		MonitoringInstanceVPSHandler:              handlers.MonitoringInstanceVPS(vpsMonitoringInstanceLinkRepo),
 		MonitoringInstanceRuntimeFactsHandler:     handlers.MonitoringInstanceRuntimeFacts(runtimeFactsRepo),
-		MonitoringInstanceRuntimeStreamHandler:    handlers.MonitoringInstanceRuntimeStream(monitoringInstanceRepo, streamHub),
+		MonitoringInstanceRuntimeStreamHandler:    handlers.MonitoringInstanceRuntimeStream(monitoringInstanceRepo, streamHub, authSvc),
 		MonitoringInstanceRuntimeControlHandler:   handlers.MonitoringInstanceRuntimeControls(monitoringInstanceRepo),
 		MonitoringInstanceManagementReviewHandler: handlers.MonitoringInstanceManagementReview(monitoringInstanceRepo),
 		MonitoringInstancePhasesHandler:           handlers.MonitoringInstancePhases(monitoringInstanceRepo),

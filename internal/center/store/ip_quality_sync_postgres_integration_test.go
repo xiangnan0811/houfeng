@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/monitoringinstances"
@@ -280,6 +283,475 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 			t.Fatalf("facts after paused sync = %#v, want empty", counts)
 		}
 	})
+}
+func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	fixture := newRecordsPostgresFixture(t, ctx)
+	t.Run("A to B", func(t *testing.T) {
+		const prefix = "ipq_snapshot_ab"
+		seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)
+		observedAt := time.Date(2026, time.September, 1, 10, 0, 0, 0, time.UTC)
+		writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-ab-writer", 1)
+		aID, err := saveIPQualitySnapshotReport(t, ctx, writerPool, ipQualitySnapshotReport(
+			"mi_"+prefix, "fp_"+prefix, syncInterleavingIPAddress(prefix),
+			"snapshot_a_"+prefix, "snapshot-A", observedAt, observedAt.Add(time.Minute), false,
+		))
+		if err != nil {
+			t.Fatalf("save snapshot A: %v", err)
+		}
+		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "ab", "vps_"+prefix,
+			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+			},
+			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
+				_, err := saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
+					"mi_"+prefix, "fp_"+prefix, syncInterleavingIPAddress(prefix),
+					"snapshot_b_"+prefix, "snapshot-B", observedAt.Add(time.Minute), observedAt.Add(2*time.Minute), false,
+				))
+				return err
+			},
+		)
+		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-A", "link", false)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		if err != nil {
+			t.Fatalf("read snapshot B: %v", err)
+		}
+		assertIPQualitySnapshotComplete(t, later, "", "snapshot-B", "link", false)
+	})
+
+	t.Run("empty to first B", func(t *testing.T) {
+		const prefix = "ipq_snapshot_empty"
+		seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)
+		observedAt := time.Date(2026, time.September, 1, 11, 0, 0, 0, time.UTC)
+		writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-empty-writer", 1)
+		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "empty", "vps_"+prefix,
+			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+			},
+			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
+				_, err := saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
+					"mi_"+prefix, "fp_"+prefix, syncInterleavingIPAddress(prefix),
+					"snapshot_b_"+prefix, "snapshot-B", observedAt, observedAt.Add(time.Minute), false,
+				))
+				return err
+			},
+		)
+		assertIPQualitySnapshotEmpty(t, before)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		if err != nil {
+			t.Fatalf("read first snapshot B: %v", err)
+		}
+		assertIPQualitySnapshotComplete(t, later, "", "snapshot-B", "link", false)
+	})
+
+	t.Run("same timestamp live wins over backfill", func(t *testing.T) {
+		const prefix = "ipq_snapshot_order"
+		seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)
+		observedAt := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+		writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-order-writer", 1)
+		aID, err := saveIPQualitySnapshotReport(t, ctx, writerPool, ipQualitySnapshotReport(
+			"mi_"+prefix, "fp_"+prefix, syncInterleavingIPAddress(prefix),
+			"snapshot_backfill_"+prefix, "snapshot-backfill", observedAt, observedAt.Add(10*time.Minute), true,
+		))
+		if err != nil {
+			t.Fatalf("save backfill snapshot: %v", err)
+		}
+		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "order", "vps_"+prefix,
+			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+			},
+			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
+				_, err := saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
+					"mi_"+prefix, "fp_"+prefix, syncInterleavingIPAddress(prefix),
+					"snapshot_live_"+prefix, "snapshot-live", observedAt, observedAt.Add(time.Minute), false,
+				))
+				return err
+			},
+		)
+		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-backfill", "link", false)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		if err != nil {
+			t.Fatalf("read live snapshot: %v", err)
+		}
+		assertIPQualitySnapshotComplete(t, later, "", "snapshot-live", "link", false)
+	})
+
+	t.Run("link removal and replacement", func(t *testing.T) {
+		const prefix = "ipq_snapshot_link"
+		seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)
+		observedAt := time.Date(2026, time.September, 1, 13, 0, 0, 0, time.UTC)
+		writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-link-writer", 1)
+		aID, err := saveIPQualitySnapshotReport(t, ctx, writerPool, ipQualitySnapshotReport(
+			"mi_"+prefix, "fp_"+prefix, syncInterleavingIPAddress(prefix),
+			"snapshot_link_a_"+prefix, "snapshot-link-A", observedAt, observedAt.Add(time.Minute), false,
+		))
+		if err != nil {
+			t.Fatalf("save linked snapshot A: %v", err)
+		}
+		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "link", "vps_"+prefix,
+			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+			},
+			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
+				monitoringRepository := NewPostgresMonitoringInstanceRepository(pool)
+				if _, err := monitoringRepository.RetireMonitoringInstance(ctx, "mi_"+prefix, monitoringinstances.LifecycleActionInput{
+					Reason:         "replace snapshot predecessor",
+					IdempotencyKey: "retire-" + prefix,
+				}); err != nil {
+					return err
+				}
+				current, _, _, err := monitoringRepository.CreateLinkedMonitoringInstanceIdempotent(
+					ctx,
+					"vps_"+prefix,
+					monitoringinstances.LinkedCreateWireIdentity{
+						DisplayName: prefix + " replacement",
+						Provider:    "Fixture",
+						Region:      "Region",
+						City:        "City",
+					},
+					"create-"+prefix+"-replacement",
+				)
+				if err != nil {
+					return err
+				}
+				_, err = saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
+					current.MonitoringInstanceID, "fp_"+prefix+"_new", syncInterleavingIPAddress(prefix),
+					"snapshot_link_b_"+prefix, "snapshot-link-B", observedAt.Add(time.Minute), observedAt.Add(2*time.Minute), false,
+				))
+				return err
+			},
+		)
+		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-link-A", "link", false)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		if err != nil {
+			t.Fatalf("read replacement link snapshot: %v", err)
+		}
+		assertIPQualitySnapshotComplete(t, later, "", "snapshot-link-B", "link", false)
+	})
+
+	t.Run("address change", func(t *testing.T) {
+		const (
+			prefix = "ipq_snapshot_address"
+			oldIP  = "198.51.100.10"
+			newIP  = "198.51.100.11"
+		)
+		seedIPQualitySnapshotIPMatchFixture(t, ctx, fixture, prefix, "vps_"+prefix, "mi_"+prefix, oldIP)
+		observedAt := time.Date(2026, time.September, 1, 14, 0, 0, 0, time.UTC)
+		writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-address-writer", 1)
+		aID, err := saveIPQualitySnapshotReport(t, ctx, writerPool, ipQualitySnapshotReport(
+			"mi_"+prefix, "fp_"+prefix, oldIP,
+			"snapshot_address_a_"+prefix, "snapshot-address-A", observedAt, observedAt.Add(time.Minute), false,
+		))
+		if err != nil {
+			t.Fatalf("save address snapshot A: %v", err)
+		}
+		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "address", "vps_"+prefix,
+			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+			},
+			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
+				if _, err := pool.Exec(ctx, `update public.vps_assets set ipv4 = $1 where vps_id = $2`, newIP, "vps_"+prefix); err != nil {
+					return err
+				}
+				_, err := saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
+					"mi_"+prefix, "fp_"+prefix, newIP,
+					"snapshot_address_b_"+prefix, "snapshot-address-B", observedAt.Add(time.Minute), observedAt.Add(2*time.Minute), false,
+				))
+				return err
+			},
+		)
+		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-address-A", "ip_match", false)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		if err != nil {
+			t.Fatalf("read address snapshot B: %v", err)
+		}
+		assertIPQualitySnapshotComplete(t, later, "", "snapshot-address-B", "ip_match", false)
+	})
+
+	t.Run("shared address becomes ambiguous", func(t *testing.T) {
+		const (
+			prefix   = "ipq_snapshot_shared"
+			sharedIP = "198.51.100.20"
+		)
+		seedIPQualitySnapshotIPMatchFixture(t, ctx, fixture, prefix, "vps_"+prefix, "mi_"+prefix, sharedIP)
+		observedAt := time.Date(2026, time.September, 1, 15, 0, 0, 0, time.UTC)
+		writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-shared-writer", 1)
+		aID, err := saveIPQualitySnapshotReport(t, ctx, writerPool, ipQualitySnapshotReport(
+			"mi_"+prefix, "fp_"+prefix, sharedIP,
+			"snapshot_shared_a_"+prefix, "snapshot-shared-A", observedAt, observedAt.Add(time.Minute), false,
+		))
+		if err != nil {
+			t.Fatalf("save shared snapshot A: %v", err)
+		}
+		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "shared", "vps_"+prefix,
+			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+			},
+			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
+				_, err := pool.Exec(ctx, `
+					insert into public.vps_assets (vps_id, display_name, ipv4, lifecycle_status)
+					values ($1,$2,$3,'active')`, "vps_"+prefix+"_other", prefix+" other", sharedIP)
+				return err
+			},
+		)
+		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-shared-A", "ip_match", false)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		if err != nil {
+			t.Fatalf("read shared ambiguous snapshot: %v", err)
+		}
+		assertIPQualitySnapshotComplete(t, later, "", "snapshot-shared-A", "ip_match", true)
+	})
+
+	t.Run("selected historical detail remains fixed", func(t *testing.T) {
+		const prefix = "ipq_snapshot_history"
+		seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)
+		observedAt := time.Date(2026, time.September, 1, 16, 0, 0, 0, time.UTC)
+		writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-history-writer", 1)
+		aID, err := saveIPQualitySnapshotReport(t, ctx, writerPool, ipQualitySnapshotReport(
+			"mi_"+prefix, "fp_"+prefix, syncInterleavingIPAddress(prefix),
+			"snapshot_history_a_"+prefix, "snapshot-history-A", observedAt, observedAt.Add(time.Minute), false,
+		))
+		if err != nil {
+			t.Fatalf("save history snapshot A: %v", err)
+		}
+		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "history", "vps_"+prefix,
+			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
+				return repo.GetVPSIPQualityReportDetail(ctx, "vps_"+prefix, aID)
+			},
+			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
+				_, err := saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
+					"mi_"+prefix, "fp_"+prefix, syncInterleavingIPAddress(prefix),
+					"snapshot_history_b_"+prefix, "snapshot-history-B", observedAt.Add(time.Minute), observedAt.Add(2*time.Minute), false,
+				))
+				return err
+			},
+		)
+		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-history-A", "link", false)
+		if before.History == nil || len(before.History) != 0 {
+			t.Fatalf("historical detail history = %#v, want non-nil empty slice", before.History)
+		}
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQualityReportDetail(ctx, "vps_"+prefix, aID)
+		if err != nil {
+			t.Fatalf("read selected historical A after B: %v", err)
+		}
+		assertIPQualitySnapshotComplete(t, later, aID, "snapshot-history-A", "link", false)
+		if later.History == nil || len(later.History) != 0 {
+			t.Fatalf("historical detail after B history = %#v, want non-nil empty slice", later.History)
+		}
+	})
+}
+
+type ipQualityReadSnapshotBarrier struct {
+	pool    *pgxpool.Pool
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *ipQualityReadSnapshotBarrier) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	rows, err := b.pool.Query(ctx, sql, args...)
+	return b.query(ctx, rows, err)
+}
+
+func (b *ipQualityReadSnapshotBarrier) beginTx(ctx context.Context, options pgx.TxOptions) (ipQualityTx, error) {
+	tx, err := b.pool.BeginTx(ctx, options)
+	if err != nil {
+		return nil, err
+	}
+	return &ipQualityReadSnapshotTx{tx: tx, barrier: b}, nil
+}
+
+func (b *ipQualityReadSnapshotBarrier) query(ctx context.Context, rows pgx.Rows, err error) (pgx.Rows, error) {
+	if err != nil {
+		return nil, err
+	}
+	if err := b.wait(ctx); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (b *ipQualityReadSnapshotBarrier) wait(ctx context.Context) error {
+	b.once.Do(func() { close(b.entered) })
+	select {
+	case <-b.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+type ipQualityReadSnapshotTx struct {
+	tx      pgx.Tx
+	barrier *ipQualityReadSnapshotBarrier
+}
+
+func (tx *ipQualityReadSnapshotTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	rows, err := tx.tx.Query(ctx, sql, args...)
+	return tx.barrier.query(ctx, rows, err)
+}
+
+func (tx *ipQualityReadSnapshotTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	return tx.tx.Exec(ctx, sql, args...)
+}
+
+func (tx *ipQualityReadSnapshotTx) Commit(ctx context.Context) error {
+	return tx.tx.Commit(ctx)
+}
+
+func (tx *ipQualityReadSnapshotTx) Rollback(ctx context.Context) error {
+	return tx.tx.Rollback(ctx)
+}
+
+func runIPQualitySnapshotReadBarrier(
+	t *testing.T,
+	ctx context.Context,
+	fixture recordPlatformPostgresFixture,
+	name, vpsID string,
+	read func(*PostgresIPQualityRepository) (ipquality.VPSReport, error),
+	mutate func(context.Context, *PostgresIPQualityRepository, *pgxpool.Pool) error,
+) ipquality.VPSReport {
+	t.Helper()
+	readerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-"+name+"-reader", 1)
+	writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-"+name+"-mutator", 1)
+	barrier := &ipQualityReadSnapshotBarrier{
+		pool:    readerPool,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	reader := &PostgresIPQualityRepository{db: barrier, beginTx: barrier.beginTx}
+	writer := NewPostgresIPQualityRepository(writerPool)
+	resultCh := make(chan struct {
+		report ipquality.VPSReport
+		err    error
+	}, 1)
+	go func() {
+		report, err := read(reader)
+		resultCh <- struct {
+			report ipquality.VPSReport
+			err    error
+		}{report: report, err: err}
+	}()
+	select {
+	case <-barrier.entered:
+	case <-ctx.Done():
+		close(barrier.release)
+		t.Fatalf("wait for read snapshot barrier: %v", ctx.Err())
+	}
+	if err := mutate(ctx, writer, writerPool); err != nil {
+		close(barrier.release)
+		t.Fatalf("mutate after read snapshot barrier: %v", err)
+	}
+	close(barrier.release)
+	select {
+	case result := <-resultCh:
+		if result.err != nil {
+			t.Fatalf("read through repeatable-read snapshot: %v", result.err)
+		}
+		return result.report
+	case <-ctx.Done():
+		t.Fatalf("read through repeatable-read snapshot: %v", ctx.Err())
+		return ipquality.VPSReport{}
+	}
+}
+
+func saveIPQualitySnapshotReport(t *testing.T, ctx context.Context, pool *pgxpool.Pool, report ipquality.ReportWrite) (string, error) {
+	t.Helper()
+	if err := NewPostgresIPQualityRepository(pool).SaveReports(ctx, []ipquality.ReportWrite{report}); err != nil {
+		return "", err
+	}
+	var reportID string
+	err := pool.QueryRow(ctx, `
+		select report_id
+		from public.ip_quality_reports
+		where monitoring_instance_id = $1 and sync_batch_id = $2
+		order by report_id desc
+		limit 1`, report.MonitoringInstanceID, report.SyncBatchID).Scan(&reportID)
+	return reportID, err
+}
+
+func ipQualitySnapshotReport(monitoringInstanceID, fingerprint, ipAddress, syncBatchID, marker string, observedAt, receivedAt time.Time, backfilled bool) ipquality.ReportWrite {
+	report := ipQualitySyncFullReport("ipq_snapshot_fixture", syncBatchID, observedAt, receivedAt, "")
+	report.MonitoringInstanceID = monitoringInstanceID
+	report.Fingerprint = fingerprint
+	report.IPAddress = ipAddress
+	report.AgentVersion = marker
+	report.IsBackfilled = backfilled
+	report.RawJSON = json.RawMessage(fmt.Sprintf(`{"snapshot_marker":%q}`, marker))
+	report.DiagnosticsJSON = json.RawMessage(fmt.Sprintf(`{"snapshot_marker":%q}`, marker))
+	for index := range report.ProviderResults {
+		report.ProviderResults[index].ExtraJSON = json.RawMessage(fmt.Sprintf(`{"snapshot_marker":%q}`, marker))
+	}
+	for index := range report.ServiceUnlocks {
+		report.ServiceUnlocks[index].ExtraJSON = json.RawMessage(fmt.Sprintf(`{"snapshot_marker":%q}`, marker))
+	}
+	return report
+}
+
+func assertIPQualitySnapshotEmpty(t *testing.T, report ipquality.VPSReport) {
+	t.Helper()
+	if report.Summary != nil || report.LatestReport != nil {
+		t.Fatalf("empty snapshot summary/latest = %#v/%#v, want nil", report.Summary, report.LatestReport)
+	}
+	if report.ProviderResults == nil || report.ServiceUnlocks == nil || report.History == nil {
+		t.Fatalf("empty snapshot slices = %#v/%#v/%#v, want non-nil empty slices", report.ProviderResults, report.ServiceUnlocks, report.History)
+	}
+	if len(report.ProviderResults) != 0 || len(report.ServiceUnlocks) != 0 || len(report.History) != 0 {
+		t.Fatalf("empty snapshot slices = %#v/%#v/%#v, want empty", report.ProviderResults, report.ServiceUnlocks, report.History)
+	}
+}
+
+func assertIPQualitySnapshotComplete(t *testing.T, report ipquality.VPSReport, wantReportID, marker, assignmentMode string, ambiguous bool) {
+	t.Helper()
+	if report.Summary == nil || report.LatestReport == nil {
+		t.Fatalf("snapshot summary/latest = %#v/%#v, want complete response", report.Summary, report.LatestReport)
+	}
+	if wantReportID != "" && report.LatestReport.ReportID != wantReportID {
+		t.Fatalf("snapshot report id = %q, want %q", report.LatestReport.ReportID, wantReportID)
+	}
+	if report.Summary.ReportID != report.LatestReport.ReportID {
+		t.Fatalf("snapshot summary/report ids = %q/%q, want same id", report.Summary.ReportID, report.LatestReport.ReportID)
+	}
+	if report.LatestReport.AgentVersion != marker || report.Summary.AssignmentMode != assignmentMode || report.Summary.Ambiguous != ambiguous {
+		t.Fatalf("snapshot marker/assignment = %q/%q/%t, want %q/%q/%t", report.LatestReport.AgentVersion, report.Summary.AssignmentMode, report.Summary.Ambiguous, marker, assignmentMode, ambiguous)
+	}
+	if !strings.Contains(string(report.LatestReport.RawJSON), marker) || !strings.Contains(string(report.LatestReport.DiagnosticsJSON), marker) {
+		t.Fatalf("snapshot report JSON marker missing: raw=%s diagnostics=%s", report.LatestReport.RawJSON, report.LatestReport.DiagnosticsJSON)
+	}
+	if len(report.ProviderResults) != 3 || len(report.ServiceUnlocks) != 2 {
+		t.Fatalf("snapshot child counts = %d/%d, want 3/2", len(report.ProviderResults), len(report.ServiceUnlocks))
+	}
+	if !strings.Contains(string(report.ProviderResults[0].ExtraJSON), marker) || !strings.Contains(string(report.ServiceUnlocks[0].ExtraJSON), marker) {
+		t.Fatalf("snapshot child marker missing: providers=%s unlocks=%s", report.ProviderResults[0].ExtraJSON, report.ServiceUnlocks[0].ExtraJSON)
+	}
+	if report.ProviderResults == nil || report.ServiceUnlocks == nil || report.History == nil {
+		t.Fatalf("snapshot slices = %#v/%#v/%#v, want non-nil", report.ProviderResults, report.ServiceUnlocks, report.History)
+	}
+}
+
+func seedIPQualitySnapshotIPMatchFixture(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, prefix, vpsID, monitoringInstanceID, ipAddress string) {
+	t.Helper()
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.vps_assets (vps_id, display_name, ipv4, lifecycle_status)
+		values ($1,$2,$3,'active')`, vpsID, prefix, ipAddress); err != nil {
+		t.Fatalf("seed IP-match VPS %q: %v", vpsID, err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.monitoring_instances (
+			vps_id, monitoring_instance_id, display_name, region, city, provider,
+			lifecycle_status, monitoring_status, binding_status, binding_fingerprint,
+			binding_epoch_started_at, sync_token_hash
+		) values ($1,$2,$3,'','','',$4,$5,$6,$7,$8,$9)`,
+		vpsID, monitoringInstanceID, prefix+" monitor",
+		monitoringinstances.LifecycleInUse, monitoringinstances.MonitoringEnabled,
+		monitoringinstances.BindingBound, "fp_"+prefix, syncInterleavingT1.Add(-time.Hour),
+		hashSyncToken("token_"+prefix),
+	); err != nil {
+		t.Fatalf("seed IP-match monitoring instance %q: %v", monitoringInstanceID, err)
+	}
 }
 
 type ipQualitySyncStoredReport struct {

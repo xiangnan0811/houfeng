@@ -55,7 +55,7 @@ func TestConvergeAppACLCurrentRegisteredPredecessorPublishesRevisionTwo(t *testi
 	}
 	dependencies.preflightTransition = func(context.Context, pgx.Tx, appACLCurrentTransition) (appACLCurrentTransitionPreflight, error) {
 		steps = append(steps, "transition-preflight")
-		return appACLCurrentTransitionPreflight{incidentDefaults: []byte("before")}, nil
+		return appACLCurrentTransitionPreflight{settingsRowPresent: true, incidentDefaults: []byte("before")}, nil
 	}
 	dependencies.readCatalog = func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
 		steps = append(steps, "catalog")
@@ -259,7 +259,7 @@ func TestConvergeAppACLCurrentRegisteredPredecessorRollsBackEveryTransitionCutpo
 				if err := fail("preflight"); err != nil {
 					return appACLCurrentTransitionPreflight{}, err
 				}
-				return appACLCurrentTransitionPreflight{incidentDefaults: []byte("before")}, nil
+				return appACLCurrentTransitionPreflight{settingsRowPresent: true, incidentDefaults: []byte("before")}, nil
 			}
 			dependencies.applyPending = func(context.Context, pgx.Tx, migrationSourceSnapshot, []MigrationChecksumEntry) error {
 				if err := fail("apply"); err != nil {

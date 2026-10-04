@@ -23,6 +23,7 @@ type ipQualityExecutor interface {
 }
 
 type ipQualityTx interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	Commit(context.Context) error
 	Rollback(context.Context) error
@@ -377,42 +378,63 @@ func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.C
 	}
 	return &summary, nil
 }
+func emptyVPSIPQualityReport() ipquality.VPSReport {
+	return ipquality.VPSReport{
+		ProviderResults: []ipquality.ProviderResultRead{},
+		ServiceUnlocks:  []ipquality.ServiceUnlockRead{},
+		History:         []ipquality.Summary{},
+	}
+}
 
 func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID string) (ipquality.VPSReport, error) {
-	summaries, err := r.ListLatestSummariesForVPS(ctx, []string{vpsID})
+	if r.beginTx == nil {
+		return ipquality.VPSReport{}, fmt.Errorf("ip quality repository cannot read reports without transaction support")
+	}
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return ipquality.VPSReport{}, fmt.Errorf("begin ip quality read transaction: %w", err)
+	}
+	if tx == nil {
+		return ipquality.VPSReport{}, fmt.Errorf("begin ip quality read transaction: nil transaction")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	summaries, err := listLatestSummariesForVPS(ctx, tx, []string{vpsID})
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	report, ok, err := r.latestReportForVPS(ctx, vpsID)
+	summary, ok := summaries[vpsID]
+	if !ok {
+		if err := tx.Commit(ctx); err != nil {
+			return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
+		}
+		return emptyVPSIPQualityReport(), nil
+	}
+
+	report, ok, err := reportForAssignedVPS(ctx, tx, vpsID, summary.ReportID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
 	if !ok {
-		return ipquality.VPSReport{
-			ProviderResults: []ipquality.ProviderResultRead{},
-			ServiceUnlocks:  []ipquality.ServiceUnlockRead{},
-			History:         []ipquality.Summary{},
-		}, nil
+		return ipquality.VPSReport{}, fmt.Errorf("ip quality assigned report missing from read snapshot")
 	}
-	providers, err := r.providerResultsForReport(ctx, report.ReportID)
+	providers, err := providerResultsForReport(ctx, tx, report.ReportID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	unlocks, err := r.serviceUnlocksForReport(ctx, report.ReportID)
+	unlocks, err := serviceUnlocksForReport(ctx, tx, report.ReportID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	history, err := r.historyForVPS(ctx, vpsID)
+	history, err := historyForVPS(ctx, tx, vpsID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	var summary *ipquality.Summary
-	if value, ok := summaries[vpsID]; ok {
-		s := value
-		summary = &s
+	if err := tx.Commit(ctx); err != nil {
+		return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
 	}
 	return ipquality.VPSReport{
-		Summary:         summary,
+		Summary:         &summary,
 		LatestReport:    &report,
 		ProviderResults: providers,
 		ServiceUnlocks:  unlocks,
@@ -421,31 +443,45 @@ func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID
 }
 
 func (r *PostgresIPQualityRepository) GetVPSIPQualityReportDetail(ctx context.Context, vpsID, reportID string) (ipquality.VPSReport, error) {
-	report, ok, err := r.reportForAssignedVPS(ctx, vpsID, reportID)
+	if r.beginTx == nil {
+		return ipquality.VPSReport{}, fmt.Errorf("ip quality repository cannot read reports without transaction support")
+	}
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return ipquality.VPSReport{}, fmt.Errorf("begin ip quality read transaction: %w", err)
+	}
+	if tx == nil {
+		return ipquality.VPSReport{}, fmt.Errorf("begin ip quality read transaction: nil transaction")
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	report, ok, err := reportForAssignedVPS(ctx, tx, vpsID, reportID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
 	if !ok {
-		return ipquality.VPSReport{
-			ProviderResults: []ipquality.ProviderResultRead{},
-			ServiceUnlocks:  []ipquality.ServiceUnlockRead{},
-			History:         []ipquality.Summary{},
-		}, nil
+		if err := tx.Commit(ctx); err != nil {
+			return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
+		}
+		return emptyVPSIPQualityReport(), nil
 	}
-	summary, ok, err := r.summaryForAssignedVPSReport(ctx, vpsID, report.ReportID)
+	summary, ok, err := summaryForAssignedVPSReport(ctx, tx, vpsID, report.ReportID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
 	if !ok {
-		summary = summaryFromReport(vpsID, report)
+		return ipquality.VPSReport{}, fmt.Errorf("ip quality assigned summary missing from read snapshot")
 	}
-	providers, err := r.providerResultsForReport(ctx, report.ReportID)
+	providers, err := providerResultsForReport(ctx, tx, report.ReportID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	unlocks, err := r.serviceUnlocksForReport(ctx, report.ReportID)
+	unlocks, err := serviceUnlocksForReport(ctx, tx, report.ReportID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
 	}
 	return ipquality.VPSReport{
 		Summary:         &summary,
@@ -457,11 +493,15 @@ func (r *PostgresIPQualityRepository) GetVPSIPQualityReportDetail(ctx context.Co
 }
 
 func (r *PostgresIPQualityRepository) ListLatestSummariesForVPS(ctx context.Context, vpsIDs []string) (map[string]ipquality.Summary, error) {
+	return listLatestSummariesForVPS(ctx, r.db, vpsIDs)
+}
+
+func listLatestSummariesForVPS(ctx context.Context, db ipQualityDB, vpsIDs []string) (map[string]ipquality.Summary, error) {
 	out := make(map[string]ipquality.Summary, len(vpsIDs))
 	if len(vpsIDs) == 0 {
 		return out, nil
 	}
-	rows, err := r.db.Query(ctx, `
+	rows, err := db.Query(ctx, `
 		with ranked as (
 			select assigned.*,
 				row_number() over (
@@ -510,61 +550,8 @@ func (r *PostgresIPQualityRepository) ListLatestSummariesForVPS(ctx context.Cont
 	return out, nil
 }
 
-func (r *PostgresIPQualityRepository) latestReportForVPS(ctx context.Context, vpsID string) (ipquality.Report, bool, error) {
-	rows, err := r.db.Query(ctx, `
-		select r.report_id,
-			r.monitoring_instance_id,
-			r.observed_at,
-			r.received_at,
-			r.agent_version,
-			r.fingerprint,
-			r.sync_batch_id,
-			r.ip_address,
-			r.ip_version,
-			r.status,
-			r.asn,
-			r.organization,
-			r.latitude,
-			r.longitude,
-			r.use_region_code,
-			r.use_region_name,
-			r.registered_region_code,
-			r.registered_region_name,
-			r.risk_level,
-			r.error_code,
-			r.error_summary,
-			r.is_backfilled,
-			r.raw_json,
-			r.coverage_json,
-			r.diagnostics_json,
-			r.created_at
-		from ip_quality_reports r
-		join ip_quality_assigned_vps_reports assigned on assigned.report_id = r.report_id
-		where assigned.vps_id = $1
-		order by r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc
-		limit 1`, vpsID)
-	if err != nil {
-		return ipquality.Report{}, false, fmt.Errorf("query latest ip quality report for vps %q: %w", vpsID, err)
-	}
-	defer rows.Close()
-	if !rows.Next() {
-		return ipquality.Report{}, false, rows.Err()
-	}
-	report, err := scanIPQualityReport(rows)
-	if err != nil {
-		return ipquality.Report{}, false, fmt.Errorf("scan latest ip quality report for vps %q: %w", vpsID, err)
-	}
-	if rows.Next() {
-		return report, true, nil
-	}
-	if err := rows.Err(); err != nil {
-		return ipquality.Report{}, false, fmt.Errorf("iterate latest ip quality report for vps %q: %w", vpsID, err)
-	}
-	return report, true, nil
-}
-
-func (r *PostgresIPQualityRepository) reportForAssignedVPS(ctx context.Context, vpsID, reportID string) (ipquality.Report, bool, error) {
-	rows, err := r.db.Query(ctx, `
+func reportForAssignedVPS(ctx context.Context, db ipQualityDB, vpsID, reportID string) (ipquality.Report, bool, error) {
+	rows, err := db.Query(ctx, `
 		select r.report_id,
 			r.monitoring_instance_id,
 			r.observed_at,
@@ -612,8 +599,8 @@ func (r *PostgresIPQualityRepository) reportForAssignedVPS(ctx context.Context, 
 	return report, true, nil
 }
 
-func (r *PostgresIPQualityRepository) summaryForAssignedVPSReport(ctx context.Context, vpsID, reportID string) (ipquality.Summary, bool, error) {
-	rows, err := r.db.Query(ctx, `
+func summaryForAssignedVPSReport(ctx context.Context, db ipQualityDB, vpsID, reportID string) (ipquality.Summary, bool, error) {
+	rows, err := db.Query(ctx, `
 		select assigned.vps_id,
 			assigned.report_id,
 			assigned.observed_at,
@@ -653,8 +640,8 @@ func (r *PostgresIPQualityRepository) summaryForAssignedVPSReport(ctx context.Co
 	return summary, true, nil
 }
 
-func (r *PostgresIPQualityRepository) providerResultsForReport(ctx context.Context, reportID string) ([]ipquality.ProviderResultRead, error) {
-	rows, err := r.db.Query(ctx, `
+func providerResultsForReport(ctx context.Context, db ipQualityDB, reportID string) ([]ipquality.ProviderResultRead, error) {
+	rows, err := db.Query(ctx, `
 		select provider,
 			status,
 			source_type,
@@ -719,8 +706,8 @@ func (r *PostgresIPQualityRepository) providerResultsForReport(ctx context.Conte
 	return results, nil
 }
 
-func (r *PostgresIPQualityRepository) serviceUnlocksForReport(ctx context.Context, reportID string) ([]ipquality.ServiceUnlockRead, error) {
-	rows, err := r.db.Query(ctx, `
+func serviceUnlocksForReport(ctx context.Context, db ipQualityDB, reportID string) ([]ipquality.ServiceUnlockRead, error) {
+	rows, err := db.Query(ctx, `
 		select service,
 			source,
 			status,
@@ -767,8 +754,8 @@ func (r *PostgresIPQualityRepository) serviceUnlocksForReport(ctx context.Contex
 	return results, nil
 }
 
-func (r *PostgresIPQualityRepository) historyForVPS(ctx context.Context, vpsID string) ([]ipquality.Summary, error) {
-	rows, err := r.db.Query(ctx, `
+func historyForVPS(ctx context.Context, db ipQualityDB, vpsID string) ([]ipquality.Summary, error) {
+	rows, err := db.Query(ctx, `
 		select assigned.vps_id,
 			assigned.report_id,
 			assigned.observed_at,
@@ -899,25 +886,6 @@ func coverageFromJSON(raw []byte) *ipquality.Coverage {
 		return nil
 	}
 	return &coverage
-}
-
-func summaryFromReport(vpsID string, report ipquality.Report) ipquality.Summary {
-	return ipquality.Summary{
-		ReportID:      report.ReportID,
-		VPSID:         vpsID,
-		ObservedAt:    report.ObservedAt,
-		IPAddress:     report.IPAddress,
-		IPVersion:     report.IPVersion,
-		Status:        report.Status,
-		RiskLevel:     report.RiskLevel,
-		UseRegionCode: report.UseRegionCode,
-		UseRegionName: report.UseRegionName,
-		ASN:           report.ASN,
-		Organization:  report.Organization,
-		ErrorCode:     report.ErrorCode,
-		ErrorSummary:  report.ErrorSummary,
-		Coverage:      report.Coverage,
-	}
 }
 
 func defaultString(value, fallback string) string {

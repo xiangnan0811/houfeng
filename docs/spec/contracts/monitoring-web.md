@@ -8,6 +8,14 @@
 - `scripts/test-vps-state-local-live.sh` 构建当前 Web/Center 并创建独立数据库运行 `web/e2e/local-live/vps-state-live.spec.ts`。浏览器真实登录，验证不可转移监控归属、续费意向不改账单、共享服务/域名关联、失效归档摘要、详情页人工例外归档、历史恢复、显式重新接入，并保存桌面/移动与暗亮主题截图。该入口不安装依赖，不模拟 Agent sync，也不能替代上述真实 Agent 验收。
 - 已运行的独立 loopback Center 可通过 `LOCAL_LIVE_CENTER_URL`、`LOCAL_LIVE_USERNAME`、`LOCAL_LIVE_PASSWORD` 环境变量传给浏览器脚本；只允许专用可写验收环境，不复用其他正在验收的实例。凭据不写入证据。脚本默认启动自己的隔离环境；常规 Chromium 配置继续排除此真实后端测试。
 
+### Runtime WebSocket 持续会话授权
+
+- runtime stream 使用真实 Cookie 经 RequireSession 认证及授权后写入的可信 session context。握手前校验会话；缺 context 返回 401，缺 validator 或权威读取故障返回 500；不存在/过期会话返回 401。握手失败不启动订阅或 watcher，同源规则不变。
+- 已连接后每条满足原实例 fingerprint/epoch/time 条件的消息在写入前重新验证会话；实例与会话查询各最多 2 秒，socket 写入仍最多 5 秒。独立 watcher 每 5 秒执行不续期的会话验证，繁忙消息、空闲或慢写均不能绕过它。
+- 撤销、自然过期或校验故障均取消 stream 并 CloseNow，正常调度下周期加查询最多 7 秒发起关闭，真实端到端验收给 10 秒上限。清理顺序为 cancel、强制关闭、等待 watcher 退出、关闭订阅；不等待 graceful close 握手。
+- 每次读取最新持久化 expiry，正常 HTTP 续期继续有效；改密保留当前 A 会话/连接，撤销 B 只关闭 B。被动验证不修改 last_seen_at/expires_at。已经通过校验并在途的旧帧不追回，不承诺撤销与网络发送全局原子；不持数据库锁跨网络。
+- 真实 PostgreSQL/RequireSession/WebSocket 回归必须观察首帧、撤销后连接终止、保留会话继续收到合法新样本，并覆盖空闲过期、续期、查询失败、客户端断开与订阅清理；不能用直接 handler mock 替代认证证据。
+
 ### Incident threshold settings contract
 
 #### 1. Scope / Trigger

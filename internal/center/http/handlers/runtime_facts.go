@@ -10,6 +10,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"houfeng/internal/center/auth"
+	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/targets"
@@ -22,6 +24,16 @@ type hostSampleSubscriber interface {
 type monitoringInstanceGetter interface {
 	GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
 }
+
+type sessionValidator interface {
+	ValidateSession(context.Context, string) error
+}
+
+const (
+	runtimeStreamSessionCheckInterval = 5 * time.Second
+	runtimeStreamAuthorityTimeout     = 2 * time.Second
+	runtimeStreamWriteTimeout         = 5 * time.Second
+)
 
 func MonitoringInstanceRuntimeFacts(repo runtimefacts.Repository) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +102,7 @@ func TargetRuntimeFacts(repo runtimefacts.Repository) http.Handler {
 	})
 }
 
-func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSampleSubscriber) http.Handler {
+func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSampleSubscriber, validator sessionValidator) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -102,14 +114,36 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
-		if repo == nil || hub == nil {
+		if repo == nil || hub == nil || validator == nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
-		if _, err := repo.GetMonitoringInstance(r.Context(), monitoringInstanceID); errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
+
+		sessionID, ok := sessionctx.SessionIDFromContext(r.Context())
+		if !ok || strings.TrimSpace(sessionID) == "" {
+			writeError(w, http.StatusUnauthorized, "unauthenticated")
+			return
+		}
+		authorityCtx, authorityCancel := context.WithTimeout(r.Context(), runtimeStreamAuthorityTimeout)
+		err := validator.ValidateSession(authorityCtx, sessionID)
+		authorityCancel()
+		if err != nil {
+			if errors.Is(err, auth.ErrSessionNotFound) || errors.Is(err, auth.ErrSessionExpired) {
+				writeError(w, http.StatusUnauthorized, "unauthenticated")
+			} else {
+				writeError(w, http.StatusInternalServerError, "internal server error")
+			}
+			return
+		}
+
+		instanceCtx, instanceCancel := context.WithTimeout(r.Context(), runtimeStreamAuthorityTimeout)
+		_, err = repo.GetMonitoringInstance(instanceCtx, monitoringInstanceID)
+		instanceCancel()
+		if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
 			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
-		} else if err != nil {
+		}
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
@@ -118,11 +152,37 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 		if err != nil {
 			return
 		}
-		defer conn.Close(websocket.StatusNormalClosure, "")
-		ctx := conn.CloseRead(r.Context())
 
+		streamCtx, cancelStream := context.WithCancel(r.Context())
+		ctx := conn.CloseRead(streamCtx)
 		subscription := hub.SubscribeHostSamples(monitoringInstanceID)
-		defer subscription.Close()
+		watcherDone := make(chan struct{})
+		go func() {
+			defer close(watcherDone)
+			ticker := time.NewTicker(runtimeStreamSessionCheckInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					checkCtx, checkCancel := context.WithTimeout(ctx, runtimeStreamAuthorityTimeout)
+					err := validator.ValidateSession(checkCtx, sessionID)
+					checkCancel()
+					if err != nil {
+						cancelStream()
+						conn.CloseNow()
+						return
+					}
+				}
+			}
+		}()
+		defer func() {
+			cancelStream()
+			conn.CloseNow()
+			<-watcherDone
+			subscription.Close()
+		}()
 
 		for {
 			select {
@@ -132,7 +192,9 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 				if !ok {
 					return
 				}
-				current, err := repo.GetMonitoringInstance(ctx, monitoringInstanceID)
+				readCtx, readCancel := context.WithTimeout(ctx, runtimeStreamAuthorityTimeout)
+				current, err := repo.GetMonitoringInstance(readCtx, monitoringInstanceID)
+				readCancel()
 				if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
 					return
 				}
@@ -142,9 +204,17 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 				if !eligibleRuntimeStreamMessage(message, monitoringInstanceID, current, time.Now().UTC()) {
 					continue
 				}
-				writeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				checkCtx, checkCancel := context.WithTimeout(ctx, runtimeStreamAuthorityTimeout)
+				err = validator.ValidateSession(checkCtx, sessionID)
+				checkCancel()
+				if err != nil {
+					cancelStream()
+					conn.CloseNow()
+					return
+				}
+				writeCtx, writeCancel := context.WithTimeout(ctx, runtimeStreamWriteTimeout)
 				err = wsjson.Write(writeCtx, conn, message)
-				cancel()
+				writeCancel()
 				if err != nil {
 					return
 				}

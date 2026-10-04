@@ -84,11 +84,12 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 
 func TestAppACLCurrentTransitionWithoutHeartbeatMigrationRequiresExactSettingsSnapshot(t *testing.T) {
 	before := appACLCurrentTransitionPreflight{
-		settingsSnapshot: []byte(`{"settings_id":"center","incident_defaults":{"stale_threshold_intervals":12},"telegram_bot_token":"before","updated_at":"2025-01-02T03:04:05Z"}`),
+		settingsRowPresent: true,
+		settingsSnapshot:   []byte(`{"settings_id":"center","incident_defaults":{"stale_threshold_intervals":12},"telegram_bot_token":"before","updated_at":"2025-01-02T03:04:05Z"}`),
 	}
 	unchanged := []byte(`{"updated_at":"2025-01-02T03:04:05Z","telegram_bot_token":"before","incident_defaults":{"stale_threshold_intervals":12},"settings_id":"center"}`)
 
-	if err := verifyAppliedAppACLCurrentTransitionSettings(before, nil, unchanged, nil, time.Time{}); err != nil {
+	if err := verifyAppliedAppACLCurrentTransitionSettings(before, true, nil, unchanged, nil, time.Time{}); err != nil {
 		t.Fatalf("unchanged complete settings snapshot was rejected: %v", err)
 	}
 
@@ -114,10 +115,110 @@ func TestAppACLCurrentTransitionWithoutHeartbeatMigrationRequiresExactSettingsSn
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := verifyAppliedAppACLCurrentTransitionSettings(before, nil, tc.after, nil, time.Time{})
+			err := verifyAppliedAppACLCurrentTransitionSettings(before, true, nil, tc.after, nil, time.Time{})
 			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 				t.Fatalf("verifyAppliedAppACLCurrentTransitionSettings() error = %v, want %q", err, tc.wantError)
 			}
 		})
+	}
+}
+
+func TestAppACLCurrentTransitionSettingsRowPresenceAcrossRegisteredSuffixes(t *testing.T) {
+	suffixes := []struct {
+		name       string
+		transition appACLCurrentTransition
+	}{
+		{name: "P62", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
+			"0063_tune_heartbeat_incident_policy.sql",
+			"0064_add_network_rates_valid.sql",
+			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+			"0066_constrain_monitoring_and_target_state_values.sql",
+			"0067_refactor_vps_monitoring_lifecycle.sql",
+			"0068_normalize_ip_quality_host_address_identity.sql",
+		}}}},
+		{name: "P63", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
+			"0064_add_network_rates_valid.sql",
+			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+			"0066_constrain_monitoring_and_target_state_values.sql",
+			"0067_refactor_vps_monitoring_lifecycle.sql",
+			"0068_normalize_ip_quality_host_address_identity.sql",
+		}}}},
+		{name: "P64", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
+			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+			"0066_constrain_monitoring_and_target_state_values.sql",
+			"0067_refactor_vps_monitoring_lifecycle.sql",
+			"0068_normalize_ip_quality_host_address_identity.sql",
+		}}}},
+		{name: "P66", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
+			"0067_refactor_vps_monitoring_lifecycle.sql",
+			"0068_normalize_ip_quality_host_address_identity.sql",
+		}}}},
+		{name: "P67", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
+			"0068_normalize_ip_quality_host_address_identity.sql",
+		}}}},
+	}
+	for _, suffix := range suffixes {
+		t.Run(suffix.name, func(t *testing.T) {
+			if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(suffix.transition); err != nil {
+				t.Fatalf("registered %s suffix rejected: %v", suffix.name, err)
+			}
+			absent := appACLCurrentTransitionPreflight{
+				lifecycleMigrationPending: true,
+				settingsSnapshot:          []byte(`not-json`),
+				settingsExceptTransition:  []byte(`not-json`),
+			}
+			if err := verifyAppliedAppACLCurrentTransitionSettings(absent, false, nil, nil, nil, time.Time{}); err != nil {
+				t.Fatalf("absent to absent settings snapshot was rejected: %v", err)
+			}
+			if err := verifyAppliedAppACLCurrentTransitionSettings(absent, true, nil, []byte(`{}`), nil, time.Time{}); err == nil || !strings.Contains(err.Error(), "changed settings row presence") {
+				t.Fatalf("absent to present settings snapshot error = %v, want row-presence rejection", err)
+			}
+
+			present := appACLCurrentTransitionPreflight{settingsRowPresent: true}
+			if err := verifyAppliedAppACLCurrentTransitionSettings(present, false, nil, nil, nil, time.Time{}); err == nil || !strings.Contains(err.Error(), "changed settings row presence") {
+				t.Fatalf("present to absent settings snapshot error = %v, want row-presence rejection", err)
+			}
+		})
+	}
+}
+
+func TestAppACLCurrentTransitionHeartbeatSettingsTransformations(t *testing.T) {
+	beforeDefaults := []byte(`{"heartbeat_interval_seconds":5,"stale_threshold_intervals":3,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true}`)
+	afterDefaults := []byte(`{"notify_on_recovered":true,"stale_threshold_intervals":12,"notify_on_started":true,"heartbeat_interval_seconds":5,"notify_on_escalated":true,"sweep_interval_seconds":5}`)
+	if err := verifyAppliedAppACLCurrentTransitionSettings(
+		appACLCurrentTransitionPreflight{
+			settingsRowPresent:              true,
+			heartbeatPolicyMigrationPending: true,
+			incidentDefaults:                beforeDefaults,
+			settingsExceptTransition:        []byte(`{"settings_id":"center","telegram_bot_token":"before"}`),
+			updatedAt:                       time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
+			staleThreshold:                  3,
+		},
+		true,
+		afterDefaults,
+		[]byte(`{"settings_id":"center","incident_defaults":{"stale_threshold_intervals":12},"telegram_bot_token":"before","updated_at":"2025-01-02T03:04:06Z"}`),
+		[]byte(`{"settings_id":"center","telegram_bot_token":"before"}`),
+		time.Date(2025, 1, 2, 3, 4, 6, 0, time.UTC),
+	); err != nil {
+		t.Fatalf("default heartbeat settings transformation was rejected: %v", err)
+	}
+
+	custom := appACLCurrentTransitionPreflight{
+		settingsRowPresent:              true,
+		heartbeatPolicyMigrationPending: true,
+		incidentDefaults:                []byte(`{"heartbeat_interval_seconds":5,"stale_threshold_intervals":20}`),
+		settingsExceptTransition:        []byte(`{"settings_id":"center","telegram_bot_token":"before"}`),
+		updatedAt:                       time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
+		staleThreshold:                  20,
+	}
+	if err := verifyAppliedAppACLCurrentTransitionSettings(
+		custom,
+		true,
+		custom.incidentDefaults,
+		[]byte(`{"settings_id":"center","telegram_bot_token":"after"}`),
+		custom.settingsExceptTransition,
+		custom.updatedAt,
+	); err != nil {
+		t.Fatalf("custom heartbeat settings transformation was rejected: %v", err)
 	}
 }

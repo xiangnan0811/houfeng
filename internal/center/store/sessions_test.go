@@ -3,19 +3,21 @@ package store
 import (
 	"context"
 	"errors"
-	"testing"
-	"time"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"strings"
+	"testing"
+	"time"
 
 	"houfeng/internal/center/auth"
 )
 
 type fakeSessionDB struct {
-	execArgs [][]any
-	row      fakeSessionRow
-	tx       *fakeSessionTx
+	execArgs  [][]any
+	queries   []string
+	queryArgs [][]any
+	row       fakeSessionRow
+	tx        *fakeSessionTx
 }
 
 func (f *fakeSessionDB) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
@@ -23,7 +25,9 @@ func (f *fakeSessionDB) Exec(_ context.Context, _ string, args ...any) (pgconn.C
 	return pgconn.NewCommandTag("DELETE 1"), nil
 }
 
-func (f *fakeSessionDB) QueryRow(_ context.Context, _ string, _ ...any) pgx.Row {
+func (f *fakeSessionDB) QueryRow(_ context.Context, query string, args ...any) pgx.Row {
+	f.queries = append(f.queries, query)
+	f.queryArgs = append(f.queryArgs, append([]any(nil), args...))
 	return f.row
 }
 
@@ -109,6 +113,95 @@ func sessionPasswordChangedRow(changedAt time.Time) fakeSessionRow {
 		*(dest[0].(*time.Time)) = changedAt
 		return nil
 	}}
+}
+
+func sessionValidationRow(issuedAt, expiresAt, passwordChangedAt time.Time) fakeSessionRow {
+	return fakeSessionRow{scan: func(dest ...any) error {
+		*(dest[0].(*time.Time)) = issuedAt
+		*(dest[1].(*time.Time)) = expiresAt
+		*(dest[2].(*time.Time)) = passwordChangedAt
+		return nil
+	}}
+}
+
+func TestPostgresSessionRepositoryValidateSessionIsReadOnlyAndCurrent(t *testing.T) {
+	now := time.Date(2026, time.June, 23, 10, 0, 0, 0, time.UTC)
+	key := []byte("0123456789abcdef0123456789abcdef")
+
+	t.Run("valid does not renew", func(t *testing.T) {
+		db := &fakeSessionDB{row: sessionValidationRow(now.Add(-time.Minute), now.Add(time.Hour), now.Add(-time.Hour))}
+		repo, err := newPostgresSessionRepositoryWithDB(db, key)
+		if err != nil {
+			t.Fatalf("new repository: %v", err)
+		}
+		if err := repo.ValidateSession(context.Background(), "plain-session-id", func() time.Time { return now }); err != nil {
+			t.Fatalf("ValidateSession() = %v", err)
+		}
+		if len(db.execArgs) != 0 || db.tx != nil {
+			t.Fatalf("ValidateSession performed a write or transaction: exec=%d tx=%v", len(db.execArgs), db.tx != nil)
+		}
+		if len(db.queryArgs) != 1 || len(db.queryArgs[0]) != 1 {
+			t.Fatalf("query args = %#v, want one hashed session id", db.queryArgs)
+		}
+		hashedID, ok := db.queryArgs[0][0].(string)
+		if !ok || hashedID == "plain-session-id" || len(hashedID) != 64 {
+			t.Fatalf("query session id = %#v, want 64-character HMAC digest", db.queryArgs[0][0])
+		}
+		query := strings.ToLower(db.queries[0])
+		if strings.Contains(query, "for update") || strings.Contains(query, "update ") || strings.Contains(query, "delete ") {
+			t.Fatalf("validation query has write/lock clause: %q", db.queries[0])
+		}
+	})
+
+	t.Run("expired and password watermark are rejected without deletion", func(t *testing.T) {
+		cases := []struct {
+			name              string
+			issuedAt          time.Time
+			expiresAt         time.Time
+			passwordChangedAt time.Time
+		}{
+			{name: "expires at now", issuedAt: now.Add(-time.Hour), expiresAt: now, passwordChangedAt: now.Add(-time.Hour)},
+			{name: "issued before password change", issuedAt: now.Add(-time.Hour), expiresAt: now.Add(time.Hour), passwordChangedAt: now},
+		}
+		for _, tt := range cases {
+			t.Run(tt.name, func(t *testing.T) {
+				db := &fakeSessionDB{row: sessionValidationRow(tt.issuedAt, tt.expiresAt, tt.passwordChangedAt)}
+				repo, err := newPostgresSessionRepositoryWithDB(db, key)
+				if err != nil {
+					t.Fatalf("new repository: %v", err)
+				}
+				err = repo.ValidateSession(context.Background(), "sid", func() time.Time { return now })
+				if !errors.Is(err, auth.ErrSessionExpired) {
+					t.Fatalf("ValidateSession() = %v, want ErrSessionExpired", err)
+				}
+				if len(db.execArgs) != 0 {
+					t.Fatalf("ValidateSession writes = %d, want 0", len(db.execArgs))
+				}
+			})
+		}
+	})
+
+	t.Run("missing and query errors preserve classification", func(t *testing.T) {
+		missing := &fakeSessionDB{row: fakeSessionRow{scan: func(...any) error { return pgx.ErrNoRows }}}
+		repo, err := newPostgresSessionRepositoryWithDB(missing, key)
+		if err != nil {
+			t.Fatalf("new repository: %v", err)
+		}
+		if err := repo.ValidateSession(context.Background(), "sid", func() time.Time { return now }); !errors.Is(err, auth.ErrSessionNotFound) {
+			t.Fatalf("ValidateSession(missing) = %v, want ErrSessionNotFound", err)
+		}
+
+		queryErr := errors.New("database unavailable")
+		failed := &fakeSessionDB{row: fakeSessionRow{scan: func(...any) error { return queryErr }}}
+		repo, err = newPostgresSessionRepositoryWithDB(failed, key)
+		if err != nil {
+			t.Fatalf("new repository: %v", err)
+		}
+		err = repo.ValidateSession(context.Background(), "sid", func() time.Time { return now })
+		if !errors.Is(err, queryErr) || !strings.Contains(err.Error(), "validate session") {
+			t.Fatalf("ValidateSession(query error) = %v, want wrapped database error", err)
+		}
+	})
 }
 
 func TestPostgresSessionRepositoryDeletesByHMACInsteadOfPlainSessionID(t *testing.T) {

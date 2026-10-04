@@ -65,6 +65,10 @@ func TestRequireSessionBuildsTrustedTypedActorAndIgnoresForgedHeaders(t *testing
 		if !ok {
 			t.Fatal("typed actor missing from context")
 		}
+		sessionID, sessionOK := sessionctx.SessionIDFromContext(r.Context())
+		if !sessionOK || sessionID != "abc" {
+			t.Fatalf("ctx session_id = %q ok=%v, want cookie id", sessionID, sessionOK)
+		}
 		if actor.UserID != middlewareTestUserID || actor.Role != recordauth.RoleProjectAdmin || actor.ProjectID != recordauth.ProjectIDDefault {
 			t.Fatalf("typed actor = %#v, want trusted default-project admin", actor)
 		}

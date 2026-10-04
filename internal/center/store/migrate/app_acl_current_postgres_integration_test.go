@@ -2,10 +2,12 @@ package migrate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"reflect"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -26,6 +28,10 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("registered_successor_rejections", testPostgresIntegrationAppACLCurrentRegisteredSuccessorRejectsInvalidPredecessor)
 	t.Run("runtime_update_acl_drift", testPostgresIntegrationAppACLCurrentRuntimeUpdateDrift)
 	t.Run("p67_upgrade", testPostgresIntegrationAppACLCurrentP67Upgrade)
+	t.Run("registered_settings_presence_matrix", testPostgresIntegrationAppACLCurrentSettingsPresenceMatrix)
+	t.Run("missing_settings_predecessor_suffixes", testPostgresIntegrationAppACLCurrentMissingSettingsPredecessorSuffixes)
+	t.Run("missing_settings_p67_rollback_and_drift", testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift)
+	t.Run("missing_settings_concurrent_initialization", testPostgresIntegrationAppACLCurrentMissingSettingsConcurrentInitialization)
 }
 
 func testPostgresIntegrationAppACLCurrentP67Upgrade(t *testing.T) {
@@ -235,6 +241,401 @@ func testPostgresIntegrationAppACLCurrentP67Upgrade(t *testing.T) {
 			}
 		})
 	}
+}
+
+type appACLCurrentSettingsPresenceSnapshot struct {
+	Present                  bool
+	Raw                      []byte
+	IncidentDefaults         []byte
+	SettingsExceptTransition []byte
+	UpdatedAt                time.Time
+}
+
+func readAppACLCurrentSettingsPresenceSnapshot(
+	t *testing.T,
+	ctx context.Context,
+	db *pgxpool.Pool,
+) appACLCurrentSettingsPresenceSnapshot {
+	t.Helper()
+	var snapshot appACLCurrentSettingsPresenceSnapshot
+	err := db.QueryRow(ctx, `
+		select to_jsonb(settings),
+		       incident_defaults,
+		       to_jsonb(settings) - array['incident_defaults', 'updated_at']::text[],
+		       updated_at
+		from public.center_settings settings
+		where settings_id = 'center'
+	`).Scan(&snapshot.Raw, &snapshot.IncidentDefaults, &snapshot.SettingsExceptTransition, &snapshot.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return snapshot
+	}
+	if err != nil {
+		t.Fatalf("read center_settings presence snapshot: %v", err)
+	}
+	snapshot.Present = true
+	var fields map[string]json.RawMessage
+	if !json.Valid(snapshot.Raw) || json.Unmarshal(snapshot.Raw, &fields) != nil || fields == nil {
+		t.Fatalf("center_settings full JSON snapshot is invalid: %s", snapshot.Raw)
+	}
+	for _, name := range []string{"settings_id", "incident_defaults", "updated_at"} {
+		if _, ok := fields[name]; !ok {
+			t.Fatalf("center_settings full JSON snapshot is missing %q: %s", name, snapshot.Raw)
+		}
+	}
+	return snapshot
+}
+
+func assertAppACLCurrentSettingsPresenceSnapshotEqual(
+	t *testing.T,
+	before, after appACLCurrentSettingsPresenceSnapshot,
+) {
+	t.Helper()
+	if before.Present != after.Present {
+		t.Fatalf("center_settings presence changed from %t to %t", before.Present, after.Present)
+	}
+	if !before.Present {
+		return
+	}
+	if !appACLCurrentJSONEqual(before.Raw, after.Raw) ||
+		!appACLCurrentJSONEqual(before.IncidentDefaults, after.IncidentDefaults) ||
+		!appACLCurrentJSONEqual(before.SettingsExceptTransition, after.SettingsExceptTransition) ||
+		!before.UpdatedAt.Equal(after.UpdatedAt) {
+		t.Fatalf("center_settings snapshot changed\nbefore: %#v\nafter: %#v", before, after)
+	}
+}
+
+func configureAppACLCurrentP67SettingsState(t *testing.T, ctx context.Context, db *pgxpool.Pool, state string) {
+	t.Helper()
+	switch state {
+	case "missing":
+		if _, err := db.Exec(ctx, `delete from public.center_settings where settings_id = 'center'`); err != nil {
+			t.Fatalf("delete center_settings singleton for missing state: %v", err)
+		}
+	case "default":
+		if _, err := db.Exec(ctx, `
+			delete from public.center_settings where settings_id = 'center';
+			insert into public.center_settings (settings_id) values ('center')
+		`); err != nil {
+			t.Fatalf("reset center_settings singleton to schema default: %v", err)
+		}
+	case "custom":
+		if _, err := db.Exec(ctx, `
+			update public.center_settings
+			set incident_defaults = jsonb_set(incident_defaults, '{stale_threshold_intervals}', '20'::jsonb, false),
+			    updated_at = '2025-01-02 03:04:05+00'::timestamptz
+			where settings_id = 'center'
+		`); err != nil {
+			t.Fatalf("set custom center_settings singleton: %v", err)
+		}
+	default:
+		t.Fatalf("unknown center_settings state %q", state)
+	}
+}
+
+func testPostgresIntegrationAppACLCurrentSettingsPresenceMatrix(t *testing.T) {
+	t.Helper()
+	profile := appACLCurrentReleasedPostgresProfile(t, "0067_refactor_vps_monitoring_lifecycle.sql")
+	for _, state := range []string{"missing", "default", "custom"} {
+		state := state
+		t.Run(state, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
+			migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+			predecessor, _, _ := seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
+			configureAppACLCurrentP67SettingsState(t, ctx, migratorDB, state)
+			beforeSettings := readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB)
+			if state == "missing" && beforeSettings.Present {
+				t.Fatal("missing center_settings state still has a row")
+			}
+			if state != "missing" && !beforeSettings.Present {
+				t.Fatalf("%s center_settings state has no row", state)
+			}
+			if state == "default" || state == "custom" {
+				var threshold int
+				if err := migratorDB.QueryRow(ctx, `select (incident_defaults->>'stale_threshold_intervals')::int from public.center_settings where settings_id = 'center'`).Scan(&threshold); err != nil {
+					t.Fatalf("read %s stale threshold: %v", state, err)
+				}
+				wantThreshold := 20
+				if state == "default" {
+					wantThreshold = 12
+				}
+				if threshold != wantThreshold {
+					t.Fatalf("%s stale threshold = %d, want %d", state, threshold, wantThreshold)
+				}
+			}
+			if state == "custom" && !beforeSettings.UpdatedAt.Equal(time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)) {
+				t.Fatalf("custom settings updated_at = %s, want fixed timestamp", beforeSettings.UpdatedAt)
+			}
+
+			_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
+			before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
+			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			if err != nil {
+				t.Fatalf("P67 %s settings convergence: %v", state, err)
+			}
+			if successor.ManifestRevision != predecessor.ManifestRevision+1 ||
+				successor.PreviousManifestDigest != predecessor.ManifestDigest {
+				t.Fatalf("P67 %s successor = %#v, want revision %d linked to predecessor", state, successor, predecessor.ManifestRevision+1)
+			}
+			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+				t.Fatalf("admit P67 %s successor runtime: %v", state, err)
+			}
+			after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			afterSettings := readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB)
+			assertAppACLCurrentSettingsPresenceSnapshotEqual(t, beforeSettings, afterSettings)
+			assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
+
+			beforeRepeat := after
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			if err != nil {
+				t.Fatalf("repeat P67 %s settings convergence: %v", state, err)
+			}
+			afterRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			if repeated.ManifestDigest != successor.ManifestDigest || !reflect.DeepEqual(afterRepeat, beforeRepeat) {
+				t.Fatalf("P67 %s settings repeat changed durable state\nbefore: %#v\nafter: %#v", state, beforeRepeat, afterRepeat)
+			}
+			assertAppACLCurrentSettingsPresenceSnapshotEqual(t, beforeSettings, readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB))
+		})
+	}
+}
+
+func testPostgresIntegrationAppACLCurrentMissingSettingsPredecessorSuffixes(t *testing.T) {
+	t.Helper()
+	profiles := []struct {
+		name          string
+		lastMigration string
+	}{
+		{name: "P62", lastMigration: "0062_create_vps_create_idempotency.sql"},
+		{name: "P63", lastMigration: "0063_tune_heartbeat_incident_policy.sql"},
+		{name: "P64", lastMigration: "0064_add_network_rates_valid.sql"},
+		{name: "P66", lastMigration: appACLCurrentP66LastMigration},
+	}
+	for _, profileCase := range profiles {
+		profileCase := profileCase
+		t.Run(profileCase.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
+			migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+			predecessor, _, _ := seedAppACLCurrentReleasedGenesis(
+				t,
+				ctx,
+				fixture,
+				migratorDB,
+				appACLCurrentReleasedPostgresProfile(t, profileCase.lastMigration),
+			)
+			if _, err := migratorDB.Exec(ctx, `delete from public.center_settings where settings_id = 'center'`); err != nil {
+				t.Fatalf("delete %s predecessor center_settings singleton: %v", profileCase.name, err)
+			}
+			if settings := readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB); settings.Present {
+				t.Fatalf("%s predecessor still has center_settings row", profileCase.name)
+			}
+			_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
+			before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
+			assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
+			successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			if err != nil {
+				t.Fatalf("missing-settings %s convergence: %v", profileCase.name, err)
+			}
+			if successor.ManifestRevision != predecessor.ManifestRevision+1 ||
+				successor.PreviousManifestDigest != predecessor.ManifestDigest {
+				t.Fatalf("missing-settings %s successor = %#v, want revision %d linked to predecessor", profileCase.name, successor, predecessor.ManifestRevision+1)
+			}
+			if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+				t.Fatalf("admit missing-settings %s successor runtime: %v", profileCase.name, err)
+			}
+			after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
+			if settings := readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB); settings.Present {
+				t.Fatalf("missing-settings %s convergence inserted center_settings row", profileCase.name)
+			}
+			beforeRepeat := after
+			repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+			if err != nil {
+				t.Fatalf("repeat missing-settings %s convergence: %v", profileCase.name, err)
+			}
+			afterRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+			if repeated.ManifestDigest != successor.ManifestDigest || !reflect.DeepEqual(afterRepeat, beforeRepeat) {
+				t.Fatalf("repeat missing-settings %s changed durable state\nbefore: %#v\nafter: %#v", profileCase.name, beforeRepeat, afterRepeat)
+			}
+		})
+	}
+}
+
+func testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
+	migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	predecessor, _, _ := seedAppACLCurrentReleasedGenesis(
+		t,
+		ctx,
+		fixture,
+		migratorDB,
+		appACLCurrentReleasedPostgresProfile(t, "0067_refactor_vps_monitoring_lifecycle.sql"),
+	)
+	if _, err := migratorDB.Exec(ctx, `delete from public.center_settings where settings_id = 'center'`); err != nil {
+		t.Fatalf("delete P67 missing-settings singleton: %v", err)
+	}
+	_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
+	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
+	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
+
+	cutpoint := errors.New("controlled P67 missing-settings rollback cutpoint")
+	dependencies := defaultAppACLCurrentConvergenceDependencies()
+	applyDCL := dependencies.applyDCL
+	dependencies.applyDCL = func(ctx context.Context, tx pgx.Tx, contract appACLEffectiveCatalogContract) error {
+		if err := applyDCL(ctx, tx, contract); err != nil {
+			return err
+		}
+		return cutpoint
+	}
+	_, err := convergeAppACLCurrentWithDependencies(
+		ctx,
+		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+			return migratorDB.BeginTx(ctx, options)
+		},
+		fixture.runtimeRole,
+		fixture.adminRole,
+		migrations.FS,
+		appACLCurrentMigrationFragments,
+		dependencies,
+	)
+	if !errors.Is(err, cutpoint) {
+		t.Fatalf("P67 missing-settings rollback error = %v, want controlled cutpoint", err)
+	}
+	afterRollback := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+	if !reflect.DeepEqual(afterRollback, before) {
+		t.Fatalf("P67 missing-settings rollback changed durable state\nbefore: %#v\nafter: %#v", before, afterRollback)
+	}
+	if settings := readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB); settings.Present {
+		t.Fatal("P67 missing-settings rollback inserted center_settings row")
+	}
+	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
+
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	if err != nil {
+		t.Fatalf("P67 missing-settings convergence after rollback: %v", err)
+	}
+	if successor.ManifestRevision != predecessor.ManifestRevision+1 ||
+		successor.PreviousManifestDigest != predecessor.ManifestDigest {
+		t.Fatalf("P67 missing-settings successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
+	}
+	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+		t.Fatalf("admit P67 missing-settings successor runtime: %v", err)
+	}
+	afterUpgrade := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, afterUpgrade.Manifest.Manifests)
+	if settings := readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB); settings.Present {
+		t.Fatal("P67 missing-settings convergence inserted center_settings row")
+	}
+
+	runtimeIdentifier := pgx.Identifier{fixture.runtimeRole}.Sanitize()
+	if _, err := migratorDB.Exec(ctx, `revoke execute on function public.houfeng_parse_host_address(text) from `+runtimeIdentifier); err != nil {
+		t.Fatalf("revoke P67 missing-settings parser runtime EXECUTE: %v", err)
+	}
+	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err == nil || errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+		t.Fatalf("P67 missing-settings parser runtime ACL drift admission = %v, want concrete rejection", err)
+	}
+	if _, err := migratorDB.Exec(ctx, `grant execute on function public.houfeng_parse_host_address(text) to `+runtimeIdentifier); err != nil {
+		t.Fatalf("restore P67 missing-settings parser runtime EXECUTE: %v", err)
+	}
+	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+		t.Fatalf("admit P67 missing-settings parser runtime after ACL restoration: %v", err)
+	}
+}
+
+func testPostgresIntegrationAppACLCurrentMissingSettingsConcurrentInitialization(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
+	seedDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	predecessor, _, _ := seedAppACLCurrentReleasedGenesis(
+		t,
+		ctx,
+		fixture,
+		seedDB,
+		appACLCurrentReleasedPostgresProfile(t, "0067_refactor_vps_monitoring_lifecycle.sql"),
+	)
+	if _, err := seedDB.Exec(ctx, `delete from public.center_settings where settings_id = 'center'`); err != nil {
+		t.Fatalf("delete concurrent P67 missing-settings singleton: %v", err)
+	}
+	_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
+	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, seedDB, currentInput)
+	first := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	second := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	if err := first.Ping(ctx); err != nil {
+		t.Fatalf("ping first concurrent migrator connection: %v", err)
+	}
+	if err := second.Ping(ctx); err != nil {
+		t.Fatalf("ping second concurrent migrator connection: %v", err)
+	}
+	start := make(chan struct{})
+	type result struct {
+		manifest AppACLManifestPersistedV1
+		err      error
+	}
+	results := make(chan result, 2)
+	var waitGroup sync.WaitGroup
+	for _, db := range []*pgxpool.Pool{first, second} {
+		db := db
+		waitGroup.Add(1)
+		go func() {
+			defer waitGroup.Done()
+			<-start
+			manifest, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
+			results <- result{manifest: manifest, err: err}
+		}()
+	}
+	close(start)
+	waitGroup.Wait()
+	close(results)
+
+	successes := make([]AppACLManifestPersistedV1, 0, 2)
+	for outcome := range results {
+		if outcome.err == nil {
+			successes = append(successes, outcome.manifest)
+			continue
+		}
+		var pgErr *pgconn.PgError
+		if !errors.As(outcome.err, &pgErr) || pgErr.Code != "40001" {
+			t.Fatalf("concurrent missing-settings convergence error = %v, want success or serialization retry", outcome.err)
+		}
+	}
+	if len(successes) == 0 {
+		t.Fatal("concurrent missing-settings convergence produced no successful result")
+	}
+	for _, manifest := range successes {
+		if manifest.ManifestRevision != predecessor.ManifestRevision+1 ||
+			manifest.PreviousManifestDigest != predecessor.ManifestDigest {
+			t.Fatalf("concurrent missing-settings successor = %#v, want one successor linked to predecessor", manifest)
+		}
+	}
+	for index := 1; index < len(successes); index++ {
+		if successes[index].ManifestDigest != successes[0].ManifestDigest {
+			t.Fatalf("concurrent missing-settings manifests differ: %#v and %#v", successes[0], successes[index])
+		}
+	}
+	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, seedDB, currentInput)
+	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
+	if len(after.Manifest.Manifests) != 2 {
+		t.Fatalf("concurrent missing-settings manifest history length = %d, want exactly 2", len(after.Manifest.Manifests))
+	}
+	if settings := readAppACLCurrentSettingsPresenceSnapshot(t, ctx, seedDB); settings.Present {
+		t.Fatal("concurrent missing-settings convergence inserted center_settings row")
+	}
+	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
+	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+		t.Fatalf("admit concurrent missing-settings successor runtime: %v", err)
+	}
+	assertSingleIntValue(t, ctx, seedDB, `select count(*)::int from public.schema_migrations where name = '0068_normalize_ip_quality_host_address_identity.sql'`, 1)
 }
 
 func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {

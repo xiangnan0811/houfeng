@@ -63,6 +63,7 @@ type SessionRepository interface {
 	CreateIfPasswordHash(ctx context.Context, expectedHash string, session Session, now func() time.Time, ttl time.Duration) (Session, error)
 	ChangePasswordIfHash(ctx context.Context, userID, currentSessionID, expectedHash, newHash string, now func() time.Time) error
 	TouchWithUserLock(ctx context.Context, sessionID string, now func() time.Time, ttl time.Duration) (Session, error)
+	ValidateSession(ctx context.Context, sessionID string, now func() time.Time) error
 	Delete(ctx context.Context, sessionID string) error
 	DeleteExpiredBefore(ctx context.Context, cutoff time.Time) (int, error)
 }
