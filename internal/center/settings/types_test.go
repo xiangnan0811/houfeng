@@ -238,6 +238,68 @@ func TestSettingsValidateRejectsUnknownFrequencyTier(t *testing.T) {
 	}
 }
 
+func TestResolveHostSampleFrequencyTierUsesOrderedMatchingOverrides(t *testing.T) {
+	t.Parallel()
+
+	firstTier := "1m"
+	laterTier := "5m"
+	emptyTier := ""
+	tests := []struct {
+		name   string
+		base   string
+		labels []string
+		rules  OverrideRules
+		want   string
+	}{
+		{
+			name:   "rule order wins across matching labels",
+			base:   "15m",
+			labels: []string{"core", "edge"},
+			rules: OverrideRules{MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{
+				{Label: "edge", Overrides: SettingsOverrideFields{HostSampleFrequencyTier: &firstTier}},
+				{Label: "core", Overrides: SettingsOverrideFields{HostSampleFrequencyTier: &laterTier}},
+			}},
+			want: firstTier,
+		},
+		{
+			name:   "matching rule without tier continues",
+			base:   "15m",
+			labels: []string{"core"},
+			rules: OverrideRules{MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{
+				{Label: "core"},
+				{Label: "core", Overrides: SettingsOverrideFields{HostSampleFrequencyTier: &firstTier}},
+			}},
+			want: firstTier,
+		},
+		{
+			name:   "nonmatching labels use base",
+			base:   "15m",
+			labels: []string{"other"},
+			rules: OverrideRules{MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{
+				{Label: "core", Overrides: SettingsOverrideFields{HostSampleFrequencyTier: &firstTier}},
+			}},
+			want: "15m",
+		},
+		{
+			name:   "non-nil empty tier is an override",
+			base:   "15m",
+			labels: []string{"core"},
+			rules: OverrideRules{MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{
+				{Label: "core", Overrides: SettingsOverrideFields{HostSampleFrequencyTier: &emptyTier}},
+			}},
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveHostSampleFrequencyTier(tt.base, tt.labels, tt.rules); got != tt.want {
+				t.Fatalf("ResolveHostSampleFrequencyTier() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSettingsValidateRejectsInvalidOverrideScope(t *testing.T) {
 	t.Parallel()
 

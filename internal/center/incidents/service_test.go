@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -105,6 +106,8 @@ type fakeSnapshotReader struct {
 	activeByObjectSequences       map[string][][]IncidentRecord
 	hostSamples                   map[string][]runtimefacts.HostSample
 	hostSampleSequences           map[string][][]runtimefacts.HostSample
+	resourceHostSamples           map[string][]runtimefacts.HostSample
+	resourceHostSampleSequences   map[string][][]runtimefacts.HostSample
 	probeObs                      map[string][]runtimefacts.ProbeObservation
 	probeObservationSequences     map[string][][]runtimefacts.ProbeObservation
 	monitoringInstanceAggregates  map[string][]MonitoringInstanceHostDailyAggregate
@@ -158,6 +161,99 @@ func (f *fakeSnapshotReader) ListRecentHostSamples(_ context.Context, monitoring
 	}
 	return append([]runtimefacts.HostSample(nil), f.hostSamples[monitoringInstanceID]...), nil
 }
+func (f *fakeSnapshotReader) ListResourceWindowHostSamples(_ context.Context, monitoringInstanceID string, now time.Time) ([]runtimefacts.HostSample, error) {
+	appendIncidentTestTrace(f.trace, "host-window:"+monitoringInstanceID)
+	var samples []runtimefacts.HostSample
+	if sequences := f.resourceHostSampleSequences[monitoringInstanceID]; len(sequences) > 0 {
+		samples = sequences[0]
+		f.resourceHostSampleSequences[monitoringInstanceID] = sequences[1:]
+	} else if configured := f.resourceHostSamples[monitoringInstanceID]; configured != nil {
+		samples = configured
+	} else {
+		samples = f.hostSamples[monitoringInstanceID]
+	}
+	return boundedResourceWindowHostSamples(samples, now), nil
+}
+
+func boundedResourceWindowHostSamples(samples []runtimefacts.HostSample, now time.Time) []runtimefacts.HostSample {
+	anchorIndex := -1
+	for i := range samples {
+		if samples[i].ObservedAt.After(now) {
+			continue
+		}
+		if anchorIndex == -1 || newerFakeHostSample(samples[i], samples[anchorIndex]) {
+			anchorIndex = i
+		}
+	}
+	if anchorIndex == -1 {
+		return []runtimefacts.HostSample{}
+	}
+
+	anchorAt := samples[anchorIndex].ObservedAt
+	boundaryAt := anchorAt.Add(-30 * time.Minute)
+	boundaryExact := false
+	var predecessorAt time.Time
+	out := make([]runtimefacts.HostSample, 0, len(samples))
+	for _, sample := range samples {
+		switch {
+		case sample.ObservedAt.Equal(boundaryAt):
+			boundaryExact = true
+			out = append(out, sample)
+		case sample.ObservedAt.After(boundaryAt) && (sample.ObservedAt.Before(anchorAt) || sample.ObservedAt.Equal(anchorAt)):
+			out = append(out, sample)
+		case sample.ObservedAt.Before(boundaryAt) && (predecessorAt.IsZero() || sample.ObservedAt.After(predecessorAt)):
+			predecessorAt = sample.ObservedAt
+		}
+	}
+	if !boundaryExact && !predecessorAt.IsZero() {
+		for _, sample := range samples {
+			if sample.ObservedAt.Equal(predecessorAt) {
+				out = append(out, sample)
+			}
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return newerFakeHostSample(out[i], out[j])
+	})
+	return out
+}
+
+func newerFakeHostSample(a, b runtimefacts.HostSample) bool {
+	if !a.ObservedAt.Equal(b.ObservedAt) {
+		return a.ObservedAt.After(b.ObservedAt)
+	}
+	if a.IsBackfilled != b.IsBackfilled {
+		return !a.IsBackfilled
+	}
+	return a.ReceivedAt.After(b.ReceivedAt)
+}
+func TestFakeSnapshotReaderResourceWindowBoundsFutureAndPredecessor(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	predecessor := now.Add(-31 * time.Minute)
+	samples := []runtimefacts.HostSample{
+		{ObservedAt: now.Add(time.Minute)},
+		{ObservedAt: now},
+		{ObservedAt: now.Add(-10 * time.Minute)},
+		{ObservedAt: predecessor},
+		{ObservedAt: predecessor, ReceivedAt: predecessor.Add(time.Second)},
+		{ObservedAt: now.Add(-32 * time.Minute)},
+	}
+	reader := &fakeSnapshotReader{hostSamples: map[string][]runtimefacts.HostSample{"mi_window": samples}}
+
+	got, err := reader.ListResourceWindowHostSamples(context.Background(), "mi_window", now)
+	if err != nil {
+		t.Fatalf("ListResourceWindowHostSamples() error = %v", err)
+	}
+	if len(got) != 4 || !got[0].ObservedAt.Equal(now) || !got[1].ObservedAt.Equal(now.Add(-10*time.Minute)) {
+		t.Fatalf("resource window samples = %#v, want newest anchor, in-window sample, and both predecessor rows", got)
+	}
+	if !got[2].ObservedAt.Equal(predecessor) || !got[3].ObservedAt.Equal(predecessor) {
+		t.Fatalf("resource window predecessor rows = %#v, want all rows at latest timestamp before boundary", got)
+	}
+}
+
 func (f *fakeSnapshotReader) ListRecentProbeObservations(_ context.Context, targetID string, _ time.Time) ([]runtimefacts.ProbeObservation, error) {
 	appendIncidentTestTrace(f.trace, "probe:"+targetID)
 	if sequences := f.probeObservationSequences[targetID]; len(sequences) > 0 {
@@ -538,6 +634,9 @@ func TestServiceMonitoringInstanceProjectionConflictRereadsAndRetriesOnce(t *tes
 		hostSampleSequences: map[string][][]runtimefacts.HostSample{
 			monitoringInstanceID: {healthy, healthy, critical, critical},
 		},
+		resourceHostSampleSequences: map[string][][]runtimefacts.HostSample{
+			monitoringInstanceID: {healthy, critical},
+		},
 		activeByObjectSequences: map[string][][]IncidentRecord{
 			"monitoring_instance:" + monitoringInstanceID: {
 				{activeIncident(ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceDiskPressure, now.Add(-time.Hour))},
@@ -552,7 +651,7 @@ func TestServiceMonitoringInstanceProjectionConflictRereadsAndRetriesOnce(t *tes
 	}
 	notifier := &fakeNotifier{}
 	settings := centersettings.Default()
-	settingsRepo := &tracedSettingsRepository{settings: settings, trace: &trace}
+	settingsRepo := &tracedSettingsRepository{settings: settings, settingsSequence: []centersettings.CenterSettings{settings, settings, settings, settings}, trace: &trace}
 	service := NewSettingsBackedService(repo, &fakeTargetRepo{}, snapshots, writer, notifier, settingsRepo, slog.Default(), time.Minute, time.Minute)
 	service.now = func() time.Time { return now }
 
@@ -580,6 +679,8 @@ func TestServiceMonitoringInstanceProjectionConflictRereadsAndRetriesOnce(t *tes
 		"get:monitoring_instance:" + monitoringInstanceID,
 		"active:monitoring_instance:" + monitoringInstanceID,
 		"settings",
+		"settings",
+		"host-window:" + monitoringInstanceID,
 		"host:" + monitoringInstanceID,
 		"host:" + monitoringInstanceID,
 		"host-aggregate:" + monitoringInstanceID,
@@ -1609,6 +1710,55 @@ func (f *fakeSettingsRepository) GetPersistedIncidentDefaults(context.Context) (
 	}
 	return f.persistedIncidentDefaults, true, nil
 }
+func TestServiceResourcePressurePolicy(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 10, 0, 0, 123000000, time.UTC)
+	overrideTier := targets.FrequencyTier15m
+	settings := centersettings.Default()
+	settings.HostSampleFrequencyTier = targets.FrequencyTier1m
+	settings.OverrideRules.MonitoringInstanceLabels = []centersettings.MonitoringInstanceLabelOverrideRule{{
+		Label:     "resource-pressure",
+		Overrides: centersettings.SettingsOverrideFields{HostSampleFrequencyTier: &overrideTier},
+	}}
+	settingsError := errors.New("settings unavailable")
+
+	tests := []struct {
+		name          string
+		settingsRepo  SettingsRepository
+		labels        []string
+		wantInterval  time.Duration
+		wantErrorText string
+	}{
+		{name: "nil settings uses defaults", wantInterval: 5 * time.Second},
+		{name: "settings tier", settingsRepo: &fakeSettingsRepository{getSettingsResult: settings}, wantInterval: time.Minute},
+		{name: "label override", settingsRepo: &fakeSettingsRepository{getSettingsResult: settings}, labels: []string{"resource-pressure"}, wantInterval: 15 * time.Minute},
+		{name: "settings read error", settingsRepo: &fakeSettingsRepository{getSettingsErr: settingsError}, wantErrorText: "read center settings for resource pressure: settings unavailable"},
+		{name: "unknown tier", settingsRepo: &fakeSettingsRepository{getSettingsResult: centersettings.CenterSettings{}}, wantErrorText: "invalid resource pressure sample frequency tier"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &Service{settingsRepo: tt.settingsRepo}
+			got, err := service.resourcePressurePolicy(context.Background(), tt.labels, now)
+			if tt.wantErrorText != "" {
+				if err == nil || err.Error() != tt.wantErrorText {
+					t.Fatalf("resourcePressurePolicy() error = %v, want %q", err, tt.wantErrorText)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resourcePressurePolicy() error = %v", err)
+			}
+			if got.EvaluatedAt != now {
+				t.Fatalf("resourcePressurePolicy() evaluated_at = %v, want %v", got.EvaluatedAt, now)
+			}
+			if got.SampleInterval != tt.wantInterval {
+				t.Fatalf("resourcePressurePolicy() sample interval = %v, want %v", got.SampleInterval, tt.wantInterval)
+			}
+		})
+	}
+}
 
 func TestServiceNotificationFlags(t *testing.T) {
 	makeEvaluation := func(reason NotificationReason) classEvaluation {
@@ -1986,7 +2136,7 @@ func TestServiceAfterSuccessfulSyncSuppressesHeartbeatTransitionsForExplicitAllB
 	settings := centersettings.Default()
 	settings.IncidentDefaults.HeartbeatIntervalSeconds = 5
 	settings.IncidentDefaults.StaleThresholdIntervals = 12
-	settingsRepo := &fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings, persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
 	allBackfill := []syncing.HeartbeatPayload{{SyncBatchID: "batch-backfill", IsBackfilled: true}}
 
 	t.Run("stale start is suppressed", func(t *testing.T) {
@@ -2105,7 +2255,7 @@ func TestServiceAfterSuccessfulSyncSuppressesHeartbeatTransitionsForExplicitAllB
 			},
 			trace: &trace,
 		}
-		settingsRepo := &tracedSettingsRepository{settingsSequence: []centersettings.CenterSettings{settings, settings}, trace: &trace}
+		settingsRepo := &tracedSettingsRepository{settings: settings, settingsSequence: []centersettings.CenterSettings{settings, settings, settings, settings}, trace: &trace}
 		writer := &fakeMutationWriter{applyErrors: []error{ErrIncidentProjectionConflict, nil}, trace: &trace}
 		service := NewSettingsBackedService(repo, &fakeTargetRepo{}, snapshots, writer, nil, settingsRepo, slog.Default(), 5*time.Second, time.Minute)
 		service.now = func() time.Time { return now.Add(time.Second) }
@@ -2124,8 +2274,8 @@ func TestServiceAfterSuccessfulSyncSuppressesHeartbeatTransitionsForExplicitAllB
 		if got := snapshots.liveHeartbeatReceiptCalls[monitoringInstanceID]; got != 0 {
 			t.Fatalf("receipt reads = %d, want 0 across all-backfill CAS attempts", got)
 		}
-		if got := strings.Count(strings.Join(trace, "|"), "settings"); got != 2 {
-			t.Fatalf("trace = %#v, want settings reread on both attempts", trace)
+		if got := strings.Count(strings.Join(trace, "|"), "settings"); got != 4 {
+			t.Fatalf("trace = %#v, want policy and cadence settings reads on both attempts", trace)
 		}
 	})
 }
@@ -2149,7 +2299,7 @@ func TestServiceAfterSuccessfulSyncEvaluatesHeartbeatForMixedOrLiveCarrier(t *te
 			service := NewSettingsBackedService(
 				&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_" + tt.name, MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}},
 				&fakeTargetRepo{}, &fakeSnapshotReader{}, writer, notifier,
-				&fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true},
+				&fakeSettingsRepository{getSettingsResult: settings, persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true},
 				slog.Default(), 5*time.Second, time.Minute,
 			)
 
@@ -2659,7 +2809,7 @@ func TestServiceHeartbeatPolicyUsesPersistedThresholdInPeriodicAndPostSync(t *te
 					record := monitoringinstances.Record{MonitoringInstanceID: "mi_policy", DisplayName: "policy instance", MonitoringStatus: monitoringinstances.MonitoringEnabled, LifecycleStatus: monitoringinstances.LifecycleInUse, LastHeartbeatAt: &lastHeartbeat}
 					repo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: record, listMonitoringInstancesResult: []monitoringinstances.Record{record}}
 					writer := &fakeMutationWriter{}
-					settingsRepo := &fakeSettingsRepository{persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
+					settingsRepo := &fakeSettingsRepository{getSettingsResult: settings, persistedIncidentDefaults: settings.IncidentDefaults, persistedIncidentExists: true}
 					service := NewSettingsBackedService(repo, &fakeTargetRepo{}, &fakeSnapshotReader{}, writer, nil, settingsRepo, slog.Default(), 5*time.Second, time.Minute)
 
 					if err := path.run(service); err != nil {
@@ -2727,6 +2877,44 @@ func TestServiceHeartbeatPolicySettingsFailureFailsClosed(t *testing.T) {
 			t.Fatalf("logs = %q, want stable post-sync evaluation failure message", logOutput.String())
 		}
 	})
+}
+func TestServiceResourcePressurePolicySettingsReadFailureFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 14, 0, 0, 0, time.UTC)
+	settings := centersettings.Default()
+	settingsErr := errors.New("resource pressure settings unavailable")
+	monitoringInstanceID := "mi_resource_settings_error"
+	writer := &fakeMutationWriter{}
+	settingsRepo := &fakeSettingsRepository{
+		getSettingsErr:            settingsErr,
+		persistedIncidentDefaults: settings.IncidentDefaults,
+		persistedIncidentExists:   true,
+	}
+	service := NewSettingsBackedService(
+		&fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{
+			MonitoringInstanceID: monitoringInstanceID,
+			MonitoringStatus:     monitoringinstances.MonitoringEnabled,
+			LifecycleStatus:      monitoringinstances.LifecycleInUse,
+			LastHeartbeatAt:      &now,
+		}},
+		&fakeTargetRepo{},
+		&fakeSnapshotReader{},
+		writer,
+		nil,
+		settingsRepo,
+		slog.Default(),
+		5*time.Second,
+		time.Minute,
+	)
+
+	err := service.evaluateMonitoringInstance(context.Background(), monitoringInstanceID, now)
+	if err == nil || !errors.Is(err, settingsErr) || !strings.Contains(err.Error(), "read center settings for resource pressure") {
+		t.Fatalf("evaluateMonitoringInstance() error = %v, want wrapped resource pressure settings error", err)
+	}
+	if len(writer.mutations) != 0 || len(writer.notifications) != 0 {
+		t.Fatalf("mutations = %#v notifications = %#v, want fail-closed zero side effects", writer.mutations, writer.notifications)
+	}
 }
 
 func TestServiceHeartbeatRecoveryUsesStableReceiptEvidence(t *testing.T) {
@@ -3142,7 +3330,10 @@ func TestServiceAfterSuccessfulSyncUsesStoredLoadForResourcePressure(t *testing.
 		},
 	}
 	writer := &fakeMutationWriter{}
-	service := NewService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, slog.Default(), 30*time.Second, time.Minute)
+	settings := centersettings.Default()
+	settings.HostSampleFrequencyTier = targets.FrequencyTier5m
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings}
+	service := NewSettingsBackedService(monitoringInstanceRepo, targetRepo, snapshots, writer, nil, settingsRepo, slog.Default(), 30*time.Second, time.Minute)
 	service.now = func() time.Time { return now }
 
 	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
@@ -3177,6 +3368,7 @@ func TestMonitoringInstanceResourceSamplesFromHostSamplesPreservesReplayOrdering
 func TestSettingsBackedResourcePressureUsesPersistedLoadAndIOWaitThresholds(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	settings := centersettings.Default()
+	settings.HostSampleFrequencyTier = targets.FrequencyTier15m
 	settings.IncidentDefaults.Load5Warning = 4
 	settings.IncidentDefaults.Load5Critical = 8
 	settings.IncidentDefaults.IOWaitWarningPct = 20

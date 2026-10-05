@@ -103,6 +103,25 @@ type TargetLabelOverrideRule struct {
 	Overrides SettingsOverrideFields `json:"overrides"`
 }
 
+// ResolveHostSampleFrequencyTier applies monitoring-instance label overrides in
+// rule order, returning the first matching non-nil host sample frequency tier.
+func ResolveHostSampleFrequencyTier(base string, labels []string, rules OverrideRules) string {
+	for _, rule := range rules.MonitoringInstanceLabels {
+		matched := false
+		for _, label := range labels {
+			if label == rule.Label {
+				matched = true
+				break
+			}
+		}
+		if !matched || rule.Overrides.HostSampleFrequencyTier == nil {
+			continue
+		}
+		return *rule.Overrides.HostSampleFrequencyTier
+	}
+	return base
+}
+
 type SettingsOverrideFields struct {
 	HostSampleFrequencyTier *string                   `json:"host_sample_frequency_tier,omitempty"`
 	ProbeFrequencyDefaults  *ProbeFrequencyOverride   `json:"probe_frequency_defaults,omitempty"`
