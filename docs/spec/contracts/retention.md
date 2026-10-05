@@ -23,6 +23,10 @@
 
 设置缩短保留时间时也必须先聚合并封存涉及桶，再执行删除。不能先清理后补算，不能把较小样本集覆盖到已封存桶。扩大保留期限不会恢复已删除的原始数据或聚合。
 
+CPU usage/iowait/steal 的 avg/max 只纳入整组可用行：`cpu_rates_valid is not false` 且三个值均在 `[0,100]`。三个 nullable 有效计数为 `cpu_valid_sample_count`、`cpu_valid_backfilled_sample_count`、`cpu_valid_maintenance_sample_count`；新聚合必须写非 NULL（包括零），分别计可用、可用且回填、可用且维护。总 host sample_count 及非 CPU 聚合不变；整日无可用 CPU 时六个 CPU avg/max 为 NULL，非 CPU 日聚合仍保留。
+
+迁移仅添加 nullable marker/count 并放开六个 CPU avg/max 的 NOT NULL，不默认填值、不历史回填或重算 finalized。计数必须非负，CPU 子计数不大于 CPU 有效数，有效数不大于 host 总数；legacy NULL 分别按原 host 总数/回填数/维护数解释。历史范围内 guest 偏差不可恢复，不反推或宣称已纠正；范围外、NaN/Infinity 的 legacy CPU 不成为新聚合或趋势基线。raw 清理后不能由日聚合复活伪零。
+
 ## 验证
 
 - `internal/center/settings`：默认 30/365、30 与 365 边界、29 与 366 拒绝、已移除低频 TTL 不再序列化。

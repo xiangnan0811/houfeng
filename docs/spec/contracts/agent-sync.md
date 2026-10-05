@@ -304,16 +304,16 @@ if ok {
 3. **Contracts**
    - Linux: 读取 `/proc/loadavg`、`/proc/meminfo`、`/proc/uptime`、`/proc/stat`、`/proc/net/dev`、`/proc/diskstats`，并用 `statfs("/")` 计算磁盘/inode。
    - Darwin: 不读取 `/proc/*`；用 `sysctl -n vm.loadavg`、`sysctl -n hw.memsize`、`sysctl -n vm.swapusage`、`sysctl -n kern.boottime` 和 `vm_stat` 生成本地开发可用的 host sample。
-   - 不新增 agent env key，不改变 `internal/contracts/agentapi.HostSamplePayload` JSON contract。
+   - 不新增 agent env key。CPU usage/iowait/steal 共用 `cpu_rates_valid`；新 Agent 每次明确发送 true/false，原百分比 JSON 键不变。
 
 4. **Validation & Error Matrix**
-   - 必需来源读取失败 -> `Collect` 返回带上下文的 wrapped error，例如 `darwin sysctl vm.loadavg: %w` 或 `read /proc/loadavg: %w`。
+   - 除 `/proc/stat` 外的必需来源读取失败 -> `Collect` 返回带上下文的 wrapped error，例如 `darwin sysctl vm.loadavg: %w` 或 `read /proc/loadavg: %w`。CPU 文件缺失或解析失败只令 CPU 组不可用，保留同条样本的其他观测。
    - Darwin `vm.swapusage` 读取失败 -> `swap_used_pct=0`，不得阻塞整条 host sample，因为部分 macOS 环境可能禁用 swap。
-   - Darwin rate-based 字段没有稳定来源时保持零值，不得让 center 拒收 host sample。
+   - Darwin 没有真实 CPU 采集，`cpu_rates_valid=false`，CPU 零值仅为占位，不是观测；其他 rate-based 字段保持既有行为。
 
 5. **Good / Base / Bad Cases**
    - Good: macOS 本地 agent 能完成 `host_samples` 上报，Linux systemd agent 仍走完整 procfs 指标。
-   - Base: 首个 sample 的 CPU/net/disk rate 字段为零，后续 Linux sample 根据 previous snapshot 推导 rate。
+   - Base: 首个 sample 的 CPU 为不可用；后续 Linux sample 根据 previous snapshot 推导 rate。CPU 缺失后的首个有效快照仅重建基线，再下一正常区间恢复。
    - Bad: 在 Darwin 分支 fallback 读取 `/proc/loadavg`，会让 macOS smoke 重新出现 `no such file or directory`。
 
 6. **Tests Required**
@@ -324,6 +324,16 @@ if ok {
 7. **Wrong vs Correct**
    - Wrong: 在 `agent/runtime` 里按 OS 分支，或让 runtime 感知 `sysctl` / `/proc` 文件名。
    - Correct: 在 `hostsample.New()` / `Provider.Collect` 内选择平台 collector，runtime 只消费 `HostSamplePayload`。
+
+
+### CPU 速率与升级边界
+
+- Linux 仅累加 user、nice、system、idle、iowait、irq、softirq、steal 八个基础计数；guest/guest_nice 已包含在 user/nice，额外字段只验证整数格式，不重复累计或扣除。至少七项，缺 steal 按零。
+- 首次、CPU 来源缺失/非法、基础字段数量变化、零/未递增时间、任一基础计数回退、累计加和溢出或总 delta 为零，整组 CPU 标记 false。有效区间 usage 是除 idle/iowait 外的 delta 比例，iowait/steal 使用同一八项 delta 分母；usage 包含 steal。
+- Center 的共同判定为 `(marker == nil || marker) && usage/iowait/steal 全部有限且在 [0,100]`。nil/SQL NULL 仅是 legacy 未声明，不代表已验证；false 占位零不能当成观测。有限越界 CPU 只规范化 marker=false，不拒绝整批 sync；JSON 非有限数的原入口拒绝规则不变。
+- 旧队列缺 marker 按 legacy 读取；新队列持久化和重放必须保留 false，无需新队列版本，不能删除 marker 或重发伪零。
+- 支持旧 Agent→新 Center、新 Agent→新 Center；新 Agent→旧 Center 不支持（严格未知字段解码）。先暂停 Agent 自动升级，再迁移并升级所有接收 sync 的 Center 和 Web，确认全部副本支持字段后才恢复 Agent 升级。
+- 验收 Center 也必须先升级。生产不能回滚到不认识字段的 Center；保留已升级数据库/Center并修复前滚，必要时暂停 Agent 升级，不能清理离线队列绕过兼容边界。
 
 ## Scenario: Agent one-command install contract
 

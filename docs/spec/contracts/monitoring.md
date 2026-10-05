@@ -190,6 +190,15 @@ type commandAuditActorResponse struct {
 
 覆盖不可转移归属、一个当前实例约束、默认列表排除退役/归档、退役重试幂等性与新请求冲突、旧会话仅保留在线证据、显式重新接入同 ID 新会话、命令取消审计、目标生命周期与控制分离、维护/暂停/未接入不冒充健康。归档连续 180 分钟检查和事务边界由资产生命周期合同定义。
 
+## CPU 局部缺测与告警
+
+- usage/iowait/steal 是唯一 CPU 速率组，不含 load 或容器 CPU。原始读取、stream、聚合与告警共同检查 `cpu_rates_valid` 与三值有限 `[0,100]`；nil legacy 保留范围内数值但不宣称已验证。false 不改变在线或生命周期，内存、网络、磁盘等仍正常消费。
+- bucket 的样本总数计所有 host rows，CPU 平均只计可用 CPU；整桶 CPU 不可用为 null，真实有效零为 0。latest/recent HTTP 和 WS seed/append 在对外副本中将非有限 CPU 分量替换为可编码的 0 并显式 false；有限分量保留，数据库原值不重写，不能在替换后反判 true。
+- 资源压力 CPU 的 15/30 分钟分支要求原跨度成立且窗口内每个样本 CPU 可用；不能删除坏点后用两端好点伪造连续证据。非 CPU 压力仍按完整窗口独立判断。
+- CPU 恢复窗口未知时，已有 incident 原记录和摘要保持不变；只有非 CPU 确证的严格更高等级且不受维护/回填抑制时才能升级。同级、低级或无 active 不降级也不恢复；previous 为空时非 CPU 仍可正常新建。资源压力的已有 critical 使用 30 分钟恢复窗口，notice/alert 使用 15 分钟；这一窗口同时约束自然恢复与已有 active 结果的更新。非 critical 最近 15 分钟完整可用时，更早的 CPU 缺测或不足 30 分钟历史不得阻止正常的同级更新或降级。
+- 趋势按指标独立加权：load 使用正 host 权重；iowait/steal 使用范围内非空 average 和正 CPU 有效权重。权重沿用 `max(0,count-backfilled-maintenance)`，legacy CPU count 各自回退原 host count；host 权重为零不能抹去有效 CPU 日。无权重的任一基线保持 nil，不生成零基线。
+- CPU 趋势当前值要求至少三条、正跨度且全部 CPU 可用。自然恢复要求原 30 分钟跨度、当前 CPU 全可用及三个基线均非空；未知必要指标时仍只允许不受抑制的非 CPU 严格升级。回填不追发通知。
+
 ## 模型层关键不变量
 
 > 来源：当前代码与 `docs/design/product-and-architecture.md`。本节承接原根规范中的模型不变量；历史架构仅作背景。**任何 SQL / 仓库 / 服务改动都必须先验证这些不变量没被破坏**。

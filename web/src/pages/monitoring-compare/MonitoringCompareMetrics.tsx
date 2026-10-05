@@ -3,6 +3,8 @@ import { useMemo, useState, type ReactNode } from 'react'
 import { MetricChart, type MetricChartThreshold } from '../../components/atoms/MetricChart'
 import { MonoDigits } from '../../components/atoms/Mono'
 import {
+  currentCPUMetricValue,
+  lastHostSamplePoint,
   seriesMax,
   seriesValueAt,
   toAscending,
@@ -75,7 +77,9 @@ export function MonitoringCompareMetrics({ metricPoints, window: runtimeWindow }
     ascending.length === 0 ||
     (runtimeWindow !== undefined ? runtimeWindow.sample_count === 0 : false)
 
-  const cpuReadout = seriesValueAt(cpuSeries, hoveredAt)
+  const cpuHostPoint = lastHostSamplePoint(ascending)
+  const cpuReadout = hoveredAt ? seriesValueAt(cpuSeries, hoveredAt) : currentCPUMetricValue(ascending, 'cpu_usage_pct')
+  const cpuUnavailable = hoveredAt == null && cpuHostPoint != null && cpuReadout == null
   const memReadout = seriesValueAt(memSeries, hoveredAt)
   const swapReadout = seriesValueAt(swapSeries, hoveredAt)
   const diskReadout = seriesValueAt(diskSeries, hoveredAt)
@@ -109,6 +113,7 @@ export function MonitoringCompareMetrics({ metricPoints, window: runtimeWindow }
             <span className="monitoring-detail-chart__current">
               <span className={valueClass(cpuTone)}>
                 <MonoDigits>{formatPercent(cpuReadout)}</MonoDigits>
+                {cpuUnavailable ? <span className="monitoring-detail-chart__cpu-unavailable">CPU 采样不可用</span> : null}
               </span>
             </span>
           </header>

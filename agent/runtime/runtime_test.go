@@ -3299,6 +3299,7 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	path := t.TempDir() + "/buffer.json"
 	seedStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	falseCPU := false
 	seeded := agentapi.SyncRequest{
 		MonitoringInstanceID: "monitoringInstance-123",
 		SyncToken:            "sync-token-001",
@@ -3307,6 +3308,16 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 			AgentVersion: "dev",
 			Fingerprint:  "fp-001",
 			SyncBatchID:  "seeded",
+		}},
+		HostSamples: []agentapi.HostSamplePayload{{
+			ObservedAt:    time.Now().UTC().Add(-time.Minute),
+			AgentVersion:  "dev",
+			Fingerprint:   "fp-001",
+			SyncBatchID:   "seeded",
+			CPURatesValid: &falseCPU,
+			CPUUsagePct:   0,
+			CPUIOWaitPct:  0,
+			CPUStealPct:   0,
 		}},
 	}
 	if _, err := seedStore.Enqueue(context.Background(), seeded); err != nil {
@@ -3330,7 +3341,10 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 		if len(client.syncRequests) == 0 {
 			t.Fatal("Sync() requests = 0, want seeded backfilled request")
 		}
-		t.Fatalf("first Sync() seeded-entry match = false (backfilled=%t)", client.syncRequests[0].Heartbeats[0].IsBackfilled)
+		t.Fatalf("Sync() seeded-entry match = false (backfilled=%t)", client.syncRequests[0].Heartbeats[0].IsBackfilled)
+	}
+	if len(client.syncRequests[0].HostSamples) != 1 || client.syncRequests[0].HostSamples[0].CPURatesValid == nil || *client.syncRequests[0].HostSamples[0].CPURatesValid {
+		t.Fatalf("Sync() replayed CPURatesValid = %#v, want explicit false", client.syncRequests[0].HostSamples[0].CPURatesValid)
 	}
 }
 

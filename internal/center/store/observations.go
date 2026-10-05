@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/observations"
+	"houfeng/internal/contracts/agentapi"
 )
 
 type PostgresObservationRepository struct {
@@ -64,6 +65,7 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 				agent_version,
 				fingerprint,
 				cpu_usage_pct,
+				cpu_rates_valid,
 				load_1,
 				load_5,
 				load_15,
@@ -88,7 +90,8 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 				sync_batch_id,
 				containers
 			) values (
-				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
+				$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
+				$16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30
 			)`,
 			sample.MonitoringInstanceID,
 			sample.ObservedAt,
@@ -96,6 +99,7 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 			sample.AgentVersion,
 			sample.Fingerprint,
 			sample.CPUUsagePct,
+			normalizeCPURatesValidMarker(sample.CPURatesValid, sample.CPUUsagePct, sample.CPUIOWaitPct, sample.CPUStealPct),
 			sample.Load1,
 			sample.Load5,
 			sample.Load15,
@@ -170,6 +174,12 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 	return nil
 }
 
+func normalizeCPURatesValidMarker(valid *bool, usage, iowait, steal float64) *bool {
+	if agentapi.CPURatesUsable(valid, usage, iowait, steal) {
+		return valid
+	}
+	return new(false)
+}
 func derefInt(value *int) any {
 	if value == nil {
 		return nil

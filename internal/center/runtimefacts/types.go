@@ -14,6 +14,7 @@ type HostSample struct {
 	AgentVersion         string                   `json:"agent_version"`
 	Fingerprint          string                   `json:"fingerprint"`
 	CPUUsagePct          float64                  `json:"cpu_usage_pct"`
+	CPURatesValid        *bool                    `json:"cpu_rates_valid,omitempty"`
 	Load1                float64                  `json:"load_1"`
 	Load5                float64                  `json:"load_5"`
 	Load15               float64                  `json:"load_15"`

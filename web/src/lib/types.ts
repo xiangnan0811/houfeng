@@ -272,6 +272,7 @@ export type HostSample = {
   agent_version: string
   fingerprint: string
   cpu_usage_pct: number
+  cpu_rates_valid?: boolean | null
   load_1: number
   load_5: number
   load_15: number

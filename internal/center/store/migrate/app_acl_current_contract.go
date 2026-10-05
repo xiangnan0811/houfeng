@@ -58,6 +58,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	monitoringStateEnumAppACLCurrentMigrationFragment(),
 	vpsMonitoringLifecycleAppACLCurrentMigrationFragment(),
 	ipQualityHostAddressIdentityAppACLCurrentMigrationFragment(),
+	cpuRatesValidAppACLCurrentMigrationFragment(),
 }
 
 func vpsMonitoringLifecycleAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -129,6 +130,13 @@ func heartbeatIncidentPolicyAppACLCurrentMigrationFragment() AppACLCurrentMigrat
 func networkRatesValidAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
 	return AppACLCurrentMigrationFragment{
 		Migration:  "0064_add_network_rates_valid.sql",
+		Privileges: func(string) []AppACLPrivilege { return nil },
+	}
+}
+
+func cpuRatesValidAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0069_add_cpu_rates_valid.sql",
 		Privileges: func(string) []AppACLPrivilege { return nil },
 	}
 }

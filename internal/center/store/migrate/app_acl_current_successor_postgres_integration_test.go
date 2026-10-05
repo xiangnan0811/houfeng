@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -31,18 +32,7 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 			defer cancel()
 			fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
 			migratorDB := fixture.openRolePool(t, ctx, appACLCurrentTransitionMigrator)
-			oldFS := appACLCurrentTransitionTestFS(t)
-			for _, name := range []string{
-				"0063_tune_heartbeat_incident_policy.sql",
-				"0064_add_network_rates_valid.sql",
-				"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
-				"0066_constrain_monitoring_and_target_state_values.sql",
-				"0067_refactor_vps_monitoring_lifecycle.sql",
-				"0068_normalize_ip_quality_host_address_identity.sql",
-			} {
-				delete(oldFS, name)
-			}
-			oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-6]...)
+			oldFS, oldFragments := appACLCurrentExactP62SourceFixture(t)
 			oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 			if err != nil {
 				t.Fatalf("compile exact v0.79.4 source: %v", err)
@@ -300,22 +290,35 @@ type exactAppACLCurrentPredecessorState struct {
 	input      appACLEffectiveCatalogVerifierInput
 }
 
+func appACLCurrentExactP62SourceFixture(t *testing.T) (fstest.MapFS, []AppACLCurrentMigrationFragment) {
+	t.Helper()
+	const lastMigration = "0062_create_vps_create_idempotency.sql"
+	oldFS := appACLCurrentTransitionTestFS(t)
+	if _, ok := oldFS[lastMigration]; !ok {
+		t.Fatalf("exact P62 fixture is missing boundary migration %q", lastMigration)
+	}
+	for name := range oldFS {
+		if name > lastMigration {
+			delete(oldFS, name)
+		}
+	}
+	oldFragments := make([]AppACLCurrentMigrationFragment, 0, len(appACLCurrentMigrationFragments))
+	for _, fragment := range appACLCurrentMigrationFragments {
+		if fragment.Migration <= lastMigration {
+			oldFragments = append(oldFragments, cloneAppACLCurrentMigrationFragment(fragment))
+		}
+	}
+	if len(oldFragments) == 0 || oldFragments[len(oldFragments)-1].Migration != lastMigration {
+		t.Fatalf("exact P62 fixture fragments do not end at %q", lastMigration)
+	}
+	return oldFS, oldFragments
+}
+
 func seedExactAppACLCurrentPredecessor(t *testing.T, ctx context.Context, globalThreshold int) exactAppACLCurrentPredecessorState {
 	t.Helper()
 	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
 	migratorDB := fixture.openRolePool(t, ctx, appACLCurrentTransitionMigrator)
-	oldFS := appACLCurrentTransitionTestFS(t)
-	for _, name := range []string{
-		"0063_tune_heartbeat_incident_policy.sql",
-		"0064_add_network_rates_valid.sql",
-		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
-		"0066_constrain_monitoring_and_target_state_values.sql",
-		"0067_refactor_vps_monitoring_lifecycle.sql",
-		"0068_normalize_ip_quality_host_address_identity.sql",
-	} {
-		delete(oldFS, name)
-	}
-	oldFragments := append([]AppACLCurrentMigrationFragment(nil), appACLCurrentMigrationFragments[:len(appACLCurrentMigrationFragments)-6]...)
+	oldFS, oldFragments := appACLCurrentExactP62SourceFixture(t)
 	oldSource, err := compileAppACLCurrentSourceContract(oldFS, oldFragments)
 	if err != nil {
 		t.Fatalf("compile exact v0.79.4 source: %v", err)

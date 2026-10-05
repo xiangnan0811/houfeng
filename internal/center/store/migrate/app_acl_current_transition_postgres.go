@@ -253,41 +253,68 @@ func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
-	// 0067 changes the fresh-install lifecycle contract, not the heartbeat policy.
-	// 0068 only adds address identity parsing and must not be classified as a
-	// heartbeat or lifecycle transition.
+	// When present, 0069 adds CPU validity schema only and must be the unique
+	// terminal migration.  0068 adds address identity parsing, while 0067
+	// changes the fresh-install lifecycle contract; neither changes heartbeat
+	// policy.
 	successorNames := transition.successor.names
+	cpuRatesMigrationPending := false
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0069_add_cpu_rates_valid.sql" {
+		cpuRatesMigrationPending = true
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0069_add_cpu_rates_valid.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
+
 	addressIdentityMigrationPending := false
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0068_normalize_ip_quality_host_address_identity.sql" {
 		addressIdentityMigrationPending = true
 		successorNames = successorNames[:n-1]
 	}
+	for _, name := range successorNames {
+		if name == "0068_normalize_ip_quality_host_address_identity.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
+
 	lifecyclePending := appACLCurrentTransitionContainsMigration(transition, "0067_refactor_vps_monitoring_lifecycle.sql")
 	if lifecyclePending {
-		if n := len(successorNames); n == 0 || successorNames[n-1] != "0067_refactor_vps_monitoring_lifecycle.sql" {
+		if !addressIdentityMigrationPending ||
+			len(successorNames) == 0 ||
+			successorNames[len(successorNames)-1] != "0067_refactor_vps_monitoring_lifecycle.sql" {
 			return false, fmt.Errorf("unsupported registered APP transition")
 		}
 		successorNames = successorNames[:len(successorNames)-1]
 	}
 	switch {
 	case len(successorNames) == 0:
-		// P66 has only the lifecycle refactor pending; P67 has only 0068.
-		if !addressIdentityMigrationPending {
+		// P68 has only 0069; P67 has 0068 and 0069; P66 has 0067,
+		// 0068, and 0069.  All are non-heartbeat transitions.
+		if !addressIdentityMigrationPending && !cpuRatesMigrationPending {
 			return false, fmt.Errorf("unsupported registered APP transition")
 		}
 		return false, nil
 	case len(successorNames) == 4 &&
+		lifecyclePending &&
+		addressIdentityMigrationPending &&
 		successorNames[0] == "0063_tune_heartbeat_incident_policy.sql" &&
 		successorNames[1] == "0064_add_network_rates_valid.sql" &&
 		successorNames[2] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
 		successorNames[3] == "0066_constrain_monitoring_and_target_state_values.sql":
 		return true, nil
 	case len(successorNames) == 3 &&
+		lifecyclePending &&
+		addressIdentityMigrationPending &&
 		successorNames[0] == "0064_add_network_rates_valid.sql" &&
 		successorNames[1] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
 		successorNames[2] == "0066_constrain_monitoring_and_target_state_values.sql":
 		return false, nil
 	case len(successorNames) == 2 &&
+		lifecyclePending &&
+		addressIdentityMigrationPending &&
 		successorNames[0] == "0065_extend_vps_lifecycle_audit_and_snapshot.sql" &&
 		successorNames[1] == "0066_constrain_monitoring_and_target_state_values.sql":
 		return false, nil

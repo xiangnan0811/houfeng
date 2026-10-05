@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { HostSample } from '../../lib/types'
 import {
   compareHostSampleRecency,
+  hostCPURate,
   hostNetworkRate,
   hostSampleToMetricPoint,
   isEligibleHostSample,
@@ -116,6 +117,38 @@ describe('runtimeObservation', () => {
     expect(applyHttpLatestSample(previousEpoch, rebound, 'mi_001', '2026-04-24T10:01:05Z')?.sync_batch_id).toBe('epoch-b')
   })
 
+  it('keeps a real CPU zero and drops an explicit false placeholder', () => {
+    expect(hostCPURate(sample({ cpu_usage_pct: 0, cpu_iowait_pct: 0, cpu_steal_pct: 0, cpu_rates_valid: true }), 'cpu_usage_pct')).toBe(0)
+    expect(hostCPURate(sample({ cpu_usage_pct: 0, cpu_iowait_pct: 0, cpu_steal_pct: 0, cpu_rates_valid: true }), 'cpu_steal_pct')).toBe(0)
+    expect(hostCPURate(sample({ cpu_usage_pct: 0, cpu_iowait_pct: 0, cpu_steal_pct: 0, cpu_rates_valid: false }), 'cpu_usage_pct')).toBeNull()
+    expect(hostCPURate(sample({ cpu_usage_pct: 20, cpu_iowait_pct: 1, cpu_steal_pct: 0, cpu_rates_valid: false }), 'cpu_iowait_pct')).toBeNull()
+    expect(hostCPURate(null, 'cpu_usage_pct')).toBeNull()
+  })
+
+  it('accepts legacy nil CPU rates only when the whole group is finite and inside 0 to 100', () => {
+    const legacy = sample({ cpu_usage_pct: 12, cpu_iowait_pct: 3, cpu_steal_pct: 100 })
+    delete legacy.cpu_rates_valid
+    expect(hostCPURate(legacy, 'cpu_usage_pct')).toBe(12)
+    expect(hostCPURate(sample({ cpu_usage_pct: 12, cpu_iowait_pct: 3, cpu_steal_pct: 1, cpu_rates_valid: null }), 'cpu_steal_pct')).toBe(1)
+    expect(hostCPURate(sample({ cpu_usage_pct: 12, cpu_iowait_pct: 3, cpu_steal_pct: 1, cpu_rates_valid: true }), 'cpu_iowait_pct')).toBe(3)
+
+    for (const [usage, iowait, steal] of [
+      [-1, 0, 0],
+      [0, 101, 0],
+      [0, 0, Number.NaN],
+      [Number.POSITIVE_INFINITY, 0, 0],
+      [0, Number.NEGATIVE_INFINITY, 0],
+    ] as const) {
+      const invalid = sample({ cpu_usage_pct: usage, cpu_iowait_pct: iowait, cpu_steal_pct: steal, cpu_rates_valid: true })
+      expect(hostCPURate(invalid, 'cpu_usage_pct')).toBeNull()
+      expect(hostCPURate(invalid, 'cpu_iowait_pct')).toBeNull()
+      expect(hostCPURate(invalid, 'cpu_steal_pct')).toBeNull()
+      const unmarked = sample({ cpu_usage_pct: usage, cpu_iowait_pct: iowait, cpu_steal_pct: steal })
+      delete unmarked.cpu_rates_valid
+      expect(hostCPURate(unmarked, 'cpu_usage_pct')).toBeNull()
+    }
+  })
+
   it('maps live network rates into series points and leaves unknown rates as null', () => {
     const point = hostSampleToMetricPoint(sample({ net_in_bytes_per_sec: 0, network_rates_valid: true, swap_used_pct: 4, load_1: 0.9, disk_busy_pct: 6 }))
     expect(point.net_in_bytes_per_sec).toBe(0)
@@ -123,6 +156,23 @@ describe('runtimeObservation', () => {
     expect(point.load_1).toBe(0.9)
     expect(point.disk_busy_pct).toBe(6)
     expect(hostSampleToMetricPoint(sample({ net_in_bytes_per_sec: 8, network_rates_valid: false })).net_in_bytes_per_sec).toBeNull()
+  })
+
+  it('nulls only the CPU group when rates are unusable and keeps the raw sample count', () => {
+    const point = hostSampleToMetricPoint(sample({
+      cpu_usage_pct: 0,
+      cpu_iowait_pct: 0,
+      cpu_steal_pct: 0,
+      cpu_rates_valid: false,
+      mem_used_pct: 44,
+      disk_used_pct: 21,
+    }))
+    expect(point.sample_count).toBe(1)
+    expect(point.cpu_usage_pct).toBeNull()
+    expect(point.cpu_iowait_pct).toBeNull()
+    expect(point.mem_used_pct).toBe(44)
+    expect(point.disk_used_pct).toBe(21)
+    expect(hostSampleToMetricPoint(sample({ cpu_usage_pct: 0, cpu_iowait_pct: 0, cpu_steal_pct: 0, cpu_rates_valid: true })).cpu_usage_pct).toBe(0)
   })
 
   it('accepts facts without a window for legacy payloads and requires matching keys otherwise', () => {

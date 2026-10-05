@@ -12,8 +12,10 @@ import {
 } from '../../lib/format'
 import type { HostSample, MonitoringRuntimeWindow } from '../../lib/types'
 import {
+  currentCPUMetricValue,
   formatCapacityBytes,
   formatCompactRateAxis,
+  lastHostSamplePoint,
   seriesMax,
   seriesValueAt,
   thresholdLevelsText,
@@ -26,6 +28,7 @@ import {
   OBSERVATION_CHART_HEIGHT,
   type ObservationLayout,
 } from './monitoringDetailScale'
+import { hostCPURate } from './runtimeObservation'
 import type { TimeWindow } from './types'
 
 type Layout = ObservationLayout
@@ -290,13 +293,16 @@ export function MonitoringDetailObservations({
   const netHint = '下行与上行速率（B/s），两条都为正、共用纵轴。无效速率显示为缺口，不画成 0。'
   const diskIOHint = '磁盘读与写速率（B/s），两条都为正、共用纵轴。'
 
-  const cpuReadout = seriesValueAt(cpuSeries, hoveredAt)
+  const cpuHostPoint = lastHostSamplePoint(ascending)
+  const cpuReadout = hoveredAt ? seriesValueAt(cpuSeries, hoveredAt) : currentCPUMetricValue(ascending, 'cpu_usage_pct')
   const memReadout = seriesValueAt(memSeries, hoveredAt)
   const swapReadout = seriesValueAt(swapSeries, hoveredAt)
   const diskReadout = seriesValueAt(diskSeries, hoveredAt)
   const inodeReadout = seriesValueAt(inodeSeries, hoveredAt)
   const loadReadout = seriesValueAt(loadSeries, hoveredAt)
-  const iowaitReadout = seriesValueAt(iowaitSeries, hoveredAt)
+  const iowaitReadout = hoveredAt ? seriesValueAt(iowaitSeries, hoveredAt) : currentCPUMetricValue(ascending, 'cpu_iowait_pct')
+  const cpuUnavailable = hoveredAt == null && cpuHostPoint != null && cpuReadout == null
+  const iowaitUnavailable = hoveredAt == null && cpuHostPoint != null && iowaitReadout == null
   const diskBusyReadout = seriesValueAt(diskBusySeries, hoveredAt)
   const netInReadout = seriesValueAt(netInSeries, hoveredAt)
   const netOutReadout = seriesValueAt(netOutSeries, hoveredAt)
@@ -387,9 +393,10 @@ export function MonitoringDetailObservations({
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(cpuReadout, thresholds?.cpu)}`}>
               <MonoDigits>{formatPercent(cpuReadout)}</MonoDigits>
+              {cpuUnavailable ? <span className="monitoring-detail-chart__cpu-unavailable">CPU 采样不可用</span> : null}
             </span>
           }
-          notes={<Note label="被窃取">{formatPercent(sample?.cpu_steal_pct)}</Note>}
+          notes={<Note label="被窃取">{formatPercent(hostCPURate(sample, 'cpu_steal_pct'))}</Note>}
         >
           {percentChart(cpuSeries, thresholds?.cpu.warning, `CPU 使用率${availabilityLine(timeWindow, runtimeWindow)}趋势`)}
         </Plot>
@@ -508,6 +515,7 @@ export function MonitoringDetailObservations({
           current={
             <span className={`monitoring-detail-chart__value monitoring-detail-chart__value--${toneFor(iowaitReadout, thresholds?.iowait)}`}>
               <MonoDigits>{formatPercent(iowaitReadout)} · {formatPercent(diskBusyReadout)}</MonoDigits>
+              {iowaitUnavailable ? <span className="monitoring-detail-chart__cpu-unavailable">CPU 采样不可用</span> : null}
             </span>
           }
         >

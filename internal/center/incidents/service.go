@@ -2,6 +2,7 @@ package incidents
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1252,6 +1253,7 @@ func monitoringInstanceResourceSamplesFromHostSamples(hostSamples []runtimefacts
 			ObservedAt:         sample.ObservedAt,
 			ReceivedAt:         sample.ReceivedAt,
 			CPUUsagePct:        sample.CPUUsagePct,
+			CPURatesValid:      sample.CPURatesValid,
 			NormalizedLoad5:    sample.Load5,
 			MemUsedPct:         sample.MemUsedPct,
 			MemAvailableBytes:  sample.MemAvailableBytes,
@@ -1473,7 +1475,7 @@ const incidentRecentLiveHeartbeatReceiptsSQL = `
 const incidentRecentHostSamplesSQL = `
 	select
 		monitoring_instance_id, observed_at, received_at, agent_version, fingerprint,
-		cpu_usage_pct, load_1, load_5, load_15, mem_used_pct, mem_available_bytes, mem_total_bytes,
+		cpu_usage_pct, cpu_rates_valid, load_1, load_5, load_15, mem_used_pct, mem_available_bytes, mem_total_bytes,
 		swap_used_pct, disk_used_pct, disk_total_bytes, inode_used_pct, net_in_bytes_per_sec,
 		net_out_bytes_per_sec, cpu_iowait_pct, cpu_steal_pct, disk_read_bytes_per_sec,
 		disk_write_bytes_per_sec, disk_busy_pct, uptime_seconds,
@@ -1583,16 +1585,23 @@ func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, moni
 	defer rows.Close()
 	out := make([]runtimefacts.HostSample, 0)
 	for rows.Next() {
-		var sample runtimefacts.HostSample
+		var (
+			sample        runtimefacts.HostSample
+			cpuRatesValid sql.NullBool
+		)
 		if err := rows.Scan(
 			&sample.MonitoringInstanceID, &sample.ObservedAt, &sample.ReceivedAt, &sample.AgentVersion, &sample.Fingerprint,
-			&sample.CPUUsagePct, &sample.Load1, &sample.Load5, &sample.Load15, &sample.MemUsedPct, &sample.MemAvailableBytes, &sample.MemTotalBytes,
+			&sample.CPUUsagePct, &cpuRatesValid, &sample.Load1, &sample.Load5, &sample.Load15, &sample.MemUsedPct, &sample.MemAvailableBytes, &sample.MemTotalBytes,
 			&sample.SwapUsedPct, &sample.DiskUsedPct, &sample.DiskTotalBytes, &sample.InodeUsedPct, &sample.NetInBytesPerSec,
 			&sample.NetOutBytesPerSec, &sample.CPUIOWaitPct, &sample.CPUStealPct, &sample.DiskReadBytesPerSec,
 			&sample.DiskWriteBytesPerSec, &sample.DiskBusyPct, &sample.UptimeSeconds,
 			&sample.MaintenanceContext, &sample.IsBackfilled, &sample.SyncBatchID,
 		); err != nil {
 			return nil, fmt.Errorf("scan host sample: %w", err)
+		}
+		if cpuRatesValid.Valid {
+			value := cpuRatesValid.Bool
+			sample.CPURatesValid = &value
 		}
 		out = append(out, sample)
 	}
@@ -1637,7 +1646,10 @@ func (r *PostgresSnapshotReader) ListMonitoringInstanceHostDailyAggregates(ctx c
 			avg_cpu_iowait_pct,
 			avg_cpu_steal_pct,
 			backfilled_sample_count,
-			maintenance_sample_count
+			maintenance_sample_count,
+			cpu_valid_sample_count,
+			cpu_valid_backfilled_sample_count,
+			cpu_valid_maintenance_sample_count
 		from monitoring_instance_host_sample_daily_aggregates
 		where monitoring_instance_id = $1
 			and bucket_date >= $2::date
@@ -1649,17 +1661,46 @@ func (r *PostgresSnapshotReader) ListMonitoringInstanceHostDailyAggregates(ctx c
 	defer rows.Close()
 	out := make([]MonitoringInstanceHostDailyAggregate, 0)
 	for rows.Next() {
-		var aggregate MonitoringInstanceHostDailyAggregate
+		var (
+			aggregate                       MonitoringInstanceHostDailyAggregate
+			avgCPUIOWaitPct, avgCPUStealPct sql.NullFloat64
+			cpuValidSampleCount             sql.NullInt64
+			cpuValidBackfilledSampleCount   sql.NullInt64
+			cpuValidMaintenanceSampleCount  sql.NullInt64
+		)
 		if err := rows.Scan(
 			&aggregate.BucketDate,
 			&aggregate.SampleCount,
 			&aggregate.AvgLoad5,
-			&aggregate.AvgCPUIOWaitPct,
-			&aggregate.AvgCPUStealPct,
+			&avgCPUIOWaitPct,
+			&avgCPUStealPct,
 			&aggregate.BackfilledSampleCount,
 			&aggregate.MaintenanceSampleCount,
+			&cpuValidSampleCount,
+			&cpuValidBackfilledSampleCount,
+			&cpuValidMaintenanceSampleCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan monitoring instance host daily aggregate: %w", err)
+		}
+		if avgCPUIOWaitPct.Valid {
+			value := avgCPUIOWaitPct.Float64
+			aggregate.AvgCPUIOWaitPct = &value
+		}
+		if avgCPUStealPct.Valid {
+			value := avgCPUStealPct.Float64
+			aggregate.AvgCPUStealPct = &value
+		}
+		if cpuValidSampleCount.Valid {
+			value := int(cpuValidSampleCount.Int64)
+			aggregate.CPUValidSampleCount = &value
+		}
+		if cpuValidBackfilledSampleCount.Valid {
+			value := int(cpuValidBackfilledSampleCount.Int64)
+			aggregate.CPUValidBackfilledSampleCount = &value
+		}
+		if cpuValidMaintenanceSampleCount.Valid {
+			value := int(cpuValidMaintenanceSampleCount.Int64)
+			aggregate.CPUValidMaintenanceSampleCount = &value
 		}
 		out = append(out, aggregate)
 	}

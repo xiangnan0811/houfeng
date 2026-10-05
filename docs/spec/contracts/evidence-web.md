@@ -59,3 +59,10 @@ Evidence links open the protected `/evidence/:evidenceId` reader using the exist
 - 快照 ID、类型 / schema / renderer 版本、观测 / 捕获 / 引用时间、请求 / 实际窗口、精度、来源修订与水位、生成版本、敏感级别、保留策略与字段处理明细只在默认折叠的「技术细节」中；折叠摘要显示已处理字段数。
 - 不支持或解码失败仍 fail closed：只显示「不支持的证据类型」，不渲染载荷；技术细节仍可查看信封元数据。
 - 浏览器合同：`web/e2e/evidence-snapshot.spec.ts` 覆盖六种证据在 1440/1024/390 无横向溢出、技术细节折叠、回填 / 来源不可用徽标、fail closed，以及五主题 settled axe。
+
+### Host evidence calculation v2
+
+- host read model 的 `calculation_version` 为 `monitoring-evidence/v2` 时，每个 metric 必须完整包含 `sample_count`、`maintenance_count`、`backfilled_count`、`source_layer`、`source_granularity_seconds`；缺字段、非法范围/来源/秒粒度或不符合参考指标选择的 bucket 失败关闭。版本缺失或 v1 按旧 host 合同；未知版本拒绝。probe 不升级。
+- v2 bucket 接受 `mixed`，呈现为“混合来源”；metric/peak 只接受 raw/daily_aggregate。指标显示自身有效样本数和来源，共享数标为“覆盖参考样本”，不得冒充 CPU 有效数；旧 v1 缺 metric 元数据时仅在读模型沿用 bucket 元数据。
+- v2 gap 必须有合法 host metric，按 `(series_id,metric,start)` 排序/校验互斥，只与含同一指标的 bucket 检查重叠。不同指标缺口可以同窗重叠，内存正常桶不遮蔽 CPU 缺口；quality.gap_count 计指标缺口，有任一 gap 必须 partial。
+- 曲线断开只受同指标的新 gap 或无 metric 的 legacy series gap 影响。旧 v1/probe 保持原 series gap 规则；不填缺失值，不把未知当零。v1/v2 跨版本比较由原 calculation_version_incompatible 边界拒绝，导出保留指标元数据。

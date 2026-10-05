@@ -113,11 +113,20 @@ function monitoringReadModel(
   version: MonitoringEvidenceReadModel['version'],
 ): MonitoringEvidenceReadModel {
   const probe = version === 'monitoring_probe_read_model/v1'
+  // New host captures are monitoring-evidence/v2. Probe serialization stays v1.
+  const hostMetric = {
+    sample_count: 1,
+    maintenance_count: 0,
+    backfilled_count: 0,
+    source_layer: 'raw' as const,
+    source_granularity_seconds: 300,
+  }
   const metric = probe
     ? { name: 'latency_ms', unit: 'ms', average: 42, min: 42, max: 42 }
-    : { name: 'cpu_usage_pct', unit: 'percent', average: 42, min: 42, max: 42 }
+    : { name: 'cpu_usage_pct', unit: 'percent', average: 42, min: 42, max: 42, ...hostMetric }
   return {
     version,
+    ...(probe ? {} : { calculation_version: 'monitoring-evidence/v2' as const }),
     requested_start: '2026-08-16T01:00:00Z',
     requested_end: '2026-08-16T01:15:00Z',
     coverage_start: '2026-08-16T01:00:00Z',
@@ -151,6 +160,7 @@ function monitoringReadModel(
     ],
     gaps: [{
       series_id: 'series-safe',
+      ...(probe ? {} : { metric: metric.name }),
       start: '2026-08-16T01:05:00Z',
       end: '2026-08-16T01:10:00Z',
     }],
@@ -399,7 +409,8 @@ describe('EvidenceRendererRegistry', () => {
   it('does not connect a metric across an interval where only another metric has a bucket', () => {
     const model = monitoringReadModel('monitoring_host_read_model/v1')
     const firstBucket = model.buckets[0]
-    if (!firstBucket) throw new Error('monitoring fixture requires a first bucket')
+    const firstMetric = firstBucket?.metrics[0]
+    if (!firstBucket || !firstMetric) throw new Error('monitoring fixture requires a first bucket')
     model.buckets = [
       {
         ...firstBucket,
@@ -409,13 +420,13 @@ describe('EvidenceRendererRegistry', () => {
         ...firstBucket,
         start: '2026-08-16T01:05:00Z',
         end: '2026-08-16T01:10:00Z',
-        metrics: [{ name: 'mem_used_pct', unit: 'percent', average: 51 }],
+        metrics: [{ ...firstMetric, name: 'mem_used_pct', average: 51 }],
       },
       {
         ...firstBucket,
         start: '2026-08-16T01:10:00Z',
         end: '2026-08-16T01:15:00Z',
-        metrics: [{ name: 'cpu_usage_pct', unit: 'percent', average: 49 }],
+        metrics: [{ ...firstMetric, name: 'cpu_usage_pct', average: 49 }],
       },
     ]
     model.gaps = []
@@ -444,15 +455,21 @@ describe('EvidenceRendererRegistry', () => {
       sample_count: 1,
       maintenance_count: 0,
       backfilled_count: 0,
-      metrics: [{ name: 'cpu_usage_pct', unit: 'percent', average: index }],
+      metrics: [{
+        name: 'cpu_usage_pct', unit: 'percent', average: index,
+        sample_count: 1, maintenance_count: 0, backfilled_count: 0,
+        source_layer: 'raw', source_granularity_seconds: 300,
+      }],
     }))
     const gaps = Array.from({ length: 19 }, (_, index) => ({
       series_id: 'series-safe',
+      metric: 'cpu_usage_pct',
       start: new Date(start + (index * 10 + 5) * 60_000).toISOString(),
       end: new Date(start + (index + 1) * 10 * 60_000).toISOString(),
     }))
     const model = {
       version: 'monitoring_host_read_model/v1',
+      calculation_version: 'monitoring-evidence/v2',
       requested_start: buckets[0]?.start,
       requested_end: buckets.at(-1)?.end,
       coverage_start: buckets[0]?.start,
@@ -481,13 +498,14 @@ describe('EvidenceRendererRegistry', () => {
     const model = monitoringReadModel('monitoring_host_read_model/v1')
     const firstBucket = model.buckets[0]
     const secondBucket = model.buckets[1]
-    if (!firstBucket || !secondBucket) throw new Error('monitoring fixture requires two buckets')
+    const secondMetric = secondBucket?.metrics[0]
+    if (!firstBucket || !secondBucket || !secondMetric) throw new Error('monitoring fixture requires two buckets')
     model.gaps = []
     model.peaks = []
     model.buckets[1] = {
       ...secondBucket,
       start: firstBucket.end,
-      metrics: [{ name: 'cpu_usage_pct', unit: 'bytes', average: 61 }],
+      metrics: [{ ...secondMetric, unit: 'bytes', average: 61 }],
     }
     const { container } = render(<EvidenceRendererRegistry evidence={{
       ...rendererCases[1].evidence,

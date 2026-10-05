@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -14,6 +15,7 @@ import (
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/targets"
+	"houfeng/internal/contracts/agentapi"
 )
 
 const runtimeFactsMonitoringInstanceExistsSQL = `
@@ -29,6 +31,7 @@ const runtimeFactsLatestHostSampleSQL = `
 			hs.agent_version,
 			hs.fingerprint,
 			hs.cpu_usage_pct,
+			hs.cpu_rates_valid,
 			hs.load_1,
 			hs.load_5,
 			hs.load_15,
@@ -83,11 +86,13 @@ const runtimeFactsHostMetricPointsSQL = `
 					$4 - 1
 				) as bucket,
 				cpu_usage_pct,
+				cpu_rates_valid,
 				mem_used_pct,
 				disk_used_pct,
 				inode_used_pct,
 				load_5,
 				cpu_iowait_pct,
+				cpu_steal_pct,
 				net_in_bytes_per_sec,
 				net_out_bytes_per_sec,
 				network_rates_valid,
@@ -106,12 +111,22 @@ const runtimeFactsHostMetricPointsSQL = `
 		select
 			to_timestamp(extract(epoch from $2::timestamptz) + (buckets.bucket::double precision * $5::double precision))::timestamptz as observed_at,
 			count(bucketed.bucket)::integer as sample_count,
-			avg(bucketed.cpu_usage_pct)::double precision,
+			avg(bucketed.cpu_usage_pct) filter (
+				where bucketed.cpu_rates_valid is not false
+					and bucketed.cpu_usage_pct between 0 and 100
+					and bucketed.cpu_iowait_pct between 0 and 100
+					and bucketed.cpu_steal_pct between 0 and 100
+			)::double precision,
 			avg(bucketed.mem_used_pct)::double precision,
 			avg(bucketed.disk_used_pct)::double precision,
 			avg(bucketed.inode_used_pct)::double precision,
 			avg(bucketed.load_5)::double precision,
-			avg(bucketed.cpu_iowait_pct)::double precision,
+			avg(bucketed.cpu_iowait_pct) filter (
+				where bucketed.cpu_rates_valid is not false
+					and bucketed.cpu_usage_pct between 0 and 100
+					and bucketed.cpu_iowait_pct between 0 and 100
+					and bucketed.cpu_steal_pct between 0 and 100
+			)::double precision,
 			avg(bucketed.net_in_bytes_per_sec) filter (where bucketed.network_rates_valid is true)::double precision,
 			avg(bucketed.net_out_bytes_per_sec) filter (where bucketed.network_rates_valid is true)::double precision,
 			avg(bucketed.load_1)::double precision,
@@ -133,6 +148,7 @@ const runtimeFactsRecentHostSamplesSQL = `
 			agent_version,
 			fingerprint,
 			cpu_usage_pct,
+			cpu_rates_valid,
 			load_1,
 			load_5,
 			load_15,
@@ -466,6 +482,7 @@ func nullableFloat64Ptr(value sql.NullFloat64) *float64 {
 
 func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample) error {
 	var (
+		cpuRatesValid     sql.NullBool
 		networkRatesValid sql.NullBool
 		containersJSON    []byte
 	)
@@ -476,6 +493,7 @@ func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample
 		&sample.AgentVersion,
 		&sample.Fingerprint,
 		&sample.CPUUsagePct,
+		&cpuRatesValid,
 		&sample.Load1,
 		&sample.Load5,
 		&sample.Load15,
@@ -502,6 +520,10 @@ func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample
 	); err != nil {
 		return err
 	}
+	if cpuRatesValid.Valid {
+		value := cpuRatesValid.Bool
+		sample.CPURatesValid = &value
+	}
 	if networkRatesValid.Valid {
 		value := networkRatesValid.Bool
 		sample.NetworkRatesValid = &value
@@ -509,7 +531,24 @@ func scanHostSample(scanner runtimeFactsScanner, sample *runtimefacts.HostSample
 	if len(containersJSON) > 0 {
 		_ = json.Unmarshal(containersJSON, &sample.Containers)
 	}
+	normalizeHostSampleForJSON(sample)
 	return nil
+}
+
+func normalizeHostSampleForJSON(sample *runtimefacts.HostSample) {
+	if agentapi.CPURatesUsable(sample.CPURatesValid, sample.CPUUsagePct, sample.CPUIOWaitPct, sample.CPUStealPct) {
+		return
+	}
+	sample.CPURatesValid = new(false)
+	if math.IsNaN(sample.CPUUsagePct) || math.IsInf(sample.CPUUsagePct, 0) {
+		sample.CPUUsagePct = 0
+	}
+	if math.IsNaN(sample.CPUIOWaitPct) || math.IsInf(sample.CPUIOWaitPct, 0) {
+		sample.CPUIOWaitPct = 0
+	}
+	if math.IsNaN(sample.CPUStealPct) || math.IsInf(sample.CPUStealPct, 0) {
+		sample.CPUStealPct = 0
+	}
 }
 
 func scanProbeObservation(scanner runtimeFactsScanner, observation *runtimefacts.ProbeObservation) error {

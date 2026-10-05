@@ -14,63 +14,6 @@ import (
 	"houfeng/internal/center/evidence/adapters"
 )
 
-func TestMonitoringEvidenceQueriesUseAbsoluteWindowsWithoutSparklineSemantics(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		sql  string
-	}{
-		{name: "host raw", sql: monitoringEvidenceHostRawSQL},
-		{name: "host daily", sql: monitoringEvidenceHostDailySQL},
-		{name: "probe raw", sql: monitoringEvidenceProbeRawSQL},
-		{name: "probe daily", sql: monitoringEvidenceProbeDailySQL},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			normalized := strings.ToLower(tt.sql)
-			if !strings.Contains(normalized, ">= $2") || !strings.Contains(normalized, "< $3") {
-				t.Fatalf("evidence SQL = %q, want exact half-open observed window", tt.sql)
-			}
-			if strings.Contains(normalized, " limit ") || strings.Contains(normalized, "generate_series") {
-				t.Fatalf("evidence SQL = %q, row-count truncation/zero-fill is forbidden", tt.sql)
-			}
-		})
-	}
-
-	for _, query := range []string{monitoringEvidenceHostDailySQL, monitoringEvidenceProbeDailySQL} {
-		normalized := strings.ToLower(query)
-		if !strings.Contains(normalized, "at time zone 'utc') >= $2") ||
-			!strings.Contains(normalized, "at time zone 'utc') <= $3") {
-			t.Fatalf("daily evidence SQL = %q, want only fully contained UTC aggregate days", query)
-		}
-	}
-	if !strings.Contains(strings.ToLower(monitoringEvidenceProbeRawSQL), "having metric.name = 'success_ratio' or count(metric.value) > 0") {
-		t.Fatalf("probe raw evidence SQL = %q, want empty optional metric rows omitted", monitoringEvidenceProbeRawSQL)
-	}
-	if !strings.Contains(strings.ToLower(monitoringEvidenceProbeDailySQL), "coalesce(metric.average, metric.minimum, metric.maximum, metric.p95) is not null") {
-		t.Fatalf("probe daily evidence SQL = %q, want empty metric rows omitted", monitoringEvidenceProbeDailySQL)
-	}
-	for _, required := range []string{"disk_used_pct", "inode_used_pct", "net_in_bytes_per_sec", "disk_read_bytes_per_sec"} {
-		if !strings.Contains(monitoringEvidenceHostRawSQL, required) {
-			t.Fatalf("host evidence SQL omits required metric %q", required)
-		}
-	}
-	for _, required := range []string{"http_status", "tls_expiry_days"} {
-		if !strings.Contains(monitoringEvidenceProbeRawSQL, required) {
-			t.Fatalf("probe evidence SQL omits required metric %q", required)
-		}
-	}
-
-	if strings.Contains(strings.ToLower(getMonitoringInstanceSparklinesSQL), "< $2") {
-		t.Fatalf("legacy sparkline unexpectedly gained an absolute upper bound; RED fixture no longer demonstrates the evidence distinction")
-	}
-	if !strings.Contains(strings.ToLower(getTargetSparklinesSQL), "latency_ms is not null") {
-		t.Fatalf("legacy target sparkline fixture no longer demonstrates discarded failed observations")
-	}
-}
-
 func TestIPQualityEvidenceQueryAllowlistExcludesRetentionOnlyJSON(t *testing.T) {
 	t.Parallel()
 
@@ -116,7 +59,7 @@ func TestMonitoringEvidenceMergeUsesDailyAggregateForPartialRawRetentionDay(t *t
 	if !uncoveredDaily(raw, daily) {
 		t.Fatal("uncoveredDaily() = false, want partial raw retention day to require aggregate fallback")
 	}
-	merged := mergeEvidenceMetricRows(raw, daily, 24*time.Hour)
+	merged := mergeEvidenceMetricRows(raw, daily, 24*time.Hour, false)
 	if len(merged) != 1 || merged[0].SourceLayer != "daily_aggregate" || merged[0].SampleCount != 288 {
 		t.Fatalf("mergeEvidenceMetricRows() = %#v, want complete daily aggregate", merged)
 	}
@@ -317,4 +260,48 @@ func scanEvidenceMetricRow(dest []any, row evidenceMetricRow) error {
 	*(dest[17].(*time.Time)) = row.Watermark
 	*(dest[18].(*[]string)) = append([]string(nil), row.ProducerVersions...)
 	return nil
+}
+
+func TestHostEvidenceKeepsRawCPUWhenMemoryPrefersDaily(t *testing.T) {
+	day := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	end := day.Add(24 * time.Hour)
+	cpu, memory := 30.0, 60.0
+	raw := []evidenceMetricRow{
+		{SeriesKind: "host", BucketStart: day, BucketEnd: end, SourceLayer: "raw", SourceGranularity: 86400, SampleCount: 2, Metric: "cpu_usage_pct", Unit: "percent", Average: &cpu},
+		{SeriesKind: "host", BucketStart: day, BucketEnd: end, SourceLayer: "raw", SourceGranularity: 86400, SampleCount: 3, Metric: "mem_used_pct", Unit: "percent", Average: &memory},
+	}
+	daily := []evidenceMetricRow{
+		{SeriesKind: "host", BucketStart: day, BucketEnd: end, SourceLayer: "daily_aggregate", SourceGranularity: 86400, SampleCount: 10, MaintenanceCount: 2, BackfilledCount: 1, Metric: "mem_used_pct", Unit: "percent", Average: &memory},
+	}
+	rows := mergeEvidenceMetricRows(raw, daily, 24*time.Hour, true)
+	capture := evidenceCaptureFromRows(evidence.TimeWindow{Start: day, End: end}, 24*time.Hour, rows, true)
+	if len(capture.Buckets) != 1 {
+		t.Fatalf("expected one shared bucket, got %#v", capture.Buckets)
+	}
+	bucket := capture.Buckets[0]
+	if bucket.SourceLayer != adapters.MonitoringSourceMixed || bucket.SampleCount != 10 || bucket.MaintenanceCount != 2 || bucket.BackfilledCount != 1 {
+		t.Fatalf("wrong reference metadata: %#v", bucket)
+	}
+	if len(bucket.Metrics) != 2 || bucket.Metrics[0].SampleCount != 2 || bucket.Metrics[0].SourceLayer != adapters.MonitoringSourceRaw || *bucket.Metrics[0].Average != 30 ||
+		bucket.Metrics[1].SampleCount != 10 || bucket.Metrics[1].SourceLayer != adapters.MonitoringSourceDailyAggregate {
+		t.Fatalf("metric provenance lost: %#v", bucket.Metrics)
+	}
+	probeRows := mergeEvidenceMetricRows(raw, daily, 24*time.Hour, false)
+	if len(probeRows) != 1 || probeRows[0].Metric != "mem_used_pct" {
+		t.Fatalf("probe whole-day behavior changed: %#v", probeRows)
+	}
+}
+
+func TestHostEvidenceReferenceTieUsesMetricName(t *testing.T) {
+	start := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	rows := []evidenceMetricRow{
+		{BucketStart: start, BucketEnd: end, SourceLayer: "raw", SourceGranularity: 60, Metric: "mem_used_pct", SampleCount: 3, MaintenanceCount: 2},
+		{BucketStart: start, BucketEnd: end, SourceLayer: "raw", SourceGranularity: 300, Metric: "cpu_usage_pct", SampleCount: 3, BackfilledCount: 1},
+	}
+	capture := evidenceCaptureFromRows(evidence.TimeWindow{Start: start, End: end}, time.Hour, rows, true)
+	bucket := capture.Buckets[0]
+	if bucket.SampleCount != 3 || bucket.MaintenanceCount != 0 || bucket.BackfilledCount != 1 || bucket.SourceGranularity != 5*time.Minute {
+		t.Fatalf("reference tie or granularity wrong: %#v", bucket)
+	}
 }

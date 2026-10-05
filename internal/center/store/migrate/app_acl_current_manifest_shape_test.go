@@ -95,9 +95,33 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 		{name: "P62-P64-P66-P67", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP64, appACLCurrentProfileP66, appACLCurrentProfileP67}},
 		{name: "P63-P66-P67", profiles: []appACLCurrentProfileID{appACLCurrentProfileP63, appACLCurrentProfileP66, appACLCurrentProfileP67}},
 		{name: "P62-P63-P66-P67", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP63, appACLCurrentProfileP66, appACLCurrentProfileP67}},
+		{name: "P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP68}},
+		{name: "P62-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP68}},
+		{name: "P63-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP63, appACLCurrentProfileP68}},
+		{name: "P64-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP64, appACLCurrentProfileP68}},
+		{name: "P66-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP66, appACLCurrentProfileP68}},
+		{name: "P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P62-P63-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP63, appACLCurrentProfileP68}},
+		{name: "P62-P64-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP64, appACLCurrentProfileP68}},
+		{name: "P62-P66-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP66, appACLCurrentProfileP68}},
+		{name: "P64-P66-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP64, appACLCurrentProfileP66, appACLCurrentProfileP68}},
+		{name: "P63-P66-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP63, appACLCurrentProfileP66, appACLCurrentProfileP68}},
+		{name: "P62-P64-P66-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP64, appACLCurrentProfileP66, appACLCurrentProfileP68}},
+		{name: "P62-P63-P66-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP63, appACLCurrentProfileP66, appACLCurrentProfileP68}},
+		{name: "P62-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P64-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP64, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P62-P64-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP64, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P63-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP63, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P62-P63-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP63, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P66-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P62-P66-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P64-P66-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP64, appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P62-P64-P66-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP64, appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P63-P66-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP63, appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68}},
+		{name: "P62-P63-P66-P67-P68", profiles: []appACLCurrentProfileID{appACLCurrentProfileP62, appACLCurrentProfileP63, appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68}},
 	}
-	if len(testChains) != 23 {
-		t.Fatalf("published predecessor chain cases = %d, want 23", len(testChains))
+	if len(testChains) != 47 {
+		t.Fatalf("published predecessor chain cases = %d, want 47", len(testChains))
 	}
 
 	for _, tc := range testChains {
@@ -166,14 +190,14 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 				currentPrivileges,
 			)
 			if err != nil {
-				t.Fatalf("classify C68 successor: %v", err)
+				t.Fatalf("classify C69 successor: %v", err)
 			}
 			if successorShape.kind != appACLCurrentManifestShapeSuccessor ||
 				successorShape.latest.ManifestDigest != successor.ManifestDigest ||
 				successorShape.transition == nil ||
 				successorShape.transition.profile != lastProfile {
 				t.Fatalf(
-					"C68 successor shape = %#v, want kind %d/latest %x/profile %d",
+					"C69 successor shape = %#v, want kind %d/latest %x/profile %d",
 					successorShape,
 					appACLCurrentManifestShapeSuccessor,
 					successor.ManifestDigest,
@@ -266,8 +290,9 @@ func TestClassifyAppACLCurrentManifestShapeRejectsUnregisteredOrMalformedState(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	p62, p64 := transitions[0], transitions[1]
+	p62, p64, p68 := transitions[0], transitions[1], transitions[5]
 	p62Manifest := appACLCurrentShapeManifest(t, 1, [32]byte{}, p62.predecessor, p62.predecessorPrivilegeBody)
+	p68Manifest := appACLCurrentShapeManifest(t, 1, [32]byte{}, p68.predecessor, p68.predecessorPrivilegeBody)
 	currentApplied := appACLCurrentShapeApplied(t, current)
 	currentTarget := appACLCurrentShapeManifest(t, 1, [32]byte{}, current, currentPrivileges)
 
@@ -304,6 +329,157 @@ func TestClassifyAppACLCurrentManifestShapeRejectsUnregisteredOrMalformedState(t
 		_, err := appACLCurrentClassifyShape(t, current, transitions, currentApplied, []AppACLManifestPersistedV1{p62Manifest, duplicateP62, third}, "houfeng", appACLCurrentTransitionBindings, currentPrivileges)
 		if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
 			t.Fatalf("unregistered three-entry chain error = %v, want rebuild-required", err)
+		}
+	})
+	t.Run("P68 duplicate predecessor", func(t *testing.T) {
+		duplicate, buildErr := NewAppACLManifestPersistedV1(
+			2,
+			appACLCurrentTransitionMigrator,
+			p68Manifest.ManifestDigest,
+			p68.predecessor.sources.canonicalSet,
+			p68.predecessorPrivilegeBody,
+		)
+		if buildErr != nil {
+			t.Fatal(buildErr)
+		}
+		successor, buildErr := NewAppACLManifestPersistedV1(
+			3,
+			appACLCurrentTransitionMigrator,
+			duplicate.ManifestDigest,
+			current.sources.canonicalSet,
+			currentPrivileges,
+		)
+		if buildErr != nil {
+			t.Fatal(buildErr)
+		}
+		_, err := appACLCurrentClassifyShape(
+			t,
+			current,
+			transitions,
+			currentApplied,
+			[]AppACLManifestPersistedV1{p68Manifest, duplicate, successor},
+			"houfeng",
+			appACLCurrentTransitionBindings,
+			currentPrivileges,
+		)
+		if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+			t.Fatalf("duplicate P68 chain error = %v, want rebuild-required", err)
+		}
+	})
+
+	t.Run("P68 successor has an extra revision", func(t *testing.T) {
+		first, buildErr := NewAppACLManifestPersistedV1(
+			2,
+			appACLCurrentTransitionMigrator,
+			p68Manifest.ManifestDigest,
+			current.sources.canonicalSet,
+			currentPrivileges,
+		)
+		if buildErr != nil {
+			t.Fatal(buildErr)
+		}
+		second, buildErr := NewAppACLManifestPersistedV1(
+			3,
+			appACLCurrentTransitionMigrator,
+			first.ManifestDigest,
+			current.sources.canonicalSet,
+			currentPrivileges,
+		)
+		if buildErr != nil {
+			t.Fatal(buildErr)
+		}
+		_, err := appACLCurrentClassifyShape(
+			t,
+			current,
+			transitions,
+			currentApplied,
+			[]AppACLManifestPersistedV1{p68Manifest, first, second},
+			"houfeng",
+			appACLCurrentTransitionBindings,
+			currentPrivileges,
+		)
+		if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+			t.Fatalf("extra C69 revision error = %v, want rebuild-required", err)
+		}
+	})
+
+	t.Run("unknown P63-P64-P68 predecessor chain", func(t *testing.T) {
+		p63 := transitions[2]
+		p63Manifest := appACLCurrentShapeManifest(t, 1, [32]byte{}, p63.predecessor, p63.predecessorPrivilegeBody)
+		p64Manifest := appACLCurrentShapeManifest(t, 2, p63Manifest.ManifestDigest, p64.predecessor, p64.predecessorPrivilegeBody)
+		p68Manifest := appACLCurrentShapeManifest(t, 3, p64Manifest.ManifestDigest, p68.predecessor, p68.predecessorPrivilegeBody)
+		successor := appACLCurrentShapeManifest(t, 4, p68Manifest.ManifestDigest, current, currentPrivileges)
+		_, err := appACLCurrentClassifyShape(
+			t,
+			current,
+			transitions,
+			currentApplied,
+			[]AppACLManifestPersistedV1{p63Manifest, p64Manifest, p68Manifest, successor},
+			"houfeng",
+			appACLCurrentTransitionBindings,
+			currentPrivileges,
+		)
+		if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+			t.Fatalf("unknown P63-P64-P68 chain error = %v, want rebuild-required", err)
+		}
+	})
+
+	t.Run("P68 predecessor checksum drift", func(t *testing.T) {
+		driftedApplied := appACLCurrentShapeApplied(t, p68.predecessor)
+		driftedApplied[0].Checksum[0] ^= 0xff
+		_, err := appACLCurrentClassifyShape(
+			t,
+			current,
+			transitions,
+			driftedApplied,
+			[]AppACLManifestPersistedV1{p68Manifest},
+			"houfeng",
+			appACLCurrentTransitionBindings,
+			currentPrivileges,
+		)
+		if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+			t.Fatalf("P68 checksum drift error = %v, want rebuild-required", err)
+		}
+	})
+
+	t.Run("P68 predecessor privilege drift", func(t *testing.T) {
+		privilegeSet, parseErr := ParseCanonicalPrivilegeSetBodyV1(p68.predecessorPrivilegeBody)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		privilegeSet.Privileges = append(privilegeSet.Privileges, AppACLPrivilege{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: "asset_services",
+			Privilege:      AppACLPrivilegeDelete,
+		})
+		driftedPrivileges, encodeErr := CanonicalPrivilegeSetBodyV1(privilegeSet.RoleBindings, privilegeSet.Privileges)
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		drifted, buildErr := NewAppACLManifestPersistedV1(
+			1,
+			appACLCurrentTransitionMigrator,
+			[32]byte{},
+			p68.predecessor.sources.canonicalSet,
+			driftedPrivileges,
+		)
+		if buildErr != nil {
+			t.Fatal(buildErr)
+		}
+		_, err := appACLCurrentClassifyShape(
+			t,
+			current,
+			transitions,
+			appACLCurrentShapeApplied(t, p68.predecessor),
+			[]AppACLManifestPersistedV1{drifted},
+			"houfeng",
+			appACLCurrentTransitionBindings,
+			currentPrivileges,
+		)
+		if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+			t.Fatalf("P68 privilege drift error = %v, want rebuild-required", err)
 		}
 	})
 

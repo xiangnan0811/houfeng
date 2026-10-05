@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import type { MetricThresholds } from '../../config/thresholds'
+import { formatPercent } from '../../lib/format'
 import type { MonitoringInstanceRecord, MonitoringInstanceSparklinesResponse } from '../../lib/types'
 import { MonitoringInstancesTrendCell } from './MonitoringInstancesTrendCell'
 
@@ -131,6 +132,126 @@ describe('MonitoringInstancesTrendCell', () => {
     expect(memYs[1]).toBeLessThan(memYs[0]! - 4)
 
     expect(screen.getByLabelText('磁盘 24小时历史 48.0%')).toBeInTheDocument()
+  })
+
+  it('keeps CPU history when the current host bucket has no CPU rate', () => {
+    const thresholds: MetricThresholds = {
+      cpu: { warning: 80, alert: 90, critical: 95 },
+      mem: { warning: 85, alert: 92, critical: 95 },
+      disk: { warning: 85, alert: 92, critical: 97 },
+      inode: { warning: 80, alert: 90, critical: 95 },
+      iowait: { warning: 20, alert: 35, critical: 50 },
+      load5: { warning: 4, alert: 6, critical: 8 },
+    }
+    const sparklines: MonitoringInstanceSparklinesResponse = {
+      monitoring_instances: {
+        mi_001: {
+          cpu_usage_pct: [10, 20, null],
+          mem_used_pct: [30, 40, 50],
+          disk_used_pct: [12, 13, 14],
+        },
+      },
+    }
+    const { container } = render(
+      <MonitoringInstancesTrendCell
+        monitoringInstance={monitoringInstanceRecord()}
+        sparklines={sparklines}
+        thresholds={thresholds}
+      />,
+    )
+    expect(screen.getByLabelText(`CPU 24小时历史 ${formatPercent(null)} CPU采样不可用`)).toBeInTheDocument()
+    expect(screen.getByText('CPU采样不可用')).toBeInTheDocument()
+    const cpuSparkline = container.querySelector('.monitoring-table__trend-item svg.sparkline')
+    expect(cpuSparkline).toBeTruthy()
+    expect(cpuSparkline).toHaveClass('sparkline--default')
+    expect(cpuSparkline).not.toHaveClass('sparkline--accent')
+    expect(cpuSparkline?.querySelectorAll('polyline')).toHaveLength(1)
+  })
+
+  it('keeps a zero CPU history point when the later host bucket is unavailable', () => {
+    const sparklines: MonitoringInstanceSparklinesResponse = {
+      monitoring_instances: {
+        mi_001: {
+          cpu_usage_pct: [0, null],
+          mem_used_pct: [8, 9],
+          disk_used_pct: [3, 4],
+        },
+      },
+    }
+    const { container } = render(
+      <MonitoringInstancesTrendCell
+        monitoringInstance={monitoringInstanceRecord()}
+        sparklines={sparklines}
+        thresholds={null}
+      />,
+    )
+    expect(screen.getByText('CPU采样不可用')).toBeInTheDocument()
+    const cpuSparkline = container.querySelector('.monitoring-table__trend-item svg.sparkline')
+    expect(cpuSparkline?.querySelectorAll('circle, polyline').length).toBeGreaterThan(0)
+  })
+
+  it('shows a valid CPU rate at the last host bucket and ignores trailing empty buckets', () => {
+    const sparklines: MonitoringInstanceSparklinesResponse = {
+      monitoring_instances: {
+        mi_001: {
+          cpu_usage_pct: [20, null, null],
+          mem_used_pct: [5, null, null],
+          disk_used_pct: [4, null, null],
+        },
+      },
+    }
+    render(
+      <MonitoringInstancesTrendCell
+        monitoringInstance={monitoringInstanceRecord()}
+        sparklines={sparklines}
+        thresholds={null}
+      />,
+    )
+    expect(screen.getByLabelText('CPU 24小时历史 20.0%')).toBeInTheDocument()
+    expect(screen.queryByText('CPU采样不可用')).not.toBeInTheDocument()
+  })
+
+  it('shows a real zero when the last host bucket CPU rate is zero', () => {
+    const sparklines: MonitoringInstanceSparklinesResponse = {
+      monitoring_instances: {
+        mi_001: {
+          cpu_usage_pct: [0, null],
+          mem_used_pct: [5, null],
+          disk_used_pct: [4, null],
+        },
+      },
+    }
+    render(
+      <MonitoringInstancesTrendCell
+        monitoringInstance={monitoringInstanceRecord()}
+        sparklines={sparklines}
+        thresholds={null}
+      />,
+    )
+    expect(screen.getByLabelText('CPU 24小时历史 0.0%')).toBeInTheDocument()
+    expect(screen.queryByText('CPU采样不可用')).not.toBeInTheDocument()
+  })
+
+  it('does not guess a CPU bucket when memory and disk have no samples', () => {
+    const sparklines: MonitoringInstanceSparklinesResponse = {
+      monitoring_instances: {
+        mi_001: {
+          cpu_usage_pct: [10, 20],
+          mem_used_pct: [null, null],
+          disk_used_pct: [null, null],
+        },
+      },
+    }
+    const { container } = render(
+      <MonitoringInstancesTrendCell
+        monitoringInstance={monitoringInstanceRecord()}
+        sparklines={sparklines}
+        thresholds={null}
+      />,
+    )
+    expect(screen.getByText('暂无观测数据')).toBeInTheDocument()
+    expect(screen.queryByText('CPU采样不可用')).not.toBeInTheDocument()
+    expect(container.querySelector('.monitoring-table__trend-item svg.sparkline')).toBeNull()
   })
 })
 

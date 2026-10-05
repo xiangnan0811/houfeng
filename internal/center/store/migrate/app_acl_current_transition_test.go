@@ -24,29 +24,49 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 	if err != nil {
 		t.Fatalf("compileAppACLCurrentTransitions() error = %v", err)
 	}
-	if len(transitions) != 5 {
-		t.Fatalf("compiled transition count = %d, want the P62, P64, P63, P66 and P67 profiles", len(transitions))
+	if len(transitions) != 6 {
+		t.Fatalf("compiled transition count = %d, want the P62, P64, P63, P66, P67 and P68 profiles", len(transitions))
 	}
 	p63 := transitions[2]
 	if p63.profile != appACLCurrentProfileP63 || len(p63.predecessor.sources.names) != 64 ||
 		!bytes.Equal(p63.predecessor.sources.canonicalSet, appACLCurrentV0796MigrationGolden) ||
 		!bytes.Equal(p63.predecessorPrivilegeBody, appACLCurrentV0796PrivilegeGolden) ||
-		!equalStringSlices(p63.successor.names, []string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql", "0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql"}) {
+		!equalStringSlices(p63.successor.names, []string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql", "0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql"}) {
 		t.Fatal("compiled P63 profile differs from independent v0.79.6 release goldens or expected suffix")
 	}
 	p66 := transitions[3]
 	if p66.profile != appACLCurrentProfileP66 || len(p66.predecessor.sources.names) != 67 ||
 		!bytes.Equal(p66.predecessor.sources.canonicalSet, appACLCurrentV0804MigrationGolden) ||
 		!bytes.Equal(p66.predecessorPrivilegeBody, appACLCurrentV0804PrivilegeGolden) ||
-		!equalStringSlices(p66.successor.names, []string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql"}) {
+		!equalStringSlices(p66.successor.names, []string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql"}) {
 		t.Fatal("compiled P66 profile differs from independent v0.80.4 release goldens or expected suffix")
 	}
 	p67 := transitions[4]
 	if p67.profile != appACLCurrentProfileP67 || len(p67.predecessor.sources.names) != 68 ||
 		!bytes.Equal(p67.predecessor.sources.canonicalSet, appACLCurrentV1153MigrationGolden) ||
 		!bytes.Equal(p67.predecessorPrivilegeBody, appACLCurrentV1153PrivilegeGolden) ||
-		!equalStringSlices(p67.successor.names, []string{"0068_normalize_ip_quality_host_address_identity.sql"}) {
+		!equalStringSlices(p67.successor.names, []string{"0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql"}) {
 		t.Fatal("compiled P67 profile differs from independent v1.15.3 release goldens or expected suffix")
+	}
+	p68 := transitions[5]
+	if p68.profile != appACLCurrentProfileP68 || len(p68.predecessor.sources.names) != 69 ||
+		!bytes.Equal(p68.predecessor.sources.canonicalSet, appACLCurrentV1157MigrationGolden) ||
+		!bytes.Equal(p68.predecessorPrivilegeBody, appACLCurrentV1157PrivilegeGolden) ||
+		!equalStringSlices(p68.successor.names, []string{"0069_add_cpu_rates_valid.sql"}) {
+		t.Fatal("compiled P68 profile differs from the independent v1.15.7 C68 goldens or expected suffix")
+	}
+	if got := len(appACLCurrentTransitionDefinitions[5].predecessorManifestDigestGolden); got != 0 {
+		t.Fatalf("P68 predecessor manifest digest golden length = %d, want no role-bound digest golden", got)
+	}
+	if got, want := len(current.sources.names), 70; got != want {
+		t.Fatalf("current migration count = %d, want C69 count %d", got, want)
+	}
+	currentPrivilegeBody, err := appACLCurrentTransitionPrivilegeBody(current)
+	if err != nil {
+		t.Fatalf("compile C69 privilege body: %v", err)
+	}
+	if !bytes.Equal(p68.predecessorPrivilegeBody, currentPrivilegeBody) {
+		t.Fatal("P68 C68 predecessor privilege body differs from the C69 target privilege body")
 	}
 
 	p62, p64 := transitions[0], transitions[1]
@@ -66,6 +86,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		"0066_constrain_monitoring_and_target_state_values.sql",
 		"0067_refactor_vps_monitoring_lifecycle.sql",
 		"0068_normalize_ip_quality_host_address_identity.sql",
+		"0069_add_cpu_rates_valid.sql",
 	}; !equalStringSlices(got, want) {
 		t.Fatalf("P62 successor migrations = %#v, want %#v", got, want)
 	}
@@ -80,6 +101,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		"0066_constrain_monitoring_and_target_state_values.sql",
 		"0067_refactor_vps_monitoring_lifecycle.sql",
 		"0068_normalize_ip_quality_host_address_identity.sql",
+		"0069_add_cpu_rates_valid.sql",
 	}; !equalStringSlices(got, want) {
 		t.Fatalf("P64 successor migrations = %#v, want %#v", got, want)
 	}
@@ -168,7 +190,7 @@ func TestAppACLCurrentTransitionCompilerRejectsInvalidDefinitions(t *testing.T) 
 			name: "unknown profile",
 			definitions: func() []appACLCurrentTransitionDefinition {
 				value := cloneAppACLCurrentTransitionDefinitions(valid)
-				value[1].profile = 99
+				value[len(value)-1].profile = 99
 				return value
 			}(),
 			want: "unknown predecessor profile",
@@ -190,10 +212,11 @@ func TestAppACLCurrentTransitionCompilerRejectsInvalidDefinitions(t *testing.T) 
 }
 
 func TestAppACLCurrentTransitionCompilerRejectsUnapprovedPrivilegeDelta(t *testing.T) {
-	t.Run("additional grant", func(t *testing.T) {
+	t.Run("additional grant on C69", func(t *testing.T) {
 		fragments := cloneAppACLCurrentMigrationFragmentsForTransitionTest(appACLCurrentMigrationFragments)
-		originalPrivileges := fragments[len(fragments)-1].Privileges
-		fragments[len(fragments)-1].Privileges = func(databaseName string) []AppACLPrivilege {
+		fragmentIndex := appACLCurrentTransitionFragmentIndex(t, fragments, "0069_add_cpu_rates_valid.sql")
+		originalPrivileges := fragments[fragmentIndex].Privileges
+		fragments[fragmentIndex].Privileges = func(databaseName string) []AppACLPrivilege {
 			privileges := originalPrivileges(databaseName)
 			return append(privileges, AppACLPrivilege{
 				Subject:        AppACLSubjectCenterRuntime,
@@ -212,10 +235,11 @@ func TestAppACLCurrentTransitionCompilerRejectsUnapprovedPrivilegeDelta(t *testi
 		}
 	})
 
-	t.Run("parser admin drift", func(t *testing.T) {
+	t.Run("parser admin drift in C68", func(t *testing.T) {
 		fragments := cloneAppACLCurrentMigrationFragmentsForTransitionTest(appACLCurrentMigrationFragments)
-		originalPrivileges := fragments[len(fragments)-1].Privileges
-		fragments[len(fragments)-1].Privileges = func(databaseName string) []AppACLPrivilege {
+		fragmentIndex := appACLCurrentTransitionFragmentIndex(t, fragments, "0068_normalize_ip_quality_host_address_identity.sql")
+		originalPrivileges := fragments[fragmentIndex].Privileges
+		fragments[fragmentIndex].Privileges = func(databaseName string) []AppACLPrivilege {
 			privileges := originalPrivileges(databaseName)
 			for index := range privileges {
 				if privileges[index].ObjectIdentity == "public.houfeng_parse_host_address(text)" {
@@ -228,15 +252,16 @@ func TestAppACLCurrentTransitionCompilerRejectsUnapprovedPrivilegeDelta(t *testi
 		if err != nil {
 			t.Fatalf("compile current source with parser admin drift: %v", err)
 		}
-		if _, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions); err == nil || !strings.Contains(strings.ToLower(err.Error()), "exactly") {
-			t.Fatalf("compileAppACLCurrentTransitions() error = %v, want parser subject drift rejection", err)
+		if _, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions); err == nil || !strings.Contains(strings.ToLower(err.Error()), "predecessor privilege body differs from released golden") {
+			t.Fatalf("compileAppACLCurrentTransitions() error = %v, want independent P68 privilege golden rejection", err)
 		}
 	})
 
-	t.Run("parser bytea overload is not managed", func(t *testing.T) {
+	t.Run("parser bytea overload in C68 is not managed", func(t *testing.T) {
 		fragments := cloneAppACLCurrentMigrationFragmentsForTransitionTest(appACLCurrentMigrationFragments)
-		originalPrivileges := fragments[len(fragments)-1].Privileges
-		fragments[len(fragments)-1].Privileges = func(databaseName string) []AppACLPrivilege {
+		fragmentIndex := appACLCurrentTransitionFragmentIndex(t, fragments, "0068_normalize_ip_quality_host_address_identity.sql")
+		originalPrivileges := fragments[fragmentIndex].Privileges
+		fragments[fragmentIndex].Privileges = func(databaseName string) []AppACLPrivilege {
 			privileges := originalPrivileges(databaseName)
 			for index := range privileges {
 				if privileges[index].ObjectIdentity == "public.houfeng_parse_host_address(text)" {
@@ -279,6 +304,39 @@ func TestAppACLCurrentTransitionCompilerRejectsUnapprovedPrivilegeDelta(t *testi
 			t.Fatalf("validateAppACLCurrentTransitionPrivilegeDelta() error = %v, want privilege-removal rejection", err)
 		}
 	})
+	t.Run("P68 removed predecessor grant", func(t *testing.T) {
+		current, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
+		if err != nil {
+			t.Fatal(err)
+		}
+		transitions, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		modified := current
+		modified.fragments = make([]appACLCurrentCompiledMigrationFragment, len(current.fragments))
+		for index, fragment := range current.fragments {
+			modified.fragments[index] = cloneAppACLCurrentCompiledMigrationFragment(fragment)
+		}
+		removed := false
+		for index := range modified.fragments {
+			if modified.fragments[index].Migration == "0068_normalize_ip_quality_host_address_identity.sql" {
+				modified.fragments[index].Privileges = nil
+				removed = true
+				break
+			}
+		}
+		if !removed {
+			t.Fatal("C68 migration fragment was not found")
+		}
+		if err := validateAppACLCurrentTransitionPrivilegeDelta(
+			transitions[5].predecessorPrivilegeBody,
+			modified,
+			appACLCurrentProfileP68,
+		); err == nil || !strings.Contains(strings.ToLower(err.Error()), "removes") {
+			t.Fatalf("validateAppACLCurrentTransitionPrivilegeDelta() error = %v, want P68 privilege-removal rejection", err)
+		}
+	})
 }
 
 func TestAppACLCurrentTransitionCompilerRejectsReleasedGoldenDrift(t *testing.T) {
@@ -300,6 +358,19 @@ func TestAppACLCurrentTransitionCompilerRejectsReleasedGoldenDrift(t *testing.T)
 			appACLCurrentTransitionDefinitions,
 			"golden",
 		)
+	})
+	t.Run("P68 migration source golden by C68 filename", func(t *testing.T) {
+		fsys := appACLCurrentTransitionTestFS(t)
+		file := fsys["0068_normalize_ip_quality_host_address_identity.sql"]
+		file.Data = append(append([]byte(nil), file.Data...), []byte("\n-- mutated C68 predecessor\n")...)
+		current, err := compileAppACLCurrentSourceContract(fsys, appACLCurrentMigrationFragments)
+		if err != nil {
+			t.Fatalf("compile mutated C68 source: %v", err)
+		}
+		if _, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions); err == nil ||
+			!strings.Contains(strings.ToLower(err.Error()), "predecessor migration source differs from released golden") {
+			t.Fatalf("compileAppACLCurrentTransitions() error = %v, want independent P68 migration golden rejection", err)
+		}
 	})
 
 	t.Run("canonical body", func(t *testing.T) {
@@ -402,6 +473,20 @@ func cloneAppACLCurrentMigrationFragmentsForTransitionTest(source []AppACLCurren
 		cloned[index] = cloneAppACLCurrentMigrationFragment(fragment)
 	}
 	return cloned
+}
+func appACLCurrentTransitionFragmentIndex(
+	t *testing.T,
+	fragments []AppACLCurrentMigrationFragment,
+	migration string,
+) int {
+	t.Helper()
+	for index, fragment := range fragments {
+		if fragment.Migration == migration {
+			return index
+		}
+	}
+	t.Fatalf("migration fragment %q not found", migration)
+	return -1
 }
 
 func appACLCurrentTransitionTestFS(t *testing.T) fstest.MapFS {

@@ -1,6 +1,8 @@
 package incidents
 
 import (
+	"math"
+	"reflect"
 	"testing"
 	"time"
 
@@ -416,6 +418,189 @@ func TestEvaluateMonitoringInstanceResourcePressureIgnoresSuppressedHistoryForAc
 	}
 }
 
+func TestEvaluateMonitoringInstanceResourcePressureUsesSeveritySpecificCPUValidity(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	thresholds := DefaultMetricThresholds()
+	cpuSample := func(observedAt time.Time, usage float64, ratesValid bool) MonitoringInstanceResourceSample {
+		return MonitoringInstanceResourceSample{
+			ObservedAt:    observedAt,
+			CPUUsagePct:   usage,
+			CPURatesValid: &ratesValid,
+		}
+	}
+	withUnknown30MinuteCPU := []MonitoringInstanceResourceSample{
+		cpuSample(now, 85, true),
+		cpuSample(now.Add(-8*time.Minute), 85, true),
+		cpuSample(now.Add(-15*time.Minute), 85, true),
+		cpuSample(now.Add(-20*time.Minute), 85, false),
+		cpuSample(now.Add(-30*time.Minute), 85, true),
+	}
+	without30MinuteHistory := []MonitoringInstanceResourceSample{
+		cpuSample(now, 85, true),
+		cpuSample(now.Add(-8*time.Minute), 85, true),
+		cpuSample(now.Add(-15*time.Minute), 85, true),
+	}
+
+	tests := []struct {
+		name               string
+		previousSeverity   Severity
+		samples            []MonitoringInstanceResourceSample
+		wantCurrentUpdated bool
+	}{
+		{
+			name:               "notice with invalid 20m sample and valid 30m endpoint",
+			previousSeverity:   SeverityNotice,
+			samples:            withUnknown30MinuteCPU,
+			wantCurrentUpdated: true,
+		},
+		{
+			name:               "alert with invalid 20m sample and valid 30m endpoint",
+			previousSeverity:   SeverityAlert,
+			samples:            withUnknown30MinuteCPU,
+			wantCurrentUpdated: true,
+		},
+		{
+			name:               "critical with invalid 20m sample and valid 30m endpoint",
+			previousSeverity:   SeverityCritical,
+			samples:            withUnknown30MinuteCPU,
+			wantCurrentUpdated: false,
+		},
+		{
+			name:               "notice without 30m history",
+			previousSeverity:   SeverityNotice,
+			samples:            without30MinuteHistory,
+			wantCurrentUpdated: true,
+		},
+		{
+			name:               "alert without 30m history",
+			previousSeverity:   SeverityAlert,
+			samples:            without30MinuteHistory,
+			wantCurrentUpdated: true,
+		},
+		{
+			name:               "critical without 30m history",
+			previousSeverity:   SeverityCritical,
+			samples:            without30MinuteHistory,
+			wantCurrentUpdated: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previous := &IncidentRecord{
+				IncidentID:      "inc_monitoring_instance_mi_001_monitoring_instance_resource_pressure",
+				ObjectType:      ObjectTypeMonitoringInstance,
+				ObjectID:        "mi_001",
+				IncidentClass:   IncidentMonitoringInstanceResourcePressure,
+				Severity:        tt.previousSeverity,
+				StartedAt:       now.Add(-time.Hour),
+				LastEvaluatedAt: now.Add(-time.Minute),
+				SourceSummary:   "原始资源摘要",
+				Status:          IncidentStatusActive,
+			}
+
+			result := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", tt.samples, thresholds)
+			if result.Transition != TransitionNoop {
+				t.Fatalf("Transition = %q, want %q", result.Transition, TransitionNoop)
+			}
+			if result.Current == nil {
+				t.Fatal("Current = nil, want incident state")
+			}
+
+			if !tt.wantCurrentUpdated {
+				if !reflect.DeepEqual(result.Current, previous) {
+					t.Fatalf("Current = %#v, want exact noop(previous) %#v", result.Current, previous)
+				}
+				return
+			}
+
+			if result.Current.Severity != SeverityNotice {
+				t.Fatalf("Current.Severity = %q, want %q", result.Current.Severity, SeverityNotice)
+			}
+			if result.Current.SourceSummary == previous.SourceSummary {
+				t.Fatal("Current.SourceSummary retained the obsolete observation despite a complete recovery window")
+			}
+			if !result.Current.LastEvaluatedAt.Equal(now) {
+				t.Fatalf("Current.LastEvaluatedAt = %s, want %s", result.Current.LastEvaluatedAt, now)
+			}
+			if result.Current.StartedAt != previous.StartedAt {
+				t.Fatalf("Current.StartedAt = %s, want previous %s", result.Current.StartedAt, previous.StartedAt)
+			}
+		})
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureCPUValidityAndNonCPUUpgrade(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	thresholds := DefaultMetricThresholds()
+	invalidCPU := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 99, CPUIOWaitPct: 99, CPUStealPct: 99, CPURatesValid: new(false)},
+		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 99, CPUIOWaitPct: 99, CPUStealPct: 99, CPURatesValid: new(false)},
+		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 99, CPUIOWaitPct: 99, CPUStealPct: 99, CPURatesValid: new(false)},
+	}
+	started := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", invalidCPU, thresholds)
+	if started.Transition != TransitionNoop || started.Current != nil {
+		t.Fatalf("invalid CPU result = %#v, want no CPU incident", started)
+	}
+
+	previous := &IncidentRecord{
+		IncidentID:    "inc_monitoring_instance_mi_001_monitoring_instance_resource_pressure",
+		ObjectType:    ObjectTypeMonitoringInstance,
+		ObjectID:      "mi_001",
+		IncidentClass: IncidentMonitoringInstanceResourcePressure,
+		Severity:      SeverityAlert,
+		SourceSummary: "原始资源摘要",
+	}
+	held := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", invalidCPU, thresholds)
+	if held.Transition != TransitionNoop || !reflect.DeepEqual(held.Current, previous) {
+		t.Fatalf("invalid CPU recovery result = %#v, want exact noop(previous)", held)
+	}
+
+	zeroCPU := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-8 * time.Minute), CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-15 * time.Minute), CPURatesValid: new(true)},
+	}
+	recovered := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", zeroCPU, thresholds)
+	if recovered.Transition != TransitionRecovered {
+		t.Fatalf("valid zero CPU recovery = %#v, want recovered", recovered)
+	}
+
+	badBetweenGood := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 95, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 95, CPURatesValid: new(false)},
+		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 95, CPURatesValid: new(true)},
+	}
+	between := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", badBetweenGood, thresholds)
+	if between.Transition != TransitionNoop || between.Current != nil {
+		t.Fatalf("CPU gap between valid endpoints = %#v, want no CPU incident", between)
+	}
+
+	nonCPUAlert := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, NormalizedLoad5: 6.2, CPURatesValid: new(false)},
+		{ObservedAt: now.Add(-8 * time.Minute), NormalizedLoad5: 6.2, CPURatesValid: new(false)},
+		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 6.2, CPURatesValid: new(false)},
+	}
+	nonCPUStarted := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", nonCPUAlert, thresholds)
+	if nonCPUStarted.Transition != TransitionStarted || nonCPUStarted.Current == nil || nonCPUStarted.Current.Severity != SeverityAlert {
+		t.Fatalf("non-CPU pressure with invalid CPU = %#v, want alert start", nonCPUStarted)
+	}
+	nonCPUHeld := EvaluateMonitoringInstanceResourcePressure(nonCPUStarted.Current, "mi_001", nonCPUAlert, thresholds)
+	if nonCPUHeld.Transition != TransitionNoop || !reflect.DeepEqual(nonCPUHeld.Current, nonCPUStarted.Current) {
+		t.Fatalf("same-level non-CPU pressure with invalid CPU = %#v, want exact noop(previous)", nonCPUHeld)
+	}
+	nonCPUUpgrade := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, NormalizedLoad5: 8.5, CPURatesValid: new(false)},
+		{ObservedAt: now.Add(-8 * time.Minute), NormalizedLoad5: 8.5, CPURatesValid: new(false)},
+		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 8.5, CPURatesValid: new(false)},
+		{ObservedAt: now.Add(-30 * time.Minute), NormalizedLoad5: 8.5, CPURatesValid: new(false)},
+	}
+	upgraded := EvaluateMonitoringInstanceResourcePressure(nonCPUStarted.Current, "mi_001", nonCPUUpgrade, thresholds)
+	if upgraded.Transition != TransitionEscalated || upgraded.Current == nil || upgraded.Current.Severity != SeverityCritical {
+		t.Fatalf("strict non-CPU upgrade with invalid CPU = %#v, want critical escalation", upgraded)
+	}
+}
+
 func TestEvaluateTargetProbeFailureThresholdsAndRecovery(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 10, 0, 0, 0, time.UTC)
 	httpFailures := []runtimefacts.ProbeObservation{
@@ -726,7 +911,7 @@ func TestEvaluateMonitoringInstanceTrendDegradationStartsAndEscalates(t *testing
 	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
 	started := EvaluateMonitoringInstanceTrendDegradation(nil, "mi_001",
 		nodeTrendSamples(now, []float64{1.7, 1.8, 1.9}, []float64{4, 4, 4}, []float64{0.8, 0.9, 0.8}),
-		[]MonitoringInstanceHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: 2, AvgCPUStealPct: 0.5}},
+		[]MonitoringInstanceHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: new(float64(2)), AvgCPUStealPct: new(0.5)}},
 	)
 	if started.Transition != TransitionStarted {
 		t.Fatalf("Transition = %q, want %q", started.Transition, TransitionStarted)
@@ -743,7 +928,7 @@ func TestEvaluateMonitoringInstanceTrendDegradationStartsAndEscalates(t *testing
 
 	escalated := EvaluateMonitoringInstanceTrendDegradation(started.Current, "mi_001",
 		nodeTrendSamples(now.Add(30*time.Minute), []float64{1.9, 2.0, 2.1}, []float64{11, 12, 13}, []float64{0.8, 0.9, 0.8}),
-		[]MonitoringInstanceHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: 2, AvgCPUStealPct: 0.5}},
+		[]MonitoringInstanceHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: new(float64(2)), AvgCPUStealPct: new(0.5)}},
 	)
 	if escalated.Transition != TransitionEscalated {
 		t.Fatalf("Transition = %q, want %q", escalated.Transition, TransitionEscalated)
@@ -759,7 +944,7 @@ func TestEvaluateMonitoringInstanceTrendDegradationStartsAndEscalates(t *testing
 func TestEvaluateMonitoringInstanceTrendDegradationSkipsSuppressedStartsAndRecoversConservatively(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
-	baselines := []MonitoringInstanceHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: 2, AvgCPUStealPct: 0.5}}
+	baselines := []MonitoringInstanceHostDailyAggregate{{BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: new(float64(2)), AvgCPUStealPct: new(0.5)}}
 	previous := &IncidentRecord{IncidentID: "inc_monitoring_instance_mi_001_monitoring_instance_trend_degradation", ObjectType: ObjectTypeMonitoringInstance, ObjectID: "mi_001", IncidentClass: IncidentMonitoringInstanceTrendDegradation, Severity: SeverityAlert, StartedAt: now.Add(-24 * time.Hour), LastEvaluatedAt: now.Add(-time.Hour)}
 
 	suppressed := EvaluateMonitoringInstanceTrendDegradation(nil, "mi_001",
@@ -822,7 +1007,7 @@ func TestEvaluateMonitoringInstanceTrendDegradationPrefersLiveSampleAtEqualObser
 	t.Parallel()
 	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
 	baselines := []MonitoringInstanceHostDailyAggregate{{
-		BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: 2, AvgCPUStealPct: 0.5,
+		BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: new(float64(2)), AvgCPUStealPct: new(0.5),
 	}}
 
 	result := EvaluateMonitoringInstanceTrendDegradation(nil, "mi_001",
@@ -837,6 +1022,136 @@ func TestEvaluateMonitoringInstanceTrendDegradationPrefersLiveSampleAtEqualObser
 
 	if result.Transition != TransitionStarted {
 		t.Fatalf("Transition = %q, want %q when equal-time live evidence outranks backfill", result.Transition, TransitionStarted)
+	}
+}
+func TestEvaluateMonitoringInstanceTrendCPUValidityPreservesStateAndAllowsValidZeroRecovery(t *testing.T) {
+	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
+	baselines := []MonitoringInstanceHostDailyAggregate{{
+		BucketDate: now.AddDate(0, 0, -1), SampleCount: 288, AvgLoad5: 0.8, AvgCPUIOWaitPct: new(float64(2)), AvgCPUStealPct: new(0.5),
+	}}
+	previous := &IncidentRecord{
+		IncidentID:      "inc_monitoring_instance_mi_001_monitoring_instance_trend_degradation",
+		ObjectType:      ObjectTypeMonitoringInstance,
+		ObjectID:        "mi_001",
+		IncidentClass:   IncidentMonitoringInstanceTrendDegradation,
+		Severity:        SeverityNotice,
+		SourceSummary:   "原始趋势摘要",
+		StartedAt:       now.Add(-time.Hour),
+		LastEvaluatedAt: now.Add(-time.Minute),
+	}
+
+	invalidCPU := nodeTrendSamples(now, []float64{0.7, 0.8, 0.9, 0.8}, []float64{2, 2, 2, 2}, []float64{0.4, 0.4, 0.4, 0.4})
+	for i := range invalidCPU {
+		invalidCPU[i].CPURatesValid = new(false)
+	}
+	held := EvaluateMonitoringInstanceTrendDegradation(previous, "mi_001", invalidCPU, baselines)
+	if held.Transition != TransitionNoop || !reflect.DeepEqual(held.Current, previous) {
+		t.Fatalf("invalid CPU trend result = %#v, want exact noop(previous)", held)
+	}
+
+	badBetweenGood := nodeTrendSamples(now, []float64{0.7, 0.8, 0.9, 0.8}, []float64{2, 2, 2, 2}, []float64{0.4, 0.4, 0.4, 0.4})
+	badBetweenGood[0].CPURatesValid = new(true)
+	badBetweenGood[1].CPURatesValid = new(false)
+	badBetweenGood[2].CPURatesValid = new(true)
+	badBetweenGood[3].CPURatesValid = new(true)
+	between := EvaluateMonitoringInstanceTrendDegradation(previous, "mi_001", badBetweenGood, baselines)
+	if between.Transition != TransitionNoop || !reflect.DeepEqual(between.Current, previous) {
+		t.Fatalf("CPU gap between valid trend endpoints = %#v, want exact noop(previous)", between)
+	}
+
+	zeroCPU := nodeTrendSamples(now, []float64{0.7, 0.8, 0.9, 0.8}, []float64{0, 0, 0, 0}, []float64{0, 0, 0, 0})
+	for i := range zeroCPU {
+		zeroCPU[i].CPURatesValid = new(true)
+	}
+	recovered := EvaluateMonitoringInstanceTrendDegradation(previous, "mi_001", zeroCPU, baselines)
+	if recovered.Transition != TransitionRecovered {
+		t.Fatalf("valid zero CPU trend recovery = %#v, want recovered", recovered)
+	}
+	noCPUBaseline := []MonitoringInstanceHostDailyAggregate{{SampleCount: 288, AvgLoad5: 0.8}}
+	unknownBaseline := EvaluateMonitoringInstanceTrendDegradation(previous, "mi_001", zeroCPU, noCPUBaseline)
+	if unknownBaseline.Transition != TransitionNoop || !reflect.DeepEqual(unknownBaseline.Current, previous) {
+		t.Fatalf("missing CPU trend baseline = %#v, want exact noop(previous)", unknownBaseline)
+	}
+}
+
+func TestWeightedMonitoringInstanceTrendBaselinesUseIndependentCPUCountsAndLegacyFallback(t *testing.T) {
+	baselines := []MonitoringInstanceHostDailyAggregate{
+		{
+			SampleCount:                    100,
+			AvgLoad5:                       1,
+			AvgCPUIOWaitPct:                new(float64(2)),
+			AvgCPUStealPct:                 new(0.5),
+			CPUValidSampleCount:            new(1),
+			CPUValidBackfilledSampleCount:  new(0),
+			CPUValidMaintenanceSampleCount: new(0),
+		},
+		{
+			SampleCount:                    100,
+			AvgLoad5:                       3,
+			AvgCPUIOWaitPct:                new(float64(10)),
+			AvgCPUStealPct:                 new(1.5),
+			CPUValidSampleCount:            new(9),
+			CPUValidBackfilledSampleCount:  new(0),
+			CPUValidMaintenanceSampleCount: new(0),
+		},
+	}
+	load, iowait, steal := weightedMonitoringInstanceTrendBaselines(baselines)
+	if load == nil || *load != 2 {
+		t.Fatalf("load baseline = %v, want host-weighted 2", load)
+	}
+	if iowait == nil || *iowait != 9.2 {
+		t.Fatalf("iowait baseline = %v, want CPU-count-weighted 9.2", iowait)
+	}
+	if steal == nil || *steal != 1.4 {
+		t.Fatalf("steal baseline = %v, want CPU-count-weighted 1.4", steal)
+	}
+
+	legacy := []MonitoringInstanceHostDailyAggregate{{
+		SampleCount:                    15,
+		BackfilledSampleCount:          10,
+		MaintenanceSampleCount:         10,
+		AvgLoad5:                       0.8,
+		AvgCPUIOWaitPct:                new(float64(2)),
+		AvgCPUStealPct:                 new(0.5),
+		CPUValidSampleCount:            new(5),
+		CPUValidBackfilledSampleCount:  new(0),
+		CPUValidMaintenanceSampleCount: new(0),
+	}}
+	legacyLoad, legacyIOWait, legacySteal := weightedMonitoringInstanceTrendBaselines(legacy)
+	if legacyLoad != nil {
+		t.Fatalf("load baseline = %v, want nil when host weight is non-positive", legacyLoad)
+	}
+	if legacyIOWait == nil || *legacyIOWait != 2 || legacySteal == nil || *legacySteal != 0.5 {
+		t.Fatalf("independent CPU baselines = %v/%v, want usable CPU day despite host weight", legacyIOWait, legacySteal)
+	}
+
+	legacyFallback := []MonitoringInstanceHostDailyAggregate{{
+		SampleCount:            15,
+		BackfilledSampleCount:  10,
+		MaintenanceSampleCount: 0,
+		AvgCPUIOWaitPct:        new(float64(4)),
+		AvgCPUStealPct:         new(float64(1)),
+	}}
+	_, fallbackIOWait, fallbackSteal := weightedMonitoringInstanceTrendBaselines(legacyFallback)
+	if fallbackIOWait == nil || *fallbackIOWait != 4 || fallbackSteal == nil || *fallbackSteal != 1 {
+		t.Fatalf("legacy CPU count fallback = %v/%v, want legacy sample counts", fallbackIOWait, fallbackSteal)
+	}
+
+	for _, invalid := range []float64{-1, 101, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		t.Run("invalid", func(t *testing.T) {
+			baselines := []MonitoringInstanceHostDailyAggregate{{
+				SampleCount:                    10,
+				AvgCPUIOWaitPct:                new(invalid),
+				AvgCPUStealPct:                 new(float64(1)),
+				CPUValidSampleCount:            new(10),
+				CPUValidBackfilledSampleCount:  new(0),
+				CPUValidMaintenanceSampleCount: new(0),
+			}}
+			_, gotIOWait, gotSteal := weightedMonitoringInstanceTrendBaselines(baselines)
+			if gotIOWait != nil || gotSteal == nil {
+				t.Fatalf("CPU averages = %v/%v for %v, want iowait nil and valid steal", gotIOWait, gotSteal, invalid)
+			}
+		})
 	}
 }
 
@@ -864,7 +1179,7 @@ func TestNormalizeMonitoringInstanceResourceSamplesUsesReplaySafeStableOrdering(
 func TestEvaluateTargetLatencyTrendStartsAndEscalatesWithoutCritical(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
-	baselines := []TargetProbeDailyAggregate{{TargetID: "tg_001", ProbeItemID: "pb_http_1", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: float64Ptr(120)}}
+	baselines := []TargetProbeDailyAggregate{{TargetID: "tg_001", ProbeItemID: "pb_http_1", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: new(float64(120))}}
 	started := EvaluateTargetLatencyTrendDegradationAcrossSeries(nil, "tg_001",
 		[]runtimefacts.ProbeObservation{
 			targetLatencyObservation(now, "mi_001", "pb_http_1", 330),
@@ -920,14 +1235,14 @@ func TestEvaluateTargetLatencyTrendStartsAndEscalatesWithoutCritical(t *testing.
 func TestEvaluateTargetLatencyTrendSkipsSuppressedStartsAndRecoversConservatively(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC)
-	baselines := []TargetProbeDailyAggregate{{TargetID: "tg_001", ProbeItemID: "pb_http_1", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: float64Ptr(100)}}
+	baselines := []TargetProbeDailyAggregate{{TargetID: "tg_001", ProbeItemID: "pb_http_1", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: new(float64(100))}}
 	previous := &IncidentRecord{IncidentID: "inc_target_tg_001_target_latency_trend_degradation", ObjectType: ObjectTypeTarget, ObjectID: "tg_001", IncidentClass: IncidentTargetLatencyTrendDegradation, Severity: SeverityNotice, StartedAt: now.Add(-24 * time.Hour), LastEvaluatedAt: now.Add(-time.Hour)}
 
 	suppressed := EvaluateTargetLatencyTrendDegradationAcrossSeries(nil, "tg_001",
 		[]runtimefacts.ProbeObservation{
-			{ObservedAt: now, MonitoringInstanceID: "mi_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: intPtr(320), IsBackfilled: true},
-			{ObservedAt: now.Add(-10 * time.Minute), MonitoringInstanceID: "mi_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: intPtr(330), IsBackfilled: true},
-			{ObservedAt: now.Add(-20 * time.Minute), MonitoringInstanceID: "mi_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: intPtr(340), IsBackfilled: true},
+			{ObservedAt: now, MonitoringInstanceID: "mi_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: new(320), IsBackfilled: true},
+			{ObservedAt: now.Add(-10 * time.Minute), MonitoringInstanceID: "mi_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: new(330), IsBackfilled: true},
+			{ObservedAt: now.Add(-20 * time.Minute), MonitoringInstanceID: "mi_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: new(340), IsBackfilled: true},
 		},
 		baselines,
 	)
@@ -937,7 +1252,7 @@ func TestEvaluateTargetLatencyTrendSkipsSuppressedStartsAndRecoversConservativel
 
 	latestSuppressed := EvaluateTargetLatencyTrendDegradationAcrossSeries(nil, "tg_001",
 		[]runtimefacts.ProbeObservation{
-			{ObservedAt: now, MonitoringInstanceID: "mi_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: intPtr(120), MaintenanceContext: true},
+			{ObservedAt: now, MonitoringInstanceID: "mi_001", TargetID: "tg_001", ProbeItemID: "pb_http_1", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess, LatencyMS: new(120), MaintenanceContext: true},
 			targetLatencyObservation(now.Add(-10*time.Minute), "mi_001", "pb_http_1", 330),
 			targetLatencyObservation(now.Add(-20*time.Minute), "mi_001", "pb_http_1", 340),
 			targetLatencyObservation(now.Add(-30*time.Minute), "mi_001", "pb_http_1", 350),
@@ -975,7 +1290,7 @@ func TestEvaluateTargetLatencyTrendSkipsSuppressedStartsAndRecoversConservativel
 	}
 
 	secondBaseline := append([]TargetProbeDailyAggregate(nil), baselines...)
-	secondBaseline = append(secondBaseline, TargetProbeDailyAggregate{TargetID: "tg_001", ProbeItemID: "pb_http_2", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: float64Ptr(100)})
+	secondBaseline = append(secondBaseline, TargetProbeDailyAggregate{TargetID: "tg_001", ProbeItemID: "pb_http_2", BucketDate: now.AddDate(0, 0, -1), ObservationCount: 96, SuccessCount: 96, AvgLatencyMS: new(float64(100))})
 	partialRecovery := EvaluateTargetLatencyTrendDegradationAcrossSeries(previous, "tg_001",
 		[]runtimefacts.ProbeObservation{
 			targetLatencyObservation(now.Add(time.Hour), "mi_001", "pb_http_1", 120),
@@ -1032,10 +1347,6 @@ func targetLatencyObservation(observedAt time.Time, monitoringInstanceID, probeI
 		ProbeItemID:          probeItemID,
 		ProbeKind:            agentapi.ProbeKindHTTP,
 		ResultKind:           agentapi.ProbeResultSuccess,
-		LatencyMS:            intPtr(latencyMS),
+		LatencyMS:            new(latencyMS),
 	}
 }
-
-func intPtr(v int) *int { return &v }
-
-func float64Ptr(v float64) *float64 { return &v }
