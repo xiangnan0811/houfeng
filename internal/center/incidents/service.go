@@ -53,6 +53,7 @@ type SnapshotReader interface {
 	ListActiveIncidents(context.Context, ObjectType, string) ([]IncidentRecord, error)
 	ListRecentLiveHeartbeatReceipts(context.Context, string, time.Time) ([]LiveHeartbeatReceipt, error)
 	ListRecentHostSamples(context.Context, string, time.Time) ([]runtimefacts.HostSample, error)
+	ListResourceWindowHostSamples(context.Context, string, time.Time) ([]runtimefacts.HostSample, error)
 	ListRecentProbeObservations(context.Context, string, time.Time) ([]runtimefacts.ProbeObservation, error)
 	ListMonitoringInstanceHostDailyAggregates(context.Context, string, time.Time, time.Time) ([]MonitoringInstanceHostDailyAggregate, error)
 	ListTargetProbeDailyAggregates(context.Context, string, time.Time, time.Time) ([]TargetProbeDailyAggregate, error)
@@ -567,6 +568,14 @@ func (s *Service) evaluateMonitoringInstanceAttempt(ctx context.Context, monitor
 		}
 		heartbeatEvaluation = EvaluateMonitoringInstanceHeartbeatMissing(heartbeatPrevious, monitoringInstanceID, now, record.LastHeartbeatAt, policySnapshot.heartbeat, recoveryReceipts)
 	}
+	resourcePolicy, err := s.resourcePressurePolicy(ctx, record.Labels, now)
+	if err != nil {
+		return evaluationAttemptResult{err: err}
+	}
+	resourceWindowHostSamples, err := s.snapshots.ListResourceWindowHostSamples(ctx, monitoringInstanceID, now)
+	if err != nil {
+		return evaluationAttemptResult{err: fmt.Errorf("list resource window host samples for %q: %w", monitoringInstanceID, err)}
+	}
 	hostSamples, err := s.snapshots.ListRecentHostSamples(ctx, monitoringInstanceID, now.Add(-30*time.Minute))
 	if err != nil {
 		return evaluationAttemptResult{err: fmt.Errorf("list recent host samples for %q: %w", monitoringInstanceID, err)}
@@ -588,17 +597,21 @@ func (s *Service) evaluateMonitoringInstanceAttempt(ctx context.Context, monitor
 	}}
 	if len(hostSamples) > 0 {
 		latest := &hostSamples[0]
-		resourceSamples := monitoringInstanceResourceSamplesFromHostSamples(hostSamples)
 		evaluations = append(evaluations,
 			classEvaluation{class: IncidentMonitoringInstanceDiskPressure, result: EvaluateMonitoringInstanceDiskPressure(previousByClass[IncidentMonitoringInstanceDiskPressure], monitoringInstanceID, latest, thresholds)},
 			classEvaluation{class: IncidentMonitoringInstanceInodePressure, result: EvaluateMonitoringInstanceInodePressure(previousByClass[IncidentMonitoringInstanceInodePressure], monitoringInstanceID, latest, thresholds)},
-			classEvaluation{class: IncidentMonitoringInstanceResourcePressure, result: EvaluateMonitoringInstanceResourcePressure(previousByClass[IncidentMonitoringInstanceResourcePressure], monitoringInstanceID, resourceSamples, thresholds)},
 		)
 	}
-	evaluations = append(evaluations, classEvaluation{
-		class:  IncidentMonitoringInstanceTrendDegradation,
-		result: EvaluateMonitoringInstanceTrendDegradation(previousByClass[IncidentMonitoringInstanceTrendDegradation], monitoringInstanceID, monitoringInstanceResourceSamplesFromHostSamples(trendHostSamples), monitoringInstanceBaselines),
-	})
+	evaluations = append(evaluations,
+		classEvaluation{
+			class:  IncidentMonitoringInstanceResourcePressure,
+			result: EvaluateMonitoringInstanceResourcePressure(previousByClass[IncidentMonitoringInstanceResourcePressure], monitoringInstanceID, monitoringInstanceResourceSamplesFromHostSamples(resourceWindowHostSamples), thresholds, resourcePolicy),
+		},
+		classEvaluation{
+			class:  IncidentMonitoringInstanceTrendDegradation,
+			result: EvaluateMonitoringInstanceTrendDegradation(previousByClass[IncidentMonitoringInstanceTrendDegradation], monitoringInstanceID, monitoringInstanceResourceSamplesFromHostSamples(trendHostSamples), monitoringInstanceBaselines),
+		},
+	)
 
 	mutation := buildMutation(ObjectTypeMonitoringInstance, monitoringInstanceID, rowVersion, previous, evaluations)
 	result := s.applyEvaluationAttempt(ctx, mutation, evaluations, true)
@@ -933,6 +946,35 @@ func (s *Service) sweepIntervalFor(ctx context.Context) time.Duration {
 		return s.fallbackSweepInterval
 	}
 	return time.Duration(validated.SweepIntervalSeconds) * time.Second
+}
+
+func (s *Service) resourcePressurePolicy(ctx context.Context, labels []string, now time.Time) (ResourcePressurePolicy, error) {
+	settings := centersettings.Default()
+	if s.settingsRepo != nil {
+		current, err := s.settingsRepo.GetSettings(ctx)
+		if err != nil {
+			return ResourcePressurePolicy{}, fmt.Errorf("read center settings for resource pressure: %w", err)
+		}
+		settings = current
+	}
+
+	tier := centersettings.ResolveHostSampleFrequencyTier(settings.HostSampleFrequencyTier, labels, settings.OverrideRules)
+	var interval time.Duration
+	switch tier {
+	case targets.FrequencyTier5s:
+		interval = 5 * time.Second
+	case targets.FrequencyTier1m:
+		interval = time.Minute
+	case targets.FrequencyTier5m:
+		interval = 5 * time.Minute
+	case targets.FrequencyTier15m:
+		interval = 15 * time.Minute
+	case targets.FrequencyTier6h:
+		interval = 6 * time.Hour
+	default:
+		return ResourcePressurePolicy{}, errors.New("invalid resource pressure sample frequency tier")
+	}
+	return ResourcePressurePolicy{EvaluatedAt: now, SampleInterval: interval}, nil
 }
 
 func (s *Service) resolveIncidentPolicySnapshot(ctx context.Context) (incidentPolicySnapshot, error) {
@@ -1484,6 +1526,54 @@ const incidentRecentHostSamplesSQL = `
 	where monitoring_instance_id = $1 and observed_at >= $2
 	order by observed_at desc, is_backfilled asc, received_at desc, id desc`
 
+const incidentResourceWindowHostSamplesSQL = `
+	with anchor as (
+		select observed_at as anchor_at
+		from host_samples
+		where monitoring_instance_id = $1 and observed_at <= $2
+		order by observed_at desc, is_backfilled asc, received_at desc, id desc
+		limit 1
+	), bounds as (
+		select anchor_at, anchor_at - interval '30 minutes' as boundary_at
+		from anchor
+	), window_rows as (
+		select hs.*
+		from host_samples hs
+		join bounds b on hs.monitoring_instance_id = $1
+			and hs.observed_at >= b.boundary_at
+			and hs.observed_at <= b.anchor_at
+	), predecessor_at as (
+		select max(hs.observed_at) as observed_at
+		from host_samples hs
+		join bounds b on hs.monitoring_instance_id = $1
+			and hs.observed_at < b.boundary_at
+		where not exists (
+			select 1
+			from host_samples boundary_sample
+			join bounds boundary_bounds on boundary_sample.monitoring_instance_id = $1
+				and boundary_sample.observed_at = boundary_bounds.boundary_at
+		)
+	), predecessor_rows as (
+		select hs.*
+		from host_samples hs
+		join bounds b on hs.monitoring_instance_id = $1
+		join predecessor_at p on p.observed_at = hs.observed_at
+		where hs.observed_at < b.boundary_at
+	), all_rows as (
+		select * from window_rows
+		union all
+		select * from predecessor_rows
+	)
+	select
+		monitoring_instance_id, observed_at, received_at, agent_version, fingerprint,
+		cpu_usage_pct, cpu_rates_valid, load_1, load_5, load_15, mem_used_pct, mem_available_bytes, mem_total_bytes,
+		swap_used_pct, disk_used_pct, disk_total_bytes, inode_used_pct, net_in_bytes_per_sec,
+		net_out_bytes_per_sec, cpu_iowait_pct, cpu_steal_pct, disk_read_bytes_per_sec,
+		disk_write_bytes_per_sec, disk_busy_pct, uptime_seconds,
+		maintenance_context, is_backfilled, sync_batch_id
+	from all_rows
+	order by observed_at desc, is_backfilled asc, received_at desc, id desc`
+
 const incidentRecentProbeObservationsSQL = `
 	select
 		po.monitoring_instance_id, po.target_id, po.probe_item_id, pi.probe_kind,
@@ -1583,6 +1673,19 @@ func (r *PostgresSnapshotReader) ListRecentHostSamples(ctx context.Context, moni
 		return nil, fmt.Errorf("query host samples for %q: %w", monitoringInstanceID, err)
 	}
 	defer rows.Close()
+	return scanIncidentHostSamples(rows)
+}
+
+func (r *PostgresSnapshotReader) ListResourceWindowHostSamples(ctx context.Context, monitoringInstanceID string, now time.Time) ([]runtimefacts.HostSample, error) {
+	rows, err := r.db.Query(ctx, incidentResourceWindowHostSamplesSQL, monitoringInstanceID, now)
+	if err != nil {
+		return nil, fmt.Errorf("query resource window host samples for %q: %w", monitoringInstanceID, err)
+	}
+	defer rows.Close()
+	return scanIncidentHostSamples(rows)
+}
+
+func scanIncidentHostSamples(rows pgx.Rows) ([]runtimefacts.HostSample, error) {
 	out := make([]runtimefacts.HostSample, 0)
 	for rows.Next() {
 		var (

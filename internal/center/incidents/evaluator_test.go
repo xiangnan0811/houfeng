@@ -3,6 +3,7 @@ package incidents
 import (
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -352,7 +353,7 @@ func TestEvaluateMonitoringInstanceResourcePressureUsesSustainedWindow(t *testin
 	}
 
 	thresholds := DefaultMetricThresholds()
-	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, thresholds)
+	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if result.Current == nil || result.Current.Severity != SeverityAlert {
 		t.Fatalf("Current = %#v, want alert resource incident", result.Current)
 	}
@@ -367,7 +368,7 @@ func TestEvaluateMonitoringInstanceResourcePressureRequiresFullWindowCoverage(t 
 	}
 
 	thresholds := DefaultMetricThresholds()
-	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, thresholds)
+	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if result.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q when 15m/30m coverage is incomplete", result.Transition, TransitionNoop)
 	}
@@ -384,7 +385,7 @@ func TestEvaluateMonitoringInstanceResourcePressureUsesLoadAndLowAvailableMemory
 		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 6.1, MemAvailableBytes: 760 * 1024 * 1024},
 	}
 	thresholds := DefaultMetricThresholds()
-	loadResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", loadSamples, thresholds)
+	loadResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", loadSamples, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if loadResult.Current == nil || loadResult.Current.Severity != SeverityAlert {
 		t.Fatalf("Current = %#v, want alert load-driven resource incident", loadResult.Current)
 	}
@@ -394,7 +395,7 @@ func TestEvaluateMonitoringInstanceResourcePressureUsesLoadAndLowAvailableMemory
 		{ObservedAt: now.Add(-15 * time.Minute), MemUsedPct: 95, MemAvailableBytes: 420 * 1024 * 1024},
 		{ObservedAt: now.Add(-30 * time.Minute), MemUsedPct: 97, MemAvailableBytes: 380 * 1024 * 1024},
 	}
-	memoryResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", memorySamples, thresholds)
+	memoryResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", memorySamples, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if memoryResult.Current == nil || memoryResult.Current.Severity != SeverityCritical {
 		t.Fatalf("Current = %#v, want critical low-available-memory incident", memoryResult.Current)
 	}
@@ -409,7 +410,7 @@ func TestEvaluateMonitoringInstanceResourcePressureIgnoresSuppressedHistoryForAc
 	}
 
 	thresholds := DefaultMetricThresholds()
-	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, thresholds)
+	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if result.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q when only suppressed history spans the active window", result.Transition, TransitionNoop)
 	}
@@ -499,7 +500,7 @@ func TestEvaluateMonitoringInstanceResourcePressureUsesSeveritySpecificCPUValidi
 				Status:          IncidentStatusActive,
 			}
 
-			result := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", tt.samples, thresholds)
+			result := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", tt.samples, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 			if result.Transition != TransitionNoop {
 				t.Fatalf("Transition = %q, want %q", result.Transition, TransitionNoop)
 			}
@@ -538,7 +539,7 @@ func TestEvaluateMonitoringInstanceResourcePressureCPUValidityAndNonCPUUpgrade(t
 		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 99, CPUIOWaitPct: 99, CPUStealPct: 99, CPURatesValid: new(false)},
 		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 99, CPUIOWaitPct: 99, CPUStealPct: 99, CPURatesValid: new(false)},
 	}
-	started := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", invalidCPU, thresholds)
+	started := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", invalidCPU, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if started.Transition != TransitionNoop || started.Current != nil {
 		t.Fatalf("invalid CPU result = %#v, want no CPU incident", started)
 	}
@@ -551,7 +552,7 @@ func TestEvaluateMonitoringInstanceResourcePressureCPUValidityAndNonCPUUpgrade(t
 		Severity:      SeverityAlert,
 		SourceSummary: "原始资源摘要",
 	}
-	held := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", invalidCPU, thresholds)
+	held := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", invalidCPU, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if held.Transition != TransitionNoop || !reflect.DeepEqual(held.Current, previous) {
 		t.Fatalf("invalid CPU recovery result = %#v, want exact noop(previous)", held)
 	}
@@ -561,7 +562,7 @@ func TestEvaluateMonitoringInstanceResourcePressureCPUValidityAndNonCPUUpgrade(t
 		{ObservedAt: now.Add(-8 * time.Minute), CPURatesValid: new(true)},
 		{ObservedAt: now.Add(-15 * time.Minute), CPURatesValid: new(true)},
 	}
-	recovered := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", zeroCPU, thresholds)
+	recovered := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", zeroCPU, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if recovered.Transition != TransitionRecovered {
 		t.Fatalf("valid zero CPU recovery = %#v, want recovered", recovered)
 	}
@@ -571,7 +572,7 @@ func TestEvaluateMonitoringInstanceResourcePressureCPUValidityAndNonCPUUpgrade(t
 		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 95, CPURatesValid: new(false)},
 		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 95, CPURatesValid: new(true)},
 	}
-	between := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", badBetweenGood, thresholds)
+	between := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", badBetweenGood, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if between.Transition != TransitionNoop || between.Current != nil {
 		t.Fatalf("CPU gap between valid endpoints = %#v, want no CPU incident", between)
 	}
@@ -581,11 +582,11 @@ func TestEvaluateMonitoringInstanceResourcePressureCPUValidityAndNonCPUUpgrade(t
 		{ObservedAt: now.Add(-8 * time.Minute), NormalizedLoad5: 6.2, CPURatesValid: new(false)},
 		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 6.2, CPURatesValid: new(false)},
 	}
-	nonCPUStarted := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", nonCPUAlert, thresholds)
+	nonCPUStarted := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", nonCPUAlert, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if nonCPUStarted.Transition != TransitionStarted || nonCPUStarted.Current == nil || nonCPUStarted.Current.Severity != SeverityAlert {
 		t.Fatalf("non-CPU pressure with invalid CPU = %#v, want alert start", nonCPUStarted)
 	}
-	nonCPUHeld := EvaluateMonitoringInstanceResourcePressure(nonCPUStarted.Current, "mi_001", nonCPUAlert, thresholds)
+	nonCPUHeld := EvaluateMonitoringInstanceResourcePressure(nonCPUStarted.Current, "mi_001", nonCPUAlert, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if nonCPUHeld.Transition != TransitionNoop || !reflect.DeepEqual(nonCPUHeld.Current, nonCPUStarted.Current) {
 		t.Fatalf("same-level non-CPU pressure with invalid CPU = %#v, want exact noop(previous)", nonCPUHeld)
 	}
@@ -595,7 +596,7 @@ func TestEvaluateMonitoringInstanceResourcePressureCPUValidityAndNonCPUUpgrade(t
 		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 8.5, CPURatesValid: new(false)},
 		{ObservedAt: now.Add(-30 * time.Minute), NormalizedLoad5: 8.5, CPURatesValid: new(false)},
 	}
-	upgraded := EvaluateMonitoringInstanceResourcePressure(nonCPUStarted.Current, "mi_001", nonCPUUpgrade, thresholds)
+	upgraded := EvaluateMonitoringInstanceResourcePressure(nonCPUStarted.Current, "mi_001", nonCPUUpgrade, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if upgraded.Transition != TransitionEscalated || upgraded.Current == nil || upgraded.Current.Severity != SeverityCritical {
 		t.Fatalf("strict non-CPU upgrade with invalid CPU = %#v, want critical escalation", upgraded)
 	}
@@ -793,7 +794,7 @@ func TestEmptyInputDoesNotForceRecovery(t *testing.T) {
 
 	monitoringInstanceIncident := &IncidentRecord{ObjectType: ObjectTypeMonitoringInstance, ObjectID: "mi_001", IncidentClass: IncidentMonitoringInstanceResourcePressure, Severity: SeverityAlert}
 	thresholds := DefaultMetricThresholds()
-	resource := EvaluateMonitoringInstanceResourcePressure(monitoringInstanceIncident, "mi_001", nil, thresholds)
+	resource := EvaluateMonitoringInstanceResourcePressure(monitoringInstanceIncident, "mi_001", nil, thresholds, resourcePressureTestPolicy(time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC), 15*time.Minute))
 	if resource.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q for empty host input", resource.Transition, TransitionNoop)
 	}
@@ -890,7 +891,7 @@ func TestEvaluateMonitoringInstanceResourcePressureRequiresRecoveryWindowBeforeC
 		{ObservedAt: now, CPUUsagePct: 20, MemUsedPct: 40, NormalizedLoad5: 0.8},
 		{ObservedAt: now.Add(-5 * time.Minute), CPUUsagePct: 22, MemUsedPct: 42, NormalizedLoad5: 0.9},
 	}
-	result := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", insufficient, thresholds)
+	result := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", insufficient, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if result.Transition != TransitionNoop {
 		t.Fatalf("Transition = %q, want %q for incomplete safe window", result.Transition, TransitionNoop)
 	}
@@ -900,9 +901,407 @@ func TestEvaluateMonitoringInstanceResourcePressureRequiresRecoveryWindowBeforeC
 		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 22, MemUsedPct: 42, NormalizedLoad5: 0.9},
 		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 24, MemUsedPct: 44, NormalizedLoad5: 1.0},
 	}
-	recovered := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", safeWindow, thresholds)
+	recovered := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", safeWindow, thresholds, resourcePressureTestPolicy(now, 15*time.Minute))
 	if recovered.Transition != TransitionRecovered {
 		t.Fatalf("Transition = %q, want %q for sustained safe window", recovered.Transition, TransitionRecovered)
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureCriticalRecoveryRequiresThirtyMinutes(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	previous := &IncidentRecord{
+		IncidentID:    "inc_monitoring_instance_mi_001_monitoring_instance_resource_pressure",
+		ObjectType:    ObjectTypeMonitoringInstance,
+		ObjectID:      "mi_001",
+		IncidentClass: IncidentMonitoringInstanceResourcePressure,
+		Severity:      SeverityCritical,
+		SourceSummary: "原始资源摘要",
+		Status:        IncidentStatusActive,
+	}
+	thresholds := DefaultMetricThresholds()
+	policy := resourcePressureTestPolicy(now, 15*time.Minute)
+	short := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 20, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 22, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 24, CPURatesValid: new(true)},
+	}
+	held := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", short, thresholds, policy)
+	if held.Transition != TransitionNoop || !reflect.DeepEqual(held.Current, previous) {
+		t.Fatalf("short critical recovery = %#v, want exact noop(previous)", held)
+	}
+
+	full := append(append([]MonitoringInstanceResourceSample{}, short...),
+		MonitoringInstanceResourceSample{ObservedAt: now.Add(-22 * time.Minute), CPUUsagePct: 25, CPURatesValid: new(true)},
+		MonitoringInstanceResourceSample{ObservedAt: now.Add(-30 * time.Minute), CPUUsagePct: 26, CPURatesValid: new(true)},
+	)
+	recovered := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", full, thresholds, policy)
+	if recovered.Transition != TransitionRecovered {
+		t.Fatalf("full critical recovery = %#v, want recovered", recovered)
+	}
+
+	full[3].CPURatesValid = new(false)
+	invalid := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", full, thresholds, policy)
+	if invalid.Transition != TransitionNoop || !reflect.DeepEqual(invalid.Current, previous) {
+		t.Fatalf("invalid critical recovery = %#v, want exact noop(previous)", invalid)
+	}
+}
+
+func TestBuildResourcePressureWindowUsesBoundedCoverage(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	policy := resourcePressureTestPolicy(now, 5*time.Minute)
+	gapLimit := 2*policy.SampleInterval + 10*time.Millisecond
+	tests := []struct {
+		name    string
+		samples []MonitoringInstanceResourceSample
+		covered bool
+	}{
+		{
+			name: "exact left boundary",
+			samples: []MonitoringInstanceResourceSample{
+				{ObservedAt: now},
+				{ObservedAt: now.Add(-5 * time.Minute)},
+				{ObservedAt: now.Add(-15 * time.Minute)},
+			},
+			covered: true,
+		},
+		{
+			name: "inside boundary without predecessor",
+			samples: []MonitoringInstanceResourceSample{
+				{ObservedAt: now},
+				{ObservedAt: now.Add(-14 * time.Minute)},
+			},
+		},
+		{
+			name: "gap equal to G passes",
+			samples: []MonitoringInstanceResourceSample{
+				{ObservedAt: now},
+				{ObservedAt: now.Add(-5 * time.Minute)},
+				{ObservedAt: now.Add(-5*time.Minute - gapLimit)},
+			},
+			covered: true,
+		},
+		{
+			name: "gap greater than G by one nanosecond fails",
+			samples: []MonitoringInstanceResourceSample{
+				{ObservedAt: now},
+				{ObservedAt: now.Add(-5 * time.Minute)},
+				{ObservedAt: now.Add(-5*time.Minute - gapLimit - time.Nanosecond)},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			window := buildResourcePressureWindow(tt.samples, now, 15*time.Minute, policy, false)
+			if window.covered != tt.covered {
+				t.Fatalf("covered = %v, want %v; window = %#v", window.covered, tt.covered, window)
+			}
+		})
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureUsesCadenceFreshnessAndSixHourUnknown(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	thresholds := DefaultMetricThresholds()
+	dense := denseResourcePressureSamples(now, 5*time.Second+time.Millisecond, 45*time.Minute, 96, 0)
+
+	started := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", dense, thresholds, resourcePressureTestPolicy(now, 5*time.Second))
+	if started.Transition != TransitionStarted || started.Current == nil || started.Current.Severity != SeverityCritical {
+		t.Fatalf("dense 5s result = %#v, want started critical", started)
+	}
+
+	short := denseResourcePressureSamples(now, 5*time.Second+time.Millisecond, 10*time.Minute, 96, 0)
+	shortResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", short, thresholds, resourcePressureTestPolicy(now, 5*time.Second))
+	if shortResult.Transition != TransitionNoop || shortResult.Current != nil {
+		t.Fatalf("short window result = %#v, want unknown noop", shortResult)
+	}
+
+	stalePolicy := ResourcePressurePolicy{EvaluatedAt: now.Add(11 * time.Second), SampleInterval: 5 * time.Second}
+	stale := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", dense, thresholds, stalePolicy)
+	if stale.Transition != TransitionNoop || stale.Current != nil {
+		t.Fatalf("stale result = %#v, want unknown noop", stale)
+	}
+
+	freshPolicy := ResourcePressurePolicy{EvaluatedAt: now.Add(5*time.Second + 100*time.Millisecond), SampleInterval: 5 * time.Second}
+	fresh := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", dense, thresholds, freshPolicy)
+	if fresh.Transition != TransitionStarted || fresh.Current == nil {
+		t.Fatalf("fresh result = %#v, want evaluable result", fresh)
+	}
+	oneMinute := denseResourcePressureSamples(now, time.Minute+time.Millisecond, 16*time.Minute, 96, 0)
+	oneMinuteResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", oneMinute, thresholds, resourcePressureTestPolicy(now, time.Minute))
+	if oneMinuteResult.Transition != TransitionStarted || oneMinuteResult.Current == nil || oneMinuteResult.Current.Severity != SeverityAlert {
+		t.Fatalf("1m result = %#v, want started alert", oneMinuteResult)
+	}
+
+	sixHour := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", dense, thresholds, resourcePressureTestPolicy(now, 6*time.Hour))
+	if sixHour.Transition != TransitionNoop || sixHour.Current != nil {
+		t.Fatalf("6h result = %#v, want unknown noop", sixHour)
+	}
+	futureSamples := append([]MonitoringInstanceResourceSample{{ObservedAt: now.Add(time.Second), CPUUsagePct: 96, CPURatesValid: new(true)}}, dense...)
+	future := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", futureSamples, thresholds, resourcePressureTestPolicy(now, 5*time.Second))
+	if future.Transition != TransitionNoop || future.Current != nil {
+		t.Fatalf("future-anchor result = %#v, want unknown noop", future)
+	}
+
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureSingletonNeedsBoundarySupport(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	thresholds := DefaultMetricThresholds()
+	policy := resourcePressureTestPolicy(now, 15*time.Minute)
+	high := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 95, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-20 * time.Minute), CPUUsagePct: 95, CPURatesValid: new(true)},
+	}
+	started := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", high, thresholds, policy)
+	if started.Transition != TransitionStarted || started.Current == nil || started.Current.Severity != SeverityAlert {
+		t.Fatalf("high singleton result = %#v, want alert start", started)
+	}
+
+	lowBoundary := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 95, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-20 * time.Minute), CPUUsagePct: 20, CPURatesValid: new(true)},
+	}
+	lowBoundaryResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", lowBoundary, thresholds, policy)
+	if lowBoundaryResult.Transition != TransitionNoop || lowBoundaryResult.Current != nil {
+		t.Fatalf("low-boundary singleton result = %#v, want noop", lowBoundaryResult)
+	}
+
+	previous := started.Current
+	lowCurrent := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 20, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-20 * time.Minute), CPUUsagePct: 95, CPURatesValid: new(true)},
+	}
+	held := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", lowCurrent, thresholds, policy)
+	if held.Transition != TransitionNoop || !reflect.DeepEqual(held.Current, previous) {
+		t.Fatalf("high-boundary recovery result = %#v, want exact noop(previous)", held)
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureChoosesEligibleNonCPUEscalation(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	thresholds := DefaultMetricThresholds()
+	tests := []struct {
+		name             string
+		previousSeverity Severity
+		cpuUsage         float64
+		load5            float64
+		wantSeverity     Severity
+	}{
+		{name: "alert to critical load", previousSeverity: SeverityAlert, cpuUsage: 96, load5: 8.5, wantSeverity: SeverityCritical},
+		{name: "notice to alert load", previousSeverity: SeverityNotice, cpuUsage: 92, load5: 6.5, wantSeverity: SeverityAlert},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			samples := denseResourcePressureSamples(now, time.Minute, 30*time.Minute, tt.cpuUsage, 0)
+			for index := range samples {
+				samples[index].NormalizedLoad5 = tt.load5
+			}
+			samples = append(samples, MonitoringInstanceResourceSample{
+				ObservedAt:      now.Add(-5 * time.Minute),
+				CPUUsagePct:     tt.cpuUsage,
+				NormalizedLoad5: tt.load5,
+				CPURatesValid:   new(false),
+				IsBackfilled:    true,
+			})
+			previous := &IncidentRecord{
+				IncidentID:      "inc_monitoring_instance_mi_001_monitoring_instance_resource_pressure",
+				ObjectType:      ObjectTypeMonitoringInstance,
+				ObjectID:        "mi_001",
+				IncidentClass:   IncidentMonitoringInstanceResourcePressure,
+				Severity:        tt.previousSeverity,
+				StartedAt:       now.Add(-time.Hour),
+				LastEvaluatedAt: now.Add(-time.Minute),
+				SourceSummary:   "previous pressure",
+				Status:          IncidentStatusActive,
+			}
+			result := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", samples, thresholds, resourcePressureTestPolicy(now, time.Minute))
+			if result.Transition != TransitionEscalated || result.Current == nil || result.Current.Severity != tt.wantSeverity {
+				t.Fatalf("result = %#v, want non-CPU escalation to %s", result, tt.wantSeverity)
+			}
+			if !strings.Contains(result.Current.SourceSummary, "Load5") {
+				t.Fatalf("Current.SourceSummary = %q, want load-driven summary", result.Current.SourceSummary)
+			}
+			if result.Event == nil || result.Event.EventType != EventIncidentEscalated || result.Event.Severity != tt.wantSeverity {
+				t.Fatalf("Event = %#v, want escalated event at %s", result.Event, tt.wantSeverity)
+			}
+			if result.Notification == nil || !result.Notification.ShouldSend || result.Notification.Reason != NotificationReasonEscalated || result.Notification.Severity != tt.wantSeverity {
+				t.Fatalf("Notification = %#v, want escalated notification at %s", result.Notification, tt.wantSeverity)
+			}
+			if result.Current.StartedAt != previous.StartedAt {
+				t.Fatalf("Current.StartedAt = %s, want previous %s", result.Current.StartedAt, previous.StartedAt)
+			}
+		})
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureDowngradeChecksThirtyMinuteSingletonBoundary(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	previous := &IncidentRecord{
+		IncidentID:      "inc_monitoring_instance_mi_001_monitoring_instance_resource_pressure",
+		ObjectType:      ObjectTypeMonitoringInstance,
+		ObjectID:        "mi_001",
+		IncidentClass:   IncidentMonitoringInstanceResourcePressure,
+		Severity:        SeverityAlert,
+		StartedAt:       now.Add(-time.Hour),
+		LastEvaluatedAt: now.Add(-time.Minute),
+		SourceSummary:   "previous alert",
+		Status:          IncidentStatusActive,
+	}
+	samples := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 85, CPUStealPct: 0, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-30*time.Minute - time.Millisecond), CPUUsagePct: 85, CPUStealPct: 12, CPURatesValid: new(true)},
+	}
+	result := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", samples, DefaultMetricThresholds(), resourcePressureTestPolicy(now, 15*time.Minute))
+	if result.Transition != TransitionNoop || !reflect.DeepEqual(result.Current, previous) {
+		t.Fatalf("result = %#v, want exact noop(previous) when 30m boundary supports alert", result)
+	}
+	if result.Event != nil || result.Notification != nil {
+		t.Fatalf("Event = %#v, Notification = %#v, want no downgrade event or notification", result.Event, result.Notification)
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureChecksSingletonRawRecoveryAndBoundaryEvidence(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	previous := &IncidentRecord{
+		IncidentID:      "inc_monitoring_instance_mi_001_monitoring_instance_resource_pressure",
+		ObjectType:      ObjectTypeMonitoringInstance,
+		ObjectID:        "mi_001",
+		IncidentClass:   IncidentMonitoringInstanceResourcePressure,
+		Severity:        SeverityCritical,
+		StartedAt:       now.Add(-time.Hour),
+		LastEvaluatedAt: now.Add(-time.Minute),
+		SourceSummary:   "previous critical",
+		Status:          IncidentStatusActive,
+	}
+	tests := []struct {
+		name        string
+		currentCPU  float64
+		previousCPU float64
+	}{
+		{name: "notice current with critical predecessor", currentCPU: 85, previousCPU: 96},
+		{name: "safe current with critical predecessor", currentCPU: 10, previousCPU: 96},
+		{name: "critical current with safe predecessor", currentCPU: 96, previousCPU: 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			samples := []MonitoringInstanceResourceSample{
+				{ObservedAt: now, CPUUsagePct: tt.currentCPU, CPURatesValid: new(true)},
+				{ObservedAt: now.Add(-30*time.Minute - time.Millisecond), CPUUsagePct: tt.previousCPU, CPURatesValid: new(true)},
+			}
+			result := EvaluateMonitoringInstanceResourcePressure(previous, "mi_001", samples, DefaultMetricThresholds(), resourcePressureTestPolicy(now, 15*time.Minute))
+			if result.Transition != TransitionNoop || !reflect.DeepEqual(result.Current, previous) {
+				t.Fatalf("result = %#v, want exact noop(previous)", result)
+			}
+			if result.Event != nil || result.Notification != nil {
+				t.Fatalf("Event = %#v, Notification = %#v, want none", result.Event, result.Notification)
+			}
+		})
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureSingletonMemoryNeedsAvailableMemoryOnBothSides(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name              string
+		currentAvailable  int64
+		previousAvailable int64
+	}{
+		{name: "current low predecessor high", currentAvailable: 400 * 1024 * 1024, previousAvailable: 800 * 1024 * 1024},
+		{name: "current high predecessor low", currentAvailable: 800 * 1024 * 1024, previousAvailable: 400 * 1024 * 1024},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			samples := []MonitoringInstanceResourceSample{
+				{ObservedAt: now, MemUsedPct: 96, MemAvailableBytes: tt.currentAvailable, CPURatesValid: new(true)},
+				{ObservedAt: now.Add(-30*time.Minute - time.Millisecond), MemUsedPct: 96, MemAvailableBytes: tt.previousAvailable, CPURatesValid: new(true)},
+			}
+			result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, DefaultMetricThresholds(), resourcePressureTestPolicy(now, 15*time.Minute))
+			if result.Transition != TransitionStarted || result.Current == nil || result.Current.Severity != SeverityAlert {
+				t.Fatalf("result = %#v, want alert but not critical", result)
+			}
+		})
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureExcludesOutsidePredecessorFromStatistics(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	samples := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 20, MemUsedPct: 94, MemAvailableBytes: 700 * 1024 * 1024, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-8 * time.Minute), CPUUsagePct: 20, MemUsedPct: 94, MemAvailableBytes: 700 * 1024 * 1024, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-15 * time.Minute), CPUUsagePct: 20, MemUsedPct: 94, MemAvailableBytes: 700 * 1024 * 1024, CPURatesValid: new(true)},
+		{ObservedAt: now.Add(-30*time.Minute - time.Millisecond), CPUUsagePct: 99, MemUsedPct: 100, MemAvailableBytes: 1, CPURatesValid: new(true)},
+	}
+	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, DefaultMetricThresholds(), resourcePressureTestPolicy(now, 15*time.Minute))
+	if result.Transition != TransitionStarted || result.Current == nil || result.Current.Severity != SeverityAlert {
+		t.Fatalf("result = %#v, want in-window alert without predecessor contamination", result)
+	}
+	if !strings.Contains(result.Current.SourceSummary, "内存连续 15m") {
+		t.Fatalf("SourceSummary = %q, want 15m in-window memory summary", result.Current.SourceSummary)
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureDuplicateCPUValidityAndCoverage(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	dense := denseResourcePressureSamples(now, time.Minute, 30*time.Minute, 96, 0)
+	dense = append(dense, MonitoringInstanceResourceSample{
+		ObservedAt:    now.Add(-5 * time.Minute),
+		CPUUsagePct:   96,
+		CPURatesValid: new(false),
+	})
+	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", dense, DefaultMetricThresholds(), resourcePressureTestPolicy(now, time.Minute))
+	if result.Transition != TransitionNoop || result.Current != nil {
+		t.Fatalf("duplicate false CPU result = %#v, want no CPU incident", result)
+	}
+
+	duplicatesOnly := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, CPUUsagePct: 96, CPURatesValid: new(true)},
+		{ObservedAt: now, CPUUsagePct: 96, CPURatesValid: new(true)},
+	}
+	duplicateOnlyResult := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", duplicatesOnly, DefaultMetricThresholds(), resourcePressureTestPolicy(now, 15*time.Minute))
+	if duplicateOnlyResult.Transition != TransitionNoop || duplicateOnlyResult.Current != nil {
+		t.Fatalf("duplicate-only timestamp result = %#v, want no incident", duplicateOnlyResult)
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureOrdersCriticalIowaitAfterCPU(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	thresholds := DefaultMetricThresholds()
+	samples := make([]MonitoringInstanceResourceSample, 0, 7)
+	for index := 0; index <= 6; index++ {
+		samples = append(samples, MonitoringInstanceResourceSample{
+			ObservedAt:        now.Add(-time.Duration(index) * 5 * time.Minute),
+			CPUUsagePct:       20,
+			CPUIOWaitPct:      60,
+			MemUsedPct:        93,
+			MemAvailableBytes: 700 * 1024 * 1024,
+			CPURatesValid:     new(true),
+		})
+	}
+	iowait := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, thresholds, resourcePressureTestPolicy(now, 5*time.Minute))
+	if iowait.Current == nil || iowait.Current.Severity != SeverityCritical || !strings.Contains(iowait.Current.SourceSummary, "iowait") {
+		t.Fatalf("iowait result = %#v, want iowait critical summary", iowait.Current)
+	}
+
+	for index := range samples {
+		samples[index].CPUUsagePct = 96
+	}
+	cpu := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, thresholds, resourcePressureTestPolicy(now, 5*time.Minute))
+	if cpu.Current == nil || cpu.Current.Severity != SeverityCritical || !strings.Contains(cpu.Current.SourceSummary, "CPU") {
+		t.Fatalf("cpu result = %#v, want CPU critical summary", cpu.Current)
+	}
+}
+
+func TestEvaluateMonitoringInstanceResourcePressureSuppressedTimestampBreaksCoverage(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 10, 30, 0, 0, time.UTC)
+	samples := []MonitoringInstanceResourceSample{
+		{ObservedAt: now, NormalizedLoad5: 6.5},
+		{ObservedAt: now.Add(-5 * time.Minute), NormalizedLoad5: 6.5, MaintenanceContext: true},
+		{ObservedAt: now.Add(-10 * time.Minute), NormalizedLoad5: 6.5},
+		{ObservedAt: now.Add(-15 * time.Minute), NormalizedLoad5: 6.5},
+	}
+	result := EvaluateMonitoringInstanceResourcePressure(nil, "mi_001", samples, DefaultMetricThresholds(), resourcePressureTestPolicy(now, 5*time.Minute))
+	if result.Transition != TransitionNoop || result.Current != nil {
+		t.Fatalf("suppressed-gap result = %#v, want noop without bridged coverage", result)
 	}
 }
 
@@ -1337,6 +1736,26 @@ func nodeTrendSamples(now time.Time, load5 []float64, iowait []float64, steal []
 		samples = append(samples, sample)
 	}
 	return samples
+}
+
+func denseResourcePressureSamples(now time.Time, interval, duration time.Duration, cpu, iowait float64) []MonitoringInstanceResourceSample {
+	samples := make([]MonitoringInstanceResourceSample, 0, int(duration/interval)+1)
+	for elapsed := time.Duration(0); elapsed <= duration; elapsed += interval {
+		samples = append(samples, MonitoringInstanceResourceSample{
+			ObservedAt:    now.Add(-elapsed),
+			CPUUsagePct:   cpu,
+			CPUIOWaitPct:  iowait,
+			CPURatesValid: new(true),
+		})
+	}
+	return samples
+}
+
+func resourcePressureTestPolicy(now time.Time, interval time.Duration) ResourcePressurePolicy {
+	return ResourcePressurePolicy{
+		EvaluatedAt:    now.Add(100 * time.Millisecond),
+		SampleInterval: interval,
+	}
 }
 
 func targetLatencyObservation(observedAt time.Time, monitoringInstanceID, probeItemID string, latencyMS int) runtimefacts.ProbeObservation {

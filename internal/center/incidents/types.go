@@ -209,6 +209,14 @@ type HeartbeatIncidentPolicy struct {
 	RecoveryMaxIntervalGap time.Duration
 }
 
+// ResourcePressurePolicy is the current cadence and evaluation time used to
+// decide whether host samples provide sufficient resource-pressure evidence.
+// Callers must resolve it for each resource-pressure evaluation attempt.
+type ResourcePressurePolicy struct {
+	EvaluatedAt    time.Time
+	SampleInterval time.Duration
+}
+
 // LiveHeartbeatReceipt is the minimal, server-owned recovery evidence for a
 // heartbeat incident. The persistence reader guarantees that these receipts
 // are non-backfilled and ordered by ReceivedAt descending.

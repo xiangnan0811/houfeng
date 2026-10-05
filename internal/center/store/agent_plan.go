@@ -104,7 +104,7 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, monitoringInst
 	}
 
 	plan := agentplan.SyncPlan{
-		HostSampleFrequencyTier:      resolveHostSampleFrequencyTier(settings.HostSampleFrequencyTier, labels, settings.OverrideRules),
+		HostSampleFrequencyTier:      centersettings.ResolveHostSampleFrequencyTier(settings.HostSampleFrequencyTier, labels, settings.OverrideRules),
 		HostSampleMaintenanceContext: monitoringStatus == monitoringinstances.MonitoringMaintenance,
 		ProbeAssignments:             make([]agentplan.ProbeAssignment, 0),
 		IPQualityPlan:                ipQualityPlanFromSettings(settings.IPQuality),
@@ -213,19 +213,6 @@ func ipQualityPlanFromSettings(settings centersettings.IPQualitySettings) *agent
 		TimeoutSeconds:   settings.TimeoutSeconds,
 		Services:         append([]string(nil), settings.Services...),
 	}
-}
-
-func resolveHostSampleFrequencyTier(base string, monitoringInstanceLabels []string, overrideRules centersettings.OverrideRules) string {
-	labelSet := labelSet(monitoringInstanceLabels)
-	for _, rule := range overrideRules.MonitoringInstanceLabels {
-		if _, ok := labelSet[rule.Label]; !ok {
-			continue
-		}
-		if rule.Overrides.HostSampleFrequencyTier != nil {
-			return *rule.Overrides.HostSampleFrequencyTier
-		}
-	}
-	return base
 }
 
 func resolveProbeAssignmentFrequencyTier(base, probeKind, targetType string, targetLabels []string, overrideRules centersettings.OverrideRules) string {

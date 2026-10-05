@@ -116,27 +116,34 @@ func EvaluateMonitoringInstanceInodePressure(previous *IncidentRecord, monitorin
 	return evaluateMonitoringInstanceInodePressure(previous, monitoringInstanceID, sample, thresholds)
 }
 
-func EvaluateMonitoringInstanceResourcePressure(previous *IncidentRecord, monitoringInstanceID string, samples []MonitoringInstanceResourceSample, thresholds MetricThresholds) EvaluationResult {
+func EvaluateMonitoringInstanceResourcePressure(previous *IncidentRecord, monitoringInstanceID string, samples []MonitoringInstanceResourceSample, thresholds MetricThresholds, policy ResourcePressurePolicy) EvaluationResult {
 	samples = normalizeMonitoringInstanceResourceSamples(samples)
-	if len(samples) == 0 {
+	if len(samples) == 0 || !validResourcePressurePolicy(policy) {
 		return noop(previous)
 	}
-	suppressed := samples[0].MaintenanceContext || samples[0].IsBackfilled
 
 	referenceTime := samples[0].ObservedAt
-	activeSamples := unsuppressedMonitoringInstanceResourceSamples(samples)
-	window15 := nodeResourceSamplesWithin(activeSamples, referenceTime, 15*time.Minute)
-	window30 := nodeResourceSamplesWithin(activeSamples, referenceTime, 30*time.Minute)
-	severity, summary, active := resourcePressureSeverity(window15, window30, thresholds)
-	recoveryWindow := 15 * time.Minute
-	recoveryCPUSamples := window15
-	if previous != nil && previous.Severity == SeverityCritical {
-		recoveryWindow = 30 * time.Minute
-		recoveryCPUSamples = window30
+	activeWindow15 := buildResourcePressureWindowSorted(samples, referenceTime, 15*time.Minute, policy, false)
+	activeWindow30 := buildResourcePressureWindowSorted(samples, referenceTime, 30*time.Minute, policy, false)
+	suppressed := resourcePressureLatestSuppressed(samples)
+
+	var recoveryWindow15, recoveryWindow30 resourcePressureWindow
+	if previous != nil {
+		recoveryWindow15 = buildResourcePressureWindowSorted(samples, referenceTime, 15*time.Minute, policy, true)
+		recoveryWindow30 = buildResourcePressureWindowSorted(samples, referenceTime, 30*time.Minute, policy, true)
 	}
-	if !active {
-		recoverySamples := nodeResourceSamplesWithin(samples, referenceTime, recoveryWindow)
-		if previous != nil && (!spansMonitoringInstanceResourceWindow(recoverySamples, recoveryWindow) || !cpuWindowUsable(recoverySamples, recoveryWindow)) {
+	recoveryWindow := recoveryWindow15
+	if previous != nil && previous.Severity == SeverityCritical {
+		recoveryWindow = recoveryWindow30
+	}
+	recoveryEvidenceUsable := previous == nil || (recoveryWindow.covered && recoveryWindow.cpuUsable)
+	severity := resourcePressureSeverity(activeWindow15, activeWindow30, thresholds, recoveryEvidenceUsable)
+	if !severity.active {
+		if previous == nil {
+			return noop(previous)
+		}
+		if !recoveryWindow.covered || !recoveryWindow.cpuUsable ||
+			resourcePressureRecoveryHasPressure(recoveryWindow15, recoveryWindow30, thresholds, previous.Severity == SeverityCritical) {
 			return noop(previous)
 		}
 		result := recoverIfNeeded(previous, referenceTime, "资源压力恢复到安全区间", MonitoringEventProvenanceAgentSync, samples[0].IsBackfilled)
@@ -145,13 +152,21 @@ func EvaluateMonitoringInstanceResourcePressure(previous *IncidentRecord, monito
 		}
 		return result
 	}
-	if previous != nil && !cpuWindowUsable(recoveryCPUSamples, recoveryWindow) && severityRank(severity) <= severityRank(previous.Severity) {
-		return noop(previous)
+
+	if previous != nil {
+		if (!recoveryWindow.covered || !recoveryWindow.cpuUsable) &&
+			(severity.cpu || severityRank(severity.severity) <= severityRank(previous.Severity)) {
+			return noop(previous)
+		}
+		if severityRank(severity.severity) < severityRank(previous.Severity) &&
+			resourcePressureBoundarySeverityHigher(recoveryWindow15, recoveryWindow30, thresholds, severity.severity, true) {
+			return noop(previous)
+		}
 	}
 	if suppressed {
 		return skip(previous)
 	}
-	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceResourcePressure, severity, referenceTime, summary, MonitoringEventProvenanceAgentSync)
+	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceResourcePressure, severity.severity, referenceTime, severity.summary, MonitoringEventProvenanceAgentSync)
 }
 
 func EvaluateTargetProbeFailure(previous *IncidentRecord, targetID string, recent []runtimefacts.ProbeObservation) EvaluationResult {
@@ -512,64 +527,163 @@ func fastThresholdSeverity(value, notice, alert, critical float64) (Severity, bo
 	}
 }
 
-func resourcePressureSeverity(window15, window30 []MonitoringInstanceResourceSample, thresholds MetricThresholds) (Severity, string, bool) {
-	if len(window15) == 0 {
-		return SeverityNormal, "", false
-	}
-	has15m := spansMonitoringInstanceResourceWindow(window15, 15*time.Minute)
-	has30m := spansMonitoringInstanceResourceWindow(window30, 30*time.Minute)
-	cpu15Usable := cpuWindowUsable(window15, 15*time.Minute)
-	cpu30Usable := cpuWindowUsable(window30, 30*time.Minute)
+type resourcePressureSeverityResult struct {
+	severity Severity
+	summary  string
+	active   bool
+	cpu      bool
+}
 
-	avg15CPU := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUUsagePct })
-	avg15Load := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.NormalizedLoad5 })
-	avg15Mem := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.MemUsedPct })
-	avg15Swap := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.SwapUsedPct })
-	avg15Iowait := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUIOWaitPct })
-	avg15Steal := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUStealPct })
-	avg30CPU := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUUsagePct })
-	avg30Load := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.NormalizedLoad5 })
-	avg30Mem := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.MemUsedPct })
-	avg30Iowait := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUIOWaitPct })
-	avg30Steal := averageMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUStealPct })
-	min30MemAvailable := minimumMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return float64(sample.MemAvailableBytes) })
+type resourcePressureWindowStats struct {
+	count           int
+	cpuUsable       bool
+	cpuUsageTotal   float64
+	loadTotal       float64
+	memTotal        float64
+	swapTotal       float64
+	iowaitTotal     float64
+	stealTotal      float64
+	memAvailableMin float64
+}
 
-	switch {
-	case cpu30Usable && has30m && avg30CPU >= float64(thresholds.CPUCriticalPct):
-		return SeverityCritical, fmt.Sprintf("CPU 连续 30m 平均 %.1f%%", avg30CPU), true
-	case has30m && avg30Load >= thresholds.Load5Critical:
-		return SeverityCritical, fmt.Sprintf("归一化 Load5 连续 30m 平均 %.1f", avg30Load), true
-	case has30m && avg30Mem >= float64(thresholds.MemCriticalPct) && min30MemAvailable <= 512*1024*1024:
-		return SeverityCritical, fmt.Sprintf("内存连续 30m 平均 %.1f%%，可用内存持续偏低", avg30Mem), true
-	case cpu15Usable && has15m && avg15CPU >= float64(thresholds.CPUAlertPct):
-		return SeverityAlert, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", avg15CPU), true
-	case has15m && avg15Load >= thresholds.Load5Alert:
-		return SeverityAlert, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", avg15Load), true
-	case has15m && avg15Mem >= float64(thresholds.MemAlertPct):
-		return SeverityAlert, fmt.Sprintf("内存连续 15m 平均 %.1f%%", avg15Mem), true
-	case cpu30Usable && has30m && avg30Iowait >= float64(thresholds.IOWaitCriticalPct):
-		return SeverityCritical, fmt.Sprintf("iowait 连续 30m 平均 %.1f%%", avg30Iowait), true
-	case cpu15Usable && has15m && avg15Iowait >= float64(thresholds.IOWaitAlertPct):
-		return SeverityAlert, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", avg15Iowait), true
-	case cpu30Usable && has30m && avg30Steal >= 10:
-		return SeverityAlert, fmt.Sprintf("steal 连续 30m 平均 %.1f%%", avg30Steal), true
-	case cpu15Usable && has15m && avg15CPU >= float64(thresholds.CPUWarningPct):
-		return SeverityNotice, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", avg15CPU), true
-	case has15m && avg15Load >= thresholds.Load5Warning:
-		return SeverityNotice, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", avg15Load), true
-	case has15m && avg15Mem >= float64(thresholds.MemWarningPct):
-		return SeverityNotice, fmt.Sprintf("内存连续 15m 平均 %.1f%%", avg15Mem), true
-	case cpu15Usable && has15m && avg15Iowait >= float64(thresholds.IOWaitWarningPct):
-		return SeverityNotice, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", avg15Iowait), true
-	case has15m && avg15Swap > 10:
-		return SeverityNotice, fmt.Sprintf("swap 连续 15m 平均 %.1f%%", avg15Swap), true
-	case cpu15Usable && has15m && avg15Iowait >= 10:
-		return SeverityNotice, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", avg15Iowait), true
-	case cpu15Usable && has15m && avg15Steal >= 5:
-		return SeverityNotice, fmt.Sprintf("steal 连续 15m 平均 %.1f%%", avg15Steal), true
+func resourcePressureSeverity(window15, window30 resourcePressureWindow, thresholds MetricThresholds, cpuCandidatesEnabled bool) resourcePressureSeverityResult {
+	stats15 := resourcePressureWindowStatistics(window15)
+	stats30 := resourcePressureWindowStatistics(window30)
+	boundaryStats15 := resourcePressureWindowBoundaryStatistics(window15)
+	boundaryStats30 := resourcePressureWindowBoundaryStatistics(window30)
+	return resourcePressureSeverityFromStats(
+		window15, stats15, boundaryStats15,
+		window30, stats30, boundaryStats30,
+		thresholds, true, cpuCandidatesEnabled,
+	)
+}
+
+type resourcePressurePredicate uint8
+
+const (
+	resourcePressureCriticalCPU30 resourcePressurePredicate = iota
+	resourcePressureCriticalLoad30
+	resourcePressureCriticalMemory30
+	resourcePressureCriticalIOWait30
+	resourcePressureAlertCPU15
+	resourcePressureAlertLoad15
+	resourcePressureAlertMemory15
+	resourcePressureAlertIOWait15
+	resourcePressureAlertSteal30
+	resourcePressureNoticeCPU15
+	resourcePressureNoticeLoad15
+	resourcePressureNoticeMemory15
+	resourcePressureNoticeIOWait15
+	resourcePressureNoticeSwap15
+	resourcePressureNoticeIOWaitFloor15
+	resourcePressureNoticeSteal15
+)
+
+func resourcePressurePredicateMatches(predicate resourcePressurePredicate, stats resourcePressureWindowStats, thresholds MetricThresholds) bool {
+	switch predicate {
+	case resourcePressureCriticalCPU30:
+		return stats.cpuUsageTotal/float64(stats.count) >= float64(thresholds.CPUCriticalPct)
+	case resourcePressureCriticalLoad30:
+		return stats.loadTotal/float64(stats.count) >= thresholds.Load5Critical
+	case resourcePressureCriticalMemory30:
+		return stats.memTotal/float64(stats.count) >= float64(thresholds.MemCriticalPct) &&
+			stats.memAvailableMin <= 512*1024*1024
+	case resourcePressureCriticalIOWait30:
+		return stats.iowaitTotal/float64(stats.count) >= float64(thresholds.IOWaitCriticalPct)
+	case resourcePressureAlertCPU15:
+		return stats.cpuUsageTotal/float64(stats.count) >= float64(thresholds.CPUAlertPct)
+	case resourcePressureAlertLoad15:
+		return stats.loadTotal/float64(stats.count) >= thresholds.Load5Alert
+	case resourcePressureAlertMemory15:
+		return stats.memTotal/float64(stats.count) >= float64(thresholds.MemAlertPct)
+	case resourcePressureAlertIOWait15:
+		return stats.iowaitTotal/float64(stats.count) >= float64(thresholds.IOWaitAlertPct)
+	case resourcePressureAlertSteal30:
+		return stats.stealTotal/float64(stats.count) >= 10
+	case resourcePressureNoticeCPU15:
+		return stats.cpuUsageTotal/float64(stats.count) >= float64(thresholds.CPUWarningPct)
+	case resourcePressureNoticeLoad15:
+		return stats.loadTotal/float64(stats.count) >= thresholds.Load5Warning
+	case resourcePressureNoticeMemory15:
+		return stats.memTotal/float64(stats.count) >= float64(thresholds.MemWarningPct)
+	case resourcePressureNoticeIOWait15:
+		return stats.iowaitTotal/float64(stats.count) >= float64(thresholds.IOWaitWarningPct)
+	case resourcePressureNoticeSwap15:
+		return stats.swapTotal/float64(stats.count) > 10
+	case resourcePressureNoticeIOWaitFloor15:
+		return stats.iowaitTotal/float64(stats.count) >= 10
+	case resourcePressureNoticeSteal15:
+		return stats.stealTotal/float64(stats.count) >= 5
 	default:
-		return SeverityNormal, "", false
+		return false
 	}
+}
+
+func resourcePressureSeverityFromStats(
+	window15 resourcePressureWindow,
+	stats15, boundaryStats15 resourcePressureWindowStats,
+	window30 resourcePressureWindow,
+	stats30, boundaryStats30 resourcePressureWindowStats,
+	thresholds MetricThresholds,
+	requireSingletonBoundary bool,
+	cpuCandidatesEnabled bool,
+) resourcePressureSeverityResult {
+	switch {
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window30, stats30, boundaryStats30, true, requireSingletonBoundary, resourcePressureCriticalCPU30, thresholds):
+		return resourcePressureSeverityResult{SeverityCritical, fmt.Sprintf("CPU 连续 30m 平均 %.1f%%", stats30.cpuUsageTotal/float64(stats30.count)), true, true}
+	case resourcePressureCandidateSupported(window30, stats30, boundaryStats30, false, requireSingletonBoundary, resourcePressureCriticalLoad30, thresholds):
+		return resourcePressureSeverityResult{SeverityCritical, fmt.Sprintf("归一化 Load5 连续 30m 平均 %.1f", stats30.loadTotal/float64(stats30.count)), true, false}
+	case resourcePressureCandidateSupported(window30, stats30, boundaryStats30, false, requireSingletonBoundary, resourcePressureCriticalMemory30, thresholds):
+		return resourcePressureSeverityResult{SeverityCritical, fmt.Sprintf("内存连续 30m 平均 %.1f%%，可用内存持续偏低", stats30.memTotal/float64(stats30.count)), true, false}
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window30, stats30, boundaryStats30, true, requireSingletonBoundary, resourcePressureCriticalIOWait30, thresholds):
+		return resourcePressureSeverityResult{SeverityCritical, fmt.Sprintf("iowait 连续 30m 平均 %.1f%%", stats30.iowaitTotal/float64(stats30.count)), true, true}
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window15, stats15, boundaryStats15, true, requireSingletonBoundary, resourcePressureAlertCPU15, thresholds):
+		return resourcePressureSeverityResult{SeverityAlert, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", stats15.cpuUsageTotal/float64(stats15.count)), true, true}
+	case resourcePressureCandidateSupported(window15, stats15, boundaryStats15, false, requireSingletonBoundary, resourcePressureAlertLoad15, thresholds):
+		return resourcePressureSeverityResult{SeverityAlert, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", stats15.loadTotal/float64(stats15.count)), true, false}
+	case resourcePressureCandidateSupported(window15, stats15, boundaryStats15, false, requireSingletonBoundary, resourcePressureAlertMemory15, thresholds):
+		return resourcePressureSeverityResult{SeverityAlert, fmt.Sprintf("内存连续 15m 平均 %.1f%%", stats15.memTotal/float64(stats15.count)), true, false}
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window15, stats15, boundaryStats15, true, requireSingletonBoundary, resourcePressureAlertIOWait15, thresholds):
+		return resourcePressureSeverityResult{SeverityAlert, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", stats15.iowaitTotal/float64(stats15.count)), true, true}
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window30, stats30, boundaryStats30, true, requireSingletonBoundary, resourcePressureAlertSteal30, thresholds):
+		return resourcePressureSeverityResult{SeverityAlert, fmt.Sprintf("steal 连续 30m 平均 %.1f%%", stats30.stealTotal/float64(stats30.count)), true, true}
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window15, stats15, boundaryStats15, true, requireSingletonBoundary, resourcePressureNoticeCPU15, thresholds):
+		return resourcePressureSeverityResult{SeverityNotice, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", stats15.cpuUsageTotal/float64(stats15.count)), true, true}
+	case resourcePressureCandidateSupported(window15, stats15, boundaryStats15, false, requireSingletonBoundary, resourcePressureNoticeLoad15, thresholds):
+		return resourcePressureSeverityResult{SeverityNotice, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", stats15.loadTotal/float64(stats15.count)), true, false}
+	case resourcePressureCandidateSupported(window15, stats15, boundaryStats15, false, requireSingletonBoundary, resourcePressureNoticeMemory15, thresholds):
+		return resourcePressureSeverityResult{SeverityNotice, fmt.Sprintf("内存连续 15m 平均 %.1f%%", stats15.memTotal/float64(stats15.count)), true, false}
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window15, stats15, boundaryStats15, true, requireSingletonBoundary, resourcePressureNoticeIOWait15, thresholds):
+		return resourcePressureSeverityResult{SeverityNotice, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", stats15.iowaitTotal/float64(stats15.count)), true, true}
+	case resourcePressureCandidateSupported(window15, stats15, boundaryStats15, false, requireSingletonBoundary, resourcePressureNoticeSwap15, thresholds):
+		return resourcePressureSeverityResult{SeverityNotice, fmt.Sprintf("swap 连续 15m 平均 %.1f%%", stats15.swapTotal/float64(stats15.count)), true, false}
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window15, stats15, boundaryStats15, true, requireSingletonBoundary, resourcePressureNoticeIOWaitFloor15, thresholds):
+		return resourcePressureSeverityResult{SeverityNotice, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", stats15.iowaitTotal/float64(stats15.count)), true, true}
+	case cpuCandidatesEnabled && resourcePressureCandidateSupported(window15, stats15, boundaryStats15, true, requireSingletonBoundary, resourcePressureNoticeSteal15, thresholds):
+		return resourcePressureSeverityResult{SeverityNotice, fmt.Sprintf("steal 连续 15m 平均 %.1f%%", stats15.stealTotal/float64(stats15.count)), true, true}
+	default:
+		return resourcePressureSeverityResult{severity: SeverityNormal}
+	}
+}
+
+func resourcePressureCandidateSupported(
+	window resourcePressureWindow,
+	stats, boundaryStats resourcePressureWindowStats,
+	cpuRequired, requireSingletonBoundary bool,
+	predicate resourcePressurePredicate,
+	thresholds MetricThresholds,
+) bool {
+	if !window.covered || stats.count == 0 || (cpuRequired && !window.cpuUsable) ||
+		!resourcePressurePredicateMatches(predicate, stats, thresholds) {
+		return false
+	}
+	if !requireSingletonBoundary || !window.singleton {
+		return true
+	}
+	if len(window.boundarySamples) == 0 || boundaryStats.count == 0 || (cpuRequired && !boundaryStats.cpuUsable) {
+		return false
+	}
+	return resourcePressurePredicateMatches(predicate, boundaryStats, thresholds)
 }
 
 func probeFailureSeverity(failures []runtimefacts.ProbeObservation) (Severity, bool) {
@@ -711,14 +825,286 @@ func normalizeProbeObservations(observations []runtimefacts.ProbeObservation) []
 	return filtered
 }
 
-func nodeResourceSamplesWithin(samples []MonitoringInstanceResourceSample, reference time.Time, window time.Duration) []MonitoringInstanceResourceSample {
-	out := make([]MonitoringInstanceResourceSample, 0, len(samples))
+type resourcePressureWindow struct {
+	samples         []MonitoringInstanceResourceSample
+	boundarySamples []MonitoringInstanceResourceSample
+	covered         bool
+	cpuUsable       bool
+	singleton       bool
+	allowSuppressed bool
+}
+
+func validResourcePressurePolicy(policy ResourcePressurePolicy) bool {
+	if policy.EvaluatedAt.IsZero() {
+		return false
+	}
+	switch policy.SampleInterval {
+	case 5 * time.Second, time.Minute, 5 * time.Minute, 15 * time.Minute, 6 * time.Hour:
+		return true
+	default:
+		return false
+	}
+}
+
+func resourcePressureLatestSuppressed(samples []MonitoringInstanceResourceSample) bool {
+	if len(samples) == 0 {
+		return false
+	}
+	latestObservedAt := samples[0].ObservedAt
 	for _, sample := range samples {
-		if reference.Sub(sample.ObservedAt) <= window {
-			out = append(out, sample)
+		if !sample.ObservedAt.Equal(latestObservedAt) {
+			break
+		}
+		if !sample.MaintenanceContext && !sample.IsBackfilled {
+			return false
 		}
 	}
-	return out
+	return true
+}
+
+func buildResourcePressureWindow(samples []MonitoringInstanceResourceSample, reference time.Time, width time.Duration, policy ResourcePressurePolicy, allowSuppressed bool) resourcePressureWindow {
+	return buildResourcePressureWindowSorted(normalizeMonitoringInstanceResourceSamples(samples), reference, width, policy, allowSuppressed)
+}
+
+func buildResourcePressureWindowSorted(samples []MonitoringInstanceResourceSample, reference time.Time, width time.Duration, policy ResourcePressurePolicy, allowSuppressed bool) resourcePressureWindow {
+	window := resourcePressureWindow{allowSuppressed: allowSuppressed}
+	if width <= 0 || !validResourcePressurePolicy(policy) {
+		return window
+	}
+
+	leftBoundary := reference.Add(-width)
+	windowStart := -1
+	windowEnd := -1
+	boundaryStart := -1
+	boundaryEnd := -1
+	exactBoundary := false
+	for index, sample := range samples {
+		if sample.ObservedAt.After(reference) {
+			continue
+		}
+		if sample.ObservedAt.Before(leftBoundary) {
+			if windowStart >= 0 {
+				boundaryStart = index
+				boundaryEnd = index + 1
+				for boundaryEnd < len(samples) && samples[boundaryEnd].ObservedAt.Equal(sample.ObservedAt) {
+					boundaryEnd++
+				}
+			}
+			break
+		}
+		if windowStart < 0 {
+			windowStart = index
+		}
+		windowEnd = index + 1
+		if sample.ObservedAt.Equal(leftBoundary) {
+			exactBoundary = true
+		}
+	}
+	if windowStart < 0 {
+		return window
+	}
+	window.samples = samples[windowStart:windowEnd]
+	if !exactBoundary && boundaryStart >= 0 {
+		window.boundarySamples = samples[boundaryStart:boundaryEnd]
+	}
+
+	if policy.SampleInterval <= 0 || policy.SampleInterval > width {
+		return window
+	}
+	gapLimit := 2*policy.SampleInterval + 10*time.Millisecond
+	age := policy.EvaluatedAt.Sub(reference)
+	if age < 0 || age > gapLimit {
+		return window
+	}
+
+	distinctWindowTimes := resourcePressureDistinctEffectiveTimes(window.samples, allowSuppressed)
+	window.singleton = distinctWindowTimes == 1
+	if distinctWindowTimes == 0 {
+		return window
+	}
+
+	coverageOK, cpuOK, distinctTimes, oldest := resourcePressureCoverage(
+		window.samples,
+		window.boundarySamples,
+		allowSuppressed,
+		gapLimit,
+	)
+	if !coverageOK || distinctTimes < 2 || oldest.After(leftBoundary) {
+		return window
+	}
+	window.covered = true
+	window.cpuUsable = cpuOK
+	return window
+}
+
+func resourcePressureDistinctEffectiveTimes(samples []MonitoringInstanceResourceSample, allowSuppressed bool) int {
+	distinct := 0
+	for index := 0; index < len(samples); {
+		end, include := resourcePressureEffectiveGroup(samples, index, allowSuppressed)
+		if include {
+			distinct++
+		}
+		index = end
+	}
+	return distinct
+}
+
+func resourcePressureEffectiveGroup(samples []MonitoringInstanceResourceSample, start int, allowSuppressed bool) (int, bool) {
+	end := start + 1
+	for end < len(samples) && samples[end].ObservedAt.Equal(samples[start].ObservedAt) {
+		end++
+	}
+	if allowSuppressed {
+		return end, true
+	}
+	for index := start; index < end; index++ {
+		if !samples[index].MaintenanceContext && !samples[index].IsBackfilled {
+			return end, true
+		}
+	}
+	return end, false
+}
+
+func resourcePressureCoverage(
+	samples []MonitoringInstanceResourceSample,
+	boundarySamples []MonitoringInstanceResourceSample,
+	allowSuppressed bool,
+	gapLimit time.Duration,
+) (bool, bool, int, time.Time) {
+	if len(samples) == 0 {
+		return false, false, 0, time.Time{}
+	}
+	cpuOK := true
+	distinct := 0
+	var previousObservedAt time.Time
+	var oldest time.Time
+	havePrevious := false
+	for _, group := range [2][]MonitoringInstanceResourceSample{samples, boundarySamples} {
+		for index := 0; index < len(group); {
+			end, include := resourcePressureEffectiveGroup(group, index, allowSuppressed)
+			if !include {
+				return false, false, distinct, oldest
+			}
+			observedAt := group[index].ObservedAt
+			if havePrevious && previousObservedAt.Sub(observedAt) > gapLimit {
+				return false, false, distinct, oldest
+			}
+			previousObservedAt = observedAt
+			havePrevious = true
+			distinct++
+			oldest = observedAt
+			for sampleIndex := index; sampleIndex < end; sampleIndex++ {
+				sample := group[sampleIndex]
+				if !allowSuppressed && (sample.MaintenanceContext || sample.IsBackfilled) {
+					continue
+				}
+				if !agentapi.CPURatesUsable(sample.CPURatesValid, sample.CPUUsagePct, sample.CPUIOWaitPct, sample.CPUStealPct) {
+					cpuOK = false
+				}
+			}
+			index = end
+		}
+	}
+	return true, cpuOK, distinct, oldest
+}
+
+func resourcePressureWindowStatistics(window resourcePressureWindow) resourcePressureWindowStats {
+	return resourcePressureSamplesStatistics(window.samples, window.allowSuppressed)
+}
+
+func resourcePressureWindowBoundaryStatistics(window resourcePressureWindow) resourcePressureWindowStats {
+	return resourcePressureSamplesStatistics(window.boundarySamples, window.allowSuppressed)
+}
+
+func resourcePressureSamplesStatistics(samples []MonitoringInstanceResourceSample, allowSuppressed bool) resourcePressureWindowStats {
+	stats := resourcePressureWindowStats{
+		cpuUsable:       true,
+		memAvailableMin: math.Inf(1),
+	}
+	for index := 0; index < len(samples); {
+		end, include := resourcePressureEffectiveGroup(samples, index, allowSuppressed)
+		if !include {
+			index = end
+			continue
+		}
+		for sampleIndex := index; sampleIndex < end; sampleIndex++ {
+			sample := samples[sampleIndex]
+			if !allowSuppressed && (sample.MaintenanceContext || sample.IsBackfilled) {
+				continue
+			}
+			stats.count++
+			stats.cpuUsageTotal += sample.CPUUsagePct
+			stats.loadTotal += sample.NormalizedLoad5
+			stats.memTotal += sample.MemUsedPct
+			stats.swapTotal += sample.SwapUsedPct
+			stats.iowaitTotal += sample.CPUIOWaitPct
+			stats.stealTotal += sample.CPUStealPct
+			if available := float64(sample.MemAvailableBytes); available < stats.memAvailableMin {
+				stats.memAvailableMin = available
+			}
+			if !agentapi.CPURatesUsable(sample.CPURatesValid, sample.CPUUsagePct, sample.CPUIOWaitPct, sample.CPUStealPct) {
+				stats.cpuUsable = false
+			}
+		}
+		index = end
+	}
+	if stats.count == 0 {
+		stats.cpuUsable = false
+		stats.memAvailableMin = 0
+	}
+	return stats
+}
+
+func resourcePressureBoundarySeverity(window15, window30 resourcePressureWindow, thresholds MetricThresholds, include30 bool) resourcePressureSeverityResult {
+	var boundaryWindow15, boundaryWindow30 resourcePressureWindow
+	var boundaryStats15, boundaryStats30 resourcePressureWindowStats
+	if window15.covered && window15.singleton && len(window15.boundarySamples) > 0 {
+		boundaryStats15 = resourcePressureWindowBoundaryStatistics(window15)
+		if boundaryStats15.count > 0 {
+			boundaryWindow15 = resourcePressureWindow{covered: true, cpuUsable: boundaryStats15.cpuUsable}
+		}
+	}
+	if include30 && window30.covered && window30.singleton && len(window30.boundarySamples) > 0 {
+		boundaryStats30 = resourcePressureWindowBoundaryStatistics(window30)
+		if boundaryStats30.count > 0 {
+			boundaryWindow30 = resourcePressureWindow{covered: true, cpuUsable: boundaryStats30.cpuUsable}
+		}
+	}
+	return resourcePressureSeverityFromStats(
+		boundaryWindow15, boundaryStats15, resourcePressureWindowStats{},
+		boundaryWindow30, boundaryStats30, resourcePressureWindowStats{},
+		thresholds, false, true,
+	)
+}
+
+func resourcePressureRecoveryHasPressure(window15, window30 resourcePressureWindow, thresholds MetricThresholds, include30 bool) bool {
+	stats15 := resourcePressureWindowStatistics(window15)
+	boundaryStats15 := resourcePressureWindowBoundaryStatistics(window15)
+	if include30 {
+		stats30 := resourcePressureWindowStatistics(window30)
+		current := resourcePressureSeverityFromStats(window15, stats15, resourcePressureWindowStats{}, window30, stats30, resourcePressureWindowStats{}, thresholds, false, true)
+		if current.active {
+			return true
+		}
+		boundary := resourcePressureBoundarySeverity(window15, window30, thresholds, true)
+		return boundary.active
+	}
+	var emptyWindow resourcePressureWindow
+	current := resourcePressureSeverityFromStats(window15, stats15, resourcePressureWindowStats{}, emptyWindow, resourcePressureWindowStats{}, resourcePressureWindowStats{}, thresholds, false, true)
+	if current.active {
+		return true
+	}
+	if !window15.covered || !window15.singleton || len(window15.boundarySamples) == 0 || boundaryStats15.count == 0 {
+		return false
+	}
+	boundaryWindow := resourcePressureWindow{covered: true, cpuUsable: boundaryStats15.cpuUsable}
+	boundary := resourcePressureSeverityFromStats(boundaryWindow, boundaryStats15, resourcePressureWindowStats{}, emptyWindow, resourcePressureWindowStats{}, resourcePressureWindowStats{}, thresholds, false, true)
+	return boundary.active
+}
+
+func resourcePressureBoundarySeverityHigher(window15, window30 resourcePressureWindow, thresholds MetricThresholds, current Severity, include30 bool) bool {
+	boundary := resourcePressureBoundarySeverity(window15, window30, thresholds, include30)
+	return boundary.active && severityRank(boundary.severity) > severityRank(current)
 }
 
 func averageMonitoringInstanceResourceMetric(samples []MonitoringInstanceResourceSample, selector func(MonitoringInstanceResourceSample) float64) float64 {
