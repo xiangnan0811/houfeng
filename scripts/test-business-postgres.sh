@@ -25,6 +25,7 @@ anchors=(
   TestPostgresIntegrationIPQualityAddressIdentity
   TestPostgresIntegrationIPQualityReadSnapshot
   TestPostgresIntegrationRuntimeStreamSessionRevocation
+  TestPostgresIntegrationSubscriptionCostHF17HF18
 )
 selector="^($(IFS='|'; printf '%s' "${anchors[*]}"))$"
 anchors_json=$(printf '%s\n' "${anchors[@]}" | jq -R . | jq -s .)

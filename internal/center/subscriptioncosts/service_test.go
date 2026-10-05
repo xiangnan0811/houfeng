@@ -44,6 +44,489 @@ func TestEvaluateBudgetStatus(t *testing.T) {
 	}
 }
 
+func TestApplyBudgetSpendDerivesNullableAmounts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		baseCurrency string
+		rows         []CostRow
+		budget       BudgetRecord
+		wantStatus   BudgetStatus
+		wantMonthly  *float64
+		wantYearly   *float64
+	}{
+		{
+			name:         "complete ok",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(70)), "CNY", "CNY")},
+			budget:       testBudget("CNY", new(float64(100)), nil),
+			wantStatus:   BudgetStatusOK,
+			wantMonthly:  new(float64(70)),
+			wantYearly:   new(float64(840)),
+		},
+		{
+			name:         "complete warning",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(80)), "CNY", "CNY")},
+			budget:       testBudget("CNY", new(float64(100)), nil),
+			wantStatus:   BudgetStatusWarning,
+			wantMonthly:  new(float64(80)),
+			wantYearly:   new(float64(960)),
+		},
+		{
+			name:         "complete over",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(100)), "CNY", "CNY")},
+			budget:       testBudget("CNY", new(float64(100)), nil),
+			wantStatus:   BudgetStatusOver,
+			wantMonthly:  new(float64(100)),
+			wantYearly:   new(float64(1200)),
+		},
+		{
+			name:         "budget currency differs from query currency",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(100)), "CNY", "CNY")},
+			budget:       testBudget("USD", new(float64(20)), nil),
+			wantStatus:   BudgetStatusUnknown,
+		},
+		{
+			name:         "query currency differs from budget currency",
+			baseCurrency: "USD",
+			rows:         []CostRow{testCostRow(new(float64(20)), "USD", "USD")},
+			budget:       testBudget("CNY", new(float64(100)), nil),
+			wantStatus:   BudgetStatusUnknown,
+		},
+		{
+			name:         "original billing currency does not determine unit",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(70)), "USD", "CNY")},
+			budget:       testBudget("CNY", new(float64(100)), nil),
+			wantStatus:   BudgetStatusOK,
+			wantMonthly:  new(float64(70)),
+			wantYearly:   new(float64(840)),
+		},
+		{
+			name:         "matching original currency does not override base mismatch",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(70)), "USD", "CNY")},
+			budget:       testBudget("USD", new(float64(20)), nil),
+			wantStatus:   BudgetStatusUnknown,
+		},
+		{
+			name:         "incomplete below limit is unknown",
+			baseCurrency: "CNY",
+			rows: []CostRow{
+				testCostRow(new(float64(70)), "CNY", "CNY"),
+				testCostRow(nil, "CNY", "CNY"),
+			},
+			budget:     testBudget("CNY", new(float64(100)), nil),
+			wantStatus: BudgetStatusUnknown,
+		},
+		{
+			name:         "incomplete at limit preserves over without partial amount",
+			baseCurrency: "CNY",
+			rows: []CostRow{
+				testCostRow(new(float64(100)), "CNY", "CNY"),
+				testCostRow(nil, "CNY", "CNY"),
+			},
+			budget:     testBudget("CNY", new(float64(100)), nil),
+			wantStatus: BudgetStatusOver,
+		},
+		{
+			name:         "matching row with another base unit invalidates whole budget",
+			baseCurrency: "CNY",
+			rows: []CostRow{
+				testCostRow(new(float64(100)), "CNY", "CNY"),
+				testCostRow(new(float64(5)), "USD", "USD"),
+			},
+			budget:     testBudget("CNY", new(float64(100)), nil),
+			wantStatus: BudgetStatusUnknown,
+		},
+		{
+			name:         "archived priced row does not affect current budget",
+			baseCurrency: "CNY",
+			rows: []CostRow{
+				testCostRow(new(float64(70)), "CNY", "CNY"),
+				{
+					MonthlyPriceBase: new(float64(100)),
+					Currency:         "CNY",
+					BaseCurrency:     "CNY",
+					LifecycleStatus:  "archived",
+					AutoRenewCheck:   "enabled",
+				},
+			},
+			budget:      testBudget("CNY", new(float64(100)), nil),
+			wantStatus:  BudgetStatusOK,
+			wantMonthly: new(float64(70)),
+			wantYearly:  new(float64(840)),
+		},
+		{
+			name:         "archived missing amount does not make current budget incomplete",
+			baseCurrency: "CNY",
+			rows: []CostRow{
+				testCostRow(new(float64(70)), "CNY", "CNY"),
+				{
+					Currency:        "CNY",
+					BaseCurrency:    "CNY",
+					LifecycleStatus: "archived",
+					AutoRenewCheck:  "enabled",
+				},
+			},
+			budget:      testBudget("CNY", new(float64(100)), nil),
+			wantStatus:  BudgetStatusOK,
+			wantMonthly: new(float64(70)),
+			wantYearly:  new(float64(840)),
+		},
+		{
+			name:         "same unit with no matching rows is zero",
+			baseCurrency: "CNY",
+			rows: []CostRow{{
+				VPSID:            "other-vps",
+				MonthlyPriceBase: new(float64(40)),
+				Currency:         "CNY",
+				BaseCurrency:     "CNY",
+				LifecycleStatus:  "active",
+			}},
+			budget: func() BudgetRecord {
+				budget := testBudget("CNY", new(float64(100)), nil)
+				budget.ScopeType = string(BudgetScopeVPS)
+				budget.ScopeID = "target-vps"
+				return budget
+			}(),
+			wantStatus:  BudgetStatusOK,
+			wantMonthly: new(float64(0)),
+			wantYearly:  new(float64(0)),
+		},
+		{
+			name:         "unmatched budget currency mismatch remains unknown",
+			baseCurrency: "CNY",
+			rows: []CostRow{{
+				VPSID:            "other-vps",
+				MonthlyPriceBase: new(float64(40)),
+				Currency:         "CNY",
+				BaseCurrency:     "CNY",
+				LifecycleStatus:  "active",
+			}},
+			budget: func() BudgetRecord {
+				budget := testBudget("USD", new(float64(100)), nil)
+				budget.ScopeType = string(BudgetScopeVPS)
+				budget.ScopeID = "target-vps"
+				return budget
+			}(),
+			wantStatus: BudgetStatusUnknown,
+		},
+		{
+			name:         "disabled budget keeps zero derived amounts",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(100)), "USD", "USD")},
+			budget: func() BudgetRecord {
+				budget := testBudget("USD", new(float64(20)), nil)
+				budget.Enabled = false
+				return budget
+			}(),
+			wantStatus:  BudgetStatusDisabled,
+			wantMonthly: new(float64(0)),
+			wantYearly:  new(float64(0)),
+		},
+		{
+			name:         "yearly limit warning",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(80)), "CNY", "CNY")},
+			budget:       testBudget("CNY", nil, new(float64(1200))),
+			wantStatus:   BudgetStatusWarning,
+			wantMonthly:  new(float64(80)),
+			wantYearly:   new(float64(960)),
+		},
+		{
+			name:         "yearly limit over",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(100)), "CNY", "CNY")},
+			budget:       testBudget("CNY", nil, new(float64(1200))),
+			wantStatus:   BudgetStatusOver,
+			wantMonthly:  new(float64(100)),
+			wantYearly:   new(float64(1200)),
+		},
+		{
+			name:         "monthly limit takes priority over yearly limit",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(80)), "CNY", "CNY")},
+			budget:       testBudget("CNY", new(float64(100)), new(float64(600))),
+			wantStatus:   BudgetStatusWarning,
+			wantMonthly:  new(float64(80)),
+			wantYearly:   new(float64(960)),
+		},
+		{
+			name:         "zero limit keeps known zero amount",
+			baseCurrency: "CNY",
+			rows:         []CostRow{testCostRow(new(float64(0)), "CNY", "CNY")},
+			budget:       testBudget("CNY", new(float64(0)), nil),
+			wantStatus:   BudgetStatusUnknown,
+			wantMonthly:  new(float64(0)),
+			wantYearly:   new(float64(0)),
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := applyBudgetSpend(tt.rows, []BudgetRecord{tt.budget}, tt.baseCurrency)
+			if len(got) != 1 {
+				t.Fatalf("applyBudgetSpend() returned %d budgets, want 1", len(got))
+			}
+			if got[0].Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", got[0].Status, tt.wantStatus)
+			}
+			assertSpendPointer(t, "monthly", got[0].CurrentMonthlySpend, tt.wantMonthly)
+			assertSpendPointer(t, "yearly", got[0].CurrentYearlySpend, tt.wantYearly)
+		})
+	}
+}
+
+func TestApplyBudgetSpendMatchesBudgetScopes(t *testing.T) {
+	t.Parallel()
+	rows := []CostRow{
+		{
+			VPSID:            "vps_a",
+			ProviderID:       "provider_a",
+			ProviderName:     "Hetzner",
+			Labels:           []string{"edge"},
+			CostCategory:     "compute",
+			MonthlyPriceBase: new(float64(10)),
+			BaseCurrency:     "CNY",
+			Currency:         "USD",
+			LifecycleStatus:  "active",
+		},
+		{
+			VPSID:            "vps_b",
+			ProviderID:       "provider_b",
+			ProviderName:     "AWS",
+			Labels:           []string{"backup"},
+			CostCategory:     "storage",
+			MonthlyPriceBase: new(float64(20)),
+			BaseCurrency:     "CNY",
+			Currency:         "EUR",
+			LifecycleStatus:  "active",
+		},
+	}
+	tests := []struct {
+		name      string
+		scopeType BudgetScopeType
+		scopeID   string
+		wantSpend float64
+	}{
+		{name: "global", scopeType: BudgetScopeGlobal, wantSpend: 30},
+		{name: "provider id", scopeType: BudgetScopeProvider, scopeID: "provider_a", wantSpend: 10},
+		{name: "provider name", scopeType: BudgetScopeProvider, scopeID: "AWS", wantSpend: 20},
+		{name: "label", scopeType: BudgetScopeLabel, scopeID: "edge", wantSpend: 10},
+		{name: "category", scopeType: BudgetScopeCategory, scopeID: "storage", wantSpend: 20},
+		{name: "vps", scopeType: BudgetScopeVPS, scopeID: "vps_a", wantSpend: 10},
+		{name: "no match", scopeType: BudgetScopeVPS, scopeID: "vps_missing", wantSpend: 0},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			budget := testBudget("CNY", new(float64(100)), nil)
+			budget.ScopeType = string(tt.scopeType)
+			budget.ScopeID = tt.scopeID
+			got := applyBudgetSpend(rows, []BudgetRecord{budget}, "CNY")[0]
+			if got.Status != BudgetStatusOK {
+				t.Fatalf("status = %q, want ok", got.Status)
+			}
+			assertSpendPointer(t, "monthly", got.CurrentMonthlySpend, new(float64(tt.wantSpend)))
+			assertSpendPointer(t, "yearly", got.CurrentYearlySpend, new(float64(tt.wantSpend*12)))
+		})
+	}
+}
+
+func TestApplyRowBudgetStatusCombinesMatchingBudgetRisks(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		statuses      []BudgetStatus
+		want          BudgetStatus
+		disabled      bool
+		archived      bool
+		missingAmount bool
+	}{
+		{name: "single unknown", statuses: []BudgetStatus{BudgetStatusUnknown}, want: BudgetStatusUnknown},
+		{name: "unknown plus ok", statuses: []BudgetStatus{BudgetStatusUnknown, BudgetStatusOK}, want: BudgetStatusUnknown},
+		{name: "unknown plus warning", statuses: []BudgetStatus{BudgetStatusUnknown, BudgetStatusWarning}, want: BudgetStatusWarning},
+		{name: "unknown plus over", statuses: []BudgetStatus{BudgetStatusUnknown, BudgetStatusOver}, want: BudgetStatusOver},
+		{name: "multiple unknown", statuses: []BudgetStatus{BudgetStatusUnknown, BudgetStatusUnknown}, want: BudgetStatusUnknown},
+		{name: "all ok", statuses: []BudgetStatus{BudgetStatusOK, BudgetStatusOK}, want: BudgetStatusOK},
+		{name: "warning dominates unknown and ok", statuses: []BudgetStatus{BudgetStatusOK, BudgetStatusUnknown, BudgetStatusWarning}, want: BudgetStatusWarning},
+		{name: "over dominates every status", statuses: []BudgetStatus{BudgetStatusOK, BudgetStatusUnknown, BudgetStatusWarning, BudgetStatusOver}, want: BudgetStatusOver},
+		{name: "unknown plus other status", statuses: []BudgetStatus{BudgetStatusUnknown, BudgetStatusDisabled}, want: BudgetStatusUnknown},
+		{name: "ok plus other status", statuses: []BudgetStatus{BudgetStatusOK, BudgetStatusDisabled}, want: BudgetStatusOK},
+		{name: "no budgets", want: BudgetStatusUnknown},
+		{name: "only disabled budget", statuses: []BudgetStatus{BudgetStatusDisabled}, want: BudgetStatusUnknown, disabled: true},
+		{name: "archived row", statuses: []BudgetStatus{BudgetStatusOver}, want: BudgetStatusUnknown, archived: true},
+		{name: "row without amount", statuses: []BudgetStatus{BudgetStatusOver}, want: BudgetStatusUnknown, missingAmount: true},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			orders := [][]BudgetStatus{append([]BudgetStatus(nil), tt.statuses...)}
+			if len(tt.statuses) > 1 {
+				reversed := append([]BudgetStatus(nil), tt.statuses...)
+				for left, right := 0, len(reversed)-1; left < right; left, right = left+1, right-1 {
+					reversed[left], reversed[right] = reversed[right], reversed[left]
+				}
+				orders = append(orders, reversed)
+			}
+			for order, statuses := range orders {
+				row := testCostRow(new(float64(10)), "CNY", "CNY")
+				if tt.archived {
+					row.LifecycleStatus = "archived"
+				}
+				if tt.missingAmount {
+					row.MonthlyPriceBase = nil
+				}
+				budgets := make([]BudgetRecord, 0, len(statuses))
+				for _, budgetStatus := range statuses {
+					budget := testBudget("CNY", new(float64(100)), nil)
+					budget.Status = budgetStatus
+					if tt.disabled {
+						budget.Enabled = false
+					}
+					budgets = append(budgets, budget)
+				}
+				rows := []CostRow{row}
+				applyRowBudgetStatus(rows, budgets)
+				if rows[0].BudgetStatus != tt.want {
+					t.Fatalf("order %d status = %q, want %q", order, rows[0].BudgetStatus, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceBudgetSpendUsesSettingsBaseCurrencyAcrossEntrypoints(t *testing.T) {
+	t.Parallel()
+	settings := defaultCenterSettings()
+	settings.SubscriptionCost.BaseCurrency = "USD"
+	settingsRepo := &fakeSettingsRepo{settings: settings}
+	repo := &fakeSubscriptionCostRepo{}
+	service := NewService(repo, settingsRepo, nil)
+	ctx := context.Background()
+
+	configureMismatch := func() {
+		repo.rows = []CostRow{testCostRow(new(float64(70)), "USD", "CNY")}
+		repo.budgets = []BudgetRecord{testBudget("USD", new(float64(100)), nil)}
+		repo.budgets[0].BudgetID = "budget_base_currency"
+		repo.budgetMonthBuckets = nil
+		repo.costMonthBuckets = nil
+	}
+	assertUnknownBudget := func(t *testing.T, budget BudgetRecord) {
+		t.Helper()
+		if budget.Status != BudgetStatusUnknown {
+			t.Fatalf("status = %q, want unknown", budget.Status)
+		}
+		if budget.CurrentMonthlySpend != nil || budget.CurrentYearlySpend != nil {
+			t.Fatalf("spend = %v/%v, want nil/nil", budget.CurrentMonthlySpend, budget.CurrentYearlySpend)
+		}
+	}
+
+	t.Run("ListCostRows", func(t *testing.T) {
+		configureMismatch()
+		if _, err := service.ListCostRows(ctx); err != nil {
+			t.Fatalf("ListCostRows() error = %v", err)
+		}
+		assertUnknownBudget(t, repo.budgets[0])
+	})
+	t.Run("GetOverview", func(t *testing.T) {
+		configureMismatch()
+		if _, err := service.GetOverview(ctx); err != nil {
+			t.Fatalf("GetOverview() error = %v", err)
+		}
+		assertUnknownBudget(t, repo.budgets[0])
+	})
+	t.Run("GetStatistics", func(t *testing.T) {
+		configureMismatch()
+		got, err := service.GetStatistics(ctx, StatisticsWindowMonth)
+		if err != nil {
+			t.Fatalf("GetStatistics() error = %v", err)
+		}
+		if len(got.BudgetStatuses) != 1 {
+			t.Fatalf("budget statuses = %d, want 1", len(got.BudgetStatuses))
+		}
+		assertUnknownBudget(t, got.BudgetStatuses[0])
+	})
+	t.Run("ListBudgets", func(t *testing.T) {
+		configureMismatch()
+		got, err := service.ListBudgets(ctx, BudgetListFilters{})
+		if err != nil {
+			t.Fatalf("ListBudgets() error = %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("budgets = %d, want 1", len(got))
+		}
+		assertUnknownBudget(t, got[0])
+	})
+	t.Run("CreateBudget hydrates", func(t *testing.T) {
+		configureMismatch()
+		repo.budgets = nil
+		got, err := service.CreateBudget(ctx, CreateBudgetInput{
+			ScopeType:    string(BudgetScopeGlobal),
+			Name:         "created",
+			BaseCurrency: "USD",
+			MonthlyLimit: new(float64(100)),
+			WarningPct:   80,
+			Enabled:      true,
+		})
+		if err != nil {
+			t.Fatalf("CreateBudget() error = %v", err)
+		}
+		assertUnknownBudget(t, got)
+	})
+	t.Run("PatchBudget mutates and hydrates", func(t *testing.T) {
+		repo.rows = []CostRow{testCostRow(new(float64(10)), "USD", "USD")}
+		repo.budgets = []BudgetRecord{testBudget("CNY", new(float64(100)), nil)}
+		repo.budgets[0].BudgetID = "patchable"
+		got, err := service.PatchBudget(ctx, PatchBudgetInput{
+			BudgetID:     "patchable",
+			BaseCurrency: PatchString("USD"),
+			Name:         PatchString("patched"),
+		})
+		if err != nil {
+			t.Fatalf("PatchBudget() error = %v", err)
+		}
+		if got.Name != "patched" || got.BaseCurrency != "USD" {
+			t.Fatalf("patched budget = %#v, want changed name/currency", got)
+		}
+		if got.MonthlyLimit == nil || *got.MonthlyLimit != 100 {
+			t.Fatalf("monthly limit = %v, want preserved 100", got.MonthlyLimit)
+		}
+		if got.Status != BudgetStatusOK {
+			t.Fatalf("status = %q, want ok after patch", got.Status)
+		}
+		assertSpendPointer(t, "monthly", got.CurrentMonthlySpend, new(float64(10)))
+		assertSpendPointer(t, "yearly", got.CurrentYearlySpend, new(float64(120)))
+	})
+}
+
+func TestMonthlyBudgetRisksReturnSpendPointers(t *testing.T) {
+	t.Parallel()
+	limit := 100.0
+	risks := monthlyBudgetRisks(120, []SeriesPoint{{
+		Bucket:           "2026-06",
+		BudgetLimit:      &limit,
+		BudgetCurrency:   "CNY",
+		BudgetWarningPct: 80,
+	}})
+	if len(risks) != 1 {
+		t.Fatalf("monthlyBudgetRisks() returned %d records, want 1", len(risks))
+	}
+	if risks[0].Status != BudgetStatusOver {
+		t.Fatalf("status = %q, want over", risks[0].Status)
+	}
+	assertSpendPointer(t, "monthly", risks[0].CurrentMonthlySpend, new(float64(120)))
+	assertSpendPointer(t, "yearly", risks[0].CurrentYearlySpend, new(float64(1440)))
+}
+
 func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 2, 9, 0, 0, 0, time.UTC)
@@ -501,6 +984,42 @@ func datePtr(t *testing.T, value string) *subscriptions.Date {
 	return &date
 }
 
+func testCostRow(monthly *float64, currency, baseCurrency string) CostRow {
+	return CostRow{
+		MonthlyPriceBase: monthly,
+		Currency:         currency,
+		BaseCurrency:     baseCurrency,
+		LifecycleStatus:  "active",
+	}
+}
+
+func testBudget(baseCurrency string, monthlyLimit, yearlyLimit *float64) BudgetRecord {
+	return BudgetRecord{
+		ScopeType:    string(BudgetScopeGlobal),
+		BaseCurrency: baseCurrency,
+		MonthlyLimit: monthlyLimit,
+		YearlyLimit:  yearlyLimit,
+		WarningPct:   80,
+		Enabled:      true,
+	}
+}
+
+func assertSpendPointer(t *testing.T, field string, got, want *float64) {
+	t.Helper()
+	if want == nil {
+		if got != nil {
+			t.Fatalf("%s spend = %v, want nil", field, got)
+		}
+		return
+	}
+	if got == nil {
+		t.Fatalf("%s spend = nil, want %.2f", field, *want)
+	}
+	if *got != *want {
+		t.Fatalf("%s spend = %.2f, want %.2f", field, *got, *want)
+	}
+}
+
 type fakeSettingsRepo struct {
 	settings centersettings.CenterSettings
 }
@@ -565,7 +1084,7 @@ func (r *fakeSubscriptionCostRepo) ListBudgets(context.Context, BudgetListFilter
 }
 
 func (r *fakeSubscriptionCostRepo) CreateBudget(_ context.Context, input CreateBudgetInput) (BudgetRecord, error) {
-	return BudgetRecord{
+	record := BudgetRecord{
 		BudgetID:     "budget_created",
 		ScopeType:    input.ScopeType,
 		ScopeID:      input.ScopeID,
@@ -576,11 +1095,48 @@ func (r *fakeSubscriptionCostRepo) CreateBudget(_ context.Context, input CreateB
 		WarningPct:   input.WarningPct,
 		Enabled:      input.Enabled,
 		Note:         input.Note,
-	}, nil
+	}
+	r.budgets = append(r.budgets, record)
+	return record, nil
 }
 
-func (r *fakeSubscriptionCostRepo) PatchBudget(context.Context, PatchBudgetInput) (BudgetRecord, error) {
-	return BudgetRecord{}, nil
+func (r *fakeSubscriptionCostRepo) PatchBudget(_ context.Context, input PatchBudgetInput) (BudgetRecord, error) {
+	for i := range r.budgets {
+		if r.budgets[i].BudgetID != input.BudgetID {
+			continue
+		}
+		record := r.budgets[i]
+		if input.ScopeType.Set {
+			record.ScopeType = input.ScopeType.Value
+		}
+		if input.ScopeID.Set {
+			record.ScopeID = input.ScopeID.Value
+		}
+		if input.Name.Set {
+			record.Name = input.Name.Value
+		}
+		if input.BaseCurrency.Set {
+			record.BaseCurrency = input.BaseCurrency.Value
+		}
+		if input.MonthlyLimit.Set {
+			record.MonthlyLimit = input.MonthlyLimit.Value
+		}
+		if input.YearlyLimit.Set {
+			record.YearlyLimit = input.YearlyLimit.Value
+		}
+		if input.WarningPct.Set {
+			record.WarningPct = input.WarningPct.Value
+		}
+		if input.Enabled.Set {
+			record.Enabled = input.Enabled.Value
+		}
+		if input.Note.Set {
+			record.Note = input.Note.Value
+		}
+		r.budgets[i] = record
+		return record, nil
+	}
+	return BudgetRecord{}, ErrBudgetNotFound
 }
 
 func (r *fakeSubscriptionCostRepo) ListMonthlyBudgets(context.Context) ([]MonthlyBudgetRecord, error) {

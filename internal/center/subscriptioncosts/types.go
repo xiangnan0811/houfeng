@@ -229,8 +229,8 @@ type BudgetRecord struct {
 	WarningPct          int          `json:"warning_pct"`
 	Enabled             bool         `json:"enabled"`
 	Note                string       `json:"note"`
-	CurrentMonthlySpend float64      `json:"current_monthly_spend"`
-	CurrentYearlySpend  float64      `json:"current_yearly_spend"`
+	CurrentMonthlySpend *float64     `json:"current_monthly_spend"`
+	CurrentYearlySpend  *float64     `json:"current_yearly_spend"`
 	Status              BudgetStatus `json:"status"`
 	CreatedAt           time.Time    `json:"created_at"`
 	UpdatedAt           time.Time    `json:"updated_at"`
