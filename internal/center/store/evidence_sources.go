@@ -65,6 +65,11 @@ const monitoringEvidenceHostRawSQL = `
 		and h.observed_at >= $2
 		and h.observed_at < $3
 		and metric.name = any($4::text[])
+		and (metric.name not in ('cpu_usage_pct', 'cpu_iowait_pct', 'cpu_steal_pct')
+			or (h.cpu_rates_valid is not false
+				and h.cpu_usage_pct between 0 and 100
+				and h.cpu_iowait_pct between 0 and 100
+				and h.cpu_steal_pct between 0 and 100))
 	group by bucket_start, metric.name, metric.unit
 	order by bucket_start, metric.name`
 
@@ -76,16 +81,12 @@ const monitoringEvidenceHostDailySQL = `
 			((h.bucket_date + 1)::timestamp at time zone 'UTC') as bucket_end,
 		'daily_aggregate'::text as source_layer,
 		86400::bigint as source_granularity_seconds,
-		case metric.name
-			when 'cpu_usage_pct' then sample_count
-			when 'load_5' then sample_count
-			when 'mem_used_pct' then sample_count
-			when 'cpu_iowait_pct' then sample_count
-			when 'cpu_steal_pct' then sample_count
-			when 'disk_busy_pct' then sample_count
-		end::bigint as sample_count,
-		maintenance_sample_count::bigint,
-		backfilled_sample_count::bigint,
+		case when metric.name in ('cpu_usage_pct', 'cpu_iowait_pct', 'cpu_steal_pct')
+			then coalesce(cpu_valid_sample_count, sample_count) else sample_count end::bigint,
+		case when metric.name in ('cpu_usage_pct', 'cpu_iowait_pct', 'cpu_steal_pct')
+			then coalesce(cpu_valid_maintenance_sample_count, maintenance_sample_count) else maintenance_sample_count end::bigint,
+		case when metric.name in ('cpu_usage_pct', 'cpu_iowait_pct', 'cpu_steal_pct')
+			then coalesce(cpu_valid_backfilled_sample_count, backfilled_sample_count) else backfilled_sample_count end::bigint,
 		metric.name,
 		metric.unit,
 		metric.average,
@@ -110,6 +111,9 @@ const monitoringEvidenceHostDailySQL = `
 			and (h.bucket_date::timestamp at time zone 'UTC') < $3
 			and ((h.bucket_date + 1)::timestamp at time zone 'UTC') <= $3
 		and metric.name = any($4::text[])
+		and (metric.name not in ('cpu_usage_pct', 'cpu_iowait_pct', 'cpu_steal_pct')
+			or (coalesce(cpu_valid_sample_count, sample_count) > 0
+				and metric.average between 0 and 100 and metric.maximum between 0 and 100))
 	order by bucket_date, metric.name`
 
 const monitoringEvidenceProbeRawSQL = `
@@ -323,8 +327,8 @@ func (r *PostgresRuntimeFactsRepository) loadMonitoringEvidence(
 			return adapters.MonitoringSeriesCapture{}, err
 		}
 	}
-	rows := mergeEvidenceMetricRows(raw, daily, actualPrecision)
-	return evidenceCaptureFromRows(window, actualPrecision, rows), nil
+	rows := mergeEvidenceMetricRows(raw, daily, actualPrecision, host)
+	return evidenceCaptureFromRows(window, actualPrecision, rows, host), nil
 }
 
 func queryEvidenceMetricRows(ctx context.Context, db monitoringEvidenceRows, sql string, sourceID string, window evidence.TimeWindow, precision time.Duration, metrics []string) ([]evidenceMetricRow, error) {
@@ -373,9 +377,16 @@ func uncoveredDaily(raw, daily []evidenceMetricRow) bool {
 	return false
 }
 
-func mergeEvidenceMetricRows(raw, daily []evidenceMetricRow, precision time.Duration) []evidenceMetricRow {
+func mergeEvidenceMetricRows(raw, daily []evidenceMetricRow, precision time.Duration, host bool) []evidenceMetricRow {
 	type seriesDay struct {
-		series, day string
+		series, day, metric string
+	}
+	keyFor := func(row evidenceMetricRow) seriesDay {
+		key := seriesDay{series: row.SeriesID, day: row.BucketStart.UTC().Format("2006-01-02")}
+		if host {
+			key.metric = row.Metric
+		}
+		return key
 	}
 	dailyPreferred := make(map[seriesDay]struct{})
 	if precision >= 24*time.Hour {
@@ -391,19 +402,19 @@ func mergeEvidenceMetricRows(raw, daily []evidenceMetricRow, precision time.Dura
 			day := row.BucketStart.UTC().Format("2006-01-02")
 			key := metricDay{series: row.SeriesID, day: day, metric: row.Metric}
 			if rawCounts[key] < maxInt64(row.SampleCount) {
-				dailyPreferred[seriesDay{series: row.SeriesID, day: day}] = struct{}{}
+				dailyPreferred[keyFor(row)] = struct{}{}
 			}
 		}
 	}
 	rows := make([]evidenceMetricRow, 0, len(raw)+len(daily))
 	for _, row := range raw {
-		key := seriesDay{series: row.SeriesID, day: row.BucketStart.UTC().Format("2006-01-02")}
+		key := keyFor(row)
 		if _, preferDaily := dailyPreferred[key]; !preferDaily {
 			rows = append(rows, row)
 		}
 	}
 	for _, row := range daily {
-		key := seriesDay{series: row.SeriesID, day: row.BucketStart.UTC().Format("2006-01-02")}
+		key := keyFor(row)
 		if _, preferDaily := dailyPreferred[key]; preferDaily {
 			rows = append(rows, row)
 		}
@@ -420,7 +431,7 @@ func mergeEvidenceMetricRows(raw, daily []evidenceMetricRow, precision time.Dura
 	return rows
 }
 
-func evidenceCaptureFromRows(window evidence.TimeWindow, precision time.Duration, rows []evidenceMetricRow) adapters.MonitoringSeriesCapture {
+func evidenceCaptureFromRows(window evidence.TimeWindow, precision time.Duration, rows []evidenceMetricRow, host bool) adapters.MonitoringSeriesCapture {
 	type bucketKey struct {
 		series string
 		start  time.Time
@@ -448,10 +459,35 @@ func evidenceCaptureFromRows(window evidence.TimeWindow, precision time.Duration
 				SampleCount: uint64(maxInt64(row.SampleCount)), MaintenanceCount: uint64(maxInt64(row.MaintenanceCount)), BackfilledCount: uint64(maxInt64(row.BackfilledCount)),
 			}
 			grouped[key] = bucket
-		} else if bucket.SourceLayer != adapters.MonitoringSourceRaw && row.SourceLayer == string(adapters.MonitoringSourceRaw) {
+		} else if !host && bucket.SourceLayer != adapters.MonitoringSourceRaw && row.SourceLayer == string(adapters.MonitoringSourceRaw) {
 			bucket.SourceLayer = adapters.MonitoringSourceRaw
 		}
-		bucket.Metrics = append(bucket.Metrics, adapters.MonitoringMetric{Name: row.Metric, Unit: row.Unit, Average: row.Average, Min: row.Minimum, Max: row.Maximum, P95: row.P95})
+		metric := adapters.MonitoringMetric{Name: row.Metric, Unit: row.Unit, Average: row.Average, Min: row.Minimum, Max: row.Maximum, P95: row.P95}
+		if host {
+			metric.SampleCount = uint64(maxInt64(row.SampleCount))
+			metric.MaintenanceCount = uint64(maxInt64(row.MaintenanceCount))
+			metric.BackfilledCount = uint64(maxInt64(row.BackfilledCount))
+			metric.SourceLayer = adapters.MonitoringSourceLayer(row.SourceLayer)
+			metric.SourceGranularity = time.Duration(row.SourceGranularity) * time.Second
+			if bucket.SourceLayer != metric.SourceLayer {
+				bucket.SourceLayer = adapters.MonitoringSourceMixed
+			}
+			if metric.SourceGranularity > bucket.SourceGranularity {
+				bucket.SourceGranularity = metric.SourceGranularity
+			}
+			referenceName := ""
+			for _, existing := range bucket.Metrics {
+				if existing.SampleCount == bucket.SampleCount && (referenceName == "" || existing.Name < referenceName) {
+					referenceName = existing.Name
+				}
+			}
+			if metric.SampleCount > bucket.SampleCount || (metric.SampleCount == bucket.SampleCount && (referenceName == "" || metric.Name < referenceName)) {
+				bucket.SampleCount = metric.SampleCount
+				bucket.MaintenanceCount = metric.MaintenanceCount
+				bucket.BackfilledCount = metric.BackfilledCount
+			}
+		}
+		bucket.Metrics = append(bucket.Metrics, metric)
 		if observedStart.IsZero() || row.ObservedStart.Before(observedStart) {
 			observedStart = row.ObservedStart
 		}

@@ -227,12 +227,12 @@ func TestMonitoringHostPreviewPreservesCoverageGapsAndProvenance(t *testing.T) {
 				{
 					Start: start, End: start.Add(time.Hour), SourceLayer: MonitoringSourceRaw,
 					SourceGranularity: 5 * time.Minute, SampleCount: 2, MaintenanceCount: 1,
-					Metrics: []MonitoringMetric{{Name: "cpu_usage_pct", Unit: "percent", Average: &firstValue, Max: &firstValue}},
+					Metrics: []MonitoringMetric{{Name: "cpu_usage_pct", Unit: "percent", Average: &firstValue, Max: &firstValue, SampleCount: 2, MaintenanceCount: 1, SourceLayer: MonitoringSourceRaw, SourceGranularity: 5 * time.Minute}},
 				},
 				{
 					Start: start.Add(3 * time.Hour), End: end, SourceLayer: MonitoringSourceRaw,
 					SourceGranularity: 5 * time.Minute, SampleCount: 1, BackfilledCount: 1,
-					Metrics: []MonitoringMetric{{Name: "cpu_usage_pct", Unit: "percent", Average: &secondValue, Max: &secondValue}},
+					Metrics: []MonitoringMetric{{Name: "cpu_usage_pct", Unit: "percent", Average: &secondValue, Max: &secondValue, SampleCount: 1, BackfilledCount: 1, SourceLayer: MonitoringSourceRaw, SourceGranularity: 5 * time.Minute}},
 				},
 			},
 		}},
@@ -290,12 +290,12 @@ func TestMonitoringHostCaptureKeepsPopulatedBucketsAndExplicitGaps(t *testing.T)
 			{
 				Start: start, End: start.Add(time.Hour), SourceLayer: MonitoringSourceRaw,
 				SourceGranularity: 5 * time.Minute, SampleCount: 12, MaintenanceCount: 2,
-				Metrics: []MonitoringMetric{{Name: "cpu_usage_pct", Unit: "percent", Average: &firstAverage, Max: &firstMax}},
+				Metrics: []MonitoringMetric{{Name: "cpu_usage_pct", Unit: "percent", Average: &firstAverage, Max: &firstMax, SampleCount: 12, MaintenanceCount: 2, SourceLayer: MonitoringSourceRaw, SourceGranularity: 5 * time.Minute}},
 			},
 			{
 				Start: start.Add(3 * time.Hour), End: end, SourceLayer: MonitoringSourceRaw,
 				SourceGranularity: 5 * time.Minute, SampleCount: 10, BackfilledCount: 3,
-				Metrics: []MonitoringMetric{{Name: "cpu_usage_pct", Unit: "percent", Average: &lastAverage, Max: &lastMax}},
+				Metrics: []MonitoringMetric{{Name: "cpu_usage_pct", Unit: "percent", Average: &lastAverage, Max: &lastMax, SampleCount: 10, BackfilledCount: 3, SourceLayer: MonitoringSourceRaw, SourceGranularity: 5 * time.Minute}},
 			},
 		},
 	}
@@ -363,7 +363,7 @@ func TestMonitoringGapsIncludeMissingBoundaryBuckets(t *testing.T) {
 			{SeriesID: "host", Start: start.Add(2 * time.Hour), End: start.Add(3 * time.Hour)},
 		},
 	}
-	gaps, err := monitoringGaps(capture)
+	gaps, err := monitoringGaps(capture, nil)
 	if err != nil {
 		t.Fatalf("monitoringGaps() error = %v", err)
 	}
@@ -529,14 +529,40 @@ func TestMonitoringProbeV2PreservesMultipleSeries(t *testing.T) {
 		t.Fatalf("Capture() error = %v", err)
 	}
 	payload := decodeAdapterCanonicalPayload(t, snapshot.Bytes())
+	if preview.CalculationVersion != probeMonitoringCalculationVersion || snapshot.Envelope().CalculationVersion != probeMonitoringCalculationVersion {
+		t.Fatalf("probe calculation version = %q/%q, want %q", preview.CalculationVersion, snapshot.Envelope().CalculationVersion, probeMonitoringCalculationVersion)
+	}
+	if preview.Quality.SampleCount != 2 || preview.Quality.BucketCount != 1 || preview.Quality.DataPointCount != 2 || preview.Quality.GapCount != 2 {
+		t.Fatalf("probe quality = %#v, want legacy shared counts and two series gaps", preview.Quality)
+	}
 	buckets := payload["buckets"].([]any)
 	seen := map[string]bool{}
 	for _, item := range buckets {
-		seen[item.(map[string]any)["series_id"].(string)] = true
+		bucket := item.(map[string]any)
+		seen[bucket["series_id"].(string)] = true
+		metrics := bucket["metrics"].([]any)
+		for _, rawMetric := range metrics {
+			metric := rawMetric.(map[string]any)
+			for _, field := range []string{"sample_count", "maintenance_count", "backfilled_count", "source_layer", "source_granularity_seconds"} {
+				if _, present := metric[field]; present {
+					t.Fatalf("probe metric contains host-only metadata %q: %#v", field, metric)
+				}
+			}
+		}
 	}
 	if !seen["probe-a"] || !seen["probe-b"] {
 		t.Fatalf("series IDs = %#v, want both probe series", seen)
 	}
+	gaps := payload["gaps"].([]any)
+	if len(gaps) != 2 {
+		t.Fatalf("probe gaps = %#v, want one series gap per series", gaps)
+	}
+	for _, rawGap := range gaps {
+		if _, present := rawGap.(map[string]any)["metric"]; present {
+			t.Fatalf("probe gap contains host-only metric field: %#v", rawGap)
+		}
+	}
+
 }
 
 func TestMonitoringLimitsPeakBucketAndDataPointCounts(t *testing.T) {
@@ -686,7 +712,7 @@ func validMonitoringTestCapture(window evidence.TimeWindow, precision time.Durat
 		Buckets: []MonitoringBucket{{
 			SeriesID: seriesID, SeriesKind: seriesKind, Start: window.Start, End: bucketEnd,
 			SourceLayer: MonitoringSourceRaw, SourceGranularity: precision, SampleCount: 1,
-			Metrics: []MonitoringMetric{{Name: metric, Unit: unit, Average: &value, Max: &value}},
+			Metrics: []MonitoringMetric{{Name: metric, Unit: unit, Average: &value, Max: &value, SampleCount: 1, SourceLayer: MonitoringSourceRaw, SourceGranularity: precision}},
 		}},
 	}
 }
@@ -816,4 +842,190 @@ func (resolver staticSourceResolver) ResolveEvidenceSource(
 	evidence.Selection,
 ) (ResolvedEvidenceSource, error) {
 	return resolver.resolved, resolver.err
+}
+
+func TestHostMetricGapsDoNotTreatMemoryAsCPU(t *testing.T) {
+	start := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	capture := MonitoringSeriesCapture{
+		RequestedWindow: evidence.TimeWindow{Start: start, End: start.Add(time.Hour)},
+		ActualPrecision: time.Hour,
+		Buckets:         []MonitoringBucket{{SeriesID: "host", Start: start, End: start.Add(time.Hour), Metrics: []MonitoringMetric{{Name: "mem_used_pct"}}}},
+	}
+	gaps, err := monitoringGaps(capture, []string{"cpu_usage_pct", "cpu_iowait_pct", "mem_used_pct"})
+	if err != nil || len(gaps) != 2 || gaps[0].Metric != "cpu_iowait_pct" || gaps[1].Metric != "cpu_usage_pct" || gaps[0].Start != start || gaps[1].End != capture.RequestedWindow.End {
+		t.Fatalf("metric gaps = %#v, %v", gaps, err)
+	}
+	legacy, err := monitoringGaps(capture, nil)
+	if err != nil || len(legacy) != 0 {
+		t.Fatalf("probe series gaps changed: %#v, %v", legacy, err)
+	}
+}
+
+func TestHostBucketRequiresExactMetricReferenceMetadata(t *testing.T) {
+	bucket := MonitoringBucket{
+		SampleCount: 3, MaintenanceCount: 1, SourceLayer: MonitoringSourceMixed, SourceGranularity: time.Hour,
+		Metrics: []MonitoringMetric{
+			{Name: "cpu_usage_pct", SampleCount: 2, SourceLayer: MonitoringSourceRaw, SourceGranularity: time.Minute},
+			{Name: "mem_used_pct", SampleCount: 3, MaintenanceCount: 1, SourceLayer: MonitoringSourceDailyAggregate, SourceGranularity: time.Hour},
+		},
+	}
+	if !validHostBucketMetadata(bucket, time.Hour) {
+		t.Fatal("valid mixed bucket rejected")
+	}
+	bucket.SampleCount = 2
+	if validHostBucketMetadata(bucket, time.Hour) {
+		t.Fatal("CPU count incorrectly accepted as shared reference")
+	}
+	bucket.SampleCount = 3
+	bucket.Metrics[0].SampleCount = 0
+	if validHostBucketMetadata(bucket, time.Hour) {
+		t.Fatal("missing v2 metric metadata accepted")
+	}
+}
+
+func TestMonitoringHostV2CapturesMixedMetricMetadataAndPerMetricGaps(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(3 * time.Hour)
+	cpuFirst, memFirst, memLast := 20.0, 30.0, 40.0
+	capture := MonitoringSeriesCapture{
+		RequestedWindow: evidence.TimeWindow{Start: start, End: end},
+		ActualPrecision: time.Hour,
+		CoverageStart:   start,
+		CoverageEnd:     end,
+		ObservedAt:      end.Add(-time.Microsecond),
+		SourceWatermark: end.Format(time.RFC3339Nano),
+		ProducerVersion: "monitoring-store/v2",
+		Buckets: []MonitoringBucket{
+			{
+				SeriesID: "host", SeriesKind: "host", Start: start, End: start.Add(time.Hour),
+				SourceLayer: MonitoringSourceMixed, SourceGranularity: time.Hour,
+				SampleCount: 3, MaintenanceCount: 1,
+				Metrics: []MonitoringMetric{
+					{Name: "cpu_usage_pct", Unit: "percent", Average: &cpuFirst, Max: &cpuFirst, SampleCount: 2, SourceLayer: MonitoringSourceRaw, SourceGranularity: 5 * time.Minute},
+					{Name: "mem_used_pct", Unit: "percent", Average: &memFirst, Max: &memFirst, SampleCount: 3, MaintenanceCount: 1, SourceLayer: MonitoringSourceDailyAggregate, SourceGranularity: time.Hour},
+				},
+			},
+			{
+				SeriesID: "host", SeriesKind: "host", Start: start.Add(2 * time.Hour), End: end,
+				SourceLayer: MonitoringSourceDailyAggregate, SourceGranularity: time.Hour,
+				SampleCount: 1,
+				Metrics: []MonitoringMetric{
+					{Name: "mem_used_pct", Unit: "percent", Average: &memLast, Max: &memLast, SampleCount: 1, SourceLayer: MonitoringSourceDailyAggregate, SourceGranularity: time.Hour},
+				},
+			},
+		},
+	}
+	adapter, err := NewMonitoringHostAdapter(
+		staticMonitoringSource{host: capture},
+		monitoringTestResolver(t, recordauth.SourceKindMonitoringInstance, "mi_0123456789abcdef"),
+		AdapterOptions{
+			Clock:       func() time.Time { return end.Add(time.Hour) },
+			NewIntentID: func() (string, error) { return "evi_0123456789abcdef01234567", nil },
+		},
+	)
+	if err != nil {
+		t.Fatalf("NewMonitoringHostAdapter() error = %v", err)
+	}
+	selection := evidence.Selection{
+		Key: evidence.MonitoringHostV1Key(), SourceType: string(recordauth.SourceKindMonitoringInstance),
+		SourceID: "mi_0123456789abcdef", RequestedWindow: evidence.TimeWindow{Start: start, End: end},
+		Metrics: []string{"cpu_usage_pct", "mem_used_pct"}, Precision: time.Hour,
+	}
+	preview, err := adapter.PreviewCapture(context.Background(), monitoringTestActor(t), selection)
+	if err != nil {
+		t.Fatalf("PreviewCapture() error = %v", err)
+	}
+	if preview.CalculationVersion != hostMonitoringCalculationVersion ||
+		preview.Quality.SampleCount != 4 || preview.Quality.MaintenanceCount != 1 ||
+		preview.Quality.GapCount != 3 || preview.Quality.BucketCount != 2 ||
+		preview.Quality.DataPointCount != 3 || !preview.Quality.Partial {
+		t.Fatalf("Preview quality/version = %#v/%q, want shared reference counts and three metric gaps", preview.Quality, preview.CalculationVersion)
+	}
+	snapshot, err := adapter.Capture(context.Background(), monitoringTestActor(t), evidence.Intent{
+		ID: preview.IntentID, Key: selection.Key, Selection: selection,
+		PreviewDigest: sha256.Sum256([]byte("preview")), ValidUntil: preview.ValidUntil,
+	})
+	if err != nil {
+		t.Fatalf("Capture() error = %v", err)
+	}
+	payload := decodeAdapterCanonicalPayload(t, snapshot.Bytes())
+	buckets := payload["buckets"].([]any)
+	if len(buckets) != 2 {
+		t.Fatalf("payload buckets = %#v, want two populated buckets", payload["buckets"])
+	}
+	firstBucket := buckets[0].(map[string]any)
+	if firstBucket["source_layer"] != string(MonitoringSourceMixed) || firstBucket["sample_count"] != float64(3) {
+		t.Fatalf("first bucket provenance/counts = %#v", firstBucket)
+	}
+	metricMap := make(map[string]map[string]any)
+	for _, rawMetric := range firstBucket["metrics"].([]any) {
+		metric := rawMetric.(map[string]any)
+		metricMap[metric["name"].(string)] = metric
+	}
+	if metricMap["cpu_usage_pct"]["sample_count"] != float64(2) ||
+		metricMap["cpu_usage_pct"]["source_layer"] != string(MonitoringSourceRaw) ||
+		metricMap["cpu_usage_pct"]["source_granularity_seconds"] != float64(300) ||
+		metricMap["mem_used_pct"]["sample_count"] != float64(3) ||
+		metricMap["mem_used_pct"]["source_layer"] != string(MonitoringSourceDailyAggregate) {
+		t.Fatalf("per-metric metadata = %#v", metricMap)
+	}
+	gaps := payload["gaps"].([]any)
+	if len(gaps) != 3 {
+		t.Fatalf("payload gaps = %#v, want CPU two plus memory one", gaps)
+	}
+	seenGapMetrics := map[string]int{}
+	for _, rawGap := range gaps {
+		gap := rawGap.(map[string]any)
+		seenGapMetrics[gap["metric"].(string)]++
+	}
+	if seenGapMetrics["cpu_usage_pct"] != 2 || seenGapMetrics["mem_used_pct"] != 1 {
+		t.Fatalf("metric gap counts = %#v", seenGapMetrics)
+	}
+	peaks := payload["peaks"].([]any)
+	peakSources := map[string]MonitoringSourceLayer{}
+	for _, rawPeak := range peaks {
+		peak := rawPeak.(map[string]any)
+		peakSources[peak["metric"].(string)] = MonitoringSourceLayer(peak["source_layer"].(string))
+	}
+	if peakSources["cpu_usage_pct"] != MonitoringSourceRaw || peakSources["mem_used_pct"] != MonitoringSourceDailyAggregate {
+		t.Fatalf("peak provenance = %#v", peakSources)
+	}
+}
+
+func TestMonitoringHostV2RejectsIncompleteMetricMetadataAtCapture(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	window := evidence.TimeWindow{Start: start, End: start.Add(time.Hour)}
+	tests := []struct {
+		name   string
+		mutate func(*MonitoringMetric)
+	}{
+		{name: "zero sample count", mutate: func(metric *MonitoringMetric) { metric.SampleCount = 0 }},
+		{name: "missing source layer", mutate: func(metric *MonitoringMetric) { metric.SourceLayer = "" }},
+		{name: "missing source granularity", mutate: func(metric *MonitoringMetric) { metric.SourceGranularity = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			capture := validMonitoringTestCapture(window, time.Hour, "host", "host", "cpu_usage_pct", "percent")
+			tt.mutate(&capture.Buckets[0].Metrics[0])
+			adapter, err := NewMonitoringHostAdapter(
+				staticMonitoringSource{host: capture},
+				monitoringTestResolver(t, recordauth.SourceKindMonitoringInstance, "mi_0123456789abcdef"),
+				AdapterOptions{Clock: func() time.Time { return window.End.Add(time.Hour) }},
+			)
+			if err != nil {
+				t.Fatalf("NewMonitoringHostAdapter() error = %v", err)
+			}
+			_, err = adapter.PreviewCapture(context.Background(), monitoringTestActor(t), evidence.Selection{
+				Key: evidence.MonitoringHostV1Key(), SourceType: string(recordauth.SourceKindMonitoringInstance),
+				SourceID: "mi_0123456789abcdef", RequestedWindow: window, Metrics: []string{"cpu_usage_pct"},
+			})
+			if !errors.Is(err, ErrUnacceptableMonitoringEvidenceSource) {
+				t.Fatalf("PreviewCapture() error = %v, want ErrUnacceptableMonitoringEvidenceSource", err)
+			}
+		})
+	}
 }

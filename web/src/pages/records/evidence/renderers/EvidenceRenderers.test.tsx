@@ -131,12 +131,17 @@ describe('evidence renderers', () => {
 describe('monitoring evidence coverage window', () => {
   function monitoringModel(start: string, end: string): MonitoringEvidenceReadModel {
     return {
-      version: 'monitoring_host_read_model/v1', requested_start: start, requested_end: end,
+      version: 'monitoring_host_read_model/v1', calculation_version: 'monitoring-evidence/v2',
+      requested_start: start, requested_end: end,
       coverage_start: start, coverage_end: end, actual_precision_seconds: 300,
       buckets: [{
         series_id: 'host', series_kind: 'host', start, end: new Date(Date.parse(start) + 300_000).toISOString().replace('.000Z', 'Z'),
         source_layer: 'raw', source_granularity_seconds: 300, sample_count: 1, maintenance_count: 0, backfilled_count: 0,
-        metrics: [{ name: 'cpu_usage_pct', unit: 'percent', average: 10 }],
+        metrics: [{
+          name: 'cpu_usage_pct', unit: 'percent', average: 10,
+          sample_count: 1, maintenance_count: 0, backfilled_count: 0,
+          source_layer: 'raw', source_granularity_seconds: 300,
+        }],
       }],
       gaps: [], peaks: [], quality,
     }

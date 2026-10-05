@@ -405,3 +405,10 @@ VPS monitoring freshness uses the center’s existing persisted heartbeat interv
 已落地详情重做的长期要求：不得为只有快照的字段伪造历史；无效网络与缺桶保持缺测，显式零值保留。`MetricChart` 的第二序列必须等长且逐点 `observedAt` 相同，只有通过校验的序列参与空态并集；每条序列独立保留 null/gap。新增单点、阈值标注和布局选项必须 opt-in，未传入时保留既有消费者默认行为。
 
 回归覆盖主序列全空而有效第二序列有值、非法第二序列、单点默认与 opt-in、空阈值 label、Compare 与 Evidence renderer。Target 图表使用自己的真实消费者，不借用主机指标语义。路由 CSS 只依赖已登记 owner；清理样式前验证动态 modifier 和其他页面消费者，不能依据单次字面 grep 删除共享规则。安装 token 保密、metadata If-Match、冻结危险操作主体与版本、绑定确认和零事件历史入口继续由本合同对应章节保护。
+
+## CPU 缺测呈现
+
+- `HostSample.cpu_rates_valid?: boolean | null` 与 usage/iowait/steal 整组有限 `[0,100]` 共同判定。nil legacy 允许范围内值，false 始终不可用；HTTP latest/recent 与 WebSocket seed/append 都经 `hostCPURate` 收敛，真实零不变 null。
+- 详情 CPU/iowait 和对比 CPU 卡无 hover 时定位最后一个 `sample_count > 0` 的 host point，跳过尾部空桶，但不能越过有样本的 CPU null 回看旧值。该点 CPU null 显示 `—`、`CPU 采样不可用`及中性样式；完全没有 host 点才显示“暂无观测数据”。hover 保留所指桶值/缺口/时间，其他指标行为不变。
+- 列表 CPU 使用同窗同桶内存/磁盘最后有限下标的较大者定位当前 host 点，再读取对应 CPU；不能对 CPU 使用 lastNonNull。当前 null 不隐藏历史曲线，任何有限历史值（含零）仍绘制，全部 null 才用空态。没有非 CPU host 点才是“暂无观测数据”。
+- CPU 缺测不推导整机无数据、在线变化或健康色，不增加列表 CPU summary，也不改变 runtime source 的身份/权限/时序策略。

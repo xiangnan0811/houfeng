@@ -40,7 +40,7 @@ const (
 	runtimeStreamAuthHMACKey      = "0123456789abcdef0123456789abcdef"
 	runtimeStreamAuthUserID       = "usr_0123456789abcdef01234567"
 	runtimeStreamAuthUsername     = "runtime_stream_admin"
-	runtimeStreamAuthMonitoringID = "mi_runtime_stream_auth"
+	runtimeStreamAuthMonitoringID = "mi_0123456789abcdef"
 	runtimeStreamAuthFingerprint  = "fp-runtime-stream-auth"
 	runtimeStreamAuthSessionProbe = "/api/runtime-auth-probe"
 )

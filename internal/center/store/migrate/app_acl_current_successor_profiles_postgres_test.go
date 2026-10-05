@@ -411,7 +411,7 @@ func appendAppACLCurrentReleasedSuccessor(
 	profile appACLCurrentReleasedPostgresProfileData,
 ) (AppACLManifestPersistedV1, error) {
 	t.Helper()
-	_, privileges, input := appACLCurrentReleasedFixtureContract(t, fixture, profile)
+	contract, privileges, input := appACLCurrentReleasedFixtureContract(t, fixture, profile)
 	profileLastMigration := ""
 	if names := profile.source.sources.names; len(names) > 0 {
 		profileLastMigration = names[len(names)-1]
@@ -421,6 +421,7 @@ func appendAppACLCurrentReleasedSuccessor(
 	}
 	isP66 := profileLastMigration == appACLCurrentP66LastMigration
 	isP67 := profileLastMigration == "0067_refactor_vps_monitoring_lifecycle.sql"
+	isP68 := profileLastMigration == "0068_normalize_ip_quality_host_address_identity.sql"
 	tx, err := migratorDB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("begin released APP profile fixture transaction: %w", err)
@@ -490,6 +491,14 @@ func appendAppACLCurrentReleasedSuccessor(
 				return AppACLManifestPersistedV1{}, fmt.Errorf("grant released P67 runtime privilege on %s: %w", privilege.ObjectIdentity, err)
 			}
 		}
+	} else if isP68 {
+		if err := validateAppACLCurrentReleasedP68PreviousContract(t, fixture, previous); err != nil {
+			return AppACLManifestPersistedV1{}, err
+		}
+		dependencies := defaultAppACLCurrentConvergenceDependencies()
+		if err := dependencies.applyDCL(ctx, tx, contract); err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("apply released P68 catalog DCL: %w", err)
+		}
 	} else if !bytes.Equal(previous.CanonicalPrivilegeSet, privileges) {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("released profile privilege body changes the exact predecessor grants")
 	}
@@ -508,6 +517,31 @@ func appendAppACLCurrentReleasedSuccessor(
 		return AppACLManifestPersistedV1{}, fmt.Errorf("commit released APP profile fixture manifest successor: %w", err)
 	}
 	return manifest, nil
+}
+
+func validateAppACLCurrentReleasedP68PreviousContract(
+	t *testing.T,
+	fixture exactAppACLCurrentSuccessorPostgresFixture,
+	previous AppACLManifestPersistedV1,
+) error {
+	t.Helper()
+	entries, err := ParseCanonicalMigrationSetBodyV1(previous.CanonicalMigrationSet)
+	if err != nil {
+		return fmt.Errorf("parse released P68 predecessor migration body: %w", err)
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("released P68 predecessor migration body is empty")
+	}
+	lastMigration := entries[len(entries)-1].Filename
+	registered := appACLCurrentReleasedPostgresProfile(t, lastMigration)
+	if !bytes.Equal(previous.CanonicalMigrationSet, registered.source.sources.canonicalSet) {
+		return fmt.Errorf("released P68 predecessor source differs from registered %s profile", lastMigration)
+	}
+	_, privileges, _ := appACLCurrentReleasedFixtureContract(t, fixture, registered)
+	if !bytes.Equal(previous.CanonicalPrivilegeSet, privileges) {
+		return fmt.Errorf("released P68 predecessor privileges differ from registered %s profile under fixture bindings", lastMigration)
+	}
+	return nil
 }
 
 func validateAppACLCurrentReleasedP66PrivilegeDelta(previousBody, p66Body []byte) error {

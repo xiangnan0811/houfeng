@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 
@@ -69,6 +70,9 @@ func summarizeMonitoringSnapshot(descriptor evidence.Descriptor, snapshot eviden
 		"quality":                  qualityReadModel(snapshot.Envelope().Quality),
 	}
 	envelope := snapshot.Envelope()
+	if descriptor.Key == evidence.MonitoringHostV1Key() {
+		readModel["calculation_version"] = envelope.CalculationVersion
+	}
 	return evidence.Summary{
 		Key: descriptor.Key, RendererVersion: descriptor.Conformance.RendererVersion,
 		Title: title, SearchText: strings.TrimSpace(title + " " + envelope.Source.ID), ReadModel: readModel,
@@ -163,7 +167,11 @@ func compareMonitoringSnapshots(descriptor evidence.Descriptor, left, right evid
 	if !leftOK || !rightOK {
 		return incompatibleComparison(descriptor, "invalid_payload")
 	}
-	metricDeltas := monitoringMetricDeltas(leftPayload, rightPayload)
+	metricCounts := descriptor.Key == evidence.MonitoringHostV1Key() && leftEnvelope.CalculationVersion == hostMonitoringCalculationVersion
+	metricDeltas := monitoringMetricDeltas(leftPayload, rightPayload, metricCounts)
+	if metricDeltas == nil {
+		return incompatibleComparison(descriptor, "invalid_payload")
+	}
 	version := monitoringHostComparisonVersion
 	reason := "compatible_monitoring_host_v1"
 	if descriptor.Key == evidence.MonitoringProbeV2Key() {
@@ -220,9 +228,12 @@ type monitoringMetricKey struct {
 	metric   string
 }
 
-func monitoringMetricDeltas(left, right map[string]any) []any {
-	leftMetrics := aggregateMonitoringMetrics(left["buckets"])
-	rightMetrics := aggregateMonitoringMetrics(right["buckets"])
+func monitoringMetricDeltas(left, right map[string]any, metricCounts bool) []any {
+	leftMetrics := aggregateMonitoringMetrics(left["buckets"], metricCounts)
+	rightMetrics := aggregateMonitoringMetrics(right["buckets"], metricCounts)
+	if leftMetrics == nil || rightMetrics == nil {
+		return nil
+	}
 	keys := make([]monitoringMetricKey, 0, len(leftMetrics)+len(rightMetrics))
 	seen := make(map[monitoringMetricKey]struct{}, len(leftMetrics)+len(rightMetrics))
 	for key := range leftMetrics {
@@ -280,16 +291,24 @@ func monitoringMetricDeltas(left, right map[string]any) []any {
 	return out
 }
 
-func aggregateMonitoringMetrics(value any) map[monitoringMetricKey]monitoringMetricAggregate {
+func aggregateMonitoringMetrics(value any, metricCounts bool) map[monitoringMetricKey]monitoringMetricAggregate {
 	result := make(map[monitoringMetricKey]monitoringMetricAggregate)
 	buckets, _ := value.([]any)
 	for _, rawBucket := range buckets {
 		bucket, _ := rawBucket.(map[string]any)
 		seriesID := stringValue(bucket["series_id"])
-		sampleCount := numberAsInt64(bucket["sample_count"])
+		bucketCount := numberAsInt64(bucket["sample_count"])
 		metrics, _ := bucket["metrics"].([]any)
 		for _, rawMetric := range metrics {
 			metric, _ := rawMetric.(map[string]any)
+			sampleCount := bucketCount
+			if metricCounts {
+				count, ok := numberValue(metric["sample_count"])
+				if !ok || count <= 0 || count >= float64(math.MaxInt64) || math.Trunc(count) != count {
+					return nil
+				}
+				sampleCount = int64(count)
+			}
 			name := stringValue(metric["name"])
 			if name == "" {
 				continue
@@ -300,6 +319,10 @@ func aggregateMonitoringMetrics(value any) map[monitoringMetricKey]monitoringMet
 			p95, p95OK := numberValue(metric["p95"])
 			key := monitoringMetricKey{seriesID: seriesID, metric: name}
 			current := result[key]
+			if sampleCount < 0 || sampleCount > math.MaxInt64-current.sampleCount ||
+				(averageOK && sampleCount > math.MaxInt64-current.averageWeight) {
+				return nil
+			}
 			current.sampleCount += sampleCount
 			if averageOK {
 				current.averageSum += average * float64(sampleCount)

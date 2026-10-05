@@ -22,12 +22,15 @@ type FilesystemStats struct {
 	Ffree  uint64
 }
 
+type cpuCounters struct {
+	values [8]uint64
+	fields int
+}
+
 type snapshot struct {
 	observedAt    time.Time
-	cpuTotal      uint64
-	cpuIdle       uint64
-	cpuIowait     uint64
-	cpuSteal      uint64
+	cpu           cpuCounters
+	cpuPresent    bool
 	netInterfaces []networkInterfaceCounters
 	diskRead      uint64
 	diskWrite     uint64
@@ -113,13 +116,14 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 		return agentapi.HostSamplePayload{}, err
 	}
 
-	statRaw, err := p.readFile("/proc/stat")
-	if err != nil {
-		return agentapi.HostSamplePayload{}, fmt.Errorf("read /proc/stat: %w", err)
-	}
-	cpuTotal, cpuIdle, cpuIowait, cpuSteal, err := parseCPUStat(statRaw)
-	if err != nil {
-		return agentapi.HostSamplePayload{}, err
+	statRaw, statErr := p.readFile("/proc/stat")
+	var cpu cpuCounters
+	cpuPresent := false
+	if statErr == nil {
+		if parsed, parseErr := parseCPUStat(statRaw); parseErr == nil {
+			cpu = parsed
+			cpuPresent = true
+		}
 	}
 
 	netRaw, err := p.readFile("/proc/net/dev")
@@ -161,13 +165,12 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 		UptimeSeconds:     uptimeSeconds,
 	}
 	networkRatesValid := false
+	cpuRatesValid := false
 
 	current := &snapshot{
 		observedAt:    observedAt,
-		cpuTotal:      cpuTotal,
-		cpuIdle:       cpuIdle,
-		cpuIowait:     cpuIowait,
-		cpuSteal:      cpuSteal,
+		cpu:           cpu,
+		cpuPresent:    cpuPresent,
 		netInterfaces: netInterfaces,
 		diskRead:      diskRead,
 		diskWrite:     diskWrite,
@@ -176,9 +179,13 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 	if p.previous != nil {
 		elapsedSeconds := observedAt.Sub(p.previous.observedAt).Seconds()
 		if elapsedSeconds > 0 {
-			sample.CPUUsagePct = cpuUsagePct(*p.previous, *current)
-			sample.CPUIOWaitPct = cpuIowaitPct(*p.previous, *current)
-			sample.CPUStealPct = cpuStealPct(*p.previous, *current)
+			cpuUsage, cpuIowait, cpuSteal, valid := cpuRatesForSnapshot(*p.previous, *current)
+			if valid {
+				cpuRatesValid = true
+				sample.CPUUsagePct = cpuUsage
+				sample.CPUIOWaitPct = cpuIowait
+				sample.CPUStealPct = cpuSteal
+			}
 			sample.DiskReadBytesPerSec = rateBytesPerSecond(p.previous.diskRead, current.diskRead, elapsedSeconds)
 			sample.DiskWriteBytesPerSec = rateBytesPerSecond(p.previous.diskWrite, current.diskWrite, elapsedSeconds)
 			sample.DiskBusyPct = diskBusyPct(*p.previous, *current)
@@ -189,6 +196,7 @@ func (p *Provider) collectProcFS(observedAt time.Time) (agentapi.HostSamplePaylo
 			}
 		}
 	}
+	sample.CPURatesValid = new(cpuRatesValid)
 	sample.NetworkRatesValid = new(networkRatesValid)
 
 	p.previous = current
@@ -260,6 +268,7 @@ func (p *Provider) collectDarwin(observedAt time.Time) (agentapi.HostSamplePaylo
 		DiskTotalBytes:    diskTotalBytes(fsStats),
 		InodeUsedPct:      inodeUsedPct,
 		NetworkRatesValid: new(false),
+		CPURatesValid:     new(false),
 		UptimeSeconds:     uptimeSeconds,
 	}, nil
 }
@@ -477,30 +486,32 @@ func parseUptime(raw []byte) (int64, error) {
 	return int64(seconds), nil
 }
 
-func parseCPUStat(raw []byte) (total, idle, iowait, steal uint64, err error) {
+func parseCPUStat(raw []byte) (cpuCounters, error) {
 	for _, line := range strings.Split(string(raw), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) < 8 || fields[0] != "cpu" {
 			continue
 		}
-		for i := 1; i < len(fields); i++ {
-			value, parseErr := strconv.ParseUint(fields[i], 10, 64)
+		var counters cpuCounters
+		counters.fields = len(fields) - 1
+		if counters.fields > len(counters.values) {
+			counters.fields = len(counters.values)
+		}
+		for index, field := range fields[1:] {
+			value, parseErr := strconv.ParseUint(field, 10, 64)
 			if parseErr != nil {
-				return 0, 0, 0, 0, fmt.Errorf("parse cpu field %d: %w", i, parseErr)
+				return cpuCounters{}, fmt.Errorf("parse cpu field %d: %w", index+1, parseErr)
 			}
-			total += value
-			switch i {
-			case 4:
-				idle = value
-			case 5:
-				iowait = value
-			case 8:
-				steal = value
+			if index < len(counters.values) {
+				counters.values[index] = value
 			}
 		}
-		return total, idle, iowait, steal, nil
+		if _, ok := sumCPUCounterValues(counters); !ok {
+			return cpuCounters{}, fmt.Errorf("parse /proc/stat: cpu counters overflow")
+		}
+		return counters, nil
 	}
-	return 0, 0, 0, 0, fmt.Errorf("parse /proc/stat: cpu line missing")
+	return cpuCounters{}, fmt.Errorf("parse /proc/stat: cpu line missing")
 }
 
 func parseNetDev(raw []byte) ([]networkInterfaceCounters, error) {
@@ -637,31 +648,66 @@ func diskTotalBytes(stats FilesystemStats) int64 {
 	return int64(stats.Blocks * stats.Bsize)
 }
 
-func cpuUsagePct(previous, current snapshot) float64 {
-	deltaTotal := current.cpuTotal - previous.cpuTotal
-	if deltaTotal == 0 {
-		return 0
+func sumCPUCounterValues(counters cpuCounters) (uint64, bool) {
+	var total uint64
+	for _, value := range counters.values {
+		if value > ^uint64(0)-total {
+			return 0, false
+		}
+		total += value
 	}
-	deltaIdle := current.cpuIdle - previous.cpuIdle
-	deltaIowait := current.cpuIowait - previous.cpuIowait
-	busy := deltaTotal - deltaIdle - deltaIowait
-	return float64(busy) / float64(deltaTotal) * 100
+	return total, true
 }
 
-func cpuIowaitPct(previous, current snapshot) float64 {
-	deltaTotal := current.cpuTotal - previous.cpuTotal
-	if deltaTotal == 0 {
-		return 0
+func cpuRatesForSnapshot(previous, current snapshot) (usage, iowait, steal float64, valid bool) {
+	if !previous.cpuPresent ||
+		!current.cpuPresent ||
+		previous.cpu.fields != current.cpu.fields ||
+		previous.observedAt.IsZero() ||
+		current.observedAt.IsZero() ||
+		!current.observedAt.After(previous.observedAt) {
+		return 0, 0, 0, false
 	}
-	return float64(current.cpuIowait-previous.cpuIowait) / float64(deltaTotal) * 100
-}
+	if _, ok := sumCPUCounterValues(previous.cpu); !ok {
+		return 0, 0, 0, false
+	}
+	if _, ok := sumCPUCounterValues(current.cpu); !ok {
+		return 0, 0, 0, false
+	}
 
-func cpuStealPct(previous, current snapshot) float64 {
-	deltaTotal := current.cpuTotal - previous.cpuTotal
-	if deltaTotal == 0 {
-		return 0
+	var deltas [8]uint64
+	for index := range deltas {
+		if current.cpu.values[index] < previous.cpu.values[index] {
+			return 0, 0, 0, false
+		}
+		deltas[index] = current.cpu.values[index] - previous.cpu.values[index]
 	}
-	return float64(current.cpuSteal-previous.cpuSteal) / float64(deltaTotal) * 100
+
+	var deltaTotal uint64
+	for _, delta := range deltas {
+		if delta > ^uint64(0)-deltaTotal {
+			return 0, 0, 0, false
+		}
+		deltaTotal += delta
+	}
+	if deltaTotal == 0 {
+		return 0, 0, 0, false
+	}
+
+	var busy uint64
+	for index, delta := range deltas {
+		if index == 3 || index == 4 {
+			continue
+		}
+		if delta > ^uint64(0)-busy {
+			return 0, 0, 0, false
+		}
+		busy += delta
+	}
+	return float64(busy) / float64(deltaTotal) * 100,
+		float64(deltas[4]) / float64(deltaTotal) * 100,
+		float64(deltas[7]) / float64(deltaTotal) * 100,
+		true
 }
 
 func rateBytesPerSecond(previous, current uint64, elapsedSeconds float64) int64 {

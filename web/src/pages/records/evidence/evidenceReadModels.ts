@@ -11,6 +11,12 @@ const IP_SOURCE_STATUSES = new Set(['success', 'failure', 'skipped', 'not_config
 const IP_SOURCE_TYPES = new Set(['default', 'optional', 'custom'])
 const IP_SERVICE_STATUSES = new Set(['unlocked', 'blocked', 'unknown'])
 const MONITORING_SOURCE_LAYERS = new Set(['raw', 'daily_aggregate'])
+const MONITORING_BUCKET_SOURCE_LAYERS = new Set(['raw', 'daily_aggregate', 'mixed'])
+const HOST_MONITORING_EVIDENCE_V1 = 'monitoring-evidence/v1'
+const HOST_MONITORING_EVIDENCE_V2 = 'monitoring-evidence/v2'
+const MONITORING_METRIC_METADATA_KEYS = [
+  'sample_count', 'maintenance_count', 'backfilled_count', 'source_layer', 'source_granularity_seconds',
+] as const
 const EVENT_SEVERITIES = new Set(['正常', '关注', '告警', '严重'])
 const EVENT_OBJECT_TYPES = new Set(['monitoring_instance', 'target'])
 const EVENT_PROVENANCES = new Set(['agent_sync', 'center', 'web', 'retention_backfill', 'manual_correction'])
@@ -172,6 +178,11 @@ export type MonitoringMetricReadModel = {
   min?: number
   max?: number
   p95?: number
+  sample_count?: number
+  maintenance_count?: number
+  backfilled_count?: number
+  source_layer?: string
+  source_granularity_seconds?: number
 }
 
 export type MonitoringBucketReadModel = {
@@ -189,6 +200,7 @@ export type MonitoringBucketReadModel = {
 
 export type MonitoringGapReadModel = {
   series_id: string
+  metric?: string
   start: string
   end: string
 }
@@ -203,6 +215,7 @@ export type MonitoringPeakReadModel = {
 
 export type MonitoringEvidenceReadModel = {
   version: 'monitoring_host_read_model/v1' | 'monitoring_probe_read_model/v1'
+  calculation_version?: 'monitoring-evidence/v1' | 'monitoring-evidence/v2'
   requested_start: string
   requested_end: string
   coverage_start: string
@@ -595,9 +608,47 @@ export function decodeIPQualityEvidenceReadModel(value: unknown): IPQualityEvide
   }
 }
 
+type MonitoringMetricMetadata = {
+  sample_count: number
+  maintenance_count: number
+  backfilled_count: number
+  source_layer: string
+  source_granularity_seconds: number
+}
+
+function decodeMonitoringMetricMetadata(
+  input: JSONRecord,
+  required: boolean,
+  precision: number,
+): MonitoringMetricMetadata | 'absent' | null {
+  const present = MONITORING_METRIC_METADATA_KEYS.filter((key) => {
+    const field = input[key]
+    return field !== undefined && field !== null
+  })
+  if (present.length === 0) return required ? null : 'absent'
+  if (present.length !== MONITORING_METRIC_METADATA_KEYS.length) return null
+  const sampleCount = positiveIntegerField(input, 'sample_count')
+  const maintenanceCount = countField(input, 'maintenance_count')
+  const backfilledCount = countField(input, 'backfilled_count')
+  const sourceLayer = enumField(input, 'source_layer', MONITORING_SOURCE_LAYERS)
+  const granularity = positiveIntegerField(input, 'source_granularity_seconds')
+  if (sampleCount === null || maintenanceCount === null || backfilledCount === null ||
+    sourceLayer === null || granularity === null || maintenanceCount > sampleCount ||
+    backfilledCount > sampleCount || granularity > precision) return null
+  return {
+    sample_count: sampleCount,
+    maintenance_count: maintenanceCount,
+    backfilled_count: backfilledCount,
+    source_layer: sourceLayer,
+    source_granularity_seconds: granularity,
+  }
+}
+
 function decodeMonitoringMetric(
   value: unknown,
   expectedUnits: ReadonlyMap<string, string>,
+  precision: number,
+  requireMetadata: boolean,
 ): MonitoringMetricReadModel | null {
   const input = record(value)
   if (!input) return null
@@ -607,20 +658,41 @@ function decodeMonitoringMetric(
   const minimum = optionalNumberField(input, 'min')
   const maximum = optionalNumberField(input, 'max')
   const p95 = optionalNumberField(input, 'p95')
+  const metadata = decodeMonitoringMetricMetadata(input, requireMetadata, precision)
   if (name === null || unit === null || expectedUnits.get(name) !== unit || average === null ||
-    minimum === null || maximum === null || p95 === null ||
+    minimum === null || maximum === null || p95 === null || metadata === null ||
     [average, minimum, maximum, p95].every((item) => item === undefined)) return null
   const result: MonitoringMetricReadModel = { name, unit }
   if (average !== undefined) result.average = average
   if (minimum !== undefined) result.min = minimum
   if (maximum !== undefined) result.max = maximum
   if (p95 !== undefined) result.p95 = p95
+  if (metadata !== 'absent') {
+    result.sample_count = metadata.sample_count
+    result.maintenance_count = metadata.maintenance_count
+    result.backfilled_count = metadata.backfilled_count
+    result.source_layer = metadata.source_layer
+    result.source_granularity_seconds = metadata.source_granularity_seconds
+  }
   return result
+}
+
+function referenceMonitoringMetric(metrics: readonly MonitoringMetricReadModel[]): MonitoringMetricReadModel | null {
+  let reference: MonitoringMetricReadModel | null = null
+  for (const metric of metrics) {
+    const count = metric.sample_count
+    if (count === undefined) return null
+    if (!reference || count > (reference.sample_count ?? -1) ||
+      (count === reference.sample_count && metric.name < reference.name)) reference = metric
+  }
+  return reference
 }
 
 function decodeMonitoringBucket(
   value: unknown,
   expectedUnits: ReadonlyMap<string, string>,
+  precision: number,
+  metricMetadata: 'required' | 'optional',
 ): MonitoringBucketReadModel | null {
   const input = record(value)
   if (!input) return null
@@ -628,7 +700,11 @@ function decodeMonitoringBucket(
   const seriesKind = nonEmptyStringField(input, 'series_kind', MAX_FIELD_ATOM)
   const start = timestampField(input, 'start')
   const end = timestampField(input, 'end')
-  const sourceLayer = enumField(input, 'source_layer', MONITORING_SOURCE_LAYERS)
+  const sourceLayer = enumField(
+    input,
+    'source_layer',
+    metricMetadata === 'required' ? MONITORING_BUCKET_SOURCE_LAYERS : MONITORING_SOURCE_LAYERS,
+  )
   const granularity = positiveIntegerField(input, 'source_granularity_seconds')
   const sampleCount = positiveIntegerField(input, 'sample_count')
   const maintenanceCount = countField(input, 'maintenance_count')
@@ -642,10 +718,32 @@ function decodeMonitoringBucket(
   const metrics: MonitoringMetricReadModel[] = []
   const metricNames = new Set<string>()
   for (const metricValue of metricValues) {
-    const metric = decodeMonitoringMetric(metricValue, expectedUnits)
+    const metric = decodeMonitoringMetric(metricValue, expectedUnits, precision, metricMetadata === 'required')
     if (!metric || metricNames.has(metric.name)) return null
     metricNames.add(metric.name)
+    if (metric.sample_count === undefined) {
+      metric.sample_count = sampleCount
+      metric.maintenance_count = maintenanceCount
+      metric.backfilled_count = backfilledCount
+      metric.source_layer = sourceLayer
+      metric.source_granularity_seconds = granularity
+    }
     metrics.push(metric)
+  }
+  if (metricMetadata === 'required') {
+    const reference = referenceMonitoringMetric(metrics)
+    if (!reference || reference.sample_count !== sampleCount ||
+      reference.maintenance_count !== maintenanceCount ||
+      reference.backfilled_count !== backfilledCount) return null
+    let maxGranularity = 0
+    const layers = new Set<string>()
+    for (const metric of metrics) {
+      if (metric.source_layer === undefined || metric.source_granularity_seconds === undefined) return null
+      layers.add(metric.source_layer)
+      if (metric.source_granularity_seconds > maxGranularity) maxGranularity = metric.source_granularity_seconds
+    }
+    const expectedLayer = layers.size === 1 ? [...layers][0] : 'mixed'
+    if (sourceLayer !== expectedLayer || granularity !== maxGranularity) return null
   }
   return {
     series_id: seriesId,
@@ -661,15 +759,50 @@ function decodeMonitoringBucket(
   }
 }
 
-function decodeMonitoringGap(value: unknown): MonitoringGapReadModel | null {
+function decodeMonitoringGap(
+  value: unknown,
+  metricUnits: ReadonlyMap<string, string> | null,
+): MonitoringGapReadModel | null {
   const input = record(value)
   if (!input) return null
   const seriesId = nonEmptyStringField(input, 'series_id', MAX_FIELD_ATOM)
   const start = timestampField(input, 'start')
   const end = timestampField(input, 'end')
-  return seriesId === null || start === null || end === null || timestampMicros(end) <= timestampMicros(start)
-    ? null
-    : { series_id: seriesId, start, end }
+  if (seriesId === null || start === null || end === null || timestampMicros(end) <= timestampMicros(start)) return null
+  const gap: MonitoringGapReadModel = { series_id: seriesId, start, end }
+  if (metricUnits) {
+    const metric = nonEmptyStringField(input, 'metric', MAX_FIELD_ATOM)
+    if (metric === null || !metricUnits.has(metric)) return null
+    gap.metric = metric
+  }
+  return gap
+}
+
+function monitoringPeakSource(
+  buckets: readonly MonitoringBucketReadModel[],
+  peak: MonitoringPeakReadModel,
+): string | null {
+  const at = timestampMicros(peak.at)
+  let shared: string | null = null
+  let containing: string | null = null
+  let saw = false
+  for (const bucket of buckets) {
+    if (bucket.series_id !== peak.series_id) continue
+    const metric = bucket.metrics.find((item) => item.name === peak.metric)
+    if (!metric?.source_layer) continue
+    saw = true
+    if (shared === null) shared = metric.source_layer
+    else if (shared !== metric.source_layer) shared = ''
+    const start = timestampMicros(bucket.start)
+    const end = timestampMicros(bucket.end)
+    if (at >= start && at < end) {
+      if (containing !== null && containing !== metric.source_layer) return null
+      containing = metric.source_layer
+    }
+  }
+  if (!saw) return null
+  if (containing !== null) return containing
+  return shared === '' ? null : shared
 }
 
 function decodeMonitoringPeak(
@@ -716,18 +849,30 @@ export function decodeMonitoringEvidenceReadModel(
   const expectedUnits = expectedVersion === 'monitoring_probe_read_model/v1'
     ? PROBE_METRIC_UNITS
     : HOST_METRIC_UNITS
+  const host = expectedVersion === 'monitoring_host_read_model/v1'
+  let calculationVersion: MonitoringEvidenceReadModel['calculation_version'] | undefined
+  let metricMetadata: 'required' | 'optional' = 'optional'
+  if (host && Object.hasOwn(input, 'calculation_version') && input.calculation_version != null) {
+    if (input.calculation_version === HOST_MONITORING_EVIDENCE_V2) {
+      calculationVersion = HOST_MONITORING_EVIDENCE_V2
+      metricMetadata = 'required'
+    } else if (input.calculation_version === HOST_MONITORING_EVIDENCE_V1) {
+      calculationVersion = HOST_MONITORING_EVIDENCE_V1
+    } else return null
+  }
   const buckets: MonitoringBucketReadModel[] = []
   const seriesKinds = new Map<string, string>()
   const seriesEnds = new Map<string, number>()
   const seriesBucketCounts = new Map<string, number>()
   const seriesMetrics = new Set<string>()
   const bucketsBySeries = new Map<string, MonitoringBucketReadModel[]>()
+  const bucketsBySeriesMetric = new Map<string, MonitoringBucketReadModel[]>()
   let sampleCount = 0
   let maintenanceCount = 0
   let backfilledCount = 0
   let dataPointCount = 0
   for (const bucketValue of bucketValues) {
-    const bucket = decodeMonitoringBucket(bucketValue, expectedUnits)
+    const bucket = decodeMonitoringBucket(bucketValue, expectedUnits, precision, metricMetadata)
     if (!bucket) return null
     const startMicros = timestampMicros(bucket.start)
     const endMicros = timestampMicros(bucket.end)
@@ -750,35 +895,44 @@ export function decodeMonitoringEvidenceReadModel(
     dataPointCount += bucket.metrics.length
     if (![sampleCount, maintenanceCount, backfilledCount, dataPointCount].every(Number.isSafeInteger) ||
       dataPointCount > MAX_SNAPSHOT_DATA_POINTS) return null
-    for (const metric of bucket.metrics) seriesMetrics.add(`${bucket.series_id}\u0000${metric.name}`)
+    for (const metric of bucket.metrics) {
+      const metricKey = `${bucket.series_id}\u0000${metric.name}`
+      seriesMetrics.add(metricKey)
+      const metricBuckets = bucketsBySeriesMetric.get(metricKey) ?? []
+      metricBuckets.push(bucket)
+      bucketsBySeriesMetric.set(metricKey, metricBuckets)
+    }
     buckets.push(bucket)
   }
   const gaps: MonitoringGapReadModel[] = []
-  let previousGapSeries = ''
+  let previousGapIdentity = ''
   let previousGapStart = Number.NEGATIVE_INFINITY
   let previousGapEnd = Number.NEGATIVE_INFINITY
   const gapBucketCursors = new Map<string, number>()
   for (const gapValue of gapValues) {
-    const gap = decodeMonitoringGap(gapValue)
+    const gap = decodeMonitoringGap(gapValue, metricMetadata === 'required' ? expectedUnits : null)
     if (!gap || !seriesKinds.has(gap.series_id)) return null
+    const gapIdentity = gap.metric ? `${gap.series_id}\u0000${gap.metric}` : gap.series_id
     const gapStart = timestampMicros(gap.start)
     const gapEnd = timestampMicros(gap.end)
-    const sameSeriesBuckets = bucketsBySeries.get(gap.series_id) ?? []
-    let bucketCursor = gapBucketCursors.get(gap.series_id) ?? 0
+    const sameSeriesBuckets = gap.metric
+      ? bucketsBySeriesMetric.get(gapIdentity) ?? []
+      : bucketsBySeries.get(gap.series_id) ?? []
+    let bucketCursor = gapBucketCursors.get(gapIdentity) ?? 0
     while (bucketCursor < sameSeriesBuckets.length) {
       const bucket = sameSeriesBuckets[bucketCursor]
       if (!bucket || timestampMicros(bucket.end) > gapStart) break
       bucketCursor++
     }
-    gapBucketCursors.set(gap.series_id, bucketCursor)
+    gapBucketCursors.set(gapIdentity, bucketCursor)
     const candidateBucket = sameSeriesBuckets[bucketCursor]
     if (gapStart < requestedStartMicros || gapEnd > requestedEndMicros ||
-      gapEnd - gapStart > precision * 1_000_000 || gap.series_id < previousGapSeries ||
-      (gap.series_id === previousGapSeries && (gapStart < previousGapStart ||
+      gapEnd - gapStart > precision * 1_000_000 || gapIdentity < previousGapIdentity ||
+      (gapIdentity === previousGapIdentity && (gapStart < previousGapStart ||
         (gapStart === previousGapStart && gapEnd <= previousGapEnd) || gapStart < previousGapEnd)) ||
       (candidateBucket !== undefined && timestampMicros(candidateBucket.start) < gapEnd &&
         timestampMicros(candidateBucket.end) > gapStart)) return null
-    previousGapSeries = gap.series_id
+    previousGapIdentity = gapIdentity
     previousGapStart = gapStart
     previousGapEnd = gapEnd
     gaps.push(gap)
@@ -788,6 +942,10 @@ export function decodeMonitoringEvidenceReadModel(
     const peak = decodeMonitoringPeak(peakValue, expectedUnits)
     if (!peak || !seriesMetrics.has(`${peak.series_id}\u0000${peak.metric}`) ||
       timestampMicros(peak.at) < requestedStartMicros || timestampMicros(peak.at) >= requestedEndMicros) return null
+    if (metricMetadata === 'required') {
+      const source = monitoringPeakSource(buckets, peak)
+      if (source === null || peak.source_layer !== source) return null
+    }
     peaks.push(peak)
   }
   const maximumSeriesBucketCount = Math.max(...seriesBucketCounts.values())
@@ -795,9 +953,11 @@ export function decodeMonitoringEvidenceReadModel(
     quality.maintenance_count !== maintenanceCount || quality.backfilled_count !== backfilledCount ||
     quality.bucket_count !== maximumSeriesBucketCount || quality.gap_count !== gaps.length ||
     quality.peak_count !== peaks.length || quality.data_point_count !== dataPointCount ||
+    (metricMetadata === 'required' && gaps.length > 0 && !quality.partial) ||
     ((coverageStartMicros > requestedStartMicros || coverageEndMicros < requestedEndMicros) && !quality.partial)) return null
   return {
     version: expectedVersion,
+    ...(calculationVersion ? { calculation_version: calculationVersion } : {}),
     requested_start: requestedStart,
     requested_end: requestedEnd,
     coverage_start: coverageStart,

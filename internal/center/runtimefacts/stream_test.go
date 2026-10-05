@@ -2,6 +2,8 @@ package runtimefacts
 
 import (
 	"context"
+	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -57,6 +59,31 @@ func TestStreamHubPublishesHostSamplesToMatchingSubscribers(t *testing.T) {
 	case message := <-other.Messages:
 		t.Fatalf("unexpected message for other subscriber: %#v", message)
 	default:
+	}
+}
+
+func TestHostSampleFromWriteNormalizesNonFiniteCPUValuesForJSON(t *testing.T) {
+	t.Parallel()
+
+	sample := hostSampleFromWrite(observations.HostSampleWrite{
+		MonitoringInstanceID: "mi_001",
+		CPUUsagePct:          math.NaN(),
+		CPUIOWaitPct:         42,
+		CPUStealPct:          math.Inf(1),
+		MemUsedPct:           55,
+		CPURatesValid:        new(true),
+	})
+	if sample.CPURatesValid == nil || *sample.CPURatesValid {
+		t.Fatalf("CPURatesValid = %v, want explicit false", sample.CPURatesValid)
+	}
+	if sample.CPUUsagePct != 0 || sample.CPUStealPct != 0 {
+		t.Fatalf("non-finite CPU values = usage %v steal %v, want zero placeholders", sample.CPUUsagePct, sample.CPUStealPct)
+	}
+	if sample.CPUIOWaitPct != 42 || sample.MemUsedPct != 55 {
+		t.Fatalf("finite values = iowait %v mem %v, want 42 and 55", sample.CPUIOWaitPct, sample.MemUsedPct)
+	}
+	if _, err := json.Marshal(sample); err != nil {
+		t.Fatalf("json.Marshal(sample) error = %v", err)
 	}
 }
 func TestStreamHubPublishesOnlyRecordedSyncResults(t *testing.T) {

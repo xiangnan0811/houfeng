@@ -16,6 +16,7 @@ export type MetricTimeWindow = TimeWindow
 export type HostMetricSeriesPoint = Pick<
   HostMetricPoint,
   | 'observed_at'
+  | 'sample_count'
   | 'cpu_usage_pct'
   | 'mem_used_pct'
   | 'disk_used_pct'
@@ -63,6 +64,30 @@ export function seriesMax(series: MetricChartSample[]): number | undefined {
     if (isPresentValue(point.value)) max = Math.max(max, point.value)
   }
   return Number.isFinite(max) ? max : undefined
+}
+
+/** Last host row in array order. Trailing `sample_count === 0` buckets are not current. */
+export function lastHostSamplePoint(points: readonly HostMetricSeriesPoint[]): HostMetricSeriesPoint | null {
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const point = points[index]
+    if (point && point.sample_count > 0) return point
+  }
+  return null
+}
+
+/**
+ * CPU current value at the last host row. A null at that row stays null:
+ * earlier finite rates are history, not a stand-in for the current sample.
+ * Callers distinguish "no host row" with `lastHostSamplePoint`.
+ */
+export function currentCPUMetricValue(
+  points: readonly HostMetricSeriesPoint[],
+  metric: 'cpu_usage_pct' | 'cpu_iowait_pct',
+): number | null {
+  const point = lastHostSamplePoint(points)
+  if (!point) return null
+  const value = point[metric]
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
 export function seriesValueAt(series: MetricChartSample[], observedAt: string | null): number | null {

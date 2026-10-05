@@ -25,6 +25,26 @@ export function hostSampleHasValidTimes(sample: HostSample): boolean {
   return parseSampleTimestamp(sample.observed_at) != null && parseSampleTimestamp(sample.received_at) != null
 }
 
+function cpuRateInRange(value: number): boolean {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
+}
+
+/**
+ * Whole CPU group, matching `CPURatesUsable`: legacy nil/null stays usable only
+ * when usage, iowait, and steal are all finite and inside [0, 100]. Explicit
+ * false is missing, including a placeholder zero.
+ */
+export function hostCPURate(
+  sample: HostSample | null | undefined,
+  metric: 'cpu_usage_pct' | 'cpu_iowait_pct' | 'cpu_steal_pct',
+): number | null {
+  if (!sample || sample.cpu_rates_valid === false) return null
+  if (!cpuRateInRange(sample.cpu_usage_pct) || !cpuRateInRange(sample.cpu_iowait_pct) || !cpuRateInRange(sample.cpu_steal_pct)) {
+    return null
+  }
+  return sample[metric]
+}
+
 export function hostNetworkRate(sample: Pick<HostSample, 'network_rates_valid' | 'net_in_bytes_per_sec' | 'net_out_bytes_per_sec'>, direction: 'in' | 'out'): number | null {
   if (sample.network_rates_valid !== true) return null
   const value = direction === 'in' ? sample.net_in_bytes_per_sec : sample.net_out_bytes_per_sec
@@ -103,12 +123,12 @@ export function hostSampleToMetricPoint(sample: HostSample): HostMetricPoint {
   return {
     observed_at: sample.observed_at,
     sample_count: 1,
-    cpu_usage_pct: sample.cpu_usage_pct,
+    cpu_usage_pct: hostCPURate(sample, 'cpu_usage_pct'),
     mem_used_pct: sample.mem_used_pct,
     disk_used_pct: sample.disk_used_pct,
     inode_used_pct: sample.inode_used_pct,
     load_5: sample.load_5,
-    cpu_iowait_pct: sample.cpu_iowait_pct,
+    cpu_iowait_pct: hostCPURate(sample, 'cpu_iowait_pct'),
     net_in_bytes_per_sec: hostNetworkRate(sample, 'in'),
     net_out_bytes_per_sec: hostNetworkRate(sample, 'out'),
     load_1: sample.load_1,

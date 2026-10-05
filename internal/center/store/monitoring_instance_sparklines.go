@@ -2,12 +2,15 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"houfeng/internal/contracts/agentapi"
 )
 
 // MonitoringInstanceSparklinesRepository provides downsampled metric time-series for all
@@ -79,7 +82,8 @@ const getMonitoringInstanceSparklinesSQL = `
 		disk_read_bytes_per_sec,
 		disk_write_bytes_per_sec,
 		disk_busy_pct,
-		uptime_seconds
+		uptime_seconds,
+		cpu_rates_valid
 	from host_samples
 	where observed_at >= $1
 	order by monitoring_instance_id, observed_at asc`
@@ -164,9 +168,9 @@ func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSp
 	for rows.Next() {
 		var monitoringInstanceID string
 		var observedAt time.Time
+		var cpuRatesValid sql.NullBool
 		// 19 numeric columns matching the SELECT order.
 		var vals [19]float64
-
 		if err := rows.Scan(
 			&monitoringInstanceID,
 			&observedAt,
@@ -189,9 +193,16 @@ func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSp
 			&vals[16], // disk_write_bytes_per_sec
 			&vals[17], // disk_busy_pct
 			&vals[18], // uptime_seconds
+			&cpuRatesValid,
 		); err != nil {
 			return nil, fmt.Errorf("scan host_sample row: %w", err)
 		}
+
+		var cpuRatesMarker *bool
+		if cpuRatesValid.Valid {
+			cpuRatesMarker = &cpuRatesValid.Bool
+		}
+		cpuUsable := agentapi.CPURatesUsable(cpuRatesMarker, vals[0], vals[13], vals[14])
 
 		// Determine bucket index.
 		bucketIdx := int(float64(observedAt.Sub(since)) / float64(windowDuration) * float64(downsample))
@@ -216,6 +227,9 @@ func (r *PostgresMonitoringInstanceSparklinesRepository) GetMonitoringInstanceSp
 		for i, m := range metrics {
 			idx := metricIndices[i]
 			if idx < 0 {
+				continue
+			}
+			if (m == "cpu_usage_pct" || m == "cpu_iowait_pct" || m == "cpu_steal_pct") && !cpuUsable {
 				continue
 			}
 			v := vals[idx]

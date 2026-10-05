@@ -102,6 +102,7 @@ type HostSamplePayload struct {
 	Fingerprint          string          `json:"fingerprint"`
 	SyncBatchID          string          `json:"sync_batch_id"`
 	CPUUsagePct          float64         `json:"cpu_usage_pct"`
+	CPURatesValid        *bool           `json:"cpu_rates_valid,omitempty"`
 	Load1                float64         `json:"load_1"`
 	Load5                float64         `json:"load_5"`
 	Load15               float64         `json:"load_15"`
@@ -124,6 +125,15 @@ type HostSamplePayload struct {
 	MaintenanceContext   bool            `json:"maintenance_context,omitempty"`
 	IsBackfilled         bool            `json:"is_backfilled,omitempty"`
 	Containers           []ContainerInfo `json:"containers,omitempty"`
+}
+
+// CPURatesUsable accepts legacy rates only when the entire CPU group is in range.
+// An explicit false marks missing observation, not an observed zero.
+func CPURatesUsable(valid *bool, usage, iowait, steal float64) bool {
+	return (valid == nil || *valid) &&
+		usage >= 0 && usage <= 100 &&
+		iowait >= 0 && iowait <= 100 &&
+		steal >= 0 && steal <= 100
 }
 
 type ProbeObservationPayload struct {

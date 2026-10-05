@@ -122,6 +122,16 @@ GET /api/evidence/{snapshot_id}
 
 ## 3. Contracts / Invariants
 
+### Monitoring host CPU 有效覆盖（calculation v2）
+
+- 仅 `monitoring.host/v1` 的新捕获采用 `monitoring-evidence/v2`；KindKey/read-model version 不变，host read model 增加 envelope 的 `calculation_version`。probe 继续 `monitoring-evidence/v1`、原 series gaps、payload、quality 和整日来源选择，不扩展 probe 合同。
+- raw CPU 三指标只从整组可用行取值和计数/时间/版本；daily CPU 使用 nullable CPU 有效计数（legacy 各自回退 host 计数），计数零、average/max 缺失或不在 `[0,100]` 不出该指标行。禁止零填充，所选指标全无可接受值时不创建假空快照。
+- host 来源选择按 `(series, UTC day, metric)`，仅 daily 的该指标计数大于剩余 raw 时替换该指标；小于 24h precision 不选 daily。内存触发 daily 不得删除仍合法的 raw CPU。每个 series/time 仍只有一个 bucket。
+- 每个 metric 保存 `sample_count`、`maintenance_count`、`backfilled_count`、`source_layer`、`source_granularity_seconds`；计数必须正，子计数不超过总数，来源只能 raw/daily_aggregate，granularity 是 `(0,ActualPrecision]` 的整数秒。peak 使用所属 metric 来源。
+- bucket 的共享三计数是 SampleCount 最大 metric 的整组三计数，平手取 name 字典序最小者；这是“覆盖参考样本”，不宣称异源样本的精确并集或 CPU 有效数。quality 累计参考数。bucket 来源相同则原来源，不同为 mixed，granularity 取指标最大值；新 capture 严格重算校验该关系。
+- host gap 包含 `metric`，按实际 series 与 selection.Metrics 检查整窗，包含从未出现的指标；按 series/metric/start 稳定排序。任何 metric gap 令 quality.partial=true，gap_count 计指标缺口，不能用正常内存掩盖 CPU 缺测。
+- v2 比较按 metric.sample_count 累计 count 和加权 average，不允许缺字段回退 bucket count；min/max 与 mean-bucket-p95 算法不变。v1-v2 比较经 `calculation_version_incompatible` 明确拒绝；旧 v1-v1 仍可比较、读取及导出，已存快照不重写，新增字段由 descriptor allowlist 支持导出。
+
 ### 3.1 Monitoring event producer 与读取
 
 - `payload.event_at` 是 occurrence time；`state_change_events.created_at` 是 recorded time。`recorded_at >= event_at`，两者都必须为 exact UTC、无 monotonic、PostgreSQL 微秒可表示时间。

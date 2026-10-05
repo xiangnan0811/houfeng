@@ -2,11 +2,13 @@ package runtimefacts
 
 import (
 	"context"
+	"math"
 	"sync"
 	"time"
 
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
+	"houfeng/internal/contracts/agentapi"
 )
 
 const hostSampleStreamBuffer = 16
@@ -127,13 +129,14 @@ func (h *StreamHub) publishHostSample(sample HostSample) {
 }
 
 func hostSampleFromWrite(sample observations.HostSampleWrite) HostSample {
-	return HostSample{
+	output := HostSample{
 		MonitoringInstanceID: sample.MonitoringInstanceID,
 		ObservedAt:           sample.ObservedAt,
 		ReceivedAt:           sample.ReceivedAt,
 		AgentVersion:         sample.AgentVersion,
 		Fingerprint:          sample.Fingerprint,
 		CPUUsagePct:          sample.CPUUsagePct,
+		CPURatesValid:        sample.CPURatesValid,
 		Load1:                sample.Load1,
 		Load5:                sample.Load5,
 		Load15:               sample.Load15,
@@ -157,5 +160,23 @@ func hostSampleFromWrite(sample observations.HostSampleWrite) HostSample {
 		IsBackfilled:         sample.IsBackfilled,
 		SyncBatchID:          sample.SyncBatchID,
 		Containers:           sample.Containers,
+	}
+	normalizeHostSampleForJSON(&output)
+	return output
+}
+
+func normalizeHostSampleForJSON(sample *HostSample) {
+	if agentapi.CPURatesUsable(sample.CPURatesValid, sample.CPUUsagePct, sample.CPUIOWaitPct, sample.CPUStealPct) {
+		return
+	}
+	sample.CPURatesValid = new(false)
+	if math.IsNaN(sample.CPUUsagePct) || math.IsInf(sample.CPUUsagePct, 0) {
+		sample.CPUUsagePct = 0
+	}
+	if math.IsNaN(sample.CPUIOWaitPct) || math.IsInf(sample.CPUIOWaitPct, 0) {
+		sample.CPUIOWaitPct = 0
+	}
+	if math.IsNaN(sample.CPUStealPct) || math.IsInf(sample.CPUStealPct, 0) {
+		sample.CPUStealPct = 0
 	}
 }

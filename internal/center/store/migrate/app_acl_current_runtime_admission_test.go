@@ -255,6 +255,123 @@ func TestAdmitAppACLCurrentRuntimeRejectsAllPredecessorsAndAcceptsRegisteredTarg
 		})
 	}
 }
+func TestAdmitAppACLCurrentRuntimeRejectsC68AndAdmitsC69WithoutWrites(t *testing.T) {
+	source, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transitions, err := compileAppACLCurrentTransitions(source, appACLCurrentTransitionDefinitions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _, catalogSnapshot := appACLCurrentRuntimeAdmissionFixture(t, migrations.FS, appACLCurrentMigrationFragments)
+	useProductionRuntimeIdentityForSuccessorTest(&base, &catalogSnapshot)
+	p68 := transitions[5]
+	currentPrivileges, err := appACLCurrentTransitionPrivilegeBody(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c68, err := NewAppACLManifestPersistedV1(
+		1,
+		appACLCurrentTransitionMigrator,
+		[32]byte{},
+		p68.predecessor.sources.canonicalSet,
+		p68.predecessorPrivilegeBody,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c69, err := NewAppACLManifestPersistedV1(
+		2,
+		appACLCurrentTransitionMigrator,
+		c68.ManifestDigest,
+		source.sources.canonicalSet,
+		currentPrivileges,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c68Applied, err := ParseCanonicalMigrationSetBodyV1(p68.predecessor.sources.canonicalSet)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("rejects C68 before any catalog read or write", func(t *testing.T) {
+		snapshot := base
+		snapshot.Manifests = []AppACLManifestPersistedV1{c68}
+		snapshot.Head = &AppACLManifestHeadV1{
+			ManifestRevision: c68.ManifestRevision,
+			ManifestDigest:   c68.ManifestDigest,
+		}
+		snapshot.AppliedMigrations = c68Applied
+		tx := &fakeAppACLRuntimeAdmissionTx{}
+		catalogReads := 0
+		err := admitAppACLCurrentRuntimeWithDependencies(
+			context.Background(),
+			migrations.FS,
+			appACLCurrentMigrationFragments,
+			appACLCurrentRuntimeAdmissionDependencies{
+				beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil },
+				readManifest: func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error) {
+					return snapshot, nil
+				},
+				readCatalog: func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+					catalogReads++
+					return catalogSnapshot, nil
+				},
+				verifyCatalog:         verifyAppACLEffectiveCatalogSnapshot,
+				transitionDefinitions: appACLCurrentTransitionDefinitions,
+			},
+		)
+		if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
+			t.Fatalf("C68 runtime admission error = %v, want rebuild-required", err)
+		}
+		if catalogReads != 0 || tx.commitCalls != 0 || tx.rollbackCalls != 1 {
+			t.Fatalf("C68 runtime admission lifecycle = catalog reads %d, commit %d, rollback %d; want 0/0/1", catalogReads, tx.commitCalls, tx.rollbackCalls)
+		}
+	})
+
+	t.Run("admits C69 with one read-only catalog verification", func(t *testing.T) {
+		snapshot := base
+		snapshot.Manifests = []AppACLManifestPersistedV1{c68, c69}
+		snapshot.Head = &AppACLManifestHeadV1{
+			ManifestRevision: c69.ManifestRevision,
+			ManifestDigest:   c69.ManifestDigest,
+		}
+		tx := &fakeAppACLRuntimeAdmissionTx{}
+		catalogReads := 0
+		var beginOptions pgx.TxOptions
+		err := admitAppACLCurrentRuntimeWithDependencies(
+			context.Background(),
+			migrations.FS,
+			appACLCurrentMigrationFragments,
+			appACLCurrentRuntimeAdmissionDependencies{
+				beginTx: func(_ context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+					beginOptions = options
+					return tx, nil
+				},
+				readManifest: func(context.Context, pgx.Tx) (AppACLManifestRuntimeSnapshotV1, error) {
+					return snapshot, nil
+				},
+				readCatalog: func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+					catalogReads++
+					return catalogSnapshot, nil
+				},
+				verifyCatalog:         verifyAppACLEffectiveCatalogSnapshot,
+				transitionDefinitions: appACLCurrentTransitionDefinitions,
+			},
+		)
+		if err != nil {
+			t.Fatalf("C69 runtime admission error = %v", err)
+		}
+		if catalogReads != 1 || tx.commitCalls != 1 || tx.rollbackCalls != 1 {
+			t.Fatalf("C69 runtime admission lifecycle = catalog reads %d, commit %d, rollback %d; want 1/1/1", catalogReads, tx.commitCalls, tx.rollbackCalls)
+		}
+		if beginOptions.IsoLevel != pgx.RepeatableRead || beginOptions.AccessMode != pgx.ReadOnly {
+			t.Fatalf("C69 runtime admission transaction options = %#v, want REPEATABLE READ READ ONLY", beginOptions)
+		}
+	})
+}
 
 func TestAdmitAppACLCurrentRuntimeUsesOneRepeatableReadOnlySnapshot(t *testing.T) {
 	futureFS, fragments := appACLCurrentRuntimeAdmissionExtendedSource(t)

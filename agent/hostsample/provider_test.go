@@ -53,6 +53,9 @@ func TestCollectReturnsCurrentMetricsAndFirstSampleZeroRates(t *testing.T) {
 	if sample.CPUUsagePct != 0 || sample.NetInBytesPerSec != 0 || sample.DiskReadBytesPerSec != 0 {
 		t.Fatalf("first sample should start with zero rate-based fields: %#v", sample)
 	}
+	if sample.CPURatesValid == nil || *sample.CPURatesValid {
+		t.Fatalf("first CPURatesValid = %v, want explicit false", sample.CPURatesValid)
+	}
 }
 
 func TestCollectComputesRateBasedFieldsFromPreviousSnapshot(t *testing.T) {
@@ -76,14 +79,17 @@ func TestCollectComputesRateBasedFieldsFromPreviousSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second Collect() error = %v", err)
 	}
-	if second.CPUUsagePct <= 0 {
-		t.Fatalf("CPUUsagePct = %v, want > 0", second.CPUUsagePct)
+	if second.CPUUsagePct != 65 {
+		t.Fatalf("CPUUsagePct = %v, want 65", second.CPUUsagePct)
 	}
-	if second.CPUIOWaitPct <= 0 {
-		t.Fatalf("CPUIOWaitPct = %v, want > 0", second.CPUIOWaitPct)
+	if second.CPUIOWaitPct != 5 {
+		t.Fatalf("CPUIOWaitPct = %v, want 5", second.CPUIOWaitPct)
 	}
-	if second.CPUStealPct <= 0 {
-		t.Fatalf("CPUStealPct = %v, want > 0", second.CPUStealPct)
+	if second.CPUStealPct != 5 {
+		t.Fatalf("CPUStealPct = %v, want 5", second.CPUStealPct)
+	}
+	if second.CPURatesValid == nil || !*second.CPURatesValid {
+		t.Fatalf("second CPURatesValid = %v, want true", second.CPURatesValid)
 	}
 	if second.NetInBytesPerSec != 200 {
 		t.Fatalf("NetInBytesPerSec = %d, want 200", second.NetInBytesPerSec)

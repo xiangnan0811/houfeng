@@ -524,6 +524,37 @@ func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
 	}
 }
 
+func TestAgentSyncHandlerNormalizesInvalidCPURatesMarkerWithoutRejectingBatch(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentSyncService{}
+	handler := handlers.AgentSync(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+		"session_id":"mas_001","monitoring_instance_id":"mi_001",
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","cpu_usage_pct":101,"cpu_rates_valid":true,"cpu_iowait_pct":2,"cpu_steal_pct":3}]
+	}`))
+	setSyncAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	samples := svc.syncBatch.Observations.HostSamples
+	if len(samples) != 1 {
+		t.Fatalf("len(host samples) = %d, want 1", len(samples))
+	}
+	if samples[0].CPURatesValid == nil || *samples[0].CPURatesValid {
+		t.Fatalf("CPURatesValid = %v, want explicit false", samples[0].CPURatesValid)
+	}
+	if samples[0].CPUUsagePct != 101 {
+		t.Fatalf("CPUUsagePct = %v, want original out-of-range value", samples[0].CPUUsagePct)
+	}
+}
+
 func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 	t.Parallel()
 

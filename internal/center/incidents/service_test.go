@@ -3,6 +3,7 @@ package incidents
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -339,6 +340,90 @@ func TestIncidentSnapshotSeriesSQLUsesReplaySafeLatestOrdering(t *testing.T) {
 	}
 	if !strings.Contains(incidentRecentProbeObservationsSQL, "order by po.observed_at desc, po.is_backfilled asc, po.received_at desc, po.id desc") {
 		t.Fatalf("incidentRecentProbeObservationsSQL = %q, want replay-safe probe series ordering", incidentRecentProbeObservationsSQL)
+	}
+}
+func TestPostgresSnapshotReaderCPURatesValidityAndDailyAggregateNullables(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	hostDB := fakeIncidentSnapshotDB{query: func(_ context.Context, sqlText string, _ ...any) (pgx.Rows, error) {
+		if !strings.Contains(strings.ToLower(sqlText), "cpu_rates_valid") {
+			t.Fatalf("host sample SQL = %q, want cpu_rates_valid marker", sqlText)
+		}
+		return &fakeIncidentSnapshotRows{scans: []func(...any) error{func(dest ...any) error {
+			*(dest[0].(*string)) = "mi_cpu"
+			*(dest[1].(*time.Time)) = now
+			*(dest[5].(*float64)) = 20
+			marker := dest[6].(*sql.NullBool)
+			marker.Valid = true
+			marker.Bool = false
+			return nil
+		}}}, nil
+	}}
+	hostSamples, err := (&PostgresSnapshotReader{db: hostDB}).ListRecentHostSamples(context.Background(), "mi_cpu", now.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ListRecentHostSamples() error = %v", err)
+	}
+	if len(hostSamples) != 1 || hostSamples[0].CPURatesValid == nil || *hostSamples[0].CPURatesValid {
+		t.Fatalf("host samples = %#v, want explicit false CPU marker", hostSamples)
+	}
+
+	dailyDB := fakeIncidentSnapshotDB{query: func(_ context.Context, sqlText string, _ ...any) (pgx.Rows, error) {
+		normalized := strings.ToLower(strings.Join(strings.Fields(sqlText), " "))
+		for _, fragment := range []string{"cpu_valid_sample_count", "cpu_valid_backfilled_sample_count", "cpu_valid_maintenance_sample_count"} {
+			if !strings.Contains(normalized, fragment) {
+				t.Fatalf("daily aggregate SQL = %q, want %q", normalized, fragment)
+			}
+		}
+		return &fakeIncidentSnapshotRows{scans: []func(...any) error{
+			func(dest ...any) error {
+				*(dest[0].(*time.Time)) = now.AddDate(0, 0, -1)
+				*(dest[1].(*int)) = 15
+				*(dest[2].(*float64)) = 0.8
+				iowait := dest[3].(*sql.NullFloat64)
+				iowait.Valid = true
+				iowait.Float64 = 4
+				steal := dest[4].(*sql.NullFloat64)
+				steal.Valid = true
+				steal.Float64 = 0.5
+				*(dest[5].(*int)) = 10
+				*(dest[6].(*int)) = 0
+				cpuValid := dest[7].(*sql.NullInt64)
+				cpuValid.Valid = true
+				cpuValid.Int64 = 5
+				cpuBackfilled := dest[8].(*sql.NullInt64)
+				cpuBackfilled.Valid = true
+				cpuBackfilled.Int64 = 0
+				cpuMaintenance := dest[9].(*sql.NullInt64)
+				cpuMaintenance.Valid = true
+				cpuMaintenance.Int64 = 0
+				return nil
+			},
+			func(dest ...any) error {
+				*(dest[0].(*time.Time)) = now.AddDate(0, 0, -2)
+				*(dest[1].(*int)) = 10
+				*(dest[2].(*float64)) = 0.4
+				*(dest[5].(*int)) = 2
+				*(dest[6].(*int)) = 3
+				return nil
+			},
+		}}, nil
+	}}
+	daily, err := (&PostgresSnapshotReader{db: dailyDB}).ListMonitoringInstanceHostDailyAggregates(context.Background(), "mi_cpu", now.AddDate(0, 0, -7), now)
+	if err != nil {
+		t.Fatalf("ListMonitoringInstanceHostDailyAggregates() error = %v", err)
+	}
+	if len(daily) != 2 {
+		t.Fatalf("daily aggregates = %#v, want two rows", daily)
+	}
+	if daily[0].AvgCPUIOWaitPct == nil || *daily[0].AvgCPUIOWaitPct != 4 || daily[0].AvgCPUStealPct == nil || *daily[0].AvgCPUStealPct != 0.5 {
+		t.Fatalf("daily[0] CPU averages = %#v, want nullable values", daily[0])
+	}
+	if daily[0].CPUValidSampleCount == nil || *daily[0].CPUValidSampleCount != 5 {
+		t.Fatalf("daily[0] CPU valid count = %#v, want 5", daily[0].CPUValidSampleCount)
+	}
+	if daily[1].AvgCPUIOWaitPct != nil || daily[1].AvgCPUStealPct != nil || daily[1].CPUValidSampleCount != nil {
+		t.Fatalf("daily[1] = %#v, want legacy NULL CPU fields preserved", daily[1])
 	}
 }
 
@@ -3081,11 +3166,11 @@ func TestMonitoringInstanceResourceSamplesFromHostSamplesPreservesReplayOrdering
 	receivedAt := observedAt.Add(3 * time.Minute)
 
 	got := monitoringInstanceResourceSamplesFromHostSamples([]runtimefacts.HostSample{{
-		ObservedAt: observedAt, ReceivedAt: receivedAt, IsBackfilled: true,
+		ObservedAt: observedAt, ReceivedAt: receivedAt, IsBackfilled: true, CPURatesValid: new(false),
 	}})
 
-	if len(got) != 1 || !got[0].ReceivedAt.Equal(receivedAt) || !got[0].IsBackfilled {
-		t.Fatalf("resource samples = %#v, want received/backfill provenance preserved", got)
+	if len(got) != 1 || !got[0].ReceivedAt.Equal(receivedAt) || !got[0].IsBackfilled || got[0].CPURatesValid == nil || *got[0].CPURatesValid {
+		t.Fatalf("resource samples = %#v, want received/backfill provenance and CPU marker preserved", got)
 	}
 }
 
@@ -3180,8 +3265,8 @@ func TestServiceAfterSuccessfulSyncDispatchesMonitoringInstanceTrendDegradation(
 				BucketDate:      now.AddDate(0, 0, -1),
 				SampleCount:     288,
 				AvgLoad5:        0.7,
-				AvgCPUIOWaitPct: 2,
-				AvgCPUStealPct:  0.2,
+				AvgCPUIOWaitPct: new(float64(2)),
+				AvgCPUStealPct:  new(0.2),
 			}},
 		},
 	}

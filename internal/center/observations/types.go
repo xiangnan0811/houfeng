@@ -13,6 +13,7 @@ type HostSampleWrite struct {
 	AgentVersion         string
 	Fingerprint          string
 	CPUUsagePct          float64
+	CPURatesValid        *bool
 	Load1                float64
 	Load5                float64
 	Load15               float64

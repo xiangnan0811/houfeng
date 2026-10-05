@@ -562,6 +562,7 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 			AgentVersion:         sample.AgentVersion,
 			Fingerprint:          sample.Fingerprint,
 			CPUUsagePct:          sample.CPUUsagePct,
+			CPURatesValid:        normalizedCPURatesValid(sample.CPURatesValid, sample.CPUUsagePct, sample.CPUIOWaitPct, sample.CPUStealPct),
 			Load1:                sample.Load1,
 			Load5:                sample.Load5,
 			Load15:               sample.Load15,
@@ -610,6 +611,13 @@ func observationBatchFromSyncRequest(req agentapi.SyncRequest) (observations.Bat
 	}
 
 	return batch, true
+}
+
+func normalizedCPURatesValid(valid *bool, usage, iowait, steal float64) *bool {
+	if agentapi.CPURatesUsable(valid, usage, iowait, steal) {
+		return valid
+	}
+	return new(false)
 }
 
 func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {

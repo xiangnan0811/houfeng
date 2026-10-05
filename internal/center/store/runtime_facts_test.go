@@ -607,6 +607,7 @@ type fakeHostSampleValues struct {
 	AgentVersion         string
 	Fingerprint          string
 	CPUUsagePct          float64
+	CPURatesValid        *bool
 	Load1                float64
 	Load5                float64
 	Load15               float64
@@ -648,33 +649,38 @@ func scanFakeRuntimeFactsHostSample(dest []any, values fakeHostSampleValues) err
 	*(dest[3].(*string)) = values.AgentVersion
 	*(dest[4].(*string)) = values.Fingerprint
 	*(dest[5].(*float64)) = values.CPUUsagePct
-	*(dest[6].(*float64)) = values.Load1
-	*(dest[7].(*float64)) = values.Load5
-	*(dest[8].(*float64)) = values.Load15
-	*(dest[9].(*float64)) = values.MemUsedPct
-	*(dest[10].(*int64)) = values.MemAvailableBytes
-	*(dest[11].(*int64)) = values.MemTotalBytes
-	*(dest[12].(*float64)) = values.SwapUsedPct
-	*(dest[13].(*float64)) = values.DiskUsedPct
-	*(dest[14].(*int64)) = values.DiskTotalBytes
-	*(dest[15].(*float64)) = values.InodeUsedPct
-	*(dest[16].(*int64)) = values.NetInBytesPerSec
-	*(dest[17].(*int64)) = values.NetOutBytesPerSec
-	marker := dest[18].(*stdsql.NullBool)
-	if values.NetworkRatesValid != nil {
+	marker := dest[6].(*stdsql.NullBool)
+	if values.CPURatesValid != nil {
 		marker.Valid = true
-		marker.Bool = *values.NetworkRatesValid
+		marker.Bool = *values.CPURatesValid
 	}
-	*(dest[19].(*float64)) = values.CPUIOWaitPct
-	*(dest[20].(*float64)) = values.CPUStealPct
-	*(dest[21].(*int64)) = values.DiskReadBytesPerSec
-	*(dest[22].(*int64)) = values.DiskWriteBytesPerSec
-	*(dest[23].(*float64)) = values.DiskBusyPct
-	*(dest[24].(*int64)) = values.UptimeSeconds
-	*(dest[25].(*bool)) = false
+	*(dest[7].(*float64)) = values.Load1
+	*(dest[8].(*float64)) = values.Load5
+	*(dest[9].(*float64)) = values.Load15
+	*(dest[10].(*float64)) = values.MemUsedPct
+	*(dest[11].(*int64)) = values.MemAvailableBytes
+	*(dest[12].(*int64)) = values.MemTotalBytes
+	*(dest[13].(*float64)) = values.SwapUsedPct
+	*(dest[14].(*float64)) = values.DiskUsedPct
+	*(dest[15].(*int64)) = values.DiskTotalBytes
+	*(dest[16].(*float64)) = values.InodeUsedPct
+	*(dest[17].(*int64)) = values.NetInBytesPerSec
+	*(dest[18].(*int64)) = values.NetOutBytesPerSec
+	networkMarker := dest[19].(*stdsql.NullBool)
+	if values.NetworkRatesValid != nil {
+		networkMarker.Valid = true
+		networkMarker.Bool = *values.NetworkRatesValid
+	}
+	*(dest[20].(*float64)) = values.CPUIOWaitPct
+	*(dest[21].(*float64)) = values.CPUStealPct
+	*(dest[22].(*int64)) = values.DiskReadBytesPerSec
+	*(dest[23].(*int64)) = values.DiskWriteBytesPerSec
+	*(dest[24].(*float64)) = values.DiskBusyPct
+	*(dest[25].(*int64)) = values.UptimeSeconds
 	*(dest[26].(*bool)) = false
-	*(dest[27].(*string)) = values.SyncBatchID
-	*(dest[28].(*[]byte)) = []byte("[]")
+	*(dest[27].(*bool)) = false
+	*(dest[28].(*string)) = values.SyncBatchID
+	*(dest[29].(*[]byte)) = []byte("[]")
 	return nil
 }
 

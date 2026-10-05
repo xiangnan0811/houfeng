@@ -151,7 +151,7 @@ func TestMonitoringMetricDeltasPreserveExtremaWithoutAverage(t *testing.T) {
 	right := map[string]any{"buckets": []any{map[string]any{"metrics": []any{map[string]any{
 		"name": "http_status", "min": float64(500), "max": float64(503),
 	}}}}}
-	deltas := monitoringMetricDeltas(left, right)
+	deltas := monitoringMetricDeltas(left, right, false)
 	if len(deltas) != 1 {
 		t.Fatalf("metric deltas = %#v, want one HTTP status metric", deltas)
 	}
@@ -177,7 +177,7 @@ func TestMonitoringMetricDeltasKeepSeriesSeparateAndWeightBucketAverages(t *test
 		map[string]any{"series_id": "probe-a", "sample_count": float64(3), "metrics": []any{map[string]any{"name": "latency_ms", "average": float64(30)}}},
 		map[string]any{"series_id": "probe-b", "sample_count": float64(1), "metrics": []any{map[string]any{"name": "latency_ms", "average": float64(110)}}},
 	}}
-	deltas := monitoringMetricDeltas(left, right)
+	deltas := monitoringMetricDeltas(left, right, false)
 	if len(deltas) != 2 {
 		t.Fatalf("metric deltas = %#v, want one row per probe series", deltas)
 	}
@@ -276,4 +276,90 @@ func rebuildReadModelSnapshot(
 		t.Fatalf("NewCanonicalSnapshot() error = %v", err)
 	}
 	return rebuilt
+}
+
+func TestHostV2ComparisonUsesMetricCounts(t *testing.T) {
+	payload := map[string]any{"buckets": []any{
+		map[string]any{"sample_count": float64(100), "metrics": []any{map[string]any{"name": "cpu_usage_pct", "sample_count": float64(1), "average": float64(20)}}},
+		map[string]any{"sample_count": float64(10), "metrics": []any{map[string]any{"name": "cpu_usage_pct", "sample_count": float64(9), "average": float64(40)}}},
+	}}
+	deltas := monitoringMetricDeltas(payload, payload, true)
+	if len(deltas) != 1 {
+		t.Fatalf("deltas = %#v", deltas)
+	}
+	metric := deltas[0].(map[string]any)
+	if metric["left_count"] != int64(10) || metric["left_average"] != float64(38) {
+		t.Fatalf("CPU weighting used reference counts: %#v", metric)
+	}
+	missing := map[string]any{"buckets": []any{map[string]any{"sample_count": float64(100), "metrics": []any{map[string]any{"name": "cpu_usage_pct", "average": float64(20)}}}}}
+	if monitoringMetricDeltas(missing, payload, true) != nil {
+		t.Fatal("v2 missing metric count silently fell back to bucket count")
+	}
+}
+
+func TestMonitoringHostReadModelsRetainLegacyV1AndRejectInvalidV2Comparison(t *testing.T) {
+	t.Parallel()
+
+	start := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	adapter, current := captureMonitoringReadModelFixture(t, start, time.Hour, 20)
+
+	legacyPayload := decodeAdapterCanonicalPayload(t, current.Bytes())
+	for _, rawBucket := range legacyPayload["buckets"].([]any) {
+		bucket := rawBucket.(map[string]any)
+		for _, rawMetric := range bucket["metrics"].([]any) {
+			metric := rawMetric.(map[string]any)
+			delete(metric, "sample_count")
+			delete(metric, "maintenance_count")
+			delete(metric, "backfilled_count")
+			delete(metric, "source_layer")
+			delete(metric, "source_granularity_seconds")
+		}
+	}
+	for _, rawGap := range legacyPayload["gaps"].([]any) {
+		delete(rawGap.(map[string]any), "metric")
+	}
+	legacyEnvelope := current.Envelope()
+	legacyEnvelope.CalculationVersion = probeMonitoringCalculationVersion
+	legacyEnvelope.Redaction = nil
+	legacyEnvelope.CanonicalHash = [32]byte{}
+	legacyEnvelope.CanonicalSize = 0
+	legacy, _, err := evidence.NewCanonicalSnapshot(adapter.Descriptor(), legacyEnvelope, legacyPayload, evidence.RedactionNormalOnly)
+	if err != nil {
+		t.Fatalf("NewCanonicalSnapshot(legacy v1) error = %v", err)
+	}
+	summary := adapter.Summarize(legacy)
+	if summary.ReadModel["calculation_version"] != probeMonitoringCalculationVersion ||
+		summary.ReadModel["version"] != monitoringHostReadModelVersion {
+		t.Fatalf("legacy summary = %#v, want readable v1 host snapshot", summary.ReadModel)
+	}
+	exported := adapter.Export(legacy, evidence.ExportModeSafe)
+	if len(exported.Bytes) == 0 {
+		t.Fatal("legacy v1 export is empty")
+	}
+	legacyComparison := adapter.Compare(legacy, legacy, evidence.Alignment{Mode: evidence.AlignmentExact})
+	if !legacyComparison.Compatible || legacyComparison.Reason != "compatible_monitoring_host_v1" {
+		t.Fatalf("legacy self-comparison = %#v, want compatible v1 semantics", legacyComparison)
+	}
+	crossVersion := adapter.Compare(legacy, current, evidence.Alignment{Mode: evidence.AlignmentExact})
+	if crossVersion.Compatible || crossVersion.Reason != "calculation_version_incompatible" {
+		t.Fatalf("legacy/v2 comparison = %#v, want calculation_version_incompatible", crossVersion)
+	}
+
+	missingV2Payload := decodeAdapterCanonicalPayload(t, current.Bytes())
+	missingBucket := missingV2Payload["buckets"].([]any)[0].(map[string]any)
+	missingMetric := missingBucket["metrics"].([]any)[0].(map[string]any)
+	delete(missingMetric, "sample_count")
+	missingV2Envelope := current.Envelope()
+	missingV2Envelope.Redaction = nil
+	missingV2Envelope.CanonicalHash = [32]byte{}
+	missingV2Envelope.CanonicalSize = 0
+	missingV2, _, err := evidence.NewCanonicalSnapshot(adapter.Descriptor(), missingV2Envelope, missingV2Payload, evidence.RedactionNormalOnly)
+	if err != nil {
+		t.Fatalf("NewCanonicalSnapshot(missing v2 metadata) error = %v", err)
+	}
+	missingComparison := adapter.Compare(current, missingV2, evidence.Alignment{Mode: evidence.AlignmentExact})
+	if missingComparison.Compatible || missingComparison.Reason != "invalid_payload" {
+		t.Fatalf("missing v2 metadata comparison = %#v, want invalid_payload", missingComparison)
+	}
+
 }

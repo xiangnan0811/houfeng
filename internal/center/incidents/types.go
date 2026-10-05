@@ -188,6 +188,7 @@ type MonitoringInstanceResourceSample struct {
 	ObservedAt         time.Time
 	ReceivedAt         time.Time
 	CPUUsagePct        float64
+	CPURatesValid      *bool
 	NormalizedLoad5    float64
 	MemUsedPct         float64
 	MemAvailableBytes  int64
@@ -226,13 +227,16 @@ type EvaluationResult struct {
 }
 
 type MonitoringInstanceHostDailyAggregate struct {
-	BucketDate             time.Time
-	SampleCount            int
-	AvgLoad5               float64
-	AvgCPUIOWaitPct        float64
-	AvgCPUStealPct         float64
-	BackfilledSampleCount  int
-	MaintenanceSampleCount int
+	BucketDate                     time.Time
+	SampleCount                    int
+	AvgLoad5                       float64
+	AvgCPUIOWaitPct                *float64
+	AvgCPUStealPct                 *float64
+	BackfilledSampleCount          int
+	MaintenanceSampleCount         int
+	CPUValidSampleCount            *int
+	CPUValidBackfilledSampleCount  *int
+	CPUValidMaintenanceSampleCount *int
 }
 
 type TargetProbeDailyAggregate struct {

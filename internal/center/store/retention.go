@@ -98,6 +98,7 @@ func startOfUTCDay(t time.Time) time.Time {
 const upsertMonitoringInstanceHostDailyAggregatesSQL = `
 	insert into monitoring_instance_host_sample_daily_aggregates (
 		monitoring_instance_id, bucket_date, sample_count,
+		cpu_valid_sample_count, cpu_valid_backfilled_sample_count, cpu_valid_maintenance_sample_count,
 		avg_cpu_usage_pct, max_cpu_usage_pct,
 		avg_load_5, max_load_5,
 		avg_mem_used_pct, max_mem_used_pct,
@@ -110,11 +111,64 @@ const upsertMonitoringInstanceHostDailyAggregatesSQL = `
 		monitoring_instance_id,
 		(observed_at at time zone 'UTC')::date as bucket_date,
 		count(*)::integer,
-		avg(cpu_usage_pct), max(cpu_usage_pct),
+		count(*) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+		)::integer,
+		count(*) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+				and is_backfilled
+		)::integer,
+		count(*) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+				and maintenance_context
+		)::integer,
+		avg(cpu_usage_pct) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+		),
+		max(cpu_usage_pct) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+		),
 		avg(load_5), max(load_5),
 		avg(mem_used_pct), max(mem_used_pct),
-		avg(cpu_iowait_pct), max(cpu_iowait_pct),
-		avg(cpu_steal_pct), max(cpu_steal_pct),
+		avg(cpu_iowait_pct) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+		),
+		max(cpu_iowait_pct) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+		),
+		avg(cpu_steal_pct) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+		),
+		max(cpu_steal_pct) filter (
+			where cpu_rates_valid is not false
+				and cpu_usage_pct between 0 and 100
+				and cpu_iowait_pct between 0 and 100
+				and cpu_steal_pct between 0 and 100
+		),
 		avg(disk_busy_pct), max(disk_busy_pct),
 		count(*) filter (where is_backfilled)::integer,
 		count(*) filter (where maintenance_context)::integer,
@@ -125,6 +179,9 @@ const upsertMonitoringInstanceHostDailyAggregatesSQL = `
 	group by monitoring_instance_id, (observed_at at time zone 'UTC')::date
 	on conflict (monitoring_instance_id, bucket_date) do update set
 		sample_count = excluded.sample_count,
+		cpu_valid_sample_count = excluded.cpu_valid_sample_count,
+		cpu_valid_backfilled_sample_count = excluded.cpu_valid_backfilled_sample_count,
+		cpu_valid_maintenance_sample_count = excluded.cpu_valid_maintenance_sample_count,
 		avg_cpu_usage_pct = excluded.avg_cpu_usage_pct,
 		max_cpu_usage_pct = excluded.max_cpu_usage_pct,
 		avg_load_5 = excluded.avg_load_5,

@@ -209,8 +209,9 @@ func TestFileStoreReadsLegacyNodeIDBufferedRequests(t *testing.T) {
 			"request":{
 				"node_id":"node-legacy-001",
 				"sync_token":"sync-token-legacy",
-				"heartbeats":[{"observed_at":"2026-04-28T08:00:00Z","agent_version":"v0.24.1","fingerprint":"fp-001","sync_batch_id":"sync_legacy"}]
-			}
+				"heartbeats":[{"observed_at":"2026-04-28T08:00:00Z","agent_version":"v0.24.1","fingerprint":"fp-001","sync_batch_id":"sync_legacy"}],
+				"host_samples":[{"observed_at":"2026-04-28T08:00:00Z","cpu_usage_pct":0}]
+		}
 		}
 	]`
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
@@ -232,6 +233,45 @@ func TestFileStoreReadsLegacyNodeIDBufferedRequests(t *testing.T) {
 	}
 	if entries[0].Attempts != 1 {
 		t.Fatalf("Attempts = %d, want 1", entries[0].Attempts)
+	}
+	if len(entries[0].Request.HostSamples) != 1 || entries[0].Request.HostSamples[0].CPURatesValid != nil {
+		t.Fatalf("legacy host sample CPURatesValid = %#v, want nil", entries[0].Request.HostSamples[0].CPURatesValid)
+	}
+	legacyBackfilled := syncqueue.WithBackfilledFacts(entries[0].Request, true)
+	if legacyBackfilled.HostSamples[0].CPURatesValid != nil {
+		t.Fatalf("legacy backfilled CPURatesValid = %#v, want nil", legacyBackfilled.HostSamples[0].CPURatesValid)
+	}
+}
+
+func TestFileStorePersistsExplicitFalseCPURatesValidityForReplay(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "sync-buffer.json")
+	falseValue := false
+	request := syncRequest("sync_cpu_false", false)
+	request.HostSamples[0].CPURatesValid = &falseValue
+	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
+
+	if _, err := store.Enqueue(context.Background(), request); err != nil {
+		t.Fatalf("Enqueue() error = %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(raw), `"cpu_rates_valid":false`) {
+		t.Fatalf("persisted queue omitted explicit false CPU marker: %s", raw)
+	}
+
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(entries) != 1 || entries[0].Request.HostSamples[0].CPURatesValid == nil || *entries[0].Request.HostSamples[0].CPURatesValid {
+		t.Fatalf("replayed CPURatesValid = %#v, want explicit false", entries[0].Request.HostSamples[0].CPURatesValid)
+	}
+	backfilled := syncqueue.WithBackfilledFacts(entries[0].Request, true)
+	if backfilled.HostSamples[0].CPURatesValid == nil || *backfilled.HostSamples[0].CPURatesValid {
+		t.Fatalf("backfilled CPURatesValid = %#v, want explicit false", backfilled.HostSamples[0].CPURatesValid)
 	}
 }
 

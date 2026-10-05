@@ -2,6 +2,7 @@ package incidents
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -127,12 +128,15 @@ func EvaluateMonitoringInstanceResourcePressure(previous *IncidentRecord, monito
 	window15 := nodeResourceSamplesWithin(activeSamples, referenceTime, 15*time.Minute)
 	window30 := nodeResourceSamplesWithin(activeSamples, referenceTime, 30*time.Minute)
 	severity, summary, active := resourcePressureSeverity(window15, window30, thresholds)
+	recoveryWindow := 15 * time.Minute
+	recoveryCPUSamples := window15
+	if previous != nil && previous.Severity == SeverityCritical {
+		recoveryWindow = 30 * time.Minute
+		recoveryCPUSamples = window30
+	}
 	if !active {
-		recoveryWindow := 15 * time.Minute
-		if previous != nil && previous.Severity == SeverityCritical {
-			recoveryWindow = 30 * time.Minute
-		}
-		if previous != nil && !spansMonitoringInstanceResourceWindow(nodeResourceSamplesWithin(samples, referenceTime, recoveryWindow), recoveryWindow) {
+		recoverySamples := nodeResourceSamplesWithin(samples, referenceTime, recoveryWindow)
+		if previous != nil && (!spansMonitoringInstanceResourceWindow(recoverySamples, recoveryWindow) || !cpuWindowUsable(recoverySamples, recoveryWindow)) {
 			return noop(previous)
 		}
 		result := recoverIfNeeded(previous, referenceTime, "资源压力恢复到安全区间", MonitoringEventProvenanceAgentSync, samples[0].IsBackfilled)
@@ -140,6 +144,9 @@ func EvaluateMonitoringInstanceResourcePressure(previous *IncidentRecord, monito
 			return suppressNotification(result)
 		}
 		return result
+	}
+	if previous != nil && !cpuWindowUsable(recoveryCPUSamples, recoveryWindow) && severityRank(severity) <= severityRank(previous.Severity) {
+		return noop(previous)
 	}
 	if suppressed {
 		return skip(previous)
@@ -153,7 +160,6 @@ func EvaluateTargetProbeFailure(previous *IncidentRecord, targetID string, recen
 		return noop(previous)
 	}
 	suppressed := recent[0].MaintenanceContext || recent[0].IsBackfilled
-
 	failureWindow := leadingUnsuppressedFailureObservations(recent)
 	failureCount := len(failureWindow)
 	successCount := consecutiveResults(recent, agentapi.ProbeResultSuccess)
@@ -211,8 +217,7 @@ func EvaluateMonitoringInstanceTrendDegradation(previous *IncidentRecord, monito
 		return skip(previous)
 	}
 	usableCurrent := unsuppressedMonitoringInstanceResourceSamples(samples)
-	usableBaselines := usableMonitoringInstanceHostDailyAggregates(baselines)
-	if len(usableCurrent) < 3 || len(usableBaselines) == 0 || !spansMonitoringInstanceResourceWindow(usableCurrent, time.Second) {
+	if len(usableCurrent) < 3 || !spansMonitoringInstanceResourceWindow(usableCurrent, time.Second) {
 		if previous != nil {
 			return noop(previous)
 		}
@@ -220,23 +225,31 @@ func EvaluateMonitoringInstanceTrendDegradation(previous *IncidentRecord, monito
 	}
 
 	referenceTime := usableCurrent[0].ObservedAt
-	loadBaseline, iowaitBaseline, stealBaseline := weightedMonitoringInstanceTrendBaselines(usableBaselines)
+	loadBaseline, iowaitBaseline, stealBaseline := weightedMonitoringInstanceTrendBaselines(baselines)
 	loadCurrent := averageMonitoringInstanceResourceMetric(usableCurrent, func(sample MonitoringInstanceResourceSample) float64 { return sample.NormalizedLoad5 })
-	iowaitCurrent := averageMonitoringInstanceResourceMetric(usableCurrent, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUIOWaitPct })
-	stealCurrent := averageMonitoringInstanceResourceMetric(usableCurrent, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUStealPct })
+	cpuCurrentUsable := cpuWindowUsable(usableCurrent, time.Second)
 
 	degradedMetrics := make([]string, 0, 3)
-	if nodeTrendMetricDegraded(loadCurrent, loadBaseline, 1.6, 0.6) {
+	if loadBaseline != nil && nodeTrendMetricDegraded(loadCurrent, *loadBaseline, 1.6, 0.6) {
 		degradedMetrics = append(degradedMetrics, "load5")
 	}
-	if nodeTrendMetricDegraded(iowaitCurrent, iowaitBaseline, 8, 4) {
-		degradedMetrics = append(degradedMetrics, "iowait")
+	if cpuCurrentUsable && iowaitBaseline != nil {
+		iowaitCurrent := averageMonitoringInstanceResourceMetric(usableCurrent, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUIOWaitPct })
+		if nodeTrendMetricDegraded(iowaitCurrent, *iowaitBaseline, 8, 4) {
+			degradedMetrics = append(degradedMetrics, "iowait")
+		}
 	}
-	if nodeTrendMetricDegraded(stealCurrent, stealBaseline, 3, 2) {
-		degradedMetrics = append(degradedMetrics, "steal")
+	if cpuCurrentUsable && stealBaseline != nil {
+		stealCurrent := averageMonitoringInstanceResourceMetric(usableCurrent, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUStealPct })
+		if nodeTrendMetricDegraded(stealCurrent, *stealBaseline, 3, 2) {
+			degradedMetrics = append(degradedMetrics, "steal")
+		}
 	}
 	if len(degradedMetrics) == 0 {
-		if previous != nil && !spansMonitoringInstanceResourceWindow(usableCurrent, 30*time.Minute) {
+		if previous == nil {
+			return EvaluationResult{Transition: TransitionNoop}
+		}
+		if !spansMonitoringInstanceResourceWindow(usableCurrent, 30*time.Minute) || !cpuCurrentUsable || loadBaseline == nil || iowaitBaseline == nil || stealBaseline == nil {
 			return noop(previous)
 		}
 		return recoverIfNeeded(previous, referenceTime, "监控实例趋势已恢复到安全区间", MonitoringEventProvenanceAgentSync, false)
@@ -245,6 +258,9 @@ func EvaluateMonitoringInstanceTrendDegradation(previous *IncidentRecord, monito
 	severity := SeverityNotice
 	if len(degradedMetrics) >= 2 {
 		severity = SeverityAlert
+	}
+	if previous != nil && (!cpuCurrentUsable || loadBaseline == nil || iowaitBaseline == nil || stealBaseline == nil) && severityRank(severity) <= severityRank(previous.Severity) {
+		return noop(previous)
 	}
 	return evaluateTransition(previous, ObjectTypeMonitoringInstance, monitoringInstanceID, IncidentMonitoringInstanceTrendDegradation, severity, referenceTime, fmt.Sprintf("监控实例趋势劣化：%s", joinMetricLabels(degradedMetrics)), MonitoringEventProvenanceAgentSync)
 }
@@ -502,6 +518,8 @@ func resourcePressureSeverity(window15, window30 []MonitoringInstanceResourceSam
 	}
 	has15m := spansMonitoringInstanceResourceWindow(window15, 15*time.Minute)
 	has30m := spansMonitoringInstanceResourceWindow(window30, 30*time.Minute)
+	cpu15Usable := cpuWindowUsable(window15, 15*time.Minute)
+	cpu30Usable := cpuWindowUsable(window30, 30*time.Minute)
 
 	avg15CPU := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.CPUUsagePct })
 	avg15Load := averageMonitoringInstanceResourceMetric(window15, func(sample MonitoringInstanceResourceSample) float64 { return sample.NormalizedLoad5 })
@@ -517,37 +535,37 @@ func resourcePressureSeverity(window15, window30 []MonitoringInstanceResourceSam
 	min30MemAvailable := minimumMonitoringInstanceResourceMetric(window30, func(sample MonitoringInstanceResourceSample) float64 { return float64(sample.MemAvailableBytes) })
 
 	switch {
-	case has30m && avg30CPU >= float64(thresholds.CPUCriticalPct):
+	case cpu30Usable && has30m && avg30CPU >= float64(thresholds.CPUCriticalPct):
 		return SeverityCritical, fmt.Sprintf("CPU 连续 30m 平均 %.1f%%", avg30CPU), true
 	case has30m && avg30Load >= thresholds.Load5Critical:
 		return SeverityCritical, fmt.Sprintf("归一化 Load5 连续 30m 平均 %.1f", avg30Load), true
 	case has30m && avg30Mem >= float64(thresholds.MemCriticalPct) && min30MemAvailable <= 512*1024*1024:
 		return SeverityCritical, fmt.Sprintf("内存连续 30m 平均 %.1f%%，可用内存持续偏低", avg30Mem), true
-	case has15m && avg15CPU >= float64(thresholds.CPUAlertPct):
+	case cpu15Usable && has15m && avg15CPU >= float64(thresholds.CPUAlertPct):
 		return SeverityAlert, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", avg15CPU), true
 	case has15m && avg15Load >= thresholds.Load5Alert:
 		return SeverityAlert, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", avg15Load), true
 	case has15m && avg15Mem >= float64(thresholds.MemAlertPct):
 		return SeverityAlert, fmt.Sprintf("内存连续 15m 平均 %.1f%%", avg15Mem), true
-	case has30m && avg30Iowait >= float64(thresholds.IOWaitCriticalPct):
+	case cpu30Usable && has30m && avg30Iowait >= float64(thresholds.IOWaitCriticalPct):
 		return SeverityCritical, fmt.Sprintf("iowait 连续 30m 平均 %.1f%%", avg30Iowait), true
-	case has15m && avg15Iowait >= float64(thresholds.IOWaitAlertPct):
+	case cpu15Usable && has15m && avg15Iowait >= float64(thresholds.IOWaitAlertPct):
 		return SeverityAlert, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", avg15Iowait), true
-	case has30m && avg30Steal >= 10:
+	case cpu30Usable && has30m && avg30Steal >= 10:
 		return SeverityAlert, fmt.Sprintf("steal 连续 30m 平均 %.1f%%", avg30Steal), true
-	case has15m && avg15CPU >= float64(thresholds.CPUWarningPct):
+	case cpu15Usable && has15m && avg15CPU >= float64(thresholds.CPUWarningPct):
 		return SeverityNotice, fmt.Sprintf("CPU 连续 15m 平均 %.1f%%", avg15CPU), true
 	case has15m && avg15Load >= thresholds.Load5Warning:
 		return SeverityNotice, fmt.Sprintf("归一化 Load5 连续 15m 平均 %.1f", avg15Load), true
 	case has15m && avg15Mem >= float64(thresholds.MemWarningPct):
 		return SeverityNotice, fmt.Sprintf("内存连续 15m 平均 %.1f%%", avg15Mem), true
-	case has15m && avg15Iowait >= float64(thresholds.IOWaitWarningPct):
+	case cpu15Usable && has15m && avg15Iowait >= float64(thresholds.IOWaitWarningPct):
 		return SeverityNotice, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", avg15Iowait), true
 	case has15m && avg15Swap > 10:
 		return SeverityNotice, fmt.Sprintf("swap 连续 15m 平均 %.1f%%", avg15Swap), true
-	case has15m && avg15Iowait >= 10:
+	case cpu15Usable && has15m && avg15Iowait >= 10:
 		return SeverityNotice, fmt.Sprintf("iowait 连续 15m 平均 %.1f%%", avg15Iowait), true
-	case has15m && avg15Steal >= 5:
+	case cpu15Usable && has15m && avg15Steal >= 5:
 		return SeverityNotice, fmt.Sprintf("steal 连续 15m 平均 %.1f%%", avg15Steal), true
 	default:
 		return SeverityNormal, "", false
@@ -728,37 +746,86 @@ func minimumMonitoringInstanceResourceMetric(samples []MonitoringInstanceResourc
 	return minimum
 }
 
-func usableMonitoringInstanceHostDailyAggregates(baselines []MonitoringInstanceHostDailyAggregate) []MonitoringInstanceHostDailyAggregate {
-	usable := make([]MonitoringInstanceHostDailyAggregate, 0, len(baselines))
+func weightedMonitoringInstanceTrendBaselines(baselines []MonitoringInstanceHostDailyAggregate) (load, iowait, steal *float64) {
+	var loadWeight, loadTotal float64
+	var iowaitWeight, iowaitTotal float64
+	var stealWeight, stealTotal float64
 	for _, baseline := range baselines {
-		usableSamples := baseline.SampleCount - baseline.BackfilledSampleCount - baseline.MaintenanceSampleCount
-		if usableSamples <= 0 {
+		hostWeight := dailyEffectiveWeight(
+			nonNegativeDailyCount(baseline.SampleCount),
+			nonNegativeDailyCount(baseline.BackfilledSampleCount),
+			nonNegativeDailyCount(baseline.MaintenanceSampleCount),
+		)
+		if hostWeight > 0 && finiteFloat64(baseline.AvgLoad5) {
+			weight := float64(hostWeight)
+			loadWeight += weight
+			loadTotal += baseline.AvgLoad5 * weight
+		}
+
+		cpuValidWeight := dailyEffectiveWeight(
+			dailyCountValue(baseline.CPUValidSampleCount, baseline.SampleCount),
+			dailyCountValue(baseline.CPUValidBackfilledSampleCount, baseline.BackfilledSampleCount),
+			dailyCountValue(baseline.CPUValidMaintenanceSampleCount, baseline.MaintenanceSampleCount),
+		)
+		if cpuValidWeight <= 0 {
 			continue
 		}
-		usable = append(usable, baseline)
+		weight := float64(cpuValidWeight)
+		if baseline.AvgCPUIOWaitPct != nil && usableTrendCPUAverage(*baseline.AvgCPUIOWaitPct) {
+			iowaitWeight += weight
+			iowaitTotal += *baseline.AvgCPUIOWaitPct * weight
+		}
+		if baseline.AvgCPUStealPct != nil && usableTrendCPUAverage(*baseline.AvgCPUStealPct) {
+			stealWeight += weight
+			stealTotal += *baseline.AvgCPUStealPct * weight
+		}
 	}
-	return usable
+	if loadWeight > 0 {
+		value := loadTotal / loadWeight
+		load = &value
+	}
+	if iowaitWeight > 0 {
+		value := iowaitTotal / iowaitWeight
+		iowait = &value
+	}
+	if stealWeight > 0 {
+		value := stealTotal / stealWeight
+		steal = &value
+	}
+	return
 }
 
-func weightedMonitoringInstanceTrendBaselines(baselines []MonitoringInstanceHostDailyAggregate) (float64, float64, float64) {
-	var totalWeight float64
-	var loadTotal float64
-	var iowaitTotal float64
-	var stealTotal float64
-	for _, baseline := range baselines {
-		weight := float64(baseline.SampleCount - baseline.BackfilledSampleCount - baseline.MaintenanceSampleCount)
-		if weight <= 0 {
-			continue
-		}
-		totalWeight += weight
-		loadTotal += baseline.AvgLoad5 * weight
-		iowaitTotal += baseline.AvgCPUIOWaitPct * weight
-		stealTotal += baseline.AvgCPUStealPct * weight
+func nonNegativeDailyCount(value int) int64 {
+	if value <= 0 {
+		return 0
 	}
-	if totalWeight == 0 {
-		return 0, 0, 0
+	return int64(value)
+}
+
+func dailyCountValue(value *int, fallback int) int64 {
+	if value == nil {
+		return nonNegativeDailyCount(fallback)
 	}
-	return loadTotal / totalWeight, iowaitTotal / totalWeight, stealTotal / totalWeight
+	return nonNegativeDailyCount(*value)
+}
+
+func dailyEffectiveWeight(total, backfilled, maintenance int64) int64 {
+	if total <= 0 || backfilled >= total {
+		return 0
+	}
+	remaining := total - backfilled
+	if maintenance >= remaining {
+		return 0
+	}
+	return remaining - maintenance
+}
+
+func finiteFloat64(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0)
+}
+
+func usableTrendCPUAverage(value float64) bool {
+	return finiteFloat64(value) && value >= 0 && value <= 100
 }
 
 func nodeTrendMetricDegraded(current, baseline, absoluteFloor, absoluteDelta float64) bool {
@@ -906,6 +973,17 @@ func spansMonitoringInstanceResourceWindow(samples []MonitoringInstanceResourceS
 	newest := samples[0].ObservedAt
 	oldest := samples[len(samples)-1].ObservedAt
 	return newest.Sub(oldest) >= window
+}
+func cpuWindowUsable(samples []MonitoringInstanceResourceSample, window time.Duration) bool {
+	if !spansMonitoringInstanceResourceWindow(samples, window) {
+		return false
+	}
+	for _, sample := range samples {
+		if !agentapi.CPURatesUsable(sample.CPURatesValid, sample.CPUUsagePct, sample.CPUIOWaitPct, sample.CPUStealPct) {
+			return false
+		}
+	}
+	return true
 }
 
 func spansProbeObservationWindow(observations []runtimefacts.ProbeObservation, window time.Duration) bool {

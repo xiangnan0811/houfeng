@@ -20,7 +20,15 @@ var (
 	ErrMonitoringEvidenceLimitExceeded      = errors.New("monitoring evidence limit exceeded")
 )
 
-const monitoringCalculationVersion = "monitoring-evidence/v1"
+const hostMonitoringCalculationVersion = "monitoring-evidence/v2"
+const probeMonitoringCalculationVersion = "monitoring-evidence/v1"
+
+func (adapter *MonitoringAdapter) calculationVersion() string {
+	if adapter.key == evidence.MonitoringHostV1Key() {
+		return hostMonitoringCalculationVersion
+	}
+	return probeMonitoringCalculationVersion
+}
 
 type AdapterOptions struct {
 	Clock       func() time.Time
@@ -60,6 +68,7 @@ type MonitoringSourceLayer string
 const (
 	MonitoringSourceRaw            MonitoringSourceLayer = "raw"
 	MonitoringSourceDailyAggregate MonitoringSourceLayer = "daily_aggregate"
+	MonitoringSourceMixed          MonitoringSourceLayer = "mixed"
 )
 
 type MonitoringBucket struct {
@@ -76,12 +85,17 @@ type MonitoringBucket struct {
 }
 
 type MonitoringMetric struct {
-	Name    string
-	Unit    string
-	Average *float64
-	Min     *float64
-	Max     *float64
-	P95     *float64
+	Name              string
+	Unit              string
+	Average           *float64
+	Min               *float64
+	Max               *float64
+	P95               *float64
+	SampleCount       uint64
+	MaintenanceCount  uint64
+	BackfilledCount   uint64
+	SourceLayer       MonitoringSourceLayer
+	SourceGranularity time.Duration
 }
 
 func normalizeMonitoringCapture(capture MonitoringSeriesCapture) MonitoringSeriesCapture {
@@ -226,7 +240,7 @@ func (adapter *MonitoringAdapter) PreviewCapture(
 		ObservedAt:              evaluated.capture.ObservedAt.UTC(),
 		SourceWatermark:         evaluated.capture.SourceWatermark,
 		ProducerVersion:         evaluated.capture.ProducerVersion,
-		CalculationVersion:      monitoringCalculationVersion,
+		CalculationVersion:      adapter.calculationVersion(),
 		Units:                   evidence.UnitsSemantics{Status: evidence.UnitsApplicable, Values: adapter.selectedUnits(selection.Metrics)},
 		Quality:                 evaluated.quality,
 		Sensitivity:             evidence.SensitivityNormal,
@@ -277,7 +291,7 @@ func (adapter *MonitoringAdapter) Capture(
 		SourceWatermark:    evaluated.capture.SourceWatermark,
 		SourceDigest:       evaluated.canonical.Hash(),
 		ProducerVersion:    evaluated.capture.ProducerVersion,
-		CalculationVersion: monitoringCalculationVersion,
+		CalculationVersion: adapter.calculationVersion(),
 		Units:              evidence.UnitsSemantics{Status: evidence.UnitsApplicable, Values: adapter.selectedUnits(intent.Selection.Metrics)},
 		Quality:            evaluated.quality,
 		Sensitivity:        evidence.SensitivityNormal,
@@ -362,7 +376,12 @@ func (adapter *MonitoringAdapter) evaluate(
 	if err := adapter.validateCapture(selection, precision, capture); err != nil {
 		return evaluatedMonitoring{}, err
 	}
-	gaps, err := monitoringGaps(capture)
+	host := adapter.key == evidence.MonitoringHostV1Key()
+	var gapMetrics []string
+	if host {
+		gapMetrics = selection.Metrics
+	}
+	gaps, err := monitoringGaps(capture, gapMetrics)
 	if err != nil {
 		return evaluatedMonitoring{}, err
 	}
@@ -371,7 +390,7 @@ func (adapter *MonitoringAdapter) evaluate(
 	if err != nil {
 		return evaluatedMonitoring{}, err
 	}
-	payload := monitoringPayload(selection.RequestedWindow, capture, gaps, peaks)
+	payload := monitoringPayload(selection.RequestedWindow, capture, gaps, peaks, host)
 	canonical, redaction, err := evidence.CanonicalizePayload(adapter.descriptor, payload, evidence.RedactionNormalOnly)
 	if err != nil {
 		return evaluatedMonitoring{}, err
@@ -417,7 +436,8 @@ func (adapter *MonitoringAdapter) validateCapture(
 			bucket.SourceGranularity <= 0 || bucket.SourceGranularity > capture.ActualPrecision ||
 			bucket.SourceGranularity%time.Second != 0 || bucket.SampleCount > math.MaxInt64 ||
 			bucket.MaintenanceCount > bucket.SampleCount || bucket.BackfilledCount > bucket.SampleCount ||
-			(bucket.SourceLayer != MonitoringSourceRaw && bucket.SourceLayer != MonitoringSourceDailyAggregate) ||
+			(bucket.SourceLayer != MonitoringSourceRaw && bucket.SourceLayer != MonitoringSourceDailyAggregate &&
+				!(adapter.key == evidence.MonitoringHostV1Key() && bucket.SourceLayer == MonitoringSourceMixed)) ||
 			len(bucket.Metrics) == 0 {
 			return ErrUnacceptableMonitoringEvidenceSource
 		}
@@ -437,6 +457,9 @@ func (adapter *MonitoringAdapter) validateCapture(
 				return ErrUnacceptableMonitoringEvidenceSource
 			}
 		}
+		if adapter.key == evidence.MonitoringHostV1Key() && !validHostBucketMetadata(bucket, capture.ActualPrecision) {
+			return ErrUnacceptableMonitoringEvidenceSource
+		}
 		if uint64(len(bucket.Metrics)) > evidence.MaxSnapshotDataPoints-dataPointCount {
 			return ErrMonitoringEvidenceLimitExceeded
 		}
@@ -445,8 +468,40 @@ func (adapter *MonitoringAdapter) validateCapture(
 	return nil
 }
 
+func validHostBucketMetadata(bucket MonitoringBucket, precision time.Duration) bool {
+	var reference MonitoringMetric
+	var layer MonitoringSourceLayer
+	var granularity time.Duration
+	for index, metric := range bucket.Metrics {
+		if metric.SampleCount == 0 || metric.SampleCount > math.MaxInt64 ||
+			metric.MaintenanceCount > metric.SampleCount || metric.BackfilledCount > metric.SampleCount ||
+			(metric.SourceLayer != MonitoringSourceRaw && metric.SourceLayer != MonitoringSourceDailyAggregate) ||
+			metric.SourceGranularity <= 0 || metric.SourceGranularity > precision ||
+			metric.SourceGranularity%time.Second != 0 {
+			return false
+		}
+		if index == 0 || metric.SampleCount > reference.SampleCount ||
+			(metric.SampleCount == reference.SampleCount && metric.Name < reference.Name) {
+			reference = metric
+		}
+		if index == 0 {
+			layer = metric.SourceLayer
+		} else if layer != metric.SourceLayer {
+			layer = MonitoringSourceMixed
+		}
+		if metric.SourceGranularity > granularity {
+			granularity = metric.SourceGranularity
+		}
+	}
+	return bucket.SampleCount == reference.SampleCount &&
+		bucket.MaintenanceCount == reference.MaintenanceCount &&
+		bucket.BackfilledCount == reference.BackfilledCount &&
+		bucket.SourceLayer == layer && bucket.SourceGranularity == granularity
+}
+
 type monitoringGap struct {
 	SeriesID string
+	Metric   string
 	Start    time.Time
 	End      time.Time
 }
@@ -459,34 +514,57 @@ type monitoringPeak struct {
 	SourceLayer MonitoringSourceLayer
 }
 
-func monitoringGaps(capture MonitoringSeriesCapture) ([]monitoringGap, error) {
+func monitoringGaps(capture MonitoringSeriesCapture, metrics []string) ([]monitoringGap, error) {
 	bySeries := make(map[string][]MonitoringBucket)
 	for _, bucket := range capture.Buckets {
 		bySeries[bucket.SeriesID] = append(bySeries[bucket.SeriesID], bucket)
 	}
+	if metrics == nil {
+		metrics = []string{""}
+	}
 	var gaps []monitoringGap
 	for seriesID, buckets := range bySeries {
 		sort.Slice(buckets, func(left, right int) bool { return buckets[left].Start.Before(buckets[right].Start) })
-		cursor := capture.RequestedWindow.Start
-		for _, bucket := range buckets {
-			var err error
-			gaps, err = appendMonitoringGaps(gaps, seriesID, cursor, bucket.Start, capture.ActualPrecision)
-			if err != nil {
+		for _, metric := range metrics {
+			cursor := capture.RequestedWindow.Start
+			appendGap := func(end time.Time) error {
+				startIndex := len(gaps)
+				var err error
+				gaps, err = appendMonitoringGaps(gaps, seriesID, cursor, end, capture.ActualPrecision)
+				for index := startIndex; index < len(gaps); index++ {
+					gaps[index].Metric = metric
+				}
+				return err
+			}
+			for _, bucket := range buckets {
+				present := metric == ""
+				for _, value := range bucket.Metrics {
+					if value.Name == metric {
+						present = true
+						break
+					}
+				}
+				if !present {
+					continue
+				}
+				if err := appendGap(bucket.Start); err != nil {
+					return nil, err
+				}
+				if bucket.End.After(cursor) {
+					cursor = bucket.End
+				}
+			}
+			if err := appendGap(capture.RequestedWindow.End); err != nil {
 				return nil, err
 			}
-			if bucket.End.After(cursor) {
-				cursor = bucket.End
-			}
-		}
-		var err error
-		gaps, err = appendMonitoringGaps(gaps, seriesID, cursor, capture.RequestedWindow.End, capture.ActualPrecision)
-		if err != nil {
-			return nil, err
 		}
 	}
 	sort.Slice(gaps, func(left, right int) bool {
 		if gaps[left].SeriesID != gaps[right].SeriesID {
 			return gaps[left].SeriesID < gaps[right].SeriesID
+		}
+		if gaps[left].Metric != gaps[right].Metric {
+			return gaps[left].Metric < gaps[right].Metric
 		}
 		return gaps[left].Start.Before(gaps[right].Start)
 	})
@@ -516,9 +594,13 @@ func monitoringPeaks(buckets []MonitoringBucket) []monitoringPeak {
 				value = metric.Max
 			}
 			if value != nil {
+				source := bucket.SourceLayer
+				if metric.SourceLayer != "" {
+					source = metric.SourceLayer
+				}
 				peaks = append(peaks, monitoringPeak{
 					SeriesID: bucket.SeriesID, Metric: metric.Name, At: bucket.Start,
-					Value: *value, SourceLayer: bucket.SourceLayer,
+					Value: *value, SourceLayer: source,
 				})
 			}
 		}
@@ -588,12 +670,20 @@ func monitoringPayload(
 	capture MonitoringSeriesCapture,
 	gaps []monitoringGap,
 	peaks []monitoringPeak,
+	host bool,
 ) map[string]any {
 	buckets := make([]any, 0, len(capture.Buckets))
 	for _, bucket := range capture.Buckets {
 		metrics := make([]any, 0, len(bucket.Metrics))
 		for _, metric := range bucket.Metrics {
 			item := map[string]any{"name": metric.Name, "unit": metric.Unit}
+			if host {
+				item["sample_count"] = metric.SampleCount
+				item["maintenance_count"] = metric.MaintenanceCount
+				item["backfilled_count"] = metric.BackfilledCount
+				item["source_layer"] = string(metric.SourceLayer)
+				item["source_granularity_seconds"] = int64(metric.SourceGranularity / time.Second)
+			}
 			if metric.Average != nil {
 				item["average"] = *metric.Average
 			}
@@ -623,11 +713,15 @@ func monitoringPayload(
 	}
 	gapValues := make([]any, 0, len(gaps))
 	for _, gap := range gaps {
-		gapValues = append(gapValues, map[string]any{
+		item := map[string]any{
 			"series_id": gap.SeriesID,
 			"start":     gap.Start.UTC().Format(time.RFC3339Nano),
 			"end":       gap.End.UTC().Format(time.RFC3339Nano),
-		})
+		}
+		if host {
+			item["metric"] = gap.Metric
+		}
+		gapValues = append(gapValues, item)
 	}
 	peakValues := make([]any, 0, len(peaks))
 	for _, peak := range peaks {
@@ -659,6 +753,11 @@ func monitoringDescriptor(key evidence.KindKey) evidence.Descriptor {
 		"buckets.metrics.name", "buckets.metrics.unit", "buckets.metrics.average", "buckets.metrics.min", "buckets.metrics.max", "buckets.metrics.p95",
 		"gaps.series_id", "gaps.start", "gaps.end",
 		"peaks.series_id", "peaks.metric", "peaks.at", "peaks.value", "peaks.source_layer",
+	}
+	if key == evidence.MonitoringHostV1Key() {
+		normal = append(normal, "buckets.metrics.sample_count", "buckets.metrics.maintenance_count",
+			"buckets.metrics.backfilled_count", "buckets.metrics.source_layer",
+			"buckets.metrics.source_granularity_seconds", "gaps.metric")
 	}
 	forbidden := []string{"buckets.raw_json", "buckets.fingerprint", "raw_payload", "stdout", "stderr"}
 	fields := make([]evidence.FieldDefinition, 0, len(normal)+len(forbidden))

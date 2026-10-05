@@ -15,6 +15,7 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 			"0066_constrain_monitoring_and_target_state_values.sql",
 			"0067_refactor_vps_monitoring_lifecycle.sql",
 			"0068_normalize_ip_quality_host_address_identity.sql",
+			"0069_add_cpu_rates_valid.sql",
 		}},
 	}
 	p64Transition := appACLCurrentTransition{
@@ -23,6 +24,7 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 			"0066_constrain_monitoring_and_target_state_values.sql",
 			"0067_refactor_vps_monitoring_lifecycle.sql",
 			"0068_normalize_ip_quality_host_address_identity.sql",
+			"0069_add_cpu_rates_valid.sql",
 		}},
 	}
 
@@ -38,10 +40,13 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 			successor: migrationSourceSnapshot{names: p62Transition.successor.names[1:]},
 		}, want: false},
 		{name: "P66 lifecycle-only suffix preserves heartbeat policy", transition: appACLCurrentTransition{
-			successor: migrationSourceSnapshot{names: []string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql"}},
+			successor: migrationSourceSnapshot{names: []string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql"}},
 		}, want: false},
 		{name: "P67 identity-only suffix preserves heartbeat and lifecycle policy", transition: appACLCurrentTransition{
-			successor: migrationSourceSnapshot{names: []string{"0068_normalize_ip_quality_host_address_identity.sql"}},
+			successor: migrationSourceSnapshot{names: []string{"0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql"}},
+		}, want: false},
+		{name: "P68 CPU-validity-only suffix preserves settings", transition: appACLCurrentTransition{
+			successor: migrationSourceSnapshot{names: []string{"0069_add_cpu_rates_valid.sql"}},
 		}, want: false},
 		{name: "empty successor suffix is rejected", transition: appACLCurrentTransition{}, wantError: true},
 		{
@@ -59,6 +64,44 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 					"0063_tune_heartbeat_incident_policy.sql",
 					"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 					"0066_constrain_monitoring_and_target_state_values.sql",
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "duplicate C69 suffix is rejected",
+			transition: appACLCurrentTransition{
+				successor: migrationSourceSnapshot{names: []string{
+					"0069_add_cpu_rates_valid.sql",
+					"0069_add_cpu_rates_valid.sql",
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "duplicate C68 suffix is rejected",
+			transition: appACLCurrentTransition{
+				successor: migrationSourceSnapshot{names: []string{
+					"0068_normalize_ip_quality_host_address_identity.sql",
+					"0068_normalize_ip_quality_host_address_identity.sql",
+					"0069_add_cpu_rates_valid.sql",
+				}},
+			},
+			wantError: true,
+		},
+		{
+			name: "unknown suffix is rejected",
+			transition: appACLCurrentTransition{
+				successor: migrationSourceSnapshot{names: []string{"0070_future.sql"}},
+			},
+			wantError: true,
+		},
+		{
+			name: "C69 before C68 is rejected",
+			transition: appACLCurrentTransition{
+				successor: migrationSourceSnapshot{names: []string{
+					"0069_add_cpu_rates_valid.sql",
+					"0068_normalize_ip_quality_host_address_identity.sql",
 				}},
 			},
 			wantError: true,
@@ -135,6 +178,7 @@ func TestAppACLCurrentTransitionSettingsRowPresenceAcrossRegisteredSuffixes(t *t
 			"0066_constrain_monitoring_and_target_state_values.sql",
 			"0067_refactor_vps_monitoring_lifecycle.sql",
 			"0068_normalize_ip_quality_host_address_identity.sql",
+			"0069_add_cpu_rates_valid.sql",
 		}}}},
 		{name: "P63", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
 			"0064_add_network_rates_valid.sql",
@@ -142,19 +186,26 @@ func TestAppACLCurrentTransitionSettingsRowPresenceAcrossRegisteredSuffixes(t *t
 			"0066_constrain_monitoring_and_target_state_values.sql",
 			"0067_refactor_vps_monitoring_lifecycle.sql",
 			"0068_normalize_ip_quality_host_address_identity.sql",
+			"0069_add_cpu_rates_valid.sql",
 		}}}},
 		{name: "P64", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
 			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
 			"0066_constrain_monitoring_and_target_state_values.sql",
 			"0067_refactor_vps_monitoring_lifecycle.sql",
 			"0068_normalize_ip_quality_host_address_identity.sql",
+			"0069_add_cpu_rates_valid.sql",
 		}}}},
 		{name: "P66", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
 			"0067_refactor_vps_monitoring_lifecycle.sql",
 			"0068_normalize_ip_quality_host_address_identity.sql",
+			"0069_add_cpu_rates_valid.sql",
 		}}}},
 		{name: "P67", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
 			"0068_normalize_ip_quality_host_address_identity.sql",
+			"0069_add_cpu_rates_valid.sql",
+		}}}},
+		{name: "P68", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
+			"0069_add_cpu_rates_valid.sql",
 		}}}},
 	}
 	for _, suffix := range suffixes {
@@ -179,6 +230,27 @@ func TestAppACLCurrentTransitionSettingsRowPresenceAcrossRegisteredSuffixes(t *t
 				t.Fatalf("present to absent settings snapshot error = %v, want row-presence rejection", err)
 			}
 		})
+	}
+}
+func TestAppACLCurrentTransitionP68PreservesSettings(t *testing.T) {
+	transition := appACLCurrentTransition{
+		successor: migrationSourceSnapshot{names: []string{"0069_add_cpu_rates_valid.sql"}},
+	}
+	if got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err != nil || got {
+		t.Fatalf("P68 heartbeat classification = %t, error = %v, want false/nil", got, err)
+	}
+	before := appACLCurrentTransitionPreflight{
+		settingsRowPresent: true,
+		settingsSnapshot:   []byte(`{"settings_id":"center","updated_at":"2025-01-02T03:04:05Z","telegram_bot_token":"before"}`),
+	}
+	unchanged := []byte(`{"telegram_bot_token":"before","settings_id":"center","updated_at":"2025-01-02T03:04:05Z"}`)
+	if err := verifyAppliedAppACLCurrentTransitionSettings(before, true, nil, unchanged, nil, time.Time{}); err != nil {
+		t.Fatalf("P68 unchanged settings snapshot was rejected: %v", err)
+	}
+	changed := []byte(`{"telegram_bot_token":"after","settings_id":"center","updated_at":"2025-01-02T03:04:05Z"}`)
+	if err := verifyAppliedAppACLCurrentTransitionSettings(before, true, nil, changed, nil, time.Time{}); err == nil ||
+		!strings.Contains(err.Error(), "changed settings without a heartbeat policy migration") {
+		t.Fatalf("P68 changed settings snapshot error = %v, want preservation rejection", err)
 	}
 }
 

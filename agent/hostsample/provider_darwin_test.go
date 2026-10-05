@@ -70,6 +70,9 @@ func TestCollectDarwinReturnsCoreMetricsWithoutProcFS(t *testing.T) {
 	if sample.CPUUsagePct != 0 || sample.NetInBytesPerSec != 0 || sample.DiskReadBytesPerSec != 0 {
 		t.Fatalf("darwin rate-based fields should start at zero: %#v", sample)
 	}
+	if sample.CPURatesValid == nil || *sample.CPURatesValid {
+		t.Fatalf("darwin CPURatesValid = %v, want explicit false", sample.CPURatesValid)
+	}
 	if sample.NetworkRatesValid == nil || *sample.NetworkRatesValid {
 		t.Fatalf("darwin NetworkRatesValid = %v, want explicit false", sample.NetworkRatesValid)
 	}
