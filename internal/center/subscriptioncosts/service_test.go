@@ -511,20 +511,63 @@ func TestServiceBudgetSpendUsesSettingsBaseCurrencyAcrossEntrypoints(t *testing.
 func TestMonthlyBudgetRisksReturnSpendPointers(t *testing.T) {
 	t.Parallel()
 	limit := 100.0
-	risks := monthlyBudgetRisks(120, []SeriesPoint{{
-		Bucket:           "2026-06",
-		BudgetLimit:      &limit,
-		BudgetCurrency:   "CNY",
-		BudgetWarningPct: 80,
-	}})
-	if len(risks) != 1 {
-		t.Fatalf("monthlyBudgetRisks() returned %d records, want 1", len(risks))
+	budgetBuckets := func(monthlyLimit *float64, dataInsufficient bool) []SeriesPoint {
+		return []SeriesPoint{{
+			Bucket:           "2026-06",
+			BudgetLimit:      monthlyLimit,
+			BudgetCurrency:   "CNY",
+			BudgetWarningPct: 80,
+			DataInsufficient: dataInsufficient,
+		}}
 	}
-	if risks[0].Status != BudgetStatusOver {
-		t.Fatalf("status = %q, want over", risks[0].Status)
+	tests := []struct {
+		name           string
+		monthlyCost    float64
+		amountComplete bool
+		budgetBuckets  []SeriesPoint
+		wantStatus     BudgetStatus
+	}{
+		{name: "complete below warning", monthlyCost: 79, amountComplete: true, budgetBuckets: budgetBuckets(&limit, false)},
+		{name: "complete warning boundary", monthlyCost: 80, amountComplete: true, budgetBuckets: budgetBuckets(&limit, false), wantStatus: BudgetStatusWarning},
+		{name: "complete warning", monthlyCost: 90, amountComplete: true, budgetBuckets: budgetBuckets(&limit, false), wantStatus: BudgetStatusWarning},
+		{name: "complete over boundary", monthlyCost: 100, amountComplete: true, budgetBuckets: budgetBuckets(&limit, false), wantStatus: BudgetStatusOver},
+		{name: "complete over", monthlyCost: 120, amountComplete: true, budgetBuckets: budgetBuckets(&limit, false), wantStatus: BudgetStatusOver},
+		{name: "incomplete below warning", monthlyCost: 79, amountComplete: false, budgetBuckets: budgetBuckets(&limit, false)},
+		{name: "incomplete warning boundary", monthlyCost: 80, amountComplete: false, budgetBuckets: budgetBuckets(&limit, false)},
+		{name: "incomplete warning", monthlyCost: 90, amountComplete: false, budgetBuckets: budgetBuckets(&limit, false)},
+		{name: "incomplete over boundary", monthlyCost: 100, amountComplete: false, budgetBuckets: budgetBuckets(&limit, false), wantStatus: BudgetStatusOver},
+		{name: "incomplete over", monthlyCost: 120, amountComplete: false, budgetBuckets: budgetBuckets(&limit, false), wantStatus: BudgetStatusOver},
+		{name: "zero limit", monthlyCost: 120, amountComplete: true, budgetBuckets: budgetBuckets(new(float64), false)},
+		{name: "nil limit", monthlyCost: 120, amountComplete: true, budgetBuckets: budgetBuckets(nil, false)},
+		{name: "no buckets", monthlyCost: 120, amountComplete: true},
+		{name: "currency mismatch", monthlyCost: 120, amountComplete: true, budgetBuckets: budgetBuckets(&limit, true)},
 	}
-	assertSpendPointer(t, "monthly", risks[0].CurrentMonthlySpend, new(float64(120)))
-	assertSpendPointer(t, "yearly", risks[0].CurrentYearlySpend, new(float64(1440)))
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			risks := monthlyBudgetRisks(tt.monthlyCost, tt.amountComplete, tt.budgetBuckets)
+			if tt.wantStatus == "" {
+				if len(risks) != 0 {
+					t.Fatalf("monthlyBudgetRisks() = %#v, want no risks", risks)
+				}
+				return
+			}
+			if len(risks) != 1 {
+				t.Fatalf("monthlyBudgetRisks() returned %d records, want 1", len(risks))
+			}
+			if risks[0].Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", risks[0].Status, tt.wantStatus)
+			}
+			if tt.amountComplete {
+				yearly := tt.monthlyCost * 12
+				assertSpendPointer(t, "monthly", risks[0].CurrentMonthlySpend, &tt.monthlyCost)
+				assertSpendPointer(t, "yearly", risks[0].CurrentYearlySpend, &yearly)
+			} else {
+				assertSpendPointer(t, "monthly", risks[0].CurrentMonthlySpend, nil)
+				assertSpendPointer(t, "yearly", risks[0].CurrentYearlySpend, nil)
+			}
+		})
+	}
 }
 
 func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
@@ -605,6 +648,9 @@ func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
 	}
 	if overview.BudgetRiskCount != 1 || len(overview.BudgetRisks) != 1 || overview.BudgetRisks[0].Status != BudgetStatusOver {
 		t.Fatalf("budget risks = count %d rows %#v, want one over risk", overview.BudgetRiskCount, overview.BudgetRisks)
+	}
+	if overview.BudgetRisks[0].CurrentMonthlySpend != nil || overview.BudgetRisks[0].CurrentYearlySpend != nil {
+		t.Fatalf("incomplete budget risk spend = monthly %v yearly %v, want nil/nil", overview.BudgetRisks[0].CurrentMonthlySpend, overview.BudgetRisks[0].CurrentYearlySpend)
 	}
 	if len(overview.UpcomingRenewals) != 2 || overview.UpcomingRenewals[0].SubscriptionID != "sub_a" {
 		t.Fatalf("upcoming renewals = %#v, want sorted sub_a first", overview.UpcomingRenewals)

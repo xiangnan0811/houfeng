@@ -191,6 +191,9 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 - A comparable budget is complete when every matching current row has a non-null `MonthlyPriceBase`; no matching rows are a complete zero. Sum non-null monthly base amounts and derive yearly spend as monthly spend multiplied by 12. If the rows are incomplete, both public spend fields are `null`; only an `over` result proven by the known sum reaching the existing threshold is retained, otherwise the budget is `unknown`. Complete amounts remain numeric even when the status is `unknown` because an effective limit is zero; existing `EvaluateBudgetStatus` rules remain authoritative, including `>=` thresholds, monthly-limit precedence, and yearly-limit conversion.
 - Disabled budgets retain `status=disabled` and numeric zero for both spend fields regardless of rows or currency. They are not candidates for row-level status merging. Budget derivation in create/edit responses, listing, statistics, and global base-currency changes never rewrites stored budget currency/limits or billing facts. Explicit budget edits still persist the requested facts; derived amounts and statuses always use the current query currency.
 
+- 月度概览的 `budget_risks` 使用当前月 `total_monthly_cost` 的已知小计，并以 `current_unknown_amount_count == 0` 作为金额完整条件。当前缺有效账单资产的 VPS，或当前订阅缺换算金额（例如汇率缺失）的行，都会使当前月金额不完整；归档对象的缺口只计入 `archived_unknown_amount_count`，不改变当前完整性。
+- 月度概览金额不完整时，不输出 `warning`；只有已知小计已达到现有限额并证明 `over` 时仍输出风险记录，并将 `current_monthly_spend` 与 `current_yearly_spend` 序列化为 `null`。不完整金额的 `unknown` 不进入 `budget_risks`；`budget_risk_count` 始终等于该列表长度，因此为 0 只表示没有确定的 `warning`/`over`，不表示金额完整。`current_unknown_amount_count` 仍表达当前缺口。
+
 The individual budget status table is:
 
 | Status | Condition |

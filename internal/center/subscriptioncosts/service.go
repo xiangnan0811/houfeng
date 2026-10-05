@@ -180,8 +180,8 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 		}
 	}
 
-	overview.BudgetRiskCount = currentMonthBudgetRiskCount(overview.TotalMonthlyCost, budgetMonthBuckets)
-	overview.BudgetRisks = monthlyBudgetRisks(overview.TotalMonthlyCost, budgetMonthBuckets)
+	overview.BudgetRisks = monthlyBudgetRisks(overview.TotalMonthlyCost, overview.CurrentUnknownAmountCount == 0, budgetMonthBuckets)
+	overview.BudgetRiskCount = len(overview.BudgetRisks)
 	sortRenewalQueue(overview.UpcomingRenewals)
 	if len(overview.UpcomingRenewals) > 12 {
 		overview.UpcomingRenewals = overview.UpcomingRenewals[:12]
@@ -681,14 +681,7 @@ func mergeBudgetMonthBuckets(costBuckets, budgetBuckets []SeriesPoint) []SeriesP
 	return costBuckets
 }
 
-func currentMonthBudgetRiskCount(monthlyCost float64, budgetBuckets []SeriesPoint) int {
-	if len(monthlyBudgetRisks(monthlyCost, budgetBuckets)) > 0 {
-		return 1
-	}
-	return 0
-}
-
-func monthlyBudgetRisks(monthlyCost float64, budgetBuckets []SeriesPoint) []BudgetRecord {
+func monthlyBudgetRisks(monthlyCost float64, amountComplete bool, budgetBuckets []SeriesPoint) []BudgetRecord {
 	if len(budgetBuckets) == 0 {
 		return nil
 	}
@@ -697,8 +690,16 @@ func monthlyBudgetRisks(monthlyCost float64, budgetBuckets []SeriesPoint) []Budg
 		return nil
 	}
 	status := budgetStatusForMonthlySpend(monthlyCost, budget.BudgetLimit, budget.BudgetWarningPct)
+	if !amountComplete && status != BudgetStatusOver {
+		return nil
+	}
 	if status != BudgetStatusWarning && status != BudgetStatusOver {
 		return nil
+	}
+	var monthlySpend, yearlySpend *float64
+	if amountComplete {
+		monthlySpend = new(monthlyCost)
+		yearlySpend = new(monthlyCost * 12)
 	}
 	return []BudgetRecord{{
 		BudgetID:            "monthly-" + budget.Bucket,
@@ -708,8 +709,8 @@ func monthlyBudgetRisks(monthlyCost float64, budgetBuckets []SeriesPoint) []Budg
 		MonthlyLimit:        budget.BudgetLimit,
 		WarningPct:          budget.BudgetWarningPct,
 		Enabled:             true,
-		CurrentMonthlySpend: new(monthlyCost),
-		CurrentYearlySpend:  new(monthlyCost * 12),
+		CurrentMonthlySpend: monthlySpend,
+		CurrentYearlySpend:  yearlySpend,
 		Status:              status,
 	}}
 }

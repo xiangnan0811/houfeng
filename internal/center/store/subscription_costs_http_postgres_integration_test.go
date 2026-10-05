@@ -24,11 +24,19 @@ import (
 )
 
 const (
-	subscriptionCostHF17VPSA     = "vps_hf17_a"
-	subscriptionCostHF17VPSB     = "vps_hf17_b"
-	subscriptionCostHF17SubA     = "sub_hf17_a"
-	subscriptionCostHF17SubB     = "sub_hf17_b"
-	subscriptionCostHF17Provider = "provider_hf17"
+	subscriptionCostHF17VPSA               = "vps_hf17_a"
+	subscriptionCostHF17VPSB               = "vps_hf17_b"
+	subscriptionCostHF17SubA               = "sub_hf17_a"
+	subscriptionCostHF17SubB               = "sub_hf17_b"
+	subscriptionCostHF17Provider           = "provider_hf17"
+	subscriptionCostHF19AmountVPS          = "vps_hf19_amount"
+	subscriptionCostHF19AmountSub          = "sub_hf19_amount"
+	subscriptionCostHF19CurrentGapVPS      = "vps_hf19_current_gap"
+	subscriptionCostHF19CurrentGapSub      = "sub_hf19_current_gap"
+	subscriptionCostHF19CurrentMissingVPS  = "vps_hf19_current_missing"
+	subscriptionCostHF19ArchivedGapVPS     = "vps_hf19_archived_gap"
+	subscriptionCostHF19ArchivedGapSub     = "sub_hf19_archived_gap"
+	subscriptionCostHF19ArchivedMissingVPS = "vps_hf19_archived_missing"
 )
 
 func TestPostgresIntegrationSubscriptionCostHF17HF18(t *testing.T) {
@@ -248,6 +256,213 @@ func TestPostgresIntegrationSubscriptionCostHF17HF18(t *testing.T) {
 		assertSubscriptionCostHF17Filter(t, ctx, client, server.URL, "unknown", []string{subscriptionCostHF17SubB})
 	}) {
 		return
+	}
+}
+
+func TestPostgresIntegrationSubscriptionCostHF19(t *testing.T) {
+	scenarios := []subscriptionCostHF19Scenario{
+		{
+			name:               "90 with current missing exchange rate",
+			amount:             90,
+			currentMissingRate: true,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 90, totalYearly: 1080, currentUnknown: 1,
+			},
+		},
+		{
+			name:               "120 with current missing exchange rate retains over",
+			amount:             120,
+			currentMissingRate: true,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440, currentUnknown: 1,
+				riskStatus: "over",
+			},
+		},
+		{
+			name:                       "90 with current missing subscription",
+			amount:                     90,
+			currentMissingSubscription: true,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 90, totalYearly: 1080, currentUnknown: 1,
+			},
+		},
+		{
+			name:                       "120 with current missing subscription retains over",
+			amount:                     120,
+			currentMissingSubscription: true,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440, currentUnknown: 1,
+				riskStatus: "over",
+			},
+		},
+		{
+			name:   "complete 79",
+			amount: 79,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 79, totalYearly: 948,
+			},
+		},
+		{
+			name:   "complete 90 warning",
+			amount: 90,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 90, totalYearly: 1080,
+				riskStatus: "warning", monthlySpend: new(float64(90)),
+				yearlySpend: new(float64(1080)),
+			},
+		},
+		{
+			name:   "complete 120 over",
+			amount: 120,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440,
+				riskStatus: "over", monthlySpend: new(float64(120)),
+				yearlySpend: new(float64(1440)),
+			},
+		},
+		{
+			name:                        "current complete with archived gaps",
+			amount:                      90,
+			archivedMissingRate:         true,
+			archivedMissingSubscription: true,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 90, totalYearly: 1080, archivedUnknown: 2,
+				riskStatus: "warning", monthlySpend: new(float64(90)),
+				yearlySpend: new(float64(1080)),
+			},
+		},
+		{
+			name:   "complete 120 without budget",
+			amount: 120,
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440,
+			},
+		},
+		{
+			name:   "complete 120 with future-only budget",
+			amount: 120,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 12, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440,
+			},
+		},
+		{
+			name:   "complete 120 with mismatched currency budget",
+			amount: 120,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: 0, currency: "USD", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440,
+			},
+		},
+		{
+			name:   "history inherits nearest comparable budget",
+			amount: 120,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: -2, currency: "CNY", limit: 200},
+				{offset: -1, currency: "CNY", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440,
+				riskStatus: "over", monthlySpend: new(float64(120)),
+				yearlySpend: new(float64(1440)),
+			},
+		},
+		{
+			name:   "history does not fall back past mismatched currency",
+			amount: 120,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: -2, currency: "CNY", limit: 100},
+				{offset: -1, currency: "USD", limit: 100},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440,
+			},
+		},
+		{
+			name:   "future budget does not mask historical budget",
+			amount: 120,
+			budgets: []subscriptionCostHF19BudgetSeed{
+				{offset: -1, currency: "CNY", limit: 100},
+				{offset: 12, currency: "CNY", limit: 200},
+			},
+			want: subscriptionCostHF19Expectation{
+				totalMonthly: 120, totalYearly: 1440,
+				riskStatus: "over", monthlySpend: new(float64(120)),
+				yearlySpend: new(float64(1440)),
+			},
+		},
+	}
+
+	for _, scenario := range scenarios {
+		scenario := scenario
+		t.Run(scenario.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+			defer cancel()
+
+			fixture := newRuntimeStreamAuthFixture(t)
+			seedSubscriptionCostHF19Facts(t, ctx, fixture.pool, scenario)
+
+			costRepo := store.NewPostgresSubscriptionCostRepository(fixture.pool)
+			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+			costService := subscriptioncosts.NewService(costRepo, settingsRepo, nil)
+			authMiddleware := centerhttp.RequireSession(fixture.service, fixture.scope)
+			router := centerhttp.New(centerhttp.RouterOptions{
+				Version:                           "test",
+				AuthLoginHandler:                  handlers.Login(fixture.service),
+				AuthLogoutHandler:                 handlers.Logout(fixture.service),
+				AuthMeHandler:                     handlers.Me(fixture.service),
+				AuthChangePasswordHandler:         handlers.ChangePassword(fixture.service),
+				AuthMiddleware:                    authMiddleware,
+				SubscriptionOverviewHandler:       handlers.SubscriptionOverview(costService),
+				SubscriptionMonthlyBudgetsHandler: handlers.SubscriptionMonthlyBudgets(costService),
+			})
+			server := httptest.NewTLSServer(router)
+			defer server.Close()
+
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatalf("new cookie jar: %v", err)
+			}
+			client := runtimeStreamAuthHTTPClientWithJar(server, jar)
+			runtimeStreamAuthLogin(t, client, server.URL, runtimeStreamAuthPassword)
+
+			initial := getSubscriptionCostHF19Overview(t, ctx, client, server.URL)
+			for _, budget := range scenario.budgets {
+				month := subscriptionCostHF19MonthStart(initial.SnapshotGeneratedAt, budget.offset)
+				putSubscriptionCostHF19MonthlyBudget(t, ctx, client, server.URL, month, budget.currency, budget.limit)
+			}
+
+			final := getSubscriptionCostHF19Overview(t, ctx, client, server.URL)
+			assertSubscriptionCostHF19Overview(t, final, scenario.want)
+		})
 	}
 }
 
@@ -663,4 +878,178 @@ func subscriptionCostHF17AssertFloatPtr(t *testing.T, name string, actual, expec
 	if math.Abs(*actual-*expected) > 0.000001 {
 		t.Fatalf("%s = %.6f, want %.6f", name, *actual, *expected)
 	}
+}
+
+type subscriptionCostHF19Scenario struct {
+	name                        string
+	amount                      float64
+	currentMissingRate          bool
+	currentMissingSubscription  bool
+	archivedMissingRate         bool
+	archivedMissingSubscription bool
+	budgets                     []subscriptionCostHF19BudgetSeed
+	want                        subscriptionCostHF19Expectation
+}
+
+type subscriptionCostHF19BudgetSeed struct {
+	offset   int
+	currency string
+	limit    float64
+}
+
+type subscriptionCostHF19Expectation struct {
+	totalMonthly    float64
+	totalYearly     float64
+	currentUnknown  int
+	archivedUnknown int
+	riskStatus      string
+	monthlySpend    *float64
+	yearlySpend     *float64
+}
+
+type subscriptionCostHF19Overview struct {
+	Raw                        map[string]json.RawMessage `json:"-"`
+	TotalMonthlyCost           float64                    `json:"total_monthly_cost"`
+	TotalYearlyCost            float64                    `json:"total_yearly_cost"`
+	CurrentUnknownAmountCount  int                        `json:"current_unknown_amount_count"`
+	ArchivedUnknownAmountCount int                        `json:"archived_unknown_amount_count"`
+	BudgetRiskCount            int                        `json:"budget_risk_count"`
+	SnapshotGeneratedAt        time.Time                  `json:"snapshot_generated_at"`
+	BudgetRisks                []json.RawMessage          `json:"budget_risks"`
+}
+
+func getSubscriptionCostHF19Overview(t *testing.T, ctx context.Context, client *http.Client, serverURL string) subscriptionCostHF19Overview {
+	t.Helper()
+	body := subscriptionCostHF17Request(t, ctx, client, http.MethodGet, serverURL+"/api/subscriptions/overview", "", http.StatusOK)
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("decode subscription overview fields: %v; body=%s", err, body)
+	}
+	var overview subscriptionCostHF19Overview
+	if err := json.Unmarshal(body, &overview); err != nil {
+		t.Fatalf("decode subscription overview: %v; body=%s", err, body)
+	}
+	if overview.SnapshotGeneratedAt.IsZero() {
+		t.Fatalf("subscription overview snapshot_generated_at is zero; body=%s", body)
+	}
+	overview.Raw = raw
+	return overview
+}
+
+func putSubscriptionCostHF19MonthlyBudget(t *testing.T, ctx context.Context, client *http.Client, serverURL string, month time.Time, currency string, limit float64) {
+	t.Helper()
+	path := serverURL + "/api/subscription-monthly-budgets/" + month.UTC().Format("2006-01")
+	body := subscriptionCostHF17Marshal(t, map[string]any{
+		"base_currency": currency,
+		"monthly_limit": limit,
+		"warning_pct":   80,
+	})
+	subscriptionCostHF17Request(t, ctx, client, http.MethodPut, path, body, http.StatusOK)
+}
+
+func assertSubscriptionCostHF19Overview(t *testing.T, overview subscriptionCostHF19Overview, want subscriptionCostHF19Expectation) {
+	t.Helper()
+	if math.Abs(overview.TotalMonthlyCost-want.totalMonthly) > 0.000001 {
+		t.Fatalf("total_monthly_cost = %.6f, want %.6f", overview.TotalMonthlyCost, want.totalMonthly)
+	}
+	if math.Abs(overview.TotalYearlyCost-want.totalYearly) > 0.000001 {
+		t.Fatalf("total_yearly_cost = %.6f, want %.6f", overview.TotalYearlyCost, want.totalYearly)
+	}
+	if overview.CurrentUnknownAmountCount != want.currentUnknown {
+		t.Fatalf("current_unknown_amount_count = %d, want %d", overview.CurrentUnknownAmountCount, want.currentUnknown)
+	}
+	if overview.ArchivedUnknownAmountCount != want.archivedUnknown {
+		t.Fatalf("archived_unknown_amount_count = %d, want %d", overview.ArchivedUnknownAmountCount, want.archivedUnknown)
+	}
+	wantRiskCount := 0
+	if want.riskStatus != "" {
+		wantRiskCount = 1
+	}
+	if overview.BudgetRiskCount != wantRiskCount {
+		t.Fatalf("budget_risk_count = %d, want %d", overview.BudgetRiskCount, wantRiskCount)
+	}
+	if len(overview.BudgetRisks) != overview.BudgetRiskCount {
+		t.Fatalf("budget_risk_count = %d but budget_risks length = %d", overview.BudgetRiskCount, len(overview.BudgetRisks))
+	}
+	rawRisks, ok := overview.Raw["budget_risks"]
+	if !ok {
+		t.Fatal(`overview JSON field "budget_risks" is missing`)
+	}
+	if wantRiskCount == 0 {
+		if !bytes.Equal(bytes.TrimSpace(rawRisks), []byte("null")) {
+			t.Fatalf(`overview JSON field "budget_risks" = %s, want null`, rawRisks)
+		}
+		return
+	}
+
+	budget := decodeSubscriptionCostHF17Budget(t, overview.BudgetRisks[0])
+	wantBudgetID := "monthly-" + overview.SnapshotGeneratedAt.UTC().Format("2006-01")
+	if budget.BudgetID != wantBudgetID {
+		t.Fatalf("budget risk id = %q, want %q", budget.BudgetID, wantBudgetID)
+	}
+	if budget.ScopeType != "global" || budget.Name != "月预算 "+overview.SnapshotGeneratedAt.UTC().Format("2006-01") {
+		t.Fatalf("budget risk identity = scope=%q name=%q, want global/current month", budget.ScopeType, budget.Name)
+	}
+	if budget.BaseCurrency != "CNY" || budget.WarningPct != 80 || !budget.Enabled || string(budget.Status) != want.riskStatus {
+		t.Fatalf("budget risk metadata = currency=%q warning=%d enabled=%v status=%q, want CNY/80/true/%q", budget.BaseCurrency, budget.WarningPct, budget.Enabled, budget.Status, want.riskStatus)
+	}
+	subscriptionCostHF17AssertRequiredNullableNumber(t, budget.Raw, "monthly_limit", new(float64(100)))
+	subscriptionCostHF17AssertRequiredNullableNumber(t, budget.Raw, "yearly_limit", nil)
+	subscriptionCostHF17AssertRequiredNullableNumber(t, budget.Raw, "current_monthly_spend", want.monthlySpend)
+	subscriptionCostHF17AssertRequiredNullableNumber(t, budget.Raw, "current_yearly_spend", want.yearlySpend)
+}
+
+func seedSubscriptionCostHF19Facts(t *testing.T, ctx context.Context, db *pgxpool.Pool, scenario subscriptionCostHF19Scenario) {
+	t.Helper()
+	subscriptionCostHF19InsertSubscription(t, ctx, db, "sub_hf19_fixture_baseline", "vps_"+runtimeStreamAuthMonitoringID, 0, "CNY")
+	subscriptionCostHF19InsertVPS(t, ctx, db, subscriptionCostHF19AmountVPS, "HF19 amount VPS", "active")
+	subscriptionCostHF19InsertSubscription(t, ctx, db, subscriptionCostHF19AmountSub, subscriptionCostHF19AmountVPS, scenario.amount, "CNY")
+
+	if scenario.currentMissingRate {
+		subscriptionCostHF19InsertVPS(t, ctx, db, subscriptionCostHF19CurrentGapVPS, "HF19 current missing rate VPS", "active")
+		subscriptionCostHF19InsertSubscription(t, ctx, db, subscriptionCostHF19CurrentGapSub, subscriptionCostHF19CurrentGapVPS, 1, "EUR")
+	}
+	if scenario.currentMissingSubscription {
+		subscriptionCostHF19InsertVPS(t, ctx, db, subscriptionCostHF19CurrentMissingVPS, "HF19 current missing subscription VPS", "active")
+	}
+	if scenario.archivedMissingRate {
+		subscriptionCostHF19InsertVPS(t, ctx, db, subscriptionCostHF19ArchivedGapVPS, "HF19 archived missing rate VPS", "archived")
+		subscriptionCostHF19InsertSubscription(t, ctx, db, subscriptionCostHF19ArchivedGapSub, subscriptionCostHF19ArchivedGapVPS, 1, "EUR")
+	}
+	if scenario.archivedMissingSubscription {
+		subscriptionCostHF19InsertVPS(t, ctx, db, subscriptionCostHF19ArchivedMissingVPS, "HF19 archived missing subscription VPS", "archived")
+	}
+}
+
+func subscriptionCostHF19InsertVPS(t *testing.T, ctx context.Context, db *pgxpool.Pool, vpsID, displayName, lifecycle string) {
+	t.Helper()
+	subscriptionCostHF19ExecSQL(t, ctx, db, `
+		insert into vps_assets (
+			vps_id, display_name, lifecycle_status, usage_status, renewal_decision,
+			auto_renew_check, archived_at
+		) values ($1, $2, $3, 'in_use', 'keep', 'unchecked',
+			case when $3 = 'archived' then now() else null end)`,
+		vpsID, displayName, lifecycle)
+}
+
+func subscriptionCostHF19InsertSubscription(t *testing.T, ctx context.Context, db *pgxpool.Pool, subscriptionID, vpsID string, amount float64, currency string) {
+	t.Helper()
+	subscriptionCostHF19ExecSQL(t, ctx, db, `
+		insert into subscriptions (
+			subscription_id, vps_id, price, currency, billing_cycle, billing_months,
+			monthly_price, billing_period_unit, billing_period_length, status, created_at, updated_at
+		) values ($1, $2, $3, $4, 'monthly', 1, $3, 'month', 1, 'active', now(), now())`,
+		subscriptionID, vpsID, amount, currency)
+}
+
+func subscriptionCostHF19ExecSQL(t *testing.T, ctx context.Context, db *pgxpool.Pool, sql string, args ...any) {
+	t.Helper()
+	if _, err := db.Exec(ctx, sql, args...); err != nil {
+		t.Fatalf("subscription cost HF19 fixture SQL: %v", err)
+	}
+}
+
+func subscriptionCostHF19MonthStart(snapshot time.Time, offset int) time.Time {
+	snapshot = snapshot.UTC()
+	return time.Date(snapshot.Year(), snapshot.Month(), 1, 0, 0, 0, 0, time.UTC).AddDate(0, offset, 0)
 }
