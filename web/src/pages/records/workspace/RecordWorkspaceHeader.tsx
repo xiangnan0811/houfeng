@@ -16,6 +16,8 @@ type RecordWorkspaceHeaderProps = {
   subjectReturnHref: string | null
   subjectReturnState: unknown
   ownerLabel: string
+  /** 附件仍在上传或安全检查：发布要等它们进入草稿，否则会漏掉或被后端拒绝。 */
+  uploading?: boolean
   onSave: () => void
   onPublish: () => void
   onExport: () => void
@@ -33,15 +35,16 @@ function RecordMark() {
   )
 }
 
-function syncText(state: RecordWorkspaceState): string {
+function syncText(state: RecordWorkspaceState, uploading: boolean): string {
   if (state.saving) return '正在保存草稿'
+  if (uploading) return '附件上传中，完成后可发布'
   if (state.dirty) return '本地未同步'
   if (state.draft) return '草稿已同步'
   return '尚未创建草稿'
 }
 
-function syncTone(state: RecordWorkspaceState): string {
-  if (state.saving) return 'record-identity__sync--saving'
+function syncTone(state: RecordWorkspaceState, uploading: boolean): string {
+  if (state.saving || uploading) return 'record-identity__sync--saving'
   if (state.dirty) return 'record-identity__sync--dirty'
   return state.draft ? 'record-identity__sync--synced' : ''
 }
@@ -54,6 +57,7 @@ export function RecordWorkspaceHeader({
   subjectReturnHref,
   subjectReturnState,
   ownerLabel,
+  uploading = false,
   onSave,
   onPublish,
   onExport,
@@ -100,8 +104,8 @@ export function RecordWorkspaceHeader({
           </div>
           {editable ? (
             <p className="record-identity__meta record-identity__meta--sync">
-              <span className={['record-identity__sync', syncTone(state)].filter(Boolean).join(' ')} role="status">
-                {syncText(state)}{state.message ? ` · ${state.message}` : ''}
+              <span className={['record-identity__sync', syncTone(state, uploading)].filter(Boolean).join(' ')} role="status">
+                {syncText(state, uploading)}{state.message ? ` · ${state.message}` : ''}
               </span>
               {mode === 'edit' && payload.title ? <span className="record-identity__editing">{payload.title}</span> : null}
               {subjectReturn}
@@ -169,7 +173,7 @@ export function RecordWorkspaceHeader({
         {editable ? (
           <>
             <Button size="md" variant="secondary" disabled={state.saving} onClick={onSave}>保存草稿</Button>
-            <Button size="md" disabled={state.publishing} onClick={onPublish}>发布修订</Button>
+            <Button size="md" disabled={state.publishing || uploading} onClick={onPublish}>发布修订</Button>
           </>
         ) : null}
       </div>

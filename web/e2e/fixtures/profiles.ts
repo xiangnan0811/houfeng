@@ -327,6 +327,14 @@ const RECORD_USER_ID = 'usr_0123456789abcdef01234567'
 const RECORD_TIMESTAMP = '2026-08-17T09:00:00Z'
 const RECORD_EVIDENCE_ID = 'evs_e2ethirdnight'
 const RECORD_ATTACHMENT_ID = 'att_e2emtrreport'
+export const RECORD_ATTACHMENT_METADATA = {
+  attachment_id: RECORD_ATTACHMENT_ID,
+  state: 'available',
+  display_name: 'mtr-第三晚-alpha.txt',
+  media_type: 'text/plain',
+  size_bytes: 18432,
+  preview_available: true,
+} as const
 
 const RECORD_BODY_MARKDOWN = [
   '# 第三晚 TCP 观测',
@@ -582,6 +590,11 @@ export function recordDetailProfile(options: {
     ? { ...baseRevision, evidence_snapshot_ids: [...options.revisionSave.evidenceSnapshotIds] }
     : baseRevision
   return authenticatedProfile({
+    // 记录页按 attachment_ids 逐个读取附件元数据，展示文件名、类型与大小。
+    [apiRouteKey('GET', `/api/attachments/${RECORD_ATTACHMENT_ID}`)]: {
+      status: 200,
+      body: RECORD_ATTACHMENT_METADATA,
+    },
     [apiRouteKey('GET', '/api/records/rec_e2e001')]: {
       status: 200,
       body: {

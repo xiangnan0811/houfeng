@@ -325,7 +325,7 @@ export class ApiFixtureController {
         'Content-Type': 'application/json',
         ...fixture.headers,
       },
-      body: fixture.status === 204 ? '' : JSON.stringify(fixture.body),
+      body: fixture.status === 204 ? '' : fixture.rawBody ?? JSON.stringify(fixture.body),
     })
   }
 
@@ -338,6 +338,12 @@ export class ApiFixtureController {
       const body = request.postData()
       if (body === null || body.length === 0) return true
       this.unexpectedRequests.push(`${key} body must be empty`)
+      return false
+    }
+    if (fixture.expectRawBodyBytes !== undefined) {
+      const size = request.postDataBuffer()?.length ?? 0
+      if (size === fixture.expectRawBodyBytes) return true
+      this.unexpectedRequests.push(`${key} raw body expected ${fixture.expectRawBodyBytes} bytes received ${size}`)
       return false
     }
     if (!fixture.expectedBodyKeys) {

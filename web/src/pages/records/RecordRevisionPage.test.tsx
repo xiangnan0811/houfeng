@@ -28,6 +28,11 @@ vi.mock('../../lib/recordsApi', () => ({
   createRecord: vi.fn(),
   createRecordRevision: vi.fn(),
   restoreRecordRevision: vi.fn(),
+  createAttachmentUpload: vi.fn(),
+  uploadAttachmentContent: vi.fn(),
+  completeAttachmentUpload: vi.fn(),
+  getAttachmentMetadata: vi.fn(),
+  getAttachmentContent: vi.fn(),
 }))
 
 vi.mock('../../lib/recordCollaborationApi', () => ({

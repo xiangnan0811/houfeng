@@ -1,5 +1,7 @@
 import { Button, Input } from '../../../components/atoms'
 import { RecordWatchControl } from '../../../components/RecordWatchControl'
+import { attachmentPreviewKind } from '../attachments/attachmentFiles'
+import { AuthorizedAttachmentDownload } from '../attachments/AuthorizedAttachmentDownload'
 import type { RecordMaterialItem } from '../editor/RecordMaterialDrawer'
 import { RecordMaterialList } from '../editor/RecordMaterialList'
 import { RecordOutline } from '../editor/RecordOutline'
@@ -10,6 +12,7 @@ type RecordReadingAsideProps = {
   source: string
   model: unknown
   materials: readonly RecordMaterialItem[]
+  onPreview: (item: RecordMaterialItem) => void
   collaboration: RecordCollaboration | null
   restore: {
     reason: string
@@ -19,7 +22,7 @@ type RecordReadingAsideProps = {
   } | null
 }
 
-export function RecordReadingAside({ source, model, materials, collaboration, restore }: RecordReadingAsideProps) {
+export function RecordReadingAside({ source, model, materials, onPreview, collaboration, restore }: RecordReadingAsideProps) {
   return (
     <>
       {restore ? (
@@ -37,7 +40,22 @@ export function RecordReadingAside({ source, model, materials, collaboration, re
           材料 <span className={countClass(materials.length)}>{materials.length}</span>
         </h2>
         {materials.length > 0
-          ? <RecordMaterialList items={materials} />
+          ? (
+            <RecordMaterialList
+              items={materials}
+              renderActions={(item) => item.attachment ? (
+                <>
+                  {attachmentPreviewKind(item.attachment) ? (
+                    <button type="button" className="text-link" onClick={() => onPreview(item)}
+                      aria-label={`预览${item.attachment.display_name}`}>
+                      预览
+                    </button>
+                  ) : null}
+                  <AuthorizedAttachmentDownload attachment={item.attachment} />
+                </>
+              ) : null}
+            />
+          )
           : <p className="record-muted">没有附件或证据</p>}
       </section>
 

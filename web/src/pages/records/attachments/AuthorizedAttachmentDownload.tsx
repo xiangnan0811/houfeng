@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { Button } from '../../components/atoms'
-import { ApiError } from '../../lib/apiRequest'
-import { getAttachmentContent } from '../../lib/recordsApi'
-import type { AttachmentContentVariant, AttachmentMetadata } from '../../lib/types'
+import { ApiError } from '../../../lib/apiRequest'
+import { getAttachmentContent } from '../../../lib/recordsApi'
+import type { AttachmentContentVariant, AttachmentMetadata } from '../../../lib/types'
+import { safeDownloadFilename } from './attachmentFiles'
 
 type AttachmentContentLoader = (
   attachmentId: string,
@@ -13,11 +13,10 @@ type AttachmentContentLoader = (
 
 type AuthorizedAttachmentDownloadProps = {
   attachment: AttachmentMetadata
-  variant?: AttachmentContentVariant
   loadContent?: AttachmentContentLoader
 }
 
-type DownloadState = 'idle' | 'loading' | 'started' | 'error'
+type DownloadState = 'idle' | 'loading' | 'error'
 
 function deniedMessage(reason: unknown): string {
   if (reason instanceof ApiError && (reason.status === 403 || reason.status === 404)) {
@@ -26,9 +25,9 @@ function deniedMessage(reason: unknown): string {
   return '附件下载失败，请重试'
 }
 
+// 材料清单行内的下载链接：经授权读取原文件后以对象 URL 触发保存，不直接暴露内容地址。
 export function AuthorizedAttachmentDownload({
   attachment,
-  variant = 'original',
   loadContent = getAttachmentContent,
 }: AuthorizedAttachmentDownloadProps) {
   const [state, setState] = useState<DownloadState>('idle')
@@ -48,10 +47,7 @@ export function AuthorizedAttachmentDownload({
     }
   }, [])
 
-  const previewUnavailable = variant === 'preview' && !attachment.preview_available
-  const unavailable = attachment.state !== 'available' || previewUnavailable
-  const actionLabel = variant === 'preview' ? '下载安全预览' : '下载原文件'
-  const buttonLabel = state === 'started' ? `再次${actionLabel}` : actionLabel
+  const unavailable = attachment.state !== 'available'
 
   async function startDownload(): Promise<void> {
     if (unavailable || state === 'loading') return
@@ -64,16 +60,16 @@ export function AuthorizedAttachmentDownload({
     setError(null)
     setState('loading')
     try {
-      const content = await loadContent(attachment.attachment_id, variant, request.signal)
+      const content = await loadContent(attachment.attachment_id, 'original', request.signal)
       if (request.signal.aborted || !mountedRef.current) return
       const objectURL = URL.createObjectURL(content)
       objectURLRef.current = objectURL
       const anchor = document.createElement('a')
       anchor.href = objectURL
-      anchor.download = attachment.display_name
+      anchor.download = safeDownloadFilename(attachment.display_name)
       anchor.rel = 'noopener'
       anchor.click()
-      if (mountedRef.current) setState('started')
+      if (mountedRef.current) setState('idle')
     } catch (reason: unknown) {
       if (request.signal.aborted || !mountedRef.current) return
       setError(deniedMessage(reason))
@@ -84,36 +80,17 @@ export function AuthorizedAttachmentDownload({
   }
 
   return (
-    <div className="asset-decision-chip-row">
-      <Button
-        size="sm"
-        variant="secondary"
+    <>
+      <button
+        type="button"
+        className="text-link"
         disabled={unavailable || state === 'loading'}
-        aria-label={buttonLabel}
+        aria-label={`下载${attachment.display_name}`}
         onClick={() => { void startDownload() }}
       >
-        {buttonLabel}
-      </Button>
-      {unavailable && (
-        <span role="note">
-          {previewUnavailable ? '安全预览尚不可用' : '附件尚不可下载'}
-        </span>
-      )}
-      {state === 'loading' && (
-        <span role="status">
-          正在申请下载授权…
-        </span>
-      )}
-      {state === 'started' && (
-        <span role="status">
-          下载已开始
-        </span>
-      )}
-      {state === 'error' && error && (
-        <span className="tone--critical" role="alert">
-          {error}
-        </span>
-      )}
-    </div>
+        {state === 'loading' ? '下载中…' : '下载'}
+      </button>
+      {state === 'error' && error ? <span className="record-material__stale" role="alert">{error}</span> : null}
+    </>
   )
 }

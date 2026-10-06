@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { RecordActionPanel } from '../../components/RecordActionPanel'
@@ -7,6 +7,9 @@ import { RecordWatchControl } from '../../components/RecordWatchControl'
 import { PageState } from '../../components/PageState'
 import { useAuth } from '../../lib/auth-context'
 import { decodeRenderModelStatusV1, insertMaterialToken } from '../../lib/documentMarkdown'
+import { AttachmentPreviewDialog } from './attachments/AttachmentPreview'
+import { useAttachmentMetadata } from './attachments/useAttachmentMetadata'
+import { useRecordAttachmentUploads } from './attachments/useRecordAttachmentUploads'
 import { PromoteChecklistActionDialog } from './editor/PromoteChecklistActionDialog'
 import { RecordConflictResolver } from './editor/RecordConflictResolver'
 import { RecordMaterialDrawer, type RecordMaterialItem } from './editor/RecordMaterialDrawer'
@@ -93,10 +96,25 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
   const collaboration = useRecordCollaboration(recordId, mode)
   const [layout, setLayout] = useState<RecordEditorLayout>('split')
   const [materialsOpen, setMaterialsOpen] = useState(false)
+  const [previewing, setPreviewing] = useState<RecordMaterialItem | null>(null)
   const [promoteOpen, setPromoteOpen] = useState(false)
   const [tool, setTool] = useState<RecordTool>(null)
   const [restoreReason, setRestoreReason] = useState('恢复历史修订')
   const editable = mode === 'new' || mode === 'edit'
+  const attachmentMetadata = useAttachmentMetadata(state.payload.attachment_ids)
+  const uploads = useRecordAttachmentUploads({
+    ensureDraft: commands.ensureDraft,
+    isPublishing: commands.isPublishing,
+    onAvailable: commands.addAttachment,
+  })
+  const { reset: resetUploads } = uploads
+  // 草稿被发布或丢弃后，它名下剩下的失败/取消项随之作废，不能再对已消费的草稿重试。
+  const draftId = state.draft?.draft_id ?? null
+  const uploadDraftIdRef = useRef(draftId)
+  useEffect(() => {
+    if (uploadDraftIdRef.current && uploadDraftIdRef.current !== draftId) resetUploads()
+    uploadDraftIdRef.current = draftId
+  }, [draftId, resetUploads])
 
   const members = (() => {
     const options = new Map<string, string>()
@@ -115,12 +133,19 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
     ? [...(state.revision?.evidence_snapshot_ids ?? [])]
     : [...(state.record?.current.evidence_snapshot_ids ?? [])]
   const materials: RecordMaterialItem[] = [
-    ...state.payload.attachment_ids.map((id) => ({
-      kind: 'attachment' as const,
-      id,
-      label: `附件 ${id}`,
-      available: true,
-    })),
+    ...state.payload.attachment_ids.map((id): RecordMaterialItem => {
+      const entry = attachmentMetadata.get(id)
+      const metadata = entry?.status === 'ready' ? entry.metadata : undefined
+      return {
+        kind: 'attachment',
+        id,
+        // 元数据未到或读不到时只显示"附件"，不露出原始 ID。
+        label: metadata?.display_name ?? '附件',
+        available: metadata?.state === 'available',
+        pending: !entry || entry.status === 'loading',
+        ...(metadata ? { attachment: metadata } : {}),
+      }
+    }),
     ...evidenceIds.map((id) => ({
       kind: 'evidence' as const,
       id,
@@ -176,8 +201,13 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
           : null}
         subjectReturnState={subjectReturn?.kind === 'target' ? undefined : location.state}
         ownerLabel={ownerLabel}
+        uploading={uploads.active}
         onSave={() => void commands.saveDraft()}
-        onPublish={() => void commands.publish()}
+        onPublish={() => {
+          // 附件还在上传或安全检查时不发布：否则发布会先删掉草稿，未完成的附件随之被释放。
+          if (uploads.isBusy()) return
+          void commands.publish()
+        }}
         onExport={() => setTool('export')}
         onImport={() => setTool('import')}
       />
@@ -265,6 +295,7 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
               source={state.payload.body_markdown}
               model={previewModel}
               materials={materials}
+              onPreview={setPreviewing}
               collaboration={hasCollaboration ? collaboration : null}
               restore={mode === 'revision' ? {
                 reason: restoreReason,
@@ -289,6 +320,15 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
         onClose={() => setMaterialsOpen(false)}
         items={materials}
         readOnly={!editable}
+        uploads={editable ? {
+          rows: uploads.rows,
+          notice: uploads.notice,
+          disabled: state.publishing,
+          onFiles: (files) => { void uploads.addFiles(files) },
+          onRetry: uploads.retry,
+          onCancel: uploads.cancel,
+          onRemove: uploads.remove,
+        } : undefined}
         onInsert={(item) => {
           if (!editable) return
           commands.setBody(insertMaterialToken(state.payload.body_markdown, item))
@@ -316,6 +356,7 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
           }, () => setPromoteOpen(false))
         }}
       />
+      <AttachmentPreviewDialog attachment={previewing?.attachment ?? null} onClose={() => setPreviewing(null)} />
       <RecordConflictResolver
         open={state.status === 'conflict' && state.conflictPayload !== null}
         local={state.conflictPayload ?? state.payload}
