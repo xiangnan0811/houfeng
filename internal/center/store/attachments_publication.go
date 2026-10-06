@@ -31,6 +31,9 @@ func (repository *PostgresAttachmentRepository) PrepareBlobPublication(
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockBlobPublicationOwner(ctx, tx, request); err != nil {
+		return attachments.BlobPublicationIntent{}, err
+	}
 	if _, err := tx.Exec(ctx, `lock table public.blob_objects in share row exclusive mode`); err != nil {
 		return attachments.BlobPublicationIntent{}, fmt.Errorf("lock Blob metadata for publication preparation: %w", err)
 	}
@@ -124,6 +127,64 @@ func (repository *PostgresAttachmentRepository) PrepareBlobPublication(
 		return attachments.BlobPublicationIntent{}, fmt.Errorf("commit Blob publication preparation: %w", err)
 	}
 	return intent, nil
+}
+
+// lockBlobPublicationOwner 在登记写入意图前锁住并复核所有者：草稿释放会删掉上传与处理任务行，
+// 若意图在释放之后才登记，就成了没有所有者的 prepared 意图，过期清理可能误删去重共用的对象。
+// 所有者行锁先于 Blob/分片表锁取得，与释放（先锁上传/任务行、后锁 blob_objects）不成环。
+// 所有者还必须处于可写入状态（上传 created/uploading、预览任务 claimed），否则立即拒绝、
+// 不去等表锁：永久删除先取 blob_objects 表锁、只删除终态所有者，对可写入的所有者会 fail closed，
+// 因此两者不会互相等待成环。
+func lockBlobPublicationOwner(
+	ctx context.Context,
+	tx attachmentTx,
+	request attachments.BlobPublicationPrepareRequest,
+) error {
+	var query string
+	switch request.OwnerKind {
+	case attachments.BlobPublicationOwnerUpload:
+		query = `select upload_id, upload_state from public.attachment_uploads
+			where upload_id = $1 and project_id = $2
+			for share`
+	case attachments.BlobPublicationOwnerProcessorPreview:
+		query = `select job.processor_job_id, job.processor_state
+			from public.attachment_processor_jobs as job
+			join public.attachment_uploads as upload on upload.upload_id = job.upload_id
+			where job.processor_job_id = $1 and upload.project_id = $2
+			for share of job`
+	default:
+		return attachments.ErrInvalidBlobPublicationRequest
+	}
+	var ownerID, state string
+	err := tx.QueryRow(ctx, query, request.OwnerID, request.ProjectID).Scan(&ownerID, &state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if request.OwnerKind == attachments.BlobPublicationOwnerProcessorPreview {
+			return attachments.ErrProcessorClaimLost
+		}
+		return attachments.ErrAttachmentOwnerNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("lock Blob publication owner: %w", err)
+	}
+	if ownerID != request.OwnerID {
+		return attachments.ErrBlobPublicationConflict
+	}
+	switch request.OwnerKind {
+	case attachments.BlobPublicationOwnerUpload:
+		switch attachments.UploadState(state) {
+		case attachments.UploadStateCreated, attachments.UploadStateUploading:
+			return nil
+		case attachments.UploadStateExpired:
+			return attachments.ErrUploadExpired
+		default:
+			return attachments.ErrAttachmentConflict
+		}
+	default:
+		if state != "claimed" {
+			return attachments.ErrProcessorClaimLost
+		}
+		return nil
+	}
 }
 
 // rebindProcessorPreviewPublication fences a crashed processor generation

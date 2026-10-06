@@ -49,6 +49,13 @@ func TestPostgresIntegrationAttachmentBlobPublicationPrepareReplayUsesCurrentAct
 		fixture.openDirectRuntimePool(t, ctx, "publication-prepare-replay", 2),
 	)
 	content := []byte("publication prepare replay current active intent\n")
+	// 写入意图登记会复核所有者，三个上传所有者都要真实存在。
+	localHarness := attachmentPublicationCrashHarness{
+		backendKind: attachments.BackendKindLocal, transportKind: attachments.TransportKindLocal,
+	}
+	for _, owner := range []string{"aup_pubpreparehistory", "aup_pubpreparecurrent", "aup_pubprepareconflict"} {
+		prepareAttachmentPublicationCrashUpload(t, ctx, fixture, repository, localHarness, owner, content)
+	}
 	historicalRequest := attachmentPublicationCrashPrepareRequest(
 		content,
 		"aup_pubpreparehistory",
@@ -435,12 +442,7 @@ func prepareS3AttachmentPublicationCrashUpload(
 	content []byte,
 ) attachmentPublicationCrashUpload {
 	t.Helper()
-	if harness.backendKind == attachments.BackendKindLocal {
-		assertAttachmentPublicationCrashPersistedTemporaryIdentity(
-			t, ctx, fixture, harness, uploadID, "",
-		)
-		return attachmentPublicationCrashUpload{}
-	}
+	// 本地传输同样要有真实上传行：写入意图登记会复核所有者是否仍存在。
 	return prepareAttachmentPublicationCrashUpload(
 		t, ctx, fixture, repository, harness, uploadID, content,
 	)

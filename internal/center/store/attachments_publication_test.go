@@ -33,6 +33,8 @@ func TestPostgresAttachmentRepositoryPreparesBlobPublicationAfterCanonicalLocks(
 	request := publicationStorePrepareRequest(0x11, attachments.BlobPublicationOwnerUpload, "aup_publication1", 1)
 	prepared := publicationStoreIntent("bpi_publication1", request, "")
 	tx := newPublicationStoreTx(t,
+		publicationStepWithArgs(publicationQuery("owner_lock", []any{request.OwnerID, publicationStoreOwnerState(request)}, "for share"),
+			publicationStoreExactArgs(request.OwnerID, request.ProjectID)),
 		publicationExec("blob_lock", "LOCK TABLE", "lock table public.blob_objects"),
 		publicationExec("upload_parts_lock", "LOCK TABLE", "lock table public.attachment_upload_parts"),
 		publicationStepWithArgs(publicationQuery("gc_fence", []any{false},
@@ -49,7 +51,57 @@ func TestPostgresAttachmentRepositoryPreparesBlobPublicationAfterCanonicalLocks(
 	if err != nil || got != prepared {
 		t.Fatalf("PrepareBlobPublication() = (%#v, %v), want %#v", got, err, prepared)
 	}
-	tx.assertDone("blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "commit", "rollback")
+	tx.assertDone("owner_lock", "blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "commit", "rollback")
+}
+
+func TestPostgresAttachmentRepositoryRejectsPublicationWhenOwnerWasReleased(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		request attachments.BlobPublicationPrepareRequest
+		want    error
+	}{
+		{name: "upload", request: publicationStorePrepareRequest(0x13, attachments.BlobPublicationOwnerUpload, "aup_publication13", 1), want: attachments.ErrAttachmentOwnerNotFound},
+		{name: "processor preview", request: publicationStorePrepareRequest(0x14, attachments.BlobPublicationOwnerProcessorPreview, "apj_publication14", 1), want: attachments.ErrProcessorClaimLost},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tx := newPublicationStoreTx(t,
+				publicationQueryError("owner_lock", pgx.ErrNoRows, "for share"),
+			)
+			repository := publicationStoreRepository(tx, "bpi_unused")
+			_, err := repository.PrepareBlobPublication(context.Background(), test.request)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("PrepareBlobPublication(released owner) error = %v, want %v", err, test.want)
+			}
+			// 所有者已不在时不能再取 Blob/分片表锁或登记意图。
+			tx.assertDone("owner_lock", "rollback")
+		})
+	}
+}
+
+func TestPostgresAttachmentRepositoryRejectsPublicationForNonWritableOwner(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		request attachments.BlobPublicationPrepareRequest
+		state   string
+		want    error
+	}{
+		{name: "expired upload", request: publicationStorePrepareRequest(0x15, attachments.BlobPublicationOwnerUpload, "aup_publication15", 1), state: "expired", want: attachments.ErrUploadExpired},
+		{name: "completed upload", request: publicationStorePrepareRequest(0x16, attachments.BlobPublicationOwnerUpload, "aup_publication16", 1), state: "quarantined", want: attachments.ErrAttachmentConflict},
+		{name: "finished preview job", request: publicationStorePrepareRequest(0x17, attachments.BlobPublicationOwnerProcessorPreview, "apj_publication17", 1), state: "succeeded", want: attachments.ErrProcessorClaimLost},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tx := newPublicationStoreTx(t,
+				publicationQuery("owner_lock", []any{test.request.OwnerID, test.state}, "for share"),
+			)
+			repository := publicationStoreRepository(tx, "bpi_unused")
+			_, err := repository.PrepareBlobPublication(context.Background(), test.request)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("PrepareBlobPublication(%s) error = %v, want %v", test.name, err, test.want)
+			}
+			// 不可写入的所有者立即拒绝，不去等 Blob/分片表锁，避免与先取表锁的永久删除成环。
+			tx.assertDone("owner_lock", "rollback")
+		})
+	}
 }
 
 func TestPostgresAttachmentRepositoryNormalizesPublicationExpiryToMicroseconds(t *testing.T) {
@@ -60,6 +112,8 @@ func TestPostgresAttachmentRepositoryNormalizesPublicationExpiryToMicroseconds(t
 	requestForStorage.PublishExpiresAt = normalizedExpiry
 	prepared := publicationStoreIntent("bpi_publication12", requestForStorage, "")
 	tx := newPublicationStoreTx(t,
+		publicationStepWithArgs(publicationQuery("owner_lock", []any{request.OwnerID, publicationStoreOwnerState(request)}, "for share"),
+			publicationStoreExactArgs(request.OwnerID, request.ProjectID)),
 		publicationExec("blob_lock", "LOCK TABLE", "lock table public.blob_objects"),
 		publicationExec("upload_parts_lock", "LOCK TABLE", "lock table public.attachment_upload_parts"),
 		publicationStepWithArgs(publicationQuery("gc_fence", []any{false},
@@ -76,12 +130,14 @@ func TestPostgresAttachmentRepositoryNormalizesPublicationExpiryToMicroseconds(t
 	if err != nil || got != prepared {
 		t.Fatalf("PrepareBlobPublication(non-microsecond expiry) = (%#v, %v), want %#v", got, err, prepared)
 	}
-	tx.assertDone("blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "commit", "rollback")
+	tx.assertDone("owner_lock", "blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "commit", "rollback")
 }
 
 func TestPostgresAttachmentRepositoryRejectsPublicationAcrossActiveGCFence(t *testing.T) {
 	request := publicationStorePrepareRequest(0x22, attachments.BlobPublicationOwnerUpload, "aup_publication2", 1)
 	tx := newPublicationStoreTx(t,
+		publicationStepWithArgs(publicationQuery("owner_lock", []any{request.OwnerID, publicationStoreOwnerState(request)}, "for share"),
+			publicationStoreExactArgs(request.OwnerID, request.ProjectID)),
 		publicationExec("blob_lock", "LOCK TABLE", "lock table public.blob_objects"),
 		publicationExec("upload_parts_lock", "LOCK TABLE", "lock table public.attachment_upload_parts"),
 		publicationQueryWithout("gc_fence", []any{true}, []string{"object_version"},
@@ -93,7 +149,7 @@ func TestPostgresAttachmentRepositoryRejectsPublicationAcrossActiveGCFence(t *te
 	if !errors.Is(err, attachments.ErrBlobGCProtected) {
 		t.Fatalf("PrepareBlobPublication(active GC) error = %v, want ErrBlobGCProtected", err)
 	}
-	tx.assertDone("blob_lock", "upload_parts_lock", "gc_fence", "rollback")
+	tx.assertDone("owner_lock", "blob_lock", "upload_parts_lock", "gc_fence", "rollback")
 }
 
 func TestPostgresAttachmentRepositoryReplaysOnlyExactPublicationPrepare(t *testing.T) {
@@ -128,6 +184,8 @@ func TestPostgresAttachmentRepositoryReplaysOnlyExactPublicationPrepare(t *testi
 				test.mutate(&stored)
 			}
 			tx := newPublicationStoreTx(t,
+				publicationStepWithArgs(publicationQuery("owner_lock", []any{request.OwnerID, publicationStoreOwnerState(request)}, "for share"),
+					publicationStoreExactArgs(request.OwnerID, request.ProjectID)),
 				publicationExec("blob_lock", "LOCK TABLE", "lock table public.blob_objects"),
 				publicationExec("upload_parts_lock", "LOCK TABLE", "lock table public.attachment_upload_parts"),
 				publicationStepWithArgs(publicationQuery("gc_fence", []any{false}, "from public.blob_gc_deletions"),
@@ -154,13 +212,13 @@ func TestPostgresAttachmentRepositoryReplaysOnlyExactPublicationPrepare(t *testi
 				if tx.committed {
 					t.Fatalf("PrepareBlobPublication(%s) committed a conflicting replay", test.name)
 				}
-				tx.assertDone("blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "intent_replay", "rollback")
+				tx.assertDone("owner_lock", "blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "intent_replay", "rollback")
 				return
 			}
 			if err != nil || got != stored {
 				t.Fatalf("PrepareBlobPublication(%s) = (%#v, %v), want %#v", test.name, got, err, stored)
 			}
-			tx.assertDone("blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "intent_replay", "commit", "rollback")
+			tx.assertDone("owner_lock", "blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "intent_replay", "commit", "rollback")
 		})
 	}
 }
@@ -169,6 +227,8 @@ func TestPostgresAttachmentRepositoryPrepareReplaySelectsExactActiveIntent(t *te
 	request := publicationStorePrepareRequest(0x34, attachments.BlobPublicationOwnerUpload, "aup_publication34", 1)
 	prepared := publicationStoreIntent("bpi_existing34", request, "")
 	tx := newPublicationStoreTx(t,
+		publicationStepWithArgs(publicationQuery("owner_lock", []any{request.OwnerID, publicationStoreOwnerState(request)}, "for share"),
+			publicationStoreExactArgs(request.OwnerID, request.ProjectID)),
 		publicationExec("blob_lock", "LOCK TABLE", "lock table public.blob_objects"),
 		publicationExec("upload_parts_lock", "LOCK TABLE", "lock table public.attachment_upload_parts"),
 		publicationStepWithArgs(publicationQuery("gc_fence", []any{false}, "from public.blob_gc_deletions"),
@@ -189,7 +249,7 @@ func TestPostgresAttachmentRepositoryPrepareReplaySelectsExactActiveIntent(t *te
 	if err != nil || got != prepared {
 		t.Fatalf("PrepareBlobPublication(exact active replay) = (%#v, %v), want %#v", got, err, prepared)
 	}
-	tx.assertDone("blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "intent_replay", "commit", "rollback")
+	tx.assertDone("owner_lock", "blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "intent_replay", "commit", "rollback")
 }
 
 func TestPostgresAttachmentRepositoryRebindsProcessorPreviewPublicationAfterClaimTakeover(t *testing.T) {
@@ -208,6 +268,8 @@ func TestPostgresAttachmentRepositoryRebindsProcessorPreviewPublicationAfterClai
 			reboundIntent := oldIntent
 			reboundIntent.OwnerGeneration = newRequest.OwnerGeneration
 			tx := newPublicationStoreTx(t,
+				publicationStepWithArgs(publicationQuery("owner_lock", []any{newRequest.OwnerID, publicationStoreOwnerState(newRequest)}, "for share"),
+					publicationStoreExactArgs(newRequest.OwnerID, newRequest.ProjectID)),
 				publicationExec("blob_lock", "LOCK TABLE", "lock table public.blob_objects"),
 				publicationExec("upload_parts_lock", "LOCK TABLE", "lock table public.attachment_upload_parts"),
 				publicationStepWithArgs(publicationQuery("gc_fence", []any{false}, "from public.blob_gc_deletions"),
@@ -235,7 +297,7 @@ func TestPostgresAttachmentRepositoryRebindsProcessorPreviewPublicationAfterClai
 			if err != nil || got != reboundIntent {
 				t.Fatalf("PrepareBlobPublication(processor takeover) = (%#v, %v), want %#v", got, err, reboundIntent)
 			}
-			tx.assertDone("blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "intent_replay", "intent_rebind", "commit", "rollback")
+			tx.assertDone("owner_lock", "blob_lock", "upload_parts_lock", "gc_fence", "intent_insert", "intent_replay", "intent_rebind", "commit", "rollback")
 		})
 	}
 }
@@ -1937,4 +1999,12 @@ func publicationStoreCleanupReceiptDigest(
 	appendString(string(intent.Target.BackendKind))
 	appendString(string(outcome))
 	return sha256.Sum256(encoded)
+}
+
+// publicationStoreOwnerState 是登记写入意图时所有者应处的可写入状态。
+func publicationStoreOwnerState(request attachments.BlobPublicationPrepareRequest) string {
+	if request.OwnerKind == attachments.BlobPublicationOwnerProcessorPreview {
+		return "claimed"
+	}
+	return string(attachments.UploadStateUploading)
 }

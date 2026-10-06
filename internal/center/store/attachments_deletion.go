@@ -581,6 +581,13 @@ func (repository *PostgresAttachmentRepository) prepareAttachmentDeletion(
 		}
 		return attachmentDeletionPreparation{claims: claims, counts: counts}, nil
 	}
+	// 配额行锁先于 Blob 表锁，与草稿附件释放、处理器完成（先配额、后 blob_objects）同序，避免互等。
+	usage, quotaVersion, quotaExists, err := lockExistingAttachmentProcessorQuotaAccount(
+		ctx, tx, command.Operation.Object.ProjectID,
+	)
+	if err != nil {
+		return attachmentDeletionPreparation{}, err
+	}
 	if _, err := tx.Exec(ctx, `lock table public.blob_objects in share row exclusive mode`); err != nil {
 		return attachmentDeletionPreparation{}, fmt.Errorf("lock Blob metadata for attachment purge: %w", err)
 	}
@@ -608,9 +615,8 @@ func (repository *PostgresAttachmentRepository) prepareAttachmentDeletion(
 		return attachmentDeletionPreparation{}, err
 	}
 	if len(attachmentIDs) > 0 {
-		usage, quotaVersion, err := lockBlobGCQuotaAccount(ctx, tx, command.Operation.Object.ProjectID)
-		if err != nil {
-			return attachmentDeletionPreparation{}, err
+		if !quotaExists {
+			return attachmentDeletionPreparation{}, attachments.ErrAttachmentConflict
 		}
 		if logicalBytes < 0 || usage.LogicalBytes < logicalBytes {
 			return attachmentDeletionPreparation{}, recorddeletion.ErrDeletionSafetyUnavailable

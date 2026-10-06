@@ -1007,6 +1007,9 @@ func writeRecordsApplicationError(w http.ResponseWriter, err error) {
 		writeRecordError(w, http.StatusConflict, "record_revision_conflict", "record revision changed", nil)
 	case errors.Is(err, records.ErrDraftConflict):
 		writeRecordError(w, http.StatusConflict, "draft_conflict", "draft changed", nil)
+	case errors.Is(err, records.ErrDraftAttachmentsBusy):
+		w.Header().Set("Retry-After", "5")
+		writeRecordError(w, http.StatusConflict, "draft_attachments_busy", "draft attachments are still processing", nil)
 	case errors.Is(err, records.ErrRecordAlreadyExists):
 		writeRecordError(w, http.StatusConflict, "record_conflict", "record already exists", nil)
 	case errors.Is(err, recordplatform.ErrIdempotencyKeyReused), errors.Is(err, recordplatform.ErrIdempotencyConflictState):
