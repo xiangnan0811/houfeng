@@ -345,6 +345,10 @@ func cleanupPublishedRecordDraft(ctx context.Context, tx pgx.Tx, command records
 	if command.DraftID == "" {
 		return nil
 	}
+	// 被新修订引用的附件已由 revision participant 转给记录，剩下的仍归草稿，必须先释放。
+	if err := releaseDraftOwnedAttachments(ctx, tx, command.DraftID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		delete from public.record_draft_checkpoints
 		where draft_id = $1`, command.DraftID); err != nil {

@@ -691,6 +691,110 @@ func TestPostgresIntegrationAttachmentDeletionFailsClosedForActiveUploadPartial(
 	}
 }
 
+func TestPostgresIntegrationAttachmentDeletionLocksQuotaBeforeBlobTables(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "attachment-deletion-lock-order", 2)
+	recordRepository := newRecordsPostgresRepository(t, runtimePool)
+	record, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, "rec_attdeleteorder", "", 0, 0,
+		recordsPostgresCompleteRevisionInput(t, "Attachment deletion lock order"), "attachment-deletion-order",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision() error = %v", err)
+	}
+	blobStore, err := attachments.NewLocalBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewLocalBlobStore() error = %v", err)
+	}
+	content := []byte("attachment deletion lock order content\n")
+	digest := sha256.Sum256(content)
+	object, err := blobStore.Put(ctx, attachments.PutRequest{
+		ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)),
+	}, bytes.NewReader(content))
+	if err != nil {
+		t.Fatalf("Put() error = %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.blob_objects (
+			blob_key, sha256_digest, object_version, size_bytes, backend_kind
+		) values ($1, $2, $3, $4, 'local')`,
+		object.Key, object.SHA256[:], object.VersionID, object.SizeBytes); err != nil {
+		t.Fatalf("insert Blob metadata: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_attachments (
+			attachment_id, project_id, record_id, attachment_state,
+			display_name, media_type, logical_size_bytes,
+			blob_key, blob_object_version, created_by
+		) values ('att_deleteorder', 'default', $1, 'available',
+		  'order.txt', 'text/plain', $2, $3, $4, 'usr_records1')`,
+		record.RecordID, object.SizeBytes, object.Key, object.VersionID); err != nil {
+		t.Fatalf("insert attachment: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.record_revision_attachments (record_id, revision_id, ordinal, attachment_id)
+		values ($1, $2, 0, 'att_deleteorder')`, record.RecordID, record.RevisionID); err != nil {
+		t.Fatalf("insert attachment ref: %v", err)
+	}
+	if _, err := fixture.db.Exec(ctx, `
+		insert into public.attachment_quota_accounts (project_id, logical_bytes, reserved_bytes, physical_bytes)
+		values ('default', $1, 0, $1)`, object.SizeBytes); err != nil {
+		t.Fatalf("insert attachment quota: %v", err)
+	}
+	operation := recorddeletion.DeletionOperation{
+		OperationID: "rpo_attdeleteorder", ReservationID: "drs_attdeleteorder",
+		Object:     recordplatform.ObjectRef{ProjectID: "default", ObjectKind: "record", ObjectID: record.RecordID},
+		ReasonCode: recorddeletion.DeletionReasonUserConfirmed,
+		State:      recorddeletion.DeletionStateOnlinePurging, FenceEpoch: 10,
+		LedgerSequence: 15, LedgerEntryHash: testStoreRecordPlatformDigest(0xa3),
+	}
+	seedAttachmentDeletionOperation(t, ctx, fixture, operation, record.RevisionID)
+	repository := NewPostgresAttachmentRepository(runtimePool)
+	if err := repository.ConfigureAttachmentDeletionBlobStore(attachments.BackendKindLocal, blobStore); err != nil {
+		t.Fatalf("ConfigureAttachmentDeletionBlobStore() error = %v", err)
+	}
+	adapter, err := attachments.NewDeletionAdapter(repository)
+	if err != nil {
+		t.Fatalf("NewDeletionAdapter() error = %v", err)
+	}
+
+	// 模拟草稿附件释放：先持有配额行锁，之后才会去取 blob_objects 表锁。
+	holder, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin quota holder: %v", err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err := holder.Exec(ctx, `
+		select 1 from public.attachment_quota_accounts where project_id = 'default' for update`); err != nil {
+		t.Fatalf("hold quota row: %v", err)
+	}
+	outcome := make(chan error, 1)
+	go func() {
+		_, purgeErr := adapter.PurgeDeletion(context.Background(), recorddeletion.PurgeTarget{Operation: operation})
+		outcome <- purgeErr
+	}()
+	waitForRecordsPostgresLockWaiter(t, ctx, fixture.db, "%from public.attachment_quota_accounts%for update%")
+	// 永久删除此刻在等配额行，还没拿 Blob 表锁：释放一侧能立即取得 blob_objects 锁，不会成环。
+	if _, err := holder.Exec(ctx, `lock table public.blob_objects in row exclusive mode nowait`); err != nil {
+		t.Fatalf("Blob table locked before quota row: %v", err)
+	}
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatalf("release quota holder: %v", err)
+	}
+	if err := <-outcome; err != nil {
+		t.Fatalf("PurgeDeletion() after quota holder released error = %v", err)
+	}
+	var remaining int
+	if err := fixture.db.QueryRow(ctx, `
+		select count(*)::int from public.record_attachments where attachment_id = 'att_deleteorder'`).Scan(&remaining); err != nil {
+		t.Fatalf("count purged attachment: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("purged attachment rows = %d, want 0", remaining)
+	}
+}
+
 func TestPostgresIntegrationAttachmentDeletionFailsClosedForActivePublicationIntent(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)

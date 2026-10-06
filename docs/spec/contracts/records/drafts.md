@@ -40,6 +40,7 @@ type RevisionCommitCommand struct {
 - routing SQL 的原子 reservation filter 不能替代 race recheck。PATCH 在一个 admitted pgx transaction 中按 `atomic routing -> optional mutation-fence recheck -> author row FOR UPDATE -> exact ETag -> update -> checkpoint -> expiry prune -> newest-20 prune` 执行；Get/list 使用 read-fence recheck。非改基准且相同 canonical payload 时只续 `updated_at/warning_at/expires_at`，不增加 version、发行 checkpoint ID 或写 checkpoint。
 - 改基准请求在 mutation-fence recheck 之后、author row `FOR UPDATE` 之前先以 `for key share` 锁定并读取记录根，锁顺序与附件上传（记录 `FOR UPDATE` -> 草稿 `FOR UPDATE`）和草稿创建一致，避免交错死锁；`exact ETag` 之后要求目标等于 `current_revision_id` 且 lifecycle 为 active，再与 payload 一起更新 `base_revision_id`。即使 payload 未变也推进 version/ETag，使其他标签页持有的旧 ETag 失效；payload 未变时不发行 checkpoint ID、不写 checkpoint。service 先用当前授权预检：ETag 不符返回 `DraftConflictError`（不能借改基准覆盖另一标签页的修改），头不符返回携带当前头与服务端草稿的 `DraftRevisionConflictError`；store 内复核失败返回同一 typed error。草稿 ID 不变，因此草稿拥有的附件归属不受影响；不得用 discard + create 代替。
 - 内容变化时每个 `date_bin(..., 5 minutes, fixed origin)` bucket 最多一个 immutable checkpoint；保留最新 20 个并删除 `checkpoint_expires_at <= transaction_timestamp()` 的行。draft inactivity TTL 为 90 天，warning boundary 为 expiry 前 7 天；所有时间以 database transaction time 为准。
+- discard/revoke、publish cleanup 与过期清理在删除 checkpoints/draft 之前，于同一 transaction 释放仍归该草稿所有（`record_attachments.draft_id = D`）的附件：`draft_id` 是不可延迟的 `on delete restrict` 外键，不先释放就会以 FK 错误变成 500。publish 时被新修订引用的附件已由 revision participant 转给记录，只释放其余的（包括 created/uploading/quarantined/rejected/expired 与未引用的 available）。释放在已持有草稿行锁之后进行，按 `quota account FOR UPDATE -> attachments/uploads FOR UPDATE -> processor workspaces FOR UPDATE -> processor jobs FOR UPDATE -> busy 判定 -> lock blob_objects -> 删除 workspaces/jobs/parts/uploads/attachments -> 写回配额` 执行，与处理器完成（quota -> upload/attachment -> job）、工作区清理与回执重放（workspace -> job）、放弃上传过期及 Blob GC（`blob_objects -> parts`）的锁顺序一致；记录永久删除的附件 purge 也先锁配额账户、再取 `blob_objects`/分片表锁，不能反过来，否则会与另一草稿的释放互等。配额：未完成上传退回预留，available 退回逻辑字节，rejected/expired 不变；只被上传分片引用的对象以 `ensureAttachmentBlob` 登记为 Blob（新增时计入物理字节），留给 Blob GC 按 24h 宽限回收，不在请求事务内删除物理对象。处理器持有未过期租约、存在未 purge 的处理工作区、S3 临时对象未删除，或上传/预览仍有未完成（非 `completed`）的 publication intent 时返回 `ErrDraftAttachmentsBusy` 且不改动任何行（intent 在分片记录时即被消费，只有写入中途中断的上传会保持忙，直到 intent 过期清理完成）。为防止释放之后才登记的孤立 intent，`PrepareBlobPublication` 在同一事务先 `FOR SHARE` 锁定并复核所有者（上传行或预览所属处理任务），再取 Blob/分片表锁；所有者已被释放时上传返回 `ErrAttachmentOwnerNotFound`、预览返回 `ErrProcessorClaimLost`，不登记 intent；所有者不在可写入状态（上传非 created/uploading、预览任务非 claimed）时立即拒绝（过期上传为 `ErrUploadExpired`），不去等 Blob 表锁，避免与先取 `blob_objects` 表锁、只删除终态所有者的永久删除互相等待；同一对象正被 GC 删除时同样视为忙。过期清理在 claim SQL 的 `limit` 之前排除附件仍在处理的草稿，避免它们反复占满批次；claim 后仍可能因 GC fence 等瞬时原因变忙，因此对每个拥有附件的草稿开 savepoint，忙则回滚该 savepoint 并跳过、留待下一批。已知限制：S3 上传若浏览器从未 PUT，临时对象 reconciler 现在不会把“从未出现”记为已清理（已有缺陷），这类草稿会一直判为忙；生产默认 local 存储不受影响，启用 S3 前须先修复该 reconciler。普通 Blob GC worker 尚未在生产接线，释放后的孤儿 Blob 暂不回收。
 - discard/revoke 与 publish cleanup 都先删除 checkpoints 再删除 draft。publish 必须在现有 revision transaction 内锁定作者 draft，校验 exact ETag 及 create/new-draft 或 update/same-record-and-base shape，在 formal revision/no-change 成功后、idempotency complete 前 cleanup。任一 conflict 或 cleanup error 回滚正式事实并保留 draft。
 - completed idempotency replay 在 draft validation/cleanup 之前返回 persisted revision result；首次 publish 已删除 draft 后，同 key/same fingerprint replay 仍必须成功。request fingerprint 绑定 `DraftID` 与强 ETag，换 draft 或换 version 不能复用同 key。
 - 普通 draft create/read/PATCH/discard/revoke/expiry cleanup 不写 `record_domain_activities`、`record_outbox`、search 或 notification；只有 publish 成功产生正式 revision 既有的 activity/outbox。
@@ -61,6 +62,8 @@ type RevisionCommitCommand struct {
 | 非改基准 PATCH payload 未变化 | version/ETag/payload 不变，只刷新 90-day TTL 与 7-day warning；0 checkpoint。 |
 | 改基准 PATCH payload 未变化 | `base_revision_id` 更新，version/ETag 推进；0 checkpoint。 |
 | checkpoint ID、insert、retention prune 或 publish cleanup 任一步失败 | 整个 transaction rollback；不得留下半份 draft 或半份 formal revision。 |
+| discard/revoke/publish/expiry 时草稿仍拥有附件 | 同一 transaction 释放附件并按状态退回配额，未登记的分片对象登记为 Blob；草稿与附件行一并删除。 |
+| 释放时处理器租约未过期、工作区未 purge、S3 临时对象未删、publication intent 未完成或对象正被 GC 删除 | `ErrDraftAttachmentsBusy` -> HTTP `409 draft_attachments_busy` + `Retry-After: 5`；0 write，草稿与附件保持原状；publish 整笔回滚可用同一 idempotency key 重试；过期清理跳过该草稿。 |
 | expiry cleanup limit 为 0 或大于 100 | `ErrInvalidDraftCommand`；不开始 transaction。 |
 | existing-record draft 在 expiry claim 前已有 `fenced|committed` reservation | claim SQL 返回 0 row；expired draft/checkpoint 保留，且不占 batch limit。 |
 | reservation 在 expiry row claim 后并发建立 | mutation-fence recheck 返回 `ErrRecordDeletionReserved`；整批 0 checkpoint/draft delete。 |
@@ -73,7 +76,8 @@ type RevisionCommitCommand struct {
 - Good：expiry worker 的首条 SQL 跳过已经 reserved 的 existing-record draft；claim 后出现 reservation 时，二次 mutation fence 在 delete 前中止并回滚整批。
 - Base：autosave 内容与 server canonical payload 相同，仅刷新 inactivity TTL，避免 version 与 recovery history 噪音。
 - Good：用户解决修订冲突后，同一草稿以 `If-Match` + `base_revision_id` 改到确认头再发布；草稿附件仍归它所有。
-- Bad：客户端先 DELETE 旧草稿再在新头 create；跨标签页会删掉别处仍在用的草稿，草稿拥有附件时还会被外键拦住。
+- Bad：客户端先 DELETE 旧草稿再在新头 create；跨标签页会删掉别处仍在用的草稿，草稿拥有的附件也会随旧草稿被释放。
+- Bad：删除草稿时直接 `delete from record_drafts`；只要上传过附件就因 `record_attachments.draft_id` 外键失败成 500，一份被拒绝或过期的上传会让草稿永远无法丢弃或发布。
 - Bad：formal revision 先 commit，再调用独立 `DeleteDraft`；cleanup failure 会留下“已发布但仍可编辑”的 server draft，retry 也无法证明单一结果。
 - Bad：用 `limit` 但没有 `SKIP LOCKED` 或跨 transaction claim/delete；并发 worker 会阻塞、重复 claim 或留下部分 cleanup。
 - Bad：expiry cleanup 只按 `expires_at` claim 后直接 delete；它会绕过 permanent-delete reservation，或者在 claim 与 delete 之间吞掉刚被 fenced 的 draft。
@@ -90,7 +94,7 @@ scripts/test-record-platform-integration.sh postgres -- \
 ```
 
 - Unit/race 必须覆盖 immutable payload/ETag、作者隔离、two-client conflict、no-change TTL、checkpoint SQL、discard/revoke、expired batch grammar、publish create/update/no-change/conflict/rollback/replay，以及改基准的确认头/头再变/归档/ETag 冲突/new-record 拒绝。
-- 真实 PostgreSQL 必须覆盖并发 PATCH 单赢家、五分钟 bucket/newest 20/seven-day retention、并发 cleanup claim 不相交、`fenced|committed` 过期 existing-record draft/checkpoint 均保留、publish/discard/revoke cleanup、改基准只落到当前头（非头 typed conflict、旧 ETag 冲突、同 payload 推进 version 且 0 checkpoint、记录行被他人持锁时不先锁草稿行、改基准后可发布），以及普通 draft 操作的 activity/outbox 零行；runner 不接受 `SKIP`。
+- 真实 PostgreSQL 必须覆盖并发 PATCH 单赢家、五分钟 bucket/newest 20/seven-day retention、并发 cleanup claim 不相交、`fenced|committed` 过期 existing-record draft/checkpoint 均保留、publish/discard/revoke cleanup、草稿附件释放（六种上传状态的 discard、未引用附件随 publish 释放、处理器租约有效时 busy 且 0 write、过期清理跳过 busy 草稿并以 savepoint 撤销其改动、配额与 Blob 登记精确）、改基准只落到当前头（非头 typed conflict、旧 ETag 冲突、同 payload 推进 version 且 0 checkpoint、记录行被他人持锁时不先锁草稿行、改基准后可发布），以及普通 draft 操作的 activity/outbox 零行；runner 不接受 `SKIP`。
 
 ### 7. Wrong vs Correct
 

@@ -324,6 +324,7 @@ func TestPostgresRecordRepositoryPublishesDraftAfterFormalSideEffectsInSameTrans
 		"domain_activity",
 		"transaction_participant",
 		"outbox",
+		"draft_attachment_lookup",
 		"draft_checkpoint_delete",
 		"draft_delete",
 		"admission",
@@ -374,6 +375,7 @@ func TestPostgresRecordRepositoryPublishesNewRecordDraftIntoRevisionOne(t *testi
 		"current_projection",
 		"domain_activity",
 		"outbox",
+		"draft_attachment_lookup",
 		"draft_checkpoint_delete",
 		"draft_delete",
 		"admission",
@@ -431,6 +433,7 @@ func TestPostgresRecordRepositoryPublishesDraftOnNoChangeBeforeCompletingIdempot
 		"fence_reservation_recheck",
 		"root_lock",
 		"draft_lock",
+		"draft_attachment_lookup",
 		"draft_checkpoint_delete",
 		"draft_delete",
 		"admission",
@@ -610,7 +613,7 @@ func TestPostgresRecordRepositoryPublishedDraftReplayDoesNotReadCleanedDraft(t *
 func TestPostgresRecordRepositoryPublishedDraftCleanupFailureRollsBackFormalMutation(t *testing.T) {
 	t.Parallel()
 
-	for _, cutPoint := range []string{"draft_checkpoint_delete", "draft_delete"} {
+	for _, cutPoint := range []string{"draft_attachment_lookup", "draft_checkpoint_delete", "draft_delete"} {
 		t.Run(cutPoint, func(t *testing.T) {
 			t.Parallel()
 			now := time.Date(2026, time.August, 3, 14, 58, 0, 0, time.UTC)
@@ -1441,7 +1444,7 @@ func (tx *fakeRecordRevisionTx) QueryRow(_ context.Context, sql string, args ...
 			tx.now.Add(24 * time.Hour),
 			tx.now,
 		}}
-	case "fence_reservation_lock", "fence_lease_lock", "fence_reservation_recheck":
+	case "fence_reservation_lock", "fence_lease_lock", "fence_reservation_recheck", "draft_attachment_lookup":
 		return fakeRecordRevisionRow{err: pgx.ErrNoRows}
 	case "idempotency_claim":
 		return fakeRecordRevisionRow{values: []any{"records_api_01", int64(1), tx.now.Add(time.Minute)}}
@@ -1607,6 +1610,8 @@ func recordRevisionSQLStep(sql string) string {
 		return "lifecycle_replay"
 	case strings.Contains(compact, "insert into public.record_outbox"):
 		return "outbox"
+	case strings.Contains(compact, "from public.record_attachments") && strings.Contains(compact, "where draft_id = $1"):
+		return "draft_attachment_lookup"
 	case strings.Contains(compact, "delete from public.record_draft_checkpoints"):
 		return "draft_checkpoint_delete"
 	case strings.Contains(compact, "delete from public.record_drafts"):

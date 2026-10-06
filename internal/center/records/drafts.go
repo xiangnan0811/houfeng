@@ -28,6 +28,9 @@ var (
 	ErrDraftNotFound         = errors.New("record draft not found")
 	ErrDraftConflict         = errors.New("record draft conflict")
 	ErrDraftRevisionConflict = errors.New("record draft base revision conflict")
+	// ErrDraftAttachmentsBusy 表示草稿名下仍有附件在处理（处理器租约、工作区或 S3 临时对象未清），
+	// 暂不能丢弃或随发布清理草稿；稍后重试即可，草稿与附件均保持原状。
+	ErrDraftAttachmentsBusy = errors.New("record draft attachments are still being processed")
 )
 
 type Draft struct {

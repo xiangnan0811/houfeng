@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -188,6 +189,25 @@ func TestRecordDraftsHandlerMapsConflictsWithAllowlistedRecovery(t *testing.T) {
 	if response.Recovery.ServerDraft.DraftID != server.DraftID || len(response.Recovery.LocalPayload) == 0 ||
 		strings.Contains(recorder.Body.String(), "project_id") || strings.Contains(recorder.Body.String(), "author_id") {
 		t.Fatalf("conflict recovery = %#v; body=%s", response.Recovery, recorder.Body.String())
+	}
+}
+
+func TestRecordDraftsHandlerMapsBusyDraftAttachmentsToRetryableConflict(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	handler := RecordDraftsWithOptions(&recordDraftHandlerApplicationStub{
+		discardDraft: func(context.Context, records.DraftDiscardRequest) error {
+			return fmt.Errorf("run record platform transaction callback: %w", records.ErrDraftAttachmentsBusy)
+		},
+	}, RecordDraftHandlerOptions{NewDraftID: func() (string, error) { return "rdf_unused", nil }})
+	request := recordsHandlerRequest(t, actor, http.MethodDelete, "/api/record-drafts/rdf_httpcontract", "")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	// 附件仍在处理只是暂时的：用可重试的 409 告知客户端，而不是 500。
+	assertRecordsHandlerError(t, recorder, http.StatusConflict, "draft_attachments_busy")
+	if recorder.Header().Get("Retry-After") != "5" {
+		t.Fatalf("Retry-After = %q, want 5", recorder.Header().Get("Retry-After"))
 	}
 }
 

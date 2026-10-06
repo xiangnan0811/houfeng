@@ -696,6 +696,7 @@ func TestRecordsHandlerMapsStableErrorsAndRejectsUntrustedOrOversizedInput(t *te
 		{name: "not found", err: records.ErrRecordNotFound, wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
 		{name: "reserved", err: records.ErrRecordDeletionReserved, wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
 		{name: "revision conflict", err: records.ErrRecordRevisionConflict, wantStatus: http.StatusConflict, wantCode: "record_revision_conflict"},
+		{name: "draft attachments busy", err: records.ErrDraftAttachmentsBusy, wantStatus: http.StatusConflict, wantCode: "draft_attachments_busy"},
 		{name: "idempotency reused", err: recordplatform.ErrIdempotencyKeyReused, wantStatus: http.StatusConflict, wantCode: "idempotency_key_reused"},
 		{name: "semantic validation", err: records.ErrInvalidRevisionInput, wantStatus: http.StatusUnprocessableEntity, wantCode: "record_invalid"},
 		{name: "status reason required", err: records.ErrStatusTransitionReasonRequired, wantStatus: http.StatusUnprocessableEntity, wantCode: "record_invalid"},

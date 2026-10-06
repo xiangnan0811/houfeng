@@ -639,6 +639,9 @@ func (repository *PostgresRecordDraftRepository) DeleteDraft(
 			return records.ErrDraftConflict
 		}
 
+		if err := releaseDraftOwnedAttachments(ctx, transaction.tx, command.DraftID); err != nil {
+			return err
+		}
 		if _, err := transaction.tx.Exec(ctx, `
 			delete from public.record_draft_checkpoints
 			where draft_id = $1`, command.DraftID); err != nil {
@@ -701,6 +704,29 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 					  and reservations.state in ('fenced', 'committed')
 				)
 			  )
+			  -- 附件仍在处理的草稿在 limit 之前排除，否则它们会反复占满批次，饿死后面的草稿。
+			  and not exists (
+				select 1
+				from public.record_attachments as attachment
+				left join public.attachment_uploads as upload
+				  on upload.attachment_id = attachment.attachment_id
+				left join public.attachment_processor_jobs as job
+				  on job.attachment_id = attachment.attachment_id
+				where attachment.draft_id = drafts.draft_id
+				  and ((upload.temporary_object_key is not null and upload.temporary_object_deleted_at is null)
+				    or (job.processor_state = 'claimed' and job.lease_expires_at > transaction_timestamp())
+				    or exists (
+					  select 1 from public.content_processor_workspaces as workspace
+					  where workspace.processor_job_id = job.processor_job_id
+					    and workspace.workspace_state <> 'purged'
+				    )
+				    or exists (
+					  select 1 from public.blob_publication_intents as publication
+					  where publication.publication_state <> 'completed'
+					    and ((publication.owner_kind = 'upload' and publication.owner_id = upload.upload_id)
+					      or (publication.owner_kind = 'processor_preview' and publication.owner_id = job.processor_job_id))
+				    ))
+			  )
 			order by drafts.expires_at, drafts.draft_id
 			for update skip locked
 			limit $1`, int64(limit), recordObjectKind)
@@ -742,6 +768,14 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 				return err
 			}
 		}
+		released, err := releaseExpiredDraftAttachments(ctx, transaction.tx, claimed)
+		if err != nil {
+			return err
+		}
+		claimed = released
+		if len(claimed) == 0 {
+			return nil
+		}
 
 		if _, err := transaction.tx.Exec(ctx, `
 			delete from public.record_draft_checkpoints
@@ -763,6 +797,43 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 		return nil, err
 	}
 	return claimed, nil
+}
+
+// releaseExpiredDraftAttachments 逐个释放过期草稿名下的附件，返回可以删除的草稿。
+// 附件仍在处理的草稿跳过、留待下一批；每个草稿在独立 savepoint 中释放，
+// 跳过时撤销它已做的 Blob 登记，不影响同批其他草稿。
+func releaseExpiredDraftAttachments(ctx context.Context, tx pgx.Tx, draftIDs []string) ([]string, error) {
+	released := make([]string, 0, len(draftIDs))
+	for _, draftID := range draftIDs {
+		_, owns, err := draftOwnedAttachmentProject(ctx, tx, draftID)
+		if err != nil {
+			return nil, err
+		}
+		if !owns {
+			released = append(released, draftID)
+			continue
+		}
+		savepoint, err := tx.Begin(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin expired draft attachment release: %w", err)
+		}
+		err = releaseDraftOwnedAttachments(ctx, savepoint, draftID)
+		if errors.Is(err, records.ErrDraftAttachmentsBusy) {
+			if rollbackErr := savepoint.Rollback(ctx); rollbackErr != nil {
+				return nil, fmt.Errorf("roll back busy expired draft attachment release: %w", rollbackErr)
+			}
+			continue
+		}
+		if err != nil {
+			_ = savepoint.Rollback(ctx)
+			return nil, err
+		}
+		if err := savepoint.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("release expired draft attachment savepoint: %w", err)
+		}
+		released = append(released, draftID)
+	}
+	return released, nil
 }
 
 type recordDraftRebaseHead struct {
