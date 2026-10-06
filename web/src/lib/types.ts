@@ -3184,6 +3184,8 @@ export type CreateRecordDraftInput = ({
 
 export type PatchRecordDraftInput = {
   payload: RecordDraftPayload
+  // 只在用户解决修订冲突后携带：把已有记录草稿原子改到已确认的当前头，头再变则返回 409。
+  base_revision_id?: string
 }
 
 // 修订的证据是请求里的有序全集：沿用已有快照必须逐项带上，后端不会自动继承上一修订。
@@ -3216,7 +3218,8 @@ export type RecordRevisionConflictRecovery = {
   server_revision_id: string
   server_lock_version: number
   server_authorization_epoch: number
-  draft: RecordDraft
+  // 在旧基准上创建草稿时服务端还没有草稿，此时省略。
+  draft?: RecordDraft
 }
 
 export type RecordErrorRecovery = RecordDraftConflictRecovery | RecordRevisionConflictRecovery

@@ -984,17 +984,21 @@ func writeRecordsApplicationError(w http.ResponseWriter, err error) {
 			LocalPayload: json.RawMessage(draftConflict.LocalPayload.JSON()),
 		})
 	case errors.As(err, &draftRevisionConflict):
-		draft, draftErr := newRecordDraftResponse(draftRevisionConflict.Draft)
-		if draftErr != nil {
-			writeRecordInternalError(w)
-			return
-		}
-		writeRecordError(w, http.StatusConflict, "record_revision_conflict", "record revision changed", recordRevisionConflictRecovery{
+		recovery := recordRevisionConflictRecovery{
 			ServerRevisionID:         draftRevisionConflict.ServerRevisionID,
 			ServerLockVersion:        draftRevisionConflict.ServerLockVersion,
 			ServerAuthorizationEpoch: draftRevisionConflict.ServerAuthorizationEpoch,
-			Draft:                    draft,
-		})
+		}
+		// 在旧基准上创建草稿时服务端还没有草稿，recovery 只带当前头。
+		if draftRevisionConflict.Draft.DraftID != "" {
+			draft, draftErr := newRecordDraftResponse(draftRevisionConflict.Draft)
+			if draftErr != nil {
+				writeRecordInternalError(w)
+				return
+			}
+			recovery.Draft = &draft
+		}
+		writeRecordError(w, http.StatusConflict, "record_revision_conflict", "record revision changed", recovery)
 	case errors.Is(err, recordauth.ErrDenied), errors.Is(err, records.ErrRecordNotFound),
 		errors.Is(err, records.ErrDraftNotFound), errors.Is(err, records.ErrRecordDeletionReserved),
 		errors.Is(err, store.ErrRecordSubjectNotFound):
@@ -1059,10 +1063,10 @@ type recordDraftConflictRecovery struct {
 }
 
 type recordRevisionConflictRecovery struct {
-	ServerRevisionID         string              `json:"server_revision_id"`
-	ServerLockVersion        uint64              `json:"server_lock_version"`
-	ServerAuthorizationEpoch uint64              `json:"server_authorization_epoch"`
-	Draft                    recordDraftResponse `json:"draft"`
+	ServerRevisionID         string               `json:"server_revision_id"`
+	ServerLockVersion        uint64               `json:"server_lock_version"`
+	ServerAuthorizationEpoch uint64               `json:"server_authorization_epoch"`
+	Draft                    *recordDraftResponse `json:"draft,omitempty"`
 }
 
 func decodeRecordsRequestJSON(w http.ResponseWriter, request *http.Request, destination any) bool {
