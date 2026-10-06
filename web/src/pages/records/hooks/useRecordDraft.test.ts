@@ -5,7 +5,7 @@ import { ApiError } from '../../../lib/apiRequest'
 import type { RecordDraft } from '../../../lib/types'
 import { draftBufferKey, draftBufferRecordId, memoryDraftBufferStore, readUnsyncedDraft, writeUnsyncedDraft } from '../draftBuffer'
 import { emptyRecordDraftPayload, recordDetailFixture, recordRevisionFixture } from '../testFixtures'
-import { useRecordDraft } from './useRecordDraft'
+import { useRecordDraft, type PublishEvidence } from './useRecordDraft'
 
 const api = vi.hoisted(() => ({
   getRecord: vi.fn(),
@@ -173,6 +173,124 @@ describe('useRecordDraft', () => {
     expect(result.current.state.dirty).toBe(false)
     expect(result.current.state.draft).toBeNull()
     expect(result.current.state.publishedRecordId).toBe('rec_new')
+  })
+
+  it('publishes a new record with captured evidence on the pre-allocated record id', async () => {
+    const draft = draftFixture()
+    api.createRecordDraft.mockResolvedValue(draft)
+    api.createRecord.mockResolvedValue({ record_id: 'rec_allocated' })
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await act(async () => {
+      await expect(result.current.commands.publish([
+        pendingEvidence('eci_1'),
+        pendingEvidence('eci_2'),
+      ])).resolves.toBe(true)
+    })
+    expect(api.createRecord).toHaveBeenCalledWith({
+      draft_id: draft.draft_id,
+      draft_etag: draft.etag,
+      record_id: 'rec_allocated',
+      evidence_items: [{ capture_intent_id: 'eci_1' }, { capture_intent_id: 'eci_2' }],
+    }, expect.any(String))
+    expect(result.current.state.publishedRecordId).toBe('rec_allocated')
+  })
+
+  it('appends captured evidence after the existing snapshots when publishing a revision', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture({
+      current: recordRevisionFixture({ evidence_snapshot_ids: ['evs_old_1', 'evs_old_2'] }),
+    }))
+    api.createRecordDraft.mockResolvedValue(draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+    api.createRecordRevision.mockResolvedValue({ record_id: 'rec_001' })
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await result.current.commands.publish([pendingEvidence('eci_new', 'rec_001')])
+    })
+    expect(api.createRecordRevision).toHaveBeenCalledWith('rec_001', expect.objectContaining({
+      evidence_items: [
+        { existing_snapshot_id: 'evs_old_1' },
+        { existing_snapshot_id: 'evs_old_2' },
+        { capture_intent_id: 'eci_new' },
+      ],
+    }), expect.any(String))
+    expect(api.createRecordRevision.mock.calls[0]?.[1]).not.toHaveProperty('record_id')
+  })
+
+  it('refuses to publish an expired evidence preview without touching the server', async () => {
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await act(async () => {
+      await expect(result.current.commands.publish([
+        pendingEvidence('eci_live'),
+        { ...pendingEvidence('eci_old'), valid_until: new Date(Date.now() - 1_000).toISOString() },
+      ])).resolves.toBe(false)
+    })
+    expect(result.current.state.message).toBe('有证据预览已过期，请移除后重新采集')
+    expect(result.current.state.publishing).toBe(false)
+    expect(api.createRecordDraft).not.toHaveBeenCalled()
+    expect(api.createRecord).not.toHaveBeenCalled()
+  })
+
+  it('does not submit evidence that expired while the draft was being saved', async () => {
+    let releaseDraft: () => void = () => undefined
+    api.createRecordDraft.mockImplementation(() => new Promise((resolve) => {
+      releaseDraft = () => resolve(draftFixture())
+    }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    const expiring = { ...pendingEvidence('eci_1'), valid_until: new Date(Date.now() + 60_000).toISOString() }
+    let publishing: Promise<boolean> = Promise.resolve(true)
+    act(() => {
+      publishing = result.current.commands.publish([expiring])
+    })
+    await waitFor(() => expect(api.createRecordDraft).toHaveBeenCalled())
+    const realNow = Date.now()
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(realNow + 120_000)
+    try {
+      await act(async () => {
+        releaseDraft()
+        await expect(publishing).resolves.toBe(false)
+      })
+    } finally {
+      clock.mockRestore()
+    }
+    expect(api.createRecord).not.toHaveBeenCalled()
+    expect(result.current.state.message).toBe('有证据预览已过期，请移除后重新采集')
+  })
+
+  it('ignores a second publish while the first is still running', async () => {
+    let releaseCreate: () => void = () => undefined
+    api.createRecord.mockImplementation(() => new Promise((resolve) => {
+      releaseCreate = () => resolve({ record_id: 'rec_allocated' })
+    }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    let first: Promise<boolean> = Promise.resolve(false)
+    act(() => {
+      first = result.current.commands.publish([pendingEvidence('eci_1')])
+    })
+    await waitFor(() => expect(api.createRecord).toHaveBeenCalledTimes(1))
+    await act(async () => {
+      await expect(result.current.commands.publish([pendingEvidence('eci_1')])).resolves.toBe(false)
+    })
+    await act(async () => {
+      releaseCreate()
+      await expect(first).resolves.toBe(true)
+    })
+    expect(api.createRecord).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains a publish rejected because the evidence source changed since the preview', async () => {
+    api.createRecord.mockRejectedValue(new ApiError(409, 'evidence preview stale', { code: 'evidence_preview_stale' }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    await act(async () => {
+      await expect(result.current.commands.publish([pendingEvidence('eci_1')])).resolves.toBe(false)
+    })
+    expect(result.current.state.message).toBe('有证据预览已失效（过期或来源数据已变化），请移除后重新采集')
+    expect(result.current.state.publishedRecordId).toBeNull()
   })
 
   it('patches the latest payload before publishing an existing draft', async () => {
@@ -905,7 +1023,7 @@ describe('useRecordDraft', () => {
       const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
       await waitFor(() => expect(result.current.state.status).toBe('ready'))
       act(() => result.current.commands.patchPayload({ title: 'mine' }))
-      let publishing: Promise<void> = Promise.resolve()
+      let publishing: Promise<boolean> = Promise.resolve(false)
       await act(async () => {
         publishing = result.current.commands.publish()
         await waitFor(() => expect(api.createRecordRevision).toHaveBeenCalled())
@@ -1028,7 +1146,7 @@ describe('useRecordDraft', () => {
     const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
     await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'mine' }))
-    let publishing: Promise<void> = Promise.resolve()
+    let publishing: Promise<boolean> = Promise.resolve(false)
     await act(async () => {
       publishing = result.current.commands.publish()
       await waitFor(() => expect(api.createRecordRevision).toHaveBeenCalled())
@@ -1051,7 +1169,8 @@ describe('useRecordDraft', () => {
     await waitFor(() => expect(result.current.state.status).toBe('ready'))
     act(() => result.current.commands.patchPayload({ title: 'mine' }))
     await act(async () => {
-      await result.current.commands.publish()
+      // 修订已写入：随后的读取失败不影响“已发布”的结论，调用方据此放下已发布的证据。
+      await expect(result.current.commands.publish()).resolves.toBe(true)
     })
     // 服务端已在发布事务中删除草稿：读取失败也不能再把它交给上传入口。
     expect(result.current.state.draft).toBeNull()
@@ -1567,6 +1686,10 @@ describe('useRecordDraft', () => {
     expect(result.current.state.record?.current.revision_id).toBe('rrv_002')
   })
 })
+
+function pendingEvidence(captureIntentId: string, recordId = 'rec_allocated'): PublishEvidence {
+  return { record_id: recordId, capture_intent_id: captureIntentId, valid_until: new Date(Date.now() + 10 * 60_000).toISOString() }
+}
 
 function draftFixture(overrides: Partial<RecordDraft> = {}): RecordDraft {
   return {

@@ -1,6 +1,6 @@
 import { useRef, useState, type DragEvent } from 'react'
 
-import { Badge, Button, Modal } from '../../../components/atoms'
+import { Badge, Button, Modal, SegmentedControl } from '../../../components/atoms'
 import type { BadgeTone } from '../../../components/atoms/Badge'
 import type { DocumentReference } from '../../../lib/documentMarkdown'
 import { formatBytes } from '../../../lib/format'
@@ -8,6 +8,9 @@ import type { AttachmentMetadata } from '../../../lib/types'
 import { ATTACHMENT_ACCEPT, ATTACHMENT_FORMAT_HINT } from '../attachments/attachmentFiles'
 import type { RecordAttachmentQueueStatus } from '../attachments/recordAttachments'
 import { isActiveUpload, type RecordAttachmentUploadRow } from '../attachments/useRecordAttachmentUploads'
+import { EvidenceCapturePicker, type EvidenceCaptureSubject, type PendingEvidence } from '../evidence/EvidenceCapturePicker'
+import type { OtherEvidenceSourceLoaders } from '../evidence/useOtherEvidenceSource'
+import type { EvidenceCapturePreview, EvidenceCapturePreviewInput } from '../../../lib/types'
 import { RecordMaterialList } from './RecordMaterialList'
 
 export type RecordMaterialItem = DocumentReference & {
@@ -17,6 +20,18 @@ export type RecordMaterialItem = DocumentReference & {
   attachment?: AttachmentMetadata
   /** 元数据仍在读取。 */
   pending?: boolean
+  /** 本次编辑新采集、尚未随发布保存的证据。 */
+  unsaved?: boolean
+}
+
+export type RecordMaterialCapture = {
+  recordId?: string | undefined
+  subjects: readonly EvidenceCaptureSubject[]
+  otherSources?: OtherEvidenceSourceLoaders | undefined
+  requestPreview: (input: EvidenceCapturePreviewInput, signal: AbortSignal) => Promise<EvidenceCapturePreview>
+  onConfirm: (evidence: PendingEvidence) => void
+  /** 发布进行中：不能加入或移除待保存证据。 */
+  disabled?: boolean
 }
 
 export type RecordMaterialUploads = {
@@ -36,6 +51,7 @@ type RecordMaterialDrawerProps = {
   items: readonly RecordMaterialItem[]
   readOnly?: boolean
   uploads?: RecordMaterialUploads | undefined
+  capture?: RecordMaterialCapture | undefined
   onInsert: (item: RecordMaterialItem) => void
   onRemove: (item: RecordMaterialItem) => void
 }
@@ -147,13 +163,31 @@ export function RecordMaterialDrawer({
   items,
   readOnly = false,
   uploads,
+  capture,
   onInsert,
   onRemove,
 }: RecordMaterialDrawerProps) {
+  const [tool, setTool] = useState<'upload' | 'capture'>('upload')
+  const tools = [
+    ...(uploads ? [{ value: 'upload' as const, label: '上传附件' }] : []),
+    ...(capture ? [{ value: 'capture' as const, label: '采集证据' }] : []),
+  ]
+  const activeTool = tools.some((item) => item.value === tool) ? tool : tools[0]?.value
   return (
     <Modal open={open} onClose={onClose} title="材料与引用" size="lg">
       <div className="record-material-drawer">
-        {!readOnly && uploads ? <AttachmentUploadArea uploads={uploads} /> : null}
+        {!readOnly && tools.length > 1 ? <SegmentedControl label="添加材料" items={tools} value={activeTool ?? 'upload'} onChange={setTool} /> : null}
+        {!readOnly && uploads && activeTool === 'upload' ? <AttachmentUploadArea uploads={uploads} /> : null}
+        {!readOnly && capture && activeTool === 'capture' ? (
+          <EvidenceCapturePicker
+            recordId={capture.recordId}
+            subjects={capture.subjects}
+            otherSources={capture.otherSources}
+            requestPreview={capture.requestPreview}
+            onConfirm={capture.onConfirm}
+            disabled={capture.disabled ?? false}
+          />
+        ) : null}
         {items.length === 0 ? <p className="record-muted">当前修订没有可引用材料</p> : (
           <RecordMaterialList
             items={items}
@@ -163,10 +197,13 @@ export function RecordMaterialDrawer({
                   aria-label={`插入${item.attachment?.display_name ?? item.label}`}>
                   插入引用
                 </Button>
-                <Button size="sm" variant="ghost" disabled={readOnly} onClick={() => onRemove(item)}
-                  aria-label={`移除${item.attachment?.display_name ?? item.label}`}>
-                  移除
-                </Button>
+                {/* 已保存的证据暂不支持移除，只能移除附件与本次新采集、尚未保存的证据。 */}
+                {item.kind === 'attachment' || item.unsaved ? (
+                  <Button size="sm" variant="ghost" disabled={readOnly || (item.unsaved === true && capture?.disabled === true)} onClick={() => onRemove(item)}
+                    aria-label={`移除${item.attachment?.display_name ?? item.label}`}>
+                    移除
+                  </Button>
+                ) : null}
               </>
             )}
           />

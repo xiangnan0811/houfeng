@@ -20,6 +20,8 @@ const api = vi.hoisted(() => ({
   completeAttachmentUpload: vi.fn(),
   getAttachmentMetadata: vi.fn(),
   getAttachmentContent: vi.fn(),
+  captureEvidencePreview: vi.fn(),
+  getEvidenceSnapshot: vi.fn(),
 }))
 
 vi.mock('../../lib/auth-context', () => ({

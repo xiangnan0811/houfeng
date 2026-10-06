@@ -659,6 +659,10 @@ export function recordDetailProfile(options: {
       body: { items: [] },
     },
     ...(options.revisionSave ? recordRevisionSaveRoutes(revision) : {}),
+    ...recordEvidenceRoutes([
+      ...(revision.evidence_snapshot_ids ?? []),
+      ...(options.populated ? RECORD_REVISION.evidence_snapshot_ids ?? [] : []),
+    ]),
   })
 }
 
@@ -1966,17 +1970,18 @@ function evidenceReadModelFor(kind: Exclude<EvidenceSnapshotFixtureKind, 'unsupp
   }
 }
 
-/** A retained evidence snapshot for `/evidence/evs_e2eview`, one per renderer kind. */
-export function evidenceSnapshotProfile(options: {
+type EvidenceSnapshotFixtureOptions = {
   kind: EvidenceSnapshotFixtureKind
   sourceUnavailable?: boolean
   redacted?: boolean
   backfilled?: boolean
-}): ApiFixtureProfile {
+}
+
+function evidenceSnapshotBody(snapshotId: string, options: EvidenceSnapshotFixtureOptions) {
   const readable = options.kind === 'unsupported' ? evidenceReadModelFor('command.audit') : evidenceReadModelFor(options.kind)
-  const body = {
+  return {
     record_id: 'rec_e2e001',
-    snapshot_id: 'evs_e2eview',
+    snapshot_id: snapshotId,
     kind: options.kind === 'unsupported' ? 'command.audit' : options.kind,
     schema_version: readable.schema_version,
     subject: { type: 'vps', id: 'vps_0123456789abcdef', display_name: 'VPS Alpha' },
@@ -2018,9 +2023,21 @@ export function evidenceSnapshotProfile(options: {
     title: readable.title,
     read_model: readable.read_model,
   }
+}
+
+/** A retained evidence snapshot for `/evidence/evs_e2eview`, one per renderer kind. */
+export function evidenceSnapshotProfile(options: EvidenceSnapshotFixtureOptions): ApiFixtureProfile {
   return authenticatedProfile({
-    [apiRouteKey('GET', '/api/evidence/evs_e2eview')]: { status: 200, body },
+    [apiRouteKey('GET', '/api/evidence/evs_e2eview')]: { status: 200, body: evidenceSnapshotBody('evs_e2eview', options) },
   })
+}
+
+// 记录材料清单逐个读取证据快照，显示“类型 · 标题”。
+export function recordEvidenceRoutes(snapshotIds: readonly string[]): ApiFixtureProfile {
+  return Object.fromEntries([...new Set(snapshotIds)].map((snapshotId) => [
+    apiRouteKey('GET', `/api/evidence/${snapshotId}`),
+    { status: 200, body: evidenceSnapshotBody(snapshotId, { kind: 'monitoring.host' }) },
+  ]))
 }
 
 const SUBJECT_ACTIVITY_SUBJECTS = {

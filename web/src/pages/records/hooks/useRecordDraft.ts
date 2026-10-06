@@ -50,7 +50,11 @@ export type RecordWorkspaceCommands = {
   patchPayload: (patch: Partial<RecordDraftPayload>) => void
   setBody: (body: string) => void
   saveDraft: () => Promise<void>
-  publish: () => Promise<void>
+  /**
+   * 发布当前编辑；evidence 是本次新采集、待保存的证据，按采集顺序追加在已有证据之后。
+   * 返回记录或修订是否已写入：写入后即使随后的读取失败也返回 true，调用方据此放下已发布的证据。
+   */
+  publish: (evidence?: readonly PublishEvidence[]) => Promise<boolean>
   restore: (saveReason: string) => Promise<void>
   resolveConflict: (payload: RecordDraftPayload) => void
   dismissConflict: () => void
@@ -62,7 +66,15 @@ export type RecordWorkspaceCommands = {
   addAttachment: (attachmentId: string) => void
 }
 
+/** 待保存证据在发布时需要的部分：采集意图与其绑定的记录 ID、有效期。 */
+export type PublishEvidence = Readonly<{
+  record_id: string
+  capture_intent_id: string
+  valid_until: string
+}>
+
 const AUTOSAVE_MS = 2000
+const EVIDENCE_EXPIRED_MESSAGE = '有证据预览已过期，请移除后重新采集'
 
 function isClosedError(error: unknown): boolean {
   return error instanceof ApiError && (error.status === 403 || error.status === 404 || error.status === 410)
@@ -86,6 +98,8 @@ function newIdempotencyKey(): string {
 function errorMessage(error: unknown, fallback: string): string {
   // 草稿名下附件仍在安全检查时后端暂不清理草稿，稍后重试即可。
   if (error instanceof ApiError && error.code === 'draft_attachments_busy') return '附件仍在安全检查，请稍后再发布'
+  // 发布时会重新采集：来源数据变化、预览过期或来源已不可用都会让预览失效。
+  if (error instanceof ApiError && error.code === 'evidence_preview_stale') return '有证据预览已失效（过期或来源数据已变化），请移除后重新采集'
   return error instanceof Error ? error.message : fallback
 }
 
@@ -540,17 +554,38 @@ export function useRecordDraft(options: {
     return () => window.clearTimeout(timer)
   }, [dirty, options.mode, payload, persistUnsynced, saveDraft, status])
 
-  const publish = useCallback(async () => {
+  const publish = useCallback(async (evidence: readonly PublishEvidence[] = []) => {
+    if (publishingRef.current) return false
+    // 采集意图 15 分钟内有效：过期的不发出去，免得整笔发布被拒。保存草稿可能耗时，正式提交前再查一次。
+    const evidenceExpired = () => evidence.some((item) => !(Date.parse(item.valid_until) > Date.now()))
+    if (evidenceExpired()) {
+      reportSaveError(new Error(EVIDENCE_EXPIRED_MESSAGE))
+      return false
+    }
     publishingRef.current = true
     setPublishing(true)
+    let published = false
     try {
       let currentDraft = await saveDraft()
       // 首次保存失败或进入冲突时不能再补存一次：那会绕过刚打开的冲突解决器继续发布。
       if (currentDraft && dirtyRef.current) currentDraft = await saveDraft()
-      if (!currentDraft) return
+      if (!currentDraft) return false
+      if (evidenceExpired()) {
+        reportSaveError(new Error(EVIDENCE_EXPIRED_MESSAGE))
+        return false
+      }
       const head = confirmedHeadRef.current ?? baseRef.current
       if (options.mode === 'new' || !options.recordId) {
-        const created = await createRecord({ draft_id: currentDraft.draft_id, draft_etag: currentDraft.etag }, newIdempotencyKey())
+        // 新记录的证据都绑定在首次预览预分配的同一个 record_id 上。
+        const created = await createRecord(evidence.length > 0
+          ? {
+            draft_id: currentDraft.draft_id,
+            draft_etag: currentDraft.etag,
+            record_id: evidence[0]!.record_id,
+            evidence_items: evidence.map((item) => ({ capture_intent_id: item.capture_intent_id })),
+          }
+          : { draft_id: currentDraft.draft_id, draft_etag: currentDraft.etag }, newIdempotencyKey())
+        published = true
         draftRef.current = null
         if (mountedRef.current) {
           setDraft(null)
@@ -567,8 +602,12 @@ export function useRecordDraft(options: {
           lock_version: head.lock_version,
           authorization_epoch: head.authorization_epoch,
           // 证据不在草稿里：沿用基准修订的快照，否则新修订会丢掉全部证据。
-          evidence_items: existingEvidenceItems(head.current),
+          evidence_items: [
+            ...existingEvidenceItems(head.current),
+            ...evidence.map((item) => ({ capture_intent_id: item.capture_intent_id })),
+          ],
         }, newIdempotencyKey())
+        published = true
         // 发布成功时服务端已在同一事务删除草稿：立刻放下它，不依赖随后的读取成功，
         // 否则读取失败会让上传等入口继续拿到已消费的草稿。
         draftRef.current = null
@@ -592,20 +631,22 @@ export function useRecordDraft(options: {
         }
       }
       await store.delete(draftBufferKey(options.userId, bufferRecordId))
+      return published
     } catch (error) {
       if (isRevisionConflict(error)) {
         await applyRevisionConflict()
-        return
+        return published
       }
       if (isDraftConflict(error)) {
         applyDraftConflict(error)
-        return
+        return published
       }
       if (isClosedError(error)) {
         await closeAuthorized(error)
-        return
+        return published
       }
       reportSaveError(error)
+      return published
     } finally {
       publishingRef.current = false
       if (mountedRef.current) setPublishing(false)

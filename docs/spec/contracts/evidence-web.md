@@ -7,7 +7,7 @@
 #### 1. Scope / Trigger
 
 - Trigger：修改 `EvidenceQuota` DTO、`EvidenceCapturePicker` 的 preview/confirm 逻辑、Records evidence API transport 或现有 Records lazy route 接线时。
-- `EvidenceCapturePicker` 仍是尚未生产挂载的 route-private injected component；受保护的 `EvidenceSnapshotPage` reader 已由 `web/src/app/router.tsx` 懒加载，并调用真实 evidence API 与 renderer registry。本节约束 server-owned quota 状态，不因 capacity 功能新建 route、不把 `recordsApi.ts` 带入 eager graph、不引入轮询或全局 store；reader 合同见下方正文。
+- `EvidenceCapturePicker` 挂载在记录工作区材料对话框的"采集证据"里（见 [记录证据采集](records/web-surfaces.md#记录证据采集材料对话框)），预览请求经注入的 `captureEvidencePreview`；受保护的 `EvidenceSnapshotPage` reader 已由 `web/src/app/router.tsx` 懒加载，并调用真实 evidence API 与 renderer registry。本节约束采集表单与 server-owned quota 状态，不新建 route、不把 `recordsApi.ts` 带入 eager graph、不引入轮询或全局 store；reader 合同见下方正文。
 
 #### 2. Signatures
 
@@ -25,10 +25,14 @@ export type EvidenceCaptureReference = {
 
 #### 3. Contracts
 
+- 后端没有采集目录接口：`evidenceCaptureCatalog.ts` 按各 adapter 的 `ValidateSelection` 维护可采集类型、来源类型、指标（中文名，常用指标默认勾选，其余在"更多指标"）、精度与敏感拓扑字段；`comparison.result` 不可采集。指标与敏感字段提交前去重并按字典序排序。
+- 时间窗口：快捷"近 1 小时 / 6 小时 / 24 小时 / 7 天"截止到至少 5 分钟前并对齐 5 分钟（正在写入的数据会让发布时的重新采集与预览不一致）；"自定义"用 `datetime-local`，按浏览器本地时区换成 UTC，开始须早于结束；订阅成本只选月份，提交完整的 UTC 自然月。监控精度"自动"提交 0，其余只提供不低于服务端按窗口长度默认精度的 60 秒倍数；窗口变长使已选精度不再可选时，显示与提交都回到"自动"。
+- 预览响应必须与请求的类型、schema、来源、请求窗口一致，已有记录时 `record_id` 必须相同，且 `record_id`、`capture_intent_id`、`snapshot_id` 都非空，否则提示"预览结果与当前选择不一致，请重新生成"。预览错误按码提示：`resource_not_found` 来源不可访问或已删除，`evidence_source_empty` 所选窗口内没有数据，`evidence_window_too_large` 超出单份上限，`evidence_invalid` 选择无效，`evidence_kind_unavailable` 类型暂不可用，其余稍后重试。进行中的预览在选择变化时中止。
+- 预览卡显示类型 · 来源、质量与配额徽标、实际窗口与估算大小，以及"预览在 HH:mm 前发布有效"；到期后显示"预览已过期，请重新生成"且不能加入。加入后清掉预览并提示"已加入…，发布后保存"，同一预览不能再次加入。记录发布进行中（`disabled`）可以预览但不能加入，提示"正在发布，完成后再加入证据"。
 - quota完全由preview response提供；Web不得读取attachment quota、根据estimated bytes推断threshold、缓存project usage或启动polling。上游selection任一变化仍清空preview与confirm state。
 - `allowed`与带精确固定server reason的`warning`可确认；`warning|exceeded|unavailable`的reason分别只能是`project evidence quota warning threshold reached`、`project evidence quota exceeded`、`project evidence capacity unavailable`。状态与reason不匹配、任意dependency/identity文本、unknown/missing quota或stale preview必须禁用confirm且不得进入preview DOM；`handleConfirm`本身也要重复失败关闭，不能只依赖disabled样式。
 - preview展示allowlisted quota status/reason与estimated canonical bytes；不得展示payload、metadata、authorization、digest、stdout/stderr，也不得用`JSON.stringify`或object spread renderer回退。
-- confirm payload仍只能是`record_id + capture_intent_id`，不能把quota、estimated size、payload或客户端同意标志回传。warning的确认不改变server canonical status/reason。
+- confirm交给工作区的是`record_id + capture_intent_id + snapshot_id`与只用于显示的类型/来源/窗口标签及`valid_until`；发布只发送`capture_intent_id`（新记录另带`record_id`），`snapshot_id`仅作正文引用与列表键，不能把quota、estimated size、payload或客户端同意标志回传。warning的确认不改变server canonical status/reason。
 - `recordsApi.ts`继续lazy-only；capacity状态不构成新增eager endpoint、Context、常驻缓存或production route挂载理由。
 
 #### 4. Validation & Error Matrix
@@ -43,7 +47,7 @@ export type EvidenceCaptureReference = {
 
 #### 5. Tests Required
 
-- `EvidenceCapturePicker.test.tsx`覆盖warning可确认、exceeded/unavailable不可确认、stale、upstream reset与confirm body exact allowlist。
+- `EvidenceCapturePicker.test.tsx`覆盖默认选择与排序后的请求体、快捷/自定义/月份窗口、精度选项、敏感字段、upstream reset与请求中止、过期与exceeded不可确认、不一致或缺`snapshot_id`的响应、错误码提示、主体VPS实例优先与其他VPS模式、加入后不能重复加入；`evidenceCaptureCatalog.test.ts`覆盖默认精度边界与目录去重。
 - `recordsApi.test.ts`与architecture/bundle contracts继续证明唯一transport、lazy-only graph和wire shape不变。
 - 使用Node 22运行focused Vitest、lint、strict TypeScript/build、bundle/CSS contracts及`make verify-web`；不得抬bundle/CSS budget。
 
