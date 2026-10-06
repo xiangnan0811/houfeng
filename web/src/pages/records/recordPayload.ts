@@ -1,4 +1,4 @@
-import type { RecordDraftPayload, RecordRevision } from '../../lib/types'
+import type { RecordDraftPayload, RecordEvidenceItemInput, RecordRevision } from '../../lib/types'
 
 export function emptyRecordDraftPayload(ownerId = ''): RecordDraftPayload {
   return {
@@ -50,4 +50,9 @@ export function payloadFromRevision(revision: RecordRevision): RecordDraftPayloa
     template: revision.template ?? null,
     save_reason: '',
   }
+}
+
+/** 保存新修订时沿用当前修订的证据：按原顺序逐项声明为已有快照，否则后端会把新修订的证据置空。 */
+export function existingEvidenceItems(revision: Pick<RecordRevision, 'evidence_snapshot_ids'>): RecordEvidenceItemInput[] {
+  return (revision.evidence_snapshot_ids ?? []).map((snapshotId) => ({ existing_snapshot_id: snapshotId }))
 }

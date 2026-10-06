@@ -3186,9 +3186,15 @@ export type PatchRecordDraftInput = {
   payload: RecordDraftPayload
 }
 
+// 修订的证据是请求里的有序全集：沿用已有快照必须逐项带上，后端不会自动继承上一修订。
+export type RecordEvidenceItemInput =
+  | { capture_intent_id: string; existing_snapshot_id?: never }
+  | { existing_snapshot_id: string; capture_intent_id?: never }
+
 export type PublishRecordInput = {
   draft_id: string
   draft_etag: string
+  evidence_items?: RecordEvidenceItemInput[]
 }
 
 export type PublishRecordRevisionInput = PublishRecordInput & {

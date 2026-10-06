@@ -24,7 +24,7 @@ import {
   type DraftBufferStore,
   type UnsyncedDraft,
 } from '../draftBuffer'
-import { emptyRecordDraftPayload, payloadFromRevision } from '../recordPayload'
+import { emptyRecordDraftPayload, existingEvidenceItems, payloadFromRevision } from '../recordPayload'
 
 export type RecordWorkspaceMode = 'new' | 'edit' | 'read' | 'revision'
 export type RecordWorkspaceStatus = 'loading' | 'ready' | 'empty' | 'error' | 'revoked' | 'conflict'
@@ -477,6 +477,8 @@ export function useRecordDraft(options: {
           base_revision_id: recordRef.current.current_revision_id,
           lock_version: recordRef.current.lock_version,
           authorization_epoch: recordRef.current.authorization_epoch,
+          // 证据不在草稿里：沿用基准修订的快照，否则新修订会丢掉全部证据。
+          evidence_items: existingEvidenceItems(recordRef.current.current),
         }, newIdempotencyKey())
         const latest = await getRecord(options.recordId)
         draftRef.current = null
