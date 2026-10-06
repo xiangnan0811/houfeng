@@ -4,7 +4,7 @@ import type {
   AttachmentMetadata,
   AttachmentUploadCompletion,
   AttachmentUploadSession,
-} from '../../lib/types'
+} from '../../../lib/types'
 import {
   createRecordAttachmentQueueController,
   type RecordAttachmentQueueDependencies,

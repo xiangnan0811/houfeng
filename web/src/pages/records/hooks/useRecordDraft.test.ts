@@ -975,6 +975,107 @@ describe('useRecordDraft', () => {
     })
   })
 
+  it('adds an uploaded attachment to both the payload and an open conflict without dismissing it', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    api.patchRecordDraft.mockRejectedValueOnce(new ApiError(409, 'draft changed', {
+      code: 'draft_conflict',
+      recovery: { server_draft: draftFixture({ etag: 'etag-other' }), local_payload: emptyRecordDraftPayload('usr_1') },
+    }))
+    api.listRecordDrafts.mockResolvedValue({ items: [draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' })] })
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ title: 'mine' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    expect(result.current.state.status).toBe('conflict')
+
+    act(() => result.current.commands.addAttachment('att_new'))
+    act(() => result.current.commands.addAttachment('att_new'))
+
+    expect(result.current.state.status).toBe('conflict')
+    expect(result.current.state.payload.attachment_ids).toEqual(['att_new'])
+    expect(result.current.state.conflictPayload?.attachment_ids).toEqual(['att_new'])
+  })
+
+  it('refuses to hand out the draft for uploads while a conflict is open', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    api.listRecordDrafts.mockResolvedValue({ items: [draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' })] })
+    api.patchRecordDraft.mockRejectedValueOnce(new ApiError(409, 'draft changed', {
+      code: 'draft_conflict',
+      recovery: { server_draft: draftFixture({ etag: 'etag-other' }), local_payload: emptyRecordDraftPayload('usr_1') },
+    }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    await expect(result.current.commands.ensureDraft()).resolves.toEqual(expect.objectContaining({ draft_id: 'dft_001' }))
+    act(() => result.current.commands.patchPayload({ title: 'mine' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    expect(result.current.state.status).toBe('conflict')
+    // 已有服务端草稿也不能交出：上传会绕过解决器，被确认的内容可能不引用它。
+    await expect(result.current.commands.ensureDraft()).resolves.toBeUndefined()
+  })
+
+  it('refuses to hand out the draft for uploads while a publish is consuming it', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    api.createRecordDraft.mockResolvedValue(draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+    let finishPublish: (value: unknown) => void = () => undefined
+    api.createRecordRevision.mockReturnValueOnce(new Promise((resolve) => { finishPublish = resolve }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ title: 'mine' }))
+    let publishing: Promise<void> = Promise.resolve()
+    await act(async () => {
+      publishing = result.current.commands.publish()
+      await waitFor(() => expect(api.createRecordRevision).toHaveBeenCalled())
+    })
+    expect(result.current.commands.isPublishing()).toBe(true)
+    await expect(result.current.commands.ensureDraft()).resolves.toBeUndefined()
+    await act(async () => {
+      finishPublish({ record_id: 'rec_001' })
+      await publishing
+    })
+    expect(result.current.commands.isPublishing()).toBe(false)
+  })
+
+  it('lets go of the consumed draft as soon as publish succeeds even if the refresh read fails', async () => {
+    api.getRecord.mockResolvedValueOnce(recordDetailFixture()).mockRejectedValue(new ApiError(500, 'refresh failed'))
+    api.createRecordDraft.mockResolvedValue(draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+    api.createRecordRevision.mockResolvedValueOnce({ record_id: 'rec_001' })
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ title: 'mine' }))
+    await act(async () => {
+      await result.current.commands.publish()
+    })
+    // 服务端已在发布事务中删除草稿：读取失败也不能再把它交给上传入口。
+    expect(result.current.state.draft).toBeNull()
+    api.createRecordDraft.mockClear()
+    api.createRecordDraft.mockResolvedValueOnce(draftFixture({ draft_id: 'dft_next', record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+    await expect(result.current.commands.ensureDraft()).resolves.toEqual(expect.objectContaining({ draft_id: 'dft_next' }))
+    expect(api.createRecordDraft).toHaveBeenCalledTimes(1)
+  })
+
+  it('explains a publish refused while draft attachments are still being checked', async () => {
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    api.createRecordDraft.mockResolvedValue(draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+    api.createRecordRevision.mockRejectedValueOnce(new ApiError(409, 'draft attachments are still processing', { code: 'draft_attachments_busy' }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => result.current.commands.patchPayload({ title: 'mine' }))
+    await act(async () => {
+      await result.current.commands.publish()
+    })
+    expect(result.current.state.status).toBe('ready')
+    expect(result.current.state.message).toBe('附件仍在安全检查，请稍后再发布')
+  })
+
   it('loads the advanced server revision before opening the conflict resolver', async () => {
     const first = recordDetailFixture()
     const second = recordDetailFixture({

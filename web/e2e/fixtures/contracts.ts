@@ -9,6 +9,10 @@ export type ApiFixtureResponse = {
   headers?: Readonly<Record<string, string>>
   expectedBodyKeys?: readonly string[]
   expectNoBody?: true
+  /** 写请求体是二进制内容（如附件上传）：只校验非空且字节数等于给定值。 */
+  expectRawBodyBytes?: number
+  /** 原样返回的响应体（如附件内容或预览图），不做 JSON 编码。 */
+  rawBody?: Buffer | string
 }
 
 export type ApiFixtureProfile = Readonly<Record<ApiRouteKey, ApiFixtureResponse>>

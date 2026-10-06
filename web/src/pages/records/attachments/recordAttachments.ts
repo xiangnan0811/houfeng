@@ -3,13 +3,13 @@ import {
   createAttachmentUpload,
   getAttachmentMetadata,
   uploadAttachmentContent,
-} from '../../lib/recordsApi'
+} from '../../../lib/recordsApi'
 import type {
   AttachmentMetadata,
   AttachmentUploadCompletion,
   AttachmentUploadSession,
   CreateAttachmentUploadInput,
-} from '../../lib/types'
+} from '../../../lib/types'
 
 export type RecordAttachmentQueueStatus =
   | 'queued'
@@ -126,12 +126,12 @@ const defaultDependencies: RecordAttachmentQueueDependencies = {
   waitForPoll,
 }
 
-function initialItem(clientId: string, file: File): RecordAttachmentQueueItem {
+function initialItem(clientId: string, file: File, mediaType: string): RecordAttachmentQueueItem {
   return {
     client_id: clientId,
     file,
     display_name: file.name,
-    media_type: file.type || 'application/octet-stream',
+    media_type: mediaType,
     size_bytes: file.size,
     status: 'queued',
   }
@@ -146,8 +146,11 @@ export function createRecordAttachmentQueueController(options: Readonly<{
   onChange: (items: readonly RecordAttachmentQueueItem[]) => void
   dependencies?: RecordAttachmentQueueDependencies
   maxPollAttempts?: number
+  /** 声明给后端的媒体类型；默认取浏览器给出的 file.type。 */
+  mediaTypeFor?: (file: File) => string
 }>): RecordAttachmentQueueController {
   const dependencies = options.dependencies ?? defaultDependencies
+  const mediaTypeFor = options.mediaTypeFor ?? ((file: File) => file.type || 'application/octet-stream')
   const maxPollAttempts = options.maxPollAttempts ?? 120
   const entries = new Map<string, QueueEntry>()
   let disposed = false
@@ -247,7 +250,7 @@ export function createRecordAttachmentQueueController(options: Readonly<{
       const clientId = dependencies.newClientID(file)
       if (entries.has(clientId)) throw new Error(`duplicate attachment queue id: ${clientId}`)
       const entry: QueueEntry = {
-        item: initialItem(clientId, file),
+        item: initialItem(clientId, file, mediaTypeFor(file)),
         generation: 0,
         abortController: null,
       }
@@ -274,7 +277,7 @@ export function createRecordAttachmentQueueController(options: Readonly<{
     const entry = entries.get(clientId)
     if (!entry || !['failed', 'cancelled', 'expired'].includes(entry.item.status)) return false
     entry.abortController?.abort(abortReason())
-    entry.item = initialItem(clientId, entry.item.file)
+    entry.item = initialItem(clientId, entry.item.file, entry.item.media_type)
     emit()
     start(entry)
     return true

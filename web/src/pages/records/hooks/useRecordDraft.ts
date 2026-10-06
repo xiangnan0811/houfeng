@@ -54,6 +54,12 @@ export type RecordWorkspaceCommands = {
   restore: (saveReason: string) => Promise<void>
   resolveConflict: (payload: RecordDraftPayload) => void
   dismissConflict: () => void
+  /** 返回当前草稿；还没有草稿时先保存一次。冲突未解决、发布进行中或保存失败时为 undefined。 */
+  ensureDraft: () => Promise<RecordDraft | undefined>
+  /** 同步读取是否正在发布。 */
+  isPublishing: () => boolean
+  /** 把已可引用的附件加入草稿；不改变冲突状态。 */
+  addAttachment: (attachmentId: string) => void
 }
 
 const AUTOSAVE_MS = 2000
@@ -78,6 +84,8 @@ function newIdempotencyKey(): string {
 }
 
 function errorMessage(error: unknown, fallback: string): string {
+  // 草稿名下附件仍在安全检查时后端暂不清理草稿，稍后重试即可。
+  if (error instanceof ApiError && error.code === 'draft_attachments_busy') return '附件仍在安全检查，请稍后再发布'
   return error instanceof Error ? error.message : fallback
 }
 
@@ -128,6 +136,8 @@ export function useRecordDraft(options: {
   // 冲突解决器打开期间为真：服务端保存一律暂停（含定时器已触发、仍在保存链上排队的自动保存），
   // 本地缓冲照常写入。用户解决或关闭冲突后才恢复。
   const conflictOpenRef = useRef(false)
+  // 发布进行中为真：上传入口据此拒绝，避免附件挂到正被发布消费的草稿上。
+  const publishingRef = useRef(false)
   // 修订冲突时加载到、等待用户处理的服务端头；用户解决冲突后才成为确认头。
   const pendingHeadRef = useRef<RecordDetail | null>(null)
   // 用户在冲突解决器里确认过的头：下一次保存把草稿原子改到它上面，发布也按它的锁版本、
@@ -531,6 +541,7 @@ export function useRecordDraft(options: {
   }, [dirty, options.mode, payload, persistUnsynced, saveDraft, status])
 
   const publish = useCallback(async () => {
+    publishingRef.current = true
     setPublishing(true)
     try {
       let currentDraft = await saveDraft()
@@ -558,15 +569,17 @@ export function useRecordDraft(options: {
           // 证据不在草稿里：沿用基准修订的快照，否则新修订会丢掉全部证据。
           evidence_items: existingEvidenceItems(head.current),
         }, newIdempotencyKey())
+        // 发布成功时服务端已在同一事务删除草稿：立刻放下它，不依赖随后的读取成功，
+        // 否则读取失败会让上传等入口继续拿到已消费的草稿。
+        draftRef.current = null
+        if (mountedRef.current) setDraft(null)
         // 发布后的读取最权威：作废此前仍在途的后台读取。
         recordLoadRef.current += 1
         const latest = await getRecord(options.recordId)
-        draftRef.current = null
         baseRef.current = latest
         pendingHeadRef.current = null
         confirmedHeadRef.current = null
         if (mountedRef.current) {
-          setDraft(null)
           setRecord(latest)
           recordRef.current = latest
           setRevision(latest.current)
@@ -594,6 +607,7 @@ export function useRecordDraft(options: {
       }
       reportSaveError(error)
     } finally {
+      publishingRef.current = false
       if (mountedRef.current) setPublishing(false)
     }
   }, [applyDraftConflict, applyRevisionConflict, bufferRecordId, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, saveDraft, store])
@@ -727,6 +741,25 @@ export function useRecordDraft(options: {
         setConflictPayload(null)
         setConflictServer(null)
         setStatus('ready')
+        setDirty(true)
+        dirtyRef.current = true
+        generationRef.current += 1
+      },
+      // 冲突未解决或工作区已关闭时不交出草稿：已有草稿也不行，否则上传会绕过解决器。
+      ensureDraft: async () => {
+        if (closedRef.current || conflictOpenRef.current || publishingRef.current) return undefined
+        return draftRef.current ?? saveDraft()
+      },
+      isPublishing: () => publishingRef.current,
+      addAttachment: (attachmentId) => {
+        if (payloadRef.current.attachment_ids.includes(attachmentId)) return
+        const next = { ...payloadRef.current, attachment_ids: [...payloadRef.current.attachment_ids, attachmentId] }
+        payloadRef.current = next
+        setPayload(next)
+        // 冲突解决器打开时，本地一侧同样带上新附件，否则确认后会把刚上传的附件丢掉。
+        setConflictPayload((current) => current && !current.attachment_ids.includes(attachmentId)
+          ? { ...current, attachment_ids: [...current.attachment_ids, attachmentId] }
+          : current)
         setDirty(true)
         dirtyRef.current = true
         generationRef.current += 1

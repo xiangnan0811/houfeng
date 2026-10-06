@@ -24,6 +24,11 @@ vi.mock('../../lib/recordsApi', () => ({
   restoreRecordRevision: vi.fn(),
   listRecordDrafts: vi.fn().mockResolvedValue({ items: [] }),
   getRecordDraft: vi.fn(),
+  createAttachmentUpload: vi.fn(),
+  uploadAttachmentContent: vi.fn(),
+  completeAttachmentUpload: vi.fn(),
+  getAttachmentMetadata: vi.fn(),
+  getAttachmentContent: vi.fn(),
 }))
 
 describe('RecordNewPage', () => {

@@ -15,6 +15,11 @@ const api = vi.hoisted(() => ({
   createRecord: vi.fn(),
   createRecordRevision: vi.fn(),
   restoreRecordRevision: vi.fn(),
+  createAttachmentUpload: vi.fn(),
+  uploadAttachmentContent: vi.fn(),
+  completeAttachmentUpload: vi.fn(),
+  getAttachmentMetadata: vi.fn(),
+  getAttachmentContent: vi.fn(),
 }))
 
 const collab = vi.hoisted(() => ({
@@ -258,6 +263,35 @@ describe('RecordWorkspace', () => {
     expect(back).toHaveAttribute('href', '/monitoring/mi_001/records')
     expect(back.getAttribute('href')).not.toContain('return_vps=')
     expect(back.getAttribute('href')).not.toContain('javascript')
+  })
+
+  it('drops failed uploads of a draft once the draft has been published', async () => {
+    const existingDraft = { ...draftFixture(), record_id: 'rec_001', base_revision_id: 'rrv_001' }
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    api.createRecordDraft.mockResolvedValue(existingDraft)
+    api.patchRecordDraft.mockResolvedValue(existingDraft)
+    api.createRecordRevision.mockResolvedValue({ record_id: 'rec_001' })
+    api.getAttachmentMetadata.mockRejectedValue(new Error('unavailable'))
+    api.createAttachmentUpload.mockRejectedValue(new Error('网络中断'))
+    render(
+      <MemoryRouter initialEntries={['/records/rec_001/edit']}>
+        <Routes>
+          <Route path="/records/:recordId/edit" element={<WorkspaceByRecordId mode="edit" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '管理材料' }))
+    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [new File(['x'], 'trace.log')] } })
+    expect(await screen.findByRole('button', { name: '重试上传trace.log' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '发布修订' }))
+    await waitFor(() => expect(api.createRecordRevision).toHaveBeenCalled())
+    await waitFor(() => expect(api.getRecord).toHaveBeenCalledTimes(2))
+
+    // 草稿已随发布消费：它名下的失败项不能再对它重试，队列随之清空。
+    fireEvent.click(screen.getByRole('button', { name: '管理材料' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: '重试上传trace.log' })).not.toBeInTheDocument())
   })
 
   it('preserves canonical subject return across publish and related read/edit hops', async () => {

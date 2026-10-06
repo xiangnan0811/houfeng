@@ -34,6 +34,66 @@ describe('RecordMaterialDrawer', () => {
     })).toContain('houfeng-evidence:ev_7K2P')
   })
 
+  it('shows attachment names and routes picked files, retries and removals to the upload queue', () => {
+    const uploads = {
+      rows: [
+        { client_id: 'c1', display_name: 'alpha.png', size_bytes: 2048, status: 'processing' as const },
+        { client_id: 'c2', display_name: 'beta.log', size_bytes: 10, status: 'failed' as const, error: '网络中断' },
+      ],
+      notice: '',
+      onFiles: vi.fn(),
+      onRetry: vi.fn(),
+      onCancel: vi.fn(),
+      onRemove: vi.fn(),
+    }
+    render(
+      <MemoryRouter>
+        <RecordMaterialDrawer
+          open
+          onClose={vi.fn()}
+          onInsert={vi.fn()}
+          onRemove={vi.fn()}
+          uploads={uploads}
+          items={[{
+            kind: 'attachment', id: 'att_mtr', label: '附件 att_mtr', available: true,
+            attachment: { attachment_id: 'att_mtr', state: 'available', display_name: 'mtr.txt', media_type: 'text/plain', size_bytes: 1024, preview_available: true },
+          }]}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByText('mtr.txt')).toBeInTheDocument()
+    expect(screen.queryByText('att_mtr')).not.toBeInTheDocument()
+    expect(screen.getByText('安全检查中')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '取消上传alpha.png' }))
+    expect(uploads.onCancel).toHaveBeenCalledWith('c1')
+    expect(screen.getByText('网络中断')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试上传beta.log' }))
+    expect(uploads.onRetry).toHaveBeenCalledWith('c2')
+    fireEvent.click(screen.getByRole('button', { name: '移除上传beta.log' }))
+    expect(uploads.onRemove).toHaveBeenCalledWith('c2')
+    const file = new File(['x'], 'gamma.txt', { type: 'text/plain' })
+    fireEvent.change(screen.getByLabelText('选择附件文件'), { target: { files: [file] } })
+    expect(uploads.onFiles).toHaveBeenCalledWith([file])
+  })
+
+  it('hides raw attachment IDs while metadata is loading and blocks new files during publish', () => {
+    render(
+      <MemoryRouter>
+        <RecordMaterialDrawer
+          open
+          onClose={vi.fn()}
+          onInsert={vi.fn()}
+          onRemove={vi.fn()}
+          uploads={{ rows: [], notice: '', disabled: true, onFiles: vi.fn(), onRetry: vi.fn(), onCancel: vi.fn(), onRemove: vi.fn() }}
+          items={[{ kind: 'attachment', id: 'att_secret', label: '附件', available: false, pending: true }]}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByText('att_secret')).not.toBeInTheDocument()
+    expect(screen.getByText('读取中')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '选择文件' })).toBeDisabled()
+  })
+
   it('disables insert and remove when the workspace is read-only', () => {
     const onInsert = vi.fn()
     const onRemove = vi.fn()

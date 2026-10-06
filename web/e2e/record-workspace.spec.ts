@@ -134,9 +134,11 @@ for (const viewport of VIEWPORTS) {
     const drawer = page.getByRole('dialog', { name: '材料与引用' })
     await expect(drawer).toBeVisible()
     await expect(drawer.getByText('evs_e2ethirdnight', { exact: true })).toBeVisible()
-    await expect(drawer.getByText('att_e2emtrreport', { exact: true })).toBeVisible()
+    // 附件按元数据显示文件名与类型大小，不再露出原始 ID。
+    await expect(drawer.getByText('mtr-第三晚-alpha.txt', { exact: true })).toBeVisible()
+    await expect(drawer.getByText('att_e2emtrreport', { exact: true })).toHaveCount(0)
 
-    const insertAttachment = drawer.getByRole('button', { name: '插入附件 att_e2emtrreport' })
+    const insertAttachment = drawer.getByRole('button', { name: '插入mtr-第三晚-alpha.txt' })
     await expectLocatorNotClipped(insertAttachment)
     await insertAttachment.click()
     await expect(page.getByLabel('Markdown 源文')).toHaveValue(/houfeng-attachment:att_e2emtrreport/u)

@@ -15,6 +15,11 @@ const api = vi.hoisted(() => ({
   restoreRecordRevision: vi.fn(),
   listRecordDrafts: vi.fn().mockResolvedValue({ items: [] }),
   getRecordDraft: vi.fn(),
+  createAttachmentUpload: vi.fn(),
+  uploadAttachmentContent: vi.fn(),
+  completeAttachmentUpload: vi.fn(),
+  getAttachmentMetadata: vi.fn(),
+  getAttachmentContent: vi.fn(),
 }))
 
 vi.mock('../../lib/auth-context', () => ({
