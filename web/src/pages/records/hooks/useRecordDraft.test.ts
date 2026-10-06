@@ -483,6 +483,33 @@ describe('useRecordDraft', () => {
     expect(result.current.state.dirty).toBe(true)
   })
 
+  it.each([
+    { name: 'keeps every existing evidence snapshot in order', ids: ['evs_b', 'evs_a', 'evs_c'] },
+    { name: 'sends an explicit empty evidence list when the record has none', ids: [] as string[] },
+  ])('formal revision save $name', async ({ ids }) => {
+    // 修订的证据是请求里的有序全集；缺省会让后端把新修订的证据置空。
+    api.getRecord.mockResolvedValue(recordDetailFixture({
+      current: recordRevisionFixture({ evidence_snapshot_ids: ids }),
+    }))
+    api.createRecordDraft.mockResolvedValue(draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+    api.createRecordRevision.mockResolvedValue({ record_id: 'rec_001' })
+    // store 必须在渲染外创建：hook 的加载 effect 依赖其引用，每次渲染新建会无限重载。
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({
+      mode: 'edit',
+      recordId: 'rec_001',
+      userId: 'usr_1',
+      store,
+    }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await result.current.commands.publish()
+    })
+    expect(api.createRecordRevision).toHaveBeenCalledWith('rec_001', expect.objectContaining({
+      evidence_items: ids.map((id) => ({ existing_snapshot_id: id })),
+    }), expect.any(String))
+  })
+
   it('opens the conflict resolver when formal save reports a newer revision', async () => {
     api.getRecord.mockResolvedValue(recordDetailFixture())
     api.createRecordDraft.mockResolvedValue(draftFixture({

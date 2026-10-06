@@ -323,3 +323,18 @@ for (const viewport of VIEWPORTS) {
     await expectNoDocumentOverflow(page)
   })
 }
+
+test('publishing an edited record keeps every existing evidence snapshot in order', async ({ api, page }) => {
+  // 修订的证据是请求里的有序全集；漏传会让新修订丢掉全部证据。
+  const evidenceSnapshotIds = ['evs_e2ethirdnight', 'evs_e2efirstnight'] as const
+  api.useProfile(recordDetailProfile({ revisionSave: { evidenceSnapshotIds } }))
+  await page.goto('/records/rec_e2e001/edit')
+  await page.getByLabel('保存原因').fill('补充第三晚复现结论')
+
+  const revisionRequest = page.waitForRequest((request) =>
+    request.method() === 'POST' && new URL(request.url()).pathname === '/api/records/rec_e2e001/revisions')
+  await page.getByRole('button', { name: '发布修订' }).click()
+  const body = (await revisionRequest).postDataJSON() as { evidence_items: unknown }
+  expect(body.evidence_items).toEqual(evidenceSnapshotIds.map((id) => ({ existing_snapshot_id: id })))
+  await expect.poll(() => api.requestCount('POST', '/api/records/rec_e2e001/revisions')).toBe(1)
+})

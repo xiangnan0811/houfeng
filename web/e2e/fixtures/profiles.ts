@@ -523,14 +523,64 @@ const RECORD_POPULATED_COMMENTS = [
  * The `/records/new` profile cannot exercise reading, layout switching or a populated
  * material drawer, so those paths need their own served record.
  */
+// 编辑已有记录后发布修订：草稿创建与修订提交都声明精确的请求体字段。
+const RECORD_REVISION_PUBLISH_KEYS = ['draft_id', 'draft_etag', 'base_revision_id', 'lock_version', 'authorization_epoch', 'evidence_items'] as const
+
+function recordRevisionSaveRoutes(revision: { revision_id: string }): ApiFixtureProfile {
+  const draft = {
+    draft_id: 'rdf_e2e_revise',
+    record_id: 'rec_e2e001',
+    base_revision_id: revision.revision_id,
+    etag: 'rdt1_e2e_revise',
+    payload: {},
+    version: 1,
+    warning_at: '2026-08-21T10:00:00Z',
+    created_at: '2026-08-20T10:00:00Z',
+    updated_at: '2026-08-20T10:00:00Z',
+    expires_at: '2026-08-22T10:00:00Z',
+  }
+  return {
+    [apiRouteKey('POST', '/api/record-drafts')]: {
+      status: 200,
+      body: draft,
+      expectedBodyKeys: ['record_id', 'base_revision_id', 'payload'],
+    },
+    [apiRouteKey('PATCH', `/api/record-drafts/${draft.draft_id}`)]: {
+      status: 200,
+      body: { ...draft, etag: 'rdt2_e2e_revise', version: 2 },
+      expectedBodyKeys: ['payload'],
+    },
+    [apiRouteKey('POST', '/api/records/rec_e2e001/revisions')]: {
+      status: 200,
+      body: {
+        record_id: 'rec_e2e001',
+        revision_id: 'rrv_e2e_revised',
+        revision_no: 3,
+        lock_version: 5,
+        authorization_epoch: 2,
+        lifecycle: 'active',
+        created: false,
+        replayed: false,
+        committed_at: '2026-08-20T10:01:00Z',
+      },
+      expectedBodyKeys: RECORD_REVISION_PUBLISH_KEYS,
+    },
+  }
+}
+
 export function recordDetailProfile(options: {
   renderModel?: 'ready' | 'unsupported'
   /** Sectioned body, named participants, actions, comments and an older revision. */
   populated?: boolean
+  /** 覆盖当前修订的证据快照（按顺序），并允许编辑后发布新修订。 */
+  revisionSave?: { evidenceSnapshotIds: readonly string[] }
 } = {}): ApiFixtureProfile {
-  const revision = options.populated
+  const baseRevision = options.populated
     ? RECORD_RICH_REVISION
     : options.renderModel === 'unsupported' ? RECORD_UNSUPPORTED_REVISION : RECORD_REVISION
+  const revision = options.revisionSave
+    ? { ...baseRevision, evidence_snapshot_ids: [...options.revisionSave.evidenceSnapshotIds] }
+    : baseRevision
   return authenticatedProfile({
     [apiRouteKey('GET', '/api/records/rec_e2e001')]: {
       status: 200,
@@ -595,6 +645,7 @@ export function recordDetailProfile(options: {
       status: 200,
       body: { items: [] },
     },
+    ...(options.revisionSave ? recordRevisionSaveRoutes(revision) : {}),
   })
 }
 
