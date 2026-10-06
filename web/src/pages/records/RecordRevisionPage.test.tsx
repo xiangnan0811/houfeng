@@ -33,6 +33,8 @@ vi.mock('../../lib/recordsApi', () => ({
   completeAttachmentUpload: vi.fn(),
   getAttachmentMetadata: vi.fn(),
   getAttachmentContent: vi.fn(),
+  captureEvidencePreview: vi.fn(),
+  getEvidenceSnapshot: vi.fn(),
 }))
 
 vi.mock('../../lib/recordCollaborationApi', () => ({

@@ -10,6 +10,12 @@ import { decodeRenderModelStatusV1, insertMaterialToken } from '../../lib/docume
 import { AttachmentPreviewDialog } from './attachments/AttachmentPreview'
 import { useAttachmentMetadata } from './attachments/useAttachmentMetadata'
 import { useRecordAttachmentUploads } from './attachments/useRecordAttachmentUploads'
+import type { EvidenceCaptureSubject, PendingEvidence } from './evidence/EvidenceCapturePicker'
+import { captureEvidencePreview, getEvidenceSnapshot } from '../../lib/recordsApi'
+import { evidenceKindLabel } from './evidence/evidencePresentation'
+import { useIdLookup } from './hooks/useIdLookup'
+import { listVPSAssets, listVPSMonitoringInstances } from '../../lib/api'
+import type { OtherEvidenceSourceLoaders } from './evidence/useOtherEvidenceSource'
 import { PromoteChecklistActionDialog } from './editor/PromoteChecklistActionDialog'
 import { RecordConflictResolver } from './editor/RecordConflictResolver'
 import { RecordMaterialDrawer, type RecordMaterialItem } from './editor/RecordMaterialDrawer'
@@ -31,6 +37,17 @@ import './RecordWorkspace.css'
 const MarkdownPreview = lazy(() => import('./editor/MarkdownPreview').then((module) => ({
   default: module.MarkdownPreview,
 })))
+
+// 采集证据时可选的“其他 VPS”来源；模块级常量保证引用稳定。
+const OTHER_EVIDENCE_SOURCES: OtherEvidenceSourceLoaders = {
+  listVPS: () => listVPSAssets(),
+  listMonitoringInstances: (vpsId) => listVPSMonitoringInstances(vpsId),
+}
+
+// 证据清单只需要标题与类型；模块级函数保证查询缓存的 loader 引用稳定。
+function loadEvidenceSummary(snapshotId: string, signal: AbortSignal): Promise<{ title: string; kind: string }> {
+  return getEvidenceSnapshot(snapshotId, signal).then((snapshot) => ({ title: snapshot.title, kind: snapshot.kind }))
+}
 
 type RecordWorkspaceProps = {
   mode: RecordWorkspaceMode
@@ -97,6 +114,7 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
   const [layout, setLayout] = useState<RecordEditorLayout>('split')
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [previewing, setPreviewing] = useState<RecordMaterialItem | null>(null)
+  const [pendingEvidence, setPendingEvidence] = useState<readonly PendingEvidence[]>([])
   const [promoteOpen, setPromoteOpen] = useState(false)
   const [tool, setTool] = useState<RecordTool>(null)
   const [restoreReason, setRestoreReason] = useState('恢复历史修订')
@@ -112,9 +130,22 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
   const draftId = state.draft?.draft_id ?? null
   const uploadDraftIdRef = useRef(draftId)
   useEffect(() => {
-    if (uploadDraftIdRef.current && uploadDraftIdRef.current !== draftId) resetUploads()
+    if (uploadDraftIdRef.current && uploadDraftIdRef.current !== draftId) {
+      resetUploads()
+    }
     uploadDraftIdRef.current = draftId
   }, [draftId, resetUploads])
+
+  // 待保存证据只在当前页面：离开前提示，避免误丢。
+  useEffect(() => {
+    if (pendingEvidence.length === 0) return
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [pendingEvidence.length])
 
   const members = (() => {
     const options = new Map<string, string>()
@@ -132,6 +163,16 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
   const evidenceIds = mode === 'revision'
     ? [...(state.revision?.evidence_snapshot_ids ?? [])]
     : [...(state.record?.current.evidence_snapshot_ids ?? [])]
+  const evidenceSummaries = useIdLookup(evidenceIds, loadEvidenceSummary)
+  // 发布后新修订已带回的证据不再算待保存（放下待保存要等发布完全结束，中间可能已读到新修订）。
+  const unsavedEvidence = pendingEvidence.filter((evidence) => !evidenceIds.includes(evidence.snapshot_id))
+  // 证据来源取自正在编辑的记录主体（跳过还没选定来源的空白行）；显示名优先用已发布修订里的身份快照。
+  const captureSubjects: EvidenceCaptureSubject[] = state.payload.subjects.filter((subject) => subject.source_id.trim() !== '').map((subject) => {
+    const identity = state.record?.current.subjects.find(
+      (published) => published.kind === subject.kind && published.source_id === subject.source_id,
+    )?.identity
+    return { kind: subject.kind, source_id: subject.source_id, label: identity?.display_name || subject.source_id }
+  })
   const materials: RecordMaterialItem[] = [
     ...state.payload.attachment_ids.map((id): RecordMaterialItem => {
       const entry = attachmentMetadata.get(id)
@@ -146,12 +187,25 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
         ...(metadata ? { attachment: metadata } : {}),
       }
     }),
-    ...evidenceIds.map((id) => ({
-      kind: 'evidence' as const,
-      id,
-      label: `证据 ${id}`,
+    ...evidenceIds.map((id): RecordMaterialItem => {
+      const entry = evidenceSummaries.get(id)
+      const summary = entry?.status === 'ready' ? entry.metadata : undefined
+      return {
+        kind: 'evidence',
+        id,
+        // 不露出快照 ID：读到前显示“证据”，读到后显示“类型 · 标题”。
+        label: summary ? `${evidenceKindLabel(summary.kind)} · ${summary.title}` : '证据',
+        available: entry?.status !== 'unavailable',
+        pending: !entry || entry.status === 'loading',
+      }
+    }),
+    ...(editable ? unsavedEvidence.map((evidence): RecordMaterialItem => ({
+      kind: 'evidence',
+      id: evidence.snapshot_id,
+      label: `${evidence.kind_label} · ${evidence.source_label}`,
       available: true,
-    })),
+      unsaved: true,
+    })) : []),
   ]
 
   useEffect(() => {
@@ -205,8 +259,13 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
         onSave={() => void commands.saveDraft()}
         onPublish={() => {
           // 附件还在上传或安全检查时不发布：否则发布会先删掉草稿，未完成的附件随之被释放。
-          if (uploads.isBusy()) return
-          void commands.publish()
+          // 已在发布时不重入：否则会用另一个幂等键再发一次。
+          if (uploads.isBusy() || commands.isPublishing()) return
+          const evidence = unsavedEvidence
+          // 只放下这次随发布写入的证据；发布失败（过期、冲突等）时全部保留，由用户移除后重新采集。
+          void commands.publish(evidence).then((published) => {
+            if (published) setPendingEvidence((current) => current.filter((item) => !evidence.includes(item)))
+          })
         }}
         onExport={() => setTool('export')}
         onImport={() => setTool('import')}
@@ -333,8 +392,28 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
           if (!editable) return
           commands.setBody(insertMaterialToken(state.payload.body_markdown, item))
         }}
+        capture={editable ? {
+          recordId: recordId ?? pendingEvidence[0]?.record_id,
+          subjects: captureSubjects,
+          otherSources: OTHER_EVIDENCE_SOURCES,
+          requestPreview: captureEvidencePreview,
+          // 发布进行中加入的证据赶不上这次发布，新记录还会随发布成功跳走而丢失：此时不接受。
+          onConfirm: (evidence) => {
+            if (commands.isPublishing()) return
+            setPendingEvidence((current) =>
+              current.some((item) => item.capture_intent_id === evidence.capture_intent_id) ? current : [...current, evidence])
+          },
+          disabled: state.publishing,
+        } : undefined}
         onRemove={(item) => {
-          if (!editable || item.kind !== 'attachment') return
+          if (!editable) return
+          if (item.kind === 'evidence') {
+            // 发布已带上这份证据时移除不再生效，不能让界面与请求不一致。
+            if (item.unsaved && !commands.isPublishing()) {
+              setPendingEvidence((current) => current.filter((evidence) => evidence.snapshot_id !== item.id))
+            }
+            return
+          }
           commands.patchPayload({
             attachment_ids: state.payload.attachment_ids.filter((id) => id !== item.id),
           })

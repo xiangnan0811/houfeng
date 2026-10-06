@@ -19,12 +19,12 @@ import type {
   ComparisonEvaluateResponse,
   ComparisonFixedItemInput,
   CreateAttachmentUploadInput,
+  CreateRecordInput,
   CreateRecordDraftInput,
   EvidenceCapturePreview,
   EvidenceCapturePreviewInput,
   EvidenceSnapshotRead,
   PatchRecordDraftInput,
-  PublishRecordInput,
   PublishRecordRevisionInput,
   RecordDeletionExecuteInput,
   RecordDeletionOperation,
@@ -284,7 +284,7 @@ export function getRecord(recordId: string): Promise<RecordDetail> {
   return requestJSON<RecordDetail>(`/api/records/${encoded(recordId)}`)
 }
 
-export function createRecord(input: PublishRecordInput, idempotencyKey: string): Promise<RecordMutationResult> {
+export function createRecord(input: CreateRecordInput, idempotencyKey: string): Promise<RecordMutationResult> {
   return postIdempotentJSON<RecordMutationResult>('/api/records', input, idempotencyKey)
 }
 

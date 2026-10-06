@@ -20,6 +20,8 @@ const api = vi.hoisted(() => ({
   completeAttachmentUpload: vi.fn(),
   getAttachmentMetadata: vi.fn(),
   getAttachmentContent: vi.fn(),
+  captureEvidencePreview: vi.fn(),
+  getEvidenceSnapshot: vi.fn(),
 }))
 
 const collab = vi.hoisted(() => ({
@@ -45,7 +47,33 @@ vi.mock('../../lib/auth-context', () => ({
   }),
 }))
 
+const vpsApi = vi.hoisted(() => ({
+  listVPSAssets: vi.fn(),
+  listVPSMonitoringInstances: vi.fn(),
+}))
+
+// 可让发布在删除本地缓冲前停住：此时新修订已读回，待保存证据尚未放下。
+const bufferGate = vi.hoisted(() => ({ hold: null as Promise<void> | null }))
+
+vi.mock('./draftBuffer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./draftBuffer')>()
+  return {
+    ...actual,
+    memoryDraftBufferStore: (...args: Parameters<typeof actual.memoryDraftBufferStore>) => {
+      const store = actual.memoryDraftBufferStore(...args)
+      return {
+        ...store,
+        delete: async (key: string) => {
+          await bufferGate.hold
+          return store.delete(key)
+        },
+      }
+    },
+  }
+})
+
 vi.mock('../../lib/recordsApi', () => api)
+vi.mock('../../lib/api', async (importOriginal) => ({ ...await importOriginal<object>(), ...vpsApi }))
 vi.mock('../../lib/recordCollaborationApi', () => collab)
 
 function draftFixture() {
@@ -59,6 +87,25 @@ function draftFixture() {
     updated_at: '2026-08-18T00:00:00Z',
     expires_at: '2026-08-19T00:00:00Z',
   }
+}
+
+type CapturePreviewInput = { kind: string; schema_version: number; source_type: string; source_id: string; requested_window: { start: string; end: string } }
+
+// 预览按请求回显来源与窗口，每次一个新的采集意图。
+function mockCapturePreviews() {
+  let intent = 0
+  api.captureEvidencePreview.mockImplementation((input: CapturePreviewInput) => {
+    intent += 1
+    return Promise.resolve({
+      record_id: 'rec_001', snapshot_id: `evs_new_${intent}`, capture_intent_id: `eci_${intent}`,
+      kind: input.kind, schema_version: input.schema_version,
+      subject: { type: 'vps', id: 'vps_0123456789abcdef', display_name: 'VPS Alpha' },
+      source: { type: input.source_type, id: input.source_id, display_name: '' },
+      requested_window: input.requested_window, actual_window: input.requested_window,
+      quality: { status: 'complete' }, quota: { status: 'allowed' }, estimated_canonical_bytes: 2048,
+      valid_until: new Date(Date.now() + 15 * 60_000).toISOString(),
+    })
+  })
 }
 
 function WorkspaceByRecordId({ mode }: { mode: 'read' | 'edit' }) {
@@ -144,6 +191,7 @@ describe('RecordWorkspace', () => {
       revision_id: 'rrv_001',
       evidence_snapshot_ids: ['ev_hist'],
     }))
+    api.getEvidenceSnapshot.mockResolvedValue({ title: '第三晚 TCP 观测', kind: 'monitoring.host' })
     render(
       <MemoryRouter>
         <RecordWorkspace mode="revision" recordId="rec_001" revisionId="rrv_001" />
@@ -152,7 +200,11 @@ describe('RecordWorkspace', () => {
     expect(await screen.findByRole('heading', { name: 'Database outage' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '导出' })).toBeInTheDocument()
     const materials = screen.getByRole('list', { name: '材料清单' })
-    expect(within(materials).getByText('ev_hist')).toBeInTheDocument()
+    // 证据按类型与标题显示，不露出快照 ID；只读取历史修订引用的那一份。
+    expect(await within(materials).findByText('主机监控 · 第三晚 TCP 观测')).toBeInTheDocument()
+    expect(within(materials).queryByText('ev_hist')).toBeNull()
+    expect(api.getEvidenceSnapshot).toHaveBeenCalledTimes(1)
+    expect(api.getEvidenceSnapshot).toHaveBeenCalledWith('ev_hist', expect.any(AbortSignal))
     expect(within(materials).getByRole('link', { name: '查看证据' })).toHaveAttribute('href', '/evidence/ev_hist')
     expect(screen.queryByText('ev_current')).toBeNull()
     expect(screen.queryByRole('button', { name: '管理材料' })).toBeNull()
@@ -292,6 +344,149 @@ describe('RecordWorkspace', () => {
     // 草稿已随发布消费：它名下的失败项不能再对它重试，队列随之清空。
     fireEvent.click(screen.getByRole('button', { name: '管理材料' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: '重试上传trace.log' })).not.toBeInTheDocument())
+  })
+
+  it('keeps captured evidence pending on the page and publishes it with the revision', async () => {
+    const existingDraft = { ...draftFixture(), record_id: 'rec_001', base_revision_id: 'rrv_001' }
+    api.getRecord.mockResolvedValue(recordDetailFixture({
+      current: recordRevisionFixture({ evidence_snapshot_ids: ['evs_old'] }),
+    }))
+    api.getEvidenceSnapshot.mockResolvedValue({ title: '上周观测', kind: 'monitoring.host' })
+    api.getAttachmentMetadata.mockRejectedValue(new Error('unavailable'))
+    api.createRecordDraft.mockResolvedValue(existingDraft)
+    api.patchRecordDraft.mockResolvedValue(existingDraft)
+    api.createRecordRevision.mockResolvedValue({ record_id: 'rec_001' })
+    vpsApi.listVPSMonitoringInstances.mockResolvedValue([{ monitoring_instance_id: 'mi_alpha', display_name: 'Alpha 监控' }])
+    mockCapturePreviews()
+    render(
+      <MemoryRouter initialEntries={['/records/rec_001/edit']}>
+        <Routes>
+          <Route path="/records/:recordId/edit" element={<WorkspaceByRecordId mode="edit" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '管理材料' }))
+    fireEvent.click(screen.getByRole('button', { name: '采集证据' }))
+    // 主体 VPS 名下的监控实例是默认来源，带记录 ID 预览。
+    await waitFor(() => expect(screen.getByLabelText('来源')).toHaveDisplayValue('VPS Alpha · Alpha 监控'))
+    const addPreview = async () => {
+      fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+      fireEvent.click(within(await screen.findByRole('region', { name: '证据预览' })).getByRole('button', { name: '加入记录' }))
+    }
+    await addPreview()
+    await addPreview()
+    expect(api.captureEvidencePreview).toHaveBeenCalledWith(
+      expect.objectContaining({ record_id: 'rec_001', source_type: 'monitoring_instance', source_id: 'mi_alpha' }),
+      expect.any(AbortSignal),
+    )
+
+    const materials = screen.getByRole('dialog', { name: '材料与引用' })
+    expect(within(materials).getAllByText('待保存')).toHaveLength(2)
+    // 已保存的证据不能移除，本次新采集的可以。
+    expect(within(materials).queryByRole('button', { name: '移除主机监控 · 上周观测' })).not.toBeInTheDocument()
+    fireEvent.click(within(materials).getAllByRole('button', { name: '移除主机监控 · VPS Alpha · Alpha 监控' })[0]!)
+    expect(within(materials).getAllByText('待保存')).toHaveLength(1)
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '发布修订' }))
+    await waitFor(() => expect(api.createRecordRevision).toHaveBeenCalled())
+    expect(api.createRecordRevision).toHaveBeenCalledWith('rec_001', expect.objectContaining({
+      evidence_items: [{ existing_snapshot_id: 'evs_old' }, { capture_intent_id: 'eci_2' }],
+    }), expect.any(String))
+    await waitFor(() => expect(api.getRecord).toHaveBeenCalledTimes(2))
+    fireEvent.click(screen.getByRole('button', { name: '管理材料' }))
+    expect(screen.queryByText('待保存')).not.toBeInTheDocument()
+  })
+
+  it('shows a published capture once, as saved, even before the publish finishes', async () => {
+    const existingDraft = { ...draftFixture(), record_id: 'rec_001', base_revision_id: 'rrv_001' }
+    api.getRecord
+      .mockResolvedValueOnce(recordDetailFixture({ current: recordRevisionFixture({ evidence_snapshot_ids: ['evs_old'] }) }))
+      .mockResolvedValue(recordDetailFixture({
+        current_revision_id: 'rrv_002',
+        current: recordRevisionFixture({ revision_id: 'rrv_002', evidence_snapshot_ids: ['evs_old', 'evs_new_1'] }),
+      }))
+    api.getEvidenceSnapshot.mockImplementation((id: string) => Promise.resolve({ title: id === 'evs_old' ? '上周观测' : '本次观测', kind: 'monitoring.host' }))
+    api.getAttachmentMetadata.mockRejectedValue(new Error('unavailable'))
+    api.createRecordDraft.mockResolvedValue(existingDraft)
+    api.patchRecordDraft.mockResolvedValue(existingDraft)
+    let releaseBuffer: () => void = () => undefined
+    // 修订写入后才拦住缓冲删除：保存草稿时的删除照常放行。
+    api.createRecordRevision.mockImplementation(() => {
+      bufferGate.hold = new Promise((resolve) => { releaseBuffer = resolve })
+      return Promise.resolve({ record_id: 'rec_001' })
+    })
+    vpsApi.listVPSMonitoringInstances.mockResolvedValue([{ monitoring_instance_id: 'mi_alpha', display_name: 'Alpha 监控' }])
+    mockCapturePreviews()
+    render(
+      <MemoryRouter initialEntries={['/records/rec_001/edit']}>
+        <Routes>
+          <Route path="/records/:recordId/edit" element={<WorkspaceByRecordId mode="edit" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    try {
+      fireEvent.click(await screen.findByRole('button', { name: '管理材料' }))
+      fireEvent.click(screen.getByRole('button', { name: '采集证据' }))
+      await waitFor(() => expect(screen.getByLabelText('来源')).toHaveDisplayValue('VPS Alpha · Alpha 监控'))
+      fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+      fireEvent.click(within(await screen.findByRole('region', { name: '证据预览' })).getByRole('button', { name: '加入记录' }))
+
+      fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+      fireEvent.click(screen.getByRole('button', { name: '发布修订' }))
+      await waitFor(() => expect(api.getRecord).toHaveBeenCalledTimes(2))
+      fireEvent.click(screen.getByRole('button', { name: '管理材料' }))
+      const materials = screen.getByRole('dialog', { name: '材料与引用' })
+      // 新修订已带回这份快照：它只作为已保存证据出现一次，不再是“待保存”。
+      expect(await within(materials).findByText('主机监控 · 本次观测')).toBeInTheDocument()
+      expect(within(materials).queryByText('待保存')).not.toBeInTheDocument()
+      expect(within(materials).queryByRole('button', { name: '移除主机监控 · VPS Alpha · Alpha 监控' })).not.toBeInTheDocument()
+    } finally {
+      releaseBuffer()
+      bufferGate.hold = null
+    }
+  })
+
+  it('locks pending evidence while a publish is in flight', async () => {
+    const existingDraft = { ...draftFixture(), record_id: 'rec_001', base_revision_id: 'rrv_001' }
+    api.getRecord.mockResolvedValue(recordDetailFixture())
+    api.getAttachmentMetadata.mockRejectedValue(new Error('unavailable'))
+    api.createRecordDraft.mockResolvedValue(existingDraft)
+    api.patchRecordDraft.mockResolvedValue(existingDraft)
+    let releasePublish: () => void = () => undefined
+    api.createRecordRevision.mockImplementation(() => new Promise((resolve) => {
+      releasePublish = () => resolve({ record_id: 'rec_001' })
+    }))
+    vpsApi.listVPSMonitoringInstances.mockResolvedValue([{ monitoring_instance_id: 'mi_alpha', display_name: 'Alpha 监控' }])
+    mockCapturePreviews()
+    render(
+      <MemoryRouter initialEntries={['/records/rec_001/edit']}>
+        <Routes>
+          <Route path="/records/:recordId/edit" element={<WorkspaceByRecordId mode="edit" />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '管理材料' }))
+    fireEvent.click(screen.getByRole('button', { name: '采集证据' }))
+    await waitFor(() => expect(screen.getByLabelText('来源')).toHaveDisplayValue('VPS Alpha · Alpha 监控'))
+    fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+    fireEvent.click(within(await screen.findByRole('region', { name: '证据预览' })).getByRole('button', { name: '加入记录' }))
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '发布修订' }))
+    await waitFor(() => expect(api.createRecordRevision).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: '管理材料' }))
+    const materials = screen.getByRole('dialog', { name: '材料与引用' })
+    // 已随这次发布提交的证据不能移除，新预览也不能加入。
+    expect(within(materials).getByRole('button', { name: '移除主机监控 · VPS Alpha · Alpha 监控' })).toBeDisabled()
+    fireEvent.click(within(materials).getByRole('button', { name: '采集证据' }))
+    await waitFor(() => expect(screen.getByLabelText('来源')).toHaveDisplayValue('VPS Alpha · Alpha 监控'))
+    fireEvent.click(screen.getByRole('button', { name: '生成预览' }))
+    expect(within(await screen.findByRole('region', { name: '证据预览' })).getByRole('button', { name: '加入记录' })).toBeDisabled()
+
+    releasePublish()
+    await waitFor(() => expect(within(materials).queryByText('待保存')).not.toBeInTheDocument())
+    expect(api.createRecordRevision).toHaveBeenCalledTimes(1)
   })
 
   it('preserves canonical subject return across publish and related read/edit hops', async () => {

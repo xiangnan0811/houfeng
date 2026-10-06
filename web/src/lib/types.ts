@@ -3199,6 +3199,11 @@ export type PublishRecordInput = {
   evidence_items?: RecordEvidenceItemInput[]
 }
 
+// 新建记录带证据时，record_id 必须是首次证据预览时服务端预分配的那个；修订请求不接受该字段。
+export type CreateRecordInput = PublishRecordInput & {
+  record_id?: string
+}
+
 export type PublishRecordRevisionInput = PublishRecordInput & {
   base_revision_id: string
   lock_version: number

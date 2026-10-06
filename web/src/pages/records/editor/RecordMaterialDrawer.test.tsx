@@ -6,7 +6,7 @@ import { insertMaterialToken } from '../../../lib/documentMarkdown'
 import { RecordMaterialDrawer } from './RecordMaterialDrawer'
 
 describe('RecordMaterialDrawer', () => {
-  it('inserts authorized tokens and can remove current materials without rewriting history', () => {
+  it('inserts authorized tokens and only removes attachments or unsaved evidence', () => {
     const onInsert = vi.fn()
     const onRemove = vi.fn()
     render(
@@ -18,6 +18,7 @@ describe('RecordMaterialDrawer', () => {
           onRemove={onRemove}
           items={[
             { kind: 'evidence', id: 'ev_7K2P', label: '第三晚 TCP 观测', available: true },
+            { kind: 'evidence', id: 'evs_new', label: '主机监控 · alpha', available: true, unsaved: true },
             { kind: 'attachment', id: 'att_old', label: '失效附件', available: false },
           ]}
         />
@@ -25,8 +26,14 @@ describe('RecordMaterialDrawer', () => {
     )
     fireEvent.click(screen.getByRole('button', { name: '插入第三晚 TCP 观测' }))
     expect(onInsert).toHaveBeenCalledWith(expect.objectContaining({ id: 'ev_7K2P' }))
-    fireEvent.click(screen.getByRole('button', { name: '移除第三晚 TCP 观测' }))
-    expect(onRemove).toHaveBeenCalled()
+    // 已保存的证据暂不支持移除；待保存证据与附件可以。
+    expect(screen.queryByRole('button', { name: '移除第三晚 TCP 观测' })).not.toBeInTheDocument()
+    expect(screen.getByText('待保存')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '移除主机监控 · alpha' }))
+    expect(onRemove).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'evs_new' }))
+    fireEvent.click(screen.getByRole('button', { name: '移除失效附件' }))
+    expect(onRemove).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'att_old' }))
+    expect(screen.getAllByRole('link', { name: '查看证据' })).toHaveLength(1)
     expect(screen.getByText('引用已失效')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '查看证据' })).toHaveAttribute('href', '/evidence/ev_7K2P')
     expect(insertMaterialToken('', {
@@ -105,15 +112,18 @@ describe('RecordMaterialDrawer', () => {
           onClose={vi.fn()}
           onInsert={onInsert}
           onRemove={onRemove}
-          items={[{ kind: 'evidence', id: 'ev_7K2P', label: '第三晚 TCP 观测', available: true }]}
+          items={[
+            { kind: 'evidence', id: 'ev_7K2P', label: '第三晚 TCP 观测', available: true },
+            { kind: 'attachment', id: 'att_report', label: '报告', available: true },
+          ]}
         />
       </MemoryRouter>,
     )
     expect(screen.getByRole('button', { name: '插入第三晚 TCP 观测' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '移除第三晚 TCP 观测' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '移除报告' })).toBeDisabled()
     expect(screen.getByRole('link', { name: '查看证据' })).toHaveAttribute('href', '/evidence/ev_7K2P')
     fireEvent.click(screen.getByRole('button', { name: '插入第三晚 TCP 观测' }))
-    fireEvent.click(screen.getByRole('button', { name: '移除第三晚 TCP 观测' }))
+    fireEvent.click(screen.getByRole('button', { name: '移除报告' }))
     expect(onInsert).not.toHaveBeenCalled()
     expect(onRemove).not.toHaveBeenCalled()
   })

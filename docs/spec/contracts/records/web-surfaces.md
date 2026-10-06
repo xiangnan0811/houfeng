@@ -33,7 +33,7 @@
 ## 草稿与比较 transport
 
 - `CreateRecordDraftInput` 是关闭联合：新记录草稿只发送 `payload`，已有记录草稿必须同时发送 `record_id` 与 `base_revision_id`；不得在 TypeScript contract 中强迫新草稿伪造空 ID，也不得允许两个 routing fields 只出现一个。
-- 已有记录发布新修订时，证据不在草稿 payload 中：`createRecordRevision` 必须按基准修订 `evidence_snapshot_ids` 的原顺序逐项发送 `evidence_items: [{ existing_snapshot_id }]`（无证据时为空数组），否则后端会把新修订证据置空。新记录与比较另存不发送该字段；恢复历史修订由后端重建证据。
+- 已有记录发布新修订时，证据不在草稿 payload 中：`createRecordRevision` 必须按基准修订 `evidence_snapshot_ids` 的原顺序逐项发送 `evidence_items: [{ existing_snapshot_id }]`（无证据时为空数组），否则后端会把新修订证据置空；本次新采集的证据按加入顺序以 `{ capture_intent_id }` 追加在其后。新记录没有采集证据时不发送该字段，有时发送 `record_id`（首次预览时服务端预分配）与非空 `evidence_items: [{ capture_intent_id }]`；比较另存不发送该字段；恢复历史修订由后端重建证据。
 - 已有记录编辑以加载时（或上次发布后）的记录头为编辑基准，用于创建草稿与发布的 `base_revision_id`、锁版本、授权代次和证据；后台重新校验与冲突读取只更新展示，较早发出的记录读取晚到时丢弃。正式发布或已有记录草稿创建遇到修订冲突（`409 record_revision_conflict`，无论是否带 recovery，包括只有锁版本/授权代次推进的情况）时，工作区读取服务端当前头作为待确认头，解决器的服务端内容绑定这同一份快照；读取失败（非撤销）时提示稍后重试，不打开无法确认的解决器。只有用户在解决器中确认后它才成为确认头：下一次保存对同一草稿（ID 不变，附件归属随之保留）发送带 `If-Match` 的 `PATCH { payload, base_revision_id: <确认头> }`，无草稿时以确认头创建；发布按确认头的基准、锁版本、授权代次与证据提交。确认头不被后台刷新替换，头再变由服务端 409 重新打开解决器；关闭冲突或草稿 ETag 冲突不改编辑基准。保存进入冲突或失败后，发布不得再补存一次绕过解决器；任一冲突落地后（包括工作区已卸载、不再显示解决器时）暂停所有服务端保存（含定时器已触发、仍在保存链上排队的自动保存），本地缓冲照常写入；解决、关闭冲突或继续编辑后恢复，并重新排定一次自动保存；草稿 ETag 冲突替换解决器内容时清除待确认头，草稿合并不得顺带确认用户未看到的记录头。
 - Records 草稿 PATCH 原样发送响应中的 `If-Match: <draft-etag>`，不得套用 legacy metadata helper 的额外引号；formal mutation 使用独立 `Idempotency-Key`。permanent-delete execute 的 `DeletionRequestTokenV1` 是唯一 `Idempotency-Key`，JSON body 只能含 `reservation_id`。
 - `/records/compare` 使用 `comparison-url/v1` query `state`（canonical key order、UTC、整数秒）。state 不含 `token` / `comparison_intent` / `payload` / `title` / `body_markdown`。candidate 确认前 `POST /api/evidence/comparisons` 次数为 0。另存必须走 `createRecordDraft` + `saveComparisonRecord`，不得调用 `createRecord` / `useRecordDraft.publish()`。同一 digest 重试必须复用 `record_id` 与 `Idempotency-Key`。证据类型切换是 SegmentedControl 值选择，不是无 panel 的 Tabs。`HOUFENG_COMPARISON_ENABLED` 默认关。
@@ -70,6 +70,22 @@
 | 上传不支持的类型（如 `.pcap`）、空文件或超过 50 MiB | 只在队列显示原因，不创建草稿、不调用 `POST /api/attachment-uploads`；`useRecordAttachmentUploads.test.ts`、`record-attachments.spec.ts` 回归 |
 | 上传进入安全检查 | 队列显示"安全检查中"，页头禁用发布；检查通过后加入草稿 `attachment_ids` 并自动保存；`record-attachments.spec.ts` 回归 |
 | 阅读页预览与下载 | 文本读取为纯文本、图片以同源预览地址显示，下载文件名为附件显示名；1440 / 1024 / 390 无横向溢出；`record-attachments.spec.ts` 回归 |
+
+## 记录证据采集（材料对话框）
+
+- 编辑 / 新建态的材料对话框顶部用 `SegmentedControl`（"添加材料"）在"上传附件 / 采集证据"之间切换；采集区是 `EvidenceCapturePicker`，只在切到采集时挂载。采集合同（预览、配额、确认）见 [证据 Web 合同](../evidence-web.md)。
+- 来源优先取正在编辑的记录主体：主体本身（VPS、监控实例、入口探测目标）在前，主体 VPS 名下的当前监控实例随后（标为"VPS · 实例"，已是主体的实例不重复）；读取中来源显示"正在读取…"且不能预览。来源下拉末尾的"其他 VPS…"可任选一台 VPS，监控类证据再选它的监控实例，用于跨主机对比；没有匹配来源时直接进入该模式。VPS 与实例列表在需要时才读取，读取失败提示"列表读取失败，请稍后重试"。入口探测目标不挂在 VPS 下，只能取记录主体。
+- 加入记录后的证据只保留在当前页面（不进草稿、不进本地缓冲），以"类型 · 来源"和"待保存"徽标出现在材料清单，可插入引用、可移除；已保存的证据暂不支持移除，也只有已保存的证据有"查看证据"。存在待保存证据时离开页面由浏览器 `beforeunload` 提示。同一采集意图只加入一次。
+- 发布时把待保存证据随修订（或新记录）一起提交，见上文证据顺序；发布进行中不重入，也不能加入或移除待保存证据（新记录发布成功会跳走，期间加入的证据会丢失）。任一项已过有效期（`valid_until`）时不发请求（保存草稿后、正式提交前再查一次），提示"有证据预览已过期，请移除后重新采集"；服务端重新采集与预览不一致返回 `409 evidence_preview_stale` 时提示"有证据预览已失效（过期或来源数据已变化），请移除后重新采集"，待保存证据全部保留。记录或修订写入后（即使随后读取失败）只放下这次发布的证据；新修订已带回的快照不再显示为待保存。
+- 材料清单不显示快照 ID：已保存证据逐个读取 `GET /api/evidence/{id}` 并按 ID 缓存，读到前显示"证据"，读到后显示"证据类型 · 标题"。
+
+| 条件 | 预期 |
+| --- | --- |
+| 主体只有 VPS，采集主机监控 | 来源默认是该 VPS 名下的监控实例，预览带 `record_id`（已有记录）；`EvidenceCapturePicker.test.tsx`、`RecordWorkspace.test.tsx` 回归 |
+| 加入两份后移除一份再发布修订 | `evidence_items` 为既有快照加剩下的一个 `capture_intent_id`，发布后"待保存"消失；`RecordWorkspace.test.tsx`、`record-evidence-capture.spec.ts` 回归 |
+| 新建记录采集后发布 | `createRecord` body 带首次预览的 `record_id` 与 `evidence_items`；`useRecordDraft.test.ts`、`record-evidence-capture.spec.ts` 回归 |
+| 待保存证据已过期（含保存草稿期间过期）或服务端返回 `evidence_preview_stale` | 不发请求或提示重新采集，证据保留；`useRecordDraft.test.ts` 回归 |
+| 发布进行中再次发布、加入或移除待保存证据 | 不重复提交；"加入记录"与待保存证据的"移除"禁用；`useRecordDraft.test.ts`、`RecordWorkspace.test.tsx` 回归 |
 
 ## 横向比较工作台版式
 

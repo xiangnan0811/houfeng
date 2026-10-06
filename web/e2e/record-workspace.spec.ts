@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright'
 
 import { expect, test } from './fixtures'
 import { apiRouteKey } from './fixtures/contracts'
-import { authenticatedProfile, recordDetailProfile } from './fixtures/profiles'
+import { authenticatedProfile, recordDetailProfile, recordEvidenceRoutes } from './fixtures/profiles'
 import { expectLocatorNotClipped, expectNoDocumentOverflow } from './support/geometry'
 
 const VIEWPORTS = [
@@ -133,7 +133,9 @@ for (const viewport of VIEWPORTS) {
 
     const drawer = page.getByRole('dialog', { name: '材料与引用' })
     await expect(drawer).toBeVisible()
-    await expect(drawer.getByText('evs_e2ethirdnight', { exact: true })).toBeVisible()
+    // 证据按快照显示“类型 · 标题”，同样不露出快照 ID。
+    await expect(drawer.getByText(/^主机监控 · /u)).toBeVisible()
+    await expect(drawer.getByText('evs_e2ethirdnight', { exact: true })).toHaveCount(0)
     // 附件按元数据显示文件名与类型大小，不再露出原始 ID。
     await expect(drawer.getByText('mtr-第三晚-alpha.txt', { exact: true })).toBeVisible()
     await expect(drawer.getByText('att_e2emtrreport', { exact: true })).toHaveCount(0)
@@ -343,7 +345,10 @@ test('publishing an edited record keeps every existing evidence snapshot in orde
 })
 
 test('re-publishing after resolving a revision conflict rebases the same draft onto the new head', async ({ api, page }) => {
-  const base = recordDetailProfile({ revisionSave: { evidenceSnapshotIds: ['evs_e2ethirdnight'] } })
+  const base = {
+    ...recordDetailProfile({ revisionSave: { evidenceSnapshotIds: ['evs_e2ethirdnight'] } }),
+    ...recordEvidenceRoutes(['evs_e2eserver']),
+  }
   const recordKey = apiRouteKey('GET', '/api/records/rec_e2e001')
   const loaded = base[recordKey]!.body as { current: Record<string, unknown> }
   // 别人已在服务端发布了新修订：冲突后读取到的新头。
