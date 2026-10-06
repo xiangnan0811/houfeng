@@ -564,7 +564,7 @@ func (r *PostgresIPQualityRepository) LoadIPQualityEvidence(
 		if err := rows.Err(); err != nil {
 			return adapters.IPQualityEvidenceReport{}, err
 		}
-		return adapters.IPQualityEvidenceReport{}, fmt.Errorf("IP quality evidence report not found")
+		return adapters.IPQualityEvidenceReport{}, fmt.Errorf("IP quality evidence report not found: %w", evidence.ErrSourceEmpty)
 	}
 	var report adapters.IPQualityEvidenceReport
 	var coverageJSON []byte

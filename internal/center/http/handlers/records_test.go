@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -697,6 +698,14 @@ func TestRecordsHandlerMapsStableErrorsAndRejectsUntrustedOrOversizedInput(t *te
 		{name: "reserved", err: records.ErrRecordDeletionReserved, wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
 		{name: "revision conflict", err: records.ErrRecordRevisionConflict, wantStatus: http.StatusConflict, wantCode: "record_revision_conflict"},
 		{name: "draft attachments busy", err: records.ErrDraftAttachmentsBusy, wantStatus: http.StatusConflict, wantCode: "draft_attachments_busy"},
+		// 发布时重新采集：来源错误链里带着内层拒绝，也必须是 409 而不是会被当成记录撤销的 404。
+		{name: "evidence source denied at publish", err: fmt.Errorf("%w: %w", evidence.ErrSourceNotFound, recordauth.ErrDenied), wantStatus: http.StatusConflict, wantCode: "evidence_preview_stale"},
+		{name: "evidence source subject unavailable at publish", err: fmt.Errorf("%w: %w", evidence.ErrSourceNotFound, store.ErrRecordSubjectUnavailable), wantStatus: http.StatusServiceUnavailable, wantCode: "record_service_unavailable"},
+		{name: "evidence window emptied at publish", err: evidence.ErrSourceEmpty, wantStatus: http.StatusConflict, wantCode: "evidence_preview_stale"},
+		{name: "evidence window too large at publish", err: evidence.ErrWindowTooLarge, wantStatus: http.StatusConflict, wantCode: "evidence_preview_stale"},
+		{name: "evidence persistence conflict", err: store.ErrEvidencePersistenceConflict, wantStatus: http.StatusConflict, wantCode: "evidence_preview_stale"},
+		{name: "evidence capacity unavailable", err: evidence.ErrCapacityUnavailable, wantStatus: http.StatusServiceUnavailable, wantCode: "record_service_unavailable"},
+		{name: "existing snapshot not found", err: evidence.ErrSnapshotNotFound, wantStatus: http.StatusUnprocessableEntity, wantCode: "record_invalid"},
 		{name: "idempotency reused", err: recordplatform.ErrIdempotencyKeyReused, wantStatus: http.StatusConflict, wantCode: "idempotency_key_reused"},
 		{name: "semantic validation", err: records.ErrInvalidRevisionInput, wantStatus: http.StatusUnprocessableEntity, wantCode: "record_invalid"},
 		{name: "status reason required", err: records.ErrStatusTransitionReasonRequired, wantStatus: http.StatusUnprocessableEntity, wantCode: "record_invalid"},

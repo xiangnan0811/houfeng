@@ -999,6 +999,16 @@ func writeRecordsApplicationError(w http.ResponseWriter, err error) {
 			recovery.Draft = &draft
 		}
 		writeRecordError(w, http.StatusConflict, "record_revision_conflict", "record revision changed", recovery)
+	// 发布时重新采集证据失败：来源已不可访问、窗口已无数据、超出上限或写入冲突，都说明预览不再成立。
+	// 必须排在 ErrDenied 之前——来源错误链里带着内层的拒绝，误判成 404 会让编辑器以为记录被撤销。
+	case errors.Is(err, store.ErrRecordSubjectUnavailable) && errors.Is(err, evidence.ErrSourceNotFound),
+		errors.Is(err, evidence.ErrCapacityUnavailable):
+		writeRecordError(w, http.StatusServiceUnavailable, "record_service_unavailable", "record service unavailable", nil)
+	case errors.Is(err, evidence.ErrSourceNotFound), errors.Is(err, evidence.ErrSourceEmpty),
+		errors.Is(err, evidence.ErrWindowTooLarge), errors.Is(err, store.ErrEvidencePersistenceConflict):
+		writeRecordError(w, http.StatusConflict, "evidence_preview_stale", "evidence preview is stale", nil)
+	case errors.Is(err, evidence.ErrSnapshotNotFound):
+		writeRecordError(w, http.StatusUnprocessableEntity, "record_invalid", "record content is invalid", nil)
 	case errors.Is(err, recordauth.ErrDenied), errors.Is(err, records.ErrRecordNotFound),
 		errors.Is(err, records.ErrDraftNotFound), errors.Is(err, records.ErrRecordDeletionReserved),
 		errors.Is(err, store.ErrRecordSubjectNotFound):

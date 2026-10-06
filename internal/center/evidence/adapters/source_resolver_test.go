@@ -26,9 +26,9 @@ func TestRecordEvidenceSourceResolverClosedMatrix(t *testing.T) {
 		{name: "vps", selection: resolverTestSelection("vps", "vps_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", recordauth.ProjectIDDefault, nil), wantKind: recordauth.SourceKindVPS, wantSource: "vps_0123456789abcdef"},
 		{name: "monitoring instance", selection: resolverTestSelection("monitoring_instance", "mi_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindMonitoringInstance, "mi_0123456789abcdef", recordauth.ProjectIDDefault, nil), wantKind: recordauth.SourceKindMonitoringInstance, wantSource: "mi_0123456789abcdef"},
 		{name: "target", selection: resolverTestSelection("target", "tg_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindTarget, "tg_0123456789abcdef", recordauth.ProjectIDDefault, nil), wantKind: recordauth.SourceKindTarget, wantSource: "tg_0123456789abcdef"},
-		{name: "unknown kind", selection: resolverTestSelection("generic", "vps_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", recordauth.ProjectIDDefault, nil), wantErr: ErrEvidenceSourceUnavailable},
-		{name: "wrong identifier for kind", selection: resolverTestSelection("vps", "tg_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", recordauth.ProjectIDDefault, nil), wantErr: ErrEvidenceSourceUnavailable},
-		{name: "wrong project", selection: resolverTestSelection("vps", "vps_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", "project_other", nil), wantErr: ErrEvidenceSourceUnavailable},
+		{name: "unknown kind", selection: resolverTestSelection("generic", "vps_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", recordauth.ProjectIDDefault, nil), wantErr: ErrEvidenceSourceInvalid},
+		{name: "wrong identifier for kind", selection: resolverTestSelection("vps", "tg_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", recordauth.ProjectIDDefault, nil), wantErr: ErrEvidenceSourceInvalid},
+		{name: "wrong project", selection: resolverTestSelection("vps", "vps_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", "project_other", nil), wantErr: ErrEvidenceSourceInconsistent},
 		{name: "missing source", selection: resolverTestSelection("vps", "vps_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", recordauth.ProjectIDDefault, records.ErrSubjectAdapterNotFound), wantErr: ErrEvidenceSourceUnavailable},
 		{name: "dependency failure", selection: resolverTestSelection("vps", "vps_0123456789abcdef"), adapter: resolverTestAdapter(t, records.SubjectKindVPS, "vps_0123456789abcdef", recordauth.ProjectIDDefault, dependencyErr), wantErr: ErrEvidenceSourceUnavailable},
 	}
@@ -47,8 +47,16 @@ func TestRecordEvidenceSourceResolverClosedMatrix(t *testing.T) {
 			}
 			resolved, err := resolver.ResolveEvidenceSource(context.Background(), actor, test.selection)
 			if test.wantErr != nil {
-				if !errors.Is(err, test.wantErr) {
+				// 三类互斥：不存在/无权是 ErrSourceNotFound，选择不合法是 ErrInvalidCanonicalPayload，不一致两者都不是。
+				wantNotFound := errors.Is(test.wantErr, evidence.ErrSourceNotFound)
+				wantInvalid := errors.Is(test.wantErr, evidence.ErrInvalidCanonicalPayload)
+				if !errors.Is(err, test.wantErr) || errors.Is(err, evidence.ErrSourceNotFound) != wantNotFound ||
+					errors.Is(err, evidence.ErrInvalidCanonicalPayload) != wantInvalid {
 					t.Fatalf("ResolveEvidenceSource() error = %v, want %v", err, test.wantErr)
+				}
+				// 内层错误链要保留：主体服务暂不可用时调用方据此映射为 503。
+				if test.name == "dependency failure" && !errors.Is(err, dependencyErr) {
+					t.Fatalf("ResolveEvidenceSource() error = %v, want inner dependency error kept", err)
 				}
 				return
 			}

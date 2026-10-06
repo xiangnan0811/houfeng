@@ -662,8 +662,8 @@ func TestLoadAssetHistoryStopsAtGlobalSourceBound(t *testing.T) {
 	}}
 	repository := &PostgresRenewalDecisionRepository{db: db}
 	_, err := repository.LoadAssetHistory(context.Background(), "vps_0123456789abcdef", evidence.TimeWindow{Start: start, End: start.Add(24 * time.Hour)})
-	if err == nil || !strings.Contains(err.Error(), "exceeds source bound") {
-		t.Fatalf("LoadAssetHistory() error = %v, want global source bound rejection", err)
+	if err == nil || !strings.Contains(err.Error(), "exceeds source bound") || !errors.Is(err, evidence.ErrWindowTooLarge) {
+		t.Fatalf("LoadAssetHistory() error = %v, want global source bound rejection classified as ErrWindowTooLarge", err)
 	}
 	if queryCount != 1 {
 		t.Fatalf("LoadAssetHistory() query count = %d, want early stop after bounded renewal query", queryCount)

@@ -175,8 +175,15 @@ func (adapter *MonitoringEventAdapter) evaluate(ctx context.Context, actor evide
 	if err != nil {
 		return discreteEvaluation{}, err
 	}
-	if capture.EventCount == 0 || capture.EventCount != uint64(len(capture.Events)) || capture.EventCount > evidence.MaxSnapshotDataPoints {
+	// 先确认计数与条目一致（完整性），再区分“没有数据”和“超出上限”。
+	if capture.EventCount != uint64(len(capture.Events)) {
 		return discreteEvaluation{}, fmt.Errorf("%w: monitoring event source bound", evidence.ErrInvalidCanonicalPayload)
+	}
+	if capture.EventCount == 0 {
+		return discreteEvaluation{}, fmt.Errorf("%w: monitoring events", evidence.ErrSourceEmpty)
+	}
+	if capture.EventCount > evidence.MaxSnapshotDataPoints {
+		return discreteEvaluation{}, fmt.Errorf("%w: monitoring events", evidence.ErrWindowTooLarge)
 	}
 	capture = cloneAndSortMonitoringEventCapture(capture)
 	now := adapterNow(adapter.options)
@@ -294,7 +301,10 @@ func validateMonitoringEventCapture(capture MonitoringEventCapture, selection ev
 			latestRecorded = event.RecordedAt
 		}
 	}
-	if pointCount > evidence.MaxSnapshotDataPoints || watermark.Before(latestRecorded) {
+	if pointCount > evidence.MaxSnapshotDataPoints {
+		return fmt.Errorf("%w: monitoring event data points", evidence.ErrWindowTooLarge)
+	}
+	if watermark.Before(latestRecorded) {
 		return fmt.Errorf("%w: monitoring event coverage", evidence.ErrInvalidCanonicalPayload)
 	}
 	return nil

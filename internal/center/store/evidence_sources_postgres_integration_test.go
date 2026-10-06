@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"testing"
 	"time"
 
@@ -686,4 +687,24 @@ func (resolver integrationMonitoringResolver) ResolveEvidenceSource(_ context.Co
 	}
 	identity := evidence.IdentitySnapshot{Type: selection.SourceType, ID: resolver.sourceID, Fields: map[string]string{"display_name": "Evidence source"}}
 	return adapters.ResolvedEvidenceSource{Subject: identity, Source: identity, Authorization: authorization}, nil
+}
+
+// 窗口内没有报告或账单时返回可分类的 ErrSourceEmpty，接口据此回 422 evidence_source_empty 而不是 500。
+func TestPostgresIntegrationEvidenceSourcesClassifyEmptyWindows(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "evidence-sources-empty", 1)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	ipRepository := &PostgresIPQualityRepository{db: runtimePool}
+	_, err := ipRepository.LoadIPQualityEvidence(ctx, "vps_0123456789abcdef", evidence.TimeWindow{Start: now.Add(-24 * time.Hour), End: now})
+	if !errors.Is(err, evidence.ErrSourceEmpty) {
+		t.Fatalf("LoadIPQualityEvidence(no reports) error = %v, want ErrSourceEmpty", err)
+	}
+	costRepository := NewPostgresSubscriptionCostRepository(runtimePool)
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	_, err = costRepository.LoadSubscriptionCostEvidence(ctx, "vps_0123456789abcdef", evidence.TimeWindow{Start: month.AddDate(0, -1, 0), End: month})
+	if !errors.Is(err, evidence.ErrSourceEmpty) {
+		t.Fatalf("LoadSubscriptionCostEvidence(no subscription) error = %v, want ErrSourceEmpty", err)
+	}
 }

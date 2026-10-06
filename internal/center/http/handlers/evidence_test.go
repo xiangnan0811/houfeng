@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"houfeng/internal/center/evidence"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/store"
 )
 
 func TestEvidenceHandlerCapturePreviewAndReadMatrix(t *testing.T) {
@@ -145,6 +147,10 @@ func TestEvidenceHandlerFailClosedMatrix(t *testing.T) {
 		{name: "unknown kind", path: "/api/evidence/capture-previews", method: http.MethodPost, body: `{"record_id":"rec_httpcontract","kind":"unknown.kind","schema_version":1,"source_type":"monitoring_instance","source_id":"mi_0123456789abcdef","requested_window":{"start":"2026-08-16T01:00:00Z","end":"2026-08-16T02:00:00Z"},"metrics":[],"precision_seconds":0,"sensitive_topology_fields":[]}`, captureErr: evidence.ErrKindNotRegistered, wantStatus: http.StatusServiceUnavailable, wantCode: "evidence_kind_unavailable"},
 		{name: "unstable source", path: "/api/evidence/capture-previews", method: http.MethodPost, body: `{"record_id":"rec_httpcontract","kind":"monitoring.host","schema_version":1,"source_type":"monitoring_instance","source_id":"mi_0123456789abcdef","requested_window":{"start":"2026-08-16T01:00:00Z","end":"2026-08-16T02:00:00Z"},"metrics":["cpu_usage_pct"],"precision_seconds":60,"sensitive_topology_fields":[]}`, captureErr: evidence.ErrSourceUnstable, wantStatus: http.StatusConflict, wantCode: "evidence_source_unstable"},
 		{name: "preview stale", path: "/api/evidence/capture-previews", method: http.MethodPost, body: `{"record_id":"rec_httpcontract","kind":"monitoring.host","schema_version":1,"source_type":"monitoring_instance","source_id":"mi_0123456789abcdef","requested_window":{"start":"2026-08-16T01:00:00Z","end":"2026-08-16T02:00:00Z"},"metrics":["cpu_usage_pct"],"precision_seconds":60,"sensitive_topology_fields":[]}`, captureErr: evidence.ErrPreviewStale, wantStatus: http.StatusConflict, wantCode: "evidence_preview_stale"},
+		{name: "source not found", path: "/api/evidence/capture-previews", method: http.MethodPost, body: `{"record_id":"rec_httpcontract","kind":"monitoring.host","schema_version":1,"source_type":"monitoring_instance","source_id":"mi_0123456789abcdef","requested_window":{"start":"2026-08-16T01:00:00Z","end":"2026-08-16T02:00:00Z"},"metrics":["cpu_usage_pct"],"precision_seconds":60,"sensitive_topology_fields":[]}`, captureErr: fmt.Errorf("resolve: %w: %w", evidence.ErrSourceNotFound, recordauth.ErrDenied), wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
+		{name: "source subject unavailable", path: "/api/evidence/capture-previews", method: http.MethodPost, body: `{"record_id":"rec_httpcontract","kind":"monitoring.host","schema_version":1,"source_type":"monitoring_instance","source_id":"mi_0123456789abcdef","requested_window":{"start":"2026-08-16T01:00:00Z","end":"2026-08-16T02:00:00Z"},"metrics":["cpu_usage_pct"],"precision_seconds":60,"sensitive_topology_fields":[]}`, captureErr: fmt.Errorf("resolve: %w: %w", evidence.ErrSourceNotFound, store.ErrRecordSubjectUnavailable), wantStatus: http.StatusServiceUnavailable, wantCode: "evidence_service_unavailable"},
+		{name: "empty window", path: "/api/evidence/capture-previews", method: http.MethodPost, body: `{"record_id":"rec_httpcontract","kind":"monitoring.host","schema_version":1,"source_type":"monitoring_instance","source_id":"mi_0123456789abcdef","requested_window":{"start":"2026-08-16T01:00:00Z","end":"2026-08-16T02:00:00Z"},"metrics":["cpu_usage_pct"],"precision_seconds":60,"sensitive_topology_fields":[]}`, captureErr: fmt.Errorf("monitoring window: %w", evidence.ErrSourceEmpty), wantStatus: http.StatusUnprocessableEntity, wantCode: "evidence_source_empty"},
+		{name: "oversized window", path: "/api/evidence/capture-previews", method: http.MethodPost, body: `{"record_id":"rec_httpcontract","kind":"monitoring.host","schema_version":1,"source_type":"monitoring_instance","source_id":"mi_0123456789abcdef","requested_window":{"start":"2026-08-16T01:00:00Z","end":"2026-08-16T02:00:00Z"},"metrics":["cpu_usage_pct"],"precision_seconds":60,"sensitive_topology_fields":[]}`, captureErr: fmt.Errorf("buckets: %w", evidence.ErrWindowTooLarge), wantStatus: http.StatusUnprocessableEntity, wantCode: "evidence_window_too_large"},
 		{name: "record source permission intersection", path: "/api/evidence/evs_httpcontract", method: http.MethodGet, readErr: recordauth.ErrDenied, wantStatus: http.StatusNotFound, wantCode: "resource_not_found"},
 	}
 	for _, test := range tests {
