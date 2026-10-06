@@ -415,6 +415,59 @@ func TestRecordDraftsHandlerMapsBaseRevisionConflictWithAllowlistedRecovery(t *t
 	}
 }
 
+func TestRecordDraftsHandlerPatchForwardsConfirmedBaseRevision(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	draft := mustRecordsHandlerDraft(t, actor, "rec_httpcontract", "rrv_httpbase")
+	rebased := mustRecordsHandlerDraft(t, actor, "rec_httpcontract", "rrv_httphead")
+	handler := RecordDraftsWithOptions(&recordDraftHandlerApplicationStub{
+		patchDraft: func(_ context.Context, request records.DraftPatchRequest) (records.Draft, error) {
+			if request.DraftID != draft.DraftID || request.IfMatch != draft.ETag || request.BaseRevisionID != "rrv_httphead" {
+				t.Fatalf("PatchDraft() request = %#v", request)
+			}
+			return rebased, nil
+		},
+	}, RecordDraftHandlerOptions{NewDraftID: func() (string, error) { return "rdf_unused", nil }})
+	request := recordsHandlerRequest(t, actor, http.MethodPatch, "/api/record-drafts/"+draft.DraftID,
+		`{"base_revision_id":"rrv_httphead","payload":`+string(draft.Payload.JSON())+`}`)
+	request.Header.Set("If-Match", draft.ETag.String())
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"base_revision_id":"rrv_httphead"`) {
+		t.Fatalf("status = %d; body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestRecordDraftsHandlerMapsStaleCreateBaseWithoutDraftRecovery(t *testing.T) {
+	actor := mustRecordsHandlerActor(t)
+	draft := mustRecordsHandlerDraft(t, actor, "rec_httpcontract", "rrv_httpbase")
+	handler := RecordDraftsWithOptions(&recordDraftHandlerApplicationStub{
+		createDraft: func(context.Context, records.DraftCreateRequest) (records.Draft, error) {
+			return records.Draft{}, &records.DraftRevisionConflictError{
+				ServerRevisionID: "rrv_httpserver", ServerLockVersion: 8, ServerAuthorizationEpoch: 6,
+			}
+		},
+	}, RecordDraftHandlerOptions{NewDraftID: func() (string, error) { return draft.DraftID, nil }})
+	request := recordsHandlerRequest(t, actor, http.MethodPost, "/api/record-drafts",
+		`{"record_id":"rec_httpcontract","base_revision_id":"rrv_httpbase","payload":`+string(draft.Payload.JSON())+`}`)
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	// 服务端尚无草稿时仍要给出当前头，不能因为缺草稿而降级成 500。
+	assertRecordsHandlerError(t, recorder, http.StatusConflict, "record_revision_conflict")
+	var response struct {
+		Recovery map[string]json.RawMessage `json:"recovery"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode conflict response: %v", err)
+	}
+	if string(response.Recovery["server_revision_id"]) != `"rrv_httpserver"` || response.Recovery["draft"] != nil {
+		t.Fatalf("conflict recovery = %s", recorder.Body.String())
+	}
+}
+
 func TestRecordDraftsHandlerRequiresExactIfMatchAndImmutableRouting(t *testing.T) {
 	actor := mustRecordsHandlerActor(t)
 	draft := mustRecordsHandlerDraft(t, actor, "", "")

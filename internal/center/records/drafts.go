@@ -112,6 +112,8 @@ type DraftPatchRequest struct {
 	DraftID string
 	IfMatch DraftETag
 	Payload DraftPayload
+	// BaseRevisionID 为空表示沿用草稿基准；非空时把已有记录草稿原子改到调用方确认过的当前头。
+	BaseRevisionID string
 }
 
 type DraftDiscardRequest struct {
@@ -432,7 +434,8 @@ func (service *DraftService) PatchDraft(ctx context.Context, request DraftPatchR
 	if err != nil {
 		return Draft{}, err
 	}
-	if _, err := service.authorizeDraftRouting(ctx, actor, routing, recordauth.CapabilityDraftUpdate); err != nil {
+	current, err := service.authorizeDraftRouting(ctx, actor, routing, recordauth.CapabilityDraftUpdate)
+	if err != nil {
 		return Draft{}, err
 	}
 	draft, err := service.drafts.GetDraft(ctx, routing.DraftID, actor.UserID)
@@ -442,19 +445,41 @@ func (service *DraftService) PatchDraft(ctx context.Context, request DraftPatchR
 	if draft.Validate() != nil || !sameDraftRouting(routing, DraftRoutingFromDraft(draft)) {
 		return Draft{}, ErrDraftNotFound
 	}
+	nextBaseRevisionID := draft.BaseRevisionID
+	if request.BaseRevisionID != "" {
+		if draft.RecordID == "" || !validRevisionID(request.BaseRevisionID) {
+			return Draft{}, ErrInvalidDraftCommand
+		}
+		nextBaseRevisionID = request.BaseRevisionID
+	}
+	if nextBaseRevisionID != draft.BaseRevisionID {
+		// 先判 ETag 再判头：另一个标签页改过草稿时必须走草稿冲突，不能借改基准覆盖它。
+		if draft.ETag != request.IfMatch {
+			return Draft{}, &DraftConflictError{Server: draft, LocalPayload: request.Payload}
+		}
+		if current.CurrentRevisionID != nextBaseRevisionID || current.Lifecycle != LifecycleActive {
+			return Draft{}, &DraftRevisionConflictError{
+				ServerRevisionID:         current.CurrentRevisionID,
+				ServerLockVersion:        current.LockVersion,
+				ServerAuthorizationEpoch: current.AuthorizationEpoch,
+				Draft:                    draft,
+			}
+		}
+	}
 
 	updated, err := service.drafts.PatchDraft(ctx, DraftPatchCommand{
-		DraftID:  draft.DraftID,
-		AuthorID: actor.UserID,
-		IfMatch:  request.IfMatch,
-		Payload:  request.Payload,
-		Policy:   DefaultDraftRetentionPolicy(),
+		DraftID:        draft.DraftID,
+		AuthorID:       actor.UserID,
+		IfMatch:        request.IfMatch,
+		Payload:        request.Payload,
+		BaseRevisionID: request.BaseRevisionID,
+		Policy:         DefaultDraftRetentionPolicy(),
 	})
 	if err != nil {
 		return Draft{}, err
 	}
 	if updated.Validate() != nil || updated.DraftID != draft.DraftID || updated.AuthorID != draft.AuthorID ||
-		updated.ProjectID != draft.ProjectID || updated.RecordID != draft.RecordID || updated.BaseRevisionID != draft.BaseRevisionID {
+		updated.ProjectID != draft.ProjectID || updated.RecordID != draft.RecordID || updated.BaseRevisionID != nextBaseRevisionID {
 		return Draft{}, ErrInvalidDraftCommand
 	}
 	return updated, nil
@@ -611,13 +636,16 @@ type DraftPatchCommand struct {
 	AuthorID string
 	IfMatch  DraftETag
 	Payload  DraftPayload
-	Policy   DraftRetentionPolicy
+	// BaseRevisionID 非空时要求草稿属于已有记录，且在同一事务内等于记录当前头才改基准。
+	BaseRevisionID string
+	Policy         DraftRetentionPolicy
 }
 
 func (command DraftPatchCommand) Validate() error {
 	if !validDraftID(command.DraftID) || recordauth.ValidateActorUserID(command.AuthorID) != nil ||
 		len(command.Payload.json) == 0 || command.Payload.hash == [sha256.Size]byte{} ||
-		command.Policy.Validate() != nil {
+		command.Policy.Validate() != nil ||
+		(command.BaseRevisionID != "" && !validRevisionID(command.BaseRevisionID)) {
 		return ErrInvalidDraftCommand
 	}
 	if _, err := command.IfMatch.Digest(); err != nil {

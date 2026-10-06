@@ -34,12 +34,14 @@
 
 - `CreateRecordDraftInput` 是关闭联合：新记录草稿只发送 `payload`，已有记录草稿必须同时发送 `record_id` 与 `base_revision_id`；不得在 TypeScript contract 中强迫新草稿伪造空 ID，也不得允许两个 routing fields 只出现一个。
 - 已有记录发布新修订时，证据不在草稿 payload 中：`createRecordRevision` 必须按基准修订 `evidence_snapshot_ids` 的原顺序逐项发送 `evidence_items: [{ existing_snapshot_id }]`（无证据时为空数组），否则后端会把新修订证据置空。新记录与比较另存不发送该字段；恢复历史修订由后端重建证据。
+- 已有记录编辑以加载时（或上次发布后）的记录头为编辑基准，用于创建草稿与发布的 `base_revision_id`、锁版本、授权代次和证据；后台重新校验与冲突读取只更新展示，较早发出的记录读取晚到时丢弃。正式发布或已有记录草稿创建遇到修订冲突（`409 record_revision_conflict`，无论是否带 recovery，包括只有锁版本/授权代次推进的情况）时，工作区读取服务端当前头作为待确认头，解决器的服务端内容绑定这同一份快照；读取失败（非撤销）时提示稍后重试，不打开无法确认的解决器。只有用户在解决器中确认后它才成为确认头：下一次保存对同一草稿（ID 不变，附件归属随之保留）发送带 `If-Match` 的 `PATCH { payload, base_revision_id: <确认头> }`，无草稿时以确认头创建；发布按确认头的基准、锁版本、授权代次与证据提交。确认头不被后台刷新替换，头再变由服务端 409 重新打开解决器；关闭冲突或草稿 ETag 冲突不改编辑基准。保存进入冲突或失败后，发布不得再补存一次绕过解决器；任一冲突落地后（包括工作区已卸载、不再显示解决器时）暂停所有服务端保存（含定时器已触发、仍在保存链上排队的自动保存），本地缓冲照常写入；解决、关闭冲突或继续编辑后恢复，并重新排定一次自动保存；草稿 ETag 冲突替换解决器内容时清除待确认头，草稿合并不得顺带确认用户未看到的记录头。
 - Records 草稿 PATCH 原样发送响应中的 `If-Match: <draft-etag>`，不得套用 legacy metadata helper 的额外引号；formal mutation 使用独立 `Idempotency-Key`。permanent-delete execute 的 `DeletionRequestTokenV1` 是唯一 `Idempotency-Key`，JSON body 只能含 `reservation_id`。
 - `/records/compare` 使用 `comparison-url/v1` query `state`（canonical key order、UTC、整数秒）。state 不含 `token` / `comparison_intent` / `payload` / `title` / `body_markdown`。candidate 确认前 `POST /api/evidence/comparisons` 次数为 0。另存必须走 `createRecordDraft` + `saveComparisonRecord`，不得调用 `createRecord` / `useRecordDraft.publish()`。同一 digest 重试必须复用 `record_id` 与 `Idempotency-Key`。证据类型切换是 SegmentedControl 值选择，不是无 panel 的 Tabs。`HOUFENG_COMPARISON_ENABLED` 默认关。
 
 | 条件 | 预期 |
 | --- | --- |
 | 新记录草稿携带一个或伪造两个空 routing fields | TypeScript union/source review 阻断；body 只含 `payload` |
+| 修订冲突解决后再次发布 | 同一草稿 PATCH 携带确认头 `base_revision_id` 后按确认头发布，不创建/删除草稿；后台刷新到更新头或旧读取晚到都不改确认头与解决器内容；只推进锁版本/授权代次的无 recovery 409 也要求确认；改基准再遇 409 时重新打开解决器且不发布；关闭冲突（含首次创建冲突）不改编辑基准；新头读取失败时不打开解决器；草稿冲突接替修订冲突后确认不改基准；冲突期间（含卸载后晚到的冲突）不向服务端保存（含已排队的自动保存）但仍写本地缓冲，关闭或保留本地后恢复自动保存；`useRecordDraft.test.ts` 与 `record-workspace.spec.ts` 回归 |
 | 编辑带证据的记录后发布修订 | body 含与基准修订同序的 `existing_snapshot_id` 全集；`useRecordDraft.test.ts` 与 `record-workspace.spec.ts` 回归 |
 | Records draft PATCH 给 ETag 增加引号 | 后端 exact `If-Match` 拒绝；原样发送 draft response 的 `etag` |
 | deletion token 同时进入 header 和 JSON body | body unknown-field decode 失败；只保留 header token 与 body `reservation_id` |

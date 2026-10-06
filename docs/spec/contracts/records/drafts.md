@@ -29,6 +29,7 @@ type RevisionCommitCommand struct {
 }
 ```
 
+- `DraftPatchCommand.BaseRevisionID` 为空表示沿用草稿基准；非空且不同于当前基准时是改基准（rebase），只允许已有记录草稿。HTTP PATCH body 只接受可选 `base_revision_id`，`record_id` 仍不可变。
 - `DraftID` / `DraftETag` 是 optional pair：两者同时为空表示非 draft 正式保存；两者同时有效表示 publish。
 - `ClaimExpiredDrafts` 的 `limit` 闭合为 `1..100`，返回同一事务实际删除的 draft IDs。
 
@@ -36,7 +37,8 @@ type RevisionCommitCommand struct {
 
 - draft payload 是 immutable canonical JSON object；payload hash 与 ETag 必须从 persisted payload、draft ID、author、version 重新计算验证，不能信任数据库中的摘要列或客户端项目/作者字段。
 - `GetDraft`、list、PATCH 与作者操作的 cleanup 使用 author-scoped routing SQL；该 SQL 必须在返回 metadata row 前以 correlated `not exists` 排除 existing-record draft 的 `fenced|committed` reservation，并在过滤之后应用 list `limit`。错误作者与已 reserved 的 existing-record draft 在 payload read 前得到 `ErrDraftNotFound`；`record_id is null` 的 new-record draft 保持可见。
-- routing SQL 的原子 reservation filter 不能替代 race recheck。PATCH 在一个 admitted pgx transaction 中按 `atomic routing -> optional mutation-fence recheck -> author row FOR UPDATE -> exact ETag -> update -> checkpoint -> expiry prune -> newest-20 prune` 执行；Get/list 使用 read-fence recheck。相同 canonical payload 只续 `updated_at/warning_at/expires_at`，不增加 version、发行 checkpoint ID 或写 checkpoint。
+- routing SQL 的原子 reservation filter 不能替代 race recheck。PATCH 在一个 admitted pgx transaction 中按 `atomic routing -> optional mutation-fence recheck -> author row FOR UPDATE -> exact ETag -> update -> checkpoint -> expiry prune -> newest-20 prune` 执行；Get/list 使用 read-fence recheck。非改基准且相同 canonical payload 时只续 `updated_at/warning_at/expires_at`，不增加 version、发行 checkpoint ID 或写 checkpoint。
+- 改基准请求在 mutation-fence recheck 之后、author row `FOR UPDATE` 之前先以 `for key share` 锁定并读取记录根，锁顺序与附件上传（记录 `FOR UPDATE` -> 草稿 `FOR UPDATE`）和草稿创建一致，避免交错死锁；`exact ETag` 之后要求目标等于 `current_revision_id` 且 lifecycle 为 active，再与 payload 一起更新 `base_revision_id`。即使 payload 未变也推进 version/ETag，使其他标签页持有的旧 ETag 失效；payload 未变时不发行 checkpoint ID、不写 checkpoint。service 先用当前授权预检：ETag 不符返回 `DraftConflictError`（不能借改基准覆盖另一标签页的修改），头不符返回携带当前头与服务端草稿的 `DraftRevisionConflictError`；store 内复核失败返回同一 typed error。草稿 ID 不变，因此草稿拥有的附件归属不受影响；不得用 discard + create 代替。
 - 内容变化时每个 `date_bin(..., 5 minutes, fixed origin)` bucket 最多一个 immutable checkpoint；保留最新 20 个并删除 `checkpoint_expires_at <= transaction_timestamp()` 的行。draft inactivity TTL 为 90 天，warning boundary 为 expiry 前 7 天；所有时间以 database transaction time 为准。
 - discard/revoke 与 publish cleanup 都先删除 checkpoints 再删除 draft。publish 必须在现有 revision transaction 内锁定作者 draft，校验 exact ETag 及 create/new-draft 或 update/same-record-and-base shape，在 formal revision/no-change 成功后、idempotency complete 前 cleanup。任一 conflict 或 cleanup error 回滚正式事实并保留 draft。
 - completed idempotency replay 在 draft validation/cleanup 之前返回 persisted revision result；首次 publish 已删除 draft 后，同 key/same fingerprint replay 仍必须成功。request fingerprint 绑定 `DraftID` 与强 ETag，换 draft 或换 version 不能复用同 key。
@@ -53,8 +55,11 @@ type RevisionCommitCommand struct {
 | existing-record draft 在 routing query 前已有 `fenced|committed` reservation | correlated filter 返回 0 row / `ErrDraftNotFound`；0 routing metadata row、0 payload read、0 draft write。 |
 | reservation 在 routing row 返回后并发建立 | transaction 内 read/mutation fence recheck 返回 `ErrRecordDeletionReserved`；0 payload read、0 draft write。 |
 | PATCH / publish ETag 已推进 | `ErrDraftConflict`；PATCH typed error携带 current server draft 与 local payload；0 draft/checkpoint write。 |
-| existing draft base/current lifecycle 已推进 | create/prepare/publish 返回 `ErrDraftRevisionConflict`；draft 保留。 |
-| PATCH payload 未变化 | version/ETag/payload 不变，只刷新 90-day TTL 与 7-day warning；0 checkpoint。 |
+| existing draft base/current lifecycle 已推进 | create/prepare/publish 返回 `ErrDraftRevisionConflict`；draft 保留。create 时尚无草稿，typed error 不带 draft，HTTP recovery 省略 `draft` 而不是 500。 |
+| PATCH 改基准目标不是当前头或记录已归档 | `DraftRevisionConflictError` 携带当前头、锁版本、授权代次与服务端草稿；0 draft/checkpoint write。 |
+| new-record draft PATCH 携带 `base_revision_id` | `ErrInvalidDraftCommand`；0 write。 |
+| 非改基准 PATCH payload 未变化 | version/ETag/payload 不变，只刷新 90-day TTL 与 7-day warning；0 checkpoint。 |
+| 改基准 PATCH payload 未变化 | `base_revision_id` 更新，version/ETag 推进；0 checkpoint。 |
 | checkpoint ID、insert、retention prune 或 publish cleanup 任一步失败 | 整个 transaction rollback；不得留下半份 draft 或半份 formal revision。 |
 | expiry cleanup limit 为 0 或大于 100 | `ErrInvalidDraftCommand`；不开始 transaction。 |
 | existing-record draft 在 expiry claim 前已有 `fenced|committed` reservation | claim SQL 返回 0 row；expired draft/checkpoint 保留，且不占 batch limit。 |
@@ -67,6 +72,8 @@ type RevisionCommitCommand struct {
 - Good：publish 创建 revision/activity/outbox 后在同一 transaction 删除 checkpoint/draft并完成 idempotency；同 key retry 不再要求 draft 存在。
 - Good：expiry worker 的首条 SQL 跳过已经 reserved 的 existing-record draft；claim 后出现 reservation 时，二次 mutation fence 在 delete 前中止并回滚整批。
 - Base：autosave 内容与 server canonical payload 相同，仅刷新 inactivity TTL，避免 version 与 recovery history 噪音。
+- Good：用户解决修订冲突后，同一草稿以 `If-Match` + `base_revision_id` 改到确认头再发布；草稿附件仍归它所有。
+- Bad：客户端先 DELETE 旧草稿再在新头 create；跨标签页会删掉别处仍在用的草稿，草稿拥有附件时还会被外键拦住。
 - Bad：formal revision 先 commit，再调用独立 `DeleteDraft`；cleanup failure 会留下“已发布但仍可编辑”的 server draft，retry 也无法证明单一结果。
 - Bad：用 `limit` 但没有 `SKIP LOCKED` 或跨 transaction claim/delete；并发 worker 会阻塞、重复 claim 或留下部分 cleanup。
 - Bad：expiry cleanup 只按 `expires_at` claim 后直接 delete；它会绕过 permanent-delete reservation，或者在 claim 与 delete 之间吞掉刚被 fenced 的 draft。
@@ -82,8 +89,8 @@ scripts/test-record-platform-integration.sh postgres -- \
   -run '^TestPostgresIntegrationRecordDraft' -count=1
 ```
 
-- Unit/race 必须覆盖 immutable payload/ETag、作者隔离、two-client conflict、no-change TTL、checkpoint SQL、discard/revoke、expired batch grammar、publish create/update/no-change/conflict/rollback/replay。
-- 真实 PostgreSQL 必须覆盖并发 PATCH 单赢家、五分钟 bucket/newest 20/seven-day retention、并发 cleanup claim 不相交、`fenced|committed` 过期 existing-record draft/checkpoint 均保留、publish/discard/revoke cleanup，以及普通 draft 操作的 activity/outbox 零行；runner 不接受 `SKIP`。
+- Unit/race 必须覆盖 immutable payload/ETag、作者隔离、two-client conflict、no-change TTL、checkpoint SQL、discard/revoke、expired batch grammar、publish create/update/no-change/conflict/rollback/replay，以及改基准的确认头/头再变/归档/ETag 冲突/new-record 拒绝。
+- 真实 PostgreSQL 必须覆盖并发 PATCH 单赢家、五分钟 bucket/newest 20/seven-day retention、并发 cleanup claim 不相交、`fenced|committed` 过期 existing-record draft/checkpoint 均保留、publish/discard/revoke cleanup、改基准只落到当前头（非头 typed conflict、旧 ETag 冲突、同 payload 推进 version 且 0 checkpoint、记录行被他人持锁时不先锁草稿行、改基准后可发布），以及普通 draft 操作的 activity/outbox 零行；runner 不接受 `SKIP`。
 
 ### 7. Wrong vs Correct
 

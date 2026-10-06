@@ -83,7 +83,7 @@ type recordDeletionOperationResponse struct {
 | request body 超过 limit | `413 request_too_large` |
 | denied、not found、deletion reserved、source gone | opaque `404 resource_not_found` |
 | draft ETag conflict | `409 draft_conflict` + allowlisted recovery（如有 typed conflict） |
-| record/base revision/CAS conflict | `409 record_revision_conflict` + allowlisted recovery（如有 typed conflict） |
+| record/base revision/CAS conflict | `409 record_revision_conflict` + allowlisted recovery（如有 typed conflict）；recovery 的 `draft` 仅在服务端已有草稿时出现，创建草稿时省略 |
 | idempotency key reuse/in-progress 或 record already exists | 对应稳定 `409` code |
 | revision/draft/lifecycle semantic validation | `422 record_invalid` |
 | runtime admission、source resolution 或 reservation dependency unavailable | `503 record_service_unavailable` |

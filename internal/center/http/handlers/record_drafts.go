@@ -171,7 +171,8 @@ func handleRecordDraftItem(
 		if !decodeRecordsRequestJSON(w, request, &input) {
 			return
 		}
-		if input.RecordID != "" || input.BaseRevisionID != "" {
+		// 记录归属不可变；base_revision_id 只用于把已有记录草稿改到确认过的当前头。
+		if input.RecordID != "" {
 			writeRecordError(w, http.StatusBadRequest, "invalid_request", "draft routing is immutable", nil)
 			return
 		}
@@ -180,7 +181,7 @@ func handleRecordDraftItem(
 			return
 		}
 		draft, err := application.PatchDraft(request.Context(), records.DraftPatchRequest{
-			Actor: actor, DraftID: draftID, IfMatch: etag, Payload: payload,
+			Actor: actor, DraftID: draftID, IfMatch: etag, Payload: payload, BaseRevisionID: input.BaseRevisionID,
 		})
 		if err != nil {
 			writeRecordsApplicationError(w, err)

@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
 
 import { expect, test } from './fixtures'
+import { apiRouteKey } from './fixtures/contracts'
 import { authenticatedProfile, recordDetailProfile } from './fixtures/profiles'
 import { expectLocatorNotClipped, expectNoDocumentOverflow } from './support/geometry'
 
@@ -337,4 +338,73 @@ test('publishing an edited record keeps every existing evidence snapshot in orde
   const body = (await revisionRequest).postDataJSON() as { evidence_items: unknown }
   expect(body.evidence_items).toEqual(evidenceSnapshotIds.map((id) => ({ existing_snapshot_id: id })))
   await expect.poll(() => api.requestCount('POST', '/api/records/rec_e2e001/revisions')).toBe(1)
+})
+
+test('re-publishing after resolving a revision conflict rebases the same draft onto the new head', async ({ api, page }) => {
+  const base = recordDetailProfile({ revisionSave: { evidenceSnapshotIds: ['evs_e2ethirdnight'] } })
+  const recordKey = apiRouteKey('GET', '/api/records/rec_e2e001')
+  const loaded = base[recordKey]!.body as { current: Record<string, unknown> }
+  // 别人已在服务端发布了新修订：冲突后读取到的新头。
+  const advanced = {
+    ...loaded,
+    current_revision_id: 'rrv_e2eserver',
+    lock_version: 5,
+    current: { ...loaded.current, revision_id: 'rrv_e2eserver', revision_no: 3, title: '服务端已更新', evidence_snapshot_ids: ['evs_e2eserver'] },
+  }
+  const staleDraft = base[apiRouteKey('POST', '/api/record-drafts')]!.body as Record<string, unknown>
+  const draftPath = `/api/record-drafts/${String(staleDraft.draft_id)}`
+  api.useProfile(base)
+  await page.goto('/records/rec_e2e001/edit')
+  await page.getByLabel('保存原因').fill('补充第三晚复现结论')
+
+  api.useProfile({
+    ...base,
+    [recordKey]: { status: 200, body: advanced },
+    [apiRouteKey('POST', '/api/records/rec_e2e001/revisions')]: {
+      status: 409,
+      body: {
+        code: 'record_revision_conflict',
+        message: 'record revision changed',
+        field_errors: [],
+        recovery: { server_revision_id: 'rrv_e2eserver', server_lock_version: 5, server_authorization_epoch: 2, draft: staleDraft },
+      },
+      expectedBodyKeys: ['draft_id', 'draft_etag', 'base_revision_id', 'lock_version', 'authorization_epoch', 'evidence_items'],
+    },
+  })
+  await page.getByRole('button', { name: '发布修订' }).click()
+  const resolver = page.getByRole('alertdialog', { name: '修订冲突' })
+  await expect(resolver).toBeVisible()
+
+  api.useProfile({
+    ...base,
+    [recordKey]: { status: 200, body: advanced },
+    [apiRouteKey('PATCH', draftPath)]: {
+      status: 200,
+      body: { ...staleDraft, base_revision_id: 'rrv_e2eserver', etag: 'rdt2_e2e_rebased', version: 2 },
+      expectedBodyKeys: ['payload', 'base_revision_id'],
+    },
+  })
+  // 解决冲突后自动保存也会触发改基准，监听必须在解决之前注册。
+  const rebaseRequest = page.waitForRequest((request) =>
+    request.method() === 'PATCH' && new URL(request.url()).pathname === draftPath)
+  const revisionRequest = page.waitForRequest((request) =>
+    request.method() === 'POST' && new URL(request.url()).pathname === '/api/records/rec_e2e001/revisions')
+  await resolver.getByRole('button', { name: '全部保留本地' }).click()
+  await expect(resolver).toHaveCount(0)
+  await page.getByRole('button', { name: '发布修订' }).click()
+
+  // 同一份草稿（附件归属不变）带 If-Match 原子改到新头，再按新头的锁版本与证据发布。
+  const rebase = await rebaseRequest
+  expect(rebase.headers()['if-match']).toBe(String(staleDraft.etag))
+  expect(rebase.postDataJSON()).toMatchObject({ base_revision_id: 'rrv_e2eserver' })
+  expect((await revisionRequest).postDataJSON()).toMatchObject({
+    draft_id: staleDraft.draft_id,
+    draft_etag: 'rdt2_e2e_rebased',
+    base_revision_id: 'rrv_e2eserver',
+    lock_version: 5,
+    evidence_items: [{ existing_snapshot_id: 'evs_e2eserver' }],
+  })
+  await expect.poll(() => api.requestCount('POST', '/api/records/rec_e2e001/revisions')).toBe(2)
+  // 只有冲突前的那次创建：改基准不再丢弃重建草稿。
+  expect(api.requestCount('POST', '/api/record-drafts')).toBe(1)
 })

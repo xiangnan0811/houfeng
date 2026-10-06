@@ -178,6 +178,133 @@ func TestDraftServicePatchUsesTrustedAuthorAndKeepsAdvancedBase(t *testing.T) {
 	}
 }
 
+func TestDraftServicePatchRebasesOnlyOntoConfirmedCurrentHead(t *testing.T) {
+	actor := mustAuthorizationActor(t, recordauth.RoleProjectAdmin)
+	originalPayload, err := NewDraftPayload([]byte(`{"title":"Original"}`))
+	if err != nil {
+		t.Fatalf("NewDraftPayload(original) error = %v", err)
+	}
+	localPayload, err := NewDraftPayload([]byte(`{"title":"Local"}`))
+	if err != nil {
+		t.Fatalf("NewDraftPayload(local) error = %v", err)
+	}
+	originalETag, err := NewDraftETag("rdf_0123456789abcdef", actor.UserID, 1, originalPayload)
+	if err != nil {
+		t.Fatalf("NewDraftETag(original) error = %v", err)
+	}
+	staleETag, err := NewDraftETag("rdf_0123456789abcdef", actor.UserID, 1, localPayload)
+	if err != nil {
+		t.Fatalf("NewDraftETag(stale) error = %v", err)
+	}
+	now := time.Date(2026, time.August, 3, 12, 0, 0, 0, time.UTC)
+	existing := Draft{
+		DraftID:        "rdf_0123456789abcdef",
+		ProjectID:      recordauth.ProjectIDDefault,
+		RecordID:       "rec_0123456789abcdef",
+		BaseRevisionID: "rrv_1111111111111111",
+		AuthorID:       actor.UserID,
+		Payload:        originalPayload,
+		Version:        1,
+		ETag:           originalETag,
+		WarningAt:      now.Add(83 * 24 * time.Hour),
+		CreatedAt:      now,
+		UpdatedAt:      now,
+		ExpiresAt:      now.Add(90 * 24 * time.Hour),
+	}
+	newRecord := existing
+	newRecord.RecordID = ""
+	newRecord.BaseRevisionID = ""
+	visibility := mustAuthorizationVisibility(t, recordauth.VisibilityKindProject, nil)
+	head := CurrentRecordAuthorization{
+		RecordID:           existing.RecordID,
+		CurrentRevisionID:  "rrv_2222222222222222",
+		LockVersion:        7,
+		AuthorizationEpoch: 3,
+		Lifecycle:          LifecycleActive,
+		Evidence: RecordAuthorizationEvidence{
+			ProjectID:  recordauth.ProjectIDDefault,
+			Visibility: visibility,
+			Sources: []recordauth.SourceAuthorization{
+				mustLiveAuthorization(t, recordauth.SourceKindVPS, testRecordVPSID, visibility, visibility),
+			},
+		},
+	}
+	archived := head
+	archived.Lifecycle = LifecycleArchived
+
+	tests := []struct {
+		name          string
+		draft         Draft
+		current       CurrentRecordAuthorization
+		ifMatch       DraftETag
+		base          string
+		wantBase      string
+		wantRevision  bool
+		wantDraftConf bool
+		wantInvalid   bool
+	}{
+		{name: "confirmed head", draft: existing, current: head, ifMatch: originalETag, base: head.CurrentRevisionID, wantBase: head.CurrentRevisionID},
+		{name: "unchanged base keeps patch semantics", draft: existing, current: head, ifMatch: originalETag, base: existing.BaseRevisionID, wantBase: existing.BaseRevisionID},
+		{name: "head moved again", draft: existing, current: head, ifMatch: originalETag, base: "rrv_3333333333333333", wantRevision: true},
+		{name: "archived record", draft: existing, current: archived, ifMatch: originalETag, base: head.CurrentRevisionID, wantRevision: true},
+		{name: "draft changed elsewhere", draft: existing, current: head, ifMatch: staleETag, base: head.CurrentRevisionID, wantDraftConf: true},
+		{name: "new-record draft", draft: newRecord, current: head, ifMatch: originalETag, base: head.CurrentRevisionID, wantInvalid: true},
+		{name: "malformed base", draft: existing, current: head, ifMatch: originalETag, base: "rev_bad", wantInvalid: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &draftServiceStoreStub{draft: tt.draft}
+			service, err := NewDraftService(store, &currentRecordAuthorizationSourceStub{current: tt.current})
+			if err != nil {
+				t.Fatalf("NewDraftService() error = %v", err)
+			}
+
+			updated, err := service.PatchDraft(context.Background(), DraftPatchRequest{
+				Actor:          actor,
+				DraftID:        tt.draft.DraftID,
+				IfMatch:        tt.ifMatch,
+				Payload:        localPayload,
+				BaseRevisionID: tt.base,
+			})
+
+			var revisionConflict *DraftRevisionConflictError
+			var draftConflict *DraftConflictError
+			switch {
+			case tt.wantRevision:
+				if !errors.As(err, &revisionConflict) || revisionConflict.ServerRevisionID != tt.current.CurrentRevisionID ||
+					revisionConflict.ServerLockVersion != tt.current.LockVersion ||
+					revisionConflict.ServerAuthorizationEpoch != tt.current.AuthorizationEpoch ||
+					revisionConflict.Draft.ETag != tt.draft.ETag {
+					t.Fatalf("PatchDraft() error = %#v, want revision conflict with server draft", err)
+				}
+			case tt.wantDraftConf:
+				if !errors.As(err, &draftConflict) || draftConflict.Server.ETag != tt.draft.ETag ||
+					draftConflict.LocalPayload.Hash() != localPayload.Hash() {
+					t.Fatalf("PatchDraft() error = %#v, want draft conflict", err)
+				}
+			case tt.wantInvalid:
+				if !errors.Is(err, ErrInvalidDraftCommand) {
+					t.Fatalf("PatchDraft() error = %v, want ErrInvalidDraftCommand", err)
+				}
+			default:
+				if err != nil {
+					t.Fatalf("PatchDraft() error = %v", err)
+				}
+				if updated.BaseRevisionID != tt.wantBase || updated.Version != 2 || updated.Payload.Hash() != localPayload.Hash() {
+					t.Fatalf("PatchDraft() = %#v", updated)
+				}
+				if len(store.patchCommands) != 1 || store.patchCommands[0].BaseRevisionID != tt.base {
+					t.Fatalf("store commands = %#v", store.patchCommands)
+				}
+				return
+			}
+			if len(store.patchCommands) != 0 {
+				t.Fatalf("store patched despite rejection: %#v", store.patchCommands)
+			}
+		})
+	}
+}
+
 func TestDraftServiceCreatesNewAndExistingDraftsFromTrustedActor(t *testing.T) {
 	actor := mustAuthorizationActor(t, recordauth.RoleProjectAdmin)
 	payload, err := NewDraftPayload([]byte(`{"title":"Draft"}`))
@@ -363,6 +490,7 @@ type draftServiceStoreStub struct {
 	deleteCalls   int
 	deleteReason  DraftDeleteReason
 	patchAuthorID string
+	patchCommands []DraftPatchCommand
 	steps         *[]string
 	getCalls      int
 }
@@ -423,12 +551,16 @@ func (store *draftServiceStoreStub) ListDraftRoutings(_ context.Context, authorI
 
 func (store *draftServiceStoreStub) PatchDraft(_ context.Context, command DraftPatchCommand) (Draft, error) {
 	store.patchAuthorID = command.AuthorID
+	store.patchCommands = append(store.patchCommands, command)
 	if command.DraftID != store.draft.DraftID || command.AuthorID != store.draft.AuthorID || command.IfMatch != store.draft.ETag {
 		return Draft{}, ErrDraftNotFound
 	}
 	etag, err := NewDraftETag(store.draft.DraftID, store.draft.AuthorID, store.draft.Version+1, command.Payload)
 	if err != nil {
 		return Draft{}, err
+	}
+	if command.BaseRevisionID != "" {
+		store.draft.BaseRevisionID = command.BaseRevisionID
 	}
 	store.draft.Payload = command.Payload
 	store.draft.Version++

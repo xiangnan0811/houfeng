@@ -656,6 +656,186 @@ func TestPostgresIntegrationRecordDraftPublishDiscardAndRevokeCleanupAreAtomic(t
 // Drafts created in one transaction share updated_at down to the microsecond, so
 // the tie-break half of the keyset is not hypothetical. This walks the whole list
 // one draft at a time to prove no draft is skipped or served twice.
+func TestPostgresIntegrationRecordDraftRebaseMovesBaseOnlyOntoCurrentHead(t *testing.T) {
+	ctx := context.Background()
+	fixture := newRecordsPostgresFixture(t, ctx)
+	runtimePool := fixture.openDirectRuntimePool(t, ctx, "record-draft-rebase", 2)
+	recordRepository := newRecordsPostgresRepository(t, runtimePool)
+	draftRepository := newRecordsPostgresDraftRepository(runtimePool)
+
+	recordID := "rec_pgrebase"
+	first, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordCreate, recordID, "", 0, 0,
+		recordsPostgresCompleteRevisionInput(t, "Rebase one"), "record-draft-rebase-create",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision(first) error = %v", err)
+	}
+	payload := recordsPostgresDraftPayload(t, "Local edit")
+	draft, err := draftRepository.CreateDraft(ctx, records.DraftCreateCommand{
+		DraftID:        "rdf_pgrebase",
+		ProjectID:      recordauth.ProjectIDDefault,
+		RecordID:       recordID,
+		BaseRevisionID: first.RevisionID,
+		AuthorID:       recordsPostgresDraftAuthorID,
+		Payload:        payload,
+		Policy:         records.DefaultDraftRetentionPolicy(),
+	})
+	if err != nil {
+		t.Fatalf("CreateDraft() error = %v", err)
+	}
+	second, err := recordRepository.CommitRevision(ctx, recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordUpdate, recordID, first.RevisionID, first.LockVersion, first.AuthorizationEpoch,
+		recordsPostgresCompleteRevisionInput(t, "Rebase two"), "record-draft-rebase-update",
+	))
+	if err != nil {
+		t.Fatalf("CommitRevision(second) error = %v", err)
+	}
+
+	rebase := func(ifMatch records.DraftETag, base string) (records.Draft, error) {
+		return draftRepository.PatchDraft(ctx, records.DraftPatchCommand{
+			DraftID:        draft.DraftID,
+			AuthorID:       draft.AuthorID,
+			IfMatch:        ifMatch,
+			Payload:        payload,
+			BaseRevisionID: base,
+			Policy:         records.DefaultDraftRetentionPolicy(),
+		})
+	}
+	var revisionConflict *records.DraftRevisionConflictError
+	if _, err := rebase(draft.ETag, "rrv_pgnothead"); !errors.As(err, &revisionConflict) ||
+		revisionConflict.ServerRevisionID != second.RevisionID ||
+		revisionConflict.ServerLockVersion != second.LockVersion ||
+		revisionConflict.ServerAuthorizationEpoch != second.AuthorizationEpoch ||
+		revisionConflict.Draft.ETag != draft.ETag {
+		t.Fatalf("rebase(non-head) error = %#v, want revision conflict carrying server draft", err)
+	}
+	staleETag, err := records.NewDraftETag(draft.DraftID, draft.AuthorID, 1, recordsPostgresDraftPayload(t, "Other tab"))
+	if err != nil {
+		t.Fatalf("NewDraftETag(stale) error = %v", err)
+	}
+	var draftConflict *records.DraftConflictError
+	if _, err := rebase(staleETag, second.RevisionID); !errors.As(err, &draftConflict) {
+		t.Fatalf("rebase(stale etag) error = %v, want draft conflict", err)
+	}
+	assertRecordsPostgresDraftRow(t, ctx, fixture.db, draft.DraftID, first.RevisionID, 1)
+
+	// 模拟附件上传事务先持有记录行锁：改基准必须先等记录行，不能先锁草稿行形成交错死锁。
+	holder, err := fixture.db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin record lock holder: %v", err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err := holder.Exec(ctx, `select 1 from public.records where record_id = $1 for update`, recordID); err != nil {
+		t.Fatalf("hold record row: %v", err)
+	}
+	type rebaseOutcome struct {
+		draft records.Draft
+		err   error
+	}
+	outcome := make(chan rebaseOutcome, 1)
+	go func() {
+		// 内容不变也要推进版本：其他标签页手里旧 ETag 必须失效。
+		rebased, err := rebase(draft.ETag, second.RevisionID)
+		outcome <- rebaseOutcome{draft: rebased, err: err}
+	}()
+	waitForRecordsPostgresLockWaiter(t, ctx, fixture.db, "%from public.records%for key share%")
+	if _, err := holder.Exec(ctx, `select 1 from public.record_drafts where draft_id = $1 for update nowait`, draft.DraftID); err != nil {
+		t.Fatalf("draft row locked before record row: %v", err)
+	}
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatalf("release record lock holder: %v", err)
+	}
+	result := <-outcome
+	rebased, err := result.draft, result.err
+	if err != nil {
+		t.Fatalf("rebase(head) error = %v", err)
+	}
+	if rebased.BaseRevisionID != second.RevisionID || rebased.Version != 2 || rebased.ETag == draft.ETag {
+		t.Fatalf("rebase(head) = %#v", rebased)
+	}
+	assertRecordsPostgresDraftRow(t, ctx, fixture.db, draft.DraftID, second.RevisionID, 2)
+	var checkpoints int
+	if err := fixture.db.QueryRow(ctx, `
+		select count(*)::int from public.record_draft_checkpoints where draft_id = $1`, draft.DraftID).Scan(&checkpoints); err != nil {
+		t.Fatalf("count rebase checkpoints: %v", err)
+	}
+	if checkpoints != 0 {
+		t.Fatalf("same-payload rebase checkpoints = %d, want 0", checkpoints)
+	}
+	reread, err := draftRepository.GetDraft(ctx, draft.DraftID, draft.AuthorID)
+	if err != nil || reread.ETag != rebased.ETag || reread.BaseRevisionID != second.RevisionID {
+		t.Fatalf("GetDraft() after rebase = (%#v, %v)", reread, err)
+	}
+
+	newRecordDraft := createRecordsPostgresDraft(t, ctx, draftRepository, "rdf_pgrebasenew", payload)
+	if _, err := draftRepository.PatchDraft(ctx, records.DraftPatchCommand{
+		DraftID:        newRecordDraft.DraftID,
+		AuthorID:       newRecordDraft.AuthorID,
+		IfMatch:        newRecordDraft.ETag,
+		Payload:        payload,
+		BaseRevisionID: second.RevisionID,
+		Policy:         records.DefaultDraftRetentionPolicy(),
+	}); !errors.Is(err, records.ErrInvalidDraftCommand) {
+		t.Fatalf("rebase(new-record draft) error = %v, want ErrInvalidDraftCommand", err)
+	}
+
+	publish := recordsPostgresRevisionCommand(
+		t, recordplatform.OperationKindRecordUpdate, recordID, second.RevisionID, second.LockVersion, second.AuthorizationEpoch,
+		recordsPostgresCompleteRevisionInput(t, "Rebase three"), "record-draft-rebase-publish",
+	)
+	publish.DraftID = rebased.DraftID
+	publish.DraftETag = rebased.ETag
+	if _, err := recordRepository.CommitRevision(ctx, publish); err != nil {
+		t.Fatalf("CommitRevision(rebased draft) error = %v", err)
+	}
+	var remaining int
+	if err := fixture.db.QueryRow(ctx, `select count(*)::int from public.record_drafts where draft_id = $1`, draft.DraftID).Scan(&remaining); err != nil {
+		t.Fatalf("count published draft: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("published rebased draft rows = %d, want 0", remaining)
+	}
+}
+
+func waitForRecordsPostgresLockWaiter(t *testing.T, ctx context.Context, db *pgxpool.Pool, queryPattern string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var waiting int
+		if err := db.QueryRow(ctx, `
+			select count(*)::int from pg_stat_activity
+			where wait_event_type = 'Lock' and query like $1`, queryPattern).Scan(&waiting); err != nil {
+			t.Fatalf("read lock waiters: %v", err)
+		}
+		if waiting > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("no backend waited on a lock for %q", queryPattern)
+}
+
+func assertRecordsPostgresDraftRow(
+	t *testing.T,
+	ctx context.Context,
+	db *pgxpool.Pool,
+	draftID string,
+	wantBase string,
+	wantVersion int64,
+) {
+	t.Helper()
+	var base string
+	var version int64
+	if err := db.QueryRow(ctx, `
+		select base_revision_id, draft_version from public.record_drafts where draft_id = $1`, draftID).Scan(&base, &version); err != nil {
+		t.Fatalf("read draft %s: %v", draftID, err)
+	}
+	if base != wantBase || version != wantVersion {
+		t.Fatalf("draft %s = base %q version %d, want %q/%d", draftID, base, version, wantBase, wantVersion)
+	}
+}
+
 func TestPostgresIntegrationRecordDraftRoutingKeysetPagesThroughTiedTimestamps(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)

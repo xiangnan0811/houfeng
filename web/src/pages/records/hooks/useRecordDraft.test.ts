@@ -302,6 +302,134 @@ describe('useRecordDraft', () => {
     expect(result.current.state.dirty).toBe(false)
   })
 
+  it('keeps buffering locally but pauses server autosave while a conflict resolver is open', async () => {
+    vi.useFakeTimers()
+    api.patchRecordDraft.mockRejectedValueOnce(new ApiError(409, 'draft changed', {
+      code: 'draft_conflict',
+      recovery: { server_draft: draftFixture({ etag: 'etag-other' }), local_payload: emptyRecordDraftPayload('usr_1') },
+    }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    act(() => result.current.commands.patchPayload({ title: 'first' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    act(() => result.current.commands.patchPayload({ title: 'second' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    expect(result.current.state.status).toBe('conflict')
+    expect(api.patchRecordDraft).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+    expect(api.patchRecordDraft).toHaveBeenCalledTimes(1)
+    // 刷新或关闭页面不会走卸载补写：冲突中的本地修改必须已经落到缓冲。
+    expect((await readUnsyncedDraft(store, draftBufferKey('usr_1')))?.payload.title).toBe('second')
+    vi.useRealTimers()
+  })
+
+  it.each([
+    ['dismissing', 'dismiss'],
+    ['keeping the same local payload', 'resolve'],
+] as const)('resumes server autosave after %s once the conflict timer ran out', async (_label, action) => {
+    vi.useFakeTimers()
+    api.patchRecordDraft.mockRejectedValueOnce(new ApiError(409, 'draft changed', {
+      code: 'draft_conflict',
+      recovery: { server_draft: draftFixture({ etag: 'etag-other' }), local_payload: emptyRecordDraftPayload('usr_1') },
+    }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    act(() => result.current.commands.patchPayload({ title: 'first' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    act(() => result.current.commands.patchPayload({ title: 'second' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5000)
+    })
+    expect(api.patchRecordDraft).toHaveBeenCalledTimes(1)
+
+    act(() => {
+      if (action === 'dismiss') result.current.commands.dismissConflict()
+      else result.current.commands.resolveConflict(result.current.state.payload)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500)
+    })
+    expect(api.patchRecordDraft).toHaveBeenCalledTimes(2)
+    expect(api.patchRecordDraft).toHaveBeenLastCalledWith('dft_001', { payload: expect.objectContaining({ title: 'second' }) }, 'etag-other')
+    vi.useRealTimers()
+  })
+
+  it('drops a queued autosave when the conflict lands after the workspace unmounted', async () => {
+    vi.useFakeTimers()
+    let rejectPatch: (error: unknown) => void = () => undefined
+    api.patchRecordDraft.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectPatch = reject }))
+    const store = memoryDraftBufferStore()
+    const { result, unmount } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    act(() => result.current.commands.patchPayload({ title: 'first' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    act(() => result.current.commands.patchPayload({ title: 'second' }))
+    let saving: Promise<void> = Promise.resolve()
+    act(() => {
+      saving = result.current.commands.saveDraft()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500)
+    })
+    unmount()
+    await act(async () => {
+      rejectPatch(new ApiError(409, 'draft changed', {
+        code: 'draft_conflict',
+        recovery: { server_draft: draftFixture({ etag: 'etag-other' }), local_payload: emptyRecordDraftPayload('usr_1') },
+      }))
+      await saving
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    // 卸载后不再有解决器，排队的自动保存不能用服务端新 ETag 把本地内容写回去。
+    expect(api.patchRecordDraft).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
+  it('drops an autosave already queued behind a save that lands a conflict', async () => {
+    vi.useFakeTimers()
+    let rejectPatch: (error: unknown) => void = () => undefined
+    api.patchRecordDraft.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectPatch = reject }))
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'new', userId: 'usr_1', store }))
+    act(() => result.current.commands.patchPayload({ title: 'first' }))
+    await act(async () => {
+      await result.current.commands.saveDraft()
+    })
+    act(() => result.current.commands.patchPayload({ title: 'second' }))
+    let saving: Promise<void> = Promise.resolve()
+    act(() => {
+      saving = result.current.commands.saveDraft()
+    })
+    // 手动保存的响应超过自动保存间隔：定时器已触发，自动保存排在保存链上。
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2500)
+    })
+    await act(async () => {
+      rejectPatch(new ApiError(409, 'draft changed', {
+        code: 'draft_conflict',
+        recovery: { server_draft: draftFixture({ etag: 'etag-other' }), local_payload: emptyRecordDraftPayload('usr_1') },
+      }))
+      await saving
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    expect(result.current.state.status).toBe('conflict')
+    expect(api.patchRecordDraft).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+  })
+
   it('discards a late persist after a later successful save', async () => {
     vi.useFakeTimers()
     let releaseWrite: (() => void) | undefined
@@ -532,6 +660,319 @@ describe('useRecordDraft', () => {
     })
     expect(result.current.state.status).toBe('conflict')
     expect(result.current.state.conflictPayload).not.toBeNull()
+  })
+
+  describe('after a formal revision conflict', () => {
+    const first = recordDetailFixture()
+    const second = recordDetailFixture({
+      current_revision_id: 'rrv_002',
+      lock_version: 8,
+      authorization_epoch: 5,
+      current: recordRevisionFixture({ revision_id: 'rrv_002', title: 'server advanced', evidence_snapshot_ids: ['evs_server'] }),
+    })
+    const third = recordDetailFixture({
+      current_revision_id: 'rrv_003',
+      lock_version: 9,
+      authorization_epoch: 6,
+      current: recordRevisionFixture({ revision_id: 'rrv_003', title: 'advanced again', evidence_snapshot_ids: ['evs_third'] }),
+    })
+    const staleDraft = draftFixture({ draft_id: 'rdf_old', etag: 'etag-old', record_id: 'rec_001', base_revision_id: 'rrv_001' })
+    const revisionConflict = (serverRevisionId: string, draft?: RecordDraft) => new ApiError(409, 'revision advanced', {
+      recovery: { server_revision_id: serverRevisionId, server_lock_version: 8, server_authorization_epoch: 5, ...(draft ? { draft } : {}) },
+    })
+
+    async function openConflict() {
+      api.getRecord.mockResolvedValueOnce(first).mockResolvedValue(second)
+      api.createRecordDraft.mockResolvedValueOnce(staleDraft)
+      api.createRecordRevision
+        .mockRejectedValueOnce(revisionConflict('rrv_002', staleDraft))
+        .mockResolvedValueOnce({ record_id: 'rec_001' })
+      const store = memoryDraftBufferStore()
+      const hook = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+      await waitFor(() => expect(hook.result.current.state.status).toBe('ready'))
+      act(() => hook.result.current.commands.patchPayload({ title: 'mine' }))
+      await act(async () => {
+        await hook.result.current.commands.publish()
+      })
+      expect(hook.result.current.state.status).toBe('conflict')
+      return hook
+    }
+
+    it('rebases the same draft onto the confirmed head, then publishes against that head', async () => {
+      api.patchRecordDraft.mockResolvedValueOnce(draftFixture({ draft_id: 'rdf_old', etag: 'etag-rebased', record_id: 'rec_001', base_revision_id: 'rrv_002' }))
+      const { result } = await openConflict()
+
+      const merged = { ...result.current.state.payload, title: 'merged' }
+      act(() => result.current.commands.resolveConflict(merged))
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+
+      // 草稿 ID 不变（附件归属随之保留），由服务端在同一事务里核对 ETag 与当前头后改基准。
+      expect(api.createRecordDraft).toHaveBeenCalledTimes(1)
+      expect(api.patchRecordDraft).toHaveBeenCalledWith('rdf_old', {
+        payload: expect.objectContaining({ title: 'merged' }),
+        base_revision_id: 'rrv_002',
+      }, 'etag-old')
+      expect(api.createRecordRevision).toHaveBeenLastCalledWith('rec_001', expect.objectContaining({
+        draft_id: 'rdf_old',
+        draft_etag: 'etag-rebased',
+        base_revision_id: 'rrv_002',
+        lock_version: 8,
+        authorization_epoch: 5,
+        evidence_items: [{ existing_snapshot_id: 'evs_server' }],
+      }), expect.any(String))
+      expect(result.current.state.status).toBe('ready')
+    })
+
+    it('keeps the confirmed head when a background refresh sees a newer one', async () => {
+      api.patchRecordDraft.mockResolvedValueOnce(draftFixture({ draft_id: 'rdf_old', etag: 'etag-rebased', record_id: 'rec_001', base_revision_id: 'rrv_002' }))
+      const { result } = await openConflict()
+      act(() => result.current.commands.resolveConflict({ ...result.current.state.payload, title: 'merged' }))
+      api.getRecord.mockResolvedValue(third)
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      await waitFor(() => expect(result.current.state.record?.current_revision_id).toBe('rrv_003'))
+
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+
+      // 用户没看过 rrv_003，不能拿它的锁版本与证据替用户发布；服务端会因头已变再次拒绝。
+      expect(api.patchRecordDraft).toHaveBeenCalledWith('rdf_old', expect.objectContaining({ base_revision_id: 'rrv_002' }), 'etag-old')
+      expect(api.createRecordRevision).toHaveBeenLastCalledWith('rec_001', expect.objectContaining({
+        base_revision_id: 'rrv_002',
+        lock_version: 8,
+        evidence_items: [{ existing_snapshot_id: 'evs_server' }],
+      }), expect.any(String))
+    })
+
+    it('reopens the resolver on the newer head when it moves again before the rebase lands', async () => {
+      const { result } = await openConflict()
+      act(() => result.current.commands.resolveConflict({ ...result.current.state.payload, title: 'merged' }))
+      api.getRecord.mockResolvedValue(third)
+      api.patchRecordDraft
+        .mockRejectedValueOnce(revisionConflict('rrv_003', staleDraft))
+        .mockResolvedValueOnce(draftFixture({ draft_id: 'rdf_old', etag: 'etag-third', record_id: 'rec_001', base_revision_id: 'rrv_003' }))
+
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+      expect(result.current.state.status).toBe('conflict')
+      expect(result.current.state.record?.current_revision_id).toBe('rrv_003')
+      expect(api.createRecordRevision).toHaveBeenCalledTimes(1)
+
+      act(() => result.current.commands.resolveConflict({ ...result.current.state.payload, title: 'merged twice' }))
+      await act(async () => {
+        await result.current.commands.saveDraft()
+      })
+      expect(api.patchRecordDraft).toHaveBeenLastCalledWith('rdf_old', expect.objectContaining({ base_revision_id: 'rrv_003' }), 'etag-old')
+    })
+
+    it('leaves the draft base alone when the operator dismisses the conflict', async () => {
+      const { result } = await openConflict()
+      act(() => result.current.commands.dismissConflict())
+      act(() => result.current.commands.patchPayload({ title: 'mine again' }))
+      await act(async () => {
+        await result.current.commands.saveDraft()
+      })
+      expect(api.patchRecordDraft).toHaveBeenCalledWith('rdf_old', { payload: expect.objectContaining({ title: 'mine again' }) }, 'etag-old')
+    })
+
+    it('keeps the pre-conflict base when the operator dismisses a create conflict', async () => {
+      api.getRecord.mockResolvedValueOnce(first).mockResolvedValue(second)
+      api.createRecordDraft
+        .mockRejectedValueOnce(revisionConflict('rrv_002'))
+        .mockRejectedValueOnce(revisionConflict('rrv_002'))
+      const store = memoryDraftBufferStore()
+      const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+      await waitFor(() => expect(result.current.state.status).toBe('ready'))
+      act(() => result.current.commands.patchPayload({ title: 'mine' }))
+      await act(async () => {
+        await result.current.commands.saveDraft()
+      })
+      act(() => result.current.commands.dismissConflict())
+
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+
+      // 用户没确认 rrv_002：仍按冲突前的 rrv_001 创建，服务端再次拒绝并重新打开解决器，不会按新头发布。
+      expect(api.createRecordDraft).toHaveBeenLastCalledWith(expect.objectContaining({ base_revision_id: 'rrv_001' }))
+      expect(api.createRecordRevision).not.toHaveBeenCalled()
+      expect(result.current.state.status).toBe('conflict')
+    })
+
+    it('binds the resolver to the conflict snapshot even when an older background read lands later', async () => {
+      let resolveStaleRead: (detail: typeof first) => void = () => undefined
+      api.getRecord
+        .mockResolvedValueOnce(first)
+        .mockReturnValueOnce(new Promise((resolve) => { resolveStaleRead = resolve }))
+        .mockResolvedValue(second)
+      api.createRecordDraft.mockResolvedValueOnce(staleDraft)
+      api.createRecordRevision
+        .mockRejectedValueOnce(revisionConflict('rrv_002', staleDraft))
+        .mockResolvedValueOnce({ record_id: 'rec_001' })
+      api.patchRecordDraft.mockResolvedValueOnce(draftFixture({ draft_id: 'rdf_old', etag: 'etag-rebased', record_id: 'rec_001', base_revision_id: 'rrv_002' }))
+      const store = memoryDraftBufferStore()
+      const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+      await waitFor(() => expect(result.current.state.status).toBe('ready'))
+      act(() => result.current.commands.patchPayload({ title: 'mine' }))
+      await act(async () => {
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+      expect(result.current.state.conflictServer?.title).toBe('server advanced')
+
+      await act(async () => {
+        resolveStaleRead(first)
+      })
+      expect(result.current.state.record?.current_revision_id).toBe('rrv_002')
+      expect(result.current.state.conflictServer?.title).toBe('server advanced')
+
+      act(() => result.current.commands.resolveConflict({ ...result.current.state.payload, title: 'merged' }))
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+      expect(api.patchRecordDraft).toHaveBeenCalledWith('rdf_old', expect.objectContaining({ base_revision_id: 'rrv_002' }), 'etag-old')
+    })
+
+    it('asks for confirmation when only the lock version or authorization epoch moved', async () => {
+      const relocked = recordDetailFixture({ lock_version: 9, authorization_epoch: 6 })
+      api.getRecord.mockResolvedValueOnce(first).mockResolvedValue(relocked)
+      api.createRecordDraft.mockResolvedValueOnce(staleDraft)
+      api.patchRecordDraft.mockResolvedValueOnce(draftFixture({ draft_id: 'rdf_old', etag: 'etag-saved', record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+      // 同一修订上的 CAS 失败只有错误码，没有 recovery。
+      api.createRecordRevision
+        .mockRejectedValueOnce(new ApiError(409, 'record revision changed', { code: 'record_revision_conflict' }))
+        .mockResolvedValueOnce({ record_id: 'rec_001' })
+      const store = memoryDraftBufferStore()
+      const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+      await waitFor(() => expect(result.current.state.status).toBe('ready'))
+      act(() => result.current.commands.patchPayload({ title: 'mine' }))
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+      expect(result.current.state.status).toBe('conflict')
+
+      act(() => result.current.commands.resolveConflict({ ...result.current.state.payload, title: 'merged' }))
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+      expect(api.patchRecordDraft).toHaveBeenCalledWith('rdf_old', { payload: expect.objectContaining({ title: 'merged' }) }, 'etag-old')
+      expect(api.createRecordRevision).toHaveBeenLastCalledWith('rec_001', expect.objectContaining({
+        draft_etag: 'etag-saved',
+        base_revision_id: 'rrv_001',
+        lock_version: 9,
+        authorization_epoch: 6,
+      }), expect.any(String))
+    })
+
+    it('reports instead of opening an unconfirmable resolver when the new head cannot be read', async () => {
+      api.getRecord.mockResolvedValueOnce(first).mockRejectedValue(new ApiError(503, 'record service unavailable'))
+      api.createRecordDraft.mockResolvedValueOnce(staleDraft)
+      api.createRecordRevision.mockRejectedValueOnce(revisionConflict('rrv_002', staleDraft))
+      const store = memoryDraftBufferStore()
+      const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+      await waitFor(() => expect(result.current.state.status).toBe('ready'))
+      act(() => result.current.commands.patchPayload({ title: 'mine' }))
+      await act(async () => {
+        await result.current.commands.publish()
+      })
+      expect(result.current.state.status).toBe('ready')
+      expect(result.current.state.conflictPayload).toBeNull()
+      expect(result.current.state.message).toBe('记录已有新修订，暂时无法读取，请稍后重试')
+    })
+
+    it('holds server saves while the resolver is open', async () => {
+      const { result } = await openConflict()
+      const patches = api.patchRecordDraft.mock.calls.length
+      await act(async () => {
+        await result.current.commands.saveDraft()
+      })
+      expect(api.patchRecordDraft).toHaveBeenCalledTimes(patches)
+    })
+
+    it('does not confirm a hidden head when an in-flight save lands a draft conflict afterwards', async () => {
+      api.getRecord.mockResolvedValueOnce(first).mockResolvedValue(second)
+      api.createRecordDraft.mockResolvedValueOnce(staleDraft)
+      let rejectRevision: (error: unknown) => void = () => undefined
+      api.createRecordRevision.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectRevision = reject }))
+      const store = memoryDraftBufferStore()
+      const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+      await waitFor(() => expect(result.current.state.status).toBe('ready'))
+      act(() => result.current.commands.patchPayload({ title: 'mine' }))
+      let publishing: Promise<void> = Promise.resolve()
+      await act(async () => {
+        publishing = result.current.commands.publish()
+        await waitFor(() => expect(api.createRecordRevision).toHaveBeenCalled())
+      })
+
+      // 发布请求在途时另一处保存已发出，随后才收到草稿冲突。
+      const otherTab = draftFixture({
+        draft_id: 'rdf_old',
+        etag: 'etag-other',
+        record_id: 'rec_001',
+        base_revision_id: 'rrv_001',
+        payload: { ...emptyRecordDraftPayload('usr_1'), title: 'other tab' },
+      })
+      let rejectPatch: (error: unknown) => void = () => undefined
+      api.patchRecordDraft.mockReturnValueOnce(new Promise((_resolve, reject) => { rejectPatch = reject }))
+      act(() => result.current.commands.patchPayload({ title: 'mine again' }))
+      let saving: Promise<void> = Promise.resolve()
+      await act(async () => {
+        saving = result.current.commands.saveDraft()
+        await waitFor(() => expect(api.patchRecordDraft).toHaveBeenCalled())
+      })
+      await act(async () => {
+        rejectRevision(revisionConflict('rrv_002', staleDraft))
+        await publishing
+      })
+      expect(result.current.state.conflictServer?.title).toBe('server advanced')
+      await act(async () => {
+        rejectPatch(new ApiError(409, 'draft changed', {
+          code: 'draft_conflict',
+          recovery: { server_draft: otherTab, local_payload: result.current.state.payload },
+        }))
+        await saving
+      })
+      expect(result.current.state.conflictServer?.title).toBe('other tab')
+
+      act(() => result.current.commands.resolveConflict({ ...result.current.state.payload, title: 'merged with tab' }))
+      await act(async () => {
+        await result.current.commands.saveDraft()
+      })
+      // 用户合并的是草稿冲突，没看过 rrv_002：保存不得改基准。
+      expect(api.patchRecordDraft).toHaveBeenLastCalledWith('rdf_old', { payload: expect.objectContaining({ title: 'merged with tab' }) }, 'etag-other')
+    })
+
+    it('creates the first draft on the confirmed head when the create itself hit a stale base', async () => {
+      api.getRecord.mockResolvedValueOnce(first).mockResolvedValue(second)
+      api.createRecordDraft
+        .mockRejectedValueOnce(revisionConflict('rrv_002'))
+        .mockResolvedValueOnce(draftFixture({ draft_id: 'rdf_new', record_id: 'rec_001', base_revision_id: 'rrv_002' }))
+      const store = memoryDraftBufferStore()
+      const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+      await waitFor(() => expect(result.current.state.status).toBe('ready'))
+      act(() => result.current.commands.patchPayload({ title: 'mine' }))
+      await act(async () => {
+        await result.current.commands.saveDraft()
+      })
+      expect(result.current.state.status).toBe('conflict')
+
+      act(() => result.current.commands.resolveConflict({ ...result.current.state.payload, title: 'merged' }))
+      await act(async () => {
+        await result.current.commands.saveDraft()
+      })
+      expect(api.createRecordDraft).toHaveBeenLastCalledWith({
+        record_id: 'rec_001',
+        base_revision_id: 'rrv_002',
+        payload: expect.objectContaining({ title: 'merged' }),
+      })
+    })
   })
 
   it('loads the advanced server revision before opening the conflict resolver', async () => {

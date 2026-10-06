@@ -420,6 +420,14 @@ func (repository *PostgresRecordDraftRepository) PatchDraft(
 				return err
 			}
 		}
+		var head *recordDraftRebaseHead
+		if command.BaseRevisionID != "" && recordID != nil {
+			// 与附件上传、草稿创建一致：先锁记录行再锁草稿行，避免交错死锁。
+			head, err = lockRecordHeadForDraftRebase(ctx, transaction.tx, *recordID)
+			if err != nil {
+				return err
+			}
+		}
 
 		server, err := loadRecordDraftForUpdate(ctx, transaction.tx, command.DraftID, command.AuthorID)
 		if err != nil {
@@ -428,11 +436,17 @@ func (repository *PostgresRecordDraftRepository) PatchDraft(
 		if server.ETag != command.IfMatch {
 			return &records.DraftConflictError{Server: server, LocalPayload: command.Payload}
 		}
+		nextBaseRevisionID, err := patchDraftBaseRevision(server, command.BaseRevisionID, head)
+		if err != nil {
+			return err
+		}
+		rebase := nextBaseRevisionID != server.BaseRevisionID
+		payloadChanged := server.Payload.Hash() != command.Payload.Hash()
 		oldETagDigest, err := server.ETag.Digest()
 		if err != nil {
 			return err
 		}
-		if server.Payload.Hash() == command.Payload.Hash() {
+		if !rebase && !payloadChanged {
 			var updatedAt time.Time
 			var warningAt time.Time
 			var expiresAt time.Time
@@ -465,10 +479,6 @@ func (repository *PostgresRecordDraftRepository) PatchDraft(
 			return nil
 		}
 
-		checkpointID, err := repository.newCheckpointID()
-		if err != nil {
-			return fmt.Errorf("issue record draft checkpoint id: %w", err)
-		}
 		nextVersion := server.Version + 1
 		nextETag, err := records.NewDraftETag(server.DraftID, server.AuthorID, nextVersion, command.Payload)
 		if err != nil {
@@ -489,6 +499,7 @@ func (repository *PostgresRecordDraftRepository) PatchDraft(
 			    payload_hash = $4,
 			    draft_version = $5,
 			    etag_digest = $6,
+			    base_revision_id = $10,
 			    updated_at = transaction_timestamp(),
 			    warning_at = transaction_timestamp() + (($8::bigint - $9::bigint) * interval '1 microsecond'),
 			    expires_at = transaction_timestamp() + ($8 * interval '1 microsecond')
@@ -503,6 +514,7 @@ func (repository *PostgresRecordDraftRepository) PatchDraft(
 			oldETagDigest[:],
 			command.Policy.DraftTTL.Microseconds(),
 			command.Policy.WarningLead.Microseconds(),
+			nullableRecordString(nextBaseRevisionID),
 		).Scan(&updatedAt, &warningAt, &expiresAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return &records.DraftConflictError{Server: server, LocalPayload: command.Payload}
@@ -511,49 +523,57 @@ func (repository *PostgresRecordDraftRepository) PatchDraft(
 			return fmt.Errorf("patch record draft: %w", err)
 		}
 
-		if _, err := transaction.tx.Exec(ctx, `
-			insert into public.record_draft_checkpoints (
-				checkpoint_id, draft_id, checkpoint_bucket,
-				checkpoint_payload, checkpoint_payload_hash, checkpoint_draft_version,
-				created_at, checkpoint_expires_at
-			) values (
-				$1, $2,
-				date_bin($3 * interval '1 microsecond', transaction_timestamp(), timestamptz '2000-01-01 00:00:00+00'),
-				$4, $5, $6,
-				transaction_timestamp(),
-				transaction_timestamp() + ($7 * interval '1 microsecond')
-			)
-			on conflict (draft_id, checkpoint_bucket) do nothing`,
-			checkpointID,
-			command.DraftID,
-			command.Policy.CheckpointBucket.Microseconds(),
-			command.Payload.JSON(),
-			payloadHash[:],
-			int64(nextVersion),
-			command.Policy.CheckpointTTL.Microseconds(),
-		); err != nil {
-			return fmt.Errorf("insert record draft checkpoint: %w", err)
-		}
-		if _, err := transaction.tx.Exec(ctx, `
-			delete from public.record_draft_checkpoints
-			where draft_id = $1
-			  and checkpoint_expires_at <= transaction_timestamp()`, command.DraftID); err != nil {
-			return fmt.Errorf("delete expired record draft checkpoints: %w", err)
-		}
-		if _, err := transaction.tx.Exec(ctx, `
-			delete from public.record_draft_checkpoints
-			where draft_id = $1
-			  and checkpoint_id in (
-				select checkpoint_id
-				from public.record_draft_checkpoints
+		// 只改基准、内容未变时不写 checkpoint：恢复历史只记录内容变化。
+		if payloadChanged {
+			checkpointID, err := repository.newCheckpointID()
+			if err != nil {
+				return fmt.Errorf("issue record draft checkpoint id: %w", err)
+			}
+			if _, err := transaction.tx.Exec(ctx, `
+				insert into public.record_draft_checkpoints (
+					checkpoint_id, draft_id, checkpoint_bucket,
+					checkpoint_payload, checkpoint_payload_hash, checkpoint_draft_version,
+					created_at, checkpoint_expires_at
+				) values (
+					$1, $2,
+					date_bin($3 * interval '1 microsecond', transaction_timestamp(), timestamptz '2000-01-01 00:00:00+00'),
+					$4, $5, $6,
+					transaction_timestamp(),
+					transaction_timestamp() + ($7 * interval '1 microsecond')
+				)
+				on conflict (draft_id, checkpoint_bucket) do nothing`,
+				checkpointID,
+				command.DraftID,
+				command.Policy.CheckpointBucket.Microseconds(),
+				command.Payload.JSON(),
+				payloadHash[:],
+				int64(nextVersion),
+				command.Policy.CheckpointTTL.Microseconds(),
+			); err != nil {
+				return fmt.Errorf("insert record draft checkpoint: %w", err)
+			}
+			if _, err := transaction.tx.Exec(ctx, `
+				delete from public.record_draft_checkpoints
 				where draft_id = $1
-				order by created_at desc, checkpoint_id desc
-				offset $2
-			  )`, command.DraftID, command.Policy.CheckpointLimit); err != nil {
-			return fmt.Errorf("prune record draft checkpoints: %w", err)
+				  and checkpoint_expires_at <= transaction_timestamp()`, command.DraftID); err != nil {
+				return fmt.Errorf("delete expired record draft checkpoints: %w", err)
+			}
+			if _, err := transaction.tx.Exec(ctx, `
+				delete from public.record_draft_checkpoints
+				where draft_id = $1
+				  and checkpoint_id in (
+					select checkpoint_id
+					from public.record_draft_checkpoints
+					where draft_id = $1
+					order by created_at desc, checkpoint_id desc
+					offset $2
+				  )`, command.DraftID, command.Policy.CheckpointLimit); err != nil {
+				return fmt.Errorf("prune record draft checkpoints: %w", err)
+			}
 		}
 
 		updated = server
+		updated.BaseRevisionID = nextBaseRevisionID
 		updated.Payload = command.Payload
 		updated.Version = nextVersion
 		updated.ETag = nextETag
@@ -743,6 +763,49 @@ func (repository *PostgresRecordDraftRepository) ClaimExpiredDrafts(
 		return nil, err
 	}
 	return claimed, nil
+}
+
+type recordDraftRebaseHead struct {
+	currentRevisionID  string
+	lifecycle          string
+	lockVersion        int64
+	authorizationEpoch int64
+}
+
+func lockRecordHeadForDraftRebase(ctx context.Context, tx pgx.Tx, recordID string) (*recordDraftRebaseHead, error) {
+	var head recordDraftRebaseHead
+	err := tx.QueryRow(ctx, `
+		select current_revision_id, lifecycle, lock_version, authorization_epoch
+		from public.records
+		where record_id = $1
+		for key share`, recordID).Scan(&head.currentRevisionID, &head.lifecycle, &head.lockVersion, &head.authorizationEpoch)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, records.ErrRecordNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("load record root for draft rebase: %w", err)
+	}
+	return &head, nil
+}
+
+// patchDraftBaseRevision 在已锁定草稿行并核对 ETag 后决定 PATCH 之后的基准修订。改基准只允许已有记录草稿，
+// 且目标必须仍是活跃记录的当前头；否则带回当前头与服务端草稿供客户端重新确认。
+func patchDraftBaseRevision(server records.Draft, requested string, head *recordDraftRebaseHead) (string, error) {
+	if requested == "" || requested == server.BaseRevisionID {
+		return server.BaseRevisionID, nil
+	}
+	if server.RecordID == "" || head == nil {
+		return "", fmt.Errorf("%w: new-record draft has no base revision", records.ErrInvalidDraftCommand)
+	}
+	if head.currentRevisionID != requested || head.lifecycle != string(records.LifecycleActive) {
+		return "", &records.DraftRevisionConflictError{
+			ServerRevisionID:         head.currentRevisionID,
+			ServerLockVersion:        uint64(head.lockVersion),
+			ServerAuthorizationEpoch: uint64(head.authorizationEpoch),
+			Draft:                    server,
+		}
+	}
+	return requested, nil
 }
 
 func (repository *PostgresRecordDraftRepository) CreateDraft(

@@ -66,8 +66,11 @@ function isDraftConflict(error: unknown): boolean {
   return Boolean(error instanceof ApiError && error.recovery && typeof error.recovery === 'object' && 'server_draft' in error.recovery)
 }
 
+// 锁版本或授权代次推进时后端只返回错误码、不带 recovery，同样要重新读取当前头让用户确认。
 function isRevisionConflict(error: unknown): boolean {
-  return Boolean(error instanceof ApiError && error.recovery && typeof error.recovery === 'object' && 'server_revision_id' in error.recovery)
+  if (!(error instanceof ApiError) || error.status !== 409) return false
+  return error.code === 'record_revision_conflict'
+    || Boolean(error.recovery && typeof error.recovery === 'object' && 'server_revision_id' in error.recovery)
 }
 
 function newIdempotencyKey(): string {
@@ -118,6 +121,18 @@ export function useRecordDraft(options: {
   const generationRef = useRef(0)
   const bufferIdentityRef = useRef(bufferRecordId)
   const securityRef = useRef<RecordSecurityController | null>(null)
+  // 本地编辑所依据的记录头：创建草稿与发布的默认基准。后台刷新与冲突读取只更新展示，不改它。
+  const baseRef = useRef<RecordDetail | null>(null)
+  // 记录读取序号：较早发出的读取晚到时不能覆盖更新的展示。
+  const recordLoadRef = useRef(0)
+  // 冲突解决器打开期间为真：服务端保存一律暂停（含定时器已触发、仍在保存链上排队的自动保存），
+  // 本地缓冲照常写入。用户解决或关闭冲突后才恢复。
+  const conflictOpenRef = useRef(false)
+  // 修订冲突时加载到、等待用户处理的服务端头；用户解决冲突后才成为确认头。
+  const pendingHeadRef = useRef<RecordDetail | null>(null)
+  // 用户在冲突解决器里确认过的头：下一次保存把草稿原子改到它上面，发布也按它的锁版本、
+  // 授权代次和证据提交。后台刷新拿到的更新头不会悄悄替代它，头再变由服务端 409 重新打开解决器。
+  const confirmedHeadRef = useRef<RecordDetail | null>(null)
 
   useEffect(() => {
     payloadRef.current = payload
@@ -137,6 +152,10 @@ export function useRecordDraft(options: {
     setDraft(null)
     draftRef.current = null
     recordRef.current = null
+    baseRef.current = null
+    conflictOpenRef.current = false
+    pendingHeadRef.current = null
+    confirmedHeadRef.current = null
     const nextPayload = emptyRecordDraftPayload(options.userId)
     payloadRef.current = nextPayload
     setPayload(nextPayload)
@@ -190,6 +209,10 @@ export function useRecordDraft(options: {
   useEffect(() => {
     closedRef.current = false
     restoreKeyRef.current = null
+    baseRef.current = null
+    conflictOpenRef.current = false
+    pendingHeadRef.current = null
+    confirmedHeadRef.current = null
   }, [options.mode, options.recordId, options.revisionId])
 
   useEffect(() => {
@@ -260,6 +283,7 @@ export function useRecordDraft(options: {
       if (!active || !mountedRef.current) return
       setRecord(loaded)
       recordRef.current = loaded
+      baseRef.current = loaded
       setRevision(loaded.current)
 
       if (options.mode === 'read') {
@@ -328,6 +352,9 @@ export function useRecordDraft(options: {
   }, [bufferRecordId, closeAuthorized, emptyShell, options.mode, options.recordId, options.revisionId, options.userId, store])
 
   const patchPayload = useCallback((patch: Partial<RecordDraftPayload>) => {
+    // 编辑会把状态置回 ready、关掉解决器，等同关闭冲突。
+    conflictOpenRef.current = false
+    pendingHeadRef.current = null
     generationRef.current += 1
     setPayload((current) => {
       const next = { ...current, ...patch }
@@ -362,6 +389,10 @@ export function useRecordDraft(options: {
   }, [bufferRecordId, options.recordId, options.userId, store])
 
   const applyDraftConflict = useCallback((error: unknown) => {
+    // 先于挂载判断置位：即使页面已卸载，排在保存链上的自动保存也不能拿服务端新 ETag 覆盖对方草稿。
+    conflictOpenRef.current = true
+    // 解决器改为展示服务端草稿：之前读到的待确认头不再可见，不能随草稿合并一起被确认。
+    pendingHeadRef.current = null
     const recovery = error instanceof ApiError && error.recovery && typeof error.recovery === 'object' && 'server_draft' in error.recovery
       ? error.recovery as { server_draft: RecordDraft }
       : null
@@ -378,19 +409,58 @@ export function useRecordDraft(options: {
     }
   }, [])
 
+  const applyRevisionConflict = useCallback(async () => {
+    if (options.recordId) {
+      const loadSeq = ++recordLoadRef.current
+      let latest: RecordDetail
+      try {
+        latest = await getRecord(options.recordId)
+      } catch (loadError) {
+        if (isClosedError(loadError)) {
+          await closeAuthorized(loadError)
+          return
+        }
+        // 读不到新头就没有可确认的对象：不打开解决器，提示稍后重试，下次发布会重新进入冲突。
+        if (!closedRef.current) reportSaveError(new Error('记录已有新修订，暂时无法读取，请稍后重试'))
+        return
+      }
+      conflictOpenRef.current = true
+      if (closedRef.current || !mountedRef.current) return
+      pendingHeadRef.current = latest
+      if (loadSeq === recordLoadRef.current) {
+        setRecord(latest)
+        recordRef.current = latest
+        setRevision(latest.current)
+      }
+      // 解决器展示的服务端内容与待确认头是同一份快照，后台刷新不会把两者拆开。
+      setConflictServer(payloadFromRevision(latest.current))
+    }
+    conflictOpenRef.current = true
+    if (closedRef.current || !mountedRef.current) return
+    setConflictPayload(payloadRef.current)
+    setStatus('conflict')
+  }, [closeAuthorized, options.recordId, reportSaveError])
+
   const saveDraft = useCallback(async (): Promise<RecordDraft | undefined> => {
-    if (options.mode === 'read' || options.mode === 'revision' || closedRef.current) return
+    if (options.mode === 'read' || options.mode === 'revision' || closedRef.current || conflictOpenRef.current) return
     const run = saveChainRef.current.then(async (): Promise<RecordDraft | undefined> => {
-      if (options.mode === 'read' || options.mode === 'revision' || closedRef.current) return
+      if (options.mode === 'read' || options.mode === 'revision' || closedRef.current || conflictOpenRef.current) return
       const generation = generationRef.current
       setSaving(true)
       try {
         const current = payloadRef.current
-        const next = draftRef.current
-          ? await patchRecordDraft(draftRef.current.draft_id, { payload: current }, draftRef.current.etag)
-          : await createRecordDraft(options.recordId && recordRef.current
-            ? { record_id: options.recordId, base_revision_id: recordRef.current.current_revision_id, payload: current }
+        const existing = draftRef.current
+        const head = confirmedHeadRef.current ?? baseRef.current
+        const rebaseTo = existing?.record_id && confirmedHeadRef.current
+          && existing.base_revision_id !== confirmedHeadRef.current.current_revision_id
+          ? confirmedHeadRef.current.current_revision_id
+          : undefined
+        const next = existing
+          ? await patchRecordDraft(existing.draft_id, rebaseTo ? { payload: current, base_revision_id: rebaseTo } : { payload: current }, existing.etag)
+          : await createRecordDraft(options.recordId && head
+            ? { record_id: options.recordId, base_revision_id: head.current_revision_id, payload: current }
             : { payload: current })
+        if (closedRef.current) return
         draftRef.current = next
         if (generation === generationRef.current) {
           await store.delete(draftBufferKey(options.userId, bufferRecordId))
@@ -404,6 +474,10 @@ export function useRecordDraft(options: {
         }
         return next
       } catch (error) {
+        if (isRevisionConflict(error)) {
+          await applyRevisionConflict()
+          return
+        }
         if (isDraftConflict(error)) {
           applyDraftConflict(error)
           return
@@ -427,7 +501,7 @@ export function useRecordDraft(options: {
     })
     saveChainRef.current = run.then(() => undefined, () => undefined)
     return run
-  }, [applyDraftConflict, bufferRecordId, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, store])
+  }, [applyDraftConflict, applyRevisionConflict, bufferRecordId, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, store])
 
   useEffect(() => {
     return () => {
@@ -446,20 +520,24 @@ export function useRecordDraft(options: {
   }, [options.mode, options.recordId, options.userId, store])
 
   useEffect(() => {
+    // 冲突期间仍写本地缓冲；服务端保存由 saveDraft 按 conflictOpenRef 暂停。status 列入依赖，
+    // 使解决或关闭冲突后重新排定一次自动保存（冲突期间的定时器可能已经耗尽）。
     if (!dirty || options.mode === 'read' || options.mode === 'revision') return
     const generation = generationRef.current
     const timer = window.setTimeout(() => {
       void persistUnsynced(payloadRef.current, generation).then(() => saveDraft())
     }, AUTOSAVE_MS)
     return () => window.clearTimeout(timer)
-  }, [dirty, options.mode, payload, persistUnsynced, saveDraft])
+  }, [dirty, options.mode, payload, persistUnsynced, saveDraft, status])
 
   const publish = useCallback(async () => {
     setPublishing(true)
     try {
       let currentDraft = await saveDraft()
-      if (dirtyRef.current) currentDraft = await saveDraft()
+      // 首次保存失败或进入冲突时不能再补存一次：那会绕过刚打开的冲突解决器继续发布。
+      if (currentDraft && dirtyRef.current) currentDraft = await saveDraft()
       if (!currentDraft) return
+      const head = confirmedHeadRef.current ?? baseRef.current
       if (options.mode === 'new' || !options.recordId) {
         const created = await createRecord({ draft_id: currentDraft.draft_id, draft_etag: currentDraft.etag }, newIdempotencyKey())
         draftRef.current = null
@@ -470,18 +548,23 @@ export function useRecordDraft(options: {
           dirtyRef.current = false
           setMessage('')
         }
-      } else if (recordRef.current) {
+      } else if (head) {
         await createRecordRevision(options.recordId, {
           draft_id: currentDraft.draft_id,
           draft_etag: currentDraft.etag,
-          base_revision_id: recordRef.current.current_revision_id,
-          lock_version: recordRef.current.lock_version,
-          authorization_epoch: recordRef.current.authorization_epoch,
+          base_revision_id: head.current_revision_id,
+          lock_version: head.lock_version,
+          authorization_epoch: head.authorization_epoch,
           // 证据不在草稿里：沿用基准修订的快照，否则新修订会丢掉全部证据。
-          evidence_items: existingEvidenceItems(recordRef.current.current),
+          evidence_items: existingEvidenceItems(head.current),
         }, newIdempotencyKey())
+        // 发布后的读取最权威：作废此前仍在途的后台读取。
+        recordLoadRef.current += 1
         const latest = await getRecord(options.recordId)
         draftRef.current = null
+        baseRef.current = latest
+        pendingHeadRef.current = null
+        confirmedHeadRef.current = null
         if (mountedRef.current) {
           setDraft(null)
           setRecord(latest)
@@ -498,21 +581,7 @@ export function useRecordDraft(options: {
       await store.delete(draftBufferKey(options.userId, bufferRecordId))
     } catch (error) {
       if (isRevisionConflict(error)) {
-        if (options.recordId) {
-          const latest = await getRecord(options.recordId).catch((loadError: unknown) => {
-            if (isClosedError(loadError)) throw loadError
-            return null
-          })
-          if (latest && mountedRef.current) {
-            setRecord(latest)
-            recordRef.current = latest
-            setRevision(latest.current)
-          }
-        }
-        if (mountedRef.current) {
-          setConflictPayload(payloadRef.current)
-          setStatus('conflict')
-        }
+        await applyRevisionConflict()
         return
       }
       if (isDraftConflict(error)) {
@@ -527,7 +596,7 @@ export function useRecordDraft(options: {
     } finally {
       if (mountedRef.current) setPublishing(false)
     }
-  }, [applyDraftConflict, bufferRecordId, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, saveDraft, store])
+  }, [applyDraftConflict, applyRevisionConflict, bufferRecordId, closeAuthorized, options.mode, options.recordId, options.userId, reportSaveError, saveDraft, store])
 
   const restore = useCallback(async (saveReason: string) => {
     if (!options.recordId || !options.revisionId) return
@@ -555,9 +624,10 @@ export function useRecordDraft(options: {
 
   const revalidateAccess = useCallback(async () => {
     if (closedRef.current || !options.recordId || options.mode === 'new') return
+    const loadSeq = ++recordLoadRef.current
     try {
       const latest = await getRecord(options.recordId)
-      if (!mountedRef.current || closedRef.current) return
+      if (!mountedRef.current || closedRef.current || loadSeq !== recordLoadRef.current) return
       setRecord(latest)
       recordRef.current = latest
     } catch (error) {
@@ -646,6 +716,12 @@ export function useRecordDraft(options: {
       publish,
       restore,
       resolveConflict: (next) => {
+        // 只有已加载服务端新头的修订冲突，解决后才把草稿改到这个头上。
+        if (pendingHeadRef.current) {
+          confirmedHeadRef.current = pendingHeadRef.current
+          pendingHeadRef.current = null
+        }
+        conflictOpenRef.current = false
         setPayload(next)
         payloadRef.current = next
         setConflictPayload(null)
@@ -656,6 +732,8 @@ export function useRecordDraft(options: {
         generationRef.current += 1
       },
       dismissConflict: () => {
+        pendingHeadRef.current = null
+        conflictOpenRef.current = false
         setConflictPayload(null)
         setConflictServer(null)
         setStatus('ready')
