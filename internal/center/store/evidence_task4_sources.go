@@ -298,7 +298,7 @@ func (r *PostgresIncidentRepository) LoadMonitoringEventEvidence(ctx context.Con
 			watermark = fact.RecordedAt
 		}
 		if uint64(len(capture.Events)) > evidence.MaxSnapshotDataPoints {
-			return adapters.MonitoringEventCapture{}, fmt.Errorf("monitoring event evidence exceeds source bound")
+			return adapters.MonitoringEventCapture{}, fmt.Errorf("monitoring event evidence exceeds source bound: %w", evidence.ErrWindowTooLarge)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -335,7 +335,7 @@ func (r *PostgresCommandAuditRepository) LoadCommandAuditEvidence(ctx context.Co
 			watermark = recordedAt
 		}
 		if uint64(len(capture.Audits)) > evidence.MaxSnapshotDataPoints {
-			return adapters.CommandAuditCapture{}, fmt.Errorf("command audit evidence exceeds source bound")
+			return adapters.CommandAuditCapture{}, fmt.Errorf("command audit evidence exceeds source bound: %w", evidence.ErrWindowTooLarge)
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -361,7 +361,7 @@ func (r *PostgresSubscriptionCostRepository) LoadSubscriptionCostEvidence(ctx co
 		if err := rows.Err(); err != nil {
 			return adapters.SubscriptionCostCapture{}, fmt.Errorf("iterate subscription cost evidence: %w", err)
 		}
-		return adapters.SubscriptionCostCapture{}, fmt.Errorf("subscription cost evidence not found")
+		return adapters.SubscriptionCostCapture{}, fmt.Errorf("subscription cost evidence not found: %w", evidence.ErrSourceEmpty)
 	}
 	var capture adapters.SubscriptionCostCapture
 	var candidateCount int
@@ -393,7 +393,7 @@ func (r *PostgresSubscriptionCostRepository) LoadSubscriptionCostEvidence(ctx co
 		if err := budgetRows.Err(); err != nil {
 			return adapters.SubscriptionCostCapture{}, fmt.Errorf("iterate subscription budget evidence: %w", err)
 		}
-		return adapters.SubscriptionCostCapture{}, fmt.Errorf("subscription budget evidence not found")
+		return adapters.SubscriptionCostCapture{}, fmt.Errorf("subscription budget evidence not found: %w", evidence.ErrSourceEmpty)
 	}
 	var budgetMonth, budgetWatermark time.Time
 	var budgetCurrency string
@@ -470,7 +470,7 @@ func (r *PostgresRenewalDecisionRepository) LoadAssetHistory(ctx context.Context
 		updateWatermark(fact.RecordedAt)
 		if seenCount > evidence.MaxSnapshotDataPoints {
 			renewalRows.Close()
-			return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound")
+			return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound: %w", evidence.ErrWindowTooLarge)
 		}
 	}
 	if err := closeEvidenceRows(renewalRows, "asset renewal"); err != nil {
@@ -494,7 +494,7 @@ func (r *PostgresRenewalDecisionRepository) LoadAssetHistory(ctx context.Context
 		updateWatermark(fact.RecordedAt)
 		if seenCount > evidence.MaxSnapshotDataPoints {
 			priceRows.Close()
-			return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound")
+			return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound: %w", evidence.ErrWindowTooLarge)
 		}
 	}
 	if err := closeEvidenceRows(priceRows, "asset price"); err != nil {
@@ -518,7 +518,7 @@ func (r *PostgresRenewalDecisionRepository) LoadAssetHistory(ctx context.Context
 		updateWatermark(fact.RecordedAt)
 		if seenCount > evidence.MaxSnapshotDataPoints {
 			ipRows.Close()
-			return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound")
+			return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound: %w", evidence.ErrWindowTooLarge)
 		}
 	}
 	if err := closeEvidenceRows(ipRows, "asset IP"); err != nil {
@@ -542,14 +542,14 @@ func (r *PostgresRenewalDecisionRepository) LoadAssetHistory(ctx context.Context
 		updateWatermark(fact.RecordedAt)
 		if seenCount > evidence.MaxSnapshotDataPoints {
 			specRows.Close()
-			return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound")
+			return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound: %w", evidence.ErrWindowTooLarge)
 		}
 	}
 	if err := closeEvidenceRows(specRows, "asset spec"); err != nil {
 		return adapters.AssetHistoryCapture{}, err
 	}
 	if seenCount > evidence.MaxSnapshotDataPoints {
-		return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound")
+		return adapters.AssetHistoryCapture{}, fmt.Errorf("asset history evidence exceeds source bound: %w", evidence.ErrWindowTooLarge)
 	}
 	capture.FactCount = seenCount
 	if !watermark.IsZero() {

@@ -96,8 +96,11 @@ func (adapter *AssetHistoryAdapter) Load(ctx context.Context, vpsID string, wind
 		return AssetHistoryCapture{}, err
 	}
 	total := uint64(len(capture.RenewalDecisions) + len(capture.PriceHistories) + len(capture.IPHistories) + len(capture.SpecSnapshots))
-	if capture.FactCount == 0 || capture.FactCount != total || total > evidence.MaxSnapshotDataPoints {
+	if capture.FactCount == 0 || capture.FactCount != total {
 		return AssetHistoryCapture{}, fmt.Errorf("%w: asset history source bound", evidence.ErrInvalidCanonicalPayload)
+	}
+	if total > evidence.MaxSnapshotDataPoints {
+		return AssetHistoryCapture{}, fmt.Errorf("%w: asset history", evidence.ErrWindowTooLarge)
 	}
 	capture = cloneAndSortAssetHistoryCapture(capture)
 	if err := validateAssetHistoryCapture(capture, vpsID, window, adapter.clock().UTC()); err != nil {

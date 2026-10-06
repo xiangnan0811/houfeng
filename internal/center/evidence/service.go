@@ -23,7 +23,13 @@ var (
 	ErrEvidenceServiceUnavailable   = errors.New("evidence service unavailable")
 	ErrSnapshotNotFound             = errors.New("evidence snapshot not found")
 	ErrSourceUnstable               = errors.New("evidence source unstable")
-	ErrPreviewStale                 = errors.New("evidence preview stale")
+	// ErrSourceNotFound：来源不存在、已删除或当前用户无权采集，对外不区分原因。
+	ErrSourceNotFound = errors.New("evidence source not found")
+	// ErrSourceEmpty：来源在所选窗口内没有可采集的数据。
+	ErrSourceEmpty = errors.New("evidence source has no data in window")
+	// ErrWindowTooLarge：所选窗口与精度产生的桶数或数据点超过单份证据上限。
+	ErrWindowTooLarge = errors.New("evidence window too large")
+	ErrPreviewStale   = errors.New("evidence preview stale")
 )
 
 type CapturePreviewRequest struct {

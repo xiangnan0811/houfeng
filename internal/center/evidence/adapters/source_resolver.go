@@ -10,7 +10,13 @@ import (
 	"houfeng/internal/center/records"
 )
 
-var ErrEvidenceSourceUnavailable = errors.New("evidence source unavailable")
+// 来源错误分三类：不存在、已删除或无权采集对外不区分（ErrSourceNotFound）；来源选择本身不合法
+// 是选择错误（ErrInvalidCanonicalPayload）；解析结果与请求不一致是完整性问题，不归入前两类。
+var (
+	ErrEvidenceSourceUnavailable  = fmt.Errorf("evidence source unavailable: %w", evidence.ErrSourceNotFound)
+	ErrEvidenceSourceInvalid      = fmt.Errorf("evidence source selection invalid: %w", evidence.ErrInvalidCanonicalPayload)
+	ErrEvidenceSourceInconsistent = errors.New("evidence source resolution inconsistent")
+)
 
 // RecordEvidenceSourceResolver is the closed bridge from an evidence selection
 // to the existing Records subject authority. It deliberately has no generic
@@ -33,7 +39,7 @@ func (resolver *RecordEvidenceSourceResolver) ResolveEvidenceSource(
 	}
 	kind, ok := evidenceSourceSubjectKind(selection.SourceType)
 	if !ok {
-		return ResolvedEvidenceSource{}, ErrEvidenceSourceUnavailable
+		return ResolvedEvidenceSource{}, ErrEvidenceSourceInvalid
 	}
 	resolved, err := resolver.subjects.Resolve(ctx, actor, records.SubjectReference{
 		RegistryVersion: records.SubjectRegistryVersionV1,
@@ -41,15 +47,24 @@ func (resolver *RecordEvidenceSourceResolver) ResolveEvidenceSource(
 		Role:            records.RelationRoleEvidenceSource,
 		SourceID:        selection.SourceID,
 	})
-	if err != nil {
-		return ResolvedEvidenceSource{}, fmt.Errorf("%w: %v", ErrEvidenceSourceUnavailable, err)
+	switch {
+	case errors.Is(err, records.ErrInvalidSubjectReference):
+		return ResolvedEvidenceSource{}, fmt.Errorf("%w: %w", ErrEvidenceSourceInvalid, err)
+	case errors.Is(err, records.ErrInvalidResolvedSubject):
+		return ResolvedEvidenceSource{}, fmt.Errorf("%w: %w", ErrEvidenceSourceInconsistent, err)
+	case err != nil:
+		// 保留内层错误链：主体服务暂不可用时由调用方映射为 503，而不是当成来源不存在。
+		return ResolvedEvidenceSource{}, fmt.Errorf("%w: %w", ErrEvidenceSourceUnavailable, err)
 	}
 	authorization, err := recordauth.NormalizeSourceAuthorization(resolved.CaptureAuthorization)
 	if err != nil || authorization.Digest != resolved.CaptureAuthorization.Digest ||
-		authorization.State != recordauth.SourceStateLive || authorization.CurrentScope == nil ||
-		authorization.CaptureScope.ProjectID != actor.ProjectID || authorization.Kind != recordauth.SourceKind(selection.SourceType) ||
-		authorization.SourceID != selection.SourceID || resolved.ProjectID != actor.ProjectID ||
+		authorization.Kind != recordauth.SourceKind(selection.SourceType) || authorization.SourceID != selection.SourceID ||
 		resolved.StableID != selection.SourceID || resolved.IdentitySnapshot.Kind() != kind {
+		return ResolvedEvidenceSource{}, ErrEvidenceSourceInconsistent
+	}
+	// 来源已退役或不在当前项目：对采集者而言等同不存在。
+	if authorization.State != recordauth.SourceStateLive || authorization.CurrentScope == nil ||
+		authorization.CaptureScope.ProjectID != actor.ProjectID || resolved.ProjectID != actor.ProjectID {
 		return ResolvedEvidenceSource{}, ErrEvidenceSourceUnavailable
 	}
 	identity := evidence.IdentitySnapshot{

@@ -170,8 +170,15 @@ func (adapter *CommandAuditAdapter) evaluate(ctx context.Context, actor evidence
 	if err != nil {
 		return discreteEvaluation{}, err
 	}
-	if capture.AuditCount == 0 || capture.AuditCount != uint64(len(capture.Audits)) || capture.AuditCount > evidence.MaxSnapshotDataPoints {
+	// 先确认计数与条目一致（完整性），再区分“没有数据”和“超出上限”。
+	if capture.AuditCount != uint64(len(capture.Audits)) {
 		return discreteEvaluation{}, fmt.Errorf("%w: command audit source bound", evidence.ErrInvalidCanonicalPayload)
+	}
+	if capture.AuditCount == 0 {
+		return discreteEvaluation{}, fmt.Errorf("%w: command audits", evidence.ErrSourceEmpty)
+	}
+	if capture.AuditCount > evidence.MaxSnapshotDataPoints {
+		return discreteEvaluation{}, fmt.Errorf("%w: command audits", evidence.ErrWindowTooLarge)
 	}
 	capture = cloneAndSortCommandAuditCapture(capture)
 	now := adapterNow(adapter.options)

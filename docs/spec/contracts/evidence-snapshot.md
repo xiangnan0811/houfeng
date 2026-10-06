@@ -172,6 +172,8 @@ GET /api/evidence/{snapshot_id}
 - existing-reference路径必须用`evidence_snapshots` inner join `evidence_payloads`读取encoding/digest/canonical/compressed size等完整metadata并验证split-column绑定，但不得select、解压或复制`compressed_payload`。完整read/export在授权后重新读取payload时必须把两次metadata逐字段精确绑定。
 - JSONB round-trip只允许`SourceAuthorization`私有canonical-byte cache被`RestoreSnapshotEnvelopeMetadata`重建；offset time、非canonical public authorization slice顺序或其他可被normalize改变的持久化metadata一律视为corruption，禁止静默修正。
 - HTTP response由transport-owned显式DTO构建，只含allowlisted envelope、preview-bound precision/bucket/quota/retention/redaction、`renderer_version`和显式版本化`read_model`；禁止canonical payload、authorization digest、任意metadata或generic JSON fallback。
+- 预览错误必须可分类，不得把正常业务情况落成 `500 internal_error`：来源不存在、已删除、已退役或无权采集（含 `Authorize` 拒绝，统一包成 `evidence.ErrSourceNotFound`，resolver 用 `%w` 保留内层链）对外为 opaque `404 resource_not_found`；来源类型未知或来源 ID 不合法（`records.ErrInvalidSubjectReference`）是选择错误 `422 evidence_invalid`；解析结果与请求不一致（摘要、种类、ID、身份或项目不符）是完整性问题，不归入以上两类；内层是主体服务暂不可用（`store.ErrRecordSubjectUnavailable`）时为 `503 evidence_service_unavailable`；所选窗口内没有数据（监控零桶、事件/审计零条、无 IP 质量报告、无订阅账单或预算）为 `422 evidence_source_empty`；桶数或数据点超过单份上限（含 PostgreSQL loader 读到第 `MaxSnapshotDataPoints+1` 条时的提前终止、事件“事件数 + 指标数”超限）为 `422 evidence_window_too_large`。计数与条目不一致始终是完整性错误，先于“无数据 / 超上限”判定。选择参数本身非法仍是 `422 evidence_invalid`。
+- 带证据的 Records save 在发布时重新采集；来源已不可访问、窗口已无数据、超出上限或证据持久化冲突都说明预览不再成立，统一为 `409 evidence_preview_stale`，且必须先于 `ErrDenied -> 404` 判定（来源错误链带着内层拒绝，误判 404 会让客户端以为记录被撤销）；主体服务或证据容量暂不可用为 `503 record_service_unavailable`；`existing_snapshot_id` 找不到为 `422 record_invalid`。
 - production bootstrap已具备closed source resolver与read/reference composition，但真实deployment-membership `AdmissionGate`和witnessed source-deletion authority仍是外部依赖；gate为nil/typed-nil时必须稳定503、零worker/零写，禁止allow-all fallback或仅为演示打开feature。
 
 ### 3.6 Deletion、export 与 recovery
@@ -220,6 +222,7 @@ GET /api/evidence/{snapshot_id}
 | Asset history | 四类 facts 合计在全局 cap 内 | 超 cap 后继续 query、复制 hostile oversized slice |
 | Canonical ordering | source facts clone 后按稳定键排序 | 依赖数据库或 custom source 当前顺序产生 hash |
 | Preview/save | server-owned ID、ordered tagged union、prepared count/identity精确一致 | 客户端payload、空preparer吞掉非空items、重排snapshot |
+| Preview/save 错误 | 来源不可访问 404、主体服务不可用 503、窗口无数据 422 `evidence_source_empty`、超上限 422 `evidence_window_too_large`；发布时重新采集失败 409 `evidence_preview_stale` | 正常业务情况落成 500、`%v` 丢掉内层错误链、发布时来源拒绝被映射成 404 |
 | Read | record+source授权先于kind/payload、exact registry、strict metadata/payload binding、versioned allowlist | denied actor区分unknown/corrupt payload、metadata-only读取payload bytes、静默normalize持久化envelope、raw payload/authorization/generic JSON |
 | Deletion/export | owned logical rows删除、global-ref payload GC、`kind.Export` | 删除其他copy、raw JSON export、不可重试receipt |
 | Recovery | deep-cloned reachable inventory、exact timestamp、同输入幂等 | orphan payload、浅拷贝TOCTOU、prefix kind放行、分歧replay |

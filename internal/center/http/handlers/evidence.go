@@ -394,7 +394,10 @@ func decodeEvidenceRequestJSON(w http.ResponseWriter, request *http.Request, des
 
 func writeEvidenceApplicationError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, recordauth.ErrDenied), errors.Is(err, evidence.ErrSnapshotNotFound),
+	// 来源解析保留了内层错误链：主体服务暂不可用是 503，不能当成来源不存在。
+	case errors.Is(err, store.ErrRecordSubjectUnavailable):
+		writeEvidenceError(w, http.StatusServiceUnavailable, "evidence_service_unavailable", "evidence service unavailable")
+	case errors.Is(err, recordauth.ErrDenied), errors.Is(err, evidence.ErrSnapshotNotFound), errors.Is(err, evidence.ErrSourceNotFound),
 		errors.Is(err, evidence.ErrComparisonSubjectNotFound), errors.Is(err, evidence.ErrComparisonSelectionNotFound):
 		writeEvidenceNotFound(w)
 	case errors.Is(err, evidence.ErrInvalidComparisonSelection):
@@ -407,6 +410,10 @@ func writeEvidenceApplicationError(w http.ResponseWriter, err error) {
 		writeEvidenceError(w, http.StatusUnprocessableEntity, "comparison_request_memory_limit", "comparison request exceeds memory limit")
 	case errors.Is(err, evidence.ErrComparisonResultTooLarge):
 		writeEvidenceError(w, http.StatusUnprocessableEntity, "comparison_result_too_large", "comparison result is too large")
+	case errors.Is(err, evidence.ErrSourceEmpty):
+		writeEvidenceError(w, http.StatusUnprocessableEntity, "evidence_source_empty", "evidence source has no data in window")
+	case errors.Is(err, evidence.ErrWindowTooLarge):
+		writeEvidenceError(w, http.StatusUnprocessableEntity, "evidence_window_too_large", "evidence window is too large")
 	case errors.Is(err, evidence.ErrKindNotRegistered), errors.Is(err, evidence.ErrUnknownKindVersion):
 		writeEvidenceError(w, http.StatusServiceUnavailable, "evidence_kind_unavailable", "evidence kind unavailable")
 	case errors.Is(err, evidence.ErrSourceUnstable):

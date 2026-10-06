@@ -17,7 +17,7 @@ import (
 
 var (
 	ErrUnacceptableMonitoringEvidenceSource = errors.New("unacceptable monitoring evidence source")
-	ErrMonitoringEvidenceLimitExceeded      = errors.New("monitoring evidence limit exceeded")
+	ErrMonitoringEvidenceLimitExceeded      = fmt.Errorf("monitoring evidence limit exceeded: %w", evidence.ErrWindowTooLarge)
 )
 
 const hostMonitoringCalculationVersion = "monitoring-evidence/v2"
@@ -407,6 +407,9 @@ func (adapter *MonitoringAdapter) validateCapture(
 	requestedPrecision time.Duration,
 	capture MonitoringSeriesCapture,
 ) error {
+	if len(capture.Buckets) == 0 && !capture.ZeroFilled && !capture.Truncated {
+		return fmt.Errorf("%w: monitoring window", evidence.ErrSourceEmpty)
+	}
 	if capture.ZeroFilled || capture.Truncated {
 		return ErrUnacceptableMonitoringEvidenceSource
 	}
@@ -925,10 +928,12 @@ func resolveEvidenceSource(
 	}
 	authorization, err := recordauth.NormalizeSourceAuthorization(resolved.Authorization)
 	if err != nil || authorization.Digest != resolved.Authorization.Digest ||
-		authorization.State != recordauth.SourceStateLive || authorization.CurrentScope == nil ||
 		string(authorization.Kind) != selection.SourceType || authorization.SourceID != selection.SourceID ||
 		resolved.Source.Type != selection.SourceType || resolved.Source.ID != selection.SourceID {
-		return ResolvedEvidenceSource{}, recordauth.ErrDenied
+		return ResolvedEvidenceSource{}, fmt.Errorf("%w: resolved source", ErrEvidenceSourceInconsistent)
+	}
+	if authorization.State != recordauth.SourceStateLive || authorization.CurrentScope == nil {
+		return ResolvedEvidenceSource{}, fmt.Errorf("%w: source not live", evidence.ErrSourceNotFound)
 	}
 	resource := recordauth.ResourceScope{
 		Version:    recordauth.ResourceScopeVersionV1,
@@ -937,7 +942,8 @@ func resolveEvidenceSource(
 		Sources:    []recordauth.SourceAuthorization{authorization},
 	}
 	if err := recordauth.Authorize(normalizedActor, recordauth.CapabilityEvidenceCreate, resource); err != nil {
-		return ResolvedEvidenceSource{}, err
+		// 无权采集与来源不存在对外一致；包上 ErrSourceNotFound，发布时才能判成预览失效而不是记录撤销。
+		return ResolvedEvidenceSource{}, fmt.Errorf("%w: %w", evidence.ErrSourceNotFound, err)
 	}
 	resolved.Authorization = authorization
 	return resolved, nil
