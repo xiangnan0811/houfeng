@@ -144,30 +144,6 @@ func TestPostgresSubscriptionCostRepositoryListCostRowsIncludesArchivedPotential
 	}
 }
 
-func TestPostgresSubscriptionCostRepositoryListActiveCurrenciesExcludesArchivedAndCancelledVPS(t *testing.T) {
-	t.Parallel()
-
-	var seenSQL string
-	repo := &PostgresSubscriptionCostRepository{db: fakeSubscriptionCostDB{
-		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			seenSQL = sql
-			return &fakeSubscriptionCostRows{}, nil
-		},
-	}}
-
-	if _, err := repo.ListActiveCurrencies(context.Background()); err != nil {
-		t.Fatalf("ListActiveCurrencies() error = %v", err)
-	}
-	for _, snippet := range []string{
-		"join vps_assets v on v.vps_id = subscriptions.vps_id",
-		"v.lifecycle_status = 'active'",
-	} {
-		if !strings.Contains(seenSQL, snippet) {
-			t.Fatalf("ListActiveCurrencies SQL missing %q in %s", snippet, seenSQL)
-		}
-	}
-}
-
 func TestPostgresSubscriptionCostRepositoryListBudgetMonthBucketsCarriesForward(t *testing.T) {
 	t.Parallel()
 

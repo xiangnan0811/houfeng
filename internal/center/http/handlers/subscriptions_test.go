@@ -137,7 +137,7 @@ func TestSubscriptionsCollectionListsSubscriptionsWithFilters(t *testing.T) {
 		UpdatedAt:      now,
 	}}}
 
-	handler := handlers.SubscriptionsCollection(repo)
+	handler := handlers.SubscriptionsCollection(repo, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions?vps_id=+vps_001+&status=+active+&renew_before=2026-07-01&renew_after=2026-05-01&renew_within_days=30&sort=renew_at&order=desc&asset_scope=archived", nil)
 	recorder := httptest.NewRecorder()
 
@@ -167,7 +167,7 @@ func TestSubscriptionsCollectionListsSubscriptionsWithFilters(t *testing.T) {
 
 func TestSubscriptionsCollectionAcceptsHistoricalAssetScope(t *testing.T) {
 	repo := &fakeSubscriptionRepository{}
-	handler := handlers.SubscriptionsCollection(repo)
+	handler := handlers.SubscriptionsCollection(repo, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions?asset_scope=historical", nil)
 	recorder := httptest.NewRecorder()
 
@@ -183,7 +183,7 @@ func TestSubscriptionsCollectionAcceptsHistoricalAssetScope(t *testing.T) {
 
 func TestSubscriptionsCollectionDefaultsToCurrentAssetScope(t *testing.T) {
 	repo := &fakeSubscriptionRepository{}
-	handler := handlers.SubscriptionsCollection(repo)
+	handler := handlers.SubscriptionsCollection(repo, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions", nil)
 	recorder := httptest.NewRecorder()
 
@@ -219,7 +219,7 @@ func TestSubscriptionsCollectionCreatesSubscription(t *testing.T) {
 		UpdatedAt:      now,
 	}}
 
-	handler := handlers.SubscriptionsCollection(repo)
+	handler := handlers.SubscriptionsCollection(repo, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(`{
 		"vps_id":" vps_001 ",
 		"price":120,
@@ -266,7 +266,7 @@ func TestSubscriptionsCollectionCreatesSubscription(t *testing.T) {
 }
 
 func TestSubscriptionsCollectionCreateRequiresIdempotencyKey(t *testing.T) {
-	handler := handlers.SubscriptionsCollection(&fakeSubscriptionRepository{})
+	handler := handlers.SubscriptionsCollection(&fakeSubscriptionRepository{}, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(`{
 		"vps_id":"vps_001",
 		"price":12,
@@ -299,7 +299,7 @@ func TestSubscriptionsCollectionCreateReplaysSameIdempotencyKey(t *testing.T) {
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}}
-	handler := handlers.SubscriptionsCollection(repo)
+	handler := handlers.SubscriptionsCollection(repo, nil, nil)
 	body := `{"vps_id":"vps_001","price":12,"currency":"USD","billing_months":1}`
 
 	first := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(body))
@@ -333,7 +333,7 @@ func TestSubscriptionsCollectionCreateRejectsReusedIdempotencyKey(t *testing.T) 
 		Price:          12,
 		Currency:       "USD",
 	}}
-	handler := handlers.SubscriptionsCollection(repo)
+	handler := handlers.SubscriptionsCollection(repo, nil, nil)
 
 	first := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(`{"vps_id":"vps_001","price":12,"currency":"USD","billing_months":1}`))
 	first.Header.Set("Idempotency-Key", "reuse-collection-001")
@@ -376,7 +376,7 @@ func TestVPSSubscriptionsCreateRejectsMissingRequiredFields(t *testing.T) {
 			payload := validVPSSubscriptionCreatePayload()
 			delete(payload, field)
 			repo := &fakeSubscriptionRepository{}
-			handler := handlers.VPSSubscriptions(repo)
+			handler := handlers.VPSSubscriptions(repo, nil)
 			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
 			req.Header.Set("Idempotency-Key", "missing-required-"+field)
 			recorder := httptest.NewRecorder()
@@ -410,7 +410,7 @@ func TestVPSSubscriptionsCreateRejectsNullRequiredFields(t *testing.T) {
 			payload := validVPSSubscriptionCreatePayload()
 			payload[field] = nil
 			repo := &fakeSubscriptionRepository{}
-			handler := handlers.VPSSubscriptions(repo)
+			handler := handlers.VPSSubscriptions(repo, nil)
 			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
 			req.Header.Set("Idempotency-Key", "null-required-"+field)
 			recorder := httptest.NewRecorder()
@@ -439,7 +439,7 @@ func TestVPSSubscriptionsCreateRejectsNullOptionalNonNullableFields(t *testing.T
 			payload := validVPSSubscriptionCreatePayload()
 			payload[field] = nil
 			repo := &fakeSubscriptionRepository{}
-			handler := handlers.VPSSubscriptions(repo)
+			handler := handlers.VPSSubscriptions(repo, nil)
 			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
 			req.Header.Set("Idempotency-Key", "null-optional-"+field)
 			recorder := httptest.NewRecorder()
@@ -477,7 +477,7 @@ func TestVPSSubscriptionsCreateAcceptsAbsentOrNullNullableDates(t *testing.T) {
 				delete(payload, tt.field)
 			}
 			repo := &fakeSubscriptionRepository{}
-			handler := handlers.VPSSubscriptions(repo)
+			handler := handlers.VPSSubscriptions(repo, nil)
 			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
 			req.Header.Set("Idempotency-Key", "null-date-"+tt.field)
 			recorder := httptest.NewRecorder()
@@ -508,7 +508,7 @@ func TestVPSSubscriptionsCreatePreservesExplicitZeroFalseAndBlankValues(t *testi
 	payload["payment_method"] = ""
 	payload["note"] = ""
 	repo := &fakeSubscriptionRepository{}
-	handler := handlers.VPSSubscriptions(repo)
+	handler := handlers.VPSSubscriptions(repo, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
 	req.Header.Set("Idempotency-Key", "explicit-zero-values")
 	recorder := httptest.NewRecorder()
@@ -547,7 +547,7 @@ func TestVPSSubscriptionsCreatesBillingFactWithoutUserStatus(t *testing.T) {
 		UpdatedAt:      now,
 	}}
 
-	handler := handlers.VPSSubscriptions(repo)
+	handler := handlers.VPSSubscriptions(repo, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(`{
 		"price":12,
 		"currency":" usd ",
@@ -604,7 +604,7 @@ func TestVPSSubscriptionsCreateAcceptsRealWorkbenchFormPayload(t *testing.T) {
 		CreatedAt:           now,
 		UpdatedAt:           now,
 	}}
-	handler := handlers.VPSSubscriptions(repo)
+	handler := handlers.VPSSubscriptions(repo, nil)
 	// Real Overview / Legacy form body from buildSubscriptionInput:
 	// billing_period_unit, billing_period_length, and renewal_mode are always sent.
 	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(`{
@@ -645,7 +645,7 @@ func TestVPSSubscriptionsCreateAcceptsRealWorkbenchFormPayload(t *testing.T) {
 }
 
 func TestVPSSubscriptionsCreateRequiresIdempotencyKey(t *testing.T) {
-	handler := handlers.VPSSubscriptions(&fakeSubscriptionRepository{})
+	handler := handlers.VPSSubscriptions(&fakeSubscriptionRepository{}, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, validVPSSubscriptionCreatePayload())))
 	recorder := httptest.NewRecorder()
 
@@ -673,7 +673,7 @@ func TestVPSSubscriptionsCreateReplaysSameIdempotencyKey(t *testing.T) {
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}}
-	handler := handlers.VPSSubscriptions(repo)
+	handler := handlers.VPSSubscriptions(repo, nil)
 	body := marshalVPSSubscriptionCreatePayload(t, validVPSSubscriptionCreatePayload())
 
 	first := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(body))
@@ -707,7 +707,7 @@ func TestVPSSubscriptionsCreateRejectsReusedIdempotencyKey(t *testing.T) {
 		Price:          12,
 		Currency:       "USD",
 	}}
-	handler := handlers.VPSSubscriptions(repo)
+	handler := handlers.VPSSubscriptions(repo, nil)
 	firstPayload := validVPSSubscriptionCreatePayload()
 
 	first := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, firstPayload)))
@@ -738,7 +738,7 @@ func TestVPSSubscriptionsCreateRejectsReusedIdempotencyKey(t *testing.T) {
 
 func TestVPSSubscriptionsRejectsStatusField(t *testing.T) {
 	repo := &fakeSubscriptionRepository{}
-	handler := handlers.VPSSubscriptions(repo)
+	handler := handlers.VPSSubscriptions(repo, nil)
 	payload := validVPSSubscriptionCreatePayload()
 	payload["status"] = "paused"
 	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
@@ -767,7 +767,7 @@ func TestVPSSubscriptionsRejectsStatusField(t *testing.T) {
 
 func TestVPSSubscriptionsListsOnlyScopedVPSSubscriptions(t *testing.T) {
 	repo := &fakeSubscriptionRepository{}
-	handler := handlers.VPSSubscriptions(repo)
+	handler := handlers.VPSSubscriptions(repo, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/subscriptions?status=active&order=desc", nil)
 	recorder := httptest.NewRecorder()
 
@@ -809,7 +809,7 @@ func TestSubscriptionsCollectionRejectsInvalidInput(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := handlers.SubscriptionsCollection(&fakeSubscriptionRepository{})
+			handler := handlers.SubscriptionsCollection(&fakeSubscriptionRepository{}, nil, nil)
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			recorder := httptest.NewRecorder()
 
@@ -836,7 +836,7 @@ func TestSubscriptionItemGetsSubscription(t *testing.T) {
 		UpdatedAt:      now,
 	}}
 
-	handler := handlers.SubscriptionItem(repo)
+	handler := handlers.SubscriptionItem(repo, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/subscriptions/sub_001", nil)
 	recorder := httptest.NewRecorder()
 
@@ -879,7 +879,7 @@ func TestSubscriptionItemPatchesSubscription(t *testing.T) {
 		UpdatedAt:          now,
 	}}
 
-	handler := handlers.SubscriptionItem(repo)
+	handler := handlers.SubscriptionItem(repo, nil)
 	req := httptest.NewRequest(http.MethodPatch, "/api/subscriptions/sub_001", strings.NewReader(`{
 		"vps_id":" vps_002 ",
 		"price":240,
@@ -928,7 +928,7 @@ func TestSubscriptionItemPatchesSubscription(t *testing.T) {
 func TestSubscriptionCreateMapsReplayOwnershipConflict(t *testing.T) {
 	handler := handlers.SubscriptionsCollection(&fakeSubscriptionRepository{
 		createSubscriptionErr: subscriptions.ErrSubscriptionReplayOwnershipConflict,
-	})
+	}, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/subscriptions", strings.NewReader(`{
 		"vps_id":"vps_001",
 		"price":12,
@@ -955,7 +955,7 @@ func TestSubscriptionCreateMapsReplayOwnershipConflict(t *testing.T) {
 func TestSubscriptionPatchMapsOwnershipChangeConflict(t *testing.T) {
 	handler := handlers.SubscriptionItem(&fakeSubscriptionRepository{
 		patchSubscriptionErr: subscriptions.ErrSubscriptionOwnershipChangeForbidden,
-	})
+	}, nil)
 	req := httptest.NewRequest(http.MethodPatch, "/api/subscriptions/sub_001", strings.NewReader(`{"vps_id":"vps_002"}`))
 	recorder := httptest.NewRecorder()
 
@@ -985,7 +985,7 @@ func TestSubscriptionItemReturnsNotFound(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := handlers.SubscriptionItem(tt.repo)
+			handler := handlers.SubscriptionItem(tt.repo, nil)
 			req := httptest.NewRequest(tt.method, "/api/subscriptions/sub_missing", strings.NewReader(`{"note":"review"}`))
 			recorder := httptest.NewRecorder()
 
@@ -1026,7 +1026,7 @@ func TestSubscriptionItemRejectsInvalidPatchAndDeeperPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := handlers.SubscriptionItem(&fakeSubscriptionRepository{})
+			handler := handlers.SubscriptionItem(&fakeSubscriptionRepository{}, nil)
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 			recorder := httptest.NewRecorder()
 
@@ -1047,9 +1047,9 @@ func TestSubscriptionsMapInvalidVPSReferenceToBadRequest(t *testing.T) {
 		path    string
 		body    string
 	}{
-		{name: "create", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{createSubscriptionErr: subscriptions.ErrInvalidSubscriptionInput}), method: http.MethodPost, path: "/api/subscriptions", body: `{"vps_id":"vps_missing","price":12,"currency":"USD","billing_months":1}`},
-		{name: "patch", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{patchSubscriptionErr: subscriptions.ErrInvalidSubscriptionInput}), method: http.MethodPatch, path: "/api/subscriptions/sub_001", body: `{"vps_id":"vps_missing"}`},
-		{name: "list", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{listSubscriptionsErr: subscriptions.ErrInvalidSubscriptionInput}), method: http.MethodGet, path: "/api/subscriptions", body: ``},
+		{name: "create", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{createSubscriptionErr: subscriptions.ErrInvalidSubscriptionInput}, nil, nil), method: http.MethodPost, path: "/api/subscriptions", body: `{"vps_id":"vps_missing","price":12,"currency":"USD","billing_months":1}`},
+		{name: "patch", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{patchSubscriptionErr: subscriptions.ErrInvalidSubscriptionInput}, nil), method: http.MethodPatch, path: "/api/subscriptions/sub_001", body: `{"vps_id":"vps_missing"}`},
+		{name: "list", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{listSubscriptionsErr: subscriptions.ErrInvalidSubscriptionInput}, nil, nil), method: http.MethodGet, path: "/api/subscriptions", body: ``},
 	}
 
 	for _, tt := range tests {
@@ -1073,9 +1073,9 @@ func TestSubscriptionsUnsupportedMethodsReturnMethodNotAllowed(t *testing.T) {
 		method  string
 		path    string
 	}{
-		{name: "collection", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{}), method: http.MethodDelete, path: "/api/subscriptions"},
-		{name: "vps scoped", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{}), method: http.MethodDelete, path: "/api/vps/vps_001/subscriptions"},
-		{name: "item", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{}), method: http.MethodPost, path: "/api/subscriptions/sub_001"},
+		{name: "collection", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{}, nil, nil), method: http.MethodDelete, path: "/api/subscriptions"},
+		{name: "vps scoped", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{}, nil), method: http.MethodDelete, path: "/api/vps/vps_001/subscriptions"},
+		{name: "item", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{}, nil), method: http.MethodPost, path: "/api/subscriptions/sub_001"},
 	}
 
 	for _, tt := range tests {
@@ -1100,12 +1100,12 @@ func TestSubscriptionsMapRepositoryFailures(t *testing.T) {
 		path    string
 		body    string
 	}{
-		{name: "list", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{listSubscriptionsErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/subscriptions"},
-		{name: "create", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/subscriptions", body: `{"vps_id":"vps_001","price":12,"currency":"USD","billing_months":1}`},
-		{name: "vps scoped list", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{listSubscriptionsErr: errors.New("list failed")}), method: http.MethodGet, path: "/api/vps/vps_001/subscriptions"},
-		{name: "vps scoped create", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}), method: http.MethodPost, path: "/api/vps/vps_001/subscriptions", body: marshalVPSSubscriptionCreatePayload(t, validVPSSubscriptionCreatePayload())},
-		{name: "get", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{getSubscriptionErr: errors.New("get failed")}), method: http.MethodGet, path: "/api/subscriptions/sub_001"},
-		{name: "patch", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{patchSubscriptionErr: errors.New("patch failed")}), method: http.MethodPatch, path: "/api/subscriptions/sub_001", body: `{"note":"review"}`},
+		{name: "list", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{listSubscriptionsErr: errors.New("list failed")}, nil, nil), method: http.MethodGet, path: "/api/subscriptions"},
+		{name: "create", handler: handlers.SubscriptionsCollection(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}, nil, nil), method: http.MethodPost, path: "/api/subscriptions", body: `{"vps_id":"vps_001","price":12,"currency":"USD","billing_months":1}`},
+		{name: "vps scoped list", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{listSubscriptionsErr: errors.New("list failed")}, nil), method: http.MethodGet, path: "/api/vps/vps_001/subscriptions"},
+		{name: "vps scoped create", handler: handlers.VPSSubscriptions(&fakeSubscriptionRepository{createSubscriptionErr: errors.New("create failed")}, nil), method: http.MethodPost, path: "/api/vps/vps_001/subscriptions", body: marshalVPSSubscriptionCreatePayload(t, validVPSSubscriptionCreatePayload())},
+		{name: "get", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{getSubscriptionErr: errors.New("get failed")}, nil), method: http.MethodGet, path: "/api/subscriptions/sub_001"},
+		{name: "patch", handler: handlers.SubscriptionItem(&fakeSubscriptionRepository{patchSubscriptionErr: errors.New("patch failed")}, nil), method: http.MethodPatch, path: "/api/subscriptions/sub_001", body: `{"note":"review"}`},
 	}
 
 	for _, tt := range tests {

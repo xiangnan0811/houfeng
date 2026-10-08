@@ -2040,23 +2040,23 @@ func validAppACLR2CatalogSnapshotFixture(t *testing.T, frozen FrozenAppACLR1Stat
 		}
 	}
 	return AppACLR2BootstrapCatalogSnapshotV1{
-		ServerVersionNum: receipt.ServerVersionNum, ServerVersion: receipt.ServerVersion,
-		DatabaseOID: 424242, DatabaseName: "houfeng_app", PostgresSystemIdentifier: "72623859790382856",
-		Domains:         []AppACLDomainR2V1{appACLR2GoldenDomainFixture()},
-		Roles:           roles,
-		PGControlSystem: appACLR2PGControlSystemCatalogFixture(),
-		Extension: AppACLR2PGCryptoExtensionCatalogV1{
-			Name: receipt.ExtensionName, OID: receipt.ExtensionOID, Schema: receipt.ExtensionSchema,
-			SchemaOID: 600, Version: receipt.ExtensionVersion,
-			OwnerName: receipt.ExtensionOwnerName, OwnerOID: receipt.ExtensionOwnerOID,
-		},
-		Members: members,
-	}, AppACLR2ReceiptCatalogSnapshotV1{
-		Table:           appACLR2ReceiptTableCatalogFixture(),
-		ReservedObjects: appACLR2ReservedCatalogObjectFixture(),
-		ACL:             appACLR2GoldenL2ACLFixture(),
-		Helpers:         appACLR2ReceiptHelperCatalogFixture(),
-	}
+			ServerVersionNum: receipt.ServerVersionNum, ServerVersion: receipt.ServerVersion,
+			DatabaseOID: 424242, DatabaseName: "houfeng_app", PostgresSystemIdentifier: "72623859790382856",
+			Domains:         []AppACLDomainR2V1{appACLR2GoldenDomainFixture()},
+			Roles:           roles,
+			PGControlSystem: appACLR2PGControlSystemCatalogFixture(),
+			Extension: AppACLR2PGCryptoExtensionCatalogV1{
+				Name: receipt.ExtensionName, OID: receipt.ExtensionOID, Schema: receipt.ExtensionSchema,
+				SchemaOID: 600, Version: receipt.ExtensionVersion,
+				OwnerName: receipt.ExtensionOwnerName, OwnerOID: receipt.ExtensionOwnerOID,
+			},
+			Members: members,
+		}, AppACLR2ReceiptCatalogSnapshotV1{
+			Table:           appACLR2ReceiptTableCatalogFixture(),
+			ReservedObjects: appACLR2ReservedCatalogObjectFixture(),
+			ACL:             appACLR2GoldenL2ACLFixture(),
+			Helpers:         appACLR2ReceiptHelperCatalogFixture(),
+		}
 }
 
 func appACLR2ReceiptHelperCatalogFixture() []AppACLR2ReceiptHelperCatalogV1 {

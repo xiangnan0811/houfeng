@@ -165,6 +165,8 @@ type commandAuditActorResponse struct {
 
 监控实例永久属于 `vps_id` 指定的一台 VPS。只允许 VPS 详情的 scoped create 创建；普通集合 POST、关联已有实例、跨 VPS 转绑、解除归属、监控单独归档/恢复归档/永久清理入口均关闭。
 
+实例资料是创建时从 VPS 复制的独立副本，不随之后的 VPS 编辑同步。region/city/provider 未知可为空，显示层使用“未知”而不持久化占位词。scoped create 的旧省略/空串继续继承，显式清空使用排序去重的 `clear_fields`（仅 region/city/provider），其兼容摘要与重放合同见 [资产合同](assets.md#vps-scoped-monitoringinstance-creation)；关联备注默认为空，历史资料不自动清洗。
+
 - `GET /api/monitoring-instances?scope=active|retired|all`：默认仅管理中 VPS 的当前待接入或已接入实例；退役历史通过 VPS 关联历史和 `retired` 查询。
 - `GET /api/monitoring-instances/{id}/management-review` 只提供适用的退役资格；已退役禁止新的退役转换。
 - `POST /api/monitoring-instances/{id}/lifecycle/retire` 要求非空原因及 `Idempotency-Key`。同一请求重试回放原结果；同键不同请求冲突；新键重复退役冲突。

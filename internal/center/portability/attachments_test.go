@@ -134,9 +134,7 @@ func TestOfficialArchivePreviewNamesAndRestoresAuthorizedAttachmentBytes(t *test
 	service.importer = importer
 	service.evidenceImports = &evidenceImportStub{}
 	service.rebuilder = &importRebuildStub{}
-	plan, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-att-1", Archive: raw,
-	})
+	plan, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-att-1", Archive: raw})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -235,9 +233,7 @@ func TestOfficialArchiveRestoresWebPAndNamesUnsupportedOnPreview(t *testing.T) {
 	service.importer = importer
 	service.evidenceImports = &evidenceImportStub{}
 	service.rebuilder = &importRebuildStub{}
-	plan, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-webp-1", Archive: raw,
-	})
+	plan, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-webp-1", Archive: raw})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}

@@ -68,7 +68,7 @@ describe('searchRecordsForGlobalSearch', () => {
   it('describes a hit by title, type, and primary subject', async () => {
     vi.mocked(api.searchRecords).mockResolvedValue({ items: [hit()], generation: 3 })
 
-    const [first] = await searchRecordsForGlobalSearch('磁盘', 4)
+    const [first] = (await searchRecordsForGlobalSearch('磁盘', 4)).matches
 
     expect(first).toEqual({
       id: 'rec_001',
@@ -81,7 +81,7 @@ describe('searchRecordsForGlobalSearch', () => {
   it('closes the group with the canonical search page query', async () => {
     vi.mocked(api.searchRecords).mockResolvedValue({ items: [hit()], generation: 3 })
 
-    const hits = await searchRecordsForGlobalSearch('  磁盘 IO  ', 4)
+    const hits = (await searchRecordsForGlobalSearch('  磁盘 IO  ', 4)).matches
 
     expect(hits.at(-1)).toEqual({
       id: RECORD_SEARCH_ALL_HIT_ID,
@@ -94,7 +94,7 @@ describe('searchRecordsForGlobalSearch', () => {
   it('offers no search page link when the server found nothing', async () => {
     vi.mocked(api.searchRecords).mockResolvedValue({ items: [], generation: 3 })
 
-    expect(await searchRecordsForGlobalSearch('磁盘', 4)).toEqual([])
+    expect(await searchRecordsForGlobalSearch('磁盘', 4)).toEqual({ matches: [], error: null })
   })
 
   it('falls back to the record id when a revision carries no title', async () => {
@@ -102,7 +102,7 @@ describe('searchRecordsForGlobalSearch', () => {
     delete untitled.current.business_status
     vi.mocked(api.searchRecords).mockResolvedValue({ items: [untitled], generation: 3 })
 
-    const [first] = await searchRecordsForGlobalSearch('磁盘', 4)
+    const [first] = (await searchRecordsForGlobalSearch('磁盘', 4)).matches
 
     expect(first).toEqual({
       id: 'rec_001',
@@ -113,21 +113,25 @@ describe('searchRecordsForGlobalSearch', () => {
   })
 
   // The palette also searches assets. A records index that has not finished
-  // building, a center with the records platform switched off, or a revoked
-  // session must not blank out the rest of the results. The session-ending side
-  // effect of a 401 belongs to the transport, which fires it before rejecting.
+  // building, a network failure, or a revoked session must stay a records
+  // failure — not a successful empty page the palette could mistake for
+  // "nothing matched". The session-ending side effect of a 401 belongs to the
+  // transport, which fires it before rejecting.
   it.each([
     ['the index is unavailable', new ApiError(503, 'search index unavailable')],
     ['the session was revoked', new ApiError(401, 'unauthenticated')],
     ['the network is down', new TypeError('Failed to fetch')],
-  ])('reports nothing rather than failing when %s', async (_case, failure) => {
+  ])('reports a safe unavailable error rather than an empty success when %s', async (_case, failure) => {
     vi.mocked(api.searchRecords).mockRejectedValue(failure)
 
-    expect(await searchRecordsForGlobalSearch('磁盘', 4)).toEqual([])
+    expect(await searchRecordsForGlobalSearch('磁盘', 4)).toEqual({
+      matches: [],
+      error: '运维记录搜索暂不可用',
+    })
   })
 
   it('skips the request entirely for a blank query', async () => {
-    expect(await searchRecordsForGlobalSearch('   ', 4)).toEqual([])
+    expect(await searchRecordsForGlobalSearch('   ', 4)).toEqual({ matches: [], error: null })
     expect(api.searchRecords).not.toHaveBeenCalled()
   })
 
@@ -137,7 +141,7 @@ describe('searchRecordsForGlobalSearch', () => {
       generation: 3,
     })
 
-    const hits = await searchRecordsForGlobalSearch('磁盘', 2)
+    const hits = (await searchRecordsForGlobalSearch('磁盘', 2)).matches
 
     expect(hits.filter((entry) => entry.id !== RECORD_SEARCH_ALL_HIT_ID)).toHaveLength(2)
   })

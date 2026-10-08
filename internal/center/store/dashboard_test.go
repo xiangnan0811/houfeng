@@ -47,17 +47,18 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 				*(dest[1].(*int)) = 4
 				*(dest[2].(*int)) = 2
 				*(dest[3].(*int)) = 1
-				*(dest[4].(*int)) = 1
-				*(dest[5].(*int)) = 0
-				*(dest[6].(*int)) = 1
+				*(dest[4].(*int)) = 2
+				*(dest[5].(*int)) = 1
+				*(dest[6].(*int)) = 0
 				*(dest[7].(*int)) = 1
-				*(dest[8].(*int)) = 2
-				*(dest[9].(*int)) = 1
+				*(dest[8].(*int)) = 1
+				*(dest[9].(*int)) = 2
 				*(dest[10].(*int)) = 1
 				*(dest[11].(*int)) = 1
 				*(dest[12].(*int)) = 1
-				*(dest[13].(*int)) = 3
-				*(dest[14].(*int)) = 2
+				*(dest[13].(*int)) = 1
+				*(dest[14].(*int)) = 3
+				*(dest[15].(*int)) = 2
 				return nil
 			}}
 		},
@@ -71,10 +72,10 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 					*(dest[3].(*int)) = 1
 					*(dest[4].(*int)) = 1
 					*(dest[5].(*int)) = 1
-					*(dest[5].(*int)) = 1
 					*(dest[6].(*int)) = 0
 					*(dest[7].(*int)) = 1
 					*(dest[8].(*int)) = 0
+					*(dest[9].(*int)) = 0
 					return nil
 				}}}}, nil
 			case strings.Contains(sql, "hour_buckets"):
@@ -157,8 +158,8 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if overview.TotalMonitoringInstanceCount != 5 || overview.TotalTargetCount != 4 {
 		t.Fatalf("total counts = (%d,%d), want (5,4)", overview.TotalMonitoringInstanceCount, overview.TotalTargetCount)
 	}
-	if overview.AbnormalMonitoringInstanceCount != 2 || overview.SevereMonitoringInstanceCount != 1 || overview.RecentRecoveryCount != 2 {
-		t.Fatalf("overview = %#v, want abnormal=2, severe=1 and populated recovery count", overview)
+	if overview.AbnormalMonitoringInstanceCount != 2 || overview.UnobservedTargetCount != 2 || overview.SevereMonitoringInstanceCount != 1 || overview.RecentRecoveryCount != 2 {
+		t.Fatalf("overview = %#v, want abnormal=2, unobserved targets=2, severe=1 and populated recovery count", overview)
 	}
 	if overview.SevereMonitoringInstanceCount > overview.AbnormalMonitoringInstanceCount {
 		t.Fatalf("monitoring instance counts = abnormal %d / severe %d, severe must remain a subset of abnormal", overview.AbnormalMonitoringInstanceCount, overview.SevereMonitoringInstanceCount)
@@ -175,8 +176,8 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if len(overview.GroupSummaries) != 1 || overview.GroupSummaries[0].Group != "production" {
 		t.Fatalf("GroupSummaries = %#v, want production group summary", overview.GroupSummaries)
 	}
-	if overview.GroupSummaries[0].MonitoringInstanceCount != 3 || overview.GroupSummaries[0].TargetCount != 2 {
-		t.Fatalf("GroupSummaries[0] = %#v, want full monitoringInstance/target counts", overview.GroupSummaries[0])
+	if overview.GroupSummaries[0].MonitoringInstanceCount != 3 || overview.GroupSummaries[0].TargetCount != 2 || overview.GroupSummaries[0].UnobservedTargetCount != 1 {
+		t.Fatalf("GroupSummaries[0] = %#v, want full monitoringInstance/target/unobserved counts", overview.GroupSummaries[0])
 	}
 	if !overview.NotificationStatus.TelegramConfigured || !overview.NotificationStatus.TelegramRuntimeManaged || !overview.NotificationStatus.TelegramRuntimeApplyActive {
 		t.Fatalf("NotificationStatus = %#v, want configured runtime-managed telegram", overview.NotificationStatus)
@@ -223,101 +224,6 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	}
 }
 
-func TestPostgresDashboardRepositoryBuildsAbnormalSummaryQueries(t *testing.T) {
-	capturedSQL := []string{}
-	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
-		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scan: func(dest ...any) error { return nil }}
-		},
-		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			capturedSQL = append(capturedSQL, sql)
-			return &fakeDashboardRows{}, nil
-		},
-	}}
-
-	_, err := repo.GetDashboardOverview(context.Background(), 7)
-	if err != nil {
-		t.Fatalf("GetDashboardOverview() error = %v", err)
-	}
-
-	monitoringSQL := firstSQLContaining(capturedSQL, "mi.current_primary_issue_summary")
-	if monitoringSQL == "" {
-		t.Fatalf("capturedSQL = %#v, want monitoring instance abnormal summary query", capturedSQL)
-	}
-	for _, want := range []string{
-		"mi.projected_health_status <> '正常'",
-		"mi.binding_status <> '已绑定'",
-		"mi.last_trusted_online_at is null",
-		"from vps_assets v",
-		"lifecycle_status <> '已退役'",
-		"v.lifecycle_status = 'active'",
-		"when '严重' then 3",
-		"mi.current_active_incident_count desc",
-	} {
-		if !strings.Contains(monitoringSQL, want) {
-			t.Fatalf("monitoringSQL = %q, want %q", monitoringSQL, want)
-		}
-	}
-
-	targetSQL := firstSQLContaining(capturedSQL, "t.current_primary_issue_summary")
-	if targetSQL == "" {
-		t.Fatalf("capturedSQL = %#v, want target abnormal summary query", capturedSQL)
-	}
-	for _, want := range []string{
-		"t.current_health_status <> '正常'",
-		"from asset_service_associations",
-		"from asset_domain_associations",
-		"v.lifecycle_status = 'active'",
-		"current_health_status <> '正常'",
-		"when '严重' then 3",
-		"t.current_active_incident_count desc",
-	} {
-		if !strings.Contains(targetSQL, want) {
-			t.Fatalf("targetSQL = %q, want %q", targetSQL, want)
-		}
-	}
-}
-
-func TestPostgresDashboardRepositoryBuildsVisibleCurrentRuntimeCountQuery(t *testing.T) {
-	capturedSQL := ""
-	_, err := loadDashboardCounts(context.Background(), fakeDashboardQueryer{
-		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
-			capturedSQL = sql
-			return fakeRow{scan: func(dest ...any) error { return nil }}
-		},
-		query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
-			t.Fatal("Query() should not be called")
-			return nil, nil
-		},
-	})
-	if err != nil {
-		t.Fatalf("loadDashboardCounts() error = %v", err)
-	}
-	for _, want := range []string{
-		"visible_monitoring_instances as",
-		"visible_targets as",
-		"visible_events as",
-		"from vps_assets v",
-		"from asset_service_associations",
-		"from asset_domain_associations",
-		"lifecycle_status <> '已退役'",
-		"v.lifecycle_status = 'active'",
-		"from visible_monitoring_instances where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status <> '正常'",
-		"from visible_targets where run_status = '启用' and current_health_status <> '正常'",
-		"from visible_monitoring_instances where monitoring_status = '维护中'",
-		"from visible_targets where run_status = '维护中'",
-		"from monitoring_instances where lifecycle_status = '已退役'",
-		"from targets where lifecycle_status = 'retired'",
-		"from visible_events e where event_type = 'incident_started'",
-		"from visible_events e where event_type = 'incident_recovered'",
-		"e.payload ->> 'event_at'",
-	} {
-		if !strings.Contains(capturedSQL, want) {
-			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
-		}
-	}
-}
-
 func TestLoadDashboardTrends24hDefaultsToCurrentAssetVisibility(t *testing.T) {
 	capturedSQL := ""
 	_, _, err := loadDashboardTrends24h(context.Background(), fakeDashboardQueryer{
@@ -350,52 +256,6 @@ func TestLoadDashboardTrends24hDefaultsToCurrentAssetVisibility(t *testing.T) {
 		if !strings.Contains(capturedSQL, want) {
 			t.Fatalf("capturedSQL = %q, want %q", capturedSQL, want)
 		}
-	}
-}
-
-func TestPostgresDashboardRepositoryBuildsFullGroupSummaryQuery(t *testing.T) {
-	capturedSQL := []string{}
-	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
-		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
-			return fakeRow{scan: func(dest ...any) error { return nil }}
-		},
-		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			capturedSQL = append(capturedSQL, sql)
-			return &fakeDashboardRows{}, nil
-		},
-	}}
-
-	_, err := repo.GetDashboardOverview(context.Background(), 7)
-	if err != nil {
-		t.Fatalf("GetDashboardOverview() error = %v", err)
-	}
-
-	groupSQL := firstSQLContaining(capturedSQL, "monitoring_instance_groups")
-	if groupSQL == "" {
-		t.Fatalf("capturedSQL = %#v, want full group summary query", capturedSQL)
-	}
-	for _, want := range []string{
-		"visible_monitoring_instances as",
-		"visible_targets as",
-		"from monitoring_instances mi",
-		"from targets t",
-		"from vps_assets v",
-		"from asset_service_associations",
-		"from asset_domain_associations",
-		"v.lifecycle_status = 'active'",
-		"from visible_monitoring_instances",
-		"from visible_targets",
-		"full outer join target_groups",
-		`coalesce(nullif(btrim("group"), ''), '未分组')`,
-		"current_health_status <> '正常'",
-		"order by",
-	} {
-		if !strings.Contains(groupSQL, want) {
-			t.Fatalf("groupSQL = %q, want %q", groupSQL, want)
-		}
-	}
-	if strings.Contains(groupSQL, "limit $1") {
-		t.Fatalf("groupSQL = %q, want group summaries unaffected by dashboard limit", groupSQL)
 	}
 }
 

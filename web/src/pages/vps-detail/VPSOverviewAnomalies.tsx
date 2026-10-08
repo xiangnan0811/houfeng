@@ -4,10 +4,11 @@ import { Button } from '../../components/atoms'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import type { VPSOverviewAnomaly, VPSOverviewAnomalyAction } from '../../lib/types'
 import {
-  overviewAnomalyDetailLabel,
+  overviewAnomalyDetailPresentation,
   overviewAnomalySeverityClass,
-  overviewAnomalySourceLabel,
+  overviewAnomalySourcePresentation,
   overviewUnlinkedAnomalyCopy,
+  type DiagnosticNote,
 } from '../../lib/vpsOverviewPresentation'
 import {
   isVPSOverviewWriteCommand,
@@ -47,11 +48,16 @@ export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
         {anomalies.map((anomaly) => {
           const unlinked = anomaly.rule_id === 'monitoring.unlinked.v1'
           const unlinkedCopy = unlinked ? overviewUnlinkedAnomalyCopy(anomaly) : null
-          const sourceLabel = overviewAnomalySourceLabel(anomaly.source)
-          const showSource = !unlinked && Boolean(sourceLabel) && !anomaly.title.includes(sourceLabel)
+          const source = overviewAnomalySourcePresentation(anomaly.source)
+          const sourceLabel = source.summary
+          const showSource = !unlinked && Boolean(sourceLabel) && !anomaly.title.includes(sourceLabel ?? '')
           const detail = !unlinked && anomaly.detail
-            ? overviewAnomalyDetailLabel(anomaly.rule_id, anomaly.detail)
+            ? overviewAnomalyDetailPresentation(anomaly.rule_id, anomaly.detail)
             : null
+          const diagnostics: DiagnosticNote[] = [
+            ...(unlinkedCopy?.diagnostics ?? detail?.diagnostics ?? []),
+            ...source.diagnostics,
+          ]
           const showFallbackReason = Boolean(unlinkedCopy) && !(soleUnlinked && unlinkedCopy?.impact)
           return (
           <li
@@ -65,10 +71,23 @@ export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
                   {showFallbackReason ? <p className="vps-overview-anomalies__detail">{unlinkedCopy.reason}</p> : null}
                   {unlinkedCopy.impact ? <p className="vps-overview-anomalies__detail">{unlinkedCopy.impact}</p> : null}
                 </>
-              ) : detail ? (
-                <p className="vps-overview-anomalies__detail">{detail}</p>
+              ) : detail?.summary ? (
+                <p className="vps-overview-anomalies__detail">{detail.summary}</p>
               ) : null}
               {showSource ? <p className="vps-overview-anomalies__source">{sourceLabel}</p> : null}
+              {diagnostics.length > 0 ? (
+                <details className="vps-overview-anomalies__diagnostic">
+                  <summary>诊断信息</summary>
+                  <dl>
+                    {diagnostics.map((item, index) => (
+                      <div key={`${item.label}-${index}`}>
+                        <dt>{item.label}</dt>
+                        <dd>{item.detail}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </details>
+              ) : null}
             </div>
             <div className="vps-overview-anomalies__actions">
               {anomaly.primary_action ? (

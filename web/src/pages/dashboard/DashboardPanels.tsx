@@ -19,9 +19,10 @@ function renewalDaysLabel(daysLeft: number): string {
 }
 
 function renewalPriceLabel(item: DashboardRenewalItem): string {
-  if (item.monthlyPrice == null) return '金额待核对'
-  if (item.exchangeRateStale) return '汇率过期，金额待核对'
-  return `${formatMoney(item.monthlyPrice, item.currency)}/月`
+  if (item.monthlyPrice == null || item.rateStatus === 'missing') return '金额待核对'
+  const amount = `${formatMoney(item.monthlyPrice, item.currency)}/月`
+  if (item.rateStatus === 'stale') return `汇率过期 · ${amount}`
+  return amount
 }
 
 function PanelHeader({ id, title, meta, link }: { id: string; title: string; meta?: string; link: { to: string; label: string } }) {

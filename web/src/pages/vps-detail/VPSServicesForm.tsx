@@ -40,7 +40,7 @@ export function VPSServicesForm({
       ? `入口探测列表不可用：${targetsError}`
       : targets.length === 0
         ? '没有可关联的入口探测；可先创建观测入口，或保留为空。'
-        : '入口探测仅用于跳转引用，不会创建或修改 ProbeItem。'
+        : '入口探测仅用于跳转引用，不会创建或修改探测项。'
 
   return (
     <form id={formId} className="vps-form" onSubmit={onSubmit} aria-busy={submitting}>

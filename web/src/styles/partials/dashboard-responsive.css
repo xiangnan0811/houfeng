@@ -17,7 +17,7 @@
   .dashboard-primary-action .btn,.dashboard-degradation .btn{width:100%}
   .dashboard-judgement,.dashboard-evidence-lane,.dashboard-panel{padding:var(--space-3)}
   .dashboard-evidence-lane__header{align-items:center}
-  .dashboard-evidence-metrics,.dashboard-source-list{grid-template-columns:minmax(0,1fr)}
+  .dashboard-source-list{grid-template-columns:minmax(0,1fr)}
   .dashboard-attention-link{grid-template-columns:auto minmax(0,1fr)}
   .dashboard-attention-link__meta{grid-column:2;max-width:none;text-align:left}
 }

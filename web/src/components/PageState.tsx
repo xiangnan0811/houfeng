@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 import { Timestamp } from './atoms/Mono'
 
-export type PageStateKind = 'loading' | 'error' | 'empty'
+export type PageStateKind = 'loading' | 'error' | 'empty' | 'notfound'
 export type PageStateSurface = 'panel' | 'empty'
 
 type PageStateProps = {
@@ -26,6 +26,7 @@ function truncateTechnicalSummary(value: string): string {
 
 function stateLabel(kind: Exclude<PageStateKind, 'empty'>): string {
   if (kind === 'loading') return '正在加载'
+  if (kind === 'notfound') return '页面不存在'
   return '状态异常'
 }
 

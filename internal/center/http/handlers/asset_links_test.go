@@ -292,7 +292,7 @@ func TestVPSMonitoringInstancesDelegatesEmptyWireIdentityToRepository(t *testing
 			VPSID:                "vps_path",
 			MonitoringInstanceID: "mi_001",
 			LinkedAt:             now,
-			Note:                 "created from vps detail",
+			Note:                 "",
 		},
 	}
 
@@ -310,7 +310,7 @@ func TestVPSMonitoringInstancesDelegatesEmptyWireIdentityToRepository(t *testing
 		t.Fatalf("creator vps id = %q, want path vps id", creator.vpsID)
 	}
 	wire := creator.idempotentWire
-	if wire.DisplayName != "" || wire.Group != "" || wire.Region != "" || wire.City != "" || wire.Provider != "" || len(wire.Labels) != 0 || wire.Note != "" || wire.LinkNote != "" {
+	if wire.DisplayName != "" || wire.Group != "" || wire.Region != "" || wire.City != "" || wire.Provider != "" || len(wire.Labels) != 0 || wire.Note != "" || wire.LinkNote != "" || wire.ClearFields != nil {
 		t.Fatal("wire identity did not preserve the exact empty request fields")
 	}
 	if creator.legacyCalls != 0 || creator.idempotentCalls != 1 || creator.idempotentKey != "monitoring-create-001" {
@@ -352,6 +352,55 @@ func TestVPSMonitoringInstancesPreservesNormalizedWireIdentity(t *testing.T) {
 	wire := creator.idempotentWire
 	if wire.DisplayName != "Explicit name" || wire.Group != "Edge" || wire.Region != "Explicit region" || wire.City != "Explicit city" || wire.Provider != "Explicit provider" || len(wire.Labels) != 1 || wire.Labels[0] != "explicit" || wire.Note != "Explicit note" || wire.LinkNote != "Explicit link note" {
 		t.Fatal("wire identity did not preserve all eight normalized request fields")
+	}
+}
+func TestVPSMonitoringInstancesNormalizesAndValidatesClearFields(t *testing.T) {
+	tests := []struct {
+		name          string
+		body          string
+		wantStatus    int
+		wantClear     string
+		wantCallCount int
+	}{
+		{
+			name:          "normalizes and deduplicates clear fields",
+			body:          `{"region":"  ","clear_fields":[" provider ","region","region"]}`,
+			wantStatus:    http.StatusCreated,
+			wantClear:     "provider\x00region",
+			wantCallCount: 1,
+		},
+		{
+			name:       "rejects unknown field",
+			body:       `{"clear_fields":["country"]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "rejects nonempty conflict",
+			body:       `{"provider":"manual","clear_fields":["provider"]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			creator := &fakeLinkedMonitoringInstanceCreator{}
+			req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/monitoring-instances", strings.NewReader(tt.body))
+			req.Header.Set("Idempotency-Key", "monitoring-clear-fields-001")
+			recorder := httptest.NewRecorder()
+
+			handlers.VPSMonitoringInstances(&fakeAssetLinkRepository{}, creator).ServeHTTP(recorder, req)
+
+			if recorder.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
+			}
+			if creator.idempotentCalls != tt.wantCallCount {
+				t.Fatalf("creator calls = %d, want %d", creator.idempotentCalls, tt.wantCallCount)
+			}
+			if tt.wantClear != "" && strings.Join(creator.idempotentWire.ClearFields, "\x00") != tt.wantClear {
+				t.Fatal("clear fields normalization mismatch")
+			}
+		})
 	}
 }
 

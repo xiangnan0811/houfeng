@@ -62,7 +62,7 @@ describe('TargetProbeList', () => {
       />,
     )
 
-    expect(screen.getByRole('heading', { name: '目标尚未配置 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '目标尚未配置探测项' })).toBeInTheDocument()
   })
 
   it('renders probe item rows with the latest observations', () => {
@@ -98,7 +98,7 @@ describe('TargetProbeList', () => {
     )
 
     fireEvent.click(
-      screen.getByRole('button', { name: /^删除 ProbeItem pb_001\b/ }),
+      screen.getByRole('button', { name: /^删除 探测项 pb_001\b/ }),
     )
     expect(onDelete).toHaveBeenCalledTimes(1)
   })
@@ -115,10 +115,10 @@ describe('TargetProbeList', () => {
       />,
     )
 
-    const dialog = screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })
+    const dialog = screen.getByRole('alertdialog', { name: '确认删除探测项' })
     expect(dialog).toBeInTheDocument()
     expect(within(dialog).getByText('path: /healthz · method: GET')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认删除探测项' })).toBeInTheDocument()
   })
 
   it('puts latest HTTP, TLS, and error evidence in one compact table cell', () => {
@@ -169,6 +169,39 @@ describe('TargetProbeList', () => {
     expect(screen.queryByRole('columnheader', { name: '执行监控实例' })).not.toBeInTheDocument()
   })
 
+  it('keeps a failed result readable and folds the raw diagnostic', () => {
+    render(
+      <TargetProbeList
+        probeItems={[probeItem()]}
+        observationsByProbe={
+          new Map([[
+            'pb_001',
+            [observation({
+              result_kind: 'failure',
+              latency_ms: 12,
+              http_status: 503,
+              error_summary: 'connect: timeout',
+              error_code: 'probe_timeout',
+            })],
+          ]])
+        }
+        actionsDisabled={false}
+        pendingProbeConfirmation={null}
+        confirmationCardDisabled={false}
+        {...noopHandlers}
+      />,
+    )
+
+    const result = screen.getByText('失败').closest('.target-probe-table__result')
+    expect(result).toHaveTextContent('失败')
+    expect(result).toHaveTextContent('12 ms')
+    expect(result).toHaveTextContent('503')
+    const details = result?.querySelector('details')
+    expect(details).not.toHaveAttribute('open')
+    expect(details).toHaveTextContent('connect: timeout')
+    expect(screen.getByText('失败').closest('details')).toBeNull()
+  })
+
   it('shows quiet empty copy in the latest cells when a probe item has no observations yet', () => {
     render(
       <TargetProbeList
@@ -200,7 +233,7 @@ describe('TargetProbeList', () => {
       />,
     )
 
-    const button = screen.getByRole('button', { name: '添加 Probe' })
+    const button = screen.getByRole('button', { name: '添加探测项' })
     expect(button).toBeInTheDocument()
     fireEvent.click(button)
     expect(onAddProbe).toHaveBeenCalledTimes(1)

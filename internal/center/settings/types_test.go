@@ -754,6 +754,42 @@ func TestSettingsValidateChecksOverrideIncidentThresholdOrderAgainstConfiguredDe
 		t.Fatalf("Validate() error = %v, want override cpu thresholds", err)
 	}
 }
+func TestSettingsValidatePreservesExplicitFalseIncidentOverride(t *testing.T) {
+	t.Parallel()
+
+	input := Default()
+	input.OverrideRules = OverrideRules{
+		MonitoringInstanceLabels: []MonitoringInstanceLabelOverrideRule{{
+			Label: "core",
+			Overrides: SettingsOverrideFields{
+				IncidentDefaults: &IncidentDefaultsOverride{
+					NotifyOnStarted: new(false),
+				},
+			},
+		}},
+	}
+
+	normalized, err := Validate(input)
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	override := normalized.OverrideRules.MonitoringInstanceLabels[0].Overrides.IncidentDefaults
+	if override == nil || override.NotifyOnStarted == nil || *override.NotifyOnStarted {
+		t.Fatalf("normalized notify_on_started = %#v, want explicit false pointer", override)
+	}
+	body, err := json.Marshal(normalized.OverrideRules)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	var roundTrip OverrideRules
+	if err := json.Unmarshal(body, &roundTrip); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	roundTripOverride := roundTrip.MonitoringInstanceLabels[0].Overrides.IncidentDefaults
+	if roundTripOverride == nil || roundTripOverride.NotifyOnStarted == nil || *roundTripOverride.NotifyOnStarted {
+		t.Fatalf("round-trip notify_on_started = %#v, want explicit false pointer", roundTripOverride)
+	}
+}
 
 func stringPtr(value string) *string { return &value }
 

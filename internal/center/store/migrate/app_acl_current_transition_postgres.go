@@ -253,11 +253,27 @@ func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
-	// When present, 0069 adds CPU validity schema only and must be the unique
-	// terminal migration.  0068 adds address identity parsing, while 0067
-	// changes the fresh-install lifecycle contract; neither changes heartbeat
-	// policy.
+	// 0071 adds access-management ACL only, while 0070 adds nullable
+	// destination-subject columns and 0069 adds CPU validity schema. These
+	// non-heartbeat migrations must be stripped from the terminal suffix before
+	// policy-shape classification below.
 	successorNames := transition.successor.names
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0071_add_access_management.sql" {
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0071_add_access_management.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0070_add_record_import_destination_subject.sql" {
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0070_add_record_import_destination_subject.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
 	cpuRatesMigrationPending := false
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0069_add_cpu_rates_valid.sql" {
 		cpuRatesMigrationPending = true
@@ -268,7 +284,6 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 			return false, fmt.Errorf("unsupported registered APP transition")
 		}
 	}
-
 	addressIdentityMigrationPending := false
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0068_normalize_ip_quality_host_address_identity.sql" {
 		addressIdentityMigrationPending = true
@@ -291,8 +306,11 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 	}
 	switch {
 	case len(successorNames) == 0:
-		// P68 has only 0069; P67 has 0068 and 0069; P66 has 0067,
-		// 0068, and 0069.  All are non-heartbeat transitions.
+		// P69 carries only 0070 and 0071; P70 carries only 0071. P68 and
+		// earlier profiles still carry their historical suffixes.
+		if transition.profile == appACLCurrentProfileP69 || transition.profile == appACLCurrentProfileP70 {
+			return false, nil
+		}
 		if !addressIdentityMigrationPending && !cpuRatesMigrationPending {
 			return false, fmt.Errorf("unsupported registered APP transition")
 		}

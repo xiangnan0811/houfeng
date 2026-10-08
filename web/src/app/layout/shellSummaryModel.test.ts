@@ -17,6 +17,7 @@ function overview(overrides: Partial<DashboardOverview> = {}): DashboardOverview
     total_target_count: 1,
     abnormal_monitoring_instance_count: 0,
     abnormal_target_count: 0,
+    unobserved_target_count: 0,
     severe_monitoring_instance_count: 0,
     severe_target_count: 0,
     maintenance_monitoring_instance_count: 0,
@@ -69,18 +70,33 @@ describe('buildShellSummaryModel', () => {
       .toMatchObject({ state: 'unavailable', label: '系统摘要不可用', showAnomalyCounts: false })
   })
 
-  it('derives clear and anomaly from a fresh snapshot', () => {
+  it('keeps known abnormalities and unobserved targets as separate fresh facts', () => {
     expect(buildShellSummaryModel(success(), NOW)).toMatchObject({
       state: 'clear',
-      label: '系统摘要无异常',
+      label: '当前运行异常计数为 0',
       showAnomalyCounts: true,
     })
     expect(buildShellSummaryModel(success(overview({ abnormal_target_count: 2 })), NOW))
       .toMatchObject({
         state: 'anomaly',
-        label: '系统摘要有异常',
+        label: '运行异常 2',
         showAnomalyCounts: true,
       })
+    expect(buildShellSummaryModel(success(overview({ unobserved_target_count: 4 })), NOW))
+      .toMatchObject({
+        state: 'unobserved',
+        label: '尚有目标无观测',
+        showAnomalyCounts: true,
+      })
+    expect(buildShellSummaryModel(success(overview({
+      abnormal_monitoring_instance_count: 1,
+      abnormal_target_count: 2,
+      unobserved_target_count: 3,
+    })), NOW)).toMatchObject({
+      state: 'anomaly',
+      label: '运行异常 3，尚有目标无观测 3',
+      showAnomalyCounts: true,
+    })
   })
 
   it('expires a snapshot at the exact freshness boundary', () => {

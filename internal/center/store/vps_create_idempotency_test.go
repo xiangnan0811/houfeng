@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -101,6 +102,80 @@ func TestVPSCreateDigestsUseNormalizedScopedRequestIdentity(t *testing.T) {
 	}
 }
 
+func TestLinkedCreateOmittedClearFieldsKeepsLegacyJSONAndDigest(t *testing.T) {
+	t.Parallel()
+
+	wire := monitoringinstances.NormalizeLinkedCreateWireIdentity(monitoringinstances.LinkedCreateWireIdentity{
+		DisplayName: "Tokyo Edge",
+		Group:       "edge",
+		Region:      "Tokyo",
+		City:        "Tokyo",
+		Provider:    "Acme",
+		Labels:      []string{"prod"},
+		Note:        "monitoring note",
+		LinkNote:    "link note",
+	})
+	type legacyLinkedCreateWireIdentity struct {
+		DisplayName string   `json:"display_name"`
+		Group       string   `json:"group"`
+		Region      string   `json:"region"`
+		City        string   `json:"city"`
+		Provider    string   `json:"provider"`
+		Labels      []string `json:"labels"`
+		Note        string   `json:"note"`
+		LinkNote    string   `json:"link_note"`
+	}
+	legacy := legacyLinkedCreateWireIdentity{
+		DisplayName: wire.DisplayName,
+		Group:       wire.Group,
+		Region:      wire.Region,
+		City:        wire.City,
+		Provider:    wire.Provider,
+		Labels:      wire.Labels,
+		Note:        wire.Note,
+		LinkNote:    wire.LinkNote,
+	}
+	currentJSON, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatalf("marshal current identity error type = %T", err)
+	}
+	legacyJSON, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy identity error type = %T", err)
+	}
+	if string(currentJSON) != string(legacyJSON) {
+		t.Fatalf("omitted clear fields changed legacy JSON shape")
+	}
+
+	currentDigest, err := linkedMonitoringInstanceCreateDigest("vps_001", wire)
+	if err != nil {
+		t.Fatalf("current digest error type = %T", err)
+	}
+	// Fixed pre-clear_fields receipt vector: changes must still replay stored receipts.
+	if currentDigest != "28b18286b8949e33863d2f6e9005977de3ecd203d9d3a30344f5bdddcf3c9b7b" {
+		t.Fatal("legacy receipt digest changed")
+	}
+	emptyWire := wire
+	emptyWire.ClearFields = []string{}
+	emptyDigest, err := linkedMonitoringInstanceCreateDigest("vps_001", monitoringinstances.NormalizeLinkedCreateWireIdentity(emptyWire))
+	if err != nil {
+		t.Fatalf("empty clear fields digest error type = %T", err)
+	}
+	if currentDigest != emptyDigest {
+		t.Fatalf("nil and empty clear fields produced different digests")
+	}
+	legacyDigest, err := createidempotency.DigestNormalizedRequest(struct {
+		VPSID string                         `json:"vps_id"`
+		Input legacyLinkedCreateWireIdentity `json:"input"`
+	}{VPSID: "vps_001", Input: legacy})
+	if err != nil {
+		t.Fatalf("legacy digest error type = %T", err)
+	}
+	if currentDigest != legacyDigest {
+		t.Fatalf("omitted clear fields changed legacy digest")
+	}
+}
+
 func TestVPSCreateAdvisoryLockOperationsAreDistinct(t *testing.T) {
 	t.Parallel()
 
@@ -156,27 +231,42 @@ func TestDeriveLinkedMonitoringInstanceCreateInputPreservesWireContract(t *testi
 				DisplayName: "VPS display", Group: "group", Region: "VPS region", City: "VPS city", Provider: "VPS provider",
 				LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment, Labels: []string{"vps"}, Note: "VPS note",
 			},
-			wantLinkNote: "created from vps detail",
+			wantLinkNote: "",
 		},
 		{
-			name:     "secondary and fixed defaults",
+			name:     "secondary defaults and unknown provider",
 			wire:     monitoringinstances.LinkedCreateWireIdentity{},
 			defaults: linkedMonitoringInstanceVPSDefaults{Country: "VPS country", Datacenter: "VPS datacenter"},
 			want: monitoringinstances.CreateInput{
-				DisplayName: "vps_path", Region: "VPS country", City: "VPS datacenter", Provider: "未关联服务商",
+				DisplayName: "vps_path", Region: "VPS country", City: "VPS datacenter",
 				LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
 			},
-			wantLinkNote: "created from vps detail",
+			wantLinkNote: "",
 		},
 		{
-			name:     "unknown location defaults",
+			name:     "empty unknown values",
 			wire:     monitoringinstances.LinkedCreateWireIdentity{},
 			defaults: linkedMonitoringInstanceVPSDefaults{},
 			want: monitoringinstances.CreateInput{
-				DisplayName: "vps_path", Region: "未确认", City: "未确认", Provider: "未关联服务商",
+				DisplayName:     "vps_path",
 				LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
 			},
-			wantLinkNote: "created from vps detail",
+			wantLinkNote: "",
+		},
+		{
+			name: "explicit clear after inheritance",
+			wire: monitoringinstances.LinkedCreateWireIdentity{
+				Group: "group", ClearFields: []string{"provider", "region"},
+			},
+			defaults: linkedMonitoringInstanceVPSDefaults{
+				DisplayName: "VPS display", Region: "VPS region", Country: "VPS country", City: "VPS city", Datacenter: "VPS datacenter",
+				ProviderName: "VPS provider", Labels: []string{"vps"}, Note: "VPS note",
+			},
+			want: monitoringinstances.CreateInput{
+				DisplayName: "VPS display", Group: "group", City: "VPS city",
+				LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment, Labels: []string{"vps"}, Note: "VPS note",
+			},
+			wantLinkNote: "",
 		},
 	}
 
@@ -884,6 +974,11 @@ func TestCreateLinkedMonitoringInstanceIdempotentCreateReplayAndReuse(t *testing
 	input := testMonitoringInstanceInput()
 	linkNote := " private link note "
 	wireIdentity := monitoringinstances.NormalizeLinkedCreateWireIdentity(linkedCreateWireIdentityFromPersistence(input, linkNote))
+	wireIdentity.Region = ""
+	wireIdentity.City = ""
+	wireIdentity.Provider = ""
+	changedClearWire := wireIdentity
+	changedClearWire.ClearFields = []string{"region"}
 	digest, err := linkedMonitoringInstanceCreateDigest("vps_001", wireIdentity)
 	if err != nil {
 		t.Fatalf("linkedMonitoringInstanceCreateDigest() error = %T", err)
@@ -894,6 +989,7 @@ func TestCreateLinkedMonitoringInstanceIdempotentCreateReplayAndReuse(t *testing
 	for _, test := range []struct {
 		name         string
 		storedDigest string
+		wire         *monitoringinstances.LinkedCreateWireIdentity
 		vpsMissing   bool
 		activeLinks  int
 		wantReplay   bool
@@ -902,6 +998,7 @@ func TestCreateLinkedMonitoringInstanceIdempotentCreateReplayAndReuse(t *testing
 	}{
 		{name: "first create", wantInsert: 1},
 		{name: "same digest replay", storedDigest: digest, wantReplay: true},
+		{name: "different clear intent reuse", storedDigest: digest, wire: &changedClearWire, wantErr: createidempotency.ErrIdempotencyKeyReused},
 		{name: "different digest reuse", storedDigest: strings.Repeat("f", 64), wantErr: createidempotency.ErrIdempotencyKeyReused},
 		{name: "missing vps", vpsMissing: true, wantErr: assetlinks.ErrVPSMonitoringInstanceLinkNotFound},
 		{name: "active link conflict", activeLinks: 1, wantErr: assetlinks.ErrVPSActiveMonitoringInstanceExists},
@@ -1010,10 +1107,15 @@ func TestCreateLinkedMonitoringInstanceIdempotentCreateReplayAndReuse(t *testing
 			}
 			repo := &PostgresMonitoringInstanceRepository{db: fakeMonitoringInstanceDB{beginTx: func(context.Context, pgx.TxOptions) (pgx.Tx, error) { return tx, nil }}}
 
+			requestWire := wireIdentity
+			if test.wire != nil {
+				requestWire = *test.wire
+			}
+
 			gotMonitoring, gotLink, replayed, err := repo.CreateLinkedMonitoringInstanceIdempotent(
 				context.Background(),
 				" vps_001 ",
-				linkedCreateWireIdentityFromPersistence(input, linkNote),
+				requestWire,
 				"idempotency-key-0001",
 			)
 			if !errors.Is(err, test.wantErr) {
@@ -1044,12 +1146,14 @@ func TestCreateLinkedMonitoringInstanceIdempotentReplayIgnoresChangedDerivedPers
 		Labels:      []string{" ", ""},
 		Note:        " ",
 		LinkNote:    " ",
+		ClearFields: []string{" provider ", "region", "region"},
 	}
 	secondWireIdentity := firstWireIdentity
 	secondWireIdentity.Group = "edge"
 	secondWireIdentity.Labels = nil
 	secondWireIdentity.Note = ""
 	secondWireIdentity.LinkNote = ""
+	secondWireIdentity.ClearFields = []string{"region", "provider"}
 	now := time.Date(2026, time.August, 28, 10, 0, 0, 0, time.UTC)
 	originalMonitoring := testMonitoringInstanceRecord(now)
 	originalLink := assetlinks.Record{
@@ -1057,7 +1161,7 @@ func TestCreateLinkedMonitoringInstanceIdempotentReplayIgnoresChangedDerivedPers
 		VPSID:                "vps_001",
 		MonitoringInstanceID: originalMonitoring.MonitoringInstanceID,
 		LinkedAt:             now,
-		Note:                 "created from vps detail",
+		Note:                 "",
 	}
 	var storedDigest string
 	monitoringInserts := 0

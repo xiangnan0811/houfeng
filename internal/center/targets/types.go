@@ -76,6 +76,8 @@ type TargetRecord struct {
 	Note                              string     `json:"note"`
 	CurrentHealthStatus               string     `json:"current_health_status"`
 	CurrentActiveIncidentCount        int        `json:"current_active_incident_count"`
+	EnabledProbeCount                 int        `json:"enabled_probe_count"`
+	MatchingExecutorCount             int        `json:"matching_executor_count"`
 	LastSuccessAt                     *time.Time `json:"last_success_at,omitempty"`
 	LastFailureAt                     *time.Time `json:"last_failure_at,omitempty"`
 	CurrentPrimaryIssueSummary        string     `json:"current_primary_issue_summary"`

@@ -63,7 +63,7 @@ const subscription: SubscriptionRecord = {
   base_currency: 'CNY',
   exchange_rate: 7,
   exchange_rate_date: '2026-05-09',
-  exchange_rate_stale: false,
+  exchange_rate_status: 'fresh',
   budget_status: 'ok',
   next_reminder_at: '2026-05-18T00:00:00Z',
   started_at: '2026-05-01',
@@ -89,7 +89,9 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
     renewal_due_14d_count: 0,
     renewal_due_30d_count: subscriptions.filter((sub) => sub.renew_at).length,
     budget_risk_count: 0,
-    exchange_rate_stale_count: subscriptions.filter((sub) => sub.exchange_rate_stale).length,
+    current_missing_rate_count: subscriptions.filter((sub) => sub.exchange_rate_status === 'missing').length,
+    current_stale_rate_count: subscriptions.filter((sub) => sub.exchange_rate_status === 'stale').length,
+    current_unknown_amount_count: subscriptions.filter((sub) => sub.monthly_price_base == null).length,
     decision_attention_count: 0,
     missing_subscription_vps_count: 0,
     upcoming_renewals: subscriptions.filter((sub) => sub.renew_at).map((sub) => ({
@@ -109,7 +111,7 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
       currency: sub.currency,
       renewal_decision: 'keep',
       lifecycle_status: 'active',
-      exchange_rate_stale: Boolean(sub.exchange_rate_stale),
+      exchange_rate_status: sub.exchange_rate_status ?? 'fresh',
     })),
     provider_breakdown: subscriptions.length > 0 ? [{
       key: 'pv_001',
@@ -146,7 +148,7 @@ function overviewFor(subscriptions: SubscriptionRecord[] = [], overrides: Partia
       ...(sub.exchange_rate_date === undefined
         ? {}
         : { exchange_rate_date: sub.exchange_rate_date }),
-      exchange_rate_stale: Boolean(sub.exchange_rate_stale),
+      exchange_rate_status: sub.exchange_rate_status ?? 'fresh',
       ...(sub.renew_at === undefined ? {} : { renew_at: sub.renew_at }),
       ...(sub.next_reminder_at === undefined
         ? {}
@@ -229,7 +231,7 @@ function setupSubscriptionFetch({
           base_currency: 'CNY',
           exchange_rate: 7,
           exchange_rate_date: '2026-05-09',
-          exchange_rate_stale: false,
+          exchange_rate_status: 'fresh',
           budget_status: 'ok',
           created_at: '2026-05-09T08:00:00Z',
           updated_at: '2026-05-09T08:00:00Z',
@@ -256,7 +258,7 @@ function setupSubscriptionFetch({
         base_currency: 'CNY',
         exchange_rate: 7,
         exchange_rate_date: '2026-05-09',
-        exchange_rate_stale: false,
+        exchange_rate_status: 'fresh',
         budget_status: 'ok',
         updated_at: '2026-05-09T09:00:00Z',
       }
@@ -280,8 +282,11 @@ function setupSubscriptionFetch({
       if (statisticsError) return Promise.resolve(mockJSONResponse({ error: statisticsError }, 500))
       return Promise.resolve(mockJSONResponse(statistics ?? statisticsFor(currentSubscriptions)))
     }
+    if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+      return Promise.resolve(mockJSONResponse({ items: [] }))
+    }
     if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
-      return Promise.resolve(mockJSONResponse({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '2026-05-09T08:00:00Z', succeeded: [], failed: [] }))
+      return Promise.resolve(mockJSONResponse({ items: [] }, 202))
     }
     return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
   })
@@ -842,13 +847,35 @@ describe('SubscriptionsPage', () => {
     await waitFor(() => expect(screen.getByText('月成本不可用')).toBeInTheDocument())
   })
 
-  it('keeps workbench refresh statistics lazy until insights has been visited', async () => {
+  it('reloads latched cost statistics only after an in-flight rate refresh succeeds', async () => {
+    let refreshCount = 0
     const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
+        refreshCount += 1
+        return Promise.resolve(mockJSONResponse({
+          items: [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'missing', refresh_status: 'queued', attempt_count: 1 }],
+        }, 202))
+      }
+      if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse({
+          items: refreshCount > 0
+            ? [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'fresh', refresh_status: 'idle', attempt_count: 1 }]
+            : [],
+        }))
+      }
+      return original(url, init)
+    })
     render(<MemoryRouter initialEntries={['/subscriptions?view=details']}><SubscriptionsPage /></MemoryRouter>)
     const statsCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/statistics?window=year').length
+    const overviewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/overview').length
     await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).toBeEnabled())
+    const overviewBefore = overviewCalls()
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).toBeEnabled())
+    expect(await screen.findByText('汇率已更新')).toBeInTheDocument()
+    await waitFor(() => expect(overviewCalls()).toBeGreaterThan(overviewBefore))
     expect(statsCalls()).toBe(0)
     openInsights()
     await waitFor(() => expect(statsCalls()).toBe(1))
@@ -857,13 +884,25 @@ describe('SubscriptionsPage', () => {
     await waitFor(() => expect(statsCalls()).toBe(2))
   })
 
-  it('refreshes newly opened insights when an earlier rate refresh completes', async () => {
+  it('reloads insights opened while a rate refresh is still in flight once that refresh succeeds', async () => {
     let finishRefresh!: (response: Response) => void
     const pending = new Promise<Response>((resolve) => { finishRefresh = resolve })
+    let posted = false
     const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
     const original = fetchMock.getMockImplementation()!
     fetchMock.mockImplementation((url: string, init?: RequestInit) => {
-      if (url === '/api/subscriptions/exchange-rates/refresh') return pending
+      const method = init?.method ?? 'GET'
+      if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
+        posted = true
+        return pending
+      }
+      if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse({
+          items: posted
+            ? [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'fresh', refresh_status: 'idle', attempt_count: 1 }]
+            : [],
+        }))
+      }
       return original(url, init)
     })
     render(<MemoryRouter initialEntries={['/subscriptions?view=details']}><SubscriptionsPage /></MemoryRouter>)
@@ -872,8 +911,112 @@ describe('SubscriptionsPage', () => {
     openInsights()
     const statsCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/statistics?window=year').length
     await waitFor(() => expect(statsCalls()).toBe(1))
-    finishRefresh(mockJSONResponse({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '2026-05-09T08:00:00Z', succeeded: [], failed: [] }))
+    finishRefresh(mockJSONResponse({
+      items: [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'stale', refresh_status: 'queued', attempt_count: 1 }],
+    }, 202))
     await waitFor(() => expect(statsCalls()).toBe(2))
+  })
+
+  it('rechecks rate status after a subscription write and polls queued work without posting a refresh', async () => {
+    let patched = false
+    let queuedDelivered = false
+    let releaseIdle!: (response: Response) => void
+    const idlePending = new Promise<Response>((resolve) => { releaseIdle = resolve })
+    const pair = (refreshStatus: 'queued' | 'idle', rateStatus: 'missing' | 'fresh') => ({
+      provider: 'frankfurter',
+      base_currency: 'CNY',
+      quote_currency: 'USD',
+      rate_status: rateStatus,
+      refresh_status: refreshStatus,
+      attempt_count: 1,
+    })
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/subscriptions/sub_001' && method === 'PATCH') patched = true
+      if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+        if (!patched) return Promise.resolve(mockJSONResponse({ items: [] }))
+        if (!queuedDelivered) {
+          queuedDelivered = true
+          return Promise.resolve(mockJSONResponse({ items: [pair('queued', 'missing')] }))
+        }
+        return idlePending
+      }
+      return original(url, init)
+    })
+    render(<MemoryRouter initialEntries={['/subscriptions?view=details']}><SubscriptionsPage /></MemoryRouter>)
+    await waitFor(() => expect(screen.getAllByText('CNY 84.00').length).toBeGreaterThan(0))
+    const statusGets = () => fetchMock.mock.calls.filter(([url, init]) => url === '/api/subscriptions/exchange-rates/status' && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET').length
+    const refreshPosts = () => fetchMock.mock.calls.filter(([url, init]) => url === '/api/subscriptions/exchange-rates/refresh' && (init as RequestInit | undefined)?.method === 'POST').length
+    const overviewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/overview').length
+    const statusBefore = statusGets()
+    const overviewBefore = overviewCalls()
+    const editDialog = openSubscriptionEditor()
+    fireEvent.change(within(editDialog).getByLabelText('价格'), { target: { value: '24' } })
+    fireEvent.click(within(editDialog).getByRole('button', { name: '保存订阅' }))
+    expect(await screen.findByText('补取中 1 项')).toBeInTheDocument()
+    expect(statusGets()).toBeGreaterThan(statusBefore)
+    expect(refreshPosts()).toBe(0)
+    await waitFor(() => expect(overviewCalls()).toBeGreaterThan(overviewBefore))
+    const overviewAfterWrite = overviewCalls()
+    releaseIdle(mockJSONResponse({ items: [pair('idle', 'fresh')] }))
+    expect(await screen.findByText('汇率已更新')).toBeInTheDocument()
+    await waitFor(() => expect(overviewCalls()).toBeGreaterThan(overviewAfterWrite))
+    expect(refreshPosts()).toBe(0)
+  })
+
+  it('reloads costs when a manual refresh is already idle fresh without calling HTTP 202 a success', async () => {
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
+        return Promise.resolve(mockJSONResponse({
+          items: [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'fresh', refresh_status: 'idle', attempt_count: 0 }],
+        }, 202))
+      }
+      return original(url, init)
+    })
+    render(<MemoryRouter initialEntries={['/subscriptions?view=details']}><SubscriptionsPage /></MemoryRouter>)
+    const overviewCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/overview').length
+    const statsCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === '/api/subscriptions/statistics?window=year').length
+    await waitFor(() => expect(screen.getAllByText('CNY 84.00').length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).toBeEnabled())
+    const overviewBefore = overviewCalls()
+    fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
+    await waitFor(() => expect(overviewCalls()).toBeGreaterThan(overviewBefore))
+    expect(screen.queryByText('汇率已更新')).not.toBeInTheDocument()
+    expect(statsCalls()).toBe(0)
+  })
+
+  it('keeps cost amounts and shows a scoped status error when the status read fails', async () => {
+    let statusReadable = false
+    const secret = 'https://fx.example/latest?access_key=super-secret-token'
+    const fetchMock = setupSubscriptionFetch({ subscriptions: [subscription] })
+    const original = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      const method = init?.method ?? 'GET'
+      if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+        if (!statusReadable) return Promise.resolve(mockJSONResponse({ error: secret }, 500))
+        return Promise.resolve(mockJSONResponse({ items: [] }))
+      }
+      return original(url, init)
+    })
+    render(<MemoryRouter initialEntries={['/subscriptions?view=details']}><SubscriptionsPage /></MemoryRouter>)
+    expect(await screen.findByRole('alert')).toHaveTextContent('汇率状态暂不可读')
+    await waitFor(() => expect(screen.getAllByText('CNY 84.00').length).toBeGreaterThan(0))
+    expect(screen.getByRole('heading', { name: '订阅明细' })).toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('super-secret-token')
+    expect(document.body.textContent).not.toContain('fx.example')
+    const statusGets = () => fetchMock.mock.calls.filter(([url, init]) => url === '/api/subscriptions/exchange-rates/status' && ((init as RequestInit | undefined)?.method ?? 'GET') === 'GET').length
+    const beforeRetry = statusGets()
+    statusReadable = true
+    fireEvent.click(screen.getByRole('button', { name: '重试读取' }))
+    await waitFor(() => expect(screen.queryByText('汇率状态暂不可读')).not.toBeInTheDocument())
+    expect(statusGets()).toBeGreaterThan(beforeRetry)
+    expect(screen.getAllByText('CNY 84.00').length).toBeGreaterThan(0)
+    expect(document.body.textContent).not.toContain('super-secret-token')
   })
 
   it('retries statistics without reloading the subscription list', async () => {

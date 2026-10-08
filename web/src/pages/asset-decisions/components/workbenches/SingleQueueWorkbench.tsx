@@ -6,6 +6,7 @@ import { formatDate } from '../../../../lib/format'
 import type { VPSAssetRecord } from '../../../../lib/types'
 import { RenewalBadge } from '../../../assetPageBadges'
 import { daysUntilDate, renewalTimingLabel, renewalUrgency } from '../../../assetPageUtils'
+import { exchangeRateStatusLabel } from '../../../subscriptions/exchangeRatePresentation'
 import { hasCancellationAttention, subscriptionCostAttention } from '../../businessLogic'
 import { baseMoney } from '../../formatters'
 import { vpsWorkbenchPath } from '../../paths'
@@ -55,8 +56,8 @@ function QueueRow({ item, renewalWindow, onSelectVPS, onNavigateToVPS, onNavigat
       )}
       {subscription ? (
         <span className="asset-scan-row__amount mono tnum">
-          {subscriptionCostAttention(subscription) ? <small className="asset-scan-row__warn">汇率过期</small> : null}
-          {baseMoney(subscription.monthly_price_base, subscription.base_currency ?? 'CNY')}/月
+          {subscriptionCostAttention(subscription) ? <small className="asset-scan-row__warn">{exchangeRateStatusLabel(subscription.exchange_rate_status)}</small> : null}
+          {subscription.monthly_price_base == null ? '金额待核对' : `${baseMoney(subscription.monthly_price_base, subscription.base_currency ?? 'CNY')}/月`}
         </span>
       ) : <span aria-hidden="true" />}
       {vps.active_monitoring_instance_link_count > 0

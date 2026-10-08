@@ -102,7 +102,8 @@
 
 `POST /api/vps/{vps_id}/monitoring-instances` 是普通 agent 接入的主合同。它从 VPS 创建 MonitoringInstance 并在同一个事务内写入 active `vps_monitoring_instance_links`，避免先创建孤立监控实例再回 VPS 关联。
 
-- 请求只允许少量覆盖字段：`display_name`、`group`、`region`、`city`、`provider`、`labels`、`note`、`link_note`。缺省值必须从 VPS 的 display name、provider、region/city/datacenter/country、labels、note 派生。
+- 请求允许覆盖 `display_name`、`group`、`region`、`city`、`provider`、`labels`、`note`、`link_note`，另可发送 `clear_fields`。创建时复制 VPS 资料形成独立副本，之后编辑 VPS 不覆盖实例。region 默认按 VPS region→country→空，city 按 city→datacenter→空，provider 按 provider_name→空；未知可以为空，不写入“未确认”“未关联服务商”等占位词。link_note 默认空。name/group/labels/note 既有规则不变，历史占位内容不清洗。
+- 为兼容已有请求，region/city/provider 省略或空串仍表示继承；显式清空必须发送空值及 `clear_fields`。该数组只允许 `region|city|provider`，trim 后排序去重；未知字段或与同字段非空覆盖冲突返回 400。清空在继承后施加。前端输入 placeholder 仅作显示，不能作为实际 value 提交；重新填值会移除对应清空意图。
 - 创建出的 MonitoringInstance 默认是运行观测附属事实：`lifecycle_status='待接入'`，binding / health / heartbeat 等仍由 onboarding 和 agent sync 推进。
 - 如果 VPS 不存在、MonitoringInstance insert 失败或 link 失败，整个事务必须回滚，不留下孤立 MonitoringInstance。
 - 该路径不得修改 VPS lifecycle / usage / renewal decision，也不得修改 Subscription、Target、ProbeItem 或 Agent plan；它只创建观测对象和 VPS 关联证据。
@@ -132,6 +133,7 @@
 
 - shared key trim/format 为 8..128 且只允许 `[A-Za-z0-9._:-]`；缺失、重复或非法 header 为 400 `invalid_idempotency_key`，且不得调用 create repository。
 - digest 必须来自 normalize 后的 path VPS scope + 实际 wire identity。Monitoring digest 不包含从可变 VPS 状态派生的 persistence defaults；相同 wire retry 即使 VPS 默认值变化也必须 replay 原 instance/link。
+- `LinkedCreateWireIdentity.ClearFields` 必须是末尾的 `json:"clear_fields,omitempty"` 字段，空数组标准化为 nil；没有清空意图时 canonical payload 与旧摘要逐字节相同，不增加版本或改变旧字段编码。非空清空意图进入摘要；同 key 改清空集合返回既有 409，排序/重复的等价集合可 replay。响应丢失后重试即使 VPS 资料已经修改，也不能重新派生副本或增建实例。
 - 顺序为 normalize/validate→READ COMMITTED transaction→graph 锁（service/domain/MI）→operation-namespaced receipt lock→receipt lookup→mismatch/replay 或 result+receipt insert→commit。experience-log 不修改依赖图，保留原 receipt 协议。任一 cut point 失败都 rollback/fail closed。
 - first create 为 201；same key + same digest 为 200 原 ID 且无额外写；same key + different digest 为 409 `idempotency_key_reused`。HTTP 错误/日志不得包含 key、digest、body、note/details、SQL 或 wrapped internal error。
 - `0062` 是 `0061` 后的 additive migration；runtime APP 对四张 receipt 表只有 `select`/`insert`，无 update/delete/sequence 权限。不得修改已发布 migration。

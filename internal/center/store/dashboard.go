@@ -60,28 +60,7 @@ func dashboardCurrentMonitoringInstanceVisibilitySQL(alias string) string {
 }
 
 func dashboardCurrentTargetVisibilitySQL(alias string) string {
-	return fmt.Sprintf(`(%s.lifecycle_status = 'active' and (
-		not exists (
-			select 1
-			from (
-				select vps_id, target_id from asset_service_associations where ended_at is null and target_id is not null
-				union all
-				select vps_id, target_id from asset_domain_associations where ended_at is null and target_id is not null
-			) a
-			where a.target_id = %s.target_id
-		)
-		or exists (
-			select 1
-			from (
-				select vps_id, target_id from asset_service_associations where ended_at is null and target_id is not null
-				union all
-				select vps_id, target_id from asset_domain_associations where ended_at is null and target_id is not null
-			) a
-			join vps_assets v on v.vps_id = a.vps_id
-			where a.target_id = %s.target_id
-			  and v.lifecycle_status = 'active'
-		)
-	))`, alias, alias, alias)
+	return targetCurrentVisibilitySQL(alias)
 }
 
 func dashboardCurrentEventVisibilitySQL(alias string) string {
@@ -221,6 +200,13 @@ func loadAbnormalMonitoringInstanceSummaries(ctx context.Context, queryer dashbo
 
 func loadAbnormalTargetSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardTargetSummary, error) {
 	rows, err := queryer.Query(ctx, `
+		with visible_targets as (
+			select
+				t.*,
+				`+targetHealthProjectionSQL("t")+` as projected_health_status
+			from targets t
+			where `+targetCurrentVisibilitySQL("t")+`
+		)
 		select
 			t.target_id,
 			t.name,
@@ -229,15 +215,16 @@ func loadAbnormalTargetSummaries(ctx context.Context, queryer dashboardQueryer, 
 			t.base_port,
 			t.run_status,
 			t."group",
-			t.current_health_status,
+			t.projected_health_status,
 			t.last_success_at,
 			t.last_failure_at,
 			t.current_active_incident_count,
 			t.current_primary_issue_summary
-		from targets t
-		where t.run_status = '启用' and t.current_health_status <> '正常'
-		  and `+dashboardCurrentTargetVisibilitySQL("t")+`
-		order by case t.current_health_status
+		from visible_targets t
+		where t.run_status = '启用'
+		  and (t.last_success_at is not null or t.last_failure_at is not null)
+		  and t.projected_health_status in ('关注', '告警', '严重')
+		order by case t.projected_health_status
 			when '严重' then 3
 			when '告警' then 2
 			when '关注' then 1
@@ -342,9 +329,11 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 			where `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
 		),
 		visible_targets as (
-			select t.*
+			select
+				t.*,
+				`+targetHealthProjectionSQL("t")+` as projected_health_status
 			from targets t
-			where `+dashboardCurrentTargetVisibilitySQL("t")+`
+			where `+targetCurrentVisibilitySQL("t")+`
 		),
 		visible_events as (
 			select e.*
@@ -355,9 +344,10 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 			(select count(*)::int from visible_monitoring_instances),
 			(select count(*)::int from visible_targets),
 			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status <> '正常'),
-			(select count(*)::int from visible_targets where run_status = '启用' and current_health_status <> '正常'),
+			(select count(*)::int from visible_targets where run_status = '启用' and (last_success_at is not null or last_failure_at is not null) and projected_health_status in ('关注', '告警', '严重')),
+			(select count(*)::int from visible_targets where run_status = '启用' and last_success_at is null and last_failure_at is null),
 			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status = '严重'),
-			(select count(*)::int from visible_targets where run_status = '启用' and current_health_status = '严重'),
+			(select count(*)::int from visible_targets where run_status = '启用' and (last_success_at is not null or last_failure_at is not null) and projected_health_status = '严重'),
 			(select count(*)::int from visible_monitoring_instances where monitoring_status = '维护中'),
 			(select count(*)::int from visible_targets where run_status = '维护中'),
 			(select count(*)::int from visible_monitoring_instances where lifecycle_status = '待接入' or binding_status in ('未绑定', '指纹变更待确认')),
@@ -372,6 +362,7 @@ func loadDashboardCounts(ctx context.Context, queryer dashboardQueryer) (inciden
 		&overview.TotalTargetCount,
 		&overview.AbnormalMonitoringInstanceCount,
 		&overview.AbnormalTargetCount,
+		&overview.UnobservedTargetCount,
 		&overview.SevereMonitoringInstanceCount,
 		&overview.SevereTargetCount,
 		&overview.MaintenanceMonitoringInstanceCount,
@@ -397,9 +388,11 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 			where `+dashboardCurrentMonitoringInstanceVisibilitySQL("mi")+`
 		),
 		visible_targets as (
-			select t.*
+			select
+				t.*,
+				`+targetHealthProjectionSQL("t")+` as projected_health_status
 			from targets t
-			where `+dashboardCurrentTargetVisibilitySQL("t")+`
+			where `+targetCurrentVisibilitySQL("t")+`
 		),
 		monitoring_instance_groups as (
 			select
@@ -415,8 +408,9 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 			select
 				coalesce(nullif(btrim("group"), ''), '未分组') as group_name,
 				count(*)::int as target_count,
-				(count(*) filter (where run_status = '启用' and current_health_status <> '正常'))::int as abnormal_target_count,
-				(count(*) filter (where run_status = '启用' and current_health_status = '严重'))::int as severe_target_count,
+				(count(*) filter (where run_status = '启用' and (last_success_at is not null or last_failure_at is not null) and projected_health_status in ('关注', '告警', '严重')))::int as abnormal_target_count,
+				(count(*) filter (where run_status = '启用' and last_success_at is null and last_failure_at is null))::int as unobserved_target_count,
+				(count(*) filter (where run_status = '启用' and (last_success_at is not null or last_failure_at is not null) and projected_health_status = '严重'))::int as severe_target_count,
 				(count(*) filter (where run_status = '维护中'))::int as maintenance_target_count
 			from visible_targets
 			group by 1
@@ -427,6 +421,7 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 			coalesce(tg.target_count, 0),
 			coalesce(ng.abnormal_monitoring_instance_count, 0),
 			coalesce(tg.abnormal_target_count, 0),
+			coalesce(tg.unobserved_target_count, 0),
 			coalesce(ng.severe_monitoring_instance_count, 0),
 			coalesce(tg.severe_target_count, 0),
 			coalesce(ng.maintenance_monitoring_instance_count, 0),
@@ -452,6 +447,7 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 			&record.TargetCount,
 			&record.AbnormalMonitoringInstanceCount,
 			&record.AbnormalTargetCount,
+			&record.UnobservedTargetCount,
 			&record.SevereMonitoringInstanceCount,
 			&record.SevereTargetCount,
 			&record.MaintenanceMonitoringInstanceCount,
@@ -497,8 +493,36 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
         with active_vps as (
             select * from vps_assets where lifecycle_status = 'active'
         ), current_monitoring as (
-            select n.*, `+monitoringHealthProjectionSQL("n", "v.lifecycle_status")+` as projected_health_status from monitoring_instances n join active_vps v on v.vps_id = n.vps_id
+            select n.*, `+monitoringHealthProjectionSQL("n", "v.lifecycle_status")+` as projected_health_status
+            from monitoring_instances n
+            join active_vps v on v.vps_id = n.vps_id
             where n.lifecycle_status <> '已退役'
+        ), visible_target_health as (
+            select t.*, `+targetHealthProjectionSQL("t")+` as projected_health_status
+            from targets t
+            where `+targetCurrentVisibilitySQL("t")+`
+        ), current_target_associations as (
+            select vps_id, target_id
+            from asset_service_associations
+            where ended_at is null and target_id is not null
+            union
+            select vps_id, target_id
+            from asset_domain_associations
+            where ended_at is null and target_id is not null
+        ), target_abnormal_vps as (
+            select distinct a.vps_id
+            from current_target_associations a
+            join active_vps v on v.vps_id = a.vps_id
+            join visible_target_health t on t.target_id = a.target_id
+            where t.run_status = '启用'
+              and (t.last_success_at is not null or t.last_failure_at is not null)
+              and t.projected_health_status in ('关注', '告警', '严重')
+        ), abnormal_vps as (
+            select distinct vps_id
+            from current_monitoring
+            where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status <> '正常'
+            union
+            select vps_id from target_abnormal_vps
         ), renewal_due as (
             select s.subscription_id, s.vps_id from subscriptions s
             join active_vps v on v.vps_id = s.vps_id
@@ -513,7 +537,7 @@ func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (i
             (select count(*)::int from vps_assets where renewal_decision = 'cancel' and auto_renew_check in ('unchecked', 'enabled')),
             (select count(*)::int from vps_followups where status = 'pending'),
             (select count(*)::int from active_vps v where not exists (select 1 from current_monitoring n where n.vps_id = v.vps_id)),
-            (select count(distinct vps_id)::int from current_monitoring where lifecycle_status = '已接入' and monitoring_status = '启用' and projected_health_status <> '正常')
+            (select count(*)::int from abnormal_vps)
 	`).Scan(
 		&summary.RenewalDue30dSubscriptionCount,
 		&summary.RenewalDue30dVPSCount,

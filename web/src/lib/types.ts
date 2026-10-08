@@ -361,6 +361,8 @@ export type TargetRecord = {
   note: string
   current_health_status: string
   current_active_incident_count: number
+  enabled_probe_count: number
+  matching_executor_count: number
   last_success_at?: string
   last_failure_at?: string
   current_primary_issue_summary: string
@@ -511,6 +513,7 @@ export type DashboardOverview = {
   total_target_count: number
   abnormal_monitoring_instance_count: number
   abnormal_target_count: number
+  unobserved_target_count: number
   severe_monitoring_instance_count: number
   severe_target_count: number
   maintenance_monitoring_instance_count: number
@@ -548,6 +551,7 @@ export type DashboardGroupSummary = {
   target_count: number
   abnormal_monitoring_instance_count: number
   abnormal_target_count: number
+  unobserved_target_count: number
   severe_monitoring_instance_count: number
   severe_target_count: number
   maintenance_monitoring_instance_count: number
@@ -576,7 +580,6 @@ export type DashboardAssetSummary = {
   monthly_cost_base?: number
   yearly_cost_base?: number
   budget_risk_count?: number
-  exchange_rate_stale_count?: number
 }
 
 export type DashboardAssetCostByCurrency = {
@@ -2124,6 +2127,7 @@ export type CreateVPSMonitoringInstanceInput = {
   labels?: string[]
   note?: string
   link_note?: string
+  clear_fields?: Array<'region' | 'city' | 'provider'>
 }
 
 export type CreateVPSMonitoringInstanceResponse = MonitoringInstanceRecord & {
@@ -2360,7 +2364,7 @@ export type SubscriptionRecord = {
   base_currency?: string
   exchange_rate?: number | null
   exchange_rate_date?: string | null
-  exchange_rate_stale?: boolean
+  exchange_rate_status?: ExchangeRateStatus
   budget_status?: SubscriptionBudgetStatus | string
   next_reminder_at?: string | null
   created_at: string
@@ -2451,7 +2455,7 @@ export type SubscriptionRenewalQueueItem = {
   currency: string
   renewal_decision: string
   lifecycle_status: string
-  exchange_rate_stale: boolean
+  exchange_rate_status: ExchangeRateStatus
 }
 
 export type MissingSubscriptionAsset = {
@@ -2481,7 +2485,7 @@ export type SubscriptionCostRow = {
   base_currency: string
   exchange_rate?: number | null
   exchange_rate_date?: string | null
-  exchange_rate_stale: boolean
+  exchange_rate_status: ExchangeRateStatus
   renew_at?: string | null
   next_reminder_at?: string | null
   status: string
@@ -2576,7 +2580,8 @@ export type SubscriptionOverview = {
   renewal_due_14d_count: number
   renewal_due_30d_count: number
   budget_risk_count: number
-  exchange_rate_stale_count: number
+  current_missing_rate_count: number
+  current_stale_rate_count: number
   decision_attention_count: number
   missing_subscription_vps_count: number
   upcoming_renewals: SubscriptionRenewalQueueItem[]
@@ -2613,20 +2618,24 @@ export type SubscriptionStatistics = {
   budget_statuses: SubscriptionBudgetRecord[]
 }
 
-export type ExchangeRateFetchResult = {
-  quote_currency: string
-  base_currency: string
-  rate: number
-  rate_date?: string
-  error?: string
-}
+export type ExchangeRateStatus = 'identity' | 'fresh' | 'stale' | 'missing'
 
-export type ExchangeRateRefreshResult = {
+export type ExchangeRateRefreshStatus = 'idle' | 'queued' | 'running' | 'failed'
+
+export type ExchangeRatePairStatus = {
   provider: string
   base_currency: string
-  fetched_at: string
-  succeeded: ExchangeRateFetchResult[]
-  failed: ExchangeRateFetchResult[]
+  quote_currency: string
+  rate_status: ExchangeRateStatus
+  refresh_status: ExchangeRateRefreshStatus
+  last_attempt_at?: string
+  next_retry_at?: string
+  attempt_count: number
+  error_summary?: string
+}
+
+export type ExchangeRateStatusSnapshot = {
+  items: ExchangeRatePairStatus[]
 }
 
 export type SettingsUpdateInput = {
@@ -3051,10 +3060,17 @@ export type RecordImportQuarantine = {
   observed_at?: string
 }
 
+/** Server echo of the one subject chosen before dry-run. It is not an authorization snapshot. */
+export type RecordImportDestinationSubject = {
+  subject_kind: RecordSubjectKind
+  subject_id: string
+}
+
 export type RecordImportPlan = {
   plan_id: string
   job_state: string
   lock_version: number
+  destination_subject: RecordImportDestinationSubject
   remaps: RecordImportRemap[]
   quarantine: RecordImportQuarantine[]
   object_count: number
@@ -3844,4 +3860,42 @@ export type VPSFollowupRecord = {
   created_at: string
   updated_at: string
   resolved_at?: string | null
+}
+
+export type AccessUserSummary = {
+  user_id: string
+  username: string
+  display_name: string
+  role: string
+  is_supervisor: boolean
+  disabled_at: string | null
+  created_at: string
+}
+
+export type AccessGroupSummary = {
+  group_id: string
+  display_name: string
+}
+
+/** Normal rows are a flat user summary, including is_supervisor:false and disabled_at:null; missing is absent or false. Dangling rows are exactly { user_id, missing: true }. */
+export type AccessMemberSummary =
+  | { user_id: string; missing: true }
+  | AccessUserSummary
+
+export type CreateAccessUserInput = {
+  username: string
+  password: string
+  display_name: string
+}
+
+export type CreateAccessGroupInput = {
+  display_name: string
+}
+
+export type RenameAccessGroupInput = {
+  display_name: string
+}
+
+export type ResetAccessUserPasswordInput = {
+  password: string
 }

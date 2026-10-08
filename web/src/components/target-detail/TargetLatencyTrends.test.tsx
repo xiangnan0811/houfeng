@@ -94,7 +94,7 @@ describe('TargetLatencyTrends', () => {
       screen.getByRole('heading', { name: '近 24h 尚未配置探测' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('添加至少一种 ProbeItem 后才会产生延迟样本。'),
+      screen.getByText('添加至少一种探测项后才会产生延迟样本。'),
     ).toBeInTheDocument()
   })
 

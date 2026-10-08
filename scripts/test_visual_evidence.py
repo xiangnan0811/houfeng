@@ -68,6 +68,10 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         status, user = call_observability_api("/api/auth/me")
         self.assertEqual(status, 200)
         self.assertEqual(user["username"], "observability-evidence")
+        self.assertEqual(
+            user["runtime_capabilities"],
+            {"records": True, "comparison": True, "portability": True},
+        )
 
         status, settings = call_observability_api("/api/settings")
         self.assertEqual(status, 200)
@@ -165,6 +169,14 @@ class VisualEvidenceMockAPITest(unittest.TestCase):
         self.assertEqual(body["path"], "/api/vps")
 
     def test_asset_workflows_profile_still_serves_asset_routes(self) -> None:
+        status, user = call_asset_workflow_api("/api/auth/me")
+        self.assertEqual(status, 200)
+        self.assertEqual(user["username"], "visual-evidence")
+        self.assertEqual(
+            user["runtime_capabilities"],
+            {"records": True, "comparison": True, "portability": True},
+        )
+
         status, overview = call_asset_workflow_api(
             "/api/asset-decisions/overview",
             "view=needs_decision&renew_within_days=30",

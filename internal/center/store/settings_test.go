@@ -211,6 +211,38 @@ func TestCenterSettingsRepositoryGetSettingsReadsIPQualityEnabledLikeSyncPlan(t 
 		})
 	}
 }
+func TestCenterSettingsRepositoryGetSettingsPreservesExplicitFalseOverride(t *testing.T) {
+	t.Parallel()
+
+	persisted := centersettings.Default()
+	persisted.OverrideRules = centersettings.OverrideRules{
+		MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{{
+			Label: "core",
+			Overrides: centersettings.SettingsOverrideFields{
+				IncidentDefaults: &centersettings.IncidentDefaultsOverride{
+					NotifyOnStarted: new(false),
+				},
+			},
+		}},
+	}
+	repo := &PostgresSettingsRepository{db: fakeSettingsQueryer{
+		queryRow: func(context.Context, string, ...any) pgx.Row {
+			return fakeSettingsRow{scan: func(dest ...any) error {
+				scanCenterSettingsRow(dest, persisted)
+				return nil
+			}}
+		},
+	}}
+
+	got, err := repo.GetSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetSettings() error = %v", err)
+	}
+	override := got.OverrideRules.MonitoringInstanceLabels[0].Overrides.IncidentDefaults
+	if override == nil || override.NotifyOnStarted == nil || *override.NotifyOnStarted {
+		t.Fatalf("GetSettings() notify_on_started = %#v, want explicit false pointer", override)
+	}
+}
 
 type fakeSettingsQueryer struct {
 	queryRow func(context.Context, string, ...any) pgx.Row

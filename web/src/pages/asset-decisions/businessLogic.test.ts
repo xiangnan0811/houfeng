@@ -16,6 +16,7 @@ import {
   buildDecisionQueue,
   buildManualGroupProgress,
   buildPortfolioLead,
+  buildSecondaryNavItems,
   deriveClosedLoopMetrics,
   deriveNextWorkItems,
   filterDecisionQueue,
@@ -277,8 +278,8 @@ describe('Asset Decisions portfolio model', () => {
       .toEqual([expect.objectContaining({ kind: 'record_drift', title: '事实漂移记录' })])
   })
 
-  it('distinguishes a fully loaded stable portfolio from a partial evidence state', () => {
-    const stableMetrics: ClosedLoopMetrics = {
+  it('distinguishes a fully loaded scoped-empty portfolio from a partial evidence state', () => {
+    const emptyMetrics: ClosedLoopMetrics = {
       autoGroupCount: 0,
       manualActiveCount: 0,
       recordActiveCount: 0,
@@ -291,26 +292,48 @@ describe('Asset Decisions portfolio model', () => {
       partialErrorCount: 0,
     }
 
-    expect(buildPortfolioLead(
+    const lead = buildPortfolioLead(
       'needs_decision',
       30,
       portfolioOverview({ group_count: 0, top_groups: [] }),
       [],
       [],
-      stableMetrics,
+      emptyMetrics,
       [],
-    )).toMatchObject({
-      kind: 'stable',
-      title: '当前没有需要处理的组合决策',
-      riskLabel: '闭环稳定',
+    )
+    expect(lead).toMatchObject({
+      kind: 'scoped-empty',
+      tone: 'neutral',
+      title: '当前视图暂无组合决策',
+      contextLabel: '全局资产组合 · 需要决策 · 30 天续费窗口',
+      riskLabel: '无待处理决策',
     })
+    expect(lead.actionLabel).toBeUndefined()
+    expect(lead.title).not.toContain('健康')
+    expect(lead.title).not.toContain('稳定')
+    expect(lead.riskLabel).not.toBe('闭环稳定')
+    expect(lead.riskLabel).not.toBe('暂无异常')
+    expect(lead.riskLabel).toBe('无待处理决策')
+
+    const filteredLead = buildPortfolioLead(
+      'needs_decision',
+      30,
+      portfolioOverview({ group_count: 0, top_groups: [] }),
+      [],
+      [],
+      emptyMetrics,
+      [{ key: 'provider_id', label: '服务商', value: 'pv_001' }],
+    )
+    expect(filteredLead.contextLabel).toBe('服务商 pv_001')
+    expect(filteredLead.kind).toBe('scoped-empty')
+
     expect(buildPortfolioLead(
       'needs_decision',
       30,
       null,
       [],
       [],
-      { ...stableMetrics, partialErrorCount: 1 },
+      { ...emptyMetrics, partialErrorCount: 1 },
       [],
     )).toMatchObject({
       kind: 'work',
@@ -318,6 +341,75 @@ describe('Asset Decisions portfolio model', () => {
       title: '部分资产决策证据不可用',
       riskLabel: '证据待确认',
     })
+
+    const loadingLead = buildPortfolioLead(
+      'needs_decision',
+      30,
+      null,
+      [],
+      [],
+      emptyMetrics,
+      [],
+      true,
+    )
+    expect(loadingLead).toMatchObject({
+      kind: 'scoped-empty',
+      tone: 'neutral',
+      title: '正在评估组合决策…',
+      summary: '正在汇总决策组、执行回读与场景事实，请稍候…',
+      riskLabel: '读取中',
+    })
+    expect(loadingLead.title).not.toContain('暂无')
+    expect(loadingLead.title).not.toContain('健康')
+    expect(loadingLead.title).not.toContain('稳定')
+  })
+
+  it('guarantees secondary strip visible units and ensures loading/unavailable never collapse to zero', () => {
+    const loadingItems = buildSecondaryNavItems(
+      emptyRecordsState({ loading: true }),
+      emptyManualGroupsState({ loading: true }),
+      emptyTemplatesState({ loading: true }),
+      emptyQueueState({ renewalsLoading: true, queueLoading: true }),
+      0,
+      0,
+    )
+    expect(loadingItems[0]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '打开记录' })
+    expect(loadingItems[1]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '打开场景' })
+    expect(loadingItems[2]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '查看续费' })
+    expect(loadingItems[3]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '查看单台队列' })
+    for (const item of loadingItems) {
+      expect(item.meta).not.toContain('0')
+      expect(item.summary).not.toContain('无临近项')
+      expect(item.summary).not.toContain('暂无待处理')
+    }
+
+    const errorItems = buildSecondaryNavItems(
+      emptyRecordsState({ error: 'fail' }),
+      emptyManualGroupsState({ error: 'fail' }),
+      emptyTemplatesState({ error: 'fail' }),
+      emptyQueueState({ renewalsError: 'fail', queueError: 'fail' }),
+      0,
+      0,
+    )
+    expect(errorItems[0]).toMatchObject({ meta: '不可用', summary: '不可用', tone: 'alert' })
+    expect(errorItems[1]).toMatchObject({ meta: '不可用', summary: '部分不可用', tone: 'alert' })
+    expect(errorItems[2]).toMatchObject({ meta: '不可用', summary: '不可用', tone: 'alert' })
+    expect(errorItems[3]).toMatchObject({ meta: '不可用', summary: '不可用', tone: 'alert' })
+    for (const item of errorItems) {
+      expect(item.meta).not.toContain('0')
+      expect(item.summary).not.toContain('无临近项')
+      expect(item.summary).not.toContain('暂无待处理')
+    }
+
+    const loadedItems = buildSecondaryNavItems(
+      emptyRecordsState({ records: [savedRecord()] }),
+      emptyManualGroupsState({ groups: [manualSummary()] }),
+      emptyTemplatesState({ templates: [] }),
+      emptyQueueState({ renewals: [assetSubscription()] }),
+      1,
+      4,
+    )
+    expect(loadedItems.map((item) => item.meta)).toEqual(['1 条', '模板 0 个 · 组合 1 组', '1 条', '1 / 4 台'])
   })
 })
 
@@ -410,7 +502,9 @@ describe('Asset Decisions composed page model', () => {
       'renewals',
       'single_queue',
     ])
-    expect(model.secondaryNavItems[0]).toMatchObject({ meta: '不可用', tone: 'alert' })
+    expect(model.secondaryNavItems[0]).toMatchObject({ meta: '不可用', summary: '不可用', tone: 'alert' })
     expect(model.secondaryNavItems[1]).toMatchObject({ summary: '部分不可用', tone: 'alert' })
+    expect(model.secondaryNavItems[2]).toMatchObject({ meta: '1 条', summary: '有临近项', tone: 'notice' })
+    expect(model.secondaryNavItems[3]).toMatchObject({ meta: '2 / 3 台', summary: '可逐台处理', tone: 'notice' })
   })
 })

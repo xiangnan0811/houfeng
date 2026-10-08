@@ -328,6 +328,10 @@
 .record-tool__actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}
 .record-tool__list{margin:0;padding-left:1.2em;color:var(--text-secondary);font-size:13px;overflow-wrap:anywhere}
 .record-tool__target,.record-tool__message{margin:0;color:var(--text-secondary);font-size:13px}
+.record-import-destination{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.record-import-destination__notice{margin:0;color:var(--text-primary);font-size:14px;line-height:1.5}
+.record-import-destination__id{margin:0;color:var(--text-muted);font-size:12px;overflow-wrap:anywhere}
+.record-import-destination__id code{font-family:var(--font-mono);font-size:12px}
 /* 记录收件箱：同一面板内按行分隔的通知列表，未读以强调色圆点与标题字重区分。 */
 .record-inbox-list{margin:0;padding:0;list-style:none;border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-3);background:var(--panel-bg);overflow:hidden}
 .record-inbox-item{display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:start;gap:var(--space-2) var(--space-4);padding:var(--space-4);border-top:var(--border-w) solid var(--border-muted)}

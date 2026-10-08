@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,9 +18,11 @@ type SeedInitialUserOptions struct {
 	PasswordBcryptCost int
 }
 
-// SeedInitialUser creates the first admin user when the users table is empty.
-// On non-empty repositories it is a no-op. Validates username/password against
-// the package-level limits before any DB write.
+// SeedInitialUser creates the first supervisor account when the users table is
+// empty. On non-empty repositories it is a no-op. Concurrent initializers
+// converge on the persisted supervisor rather than replacing credentials.
+// Validates username/password against the package-level limits before any DB
+// write.
 func SeedInitialUser(ctx context.Context, users UserRepository, username, password, displayName string, now func() time.Time) error {
 	return SeedInitialUserWithOptions(ctx, users, SeedInitialUserOptions{
 		Username:    username,
@@ -58,7 +61,7 @@ func SeedInitialUserWithOptions(ctx context.Context, users UserRepository, opts 
 	if err != nil {
 		return err
 	}
-	id, err := newUserID()
+	id, err := NewUserID()
 	if err != nil {
 		return err
 	}
@@ -71,18 +74,31 @@ func SeedInitialUserWithOptions(ctx context.Context, users UserRepository, opts 
 	if displayName == "" {
 		displayName = username
 	}
-	return users.Create(ctx, User{
+	err = users.Create(ctx, User{
 		UserID:            id,
 		Username:          username,
 		PasswordHash:      hash,
 		DisplayName:       displayName,
 		Role:              RoleAdmin,
+		IsSupervisor:      true,
 		CreatedAt:         t,
 		PasswordChangedAt: t,
 	})
+	if errors.Is(err, ErrInitialUserAlreadyExists) {
+		return nil
+	}
+	if errors.Is(err, ErrUsernameTaken) {
+		existing, findErr := users.FindByUsername(ctx, username)
+		if findErr == nil && existing.Role == RoleAdmin && existing.IsSupervisor && existing.DisabledAt == nil {
+			return nil
+		}
+	}
+	return err
 }
 
-func newUserID() (string, error) {
+// NewUserID returns a user identifier with the established usr_ plus 24-hex
+// grammar used by persisted account and authorization records.
+func NewUserID() (string, error) {
 	var buf [12]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		return "", fmt.Errorf("read random: %w", err)

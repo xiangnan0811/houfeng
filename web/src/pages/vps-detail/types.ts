@@ -5,6 +5,7 @@ import type {
   AssetServiceStatus,
   AssetServiceType,
   CancellationPreview,
+  CreateVPSMonitoringInstanceInput,
   LifecycleActionResult,
   MonitoringInstanceRecord,
   ProviderRecord,
@@ -114,6 +115,7 @@ export type MonitoringInstanceCreateDraftState = {
   labels: string
   note: string
   linkNote: string
+  clearedFields: NonNullable<CreateVPSMonitoringInstanceInput['clear_fields']>
 }
 
 export type SubscriptionDraftState = {

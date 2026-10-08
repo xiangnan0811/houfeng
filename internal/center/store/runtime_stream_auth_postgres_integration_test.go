@@ -325,7 +325,7 @@ func runtimeStreamAuthMux(t *testing.T, fixture *runtimeStreamAuthFixture, valid
 		Version:                                "test",
 		AuthLoginHandler:                       handlers.Login(fixture.service),
 		AuthLogoutHandler:                      handlers.Logout(fixture.service),
-		AuthMeHandler:                          handlers.Me(fixture.service),
+		AuthMeHandler:                          handlers.Me(fixture.service, handlers.RuntimeCapabilities{}),
 		AuthChangePasswordHandler:              handlers.ChangePassword(fixture.service),
 		AuthMiddleware:                         authMiddleware,
 		MonitoringInstanceRuntimeStreamHandler: streamHandler,

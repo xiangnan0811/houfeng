@@ -3,6 +3,7 @@ import { type FormEvent } from 'react'
 import { Input } from '../../components/atoms'
 import type { VPSAssetDetail } from '../../lib/types'
 import type { MonitoringInstanceCreateDraftState } from './types'
+import { updateMonitoringInstanceCreateDraft } from './vpsDetailHelpers'
 
 type VPSMonitoringInstanceCreateFormProps = {
   formId: string
@@ -23,14 +24,15 @@ export function VPSMonitoringInstanceCreateForm({
   onFeedbackClear,
   onSubmit,
 }: VPSMonitoringInstanceCreateFormProps) {
-  function update<K extends keyof MonitoringInstanceCreateDraftState>(key: K, value: MonitoringInstanceCreateDraftState[K]) {
-    onDraftChange({ ...draft, [key]: value })
+  function update(key: Exclude<keyof MonitoringInstanceCreateDraftState, 'clearedFields'>, value: string) {
+    onDraftChange(updateMonitoringInstanceCreateDraft(draft, key, value))
     onFeedbackClear()
   }
 
   return (
     <form id={formId} className="vps-form" onSubmit={onSubmit} aria-busy={submitting}>
       <p className="vps-context">{detail.display_name}</p>
+      <p className="vps-context">区域、城市和服务商复制自当前 VPS。创建后为独立副本，之后修改 VPS 不会更新此监控实例。</p>
       <div className="vps-form-grid">
         <Input
           label="监控实例名称"
@@ -48,16 +50,19 @@ export function VPSMonitoringInstanceCreateForm({
           label="服务商"
           value={draft.provider}
           onChange={(event) => update('provider', event.target.value)}
+          placeholder="未知"
         />
         <Input
           label="区域"
           value={draft.region}
           onChange={(event) => update('region', event.target.value)}
+          placeholder="未知"
         />
         <Input
           label="城市"
           value={draft.city}
           onChange={(event) => update('city', event.target.value)}
+          placeholder="未知"
         />
         <Input
           label="标签"

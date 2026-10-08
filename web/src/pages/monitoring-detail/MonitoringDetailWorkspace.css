@@ -249,7 +249,6 @@
 .target-probe-table__config{color:var(--text-muted);font-size:var(--monitoring-detail-helper-size);line-height:1.35;overflow-wrap:anywhere}
 .target-probe-table__result{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 6px;min-width:0;color:var(--text-secondary);font-size:var(--monitoring-detail-helper-size-strong);line-height:1.4}
 .target-probe-table__muted{color:var(--text-muted)}
-.target-probe-table__error{color:var(--color-state-alert);overflow-wrap:anywhere}
 .target-probe-table__actions-cell{white-space:nowrap}
 .target-probe-table__actions{display:inline-flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}
 .target-detail-latency__meta{margin:0 0 8px}

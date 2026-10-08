@@ -27,6 +27,8 @@
       "src/styles/partials/legacy-targets.css"
     ],
     "settings-subscriptions": [
+      "src/pages/settings/AccessManagementSection.css",
+      "src/pages/settings/OverrideRulesSection.css",
       "src/styles/partials/legacy-subscriptions.css"
     ],
     "shared-atoms-page": [

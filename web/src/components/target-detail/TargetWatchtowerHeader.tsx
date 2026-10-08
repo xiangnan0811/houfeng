@@ -1,7 +1,8 @@
-import { Badge, Hostname } from '../atoms'
+import { Badge, Hostname, MonoDigits } from '../atoms'
 import { Button } from '../atoms/Button'
 import { formatLabelList } from '../../lib/format'
 import type { TargetRecord } from '../../lib/types'
+import { targetControlBadge, targetHealthBadge, targetTypePresentation } from '../../pages/targets/targetHelpers'
 import type { TargetRuntimeAction } from './TargetRuntimeControls'
 
 const RUNTIME_ACTION_BUTTONS_BY_RUN_STATUS: Record<
@@ -56,14 +57,9 @@ export function TargetWatchtowerHeader({
   const labelText = formatLabelList(target.labels)
   const execLabelText = formatLabelList(target.execution_monitoring_instance_labels)
   const runtimeActions = targetRuntimeActions(target)
-  const controlBadge =
-    target.lifecycle_status === 'retired'
-      ? { label: '已退役', tone: 'offline' as const }
-      : target.run_status === '维护中'
-      ? { label: '维护中', tone: 'maintenance' as const }
-      : target.run_status === '暂停'
-        ? { label: '暂停', tone: 'offline' as const }
-        : null
+  const controlBadge = targetControlBadge(target)
+  const healthBadge = targetHealthBadge(target)
+  const targetType = targetTypePresentation(target.target_type)
 
   return (
     <header className="target-detail-header" role="banner" aria-label="目标身份与操作">
@@ -73,12 +69,23 @@ export function TargetWatchtowerHeader({
           {controlBadge ? (
             <Badge variant="state" tone={controlBadge.tone}>{controlBadge.label}</Badge>
           ) : null}
+          {healthBadge ? (
+            <Badge variant="state" tone={healthBadge.tone}>{healthBadge.label}</Badge>
+          ) : null}
           {readOnly ? <span className="monitoring-detail-readonly">只读预览</span> : null}
         </div>
         <dl className="target-detail-identity">
           <div className="target-detail-identity__item">
             <dt>类型</dt>
-            <dd>{target.target_type}</dd>
+            <dd>
+              {targetType.label}
+              {targetType.raw ? (
+                <details>
+                  <summary>诊断信息</summary>
+                  <span>{targetType.raw}</span>
+                </details>
+              ) : null}
+            </dd>
           </div>
           <div className="target-detail-identity__item">
             <dt>主机</dt>
@@ -102,6 +109,14 @@ export function TargetWatchtowerHeader({
               <dd>{execLabelText}</dd>
             </div>
           ) : null}
+          <div className="target-detail-identity__item">
+            <dt>启用探测项</dt>
+            <dd><MonoDigits>{target.enabled_probe_count}</MonoDigits></dd>
+          </div>
+          <div className="target-detail-identity__item">
+            <dt>可接收实例</dt>
+            <dd><MonoDigits>{target.matching_executor_count}</MonoDigits></dd>
+          </div>
           <div className="target-detail-identity__item">
             <dt>ID</dt>
             <dd><Hostname truncate maxChars={14}>{target.target_id}</Hostname></dd>

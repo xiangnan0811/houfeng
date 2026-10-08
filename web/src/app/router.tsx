@@ -1,10 +1,12 @@
 import { createElement, lazy, Suspense, type ComponentType } from 'react'
-import { createBrowserRouter, Navigate, type RouteObject } from 'react-router-dom'
+import { createBrowserRouter, type RouteObject } from 'react-router-dom'
 
 import { AppShell } from './layout/AppShell'
 import { RequireAuth } from './RequireAuth'
+import { RuntimeCapabilityGate } from './RuntimeCapabilityGate'
 import { RouteErrorPage } from './RouteErrorPage'
 import { RouteModuleFallback } from './RouteModuleFallback'
+import { NotFoundPage } from './NotFoundPage'
 
 const assetDecisionsPage = lazy(() =>
   import('../pages/AssetDecisionsPage').then((module) => ({ default: module.AssetDecisionsPage })),
@@ -106,6 +108,18 @@ function routeElement(Component: ComponentType, loadingLabel: string) {
   )
 }
 
+function guardedRecordsRoute(
+  Component: ComponentType,
+  loadingLabel: string,
+  kind: 'records' | 'comparison' = 'records',
+) {
+  return (
+    <RuntimeCapabilityGate kind={kind}>
+      {routeElement(Component, loadingLabel)}
+    </RuntimeCapabilityGate>
+  )
+}
+
 export const appRoutes: RouteObject[] = [
   {
     path: '/login',
@@ -123,22 +137,22 @@ export const appRoutes: RouteObject[] = [
           { index: true, element: routeElement(dashboardPage, '正在加载工作台') },
           { path: 'vps', element: routeElement(vpsPage, '正在加载 VPS 库存') },
           { path: 'vps/:vpsId/ip-quality', element: routeElement(vpsIPQualityPage, '正在加载 IP 质量报告') },
-          { path: 'vps/:vpsId/activity', element: routeElement(subjectActivityPage, '正在加载 VPS 活动') },
-          { path: 'vps/:vpsId/records', element: routeElement(subjectRecordsPage, '正在加载 VPS 记录') },
-          { path: 'vps/:vpsId/evidence', element: routeElement(subjectEvidencePage, '正在加载 VPS 证据') },
+          { path: 'vps/:vpsId/activity', element: guardedRecordsRoute(subjectActivityPage, '正在加载 VPS 活动') },
+          { path: 'vps/:vpsId/records', element: guardedRecordsRoute(subjectRecordsPage, '正在加载 VPS 记录') },
+          { path: 'vps/:vpsId/evidence', element: guardedRecordsRoute(subjectEvidencePage, '正在加载 VPS 证据') },
           { path: 'vps/:vpsId', element: routeElement(vpsDetailPage, '正在加载 VPS 详情') },
           { path: 'archive', element: routeElement(archivePage, '正在加载归档资产') },
           { path: 'archive/:vpsId', element: routeElement(archiveDetailPage, '正在加载归档详情') },
           { path: 'providers', element: routeElement(providersPage, '正在加载服务商') },
-          { path: 'record-inbox', element: routeElement(recordInboxPage, '正在加载记录通知') },
-          { path: 'records', element: routeElement(recordSearchPage, '正在加载运维记录') },
-          { path: 'records/drafts', element: routeElement(recordDraftsPage, '正在加载记录草稿') },
-          { path: 'records/new', element: routeElement(recordNewPage, '正在加载新建记录') },
-          { path: 'records/compare', element: routeElement(recordComparisonPage, '正在加载横向比较') },
-          { path: 'records/:recordId/edit', element: routeElement(recordEditPage, '正在加载记录编辑') },
-          { path: 'records/:recordId/revisions/:revisionId', element: routeElement(recordRevisionPage, '正在加载历史修订') },
-          { path: 'records/:recordId', element: routeElement(recordDetailPage, '正在加载运维记录') },
-          { path: 'evidence/:evidenceId', element: routeElement(evidenceSnapshotPage, '正在加载证据快照') },
+          { path: 'record-inbox', element: guardedRecordsRoute(recordInboxPage, '正在加载记录通知') },
+          { path: 'records', element: guardedRecordsRoute(recordSearchPage, '正在加载运维记录') },
+          { path: 'records/drafts', element: guardedRecordsRoute(recordDraftsPage, '正在加载记录草稿') },
+          { path: 'records/new', element: guardedRecordsRoute(recordNewPage, '正在加载新建记录') },
+          { path: 'records/compare', element: guardedRecordsRoute(recordComparisonPage, '正在加载横向比较', 'comparison') },
+          { path: 'records/:recordId/edit', element: guardedRecordsRoute(recordEditPage, '正在加载记录编辑') },
+          { path: 'records/:recordId/revisions/:revisionId', element: guardedRecordsRoute(recordRevisionPage, '正在加载历史修订') },
+          { path: 'records/:recordId', element: guardedRecordsRoute(recordDetailPage, '正在加载运维记录') },
+          { path: 'evidence/:evidenceId', element: guardedRecordsRoute(evidenceSnapshotPage, '正在加载证据快照') },
           { path: 'subscriptions', element: routeElement(subscriptionsPage, '正在加载订阅') },
           {
             path: 'asset-decisions',
@@ -151,15 +165,15 @@ export const appRoutes: RouteObject[] = [
           },
           {
             path: 'monitoring/:monitoringInstanceId/activity',
-            element: routeElement(subjectActivityPage, '正在加载监控活动'),
+            element: guardedRecordsRoute(subjectActivityPage, '正在加载监控活动'),
           },
           {
             path: 'monitoring/:monitoringInstanceId/records',
-            element: routeElement(subjectRecordsPage, '正在加载监控记录'),
+            element: guardedRecordsRoute(subjectRecordsPage, '正在加载监控记录'),
           },
           {
             path: 'monitoring/:monitoringInstanceId/evidence',
-            element: routeElement(subjectEvidencePage, '正在加载监控证据'),
+            element: guardedRecordsRoute(subjectEvidencePage, '正在加载监控证据'),
           },
           {
             path: 'monitoring/:monitoringInstanceId',
@@ -168,15 +182,15 @@ export const appRoutes: RouteObject[] = [
           { path: 'targets', element: routeElement(targetsPage, '正在加载入口探测') },
           {
             path: 'targets/:targetId/activity',
-            element: routeElement(subjectActivityPage, '正在加载目标活动'),
+            element: guardedRecordsRoute(subjectActivityPage, '正在加载目标活动'),
           },
           {
             path: 'targets/:targetId/records',
-            element: routeElement(subjectRecordsPage, '正在加载目标记录'),
+            element: guardedRecordsRoute(subjectRecordsPage, '正在加载目标记录'),
           },
           {
             path: 'targets/:targetId/evidence',
-            element: routeElement(subjectEvidencePage, '正在加载目标证据'),
+            element: guardedRecordsRoute(subjectEvidencePage, '正在加载目标证据'),
           },
           {
             path: 'targets/:targetId',
@@ -185,7 +199,7 @@ export const appRoutes: RouteObject[] = [
           { path: 'events', element: routeElement(eventsPage, '正在加载事件时间线') },
           { path: 'command-audit', element: routeElement(commandAuditPage, '加载命令审计') },
           { path: 'settings', element: routeElement(settingsPage, '正在加载设置') },
-          { path: '*', element: <Navigate to="/" replace /> },
+          { path: '*', element: <NotFoundPage /> },
         ],
       },
     ],

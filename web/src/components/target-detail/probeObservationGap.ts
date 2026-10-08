@@ -18,7 +18,7 @@ export function describeProbeLatencyGap(
     return {
       kind: 'unconfigured',
       title: `${timeWindowLabel} 尚未配置探测`,
-      description: '添加至少一种 ProbeItem 后才会产生延迟样本。',
+      description: '添加至少一种探测项后才会产生延迟样本。',
     }
   }
 
@@ -27,7 +27,7 @@ export function describeProbeLatencyGap(
     return {
       kind: 'disabled',
       title: `${timeWindowLabel} 探测已停用`,
-      description: '所有 ProbeItem 当前均已停用，启用后才会采集延迟。',
+      description: '所有探测项当前均已停用，启用后才会采集延迟。',
     }
   }
 
@@ -44,7 +44,7 @@ export function describeProbeLatencyGap(
   return {
     kind: 'failure',
     title: `${timeWindowLabel} 无可用延迟样本`,
-    description: '窗口内有观测，但没有带 latency_ms 的成功样本。',
+    description: '窗口内有观测，但没有带延迟的成功样本。',
   }
 }
 

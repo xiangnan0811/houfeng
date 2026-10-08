@@ -85,6 +85,12 @@ func sessionUserRow(hash string, changedAt time.Time) fakeSessionRow {
 	return fakeSessionRow{scan: func(dest ...any) error {
 		*(dest[0].(*string)) = hash
 		*(dest[1].(*time.Time)) = changedAt
+		if len(dest) == 3 {
+			*(dest[2].(**time.Time)) = nil
+		} else {
+			*(dest[2].(*bool)) = false
+			*(dest[3].(**time.Time)) = nil
+		}
 		return nil
 	}}
 }
@@ -111,6 +117,8 @@ func sessionDetailsRow(userID string, issuedAt, lastSeenAt, expiresAt time.Time)
 func sessionPasswordChangedRow(changedAt time.Time) fakeSessionRow {
 	return fakeSessionRow{scan: func(dest ...any) error {
 		*(dest[0].(*time.Time)) = changedAt
+		*(dest[1].(*bool)) = false
+		*(dest[2].(**time.Time)) = nil
 		return nil
 	}}
 }
@@ -120,6 +128,7 @@ func sessionValidationRow(issuedAt, expiresAt, passwordChangedAt time.Time) fake
 		*(dest[0].(*time.Time)) = issuedAt
 		*(dest[1].(*time.Time)) = expiresAt
 		*(dest[2].(*time.Time)) = passwordChangedAt
+		*(dest[3].(**time.Time)) = nil
 		return nil
 	}}
 }

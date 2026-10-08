@@ -160,8 +160,11 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 		if row.MonthlyPriceBase == nil {
 			overview.CurrentUnknownAmountCount++
 		}
-		if row.ExchangeRateStale {
-			overview.ExchangeRateStaleCount++
+		switch row.ExchangeRateStatus {
+		case ExchangeRateStatusMissing:
+			overview.CurrentMissingRateCount++
+		case ExchangeRateStatusStale:
+			overview.CurrentStaleRateCount++
 		}
 		if isDecisionAttention(row) {
 			overview.DecisionAttentionCount++
@@ -381,70 +384,6 @@ func (s *Service) hydrateBudget(ctx context.Context, budget BudgetRecord) (Budge
 	}
 	budgets := applyBudgetSpend(rows, []BudgetRecord{budget}, settings.BaseCurrency)
 	return budgets[0], nil
-}
-
-func (s *Service) RefreshExchangeRates(ctx context.Context) (ExchangeRateRefreshResult, error) {
-	settings, err := s.GetSettings(ctx)
-	if err != nil {
-		return ExchangeRateRefreshResult{}, err
-	}
-	provider := s.providers[settings.ExchangeRateProvider]
-	if provider == nil {
-		return ExchangeRateRefreshResult{}, fmt.Errorf("%w: exchange rate provider is not configured", ErrInvalidInput)
-	}
-
-	currencies, err := s.repo.ListActiveCurrencies(ctx)
-	if err != nil {
-		return ExchangeRateRefreshResult{}, fmt.Errorf("list active subscription currencies: %w", err)
-	}
-
-	now := s.now().UTC()
-	result := ExchangeRateRefreshResult{
-		Provider:     settings.ExchangeRateProvider,
-		BaseCurrency: settings.BaseCurrency,
-		FetchedAt:    now,
-		Succeeded:    []ExchangeRateFetchResult{},
-		Failed:       []ExchangeRateFetchResult{},
-	}
-	for _, currency := range currencies {
-		currency = strings.ToUpper(strings.TrimSpace(currency))
-		if currency == "" || currency == settings.BaseCurrency {
-			continue
-		}
-		fetched, err := provider.FetchRate(ctx, currency, settings.BaseCurrency)
-		if err != nil {
-			result.Failed = append(result.Failed, ExchangeRateFetchResult{
-				QuoteCurrency: currency,
-				BaseCurrency:  settings.BaseCurrency,
-				Error:         sanitizeProviderError(err),
-			})
-			continue
-		}
-		if _, err := s.repo.UpsertExchangeRate(ctx, ExchangeRateUpsert{
-			Provider:      settings.ExchangeRateProvider,
-			BaseCurrency:  settings.BaseCurrency,
-			QuoteCurrency: currency,
-			Rate:          fetched.Rate,
-			RateDate:      fetched.RateDate,
-			FetchedAt:     now,
-		}); err != nil {
-			result.Failed = append(result.Failed, ExchangeRateFetchResult{
-				QuoteCurrency: currency,
-				BaseCurrency:  settings.BaseCurrency,
-				Rate:          fetched.Rate,
-				RateDate:      fetched.RateDate,
-				Error:         "store exchange rate failed",
-			})
-			continue
-		}
-		result.Succeeded = append(result.Succeeded, ExchangeRateFetchResult{
-			QuoteCurrency: currency,
-			BaseCurrency:  settings.BaseCurrency,
-			Rate:          fetched.Rate,
-			RateDate:      fetched.RateDate,
-		})
-	}
-	return result, nil
 }
 
 func subscriptionDay(now time.Time) subscriptions.Date {
@@ -724,19 +663,19 @@ func budgetStatusForMonthlySpend(monthlyCost float64, monthlyLimit *float64, war
 
 func renewalQueueItem(row CostRow) RenewalQueueItem {
 	return RenewalQueueItem{
-		SubscriptionID:    row.SubscriptionID,
-		VPSID:             row.VPSID,
-		VPSDisplayName:    row.VPSDisplayName,
-		DisplayName:       row.DisplayName,
-		ProviderName:      row.ProviderName,
-		RenewAt:           row.RenewAt,
-		MonthlyPriceBase:  row.MonthlyPriceBase,
-		YearlyPriceBase:   row.YearlyPriceBase,
-		BaseCurrency:      row.BaseCurrency,
-		Currency:          row.Currency,
-		RenewalDecision:   row.RenewalDecision,
-		LifecycleStatus:   row.LifecycleStatus,
-		ExchangeRateStale: row.ExchangeRateStale,
+		SubscriptionID:     row.SubscriptionID,
+		VPSID:              row.VPSID,
+		VPSDisplayName:     row.VPSDisplayName,
+		DisplayName:        row.DisplayName,
+		ProviderName:       row.ProviderName,
+		RenewAt:            row.RenewAt,
+		MonthlyPriceBase:   row.MonthlyPriceBase,
+		YearlyPriceBase:    row.YearlyPriceBase,
+		BaseCurrency:       row.BaseCurrency,
+		Currency:           row.Currency,
+		RenewalDecision:    row.RenewalDecision,
+		LifecycleStatus:    row.LifecycleStatus,
+		ExchangeRateStatus: row.ExchangeRateStatus,
 	}
 }
 
@@ -792,14 +731,16 @@ func sanitizeProviderError(err error) string {
 	if err == nil {
 		return ""
 	}
-	message := sensitiveProviderErrorPattern.ReplaceAllString(err.Error(), "$1=[redacted]")
+	message := sensitiveProviderURLPattern.ReplaceAllString(err.Error(), "[provider request redacted]")
+	message = sensitiveProviderErrorPattern.ReplaceAllString(message, "$1=[redacted]")
 	if len(message) > 160 {
 		message = message[:160]
 	}
 	return message
 }
 
-var sensitiveProviderErrorPattern = regexp.MustCompile(`(?i)\b(access_key|api[_-]?key|apikey|token)=([^&\s]+)`)
+var sensitiveProviderURLPattern = regexp.MustCompile(`(?i)\bhttps?://[^\s]+`)
+var sensitiveProviderErrorPattern = regexp.MustCompile(`(?i)\b(access[_ -]?key|api[_ -]?key|apikey|token)\s*[:=]\s*[^\s,]+`)
 
 func MapSettingsError(err error) error {
 	if errors.Is(err, centersettings.ErrInvalidSettings) {

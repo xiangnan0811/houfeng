@@ -282,6 +282,17 @@ func verifyExactAppACLCurrentInTx(
 	if err := dependencies.rejectLegacy(ctx, tx, priorSource.sources, priorVerifier.Contract, migratorRole); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
+	if shape.kind == appACLCurrentManifestShapePredecessor {
+		// The serializable snapshot is established before the transaction
+		// advisory lock can wait. PostgreSQL ACL privilege helpers may then
+		// observe a concurrently committed successor grant even while the
+		// manifest/ledger reads remain on the predecessor snapshot. Locking the
+		// singleton head here makes that state change a serialization failure
+		// before strict predecessor ACL verification can report false drift.
+		if _, err := dependencies.readHeadForUpdate(ctx, tx); err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("lock current APP manifest head before predecessor catalog verification: %w", err)
+		}
+	}
 	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, priorVerifier, dependencies); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}

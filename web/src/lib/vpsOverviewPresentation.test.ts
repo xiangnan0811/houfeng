@@ -3,6 +3,9 @@ import type { VPSOverview } from './types'
 
 import {
   overviewAnomalyDetailLabel,
+  overviewAnomalyDetailPresentation,
+  overviewMonitoringSupportingPresentation,
+  overviewSummaryDetailPresentation,
   overviewAnomalySourceLabel,
   overviewIPQualityActionLabel,
   overviewLifecycleLabel,
@@ -14,6 +17,7 @@ import {
   overviewSameAssetActionTitle,
   overviewSummaryCellLabel,
   overviewSummaryDetailLabel,
+  overviewUnmatchedStatus,
   overviewUsageLabel,
 } from './vpsOverviewPresentation'
 
@@ -55,14 +59,26 @@ describe('vpsOverviewPresentation', () => {
   it('maps classified summary and anomaly details without leaking machine tokens', () => {
     expect(overviewSummaryDetailLabel('ip_quality', 'partial')).toBe('采集不完整')
     expect(overviewSummaryDetailLabel('ip_quality', 'high')).toBe('高风险')
-    expect(overviewSummaryDetailLabel('renewal', 'to_cancel')).toBe('to_cancel')
     expect(overviewLifecycleLabel('archived')).toBe('已归档')
     expect(overviewAnomalyDetailLabel('lifecycle.blocker.v1', 'archived')).toBe('已归档')
     expect(overviewAnomalyDetailLabel('ip_quality.risk.elevated.v1', 'high')).toBe('高风险')
     expect(overviewAnomalyDetailLabel('source.unavailable.v1', 'ip_quality, monitoring, renewal'))
       .toBe('IP 质量、监控、续费')
-    expect(overviewAnomalyDetailLabel('monitoring.health.abnormal.v1', 'probe timeout')).toBe('probe timeout')
-    expect(overviewSummaryDetailLabel('monitoring', 'tcp connect failed')).toBe('tcp connect failed')
+    expect(overviewAnomalyDetailLabel('monitoring.health.abnormal.v1', 'probe timeout')).toBe('')
+    expect(overviewAnomalyDetailPresentation('monitoring.health.abnormal.v1', 'probe timeout').diagnostics
+      .map((item) => item.detail)).toEqual(['probe timeout'])
+    const arbitraryDetail = '心跳上报延迟 https://status.example/delay'
+    const foldedDetail = overviewAnomalyDetailPresentation('monitoring.health.abnormal.v1', arbitraryDetail)
+    expect(foldedDetail.summary ?? '').not.toContain(arbitraryDetail)
+    expect(foldedDetail.diagnostics.map((item) => item.detail)).toContain(arbitraryDetail)
+    expect(overviewSummaryCellLabel('monitoring', '心跳超时 https://status.example/down')).toBe('状态未知')
+    expect(overviewUnmatchedStatus('monitoring', '心跳超时 https://status.example/down'))
+      .toBe('心跳超时 https://status.example/down')
+    expect(overviewAnomalyDetailLabel('monitoring.health.abnormal.v1', '心跳超时 https://status.example/down')).toBe('')
+    expect(overviewSummaryDetailLabel('monitoring', 'tcp connect failed')).toBe('')
+    expect(overviewSummaryDetailPresentation('monitoring', 'tcp connect failed').diagnostics)
+      .toEqual([{ label: '监控详情', detail: 'tcp connect failed' }])
+    expect(overviewSummaryDetailLabel('renewal', 'to_cancel')).toBe('')
     expect(overviewSummaryDetailLabel('ip_quality', 'ip_quality_disabled_has_history'))
       .toBe('存在历史报告（当前未启用）')
   })
@@ -124,10 +140,18 @@ describe('vpsOverviewPresentation', () => {
     expect(overviewMonitoringSupportingDetail('', '正常', 1)).toBe('1个实例')
   })
 
-  it('composes relation count with independent monitoring issue detail', () => {
-    expect(overviewMonitoringSupportingDetail('心跳上报延迟', '关注', 1)).toBe('1个实例 · 心跳上报延迟')
-    expect(overviewMonitoringSupportingDetail('probe timeout', '正常', 2)).toBe('2个实例 · probe timeout')
-    expect(overviewMonitoringSupportingDetail('心跳上报延迟', '关注')).toBe('心跳上报延迟')
+  it('keeps a known instance count outside an arbitrary monitoring detail', () => {
+    const raw = '心跳上报延迟 https://status.example/down'
+    const counted = overviewMonitoringSupportingPresentation(raw, '关注', 1)
+    expect(counted.text).toBe('1个实例')
+    expect(counted.text).not.toContain(raw)
+    expect(counted.diagnostics.map((item) => item.detail)).toContain(raw)
+    const bare = overviewMonitoringSupportingPresentation(raw, '关注')
+    expect(bare.text).not.toContain(raw)
+    expect(bare.diagnostics.map((item) => item.detail)).toContain(raw)
+    expect(overviewMonitoringSupportingDetail('probe timeout', '正常', 2)).toBe('2个实例')
+    expect(overviewMonitoringSupportingPresentation('probe timeout', '正常', 2).diagnostics
+      .map((item) => item.detail)).toEqual(['probe timeout'])
   })
 
   it('names IP quality destinations from known report, history, or missing evidence', () => {

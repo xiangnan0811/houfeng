@@ -16,6 +16,7 @@ type RouterOptions struct {
 	CommandAuditsHandler                          stdhttp.Handler
 	IncidentsHandler                              stdhttp.Handler
 	SettingsHandler                               stdhttp.Handler
+	AccessAdminHandler                            stdhttp.Handler
 	RecordsEnabled                                bool
 	ComparisonEnabled                             bool
 	PortabilityEnabled                            bool
@@ -78,6 +79,7 @@ type RouterOptions struct {
 	SubscriptionStatisticsHandler                 stdhttp.Handler
 	SubscriptionSettingsHandler                   stdhttp.Handler
 	SubscriptionExchangeRateRefreshHandler        stdhttp.Handler
+	SubscriptionExchangeRateStatusHandler         stdhttp.Handler
 	SubscriptionBudgetsHandler                    stdhttp.Handler
 	SubscriptionMonthlyBudgetsHandler             stdhttp.Handler
 	MonitoringInstancesCollectionHandler          stdhttp.Handler
@@ -154,6 +156,19 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.AuthChangePasswordHandler != nil {
 		mux.Handle("/api/auth/password", opts.AuthChangePasswordHandler)
+	}
+
+	if opts.AccessAdminHandler != nil {
+		handler := protect(opts.AccessAdminHandler)
+		mux.Handle("/api/admin/users", handler)
+		mux.Handle("/api/admin/users/{id}/disable", handler)
+		mux.Handle("/api/admin/users/{id}/enable", handler)
+		mux.Handle("/api/admin/users/{id}/reset-password", handler)
+		mux.Handle("/api/admin/record-access-groups", handler)
+		mux.Handle("/api/admin/record-access-groups/{id}", handler)
+		mux.Handle("/api/admin/record-access-groups/{id}/members", handler)
+		mux.Handle("/api/admin/record-access-groups/{id}/members/{user_id}", handler)
+		mux.Handle("/api/record-access-groups/mine", handler)
 	}
 
 	if opts.DashboardHandler != nil {
@@ -452,6 +467,9 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.SubscriptionExchangeRateRefreshHandler != nil {
 		mux.Handle("/api/subscriptions/exchange-rates/refresh", protect(opts.SubscriptionExchangeRateRefreshHandler))
+	}
+	if opts.SubscriptionExchangeRateStatusHandler != nil {
+		mux.Handle("/api/subscriptions/exchange-rates/status", protect(opts.SubscriptionExchangeRateStatusHandler))
 	}
 	if opts.SubscriptionBudgetsHandler != nil {
 		mux.Handle("/api/subscription-budgets", protect(opts.SubscriptionBudgetsHandler))

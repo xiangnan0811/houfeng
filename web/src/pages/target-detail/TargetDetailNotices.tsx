@@ -5,7 +5,7 @@ import { Button } from '../../components/atoms/Button'
 import { MonoDigits } from '../../components/atoms/Mono'
 import { formatElapsedSince } from '../../lib/format'
 import type { ActiveIncidentRecord, TargetRecord } from '../../lib/types'
-import { isCoverageGapTarget } from '../targets/targetHelpers'
+import { targetCoverageNotices } from '../targets/targetHelpers'
 
 type NoticeTone = ObservabilityTone
 
@@ -114,15 +114,15 @@ export function TargetDetailNotices({
       ),
     })
   }
-  if (isCoverageGapTarget(target) && target.current_active_incident_count === 0) {
+  for (const notice of targetCoverageNotices(target)) {
     rows.push({
-      key: 'coverage',
+      key: notice.key,
       node: (
         <NoticeRow
           tone="notice"
-          mark="覆盖缺口"
-          title="缺少执行监控实例标签"
-          detail="探测覆盖边界不明确"
+          mark="执行覆盖"
+          title={notice.title}
+          detail={notice.detail}
         />
       ),
     })

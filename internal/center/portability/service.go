@@ -68,6 +68,7 @@ type Options struct {
 	Importer        DocumentImporter
 	EvidenceImports EvidenceImporter
 	Kinds           KindSource
+	Subjects        records.SubjectAdapterRegistry
 	Attachments     AttachmentSource
 	AttachmentBlobs attachments.BlobStore
 	Rebuilder       ImportProjectionRebuilder
@@ -90,6 +91,7 @@ type Service struct {
 	importer        DocumentImporter
 	evidenceImports EvidenceImporter
 	kinds           KindSource
+	subjects        records.SubjectAdapterRegistry
 	attachments     AttachmentSource
 	attachmentBlobs attachments.BlobStore
 	rebuilder       ImportProjectionRebuilder
@@ -109,6 +111,7 @@ type cachedImportPlan struct {
 	actorID       string
 	expiresAt     time.Time
 	archiveDigest [32]byte
+	destination   records.SubjectReference
 	documents     []store.ImportDocumentPlan
 	evidence      []importedEvidencePlan
 	attachments   []importedAttachmentPlan
@@ -155,6 +158,7 @@ func NewService(options Options) (*Service, error) {
 		importer:        options.Importer,
 		evidenceImports: options.EvidenceImports,
 		kinds:           options.Kinds,
+		subjects:        options.Subjects,
 		attachments:     options.Attachments,
 		attachmentBlobs: options.AttachmentBlobs,
 		rebuilder:       options.Rebuilder,

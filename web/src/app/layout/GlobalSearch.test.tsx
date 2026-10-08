@@ -1,5 +1,5 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { act, createEvent, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { MemoryRouter, useLocation } from 'react-router-dom'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 import { GlobalSearch } from './GlobalSearch'
@@ -87,6 +87,8 @@ const mockTargets = [
     note: '',
     current_health_status: '正常',
     current_active_incident_count: 0,
+    enabled_probe_count: 1,
+    matching_executor_count: 1,
     current_primary_issue_summary: '',
     created_at: '2026-04-20T00:00:00Z',
     updated_at: '2026-04-30T08:00:00Z',
@@ -130,6 +132,19 @@ const mockSubscriptions = [
   },
 ] as Awaited<ReturnType<typeof api.listSubscriptions>>
 
+
+function Pathname() {
+  const pathname = useLocation().pathname
+  return <div data-testid="pathname">{pathname}</div>
+}
+
+/** jsdom does not submit a form from Enter; a real field does unless the key is cancelled. */
+function pressEnter(input: HTMLElement) {
+  const event = createEvent.keyDown(input, { key: 'Enter' })
+  fireEvent(input, event)
+  if (!event.defaultPrevented) fireEvent.submit(input.closest('form')!)
+}
+
 describe('GlobalSearch', () => {
   beforeEach(() => {
     vi.spyOn(api, 'listVPSAssets').mockResolvedValue(mockVPS)
@@ -138,7 +153,12 @@ describe('GlobalSearch', () => {
     vi.spyOn(api, 'listProviders').mockResolvedValue(mockProviders)
     vi.spyOn(api, 'listSubscriptions').mockResolvedValue(mockSubscriptions)
     searchRecordsForGlobalSearch.mockReset()
-    searchRecordsForGlobalSearch.mockResolvedValue([])
+    searchRecordsForGlobalSearch.mockResolvedValue({ matches: [], error: null })
+    vi.mocked(api.listVPSAssets).mockClear()
+    vi.mocked(api.listMonitoringInstances).mockClear()
+    vi.mocked(api.listTargets).mockClear()
+    vi.mocked(api.listProviders).mockClear()
+    vi.mocked(api.listSubscriptions).mockClear()
   })
 
   it('advertises the keyboard shortcut and focuses the field on Ctrl+K', async () => {
@@ -167,6 +187,23 @@ describe('GlobalSearch', () => {
     expect(screen.getByText('支持检索范围')).toBeInTheDocument()
     expect(screen.getByText(/VPS · 监控实例 · 入口探测 · 服务商 · 订阅 · 运维记录/)).toBeInTheDocument()
     expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+  })
+
+  it('does not import or describe record search when records are disabled', async () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch recordsEnabled={false} />
+      </MemoryRouter>,
+    )
+    const input = screen.getByLabelText('全局搜索')
+    expect(input).toHaveAttribute('placeholder', '搜索 VPS、IP…')
+    fireEvent.focus(input)
+    expect(screen.getByText('VPS · 监控实例 · 入口探测 · 服务商 · 订阅')).toBeInTheDocument()
+    expect(screen.queryByText(/运维记录/)).not.toBeInTheDocument()
+    fireEvent.change(input, { target: { value: 'tokyo' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(screen.getByText('Tokyo VPS')).toBeInTheDocument())
+    expect(searchRecordsForGlobalSearch).not.toHaveBeenCalled()
   })
 
   it('matches records across assets and observation objects with grouped links', async () => {
@@ -225,7 +262,7 @@ describe('GlobalSearch', () => {
   })
 
   it('groups records beside the assets and links each hit to its record', async () => {
-    searchRecordsForGlobalSearch.mockResolvedValue([recordHit])
+    searchRecordsForGlobalSearch.mockResolvedValue({ matches: [recordHit], error: null })
     render(
       <MemoryRouter>
         <GlobalSearch />
@@ -246,10 +283,13 @@ describe('GlobalSearch', () => {
   })
 
   it('offers the way through to the full records result set', async () => {
-    searchRecordsForGlobalSearch.mockResolvedValue([
-      recordHit,
-      { id: '__all__', label: '查看全部匹配记录', hint: '磁盘', to: '/records?q=%E7%A3%81%E7%9B%98' },
-    ])
+    searchRecordsForGlobalSearch.mockResolvedValue({
+      matches: [
+        recordHit,
+        { id: '__all__', label: '查看全部匹配记录', hint: '磁盘', to: '/records?q=%E7%A3%81%E7%9B%98' },
+      ],
+      error: null,
+    })
     render(
       <MemoryRouter>
         <GlobalSearch />
@@ -265,7 +305,7 @@ describe('GlobalSearch', () => {
   })
 
   it('finds a record when no asset matches the query', async () => {
-    searchRecordsForGlobalSearch.mockResolvedValue([recordHit])
+    searchRecordsForGlobalSearch.mockResolvedValue({ matches: [recordHit], error: null })
     render(
       <MemoryRouter>
         <GlobalSearch />
@@ -281,7 +321,7 @@ describe('GlobalSearch', () => {
 
   it('reports an asset failure without hiding the records that did answer', async () => {
     vi.spyOn(api, 'listVPSAssets').mockRejectedValue(new Error('inventory unavailable'))
-    searchRecordsForGlobalSearch.mockResolvedValue([recordHit])
+    searchRecordsForGlobalSearch.mockResolvedValue({ matches: [recordHit], error: null })
     render(
       <MemoryRouter>
         <GlobalSearch />
@@ -292,7 +332,9 @@ describe('GlobalSearch', () => {
     fireEvent.submit(input.closest('form')!)
 
     await waitFor(() => expect(screen.getByText('东京节点磁盘 IO 抖动')).toBeInTheDocument())
-    expect(screen.getByText('inventory unavailable')).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('资产搜索暂不可用')
+    expect(screen.queryByText('inventory unavailable')).not.toBeInTheDocument()
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
   })
 
   it('ignores an earlier search that resolves after a later one', async () => {
@@ -308,6 +350,7 @@ describe('GlobalSearch', () => {
     const input = screen.getByLabelText('全局搜索')
     fireEvent.change(input, { target: { value: 'blog.example' } })
     fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(releaseFirst).toBeTypeOf('function'))
     fireEvent.change(input, { target: { value: 'hetzner' } })
     fireEvent.submit(input.closest('form')!)
 
@@ -369,13 +412,19 @@ describe('GlobalSearch', () => {
     fireEvent.focus(input)
     expect(screen.getByText('支持检索范围')).toBeInTheDocument()
 
+    fireEvent.change(input, { target: { value: '   ' } })
     fireEvent.submit(input.closest('form')!)
     expect(input).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByText('支持检索范围')).toBeInTheDocument()
     expect(screen.getByRole('status')).toHaveTextContent('请输入搜索关键词')
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+    expect(api.listVPSAssets).not.toHaveBeenCalled()
+    expect(searchRecordsForGlobalSearch).not.toHaveBeenCalled()
 
     fireEvent.change(input, { target: { value: 'tokyo' } })
     expect(screen.queryByText(/请输入搜索关键词/)).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('按 Enter 搜索')
+    expect(api.listVPSAssets).not.toHaveBeenCalled()
   })
 
   it('closes popup and clears painted help when focus leaves the search widget (focusleave)', () => {
@@ -456,5 +505,261 @@ describe('GlobalSearch', () => {
     // 触屏点空白处未必移走焦点：组件主动失焦，窄屏展开的搜索框随之收回。
     fireEvent.pointerDown(screen.getByText('页面空白'))
     expect(input).not.toHaveFocus()
+  })
+
+  it('drops the previous list as soon as the query changes and Enter searches the new text', async () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+        <Pathname />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.change(input, { target: { value: 'blog.example' } })
+    fireEvent.submit(input.closest('form')!)
+    const blog = await screen.findByRole('option', { name: /Blog/ })
+    expect(blog).toHaveAttribute('aria-selected', 'true')
+    expect(input).toHaveAttribute('aria-activedescendant', blog.id)
+
+    fireEvent.change(input, { target: { value: '不存在的新词' } })
+    expect(screen.queryByRole('option')).not.toBeInTheDocument()
+    expect(screen.queryByText('Blog')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('按 Enter 搜索')
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+
+    pressEnter(input)
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/')
+    await waitFor(() => expect(screen.getByText('没有匹配项')).toBeInTheDocument())
+    expect(screen.queryByText('Blog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('option')).not.toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/')
+  })
+
+  it('submits the edited query instead of activating the focused result from the previous one', async () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+        <Pathname />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.change(input, { target: { value: 'blog.example' } })
+    fireEvent.submit(input.closest('form')!)
+    await screen.findByRole('option', { name: /Blog/ })
+
+    fireEvent.change(input, { target: { value: 'hetzner' } })
+    pressEnter(input)
+
+    const first = await screen.findByRole('option', { name: /Tokyo VPS/ })
+    expect(first).toHaveAttribute('aria-selected', 'true')
+    expect(input).toHaveAttribute('aria-activedescendant', first.id)
+    expect(screen.getAllByRole('option').some((option) => option.getAttribute('href') === '/providers')).toBe(true)
+    expect(screen.queryByRole('option', { name: /Blog/ })).not.toBeInTheDocument()
+    expect(screen.getByTestId('pathname')).toHaveTextContent('/')
+  })
+
+  it('ignores a response for the query that was replaced before it returned', async () => {
+    let releaseFirst: ((value: Awaited<ReturnType<typeof api.listVPSAssets>>) => void) | undefined
+    vi.spyOn(api, 'listVPSAssets').mockImplementationOnce(
+      () => new Promise((resolve) => { releaseFirst = resolve }),
+    )
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'blog.example' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(releaseFirst).toEqual(expect.any(Function)))
+    fireEvent.change(input, { target: { value: 'hetzner' } })
+
+    expect(screen.queryByRole('option')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('按 Enter 搜索')
+    await act(async () => { releaseFirst?.(mockVPS) })
+    expect(screen.queryByText('Blog')).not.toBeInTheDocument()
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('按 Enter 搜索')
+  })
+
+  it('shows a source as soon as it succeeds and keeps it when the other fails', async () => {
+    let releaseRecords: ((value: { matches: typeof recordHit[]; error: string | null }) => void) | undefined
+    searchRecordsForGlobalSearch.mockImplementation(
+      () => new Promise((resolve) => { releaseRecords = resolve }),
+    )
+    vi.spyOn(api, 'listVPSAssets').mockRejectedValue(new Error('inventory unavailable'))
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.change(input, { target: { value: 'tokyo' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('资产搜索暂不可用'))
+    expect(screen.queryByText('inventory unavailable')).not.toBeInTheDocument()
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+    expect(screen.queryByText('东京节点磁盘 IO 抖动')).not.toBeInTheDocument()
+
+    releaseRecords?.({ matches: [recordHit], error: null })
+    await waitFor(() => expect(screen.getByText('东京节点磁盘 IO 抖动')).toBeInTheDocument())
+    expect(screen.getByRole('alert')).toHaveTextContent('资产搜索暂不可用')
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+  })
+
+  it('keeps asset matches when record search fails later', async () => {
+    let releaseRecords: ((reason?: unknown) => void) | undefined
+    searchRecordsForGlobalSearch.mockImplementation(
+      () => new Promise((_resolve, reject) => { releaseRecords = reject }),
+    )
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.change(input, { target: { value: 'tokyo' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(screen.getByText('Tokyo VPS')).toBeInTheDocument())
+    expect(screen.getByText('正在加载…')).toBeInTheDocument()
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+
+    releaseRecords?.(new Error('index offline'))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('运维记录搜索暂不可用'))
+    expect(screen.getByText('Tokyo VPS')).toBeInTheDocument()
+    expect(screen.queryByText('index offline')).not.toBeInTheDocument()
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+  })
+
+  it('does not treat a failed source with no rows as an empty successful search', async () => {
+    vi.spyOn(api, 'listVPSAssets').mockRejectedValue(new Error('inventory unavailable'))
+    searchRecordsForGlobalSearch.mockResolvedValue({ matches: [], error: 'index offline raw' })
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.change(input, { target: { value: 'zzznever' } })
+    fireEvent.submit(input.closest('form')!)
+
+    await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(2))
+    expect(screen.getByText('资产搜索暂不可用')).toBeInTheDocument()
+    expect(screen.getByText('运维记录搜索暂不可用')).toBeInTheDocument()
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+    expect(screen.queryByText('inventory unavailable')).not.toBeInTheDocument()
+    expect(screen.queryByText('index offline raw')).not.toBeInTheDocument()
+  })
+
+  it('distinguishes an unsubmitted query from a finished search that matched nothing', async () => {
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'zzznever' } })
+    expect(screen.getByRole('status')).toHaveTextContent('按 Enter 搜索')
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+    expect(screen.queryByText('支持检索范围')).not.toBeInTheDocument()
+    expect(api.listVPSAssets).not.toHaveBeenCalled()
+    expect(searchRecordsForGlobalSearch).not.toHaveBeenCalled()
+
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(screen.getByText('没有匹配项')).toBeInTheDocument())
+    expect(screen.queryByText('按 Enter 搜索')).not.toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: 'zzznever!' } })
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('按 Enter 搜索')
+  })
+
+  it('clears a finished search when the field is emptied and does not restore it on focus', async () => {
+    searchRecordsForGlobalSearch.mockResolvedValue({ matches: [recordHit], error: null })
+    render(
+      <MemoryRouter>
+        <GlobalSearch />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.focus(input)
+    fireEvent.change(input, { target: { value: 'tokyo' } })
+    fireEvent.submit(input.closest('form')!)
+    await screen.findByText('Tokyo VPS')
+    expect(screen.getByText('东京节点磁盘 IO 抖动')).toBeInTheDocument()
+
+    fireEvent.change(input, { target: { value: '' } })
+    expect(screen.queryByText('Tokyo VPS')).not.toBeInTheDocument()
+    expect(screen.queryByText('东京节点磁盘 IO 抖动')).not.toBeInTheDocument()
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(screen.getByText('支持检索范围')).toBeInTheDocument()
+    expect(screen.queryByText('没有匹配项')).not.toBeInTheDocument()
+
+    const container = input.closest('.global-search')!
+    const outside = document.createElement('button')
+    document.body.appendChild(outside)
+    try {
+      fireEvent.blur(container, { relatedTarget: outside })
+      fireEvent.focus(input)
+    } finally {
+      document.body.removeChild(outside)
+    }
+    expect(screen.getByText('支持检索范围')).toBeInTheDocument()
+    expect(screen.queryByText('Tokyo VPS')).not.toBeInTheDocument()
+    expect(input).toHaveValue('')
+
+    let releaseAssets: ((value: Awaited<ReturnType<typeof api.listVPSAssets>>) => void) | undefined
+    vi.spyOn(api, 'listVPSAssets').mockImplementationOnce(
+      () => new Promise((resolve) => { releaseAssets = resolve }),
+    )
+    fireEvent.change(input, { target: { value: 'blog.example' } })
+    fireEvent.submit(input.closest('form')!)
+    await waitFor(() => expect(releaseAssets).toEqual(expect.any(Function)))
+    fireEvent.change(input, { target: { value: '' } })
+    await act(async () => { releaseAssets?.(mockVPS) })
+    expect(screen.queryByText('Blog')).not.toBeInTheDocument()
+    expect(screen.getByText('支持检索范围')).toBeInTheDocument()
+  })
+
+  it('invalidates visible results when record search is turned off and ignores the late response', async () => {
+    let releaseRecords: ((value: { matches: typeof recordHit[]; error: string | null }) => void) | undefined
+    searchRecordsForGlobalSearch.mockImplementation(
+      () => new Promise((resolve) => { releaseRecords = resolve }),
+    )
+    const view = render(
+      <MemoryRouter>
+        <GlobalSearch recordsEnabled />
+      </MemoryRouter>,
+    )
+    const input = screen.getByRole('combobox', { name: '全局搜索' })
+    fireEvent.change(input, { target: { value: 'tokyo' } })
+    fireEvent.submit(input.closest('form')!)
+    await screen.findByText('Tokyo VPS')
+    expect(screen.getByText('正在加载…')).toBeInTheDocument()
+
+    view.rerender(
+      <MemoryRouter>
+        <GlobalSearch recordsEnabled={false} />
+      </MemoryRouter>,
+    )
+    expect(input).toHaveAttribute('placeholder', '搜索 VPS、IP…')
+    expect(screen.queryByText('Tokyo VPS')).not.toBeInTheDocument()
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('按 Enter 搜索')
+
+    expect(releaseRecords).toEqual(expect.any(Function))
+    await act(async () => { releaseRecords?.({ matches: [recordHit], error: null }) })
+    expect(screen.queryByText('东京节点磁盘 IO 抖动')).not.toBeInTheDocument()
+    expect(screen.queryByText('Tokyo VPS')).not.toBeInTheDocument()
+
+    searchRecordsForGlobalSearch.mockClear()
+    fireEvent.submit(input.closest('form')!)
+    await screen.findByText('Tokyo VPS')
+    expect(searchRecordsForGlobalSearch).not.toHaveBeenCalled()
+    expect(screen.queryByText(/运维记录/)).not.toBeInTheDocument()
   })
 })

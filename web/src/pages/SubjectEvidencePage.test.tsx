@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as authContext from '../lib/auth-context'
 import * as recordsApi from '../lib/recordsApi'
 import type { SubjectActivityListResponse } from '../lib/types'
 import { SubjectEvidencePage } from './SubjectEvidencePage'
@@ -45,6 +46,26 @@ function mockPage(): SubjectActivityListResponse {
 }
 
 describe('SubjectEvidencePage', () => {
+  beforeEach(() => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: true, portability: true },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -72,5 +93,40 @@ describe('SubjectEvidencePage', () => {
     expect(screen.getByRole('link', { name: '加入横向比较' }).getAttribute('href')).toMatch(
       /^\/records\/compare\?state=/,
     )
+  })
+
+  it('keeps evidence rows and hides comparison entry points when comparison is off', async () => {
+    const list = vi.spyOn(recordsApi, 'listSubjectActivity').mockResolvedValue(mockPage())
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: false, portability: true },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/targets/tg_001/evidence']}>
+        <Routes>
+          <Route path="/targets/:targetId/evidence" element={<SubjectEvidencePage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(list).toHaveBeenCalledWith('target', 'tg_001', { view: 'evidence' }))
+    expect(screen.getByText('探针证据')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '新建记录' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '横向比较' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '加入横向比较' })).not.toBeInTheDocument()
   })
 })

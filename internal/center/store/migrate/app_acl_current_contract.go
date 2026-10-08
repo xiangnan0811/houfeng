@@ -59,6 +59,46 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	vpsMonitoringLifecycleAppACLCurrentMigrationFragment(),
 	ipQualityHostAddressIdentityAppACLCurrentMigrationFragment(),
 	cpuRatesValidAppACLCurrentMigrationFragment(),
+	recordImportDestinationSubjectAppACLCurrentMigrationFragment(),
+	accessManagementAppACLCurrentMigrationFragment(),
+}
+
+func accessManagementAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0071_add_access_management.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return []AppACLPrivilege{
+				{
+					Subject:        AppACLSubjectCenterRuntime,
+					ObjectClass:    AppACLObjectClassTable,
+					SchemaName:     appACLManagedPublicSchemaR1,
+					ObjectIdentity: "record_access_groups",
+					Privilege:      AppACLPrivilegeInsert,
+				},
+				{
+					Subject:        AppACLSubjectCenterRuntime,
+					ObjectClass:    AppACLObjectClassTable,
+					SchemaName:     appACLManagedPublicSchemaR1,
+					ObjectIdentity: "record_access_groups",
+					Privilege:      AppACLPrivilegeUpdate,
+				},
+				{
+					Subject:        AppACLSubjectCenterRuntime,
+					ObjectClass:    AppACLObjectClassTable,
+					SchemaName:     appACLManagedPublicSchemaR1,
+					ObjectIdentity: "record_access_group_members",
+					Privilege:      AppACLPrivilegeInsert,
+				},
+				{
+					Subject:        AppACLSubjectCenterRuntime,
+					ObjectClass:    AppACLObjectClassTable,
+					SchemaName:     appACLManagedPublicSchemaR1,
+					ObjectIdentity: "record_access_group_members",
+					Privilege:      AppACLPrivilegeDelete,
+				},
+			}
+		},
+	}
 }
 
 func vpsMonitoringLifecycleAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -137,6 +177,13 @@ func networkRatesValidAppACLCurrentMigrationFragment() AppACLCurrentMigrationFra
 func cpuRatesValidAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
 	return AppACLCurrentMigrationFragment{
 		Migration:  "0069_add_cpu_rates_valid.sql",
+		Privileges: func(string) []AppACLPrivilege { return nil },
+	}
+}
+
+func recordImportDestinationSubjectAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration:  "0070_add_record_import_destination_subject.sql",
 		Privileges: func(string) []AppACLPrivilege { return nil },
 	}
 }

@@ -14,6 +14,7 @@ type ImportDocumentRequest struct {
 	Title                 string
 	BodyMarkdown          string
 	IdempotencyKey        string
+	SubjectReferences     []SubjectReference
 	EvidencePreparation   evidence.RevisionPreparation
 	AttachmentIDs         []string
 	ImportedAttachments   []attachments.ImportedAvailableAttachment
@@ -108,6 +109,7 @@ func (application *Application) ImportDocuments(
 			Actor:               request.Actor,
 			RecordID:            request.RecordID,
 			Values:              values,
+			SubjectReferences:   append([]SubjectReference(nil), request.SubjectReferences...),
 			EvidencePreparation: request.EvidencePreparation,
 			ImportedAttachments: append([]attachments.ImportedAvailableAttachment(nil), request.ImportedAttachments...),
 			ActivityKind:        DomainActivityRecordCreated,
@@ -153,6 +155,7 @@ func (application *Application) ImportDocumentsFinishing(
 			Actor:               request.Actor,
 			RecordID:            request.RecordID,
 			Values:              values,
+			SubjectReferences:   append([]SubjectReference(nil), request.SubjectReferences...),
 			EvidencePreparation: request.EvidencePreparation,
 			ImportedAttachments: append([]attachments.ImportedAvailableAttachment(nil), request.ImportedAttachments...),
 			ActivityKind:        DomainActivityRecordCreated,

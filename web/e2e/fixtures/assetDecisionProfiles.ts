@@ -72,7 +72,7 @@ function subscriptionRow([vpsId, days, price, currency, base, stale, mode]: (typ
     base_currency: 'CNY',
     exchange_rate: base / price,
     exchange_rate_date: '2026-09-30',
-    exchange_rate_stale: stale,
+    exchange_rate_status: stale ? 'stale' : 'fresh',
     budget_status: 'ok',
     started_at: '2026-01-01',
     renew_at: calendarDate(days),

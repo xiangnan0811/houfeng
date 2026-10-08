@@ -1,8 +1,11 @@
-import type { FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 
+import { listMonitoringInstances } from '../../lib/api'
 import {
   TARGET_RUN_STATUS_OPTIONS,
   TARGET_TYPE_OPTIONS,
+  distinctSorted,
+  parseLabels,
 } from './targetHelpers'
 import type { CreateTargetFormState } from './types'
 
@@ -26,10 +29,31 @@ export function CreateTargetPanel({
   onSubmit,
   onFieldChange,
 }: CreateTargetPanelProps) {
+  const [labelSuggestions, setLabelSuggestions] = useState<string[]>([])
+  const suggestionsRequested = useRef(false)
+
+  function loadLabelSuggestions() {
+    if (suggestionsRequested.current) return
+    suggestionsRequested.current = true
+    void listMonitoringInstances('active')
+      .then((instances) => {
+        setLabelSuggestions(distinctSorted(instances.flatMap((instance) => instance.labels)))
+      })
+      .catch(() => {
+        setLabelSuggestions([])
+      })
+  }
+
+  function appendExecutionLabel(label: string) {
+    const current = parseLabels(form.executionMonitoringInstanceLabels)
+    if (current.includes(label)) return
+    onFieldChange('executionMonitoringInstanceLabels', [...current, label].join(', '))
+  }
+
   return (
     <section className="target-create-drawer">
       <p className="target-create-drawer__description">
-        填写入口、执行监控实例标签与运行状态，创建后进入目标详情页继续配置 ProbeItem。
+        填写入口、执行监控实例标签与运行状态，创建后进入目标详情页继续配置探测项。
       </p>
       <form className="target-create-drawer__form" onSubmit={onSubmit}>
         <p>
@@ -92,9 +116,28 @@ export function CreateTargetPanel({
             <input
               name="executionMonitoringInstanceLabels"
               value={form.executionMonitoringInstanceLabels}
+              aria-describedby="target-execution-label-hint"
+              onFocus={loadLabelSuggestions}
               onChange={(event) => onFieldChange('executionMonitoringInstanceLabels', event.target.value)}
             />
           </label>
+          <span id="target-execution-label-hint" className="sub">
+            可选择已有监控实例标签，也可填写尚未使用的标签。
+          </span>
+          {labelSuggestions.length > 0 ? (
+            <span role="group" aria-label="已有监控实例标签">
+              {labelSuggestions.map((label) => (
+                <button
+                  key={label}
+                  type="button"
+                  className="btn sm secondary"
+                  onClick={() => appendExecutionLabel(label)}
+                >
+                  {label}
+                </button>
+              ))}
+            </span>
+          ) : null}
         </p>
         <p>
           <label>

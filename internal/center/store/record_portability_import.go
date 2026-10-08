@@ -15,13 +15,14 @@ import (
 )
 
 type RecordImportJob struct {
-	ImportJobID   string
-	PlanID        string
-	ActorID       string
-	JobState      string
-	LockVersion   uint64
-	ArchiveDigest [32]byte
-	ExpiresAt     time.Time
+	ImportJobID        string
+	PlanID             string
+	ActorID            string
+	JobState           string
+	LockVersion        uint64
+	ArchiveDigest      [32]byte
+	DestinationSubject records.SubjectReference
+	ExpiresAt          time.Time
 }
 
 type RecordImportArtifact struct {
@@ -70,36 +71,67 @@ type QuarantinedEvidence struct {
 }
 
 type RecordImportPlan struct {
-	ImportPlanID     string
-	ImportJobID      string
-	PlanDigest       [32]byte
-	ObjectCount      uint64
-	RemapCount       uint64
-	LockVersion      uint64
-	JobState         string
-	Remaps           []ImportRemap
-	Documents        []ImportDocumentPlan
-	Quarantine       []QuarantinedEvidence
-	AppliedRecordIDs []string
-	ExpiresAt        time.Time
+	ImportPlanID       string
+	ImportJobID        string
+	PlanDigest         [32]byte
+	ObjectCount        uint64
+	RemapCount         uint64
+	LockVersion        uint64
+	JobState           string
+	DestinationSubject records.SubjectReference
+	Remaps             []ImportRemap
+	Documents          []ImportDocumentPlan
+	Quarantine         []QuarantinedEvidence
+	AppliedRecordIDs   []string
+	ExpiresAt          time.Time
 }
 
 type ClaimRecordImportJobInput struct {
-	ActorID        string
-	IdempotencyKey string
-	ArchiveDigest  [32]byte
-	ExpiresAt      time.Time
+	ActorID            string
+	IdempotencyKey     string
+	ArchiveDigest      [32]byte
+	DestinationSubject records.SubjectReference
+	ExpiresAt          time.Time
 }
 
 type SaveRecordImportPlanInput struct {
-	ImportJobID string
-	PlanDigest  [32]byte
-	ObjectCount uint64
-	RemapCount  uint64
-	Remaps      []ImportRemap
-	Quarantine  []QuarantinedEvidence
-	Documents   []ImportDocumentPlan
-	ExpiresAt   time.Time
+	ImportJobID        string
+	PlanDigest         [32]byte
+	ObjectCount        uint64
+	RemapCount         uint64
+	Remaps             []ImportRemap
+	Quarantine         []QuarantinedEvidence
+	Documents          []ImportDocumentPlan
+	DestinationSubject records.SubjectReference
+	ExpiresAt          time.Time
+}
+
+func validImportDestination(destination records.SubjectReference) bool {
+	return destination.RegistryVersion == records.SubjectRegistryVersionV1 &&
+		records.ValidSubjectKind(destination.Kind) &&
+		destination.Role == records.RelationRoleAffected &&
+		destination.Primary &&
+		records.ValidSubjectSourceID(destination.Kind, destination.SourceID)
+}
+
+func decodeImportDestination(kind, sourceID *string) (records.SubjectReference, error) {
+	if kind == nil && sourceID == nil {
+		return records.SubjectReference{}, ErrRecordImportCASConflict
+	}
+	if kind == nil || sourceID == nil {
+		return records.SubjectReference{}, ErrRecordPortabilityUnavailable
+	}
+	destination := records.SubjectReference{
+		RegistryVersion: records.SubjectRegistryVersionV1,
+		Kind:            records.SubjectKind(*kind),
+		Role:            records.RelationRoleAffected,
+		SourceID:        *sourceID,
+		Primary:         true,
+	}
+	if !validImportDestination(destination) {
+		return records.SubjectReference{}, ErrRecordPortabilityUnavailable
+	}
+	return destination, nil
 }
 
 type AdvanceRecordImportJobInput struct {
@@ -130,25 +162,46 @@ func (repository *PostgresRecordPortabilityRepository) ClaimImportJob(
 	input ClaimRecordImportJobInput,
 ) (RecordImportJob, error) {
 	if ctx == nil || repository == nil || repository.platform == nil ||
-		input.ActorID == "" || input.IdempotencyKey == "" || input.ArchiveDigest == [32]byte{} {
+		input.ActorID == "" || input.IdempotencyKey == "" || input.ArchiveDigest == [32]byte{} ||
+		!validImportDestination(input.DestinationSubject) {
 		return RecordImportJob{}, ErrRecordPortabilityUnavailable
 	}
 	var claimed RecordImportJob
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
-		var digest []byte
-		err := transaction.tx.QueryRow(ctx, `
-			select import_job_id, actor_id, job_state, lock_version, archive_digest, expires_at
-			from public.record_import_jobs
-			where project_id = $1 and actor_id = $2 and idempotency_key = $3
-		`, recordauth.ProjectIDDefault, input.ActorID, input.IdempotencyKey).Scan(
-			&claimed.ImportJobID, &claimed.ActorID, &claimed.JobState, &claimed.LockVersion, &digest, &claimed.ExpiresAt,
-		)
-		if err == nil {
+		var loadExisting = func() error {
+			var digest []byte
+			var destinationKind, destinationSourceID *string
+			err := transaction.tx.QueryRow(ctx, `
+				select import_job_id, actor_id, job_state, lock_version, archive_digest,
+				       destination_subject_kind, destination_subject_source_id, expires_at
+				from public.record_import_jobs
+				where project_id = $1 and actor_id = $2 and idempotency_key = $3
+				for update
+			`, recordauth.ProjectIDDefault, input.ActorID, input.IdempotencyKey).Scan(
+				&claimed.ImportJobID, &claimed.ActorID, &claimed.JobState, &claimed.LockVersion,
+				&digest, &destinationKind, &destinationSourceID, &claimed.ExpiresAt,
+			)
+			if err != nil {
+				return err
+			}
+			if len(digest) != sha256.Size {
+				return ErrRecordPortabilityUnavailable
+			}
 			copy(claimed.ArchiveDigest[:], digest)
-			if claimed.ArchiveDigest != input.ArchiveDigest {
+			destination, err := decodeImportDestination(destinationKind, destinationSourceID)
+			if err != nil {
+				return err
+			}
+			claimed.DestinationSubject = destination
+			if claimed.ArchiveDigest != input.ArchiveDigest || claimed.DestinationSubject != input.DestinationSubject {
 				return ErrRecordImportCASConflict
 			}
 			return attachImportPlanID(ctx, transaction, &claimed)
+		}
+
+		err := loadExisting()
+		if err == nil {
+			return nil
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return err
@@ -158,19 +211,32 @@ func (repository *PostgresRecordPortabilityRepository) ClaimImportJob(
 			return ErrRecordPortabilityUnavailable
 		}
 		now := time.Now().UTC()
-		if _, err := transaction.tx.Exec(ctx, `
+		tag, err := transaction.tx.Exec(ctx, `
 			insert into public.record_import_jobs (
 				import_job_id, project_id, actor_id, idempotency_key, job_state,
-				identity_classification, archive_digest, lock_version, expires_at, created_at, updated_at
-			) values ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $9)
+				identity_classification, archive_digest, lock_version,
+				destination_subject_kind, destination_subject_source_id,
+				expires_at, created_at, updated_at
+			) values ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, $11, $11)
+			on conflict (project_id, actor_id, idempotency_key) do nothing
 		`, jobID, recordauth.ProjectIDDefault, input.ActorID, input.IdempotencyKey,
-			RecordImportJobStateQuarantined, "unknown", input.ArchiveDigest[:], input.ExpiresAt.UTC(), now,
-		); err != nil {
+			RecordImportJobStateQuarantined, "unknown", input.ArchiveDigest[:],
+			string(input.DestinationSubject.Kind), input.DestinationSubject.SourceID,
+			input.ExpiresAt.UTC(), now)
+		if err != nil {
 			return err
 		}
+		if tag.RowsAffected() == 0 {
+			return loadExisting()
+		}
 		claimed = RecordImportJob{
-			ImportJobID: jobID, ActorID: input.ActorID, JobState: RecordImportJobStateQuarantined,
-			LockVersion: 1, ArchiveDigest: input.ArchiveDigest, ExpiresAt: input.ExpiresAt.UTC(),
+			ImportJobID:        jobID,
+			ActorID:            input.ActorID,
+			JobState:           RecordImportJobStateQuarantined,
+			LockVersion:        1,
+			ArchiveDigest:      input.ArchiveDigest,
+			DestinationSubject: input.DestinationSubject,
+			ExpiresAt:          input.ExpiresAt.UTC(),
 		}
 		return nil
 	})
@@ -199,11 +265,31 @@ func (repository *PostgresRecordPortabilityRepository) SaveImportPlan(
 	ctx context.Context,
 	input SaveRecordImportPlanInput,
 ) (RecordImportPlan, error) {
-	if ctx == nil || repository == nil || repository.platform == nil || input.ImportJobID == "" {
+	if ctx == nil || repository == nil || repository.platform == nil || input.ImportJobID == "" ||
+		input.PlanDigest == [32]byte{} || !validImportDestination(input.DestinationSubject) {
 		return RecordImportPlan{}, ErrRecordPortabilityUnavailable
 	}
 	var saved RecordImportPlan
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+		var destinationKind, destinationSourceID *string
+		if err := transaction.tx.QueryRow(ctx, `
+			select destination_subject_kind, destination_subject_source_id
+			from public.record_import_jobs
+			where import_job_id = $1
+			for update
+		`, input.ImportJobID).Scan(&destinationKind, &destinationSourceID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrRecordImportNotFound
+			}
+			return err
+		}
+		destination, err := decodeImportDestination(destinationKind, destinationSourceID)
+		if err != nil {
+			return err
+		}
+		if destination != input.DestinationSubject {
+			return ErrRecordImportCASConflict
+		}
 		planID, err := ids.New("rip")
 		if err != nil {
 			return ErrRecordPortabilityUnavailable
@@ -214,8 +300,7 @@ func (repository *PostgresRecordPortabilityRepository) SaveImportPlan(
 				import_plan_id, import_job_id, plan_digest, object_count, remap_count, expires_at, created_at
 			) values ($1, $2, $3, $4, $5, $6, $7)
 		`, planID, input.ImportJobID, input.PlanDigest[:], int64(input.ObjectCount), int64(input.RemapCount),
-			input.ExpiresAt.UTC(), now,
-		); err != nil {
+			input.ExpiresAt.UTC(), now); err != nil {
 			return err
 		}
 		for _, remap := range input.Remaps {
@@ -231,7 +316,8 @@ func (repository *PostgresRecordPortabilityRepository) SaveImportPlan(
 		saved = RecordImportPlan{
 			ImportPlanID: planID, ImportJobID: input.ImportJobID, PlanDigest: input.PlanDigest,
 			ObjectCount: input.ObjectCount, RemapCount: input.RemapCount, Remaps: input.Remaps,
-			Documents: input.Documents, Quarantine: input.Quarantine, ExpiresAt: input.ExpiresAt.UTC(),
+			Documents: input.Documents, Quarantine: input.Quarantine,
+			DestinationSubject: destination, ExpiresAt: input.ExpiresAt.UTC(),
 			LockVersion: 1, JobState: RecordImportJobStatePlanned,
 		}
 		return nil
@@ -253,13 +339,22 @@ func (repository *PostgresRecordPortabilityRepository) LoadImportPlan(
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		var digest []byte
 		var objectCount, remapCount int64
+		var destinationKind, destinationSourceID *string
 		if err := transaction.tx.QueryRow(ctx, `
-			select import_plan_id, import_job_id, plan_digest, object_count, remap_count, expires_at
-			from public.record_import_plans
-			where import_plan_id = $1
+			select plan.import_plan_id, plan.import_job_id, plan.plan_digest,
+			       plan.object_count, plan.remap_count, plan.expires_at,
+			       job.destination_subject_kind, job.destination_subject_source_id
+			from public.record_import_plans as plan
+			join public.record_import_jobs as job on job.import_job_id = plan.import_job_id
+			where plan.import_plan_id = $1
 		`, planID).Scan(
-			&plan.ImportPlanID, &plan.ImportJobID, &digest, &objectCount, &remapCount, &plan.ExpiresAt,
+			&plan.ImportPlanID, &plan.ImportJobID, &digest, &objectCount, &remapCount,
+			&plan.ExpiresAt, &destinationKind, &destinationSourceID,
 		); err != nil {
+			return err
+		}
+		destination, err := decodeImportDestination(destinationKind, destinationSourceID)
+		if err != nil {
 			return err
 		}
 		if len(digest) != sha256.Size {
@@ -268,6 +363,7 @@ func (repository *PostgresRecordPortabilityRepository) LoadImportPlan(
 		copy(plan.PlanDigest[:], digest)
 		plan.ObjectCount = uint64(objectCount)
 		plan.RemapCount = uint64(remapCount)
+		plan.DestinationSubject = destination
 		rows, err := transaction.tx.Query(ctx, `
 			select entity_kind, source_id, target_id
 			from public.record_import_entity_mappings
@@ -504,17 +600,27 @@ func (repository *PostgresRecordPortabilityRepository) LoadImportJob(
 	var job RecordImportJob
 	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		var digest []byte
+		var destinationKind, destinationSourceID *string
 		if err := transaction.tx.QueryRow(ctx, `
-			select import_job_id, actor_id, job_state, lock_version, archive_digest, expires_at
+			select import_job_id, actor_id, job_state, lock_version, archive_digest,
+			       destination_subject_kind, destination_subject_source_id, expires_at
 			from public.record_import_jobs
 			where import_job_id = $1
-		`, importJobID).Scan(&job.ImportJobID, &job.ActorID, &job.JobState, &job.LockVersion, &digest, &job.ExpiresAt); err != nil {
+		`, importJobID).Scan(
+			&job.ImportJobID, &job.ActorID, &job.JobState, &job.LockVersion, &digest,
+			&destinationKind, &destinationSourceID, &job.ExpiresAt,
+		); err != nil {
 			return err
 		}
 		if len(digest) != sha256.Size {
 			return ErrRecordPortabilityUnavailable
 		}
+		destination, err := decodeImportDestination(destinationKind, destinationSourceID)
+		if err != nil {
+			return err
+		}
 		copy(job.ArchiveDigest[:], digest)
+		job.DestinationSubject = destination
 		return attachImportPlanID(ctx, transaction, &job)
 	})
 	if err != nil {

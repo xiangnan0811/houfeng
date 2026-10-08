@@ -21,6 +21,7 @@ const (
 var (
 	ErrUserNotFound              = errors.New("user not found")
 	ErrUsernameTaken             = errors.New("username already taken")
+	ErrInitialUserAlreadyExists  = errors.New("initial supervisor already exists")
 	ErrInvalidCredentials        = errors.New("invalid username or password")
 	ErrSessionNotFound           = errors.New("session not found")
 	ErrSessionExpired            = errors.New("session expired")
@@ -38,18 +39,32 @@ type User struct {
 	PasswordHash      string
 	DisplayName       string
 	Role              string
+	IsSupervisor      bool
+	DisabledAt        *time.Time
 	CreatedAt         time.Time
 	PasswordChangedAt time.Time
 }
 
+// ManagementCapabilities describes product-management operations granted by
+// the persisted account state. It is deliberately independent of the login
+// role and runtime feature flags.
+type ManagementCapabilities struct {
+	Access bool `json:"access"`
+}
+
+func (u User) ManagementCapabilities() ManagementCapabilities {
+	return ManagementCapabilities{Access: u.IsSupervisor && u.DisabledAt == nil}
+}
+
 type Session struct {
-	SessionID  string
-	UserID     string
-	IssuedAt   time.Time
-	LastSeenAt time.Time
-	ExpiresAt  time.Time
-	UserAgent  string
-	ClientIP   string
+	SessionID              string
+	UserID                 string
+	IssuedAt               time.Time
+	LastSeenAt             time.Time
+	ExpiresAt              time.Time
+	UserAgent              string
+	ClientIP               string
+	ManagementCapabilities ManagementCapabilities
 }
 
 type UserRepository interface {

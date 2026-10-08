@@ -52,6 +52,7 @@ order by g.group_id asc
 - `records.NormalizeCompleteRevisionInput` 只能接受服务端 adapter 解析并已经 canonical/digest-checked 的 source authorization，但必须接受完整 `live|tombstoned` 两种 union；不得在 `recordauth.NormalizeSourceAuthorization` 之上再叠加 live-only 条件。来源删除后的新修订继续保存 immutable capture scope，并以 witnessed final floor/last-live evidence 完成授权；live route 必须为空。历史 row 中的 evidence 不得当作 current scope cache，后续保存/读取仍由 adapter 重新解析 live 或 witnessed tombstone。
 - 每个 source 的 capture/current/floor/witness 必须同 project。live 必须满足 `CurrentScope <= CaptureScope`；tombstone 必须满足 `LastLiveScope <= CaptureScope` 且 `FinalFloor <= LastLiveScope`。source digest 覆盖 kind、ID、state、capture 以及 live current 或 tombstone floor + witness，因此不得跨 source/state/transition 重放。
 - `Policy.Authorize` 依次验证 actor、capability、canonical resource、project 相等、role-capability、resource visibility、每个 source 的 capture，及每个 live `CurrentScope` 或 tombstone `FinalFloor`。`project_admin` 拥有全部**已知** capability，但没有资源 scope、跨项目、union 完整性或 digest 的 bypass；所有交集都必须允许才可放行。
+- 初始主管理员的管理权与 Records scope 独立：`is_supervisor` 不进入 actor，不绕过上述交集。组名称目录也不进入 `ScopeRepository`；成员变更在下一请求重新读取生效，已在途请求继续使用原 request-local actor，不宣称撤销在途写入。
 
 ### 4. Validation & Error Matrix
 
@@ -141,3 +142,85 @@ if err != nil || authorization.Digest != input.CaptureAuthorization.Digest {
 	return records.ErrInvalidRevisionInput
 }
 ```
+
+## Scenario: 用户与权限组管理
+
+### 管理权与数据边界
+
+- 只有持久化的活跃主管理员可以管理账号、组和成员；新增账号始终是普通 `admin`，
+  映射为 Records `project_admin`，没有第二种登录角色。普通管理员访问任何管理路由均
+  返回 403 `management_forbidden`，先于输入解析及目标存在性检查。
+- `/api/auth/me` 与登录成功响应独立返回 `management_capabilities: {access:boolean}`，
+  仅由 `is_supervisor && disabled_at == nil` 得出，不由 role 或 Records 环境开关推断。
+  管理路由和本人组目录不依赖 Records 开关；前端能力解析失败必须关闭管理入口。
+- 账号可创建、列出、启用、停用及重置密码，不提供删除、改用户名、管理权转移。
+  主管理员不可停用，也不可通过管理 API 重置自己的密码；返回 409
+  `supervisor_protected`，改密使用需旧密码的既有自助路径。
+- 组可创建、改名、增删成员，不提供组删除。稳定 `group_id` 保持 immutable revision
+  引用；改名不改变成员或授权。名称 trim 后为 1–100 字符，项目内唯一，冲突为 409。
+  旧成员无 user FK；添加必须确认目标账号存在、活跃且为 admin，停用目标返回 409
+  `user_disabled`。移除只要求组存在和 user ID 格式合法，可清理悬空旧成员。
+- C71 仅追加 `0071_add_access_management.sql`。旧库零用户留给 seed，单个 admin 提升
+  为主管理员，多用户或唯一非 admin 整体失败回滚，不猜测初始身份。主管理员 CHECK
+  与 partial UNIQUE index 在数据库中保证唯一且活跃。升级遵循
+  [APP ACL current](../platform/app-acl-current.md)，Center runtime 不自行提权迁移。
+
+### HTTP 与目录形状
+
+管理 handler 使用既有 session cookie、RequireSession 和 RequireSameOrigin；只从
+sessionctx 取 user ID。请求拒绝未知字段，不接受客户端 role、supervisor、project 或 actor。
+密码不出现在 DTO、日志、URL 或本地草稿中。以下目录均返回全量稳定排序的 `items`：
+用户按 username/user_id，组按 display_name/group_id。
+
+| 方法与路径 | 请求 | 成功响应 |
+| --- | --- | --- |
+| GET `/api/admin/users` | 无 | 200 `{items:UserSummary[]}` |
+| POST `/api/admin/users` | `{username,password,display_name}` | 201 UserSummary |
+| POST `/api/admin/users/{id}/disable`、`/enable` | `{}` | 200 UserSummary |
+| POST `/api/admin/users/{id}/reset-password` | `{password}` | 204 |
+| GET `/api/admin/record-access-groups` | 无 | 200 `{items:GroupSummary[]}` |
+| POST `/api/admin/record-access-groups` | `{display_name}` | 201 GroupSummary |
+| PATCH `/api/admin/record-access-groups/{id}` | `{display_name}` | 200 GroupSummary |
+| GET `/api/admin/record-access-groups/{id}/members` | 无 | 200 `{items:MemberSummary[]}` |
+| PUT `/api/admin/record-access-groups/{id}/members/{user_id}` | `{}` | 204 |
+| DELETE `/api/admin/record-access-groups/{id}/members/{user_id}` | 无 | 204 |
+| GET `/api/record-access-groups/mine` | 无；任何活跃登录账号 | 200 `{items:GroupSummary[]}` |
+
+- `UserSummary` 仅有 `user_id,username,display_name,role,is_supervisor,disabled_at,created_at`；
+  活跃账号的 `disabled_at` 为 null，普通账号的 `is_supervisor` 为 false，字段不省略。
+- `GroupSummary` 仅有 `group_id,display_name`。`MemberSummary` 正常行为完整、扁平的
+  UserSummary；悬空行仅 `{user_id,missing:true}`，界面显示“账号不可用”，不当作新用户。
+- 本人组目录只返回实际成员组；主管理员也不自动获得全组作为编辑器可选项。
+  成员逐个 PUT/DELETE，添加已有成员与移除不存在成员均为 204，不提供 bulk replace。
+- 错误为 `{error,code}`：400 `invalid_request`、401 既有未认证响应、403
+  `management_forbidden`、404 `resource_not_found`、409
+  `username_taken|group_name_taken|supervisor_protected|user_disabled`、
+  503 `management_unavailable`。SQL 或依赖细节不得回传，客户端只显示白名单中文文案。
+
+### 事务与撤权
+
+- 每个管理读重新确认主管理员；每个写为 ReadCommitted 事务，先锁 actor users 行并
+  重新确认 role、supervisor 和活跃状态，再按 actor→target user→group→membership/sessions
+  锁序执行。self-target 复用已持有的 actor 锁。密码哈希在事务外计算，事务内再授权。
+- 停用与删除该账号全部 sessions 同一事务，重复停用不改首次时间。启用只清
+  disabled_at，不恢复旧会话。重置密码使用配置 bcrypt cost，更新密码 watermark 并
+  同事务撤销全部 sessions；重置停用账号不自动启用。会话锁内检查 disabled/hash，
+  不允许 bcrypt 与停用/重置竞态重新建立旧授权会话。
+- 组撤权不注销登录 cookie；被撤权者 `/me` 仍为 200，但 Records current/history/
+  附件等读取经过原 policy 返回 opaque 404。恢复成员可恢复 scope；管理员没有资源 bypass。
+  客户端重验 403/404/410 时先同步撤销内容租约、关闭闩和代次，并清空内存中的正文、附件与草稿，再异步删除本地未同步 buffer。删除被拒绝或尚未结束时不得继续展示受保护内容，也不得在卸载或迟到的缓冲读取时写回。不把资源 404
+  当作 session 失效。导入主体自身仍 project 可见时，记录组撤权不等于撤销 import capability。
+- 发布 revision 继续同时检查旧、新 visibility；角色与组 grant 为 OR。选择
+  `project_admin` 包含全部当前 admin，不能排除单个 admin；空 restricted 是 deny-all。
+
+### 回归证据入口
+
+- `internal/center/accessadmin` 与 `internal/center/http/handlers/access_admin_test.go`：
+  管理授权先于输入验证、未知字段、密码策略、目录 DTO 和脱敏错误。
+- store 的 `TestPostgresIntegrationAccessManagement*`：真实事务、并发 seed/登录/
+  停用/重置边界、回滚、稳定成员 ID、A/B scope 撤销与恢复且 cookie 仍有效。
+- migrate 的同名前缀测试：零/单用户迁移与异常多用户回滚；APP ACL current 套件：
+  冻结 C70 前驱、精确四 tuple 增量、191 条 predecessor chain 和并发迁移序列化。
+- Web 行为测试覆盖 capability gating、异步成员归属、敏感草稿、project 清 grant、
+  本人组选择、目录失败不丢 grant，以及撤权时先清空工作区再删 buffer（删除失败或未完成也不写回）。真实浏览器仍须以两个独立
+  cookie jar 和产品管理 UI 验证，不得用测试、直接 ACL 写表或登出替代撤权验收。

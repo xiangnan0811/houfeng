@@ -210,32 +210,7 @@ func TestRecordsCapacityAndBrowserScriptsOwnInventoriedCorpus(t *testing.T) {
 func requireTestsPresent(t *testing.T, names []string) {
 	t.Helper()
 	root := filepath.Join("..", "..", "..")
-	present := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			name := entry.Name()
-			if name == ".git" || name == "node_modules" || name == "web" || name == "bin" || name == "dist" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		payload, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		for _, testName := range names {
-			if bytes.Contains(payload, []byte("func "+testName+"(")) {
-				present[testName] = path
-			}
-		}
-		return nil
-	})
+	present, err := findRepositoryTestNames(root, names)
 	if err != nil {
 		t.Fatalf("walk tests: %v", err)
 	}

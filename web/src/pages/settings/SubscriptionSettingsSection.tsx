@@ -4,11 +4,12 @@ import { PageState } from '../../components/PageState'
 import {
   getSubscriptionCostSettings,
   listSubscriptionMonthlyBudgets,
-  refreshSubscriptionExchangeRates,
   updateSubscriptionCostSettings,
 } from '../../lib/api'
 import type { SubscriptionCostSettings, SubscriptionMonthlyBudgetRecord } from '../../lib/types'
 import { SubscriptionBudgetSection } from './SubscriptionBudgetSection'
+import { ExchangeRateNoticeBody } from '../subscriptions/ExchangeRateNoticeBody'
+import { useExchangeRateRefresh } from '../subscriptions/useExchangeRateRefresh'
 import {
   buildSettingsInput,
   describeError,
@@ -40,8 +41,7 @@ export function SubscriptionSettingsSection() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [refreshingRates, setRefreshingRates] = useState(false)
-  const [rateNotice, setRateNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null)
+  const rateRefresh = useExchangeRateRefresh(() => {})
 
   useEffect(() => {
     let cancelled = false
@@ -98,27 +98,12 @@ export function SubscriptionSettingsSection() {
       setState((current) => ({ ...current, settings: updated }))
       setDraft(settingsToDraft(updated))
       setNotice('订阅成本设置已保存')
+      rateRefresh.readStatus()
     } catch (err: unknown) {
       setError(describeError(err, '保存订阅设置失败'))
     } finally {
       setSubmitting(false)
     }
-  }
-
-  function handleRefreshRates() {
-    setRateNotice(null)
-    setRefreshingRates(true)
-    refreshSubscriptionExchangeRates()
-      .then((result) => {
-        const failedItems = result.failed ?? []
-        const failed = failedItems.map((item) => item?.quote_currency).filter(Boolean)
-        setRateNotice({
-          tone: failedItems.length > 0 ? 'error' : 'success',
-          text: `汇率刷新完成：成功 ${result.succeeded?.length ?? 0}，失败 ${failedItems.length}${failed.length ? `（${failed.join(', ')}）` : ''}`,
-        })
-      })
-      .catch((err: unknown) => setRateNotice({ tone: 'error', text: describeError(err, '汇率刷新失败') }))
-      .finally(() => setRefreshingRates(false))
   }
 
   if (state.loading) {
@@ -147,16 +132,17 @@ export function SubscriptionSettingsSection() {
           <div className="subscription-settings__head">
             <h2 className="ss-title" id={headingId}>成本基准与汇率</h2>
             <div className="subscription-settings__head-actions">
-              {rateNotice ? (
-                <span
-                  className={`subscription-settings__rate-notice subscription-settings__rate-notice--${rateNotice.tone}`}
-                  role={rateNotice.tone === 'error' ? 'alert' : 'status'}
-                >
-                  {rateNotice.text}
-                </span>
+              {rateRefresh.notice ? (
+                <ExchangeRateNoticeBody
+                  notice={rateRefresh.notice}
+                  className={`subscription-settings__rate-notice subscription-settings__rate-notice--${rateRefresh.notice.tone === 'error' ? 'error' : 'success'}`}
+                />
               ) : null}
-              <button type="button" className="btn sm secondary" onClick={handleRefreshRates} disabled={refreshingRates}>
-                {refreshingRates ? '刷新中…' : '刷新汇率'}
+              {rateRefresh.statusUnavailable ? (
+                <button type="button" className="btn sm secondary" onClick={rateRefresh.readStatus}>重试读取</button>
+              ) : null}
+              <button type="button" className="btn sm secondary" onClick={rateRefresh.refresh} disabled={rateRefresh.refreshing}>
+                {rateRefresh.buttonLabel}
               </button>
             </div>
           </div>

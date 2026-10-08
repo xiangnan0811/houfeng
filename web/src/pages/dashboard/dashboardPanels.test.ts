@@ -32,7 +32,11 @@ function event(index: number, overrides: Partial<StateChangeEventRecord> = {}): 
   }
 }
 
-function renewal(index: number, renewAt: string | null): SubscriptionRenewalQueueItem {
+function renewal(
+  index: number,
+  renewAt: string | null,
+  exchangeRateStatus: SubscriptionRenewalQueueItem['exchange_rate_status'] = 'fresh',
+): SubscriptionRenewalQueueItem {
   return {
     subscription_id: `sub_${index}`,
     vps_id: `vps_${index}`,
@@ -45,7 +49,7 @@ function renewal(index: number, renewAt: string | null): SubscriptionRenewalQueu
     currency: 'USD',
     renewal_decision: 'keep',
     lifecycle_status: 'active',
-    exchange_rate_stale: false,
+    exchange_rate_status: exchangeRateStatus,
   }
 }
 
@@ -119,13 +123,13 @@ describe('buildRenewalPanel', () => {
     const renewals = [
       renewal(1, '2026-09-29'),
       renewal(2, '2026-09-27'),
-      { ...renewal(3, '2026-10-02'), exchange_rate_stale: true },
+      renewal(3, '2026-10-02', 'stale'),
     ]
     const panel = buildRenewalPanel(remoteSuccess(subscriptionOverviewFixture({ upcoming_renewals: renewals }), new Date(NOW).toISOString()), NOW)
-    expect(panel.status === 'ready' ? panel.items.map((item) => [item.key, item.daysLeft, item.exchangeRateStale]) : null).toEqual([
-      ['sub_2', -2, false],
-      ['sub_1', 0, false],
-      ['sub_3', 3, true],
+    expect(panel.status === 'ready' ? panel.items.map((item) => [item.key, item.daysLeft, item.rateStatus]) : null).toEqual([
+      ['sub_2', -2, 'fresh'],
+      ['sub_1', 0, 'fresh'],
+      ['sub_3', 3, 'stale'],
     ])
   })
 

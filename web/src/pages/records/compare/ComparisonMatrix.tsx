@@ -1,5 +1,6 @@
 import { ScrollRegion } from '../../../components/atoms'
 import type { ComparisonEvaluateResponse, ComparisonReason } from '../../../lib/types'
+import { comparisonEvidenceKindLabel, comparisonEvidenceTechnicalKind } from './comparisonLabels'
 import { isHostOrProbeKind, seriesForKindAndMetric } from './comparisonQueryState'
 
 const REASON_LABELS: Partial<Record<ComparisonReason, string>> = {
@@ -10,8 +11,18 @@ const REASON_LABELS: Partial<Record<ComparisonReason, string>> = {
   coverage_truncated: '覆盖被截断',
   common_overlap_unsupported: '不支持共同重叠',
   common_overlap_empty: '重叠为空',
-  schema_incompatible: 'schema 不兼容',
+  schema_incompatible: '结构不兼容',
+  unit_incompatible: '单位不兼容',
+  precision_incompatible: '精度不兼容',
+  source_tombstoned: '来源已墓碑化',
+  source_unavailable: '来源当前不可用',
   snapshot_unreadable: '不可读',
+}
+
+function matrixReasonCopy(reason: string): { label: string; diagnostic: string | null } {
+  const label = Object.hasOwn(REASON_LABELS, reason) ? REASON_LABELS[reason as ComparisonReason] : undefined
+  if (label) return { label, diagnostic: null }
+  return { label: '不兼容', diagnostic: reason }
 }
 
 type Props = {
@@ -55,18 +66,35 @@ export function ComparisonMatrix({ kind, metric, baseline = 0, comparison }: Pro
               const finding = comparison.review.find((entry) => entry.item_index === index)
               const pair = comparison.pairwise.find((entry) => entry.item_index === index)
               const itemSeries = series.find((entry) => entry.item_index === index)
+              const reasonCopy = finding ? matrixReasonCopy(finding.reason) : null
               return (
                 <tr key={`${item.snapshot_id}-${index}`}>
                   <th scope="row">
                     第 {index + 1} 项{index === baseline ? <span className="record-compare-baseline">基准</span> : null}
                   </th>
-                  <td>{item.kind}/v{item.schema_version}</td>
+                  <td>
+                    <span>{comparisonEvidenceKindLabel(item.kind)}</span>
+                    <details>
+                      <summary>技术标识</summary>
+                      <code>{comparisonEvidenceTechnicalKind(item.kind, item.schema_version)}</code>
+                    </details>
+                  </td>
                   <td>{coverageLabel(pair?.values, finding?.reason)}</td>
                   <td className="mono">{bucketCount(itemSeries)}</td>
                   <td>{qualityLabel(pair?.values, finding?.reason)}</td>
                   <td>{item.revision_context === 'not_applicable' ? '不适用' : '绑定修订'}</td>
                   <td className={finding ? 'record-compare-matrix__note--warn' : undefined}>
-                    {finding ? (REASON_LABELS[finding.reason] ?? finding.reason) : '可比较'}
+                    {reasonCopy ? (
+                      <>
+                        {reasonCopy.label}
+                        {reasonCopy.diagnostic ? (
+                          <details>
+                            <summary>诊断信息</summary>
+                            <p>{reasonCopy.diagnostic}</p>
+                          </details>
+                        ) : null}
+                      </>
+                    ) : '可比较'}
                   </td>
                 </tr>
               )
@@ -97,7 +125,7 @@ function coverageLabel(values: Record<string, unknown> | undefined, reason?: Com
     return `部分 ${matched}/${total}`
   }
   if (reason === 'coverage_partial' || reason === 'coverage_truncated') {
-    return REASON_LABELS[reason] ?? reason
+    return matrixReasonCopy(reason).label
   }
   return '无对齐'
 }
@@ -105,6 +133,6 @@ function coverageLabel(values: Record<string, unknown> | undefined, reason?: Com
 function qualityLabel(values: Record<string, unknown> | undefined, reason?: ComparisonReason): string {
   if (values?.equal === true) return '相等'
   if (values?.equal === false) return '有差值'
-  if (reason) return REASON_LABELS[reason] ?? reason
+  if (reason) return matrixReasonCopy(reason).label
   return '未评估'
 }

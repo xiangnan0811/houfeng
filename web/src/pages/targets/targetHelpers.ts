@@ -3,9 +3,34 @@ import { ApiError } from '../../lib/api'
 import type { CreateTargetInput, TargetRecord } from '../../lib/types'
 import type { CreateTargetFormState } from './types'
 
+const TARGET_TYPE_LABELS: Record<string, string> = {
+  service: '服务',
+  china_reference: '国内参考',
+}
+
+const UNKNOWN_TARGET_TYPE = '未知类型'
+
+function mappedTargetType(value: string): string | undefined {
+  if (!Object.hasOwn(TARGET_TYPE_LABELS, value)) return undefined
+  const label = Object.getOwnPropertyDescriptor(TARGET_TYPE_LABELS, value)?.value
+  return typeof label === 'string' && label ? label : undefined
+}
+
+/** User-facing target type. Wire values stay `service` / `china_reference`. */
+export function targetTypePresentation(value: string): { label: string; raw: string | null } {
+  const known = mappedTargetType(value)
+  if (known) return { label: known, raw: null }
+  const trimmed = value.trim()
+  return { label: trimmed ? UNKNOWN_TARGET_TYPE : '', raw: trimmed || null }
+}
+
+export function targetTypeLabel(value: string): string {
+  return targetTypePresentation(value).label
+}
+
 export const TARGET_TYPE_OPTIONS = [
-  { value: 'service', label: 'service' },
-  { value: 'china_reference', label: 'china_reference' },
+  { value: 'service', label: '服务' },
+  { value: 'china_reference', label: '国内参考' },
 ] as const
 
 export const TARGET_RUN_STATUS_OPTIONS = [
@@ -25,6 +50,7 @@ export const TARGET_HEALTH_STATUS_FILTER_OPTIONS = [
   { value: '关注', label: '关注' },
   { value: '告警', label: '告警' },
   { value: '严重', label: '严重' },
+  { value: '数据不可用', label: '数据不可用' },
 ] as const
 
 export const initialCreateForm: CreateTargetFormState = {
@@ -59,9 +85,7 @@ export function distinctSorted(values: string[]): string[] {
   return out.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
 }
 
-export function isCoverageGapTarget(target: TargetRecord) {
-  return target.lifecycle_status !== 'retired' && target.execution_monitoring_instance_labels.length === 0
-}
+const KNOWN_ABNORMAL_HEALTH = new Set(['关注', '告警', '严重'])
 
 const ABNORMAL_HEALTH: Record<string, BadgeTone> = {
   关注: 'notice',
@@ -69,38 +93,108 @@ const ABNORMAL_HEALTH: Record<string, BadgeTone> = {
   严重: 'critical',
 }
 
+/** Retired targets stay in history. Archived-carrier visibility is a dashboard count, not a list-row inference. */
+export function isCurrentListTarget(target: TargetRecord) {
+  return target.lifecycle_status !== 'retired'
+}
+
+export function hasTargetObservation(target: TargetRecord) {
+  return Boolean(target.last_success_at) || Boolean(target.last_failure_at)
+}
+
+export function isAbnormalTarget(target: TargetRecord) {
+  return isCurrentListTarget(target)
+    && target.run_status === '启用'
+    && hasTargetObservation(target)
+    && KNOWN_ABNORMAL_HEALTH.has(target.current_health_status)
+}
+
+export function isUnobservedTarget(target: TargetRecord) {
+  return isCurrentListTarget(target)
+    && target.run_status === '启用'
+    && !target.last_success_at
+    && !target.last_failure_at
+}
+
+function isAssignableTarget(target: TargetRecord) {
+  return isCurrentListTarget(target) && (target.run_status === '启用' || target.run_status === '维护中')
+}
+
+export function isCoverageGapTarget(target: TargetRecord) {
+  return isAssignableTarget(target) && (target.enabled_probe_count === 0 || target.matching_executor_count === 0)
+}
+
 export type TargetAttentionBadge = { label: string; tone: BadgeTone }
 
-/** List attention cell: never 正常; control states occupy the cell. */
+export function targetControlBadge(target: TargetRecord): TargetAttentionBadge | null {
+  if (target.lifecycle_status === 'retired') return { label: '已退役', tone: 'offline' }
+  if (target.run_status === '维护中') return { label: '维护中', tone: 'maintenance' }
+  if (target.run_status === '暂停') return { label: '暂停', tone: 'offline' }
+  return null
+}
+
+export function targetHealthBadge(target: TargetRecord): TargetAttentionBadge | null {
+  if (target.lifecycle_status === 'retired') return null
+  if (target.current_health_status === '数据不可用') return { label: '数据不可用', tone: 'neutral' }
+  const tone = ABNORMAL_HEALTH[target.current_health_status]
+  if (!tone) return null
+  return { label: target.current_health_status, tone }
+}
+
+/** Control and health stay independent. 正常 stays quiet. */
 export function targetAttentionBadges(target: TargetRecord): TargetAttentionBadge[] {
-  if (target.lifecycle_status === 'retired') return [{ label: '已退役', tone: 'offline' }]
-  const badges: TargetAttentionBadge[] = []
-  if (target.run_status === '维护中') {
-    badges.push({ label: '维护中', tone: 'maintenance' })
-  } else if (target.run_status === '暂停') {
-    badges.push({ label: '暂停', tone: 'offline' })
+  const control = targetControlBadge(target)
+  const health = targetHealthBadge(target)
+  if (target.lifecycle_status === 'retired') return control ? [control] : []
+  return [control, health].filter((badge): badge is TargetAttentionBadge => badge !== null)
+}
+
+export function targetCoverageSummary(target: TargetRecord) {
+  return `启用探测项 ${target.enabled_probe_count} · 可接收实例 ${target.matching_executor_count}`
+}
+
+export type TargetCoverageNotice = { key: string; title: string; detail: string }
+
+export function targetCoverageNotices(target: TargetRecord): TargetCoverageNotice[] {
+  if (target.lifecycle_status === 'retired') return []
+  const notices: TargetCoverageNotice[] = []
+  if (target.enabled_probe_count === 0) {
+    notices.push({
+      key: 'enabled-probes',
+      title: '未配置启用探测项',
+      detail: '当前启用探测项为 0。目标暂停后，已启用的探测项仍会计入。',
+    })
   }
-  const healthTone = ABNORMAL_HEALTH[target.current_health_status]
-  if (healthTone) {
-    badges.push({ label: target.current_health_status, tone: healthTone })
-  } else if (badges.length === 0 && isCoverageGapTarget(target)) {
-    badges.push({ label: '覆盖缺口', tone: 'notice' })
+  if (isAssignableTarget(target) && target.matching_executor_count === 0) {
+    notices.push({
+      key: 'matching-executors',
+      title: '没有可接收该任务的实例',
+      detail: '按执行标签交集计算，并排除已归档、已退役和暂停的实例。',
+    })
   }
-  return badges
+  if (target.matching_executor_count > 0 && isUnobservedTarget(target)) {
+    notices.push({
+      key: 'unobserved-sample',
+      title: '已匹配实例，尚无样本',
+      detail: '可接收该任务的实例还没有产生成功或失败观测。',
+    })
+  }
+  return notices
 }
 
 export function targetIssueSummary(target: TargetRecord): string {
   if (target.lifecycle_status === 'retired') return ''
   const summary = target.current_primary_issue_summary.trim()
   if (summary) return summary
-  if (isCoverageGapTarget(target) && !ABNORMAL_HEALTH[target.current_health_status]) {
-    return '缺少执行监控实例标签'
-  }
-  return ''
+  return targetCoverageNotices(target).map((notice) => notice.title).join('，')
 }
 
 export function countAbnormalTargets(targets: TargetRecord[]) {
-  return targets.filter((target) => target.lifecycle_status !== 'retired' && target.current_health_status !== '正常').length
+  return targets.filter(isAbnormalTarget).length
+}
+
+export function countUnobservedTargets(targets: TargetRecord[]) {
+  return targets.filter(isUnobservedTarget).length
 }
 
 export function countPausedTargets(targets: TargetRecord[]) {
@@ -109,6 +203,21 @@ export function countPausedTargets(targets: TargetRecord[]) {
 
 export function countArchivedTargets(targets: TargetRecord[]) {
   return targets.filter((target) => target.lifecycle_status === 'retired').length
+}
+
+/** Current wins on id overlap. Callers must pass the current and retired collections, not scope=all. */
+export function combineCurrentAndRetiredTargets(
+  currentTargets: TargetRecord[],
+  retiredTargets: TargetRecord[],
+) {
+  const seen = new Set<string>()
+  const combined: TargetRecord[] = []
+  for (const target of [...currentTargets, ...retiredTargets]) {
+    if (seen.has(target.target_id)) continue
+    seen.add(target.target_id)
+    combined.push(target)
+  }
+  return combined
 }
 
 export function countCoverageGapTargets(targets: TargetRecord[]) {

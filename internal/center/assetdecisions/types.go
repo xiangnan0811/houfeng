@@ -667,16 +667,17 @@ func RecordSnapshotFromMember(member GroupMember) EvidenceSnapshot {
 	}
 	if member.PrimarySubscription != nil {
 		snapshot["primary_subscription"] = map[string]any{
-			"subscription_id":     member.PrimarySubscription.SubscriptionID,
-			"status":              string(member.PrimarySubscription.Status),
-			"renew_at":            member.PrimarySubscription.RenewAt,
-			"monthly_price":       member.PrimarySubscription.MonthlyPrice,
-			"currency":            member.PrimarySubscription.Currency,
-			"monthly_price_base":  member.PrimarySubscription.MonthlyPriceBase,
-			"yearly_price_base":   member.PrimarySubscription.YearlyPriceBase,
-			"base_currency":       member.PrimarySubscription.BaseCurrency,
-			"budget_status":       member.PrimarySubscription.BudgetStatus,
-			"exchange_rate_stale": member.PrimarySubscription.ExchangeRateStale,
+			"subscription_id":      member.PrimarySubscription.SubscriptionID,
+			"status":               string(member.PrimarySubscription.Status),
+			"renew_at":             member.PrimarySubscription.RenewAt,
+			"monthly_price":        member.PrimarySubscription.MonthlyPrice,
+			"currency":             member.PrimarySubscription.Currency,
+			"monthly_price_base":   member.PrimarySubscription.MonthlyPriceBase,
+			"yearly_price_base":    member.PrimarySubscription.YearlyPriceBase,
+			"base_currency":        member.PrimarySubscription.BaseCurrency,
+			"budget_status":        member.PrimarySubscription.BudgetStatus,
+			"exchange_rate_status": member.PrimarySubscription.ExchangeRateStatus,
+			"exchange_rate_stale":  member.PrimarySubscription.ExchangeRateStatus == "stale" || member.PrimarySubscription.ExchangeRateStatus == "missing",
 		}
 	}
 	return snapshot
@@ -1088,7 +1089,7 @@ func buildEvidenceChips(fact Fact, renewalWindow bool) []EvidenceChip {
 		if fact.PrimarySubscription.BudgetStatus == "warning" || fact.PrimarySubscription.BudgetStatus == "over" {
 			appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceBudgetRisk, Label: "预算风险", Tone: "alert"})
 		}
-		if fact.PrimarySubscription.ExchangeRateStale {
+		if fact.PrimarySubscription.ExchangeRateStatus == "stale" || fact.PrimarySubscription.ExchangeRateStatus == "missing" {
 			appendUniqueChip(&chips, EvidenceChip{Kind: EvidenceExchangeRateStale, Label: "汇率异常", Tone: "notice"})
 		}
 	}

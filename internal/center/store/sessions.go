@@ -95,17 +95,23 @@ func normalizeSessionClock(now func() time.Time) time.Time {
 func (r *PostgresSessionRepository) ValidateSession(ctx context.Context, sessionID string, now func() time.Time) error {
 	hashedSessionID := r.hashSessionID(sessionID)
 	var issuedAt, expiresAt, passwordChangedAt time.Time
+	var disabledAt *time.Time
 	if err := r.db.QueryRow(ctx, `
-		select s.issued_at, s.expires_at, u.password_changed_at
+		select s.issued_at, s.expires_at, u.password_changed_at, u.disabled_at
 		from sessions s
 		join users u on u.user_id = s.user_id
-		where s.session_id_hash = $1`, hashedSessionID).Scan(&issuedAt, &expiresAt, &passwordChangedAt); err != nil {
+		where s.session_id_hash = $1`, hashedSessionID).Scan(
+		&issuedAt, &expiresAt, &passwordChangedAt, &disabledAt,
+	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return auth.ErrSessionNotFound
 		}
 		return fmt.Errorf("validate session: %w", err)
 	}
 
+	if disabledAt != nil {
+		return auth.ErrSessionExpired
+	}
 	checkedAt := normalizeSessionClock(now)
 	if !expiresAt.After(checkedAt) || (!issuedAt.IsZero() && issuedAt.Before(passwordChangedAt)) {
 		return auth.ErrSessionExpired
@@ -129,20 +135,23 @@ func (r *PostgresSessionRepository) CreateIfPasswordHash(ctx context.Context, ex
 
 	var currentHash string
 	var passwordChangedAt time.Time
+	var isSupervisor bool
+	var disabledAt *time.Time
 	err = tx.QueryRow(ctx, `
-		select password_hash, password_changed_at
+		select password_hash, password_changed_at, is_supervisor, disabled_at
 		from users
 		where user_id = $1
-		for update`, session.UserID).Scan(&currentHash, &passwordChangedAt)
+		for update`, session.UserID).Scan(&currentHash, &passwordChangedAt, &isSupervisor, &disabledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.Session{}, auth.ErrInvalidCredentials
 	}
 	if err != nil {
 		return auth.Session{}, fmt.Errorf("lock user for session creation: %w", err)
 	}
-	if !hmac.Equal([]byte(currentHash), []byte(expectedHash)) {
+	if !hmac.Equal([]byte(currentHash), []byte(expectedHash)) || disabledAt != nil {
 		return auth.Session{}, auth.ErrInvalidCredentials
 	}
+	session.ManagementCapabilities = auth.ManagementCapabilities{Access: isSupervisor && disabledAt == nil}
 
 	issuedAt := laterSessionTime(normalizeSessionClock(now), passwordChangedAt.UTC())
 	session.IssuedAt = issuedAt
@@ -171,16 +180,20 @@ func (r *PostgresSessionRepository) ChangePasswordIfHash(ctx context.Context, us
 
 	var currentHash string
 	var passwordChangedAt time.Time
+	var disabledAt *time.Time
 	err = tx.QueryRow(ctx, `
-		select password_hash, password_changed_at
+		select password_hash, password_changed_at, disabled_at
 		from users
 		where user_id = $1
-		for update`, userID).Scan(&currentHash, &passwordChangedAt)
+		for update`, userID).Scan(&currentHash, &passwordChangedAt, &disabledAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return auth.ErrUserNotFound
 	}
 	if err != nil {
 		return fmt.Errorf("lock user for password change: %w", err)
+	}
+	if disabledAt != nil {
+		return auth.ErrSessionNotFound
 	}
 	if !hmac.Equal([]byte(currentHash), []byte(expectedHash)) {
 		return auth.ErrInvalidCredentials
@@ -264,11 +277,13 @@ func (r *PostgresSessionRepository) TouchWithUserLock(ctx context.Context, sessi
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var passwordChangedAt time.Time
+	var isSupervisor bool
+	var disabledAt *time.Time
 	if err := tx.QueryRow(ctx, `
-		select password_changed_at
+		select password_changed_at, is_supervisor, disabled_at
 		from users
 		where user_id = $1
-		for update`, userID).Scan(&passwordChangedAt); err != nil {
+		for update`, userID).Scan(&passwordChangedAt, &isSupervisor, &disabledAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return auth.Session{}, auth.ErrUserNotFound
 		}
@@ -292,7 +307,16 @@ func (r *PostgresSessionRepository) TouchWithUserLock(ctx context.Context, sessi
 	if session.UserID != userID {
 		return auth.Session{}, auth.ErrSessionNotFound
 	}
-
+	if disabledAt != nil {
+		if _, err := tx.Exec(ctx, `delete from sessions where session_id_hash = $1 and user_id = $2`, hashedSessionID, userID); err != nil {
+			return auth.Session{}, fmt.Errorf("delete disabled session: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return auth.Session{}, fmt.Errorf("commit disabled session deletion: %w", err)
+		}
+		return auth.Session{}, auth.ErrSessionExpired
+	}
+	session.ManagementCapabilities = auth.ManagementCapabilities{Access: isSupervisor && disabledAt == nil}
 	checkedAt := normalizeSessionClock(now)
 	if !session.ExpiresAt.After(checkedAt) || (!session.IssuedAt.IsZero() && session.IssuedAt.Before(passwordChangedAt)) {
 		if _, err := tx.Exec(ctx, `delete from sessions where session_id_hash = $1 and user_id = $2`, hashedSessionID, userID); err != nil {

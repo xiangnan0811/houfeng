@@ -7,7 +7,10 @@ import {
   compareFactDraftAgainstLatest,
   decisionDraftAlreadySatisfied,
   detailToFactEditForm,
+  buildMonitoringInstanceCreateInput,
+  monitoringInstanceCreateDraftFromDetail,
   mergeFactDraftWithLatest,
+  updateMonitoringInstanceCreateDraft,
 } from './vpsDetailHelpers'
 import type { FactEditFormState } from './types'
 
@@ -227,5 +230,154 @@ describe('independent VPS facts', () => {
   it('preserves review-date changes even when the renewal intent is unchanged', () => {
     const latest = detailFixture({ renewal_decision: 'cancel' })
     expect(decisionDraftAlreadySatisfied({ renewalDecision: 'cancel', reason: '', reviewAt: '2027-01-01' }, latest)).toBe(false)
+  })
+})
+
+const MONITORING_CREATE_BODY_KEYS = [
+  'display_name',
+  'group',
+  'region',
+  'city',
+  'provider',
+  'labels',
+  'note',
+  'link_note',
+] as const
+
+describe('monitoring instance create copy', () => {
+  it('leaves unknown identity empty and keeps the previous name, group, labels, and note rules', () => {
+    const draft = monitoringInstanceCreateDraftFromDetail(detailFixture({
+      display_name: '边缘甲',
+      region: '',
+      country: '',
+      city: '',
+      datacenter: '',
+      provider_name: '',
+      labels: ['edge', 'prod'],
+      note: '资产备注',
+    }))
+
+    expect(draft).toEqual({
+      displayName: '边缘甲',
+      group: '',
+      region: '',
+      city: '',
+      provider: '',
+      labels: 'edge, prod',
+      note: '资产备注',
+      linkNote: '',
+      clearedFields: [],
+    })
+    const input = buildMonitoringInstanceCreateInput(draft)
+    expect(input).toEqual({
+      display_name: '边缘甲',
+      group: '',
+      region: '',
+      city: '',
+      provider: '',
+      labels: ['edge', 'prod'],
+      note: '资产备注',
+      link_note: '',
+    })
+    expect(Object.keys(input)).toEqual(MONITORING_CREATE_BODY_KEYS)
+    expect(JSON.stringify(input)).not.toMatch(/未确认|未关联服务商|created from vps detail/)
+  })
+
+  it('copies region from country and city from datacenter only when the primary field is empty', () => {
+    const fallback = monitoringInstanceCreateDraftFromDetail(detailFixture({
+      region: '',
+      country: 'JP',
+      city: '',
+      datacenter: 'NRT',
+      provider_name: '',
+    }))
+    expect(fallback.region).toBe('JP')
+    expect(fallback.city).toBe('NRT')
+    expect(fallback.provider).toBe('')
+    expect(fallback.linkNote).toBe('')
+    expect(buildMonitoringInstanceCreateInput(fallback)).not.toHaveProperty('clear_fields')
+
+    const preferred = monitoringInstanceCreateDraftFromDetail(detailFixture({
+      region: 'Kanto',
+      country: 'JP',
+      city: 'Shinjuku',
+      datacenter: 'NRT',
+      provider_name: 'Example',
+    }))
+    expect(preferred.region).toBe('Kanto')
+    expect(preferred.city).toBe('Shinjuku')
+    expect(preferred.provider).toBe('Example')
+  })
+
+  it('sends the unchanged default as the old eight fields and omits clear_fields', () => {
+    const input = buildMonitoringInstanceCreateInput(monitoringInstanceCreateDraftFromDetail(detailFixture()))
+    expect(input).toEqual({
+      display_name: '东京边缘',
+      group: '',
+      region: 'Tokyo',
+      city: 'Tokyo',
+      provider: 'Example',
+      labels: ['edge'],
+      note: '',
+      link_note: '',
+    })
+    expect(Object.keys(input)).toEqual(MONITORING_CREATE_BODY_KEYS)
+  })
+
+  it('records an explicit clear, sorts it, and removes that intent when the field is refilled', () => {
+    let draft = monitoringInstanceCreateDraftFromDetail(detailFixture({ region: '', country: 'JP' }))
+    expect(draft.region).toBe('JP')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'provider', '')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'region', '   ')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'city', '')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'region', '   ')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'displayName', '新名称')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'group', '边缘')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'labels', 'a, b')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'note', '备注')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'linkNote', '  ')
+
+    expect(draft.clearedFields).toEqual(['city', 'provider', 'region'])
+    expect(draft.displayName).toBe('新名称')
+    expect(draft.group).toBe('边缘')
+    expect(draft.labels).toBe('a, b')
+    expect(draft.note).toBe('备注')
+    const cleared = buildMonitoringInstanceCreateInput(draft)
+    expect(cleared.clear_fields).toEqual(['city', 'provider', 'region'])
+    expect(cleared).toMatchObject({
+      display_name: '新名称',
+      group: '边缘',
+      region: '',
+      city: '',
+      provider: '',
+      labels: ['a', 'b'],
+      note: '备注',
+      link_note: '',
+    })
+
+    draft = updateMonitoringInstanceCreateDraft(draft, 'region', '关东')
+    expect(draft.clearedFields).toEqual(['city', 'provider'])
+    const refilled = buildMonitoringInstanceCreateInput(draft)
+    expect(refilled.region).toBe('关东')
+    expect(refilled.clear_fields).toEqual(['city', 'provider'])
+
+    draft = updateMonitoringInstanceCreateDraft(draft, 'city', '大阪')
+    draft = updateMonitoringInstanceCreateDraft(draft, 'provider', '本地')
+    const restored = buildMonitoringInstanceCreateInput(draft)
+    expect(restored).not.toHaveProperty('clear_fields')
+    expect(Object.keys(restored)).toEqual(MONITORING_CREATE_BODY_KEYS)
+    expect(restored).toMatchObject({ city: '大阪', provider: '本地', region: '关东' })
+  })
+
+  it('ignores a stale clear flag once the field has a value again', () => {
+    const cleared = updateMonitoringInstanceCreateDraft(
+      monitoringInstanceCreateDraftFromDetail(detailFixture()),
+      'region',
+      '',
+    )
+    const input = buildMonitoringInstanceCreateInput({ ...cleared, region: 'Osaka' })
+    expect(input.region).toBe('Osaka')
+    expect(input).not.toHaveProperty('clear_fields')
+    expect(Object.keys(input)).toEqual(MONITORING_CREATE_BODY_KEYS)
   })
 })

@@ -1,6 +1,8 @@
 import { lazy, Suspense } from 'react'
 
 import { Modal } from '../../../components/atoms'
+import { capabilityFlagsForSession } from '../../../lib/auth-client'
+import { useAuth } from '../../../lib/auth-context'
 
 const RecordExportPanel = lazy(() => import('../RecordExportPanel').then((module) => ({
   default: module.RecordExportPanel,
@@ -21,6 +23,9 @@ type RecordToolDialogsProps = {
 
 /** 导出 / 导入是次要工具：从页头按钮打开弹窗，面板按需懒加载。 */
 export function RecordToolDialogs({ tool, recordId, revisionId, snapshotIds, onClose }: RecordToolDialogsProps) {
+  const auth = useAuth()
+  const { portability } = capabilityFlagsForSession(auth)
+  if (!portability) return null
   return (
     <>
       <Modal open={tool === 'export' && Boolean(recordId)} onClose={onClose} title="导出记录" size="md">

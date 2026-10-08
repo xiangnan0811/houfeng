@@ -1,6 +1,8 @@
 import { Link, useLocation } from 'react-router-dom'
 
 import { Badge, Button, Timestamp } from '../../../components/atoms'
+import { capabilityFlagsForSession } from '../../../lib/auth-client'
+import { useAuth } from '../../../lib/auth-context'
 import type { RecordWorkspaceState } from '../hooks/useRecordDraft'
 import { comparisonEntryHref, comparisonSubjectsFromSources } from '../compare/comparisonQueryState'
 import { RECORD_LIFECYCLE_LABELS, RECORD_TYPE_LABELS } from '../recordLabels'
@@ -63,6 +65,8 @@ export function RecordWorkspaceHeader({
   onExport,
   onImport,
 }: RecordWorkspaceHeaderProps) {
+  const auth = useAuth()
+  const { comparison, portability } = capabilityFlagsForSession(auth)
   const location = useLocation()
   const { mode, payload } = state
   const editable = mode === 'new' || mode === 'edit'
@@ -149,7 +153,7 @@ export function RecordWorkspaceHeader({
         {mode === 'revision' && recordId ? (
           <Link className="btn md secondary" to={recordHref(`/records/${recordId}`)} state={location.state}>当前版本</Link>
         ) : null}
-        {mode === 'revision' && recordId && revisionId ? (
+        {comparison && mode === 'revision' && recordId && revisionId ? (
           <Link
             className="btn md secondary"
             to={comparisonEntryHref({
@@ -161,10 +165,10 @@ export function RecordWorkspaceHeader({
             横向比较
           </Link>
         ) : null}
-        {(mode === 'read' || mode === 'revision') && recordId ? (
+        {portability && (mode === 'read' || mode === 'revision') && recordId ? (
           <Button size="md" variant="secondary" onClick={onExport}>导出</Button>
         ) : null}
-        {mode === 'read' || mode === 'revision' || mode === 'new' ? (
+        {portability && (mode === 'read' || mode === 'revision' || mode === 'new') ? (
           <Button size="md" variant="secondary" onClick={onImport}>导入</Button>
         ) : null}
         {mode === 'read' && recordId && state.record?.capabilities.update ? (

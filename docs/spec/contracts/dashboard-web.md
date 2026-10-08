@@ -38,13 +38,16 @@ buildDashboardModel(input: {
 - 失败不得再用 `[]` / `null` 表示。`overview` 失败是可重试整页 error；VPS / subscription 失败是局部 degradation，并保留已成功的 Dashboard 摘要。
 - mode 优先级固定为 `critical -> abnormal -> maintenance -> onboarding -> stable`。`onboarding` 只在 VPS 请求 `success([])` 且 `total_monitoring_instance_count === 0`、`total_target_count === 0` 时成立；VPS loading/error 永远不能触发首次接入。
 - `abnormal_*_count` 已包含 `severe_*_count`。总异常只允许 `abnormal_monitoring_instance_count + abnormal_target_count`；严重只做优先级分层，禁止把 severe 再加进 abnormal。
+- `unobserved_target_count` 使用后端全量计数并链接 `/targets?view=unobserved`，不改变已有异常深链。已知异常为零但无观测非零时表达“尚有目标无观测”；二者均零仅表达“当前运行异常计数为 0”。同时存在则分开展示，资产待核对仍是独立事实。
+- 下层证据 lane 保留来源、摘要生成/读取时间与金额完整性，不重复上层同组判断数字。未知目标使用中性状态，不由历史观测或摘要计数保证当前健康。
 - 每个 ready model 恰好一个 `primaryAction`。固定深链：critical → `/events?severity=严重`；abnormal → 有监控实例时 `/monitoring?abnormal=1`，否则 `/targets?abnormal=1`；maintenance → `/events?maintenance_only=1`；onboarding → `/vps`；stable → 真实资产 signal 的 `/asset-decisions?...`，无 signal 时 `/vps`。
 - 判断摘要固定三项（观测、资产、订阅），每项必须链接到其文案所指的承接工作流；不得出现“资产待核对”却固定跳 `/vps` 的链接漂移。
 - stable 只表示没有观测异常/维护/首次接入条件，不等于所有来源健康。stable + 资产待办显示 `资产判断等待核对`；stable + 局部请求失败使用 notice tone、标题 `部分事实待确认` 和信号 `局部数据不可用`，不得显示 `摘要无异常` 或 `当前没有紧急处理项`。
 - subscription 请求失败时可使用 `DashboardOverview.asset_summary.cost_by_currency` 作为较低精度 fallback，但必须同时展示来源、失败信息和 `snapshot_generated_at`；不能伪装成 subscription overview 同精度结果。
 - `snapshot_generated_at` 只能表达 `摘要生成`。VPS `loadedAt` 只能表达客户端完成读取的时间；两者都不是 Center health、agent heartbeat 或全链路同步证明。
-- 首屏保留一个 command surface、一个 `今日第一步`、三项判断摘要（以指标卡呈现，观测卡可在后端返回 24 个逐小时桶时附 `new_incident_trend_24h` 趋势，否则不画趋势）和两条证据 lane；桌面两栏布局中，右栏另有两块**有界预览**：`即将续费`（来自 subscription overview 的 `upcoming_renewals`，该队列由后端按 UTC 日窗口 `[当天, 当天+90]` 筛选且最多返回 12 条：按续费日升序最多预览 5 项，计数标注“未来 90 天（UTC）· N 项”，达到 12 条上限时写“至少 12 项”而不是总数；剩余天数与窗口同源，按续费日期与订阅摘要 `snapshot_generated_at` 所在 UTC 日期的日历差计算（后端 `subscriptioncosts` 以同一时刻确定窗口与生成时间，不用浏览器接收时间，避免跨 UTC 午夜或客户端时钟偏差；该字段无效时才退回接收时间，并在计数旁标注“天数按接收时间估算”），当天为“今天”，早于当天的兜底显示“已过”；空队列写“未来 90 天（UTC）内没有待续费的订阅”；汇率过期或缺折算金额时显示“金额待核对”，不显示精确金额；链接订阅明细；subscription loading/error 时如实显示读取中/不可用，不得显示为“没有待续费”）和 `最近动态`（来自 `recent_events`，按时间倒序最多 5 项；`recent_events` 无时间下界，入口链接不带 `time_range`，避免旧事件点进后为空）。异常对象最多展示前三项；完整事件、资产、订阅明细仍交给对应路由。不得恢复独立的第四张 KPI、Group 摘要、系统快捷入口、无上限的事件/订阅列表或第二套 Dashboard workbench。
+- 首屏保留一个 command surface、一个 `今日第一步`、三项判断摘要（以指标卡呈现，观测卡可在后端返回 24 个逐小时桶时附 `new_incident_trend_24h` 趋势，否则不画趋势）和两条证据 lane；桌面两栏布局中，右栏另有两块**有界预览**：`即将续费`（来自 subscription overview 的 `upcoming_renewals`，该队列由后端按 UTC 日窗口 `[当天, 当天+90]` 筛选且最多返回 12 条：按续费日升序最多预览 5 项，计数标注“未来 90 天（UTC）· N 项”，达到 12 条上限时写“至少 12 项”而不是总数；剩余天数与窗口同源，按续费日期与订阅摘要 `snapshot_generated_at` 所在 UTC 日期的日历差计算（后端 `subscriptioncosts` 以同一时刻确定窗口与生成时间，不用浏览器接收时间，避免跨 UTC 午夜或客户端时钟偏差；该字段无效时才退回接收时间，并在计数旁标注“天数按接收时间估算”），当天为“今天”，早于当天的兜底显示“已过”；空队列写“未来 90 天（UTC）内没有待续费的订阅”；缺折算金额时显示“金额待核对”，已有过期汇率数值可显示但必须标注“汇率过期”；链接订阅明细；subscription loading/error 时如实显示读取中/不可用，不得显示为“没有待续费”）和 `最近动态`（来自 `recent_events`，按时间倒序最多 5 项；`recent_events` 无时间下界，入口链接不带 `time_range`，避免旧事件点进后为空）。异常对象最多展示前三项；完整事件、资产、订阅明细仍交给对应路由。不得恢复独立的第四张 KPI、Group 摘要、系统快捷入口、无上限的事件/订阅列表或第二套 Dashboard workbench。
 - `abnormal_monitoring_instances` / `abnormal_targets` 只用于异常对象预览，不能推导全量 group/provider/region。`notification_status` 仍只能包含布尔配置摘要，不得暴露 token/chat id/webhook。
+- 账单判断和成本证据消费 `current_unknown_amount_count`、`current_missing_rate_count`、`current_stale_rate_count`。金额不完整时称已知金额小计，全部未知时称金额待核对；预算风险零不能替代完整性事实。金额原价为零且换算可用仍为已知零。
 
 #### 4. Validation & Error Matrix
 
@@ -127,7 +130,7 @@ buildShellSummaryModel(summary: DashboardSummaryState, now: number): ShellSummar
 #### 3. Contracts
 
 - freshness 只以 `DashboardOverview.snapshot_generated_at` 与当前时刻比较；客户端请求完成时间不得冒充摘要生成时间。
-- fresh success 无异常为 `clear / 摘要无异常`，有异常为 `anomaly / 摘要有异常`；禁止使用“系统正常”“同步完成”或等价全链路健康文案。
+- fresh success 已知异常和无观测均为零时为 `clear / 当前运行异常计数为 0`；只有无观测时显示“尚有目标无观测”，不得使用正常绿色保证；有异常时表达运行异常，并独立表达同时存在的无观测。禁止使用“系统正常”“系统摘要无异常”“同步完成”或等价全链路健康文案。
 - snapshot 生成时间无效或达到 5 分钟窗口时为 `stale / 摘要已过期`。使用一次性 timeout 触发到期重算，不引入常驻 interval。
 - 初次请求失败且没有成功快照时为 `unavailable / 摘要不可用`；已有成功快照后的刷新失败保留该 overview 与原 `snapshot_generated_at`，但状态必须转为 `stale`。
 - 只有 `clear` / `anomaly` 可以把异常计数传给 Sidebar；`loading` / `stale` / `unavailable` 必须隐藏 nav badge，不能用 0 暗示无异常。
@@ -139,8 +142,9 @@ buildShellSummaryModel(summary: DashboardSummaryState, now: number): ShellSummar
 | Condition | Expected behavior |
 | --- | --- |
 | 首次请求 pending | `loading`；无 nav badge |
-| fresh snapshot，abnormal 总数为 0 | `clear`，显示“摘要无异常”与服务端生成时间 |
-| fresh snapshot，abnormal 总数大于 0 | `anomaly`，显示“摘要有异常”与真实 nav badge |
+| fresh snapshot，abnormal 与 unobserved 均为 0 | `clear`，显示“当前运行异常计数为 0”与服务端生成时间 |
+| fresh snapshot，abnormal 为 0、unobserved 大于 0 | 显示“尚有目标无观测”，独立链接无观测筛选 |
+| fresh snapshot，abnormal 总数大于 0 | `anomaly`，显示运行异常与真实 nav badge；无观测另外表达 |
 | snapshot 超过 5 分钟或时间无效 | `stale`；保留生成时间；隐藏 nav badge |
 | 首次请求 503 | `unavailable`；不制造 0 计数 |
 | 成功后 focus refresh 503 | 保留上次 overview，转 `stale`，生成时间不改，隐藏 nav badge |

@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as authContext from '../../lib/auth-context'
 import type { VPSOverview } from '../../lib/types'
 import { VPSOverviewPageView } from './VPSOverviewPageView'
 import { useVPSDetailResources } from './hooks/useVPSDetailResources'
@@ -72,6 +73,23 @@ function overview(): VPSOverview {
 
 describe('VPSOverviewPageView readonly preview', () => {
   beforeEach(() => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: true, portability: true },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
     vi.mocked(useVPSDetailResources).mockReturnValue({
       subscriptions: { status: 'ready', items: [], error: null },
       services: { status: 'ready', items: [], error: null },

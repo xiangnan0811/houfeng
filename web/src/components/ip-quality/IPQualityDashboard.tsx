@@ -31,6 +31,7 @@ type IPQualityDashboardProps = {
   summary: IPQualitySummary
   detailPath: string
   collect: IPQualityCollectController
+  vpsId?: string
 }
 
 function scoreTone(score: number | null): BadgeTone {
@@ -115,7 +116,7 @@ function IPQualityVerdict({ report, summary }: { report: VPSIPQualityReport, sum
   )
 }
 
-export function IPQualityDashboard({ report, summary, detailPath, collect }: IPQualityDashboardProps) {
+export function IPQualityDashboard({ report, summary, detailPath, collect, vpsId }: IPQualityDashboardProps) {
   const [searchParams] = useSearchParams()
   const selectedReportId = searchParams.get('report_id')?.trim() || ''
   const viewingHistory = selectedReportId !== ''
@@ -131,7 +132,7 @@ export function IPQualityDashboard({ report, summary, detailPath, collect }: IPQ
         latest={report.latest_report ?? null}
         viewingHistory={viewingHistory}
       />
-      {viewingHistory ? null : <IPQualityCollectNotice collect={collect} />}
+      {viewingHistory ? null : <IPQualityCollectNotice collect={collect} vpsId={vpsId ?? summary.vps_id} />}
       {probeNotice ? (
         <aside className="ipq-notice ipq-notice--warning" role="note" aria-label="服务探测可信度">
           <span className="ipq-notice__dot" aria-hidden="true" />

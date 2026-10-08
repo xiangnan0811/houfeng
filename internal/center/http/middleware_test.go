@@ -222,6 +222,25 @@ func TestRequireSessionRejectsEmptyOrUnknownAuthenticatedIdentity(t *testing.T) 
 		})
 	}
 }
+func TestRequireSessionRejectsDisabledUserBeforeScopeLookup(t *testing.T) {
+	disabledAt := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	scopes := &stubScopeRepository{}
+	mw := RequireSession(&stubAuthSvc{user: auth.User{
+		UserID: middlewareTestUserID, Role: auth.RoleAdmin, IsSupervisor: true, DisabledAt: &disabledAt,
+	}}, scopes)(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Fatal("inner must not be called")
+	}))
+	r := httptest.NewRequest(http.MethodGet, "/api/protected", nil)
+	r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "abc"})
+	w := httptest.NewRecorder()
+	mw.ServeHTTP(w, r)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+	if scopes.calls != 0 {
+		t.Fatalf("scope lookup calls = %d, want 0", scopes.calls)
+	}
+}
 
 func TestUserIDFromContextEmpty(t *testing.T) {
 	uid, ok := UserIDFromContext(context.Background())

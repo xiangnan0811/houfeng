@@ -168,7 +168,7 @@ func TestVPSCreateIdempotencyLostResponsePostgres(t *testing.T) {
 			first.Note == "Initial VPS note" &&
 			firstLink.VPSID == vps.VPSID &&
 			firstLink.MonitoringInstanceID == first.MonitoringInstanceID &&
-			firstLink.Note == "created from vps detail"
+			firstLink.Note == ""
 		if !firstDefaultsMatch {
 			t.Fatalf("first monitoring create derived expected defaults = %t", firstDefaultsMatch)
 		}

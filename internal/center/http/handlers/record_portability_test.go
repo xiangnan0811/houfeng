@@ -14,6 +14,7 @@ import (
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/portability"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
 )
 
@@ -185,19 +186,86 @@ func TestRecordPortabilityHandlerMapsOriginConflict(t *testing.T) {
 	t.Parallel()
 
 	actor := mustRecordsHandlerActor(t)
+	destination := records.SubjectReference{
+		RegistryVersion: records.SubjectRegistryVersionV1,
+		Kind:            records.SubjectKindTarget,
+		Role:            records.RelationRoleAffected,
+		SourceID:        "tg_0123456789abcdef",
+		Primary:         true,
+	}
 	handler := RecordPortability(&recordPortabilityHandlerStub{
-		dryRun: func(context.Context, portability.DryRunRequest) (portability.ImportPlanView, error) {
+		dryRun: func(_ context.Context, request portability.DryRunRequest) (portability.ImportPlanView, error) {
+			if request.DestinationSubject != destination {
+				t.Fatalf("DryRun() destination = %#v, want %#v", request.DestinationSubject, destination)
+			}
 			return portability.ImportPlanView{}, portability.ErrImportOriginConflict
 		},
 		apply: func(context.Context, portability.ApplyRequest) (portability.ApplyResult, error) {
 			return portability.ApplyResult{}, portability.ErrImportOriginConflict
 		},
 	})
-	dryRun := serveRecordPortability(t, handler, actor, http.MethodPost, "/api/record-imports/dry-run", "PK", "import-origin-1")
+	dryRun := serveRecordPortability(t, handler, actor, http.MethodPost,
+		"/api/record-imports/dry-run?destination_subject_kind=target&destination_subject_id=tg_0123456789abcdef",
+		"PK", "import-origin-1")
 	assertRecordsHandlerError(t, dryRun, http.StatusConflict, "import_origin_conflict")
 	applied := serveRecordPortability(t, handler, actor, http.MethodPost, "/api/record-imports/rip_origin1/apply",
 		`{"lock_version":2}`, "")
 	assertRecordsHandlerError(t, applied, http.StatusConflict, "import_origin_conflict")
+}
+
+func TestRecordImportDryRunRejectsInvalidDestinationQuery(t *testing.T) {
+	t.Parallel()
+	actor := mustRecordsHandlerActor(t)
+	called := false
+	handler := RecordPortability(&recordPortabilityHandlerStub{
+		dryRun: func(context.Context, portability.DryRunRequest) (portability.ImportPlanView, error) {
+			called = true
+			return portability.ImportPlanView{}, nil
+		},
+	})
+	for _, query := range []string{
+		"",
+		"destination_subject_kind=target",
+		"destination_subject_id=tg_0123456789abcdef",
+		"destination_subject_kind=target&destination_subject_kind=target&destination_subject_id=tg_0123456789abcdef",
+		"destination_subject_kind=target&destination_subject_id=tg_0123456789abcdef&unexpected=x",
+		"destination_subject_kind=unknown&destination_subject_id=tg_0123456789abcdef",
+		"destination_subject_kind=target&destination_subject_id=bad",
+		"destination_subject_kind=target&destination_subject_id=",
+	} {
+		recorder := serveRecordPortability(t, handler, actor, http.MethodPost,
+			"/api/record-imports/dry-run?"+query, "PK", "import-invalid-query")
+		assertRecordsHandlerError(t, recorder, http.StatusBadRequest, "invalid_request")
+	}
+	if called {
+		t.Fatal("DryRun was called for invalid destination query")
+	}
+}
+
+func TestRecordImportDryRunMapsDestinationAuthorizationErrors(t *testing.T) {
+	t.Parallel()
+	actor := mustRecordsHandlerActor(t)
+	path := "/api/record-imports/dry-run?destination_subject_kind=target&destination_subject_id=tg_0123456789abcdef"
+	for _, test := range []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{name: "denied", err: portability.ErrExportUnauthorized, wantStatus: http.StatusNotFound},
+		{name: "unavailable", err: portability.ErrExportUnavailable, wantStatus: http.StatusServiceUnavailable},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			handler := RecordPortability(&recordPortabilityHandlerStub{
+				dryRun: func(context.Context, portability.DryRunRequest) (portability.ImportPlanView, error) {
+					return portability.ImportPlanView{}, test.err
+				},
+			})
+			recorder := serveRecordPortability(t, handler, actor, http.MethodPost, path, "PK", "import-auth")
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("status = %d, want %d (%s)", recorder.Code, test.wantStatus, recorder.Body.String())
+			}
+		})
+	}
 }
 
 type recordPortabilityHandlerStub struct {
@@ -263,7 +331,11 @@ func serveRecordPortability(
 		request.Header.Set("Idempotency-Key", key)
 	}
 	if body != "" {
-		request.Header.Set("Content-Type", "application/json")
+		contentType := "application/json"
+		if strings.HasPrefix(path, "/api/record-imports/dry-run") {
+			contentType = "application/zip"
+		}
+		request.Header.Set("Content-Type", contentType)
 	}
 	request = request.WithContext(sessionctx.WithActorScope(request.Context(), actor))
 	recorder := httptest.NewRecorder()

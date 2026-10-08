@@ -21,10 +21,12 @@
 
 ### API client
 
-- **业务 `/api/*` 调用一律由 `web/src/lib/` 下的 façade 暴露**。默认 owner 是 `api.ts`；只有全部 production consumer 都位于 lazy route、且 fresh build 证明入口预算需要隔离时，才按领域拆出 façade。当前 `observabilityApi.ts` 拥有 observability helpers；`recordsApi.ts` 拥有 Records/draft/permanent-deletion transport，只允许被 `/records/new`、`/records/:recordId` 及其 edit/revision lazy pages 和同目录 draft controller 消费，不得进入 AppShell / `api.ts` / eager router graph。业务函数使用动词 + 资源命名并返回 `Promise<T>`，T 来自 `lib/types.ts`。
-- **transport 唯一 owner 是 `web/src/lib/apiRequest.ts`**：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store'`；401 触发共享 unauthorized handler 并抛 `ApiError(401)`；非 2xx 默认只从 `error/message` 生成 legacy `status/message`，领域 façade 可通过显式 `ApiErrorDecoder` seam追加 allowlisted metadata。当前只有 lazy-only `recordsApi.ts` 静态组合 `apiError.ts` decoder，生成 `code/field_errors/recovery` 且不把 decoder 带入 eager graph。`apiRequest.ts` 同时拥有 `withQuery`；`api.ts` 只为兼容现有调用 re-export transport/query primitives。domain façade 复用这些 primitives，不得复制 fetch wrapper。
+- **业务 `/api/*` 调用一律由 `web/src/lib/` 下的 façade 暴露**。默认 owner 是 `api.ts`；只有全部 production consumer 都位于 lazy route、且 fresh build 证明入口预算需要隔离时，才按领域拆出 façade。当前 `observabilityApi.ts` 拥有 observability helpers；`recordsApi.ts` 拥有 Records/draft/permanent-deletion transport，只允许被 `/records/new`、`/records/:recordId` 及其 edit/revision lazy pages 和同目录 draft controller 消费，不得进入 AppShell / `api.ts` / eager router graph。`accessApi.ts` 拥有用户与权限管理目录和 `GET /api/record-access-groups/mine`，只被 lazy 设置页和记录编辑器消费，不进入 eager graph，也不 import `recordsApi.ts`。业务函数使用动词 + 资源命名并返回 `Promise<T>`，T 来自 `lib/types.ts`。
+- **transport 唯一 owner 是 `web/src/lib/apiRequest.ts`**：默认 `credentials: 'include'`、`Accept: application/json`、`cache: 'no-store'`；401 触发共享 unauthorized handler 并抛 `ApiError(401)`；非 2xx 默认只从 `error/message` 生成 legacy `status/message`，领域 façade 可通过显式 `ApiErrorDecoder` seam追加 allowlisted metadata。lazy `recordsApi.ts` 静态组合 `apiError.ts` decoder，生成 `code/field_errors/recovery`。lazy `accessApi.ts` 也组合该 decoder，但只借用 `code/field_errors` 再映射成固定中文，不把原始错误或密码回显到页面。两者都不把 decoder 带入 eager graph。`apiRequest.ts` 同时拥有 `withQuery`；`api.ts` 只为兼容现有调用 re-export transport/query primitives。domain façade 复用这些 primitives，不得复制 fetch wrapper。
 - **`/api/auth/*` 走 `web/src/lib/auth-client.ts`**，并复用 `apiRequest.ts` 的 primitives 与 401 hook。不要新增第二套 fetch 包装。
 - **登录确认不是身份**：`POST /api/auth/login` 只确认会话（响应仅保证 `user_id`），`login()` 必须随后读取 `GET /api/auth/me` 并只发布完整身份；`/me` 返回 401、非认证错误或不完整身份时，先尽力调用 logout 撤销刚建立的会话，再把错误交给登录页，不得以空用户名/角色进入受保护路由。
+- **运行能力由身份接口统一发现**：`GET /api/auth/me` 必须返回 `runtime_capabilities: {records:boolean, comparison:boolean, portability:boolean}`，取自 bootstrap 注册路由的同一组有效开关；后两项必须与 records 相与，不读取另一套环境变量。同一份身份还必须返回独立的 `management_capabilities: {access:boolean}`。`access` 缺失或不是布尔值与运行能力读取失败相同，固定文案“能力读取失败”，不得默认允许，也不得从 `role === 'admin'` 推断。`access: false` 仍是完整就绪会话。管理开关不改变三项运行能力的含义：`records=false` 时比较和导入导出仍然关闭，但已经为 true 的 `access` 保持 true。首次读取期间不默认启用。已有会话重新读取遇非 401 错误时保留上次已验证身份，状态为错误，页面只显示固定文案“能力读取失败”与重试，不转发底层异常，也不误报已退出或权限撤销；在刷新成功前不进入业务子树。只有完整身份、三项布尔运行能力和布尔 `access` 都验证后才能进入业务子树。
+- `/me` 会话不存在、过期或用户不存在返回 401；身份依赖故障返回脱敏 503，不清除会话 cookie，也不返回底层错误内容。
 - `If-Match` 乐观锁仍由业务 façade 的 `patchJSONBody(path, body, { ifMatch })` 表达，传入上一次拿到的 `updated_at`；transport seam 不改变 method/header/body/wire shape。
 - **不要在 page / component 里直接 `fetch()`**。业务请求必须进入 `web/src/lib/` façade 再由 page / component 调用；`MonitoringPage` 的历史直连 `fetch('/api/monitoring-instances')` 已偿还为 `createMonitoringInstance` API helper，新代码不要恢复这条路径。
 
@@ -193,7 +195,7 @@ setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => reset
 
 | Context | 文件 | 提供值 | 消费方式 |
 |---------|------|--------|----------|
-| Auth | `web/src/lib/auth-context.tsx` | `{ user, loading, login, logout, refresh }` | `useAuth()`，必须在 `<AuthProvider>` 内调用，否则抛错 |
+| Auth | `web/src/lib/auth-context.tsx` | `{ user, loading, status, error, login, logout, refresh, retry }` | `useAuth()`，必须在 `<AuthProvider>` 内调用，否则抛错；能力未知不能默认启用 |
 | Theme | `web/src/lib/theme-context.tsx` | `{ preset, mode, setPreset, setMode }` | `useTheme()`（必须在 Provider 内）/ `useThemeOptional()`（测试便利） |
 | VPS write registry | `web/src/lib/vpsWriteRegistry-context.tsx` | user-scoped `VPSWriteOwnerStore` | `useVPSWriteRegistry()`；direct page/component tests 可使用 optional hook + injected/local fallback |
 
@@ -249,10 +251,26 @@ Auth/Theme 在 `web/src/main.tsx` 根链挂载；VPS registry 在 `Authenticated
 
 - **标准 page 数据流（loading / error / data 三态 + cancelled 旗标）**：`web/src/pages/EventsPage.tsx`，配合 `web/src/lib/observabilityApi.ts` 的 `listEvents(filter)`。
 - **乐观锁更新**：`web/src/pages/MonitoringPage.tsx:283-325` 的 `handleSaveLabels` → `updateMonitoringInstanceMetadata(monitoringInstanceId, input, { expectedUpdatedAt })`，其内部由 `web/src/lib/api.ts:145-153` 走 `If-Match` 头实现。
-- **Provider + Hook 配对**：`web/src/lib/auth-context.tsx`（`AuthProvider` 内 `useEffect` 挂 401 钩子 → 用 `useAuth()` 暴露 `{ user, loading, login, logout, refresh }`）。
+- **Provider + Hook 配对**：`web/src/lib/auth-context.tsx`（`AuthProvider` 内 `useEffect` 挂 401 钩子；`useAuth()` 暴露身份、能力读取状态与重试，`useCapabilityFlags()` 只在就绪后返回有效能力）。
 - **类型驱动的 API 函数集**：`web/src/lib/api.ts` / `observabilityApi.ts` 从 `./types` 引入领域类型并复用唯一 transport/query primitives；transport 分支由 `apiRequest.test.ts` 的 >=90% branch ratchet 保护。
 
 
 ## 领域状态合同
 
 页面行为请按 [领域合同索引](../contracts/README.md) 选择；VPS 写入归属见 [异步所有权](../contracts/assets-async-ownership.md)，订阅请求协议见 [订阅合同](../contracts/subscriptions.md)。
+
+## 不存在页面与诊断呈现
+
+- 受保护路由的未知地址保留完整 pathname、query 与 hash，显示中立“没有这一页”，不重定向工作台，也不复用模块加载失败的错误语义。提供工作台链接和返回按钮；只有 Router 站内历史索引大于零才后退，否则替换到工作台。
+- 主界面使用已知中文产品标签；Target 类型 `service` / `china_reference` 显示“服务”/“国内参考”，ProbeItem 显示“探测项”，wire 值不变。未知类型、来源状态、异常详情和提供方错误使用安全主摘要，原始值仅放在默认关闭的诊断详情；不能因为含中文就直接提升原始诊断为主文案。
+- 汇率补取状态由共享呈现组件显示中文状态与受影响币种，原始失败摘要仅在“补取诊断”中展开。证据的已知生成标题与比较 kind/metric 标签仅在展示层映射，不改写冻结证据、用户标题或比较请求标识。
+
+## 设置覆盖规则
+
+- `SettingsPage` 拥有唯一结构化草稿、脏状态、保存和分区切换保护。监控标签、目标类型、目标标签规则均支持新增、删除和按数组顺序移动；标签建议不限制未来标签，类型中文显示但保存既有 wire 值。
+- “用户与权限”是独立分区（`/settings?tab=access`），只在会话就绪且 `management_capabilities.access === true` 时出现。它不读取、也不进入系统设置保存表单。直接打开该地址但没有管理能力时显示“无权管理用户与权限”，不请求管理目录，也不改到其他分区。能力尚未确认时不打开目录；读取失败仍是“能力读取失败”。系统设置有未保存修改时，切到这个分区仍要先确认。
+- 管理请求走 `accessApi.ts`。密码只留在提交前的表单内存：失败保留非敏感草稿和密码输入，成功或关闭立即清空。确认文案、URL、本地草稿和返回 DTO 都不包含密码。客户端只显示已允许的中文错误，不回显服务端原始错误。账号、权限组和成员列表各自加载、失败和重试；切换组会丢弃迟到的成员响应。成员行按 `missing === true` 判别：正常行是扁平的完整账号摘要，必须带上 `is_supervisor`（包括 false）和 `disabled_at`（包括 null），`missing` 缺省或为 false；悬空行恰好是 `{user_id, missing:true}`，多出来的账号字段视为不可用响应。只有悬空行显示“账号不可用”。
+- 全部 26 个覆盖叶字段均可编辑。频率只能是 `5s/1m/5m/15m/6h`；每字段区分继承与覆盖，布尔为继承/开启/关闭，显式 `false` 不得丢失，空数值不得转换为零。保留原始规则，只对 touched 路径深合并；明确继承删除叶字段，删除最后一个子字段时移除空对象。排序必须带着原始值和编辑一起移动。
+- UI 校验去空白后的重复/空 selector、空覆盖、范围、整数精度及按当前全局阈值逐规则叠加后的严格递增关系；Go 为最终权威。失败保留原草稿和顺序。高级 JSON 仅从同一草稿派生为只读查看，不建立第二份可编辑状态。折叠字段不得保持可见或可聚焦。
+- 主机预览取全局频率，再取首个匹配且含主机频率的监控标签规则。探测预览显式输入探测项已存频率，依次取匹配类型的当前 kind、首个匹配且含当前 kind 的目标标签规则；缺该字段不能阻断后续标签规则。显示当前值、来源规则号和回退值。全局探测默认仅用于假设新探测项的初始预览，不声称会改写已有探测项。
+- 事件判定覆盖、监控标签内的探测覆盖、目标类型/标签内的主机覆盖目前仅存储与校验，必须显示“当前运行链路未应用”，不得以预览暗示已启用运行策略。实际优先级见 [Agent 同步合同](../contracts/agent-sync.md#设置快照与覆盖优先级)。

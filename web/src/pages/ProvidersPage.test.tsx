@@ -173,11 +173,11 @@ describe('ProvidersPage', () => {
 
     renderProvidersPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '服务商目录' })).toBeInTheDocument())
+    const summary = await screen.findByLabelText('服务商目录摘要')
+    expect(screen.getByRole('heading', { name: '服务商目录' })).toBeInTheDocument()
     // 页头不再重复摘要：无自我描述、无与摘要条重复的计数胶囊，也不展示固定的口碑源数量。
     expect(screen.queryByText('供 VPS 与订阅引用的低频资产事实')).not.toBeInTheDocument()
     expect(screen.queryByText('2 个服务商')).not.toBeInTheDocument()
-    const summary = screen.getByLabelText('服务商目录摘要')
     expect(summary).toHaveTextContent('2 服务商')
     expect(summary).toHaveTextContent('1 待补资料')
     expect(summary).not.toHaveTextContent('外部口碑源入口')

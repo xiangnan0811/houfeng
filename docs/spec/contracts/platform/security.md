@@ -119,9 +119,15 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 
 - Session IDs 永不以明文持久化；所有 PostgreSQL 会话查询、更新和删除都使用部署
   注入的 HMAC-SHA256 摘要。
+- 初始 seed 先读用户数；非空库保持既有身份不变。空库创建的唯一账号必须显式
+  `is_supervisor = true`。并发空库 seed 若命中主管理员唯一索引，repository 只有
+  在重读并确认现存账号仍是 active admin supervisor 后才返回
+  `ErrInitialUserAlreadyExists`，seed 将其视为同一次初始化成功；同名唯一冲突则只
+  在重读到该 active supervisor 时收敛成功，其他账号或读取故障均保留冲突/故障。
 - 登录在锁外完成用户名查询、bcrypt 验证和随机 ID 生成；随后在一个
-  `READ COMMITTED` 事务中以 `users` 行锁重新确认 password hash。锁后取得 UTC
-  微秒时钟，只有 hash 仍匹配时才插入会话；返回值以数据库实际写入的时间字段为准。
+  `READ COMMITTED` 事务中以 `users` 行锁重新确认 password hash、`disabled_at` 和
+  `is_supervisor`。锁后取得 UTC 微秒时钟，只有 hash 仍匹配且账号未停用时才插入会话；
+  返回值以数据库实际写入的时间字段为准，并携带仅供登录响应使用的主管理能力快照。
 - 改密必须先在锁外验证旧密码并生成新 hash，随后在同一事务中按
   `users → sessions` 顺序加行锁。当前会话必须仍属于该用户、未过期且未被旧密码
   watermark 淘汰；否则不改密码、不重建会话。密码 hash、`password_changed_at`、
@@ -129,13 +135,23 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 - 改密成功保留当前浏览器的 bearer token（其 `issued_at` 与新的密码 watermark
   相同），撤销同一用户的其他会话。保留当前 token 不宣称能撤回已经线性化并执行的
   在途业务请求或同一 token 的泄露副本。
+- `management_capabilities.access` 只在持久化 `is_supervisor = true` 且
+  `disabled_at is null` 时为 true；登录响应使用锁内的非持久化快照，`/api/auth/me`
+  必须从刚读取的 User 重新计算。不得由 `role` 或 runtime capability 推断管理权；
+  停用账号的旧快照也不得恢复管理权。
+- 协作成员解析必须先以 `users.disabled_at is null` 证明账号仍是有效接收者/actor，
+  再读取其权限组；停用账号不能因历史 membership 继续获得新请求授权。历史作者、
+  评论和其他快照字段仍按其各自的 immutable snapshot 合同保留。
 - 续期先以 HMAC ID 无锁读出用户归属，再按 `users → sessions` 顺序锁定并重读；
-  所有过期、旧 watermark 会话必须先成功提交删除再返回 `ErrSessionExpired`。有效
-  续期以锁后取得的时钟与原 `last_seen_at`、密码 watermark 的最大值为新基准，
-  只允许 UPDATE，不能 UPSERT 或复活已过期行。
+  所有过期、旧 watermark 或已停用账号的会话必须先成功提交删除再返回
+  `ErrSessionExpired`。有效续期以锁后取得的时钟与原 `last_seen_at`、密码 watermark
+  的最大值为新基准，只允许 UPDATE，不能 UPSERT 或复活已过期行。
 - Logout 和过期清理只做 DELETE，不取得用户锁；它们与上述事务交错时不得重新创建
   会话。任何事务的 commit 错误必须原样作为失败返回，不得重试旧密码、不宣称已回滚。
-- `ValidateSession` 是不续期的会话权威读取：以 HMAC ID 单条 JOIN 读取最新 `issued_at`、`expires_at` 和密码 watermark，查询完成后取时钟。无行拒绝；`expires_at <= now` 或非零 issued_at 早于 watermark 拒绝。不得加行锁、写入、删除或改变 `last_seen_at` / `expires_at`，不得复用会 Touch 的 `UserBySession`。
+- `ValidateSession` 是不续期的会话权威读取：以 HMAC ID 单条 JOIN 读取最新
+  `issued_at`、`expires_at`、密码 watermark 和 `disabled_at`，查询完成后取时钟。无行、
+  停用、`expires_at <= now` 或非零 issued_at 早于 watermark 均拒绝。不得加行锁、
+  写入、删除或改变 `last_seen_at` / `expires_at`，不得复用会 Touch 的 `UserBySession`。
 - runtime WebSocket 只接受 RequireSession 成功认证及授权后写入 context 的实际 cookie session ID；header/query/body 不能代替。握手前和每条可发送消息的写入紧前均执行最多 2 秒权威校验；连接另有独立 5 秒 watcher，空闲或慢写不能阻止复核。撤销、过期及数据库错误均 fail closed，取消并强制关闭连接；正常调度下 7 秒内发起关闭，端到端验收上限 10 秒。
 - 被动校验每次读取持久化 expiry，不冻结握手过期时间；正常 HTTP Touch 合法续期后连接可继续。A 改密保留 A 当前会话/连接，撤销 B 不得误关 A。已经通过校验的在途帧不可追回，不承诺撤销和网络发送全局原子，也不得持数据库锁跨网络写。
 
@@ -144,6 +160,7 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 | Condition | Expected behavior |
 | --- | --- |
 | 锁后用户 hash 与锁外验证 hash 不同 | `ErrInvalidCredentials`，不插入/更新会话 |
+| 锁后账号已停用 | 登录返回 `ErrInvalidCredentials`；既有会话续期先提交删除再返回 `ErrSessionExpired`，不创建或复活会话 |
 | 当前会话不存在、归属不符或已退出 | `ErrSessionNotFound`，密码不改变 |
 | 当前会话在锁后时钟已过期或旧 watermark 淘汰 | `ErrSessionExpired`，密码不改变 |
 | 续期发现失效会话 | 删除事务先 commit，再返回 `ErrSessionExpired` |
@@ -159,6 +176,11 @@ syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(pool, cfg.SessionHMA
 - `internal/center/http/auth_e2e_test.go` 必须走真实 service/handler，断言改密后原
   Cookie 的受保护请求仍为 200、其他 Cookie 为 401，且新密码可登录。
 - `TestPostgresIntegrationRuntimeStreamSessionRevocation` 必须作为强制业务 PG anchor，通过真实 RequireSession、PostgreSQL auth 与 WebSocket 观察首帧→改密/退出/自然过期→连接关闭及 A 继续收帧；覆盖正常 HTTP 续期、查询故障、慢写/断开与订阅回收，并比较会话行证明被动复核不续期。至少一次执行真实 5 秒 watcher。
+- 新增 `internal/center/store/access_management_auth_integration_test.go` 必须使用真实
+  PostgreSQL 覆盖 bcrypt 完成后、会话 INSERT 前停用账号的 barrier 竞态，证明不产生
+  新会话；覆盖既有 Cookie 在停用后续期/被动校验的 401 边界、启用不复活旧会话，以及
+  锁内读取主管理能力快照。HTTP auth 回归须同时断言 login 与 `/api/auth/me` 的
+  `management_capabilities` 独立于 role/runtime capability。
 
 ---
 

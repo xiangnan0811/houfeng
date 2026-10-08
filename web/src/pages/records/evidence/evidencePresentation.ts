@@ -36,6 +36,31 @@ export function evidenceKindLabel(kind: string): string {
   return ownValue<string>(EVIDENCE_KIND_LABELS, kind) ?? kind
 }
 
+const GENERATED_EVIDENCE_TITLES: Readonly<Record<string, string>> = {
+  'Monitoring events': '监控事件',
+  'Monitoring host evidence': '主机监控',
+  'Monitoring probe evidence': '入口探测',
+  'Monitoring evidence': '监控证据',
+  'Command audit': '命令审计',
+  'IP quality report': 'IP 质量报告',
+  'Subscription cost': '订阅成本',
+  'Comparison result': '比较结果',
+}
+
+const GENERATED_KIND_TITLE = /^([a-z][a-z0-9_.]*)(?:\/v\d+)?$/
+
+/** Maps frozen generated evidence titles. Arbitrary user titles stay unchanged. */
+export function presentGeneratedEvidenceTitle(title: string): string {
+  const trimmed = title.trim()
+  if (!trimmed) return trimmed
+  const generated = ownValue(GENERATED_EVIDENCE_TITLES, trimmed)
+  if (generated) return generated
+  const match = GENERATED_KIND_TITLE.exec(trimmed)
+  if (!match) return trimmed
+  const label = evidenceKindLabel(match[1] ?? '')
+  return label === match[1] ? trimmed : label
+}
+
 const QUALITY_TONES: Record<EvidenceQuality['status'], BadgeTone> = {
   complete: 'normal',
   partial: 'notice',

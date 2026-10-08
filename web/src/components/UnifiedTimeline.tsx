@@ -2,6 +2,7 @@ import { type ReactNode, useId } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 import type { SubjectActivityItem, SubjectActivitySourceStatus } from '../lib/types'
+import { presentGeneratedEvidenceTitle } from '../pages/records/evidence/evidencePresentation'
 import {
   SOURCE_KIND_LABELS,
   SOURCE_STATE_LABELS,
@@ -100,10 +101,17 @@ function groupByDay(items: SubjectActivityItem[]): Array<{ day: string; items: S
   return groups
 }
 
-function sourceStatusLabel(status: SubjectActivitySourceStatus): string {
-  const source = SOURCE_KIND_LABELS[status.source_kind] ?? status.source_kind
-  const state = SOURCE_STATE_LABELS[status.state] ?? status.state
-  return status.reason_code ? `${source}：${state}（${status.reason_code}）` : `${source}：${state}`
+function sourceStatusCopy(status: SubjectActivitySourceStatus): { text: string; diagnostic: string | null } {
+  const sourceKnown = Object.hasOwn(SOURCE_KIND_LABELS, status.source_kind)
+  const stateKnown = Object.hasOwn(SOURCE_STATE_LABELS, status.state)
+  const source = sourceKnown ? (SOURCE_KIND_LABELS[status.source_kind] ?? '未知来源') : '未知来源'
+  const state = stateKnown ? (SOURCE_STATE_LABELS[status.state] ?? '状态未知') : '状态未知'
+  const diagnostic = [
+    sourceKnown ? '' : status.source_kind,
+    stateKnown ? '' : status.state,
+    status.reason_code?.trim() ?? '',
+  ].filter(Boolean).join(' · ')
+  return { text: `${source}：${state}`, diagnostic: diagnostic || null }
 }
 
 const ITEM_CLASSES: Record<TimelineChannel, string> = {
@@ -144,9 +152,20 @@ export function UnifiedTimeline({
     <div className="unified-timeline">
       {degraded.length > 0 ? (
         <ul className="unified-timeline__source-status" aria-label="来源状态">
-          {degraded.map((status) => (
-            <li key={status.source_kind}>{sourceStatusLabel(status)}</li>
-          ))}
+          {degraded.map((status) => {
+            const copy = sourceStatusCopy(status)
+            return (
+              <li key={status.source_kind}>
+                <span>{copy.text}</span>
+                {copy.diagnostic ? (
+                  <details>
+                    <summary>诊断信息</summary>
+                    <p>{copy.diagnostic}</p>
+                  </details>
+                ) : null}
+              </li>
+            )
+          })}
         </ul>
       ) : null}
       {groupByDay(items).map((group) => (
@@ -167,7 +186,7 @@ export function UnifiedTimeline({
                   <time className="unified-timeline__clock mono tnum" dateTime={item.event_at}>{clockText(item.event_at)}</time>
                   <div className="unified-timeline__main">
                     <div className="unified-timeline__line">
-                      <h3 className="unified-timeline__title">{item.presentation.title}</h3>
+                      <h3 className="unified-timeline__title">{presentGeneratedEvidenceTitle(item.presentation.title)}</h3>
                       <span className="unified-timeline__channel">{TIMELINE_CHANNEL_LABELS[channel]}</span>
                       {item.backfilled ? <span className="unified-timeline__tag">回填</span> : null}
                       {recordedDistinct ? (

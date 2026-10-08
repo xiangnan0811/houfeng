@@ -249,7 +249,7 @@ func TestVPSRestoreFromArchiveReturnsRestoredAsset(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/restore-from-archive", strings.NewReader(`{"reason":"重新整理用途"}`))
 	recorder := httptest.NewRecorder()
 
-	handlers.VPSRestoreFromArchive(repo).ServeHTTP(recorder, req)
+	handlers.VPSRestoreFromArchive(repo, nil).ServeHTTP(recorder, req)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
@@ -286,10 +286,10 @@ func TestAssetLifecycleHandlersValidateInputAndMapErrors(t *testing.T) {
 		{name: "archive blocked lifecycle action", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusConflict},
 		{name: "archive missing vps", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/archive", body: `{"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusNotFound},
 		{name: "archive repo failure", handler: handlers.VPSArchive(&fakeAssetLifecycleRepository{archiveErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/archive", body: `{"preview_digest":"preview", "idempotency_key":"request", "confirmation_name":"Tokyo Edge","reason":"done"}`, want: http.StatusInternalServerError},
-		{name: "restore wrong method", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{}), method: http.MethodGet, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusMethodNotAllowed},
-		{name: "restore blocked lifecycle action", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: assetlifecycle.ErrLifecycleActionBlocked}), method: http.MethodPost, path: "/api/vps/vps_cancelled/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusConflict},
-		{name: "restore missing vps", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: vpsassets.ErrVPSAssetNotFound}), method: http.MethodPost, path: "/api/vps/vps_missing/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusNotFound},
-		{name: "restore repo failure", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: errors.New("boom")}), method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusInternalServerError},
+		{name: "restore wrong method", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{}, nil), method: http.MethodGet, path: "/api/vps/vps_001/restore-from-archive", want: http.StatusMethodNotAllowed},
+		{name: "restore blocked lifecycle action", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: assetlifecycle.ErrLifecycleActionBlocked}, nil), method: http.MethodPost, path: "/api/vps/vps_cancelled/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusConflict},
+		{name: "restore missing vps", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: vpsassets.ErrVPSAssetNotFound}, nil), method: http.MethodPost, path: "/api/vps/vps_missing/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusNotFound},
+		{name: "restore repo failure", handler: handlers.VPSRestoreFromArchive(&fakeAssetLifecycleRepository{restoreErr: errors.New("boom")}, nil), method: http.MethodPost, path: "/api/vps/vps_001/restore-from-archive", body: `{"reason":"整理恢复"}`, want: http.StatusInternalServerError},
 	}
 
 	for _, tt := range tests {

@@ -103,9 +103,11 @@ for (const theme of THEMES) {
         body: { budget_month: '2026-04-01', base_currency: 'CNY', monthly_limit: 300, warning_pct: 80, note: '季度复核后下调', created_at: '2026-09-20T08:00:00Z', updated_at: '2026-10-02T04:00:00Z' },
       },
       [apiRouteKey('POST', '/api/subscriptions/exchange-rates/refresh')]: {
-        status: 200,
+        status: 202,
         expectNoBody: true,
-        body: { provider: 'fixer', base_currency: 'CNY', fetched_at: '2026-10-02T04:00:00Z', succeeded: [], failed: [{ quote_currency: 'USD' }] },
+        body: {
+          items: [{ provider: 'fixer', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'missing', refresh_status: 'failed', attempt_count: 1 }],
+        },
       },
     })
     await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -131,7 +133,7 @@ for (const theme of THEMES) {
     const blocking = await scan('success notice')
     // 第二次覆盖失败提示、行内编辑与批量覆盖展开。
     await page.getByRole('button', { name: '刷新汇率' }).click()
-    await expect(page.getByRole('alert').filter({ hasText: '失败 1（USD）' })).toBeVisible()
+    await expect(page.getByRole('alert').filter({ hasText: '补取失败：USD' })).toBeVisible()
     await page.getByRole('button', { name: '编辑 2026-07 月预算' }).click()
     await page.getByRole('checkbox', { name: '批量覆盖历史月份' }).check()
     blocking.push(...await scan('alert + editing + bulk'))

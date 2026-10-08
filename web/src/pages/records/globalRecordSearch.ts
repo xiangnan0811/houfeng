@@ -16,6 +16,14 @@ export type GlobalRecordSearchHit = {
   to: string
 }
 
+/** Visible failure for this source. Not a successful empty page. */
+export const RECORD_SEARCH_UNAVAILABLE_MESSAGE = '运维记录搜索暂不可用'
+
+export type GlobalRecordSearchOutcome = {
+  matches: GlobalRecordSearchHit[]
+  error: string | null
+}
+
 function describe(record: RecordDetail): string {
   const revision = record.current
   const primary = revision.subjects.find((subject) => subject.primary) ?? revision.subjects[0]
@@ -27,16 +35,18 @@ function describe(record: RecordDetail): string {
 }
 
 /**
- * Searches records for the palette. Failures resolve to no hits on purpose: the
- * records index can legitimately be missing on a fresh install or switched off
- * entirely, and neither should take the rest of the palette down with it.
+ * Searches records for the palette. A missing index, a refused request, or a
+ * transport failure stays on this source as an error. It must not look like a
+ * successful empty page, and it must not decide what the asset source shows.
+ * A 401 still ends the session inside the transport before this rejection is
+ * observed.
  */
 export async function searchRecordsForGlobalSearch(
   query: string,
   limit: number,
-): Promise<GlobalRecordSearchHit[]> {
+): Promise<GlobalRecordSearchOutcome> {
   const q = query.trim()
-  if (!q) return []
+  if (!q) return { matches: [], error: null }
   try {
     const response = await searchRecords({ q, limit })
     const items = Array.isArray(response.items) ? response.items : []
@@ -46,18 +56,21 @@ export async function searchRecordsForGlobalSearch(
       hint: describe(record),
       to: `/records/${record.record_id}`,
     }))
-    if (hits.length === 0) return hits
+    if (hits.length === 0) return { matches: [], error: null }
     // The palette only ever shows a few of the ranked hits, so it has to offer a
     // way through to the full result set. Only once the server has answered:
     // pointing at the search page is misleading while the index cannot serve it.
-    return [...hits, {
-      id: RECORD_SEARCH_ALL_HIT_ID,
-      label: `查看全部匹配记录`,
-      hint: q,
-      to: `/records?${recordSearchParamsFromFilters({ q }).toString()}`,
-    }]
+    return {
+      matches: [...hits, {
+        id: RECORD_SEARCH_ALL_HIT_ID,
+        label: '查看全部匹配记录',
+        hint: q,
+        to: `/records?${recordSearchParamsFromFilters({ q }).toString()}`,
+      }],
+      error: null,
+    }
   } catch {
-    return []
+    return { matches: [], error: RECORD_SEARCH_UNAVAILABLE_MESSAGE }
   }
 }
 

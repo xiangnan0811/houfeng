@@ -285,6 +285,133 @@ describe('IPQualityDashboard', () => {
     expect(screen.getByRole('button', { name: '立即采集' })).toBeDisabled()
     expect(screen.getByRole('status')).toHaveTextContent('IP 质量采集已在设置中关闭')
     expect(screen.getByRole('link', { name: '前往设置开启' })).toHaveAttribute('href', '/settings?tab=monitoring')
+    // 保持历史列表可见可交互
+    expect(screen.getByRole('heading', { name: '历史报告' })).toBeInTheDocument()
+  })
+
+  it('links unlinked or unbound agent to VPS monitoring workbench with explicit vpsId and keeps disabled button', () => {
+    renderDashboard(report(), {
+      collect: controller({}, { enabled: true, available: false, unavailable_reason: 'no_monitoring_instance' }),
+    })
+
+    expect(screen.getByRole('button', { name: '立即采集' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('该 VPS 尚未接入监控 agent')
+    expect(screen.getByRole('link', { name: '前往监控工作台' })).toHaveAttribute('href', '/vps/vps_001?workbench=monitoring')
+    expect(screen.getByRole('heading', { name: '历史报告' })).toBeInTheDocument()
+  })
+
+  it('links paused monitoring to actual MI with valid returnVPS and avoids automatic resume', () => {
+    renderDashboard(report(), {
+      collect: controller({}, {
+        enabled: true,
+        available: false,
+        unavailable_reason: 'monitoring_paused',
+        monitoring_instance_id: 'mi_001',
+      }),
+    })
+
+    expect(screen.getByRole('button', { name: '立即采集' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('监控已暂停')
+    expect(screen.getByRole('link', { name: '前往监控实例' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
+    // 不提供自动恢复或恢复监控按钮
+    expect(screen.queryByRole('button', { name: /恢复/ })).not.toBeInTheDocument()
+  })
+
+  it('does not render guessed links when monitoring instance ID is missing for paused monitoring and refuses stale request MI', () => {
+    // 缺少 monitoring_instance_id 时不生成猜测链接
+    renderDashboard(report(), {
+      collect: controller({}, {
+        enabled: true,
+        available: false,
+        unavailable_reason: 'monitoring_paused',
+      }),
+    })
+
+    expect(screen.getByRole('button', { name: '立即采集' })).toBeDisabled()
+    expect(screen.getByRole('status')).toHaveTextContent('监控已暂停')
+    expect(screen.queryByRole('link', { name: '前往监控实例' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '前往监控工作台' })).not.toBeInTheDocument()
+
+    // 仅历史 request 携带 monitoring_instance_id 时也绝不回退
+    renderDashboard(report(), {
+      collect: controller({}, {
+        enabled: true,
+        available: false,
+        unavailable_reason: 'monitoring_paused',
+        request: {
+          request_id: 'ipqc_stale',
+          monitoring_instance_id: 'mi_stale',
+          status: 'completed',
+          requested_at: new Date().toISOString(),
+          expires_at: new Date().toISOString(),
+        },
+      }),
+    })
+    expect(screen.queryByRole('link', { name: '前往监控实例' })).not.toBeInTheDocument()
+  })
+
+  it('renders raw error_summary in closed details with safe Chinese primary summary for failed collection', () => {
+    renderDashboard(report(), {
+      collect: controller({
+        active: false,
+        watchedRequestId: 'ipqc_001',
+      }, {
+        enabled: true,
+        available: true,
+        request: {
+          request_id: 'ipqc_001',
+          monitoring_instance_id: 'mi_001',
+          status: 'completed',
+          report_status: 'failure',
+          error_summary: 'dial tcp: connection refused',
+          requested_at: new Date(Date.now() - 30_000).toISOString(),
+          expires_at: new Date(Date.now() + 500_000).toISOString(),
+        },
+      }),
+    })
+
+    const statusRegion = screen.getByRole('status')
+    expect(statusRegion).toHaveTextContent('本次采集失败，仍展示上一份有效报告')
+    // 安全中文主摘要展示在 primary summary 中
+    expect(statusRegion).toHaveTextContent('网络连接失败，未能连接采集源')
+
+    // 原始 error_summary 放在默认折叠的 details 中
+    const details = statusRegion.querySelector('details')
+    expect(details).not.toBeNull()
+    expect(details).not.toHaveAttribute('open')
+    expect(within(details as HTMLElement).getByText('原始错误信息')).toBeInTheDocument()
+    expect(within(details as HTMLElement).getByText('dial tcp: connection refused')).toBeInTheDocument()
+  })
+
+  it('never promotes mixed Chinese/URL raw content to primary summary and keeps it folded in details', () => {
+    const mixedError = 'https://example.com/api/test 发生未授权错误'
+    renderDashboard(report(), {
+      collect: controller({
+        active: false,
+        watchedRequestId: 'ipqc_002',
+      }, {
+        enabled: true,
+        available: true,
+        request: {
+          request_id: 'ipqc_002',
+          monitoring_instance_id: 'mi_001',
+          status: 'completed',
+          report_status: 'failure',
+          error_summary: mixedError,
+          requested_at: new Date(Date.now() - 30_000).toISOString(),
+          expires_at: new Date(Date.now() + 500_000).toISOString(),
+        },
+      }),
+    })
+
+    const statusRegion = screen.getByRole('status')
+    // 主摘要必须是经过审查的安全中文语句，绝不能直接使用未经审查的混杂 URL/中文原文
+    expect(statusRegion).toHaveTextContent('采集执行异常，未能获取有效报告')
+
+    const details = statusRegion.querySelector('details')
+    expect(details).not.toBeNull()
+    expect(details).not.toHaveAttribute('open')
+    expect(within(details as HTMLElement).getByText(mixedError)).toBeInTheDocument()
   })
 
   it('switches header actions when viewing a historical report', () => {

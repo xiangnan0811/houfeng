@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -31,6 +32,13 @@ func TestSeedInitialUserCreatesWhenEmpty(t *testing.T) {
 	}
 	if n, _ := users.CountUsers(context.Background()); n != 1 {
 		t.Fatalf("user count = %d, want 1", n)
+	}
+	u, err := users.FindByUsername(context.Background(), seedFixtureUsername())
+	if err != nil {
+		t.Fatalf("FindByUsername: %v", err)
+	}
+	if !u.IsSupervisor || u.Role != RoleAdmin || u.DisabledAt != nil {
+		t.Fatalf("seeded user authority = %+v, want active supervisor admin", u)
 	}
 }
 
@@ -145,14 +153,64 @@ func TestSeedInitialUserRejectsBadInputs(t *testing.T) {
 }
 
 func TestNewUserIDFormat(t *testing.T) {
-	id, err := newUserID()
+	id, err := NewUserID()
 	if err != nil {
-		t.Fatalf("newUserID: %v", err)
+		t.Fatalf("NewUserID: %v", err)
 	}
 	if !strings.HasPrefix(id, "usr_") {
 		t.Fatalf("id = %q, want prefix usr_", id)
 	}
 	if len(id) != 4+24 {
 		t.Fatalf("len(id) = %d, want 28", len(id))
+	}
+	if _, err := hex.DecodeString(id[len("usr_"):]); err != nil {
+		t.Fatalf("id suffix = %q, want lowercase hexadecimal: %v", id[len("usr_"):], err)
+	}
+}
+
+type seedConflictUsers struct {
+	createErr error
+	found     User
+	findErr   error
+}
+
+func (s *seedConflictUsers) Create(context.Context, User) error { return s.createErr }
+func (s *seedConflictUsers) FindByUsername(context.Context, string) (User, error) {
+	if s.findErr != nil {
+		return User{}, s.findErr
+	}
+	return s.found, nil
+}
+func (s *seedConflictUsers) FindByID(context.Context, string) (User, error) {
+	return User{}, ErrUserNotFound
+}
+func (s *seedConflictUsers) CountUsers(context.Context) (int, error) { return 0, nil }
+
+func TestSeedInitialUserAcceptsSupervisorConflict(t *testing.T) {
+	users := &seedConflictUsers{createErr: ErrInitialUserAlreadyExists}
+	if err := SeedInitialUser(context.Background(), users, "admin", "correct-horse-battery", "", staticNow()); err != nil {
+		t.Fatalf("SeedInitialUser supervisor conflict = %v, want nil", err)
+	}
+}
+
+func TestSeedInitialUserAcceptsOnlyActiveSupervisorUsernameConflict(t *testing.T) {
+	active := &seedConflictUsers{
+		createErr: ErrUsernameTaken,
+		found:     User{Role: RoleAdmin, IsSupervisor: true},
+	}
+	if err := SeedInitialUser(context.Background(), active, "admin", "correct-horse-battery", "", staticNow()); err != nil {
+		t.Fatalf("active supervisor username conflict = %v, want nil", err)
+	}
+
+	disabledAt := staticNow()()
+	for _, existing := range []User{
+		{Role: RoleAdmin},
+		{Role: RoleAdmin, IsSupervisor: true, DisabledAt: &disabledAt},
+		{Role: "viewer", IsSupervisor: true},
+	} {
+		users := &seedConflictUsers{createErr: ErrUsernameTaken, found: existing}
+		if err := SeedInitialUser(context.Background(), users, "admin", "correct-horse-battery", "", staticNow()); !errors.Is(err, ErrUsernameTaken) {
+			t.Fatalf("existing role=%q supervisor=%t disabled=%t: err = %v, want ErrUsernameTaken", existing.Role, existing.IsSupervisor, existing.DisabledAt != nil, err)
+		}
 	}
 }

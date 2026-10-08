@@ -13,6 +13,16 @@ import (
 	"houfeng/internal/center/evidence"
 )
 
+func testImportSubjectReferences() []SubjectReference {
+	return []SubjectReference{{
+		RegistryVersion: SubjectRegistryVersionV1,
+		Kind:            SubjectKindTarget,
+		Role:            RelationRoleAffected,
+		SourceID:        "tg_0123456789abcdef",
+		Primary:         true,
+	}}
+}
+
 func TestImportDocumentRejectsImportedAuthorizationAndUsesLocalActor(t *testing.T) {
 	t.Parallel()
 
@@ -47,6 +57,7 @@ func TestImportDocumentRejectsImportedAuthorizationAndUsesLocalActor(t *testing.
 	got, err := application.ImportDocument(context.Background(), ImportDocumentRequest{
 		Actor: actor, RecordID: "rec_imported01", Title: "Disk notes",
 		BodyMarkdown: "# Body\n", IdempotencyKey: "import-1",
+		SubjectReferences: testImportSubjectReferences(),
 	})
 	if err != nil {
 		t.Fatalf("ImportDocument() error = %v", err)
@@ -103,6 +114,7 @@ func TestImportDocumentsFinishingCarriesEvidencePreparation(t *testing.T) {
 	written, err := application.ImportDocumentsFinishing(context.Background(), []ImportDocumentRequest{{
 		Actor: actor, RecordID: "rec_imported02", Title: "Disk notes",
 		BodyMarkdown: "# Body\n", IdempotencyKey: "import-evidence",
+		SubjectReferences:   testImportSubjectReferences(),
 		EvidencePreparation: preparation,
 	}}, RevisionCommitFinish{
 		OriginKind: "import", OriginDigest: [32]byte{1}, ImportJobID: "rij_imported02",
@@ -167,7 +179,8 @@ func TestImportDocumentsFinishingCarriesAttachmentIDs(t *testing.T) {
 	written, err := application.ImportDocumentsFinishing(context.Background(), []ImportDocumentRequest{{
 		Actor: actor, RecordID: "rec_imported03", Title: "Disk notes",
 		BodyMarkdown: "# Body\n", IdempotencyKey: "import-attachments",
-		AttachmentIDs: []string{item.AttachmentID}, ImportedAttachments: []attachments.ImportedAvailableAttachment{item},
+		SubjectReferences: testImportSubjectReferences(),
+		AttachmentIDs:     []string{item.AttachmentID}, ImportedAttachments: []attachments.ImportedAvailableAttachment{item},
 	}}, RevisionCommitFinish{
 		OriginKind: "import", OriginDigest: [32]byte{2}, ImportJobID: "rij_imported03",
 		JobLockVersion: 1, ActorID: actor.UserID,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -43,7 +44,10 @@ func (s *stubAuth) ChangePassword(_ context.Context, _, _, _, _ string) error { 
 
 func TestLoginHandlerSuccess(t *testing.T) {
 	svc := &stubAuth{
-		loginSess: auth.Session{SessionID: "abc", UserID: "u1", ExpiresAt: time.Now().Add(time.Hour)},
+		loginSess: auth.Session{
+			SessionID: "abc", UserID: "u1", ExpiresAt: time.Now().Add(time.Hour),
+			ManagementCapabilities: auth.ManagementCapabilities{Access: true},
+		},
 	}
 	h := Login(svc)
 	body := strings.NewReader(`{"username":"admin","password":"correct-horse"}`)
@@ -59,12 +63,33 @@ func TestLoginHandlerSuccess(t *testing.T) {
 	if len(cookies) == 0 || cookies[0].Name != auth.SessionCookieName || cookies[0].Value != "abc" {
 		t.Fatalf("cookie = %+v, want %s=abc", cookies, auth.SessionCookieName)
 	}
-	var resp meResponse
+	var resp map[string]json.RawMessage
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.UserID != "u1" {
-		t.Fatalf("user_id = %v, want u1", resp.UserID)
+	if len(resp) != 2 {
+		t.Fatalf("login acknowledgment = %#v, want user_id and management_capabilities", resp)
+	}
+	rawUserID, ok := resp["user_id"]
+	if !ok {
+		t.Fatalf("login acknowledgment = %#v, want user_id", resp)
+	}
+	var userID string
+	if err := json.Unmarshal(rawUserID, &userID); err != nil {
+		t.Fatalf("decode user_id: %v", err)
+	}
+	if userID != "u1" {
+		t.Fatalf("user_id = %v, want u1", userID)
+	}
+	var management auth.ManagementCapabilities
+	if err := json.Unmarshal(resp["management_capabilities"], &management); err != nil {
+		t.Fatalf("decode management_capabilities: %v", err)
+	}
+	if !management.Access {
+		t.Fatalf("management_capabilities = %+v, want access=true", management)
+	}
+	if _, ok := resp["runtime_capabilities"]; ok {
+		t.Fatalf("login acknowledgment unexpectedly contains runtime_capabilities: %#v", resp)
 	}
 	if svc.gotUser != "admin" || svc.gotPass != "correct-horse" {
 		t.Fatalf("forwarded creds = %q/%q", svc.gotUser, svc.gotPass)
@@ -281,9 +306,12 @@ func TestLogoutHandlerRejectNonPost(t *testing.T) {
 
 func TestMeHandlerSuccess(t *testing.T) {
 	svc := &stubAuth{
-		touchUser: auth.User{UserID: "u1", Username: "admin", Role: auth.RoleAdmin, DisplayName: "管理员"},
+		touchUser: auth.User{
+			UserID: "u1", Username: "admin", Role: auth.RoleAdmin, DisplayName: "管理员",
+			IsSupervisor: true,
+		},
 	}
-	h := Me(svc)
+	h := Me(svc, RuntimeCapabilities{})
 	r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "abc"})
 	w := httptest.NewRecorder()
@@ -299,11 +327,95 @@ func TestMeHandlerSuccess(t *testing.T) {
 	if resp.UserID != "u1" || resp.Username != "admin" || resp.Role != auth.RoleAdmin {
 		t.Fatalf("resp = %+v", resp)
 	}
+	if !resp.ManagementCapabilities.Access {
+		t.Fatalf("management_capabilities = %+v, want access=true", resp.ManagementCapabilities)
+	}
+}
+
+func TestMeHandlerRuntimeCapabilities(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured RuntimeCapabilities
+		want       RuntimeCapabilities
+	}{
+		{
+			name:       "all disabled",
+			configured: RuntimeCapabilities{},
+			want:       RuntimeCapabilities{},
+		},
+		{
+			name:       "records and portability",
+			configured: RuntimeCapabilities{Records: true, Portability: true},
+			want:       RuntimeCapabilities{Records: true, Portability: true},
+		},
+		{
+			name:       "all enabled",
+			configured: RuntimeCapabilities{Records: true, Comparison: true, Portability: true},
+			want:       RuntimeCapabilities{Records: true, Comparison: true, Portability: true},
+		},
+		{
+			name:       "children without records normalized",
+			configured: RuntimeCapabilities{Comparison: true, Portability: true},
+			want:       RuntimeCapabilities{},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &stubAuth{
+				touchUser: auth.User{UserID: "u1", Username: "admin", Role: auth.RoleAdmin, DisplayName: "管理员"},
+			}
+			h := Me(svc, tt.configured)
+			r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+			r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "abc"})
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", w.Code)
+			}
+			var resp meResponse
+			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if got := resp.ManagementCapabilities; got.Access {
+				t.Fatalf("management_capabilities = %+v, want access=false for ordinary admin", got)
+			}
+			if got := resp.RuntimeCapabilities; got != tt.want {
+				t.Fatalf("runtime_capabilities = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+func TestMeHandlerDisabledSupervisorHasNoManagementAccess(t *testing.T) {
+	disabledAt := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	svc := &stubAuth{
+		touchUser: auth.User{
+			UserID: "u1", Username: "admin", Role: auth.RoleAdmin, IsSupervisor: true,
+			DisabledAt: &disabledAt,
+		},
+	}
+	h := Me(svc, RuntimeCapabilities{})
+	r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "abc"})
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp meResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ManagementCapabilities.Access {
+		t.Fatalf("management_capabilities = %+v, disabled supervisor must not have access", resp.ManagementCapabilities)
+	}
 }
 
 func TestMeHandlerUnauthenticatedNoCookie(t *testing.T) {
 	svc := &stubAuth{}
-	h := Me(svc)
+	h := Me(svc, RuntimeCapabilities{})
 	r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
@@ -314,13 +426,62 @@ func TestMeHandlerUnauthenticatedNoCookie(t *testing.T) {
 
 func TestMeHandlerUnauthenticatedExpired(t *testing.T) {
 	svc := &stubAuth{touchErr: auth.ErrSessionExpired}
-	h := Me(svc)
+	h := Me(svc, RuntimeCapabilities{})
 	r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "abc"})
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
+func TestMeHandlerSessionErrorResponses(t *testing.T) {
+	sensitiveErr := errors.New("postgres password=s3cr3t host=secret.internal:5432")
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{name: "session not found", err: auth.ErrSessionNotFound, wantStatus: http.StatusUnauthorized},
+		{name: "wrapped session not found", err: fmt.Errorf("lookup session: %w", auth.ErrSessionNotFound), wantStatus: http.StatusUnauthorized},
+		{name: "session expired", err: auth.ErrSessionExpired, wantStatus: http.StatusUnauthorized},
+		{name: "wrapped session expired", err: fmt.Errorf("lookup session: %w", auth.ErrSessionExpired), wantStatus: http.StatusUnauthorized},
+		{name: "user not found", err: auth.ErrUserNotFound, wantStatus: http.StatusUnauthorized},
+		{name: "wrapped user not found", err: fmt.Errorf("lookup user: %w", auth.ErrUserNotFound), wantStatus: http.StatusUnauthorized},
+		{name: "identity backend unavailable", err: sensitiveErr, wantStatus: http.StatusServiceUnavailable},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &stubAuth{touchErr: tt.err}
+			h := Me(svc, RuntimeCapabilities{})
+			r := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+			r.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "valid-session"})
+			w := httptest.NewRecorder()
+
+			h.ServeHTTP(w, r)
+
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body = %q", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantStatus != http.StatusServiceUnavailable {
+				return
+			}
+			if cookies := w.Result().Cookies(); len(cookies) != 0 {
+				t.Fatalf("service-unavailable response cleared cookies: %+v", cookies)
+			}
+			body := w.Body.String()
+			for _, secret := range []string{"s3cr3t", "secret.internal", "password="} {
+				if strings.Contains(body, secret) {
+					t.Fatalf("service-unavailable response leaked %q: %q", secret, body)
+				}
+			}
+			if !strings.Contains(body, "identity temporarily unavailable") {
+				t.Fatalf("service-unavailable response = %q, want generic identity error", body)
+			}
+		})
 	}
 }
 

@@ -71,10 +71,10 @@ export function TopBar({ sync, user }: TopBarProps) {
         <span className="tp-page">{pageTitle}</span>
       )}
       <div className="tp-spacer" />
-      <GlobalSearch />
+      <GlobalSearch recordsEnabled={user?.runtime_capabilities.records === true} />
       <div className="tp-divider" />
       <ThemeSwitcher />
-      <NotificationBell />
+      {user?.runtime_capabilities.records ? <NotificationBell /> : null}
       <SyncStatus {...sync} />
       {user && <UserAvatar user={user} />}
     </header>

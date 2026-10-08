@@ -19,12 +19,14 @@ export function AssetDecisionSecondaryNav({ items, active, onOpen }: AssetDecisi
           aria-label={item.title}
           aria-describedby={`asset-decision-support-${item.value}-meta`}
           aria-pressed={active === item.value}
+          title={`${item.actionLabel}（${item.summary}）`}
         >
           <span className="asset-decision-support-strip__title">{item.title}</span>
           {/* 状态只由徽章表达，作为按钮描述让读屏同样获得。 */}
           <span id={`asset-decision-support-${item.value}-meta`}>
             <Badge variant="state" tone={item.tone}>{item.meta}</Badge>
           </span>
+          <span className="asset-decision-support-strip__action">{item.actionLabel}</span>
         </button>
       ))}
     </nav>

@@ -22,7 +22,7 @@ function actionModalContent(action: TargetRuntimeAction, target: TargetRecord) {
         title: '确认恢复目标监控',
         current: `当前：目标运行状态为${target.run_status}。`,
         result: '操作后：目标运行状态变为启用。',
-        impact: '会恢复该目标下已启用 ProbeItem 的探测执行。',
+        impact: '会恢复该目标下已启用探测项的探测执行。',
         unchanged: '不会修改历史事件或既有探测配置。',
         confirmLabel: '确认恢复目标',
       }
@@ -50,7 +50,7 @@ function actionModalContent(action: TargetRuntimeAction, target: TargetRecord) {
         current: '当前：目标处于已退役状态。',
         result: '操作后：目标运行状态变为暂停，重新纳入工作集。',
         impact: '恢复至暂停状态，便于在重新启用前检查配置与关联关系。',
-        unchanged: '不会删除历史事件、观测记录或 ProbeItem 配置。',
+        unchanged: '不会删除历史事件、观测记录或探测项配置。',
         confirmLabel: '确认恢复到暂停',
       }
     case 'archive':
@@ -59,7 +59,7 @@ function actionModalContent(action: TargetRuntimeAction, target: TargetRecord) {
         current: '当前：目标仍在当前工作集中。',
         result: '操作后：目标退出当前工作集，生命周期变为已退役，运行控制保持暂停。',
         impact: '退役后不会继续作为活跃目标参与观测、异常判定或通知。',
-        unchanged: '不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。',
+        unchanged: '不会删除历史事件、观测记录或探测项配置。后续可恢复到暂停。',
         confirmLabel: '确认退役',
       }
     case 'pause':
@@ -71,8 +71,8 @@ function actionModalContent(action: TargetRuntimeAction, target: TargetRecord) {
             ? '当前：目标运行状态为维护中。'
             : '当前：目标运行状态为启用。',
         result: '操作后：目标运行状态变为暂停。',
-        impact: '会停止该目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。',
-        unchanged: '不会删除历史事件、观测记录或 ProbeItem 配置。',
+        impact: '会停止该目标下所有探测项的执行，不再产生新的入口探测记录。',
+        unchanged: '不会删除历史事件、观测记录或探测项配置。',
         confirmLabel: '确认暂停目标',
       }
   }

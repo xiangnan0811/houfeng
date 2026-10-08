@@ -38,15 +38,15 @@ export function TargetProbeFormDrawer({
 }: TargetProbeFormDrawerProps) {
   const formId = useId()
   const title = mode.kind === 'edit'
-    ? `${target.name} · 编辑 ProbeItem`
-    : `${target.name} · 创建 ProbeItem`
+    ? `${target.name} · 编辑探测项`
+    : `${target.name} · 创建探测项`
   const submitLabel = submitting
     ? mode.kind === 'edit'
       ? '正在保存…'
       : '正在创建…'
     : mode.kind === 'edit'
-      ? '保存 ProbeItem'
-      : '创建 ProbeItem'
+      ? '保存探测项'
+      : '创建探测项'
 
   function handleClose() {
     if (submitting) return
@@ -58,7 +58,7 @@ export function TargetProbeFormDrawer({
       open={open}
       onClose={handleClose}
       title={title}
-      ariaLabel="ProbeItem 表单抽屉"
+      ariaLabel="探测项表单"
       size="md"
       contentClassName="watchtower-form-modal"
       footer={

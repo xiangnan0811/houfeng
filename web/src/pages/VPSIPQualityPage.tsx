@@ -120,7 +120,7 @@ export function VPSIPQualityPage() {
     return (
       <div className="page vps-detail-workspace ipq-page">
         <IPQualityHeader detailPath={detailPath} collect={collect} viewingHistory={reportId !== ''} showCollect={false} />
-        <IPQualityCollectNotice collect={collect} />
+        <IPQualityCollectNotice collect={collect} vpsId={vpsId} />
         <PageState
           kind="empty"
           surface="empty"
@@ -132,5 +132,5 @@ export function VPSIPQualityPage() {
     )
   }
 
-  return <IPQualityDashboard report={report} summary={summary} detailPath={detailPath} collect={collect} />
+  return <IPQualityDashboard report={report} summary={summary} detailPath={detailPath} collect={collect} vpsId={vpsId} />
 }

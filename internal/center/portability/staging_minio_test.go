@@ -44,9 +44,7 @@ func TestPortabilityImportStagingMinIOConformance(t *testing.T) {
 		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 		Payload: []byte("# Disk notes\n"),
 	}})
-	preview, err := base.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-minio", Archive: archive,
-	})
+	preview, err := base.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-minio", Archive: archive})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}

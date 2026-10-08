@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as authContext from '../../../lib/auth-context'
 import type { RecordWorkspaceState } from '../hooks/useRecordDraft'
 import { emptyRecordDraftPayload, payloadFromRevision, recordDetailFixture, recordRevisionFixture } from '../testFixtures'
 import { RecordWorkspaceHeader } from './RecordWorkspaceHeader'
@@ -46,6 +47,30 @@ function renderHeader(state: RecordWorkspaceState, extra: { revisionId?: string 
 }
 
 describe('RecordWorkspaceHeader', () => {
+  beforeEach(() => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: true, portability: true },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('shows identity facts without draft status or a self link while reading', () => {
     const record = recordDetailFixture({
       current: recordRevisionFixture({ record_type: 'troubleshooting', business_status: 'investigating', status_group: 'in_progress', revision_no: 4 }),
@@ -85,5 +110,38 @@ describe('RecordWorkspaceHeader', () => {
     expect(screen.getByText('历史修订 #2')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '当前版本' })).toHaveAttribute('href', '/records/rec_001')
     expect(screen.getByRole('link', { name: '横向比较' }).getAttribute('href')).toContain('/records/compare')
+  })
+
+  it('hides comparison and portability actions when those capabilities are off', () => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: false, portability: false },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
+    const revision = recordRevisionFixture({ revision_no: 2 })
+    renderHeader(workspaceState({
+      mode: 'revision',
+      revision,
+      record: recordDetailFixture(),
+      payload: payloadFromRevision(revision),
+    }), { revisionId: 'rrv_001' })
+
+    expect(screen.getByText('历史修订 #2')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '当前版本' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '横向比较' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '导出' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '导入' })).not.toBeInTheDocument()
   })
 })

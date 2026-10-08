@@ -20,6 +20,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
+	"houfeng/internal/center/accessadmin"
 	"houfeng/internal/center/activity"
 	centerapp "houfeng/internal/center/app"
 	"houfeng/internal/center/attachments"
@@ -253,12 +254,21 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		Now:                time.Now,
 		PasswordBcryptCost: cfg.PasswordBcryptCost,
 	})
+	accessAdminSvc := accessadmin.New(store.NewPostgresAccessAdminRepository(db.Pool()), accessadmin.Options{
+		Now:                time.Now,
+		PasswordBcryptCost: cfg.PasswordBcryptCost,
+	})
 	scopeRepo := store.NewPostgresRecordAuthorizationRepository(db.Pool())
 	sessionCleanup := auth.NewSessionCleanupWorker(sessionRepo, slog.Default(), auth.DefaultSessionCleanupInterval)
 	authMiddleware := func(next http.Handler) http.Handler {
 		return centerhttp.RequireSameOrigin(cfg.PublicBaseURL)(centerhttp.RequireSession(authSvc, scopeRepo)(next))
 	}
 	recordsEnabled := cfg.RecordPlatformMode == config.RecordPlatformModeRuntimeAdmission
+	runtimeCapabilities := handlers.RuntimeCapabilities{
+		Records:     recordsEnabled,
+		Comparison:  recordsEnabled && cfg.ComparisonEnabled,
+		Portability: recordsEnabled && cfg.PortabilityEnabled,
+	}
 	if recordsEnabled && nilBootstrapAdmissionGate(deps.recordPlatformAdmissionGate) {
 		gate, gateErr := newProductionRecordPlatformAdmissionGate(cfg)
 		if gateErr != nil {
@@ -345,10 +355,10 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		EventsHandler:                             handlers.Events(dashboardRepo),
 		CommandAuditsHandler:                      handlers.CommandAudits(commandAuditRepo),
 		IncidentsHandler:                          handlers.Incidents(incidentRepo),
-		SettingsHandler:                           handlers.Settings(settingsHandlerRepo),
-		RecordsEnabled:                            recordsEnabled,
-		ComparisonEnabled:                         recordsEnabled && cfg.ComparisonEnabled,
-		PortabilityEnabled:                        recordsEnabled && cfg.PortabilityEnabled,
+		SettingsHandler:                           handlers.Settings(settingsHandlerRepo, exchangeRateWorker),
+		RecordsEnabled:                            runtimeCapabilities.Records,
+		ComparisonEnabled:                         runtimeCapabilities.Comparison,
+		PortabilityEnabled:                        runtimeCapabilities.Portability,
 		RecordsHandler:                            recordsHandler,
 		RecordSearchHandler:                       recordSearchHandler,
 		SubjectActivityHandler:                    subjectActivityHandler,
@@ -381,7 +391,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSItemHandler:                            handlers.VPSItem(vpsAssetRepo, vpsMonitoringInstanceLinkRepo, assetLifecycleRepo, ipQualityRepo),
 		VPSOverviewHandler:                        vpsOverviewHandler,
 		VPSMonitoringInstancesHandler:             handlers.VPSMonitoringInstances(vpsMonitoringInstanceLinkRepo, monitoringInstanceRepo),
-		VPSSubscriptionsHandler:                   handlers.VPSSubscriptions(subscriptionRepo),
+		VPSSubscriptionsHandler:                   handlers.VPSSubscriptions(subscriptionRepo, exchangeRateWorker),
 		VPSTimelineHandler:                        handlers.VPSTimeline(renewalDecisionRepo),
 		VPSExperienceLogsHandler:                  handlers.VPSExperienceLogs(renewalDecisionRepo),
 		VPSDomainsHandler:                         handlers.VPSDomains(assetDomainRepo),
@@ -395,14 +405,15 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		VPSExtendValidityHandler:                  handlers.VPSExtendValidity(assetLifecycleRepo),
 		VPSArchiveReviewHandler:                   handlers.VPSArchiveReview(assetLifecycleRepo),
 		VPSArchiveHandler:                         handlers.VPSArchive(assetLifecycleRepo),
-		VPSRestoreFromArchiveHandler:              handlers.VPSRestoreFromArchive(assetLifecycleRepo),
+		VPSRestoreFromArchiveHandler:              handlers.VPSRestoreFromArchive(assetLifecycleRepo, exchangeRateWorker),
 		AssetContextTargetsHandler:                handlers.AssetContextTargets(assetLifecycleRepo),
-		SubscriptionsCollectionHandler:            handlers.SubscriptionsCollection(subscriptionRepo, subscriptionCostSvc),
-		SubscriptionItemHandler:                   handlers.SubscriptionItem(subscriptionRepo),
+		SubscriptionsCollectionHandler:            handlers.SubscriptionsCollection(subscriptionRepo, subscriptionCostSvc, exchangeRateWorker),
+		SubscriptionItemHandler:                   handlers.SubscriptionItem(subscriptionRepo, exchangeRateWorker),
 		SubscriptionOverviewHandler:               handlers.SubscriptionOverview(subscriptionCostSvc),
 		SubscriptionStatisticsHandler:             handlers.SubscriptionStatistics(subscriptionCostSvc),
-		SubscriptionSettingsHandler:               handlers.SubscriptionSettings(subscriptionCostSvc),
-		SubscriptionExchangeRateRefreshHandler:    handlers.SubscriptionExchangeRateRefresh(subscriptionCostSvc),
+		SubscriptionSettingsHandler:               handlers.SubscriptionSettings(subscriptionCostSvc, exchangeRateWorker),
+		SubscriptionExchangeRateRefreshHandler:    handlers.SubscriptionExchangeRateRefresh(exchangeRateWorker),
+		SubscriptionExchangeRateStatusHandler:     handlers.SubscriptionExchangeRateStatus(exchangeRateWorker),
 		SubscriptionBudgetsHandler:                handlers.SubscriptionBudgets(subscriptionCostSvc),
 		SubscriptionMonthlyBudgetsHandler:         handlers.SubscriptionMonthlyBudgets(subscriptionCostSvc),
 		MonitoringInstancesCollectionHandler:      handlers.MonitoringInstancesCollection(monitoringInstanceRepo),
@@ -450,8 +461,9 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 			TrustedProxies: cfg.TrustedProxies,
 		}),
 		AuthLogoutHandler:         handlers.Logout(authSvc),
-		AuthMeHandler:             handlers.Me(authSvc),
+		AuthMeHandler:             handlers.Me(authSvc, runtimeCapabilities),
 		AuthChangePasswordHandler: handlers.ChangePassword(authSvc),
+		AccessAdminHandler:        handlers.AccessAdmin(accessAdminSvc),
 		AuthMiddleware:            authMiddleware,
 	})
 	router = centerhttp.SecurityHeaders(strings.HasPrefix(cfg.PublicBaseURL, "https://"))(router)
@@ -701,7 +713,7 @@ func newVPSOverviewHandler(
 type unavailableOverviewActivity struct{}
 
 func (unavailableOverviewActivity) List(context.Context, activity.ListRequest) (activity.ListResult, error) {
-	return activity.ListResult{}, errors.New("record activity is not enabled")
+	return activity.ListResult{}, vpsoverview.ErrActivityDisabled
 }
 
 func newProductionWitnessedRecordSubjectTombstoneSource(
@@ -1061,6 +1073,7 @@ func newRecordsHTTPHandlers(
 			Imports:         store.NewPostgresRecordPortabilityRepository(pool, effectiveGate),
 			Importer:        application,
 			EvidenceImports: portability.NewKnownKindEvidenceImporter(),
+			Subjects:        subjects,
 			Rebuilder:       portability.NewAuthoritativeProjectionRebuilder(),
 			Staging:         portability.NewLeasedBlobStore(blob),
 			Attachments:     portability.NewDownloadAttachmentSource(downloadService),

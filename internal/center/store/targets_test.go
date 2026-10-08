@@ -392,27 +392,69 @@ func TestUpdateTargetMetadataMapsPreconditionMissToConflictWhenTargetExists(t *t
 	}
 }
 
-func TestPostgresTargetListHidesTargetsLinkedOnlyToArchivedVPS(t *testing.T) {
-	var seenSQL string
-	repo := &PostgresTargetRepository{db: fakeTargetDB{
-		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
-			seenSQL = sql
-			return &fakeTargetRows{}, nil
+func TestProjectTargetHealthPrecedence(t *testing.T) {
+	observedAt := time.Date(2026, time.April, 27, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		record targets.TargetRecord
+		want   string
+	}{
+		{
+			name: "retired wins over control and observation",
+			record: targets.TargetRecord{
+				LifecycleStatus:     targets.LifecycleRetired,
+				RunStatus:           targets.RunStatusPaused,
+				CurrentHealthStatus: "严重",
+				LastSuccessAt:       &observedAt,
+			},
+			want: "已退役",
 		},
-	}}
-
-	if _, err := repo.ListTargets(context.Background()); err != nil {
-		t.Fatalf("ListTargets() error = %v", err)
+		{
+			name: "paused wins over maintenance and stored health",
+			record: targets.TargetRecord{
+				LifecycleStatus:     targets.LifecycleActive,
+				RunStatus:           targets.RunStatusPaused,
+				CurrentHealthStatus: "严重",
+				LastFailureAt:       &observedAt,
+			},
+			want: "暂停",
+		},
+		{
+			name: "maintenance wins over stored health",
+			record: targets.TargetRecord{
+				LifecycleStatus:     targets.LifecycleActive,
+				RunStatus:           targets.RunStatusMaintenance,
+				CurrentHealthStatus: "告警",
+				LastSuccessAt:       &observedAt,
+			},
+			want: "维护中",
+		},
+		{
+			name: "enabled without observation is unavailable",
+			record: targets.TargetRecord{
+				LifecycleStatus:     targets.LifecycleActive,
+				RunStatus:           targets.RunStatusEnabled,
+				CurrentHealthStatus: "严重",
+			},
+			want: "数据不可用",
+		},
+		{
+			name: "observed enabled uses stored health",
+			record: targets.TargetRecord{
+				LifecycleStatus:     targets.LifecycleActive,
+				RunStatus:           targets.RunStatusEnabled,
+				CurrentHealthStatus: "关注",
+				LastSuccessAt:       &observedAt,
+			},
+			want: "关注",
+		},
 	}
-	for _, snippet := range []string{
-		"not exists",
-		"asset_service_associations",
-		"asset_domain_associations",
-		"v.lifecycle_status = 'active'",
-	} {
-		if !strings.Contains(seenSQL, snippet) {
-			t.Fatalf("ListTargets SQL missing %q in %s", snippet, seenSQL)
-		}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := projectTargetHealth(tt.record); got != tt.want {
+				t.Fatalf("projectTargetHealth() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -540,6 +582,8 @@ func scanTargetRecordDestinations(dest []any, record targets.TargetRecord) {
 	*(dest[14].(*string)) = record.CurrentPrimaryIssueSummary
 	*(dest[15].(*time.Time)) = record.CreatedAt
 	*(dest[16].(*time.Time)) = record.UpdatedAt
+	*(dest[17].(*int)) = record.EnabledProbeCount
+	*(dest[18].(*int)) = record.MatchingExecutorCount
 }
 
 func cloneIntPtr(value *int) *int {

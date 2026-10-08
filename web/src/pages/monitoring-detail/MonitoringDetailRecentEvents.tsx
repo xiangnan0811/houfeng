@@ -2,6 +2,8 @@ import { Link, useLocation } from 'react-router-dom'
 
 import { Button } from '../../components/atoms/Button'
 import { Timestamp } from '../../components/atoms/Mono'
+import { capabilityFlagsForSession } from '../../lib/auth-client'
+import { useAuth } from '../../lib/auth-context'
 import { severityTone } from '../../lib/observabilityLabels'
 import { STATE_CHANGE_EVENT_TYPE_LABELS, type StateChangeEventRecord } from '../../lib/types'
 import { withReturnVPSQuery } from './monitoringDetailHelpers'
@@ -30,12 +32,18 @@ export function MonitoringDetailRecentEvents({
   onOpenHistory,
 }: Props) {
   const location = useLocation()
+  const auth = useAuth()
+  const { records } = capabilityFlagsForSession(auth)
   const links = (
-    <nav className="monitoring-detail-recent__links" aria-label="历史、活动、记录与证据">
+    <nav className="monitoring-detail-recent__links" aria-label={records ? '历史、活动、记录与证据' : '历史'}>
       <button type="button" className="text-link" onClick={onOpenHistory}>历史</button>
-      <Link className="text-link" to={withReturnVPSQuery(`${subjectBase}/activity`, returnVPSId)} state={location.state}>活动</Link>
-      <Link className="text-link" to={withReturnVPSQuery(`${subjectBase}/records`, returnVPSId)} state={location.state}>记录</Link>
-      <Link className="text-link" to={withReturnVPSQuery(`${subjectBase}/evidence`, returnVPSId)} state={location.state}>证据</Link>
+      {records ? (
+        <>
+          <Link className="text-link" to={withReturnVPSQuery(`${subjectBase}/activity`, returnVPSId)} state={location.state}>活动</Link>
+          <Link className="text-link" to={withReturnVPSQuery(`${subjectBase}/records`, returnVPSId)} state={location.state}>记录</Link>
+          <Link className="text-link" to={withReturnVPSQuery(`${subjectBase}/evidence`, returnVPSId)} state={location.state}>证据</Link>
+        </>
+      ) : null}
     </nav>
   )
 

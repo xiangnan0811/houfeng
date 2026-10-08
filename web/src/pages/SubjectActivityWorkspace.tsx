@@ -6,6 +6,8 @@ import { PageState } from '../components/PageState'
 import { SubjectIdentityBar, SubjectKindMark } from '../components/SubjectIdentityBar'
 import { SUBJECT_KIND_LABELS } from '../components/timelineChannel'
 import { UnifiedTimeline } from '../components/UnifiedTimeline'
+import { capabilityFlagsForSession } from '../lib/auth-client'
+import { useAuth } from '../lib/auth-context'
 import type { SubjectActivityView } from '../lib/types'
 import { SubjectActivityFilters } from './records/activity/SubjectActivityFilters'
 import { SubjectLocalNavigation } from './records/activity/SubjectLocalNavigation'
@@ -63,6 +65,8 @@ function workspaceCopy(view: SubjectActivityView, filtered: boolean) {
 }
 
 export function SubjectActivityWorkspace({ view }: Props) {
+  const auth = useAuth()
+  const { comparison } = capabilityFlagsForSession(auth)
   const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const route = useMemo(
@@ -133,7 +137,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
           returnLabel="返回详情"
           actions={(
             <>
-              {view === 'evidence' ? (
+              {view === 'evidence' && comparison ? (
                 <Link className="btn md secondary" to="/records/compare" state={navigationState}>横向比较</Link>
               ) : null}
               <Link
@@ -245,7 +249,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
               omitLinkState={route.kind === 'target'}
               emptyTitle={copy.emptyTitle}
               emptyDescription={copy.emptyDescription}
-              {...(view === 'evidence' ? {
+              {...(view === 'evidence' && comparison ? {
                 itemActions: (item) => item.evidence_snapshot_id ? (
                   <Link
                     className="text-link"

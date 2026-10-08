@@ -13,7 +13,7 @@
 - `status` 使用稳定英文机器值：`active`、`paused`、`cancelled`、`expired`、`unknown`。新用户流程不得把它暴露为必填业务状态；VPS-scoped create 默认只收 price / currency / billing cycle / dates / auto-renew / payment / note 等账单事实，内部可保留 legacy status 作为兼容和历史解释字段。
 - 订阅列表通过所属 VPS 生命周期裁剪：默认 `asset_scope=current` 只返回管理中 VPS，`archived` 返回已归档 VPS 的账单，`all` 返回全部。订阅自身 `status='cancelled'|'expired'` 不能让 VPS 自动归档。
 - `renewal_mode` 只允许 `auto|manual|auto_cancelled`。获取来源在 VPS `acquisition_source` 独立记录。
-- 订阅 CRUD 不得创建 `vps_monitoring_instance_links`、不得改写 `monitoring_instances.provider`、不得增加 Dashboard / import / currency exchange 行为。
+- 订阅 CRUD 不得创建 `vps_monitoring_instance_links`、不得改写 `monitoring_instances.provider`、monitoring instance lifecycle、Target 或 Agent。成功提交后仅向既有汇率 worker 发非阻塞补取信号，不在请求中调用外部汇率网络，也不改变账单成功结果。
 - 订阅 CRUD 仍不得反向改写 VPS、MonitoringInstance 或 Target；订阅取消 / 过期后如资产状态不一致，前端必须暴露 lifecycle action 入口，而不是在订阅 PATCH 中隐式停机或退役。
 - 续费意向与服务商自动续费独立：保存 VPS `renewal_decision=cancel` 只记录意向、原因、复核时间和历史，不更改任何订阅自动续费事实。界面提示核对 VPS `auto_renew_check`。
 - 记录一次续费不得将 cancel 自动改为 keep；用户明确确认新的 VPS `validity_mode/expires_at`，账单 `renew_at` 不自动覆盖资源有效期，二者不一致仅提示。
@@ -160,10 +160,10 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 ### 2. Signatures
 
 - Settings JSON: `center_settings.subscription_cost_settings`，字段包含 `base_currency`、`exchange_rate_provider`、`fixer_api_key`、`default_reminder_offsets_days`、`max_reminder_lead_days`、`exchange_rate_stale_after_hours`。
-- DB tables: `subscription_exchange_rates(provider, base_currency, quote_currency, rate, rate_date, fetched_at, stale, error_summary)`、`subscription_budgets(budget_id, scope_type, scope_id, base_currency, monthly_limit, yearly_limit, warning_pct, enabled)`、`subscription_reminder_deliveries(subscription_id, renew_at, offset_days, reminder_kind, channel, delivery_status)`。
+- DB tables: `subscription_exchange_rates(provider, base_currency, quote_currency, rate, rate_date, fetched_at)` 只保存成功的正汇率；`subscription_budgets(budget_id, scope_type, scope_id, base_currency, monthly_limit, yearly_limit, warning_pct, enabled)`；`subscription_reminder_deliveries(subscription_id, renew_at, offset_days, reminder_kind, channel, delivery_status)`。
 - Backend APIs:
   - `GET/PUT /api/subscriptions/settings`
-  - `POST /api/subscriptions/exchange-rates/refresh`
+  - `GET /api/subscriptions/exchange-rates/status` 与 `POST /api/subscriptions/exchange-rates/refresh`，后者返回 202，仅证明任务受理。
   - `GET /api/subscriptions/overview`
   - `GET /api/subscriptions/statistics?window=month|quarter|year`
   - `GET/POST/PATCH /api/subscription-budgets`
@@ -176,11 +176,19 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 
 - Default base currency is `CNY`; user may change it through settings.
 - Fixer API key is secret material. It may be accepted in settings input or environment-backed config, but must never appear in migrations, source defaults, frontend responses, test snapshots, logs, or provider error summaries. Settings responses expose only `fixer_configured` and masked summary.
-- Frankfurter is the default provider; Fixer is configurable. Provider failures must not block subscription CRUD; failed refresh responses may mark exchange data stale or missing.
+- Frankfurter is the default provider; Fixer is configurable. Provider failures must not block subscription CRUD. 成功缓存的可用性与补取任务状态分离，不将失败或零汇率写入缓存。
 - 订阅成本设置与全局中心设置都必须通过同一 `MutateSettings` 原子入口修改：事务按 `READ COMMITTED` 初始化缺失的 `center` 单例、锁定并读取最新完整行、只调用一次 mutation callback、校验后写回完整设置并提交；提交前的 callback、校验或 SQL 失败整笔回滚。提交返回错误时结果可能未知（例如数据库已提交但响应丢失），必须向调用方返回失败，不得宣称一定回滚，也不得自动重放旧的完整设置。读取缺失行仍只返回默认值，不创建单例。
 - `PUT /api/settings` 与 `PUT /api/subscriptions/settings` 在 callback 内基于锁定后的最新值合并服务端省略字段，禁止先 `GET` 再使用旧快照写回。订阅成本的 `fixer_api_key` 省略时保留已存密钥，显式空字符串才清除；响应只公开 `fixer_configured` 与 masked summary，绝不回显明文。
 - `subscriptions` may hold billing facts such as display name, labels, category, trial/end dates, price, currency, cycle, renewal date, auto-renew, payment, and note. Monthly/yearly base costs, exchange rate metadata, budget status, and next reminder are read-model fields, not writable subscription facts.
 - 订阅创建的 header、错误、事务和 receipt 生命周期统一见 [幂等合同](#scenario-idempotent-vps-scoped-subscription-creation)。成本功能不另建创建或重放路径。
+- `CostRow`、订阅记录及续费队列统一返回 `exchange_rate_status: identity|fresh|stale|missing`，不再返回 `exchange_rate_stale`。同基准币种为 identity（原价 0 仍为已知 0）；缺汇率金额为 null；已有过期汇率继续返回数值并标 stale。当前概览分别返回 `current_missing_rate_count`、`current_stale_rate_count`，保留 `current_unknown_amount_count`；归档行不驱动补取。
+- 有效币对由 active subscriptions 与 active VPS 驱动，按当前 provider/base/quote 连接 `fetched_at DESC, rate_date DESC` 最新成功缓存；沿用既有过期阈值严格比较，不混用旧基准或旧 provider 的值。
+- `ExchangeRateWorker.Run(ctx)` 是唯一外部取汇率执行者；启动扫描、每 30 秒 reconcile、12 小时周期和容量 1 唤醒 channel 共用一条顺序执行 lane。成功写入口调用 `RequestRefresh(false)`；人工刷新调用 `RequestRefresh(true)`；信号非阻塞并合并，运行中同币对信号不导致相同调用再次排队。每次网络请求从应用 ctx 派生 10 秒 timeout。
+- 普通轮次只补 missing/stale；已开始的人工强制刷新即使成功缓存仍为 fresh，其已排程重试也必须按既有 deadline 与 attempt budget 执行，不因每次重试而重置预算。失败后按 5、30、120 秒进行三次自动重试，耗尽后保留 failed；普通 CRUD 和 30 秒扫描不能重置失败预算，12 小时周期或人工重试可开启新轮。凭据/base/provider 变化开启当前设置新轮，过期阈值变化只重算 eligible；请求中的旧币对成功结果仍按旧币对保存为历史，下轮读取最新设置。
+- “开启新轮/重置失败预算”不等于强制取 fresh：启动、12 小时周期及仅凭据变化均复用 fresh 缓存。人工刷新按币对合并；正在运行的币对由当前调用满足请求，其他已完成或未运行币对各保留一次待执行刷新。状态查询不能消费 worker 尚未处理的新币对刷新请求；在 worker 尚未发现该币对期间，状态可将 pending force discovery 的非 identity 币对投影为 `queued`，但必须保留 discovery marker 供 worker 消费。A 已完成而 B 在途时多次人工刷新，B 不重复排队，A 下一轮恰好再取一次，两者最终退出 queued/running。
+- 全局/scoped 订阅创建（共用写入口）、PATCH 换币或恢复 active、VPS 归档恢复、两个 settings 更新入口仅在成功提交后通知 worker。幂等 replay 可合并通知但不能二次创建；worker 关闭或外部失败不能把已提交业务改报失败。独立 importer 最迟由 30 秒 reconcile 发现。
+- 状态 GET 只读，不触发外部请求。两条汇率 API 均返回 `{items: ExchangeRatePairStatus[]}`，项包含 `provider, base_currency, quote_currency, rate_status, refresh_status, last_attempt_at?, next_retry_at?, attempt_count, error_summary?`；rate_status 为上述四态，refresh_status 为 `idle|queued|running|failed`。错误只提供脱敏摘要，禁止密钥及完整 URL。任务状态仅进程内保存，成功后清除错误/attempt，非活跃币对移出视图但不删缓存；重启从缓存重建并重新尝试。应用退出取消 timer 和在途网络，Run 返回，不遗留请求级 goroutine。
+- 所有成本摘要与图表按完整性限定：未知数大于零时为“已知金额小计（另有 N 项待核对）”，占比仅指已知金额；全部未知时显示金额待核对，不以零冒充总额。无订阅且无缺口可显示完整零；预算风险零不证明金额完整。
 - Budget scopes are `global`、`provider`、`label`、`category`、`vps`。Disabled budgets must not affect budget status. PATCH must distinguish omitted limits from explicit JSON `null`.
 
 #### Budget derived amount and status
@@ -219,8 +227,8 @@ Row-level `budget_status` is merged after all matching work: archived rows and r
 | Fixer key omitted in PUT | existing key is preserved |
 | Fixer key set to empty string in PUT | existing key is cleared |
 | Provider error contains `access_key` / `api_key` / `token` | response/status stores redacted error only |
-| Exchange rate missing for non-base currency | derived base costs are `null`, `exchange_rate_stale=true` |
-| Exchange cache older than stale threshold | derived row marks `exchange_rate_stale=true` |
+| Exchange rate missing for non-base currency | derived base costs are `null`, `exchange_rate_status=missing` |
+| Exchange cache older than stale threshold | numeric cached amount remains, `exchange_rate_status=stale` |
 | Budget has both monthly/yearly limits omitted or null | budget validation rejects missing effective limit |
 | Budget PATCH omits a limit field | existing limit remains unchanged |
 | Budget PATCH sends a limit as `null` | that limit is cleared, subject to at least one remaining limit |
@@ -231,9 +239,9 @@ Row-level `budget_status` is merged after all matching work: archived rows and r
 ### 5. Good/Base/Bad Cases
 
 - Good: active USD subscription has a fresh USD->CNY rate, global budget applies, overview reports CNY monthly/yearly cost and budget status.
-- Good: Fixer returns a URL-like error containing `access_key=...`; stored refresh result shows `access_key=[redacted]`.
+- Good: Fixer 返回包含完整 URL 或 key 的错误时，状态只公开脱敏失败摘要，不公开请求 URL。
 - Good: reminder worker inserts a `dispatch` delivery row, sends Telegram/Feishu through the shared dispatcher, then updates sent/failed/suppressed status and notification audit.
-- Base: CNY subscription uses exchange rate `1` and `exchange_rate_stale=false`.
+- Base: CNY subscription uses exchange rate `1` and `exchange_rate_status=identity`.
 - Base: provider outage makes non-CNY rows stale/missing but does not break `GET /api/subscriptions`.
 - Bad: subscription PATCH changes `vps_assets.renewal_decision` or lifecycle status.
 - Bad: reminder worker dispatches first and writes dedupe after sending; a crash can duplicate renewal messages.

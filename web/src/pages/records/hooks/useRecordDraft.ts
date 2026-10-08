@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { ApiError } from '../../../lib/apiRequest'
 import {
@@ -95,6 +95,10 @@ function newIdempotencyKey(): string {
   return crypto.randomUUID()
 }
 
+function workspaceIdentity(mode: RecordWorkspaceMode, recordId?: string, revisionId?: string): string {
+  return `${mode}\0${recordId ?? ''}\0${revisionId ?? ''}`
+}
+
 function errorMessage(error: unknown, fallback: string): string {
   // 草稿名下附件仍在安全检查时后端暂不清理草稿，稍后重试即可。
   if (error instanceof ApiError && error.code === 'draft_attachments_busy') return '附件仍在安全检查，请稍后再发布'
@@ -166,14 +170,10 @@ export function useRecordDraft(options: {
   }, [dirty, draft, payload, record])
 
   const emptyShell = useCallback((nextStatus: Extract<RecordWorkspaceStatus, 'error' | 'revoked' | 'empty'>, nextMessage: string) => {
-    if (!mountedRef.current) return
     generationRef.current += 1
     if (nextStatus === 'revoked' || nextStatus === 'empty') {
       closedRef.current = true
     }
-    setRecord(null)
-    setRevision(null)
-    setDraft(null)
     draftRef.current = null
     recordRef.current = null
     baseRef.current = null
@@ -182,9 +182,13 @@ export function useRecordDraft(options: {
     confirmedHeadRef.current = null
     const nextPayload = emptyRecordDraftPayload(options.userId)
     payloadRef.current = nextPayload
+    dirtyRef.current = false
+    if (!mountedRef.current) return
+    setRecord(null)
+    setRevision(null)
+    setDraft(null)
     setPayload(nextPayload)
     setDirty(false)
-    dirtyRef.current = false
     setConflictPayload(null)
     setConflictServer(null)
     setPublishedRecordId(null)
@@ -198,26 +202,33 @@ export function useRecordDraft(options: {
   }, [bufferRecordId, options.userId, store])
 
   const closeAuthorized = useCallback(async (error: unknown) => {
-    await clearLocalBuffer()
     const nextMessage = errorMessage(error, '记录访问已撤销')
     if (securityRef.current && !securityRef.current.lease.revoked) {
       securityRef.current.revoke('revoke')
     }
     emptyShell('revoked', nextMessage)
+    try {
+      await clearLocalBuffer()
+    } catch {
+      // 本地库删除被拒绝或仍未结束时，不得把已撤销的正文写回。
+    }
   }, [clearLocalBuffer, emptyShell])
 
   const reportSaveError = useCallback((error: unknown) => {
-    if (!mountedRef.current) return
-    setStatus((current) => (current === 'conflict' ? 'conflict' : 'ready'))
+    // 撤销或清空之后的迟到失败只能被丢掉。再写 ready 会把已经收起的工作区重新打开。
+    if (!mountedRef.current || closedRef.current) return
+    setStatus((current) => {
+      if (closedRef.current || current === 'revoked' || current === 'empty') return current
+      return current === 'conflict' ? 'conflict' : 'ready'
+    })
     setMessage(errorMessage(error, '草稿暂不可用'))
   }, [])
 
   useEffect(() => {
     mountedRef.current = true
     const controller = createRecordSecurityController(options.recordId ?? 'new', options.userId, record?.authorization_epoch ?? 0, (reason) => {
-      void clearLocalBuffer()
-      if (!mountedRef.current) return
       emptyShell(reason === 'visibility' || reason === 'revoke' ? 'revoked' : 'empty', '记录访问已撤销')
+      void clearLocalBuffer().catch(() => undefined)
     })
     securityRef.current = controller
     return () => {
@@ -226,6 +237,11 @@ export function useRecordDraft(options: {
       controller.dispose()
     }
   }, [clearLocalBuffer, emptyShell, options.recordId, options.userId, record?.authorization_epoch])
+
+  const workspaceIdentityRef = useRef(workspaceIdentity(options.mode, options.recordId, options.revisionId))
+  useLayoutEffect(() => {
+    workspaceIdentityRef.current = workspaceIdentity(options.mode, options.recordId, options.revisionId)
+  }, [options.mode, options.recordId, options.revisionId])
 
   // Opening another record reuses this hook, so the closed latch and the restore
   // idempotency key must not survive: otherwise a revoked record would keep every
@@ -263,7 +279,7 @@ export function useRecordDraft(options: {
   useEffect(() => {
     let active = true
     const applyBuffered = (buffered: UnsyncedDraft | undefined, overwriteLocal = false) => {
-      if (!buffered) return false
+      if (!buffered || closedRef.current) return false
       if (!overwriteLocal && (dirtyRef.current || generationRef.current > 0)) return false
       payloadRef.current = buffered.payload
       setPayload(buffered.payload)
@@ -274,7 +290,7 @@ export function useRecordDraft(options: {
 
     if (options.mode === 'new') {
       void readUnsyncedDraft(store, draftBufferKey(options.userId, bufferRecordId)).then((buffered) => {
-        if (!active || !mountedRef.current) return
+        if (!active || !mountedRef.current || closedRef.current) return
         applyBuffered(buffered)
       })
       return () => {
@@ -292,7 +308,7 @@ export function useRecordDraft(options: {
           getRecord(recordId),
           getRecordRevision(recordId, options.revisionId),
         ])
-        if (!active || !mountedRef.current) return
+        if (!active || !mountedRef.current || closedRef.current) return
         setRecord(loaded)
         recordRef.current = loaded
         setRevision(historical)
@@ -304,7 +320,7 @@ export function useRecordDraft(options: {
       }
 
       const loaded = await getRecord(recordId)
-      if (!active || !mountedRef.current) return
+      if (!active || !mountedRef.current || closedRef.current) return
       setRecord(loaded)
       recordRef.current = loaded
       baseRef.current = loaded
@@ -338,7 +354,7 @@ export function useRecordDraft(options: {
         })
         : null
       const serverDraft = listedDraft ?? fetchedDraft
-      if (!active || !mountedRef.current) return
+      if (!active || !mountedRef.current || closedRef.current) return
 
       if (serverDraft) {
         draftRef.current = serverDraft
@@ -354,6 +370,7 @@ export function useRecordDraft(options: {
       if (buffered && !bufferIsNewer) {
         await store.delete(draftBufferKey(options.userId, bufferRecordId))
       }
+      if (!active || !mountedRef.current || closedRef.current) return
       const nextPayload = serverDraft ? serverDraft.payload : payloadFromRevision(loaded.current)
       payloadRef.current = nextPayload
       setPayload(nextPayload)
@@ -489,6 +506,10 @@ export function useRecordDraft(options: {
         if (generation === generationRef.current) {
           await store.delete(draftBufferKey(options.userId, bufferRecordId))
         }
+        if (closedRef.current) {
+          draftRef.current = null
+          return
+        }
         if (mountedRef.current) {
           setDraft(next)
           if (generation === generationRef.current) {
@@ -613,21 +634,31 @@ export function useRecordDraft(options: {
         draftRef.current = null
         if (mountedRef.current) setDraft(null)
         // 发布后的读取最权威：作废此前仍在途的后台读取。
-        recordLoadRef.current += 1
-        const latest = await getRecord(options.recordId)
-        baseRef.current = latest
-        pendingHeadRef.current = null
-        confirmedHeadRef.current = null
-        if (mountedRef.current) {
-          setRecord(latest)
-          recordRef.current = latest
-          setRevision(latest.current)
-          const nextPayload = payloadFromRevision(latest.current)
-          payloadRef.current = nextPayload
-          setPayload(nextPayload)
-          setDirty(false)
-          dirtyRef.current = false
-          setMessage('')
+        // 读取返回前授权可能已经撤销。代次、关闭闩和当前身份都不符时，不得把正文写回。
+        const generation = generationRef.current
+        const loadSeq = ++recordLoadRef.current
+        const recordId = options.recordId
+        const identity = workspaceIdentityRef.current
+        const latest = await getRecord(recordId)
+        const currentPublication = !closedRef.current
+          && generation === generationRef.current
+          && loadSeq === recordLoadRef.current
+          && identity === workspaceIdentityRef.current
+        if (currentPublication) {
+          baseRef.current = latest
+          pendingHeadRef.current = null
+          confirmedHeadRef.current = null
+          if (mountedRef.current) {
+            setRecord(latest)
+            recordRef.current = latest
+            setRevision(latest.current)
+            const nextPayload = payloadFromRevision(latest.current)
+            payloadRef.current = nextPayload
+            setPayload(nextPayload)
+            setDirty(false)
+            dirtyRef.current = false
+            setMessage('')
+          }
         }
       }
       await store.delete(draftBufferKey(options.userId, bufferRecordId))

@@ -44,5 +44,20 @@ describe('ComparisonMatrix', () => {
     expect(screen.getByText('3')).toBeInTheDocument()
     expect(screen.getByText('有差值')).toBeInTheDocument()
     expect(screen.getByText('覆盖不完整')).toBeInTheDocument()
+    expect(screen.getByText('主机监控')).toBeInTheDocument()
+    const technical = screen.getByText('monitoring.host/v1')
+    expect(technical.closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('主机监控').closest('details')).toBeNull()
+  })
+
+  it('folds an unknown matrix reason instead of using it as the note', () => {
+    render(<ComparisonMatrix kind="monitoring.host/v1" comparison={{
+      ...comparison,
+      review: [{ item_index: 0, reason: 'future_code' as typeof comparison.review[number]['reason'] }],
+    }} />)
+    expect(screen.getByText('不兼容')).toBeInTheDocument()
+    const raw = screen.getByText('future_code')
+    expect(raw.closest('details')).not.toHaveAttribute('open')
+    expect(screen.getByText('不兼容').closest('details')).toBeNull()
   })
 })

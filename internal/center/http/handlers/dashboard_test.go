@@ -30,6 +30,7 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 		TotalMonitoringInstanceCount:             5,
 		TotalTargetCount:                         4,
 		AbnormalMonitoringInstanceCount:          2,
+		UnobservedTargetCount:                    2,
 		SevereMonitoringInstanceCount:            1,
 		PendingOnboardingMonitoringInstanceCount: 1,
 		PausedMonitoringInstanceCount:            1,
@@ -43,6 +44,7 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 			TargetCount:                        2,
 			AbnormalMonitoringInstanceCount:    1,
 			AbnormalTargetCount:                1,
+			UnobservedTargetCount:              1,
 			SevereMonitoringInstanceCount:      0,
 			SevereTargetCount:                  1,
 			MaintenanceMonitoringInstanceCount: 1,
@@ -130,6 +132,9 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	if body["abnormal_monitoring_instance_count"] != float64(2) {
 		t.Fatalf("body = %#v, want abnormal_monitoring_instance_count=2", body)
 	}
+	if body["unobserved_target_count"] != float64(2) {
+		t.Fatalf("body = %#v, want unobserved_target_count=2", body)
+	}
 	if body["severe_monitoring_instance_count"] != float64(1) {
 		t.Fatalf("body = %#v, want severe_monitoring_instance_count=1", body)
 	}
@@ -156,8 +161,8 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	if !ok {
 		t.Fatalf("groupSummaries[0] = %#v, want object", groupSummaries[0])
 	}
-	if groupSummary["group"] != "production" || groupSummary["target_count"] != float64(2) {
-		t.Fatalf("group summary = %#v, want snake_case group summary", groupSummary)
+	if groupSummary["group"] != "production" || groupSummary["target_count"] != float64(2) || groupSummary["unobserved_target_count"] != float64(1) {
+		t.Fatalf("group summary = %#v, want snake_case group and unobserved summary", groupSummary)
 	}
 	if _, ok := groupSummary["MonitoringInstanceCount"]; ok {
 		t.Fatalf("group summary = %#v, want snake_case keys only", groupSummary)

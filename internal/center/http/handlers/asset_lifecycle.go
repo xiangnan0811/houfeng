@@ -112,7 +112,7 @@ func VPSArchive(repo AssetLifecycleRepository) http.Handler {
 	})
 }
 
-func VPSRestoreFromArchive(repo AssetLifecycleRepository) http.Handler {
+func VPSRestoreFromArchive(repo AssetLifecycleRepository, refresher ExchangeRateRefreshRequester) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "restore-from-archive")
 		if !ok {
@@ -139,6 +139,9 @@ func VPSRestoreFromArchive(repo AssetLifecycleRepository) http.Handler {
 		} else if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
+		}
+		if refresher != nil {
+			refresher.RequestRefresh(false)
 		}
 		writeJSON(w, http.StatusOK, record)
 	})

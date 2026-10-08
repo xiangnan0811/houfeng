@@ -102,9 +102,10 @@ func (m *memorySessions) CreateIfPasswordHash(_ context.Context, expectedHash st
 	m.state.mu.Lock()
 	defer m.state.mu.Unlock()
 	u, ok := m.state.users[s.UserID]
-	if !ok || u.PasswordHash != expectedHash {
+	if !ok || u.PasswordHash != expectedHash || u.DisabledAt != nil {
 		return auth.Session{}, auth.ErrInvalidCredentials
 	}
+	s.ManagementCapabilities = u.ManagementCapabilities()
 	issuedAt := now().UTC().Truncate(time.Microsecond)
 	if u.PasswordChangedAt.After(issuedAt) {
 		issuedAt = u.PasswordChangedAt
@@ -122,6 +123,9 @@ func (m *memorySessions) ChangePasswordIfHash(_ context.Context, userID, current
 	u, ok := m.state.users[userID]
 	if !ok {
 		return auth.ErrUserNotFound
+	}
+	if u.DisabledAt != nil {
+		return auth.ErrSessionNotFound
 	}
 	if u.PasswordHash != expectedHash {
 		return auth.ErrInvalidCredentials
@@ -165,6 +169,10 @@ func (m *memorySessions) TouchWithUserLock(_ context.Context, sessionID string, 
 	if !ok {
 		return auth.Session{}, auth.ErrUserNotFound
 	}
+	if u.DisabledAt != nil {
+		delete(m.byID, sessionID)
+		return auth.Session{}, auth.ErrSessionExpired
+	}
 	checkedAt := now().UTC().Truncate(time.Microsecond)
 	if !s.ExpiresAt.After(checkedAt) || s.IssuedAt.Before(u.PasswordChangedAt) {
 		delete(m.byID, sessionID)
@@ -177,6 +185,7 @@ func (m *memorySessions) TouchWithUserLock(_ context.Context, sessionID string, 
 	if u.PasswordChangedAt.After(baseline) {
 		baseline = u.PasswordChangedAt
 	}
+	s.ManagementCapabilities = u.ManagementCapabilities()
 	s.LastSeenAt = baseline
 	s.ExpiresAt = baseline.Add(ttl)
 	m.byID[sessionID] = s
@@ -193,6 +202,9 @@ func (m *memorySessions) ValidateSession(_ context.Context, sessionID string, no
 	u, ok := m.state.users[s.UserID]
 	if !ok {
 		return auth.ErrUserNotFound
+	}
+	if u.DisabledAt != nil {
+		return auth.ErrSessionExpired
 	}
 	checkedAt := now().UTC().Truncate(time.Microsecond)
 	if !s.ExpiresAt.After(checkedAt) || (!s.IssuedAt.IsZero() && s.IssuedAt.Before(u.PasswordChangedAt)) {
@@ -249,7 +261,7 @@ func setupAuthEndToEnd(t *testing.T) (*httptest.Server, func()) {
 		DashboardHandler:          dashboard,
 		AuthLoginHandler:          handlers.Login(svc),
 		AuthLogoutHandler:         handlers.Logout(svc),
-		AuthMeHandler:             handlers.Me(svc),
+		AuthMeHandler:             handlers.Me(svc, handlers.RuntimeCapabilities{}),
 		AuthChangePasswordHandler: handlers.ChangePassword(svc),
 		AuthMiddleware:            centerhttp.RequireSession(svc, successfulScopeRepository{}),
 	})
@@ -287,9 +299,38 @@ func TestAuthEndToEndLoginFlow(t *testing.T) {
 		if err != nil {
 			t.Fatalf("login: %v", err)
 		}
+		var ack map[string]json.RawMessage
+		if err := json.NewDecoder(resp.Body).Decode(&ack); err != nil {
+			resp.Body.Close()
+			t.Fatalf("decode login acknowledgment: %v", err)
+		}
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("login = %d, want 200", resp.StatusCode)
+		}
+		if len(ack) != 2 {
+			t.Fatalf("login acknowledgment = %#v, want user_id and management_capabilities", ack)
+		}
+		rawUserID, ok := ack["user_id"]
+		if !ok {
+			t.Fatalf("login acknowledgment = %#v, want user_id", ack)
+		}
+		var userID string
+		if err := json.Unmarshal(rawUserID, &userID); err != nil {
+			t.Fatalf("decode login user_id: %v", err)
+		}
+		if userID == "" {
+			t.Fatalf("login user_id = empty, want admin user id")
+		}
+		var management auth.ManagementCapabilities
+		if err := json.Unmarshal(ack["management_capabilities"], &management); err != nil {
+			t.Fatalf("decode login management_capabilities: %v", err)
+		}
+		if !management.Access {
+			t.Fatalf("login management_capabilities = %+v, seeded supervisor must have access", management)
+		}
+		if _, ok := ack["runtime_capabilities"]; ok {
+			t.Fatalf("login acknowledgment unexpectedly contains runtime_capabilities: %#v", ack)
 		}
 	}
 
@@ -312,14 +353,16 @@ func TestAuthEndToEndLoginFlow(t *testing.T) {
 			t.Fatalf("me: %v", err)
 		}
 		var got struct {
-			UserID   string `json:"user_id"`
-			Username string `json:"username"`
-			Role     string `json:"role"`
+			UserID                 string                       `json:"user_id"`
+			Username               string                       `json:"username"`
+			Role                   string                       `json:"role"`
+			ManagementCapabilities auth.ManagementCapabilities  `json:"management_capabilities"`
+			RuntimeCapabilities    handlers.RuntimeCapabilities `json:"runtime_capabilities"`
 		}
 		_ = json.NewDecoder(resp.Body).Decode(&got)
 		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK || got.Username != "admin" || got.Role != auth.RoleAdmin {
-			t.Fatalf("me = %d %+v, want 200 admin/admin", resp.StatusCode, got)
+		if resp.StatusCode != http.StatusOK || got.Username != "admin" || got.Role != auth.RoleAdmin || !got.ManagementCapabilities.Access || got.RuntimeCapabilities != (handlers.RuntimeCapabilities{}) {
+			t.Fatalf("me = %d %+v, want 200 admin/admin with management access and all runtime capabilities disabled", resp.StatusCode, got)
 		}
 	}
 

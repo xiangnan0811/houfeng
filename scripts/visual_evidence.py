@@ -361,7 +361,7 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
             "exchange_rate": 7.3,
             "exchange_rate_date": iso_date(0),
-            "exchange_rate_stale": False,
+            "exchange_rate_status": "fresh",
             "budget_status": "over",
             "next_reminder_at": iso_timestamp(1),
             "created_at": iso_timestamp(-100),
@@ -395,7 +395,7 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
             "exchange_rate": 7.3,
             "exchange_rate_date": iso_date(-3),
-            "exchange_rate_stale": True,
+            "exchange_rate_status": "stale",
             "budget_status": "warning",
             "next_reminder_at": iso_timestamp(7),
             "created_at": iso_timestamp(-80),
@@ -429,7 +429,7 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
             "exchange_rate": 7.9,
             "exchange_rate_date": iso_date(0),
-            "exchange_rate_stale": False,
+            "exchange_rate_status": "fresh",
             "budget_status": "ok",
             "next_reminder_at": iso_timestamp(4),
             "created_at": iso_timestamp(-240),
@@ -463,7 +463,7 @@ def asset_workflow_subscriptions() -> list[dict[str, object]]:
             "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
             "exchange_rate": 7.9,
             "exchange_rate_date": iso_date(-30),
-            "exchange_rate_stale": True,
+            "exchange_rate_status": "stale",
             "budget_status": "disabled",
             "next_reminder_at": None,
             "created_at": iso_timestamp(-900),
@@ -2398,6 +2398,29 @@ def asset_workflow_monthly_budget_records() -> list[dict[str, object]]:
     ]
 
 
+def asset_workflow_exchange_rate_status() -> dict[str, object]:
+    return {
+        "items": [
+            {
+                "provider": "frankfurter",
+                "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+                "quote_currency": "USD",
+                "rate_status": "stale",
+                "refresh_status": "idle",
+                "attempt_count": 0,
+            },
+            {
+                "provider": "frankfurter",
+                "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
+                "quote_currency": "EUR",
+                "rate_status": "fresh",
+                "refresh_status": "idle",
+                "attempt_count": 0,
+            },
+        ]
+    }
+
+
 def asset_workflow_subscription_settings() -> dict[str, object]:
     return {
         "base_currency": ASSET_WORKFLOW_BASE_CURRENCY,
@@ -2581,7 +2604,7 @@ def asset_workflow_subscription_overview() -> dict[str, object]:
                 for vps in asset_workflow_vps_assets()
                 if vps["vps_id"] == row["vps_id"]
             ),
-            "exchange_rate_stale": row.get("exchange_rate_stale", False),
+            "exchange_rate_status": row.get("exchange_rate_status", "fresh"),
         }
         for row in rows
     ]
@@ -2595,7 +2618,9 @@ def asset_workflow_subscription_overview() -> dict[str, object]:
         "renewal_due_14d_count": 2,
         "renewal_due_30d_count": 3,
         "budget_risk_count": 2,
-        "exchange_rate_stale_count": 1,
+        "current_missing_rate_count": sum(1 for row in rows if row.get("exchange_rate_status") == "missing"),
+        "current_stale_rate_count": sum(1 for row in rows if row.get("exchange_rate_status") == "stale"),
+        "current_unknown_amount_count": sum(1 for row in rows if row.get("monthly_price_base") is None) + len(asset_workflow_missing_subscription_assets()),
         "decision_attention_count": 2,
         "missing_subscription_vps_count": 1,
         "upcoming_renewals": upcoming,
@@ -3584,6 +3609,21 @@ def request_json_payload(request: object) -> object:
     return json.loads(raw)
 
 
+def visual_auth_user(user_id: str, username: str, display_name: str) -> dict[str, object]:
+    return {
+        "user_id": user_id,
+        "username": username,
+        "role": "admin",
+        "display_name": display_name,
+        "runtime_capabilities": {
+            "records": True,
+            "comparison": True,
+            "portability": True,
+        },
+        "management_capabilities": {"access": False},
+    }
+
+
 def fulfill_asset_workflow_api(route: object) -> None:
     request = route.request
     parsed = urlparse(request.url)
@@ -3592,16 +3632,7 @@ def fulfill_asset_workflow_api(route: object) -> None:
     method = request.method.upper()
 
     if method == "GET" and path == "/api/auth/me":
-        fulfill_json(
-            route,
-            200,
-            {
-                "user_id": "user_visual_evidence",
-                "username": "visual-evidence",
-                "role": "admin",
-                "display_name": "Visual Evidence",
-            },
-        )
+        fulfill_json(route, 200, visual_auth_user("user_visual_evidence", "visual-evidence", "Visual Evidence"))
         return
 
     if method == "GET" and path == "/api/dashboard":
@@ -3891,6 +3922,14 @@ def fulfill_asset_workflow_api(route: object) -> None:
         fulfill_json(route, 200, asset_workflow_subscription_overview())
         return
 
+    if method == "GET" and path == "/api/subscriptions/exchange-rates/status":
+        fulfill_json(route, 200, asset_workflow_exchange_rate_status())
+        return
+
+    if method == "POST" and path == "/api/subscriptions/exchange-rates/refresh":
+        fulfill_json(route, 202, asset_workflow_exchange_rate_status())
+        return
+
     if method == "GET" and path == "/api/subscriptions/statistics":
         fulfill_json(
             route,
@@ -3953,12 +3992,11 @@ def fulfill_observability_support_api(route: object) -> None:
         fulfill_json(
             route,
             200,
-            {
-                "user_id": "user_observability_visual_evidence",
-                "username": "observability-evidence",
-                "role": "admin",
-                "display_name": "Observability Evidence",
-            },
+            visual_auth_user(
+                "user_observability_visual_evidence",
+                "observability-evidence",
+                "Observability Evidence",
+            ),
         )
         return
 

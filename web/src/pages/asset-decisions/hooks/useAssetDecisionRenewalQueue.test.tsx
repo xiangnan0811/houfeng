@@ -40,7 +40,7 @@ function subscription(overrides: Partial<SubscriptionRecord> = {}): Subscription
     base_currency: 'CNY',
     exchange_rate: 7,
     exchange_rate_date: '2026-07-10',
-    exchange_rate_stale: false,
+    exchange_rate_status: 'fresh',
     budget_status: 'ok',
     next_reminder_at: null,
     created_at: '2026-05-09T08:00:00Z',

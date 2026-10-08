@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { Badge, Timestamp } from '../../components/atoms'
 import type { BadgeTone } from '../../components/atoms/Badge'
 import type { VPSOverviewSectionState } from '../../lib/types'
-import type { OverviewObservationTone } from '../../lib/vpsOverviewPresentation'
+import type { DiagnosticNote, OverviewObservationTone } from '../../lib/vpsOverviewPresentation'
 import { VPSOverviewFreshnessRetry, VPSOverviewFreshnessTime } from './VPSOverviewFreshness'
 import {
   overviewSourceReason,
@@ -17,6 +17,7 @@ export type VPSObservationRowModel = {
   conclusion: string
   conclusionTone?: OverviewObservationTone | ''
   description?: string
+  diagnostics?: DiagnosticNote[]
   section?: VPSOverviewSectionState
   sourceLabel?: string
   time?: string | null
@@ -103,6 +104,19 @@ export function VPSObservationRows({
               >
                 <span className="vps-observation__slot">
                   {description && description !== conclusion ? description : null}
+                  {row.diagnostics && row.diagnostics.length > 0 ? (
+                    <details className="vps-observation__diagnostic">
+                      <summary>诊断信息</summary>
+                      <dl>
+                        {row.diagnostics.map((item, index) => (
+                          <div key={`${item.label}-${index}`}>
+                            <dt>{item.label}</dt>
+                            <dd>{item.detail}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </details>
+                  ) : null}
                 </span>
               </div>
               <div className="vps-observation__time" role="cell" data-label="数据时间">

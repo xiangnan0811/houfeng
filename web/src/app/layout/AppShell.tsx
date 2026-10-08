@@ -137,8 +137,9 @@ function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
     ? {
         monitoring: dashboardSummary.overview.abnormal_monitoring_instance_count,
         targets: dashboardSummary.overview.abnormal_target_count,
+        unobservedTargets: dashboardSummary.overview.unobserved_target_count,
       }
-    : { monitoring: 0, targets: 0 }
+    : { monitoring: 0, targets: 0, unobservedTargets: 0 }
 
   return (
     <>

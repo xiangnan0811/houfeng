@@ -1,7 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import * as authContext from '../../lib/auth-context'
 
 import type { AssetDomainRecord, AssetServiceRecord, SubscriptionRecord, VPSOverview } from '../../lib/types'
 import { VPSOverviewAnomalies } from './VPSOverviewAnomalies'
@@ -136,9 +138,35 @@ function managementStub(overrides: Partial<VPSManagementController> = {}): VPSMa
   }
 }
 
+const enabledCapabilityFlags = { records: true, comparison: true, portability: true }
+
+beforeEach(() => {
+  vi.spyOn(authContext, 'useAuth').mockReturnValue({
+    user: {
+      user_id: 'u1',
+      username: 'admin',
+      role: 'admin',
+      display_name: '',
+      runtime_capabilities: enabledCapabilityFlags,
+      management_capabilities: { access: false },
+    },
+    loading: false,
+    status: 'ready',
+    error: null,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: vi.fn(),
+    retry: vi.fn(),
+  })
+})
+
 describe('VPSOverviewPageView', () => {
   beforeEach(() => {
     mockReadyResources()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
   })
 
   it('distinguishes local section navigation from activity routes and limits recent evidence', () => {
@@ -178,6 +206,89 @@ describe('VPSOverviewPageView', () => {
     expect(screen.getByText('不可变证据')).toBeInTheDocument()
     expect(screen.queryByText('不应显示的第四条')).not.toBeInTheDocument()
     expect(screen.getByText('最近一条')).toBeInTheDocument()
+  })
+
+  it('shows records activity as disabled without turning it into a core fault', () => {
+    const overview = healthyOverview()
+    overview.recent_activity = {
+      section: { state: 'unavailable', observed_at: null, last_success_at: null, reason_code: 'records_disabled' },
+      items: [],
+    }
+    overview.anomalies = [
+      {
+        rule_id: 'monitoring.unlinked.v1',
+        severity: 'warning',
+        title: '监控未关联',
+        source: 'monitoring',
+        primary_action: null,
+        secondary_actions: [],
+      },
+    ]
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: false, comparison: false, portability: false },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
+
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={overview}
+          management={managementStub()}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '管理' })).toBeInTheDocument()
+    expect(screen.getByText('未启用')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '监控未关联' })).toBeInTheDocument()
+    expect(screen.queryByText('最近活动数据暂不可用，请稍后重试。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '新建记录' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '活动' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '记录' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '证据' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看全部' })).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '概览' })).toBeInTheDocument()
+  })
+
+  it('shows a records_disabled activity projection as disabled rather than an outage', () => {
+    const overview = healthyOverview()
+    overview.recent_activity = {
+      section: { state: 'unavailable', observed_at: null, last_success_at: null, reason_code: 'records_disabled' },
+      items: [],
+    }
+
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView
+          overview={overview}
+          management={managementStub()}
+          onRefresh={vi.fn()}
+          retrying={false}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByText('未启用')).toBeInTheDocument()
+    expect(screen.queryByText('最近活动数据暂不可用，请稍后重试。')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '重试' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '查看全部' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '东京边缘' })).toBeInTheDocument()
   })
 
   it('carries list provenance on overview new-record and subscription links', () => {
@@ -748,7 +859,13 @@ describe('VPSOverviewPageView', () => {
     )
     const monitoring = screen.getByLabelText('监控关联')
     expect(monitoring).toHaveTextContent('关注')
-    expect(monitoring.querySelector('.vps-overview-summary__detail')).toHaveTextContent(/^1个实例 · 心跳上报延迟$/)
+    const foldedIssue = screen.getByText('心跳上报延迟')
+    const issueDiagnostic = foldedIssue.closest('details')
+    expect(issueDiagnostic).not.toBeNull()
+    expect(issueDiagnostic).not.toHaveAttribute('open')
+    const monitoringDetail = foldedIssue.closest('.vps-overview-summary__detail')
+    expect(monitoringDetail).toBe(monitoring.querySelector('.vps-overview-summary__detail'))
+    expect(monitoringDetail?.textContent?.replace(issueDiagnostic?.textContent ?? '', '').trim()).toBe('1个实例')
   })
 
   it('opens the existing resource panel from a named row without an edit action', () => {
@@ -935,8 +1052,15 @@ describe('VPSOverviewPageView', () => {
       </MemoryRouter>,
     )
     const ipQuality = screen.getByLabelText('IP 质量')
-    expect(ipQuality).toHaveTextContent('低风险')
-    expect(ipQuality).not.toHaveTextContent('暂未配置')
+    const retainedResult = screen.getByText('低风险')
+    expect(ipQuality.contains(retainedResult)).toBe(true)
+    expect(retainedResult.closest('details')).toBeNull()
+    const foldedConfig = screen.getByText('暂未配置')
+    const configDiagnostic = foldedConfig.closest('details')
+    expect(configDiagnostic).not.toBeNull()
+    expect(configDiagnostic).not.toHaveAttribute('open')
+    expect(ipQuality.contains(foldedConfig)).toBe(true)
+    expect(configDiagnostic?.contains(retainedResult)).toBe(false)
     expect(ipQuality).toHaveTextContent(/2026/)
     expect(screen.getByRole('link', { name: '查看历史报告' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /概览 IP 质量/ })).not.toBeInTheDocument()

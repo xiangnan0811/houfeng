@@ -35,6 +35,9 @@
 .ipq-notice__title{color:var(--text-primary);font-weight:600}
 .ipq-notice__detail{min-width:0;color:var(--text-secondary);overflow-wrap:anywhere}
 .ipq-notice__action{margin-left:auto}
+.ipq-notice__raw-details{width:100%;margin-top:4px}
+.ipq-notice__raw-summary{cursor:pointer;color:var(--text-secondary);font-size:var(--type-small-size,12px)}
+.ipq-notice__raw-text{margin:6px 0 0;padding:6px 8px;background:var(--panel-bg-muted);border-radius:var(--radius-1,4px);font-size:var(--type-small-size,12px);white-space:pre-wrap;word-break:break-all}
 .ipq-notice--progress{border-color:color-mix(in srgb,var(--accent) 40%,var(--border-muted));background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
 .ipq-notice--success{border-color:color-mix(in srgb,var(--color-state-normal) 40%,var(--border-muted));background:color-mix(in srgb,var(--color-state-normal) 6%,var(--surface))}
 .ipq-notice--success .ipq-notice__dot{background:var(--color-state-normal)}

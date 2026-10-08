@@ -19,6 +19,7 @@ import (
 
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/handlers"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/store"
 	"houfeng/internal/center/subscriptioncosts"
 )
@@ -39,6 +40,140 @@ const (
 	subscriptionCostHF19ArchivedMissingVPS = "vps_hf19_archived_missing"
 )
 
+func TestPostgresIntegrationSubscriptionCostActiveExchangeRatePairs(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+	defer cancel()
+
+	fixture := newRuntimeStreamAuthFixture(t)
+	base := time.Now().UTC().Truncate(time.Microsecond)
+	const (
+		identityVPS = "vps_pair_identity"
+		freshVPS    = "vps_pair_fresh"
+		staleVPS    = "vps_pair_stale"
+		missingVPS  = "vps_pair_missing"
+		archivedVPS = "vps_pair_archived"
+		identitySub = "sub_pair_identity"
+		freshSub    = "sub_pair_fresh"
+		staleSub    = "sub_pair_stale"
+		missingSub  = "sub_pair_missing"
+		archivedSub = "sub_pair_archived"
+	)
+	subscriptionCostHF17ExecSQL(t, ctx, fixture.pool, `
+		insert into vps_assets (
+			vps_id, display_name, lifecycle_status, usage_status,
+			renewal_decision, auto_renew_check, archived_at
+		) values
+			($1, 'pair identity VPS', 'active', 'in_use', 'keep', 'unchecked', null),
+			($2, 'pair fresh VPS', 'active', 'in_use', 'keep', 'unchecked', null),
+			($3, 'pair stale VPS', 'active', 'in_use', 'keep', 'unchecked', null),
+			($4, 'pair missing VPS', 'active', 'in_use', 'keep', 'unchecked', null),
+			($5, 'pair archived VPS', 'archived', 'in_use', 'keep', 'unchecked', now())`,
+		identityVPS, freshVPS, staleVPS, missingVPS, archivedVPS)
+	subscriptionCostHF17ExecSQL(t, ctx, fixture.pool, `
+		insert into subscriptions (
+			subscription_id, vps_id, price, currency, billing_cycle, billing_months,
+			monthly_price, billing_period_unit, billing_period_length, status,
+			created_at, updated_at
+		) values
+			($1, $6, 0, 'CNY', 'monthly', 1, 0, 'month', 1, 'active', $11, $11),
+			($2, $7, 10, 'USD', 'monthly', 1, 10, 'month', 1, 'active', $11, $11),
+			($3, $8, 11, 'EUR', 'monthly', 1, 11, 'month', 1, 'active', $11, $11),
+			($4, $9, 12, 'GBP', 'monthly', 1, 12, 'month', 1, 'active', $11, $11),
+			($5, $10, 13, 'AUD', 'monthly', 1, 13, 'month', 1, 'active', $11, $11)`,
+		identitySub, freshSub, staleSub, missingSub, archivedSub,
+		identityVPS, freshVPS, staleVPS, missingVPS, archivedVPS, base)
+	freshFetchedAt := base.Add(-time.Hour)
+	freshRateDate := base.AddDate(0, 0, -2)
+	oldFetchedAt := base.Add(-2 * time.Hour)
+	oldRateDate := base.AddDate(0, 0, -1)
+	staleFetchedAt := base.Add(-37 * time.Hour)
+	staleRateDate := base.AddDate(0, 0, -3)
+	subscriptionCostHF17ExecSQL(t, ctx, fixture.pool, `
+		insert into subscription_exchange_rates (
+			rate_id, provider, base_currency, quote_currency, rate, rate_date,
+			fetched_at, created_at, updated_at
+		) values
+			('rate_pair_usd_old', 'frankfurter', 'CNY', 'USD', 7.1, $1, $2, $2, $2),
+			('rate_pair_usd_latest', 'frankfurter', 'CNY', 'USD', 7.2, $3, $4, $4, $4),
+			('rate_pair_eur_stale', 'frankfurter', 'CNY', 'EUR', 8.1, $5, $6, $6, $6),
+			('rate_pair_gbp_other_provider', 'fixer', 'CNY', 'GBP', 9.1, $5, $4, $4, $4),
+			('rate_pair_archived_aud', 'frankfurter', 'CNY', 'AUD', 9.2, $5, $4, $4, $4)`,
+		oldRateDate, oldFetchedAt, freshRateDate, freshFetchedAt,
+		staleRateDate, staleFetchedAt)
+
+	settings := centersettings.SubscriptionCostSettings{
+		BaseCurrency:                "CNY",
+		ExchangeRateProvider:        "frankfurter",
+		ExchangeRateStaleAfterHours: 36,
+		DefaultReminderOffsetsDays:  []int{14, 7, 1},
+	}
+	repository := store.NewPostgresSubscriptionCostRepository(fixture.pool)
+	pairs, err := repository.ListActiveExchangeRatePairs(ctx, settings)
+	if err != nil {
+		t.Fatalf("ListActiveExchangeRatePairs() error: %v", err)
+	}
+	if len(pairs) != 4 {
+		t.Fatalf("active exchange-rate pairs = %#v, want CNY/USD/EUR/GBP only", pairs)
+	}
+	byCurrency := make(map[string]subscriptioncosts.ExchangeRatePair, len(pairs))
+	for _, pair := range pairs {
+		if pair.Provider != settings.ExchangeRateProvider || pair.BaseCurrency != settings.BaseCurrency {
+			t.Fatalf("pair provider/base = %s/%s, want %s/%s", pair.Provider, pair.BaseCurrency, settings.ExchangeRateProvider, settings.BaseCurrency)
+		}
+		byCurrency[pair.QuoteCurrency] = pair
+	}
+	if pair := byCurrency["CNY"]; pair.RateStatus != subscriptioncosts.ExchangeRateStatusIdentity || pair.LatestRate != nil {
+		t.Fatalf("identity pair = %#v, want identity without cache", pair)
+	}
+	if pair := byCurrency["USD"]; pair.RateStatus != subscriptioncosts.ExchangeRateStatusFresh || pair.LatestRate == nil {
+		t.Fatalf("fresh pair = %#v, want latest cache", pair)
+	} else {
+		if pair.LatestRate.Rate != 7.2 || !pair.LatestRate.FetchedAt.Equal(freshFetchedAt) || pair.LatestRate.RateDate.Time.Format("2006-01-02") != freshRateDate.Format("2006-01-02") {
+			t.Fatalf("fresh latest cache = %#v, want rate=7.2 fetched_at=%s rate_date=%s", pair.LatestRate, freshFetchedAt, freshRateDate.Format("2006-01-02"))
+		}
+	}
+	if pair := byCurrency["EUR"]; pair.RateStatus != subscriptioncosts.ExchangeRateStatusStale || pair.LatestRate == nil {
+		t.Fatalf("stale pair = %#v, want stale cache", pair)
+	} else if pair.LatestRate.Rate != 8.1 || !pair.LatestRate.FetchedAt.Equal(staleFetchedAt) {
+		t.Fatalf("stale latest cache = %#v, want rate=8.1 fetched_at=%s", pair.LatestRate, staleFetchedAt)
+	}
+	if pair := byCurrency["GBP"]; pair.RateStatus != subscriptioncosts.ExchangeRateStatusMissing || pair.LatestRate != nil {
+		t.Fatalf("missing pair = %#v, want missing without cache for current provider", pair)
+	}
+
+	rows, err := repository.ListCostRows(ctx, settings)
+	if err != nil {
+		t.Fatalf("ListCostRows() error: %v", err)
+	}
+	rowsBySubscription := make(map[string]subscriptioncosts.CostRow, len(rows))
+	for _, row := range rows {
+		rowsBySubscription[row.SubscriptionID] = row
+	}
+	identityRow, ok := rowsBySubscription[identitySub]
+	if !ok {
+		t.Fatalf("ListCostRows() omitted real-zero identity subscription")
+	}
+	if identityRow.ExchangeRateStatus != subscriptioncosts.ExchangeRateStatusIdentity ||
+		identityRow.MonthlyPriceBase == nil || *identityRow.MonthlyPriceBase != 0 ||
+		identityRow.YearlyPriceBase == nil || *identityRow.YearlyPriceBase != 0 {
+		t.Fatalf("real-zero identity row = %#v, want known zero amounts and identity status", identityRow)
+	}
+	for subscriptionID, wantStatus := range map[string]subscriptioncosts.ExchangeRateStatus{
+		freshSub:   subscriptioncosts.ExchangeRateStatusFresh,
+		staleSub:   subscriptioncosts.ExchangeRateStatusStale,
+		missingSub: subscriptioncosts.ExchangeRateStatusMissing,
+	} {
+		row, ok := rowsBySubscription[subscriptionID]
+		if !ok || row.ExchangeRateStatus != wantStatus {
+			t.Fatalf("cost row %q = %#v, want exchange_rate_status=%s", subscriptionID, row, wantStatus)
+		}
+	}
+	archivedRow, ok := rowsBySubscription[archivedSub]
+	if !ok || archivedRow.LifecycleStatus != "archived" {
+		t.Fatalf("archived VPS subscription row = %#v, want retained archived potential charge", archivedRow)
+	}
+}
+
 func TestPostgresIntegrationSubscriptionCostHF17HF18(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
 	defer cancel()
@@ -55,11 +190,11 @@ func TestPostgresIntegrationSubscriptionCostHF17HF18(t *testing.T) {
 		Version:                        "test",
 		AuthLoginHandler:               handlers.Login(fixture.service),
 		AuthLogoutHandler:              handlers.Logout(fixture.service),
-		AuthMeHandler:                  handlers.Me(fixture.service),
+		AuthMeHandler:                  handlers.Me(fixture.service, handlers.RuntimeCapabilities{}),
 		AuthChangePasswordHandler:      handlers.ChangePassword(fixture.service),
 		AuthMiddleware:                 authMiddleware,
-		SubscriptionsCollectionHandler: handlers.SubscriptionsCollection(subscriptionRepo, costService),
-		SubscriptionSettingsHandler:    handlers.SubscriptionSettings(costService),
+		SubscriptionsCollectionHandler: handlers.SubscriptionsCollection(subscriptionRepo, costService, nil),
+		SubscriptionSettingsHandler:    handlers.SubscriptionSettings(costService, nil),
 		SubscriptionBudgetsHandler:     handlers.SubscriptionBudgets(costService),
 	})
 	server := httptest.NewTLSServer(router)
@@ -269,7 +404,7 @@ func TestPostgresIntegrationSubscriptionCostHF19(t *testing.T) {
 				{offset: 0, currency: "CNY", limit: 100},
 			},
 			want: subscriptionCostHF19Expectation{
-				totalMonthly: 90, totalYearly: 1080, currentUnknown: 1,
+				totalMonthly: 90, totalYearly: 1080, currentUnknown: 1, currentMissingRate: 1,
 			},
 		},
 		{
@@ -280,7 +415,7 @@ func TestPostgresIntegrationSubscriptionCostHF19(t *testing.T) {
 				{offset: 0, currency: "CNY", limit: 100},
 			},
 			want: subscriptionCostHF19Expectation{
-				totalMonthly: 120, totalYearly: 1440, currentUnknown: 1,
+				totalMonthly: 120, totalYearly: 1440, currentUnknown: 1, currentMissingRate: 1,
 				riskStatus: "over",
 			},
 		},
@@ -438,7 +573,7 @@ func TestPostgresIntegrationSubscriptionCostHF19(t *testing.T) {
 				Version:                           "test",
 				AuthLoginHandler:                  handlers.Login(fixture.service),
 				AuthLogoutHandler:                 handlers.Logout(fixture.service),
-				AuthMeHandler:                     handlers.Me(fixture.service),
+				AuthMeHandler:                     handlers.Me(fixture.service, handlers.RuntimeCapabilities{}),
 				AuthChangePasswordHandler:         handlers.ChangePassword(fixture.service),
 				AuthMiddleware:                    authMiddleware,
 				SubscriptionOverviewHandler:       handlers.SubscriptionOverview(costService),
@@ -898,13 +1033,15 @@ type subscriptionCostHF19BudgetSeed struct {
 }
 
 type subscriptionCostHF19Expectation struct {
-	totalMonthly    float64
-	totalYearly     float64
-	currentUnknown  int
-	archivedUnknown int
-	riskStatus      string
-	monthlySpend    *float64
-	yearlySpend     *float64
+	totalMonthly       float64
+	totalYearly        float64
+	currentUnknown     int
+	currentMissingRate int
+	currentStaleRate   int
+	archivedUnknown    int
+	riskStatus         string
+	monthlySpend       *float64
+	yearlySpend        *float64
 }
 
 type subscriptionCostHF19Overview struct {
@@ -912,6 +1049,8 @@ type subscriptionCostHF19Overview struct {
 	TotalMonthlyCost           float64                    `json:"total_monthly_cost"`
 	TotalYearlyCost            float64                    `json:"total_yearly_cost"`
 	CurrentUnknownAmountCount  int                        `json:"current_unknown_amount_count"`
+	CurrentMissingRateCount    int                        `json:"current_missing_rate_count"`
+	CurrentStaleRateCount      int                        `json:"current_stale_rate_count"`
 	ArchivedUnknownAmountCount int                        `json:"archived_unknown_amount_count"`
 	BudgetRiskCount            int                        `json:"budget_risk_count"`
 	SnapshotGeneratedAt        time.Time                  `json:"snapshot_generated_at"`
@@ -958,8 +1097,11 @@ func assertSubscriptionCostHF19Overview(t *testing.T, overview subscriptionCostH
 	if overview.CurrentUnknownAmountCount != want.currentUnknown {
 		t.Fatalf("current_unknown_amount_count = %d, want %d", overview.CurrentUnknownAmountCount, want.currentUnknown)
 	}
-	if overview.ArchivedUnknownAmountCount != want.archivedUnknown {
-		t.Fatalf("archived_unknown_amount_count = %d, want %d", overview.ArchivedUnknownAmountCount, want.archivedUnknown)
+	if overview.CurrentMissingRateCount != want.currentMissingRate {
+		t.Fatalf("current_missing_rate_count = %d, want %d", overview.CurrentMissingRateCount, want.currentMissingRate)
+	}
+	if overview.CurrentStaleRateCount != want.currentStaleRate {
+		t.Fatalf("current_stale_rate_count = %d, want %d", overview.CurrentStaleRateCount, want.currentStaleRate)
 	}
 	wantRiskCount := 0
 	if want.riskStatus != "" {

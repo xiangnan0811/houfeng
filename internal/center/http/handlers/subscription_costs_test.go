@@ -88,7 +88,7 @@ func (r *fakeSubscriptionCostRepository) UpsertMonthlyBudgets(_ context.Context,
 	return records, nil
 }
 
-func (r *fakeSubscriptionCostRepository) ListActiveCurrencies(context.Context) ([]string, error) {
+func (r *fakeSubscriptionCostRepository) ListActiveExchangeRatePairs(context.Context, centersettings.SubscriptionCostSettings) ([]subscriptioncosts.ExchangeRatePair, error) {
 	return nil, nil
 }
 
@@ -133,7 +133,7 @@ func TestSubscriptionSettingsPutMergesSecretWithinAtomicMutation(t *testing.T) {
 	settings.SubscriptionCost.FixerAPIKey = "existing-secret"
 	settingsRepo := &fakeSubscriptionCostSettingsRepository{settings: settings}
 	service := subscriptioncosts.NewService(&fakeSubscriptionCostRepository{}, settingsRepo, nil)
-	handler := handlers.SubscriptionSettings(service)
+	handler := handlers.SubscriptionSettings(service, nil)
 
 	req := httptest.NewRequest(http.MethodPut, "/api/subscriptions/settings", strings.NewReader(`{"base_currency":"USD"}`))
 	recorder := httptest.NewRecorder()

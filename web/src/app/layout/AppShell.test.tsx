@@ -32,8 +32,18 @@ const baseAuth = {
   login: vi.fn(),
   logout: vi.fn(),
   refresh: vi.fn(),
+  retry: vi.fn(),
+  status: 'ready' as const,
+  error: null,
 }
-const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
+const user = {
+  user_id: 'u1',
+  username: 'admin',
+  role: 'admin',
+  display_name: '',
+  runtime_capabilities: { records: true, comparison: true, portability: true },
+  management_capabilities: { access: false },
+}
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -62,6 +72,7 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
     total_target_count: 4,
     abnormal_monitoring_instance_count: 0,
     abnormal_target_count: 0,
+    unobserved_target_count: 0,
     severe_monitoring_instance_count: 0,
     severe_target_count: 0,
     maintenance_monitoring_instance_count: 0,
@@ -328,7 +339,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--anomaly')
-      expect(syncEl).toHaveAttribute('title', '系统摘要有异常')
+      expect(syncEl).toHaveAttribute('title', '运行异常 5')
     })
   })
 
@@ -349,7 +360,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--anomaly')
-      expect(syncEl).toHaveAttribute('title', '系统摘要有异常')
+      expect(syncEl).toHaveAttribute('title', '运行异常 3')
     })
   })
 
@@ -395,7 +406,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--anomaly')
-      expect(syncEl).toHaveAttribute('title', '系统摘要有异常')
+      expect(syncEl).toHaveAttribute('title', '运行异常 5')
     })
     unmount()
 
@@ -425,7 +436,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--anomaly')
-      expect(syncEl).toHaveAttribute('title', '系统摘要有异常')
+      expect(syncEl).toHaveAttribute('title', '运行异常 1')
     })
   })
 
@@ -442,11 +453,33 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--clear')
-      expect(syncEl).toHaveAttribute('title', '系统摘要无异常')
+      expect(syncEl).toHaveAttribute('title', '当前运行异常计数为 0')
     })
-    expect(screen.getByText('系统摘要无异常')).toBeInTheDocument()
+    expect(screen.getByText('当前运行异常计数为 0')).toBeInTheDocument()
+    expect(screen.queryByText('系统摘要无异常')).not.toBeInTheDocument()
     expect(screen.getByText(/系统摘要生成于/)).toBeInTheDocument()
     expect(document.querySelector('.layout')).not.toHaveTextContent('系统正常')
+  })
+
+  it('shows unobserved targets separately from known abnormalities', async () => {
+    stubDashboardFetch(
+      vi.fn().mockResolvedValue(
+        mockJSONResponse(baseOverview({
+          abnormal_monitoring_instance_count: 1,
+          abnormal_target_count: 2,
+          unobserved_target_count: 4,
+        })),
+      ),
+    )
+
+    renderAuthenticatedAppShell()
+
+    await waitFor(() => {
+      expect(document.querySelector('.tp-sync')).toHaveAttribute('title', '运行异常 3，尚有目标无观测 4')
+    })
+    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).toHaveAttribute('href', '/targets')
+    expect(screen.getByRole('link', { name: '尚无观测，4 个尚无观测' })).toHaveAttribute('href', '/targets?view=unobserved')
+    expect(screen.queryByRole('link', { name: /6 个异常/ })).not.toBeInTheDocument()
   })
 
   it('marks a dashboard snapshot stale after the freshness window expires', async () => {

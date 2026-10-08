@@ -63,8 +63,8 @@ export function TargetProbeForm({
       ? '正在保存…'
       : '正在创建…'
     : mode.kind === 'edit'
-      ? '保存 ProbeItem'
-      : '创建 ProbeItem'
+      ? '保存探测项'
+      : '创建探测项'
 
   return (
     <form
@@ -73,10 +73,10 @@ export function TargetProbeForm({
       onSubmit={onSubmit}
     >
       <p className="target-probe-drawer__eyebrow">
-        {mode.kind === 'edit' ? 'ProbeItem 编辑' : 'ProbeItem 创建'}
+        {mode.kind === 'edit' ? '探测项编辑' : '探测项创建'}
       </p>
       <label>
-        <span>Probe 类型</span>
+        <span>探测项类型</span>
         <select
           name="probeKind"
           value={form.probeKind}
@@ -96,7 +96,7 @@ export function TargetProbeForm({
           checked={form.enabled}
           onChange={(event) => onFieldChange('enabled', event.target.checked)}
         />
-        <span>启用 ProbeItem</span>
+        <span>启用探测项</span>
       </label>
       <label>
         <span>频率档位</span>

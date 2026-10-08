@@ -174,8 +174,8 @@ func planImportedAttachment(planned *plannedArchive, entry ArchiveEntry, remaps 
 	}
 	targetID := sourceID
 	if remaps != nil {
-		remap, ok := remaps[sourceID]
-		if !ok || remap.EntityKind != "attachment" {
+		remap, ok := remaps[importRemapKey("attachment", sourceID)]
+		if !ok {
 			return ErrInvalidImportRequest
 		}
 		targetID = remap.TargetID

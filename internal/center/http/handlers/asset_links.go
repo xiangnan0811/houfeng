@@ -22,6 +22,7 @@ type vpsMonitoringInstanceCreateRequest struct {
 	Labels      []string `json:"labels"`
 	Note        string   `json:"note"`
 	LinkNote    string   `json:"link_note"`
+	ClearFields []string `json:"clear_fields"`
 }
 
 type vpsMonitoringInstanceCreateResponse struct {
@@ -79,6 +80,7 @@ func VPSMonitoringInstances(repo assetlinks.Repository, creator linkedMonitoring
 				Labels:      request.Labels,
 				Note:        request.Note,
 				LinkNote:    request.LinkNote,
+				ClearFields: request.ClearFields,
 			})
 			if err := monitoringinstances.ValidateLinkedCreateWireIdentity(wireIdentity); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid input")

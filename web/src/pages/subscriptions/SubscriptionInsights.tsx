@@ -8,6 +8,7 @@ import type {
   SubscriptionStatistics,
 } from '../../lib/types'
 import { BudgetCostTrendChart, BudgetCostTrendLegend } from './BudgetCostTrendChart'
+import { knownMonthlyAmount, knownShareCaption } from './exchangeRatePresentation'
 import { money } from './insightFormat'
 import { ArchivedCharges, InsightEmpty, RenewalQueue } from './SubscriptionInsightLists'
 
@@ -23,6 +24,7 @@ type DonutItem = {
   vpsID: string | null
   isOther: boolean
   share: number
+  stale: boolean
 }
 
 export type SubscriptionInsightsProps = {
@@ -69,7 +71,7 @@ function compactAmount(value: number): string {
 
 function buildMonthlyRows(rows: SubscriptionCostRow[]): SubscriptionCostRow[] {
   return rows
-    .filter((row) => (row.monthly_price_base ?? 0) > 0)
+    .filter((row) => row.monthly_price_base != null)
     .sort((left, right) => (right.monthly_price_base ?? 0) - (left.monthly_price_base ?? 0))
 }
 
@@ -86,6 +88,7 @@ function buildDonutItems(rows: SubscriptionCostRow[]): DonutItem[] {
       vpsID: row.vps_id,
       isOther: false,
       share: total > 0 ? (cost / total) * 100 : 0,
+      stale: row.exchange_rate_status === 'stale',
     }
   })
   const other = sorted.slice(5)
@@ -101,6 +104,7 @@ function buildDonutItems(rows: SubscriptionCostRow[]): DonutItem[] {
       vpsID: null,
       isOther: true,
       share: total > 0 ? (otherCost / total) * 100 : 0,
+      stale: other.some((row) => row.exchange_rate_status === 'stale'),
     },
   ]
 }
@@ -136,6 +140,13 @@ export function SubscriptionInsights({
   const [monthCostView, setMonthCostView] = useState<MonthCostView>('pie')
   const [activeDonutKey, setActiveDonutKey] = useState<string | null>(null)
   const overviewReady = !overviewLoading && overviewError == null
+  const knownAmount = knownMonthlyAmount({
+    activeSubscriptionCount: overview?.active_subscription_count ?? 0,
+    totalMonthlyCost: overview?.total_monthly_cost ?? 0,
+    unknownCount: overview?.current_unknown_amount_count ?? 0,
+    rows: overviewReady ? overview?.vps_costs : undefined,
+  })
+  const shareCaption = overviewReady ? knownShareCaption(knownAmount) : null
   const monthlyRows = buildMonthlyRows(overviewReady ? overview?.vps_costs ?? [] : [])
   const donutItems = buildDonutItems(overviewReady ? overview?.vps_costs ?? [] : [])
   const donutTotal = donutItems.reduce((sum, item) => sum + item.cost, 0)
@@ -184,7 +195,7 @@ export function SubscriptionInsights({
           ) : statisticsLoading ? null : (
             <InsightEmpty
               title="历史成本数据不足"
-              detail={hasInsufficientTrendData ? '部分历史月份缺少可用汇率或预算币种不一致，暂不绘制可能误导的趋势曲线。' : '后端未返回足够的历史月成本与月预算 bucket。'}
+              detail={hasInsufficientTrendData ? '部分历史月份缺少可用汇率或预算币种不一致，暂不绘制可能误导的趋势曲线。' : '后端未返回足够的历史月成本与月预算分档。'}
             />
           )}
         </div>
@@ -206,12 +217,18 @@ export function SubscriptionInsights({
             value={monthCostView}
             className="subscription-insight-panel__tab-panel"
           >
+            {shareCaption && !knownAmount.allUnknown ? <p className="subscription-insight-note" role="status">{shareCaption}</p> : null}
             {overviewLoading ? (
               <InsightEmpty title="正在加载月成本" busy />
             ) : overviewError ? (
               <InsightEmpty title="月成本不可用" detail={overviewError} />
             ) : monthlyRows.length === 0 ? (
-              <InsightEmpty title="暂无可展示成本" detail="当前没有可换算为基准货币的 VPS 订阅成本。" />
+              <InsightEmpty
+                title={knownAmount.allUnknown ? '金额待核对' : '暂无可展示成本'}
+                detail={knownAmount.allUnknown
+                  ? `另有 ${knownAmount.unknownCount} 项待核对，不能按零金额绘制占比。`
+                  : '当前没有可换算为基准货币的 VPS 订阅成本。'}
+              />
             ) : monthCostView === 'pie' ? (
               <div className="subscription-donut-layout" role="region" aria-label="月成本饼图">
                 <svg className="subscription-donut" viewBox="0 0 140 140" role="group" aria-label={`本月 VPS 成本占用，总计 ${money(donutTotal, baseCurrency)}`}>
@@ -253,7 +270,7 @@ export function SubscriptionInsights({
                       <i aria-hidden="true" />
                       <span>{item.label}</span>
                       <b className="mono tnum">{money(item.cost, baseCurrency)}</b>
-                      <small className="tnum">{item.share.toFixed(1)}%</small>
+                      <small className="tnum">{item.share.toFixed(1)}%{item.stale ? ' · 汇率过期' : ''}</small>
                     </li>
                   ))}
                 </ul>
@@ -276,7 +293,7 @@ export function SubscriptionInsights({
                     <button key={row.subscription_id} type="button" className="subscription-ranking-row" onClick={() => onSelectVPS(row.vps_id)}>
                       <span className="subscription-insight-row__name">
                         <strong>{row.display_name || row.vps_display_name || row.vps_id}</strong>
-                        <small className="mono tnum">{money(row.price, row.currency)}</small>
+                        <small className="mono tnum">{money(row.price, row.currency)}{row.exchange_rate_status === 'stale' ? ' · 汇率过期' : ''}</small>
                       </span>
                       <span className="subscription-breakdown-bar">
                         <progress
@@ -311,10 +328,13 @@ export function SubscriptionInsights({
               </select>
             </label>
           </div>
+          {shareCaption && !knownAmount.allUnknown ? <p className="subscription-insight-note" role="status">{shareCaption}</p> : null}
           {statisticsError ? (
             <InsightEmpty title="构成数据不可用" detail="年度统计未加载，成本构成暂不展示。" />
           ) : statisticsLoading && currentBreakdown.length === 0 ? (
             <InsightEmpty title="正在加载构成数据" busy />
+          ) : knownAmount.allUnknown ? (
+            <InsightEmpty title="金额待核对" detail={`另有 ${knownAmount.unknownCount} 项待核对，不能按零金额绘制构成。`} />
           ) : currentBreakdown.length === 0 ? (
             <InsightEmpty title="暂无构成数据" detail="当前统计窗口没有可展示的成本构成。" />
           ) : (

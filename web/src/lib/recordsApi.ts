@@ -34,6 +34,7 @@ import type {
   RecordExportPreviewInput,
   RecordExportView,
   RecordImportApplyResult,
+  RecordImportDestinationSubject,
   RecordImportPlan,
   RecordDraft,
   RecordDraftListFilter,
@@ -473,6 +474,7 @@ export function listSubjectActivity(
   kind: RecordSubjectKind,
   sourceId: string,
   filter?: SubjectActivityFilter,
+  signal?: AbortSignal,
 ): Promise<SubjectActivityListResponse> {
   const path = `/api/subjects/${encoded(kind)}/${encoded(sourceId)}/activity`
   return requestJSON<unknown>(withQuery(path, filter
@@ -486,7 +488,7 @@ export function listSubjectActivity(
         limit: filter.limit === 50 ? undefined : filter.limit,
         cursor: filter.cursor,
       }
-    : undefined)).then(normalizeSubjectActivityResponse)
+    : undefined), signal ? { signal } : undefined).then(normalizeSubjectActivityResponse)
 }
 
 type InvalidVPSOverviewResponseReason = 'malformed_json' | 'invalid_shape'
@@ -1001,11 +1003,78 @@ export function getRecordExport(exportId: string, signal?: AbortSignal): Promise
   return requestJSON<RecordExportView>(`/api/record-exports/${encoded(exportId)}`, init)
 }
 
+type RecordImportPlanResponse = Omit<RecordImportPlan, 'remaps' | 'quarantine' | 'destination_subject'> & {
+  remaps?: RecordImportPlan['remaps'] | null
+  quarantine?: RecordImportPlan['quarantine'] | null
+  destination_subject?: unknown
+}
+
+type RecordImportApplyResponse = Omit<RecordImportApplyResult, 'record_ids'> & {
+  record_ids?: RecordImportApplyResult['record_ids'] | null
+}
+
+function importResponseObject(raw: unknown, label: string): Record<string, unknown> {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new TypeError(`invalid ${label}`)
+  }
+  return raw as Record<string, unknown>
+}
+
+/** JSON null and omitted collections are empty. Any other value is left intact. */
+function emptyImportCollection<T>(value: unknown): T[] {
+  if (value == null) return []
+  return value as T[]
+}
+
+const IMPORT_DESTINATION_KINDS = ['vps', 'monitoring_instance', 'target'] as const
+
+function normalizeImportDestinationSubject(value: unknown): RecordImportDestinationSubject {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('invalid import plan')
+  }
+  const subject = value as Record<string, unknown>
+  const kind = subject.subject_kind
+  const subjectId = subject.subject_id
+  if (typeof kind !== 'string' || !(IMPORT_DESTINATION_KINDS as readonly string[]).includes(kind)) {
+    throw new TypeError('invalid import plan')
+  }
+  if (typeof subjectId !== 'string' || subjectId.trim() === '') {
+    throw new TypeError('invalid import plan')
+  }
+  return {
+    subject_kind: kind as RecordImportDestinationSubject['subject_kind'],
+    subject_id: subjectId.trim(),
+  }
+}
+
+function normalizeRecordImportPlan(raw: unknown): RecordImportPlan {
+  const plan = importResponseObject(raw, 'import plan') as RecordImportPlanResponse
+  return {
+    ...plan,
+    destination_subject: normalizeImportDestinationSubject(plan.destination_subject),
+    remaps: emptyImportCollection(plan.remaps),
+    quarantine: emptyImportCollection(plan.quarantine),
+  }
+}
+
+function normalizeRecordImportApplyResult(raw: unknown): RecordImportApplyResult {
+  const result = importResponseObject(raw, 'import apply result') as RecordImportApplyResponse
+  return {
+    ...result,
+    record_ids: emptyImportCollection(result.record_ids),
+  }
+}
+
 export function dryRunRecordImport(
-  archive: Blob,
+  file: File,
+  destination: RecordImportDestinationSubject,
   idempotencyKey: string,
   signal?: AbortSignal,
 ): Promise<RecordImportPlan> {
+  const path = withQuery('/api/record-imports/dry-run', {
+    destination_subject_kind: destination.subject_kind,
+    destination_subject_id: destination.subject_id,
+  })
   const init: RequestInit = {
     method: 'POST',
     headers: {
@@ -1013,10 +1082,10 @@ export function dryRunRecordImport(
       'Content-Type': 'application/zip',
       'Idempotency-Key': idempotencyKey,
     },
-    body: archive,
+    body: file,
   }
   if (signal) init.signal = signal
-  return requestJSON<RecordImportPlan>('/api/record-imports/dry-run', init)
+  return requestJSON<unknown>(path, init).then(normalizeRecordImportPlan)
 }
 
 export function applyRecordImport(
@@ -1026,7 +1095,7 @@ export function applyRecordImport(
 ): Promise<RecordImportApplyResult> {
   const init = jsonBodyInit('POST', { lock_version: lockVersion })
   if (signal) init.signal = signal
-  return requestJSON<RecordImportApplyResult>(`/api/record-imports/${encoded(planId)}/apply`, init)
+  return requestJSON<unknown>(`/api/record-imports/${encoded(planId)}/apply`, init).then(normalizeRecordImportApplyResult)
 }
 
 export function downloadRecordExportContent(exportId: string, signal?: AbortSignal): Promise<Blob> {

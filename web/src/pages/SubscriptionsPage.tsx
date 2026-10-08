@@ -11,7 +11,6 @@ import {
   getSubscriptionStatistics,
   listSubscriptions,
   listVPSAssets,
-  refreshSubscriptionExchangeRates,
   updateSubscription,
 } from '../lib/api'
 import {
@@ -45,7 +44,10 @@ import {
   type VPSAssetRecord,
 } from '../lib/types'
 import { daysUntilDate } from './assetPageUtils'
+import { ExchangeRateNoticeBody } from './subscriptions/ExchangeRateNoticeBody'
+import { exchangeRateStatusLabel, knownAmountNote, knownMonthlyAmount } from './subscriptions/exchangeRatePresentation'
 import { SubscriptionInsights, type SubscriptionBreakdownKind } from './subscriptions/SubscriptionInsights'
+import { useExchangeRateRefresh } from './subscriptions/useExchangeRateRefresh'
 
 type PageState = {
   subscriptionsLoading: boolean
@@ -470,6 +472,23 @@ export function SubscriptionsPage() {
   const [statisticsReloadKey, setStatisticsReloadKey] = useState(0)
   const [statsLatched, setStatsLatched] = useState(() => view === 'insights')
   if (view === 'insights' && !statsLatched) setStatsLatched(true)
+  const rateRefresh = useExchangeRateRefresh(() => {
+    setState((current) => ({
+      ...current,
+      overviewLoading: true,
+      overviewError: null,
+      subscriptionsLoading: true,
+      subscriptionsError: null,
+      ...(statsLatched ? { statisticsLoading: true, statisticsError: null } : {}),
+    }))
+    setOverviewReloadKey((key) => key + 1)
+    setSubscriptionsReloadKey((key) => key + 1)
+    if (statsLatched) setStatisticsReloadKey((key) => key + 1)
+  })
+  const readStatusRef = useRef(rateRefresh.readStatus)
+  useLayoutEffect(() => {
+    readStatusRef.current = rateRefresh.readStatus
+  })
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm, setCreateForm] = useState<FormState>(INITIAL_FORM)
   const [createSubmitting, setCreateSubmitting] = useState(false)
@@ -478,8 +497,6 @@ export function SubscriptionsPage() {
   const [editForm, setEditForm] = useState<FormState>(INITIAL_FORM)
   const [editSubmitting, setEditSubmitting] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
-  const [refreshingRates, setRefreshingRates] = useState(false)
-  const [rateNotice, setRateNotice] = useState<string | null>(null)
   const [breakdownKind, setBreakdownKind] = useState<SubscriptionBreakdownKind>('provider')
   const [now] = useState(Date.now)
   const createIdempotencyKeyRef = useRef(crypto.randomUUID())
@@ -557,6 +574,7 @@ export function SubscriptionsPage() {
           overviewError: null,
           overview,
         }))
+        readStatusRef.current()
       })
       .catch((err: unknown) => {
         if (cancelled) return
@@ -704,7 +722,7 @@ export function SubscriptionsPage() {
     try { input = buildCreateInput(effectiveForm) } catch (err: unknown) { setCreateError(describeError(err, '输入无效')); return }
     setCreateSubmitting(true)
     createSubscription(input, createIdempotencyKeyRef.current)
-      .then(() => { resetCreate(); reloadWorkbench() })
+      .then(() => { resetCreate(); reloadWorkbench(); rateRefresh.readStatus() })
       .catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 409 && err.code === 'idempotency_key_reused') {
           createIdempotencyKeyRef.current = crypto.randomUUID()
@@ -729,7 +747,7 @@ export function SubscriptionsPage() {
     try { input = buildCreateInput(editForm) } catch (err: unknown) { setEditError(describeError(err, '输入无效')); return }
     setEditSubmitting(true)
     updateSubscription(editingId, input)
-      .then(() => { resetEdit(); reloadWorkbench() })
+      .then(() => { resetEdit(); reloadWorkbench(); rateRefresh.readStatus() })
       .catch((err: unknown) => setEditError(describeError(err, '更新失败')))
       .finally(() => setEditSubmitting(false))
   }
@@ -776,19 +794,20 @@ export function SubscriptionsPage() {
     filters.label ? { key: 'label', label: `标签: ${filters.label}`, clear: () => setFilter('label', null) } : null,
   ].filter((chip): chip is { key: string; label: string; clear: () => void } => chip != null)
 
-  function handleRefreshRates() {
-    setRateNotice(null)
-    setRefreshingRates(true)
-    refreshSubscriptionExchangeRates()
-      .then((result) => {
-        setRateNotice(`汇率刷新完成：成功 ${result.succeeded.length}，失败 ${result.failed.length}`)
-        reloadWorkbench()
-      })
-      .catch((err: unknown) => setRateNotice(describeError(err, '汇率刷新失败')))
-      .finally(() => setRefreshingRates(false))
-  }
-
   const overview = state.overview
+  const knownAmount = knownMonthlyAmount({
+    activeSubscriptionCount: overview?.active_subscription_count ?? 0,
+    totalMonthlyCost: overview?.total_monthly_cost ?? 0,
+    unknownCount: overview?.current_unknown_amount_count ?? 0,
+    rows: overview?.vps_costs,
+  })
+  const amountNote = overviewReady ? knownAmountNote(knownAmount) : null
+  const rateCountNote = overviewReady
+    ? [
+      (overview?.current_missing_rate_count ?? 0) > 0 ? `缺汇率 ${overview?.current_missing_rate_count}` : null,
+      (overview?.current_stale_rate_count ?? 0) > 0 ? `汇率过期 ${overview?.current_stale_rate_count}` : null,
+    ].filter((part) => part != null).join(' · ')
+    : ''
   const renewal30 = overviewReady ? overview?.renewal_due_30d_count ?? 0 : null
   const budgetRisk = overviewReady ? overview?.budget_risk_count ?? 0 : null
   const missingSubs = overviewReady ? overview?.missing_subscription_vps_count ?? 0 : null
@@ -801,8 +820,9 @@ export function SubscriptionsPage() {
           <div className="subscription-summary" aria-label="订阅摘要">
             <button type="button" onClick={() => clearFilters()}>
               <span className="subscription-summary__label">当前预计月成本</span>
-              <span className="subscription-summary__value"><MonoDigits>{overviewReady ? moneyBase(overview?.total_monthly_cost, baseCurrency) : '—'}</MonoDigits></span>
-              {overviewReady && (overview?.current_unknown_amount_count ?? 0) > 0 ? <small>已知金额；另有 {overview?.current_unknown_amount_count} 项待核对</small> : null}
+              <span className="subscription-summary__value"><MonoDigits>{overviewReady ? (knownAmount.allUnknown ? '金额待核对' : moneyBase(overview?.total_monthly_cost, baseCurrency)) : '—'}</MonoDigits></span>
+              {amountNote ? <small>{amountNote}</small> : null}
+              {rateCountNote ? <small>{rateCountNote}</small> : null}
             </button>
             <button
               type="button"
@@ -828,15 +848,24 @@ export function SubscriptionsPage() {
           </div>
         </div>
         <div className="page__actions">
-          <button type="button" className="btn md secondary" onClick={handleRefreshRates} disabled={refreshingRates}>
-            {refreshingRates ? '刷新中…' : '刷新汇率'}
+          <button type="button" className="btn md secondary" onClick={rateRefresh.refresh} disabled={rateRefresh.refreshing}>
+            {rateRefresh.buttonLabel}
           </button>
           <Link className="btn md secondary" to="/settings?tab=subscriptions">订阅配置</Link>
           <button type="button" className="btn md primary" onClick={openCreate}>新建订阅</button>
         </div>
       </header>
 
-      {rateNotice ? <p className="asset-operation-feedback" role="status">{rateNotice}</p> : null}
+      {rateRefresh.notice ? (
+        <ExchangeRateNoticeBody
+          notice={rateRefresh.notice}
+          className={`asset-operation-feedback${rateRefresh.notice.tone === 'error' ? ' asset-operation-feedback--error' : ''}`}
+        >
+          {rateRefresh.statusUnavailable ? (
+            <button type="button" className="btn sm secondary" onClick={rateRefresh.readStatus}>重试读取</button>
+          ) : null}
+        </ExchangeRateNoticeBody>
+      ) : null}
 
       {state.vpsError && !state.vpsLoading ? (
         <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
@@ -971,6 +1000,7 @@ export function SubscriptionsPage() {
                         const daysLeft = daysUntilDate(s.renew_at, new Date(now))
                         // 与 VPS 列表、续费窗口和后端「30 天续费」口径一致：含第 30 天。
                         const isUrgent = daysLeft != null && daysLeft <= 30
+                        const rateLabel = exchangeRateStatusLabel(s.exchange_rate_status)
                         return (
                           <tr className="data-table__row" key={s.subscription_id}>
                             <td className="data-table__cell">
@@ -991,8 +1021,9 @@ export function SubscriptionsPage() {
                             <td className="data-table__cell mono">{formatMoney(s.price, s.currency)}</td>
                             <td className="data-table__cell mono">
                               <div className="asset-table__stack">
-                                <strong>{moneyBase(s.monthly_price_base, s.base_currency ?? baseCurrency)}</strong>
-                                <small>{moneyBase(s.yearly_price_base, s.base_currency ?? baseCurrency)}/年</small>
+                                <strong>{s.monthly_price_base == null ? '金额待核对' : moneyBase(s.monthly_price_base, s.base_currency ?? baseCurrency)}</strong>
+                                {rateLabel ? <small>{rateLabel}</small> : null}
+                                {s.yearly_price_base != null ? <small>{moneyBase(s.yearly_price_base, s.base_currency ?? baseCurrency)}/年</small> : null}
                               </div>
                             </td>
                             <td className={`data-table__cell mono${isUrgent ? ' text-warn' : ''}`}>

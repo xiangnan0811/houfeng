@@ -3,6 +3,7 @@ import {
   type DashboardOverview,
   type StateChangeEventRecord,
   type SubscriptionOverview,
+  type SubscriptionRenewalQueueItem,
 } from '../../lib/types'
 import type { DashboardTone } from './dashboardModel'
 import type { RemoteState } from './dashboardRemoteState'
@@ -27,9 +28,9 @@ export type DashboardRenewalItem = {
   renewDate: string
   /** 距续费日的 UTC 日历天数；0 为今天，负数为已过（正常队列不会出现，兜底显示）。 */
   daysLeft: number
-  /** 汇率过期时折算金额不可信，界面显示为待核对。 */
+  /** 缺汇率时没有折算金额。过期汇率仍保留数值，并由 rateStatus 标明。 */
   monthlyPrice: number | null
-  exchangeRateStale: boolean
+  rateStatus: SubscriptionRenewalQueueItem['exchange_rate_status']
   currency: string
   to: string
 }
@@ -129,7 +130,7 @@ export function buildRenewalPanel(
       renewDate,
       daysLeft: calendarDaysBetween(today, renewDate) ?? 0,
       monthlyPrice: item.monthly_price_base ?? null,
-      exchangeRateStale: item.exchange_rate_stale,
+      rateStatus: item.exchange_rate_status,
       currency: item.base_currency || subscription.value.base_currency,
       to: `/vps/${encodeURIComponent(item.vps_id)}`,
     }))

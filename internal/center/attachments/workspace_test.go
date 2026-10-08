@@ -104,6 +104,7 @@ func TestContentProcessorWorkspaceRejectsRelativeAndBroadRoots(t *testing.T) {
 	t.Parallel()
 
 	filesystemRoot := filepath.VolumeName(os.TempDir()) + string(filepath.Separator)
+	systemTemporaryRoot := filepath.Join(filesystemRoot, "tmp")
 	for _, tt := range []struct {
 		name string
 		root string
@@ -111,7 +112,7 @@ func TestContentProcessorWorkspaceRejectsRelativeAndBroadRoots(t *testing.T) {
 		{name: "relative", root: "relative-workspace"},
 		{name: "current directory", root: "."},
 		{name: "filesystem root", root: filesystemRoot},
-		{name: "temporary directory", root: os.TempDir()},
+		{name: "system temporary directory", root: systemTemporaryRoot},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := NewContentProcessorWorkspace(ContentProcessorWorkspaceConfig{

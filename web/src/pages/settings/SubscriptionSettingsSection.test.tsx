@@ -32,6 +32,7 @@ function stubFetch(route: Route = () => undefined) {
     if (handled) return Promise.resolve(handled)
     if (url === '/api/subscriptions/settings' && method === 'GET') return Promise.resolve(json(SETTINGS))
     if (url === '/api/subscription-monthly-budgets' && method === 'GET') return Promise.resolve(json([BUDGET]))
+    if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') return Promise.resolve(json({ items: [] }))
     return Promise.resolve(json({ error: `unhandled ${method} ${url}` }, 404))
   })
   vi.stubGlobal('fetch', fetchMock)
@@ -53,7 +54,9 @@ describe('SubscriptionSettingsSection', () => {
     const { calls } = stubFetch((url, method) => {
       if (url === '/api/subscription-monthly-budgets/2026-07' && method === 'PUT') return json({ ...BUDGET, budget_month: '2026-07-01' })
       if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
-        return json({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '', succeeded: [], failed: [{ quote_currency: 'USD' }] })
+        return json({
+          items: [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'missing', refresh_status: 'failed', attempt_count: 1 }],
+        }, 202)
       }
       return undefined
     })
@@ -72,7 +75,7 @@ describe('SubscriptionSettingsSection', () => {
 
     // 刷新有失败币种时用 alert 播报，且不重载设置。
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
-    expect(await screen.findByRole('alert')).toHaveTextContent('汇率刷新完成：成功 0，失败 1（USD）')
+    expect(await screen.findByRole('alert')).toHaveTextContent('补取失败：USD')
     expect(calls('GET', '/api/subscriptions/settings')).toHaveLength(1)
     expect(screen.getByLabelText('最远提前天数')).toHaveValue(45)
   })
@@ -150,5 +153,31 @@ describe('SubscriptionSettingsSection', () => {
     expect(await within(addForm).findByRole('alert')).toBeInTheDocument()
     expect(within(addForm).getByLabelText('月预算 CNY')).toHaveValue(120)
     expect(calls('GET', '/api/subscription-monthly-budgets')).toHaveLength(1)
+  })
+
+  it('rechecks rate status after a settings save without posting a refresh or clearing the saved draft', async () => {
+    let saved = false
+    const { calls } = stubFetch((url, method) => {
+      if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+        return json(saved ? {
+          items: [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'missing', refresh_status: 'queued', attempt_count: 1 }],
+        } : { items: [] })
+      }
+      if (url === '/api/subscriptions/settings' && method === 'PUT') {
+        saved = true
+        return json({ ...SETTINGS, max_reminder_lead_days: 45 })
+      }
+      return undefined
+    })
+    await renderSection()
+    fireEvent.change(screen.getByLabelText('最远提前天数'), { target: { value: '45' } })
+    const statusBefore = calls('GET', '/api/subscriptions/exchange-rates/status').length
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅配置' }))
+    expect(await screen.findByText('订阅成本设置已保存')).toBeInTheDocument()
+    expect(await screen.findByText('补取中 1 项')).toBeInTheDocument()
+    expect(calls('GET', '/api/subscriptions/exchange-rates/status').length).toBeGreaterThan(statusBefore)
+    expect(calls('POST', '/api/subscriptions/exchange-rates/refresh')).toHaveLength(0)
+    expect(calls('GET', '/api/subscriptions/settings')).toHaveLength(1)
+    expect(screen.getByLabelText('最远提前天数')).toHaveValue(45)
   })
 })
