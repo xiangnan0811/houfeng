@@ -27,6 +27,14 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.18.0](https://github.com/xiangnan0811/houfeng/compare/v1.17.0...v1.18.0) (2026-10-08)
+
+
+### Features
+
+* 完善用户全链路体验与 Records 权限管理 ([afd37a4](https://github.com/xiangnan0811/houfeng/commit/afd37a4f6fa5d90aeb902bd3b468a3af1b75de7d))
+* 完善用户全链路体验与 Records 权限管理 ([b31681e](https://github.com/xiangnan0811/houfeng/commit/b31681e3109006568592693b8a79107f64a1e1f8))
+
 ## [1.17.0](https://github.com/xiangnan0811/houfeng/compare/v1.16.1...v1.17.0) (2026-10-06)
 
 
