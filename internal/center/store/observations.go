@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -171,6 +173,80 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 		}
 	}
 
+	return projectTargetProbeObservations(ctx, exec, batch.ProbeObservations)
+}
+
+type targetObservationProjection struct {
+	lastSuccessAt time.Time
+	hasSuccess    bool
+	lastFailureAt time.Time
+	hasFailure    bool
+}
+
+const projectTargetObservationSQL = `
+	update targets
+	set last_success_at = case
+			when $2::timestamptz is null then last_success_at
+			else greatest(coalesce(last_success_at, $2::timestamptz), $2::timestamptz)
+		end,
+		last_failure_at = case
+			when $3::timestamptz is null then last_failure_at
+			else greatest(coalesce(last_failure_at, $3::timestamptz), $3::timestamptz)
+		end,
+		updated_at = greatest(updated_at, now())
+	where target_id = $1
+	  and (
+			($2::timestamptz is not null and (last_success_at is null or last_success_at < $2::timestamptz))
+			or ($3::timestamptz is not null and (last_failure_at is null or last_failure_at < $3::timestamptz))
+		)`
+
+// projectTargetProbeObservations advances each target's success/failure
+// observation timestamps once per batch, in deterministic target ID order.
+// Raw observations are append-only and remain independent of this projection.
+func projectTargetProbeObservations(ctx context.Context, exec sqlExec, writes []observations.ProbeObservationWrite) error {
+	projections := make(map[string]targetObservationProjection)
+	for _, observation := range writes {
+		if observation.MaintenanceContext || observation.IsBackfilled {
+			continue
+		}
+
+		projection := projections[observation.TargetID]
+		switch observation.ResultKind {
+		case agentapi.ProbeResultSuccess:
+			if !projection.hasSuccess || observation.ObservedAt.After(projection.lastSuccessAt) {
+				projection.lastSuccessAt = observation.ObservedAt
+				projection.hasSuccess = true
+			}
+		case agentapi.ProbeResultFailure:
+			if !projection.hasFailure || observation.ObservedAt.After(projection.lastFailureAt) {
+				projection.lastFailureAt = observation.ObservedAt
+				projection.hasFailure = true
+			}
+		default:
+			continue
+		}
+		projections[observation.TargetID] = projection
+	}
+
+	targetIDs := make([]string, 0, len(projections))
+	for targetID := range projections {
+		targetIDs = append(targetIDs, targetID)
+	}
+	sort.Strings(targetIDs)
+
+	for _, targetID := range targetIDs {
+		projection := projections[targetID]
+		var successAt, failureAt any
+		if projection.hasSuccess {
+			successAt = projection.lastSuccessAt
+		}
+		if projection.hasFailure {
+			failureAt = projection.lastFailureAt
+		}
+		if _, err := exec.Exec(ctx, projectTargetObservationSQL, targetID, successAt, failureAt); err != nil {
+			return fmt.Errorf("project target observations for %q: %w", targetID, err)
+		}
+	}
 	return nil
 }
 

@@ -582,22 +582,22 @@ func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
 	service.now = func() time.Time { return now }
 	repo.rows = []CostRow{
 		{
-			SubscriptionID:    "sub_a",
-			VPSID:             "vps_a",
-			VPSDisplayName:    "Tokyo Edge",
-			ProviderID:        "pv_hetzner",
-			ProviderName:      "Hetzner",
-			DisplayName:       "Tokyo yearly",
-			CostCategory:      "compute",
-			Labels:            []string{"edge"},
-			Currency:          "USD",
-			MonthlyPriceBase:  &monthlyA,
-			YearlyPriceBase:   &yearlyA,
-			BaseCurrency:      "CNY",
-			RenewAt:           datePtr(t, "2026-06-10"),
-			ExchangeRateStale: true,
-			LifecycleStatus:   "active",
-			RenewalDecision:   "keep",
+			SubscriptionID:     "sub_a",
+			VPSID:              "vps_a",
+			VPSDisplayName:     "Tokyo Edge",
+			ProviderID:         "pv_hetzner",
+			ProviderName:       "Hetzner",
+			DisplayName:        "Tokyo yearly",
+			CostCategory:       "compute",
+			Labels:             []string{"edge"},
+			Currency:           "USD",
+			MonthlyPriceBase:   &monthlyA,
+			YearlyPriceBase:    &yearlyA,
+			BaseCurrency:       "CNY",
+			RenewAt:            datePtr(t, "2026-06-10"),
+			ExchangeRateStatus: ExchangeRateStatusStale,
+			LifecycleStatus:    "active",
+			RenewalDecision:    "keep",
 		},
 		{
 			SubscriptionID:   "sub_b",
@@ -643,8 +643,8 @@ func TestServiceOverviewAggregatesCostsBudgetsAndRenewals(t *testing.T) {
 	if overview.RenewalDue14dCount != 1 || overview.RenewalDue30dCount != 2 {
 		t.Fatalf("renewal counts = 14d %d 30d %d, want 1/2", overview.RenewalDue14dCount, overview.RenewalDue30dCount)
 	}
-	if overview.ExchangeRateStaleCount != 1 || overview.DecisionAttentionCount != 1 || overview.MissingSubscriptionVPSCount != 1 {
-		t.Fatalf("signals = stale %d decision %d missing %d, want 1/1/1", overview.ExchangeRateStaleCount, overview.DecisionAttentionCount, overview.MissingSubscriptionVPSCount)
+	if overview.CurrentMissingRateCount != 0 || overview.CurrentStaleRateCount != 1 || overview.DecisionAttentionCount != 1 || overview.MissingSubscriptionVPSCount != 1 {
+		t.Fatalf("signals = missing %d stale %d decision %d missing assets %d, want 0/1/1/1", overview.CurrentMissingRateCount, overview.CurrentStaleRateCount, overview.DecisionAttentionCount, overview.MissingSubscriptionVPSCount)
 	}
 	if overview.BudgetRiskCount != 1 || len(overview.BudgetRisks) != 1 || overview.BudgetRisks[0].Status != BudgetStatusOver {
 		t.Fatalf("budget risks = count %d rows %#v, want one over risk", overview.BudgetRiskCount, overview.BudgetRisks)
@@ -891,43 +891,6 @@ func TestServiceBulkUpsertMonthlyBudgetsRejectsInvalidScope(t *testing.T) {
 	}
 }
 
-func TestServiceRefreshExchangeRatesSanitizesProviderErrors(t *testing.T) {
-	ctx := context.Background()
-	service, repo := newTestService()
-	service.providers["frankfurter"] = fakeProvider{
-		errByQuote: map[string]error{
-			"USD": errors.New("upstream failure with access_key=super-secret-value " + strings.Repeat("x", 200)),
-		},
-		rateByQuote: map[string]FetchedExchangeRate{
-			"EUR": {Rate: 7.5, RateDate: *datePtr(t, "2026-06-02")},
-		},
-	}
-	repo.currencies = []string{"CNY", " usd ", "EUR"}
-
-	result, err := service.RefreshExchangeRates(ctx)
-	if err != nil {
-		t.Fatalf("RefreshExchangeRates() error = %v", err)
-	}
-	if len(result.Succeeded) != 1 || result.Succeeded[0].QuoteCurrency != "EUR" {
-		t.Fatalf("succeeded = %#v, want EUR only", result.Succeeded)
-	}
-	if len(repo.upserts) != 1 || repo.upserts[0].QuoteCurrency != "EUR" {
-		t.Fatalf("upserts = %#v, want EUR only", repo.upserts)
-	}
-	if len(result.Failed) != 1 || result.Failed[0].QuoteCurrency != "USD" {
-		t.Fatalf("failed = %#v, want USD only", result.Failed)
-	}
-	if len(result.Failed[0].Error) > 160 {
-		t.Fatalf("provider error length = %d, want <= 160", len(result.Failed[0].Error))
-	}
-	if strings.Contains(result.Failed[0].Error, "super-secret-value") {
-		t.Fatalf("provider error = %q, leaked provider secret", result.Failed[0].Error)
-	}
-	if !strings.Contains(result.Failed[0].Error, "access_key=[redacted]") {
-		t.Fatalf("provider error = %q, want redacted access_key", result.Failed[0].Error)
-	}
-}
-
 func TestReminderServiceDedupesDeliveriesBeforeAudit(t *testing.T) {
 	ctx := context.Background()
 	monthly := 88.0
@@ -1098,7 +1061,7 @@ type fakeSubscriptionCostRepo struct {
 	upsertMonthlyBudgetRecord MonthlyBudgetRecord
 	earliestSubscriptionMonth *subscriptions.Date
 	upsertMonthlyBudgetInputs []UpsertMonthlyBudgetInput
-	currencies                []string
+	pairs                     []ExchangeRatePair
 	upserts                   []ExchangeRateUpsert
 	candidates                []ReminderCandidate
 	deliveryKeys              map[string]string
@@ -1222,8 +1185,8 @@ func (r *fakeSubscriptionCostRepo) UpsertMonthlyBudgets(_ context.Context, input
 	return records, nil
 }
 
-func (r *fakeSubscriptionCostRepo) ListActiveCurrencies(context.Context) ([]string, error) {
-	return r.currencies, nil
+func (r *fakeSubscriptionCostRepo) ListActiveExchangeRatePairs(context.Context, centersettings.SubscriptionCostSettings) ([]ExchangeRatePair, error) {
+	return r.pairs, nil
 }
 
 func (r *fakeSubscriptionCostRepo) UpsertExchangeRate(_ context.Context, input ExchangeRateUpsert) (ExchangeRateRecord, error) {

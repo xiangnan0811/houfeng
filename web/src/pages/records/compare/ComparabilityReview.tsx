@@ -1,6 +1,6 @@
 import { Badge } from '../../../components/atoms'
 import type { ComparisonEvaluateResponse } from '../../../lib/types'
-import { COMPARISON_REASON_LABELS as REASON_LABELS } from './comparisonLabels'
+import { comparisonEvidenceKindLabel, comparisonEvidenceTechnicalKind, presentComparisonReason } from './comparisonLabels'
 
 type Props = {
   comparison: ComparisonEvaluateResponse | null
@@ -19,14 +19,29 @@ export function ComparabilityReview({ comparison }: Props) {
       </div>
       {findings.length > 0 ? (
         <ul className="record-compare-findings">
-          {findings.map((finding, index) => (
+          {findings.map((finding, index) => {
+            const reason = presentComparisonReason(finding.reason)
+            return (
             <li key={`${finding.item_index}-${finding.reason}-${index}`} className="record-compare-findings__item">
               <span className="record-compare-findings__item-ref">
-                第 {finding.item_index + 1} 项{finding.kind ? ` · ${finding.kind}/v${finding.schema_version}` : ''}
+                第 {finding.item_index + 1} 项{finding.kind ? ` · ${comparisonEvidenceKindLabel(finding.kind)}` : ''}
+                {finding.kind && finding.schema_version != null ? (
+                  <details>
+                    <summary>技术标识</summary>
+                    <code>{comparisonEvidenceTechnicalKind(finding.kind, finding.schema_version)}</code>
+                  </details>
+                ) : null}
               </span>
-              <strong>{REASON_LABELS[finding.reason]}</strong>
+              <strong>{reason.label}</strong>
+              {reason.diagnostic ? (
+                <details>
+                  <summary>诊断信息</summary>
+                  <p>{reason.diagnostic}</p>
+                </details>
+              ) : null}
             </li>
-          ))}
+            )
+          })}
         </ul>
       ) : null}
     </section>

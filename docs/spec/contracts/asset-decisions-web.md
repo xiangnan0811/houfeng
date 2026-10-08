@@ -34,6 +34,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - 同值 filter 的新对象 identity 表示 revalidation，不是新业务状态：四个 filtered GET 必须照常发出，但已有 settled overview/list 保持 `loading=false`、错误与 rows 可见，入口 DOM 不卸载。filter key、external revision 或 local retry 变化才进入 loading；返回结果仍以 cancelled flag 防止旧响应覆盖当前 state。
 - Asset Decisions 首屏必须是组合优先的单主路径：`portfolio command summary` → 次级工作区入口 → `决策组扫描`。默认页面不得恢复 `决策路径`、`下一步导览`、记录表、场景模板、自定义组合、续费 evidence 或单台队列作为同权常驻 section；也不得把单台续费队列重新提升为主视觉主体。
 - Asset Decisions 顶部必须先展示 portfolio command summary：从当前已加载的记录回读、自动组、自定义组合和模板中派生第一行动，并展示组合范围、续费窗口、执行闭环风险、evidence source 状态和 context filter 摘要。该 summary 是处理顺序导览，不是 KPI 卡片墙；不得把单台队列数量提升为主指标，也不得因为某来源失败而伪造无问题。
+- 无可处理项只表示当前筛选和窗口的 `scoped-empty`：显示中立的“当前视图暂无组合决策”和可见范围，不推断健康或闭环稳定，不显示主工作动作。参与判断的来源尚在首次读取时先显示等待评估，不提前宣布空态；局部错误保持独立不可用语义。次级入口保留可见操作词和计数单位，读取中/不可用不得伪装成零。
 - Asset Decisions 的记录、场景/模板、续费 evidence、单台队列必须通过受控的次级工作区进入；默认 `secondaryWorkbench=null`，同一时间最多展开一个次级区。用户点击入口或 URL 深链可展开对应区：`record_id -> records`，`manual_group_id|template_id -> scenarios`，`view=renewal -> renewals`，legacy `view=single_queue -> single_queue`。`group_id` 只打开自动组详情，不要求展开次级区。
 - 次级工作区切换和关闭只影响本地展开状态，不主动删除 `view`、`renew_within_days`、`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 等筛选上下文。打开对象参数只触发读取和展示，不触发创建、PATCH 或业务对象写入。
 - portfolio command summary、决策组扫描和次级入口的指标只能从当前已加载 rows 派生，例如自动组数量、进行中自定义组合、未关闭记录、readback drift/blocked/needs_evidence/open、预算压力和资料缺口。任一来源加载失败时只显示局部不可用提示并跳过该来源的工作项；风险标签必须降级为 `证据待确认` 或等价未知态，不得把失败解释成无问题、已对齐、已闭环、`证据稳定` 或真实资料缺口。

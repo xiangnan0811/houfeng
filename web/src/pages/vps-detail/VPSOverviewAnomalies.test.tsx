@@ -120,7 +120,8 @@ describe('VPSOverviewAnomalies contract', () => {
     expect(onCommand).toHaveBeenCalledWith('open_monitoring_onboarding')
   })
 
-  it('keeps a distinct provided unlinked detail instead of the conservative fallback', () => {
+  it('keeps arbitrary unlinked detail inside a closed diagnostic', () => {
+    const raw = '夜班备注已解除 https://ops.example/rebuild'
     render(
       <MemoryRouter>
         <VPSOverviewAnomalies
@@ -128,7 +129,7 @@ describe('VPSOverviewAnomalies contract', () => {
           anomalies={[anomaly({
             rule_id: 'monitoring.unlinked.v1',
             title: '未关联监控实例',
-            detail: '指定实例已解除，待人工确认是否重建。',
+            detail: raw,
             source: 'monitoring',
             primary_action: { id: 'open_monitoring_instances', label: '创建并接入 agent' },
           })]}
@@ -137,9 +138,35 @@ describe('VPSOverviewAnomalies contract', () => {
       </MemoryRouter>,
     )
 
-    expect(screen.queryByRole('heading', { name: '需要关注' })).not.toBeInTheDocument()
-    expect(screen.getByText('指定实例已解除，待人工确认是否重建。')).toBeInTheDocument()
-    expect(screen.queryByText('当前 VPS 没有关联监控实例。')).not.toBeInTheDocument()
-    expect(screen.queryByText('运行观测缺少心跳、健康与异常证据。')).not.toBeInTheDocument()
+    const item = screen.getByRole('heading', { name: '未关联监控实例' }).closest('li')
+    const primary = screen.getByText('运行观测缺少心跳、健康与异常证据。')
+    expect(item?.contains(primary)).toBe(true)
+    expect(primary.closest('details')).toBeNull()
+    expect(primary.closest('.vps-overview-anomalies__detail')).not.toBeNull()
+    const folded = screen.getByText(raw)
+    const diagnostic = folded.closest('details')
+    expect(diagnostic).not.toBeNull()
+    expect(diagnostic).not.toHaveAttribute('open')
+    expect(diagnostic?.contains(primary)).toBe(false)
+    expect(screen.queryByText(raw, { selector: '.vps-overview-anomalies__detail' })).not.toBeInTheDocument()
+  })
+
+  it('folds an unknown anomaly detail instead of using it as the judgement', () => {
+    render(
+      <MemoryRouter>
+        <VPSOverviewAnomalies
+          vpsId="vps_001"
+          anomalies={[anomaly({ detail: 'probe timeout', source: 'probe_runtime' })]}
+          onCommand={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { name: '监控异常' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '监控异常' }).closest('li')).not.toHaveTextContent(/^probe timeout/)
+    const details = screen.getByText('probe timeout').closest('details')
+    expect(details).not.toHaveAttribute('open')
+    expect(details).toHaveTextContent('probe_runtime')
+    expect(screen.queryByText('probe timeout', { selector: '.vps-overview-anomalies__detail' })).not.toBeInTheDocument()
   })
 })

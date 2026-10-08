@@ -1,13 +1,25 @@
 import AxeBuilder from '@axe-core/playwright'
 import type { Locator, Page } from '@playwright/test'
 
+import { vpsAssetFixture } from '../src/pages/dashboard/dashboardTestFixtures'
 import { expect, test } from './fixtures'
+import { apiRouteKey } from './fixtures/contracts'
 import { recordSearchProfile } from './fixtures/profiles'
 import {
   expectLocatorNotClipped,
   expectMinTouchTarget,
   expectNoDocumentOverflow,
 } from './support/geometry'
+
+function importSearchProfile() {
+  return {
+    ...recordSearchProfile(),
+    [apiRouteKey('GET', '/api/vps')]: {
+      status: 200,
+      body: [vpsAssetFixture({ display_name: '东京边缘' })],
+    },
+  }
+}
 
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 1000 },
@@ -35,7 +47,7 @@ async function expectOperableControl(locator: Locator, viewportWidth: number): P
 
 for (const viewport of VIEWPORTS) {
   test(`record search import and export stay operable at ${viewport.width}x${viewport.height}`, async ({ api, page }) => {
-    api.useProfile(recordSearchProfile())
+    api.useProfile(importSearchProfile())
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await page.goto('/records')
@@ -57,8 +69,11 @@ for (const viewport of VIEWPORTS) {
     const importPanel = importDialog.getByRole('region', { name: '记录导入' })
     await expect(importPanel).toBeVisible()
 
-    const dryRun = importPanel.getByRole('button', { name: '预检导入' })
+    const dryRun = importPanel.getByRole('button', { name: '预检导入', exact: true })
     const apply = importPanel.getByRole('button', { name: '确认应用' })
+    const kind = importPanel.getByLabel('主体类型')
+    await expect(importPanel.getByText('归档内所有记录将关联此主体。')).toBeVisible()
+    await expect(kind).toHaveValue('')
     await expect(dryRun).toBeVisible()
     await expect(dryRun).toBeDisabled()
     await expect(apply).toBeDisabled()
@@ -68,8 +83,18 @@ for (const viewport of VIEWPORTS) {
       mimeType: 'application/zip',
       buffer: Buffer.from('PK'),
     })
+    await expect(dryRun).toBeDisabled()
+    await kind.selectOption('vps')
+    const subject = importPanel.getByLabel('目标主体')
+    await expect(subject).toBeVisible()
+    await expect(subject).toHaveValue('')
+    await expect(dryRun).toBeDisabled()
+    await subject.selectOption({ label: '东京边缘' })
+    await expect(importPanel.getByText('vps_001')).toBeVisible()
     await expect(dryRun).toBeEnabled()
     await expect(apply).toBeDisabled()
+    await expectOperableControl(kind, viewport.width)
+    await expectOperableControl(subject, viewport.width)
     await expectOperableControl(dryRun, viewport.width)
     await expectNoDocumentOverflow(page)
 
@@ -102,7 +127,7 @@ for (const viewport of VIEWPORTS) {
 }
 
 test('record search import and export have no serious or critical accessibility violations at 390px', async ({ api, page }) => {
-  api.useProfile(recordSearchProfile())
+  api.useProfile(importSearchProfile())
   await page.setViewportSize({ width: 390, height: 900 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.goto('/records')
@@ -117,7 +142,8 @@ test('record search import and export have no serious or critical accessibility 
   const importDialog = page.getByRole('dialog', { name: '导入记录' })
   await expect(importDialog).toBeVisible()
   await expect(importDialog.getByRole('region', { name: '记录导入' })).toBeVisible()
-  await expect(importDialog.getByRole('button', { name: '预检导入' })).toBeVisible()
+  await expect(importDialog.getByRole('button', { name: '预检导入', exact: true })).toBeVisible()
+  await expect(importDialog.getByText('归档内所有记录将关联此主体。')).toBeVisible()
 
   await expectNoBlockingAxe(page)
 })

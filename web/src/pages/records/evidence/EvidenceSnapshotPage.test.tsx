@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../../../lib/apiRequest'
+import * as authContext from '../../../lib/auth-context'
 import * as recordsApi from '../../../lib/recordsApi'
 import type { EvidenceSnapshotRead } from '../../../lib/types'
 import { EvidenceSnapshotPage } from './EvidenceSnapshotPage'
@@ -119,6 +120,26 @@ function renderPage(path = '/evidence/evs_9') {
 }
 
 describe('EvidenceSnapshotPage', () => {
+  beforeEach(() => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: true, portability: true },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })
@@ -138,7 +159,8 @@ describe('EvidenceSnapshotPage', () => {
     renderPage()
 
     expect(screen.getByText('正在加载证据快照')).toBeInTheDocument()
-    expect(await screen.findByText('IP 质量报告')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'IP 质量报告' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { level: 1, name: 'IP quality report' })).not.toBeInTheDocument()
     expect(getSnapshot).toHaveBeenCalledWith('evs_9', expect.any(AbortSignal))
     const identity = screen.getByLabelText('证据身份')
     expect(within(identity).getAllByRole('term').map((term) => term.textContent)).toEqual(['主体', '来源', '观测'])
@@ -179,7 +201,7 @@ describe('EvidenceSnapshotPage', () => {
 
     expect(await screen.findByText('无法加载证据')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
-    expect(await screen.findByText('IP 质量报告')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { level: 1, name: 'IP 质量报告' })).toBeInTheDocument()
     expect(getSnapshot).toHaveBeenCalledTimes(2)
   })
 
@@ -193,7 +215,7 @@ describe('EvidenceSnapshotPage', () => {
 
     expect(await screen.findByText('来源已不可用')).toBeInTheDocument()
     expect(screen.getByText('含回填样本')).toBeInTheDocument()
-    expect(screen.getByText('IP 质量报告')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'IP 质量报告' })).toBeInTheDocument()
   })
 
   it('fails closed for an unknown renderer tuple', async () => {
@@ -221,8 +243,8 @@ describe('EvidenceSnapshotPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('不支持的证据类型')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '不支持的证据类型' })).toBeInTheDocument()
+    expect(screen.getByText('当前客户端无法安全展示这种证据，已隐藏原始内容。')).toBeInTheDocument()
     expect(screen.queryByText('unsupported-payload')).not.toBeInTheDocument()
-    expect(screen.queryByText('IP 质量报告')).not.toBeInTheDocument()
   })
 })

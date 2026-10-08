@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation, type InitialEntry } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as authContext from '../lib/auth-context'
 import { MonitoringComparePage } from './MonitoringComparePage'
 import { MonitoringDetailPage } from './MonitoringDetailPage'
 
@@ -112,6 +113,26 @@ function renderMonitoringCompare(initialEntry: InitialEntry = '/monitoring/compa
 }
 
 describe('MonitoringComparePage', () => {
+  beforeEach(() => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: true, portability: true },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })

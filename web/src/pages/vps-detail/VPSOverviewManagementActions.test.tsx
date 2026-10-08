@@ -77,6 +77,8 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
     note: '',
     current_health_status: '正常',
     current_active_incident_count: 0,
+    enabled_probe_count: 1,
+    matching_executor_count: 1,
     current_primary_issue_summary: '',
     created_at: '2026-08-20T00:00:00Z',
     updated_at: '2026-08-20T00:00:00Z',

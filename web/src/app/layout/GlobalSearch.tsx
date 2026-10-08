@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 
 import type { AssetSearchOutcome, SearchResult } from './globalAssetSearch'
@@ -9,12 +9,29 @@ type ResultGroup = {
   results: SearchResult[]
 }
 
+type SearchSession = {
+  generation: number
+  submittedQuery: string | null
+  resultQuery: string | null
+  assetMatches: SearchResult[]
+  recordMatches: SearchResult[]
+  assetError: string | null
+  recordError: string | null
+  assetPending: boolean
+  recordPending: boolean
+  focusIndex: number
+}
+
 /**
  * Records get their own quota rather than sharing the asset cap: they are ranked
  * by the server, and a query matching many assets should not push every record
  * out of the palette.
  */
 const RECORD_RESULTS = 4
+
+/** Fixed copy. Raw source errors stay off the palette. */
+const ASSET_SEARCH_UNAVAILABLE = '资产搜索暂不可用'
+const RECORD_SEARCH_UNAVAILABLE = '运维记录搜索暂不可用'
 
 const SEARCH_GROUP_LABELS: Record<SearchResult['kind'], string> = {
   vps: 'VPS',
@@ -31,24 +48,72 @@ const SEARCH_GROUP_ORDER: SearchResult['kind'][] = ['vps', 'monitoring_instance'
 const SEARCH_SHORTCUT_LABEL =
   typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? '⌘K' : 'Ctrl K'
 
+function emptySession(
+  generation: number,
+  submittedQuery: string | null,
+  pending: { asset: boolean; record: boolean } = { asset: false, record: false },
+): SearchSession {
+  return {
+    generation,
+    submittedQuery,
+    resultQuery: null,
+    assetMatches: [],
+    recordMatches: [],
+    assetError: null,
+    recordError: null,
+    assetPending: pending.asset,
+    recordPending: pending.record,
+    focusIndex: -1,
+  }
+}
+
+/** Results are visible only for the query that was submitted and is still in the field. */
+function resultsFor(session: SearchSession, rawQuery: string, recordsEnabled: boolean): SearchResult[] {
+  const trimmed = rawQuery.trim()
+  if (session.submittedQuery !== trimmed || session.resultQuery !== trimmed) return []
+  const combined = [...session.assetMatches, ...(recordsEnabled ? session.recordMatches : [])]
+  return recordsEnabled ? combined : combined.filter((result) => result.kind !== 'record')
+}
+
 /** Global command search with ⌘K / Ctrl+K shortcut. */
-export function GlobalSearch() {
+export function GlobalSearch({ recordsEnabled = true }: { recordsEnabled?: boolean }) {
   const navigate = useNavigate()
   const baseId = useId()
   const listboxId = `${baseId}-listbox`
   const helpId = `${baseId}-help`
   const statusId = `${baseId}-status`
+  const loadingId = `${baseId}-loading`
+  const assetErrorId = `${baseId}-asset-error`
+  const recordErrorId = `${baseId}-record-error`
 
+  const generationRef = useRef(0)
+  const submittedRef = useRef<string | null>(null)
+  const queryRef = useRef('')
+  const mountedRef = useRef(true)
+  const recordsEnabledRef = useRef(recordsEnabled)
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState<SearchResult[]>([])
+  const [search, setSearch] = useState<SearchSession>(() => emptySession(0, null))
   const [open, setOpen] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [focusIndex, setFocusIndex] = useState(-1)
-  const [emptySubmitted, setEmptySubmitted] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const searchGeneration = useRef(0)
+
+  // 卸载只作废世代。结果属于已卸下的实例，不能再落地。
+  useLayoutEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      generationRef.current += 1
+    }
+  }, [])
+
+  // 能力切换在绘制前清掉上一轮结果。在途响应的世代已经对不上。
+  useLayoutEffect(() => {
+    if (recordsEnabledRef.current === recordsEnabled) return
+    recordsEnabledRef.current = recordsEnabled
+    generationRef.current += 1
+    submittedRef.current = null
+    setSearch(emptySession(generationRef.current, null))
+  }, [recordsEnabled])
 
   function handleContainerBlur(e: React.FocusEvent<HTMLDivElement>) {
     const nextTarget = e.relatedTarget as Node | null
@@ -100,57 +165,127 @@ export function GlobalSearch() {
     return () => document.removeEventListener('keydown', onKeyDown)
   }, [open])
 
-  async function handleSearch(e: FormEvent) {
-    e.preventDefault()
-    const typed = query.trim()
-    if (!typed) {
-      setResults([])
-      setFocusIndex(-1)
-      setEmptySubmitted(true)
-      setOpen(true)
-      return
+  const session = search
+
+  function discardInFlight() {
+    generationRef.current += 1
+    submittedRef.current = null
+    setSearch(emptySession(generationRef.current, null))
+  }
+
+  function commitSource(
+    source: 'asset' | 'record',
+    generation: number,
+    searched: string,
+    matches: SearchResult[],
+    error: string | null,
+  ) {
+    if (!mountedRef.current || generationRef.current !== generation) return
+    if (submittedRef.current !== searched || queryRef.current.trim() !== searched) return
+    setSearch((prev) => {
+      if (!mountedRef.current || generationRef.current !== generation || prev.generation !== generation) return prev
+      if (submittedRef.current !== searched || queryRef.current.trim() !== searched) return prev
+      const next: SearchSession = {
+        ...prev,
+        resultQuery: searched,
+        ...(source === 'asset'
+          ? { assetMatches: matches, assetError: error, assetPending: false }
+          : { recordMatches: matches, recordError: error, recordPending: false }),
+      }
+      const count = resultsFor(next, searched, recordsEnabledRef.current).length
+      const focusStillValid = prev.focusIndex >= 0 && prev.focusIndex < count
+      next.focusIndex = count === 0 ? -1 : focusStillValid ? prev.focusIndex : 0
+      return next
+    })
+  }
+
+  // 动态 import 可以在换代、改词、卸载或关掉记录能力之后才返回。
+  // 对不上就不要再发源请求；已经发出的请求仍由 commitSource 丢掉晚到结果。
+  function sourceRequestReady(generation: number, searched: string, records: boolean) {
+    if (!mountedRef.current || generationRef.current !== generation) return false
+    if (submittedRef.current !== searched || queryRef.current.trim() !== searched) return false
+    return !records || recordsEnabledRef.current
+  }
+
+  async function runAssetSearch(generation: number, searched: string) {
+    let matches: SearchResult[] = []
+    let error: string | null = null
+    try {
+      const module = await import('./globalAssetSearch')
+      if (!sourceRequestReady(generation, searched, false)) return
+      const outcome: AssetSearchOutcome = await module.searchAssets(searched.toLowerCase())
+      matches = outcome.matches
+      error = outcome.error ? ASSET_SEARCH_UNAVAILABLE : null
+    } catch {
+      matches = []
+      error = ASSET_SEARCH_UNAVAILABLE
     }
-    const generation = ++searchGeneration.current
-    setOpen(true)
-    setLoading(true)
-    setError(null)
-    setEmptySubmitted(false)
+    commitSource('asset', generation, searched, matches, error)
+  }
 
-    const [assets, recordHits] = await Promise.all([
-      import('./globalAssetSearch')
-        .then((module) => module.searchAssets(typed.toLowerCase()))
-        .catch((): AssetSearchOutcome => ({ matches: [], error: '搜索失败' })),
+  async function runRecordSearch(generation: number, searched: string) {
+    let matches: SearchResult[] = []
+    let error: string | null = null
+    try {
       // The records transport is reached only through this dynamic import, which
-      // keeps it out of the eager shell bundle. Its own failures resolve to no
-      // hits, so an index that is still building leaves the palette usable.
-      import('../../pages/records/globalRecordSearch')
-        .then((module) => module.searchRecordsForGlobalSearch(typed, RECORD_RESULTS))
-        .catch(() => []),
-    ])
-    if (generation !== searchGeneration.current) return
+      // keeps it out of the eager shell bundle. Closed records capability must
+      // not import or fetch that module.
+      const module = await import('../../pages/records/globalRecordSearch')
+      if (!sourceRequestReady(generation, searched, true)) return
+      const outcome = await module.searchRecordsForGlobalSearch(searched, RECORD_RESULTS)
+      matches = outcome.matches.map((hit) => ({ kind: 'record' as const, ...hit }))
+      error = outcome.error ? RECORD_SEARCH_UNAVAILABLE : null
+    } catch {
+      matches = []
+      error = RECORD_SEARCH_UNAVAILABLE
+    }
+    commitSource('record', generation, searched, matches, error)
+  }
 
-    const matches = [
-      ...assets.matches,
-      ...recordHits.map((hit) => ({ kind: 'record' as const, ...hit })),
-    ]
-    setResults(matches)
-    setError(assets.error)
-    setFocusIndex(matches.length > 0 ? 0 : -1)
-    setLoading(false)
+  function handleSearch(e: FormEvent) {
+    e.preventDefault()
+    const typed = queryRef.current.trim()
+    const generation = ++generationRef.current
+    submittedRef.current = typed
+    const records = recordsEnabledRef.current
+    setSearch(emptySession(generation, typed, {
+      asset: typed.length > 0,
+      record: typed.length > 0 && records,
+    }))
+    setOpen(true)
+    if (!typed) return
+    void runAssetSearch(generation, typed)
+    if (records) void runRecordSearch(generation, typed)
   }
 
   function clearSearch() {
-    setOpen(false)
+    queryRef.current = ''
     setQuery('')
-    setResults([])
-    setFocusIndex(-1)
-    setEmptySubmitted(false)
+    discardInFlight()
+    setOpen(false)
   }
 
   function activate(result: SearchResult) {
     clearSearch()
     navigate(result.to)
   }
+
+  const trimmed = query.trim()
+  const aligned = session.submittedQuery === trimmed
+  const loading = aligned && (session.assetPending || (recordsEnabled && session.recordPending))
+  const assetError = aligned ? session.assetError : null
+  const recordError = aligned && recordsEnabled ? session.recordError : null
+  const displayedResults = resultsFor(session, query, recordsEnabled)
+  const showNoMatches = aligned
+    && session.resultQuery === trimmed
+    && trimmed !== ''
+    && !loading
+    && !assetError
+    && !recordError
+    && displayedResults.length === 0
+  const showUnsubmitted = trimmed !== '' && session.submittedQuery !== trimmed
+  const showCapabilities = trimmed === ''
+  const showEmptySubmitted = showCapabilities && session.submittedQuery === ''
 
   function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'Escape') {
@@ -169,38 +304,53 @@ export function GlobalSearch() {
       return
     }
 
-    if (!loading && results.length > 0) {
+    if (displayedResults.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setFocusIndex((i) => (i + 1) % results.length)
+        setSearch((prev) => {
+          const count = resultsFor(prev, queryRef.current, recordsEnabledRef.current).length
+          if (count === 0 || prev.focusIndex < 0) return prev
+          return { ...prev, focusIndex: (prev.focusIndex + 1) % count }
+        })
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setFocusIndex((i) => (i - 1 + results.length) % results.length)
-      } else if (e.key === 'Enter' && focusIndex >= 0) {
-        e.preventDefault()
-        const focusedResult = results[focusIndex]
-        if (focusedResult) activate(focusedResult)
+        setSearch((prev) => {
+          const count = resultsFor(prev, queryRef.current, recordsEnabledRef.current).length
+          if (count === 0 || prev.focusIndex < 0) return prev
+          return { ...prev, focusIndex: (prev.focusIndex - 1 + count) % count }
+        })
+      } else if (e.key === 'Enter' && session.focusIndex >= 0) {
+        const focusedResult = displayedResults[session.focusIndex]
+        if (focusedResult) {
+          e.preventDefault()
+          activate(focusedResult)
+        }
       }
     }
   }
 
-  const groups = groupResults(results)
-  const hasOptions = open && !loading && results.length > 0
-  const activeOptionId = hasOptions && focusIndex >= 0 && results[focusIndex]
-    ? `${baseId}-option-${focusIndex}`
+  function handleQueryChange(value: string) {
+    if (value === queryRef.current) return
+    queryRef.current = value
+    setQuery(value)
+    discardInFlight()
+  }
+
+  const groups = groupResults(displayedResults)
+  const hasOptions = open && displayedResults.length > 0
+  const activeOptionId = hasOptions && session.focusIndex >= 0 && displayedResults[session.focusIndex]
+    ? `${baseId}-option-${session.focusIndex}`
     : undefined
 
   let describedBy: string | undefined
   if (open) {
-    if (loading || error) {
-      describedBy = statusId
-    } else if (results.length === 0) {
-      if (query.trim()) {
-        describedBy = statusId
-      } else {
-        describedBy = emptySubmitted ? `${helpId} ${statusId}` : helpId
-      }
-    }
+    const describedIds: string[] = []
+    if (showCapabilities) describedIds.push(helpId)
+    if (loading) describedIds.push(loadingId)
+    if (assetError) describedIds.push(assetErrorId)
+    if (recordError) describedIds.push(recordErrorId)
+    if (showEmptySubmitted || showUnsubmitted || showNoMatches) describedIds.push(statusId)
+    if (describedIds.length > 0) describedBy = describedIds.join(' ')
   }
 
   return (
@@ -215,13 +365,10 @@ export function GlobalSearch() {
           id={`${baseId}-input`}
           type="search"
           className="global-search__input"
-          placeholder="搜索 VPS、IP、记录…"
+          placeholder={recordsEnabled ? '搜索 VPS、IP、记录…' : '搜索 VPS、IP…'}
           aria-keyshortcuts="Control+K Meta+K"
           value={query}
-          onChange={(e) => {
-            setQuery(e.target.value)
-            setEmptySubmitted(false)
-          }}
+          onChange={(e) => handleQueryChange(e.target.value)}
           onKeyDown={handleKeyDown}
           onFocus={() => setOpen(true)}
           aria-label="全局搜索"
@@ -247,92 +394,101 @@ export function GlobalSearch() {
           }}
         >
           {loading ? (
-            <p id={statusId} className="global-search__hint" role="status" aria-live="polite">
+            <p id={loadingId} className="global-search__hint" role="status" aria-live="polite">
               正在加载…
             </p>
-          ) : (
+          ) : null}
+          {assetError ? (
+            <p id={assetErrorId} className="global-search__hint global-search__hint--error" role="alert">
+              {assetError}
+            </p>
+          ) : null}
+          {recordError ? (
+            <p id={recordErrorId} className="global-search__hint global-search__hint--error" role="alert">
+              {recordError}
+            </p>
+          ) : null}
+          {showUnsubmitted ? (
+            <p id={statusId} className="global-search__hint" role="status">
+              按 Enter 搜索
+            </p>
+          ) : null}
+          {showNoMatches ? (
+            <p id={statusId} className="global-search__hint" role="status">
+              没有匹配项
+            </p>
+          ) : null}
+          {showCapabilities ? (
+            <div id={helpId} className="global-search__hint global-search__capabilities">
+              <p className="global-search__capabilities-title">支持检索范围</p>
+              <p className="global-search__capabilities-text">
+                {recordsEnabled
+                  ? 'VPS · 监控实例 · 入口探测 · 服务商 · 订阅 · 运维记录'
+                  : 'VPS · 监控实例 · 入口探测 · 服务商 · 订阅'}
+              </p>
+              <p
+                id={showEmptySubmitted ? statusId : undefined}
+                className="global-search__capabilities-sub"
+                role={showEmptySubmitted ? 'status' : undefined}
+              >
+                {showEmptySubmitted
+                  ? '请输入搜索关键词 · 支持 ⌘K / Ctrl+K'
+                  : '按 Enter 搜索 · 支持 ⌘K / Ctrl+K'}
+              </p>
+            </div>
+          ) : null}
+          {hasOptions ? (
             <>
-              {/* A partial failure keeps whatever did answer instead of discarding it. */}
-              {error ? (
-                <p id={statusId} className="global-search__hint global-search__hint--error" role="alert">
-                  {error}
-                </p>
-              ) : null}
-              {!error && results.length === 0 ? (
-                query.trim() ? (
-                  <p id={statusId} className="global-search__hint" role="status">
-                    没有匹配项
-                  </p>
-                ) : (
-                  <div id={helpId} className="global-search__hint global-search__capabilities">
-                    <p className="global-search__capabilities-title">支持检索范围</p>
-                    <p className="global-search__capabilities-text">
-                      VPS · 监控实例 · 入口探测 · 服务商 · 订阅 · 运维记录
-                    </p>
-                    <p
-                      id={emptySubmitted ? statusId : undefined}
-                      className="global-search__capabilities-sub"
-                      role={emptySubmitted ? 'status' : undefined}
-                    >
-                      {emptySubmitted
-                        ? '请输入搜索关键词 · 支持 ⌘K / Ctrl+K'
-                        : '按 Enter 搜索 · 支持 ⌘K / Ctrl+K'}
-                    </p>
+              <span className="visually-hidden" role="status" aria-live="polite">
+                找到 {displayedResults.length} 个结果
+              </span>
+              <div id={listboxId} role="listbox" aria-label="搜索结果">
+              {groups.map((group) => {
+                const groupId = `${baseId}-group-${group.kind}`
+                return (
+                  <div
+                    className="global-search__group"
+                    key={group.kind}
+                    role="group"
+                    aria-labelledby={groupId}
+                  >
+                    <p id={groupId} className="global-search__group-title">
+                      {group.label}
+                     </p>
+                    {group.results.map((result) => {
+                      const index = displayedResults.indexOf(result)
+                      const optionId = `${baseId}-option-${index}`
+                      const isFocused = index === session.focusIndex
+                      return (
+                        <Link
+                          key={`${result.kind}-${result.id}`}
+                          id={optionId}
+                          to={result.to}
+                          role="option"
+                          aria-selected={isFocused}
+                          tabIndex={-1}
+                          className={`global-search__item ${isFocused ? 'is-focused' : ''}`}
+                          onClick={clearSearch}
+                          onMouseEnter={() => {
+                            setSearch((prev) => prev.focusIndex === index ? prev : { ...prev, focusIndex: index })
+                          }}
+                        >
+                          <span className="global-search__item-kind">
+                            {SEARCH_GROUP_LABELS[result.kind]}
+                          </span>
+                          <span className="global-search__item-label">{result.label}</span>
+                          {result.hint ? (
+                            <span className="global-search__item-hint">{result.hint}</span>
+                          ) : null}
+                        </Link>
+                      )
+                    })}
                   </div>
                 )
-              ) : null}
-              {hasOptions ? (
-                <>
-                  <span className="visually-hidden" role="status" aria-live="polite">
-                    找到 {results.length} 个结果
-                  </span>
-                  <div id={listboxId} role="listbox" aria-label="搜索结果">
-                  {groups.map((group) => {
-                    const groupId = `${baseId}-group-${group.kind}`
-                    return (
-                      <div
-                        className="global-search__group"
-                        key={group.kind}
-                        role="group"
-                        aria-labelledby={groupId}
-                      >
-                        <p id={groupId} className="global-search__group-title">
-                          {group.label}
-                         </p>
-                        {group.results.map((result) => {
-                          const index = results.indexOf(result)
-                          const optionId = `${baseId}-option-${index}`
-                          const isFocused = index === focusIndex
-                          return (
-                            <Link
-                              key={`${result.kind}-${result.id}`}
-                              id={optionId}
-                              to={result.to}
-                              role="option"
-                              aria-selected={isFocused}
-                              tabIndex={-1}
-                              className={`global-search__item ${isFocused ? 'is-focused' : ''}`}
-                              onClick={clearSearch}
-                              onMouseEnter={() => setFocusIndex(index)}
-                            >
-                              <span className="global-search__item-kind">
-                                {SEARCH_GROUP_LABELS[result.kind]}
-                              </span>
-                              <span className="global-search__item-label">{result.label}</span>
-                              {result.hint ? (
-                                <span className="global-search__item-hint">{result.hint}</span>
-                              ) : null}
-                            </Link>
-                          )
-                        })}
-                      </div>
-                    )
-                  })}
-                  </div>
-                </>
-              ) : null}
+              })}
+              </div>
             </>
-          )}
+          ) : null}
         </div>
       )}
     </div>

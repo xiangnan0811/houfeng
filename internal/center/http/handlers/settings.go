@@ -84,7 +84,7 @@ type subscriptionCostSettingsUpdateRequest struct {
 	ExchangeRateStaleAfterHours *int    `json:"exchange_rate_stale_after_hours,omitempty"`
 }
 
-func Settings(repo SettingsRepository) http.Handler {
+func Settings(repo SettingsRepository, refresher ExchangeRateRefreshRequester) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -115,6 +115,9 @@ func Settings(repo SettingsRepository) http.Handler {
 				}
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
+			}
+			if refresher != nil {
+				refresher.RequestRefresh(false)
 			}
 			writeJSON(w, http.StatusOK, newSettingsResponse(record))
 		default:

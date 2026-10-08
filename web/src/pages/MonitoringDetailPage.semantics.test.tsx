@@ -1,8 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getSettings } from '../lib/api'
+import * as authContext from '../lib/auth-context'
 import type { SettingsRecord } from '../lib/types'
 import { MonitoringDetailPage } from './MonitoringDetailPage'
 
@@ -163,6 +164,26 @@ function renderPage(entry = '/monitoring/mi_001') {
     </MemoryRouter>,
   )
 }
+
+beforeEach(() => {
+  vi.spyOn(authContext, 'useAuth').mockReturnValue({
+    user: {
+      user_id: 'u1',
+      username: 'admin',
+      role: 'admin',
+      display_name: '',
+      runtime_capabilities: { records: true, comparison: true, portability: true },
+      management_capabilities: { access: false },
+    },
+    loading: false,
+    status: 'ready',
+    error: null,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: vi.fn(),
+    retry: vi.fn(),
+  })
+})
 
 afterEach(() => {
   vi.unstubAllGlobals()

@@ -5,6 +5,7 @@ export type ShellSummaryStatus =
   | 'loading'
   | 'clear'
   | 'anomaly'
+  | 'unobserved'
   | 'stale'
   | 'unavailable'
 

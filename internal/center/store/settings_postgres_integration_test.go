@@ -107,9 +107,9 @@ func TestPostgresIntegrationSettingsMutationSerializesConcurrentInitializersAndP
 				t.Fatalf("seed settings: %v", err)
 			}
 
-			settingsHandler := handlers.Settings(repo)
+			settingsHandler := handlers.Settings(repo, nil)
 			subscriptionService := subscriptioncosts.NewService(nil, repo, nil)
-			subscriptionHandler := handlers.SubscriptionSettings(subscriptionService)
+			subscriptionHandler := handlers.SubscriptionSettings(subscriptionService, nil)
 			globalRequest := func() *http.Request {
 				return httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewReader(settingsGlobalPutBody(t, targets.FrequencyTier15m)))
 			}
@@ -184,7 +184,7 @@ func TestPostgresIntegrationSettingsMutationSerializesConcurrentInitializersAndP
 			release: make(chan struct{}),
 		}
 		service := subscriptioncosts.NewService(nil, barrierRepo, nil)
-		handler := handlers.SubscriptionSettings(service)
+		handler := handlers.SubscriptionSettings(service, nil)
 		responses := make(chan *httptest.ResponseRecorder, 2)
 		go serveSettingsRequest(handler, func() *http.Request {
 			return httptest.NewRequest(http.MethodPut, "/api/subscriptions/settings", bytes.NewReader([]byte(`{"fixer_api_key":"new-secret"}`)))
@@ -234,7 +234,7 @@ func TestPostgresIntegrationSettingsMutationSerializesConcurrentInitializersAndP
 		}
 
 		service := subscriptioncosts.NewService(nil, repo, nil)
-		handler := handlers.SubscriptionSettings(service)
+		handler := handlers.SubscriptionSettings(service, nil)
 		request := httptest.NewRequest(http.MethodPut, "/api/subscriptions/settings", bytes.NewReader([]byte(`{"fixer_api_key":""}`)))
 		recorder := httptest.NewRecorder()
 		handler.ServeHTTP(recorder, request)

@@ -6,6 +6,7 @@ import type {
   SubscriptionOverview,
   VPSAssetRecord,
 } from '../../lib/types'
+import { knownAmountNote, knownMonthlyAmount } from '../subscriptions/exchangeRatePresentation'
 import { DASHBOARD_LINKS } from './dashboardLinks'
 import type { RemoteState } from './dashboardRemoteState'
 
@@ -53,6 +54,7 @@ export type DashboardBillingEvidence = {
   status: DashboardEvidenceStatus
   title: string
   detail: string
+  completeness: string
   source: 'subscription-overview' | 'dashboard-fallback'
   generatedAt: string
 }
@@ -74,6 +76,7 @@ export type DashboardObservabilityModel = {
   severeMonitoringCount: number
   abnormalTargetCount: number
   severeTargetCount: number
+  unobservedTargetCount: number
   abnormalTotal: number
   severeTotal: number
   maintenanceTotal: number
@@ -168,6 +171,7 @@ function buildObservability(overview: DashboardOverview): DashboardObservability
     severeMonitoringCount,
     abnormalTargetCount,
     severeTargetCount,
+    unobservedTargetCount: overview.unobserved_target_count,
     abnormalTotal: abnormalMonitoringCount + abnormalTargetCount,
     severeTotal: severeMonitoringCount + severeTargetCount,
     maintenanceTotal:
@@ -294,6 +298,43 @@ function dashboardCostLabel(summary: DashboardAssetSummary): string {
     .join(' + ')
 }
 
+function subscriptionAmountFacts(subscription: SubscriptionOverview) {
+  return knownMonthlyAmount({
+    activeSubscriptionCount: subscription.active_subscription_count,
+    totalMonthlyCost: subscription.total_monthly_cost,
+    unknownCount: subscription.current_unknown_amount_count ?? 0,
+    rows: subscription.vps_costs,
+  })
+}
+
+function subscriptionAmountCompleteness(subscription: SubscriptionOverview) {
+  const amount = subscriptionAmountFacts(subscription)
+  if (amount.allUnknown) return '金额待核对'
+  const note = knownAmountNote(amount)
+  if (note) return note
+  if (subscription.current_stale_rate_count > 0) {
+    return `汇率过期 ${subscription.current_stale_rate_count} 项，金额仍按过期汇率计入`
+  }
+  return '订阅摘要金额已完整折算'
+}
+
+function subscriptionBillingDetail(subscription: SubscriptionOverview): string {
+  const parts = [
+    `30 天续费 ${subscription.renewal_due_30d_count}`,
+    `预算风险 ${subscription.budget_risk_count}`,
+  ]
+  const unknown = subscription.current_unknown_amount_count ?? 0
+  if (unknown > 0) parts.push(`待核对 ${unknown}`)
+  if (subscription.current_missing_rate_count > 0) parts.push(`缺汇率 ${subscription.current_missing_rate_count}`)
+  if (subscription.current_stale_rate_count > 0) parts.push(`汇率过期 ${subscription.current_stale_rate_count}`)
+  return parts.join(' · ')
+}
+
+function subscriptionBillingTitle(subscription: SubscriptionOverview): string {
+  if (subscriptionAmountFacts(subscription).allUnknown) return '金额待核对'
+  return `${formatMoney(subscription.total_monthly_cost, subscription.base_currency)}/月`
+}
+
 function buildBillingEvidence(
   subscription: RemoteState<SubscriptionOverview>,
   overview: DashboardOverview,
@@ -301,8 +342,9 @@ function buildBillingEvidence(
   if (subscription.status === 'success') {
     return {
       status: 'available',
-      title: `${formatMoney(subscription.value.total_monthly_cost, subscription.value.base_currency)}/月`,
-      detail: `30 天续费 ${subscription.value.renewal_due_30d_count} · 预算风险 ${subscription.value.budget_risk_count} · 汇率异常 ${subscription.value.exchange_rate_stale_count}`,
+      title: subscriptionBillingTitle(subscription.value),
+      detail: subscriptionBillingDetail(subscription.value),
+      completeness: subscriptionAmountCompleteness(subscription.value),
       source: 'subscription-overview',
       generatedAt: subscription.value.snapshot_generated_at,
     }
@@ -312,6 +354,7 @@ function buildBillingEvidence(
       status: 'unavailable',
       title: dashboardCostLabel(overview.asset_summary),
       detail: `${subscription.error}；暂用较低精度的 Dashboard 聚合摘要`,
+      completeness: '金额完整性待订阅摘要恢复后确认',
       source: 'dashboard-fallback',
       generatedAt: overview.snapshot_generated_at,
     }
@@ -320,6 +363,7 @@ function buildBillingEvidence(
     status: 'loading',
     title: '订阅摘要读取中',
     detail: '暂用 Dashboard 聚合摘要，不把加载中表示为真实空数据',
+    completeness: '金额完整性待订阅摘要读取完成',
     source: 'dashboard-fallback',
     generatedAt: overview.snapshot_generated_at,
   }
@@ -350,7 +394,11 @@ function buildPrimaryAction(
   }
 }
 
-function modeCopy(mode: DashboardMode, primaryAction: DashboardAction): {
+function modeCopy(
+  mode: DashboardMode,
+  primaryAction: DashboardAction,
+  observability: DashboardObservabilityModel,
+): {
   tone: Exclude<DashboardTone, 'neutral'>
   title: string
   summary: string
@@ -383,10 +431,20 @@ function modeCopy(mode: DashboardMode, primaryAction: DashboardAction): {
       summary: '当前没有活跃异常，维护对象仍需按维护事件核对。',
     }
   }
+  const assetAttention = primaryAction.label !== '核对 VPS 库存'
+  if (!assetAttention && observability.unobservedTargetCount > 0) {
+    return {
+      tone: 'notice',
+      title: '尚有目标无观测',
+      summary: '已知运行异常计数为 0。无观测目标单独列出，不并入异常。',
+    }
+  }
   return {
-    tone: primaryAction.label === '核对 VPS 库存' ? 'normal' : 'notice',
-    title: primaryAction.label === '核对 VPS 库存' ? '当前没有紧急处理项' : '资产判断等待核对',
-    summary: 'Dashboard 只提供当前摘要；具体事实和操作由对应工作台承接。',
+    tone: assetAttention ? 'notice' : 'normal',
+    title: assetAttention ? '资产判断等待核对' : '当前没有紧急处理项',
+    summary: observability.unobservedTargetCount > 0
+      ? '资产待核对与无观测目标分别保留。'
+      : '当前运行异常计数为 0。具体事实和操作由对应工作台承接。',
   }
 }
 
@@ -436,11 +494,21 @@ function observabilityJudgement(
       tone: 'notice',
     }
   }
+  if (observability.unobservedTargetCount > 0) {
+    return {
+      id: 'observability',
+      label: '尚无观测',
+      value: `${observability.unobservedTargetCount}`,
+      detail: '不计入已知运行异常',
+      to: DASHBOARD_LINKS.targetsUnobserved,
+      tone: 'neutral',
+    }
+  }
   return {
     id: 'observability',
     label: '观测状态',
-    value: '无活跃异常',
-    detail: '查看 24h 新增与恢复记录',
+    value: '0',
+    detail: '当前运行异常计数为 0',
     to: DASHBOARD_LINKS.events24h,
     tone: 'normal',
   }
@@ -478,7 +546,9 @@ function evidenceJudgements(
         ? '账单精度已降级'
         : billingEvidence.detail,
       to: DASHBOARD_LINKS.subscriptions,
-      tone: billingEvidence.status === 'available' ? 'neutral' : 'notice',
+      tone: billingEvidence.status === 'available' && billingEvidence.completeness === '订阅摘要金额已完整折算'
+        ? 'neutral'
+        : 'notice',
     },
   ]
 }
@@ -493,7 +563,7 @@ export function buildDashboardModel(input: BuildDashboardModelInput): DashboardM
   const observability = buildObservability(overview)
   const mode = deriveMode(observability, confirmedOnboarding(overview, input.vps))
   const primaryAction = buildPrimaryAction(mode, overview, observability)
-  const copy = modeCopy(mode, primaryAction)
+  const copy = modeCopy(mode, primaryAction, observability)
   const assetEvidence = buildAssetEvidence(input.vps, overview.asset_summary)
   const billingEvidence = buildBillingEvidence(input.subscription, overview)
   const judgements = evidenceJudgements(

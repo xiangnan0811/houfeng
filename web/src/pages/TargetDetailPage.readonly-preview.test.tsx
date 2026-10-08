@@ -34,6 +34,8 @@ describe('TargetDetailPage read-only preview', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+            enabled_probe_count: 1,
+            matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -80,8 +82,8 @@ describe('TargetDetailPage read-only preview', () => {
     expect(screen.getAllByRole('button', { name: '查看历史' }).length).toBeGreaterThan(0)
     expect(screen.queryByRole('button', { name: '资料维护' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '进入维护' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '添加 ProbeItem' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /删除 ProbeItem/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '添加探测项' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /编辑探测项/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /删除 探测项/ })).not.toBeInTheDocument()
   })
 })

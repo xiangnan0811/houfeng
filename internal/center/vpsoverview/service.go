@@ -17,6 +17,10 @@ var (
 	ErrVPSNotFound = errors.New("vps overview not found")
 	// ErrInvalidOverviewRequest reports unusable service input.
 	ErrInvalidOverviewRequest = errors.New("invalid vps overview request")
+	// ErrActivityDisabled reports that Records-backed activity is intentionally
+	// disabled. The overview keeps the local activity section unavailable, but
+	// this condition does not make the core VPS judgement incomplete.
+	ErrActivityDisabled = errors.New("record activity is disabled")
 )
 
 // Request is one overview load from transport.
@@ -438,7 +442,8 @@ func (service *Service) buildOverview(identitySource IdentitySource, collected s
 	}
 
 	snapshot := snapshotFromSources(generatedAt, identity, monitoring, ipQuality, renewal)
-	if activitySection.Section.State == SectionUnavailable {
+	if activitySection.Section.State == SectionUnavailable &&
+		!errors.Is(collected.activityErr, ErrActivityDisabled) {
 		snapshot.JudgementSourcesUnavailable = appendUnique(snapshot.JudgementSourcesUnavailable, "activity")
 	}
 	anomalies := EvaluateAnomalies(snapshot)
@@ -551,6 +556,9 @@ func reasonForSourceError(kind sourceKind, err error) string {
 		}
 		return "relation_unavailable"
 	case sourceActivity:
+		if errors.Is(err, ErrActivityDisabled) {
+			return "records_disabled"
+		}
 		if timedOut {
 			return "activity_timeout"
 		}

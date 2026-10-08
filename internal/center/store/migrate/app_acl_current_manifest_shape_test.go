@@ -123,8 +123,54 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 	if len(testChains) != 47 {
 		t.Fatalf("published predecessor chain cases = %d, want 47", len(testChains))
 	}
-
+	allTestChains := append([]struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{}, testChains...)
 	for _, tc := range testChains {
+		allTestChains = append(allTestChains, struct {
+			name     string
+			profiles []appACLCurrentProfileID
+		}{
+			name:     "C69-" + tc.name,
+			profiles: append(append([]appACLCurrentProfileID(nil), tc.profiles...), appACLCurrentProfileP69),
+		})
+	}
+	allTestChains = append(allTestChains, struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{
+		name:     "P69",
+		profiles: []appACLCurrentProfileID{appACLCurrentProfileP69},
+	})
+	if len(allTestChains) != 95 {
+		t.Fatalf("independent C70 predecessor chain cases = %d, want 95", len(allTestChains))
+	}
+	c70Chains := append([]struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{}, allTestChains...)
+	allTestChains = append(allTestChains, struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{
+		name:     "P70",
+		profiles: []appACLCurrentProfileID{appACLCurrentProfileP70},
+	})
+	for _, tc := range c70Chains {
+		allTestChains = append(allTestChains, struct {
+			name     string
+			profiles []appACLCurrentProfileID
+		}{
+			name:     "C70-" + tc.name,
+			profiles: append(append([]appACLCurrentProfileID(nil), tc.profiles...), appACLCurrentProfileP70),
+		})
+	}
+	if len(allTestChains) != 191 {
+		t.Fatalf("independent C71 predecessor chain cases = %d, want 191", len(allTestChains))
+	}
+
+	for _, tc := range allTestChains {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			manifests := make([]AppACLManifestPersistedV1, 0, len(tc.profiles))
@@ -190,14 +236,14 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 				currentPrivileges,
 			)
 			if err != nil {
-				t.Fatalf("classify C69 successor: %v", err)
+				t.Fatalf("classify C71 successor: %v", err)
 			}
 			if successorShape.kind != appACLCurrentManifestShapeSuccessor ||
 				successorShape.latest.ManifestDigest != successor.ManifestDigest ||
 				successorShape.transition == nil ||
 				successorShape.transition.profile != lastProfile {
 				t.Fatalf(
-					"C69 successor shape = %#v, want kind %d/latest %x/profile %d",
+					"C71 successor shape = %#v, want kind %d/latest %x/profile %d",
 					successorShape,
 					appACLCurrentManifestShapeSuccessor,
 					successor.ManifestDigest,
@@ -399,7 +445,7 @@ func TestClassifyAppACLCurrentManifestShapeRejectsUnregisteredOrMalformedState(t
 			currentPrivileges,
 		)
 		if !errors.Is(err, ErrDevelopmentDatabaseRebuildRequired) {
-			t.Fatalf("extra C69 revision error = %v, want rebuild-required", err)
+			t.Fatalf("extra C71 revision error = %v, want rebuild-required", err)
 		}
 	})
 

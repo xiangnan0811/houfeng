@@ -48,7 +48,7 @@ func RequireSession(svc handlers.AuthService, scopes recordauth.ScopeRepository)
 				writeUnauthorized(w)
 				return
 			}
-			if u.UserID == "" || u.Role != auth.RoleAdmin {
+			if u.UserID == "" || u.Role != auth.RoleAdmin || u.DisabledAt != nil {
 				writeUnauthorized(w)
 				return
 			}

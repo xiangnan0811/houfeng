@@ -21,6 +21,9 @@ type BudgetStatus string
 type MonthlyBudgetBulkScope string
 type ReminderKind string
 
+type ExchangeRateStatus string
+type ExchangeRateRefreshStatus string
+
 const (
 	BudgetScopeGlobal   BudgetScopeType = "global"
 	BudgetScopeProvider BudgetScopeType = "provider"
@@ -44,6 +47,16 @@ const (
 	StatisticsWindowMonth   = "month"
 	StatisticsWindowQuarter = "quarter"
 	StatisticsWindowYear    = "year"
+
+	ExchangeRateStatusIdentity ExchangeRateStatus = "identity"
+	ExchangeRateStatusFresh    ExchangeRateStatus = "fresh"
+	ExchangeRateStatusStale    ExchangeRateStatus = "stale"
+	ExchangeRateStatusMissing  ExchangeRateStatus = "missing"
+
+	ExchangeRateRefreshStatusIdle    ExchangeRateRefreshStatus = "idle"
+	ExchangeRateRefreshStatusQueued  ExchangeRateRefreshStatus = "queued"
+	ExchangeRateRefreshStatusRunning ExchangeRateRefreshStatus = "running"
+	ExchangeRateRefreshStatusFailed  ExchangeRateRefreshStatus = "failed"
 )
 
 type SettingsRepository interface {
@@ -63,7 +76,7 @@ type Repository interface {
 	UpsertMonthlyBudget(context.Context, UpsertMonthlyBudgetInput) (MonthlyBudgetRecord, error)
 	EarliestSubscriptionMonth(context.Context) (*subscriptions.Date, error)
 	UpsertMonthlyBudgets(context.Context, []UpsertMonthlyBudgetInput) ([]MonthlyBudgetRecord, error)
-	ListActiveCurrencies(context.Context) ([]string, error)
+	ListActiveExchangeRatePairs(context.Context, centersettings.SubscriptionCostSettings) ([]ExchangeRatePair, error)
 	UpsertExchangeRate(context.Context, ExchangeRateUpsert) (ExchangeRateRecord, error)
 	ListReminderCandidates(context.Context, centersettings.SubscriptionCostSettings, []int) ([]ReminderCandidate, error)
 	TryCreateReminderDelivery(context.Context, ReminderDeliveryInput) (string, bool, error)
@@ -71,33 +84,33 @@ type Repository interface {
 }
 
 type CostRow struct {
-	SubscriptionID    string              `json:"subscription_id"`
-	VPSID             string              `json:"vps_id"`
-	VPSDisplayName    string              `json:"vps_display_name"`
-	ProviderID        string              `json:"provider_id"`
-	ProviderName      string              `json:"provider_name"`
-	DisplayName       string              `json:"display_name"`
-	CostCategory      string              `json:"cost_category"`
-	Labels            []string            `json:"labels"`
-	Price             float64             `json:"price"`
-	Currency          string              `json:"currency"`
-	MonthlyPrice      float64             `json:"monthly_price"`
-	MonthlyPriceBase  *float64            `json:"monthly_price_base"`
-	YearlyPriceBase   *float64            `json:"yearly_price_base"`
-	BaseCurrency      string              `json:"base_currency"`
-	ExchangeRate      *float64            `json:"exchange_rate"`
-	ExchangeRateDate  *subscriptions.Date `json:"exchange_rate_date"`
-	ExchangeRateStale bool                `json:"exchange_rate_stale"`
-	RenewAt           *subscriptions.Date `json:"renew_at"`
-	NextReminderAt    *time.Time          `json:"next_reminder_at"`
-	Status            string              `json:"status"`
-	PaymentMethod     string              `json:"payment_method"`
-	Country           string              `json:"country"`
-	Region            string              `json:"region"`
-	LifecycleStatus   string              `json:"lifecycle_status"`
-	RenewalDecision   string              `json:"renewal_decision"`
-	AutoRenewCheck    string              `json:"auto_renew_check"`
-	BudgetStatus      BudgetStatus        `json:"budget_status"`
+	SubscriptionID     string              `json:"subscription_id"`
+	VPSID              string              `json:"vps_id"`
+	VPSDisplayName     string              `json:"vps_display_name"`
+	ProviderID         string              `json:"provider_id"`
+	ProviderName       string              `json:"provider_name"`
+	DisplayName        string              `json:"display_name"`
+	CostCategory       string              `json:"cost_category"`
+	Labels             []string            `json:"labels"`
+	Price              float64             `json:"price"`
+	Currency           string              `json:"currency"`
+	MonthlyPrice       float64             `json:"monthly_price"`
+	MonthlyPriceBase   *float64            `json:"monthly_price_base"`
+	YearlyPriceBase    *float64            `json:"yearly_price_base"`
+	BaseCurrency       string              `json:"base_currency"`
+	ExchangeRate       *float64            `json:"exchange_rate"`
+	ExchangeRateDate   *subscriptions.Date `json:"exchange_rate_date"`
+	ExchangeRateStatus ExchangeRateStatus  `json:"exchange_rate_status"`
+	RenewAt            *subscriptions.Date `json:"renew_at"`
+	NextReminderAt     *time.Time          `json:"next_reminder_at"`
+	Status             string              `json:"status"`
+	PaymentMethod      string              `json:"payment_method"`
+	Country            string              `json:"country"`
+	Region             string              `json:"region"`
+	LifecycleStatus    string              `json:"lifecycle_status"`
+	RenewalDecision    string              `json:"renewal_decision"`
+	AutoRenewCheck     string              `json:"auto_renew_check"`
+	BudgetStatus       BudgetStatus        `json:"budget_status"`
 }
 
 type MissingSubscriptionAsset struct {
@@ -112,6 +125,8 @@ type MissingSubscriptionAsset struct {
 
 type Overview struct {
 	CurrentUnknownAmountCount         int                        `json:"current_unknown_amount_count"`
+	CurrentMissingRateCount           int                        `json:"current_missing_rate_count"`
+	CurrentStaleRateCount             int                        `json:"current_stale_rate_count"`
 	ArchivedPotentialCosts            []CostRow                  `json:"archived_potential_costs"`
 	ArchivedMissingSubscriptionAssets []MissingSubscriptionAsset `json:"archived_missing_subscription_assets"`
 	ArchivedUnknownAmountCount        int                        `json:"archived_unknown_amount_count"`
@@ -124,7 +139,6 @@ type Overview struct {
 	RenewalDue14dCount                int                        `json:"renewal_due_14d_count"`
 	RenewalDue30dCount                int                        `json:"renewal_due_30d_count"`
 	BudgetRiskCount                   int                        `json:"budget_risk_count"`
-	ExchangeRateStaleCount            int                        `json:"exchange_rate_stale_count"`
 	DecisionAttentionCount            int                        `json:"decision_attention_count"`
 	MissingSubscriptionVPSCount       int                        `json:"missing_subscription_vps_count"`
 	UpcomingRenewals                  []RenewalQueueItem         `json:"upcoming_renewals"`
@@ -152,19 +166,19 @@ type Statistics struct {
 }
 
 type RenewalQueueItem struct {
-	SubscriptionID    string              `json:"subscription_id"`
-	VPSID             string              `json:"vps_id"`
-	VPSDisplayName    string              `json:"vps_display_name"`
-	DisplayName       string              `json:"display_name"`
-	ProviderName      string              `json:"provider_name"`
-	RenewAt           *subscriptions.Date `json:"renew_at"`
-	MonthlyPriceBase  *float64            `json:"monthly_price_base"`
-	YearlyPriceBase   *float64            `json:"yearly_price_base"`
-	BaseCurrency      string              `json:"base_currency"`
-	Currency          string              `json:"currency"`
-	RenewalDecision   string              `json:"renewal_decision"`
-	LifecycleStatus   string              `json:"lifecycle_status"`
-	ExchangeRateStale bool                `json:"exchange_rate_stale"`
+	SubscriptionID     string              `json:"subscription_id"`
+	VPSID              string              `json:"vps_id"`
+	VPSDisplayName     string              `json:"vps_display_name"`
+	DisplayName        string              `json:"display_name"`
+	ProviderName       string              `json:"provider_name"`
+	RenewAt            *subscriptions.Date `json:"renew_at"`
+	MonthlyPriceBase   *float64            `json:"monthly_price_base"`
+	YearlyPriceBase    *float64            `json:"yearly_price_base"`
+	BaseCurrency       string              `json:"base_currency"`
+	Currency           string              `json:"currency"`
+	RenewalDecision    string              `json:"renewal_decision"`
+	LifecycleStatus    string              `json:"lifecycle_status"`
+	ExchangeRateStatus ExchangeRateStatus  `json:"exchange_rate_status"`
 }
 
 type BreakdownItem struct {
@@ -295,10 +309,29 @@ type ExchangeRateRecord struct {
 	Rate          float64            `json:"rate"`
 	RateDate      subscriptions.Date `json:"rate_date"`
 	FetchedAt     time.Time          `json:"fetched_at"`
-	Stale         bool               `json:"stale"`
 	ErrorSummary  string             `json:"error_summary"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+type ExchangeRatePair struct {
+	Provider      string
+	BaseCurrency  string
+	QuoteCurrency string
+	RateStatus    ExchangeRateStatus
+	LatestRate    *ExchangeRateRecord
+}
+
+type ExchangeRatePairStatus struct {
+	Provider      string                    `json:"provider"`
+	BaseCurrency  string                    `json:"base_currency"`
+	QuoteCurrency string                    `json:"quote_currency"`
+	RateStatus    ExchangeRateStatus        `json:"rate_status"`
+	RefreshStatus ExchangeRateRefreshStatus `json:"refresh_status"`
+	LastAttemptAt *time.Time                `json:"last_attempt_at,omitempty"`
+	NextRetryAt   *time.Time                `json:"next_retry_at,omitempty"`
+	AttemptCount  int                       `json:"attempt_count"`
+	ErrorSummary  string                    `json:"error_summary,omitempty"`
 }
 
 type ExchangeRateUpsert struct {
@@ -309,22 +342,6 @@ type ExchangeRateUpsert struct {
 	RateDate      subscriptions.Date
 	FetchedAt     time.Time
 	ErrorSummary  string
-}
-
-type ExchangeRateFetchResult struct {
-	QuoteCurrency string             `json:"quote_currency"`
-	BaseCurrency  string             `json:"base_currency"`
-	Rate          float64            `json:"rate"`
-	RateDate      subscriptions.Date `json:"rate_date"`
-	Error         string             `json:"error,omitempty"`
-}
-
-type ExchangeRateRefreshResult struct {
-	Provider     string                    `json:"provider"`
-	BaseCurrency string                    `json:"base_currency"`
-	FetchedAt    time.Time                 `json:"fetched_at"`
-	Succeeded    []ExchangeRateFetchResult `json:"succeeded"`
-	Failed       []ExchangeRateFetchResult `json:"failed"`
 }
 
 type FetchedExchangeRate struct {

@@ -72,6 +72,7 @@ type DashboardOverview struct {
 	TotalTargetCount                         int                                  `json:"total_target_count"`
 	AbnormalMonitoringInstanceCount          int                                  `json:"abnormal_monitoring_instance_count"`
 	AbnormalTargetCount                      int                                  `json:"abnormal_target_count"`
+	UnobservedTargetCount                    int                                  `json:"unobserved_target_count"`
 	SevereMonitoringInstanceCount            int                                  `json:"severe_monitoring_instance_count"`
 	SevereTargetCount                        int                                  `json:"severe_target_count"`
 	MaintenanceMonitoringInstanceCount       int                                  `json:"maintenance_monitoring_instance_count"`
@@ -104,6 +105,7 @@ type DashboardGroupSummary struct {
 	TargetCount                        int    `json:"target_count"`
 	AbnormalMonitoringInstanceCount    int    `json:"abnormal_monitoring_instance_count"`
 	AbnormalTargetCount                int    `json:"abnormal_target_count"`
+	UnobservedTargetCount              int    `json:"unobserved_target_count"`
 	SevereMonitoringInstanceCount      int    `json:"severe_monitoring_instance_count"`
 	SevereTargetCount                  int    `json:"severe_target_count"`
 	MaintenanceMonitoringInstanceCount int    `json:"maintenance_monitoring_instance_count"`

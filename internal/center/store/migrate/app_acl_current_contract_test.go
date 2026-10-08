@@ -43,6 +43,24 @@ func TestIPQualityHostAddressIdentityAppACLFragment(t *testing.T) {
 		t.Fatalf("fragment function hardening = %#v, want %#v", fragment.Functions, []AppACLCurrentFunctionContract{wantFunction})
 	}
 }
+func TestAccessManagementAppACLFragmentHasExactRuntimeDelta(t *testing.T) {
+	fragment := accessManagementAppACLCurrentMigrationFragment()
+	if fragment.Migration != "0071_add_access_management.sql" {
+		t.Fatalf("fragment migration = %q, want 0071", fragment.Migration)
+	}
+	if len(fragment.Objects) != 0 || len(fragment.Functions) != 0 {
+		t.Fatalf("access-management fragment managed objects/functions = %#v/%#v, want none", fragment.Objects, fragment.Functions)
+	}
+	want := []AppACLPrivilege{
+		{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "record_access_groups", Privilege: AppACLPrivilegeInsert},
+		{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "record_access_groups", Privilege: AppACLPrivilegeUpdate},
+		{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "record_access_group_members", Privilege: AppACLPrivilegeInsert},
+		{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "record_access_group_members", Privilege: AppACLPrivilegeDelete},
+	}
+	if got := fragment.Privileges("houfeng"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("access-management fragment privileges = %#v, want exact four-tuple delta %#v", got, want)
+	}
+}
 func TestCompileAppACLCurrentSourceContractRejectsMissingFutureFragment(t *testing.T) {
 	fsys := appACLCurrentTestMigrationFS(t)
 	fsys["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}
@@ -537,26 +555,26 @@ func appACLCurrentCatalogTestExtension() (
 	AppACLCurrentFunctionContract,
 ) {
 	return AppACLManagedObjectR1{
-		ObjectClass:    AppACLObjectClassTable,
-		SchemaName:     "public",
-		ObjectIdentity: "future_records",
-	}, AppACLManagedObjectR1{
-		ObjectClass:    AppACLObjectClassFunction,
-		SchemaName:     "public",
-		ObjectIdentity: "future_function()",
-	}, AppACLPrivilege{
-		Subject:        AppACLSubjectCenterRuntime,
-		ObjectClass:    AppACLObjectClassTable,
-		SchemaName:     "public",
-		ObjectIdentity: "future_records",
-		Privilege:      AppACLPrivilegeSelect,
-	}, AppACLCurrentFunctionContract{
-		SchemaName:      "public",
-		Identity:        "future_function()",
-		Kind:            "f",
-		SecurityDefiner: true,
-		Config:          []string{"search_path=pg_catalog"},
-	}
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     "public",
+			ObjectIdentity: "future_records",
+		}, AppACLManagedObjectR1{
+			ObjectClass:    AppACLObjectClassFunction,
+			SchemaName:     "public",
+			ObjectIdentity: "future_function()",
+		}, AppACLPrivilege{
+			Subject:        AppACLSubjectCenterRuntime,
+			ObjectClass:    AppACLObjectClassTable,
+			SchemaName:     "public",
+			ObjectIdentity: "future_records",
+			Privilege:      AppACLPrivilegeSelect,
+		}, AppACLCurrentFunctionContract{
+			SchemaName:      "public",
+			Identity:        "future_function()",
+			Kind:            "f",
+			SecurityDefiner: true,
+			Config:          []string{"search_path=pg_catalog"},
+		}
 }
 
 func appACLCurrentTestSourceContract(t *testing.T, fragments []AppACLCurrentMigrationFragment) appACLCurrentSourceContract {

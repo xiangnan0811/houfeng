@@ -28,8 +28,10 @@ describe('ComparisonKindPanel', () => {
         onSelect={onSelect}
       />,
     )
+    expect(screen.getByRole('button', { name: '主机监控' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'monitoring.host/v1' })).not.toBeInTheDocument()
     expect(screen.getByRole('group', { name: '比较指标' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'mem_used_pct' }))
+    fireEvent.click(screen.getByRole('button', { name: '内存使用率' }))
     expect(onSelect).toHaveBeenCalledWith('monitoring.host/v1', 'mem_used_pct')
   })
 })

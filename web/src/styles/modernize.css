@@ -80,6 +80,7 @@ summary:focus-visible,
 .topbar .tp-sync--loading{background:var(--text-muted)}
 .topbar .tp-sync--clear{background:var(--color-state-normal)}
 .topbar .tp-sync--anomaly{background:var(--color-state-alert)}
+.topbar .tp-sync--unobserved{background:var(--text-secondary)}
 .topbar .tp-sync--stale{background:var(--color-state-notice)}
 .topbar .tp-sync--unavailable{background:var(--color-state-critical)}
 @media (max-width: 760px){

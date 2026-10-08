@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -17,6 +18,67 @@ import (
 	"houfeng/internal/center/records"
 	"houfeng/internal/center/store"
 )
+
+var (
+	importedReferenceCommentPattern = regexp.MustCompile(`^<!-- houfeng-ref:v1 (evidence|attachment) ([A-Za-z0-9][A-Za-z0-9_-]{0,127}) -->$`)
+	importedReferenceLinkPattern    = regexp.MustCompile(`^\[(.+)\]\(houfeng-(evidence|attachment):([A-Za-z0-9][A-Za-z0-9_-]{0,127})\)$`)
+)
+
+func importRemapKey(entityKind, sourceID string) string {
+	return entityKind + "\x00" + sourceID
+}
+
+func importRemapTable(remaps []store.ImportRemap) (map[string]store.ImportRemap, error) {
+	table := make(map[string]store.ImportRemap, len(remaps))
+	for _, remap := range remaps {
+		if remap.EntityKind == "" || remap.SourceID == "" || remap.TargetID == "" {
+			return nil, ErrInvalidImportRequest
+		}
+		key := importRemapKey(remap.EntityKind, remap.SourceID)
+		if previous, ok := table[key]; ok && previous.TargetID != remap.TargetID {
+			return nil, ErrInvalidImportRequest
+		}
+		table[key] = remap
+	}
+	return table, nil
+}
+
+// rebindImportedMarkdownReferences keeps archive links readable while ensuring
+// custom evidence/attachment links never retain source IDs or point at an
+// unavailable member. Included members are rewritten to their planned target
+// IDs; unavailable members keep only their visible label.
+func rebindImportedMarkdownReferences(body string, remaps map[string]store.ImportRemap) string {
+	lines := strings.Split(body, "\n")
+	rewritten := make([]string, 0, len(lines))
+	for index := 0; index < len(lines); index++ {
+		line := lines[index]
+		comment := importedReferenceCommentPattern.FindStringSubmatch(strings.TrimSpace(line))
+		if comment != nil {
+			if index+1 < len(lines) {
+				link := importedReferenceLinkPattern.FindStringSubmatch(strings.TrimSpace(lines[index+1]))
+				if link != nil && comment[1] == link[2] && comment[2] == link[3] {
+					if remap, ok := remaps[importRemapKey(comment[1], comment[2])]; ok {
+						rewritten = append(rewritten,
+							"<!-- houfeng-ref:v1 "+comment[1]+" "+remap.TargetID+" -->",
+							"["+link[1]+"](houfeng-"+link[2]+":"+remap.TargetID+")",
+						)
+					} else {
+						rewritten = append(rewritten, link[1])
+					}
+					index++
+					continue
+				}
+			}
+			continue
+		}
+		if link := importedReferenceLinkPattern.FindStringSubmatch(strings.TrimSpace(line)); link != nil {
+			rewritten = append(rewritten, link[1])
+			continue
+		}
+		rewritten = append(rewritten, line)
+	}
+	return strings.Join(rewritten, "\n")
+}
 
 type DocumentImporter interface {
 	ImportDocuments(context.Context, []records.ImportDocumentRequest) ([]records.ImportedDocument, error)
@@ -93,9 +155,10 @@ type ImportRepository interface {
 }
 
 type DryRunRequest struct {
-	Actor          recordauth.ActorScope
-	IdempotencyKey string
-	Archive        []byte
+	Actor              recordauth.ActorScope
+	IdempotencyKey     string
+	Archive            []byte
+	DestinationSubject records.SubjectReference
 }
 
 type ImportRemap struct {
@@ -113,14 +176,20 @@ type QuarantinedEvidence struct {
 	ObservedAt string `json:"observed_at,omitempty"`
 }
 
+type ImportDestinationSubjectView struct {
+	SubjectKind records.SubjectKind `json:"subject_kind"`
+	SubjectID   string              `json:"subject_id"`
+}
+
 type ImportPlanView struct {
-	PlanID      string                `json:"plan_id"`
-	JobState    string                `json:"job_state"`
-	LockVersion uint64                `json:"lock_version"`
-	Remaps      []ImportRemap         `json:"remaps"`
-	Quarantine  []QuarantinedEvidence `json:"quarantine"`
-	ObjectCount int                   `json:"object_count"`
-	ExpiresAt   string                `json:"expires_at"`
+	PlanID             string                       `json:"plan_id"`
+	JobState           string                       `json:"job_state"`
+	LockVersion        uint64                       `json:"lock_version"`
+	Remaps             []ImportRemap                `json:"remaps"`
+	Quarantine         []QuarantinedEvidence        `json:"quarantine"`
+	ObjectCount        int                          `json:"object_count"`
+	ExpiresAt          string                       `json:"expires_at"`
+	DestinationSubject ImportDestinationSubjectView `json:"destination_subject"`
 }
 
 type ApplyRequest struct {
@@ -142,10 +211,15 @@ func (service *Service) DryRun(ctx context.Context, request DryRunRequest) (Impo
 	if service.imports == nil || ctx == nil || request.IdempotencyKey == "" || len(request.Archive) == 0 {
 		return ImportPlanView{}, ErrInvalidImportRequest
 	}
-	if _, err := recordauth.NormalizeActorScope(request.Actor); err != nil {
+	actor, err := recordauth.NormalizeActorScope(request.Actor)
+	if err != nil {
 		return ImportPlanView{}, ErrInvalidImportRequest
 	}
-	planned, err := service.planArchive(request.Archive)
+	destination := request.DestinationSubject
+	if err := service.authorizeImportDestination(ctx, actor, destination); err != nil {
+		return ImportPlanView{}, err
+	}
+	planned, err := service.planArchive(request.Archive, destination)
 	if err != nil {
 		return ImportPlanView{}, err
 	}
@@ -155,10 +229,11 @@ func (service *Service) DryRun(ctx context.Context, request DryRunRequest) (Impo
 	}
 	expiresAt := service.now().Add(service.previewTTL)
 	job, err := service.imports.ClaimImportJob(ctx, store.ClaimRecordImportJobInput{
-		ActorID:        request.Actor.UserID,
-		IdempotencyKey: request.IdempotencyKey,
-		ArchiveDigest:  digest,
-		ExpiresAt:      expiresAt,
+		ActorID:            actor.UserID,
+		IdempotencyKey:     request.IdempotencyKey,
+		ArchiveDigest:      digest,
+		DestinationSubject: destination,
+		ExpiresAt:          expiresAt,
 	})
 	if err != nil {
 		return ImportPlanView{}, mapImportError(err)
@@ -168,14 +243,14 @@ func (service *Service) DryRun(ctx context.Context, request DryRunRequest) (Impo
 		if err != nil {
 			return ImportPlanView{}, mapImportError(err)
 		}
-		rebound, err := rebindArchive(request.Archive, existing.Remaps)
+		rebound, err := rebindArchive(request.Archive, existing.Remaps, destination)
 		if err != nil {
 			return ImportPlanView{}, err
 		}
 		if rebound.digest != existing.PlanDigest {
 			return ImportPlanView{}, ErrInvalidArchive
 		}
-		if err := service.stageImportArchive(ctx, job, request.Archive); err != nil {
+		if err := service.ensureImportArchive(ctx, job, request.Archive); err != nil {
 			return ImportPlanView{}, err
 		}
 		if job.JobState == store.RecordImportJobStateQuarantined {
@@ -192,16 +267,18 @@ func (service *Service) DryRun(ctx context.Context, request DryRunRequest) (Impo
 		service.cacheImportPlan(job, rebound)
 		existing.Remaps = rebound.storeRemaps()
 		existing.Documents = rebound.documents
+		existing.DestinationSubject = destination
 		return service.planView(job, existing, rebound.quarantine), nil
 	}
 	plan, err := service.imports.SaveImportPlan(ctx, store.SaveRecordImportPlanInput{
-		ImportJobID: job.ImportJobID,
-		PlanDigest:  planned.digest,
-		ObjectCount: uint64(len(planned.documents) + len(planned.evidence) + len(planned.attachments) + len(planned.quarantine)),
-		RemapCount:  uint64(len(planned.remaps)),
-		Remaps:      planned.storeRemaps(),
-		Documents:   planned.documents,
-		ExpiresAt:   expiresAt,
+		ImportJobID:        job.ImportJobID,
+		PlanDigest:         planned.digest,
+		ObjectCount:        uint64(len(planned.documents) + len(planned.evidence) + len(planned.attachments) + len(planned.quarantine)),
+		RemapCount:         uint64(len(planned.remaps)),
+		Remaps:             planned.storeRemaps(),
+		Documents:          planned.documents,
+		DestinationSubject: destination,
+		ExpiresAt:          expiresAt,
 	})
 	if err != nil {
 		return ImportPlanView{}, mapImportError(err)
@@ -222,6 +299,7 @@ func (service *Service) DryRun(ctx context.Context, request DryRunRequest) (Impo
 	service.cacheImportPlan(job, planned)
 	plan.Documents = planned.documents
 	plan.Remaps = planned.storeRemaps()
+	plan.DestinationSubject = destination
 	plan.LockVersion = job.LockVersion
 	plan.JobState = job.JobState
 	return service.planView(job, plan, planned.quarantine), nil
@@ -245,6 +323,12 @@ func (service *Service) Apply(ctx context.Context, request ApplyRequest) (ApplyR
 	if cached.actorID == "" || cached.actorID != actor.UserID {
 		return ApplyResult{}, ErrExportUnauthorized
 	}
+	if isZeroImportDestination(cached.destination) {
+		return ApplyResult{}, ErrImportCASConflict
+	}
+	if err := service.authorizeImportDestination(ctx, actor, cached.destination); err != nil {
+		return ApplyResult{}, err
+	}
 	if cached.jobState == store.RecordImportJobStateApplied {
 		return ApplyResult{PlanID: request.PlanID, JobState: cached.jobState, RecordIDs: cached.applied}, nil
 	}
@@ -258,12 +342,16 @@ func (service *Service) Apply(ctx context.Context, request ApplyRequest) (ApplyR
 		return ApplyResult{}, ErrImportCASConflict
 	}
 	plan := store.RecordImportPlan{
-		ImportPlanID: request.PlanID, ImportJobID: cached.jobID,
-		PlanDigest: cached.digest, Documents: cached.documents, LockVersion: cached.lockVersion,
+		ImportPlanID:       request.PlanID,
+		ImportJobID:        cached.jobID,
+		PlanDigest:         cached.digest,
+		Documents:          cached.documents,
+		LockVersion:        cached.lockVersion,
+		DestinationSubject: cached.destination,
 	}
 	originDigest := cached.archiveDigest
 	if originDigest == [32]byte{} {
-		originDigest = cached.digest
+		return ApplyResult{}, ErrImportCASConflict
 	}
 	if err := service.rejectArchiveOrigin(ctx, originDigest); err != nil {
 		return ApplyResult{}, err
@@ -287,6 +375,7 @@ func (service *Service) Apply(ctx context.Context, request ApplyRequest) (ApplyR
 			Title:               document.Title,
 			BodyMarkdown:        document.Body,
 			IdempotencyKey:      "import-" + plan.ImportPlanID + "-" + document.TargetID,
+			SubjectReferences:   []records.SubjectReference{cached.destination},
 			EvidencePreparation: preparations[document.TargetID],
 			AttachmentIDs:       attachmentIDs[document.TargetID],
 			ImportedAttachments: importedAttachments[document.TargetID],
@@ -322,6 +411,77 @@ func (service *Service) Apply(ctx context.Context, request ApplyRequest) (ApplyR
 	return ApplyResult{PlanID: plan.ImportPlanID, JobState: store.RecordImportJobStateApplied, RecordIDs: recordIDs}, nil
 }
 
+func isZeroImportDestination(destination records.SubjectReference) bool {
+	return destination.RegistryVersion == 0 &&
+		destination.Kind == "" &&
+		destination.Role == "" &&
+		destination.SourceID == "" &&
+		!destination.Primary
+}
+
+func classifyImportDestinationError(err error) (error, bool) {
+	switch {
+	case errors.Is(err, records.ErrInvalidSubjectReference):
+		return ErrInvalidImportRequest, true
+	case errors.Is(err, store.ErrRecordSubjectNotFound),
+		errors.Is(err, recordauth.ErrDenied):
+		return ErrExportUnauthorized, true
+	case errors.Is(err, store.ErrRecordSubjectUnavailable),
+		errors.Is(err, records.ErrSubjectAdapterNotFound),
+		errors.Is(err, records.ErrInvalidResolvedSubject):
+		return ErrExportUnavailable, true
+	default:
+		return nil, false
+	}
+}
+
+func mapImportDestinationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if mapped, ok := classifyImportDestinationError(err); ok {
+		return mapped
+	}
+	return ErrExportUnavailable
+}
+
+func (service *Service) authorizeImportDestination(
+	ctx context.Context,
+	actor recordauth.ActorScope,
+	destination records.SubjectReference,
+) error {
+	if service == nil || ctx == nil || len(service.subjects.Kinds()) == 0 {
+		return ErrExportUnavailable
+	}
+	if destination.RegistryVersion != records.SubjectRegistryVersionV1 ||
+		!records.ValidSubjectKind(destination.Kind) ||
+		destination.Role != records.RelationRoleAffected ||
+		!destination.Primary ||
+		!records.ValidSubjectSourceID(destination.Kind, destination.SourceID) {
+		return ErrInvalidImportRequest
+	}
+	normalizedActor, err := recordauth.NormalizeActorScope(actor)
+	if err != nil {
+		return ErrInvalidImportRequest
+	}
+	resolved, err := service.subjects.Resolve(ctx, normalizedActor, destination)
+	if err != nil {
+		return mapImportDestinationError(err)
+	}
+	values, err := records.ImportedRevisionValues(normalizedActor, "", "")
+	if err != nil {
+		return ErrExportUnavailable
+	}
+	if err := records.AuthorizeRecordResource(normalizedActor, recordauth.CapabilityImport, records.RecordAuthorizationEvidence{
+		ProjectID:  resolved.ProjectID,
+		Visibility: values.VisibilityScope,
+		Sources:    []recordauth.SourceAuthorization{resolved.CaptureAuthorization},
+	}); err != nil {
+		return mapImportDestinationError(err)
+	}
+	return nil
+}
+
 func (service *Service) rejectArchiveOrigin(ctx context.Context, digest [32]byte) error {
 	if service == nil || service.imports == nil || digest == [32]byte{} {
 		return ErrInvalidImportRequest
@@ -343,12 +503,17 @@ func (service *Service) cacheImportPlan(job store.RecordImportJob, planned plann
 	if service == nil || job.PlanID == "" {
 		return
 	}
+	destination := job.DestinationSubject
+	if isZeroImportDestination(destination) {
+		destination = planned.destination
+	}
 	service.mu.Lock()
 	defer service.mu.Unlock()
 	service.importPlans[job.PlanID] = cachedImportPlan{
 		jobID: job.ImportJobID, lockVersion: job.LockVersion, jobState: job.JobState,
 		actorID: job.ActorID, expiresAt: job.ExpiresAt, archiveDigest: job.ArchiveDigest,
-		documents: planned.documents, evidence: planned.evidence, attachments: planned.attachments,
+		destination: destination,
+		documents:   planned.documents, evidence: planned.evidence, attachments: planned.attachments,
 		remaps: planned.remaps, quarantine: planned.quarantine, digest: planned.digest,
 	}
 }
@@ -378,6 +543,39 @@ func (service *Service) stageImportArchive(ctx context.Context, job store.Record
 	return mapImportError(err)
 }
 
+func (service *Service) ensureImportArchive(
+	ctx context.Context,
+	job store.RecordImportJob,
+	archive []byte,
+) error {
+	if service == nil || service.imports == nil || job.ImportJobID == "" || len(archive) == 0 {
+		return ErrExportUnavailable
+	}
+	digest := sha256.Sum256(archive)
+	if job.ArchiveDigest == [32]byte{} || digest != job.ArchiveDigest {
+		return ErrInvalidArchive
+	}
+	artifact, err := service.imports.LoadImportArtifact(ctx, job.ImportJobID)
+	switch {
+	case err == nil:
+		if artifact.SHA256 != digest || artifact.ByteSize != uint64(len(archive)) {
+			return ErrInvalidArchive
+		}
+		raw, err := service.readStagedImport(ctx, job.ImportJobID, artifact)
+		if err != nil {
+			return err
+		}
+		if len(raw) != len(archive) || sha256.Sum256(raw) != digest {
+			return ErrInvalidArchive
+		}
+		return nil
+	case errors.Is(err, store.ErrRecordImportNotFound):
+		return service.stageImportArchive(ctx, job, archive)
+	default:
+		return mapImportError(err)
+	}
+}
+
 func (service *Service) resolveImportPlan(ctx context.Context, planID string) (cachedImportPlan, error) {
 	service.mu.Lock()
 	cached, ok := service.importPlans[planID]
@@ -393,9 +591,15 @@ func (service *Service) materializeImportPlan(ctx context.Context, planID string
 	if err != nil {
 		return cachedImportPlan{}, mapImportError(err)
 	}
+	if isZeroImportDestination(plan.DestinationSubject) {
+		return cachedImportPlan{}, ErrImportCASConflict
+	}
 	job, err := service.imports.LoadImportJob(ctx, plan.ImportJobID)
 	if err != nil {
 		return cachedImportPlan{}, mapImportError(err)
+	}
+	if isZeroImportDestination(job.DestinationSubject) || job.DestinationSubject != plan.DestinationSubject {
+		return cachedImportPlan{}, ErrImportCASConflict
 	}
 	artifact, err := service.imports.LoadImportArtifact(ctx, job.ImportJobID)
 	if err != nil {
@@ -405,10 +609,10 @@ func (service *Service) materializeImportPlan(ctx context.Context, planID string
 	if err != nil {
 		return cachedImportPlan{}, err
 	}
-	if sha256.Sum256(raw) != job.ArchiveDigest {
+	if sha256.Sum256(raw) != job.ArchiveDigest || job.ArchiveDigest == [32]byte{} {
 		return cachedImportPlan{}, ErrInvalidArchive
 	}
-	planned, err := rebindArchive(raw, plan.Remaps)
+	planned, err := rebindArchive(raw, plan.Remaps, plan.DestinationSubject)
 	if err != nil {
 		return cachedImportPlan{}, err
 	}
@@ -418,7 +622,8 @@ func (service *Service) materializeImportPlan(ctx context.Context, planID string
 	cached := cachedImportPlan{
 		jobID: job.ImportJobID, lockVersion: job.LockVersion, jobState: job.JobState,
 		actorID: job.ActorID, expiresAt: job.ExpiresAt, archiveDigest: job.ArchiveDigest,
-		documents: planned.documents, evidence: planned.evidence, attachments: planned.attachments,
+		destination: plan.DestinationSubject,
+		documents:   planned.documents, evidence: planned.evidence, attachments: planned.attachments,
 		remaps: planned.remaps, quarantine: planned.quarantine, digest: planned.digest,
 	}
 	if job.JobState == store.RecordImportJobStateApplied {
@@ -456,19 +661,16 @@ func (service *Service) readStagedImport(
 	return raw, nil
 }
 
-func rebindArchive(raw []byte, remaps []store.ImportRemap) (plannedArchive, error) {
-	bySource := make(map[string]store.ImportRemap, len(remaps))
-	for _, remap := range remaps {
-		if remap.SourceID == "" || remap.TargetID == "" {
-			return plannedArchive{}, ErrInvalidImportRequest
-		}
-		bySource[remap.SourceID] = remap
+func rebindArchive(raw []byte, remaps []store.ImportRemap, destination records.SubjectReference) (plannedArchive, error) {
+	bySource, err := importRemapTable(remaps)
+	if err != nil {
+		return plannedArchive{}, err
 	}
 	_, entries, err := ReadArchiveV1(raw)
 	if err != nil {
 		return plannedArchive{}, err
 	}
-	planned := plannedArchive{}
+	planned := plannedArchive{destination: destination}
 	for _, entry := range entries {
 		if err := scanImportedMember(entry); err != nil {
 			return plannedArchive{}, err
@@ -479,8 +681,8 @@ func rebindArchive(raw []byte, remaps []store.ImportRemap) (plannedArchive, erro
 			if err != nil {
 				return plannedArchive{}, err
 			}
-			remap, ok := bySource[sourceID]
-			if !ok || remap.EntityKind != "record" {
+			remap, ok := bySource[importRemapKey("record", sourceID)]
+			if !ok {
 				return plannedArchive{}, ErrInvalidImportRequest
 			}
 			planned.documents = append(planned.documents, store.ImportDocumentPlan{
@@ -502,6 +704,9 @@ func rebindArchive(raw []byte, remaps []store.ImportRemap) (plannedArchive, erro
 	if len(planned.documents) == 0 {
 		return plannedArchive{}, ErrInvalidImportRequest
 	}
+	for index := range planned.documents {
+		planned.documents[index].Body = rebindImportedMarkdownReferences(planned.documents[index].Body, bySource)
+	}
 	planned.digest = importPlanDigest(planned)
 	return planned, nil
 }
@@ -517,6 +722,7 @@ func recordIDsFromRemaps(remaps []ImportRemap) []string {
 }
 
 type plannedArchive struct {
+	destination records.SubjectReference
 	documents   []store.ImportDocumentPlan
 	evidence    []importedEvidencePlan
 	attachments []importedAttachmentPlan
@@ -533,12 +739,12 @@ func (planned plannedArchive) storeRemaps() []store.ImportRemap {
 	return out
 }
 
-func (service *Service) planArchive(raw []byte) (plannedArchive, error) {
+func (service *Service) planArchive(raw []byte, destination records.SubjectReference) (plannedArchive, error) {
 	_, entries, err := ReadArchiveV1(raw)
 	if err != nil {
 		return plannedArchive{}, err
 	}
-	planned := plannedArchive{}
+	planned := plannedArchive{destination: destination}
 	for _, entry := range entries {
 		if err := scanImportedMember(entry); err != nil {
 			return plannedArchive{}, err
@@ -570,6 +776,13 @@ func (service *Service) planArchive(raw []byte) (plannedArchive, error) {
 	if len(planned.documents) == 0 {
 		return plannedArchive{}, ErrInvalidImportRequest
 	}
+	bySource, err := importRemapTable(planned.storeRemaps())
+	if err != nil {
+		return plannedArchive{}, err
+	}
+	for index := range planned.documents {
+		planned.documents[index].Body = rebindImportedMarkdownReferences(planned.documents[index].Body, bySource)
+	}
 	planned.digest = importPlanDigest(planned)
 	return planned, nil
 }
@@ -579,14 +792,27 @@ func (service *Service) planView(job store.RecordImportJob, plan store.RecordImp
 	for _, remap := range plan.Remaps {
 		remaps = append(remaps, ImportRemap{EntityKind: remap.EntityKind, SourceID: remap.SourceID, TargetID: remap.TargetID})
 	}
+	// A nil quarantine is an empty result. The response uses a non-nil slice so
+	// JSON encodes an array. The planner slice stays as planned; the digest
+	// distinguishes a nil slice from an empty one.
+	quarantined := make([]QuarantinedEvidence, 0, len(quarantine))
+	quarantined = append(quarantined, quarantine...)
+	destination := plan.DestinationSubject
+	if isZeroImportDestination(destination) {
+		destination = job.DestinationSubject
+	}
 	return ImportPlanView{
 		PlanID:      plan.ImportPlanID,
 		JobState:    job.JobState,
 		LockVersion: job.LockVersion,
 		Remaps:      remaps,
-		Quarantine:  quarantine,
+		Quarantine:  quarantined,
 		ObjectCount: int(plan.ObjectCount),
 		ExpiresAt:   plan.ExpiresAt.UTC().Format("2006-01-02T15:04:05Z"),
+		DestinationSubject: ImportDestinationSubjectView{
+			SubjectKind: destination.Kind,
+			SubjectID:   destination.SourceID,
+		},
 	}
 }
 
@@ -607,12 +833,17 @@ func parseImportedMarkdown(entry ArchiveEntry) (sourceID, title, body string, er
 }
 
 func stripExportMarkdownChrome(body string) string {
-	for _, heading := range []string{"\n## 已授权材料\n", "\n## 不可用材料\n"} {
-		if index := strings.Index(body, heading); index >= 0 {
-			body = strings.TrimRight(body[:index], "\n") + "\n"
-		}
+	const authorizedHeading = "\n## 已授权材料\n"
+	index := strings.Index(body, authorizedHeading)
+	if index < 0 {
+		return body
 	}
-	return body
+	before := body[:index]
+	after := body[index+len(authorizedHeading):]
+	if nextHeading := strings.Index(after, "\n## "); nextHeading >= 0 {
+		return before + after[nextHeading:]
+	}
+	return strings.TrimRight(before, "\n") + "\n"
 }
 
 func planImportedEvidence(planned *plannedArchive, entry ArchiveEntry, remaps map[string]store.ImportRemap) error {
@@ -633,8 +864,8 @@ func planImportedEvidence(planned *plannedArchive, entry ArchiveEntry, remaps ma
 	}
 	targetID := sourceID
 	if remaps != nil {
-		remap, ok := remaps[sourceID]
-		if !ok || remap.EntityKind != "evidence" {
+		remap, ok := remaps[importRemapKey("evidence", sourceID)]
+		if !ok {
 			return ErrInvalidImportRequest
 		}
 		targetID = remap.TargetID
@@ -830,13 +1061,39 @@ func (service *Service) prepareImportedEvidence(cached cachedImportPlan) (map[st
 	return preparations, nil
 }
 
+type importPlanDigestDestination struct {
+	RegistryVersion uint64               `json:"registry_version"`
+	Kind            records.SubjectKind  `json:"kind"`
+	Role            records.RelationRole `json:"role"`
+	SourceID        string               `json:"source_id"`
+	Primary         bool                 `json:"primary"`
+}
+
+type importPlanDigestPayloadV2 struct {
+	Domain             string                      `json:"domain"`
+	DestinationSubject importPlanDigestDestination `json:"destination_subject"`
+	Documents          []store.ImportDocumentPlan  `json:"documents"`
+	Evidence           []importedEvidencePlan      `json:"evidence"`
+	Attachments        []importedAttachmentPlan    `json:"attachments"`
+	Remaps             []ImportRemap               `json:"remaps"`
+	Quarantine         []QuarantinedEvidence       `json:"quarantine"`
+}
+
 func importPlanDigest(planned plannedArchive) [32]byte {
-	return sha256.Sum256(mustJSON(map[string]any{
-		"documents":   planned.documents,
-		"evidence":    planned.evidence,
-		"attachments": planned.attachments,
-		"remaps":      planned.remaps,
-		"quarantine":  planned.quarantine,
+	return sha256.Sum256(mustJSON(importPlanDigestPayloadV2{
+		Domain: "houfeng.record-import-plan.v2",
+		DestinationSubject: importPlanDigestDestination{
+			RegistryVersion: planned.destination.RegistryVersion,
+			Kind:            planned.destination.Kind,
+			Role:            planned.destination.Role,
+			SourceID:        planned.destination.SourceID,
+			Primary:         planned.destination.Primary,
+		},
+		Documents:   planned.documents,
+		Evidence:    planned.evidence,
+		Attachments: planned.attachments,
+		Remaps:      planned.remaps,
+		Quarantine:  planned.quarantine,
 	}))
 }
 
@@ -871,6 +1128,9 @@ func mapImportDocumentError(err error) error {
 	case errors.Is(err, store.ErrRecordImportCASConflict):
 		return ErrImportCASConflict
 	default:
+		if mapped, ok := classifyImportDestinationError(err); ok {
+			return mapped
+		}
 		return err
 	}
 }
@@ -881,12 +1141,15 @@ func mapImportError(err error) error {
 		return nil
 	case errors.Is(err, store.ErrRecordImportCASConflict):
 		return ErrImportCASConflict
-	case errors.Is(err, store.ErrRecordOriginTombstoned):
+	case errors.Is(err, ErrOriginTombstoned):
 		return ErrOriginTombstoned
 	case errors.Is(err, store.ErrRecordOriginConflict):
 		return ErrImportOriginConflict
 	case errors.Is(err, store.ErrRecordImportNotFound):
 		return ErrInvalidImportRequest
+	case errors.Is(err, store.ErrRecordPortabilityUnavailable),
+		errors.Is(err, store.ErrRecordPlatformAdmissionUnavailable):
+		return ErrExportUnavailable
 	default:
 		return err
 	}

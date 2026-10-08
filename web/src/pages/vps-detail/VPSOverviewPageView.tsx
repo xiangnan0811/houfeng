@@ -2,6 +2,8 @@ import { useId, type RefObject } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 import { Button } from '../../components/atoms'
+import { capabilityFlagsForSession } from '../../lib/auth-client'
+import { useAuth } from '../../lib/auth-context'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import type { VPSOverview } from '../../lib/types'
 import {
@@ -54,6 +56,8 @@ export function VPSOverviewPageView({
   retrying,
   refreshError = null,
 }: Props) {
+  const auth = useAuth()
+  const { records } = capabilityFlagsForSession(auth)
   const location = useLocation()
   const managementMenuId = useId()
   const resources = useVPSDetailResources(overview)
@@ -119,7 +123,7 @@ export function VPSOverviewPageView({
       <div className="vps-overview-page__identity-wrap">
         <VPSOverviewIdentityHeader
           identity={overview.identity}
-          {...(hideCreate ? {} : { newRecordHref, newRecordState })}
+          {...(hideCreate || !records ? {} : { newRecordHref, newRecordState })}
           {...(managementTriggerRef && !hideManage ? { managementTriggerRef } : {})}
           menuOpen={management.menuOpen}
           menuId={managementMenuId}
@@ -147,6 +151,7 @@ export function VPSOverviewPageView({
           activeView="activity"
           overviewHref={basePath}
           overviewCurrent
+          includeRecordViews={records}
         />
         <VPSDetailSectionNav />
       </div>
@@ -305,6 +310,7 @@ export function VPSOverviewPageView({
           vpsId={vpsId}
           onRefresh={onRefresh}
           retrying={retrying}
+          platformDisabled={!records || overview.recent_activity.section.reason_code === 'records_disabled'}
         />
       </section>
     </div>

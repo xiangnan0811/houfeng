@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   eventTypeLabel,
   evidenceKindLabel,
+  presentGeneratedEvidenceTitle,
   formatDuration,
   formatMetricAxisValue,
   formatMetricValue,
@@ -83,6 +84,14 @@ describe('evidencePresentation', () => {
     }
     expect(eventTypeLabel('monitoring_instance_binding_pending_rejected')).toBe('拒绝待确认指纹')
     expect(eventTypeLabel('event_corrected')).toBe('人工更正')
+  })
+
+  it('maps generated evidence titles and leaves arbitrary titles unchanged', () => {
+    expect(presentGeneratedEvidenceTitle('Monitoring events')).toBe('监控事件')
+    expect(presentGeneratedEvidenceTitle('monitoring.event/v2')).toBe('监控事件')
+    expect(presentGeneratedEvidenceTitle('IP quality report')).toBe('IP 质量报告')
+    expect(presentGeneratedEvidenceTitle('夜班手工标题')).toBe('夜班手工标题')
+    expect(presentGeneratedEvidenceTitle('Monitoring events note')).toBe('Monitoring events note')
   })
 
   it('maps tones with neutral fallback', () => {

@@ -14,6 +14,13 @@
 
 用户文案使用“入口探测”，字段标识继续使用 `target_id`。入口详情保持紧凑身份和当前观测；管理与历史为次级，incident/event 请求失败独立可重试，缺失或禁用 probe 不等同于失败观测。空 incident 列表不能证明所有源健康。Probe 对话框操作 footer 保持在滚动正文外。
 
-Target 的 `lifecycle_status` 使用 `active | retired`；`run_status` 仅使用 `启用 | 维护中 | 暂停`。退役状态不能由暂停推断，也不能作为运行控制输入。默认 API 查询只返回当前目标；列表为历史页签显式读取 `scope=all`，退役页签使用 `lifecycle_status=retired`。退役目标从异常、暂停、覆盖缺口计数和运行批量操作中排除，详情隐藏运行控制和 Probe 修改；历史仍可查看。
+Target 的 `lifecycle_status` 使用 `active | retired`；`run_status` 仅使用 `启用 | 维护中 | 暂停`。退役状态不能由暂停推断，也不能作为运行控制输入。默认 API 查询只返回当前目标；列表分别批量读取 `scope=current` 与 `scope=retired` 以支持当前及历史页签，不把 `scope=all` 中仅关联归档 VPS 的 active 目标计入当前集合。退役页签使用 `lifecycle_status=retired`。退役目标从异常、暂停、覆盖缺口计数和运行批量操作中排除，详情隐藏运行控制和 Probe 修改；历史仍可查看。
 
 Target 退役操作使用 `/runtime/archive`，将生命周期设为 `retired` 并暂停；显式 `/runtime/restore-to-paused` 恢复到 `active` 与暂停，后续启用另行确认。共享依赖审查、摘要失效重读和明确确认保持生效。回归由 `TargetsPage.test.tsx`、`TargetDetailPage.test.tsx` 和 `targetHelpers.test.ts` 覆盖。
+
+## 观测与执行覆盖
+
+- 列表异常及 `abnormal=1` 只包含当前可见、启用、有成功或失败观测时间且健康为关注/告警/严重的目标。`view=unobserved` 承接当前可见、启用且从未产生成功/失败观测的目标；两类计数不相加。健康筛选包含“数据不可用”，未知徽章使用中性色，运行控制独立显示。
+- Target 的 `last_success_at` / `last_failure_at` 只从 `result_kind=success/failure` 且 `maintenance_context=false`、`is_backfilled=false` 的实时探测观测按 `observed_at` 投影；原始观测仍保留，乱序到达不能使任一时间倒退。
+- TargetRecord 的只读 `enabled_probe_count` 表示配置为 enabled 的探测项数，暂停目标也保留配置事实。`matching_executor_count` 表示依照 Agent plan 标签交集和 archived/retired/paused 排除规则可接收任务的实例数；仅启用/维护目标可匹配，其余为零。列表与详情由后端一次聚合读取，不逐行请求。匹配不保证在线，不等于已有样本。
+- 执行标签允许未来值；无启用探测项、无匹配实例、匹配但尚无样本分别解释。已有历史观测不保证当前健康，此次不新增样本过期阈值。

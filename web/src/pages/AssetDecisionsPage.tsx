@@ -247,7 +247,7 @@ export function AssetDecisionsPage() {
   }
 
   function openPortfolioLead() {
-    if (portfolioLead.kind === 'stable') return
+    if (portfolioLead.kind === 'scoped-empty') return
     const target = portfolioLead.primaryItem?.target
     if (target) {
       if (target.type === 'record') openRecord(target.id)

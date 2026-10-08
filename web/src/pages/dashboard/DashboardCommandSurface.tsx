@@ -31,7 +31,8 @@ function signalLabel(model: DashboardReadyModel): string {
   if (model.mode === 'critical') return '严重'
   if (model.mode === 'abnormal') return '异常'
   if (model.mode === 'maintenance') return '维护'
-  if (model.mode === 'stable' && model.tone === 'normal') return '摘要无异常'
+  if (model.title === '尚有目标无观测') return '尚有目标无观测'
+  if (model.mode === 'stable' && model.tone === 'normal') return '当前运行异常计数为 0'
   if (model.mode === 'stable') return '待核对'
   return model.title
 }
@@ -134,23 +135,24 @@ export function DashboardCommandSurface({
             <h2 id="dashboard-observation-title">观测证据</h2>
             <Link className="text-link text-link--action" to={DASHBOARD_LINKS.events24h}>查看事件流</Link>
           </div>
-          <div className="dashboard-evidence-metrics">
-            <span aria-label={`异常监控实例 ${observation.abnormalMonitoringCount}`}>
-              异常监控实例 <MonoDigits>{observation.abnormalMonitoringCount}</MonoDigits>
-            </span>
-            <span aria-label={`其中严重监控实例 ${observation.severeMonitoringCount}`}>
-              其中严重 <MonoDigits>{observation.severeMonitoringCount}</MonoDigits>
-            </span>
-            <span aria-label={`异常目标 ${observation.abnormalTargetCount}`}>
-              异常目标 <MonoDigits>{observation.abnormalTargetCount}</MonoDigits>
-            </span>
-            <span aria-label={`维护对象 ${observation.maintenanceTotal}`}>
-              维护对象 <MonoDigits>{observation.maintenanceTotal}</MonoDigits>
-            </span>
-          </div>
+          <p className="dashboard-evidence-lane__provenance">
+            来源：工作台摘要
+            {' · '}
+            摘要生成 <Timestamp value={model.snapshotGeneratedAt} mode="absolute" />
+          </p>
+          <p>已有历史观测不推断当前健康。</p>
+          {observation.unobservedTargetCount > 0 && model.mode !== 'stable' ? (
+            <Link to={DASHBOARD_LINKS.targetsUnobserved}>
+              尚无观测 <MonoDigits>{observation.unobservedTargetCount}</MonoDigits>
+            </Link>
+          ) : null}
           {observation.attentionItems.length === 0 ? (
             <p className="dashboard-evidence-lane__empty">
-              {model.mode === 'onboarding' ? '尚未建立观测对象。' : '当前摘要没有异常对象。'}
+              {model.mode === 'onboarding'
+                ? '尚未建立观测对象。'
+                : observation.unobservedTargetCount > 0
+                  ? '已知异常预览为空。'
+                  : '当前摘要没有异常对象。'}
             </p>
           ) : (
             <ul className="dashboard-attention-list" aria-label="最高优先级异常对象">
@@ -184,17 +186,21 @@ export function DashboardCommandSurface({
           <div className="dashboard-source-list">
             <article className={`dashboard-source dashboard-source--${model.assetEvidence.status}`}>
               <div className="dashboard-source__header">
-                <h3>{model.assetEvidence.title}</h3>
+                <h3>{model.assetEvidence.status === 'available' && (model.assetEvidence.vpsCount ?? 0) > 0 ? 'VPS 清单已读取' : model.assetEvidence.title}</h3>
                 <span>VPS 清单</span>
               </div>
-              <p>{model.assetEvidence.detail}</p>
+              {model.assetEvidence.status === 'available' && (model.assetEvidence.vpsCount ?? 0) > 0 ? (
+                <p>来源为 VPS 清单。</p>
+              ) : (
+                <p>{model.assetEvidence.detail}</p>
+              )}
               {model.assetEvidence.loadedAt ? (
                 <small>读取于 <Timestamp value={model.assetEvidence.loadedAt} mode="absolute" /></small>
               ) : null}
             </article>
             <article className={`dashboard-source dashboard-source--${model.billingEvidence.status}`}>
               <div className="dashboard-source__header">
-                <h3>{billingUnavailable ? '订阅摘要不可用' : model.billingEvidence.title}</h3>
+                <h3>{billingUnavailable ? '订阅摘要不可用' : model.billingEvidence.status === 'available' ? '订阅金额完整性' : model.billingEvidence.title}</h3>
                 <span>
                   {model.billingEvidence.source === 'subscription-overview'
                     ? '订阅摘要'
@@ -202,7 +208,8 @@ export function DashboardCommandSurface({
                 </span>
               </div>
               {billingUnavailable ? <strong>{model.billingEvidence.title}</strong> : null}
-              <p>{model.billingEvidence.detail}</p>
+              <p>{model.billingEvidence.completeness}</p>
+              {model.billingEvidence.status === 'available' ? null : <p>{model.billingEvidence.detail}</p>}
               <small>
                 生成于 <Timestamp value={model.billingEvidence.generatedAt} mode="absolute" />
               </small>

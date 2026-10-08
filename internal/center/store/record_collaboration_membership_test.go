@@ -34,8 +34,9 @@ func TestPostgresCollaborationMembershipReaderAcceptsOnlyPersistedAdminInDefault
 		t.Fatalf("transaction query calls = row:%d rows:%d, want 1/1", tx.queryRowCalls, tx.queryCalls)
 	}
 	if !strings.Contains(strings.ToLower(tx.queryRowSQL), "from public.users") ||
-		strings.Contains(strings.ToLower(tx.queryRowSQL), "record_access_group") {
-		t.Fatalf("membership SQL = %q, want users-only authority", tx.queryRowSQL)
+		strings.Contains(strings.ToLower(tx.queryRowSQL), "record_access_group") ||
+		!strings.Contains(strings.ToLower(tx.queryRowSQL), "disabled_at is null") {
+		t.Fatalf("membership SQL = %q, want active users-only authority", tx.queryRowSQL)
 	}
 }
 
@@ -54,6 +55,7 @@ func TestPostgresCollaborationMembershipReaderMatrixFailsClosed(t *testing.T) {
 		wantErr   error
 	}{
 		{name: "missing user", projectID: recordauth.ProjectIDDefault, userID: collaborationMemberTestUserID, tx: &fakeCollaborationMembershipTx{missing: true}, wantErr: recordcollaboration.ErrMembershipDenied},
+		{name: "disabled user", projectID: recordauth.ProjectIDDefault, userID: collaborationMemberTestUserID, tx: &fakeCollaborationMembershipTx{disabled: true}, wantErr: recordcollaboration.ErrMembershipDenied},
 		{name: "other role", projectID: recordauth.ProjectIDDefault, userID: collaborationMemberTestUserID, tx: &fakeCollaborationMembershipTx{role: "viewer"}, wantErr: recordcollaboration.ErrMembershipDenied},
 		{name: "unknown role", projectID: recordauth.ProjectIDDefault, userID: collaborationMemberTestUserID, tx: &fakeCollaborationMembershipTx{role: "future_role"}, wantErr: recordcollaboration.ErrMembershipDenied},
 		{name: "other project", projectID: "other", userID: collaborationMemberTestUserID, tx: &fakeCollaborationMembershipTx{role: auth.RoleAdmin}, wantErr: recordcollaboration.ErrMembershipDenied},
@@ -93,6 +95,7 @@ type fakeCollaborationMembershipTx struct {
 	pgx.Tx
 	role          string
 	missing       bool
+	disabled      bool
 	queryRowErr   error
 	scanErr       error
 	queryErr      error
@@ -108,7 +111,7 @@ func (tx *fakeCollaborationMembershipTx) QueryRow(_ context.Context, sql string,
 	if tx.queryRowErr != nil {
 		return fakeRecordReadRow{err: tx.queryRowErr}
 	}
-	if tx.missing {
+	if tx.missing || (tx.disabled && strings.Contains(strings.ToLower(sql), "disabled_at is null")) {
 		return fakeRecordReadRow{err: pgx.ErrNoRows}
 	}
 	if tx.scanErr != nil {

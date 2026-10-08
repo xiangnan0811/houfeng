@@ -1,9 +1,7 @@
 import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
-  type VPSLifecycleStatus,
   type VPSOverview,
-  type VPSRenewalDecision,
   type SubjectActivitySubjectSnapshot,
 } from './types'
 
@@ -60,8 +58,23 @@ const IMPORTANCE_LABELS: Record<string, string> = {
   critical: '关键',
 }
 
+const UNKNOWN_STATUS_LABEL = '状态未知'
+
+function mappedLabel(map: object, value: string): string | undefined {
+  if (!Object.hasOwn(map, value)) return undefined
+  const label = Object.getOwnPropertyDescriptor(map, value)?.value
+  return typeof label === 'string' && label ? label : undefined
+}
+
+/** Known map entries stay visible. Anything else, including Chinese prose or a URL, is not a label. */
+function mappedOrUnknown(map: object, value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  return mappedLabel(map, trimmed) ?? UNKNOWN_STATUS_LABEL
+}
+
 export function overviewLifecycleLabel(value: string): string {
-  return VPS_LIFECYCLE_STATUS_LABELS[value as VPSLifecycleStatus] ?? value
+  return mappedOrUnknown(VPS_LIFECYCLE_STATUS_LABELS, value)
 }
 
 export function overviewUsageLabel(value: string): string {
@@ -69,19 +82,35 @@ export function overviewUsageLabel(value: string): string {
 }
 
 export function overviewRenewalLabel(value: string): string {
-  return VPS_RENEWAL_DECISION_LABELS[value as VPSRenewalDecision] ?? value
+  return mappedOrUnknown(VPS_RENEWAL_DECISION_LABELS, value)
 }
 
 export function overviewOverallLabel(value: string): string {
-  return OVERALL_STATUS_LABELS[value] ?? value
+  return mappedOrUnknown(OVERALL_STATUS_LABELS, value)
 }
 
 export function overviewMonitoringLabel(value: string): string {
-  return MONITORING_STATUS_LABELS[value] ?? value
+  return mappedOrUnknown(MONITORING_STATUS_LABELS, value)
 }
 
 export function overviewIPLabel(value: string): string {
-  return IP_STATUS_LABELS[value] ?? value
+  return mappedOrUnknown(IP_STATUS_LABELS, value)
+}
+
+export function overviewUnmatchedStatus(
+  key: 'overall' | 'monitoring' | 'ip_quality' | 'renewal',
+  value: string,
+): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const map = key === 'overall'
+    ? OVERALL_STATUS_LABELS
+    : key === 'monitoring'
+      ? MONITORING_STATUS_LABELS
+      : key === 'ip_quality'
+        ? IP_STATUS_LABELS
+        : VPS_RENEWAL_DECISION_LABELS
+  return mappedLabel(map, trimmed) ? null : trimmed
 }
 
 const HEALTHY_OVERALL: Record<string, true> = { healthy: true, 总体正常: true }
@@ -203,15 +232,40 @@ export function overviewSummaryCellLabel(key: 'overall' | 'monitoring' | 'ip_qua
 }
 
 export function overviewRelationStatusLabel(value: string): string {
-  return RELATION_STATUS_LABELS[value] ?? overviewRenewalLabel(value)
+  return mappedOrUnknown(RELATION_STATUS_LABELS, value)
+}
+
+export type DiagnosticNote = { label: string; detail: string }
+
+function knownLabel(map: object, value: string): string | undefined {
+  return mappedLabel(map, value)
+}
+
+/** Primary copy is a known label only. Any other text, including Chinese or a URL, stays diagnostic. */
+function knownOrDiagnostic(
+  map: object,
+  value: string,
+  diagnosticLabel: string,
+): { summary: string; diagnostics: DiagnosticNote[] } {
+  const label = knownLabel(map, value)
+  if (label) return { summary: label, diagnostics: [] }
+  return { summary: '', diagnostics: [{ label: diagnosticLabel, detail: value }] }
 }
 
 export function overviewAnomalySourceLabel(value: string): string {
-  return ANOMALY_SOURCE_LABELS[value] ?? value
+  return mappedLabel(ANOMALY_SOURCE_LABELS, value) ?? ''
+}
+
+export function overviewAnomalySourcePresentation(value: string): { summary: string | null; diagnostics: DiagnosticNote[] } {
+  const trimmed = value.trim()
+  if (!trimmed) return { summary: null, diagnostics: [] }
+  const known = mappedLabel(ANOMALY_SOURCE_LABELS, trimmed)
+  if (known) return { summary: known, diagnostics: [] }
+  return { summary: null, diagnostics: [{ label: '来源', detail: trimmed }] }
 }
 
 export function overviewImportanceLabel(value: string): string {
-  return IMPORTANCE_LABELS[value] ?? value
+  return mappedOrUnknown(IMPORTANCE_LABELS, value)
 }
 
 export function overviewLocationLabel(parts: Array<string | undefined>): string {
@@ -223,31 +277,57 @@ const SUMMARY_DETAIL_FALLBACKS: Record<string, string> = {
   ip_quality_disabled_has_history: '存在历史报告（当前未启用）',
 }
 
+export function overviewSummaryDetailPresentation(
+  key: 'overall' | 'monitoring' | 'ip_quality' | 'renewal',
+  value: string,
+): { summary: string; diagnostics: DiagnosticNote[] } {
+  const trimmed = value.trim()
+  if (!trimmed) return { summary: '', diagnostics: [] }
+  const fallback = SUMMARY_DETAIL_FALLBACKS[trimmed]
+  if (fallback) return { summary: fallback, diagnostics: [] }
+  if (key === 'monitoring') return knownOrDiagnostic(MONITORING_STATUS_LABELS, trimmed, '监控详情')
+  if (key === 'ip_quality') return knownOrDiagnostic(IP_STATUS_LABELS, trimmed, '原始详情')
+  if (key === 'renewal') return knownOrDiagnostic(VPS_RENEWAL_DECISION_LABELS, trimmed, '原始详情')
+  if (key === 'overall') return knownOrDiagnostic(OVERALL_STATUS_LABELS, trimmed, '原始详情')
+  return knownOrDiagnostic({}, trimmed, '原始详情')
+}
+
 export function overviewSummaryDetailLabel(
   key: 'overall' | 'monitoring' | 'ip_quality' | 'renewal',
   value: string,
 ): string {
+  return overviewSummaryDetailPresentation(key, value).summary
+}
+
+export function overviewAnomalyDetailPresentation(ruleId: string, value: string): { summary: string | null; diagnostics: DiagnosticNote[] } {
   const trimmed = value.trim()
-  if (!trimmed) return ''
-  if (key === 'monitoring') return trimmed
-  if (SUMMARY_DETAIL_FALLBACKS[trimmed]) return SUMMARY_DETAIL_FALLBACKS[trimmed]
-  if (key === 'ip_quality') return overviewIPLabel(trimmed)
-  if (key === 'renewal') return overviewRenewalLabel(trimmed)
-  if (key === 'overall') return overviewOverallLabel(trimmed)
-  return trimmed
+  if (!trimmed) return { summary: null, diagnostics: [] }
+  if (ruleId === 'source.unavailable.v1') {
+    const labels: string[] = []
+    const diagnostics: DiagnosticNote[] = []
+    for (const part of trimmed.split(',').map((item) => item.trim()).filter(Boolean)) {
+      const presented = overviewAnomalySourcePresentation(part)
+      if (presented.summary) labels.push(presented.summary)
+      diagnostics.push(...presented.diagnostics)
+    }
+    return { summary: labels.length > 0 ? labels.join('、') : null, diagnostics }
+  }
+  const map = ruleId.startsWith('ip_quality.')
+    ? IP_STATUS_LABELS
+    : ruleId.startsWith('lifecycle.')
+      ? VPS_LIFECYCLE_STATUS_LABELS
+      : ruleId.startsWith('renewal.')
+        ? VPS_RENEWAL_DECISION_LABELS
+        : ruleId.startsWith('monitoring.')
+          ? MONITORING_STATUS_LABELS
+          : null
+  if (!map) return { summary: null, diagnostics: [{ label: '原始详情', detail: trimmed }] }
+  const presented = knownOrDiagnostic(map, trimmed, '原始详情')
+  return { summary: presented.summary || null, diagnostics: presented.diagnostics }
 }
 
 export function overviewAnomalyDetailLabel(ruleId: string, value: string): string {
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  if (ruleId.startsWith('monitoring.')) return trimmed
-  if (ruleId === 'source.unavailable.v1') {
-    return trimmed.split(',').map((part) => overviewAnomalySourceLabel(part.trim())).join('、')
-  }
-  if (ruleId.startsWith('ip_quality.')) return overviewIPLabel(trimmed)
-  if (ruleId.startsWith('lifecycle.')) return overviewLifecycleLabel(trimmed)
-  if (ruleId.startsWith('renewal.')) return overviewRenewalLabel(trimmed)
-  return trimmed
+  return overviewAnomalyDetailPresentation(ruleId, value).summary ?? ''
 }
 
 export function overviewAnomalySeverityClass(severity: string): string {
@@ -304,33 +384,41 @@ export function overviewMonitoringInstanceCountLabel(count: number): string {
   return `${count}个实例`
 }
 
-export function overviewMonitoringSupportingDetail(
+export function overviewMonitoringSupportingPresentation(
   detail: string,
   statusLabel: string,
   relationCount?: number,
-): string {
+): { text: string; diagnostics: DiagnosticNote[] } {
   const trimmed = detail.trim()
   const generated = GENERATED_MONITORING_COUNT.exec(trimmed)
-  let extra = ''
-  if (generated) {
-    const rest = (generated[2] ?? '').trim()
-    const restLabel = rest ? overviewMonitoringLabel(rest) : ''
-    const duplicatesStatus = !rest || rest === statusLabel || restLabel === statusLabel
-    extra = duplicatesStatus ? '' : rest
-  } else if (trimmed && trimmed !== statusLabel) {
-    extra = trimmed
-  }
+  const extraSource = generated ? (generated[2] ?? '').trim() : trimmed
+  const knownExtra = knownLabel(MONITORING_STATUS_LABELS, extraSource)
+  const duplicatesStatus = !extraSource || extraSource === statusLabel || knownExtra === statusLabel
+  const folded = !extraSource || duplicatesStatus
+    ? { summary: '', diagnostics: [] as DiagnosticNote[] }
+    : knownExtra
+      ? { summary: knownExtra, diagnostics: [] as DiagnosticNote[] }
+      : { summary: '', diagnostics: [{ label: '监控详情', detail: extraSource }] }
 
   const count = relationCount != null && relationCount > 0
     ? relationCount
     : generated
       ? Number(generated[1])
       : undefined
-  if (count != null && count > 0) {
-    const countLabel = overviewMonitoringInstanceCountLabel(count)
-    return extra && extra !== countLabel ? `${countLabel} · ${extra}` : countLabel
-  }
-  return extra
+  const countLabel = count != null && count > 0 ? overviewMonitoringInstanceCountLabel(count) : ''
+  const visibleExtra = folded.summary
+  const text = countLabel
+    ? (visibleExtra && visibleExtra !== countLabel ? `${countLabel} · ${visibleExtra}` : countLabel)
+    : visibleExtra
+  return { text, diagnostics: folded.diagnostics }
+}
+
+export function overviewMonitoringSupportingDetail(
+  detail: string,
+  statusLabel: string,
+  relationCount?: number,
+): string {
+  return overviewMonitoringSupportingPresentation(detail, statusLabel, relationCount).text
 }
 
 const EMPTY_IP_ACTION_STATUSES: Record<string, true> = {
@@ -351,14 +439,13 @@ const EMPTY_IP_ACTION_STATUSES: Record<string, true> = {
 export function overviewUnlinkedAnomalyCopy(anomaly: { title: string; detail?: string }): {
   reason: string
   impact: string | null
+  diagnostics: DiagnosticNote[]
 } {
   const detail = anomaly.detail?.trim() ?? ''
-  if (detail && detail !== anomaly.title) {
-    return { reason: detail, impact: null }
-  }
   return {
     reason: '当前 VPS 没有关联监控实例。',
     impact: '运行观测缺少心跳、健康与异常证据。',
+    diagnostics: detail && detail !== anomaly.title ? [{ label: '原始详情', detail }] : [],
   }
 }
 

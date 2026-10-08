@@ -3,6 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 
 import { Button, Modal } from '../../components/atoms'
 import { PageState } from '../../components/PageState'
+import { capabilityFlagsForSession } from '../../lib/auth-client'
+import { useAuth } from '../../lib/auth-context'
 import { ApiError } from '../../lib/apiRequest'
 import { searchRecords } from '../../lib/recordsApi'
 import type { RecordDetail } from '../../lib/types'
@@ -72,6 +74,8 @@ function dedupeRecords(current: RecordDetail[], incoming: RecordDetail[]): Recor
 }
 
 export function RecordSearchPage() {
+  const auth = useAuth()
+  const { comparison, portability } = capabilityFlagsForSession(auth)
   const [searchParams, setSearchParams] = useSearchParams()
   const rawSearchKey = searchParams.toString()
   const parsedFilters = useMemo(
@@ -235,11 +239,15 @@ export function RecordSearchPage() {
       <header className="page__head">
         <h1 className="page__title">运维记录</h1>
         <div className="page__actions">
-          <Link className="btn md secondary" to={comparisonEntryHref({
-            subjects: comparisonSubjectsFromRecords(visibleRecords),
-          })}>横向比较</Link>
+          {comparison ? (
+            <Link className="btn md secondary" to={comparisonEntryHref({
+              subjects: comparisonSubjectsFromRecords(visibleRecords),
+            })}>横向比较</Link>
+          ) : null}
           <Link className="btn md secondary" to="/records/drafts">草稿</Link>
-          <Button type="button" size="md" variant="secondary" onClick={() => setImportOpen(true)}>导入</Button>
+          {portability ? (
+            <Button type="button" size="md" variant="secondary" onClick={() => setImportOpen(true)}>导入</Button>
+          ) : null}
           <Link className="btn md primary" to="/records/new">新建记录</Link>
         </div>
       </header>
@@ -263,11 +271,13 @@ export function RecordSearchPage() {
         onClose={closeAdvanced}
       />
 
-      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="导入记录" size="lg">
-        <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
-          <RecordImportPanel />
-        </Suspense>
-      </Modal>
+      {portability ? (
+        <Modal open={importOpen} onClose={() => setImportOpen(false)} title="导入记录" size="lg">
+          <Suspense fallback={<section className="card" aria-label="记录导入">正在加载导入</section>}>
+            <RecordImportPanel />
+          </Suspense>
+        </Modal>
+      ) : null}
 
 
       <section className="page-stack record-search-results" aria-label="记录搜索结果">
@@ -296,7 +306,7 @@ export function RecordSearchPage() {
         ) : null}
         {visibleRecords.length > 0 ? (
           <>
-            <p className="page-sub">点击结果行可切换导出对象；标题链接仍打开详情。</p>
+            <p className="page-sub">{portability ? '点击结果行可切换导出对象；标题链接仍打开详情。' : '标题链接打开详情。'}</p>
             <RecordSearchResultsTable
               rows={visibleRecords}
               {...(exportRecord ? { selectedRecordId: exportRecord.record_id } : {})}
@@ -313,7 +323,7 @@ export function RecordSearchPage() {
           </>
         ) : null}
       </section>
-      {exportRecord ? (
+      {portability && exportRecord ? (
         <details className="record-search-tools">
           <summary>导出选中记录</summary>
           <Suspense fallback={<section className="card" aria-label="记录导出">正在加载导出</section>}>

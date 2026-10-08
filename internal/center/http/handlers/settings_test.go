@@ -31,7 +31,7 @@ func TestSettingsHandlerRejectsRemovedLowFrequencyRetentionControls(t *testing.T
 	} {
 		repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
 		recorder := httptest.NewRecorder()
-		handlers.Settings(repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body)))
+		handlers.Settings(repo, nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body)))
 		if recorder.Code != http.StatusBadRequest || repo.putSettingsCalls != 0 {
 			t.Fatalf("removed TTL accepted: status %d calls %d body %s", recorder.Code, repo.putSettingsCalls, body)
 		}
@@ -94,7 +94,7 @@ func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing
 	record.FeishuWebhookURL = "https://open.feishu.cn/open-apis/bot/v2/hook/full-secret-value"
 	repo := &fakeSettingsRepository{getSettingsResult: record}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
 	recorder := httptest.NewRecorder()
 
@@ -149,7 +149,7 @@ func TestSettingsHandlerReturnsManagedTelegramDisableStateTruthfully(t *testing.
 	record.Telegram.RuntimeManaged = true
 	repo := &fakeSettingsRepository{getSettingsResult: record}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
 	recorder := httptest.NewRecorder()
 
@@ -191,7 +191,7 @@ func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *te
 	updated.IPQuality.Services = []string{"netflix", "chatgpt"}
 	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30},"ip_quality_settings":{"enabled":false,"frequency_seconds":259200,"stale_after_seconds":864000,"timeout_seconds":20,"services":["netflix","chatgpt"]}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -263,7 +263,7 @@ func TestSettingsHandlerPreservesExistingTelegramTokenWhenBotTokenIsOmitted(t *t
 	updated.HostSampleFrequencyTier = "5s"
 	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"chat-id"},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -300,7 +300,7 @@ func TestSettingsHandlerPreservesEffectiveFreshInstallSettingsOnUnrelatedSave(t 
 		putSettingsResult: current,
 	}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"","runtime_managed":false},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":90,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[{"label":"核心","overrides":{"host_sample_frequency_tier":"5s"}}],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -337,7 +337,7 @@ func TestSettingsHandlerPreservesEffectiveFreshInstallSettingsOnUnrelatedSave(t 
 func TestSettingsHandlerRejectsUnknownFieldsOnPut(t *testing.T) {
 	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","unexpected":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -352,7 +352,7 @@ func TestSettingsHandlerRejectsUnknownFieldsOnPut(t *testing.T) {
 func TestSettingsHandlerRejectsOversizedPutBody(t *testing.T) {
 	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	body := `{"telegram":{"chat_id":"` + strings.Repeat("x", handlers.DefaultJSONBodyLimit) + `"}}`
 	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -374,7 +374,7 @@ func TestSettingsHandlerMapsValidationFailureToBadRequest(t *testing.T) {
 		putSettingsErr:    errors.Join(centersettings.ErrInvalidSettings, errors.New("bad settings")),
 	}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"","chat_id":""},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -389,7 +389,7 @@ func TestSettingsHandlerMapsValidationFailureToBadRequest(t *testing.T) {
 func TestSettingsHandlerRejectsTelegramTokenWithoutChatID(t *testing.T) {
 	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"replacement-token","chat_id":""},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -407,7 +407,7 @@ func TestSettingsHandlerRejectsTelegramTokenWithoutChatID(t *testing.T) {
 func TestSettingsHandlerMapsRepositoryFailureToInternalServerError(t *testing.T) {
 	repo := &fakeSettingsRepository{getSettingsErr: errors.New("boom")}
 
-	handler := handlers.Settings(repo)
+	handler := handlers.Settings(repo, nil)
 	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
 	recorder := httptest.NewRecorder()
 

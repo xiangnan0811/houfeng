@@ -1,16 +1,24 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  COMPARISON_SELECTION_LIMIT_ERROR,
   COMPARISON_URL_VERSION,
+  addFixedComparisonItem,
   canonicalComparisonURLState,
+  clearFixedComparisonItems,
   comparisonEntryHref,
+  comparisonFixedItemKey,
   comparisonHref,
   comparisonSeriesMetrics,
   comparisonSubjectsFromRecords,
   comparisonSubjectsFromSources,
+  confirmComparisonSnapshotItems,
   encodeComparisonURLState,
   parseComparisonSearchParams,
   parseComparisonURLState,
+  removeFixedComparisonItem,
+  replaceFixedComparisonItems,
+  type ComparisonURLFixedItem,
   type ComparisonURLState,
 } from './comparisonQueryState'
 
@@ -215,7 +223,203 @@ describe('comparison query state', () => {
       { current: { subjects: [{ kind: 'vps', source_id: 'vps_a', primary: true }] } } as never,
     ])).toEqual([{ kind: 'vps', id: 'vps_a' }])
   })
+
+  it('identifies a snapshot and a revision without including the evidence selection', () => {
+    expect(comparisonFixedItemKey({ snapshot_id: 'evs_a' })).toBe('snapshot:evs_a')
+    expect(comparisonFixedItemKey({
+      record_id: 'rec_b',
+      revision_id: 'rrv_2',
+      snapshot_ids: ['evs_b', 'evs_c'],
+    })).toBe('revision:rec_b:rrv_2')
+  })
+
+  it('keeps an explicit revision fixed when subjects are also supplied', () => {
+    const now = Date.parse('2026-08-20T12:00:00Z')
+    const href = comparisonEntryHref({
+      items: [{ record_id: 'rec_b', revision_id: 'rrv_2' }],
+      subjects: [
+        { kind: 'vps', id: 'vps_0123456789abcdef' },
+        { kind: 'monitoring_instance', id: 'mi_0123456789abcdef' },
+      ],
+      now,
+    })
+    const parsed = parseComparisonSearchParams(new URL(href, 'https://example.test').searchParams)
+    expect(parsed.ok).toBe(true)
+    if (!parsed.ok) return
+    expect(parsed.state.mode).toBe('fixed')
+    expect(parsed.state.items).toEqual([{ record_id: 'rec_b', revision_id: 'rrv_2' }])
+    expect(parsed.state.subjects).toBeUndefined()
+    expect(parsed.state.baseline).toBe(0)
+  })
+
+  it('keeps two revisions and two snapshots, and replaces snapshot selection on the same revision', () => {
+    const now = Date.parse('2026-08-20T12:00:00Z')
+    const first = addFixedComparisonItem(null, {
+      record_id: 'rec_same',
+      revision_id: 'rrv_1',
+      snapshot_ids: ['evs_a', ' evs_a ', 'evs_b'],
+    }, now)
+    const second = addFixedComparisonItem(first.ok ? first.state : null, {
+      record_id: 'rec_same',
+      revision_id: 'rrv_2',
+      snapshot_ids: ['evs_c'],
+    }, now)
+    expect(second.ok && second.state?.items).toEqual([
+      { record_id: 'rec_same', revision_id: 'rrv_1', snapshot_ids: ['evs_a', 'evs_b'] },
+      { record_id: 'rec_same', revision_id: 'rrv_2', snapshot_ids: ['evs_c'] },
+    ])
+    const replaced = addFixedComparisonItem(second.ok ? second.state : null, {
+      record_id: 'rec_same',
+      revision_id: 'rrv_1',
+      snapshot_ids: ['evs_d'],
+    }, now)
+    expect(replaced.ok && replaced.changed).toBe(true)
+    expect(replaced.ok && replaced.state?.items).toEqual([
+      { record_id: 'rec_same', revision_id: 'rrv_1', snapshot_ids: ['evs_d'] },
+      { record_id: 'rec_same', revision_id: 'rrv_2', snapshot_ids: ['evs_c'] },
+    ])
+    const clearedSelection = addFixedComparisonItem(replaced.ok ? replaced.state : null, {
+      record_id: 'rec_same',
+      revision_id: 'rrv_1',
+    }, now)
+    expect(clearedSelection.ok && clearedSelection.state?.items?.[0]).toEqual({
+      record_id: 'rec_same',
+      revision_id: 'rrv_1',
+    })
+
+    const seeded = addFixedComparisonItem(null, { snapshot_id: ' evs_a ' }, now)
+    const snapshots = addFixedComparisonItem(seeded.ok ? seeded.state : null, { snapshot_id: 'evs_b' }, now)
+    const duplicate = addFixedComparisonItem(snapshots.ok ? snapshots.state : null, { snapshot_id: 'evs_a' }, now)
+    expect(snapshots.ok && snapshots.state?.items).toEqual([
+      { snapshot_id: 'evs_a' },
+      { snapshot_id: 'evs_b' },
+    ])
+    expect(duplicate).toMatchObject({ ok: true, changed: false })
+    expect(duplicate.ok && duplicate.state?.items).toHaveLength(2)
+  })
+
+  it('rejects a seventh distinct object without truncating or mutating the basket', () => {
+    const six = fixedWith(Array.from({ length: 6 }, (_, index) => ({ snapshot_id: `evs_${index}` })))
+    const seventh = addFixedComparisonItem(six, { snapshot_id: 'evs_6' })
+    expect(seventh).toEqual({ ok: false, error: COMPARISON_SELECTION_LIMIT_ERROR })
+    expect(six.items).toHaveLength(6)
+
+    const replaced = replaceFixedComparisonItems(six, [
+      ...six.items ?? [],
+      { snapshot_id: 'evs_6' },
+    ])
+    expect(replaced).toEqual({ ok: false, error: COMPARISON_SELECTION_LIMIT_ERROR })
+    expect(six.items).toHaveLength(6)
+
+    const deduped = replaceFixedComparisonItems(null, [
+      ...six.items ?? [],
+      { snapshot_id: 'evs_0' },
+    ], Date.parse('2026-08-20T12:00:00Z'))
+    expect(deduped.ok && deduped.state?.items).toHaveLength(6)
+    expect(addFixedComparisonItem(six, { snapshot_id: 'evs_0' })).toMatchObject({ ok: true, changed: false })
+
+    const full = fixedWith([
+      { record_id: 'rec_same', revision_id: 'rrv_1', snapshot_ids: ['evs_a'] },
+      ...Array.from({ length: 5 }, (_, index) => ({ snapshot_id: `evs_${index}` })),
+    ])
+    expect(addFixedComparisonItem(full, {
+      record_id: 'rec_other',
+      revision_id: 'rrv_9',
+    })).toEqual({ ok: false, error: COMPARISON_SELECTION_LIMIT_ERROR })
+    const updated = addFixedComparisonItem(full, {
+      record_id: 'rec_same',
+      revision_id: 'rrv_1',
+      snapshot_ids: ['evs_next'],
+    })
+    expect(updated.ok && updated.state?.items).toHaveLength(6)
+    expect(updated.ok && updated.state?.items?.[0]).toEqual({
+      record_id: 'rec_same',
+      revision_id: 'rrv_1',
+      snapshot_ids: ['evs_next'],
+    })
+  })
+
+  it('moves the baseline to the next item, otherwise the last, and clears the last object', () => {
+    const basket = fixedWith([
+      { snapshot_id: 'evs_a' },
+      { snapshot_id: 'evs_b' },
+      { snapshot_id: 'evs_c' },
+    ])
+    const removeBaseline = removeFixedComparisonItem(basket, 'snapshot:evs_a')
+    expect(removeBaseline.ok && removeBaseline.state?.items).toEqual([
+      { snapshot_id: 'evs_b' },
+      { snapshot_id: 'evs_c' },
+    ])
+    expect(removeBaseline.ok && removeBaseline.state?.baseline).toBe(0)
+    expect(removeBaseline.ok && removeBaseline.state?.kind).toBe('monitoring.probe/v2')
+
+    const removeLastBaseline = removeFixedComparisonItem({ ...basket, baseline: 2 }, 'snapshot:evs_c')
+    expect(removeLastBaseline.ok && removeLastBaseline.state?.baseline).toBe(1)
+    expect(removeLastBaseline.ok && removeLastBaseline.state?.items).toEqual([
+      { snapshot_id: 'evs_a' },
+      { snapshot_id: 'evs_b' },
+    ])
+
+    const removeBefore = removeFixedComparisonItem({ ...basket, baseline: 1 }, 'snapshot:evs_a')
+    expect(removeBefore.ok && removeBefore.state?.baseline).toBe(0)
+    expect(removeBefore.ok && removeBefore.state?.items?.[0]).toEqual({ snapshot_id: 'evs_b' })
+
+    const removeAfter = removeFixedComparisonItem({ ...basket, baseline: 1 }, 'snapshot:evs_c')
+    expect(removeAfter.ok && removeAfter.state?.baseline).toBe(1)
+
+    const reordered = replaceFixedComparisonItems({ ...basket, baseline: 2 }, [
+      { snapshot_id: 'evs_c' },
+      { snapshot_id: 'evs_a' },
+    ])
+    expect(reordered.ok && reordered.state?.baseline).toBe(0)
+    expect(reordered.ok && reordered.state?.items).toEqual([
+      { snapshot_id: 'evs_c' },
+      { snapshot_id: 'evs_a' },
+    ])
+
+    const emptied = removeFixedComparisonItem(
+      fixedWith([{ snapshot_id: 'evs_a' }]),
+      'snapshot:evs_a',
+    )
+    expect(emptied).toEqual({ ok: true, changed: true, state: null })
+    expect(clearFixedComparisonItems(basket)).toEqual({ ok: true, changed: true, state: null })
+    expect(clearFixedComparisonItems(null)).toEqual({ ok: true, changed: false, state: null })
+  })
+
+  it('confirms selected snapshot ids and does not promote a revision id', () => {
+    const now = Date.parse('2026-08-20T12:00:00Z')
+    const confirmed = confirmComparisonSnapshotItems(CANDIDATE, [
+      { record_id: 'rec_a', revision_id: 'rrv_ignored', snapshot_ids: ['evs_a', 'evs_a'] },
+      { snapshot_id: 'evs_b' },
+      { record_id: 'rec_bare', revision_id: 'rrv_bare' },
+    ], now)
+    expect(confirmed.ok && confirmed.state?.mode).toBe('fixed')
+    expect(confirmed.ok && confirmed.state?.items).toEqual([
+      { snapshot_id: 'evs_a' },
+      { snapshot_id: 'evs_b' },
+    ])
+
+    const bare = confirmComparisonSnapshotItems(CANDIDATE, [
+      { record_id: 'rec_a', revision_id: 'rrv_a' },
+      { record_id: 'rec_b', revision_id: 'rrv_b' },
+    ], now)
+    expect(bare).toEqual({ ok: true, changed: false, state: CANDIDATE })
+
+    const tooMany = confirmComparisonSnapshotItems(CANDIDATE, Array.from(
+      { length: 7 },
+      (_, index) => ({ snapshot_id: `evs_${index}` }),
+    ), now)
+    expect(tooMany).toEqual({ ok: false, error: COMPARISON_SELECTION_LIMIT_ERROR })
+  })
 })
+
+function fixedWith(items: ComparisonURLFixedItem[], baseline = 0): ComparisonURLState {
+  return {
+    ...FIXED,
+    items,
+    baseline,
+  }
+}
 
 function encodeRaw(value: unknown): string {
   return btoa(JSON.stringify(value)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')

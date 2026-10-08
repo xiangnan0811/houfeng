@@ -14,6 +14,8 @@ type Props = {
   /** When true, marks the overview link as the current page. */
   overviewCurrent?: boolean
   search?: string
+  /** Records activity, records, and evidence links. Core overview stays. */
+  includeRecordViews?: boolean
 }
 
 const VIEWS: SubjectActivityView[] = ['activity', 'records', 'evidence']
@@ -24,6 +26,7 @@ export function SubjectLocalNavigation({
   overviewHref,
   overviewCurrent = false,
   search = '',
+  includeRecordViews = true,
 }: Props) {
   const { state } = useLocation()
   const navigationState = subject.kind === 'target' ? undefined : state
@@ -42,7 +45,7 @@ export function SubjectLocalNavigation({
           概览
         </Link>
       ) : null}
-      {VIEWS.map((view) => {
+      {includeRecordViews ? VIEWS.map((view) => {
         const to = `${subject.basePath}/${view}${query}`
         const active = !overviewCurrent && view === activeView
         return (
@@ -58,7 +61,7 @@ export function SubjectLocalNavigation({
             {subjectActivityViewLabel(view)}
           </Link>
         )
-      })}
+      }) : null}
     </nav>
   )
 }

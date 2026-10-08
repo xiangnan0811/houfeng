@@ -4,6 +4,7 @@ import { Badge, type BadgeTone } from '../../components/atoms'
 import { formatDate } from '../../lib/format'
 import type { SubscriptionOverview, SubscriptionRenewalQueueItem } from '../../lib/types'
 import { daysUntilDate, renewalLabel, renewalTimingLabel, renewalUrgency } from '../assetPageUtils'
+import { exchangeRateStatusLabel } from './exchangeRatePresentation'
 import { money } from './insightFormat'
 
 const DECISION_TONES: Readonly<Record<string, BadgeTone>> = {
@@ -43,6 +44,7 @@ export function RenewalQueue({
       {items.map((item) => {
         const days = daysUntilDate(item.renew_at)
         const title = item.display_name || item.vps_display_name || item.vps_id
+        const rateLabel = exchangeRateStatusLabel(item.exchange_rate_status)
         const meta = [
           item.vps_display_name && item.vps_display_name !== title ? item.vps_display_name : '',
           item.provider_name || '未记录服务商',
@@ -65,8 +67,8 @@ export function RenewalQueue({
             </span>
             <Badge variant="state" tone={decisionTone(item.renewal_decision)}>{renewalLabel(item.renewal_decision)}</Badge>
             <span className="subscription-renewal-row__amount mono tnum">
-              {item.exchange_rate_stale ? <small>汇率过期</small> : null}
-              {money(item.monthly_price_base, item.base_currency || baseCurrency)}/月
+              {rateLabel ? <small>{rateLabel}</small> : null}
+              {item.monthly_price_base == null ? '金额待核对' : `${money(item.monthly_price_base, item.base_currency || baseCurrency)}/月`}
             </span>
           </button>
         )
@@ -91,16 +93,20 @@ export function ArchivedCharges({ overview, baseCurrency }: { overview: Subscrip
         <InsightEmpty title="暂无待核对的归档扣费" />
       ) : (
         <ul className="subscription-archived-list">
-          {costs.map((row) => (
+          {costs.map((row) => {
+            const rateLabel = exchangeRateStatusLabel(row.exchange_rate_status)
+            return (
             <li className="subscription-archived-row" key={row.subscription_id}>
               <strong>{row.vps_display_name || row.vps_id}</strong>
               <small>{row.auto_renew_check === 'enabled' ? '服务商自动续费已开启' : '服务商自动续费待核对'}</small>
               <span className="subscription-archived-row__amount mono tnum">
+                {rateLabel ? <small>{rateLabel}</small> : null}
                 {row.monthly_price_base == null ? '金额待核对' : `${money(row.monthly_price_base, baseCurrency)}/月`}
               </span>
               <Link className="text-link" to={`/vps/${encodeURIComponent(row.vps_id)}`}>核对扣费</Link>
             </li>
-          ))}
+            )
+          })}
           {missing.map((asset) => (
             <li className="subscription-archived-row" key={asset.vps_id}>
               <strong>{asset.display_name || asset.vps_id}</strong>

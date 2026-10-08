@@ -30,25 +30,15 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 			}
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = []string{"edge", "核心"}
-				if len(dest) > 1 {
-					*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
-				}
-				if len(dest) > 2 {
-					*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
-				}
-				if len(dest) > 3 {
-					*(dest[3].(*string)) = agentapi.FrequencyTier15m
-				}
-				if len(dest) > 4 {
-					*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
-						MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{},
-						TargetTypes:              []centersettings.TargetTypeOverrideRule{},
-						TargetLabels:             []centersettings.TargetLabelOverrideRule{},
-					})
-				}
-				if len(dest) > 5 {
-					*(dest[5].(*bool)) = true
-				}
+				*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
+				*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
+				*(dest[3].(*string)) = agentapi.FrequencyTier15m
+				*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
+					MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{},
+					TargetTypes:              []centersettings.TargetTypeOverrideRule{},
+					TargetLabels:             []centersettings.TargetLabelOverrideRule{},
+				})
+				*(dest[5].(*bool)) = true
 				return nil
 			}}
 		},
@@ -195,45 +185,35 @@ func TestBuildSyncPlanAppliesSettingsOverrides(t *testing.T) {
 			}
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = []string{"edge", "核心"}
-				if len(dest) > 1 {
-					*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
-				}
-				if len(dest) > 2 {
-					*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
-				}
-				if len(dest) > 3 {
-					*(dest[3].(*string)) = agentapi.FrequencyTier15m
-				}
-				if len(dest) > 4 {
-					*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
-						MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{{
-							Label: "核心",
-							Overrides: centersettings.SettingsOverrideFields{
-								HostSampleFrequencyTier: &hostTier1m,
+				*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
+				*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
+				*(dest[3].(*string)) = agentapi.FrequencyTier15m
+				*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
+					MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{{
+						Label: " 核心 ",
+						Overrides: centersettings.SettingsOverrideFields{
+							HostSampleFrequencyTier: &hostTier1m,
+						},
+					}},
+					TargetTypes: []centersettings.TargetTypeOverrideRule{{
+						TargetType: targets.TargetTypeService,
+						Overrides: centersettings.SettingsOverrideFields{
+							ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
+								HTTP: &httpTier15m,
+								TLS:  &tlsTier6h,
 							},
-						}},
-						TargetTypes: []centersettings.TargetTypeOverrideRule{{
-							TargetType: targets.TargetTypeService,
-							Overrides: centersettings.SettingsOverrideFields{
-								ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
-									HTTP: &httpTier15m,
-									TLS:  &tlsTier6h,
-								},
+						},
+					}},
+					TargetLabels: []centersettings.TargetLabelOverrideRule{{
+						Label: "slow-lane",
+						Overrides: centersettings.SettingsOverrideFields{
+							ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
+								TLS: &tlsTier5m,
 							},
-						}},
-						TargetLabels: []centersettings.TargetLabelOverrideRule{{
-							Label: "slow-lane",
-							Overrides: centersettings.SettingsOverrideFields{
-								ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
-									TLS: &tlsTier5m,
-								},
-							},
-						}},
-					})
-				}
-				if len(dest) > 5 {
-					*(dest[5].(*bool)) = true
-				}
+						},
+					}},
+				})
+				*(dest[5].(*bool)) = true
 				return nil
 			}}
 		},
@@ -313,25 +293,15 @@ func TestBuildSyncPlanReturnsAssignmentsWhenSettingsRowMissing(t *testing.T) {
 			}
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = []string{"edge", "核心"}
-				if len(dest) > 1 {
-					*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
-				}
-				if len(dest) > 2 {
-					*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
-				}
-				if len(dest) > 3 {
-					*(dest[3].(*string)) = agentapi.FrequencyTier5m
-				}
-				if len(dest) > 4 {
-					*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
-						MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{},
-						TargetTypes:              []centersettings.TargetTypeOverrideRule{},
-						TargetLabels:             []centersettings.TargetLabelOverrideRule{},
-					})
-				}
-				if len(dest) > 5 {
-					*(dest[5].(*bool)) = false
-				}
+				*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
+				*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
+				*(dest[3].(*string)) = agentapi.FrequencyTier5m
+				*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, centersettings.OverrideRules{
+					MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{},
+					TargetTypes:              []centersettings.TargetTypeOverrideRule{},
+					TargetLabels:             []centersettings.TargetLabelOverrideRule{},
+				})
+				*(dest[5].(*bool)) = false
 				return nil
 			}}
 		},
@@ -397,12 +367,8 @@ func TestBuildSyncPlanReturnsDefaultCadenceAndNoAssignmentsForLabelLessMonitorin
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 			return fakeAgentPlanRow{scan: func(dest ...any) error {
 				*(dest[0].(*[]string)) = nil
-				if len(dest) > 1 {
-					*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
-				}
-				if len(dest) > 2 {
-					*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
-				}
+				*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
+				*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
 				return nil
 			}}
 		},
@@ -434,6 +400,333 @@ func TestBuildSyncPlanSQLIncludesEnabledAndLabelOverlapFilters(t *testing.T) {
 	}
 	if !containsSQL([]string{selectAgentPlanAssignmentsSQL}, "t.run_status = any($1)") {
 		t.Fatalf("selectAgentPlanAssignmentsSQL = %q, want run_status filter", selectAgentPlanAssignmentsSQL)
+	}
+}
+func TestResolveAgentPlanSettingsUsesCanonicalDefaultsWhenRowMissing(t *testing.T) {
+	t.Parallel()
+
+	got, err := resolveAgentPlanSettings(false, []string{"core"}, "", nil, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("resolveAgentPlanSettings() error = %v", err)
+	}
+	defaults := centersettings.Default()
+	if got.HostSampleFrequencyTier != agentapi.FrequencyTier5s {
+		t.Fatalf("HostSampleFrequencyTier = %q, want %q", got.HostSampleFrequencyTier, agentapi.FrequencyTier5s)
+	}
+	if got.ProbeFrequencyDefaults != defaults.ProbeFrequencyDefaults {
+		t.Fatalf("ProbeFrequencyDefaults = %#v, want %#v", got.ProbeFrequencyDefaults, defaults.ProbeFrequencyDefaults)
+	}
+	if got.IncidentDefaults != defaults.IncidentDefaults {
+		t.Fatalf("IncidentDefaults = %#v, want %#v", got.IncidentDefaults, defaults.IncidentDefaults)
+	}
+	if len(got.OverrideRules.MonitoringInstanceLabels) != 0 ||
+		len(got.OverrideRules.TargetTypes) != 0 ||
+		len(got.OverrideRules.TargetLabels) != 0 {
+		t.Fatalf("OverrideRules = %#v, want canonical empty rule arrays", got.OverrideRules)
+	}
+	if got.IPQuality.FrequencySeconds != defaults.IPQuality.FrequencySeconds {
+		t.Fatalf("IPQuality.FrequencySeconds = %d, want %d", got.IPQuality.FrequencySeconds, defaults.IPQuality.FrequencySeconds)
+	}
+}
+
+func TestBuildSyncPlanAcceptsOverrideAgainstPersistedIncidentDefaults(t *testing.T) {
+	t.Parallel()
+
+	defaults := centersettings.Default()
+	defaults.IncidentDefaults.CPUWarningPct = 50
+	defaults.IncidentDefaults.CPUAlertPct = 60
+	defaults.IncidentDefaults.CPUCriticalPct = 70
+	overrideCritical := 75
+	overrideRules := centersettings.OverrideRules{
+		MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{{
+			Label: "core",
+			Overrides: centersettings.SettingsOverrideFields{
+				IncidentDefaults: &centersettings.IncidentDefaultsOverride{
+					CPUCriticalPct: &overrideCritical,
+				},
+			},
+		}},
+	}
+
+	repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
+				return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
+			}
+			return fakeAgentPlanRow{scan: func(dest ...any) error {
+				*(dest[0].(*[]string)) = []string{"core"}
+				*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
+				*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
+				*(dest[3].(*string)) = agentapi.FrequencyTier5s
+				*(dest[4].(*[]byte)) = mustMarshalAgentPlanJSON(t, overrideRules)
+				*(dest[5].(*bool)) = true
+				*(dest[6].(*bool)) = false
+				*(dest[7].(*[]byte)) = mustMarshalAgentPlanJSON(t, defaults.IPQuality)
+				*(dest[8].(*[]byte)) = mustMarshalAgentPlanJSON(t, defaults.ProbeFrequencyDefaults)
+				*(dest[9].(*[]byte)) = mustMarshalAgentPlanJSON(t, defaults.IncidentDefaults)
+				return nil
+			}}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if sql != selectAgentPlanAssignmentsSQL {
+				return nil, errors.New("unexpected Query")
+			}
+			return &fakeAgentPlanRows{}, nil
+		},
+	}}
+
+	if _, err := repo.BuildSyncPlan(context.Background(), "mi_001"); err != nil {
+		t.Fatalf("BuildSyncPlan() error = %v, want valid persisted-policy snapshot", err)
+	}
+}
+func TestBuildSyncPlanRejectsMalformedPersistedPolicy(t *testing.T) {
+	t.Parallel()
+
+	defaults := centersettings.Default()
+	defaultOverrideRules := mustMarshalAgentPlanJSON(t, defaults.OverrideRules)
+	defaultProbeDefaults := mustMarshalAgentPlanJSON(t, defaults.ProbeFrequencyDefaults)
+	defaultIncidentDefaults := mustMarshalAgentPlanJSON(t, defaults.IncidentDefaults)
+	testCases := []struct {
+		name                string
+		overrideJSON        []byte
+		probeJSON           []byte
+		incidentJSON        []byte
+		wantInvalidSettings bool
+	}{
+		{
+			name:         "malformed override json",
+			overrideJSON: []byte(`{"target_types":`),
+			probeJSON:    defaultProbeDefaults,
+			incidentJSON: defaultIncidentDefaults,
+		},
+		{
+			name:         "unknown incident default field",
+			overrideJSON: defaultOverrideRules,
+			probeJSON:    defaultProbeDefaults,
+			incidentJSON: []byte(`{"unexpected":true}`),
+		},
+		{
+			name:                "invalid persisted probe tier",
+			overrideJSON:        defaultOverrideRules,
+			probeJSON:           []byte(`{"tcp":"30s","http":"5s","tls":"6h"}`),
+			incidentJSON:        defaultIncidentDefaults,
+			wantInvalidSettings: true,
+		},
+	}
+
+	for _, testCase := range testCases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+				queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+					if sql != selectAgentPlanMonitoringInstanceLabelsSQL {
+						return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
+					}
+					return fakeAgentPlanRow{scan: func(dest ...any) error {
+						*(dest[0].(*[]string)) = []string{"core"}
+						*(dest[1].(*string)) = monitoringinstances.LifecycleInUse
+						*(dest[2].(*string)) = monitoringinstances.MonitoringEnabled
+						*(dest[3].(*string)) = agentapi.FrequencyTier5s
+						*(dest[4].(*[]byte)) = append([]byte(nil), testCase.overrideJSON...)
+						*(dest[5].(*bool)) = true
+						*(dest[6].(*bool)) = false
+						*(dest[7].(*[]byte)) = mustMarshalAgentPlanJSON(t, defaults.IPQuality)
+						*(dest[8].(*[]byte)) = append([]byte(nil), testCase.probeJSON...)
+						*(dest[9].(*[]byte)) = append([]byte(nil), testCase.incidentJSON...)
+						return nil
+					}}
+				},
+				query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+					if sql != selectAgentPlanAssignmentsSQL {
+						return nil, errors.New("unexpected Query")
+					}
+					return &fakeAgentPlanRows{}, nil
+				},
+			}}
+
+			_, err := repo.BuildSyncPlan(context.Background(), "mi_001")
+			if err == nil {
+				t.Fatal("BuildSyncPlan() error = nil, want malformed persisted policy rejection")
+			}
+			if testCase.wantInvalidSettings && !errors.Is(err, centersettings.ErrInvalidSettings) {
+				t.Fatalf("BuildSyncPlan() error = %v, want ErrInvalidSettings", err)
+			}
+		})
+	}
+}
+func TestResolveProbeAssignmentFrequencyTierUsesExactPrecedence(t *testing.T) {
+	t.Parallel()
+
+	t.Run("each probe kind uses its matching type override", func(t *testing.T) {
+		t.Parallel()
+
+		tcpTier := agentapi.FrequencyTier1m
+		httpTier := agentapi.FrequencyTier5m
+		tlsTier := agentapi.FrequencyTier6h
+		rules := centersettings.OverrideRules{
+			TargetTypes: []centersettings.TargetTypeOverrideRule{{
+				TargetType: targets.TargetTypeService,
+				Overrides: centersettings.SettingsOverrideFields{
+					ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
+						TCP:  &tcpTier,
+						HTTP: &httpTier,
+						TLS:  &tlsTier,
+					},
+				},
+			}},
+		}
+		for _, testCase := range []struct {
+			kind string
+			want string
+		}{
+			{kind: agentapi.ProbeKindTCP, want: tcpTier},
+			{kind: agentapi.ProbeKindHTTP, want: httpTier},
+			{kind: agentapi.ProbeKindTLS, want: tlsTier},
+		} {
+			testCase := testCase
+			t.Run(testCase.kind, func(t *testing.T) {
+				t.Parallel()
+
+				got := resolveProbeAssignmentFrequencyTier(
+					agentapi.FrequencyTier15m,
+					testCase.kind,
+					targets.TargetTypeService,
+					nil,
+					rules,
+				)
+				if got != testCase.want {
+					t.Fatalf("resolveProbeAssignmentFrequencyTier() = %q, want %q", got, testCase.want)
+				}
+			})
+		}
+	})
+
+	t.Run("target label overrides matching type", func(t *testing.T) {
+		t.Parallel()
+
+		typeTier := agentapi.FrequencyTier1m
+		labelTier := agentapi.FrequencyTier5m
+		got := resolveProbeAssignmentFrequencyTier(
+			agentapi.FrequencyTier15m,
+			agentapi.ProbeKindHTTP,
+			targets.TargetTypeService,
+			[]string{"external"},
+			centersettings.OverrideRules{
+				TargetTypes: []centersettings.TargetTypeOverrideRule{{
+					TargetType: targets.TargetTypeService,
+					Overrides: centersettings.SettingsOverrideFields{
+						ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{HTTP: &typeTier},
+					},
+				}},
+				TargetLabels: []centersettings.TargetLabelOverrideRule{{
+					Label: "external",
+					Overrides: centersettings.SettingsOverrideFields{
+						ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{HTTP: &labelTier},
+					},
+				}},
+			},
+		)
+		if got != labelTier {
+			t.Fatalf("resolveProbeAssignmentFrequencyTier() = %q, want target-label tier %q", got, labelTier)
+		}
+	})
+
+	t.Run("matching type without kind still permits target label", func(t *testing.T) {
+		t.Parallel()
+
+		labelTier := agentapi.FrequencyTier1m
+		got := resolveProbeAssignmentFrequencyTier(
+			agentapi.FrequencyTier15m,
+			agentapi.ProbeKindTLS,
+			targets.TargetTypeService,
+			[]string{"external"},
+			centersettings.OverrideRules{
+				TargetTypes: []centersettings.TargetTypeOverrideRule{{
+					TargetType: targets.TargetTypeService,
+					Overrides: centersettings.SettingsOverrideFields{
+						ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{HTTP: new(agentapi.FrequencyTier5m)},
+					},
+				}},
+				TargetLabels: []centersettings.TargetLabelOverrideRule{{
+					Label: "external",
+					Overrides: centersettings.SettingsOverrideFields{
+						ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{TLS: &labelTier},
+					},
+				}},
+			},
+		)
+		if got != labelTier {
+			t.Fatalf("resolveProbeAssignmentFrequencyTier() = %q, want target-label tier %q", got, labelTier)
+		}
+	})
+
+	t.Run("matching target label without kind is skipped in rule order", func(t *testing.T) {
+		t.Parallel()
+
+		labelTier := agentapi.FrequencyTier5m
+		got := resolveProbeAssignmentFrequencyTier(
+			agentapi.FrequencyTier15m,
+			agentapi.ProbeKindTLS,
+			targets.TargetTypeService,
+			[]string{"first", "second"},
+			centersettings.OverrideRules{
+				TargetLabels: []centersettings.TargetLabelOverrideRule{
+					{
+						Label: "first",
+						Overrides: centersettings.SettingsOverrideFields{
+							ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{HTTP: new(agentapi.FrequencyTier1m)},
+						},
+					},
+					{
+						Label: "second",
+						Overrides: centersettings.SettingsOverrideFields{
+							ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{TLS: &labelTier},
+						},
+					},
+				},
+			},
+		)
+		if got != labelTier {
+			t.Fatalf("resolveProbeAssignmentFrequencyTier() = %q, want later matching label tier %q", got, labelTier)
+		}
+	})
+
+	t.Run("exact labels preserve persisted probe base", func(t *testing.T) {
+		t.Parallel()
+
+		base := agentapi.FrequencyTier6h
+		overrideTier := agentapi.FrequencyTier1m
+		rules := centersettings.OverrideRules{TargetLabels: []centersettings.TargetLabelOverrideRule{{
+			Label: "external",
+			Overrides: centersettings.SettingsOverrideFields{
+				ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{HTTP: &overrideTier},
+			},
+		}}}
+		if got := resolveProbeAssignmentFrequencyTier(base, agentapi.ProbeKindHTTP, targets.TargetTypeService, []string{"External"}, rules); got != base {
+			t.Fatalf("case-mismatched target label tier = %q, want persisted base %q", got, base)
+		}
+		if got := resolveProbeAssignmentFrequencyTier(base, agentapi.ProbeKindHTTP, targets.TargetTypeService, nil, rules); got != base {
+			t.Fatalf("missing target label tier = %q, want persisted base %q", got, base)
+		}
+	})
+}
+
+func TestResolveHostSampleFrequencyTierUsesExactRuleOrder(t *testing.T) {
+	t.Parallel()
+
+	firstTier := agentapi.FrequencyTier1m
+	laterTier := agentapi.FrequencyTier5m
+	rules := centersettings.OverrideRules{MonitoringInstanceLabels: []centersettings.MonitoringInstanceLabelOverrideRule{
+		{Label: "edge", Overrides: centersettings.SettingsOverrideFields{HostSampleFrequencyTier: &firstTier}},
+		{Label: "core", Overrides: centersettings.SettingsOverrideFields{HostSampleFrequencyTier: &laterTier}},
+	}}
+	if got := centersettings.ResolveHostSampleFrequencyTier(agentapi.FrequencyTier15m, []string{"core", "edge"}, rules); got != firstTier {
+		t.Fatalf("ResolveHostSampleFrequencyTier() = %q, want first rule tier %q", got, firstTier)
+	}
+	if got := centersettings.ResolveHostSampleFrequencyTier(agentapi.FrequencyTier15m, []string{"EDGE"}, rules); got != agentapi.FrequencyTier15m {
+		t.Fatalf("ResolveHostSampleFrequencyTier() case-mismatch = %q, want persisted base %q", got, agentapi.FrequencyTier15m)
 	}
 }
 
@@ -630,6 +923,9 @@ type fakeAgentPlanRow struct {
 }
 
 func (f fakeAgentPlanRow) Scan(dest ...any) error {
+	if len(dest) != 10 {
+		return errors.New("unexpected agent-plan snapshot column count")
+	}
 	if err := f.scan(dest...); err != nil {
 		return err
 	}
@@ -638,29 +934,27 @@ func (f fakeAgentPlanRow) Scan(dest ...any) error {
 }
 
 func fillDefaultAgentPlanScanFields(dest []any) {
-	if len(dest) > 1 {
-		if value, ok := dest[1].(*string); ok && *value == "" {
-			*value = monitoringinstances.LifecycleInUse
-		}
+	if value, ok := dest[1].(*string); ok && *value == "" {
+		*value = monitoringinstances.LifecycleInUse
 	}
-	if len(dest) > 2 {
-		if value, ok := dest[2].(*string); ok && *value == "" {
-			*value = monitoringinstances.MonitoringEnabled
-		}
+	if value, ok := dest[2].(*string); ok && *value == "" {
+		*value = monitoringinstances.MonitoringEnabled
 	}
-	if len(dest) > 3 {
-		if value, ok := dest[3].(*string); ok && *value == "" {
-			*value = agentapi.FrequencyTier5s
-		}
+	if value, ok := dest[3].(*string); ok && *value == "" {
+		*value = agentapi.FrequencyTier5s
 	}
-	if len(dest) > 4 {
-		if value, ok := dest[4].(*[]byte); ok && len(*value) == 0 {
-			*value = []byte(`{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]}`)
-		}
+	if value, ok := dest[4].(*[]byte); ok && len(*value) == 0 {
+		*value = []byte(`{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]}`)
 	}
-	if len(dest) > 7 {
-		if value, ok := dest[7].(*[]byte); ok && len(*value) == 0 {
-			*value = []byte(`{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}`)
+	if value, ok := dest[7].(*[]byte); ok && len(*value) == 0 {
+		*value = []byte(`{"enabled":false,"frequency_seconds":86400,"timeout_seconds":15,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}`)
+	}
+	if value, ok := dest[8].(*[]byte); ok && len(*value) == 0 {
+		*value = []byte(`{"tcp":"5s","http":"5s","tls":"6h"}`)
+	}
+	if value, ok := dest[9].(*[]byte); ok && len(*value) == 0 {
+		if defaultsJSON, err := json.Marshal(centersettings.Default().IncidentDefaults); err == nil {
+			*value = defaultsJSON
 		}
 	}
 }

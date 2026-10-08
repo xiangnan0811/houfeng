@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { UnifiedTimeline } from '../components/UnifiedTimeline'
 import { ApiError } from './apiRequest'
 import {
+  applyRecordImport,
   archiveRecord,
   completeAttachmentUpload,
   captureEvidencePreview,
@@ -16,6 +17,7 @@ import {
   createRecordDraft,
   createRecordRevision,
   discardRecordDraft,
+  dryRunRecordImport,
   evaluateFixedComparison,
   executeRecordPermanentDeletion,
   getAttachmentContent,
@@ -1621,5 +1623,177 @@ describe('Records API transport', () => {
       authorization_epoch: 1,
       comparison_intent: 'cmp1.valid.payload.mac',
     })
+  })
+
+  it('normalizes null and omitted import collections and keeps empty or populated arrays', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_null',
+        job_state: 'planned',
+        destination_subject: { subject_kind: 'vps', subject_id: 'vps_contract' },
+        lock_version: 3,
+        remaps: null,
+        quarantine: null,
+        object_count: 1,
+        expires_at: '2026-08-21T13:00:00Z',
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_omitted',
+        job_state: 'planned',
+        destination_subject: { subject_kind: 'vps', subject_id: 'vps_contract' },
+        lock_version: 4,
+        object_count: 1,
+        expires_at: '2026-08-21T13:00:00Z',
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_empty',
+        job_state: 'planned',
+        destination_subject: { subject_kind: 'vps', subject_id: 'vps_contract' },
+        lock_version: 5,
+        remaps: [],
+        quarantine: [],
+        object_count: 1,
+        expires_at: '2026-08-21T13:00:00Z',
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_items',
+        job_state: 'planned',
+        destination_subject: { subject_kind: 'vps', subject_id: 'vps_contract' },
+        lock_version: 6,
+        remaps: [{ entity_kind: 'record', source_id: 'rec_source01', target_id: 'rec_local01' }],
+        quarantine: [{
+          kind: 'vendor.unknown',
+          schema: 'vendor.unknown/v1',
+          digest: 'aa',
+          byte_size: 8,
+          reason: 'cannot interpret',
+        }],
+        object_count: 2,
+        expires_at: '2026-08-21T13:00:00Z',
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_null',
+        job_state: 'applied',
+        record_ids: null,
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_omitted',
+        job_state: 'applied',
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_empty',
+        job_state: 'applied',
+        record_ids: [],
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_items',
+        job_state: 'applied',
+        record_ids: ['rec_local01'],
+      }))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_bad',
+        job_state: 'planned',
+        destination_subject: { subject_kind: 'vps', subject_id: 'vps_contract' },
+        lock_version: 7,
+        remaps: [],
+        quarantine: { unexpected: true },
+        object_count: 1,
+        expires_at: '2026-08-21T13:00:00Z',
+      }))
+      .mockResolvedValueOnce(mockResponse(200, null))
+      .mockResolvedValueOnce(mockResponse(200, {
+        plan_id: 'rip_bad_destination',
+        job_state: 'planned',
+        destination_subject: { subject_kind: 'record', subject_id: 'rec_1' },
+        lock_version: 8,
+        remaps: [],
+        quarantine: [],
+        object_count: 1,
+        expires_at: '2026-08-21T13:00:00Z',
+      }))
+
+    const archive = new File(['PK'], 'archive.zip', { type: 'application/zip' })
+    const controller = new AbortController()
+    await expect(dryRunRecordImport(archive, { subject_kind: 'vps', subject_id: 'vps_contract' }, 'import-null')).resolves.toMatchObject({
+      plan_id: 'rip_null',
+      destination_subject: { subject_kind: 'vps', subject_id: 'vps_contract' },
+      remaps: [],
+      quarantine: [],
+    })
+    await expect(dryRunRecordImport(archive, { subject_kind: 'monitoring_instance', subject_id: 'mi_contract' }, 'import-omitted')).resolves.toMatchObject({
+      plan_id: 'rip_omitted',
+      destination_subject: { subject_kind: 'vps', subject_id: 'vps_contract' },
+      remaps: [],
+      quarantine: [],
+    })
+    await expect(dryRunRecordImport(archive, { subject_kind: 'target', subject_id: 'tgt_contract' }, 'import-empty')).resolves.toMatchObject({
+      plan_id: 'rip_empty',
+      remaps: [],
+      quarantine: [],
+    })
+    await expect(dryRunRecordImport(
+      archive,
+      { subject_kind: 'vps', subject_id: 'vps_contract' },
+      'import-items',
+      controller.signal,
+    )).resolves.toMatchObject({
+      plan_id: 'rip_items',
+      remaps: [{ entity_kind: 'record', source_id: 'rec_source01', target_id: 'rec_local01' }],
+      quarantine: [{
+        kind: 'vendor.unknown',
+        schema: 'vendor.unknown/v1',
+        digest: 'aa',
+        byte_size: 8,
+        reason: 'cannot interpret',
+      }],
+    })
+    await expect(applyRecordImport('rip_null', 3)).resolves.toEqual({
+      plan_id: 'rip_null',
+      job_state: 'applied',
+      record_ids: [],
+    })
+    await expect(applyRecordImport('rip_omitted', 4)).resolves.toEqual({
+      plan_id: 'rip_omitted',
+      job_state: 'applied',
+      record_ids: [],
+    })
+    await expect(applyRecordImport('rip_empty', 5)).resolves.toEqual({
+      plan_id: 'rip_empty',
+      job_state: 'applied',
+      record_ids: [],
+    })
+    await expect(applyRecordImport('rip_items', 6)).resolves.toEqual({
+      plan_id: 'rip_items',
+      job_state: 'applied',
+      record_ids: ['rec_local01'],
+    })
+    await expect(dryRunRecordImport(archive, { subject_kind: 'vps', subject_id: 'vps_contract' }, 'import-bad-collection')).resolves.toMatchObject({
+      plan_id: 'rip_bad',
+      remaps: [],
+      quarantine: { unexpected: true },
+    })
+    await expect(dryRunRecordImport(archive, { subject_kind: 'vps', subject_id: 'vps_contract' }, 'import-null-body')).rejects.toThrow(TypeError)
+    await expect(dryRunRecordImport(archive, { subject_kind: 'vps', subject_id: 'vps_contract' }, 'import-bad-destination')).rejects.toThrow(TypeError)
+    expect(fetchMock).toHaveBeenCalledTimes(11)
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+      '/api/record-imports/dry-run?destination_subject_kind=vps&destination_subject_id=vps_contract',
+    )
+    expect(String(fetchMock.mock.calls[1]?.[0])).toBe(
+      '/api/record-imports/dry-run?destination_subject_kind=monitoring_instance&destination_subject_id=mi_contract',
+    )
+    expect(String(fetchMock.mock.calls[2]?.[0])).toBe(
+      '/api/record-imports/dry-run?destination_subject_kind=target&destination_subject_id=tgt_contract',
+    )
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: archive,
+      headers: expect.objectContaining({
+        'Content-Type': 'application/zip',
+        'Idempotency-Key': 'import-null',
+      }),
+    })
+    expect(fetchMock.mock.calls[3]?.[1]).toMatchObject({ signal: controller.signal })
+    expect(String(fetchMock.mock.calls[4]?.[0])).toBe('/api/record-imports/rip_null/apply')
+    expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body))).toEqual({ lock_version: 3 })
   })
 })

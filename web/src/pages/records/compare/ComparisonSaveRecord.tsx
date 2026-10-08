@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 
 import { Badge, Button, Input } from '../../../components/atoms'
 import type { ComparisonReason } from '../../../lib/types'
-import { COMPARISON_REASON_LABELS } from './comparisonLabels'
+import { presentComparisonReason } from './comparisonLabels'
 
 type Props = {
   blocked: boolean
@@ -36,7 +36,20 @@ export function ComparisonSaveRecord({
         </div>
         {blockers.length > 0 ? (
           <ul className="record-compare-findings">
-            {blockers.map((blocker) => <li key={blocker} className="record-compare-findings__item"><strong>{COMPARISON_REASON_LABELS[blocker] ?? blocker}</strong></li>)}
+            {blockers.map((blocker) => {
+              const reason = presentComparisonReason(blocker)
+              return (
+                <li key={blocker} className="record-compare-findings__item">
+                  <strong>{reason.label}</strong>
+                  {reason.diagnostic ? (
+                    <details>
+                      <summary>诊断信息</summary>
+                      <p>{reason.diagnostic}</p>
+                    </details>
+                  ) : null}
+                </li>
+              )
+            })}
           </ul>
         ) : (
           <p className="record-muted">缺少有效的比较意图，请重新比较后再保存。</p>
@@ -60,11 +73,11 @@ export function ComparisonSaveRecord({
       <div className="record-compare-save__actions">
         {savedRecordId ? (
           <p className="record-compare-save__saved" role="status">
-            已保存为 {savedRecordId}
+            比较记录已保存
           </p>
         ) : null}
         {savedRecordId ? (
-          <Link className="text-link" to={`/records/${encodeURIComponent(savedRecordId)}`}>打开记录</Link>
+          <Link className="text-link" to={`/records/${encodeURIComponent(savedRecordId)}`}>查看比较记录</Link>
         ) : null}
         <Button size="lg" disabled={saving} onClick={onSave}>
           {saving ? '正在另存' : '另存为记录'}

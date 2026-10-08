@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -12,6 +13,19 @@ import (
 	"houfeng/internal/center/subscriptioncosts"
 	"houfeng/internal/center/subscriptions"
 )
+
+type ExchangeRateRefreshRequester interface {
+	RequestRefresh(force bool)
+}
+
+type ExchangeRateStatusReader interface {
+	ExchangeRateRefreshRequester
+	Status(context.Context) ([]subscriptioncosts.ExchangeRatePairStatus, error)
+}
+
+type exchangeRateStatusResponse struct {
+	Items []subscriptioncosts.ExchangeRatePairStatus `json:"items"`
+}
 
 func SubscriptionOverview(service *subscriptioncosts.Service) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -47,7 +61,7 @@ func SubscriptionStatistics(service *subscriptioncosts.Service) http.Handler {
 	})
 }
 
-func SubscriptionSettings(service *subscriptioncosts.Service) http.Handler {
+func SubscriptionSettings(service *subscriptioncosts.Service, refresher ExchangeRateRefreshRequester) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -74,6 +88,9 @@ func SubscriptionSettings(service *subscriptioncosts.Service) http.Handler {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
+			if refresher != nil {
+				refresher.RequestRefresh(false)
+			}
 			writeJSON(w, http.StatusOK, newSubscriptionCostSettingsResponse(record))
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -81,23 +98,37 @@ func SubscriptionSettings(service *subscriptioncosts.Service) http.Handler {
 	})
 }
 
-func SubscriptionExchangeRateRefresh(service *subscriptioncosts.Service) http.Handler {
+func SubscriptionExchangeRateRefresh(worker ExchangeRateStatusReader) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
-		record, err := service.RefreshExchangeRates(r.Context())
-		if errors.Is(err, subscriptioncosts.ErrInvalidInput) {
-			writeError(w, http.StatusBadRequest, "invalid input")
-			return
-		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "internal server error")
-			return
-		}
-		writeJSON(w, http.StatusOK, record)
+		worker.RequestRefresh(true)
+		writeExchangeRateStatus(w, r, worker, http.StatusAccepted)
 	})
+}
+
+func SubscriptionExchangeRateStatus(worker ExchangeRateStatusReader) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
+			return
+		}
+		writeExchangeRateStatus(w, r, worker, http.StatusOK)
+	})
+}
+
+func writeExchangeRateStatus(w http.ResponseWriter, r *http.Request, worker ExchangeRateStatusReader, status int) {
+	items, err := worker.Status(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal server error")
+		return
+	}
+	if items == nil {
+		items = []subscriptioncosts.ExchangeRatePairStatus{}
+	}
+	writeJSON(w, status, exchangeRateStatusResponse{Items: items})
 }
 
 func SubscriptionBudgets(service *subscriptioncosts.Service) http.Handler {

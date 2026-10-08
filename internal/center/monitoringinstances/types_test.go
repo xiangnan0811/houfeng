@@ -78,4 +78,82 @@ func TestValidateCreateInputMetadataMatchesWireMetadataLimits(t *testing.T) {
 			}
 		})
 	}
+
+}
+
+func TestNormalizeLinkedCreateWireIdentityCanonicalizesClearFields(t *testing.T) {
+	t.Parallel()
+
+	empty := NormalizeLinkedCreateWireIdentity(LinkedCreateWireIdentity{ClearFields: []string{}})
+	if empty.ClearFields != nil {
+		t.Fatalf("empty clear fields = %#v, want nil", empty.ClearFields)
+	}
+
+	got := NormalizeLinkedCreateWireIdentity(LinkedCreateWireIdentity{
+		ClearFields: []string{" provider ", "region", "region", " city "},
+	})
+	if strings.Join(got.ClearFields, "\x00") != "city\x00provider\x00region" {
+		t.Fatalf("clear fields = %#v, want sorted unique fields", got.ClearFields)
+	}
+}
+
+func TestValidateLinkedCreateWireIdentityRejectsUnknownAndConflictingClearFields(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		input LinkedCreateWireIdentity
+		valid bool
+	}{
+		{name: "empty values are valid", input: LinkedCreateWireIdentity{}, valid: true},
+		{name: "clears empty region", input: LinkedCreateWireIdentity{ClearFields: []string{"region"}}, valid: true},
+		{name: "clears empty city", input: LinkedCreateWireIdentity{ClearFields: []string{"city"}}, valid: true},
+		{name: "clears empty provider", input: LinkedCreateWireIdentity{ClearFields: []string{"provider"}}, valid: true},
+		{name: "unknown field", input: LinkedCreateWireIdentity{ClearFields: []string{"country"}}, valid: false},
+		{name: "region conflict", input: LinkedCreateWireIdentity{Region: "manual", ClearFields: []string{"region"}}, valid: false},
+		{name: "city conflict", input: LinkedCreateWireIdentity{City: "manual", ClearFields: []string{"city"}}, valid: false},
+		{name: "provider conflict", input: LinkedCreateWireIdentity{Provider: "manual", ClearFields: []string{"provider"}}, valid: false},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			input := NormalizeLinkedCreateWireIdentity(tt.input)
+			err := ValidateLinkedCreateWireIdentity(input)
+			if (err == nil) != tt.valid {
+				t.Fatalf("ValidateLinkedCreateWireIdentity() error = %v, valid = %t", err, tt.valid)
+			}
+			if err != nil && !errors.Is(err, ErrInvalidCreateInput) {
+				t.Fatalf("ValidateLinkedCreateWireIdentity() error = %v, want ErrInvalidCreateInput", err)
+			}
+		})
+	}
+}
+
+func TestValidateCreateInputAllowsUnknownLocationValues(t *testing.T) {
+	t.Parallel()
+
+	input := NormalizeCreateInput(CreateInput{
+		DisplayName:     "Pending instance",
+		LifecycleStatus: LifecyclePendingEnrollment,
+	})
+	if err := ValidateCreateInput(input); err != nil {
+		t.Fatalf("ValidateCreateInput() error = %v, want nil for empty location/provider", err)
+	}
+}
+
+func TestValidateCreateInputRetainsDisplayAndLifecycleRequirements(t *testing.T) {
+	t.Parallel()
+
+	tests := []CreateInput{
+		{LifecycleStatus: LifecyclePendingEnrollment},
+		{DisplayName: "Pending instance"},
+		{DisplayName: "Pending instance", LifecycleStatus: "invalid"},
+	}
+	for _, input := range tests {
+		if err := ValidateCreateInput(NormalizeCreateInput(input)); !errors.Is(err, ErrInvalidCreateInput) {
+			t.Fatalf("ValidateCreateInput(%#v) error = %v, want ErrInvalidCreateInput", input, err)
+		}
+	}
 }

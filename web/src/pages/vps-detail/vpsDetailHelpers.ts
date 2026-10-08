@@ -97,13 +97,27 @@ export function monitoringInstanceCreateDraftFromDetail(detail: VPSAssetDetail):
   return {
     displayName: detail.display_name,
     group: '',
-    region: detail.region || detail.country || '未确认',
-    city: detail.city || detail.datacenter || '未确认',
-    provider: detail.provider_name || '未关联服务商',
+    region: detail.region || detail.country || '',
+    city: detail.city || detail.datacenter || '',
+    provider: detail.provider_name || '',
     labels: detail.labels.join(', '),
     note: detail.note,
-    linkNote: 'created from vps detail',
+    linkNote: '',
+    clearedFields: [],
   }
+}
+
+export function updateMonitoringInstanceCreateDraft(
+  draft: MonitoringInstanceCreateDraftState,
+  key: Exclude<keyof MonitoringInstanceCreateDraftState, 'clearedFields'>,
+  value: string,
+): MonitoringInstanceCreateDraftState {
+  const next: MonitoringInstanceCreateDraftState = { ...draft }
+  next[key] = value
+  if (key !== 'region' && key !== 'city' && key !== 'provider') return next
+  const without = draft.clearedFields.filter((field) => field !== key)
+  next.clearedFields = value.trim() === '' ? [...without, key].sort() : without
+  return next
 }
 
 export const INITIAL_DOMAIN_DRAFT: DomainDraftState = {
@@ -190,6 +204,7 @@ export function buildMonitoringInstanceCreateInput(form: MonitoringInstanceCreat
   if (!displayName) {
     throw new Error('监控实例名称不能为空。')
   }
+  const clearFields = [...new Set(form.clearedFields.filter((field) => form[field].trim() === ''))].sort()
   return {
     display_name: displayName,
     group: form.group.trim(),
@@ -198,7 +213,8 @@ export function buildMonitoringInstanceCreateInput(form: MonitoringInstanceCreat
     provider: form.provider.trim(),
     labels: parseLabels(form.labels),
     note: form.note.trim(),
-    link_note: form.linkNote.trim() || 'created from vps detail',
+    link_note: form.linkNote.trim(),
+    ...(clearFields.length > 0 ? { clear_fields: clearFields } : {}),
   }
 }
 

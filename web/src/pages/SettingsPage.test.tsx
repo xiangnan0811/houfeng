@@ -2,8 +2,20 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { authSnapshotError, type User } from '../lib/auth-client'
+import * as authClient from '../lib/auth-client'
+import { AuthProvider } from '../lib/auth-context'
 import { ThemeProvider } from '../lib/theme-context'
 import { SettingsPage } from './SettingsPage'
+
+const sessionUser = (access: boolean): User => ({
+  user_id: 'u1',
+  username: 'admin',
+  role: 'admin',
+  display_name: '管理员',
+  runtime_capabilities: { records: true, comparison: true, portability: true },
+  management_capabilities: { access },
+})
 
 function mockJSONResponse(body: unknown, status = 200) {
   return {
@@ -111,12 +123,17 @@ describe('SettingsPage', () => {
     vi.restoreAllMocks()
   })
 
-  function renderSettingsPage(initialEntry = '/settings') {
+  function renderSettingsPage(initialEntry = '/settings', session: { user?: User; fail?: boolean } = {}) {
+    const me = vi.spyOn(authClient, 'me')
+    if (session.fail) me.mockRejectedValue(authSnapshotError())
+    else me.mockResolvedValue(session.user ?? sessionUser(false))
     return render(
       <MemoryRouter initialEntries={[initialEntry]}>
-        <ThemeProvider>
-          <SettingsPage />
-        </ThemeProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <SettingsPage />
+          </ThemeProvider>
+        </AuthProvider>
       </MemoryRouter>,
     )
   }
@@ -168,9 +185,9 @@ describe('SettingsPage', () => {
 
     // Switch to advanced tab to check override rules
     switchTab('高级')
-    expect((screen.getByLabelText('监控实例标签覆盖规则 JSON') as HTMLTextAreaElement).value).toContain(
-      '"label": "edge"',
-    )
+    expect(screen.getByLabelText('监控实例标签规则 1 标签')).toHaveValue('edge')
+    expect(screen.getByLabelText('目标类型规则 1 类型')).toHaveValue('service')
+    expect(screen.getByLabelText('目标标签规则 1 标签')).toHaveValue('external')
   })
 
   it('explains the default heartbeat incident boundaries and keeps a custom threshold unchanged in PUT', async () => {
@@ -440,8 +457,13 @@ describe('SettingsPage', () => {
           { ...monthlyBudget, budget_month: '2026-07-01', base_currency: 'USD', monthly_limit: 200, note: '首次基线' },
         ],
       }))
+      if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse({ items: [] }))
+      }
       if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
-        return Promise.resolve(mockJSONResponse({ provider: 'frankfurter', base_currency: 'CNY', fetched_at: '2026-05-09T08:00:00Z', succeeded: [{ quote_currency: 'USD', base_currency: 'CNY', rate: 7, rate_date: '2026-05-09' }], failed: [] }))
+        return Promise.resolve(mockJSONResponse({
+          items: [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'fresh', refresh_status: 'idle', attempt_count: 0 }],
+        }, 202))
       }
       return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
     })
@@ -493,7 +515,8 @@ describe('SettingsPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
     await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url === '/api/subscriptions/exchange-rates/refresh' && (init as RequestInit | undefined)?.method === 'POST')).toBe(true))
-    expect(await screen.findByText('汇率刷新完成：成功 1，失败 0')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).toBeEnabled())
+    expect(screen.queryByText('汇率已更新')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '月预算' })).toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/subscription-budgets'))).toBe(false)
   })
@@ -509,6 +532,9 @@ describe('SettingsPage', () => {
       }
       if (url === '/api/subscriptions/settings' && method === 'PUT') {
         return Promise.resolve(mockJSONResponse(settingsResponseBody.subscription_cost_settings))
+      }
+      if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse({ items: [] }))
       }
       return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
     })
@@ -543,6 +569,9 @@ describe('SettingsPage', () => {
       }
       if (url === '/api/subscriptions/settings' && method === 'PUT') {
         return new Promise<Response>(() => {})
+      }
+      if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+        return Promise.resolve(mockJSONResponse({ items: [] }))
       }
       return Promise.resolve(mockJSONResponse({ error: `unhandled ${method} ${url}` }, 404))
     })
@@ -852,61 +881,288 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('shows inline validation errors when override textarea contains invalid JSON', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)),
-    )
-
+  it('keeps explicit false and untouched nested overrides when another field is saved', async () => {
+    const settings = {
+      ...settingsResponseBody,
+      override_rules: {
+        ...settingsResponseBody.override_rules,
+        target_types: [
+          {
+            target_type: 'service',
+            overrides: {
+              incident_defaults: {
+                stale_threshold_intervals: 4,
+                notify_on_started: false,
+                cpu_warning_pct: 70,
+              },
+            },
+          },
+        ],
+      },
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settings))
+      .mockResolvedValueOnce(mockJSONResponse(settings))
+    vi.stubGlobal('fetch', fetchMock)
     renderSettingsPage()
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument(),
-    )
-
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
     switchTab('高级')
-
-    // Valid JSON should not show errors
-    expect(screen.queryByText('JSON 格式无效')).not.toBeInTheDocument()
-
-    // Invalid JSON shows error
-    fireEvent.change(screen.getByLabelText('监控实例标签覆盖规则 JSON'), {
-      target: { value: 'not valid json {' },
+    fireEvent.click(screen.getByRole('button', { name: '监控实例标签规则 1 主机采样' }))
+    fireEvent.change(screen.getByLabelText('监控实例标签规则 1 主机采样频率'), { target: { value: '5m' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).override_rules).toEqual({
+      monitoring_instance_labels: [
+        {
+          label: 'edge',
+          overrides: {
+            host_sample_frequency_tier: '5m',
+            probe_frequency_defaults: { http: '1m' },
+          },
+        },
+      ],
+      target_types: settings.override_rules.target_types,
+      target_labels: settings.override_rules.target_labels,
     })
-    expect(screen.getByText('JSON 格式无效')).toBeInTheDocument()
-
-    // Non-array JSON shows specific error
-    fireEvent.change(screen.getByLabelText('目标类型覆盖规则 JSON'), {
-      target: { value: '{}' },
-    })
-    expect(screen.getByText('必须是 JSON 数组')).toBeInTheDocument()
   })
 
-  it('formats JSON when format button is clicked', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)),
-    )
-
+  it('keeps collapsed override controls out of the tab order and labels each probe kind', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)))
     renderSettingsPage()
-
-    await waitFor(() =>
-      expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument(),
-    )
-
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
     switchTab('高级')
 
-    const textarea = screen.getByLabelText('监控实例标签覆盖规则 JSON') as HTMLTextAreaElement
-    // The initial value is already pretty-printed, compact it first
-    fireEvent.change(textarea, { target: { value: '[{"label":"edge","overrides":{}}]' } })
+    const groups = screen.getAllByRole('button').filter((button) => button.getAttribute('aria-controls')?.endsWith('-panel'))
+    expect(groups.length).toBeGreaterThan(0)
+    for (const group of groups) {
+      expect(group).toHaveAttribute('aria-expanded', 'false')
+      expect(group).toHaveTextContent('展开')
+      const panel = document.getElementById(group.getAttribute('aria-controls') ?? '')
+      expect(panel?.querySelector('input, select, textarea, button')).toBeNull()
+    }
+    expect(screen.queryByRole('radio', { name: '监控实例标签规则 1 TCP 继承', hidden: true })).not.toBeInTheDocument()
 
-    // Click the first format button
-    const formatButtons = screen.getAllByRole('button', { name: '格式化' })
-    const firstFormatButton = formatButtons[0]
-    if (!firstFormatButton) throw new Error('advanced settings must expose a format command')
-    fireEvent.click(firstFormatButton)
+    const probe = screen.getByRole('button', { name: '监控实例标签规则 1 探测频率，当前运行链路未应用' })
+    fireEvent.click(probe)
+    expect(probe).toHaveAttribute('aria-expanded', 'true')
+    expect(probe).toHaveTextContent('收起')
+    const probePanel = document.getElementById(probe.getAttribute('aria-controls') ?? '')
+    expect(probePanel).not.toBeNull()
+    expect(within(probePanel as HTMLElement).getByText('TCP')).toBeVisible()
+    expect(within(probePanel as HTMLElement).getByText('HTTP')).toBeVisible()
+    expect(within(probePanel as HTMLElement).getByText('TLS')).toBeVisible()
+    const tcp = within(probePanel as HTMLElement).getByRole('radio', { name: '监控实例标签规则 1 TCP 继承' })
+    tcp.focus()
+    expect(tcp).toHaveFocus()
 
-    expect(textarea.value).toContain('  "label": "edge"')
+    fireEvent.click(probe)
+    expect(probe).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('radio', { name: '监控实例标签规则 1 TCP 继承', hidden: true })).not.toBeInTheDocument()
+    expect(tcp).not.toHaveFocus()
+  })
+
+  it('removes a probe object after its last kind is cleared and keeps the host override', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('高级')
+    fireEvent.click(screen.getByRole('button', { name: '监控实例标签规则 1 探测频率，当前运行链路未应用' }))
+    fireEvent.click(screen.getByRole('radio', { name: '监控实例标签规则 1 HTTP 继承' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).override_rules.monitoring_instance_labels).toEqual([
+      { label: 'edge', overrides: { host_sample_frequency_tier: '1m' } },
+    ])
+  })
+
+  it('moves a new rule ahead of an existing one without dropping the existing override', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('高级')
+    fireEvent.click(screen.getByRole('button', { name: '新增目标标签规则' }))
+    fireEvent.change(screen.getByLabelText('目标标签规则 2 标签'), { target: { value: 'later' } })
+    fireEvent.click(screen.getByRole('button', { name: '目标标签规则 2 探测频率' }))
+    fireEvent.click(screen.getByRole('radio', { name: '目标标签规则 2 TLS 覆盖' }))
+    fireEvent.click(screen.getByRole('button', { name: '上移目标标签规则 2' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).override_rules.target_labels).toEqual([
+      { label: 'later', overrides: { probe_frequency_defaults: { tls: '6h' } } },
+      { label: 'external', overrides: { probe_frequency_defaults: { tls: '15m' } } },
+    ])
+  })
+
+  it('keeps an invalid override draft and does not send it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('高级')
+    fireEvent.change(screen.getByLabelText('监控实例标签规则 1 标签'), { target: { value: '   ' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    expect(screen.getByLabelText('监控实例标签规则 1 标签')).toHaveAttribute('aria-invalid', 'true')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('监控实例标签规则 1 标签')).toHaveValue('   ')
+
+    fireEvent.change(screen.getByLabelText('监控实例标签规则 1 标签'), { target: { value: 'edge' } })
+    fireEvent.click(screen.getByRole('button', { name: '目标类型规则 1 异常判定，当前运行链路未应用' }))
+    fireEvent.click(screen.getByRole('radio', { name: '目标类型规则 1 CPU 关注 覆盖' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '目标类型规则 1 CPU 关注' }), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('textbox', { name: '目标类型规则 1 CPU 关注' })).toHaveValue('')
+  })
+
+  it('keeps the override draft when the settings request fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse({ error: '保存失败' }, 500))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('高级')
+    fireEvent.change(screen.getByLabelText('监控实例标签规则 1 标签'), { target: { value: 'edge-2' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('保存失败'))
+    expect(screen.getByLabelText('监控实例标签规则 1 标签')).toHaveValue('edge-2')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('derives read-only JSON from the draft without marking it dirty', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)))
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('高级')
+    expect(screen.queryByText('有未保存的修改')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /高级 JSON/ }))
+    const json = screen.getByLabelText('覆盖规则 JSON')
+    expect(json).toHaveTextContent('"label": "edge"')
+    expect(json).not.toHaveTextContent('touched')
+    expect(json).not.toHaveTextContent('inherit')
+    expect(screen.queryByText('有未保存的修改')).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('监控实例标签规则 1 标签'), { target: { value: 'edge-2' } })
+    expect(json).toHaveTextContent('"label": "edge-2"')
+    expect(screen.getByText('有未保存的修改')).toBeInTheDocument()
+  })
+
+  it('previews host and probe frequency from the unsaved draft', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)))
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('高级')
+    const hostPreview = screen.getByRole('region', { name: '主机采样预览' })
+    expect(within(hostPreview).getByText('5 秒')).toBeInTheDocument()
+    expect(within(hostPreview).getByText('全局')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('预览监控实例标签'), { target: { value: ' edge ' } })
+    expect(within(hostPreview).getByText('1 分钟')).toBeInTheDocument()
+    expect(within(hostPreview).getByText('监控实例标签规则 1')).toBeInTheDocument()
+    expect(within(hostPreview).getByText('1')).toBeInTheDocument()
+    expect(screen.queryByText('有未保存的修改')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '监控实例标签规则 1 主机采样' }))
+    fireEvent.change(screen.getByLabelText('监控实例标签规则 1 主机采样频率'), { target: { value: '15m' } })
+    expect(within(hostPreview).getByText('15 分钟')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('预览探测类型'), { target: { value: 'tls' } })
+    fireEvent.change(screen.getByLabelText('预览目标标签'), { target: { value: 'external' } })
+    const probePreview = screen.getByRole('region', { name: '探测频率预览' })
+    expect(within(probePreview).getByText('15 分钟')).toBeInTheDocument()
+    expect(within(probePreview).getByText('目标标签规则 1')).toBeInTheDocument()
+    expect(within(probePreview).getByText(/探测项已存频率/)).toBeInTheDocument()
+  })
+
+  it('checks override threshold order against the current global draft', async () => {
+    const widened = {
+      ...settingsResponseBody,
+      incident_defaults: {
+        ...settingsResponseBody.incident_defaults,
+        cpu_warning_pct: 70,
+        cpu_alert_pct: 98,
+        cpu_critical_pct: 99,
+      },
+    }
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse(widened))
+      .mockResolvedValueOnce(mockJSONResponse({
+        ...widened,
+        override_rules: {
+          ...widened.override_rules,
+          target_types: [{
+            target_type: 'service',
+            overrides: { incident_defaults: { stale_threshold_intervals: 4, cpu_warning_pct: 96 } },
+          }],
+        },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('CPU 关注阈值'), { target: { value: '70' } })
+    fireEvent.change(screen.getByLabelText('CPU 告警阈值'), { target: { value: '98' } })
+    fireEvent.change(screen.getByLabelText('CPU 严重阈值'), { target: { value: '99' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    switchTab('高级')
+    fireEvent.click(screen.getByRole('button', { name: '目标类型规则 1 异常判定，当前运行链路未应用' }))
+    fireEvent.click(screen.getByRole('radio', { name: '目标类型规则 1 CPU 关注 覆盖' }))
+    fireEvent.change(screen.getByRole('textbox', { name: '目标类型规则 1 CPU 关注' }), { target: { value: '96' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    const saved = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))
+    expect(saved.incident_defaults).toMatchObject({ cpu_warning_pct: 70, cpu_alert_pct: 98, cpu_critical_pct: 99 })
+    expect(saved.override_rules.target_types[0].overrides.incident_defaults).toEqual({
+      stale_threshold_intervals: 4,
+      cpu_warning_pct: 96,
+    })
+
+    fireEvent.change(screen.getByRole('textbox', { name: '目标类型规则 1 CPU 关注' }), { target: { value: '99' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(screen.getByRole('textbox', { name: '目标类型规则 1 CPU 关注' })).toHaveValue('99')
+  })
+
+  it('accepts a future label when suggestions fail and only suggests target labels', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/monitoring-instances')) return Promise.resolve(mockJSONResponse({ error: 'no' }, 500))
+      if (url.includes('/api/targets')) {
+        return Promise.resolve(mockJSONResponse([
+          { labels: ['from-target'], execution_monitoring_instance_labels: ['executor-only'] },
+        ]))
+      }
+      return Promise.resolve(mockJSONResponse(settingsResponseBody))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('高级')
+    fireEvent.focus(screen.getByLabelText('监控实例标签规则 1 标签'))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/monitoring-instances'),
+      expect.anything(),
+    ))
+    expect(screen.queryByRole('button', { name: 'executor-only' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('监控实例标签规则 1 标签'), { target: { value: 'future-label' } })
+    expect(screen.getByLabelText('监控实例标签规则 1 标签')).toHaveValue('future-label')
+
+    fireEvent.focus(screen.getByLabelText('目标标签规则 1 标签'))
+    expect(await screen.findByRole('button', { name: 'from-target' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'executor-only' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'from-target' }))
+    expect(screen.getByLabelText('目标标签规则 1 标签')).toHaveValue('from-target')
   })
 
   it('rejects malformed integer text instead of silently coercing it', async () => {
@@ -991,5 +1247,84 @@ describe('SettingsPage', () => {
         runtime_managed: false,
       },
     })
+  })
+
+  it('hides user management and does not request the directory when the session cannot manage access', async () => {
+    const fetchMock = vi.fn(() => Promise.reject(new Error('settings must not fetch for a forbidden access tab')))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage('/settings?tab=access')
+
+    expect(await screen.findByRole('heading', { name: '无权管理用户与权限' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '用户与权限' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { selected: true })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a failed capability read closed and retries only the session', async () => {
+    const fetchMock = vi.fn(() => Promise.reject(new Error('a failed capability read must not open management')))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage('/settings?tab=access', { fail: true })
+
+    expect(await screen.findByRole('heading', { name: '能力读取失败' })).toBeInTheDocument()
+    expect(screen.getByText('暂时无法确认管理能力，不会打开用户与权限目录。')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '账号' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(authClient.me).toHaveBeenCalledTimes(2))
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(screen.getByRole('heading', { name: '能力读取失败' })).toBeInTheDocument()
+  })
+
+  it('opens the access directory without loading system settings when management is allowed', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/admin/users') return Promise.resolve(mockJSONResponse({ items: [] }))
+      if (url === '/api/admin/record-access-groups') return Promise.resolve(mockJSONResponse({ items: [] }))
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${url}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage('/settings?tab=access', { user: sessionUser(true) })
+
+    expect(await screen.findByRole('heading', { name: '账号' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '用户与权限' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('当前监控实例主机样本频率')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(expect.arrayContaining([
+        '/api/admin/users',
+        '/api/admin/record-access-groups',
+      ]))
+    })
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/settings' || url === '/api/record-access-groups/mine')).toBe(false)
+  })
+
+  it('confirms a dirty system form before opening user management', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(mockJSONResponse(settingsResponseBody))
+      if (url === '/api/admin/users' || url === '/api/admin/record-access-groups') return Promise.resolve(mockJSONResponse({ items: [] }))
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${url}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const adminCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/admin'))
+
+    renderSettingsPage('/settings', { user: sessionUser(true) })
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('原始层保留天数'), { target: { value: '45' } })
+    switchTab('用户与权限')
+
+    expect(screen.getByRole('button', { name: '不保存' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '监控策略' })).toHaveAttribute('aria-selected', 'true')
+    expect(adminCalls()).toEqual([])
+
+    fireEvent.click(screen.getByRole('button', { name: '不保存' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: '用户与权限' })).toHaveAttribute('aria-selected', 'true'))
+    await waitFor(() => expect(adminCalls().map(([url]) => url)).toEqual(expect.arrayContaining([
+      '/api/admin/users',
+      '/api/admin/record-access-groups',
+    ])))
   })
 })

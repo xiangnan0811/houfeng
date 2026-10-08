@@ -292,7 +292,7 @@ func newCPUSamplingTLSService(t *testing.T, fixture *runtimeStreamAuthFixture, s
 		MonitoringInstanceRuntimeStreamHandler: runtimeHandler,
 		AuthLoginHandler:                       handlers.Login(fixture.service),
 		AuthLogoutHandler:                      handlers.Logout(fixture.service),
-		AuthMeHandler:                          handlers.Me(fixture.service),
+		AuthMeHandler:                          handlers.Me(fixture.service, handlers.RuntimeCapabilities{}),
 		AuthChangePasswordHandler:              handlers.ChangePassword(fixture.service),
 		AuthMiddleware:                         authMiddleware,
 	})

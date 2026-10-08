@@ -27,6 +27,8 @@ IP quality remains a read-only report, not another asset overview. Keep report i
 
 立即采集由 `useIPQualityCollect` 管理：报告加载成功后读取一次 `GET .../ip-quality/collect`；有进行中且仍可用的请求时每 3 秒轮询，请求结束、过期或变为不可用即停止，单次轮询失败继续下一轮；所有状态请求使用全局单调序号，每次切换 VPS 与组件卸载都开启新的会话代次（卸载时仍挂起的 POST 之后失败也不再补读状态）；迟到的旧响应、上一台 VPS 或同一 VPS 上一次访问的回调都不得覆盖当前结果；提交中状态只由 POST 自己结束，进行中时重复点击不再发请求；只读预览不显示立即采集按钮；本页发起或接手的请求变为 `completed` 时原地刷新最新报告（不回到加载态）。409 不单独提示错误文案，以随后读取的不可用原因为准。
 
+不可用状态保留原因对应的操作入口：`no_monitoring_instance` / `agent_not_bound` 在有明确 VPS 上下文时进入 `/vps/{id}?workbench=monitoring`，复用现有创建或接入流程；`monitoring_paused` 只使用当前 `monitoring_instance_id` 进入实例运行控制，可附有效 `return_vps`，不从历史请求猜实例、不自动恢复监控；`disabled` 进入监控设置。缺少必要 ID 时只解释原因，不生成猜测链接。采集失败的主要文案使用安全中文说明，任意语言的原始错误均放在默认关闭的诊断详情中。
+
 
 ## 服务探测能力与历史可信边界
 

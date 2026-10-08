@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"regexp"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/portability"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/center/records"
 )
 
 const recordPortabilityPrivateCache = "private, no-store"
@@ -236,6 +238,15 @@ func handleRecordImportDryRun(
 		writeRecordNotFound(w)
 		return
 	}
+	destination, err := recordImportDestinationQuery(request)
+	if err != nil {
+		writeRecordError(w, http.StatusBadRequest, "invalid_request", "invalid import destination", nil)
+		return
+	}
+	if mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type")); err != nil || mediaType != "application/zip" {
+		writeRecordError(w, http.StatusBadRequest, "invalid_request", "import archive must be application/zip", nil)
+		return
+	}
 	key, ok := recordPortabilityIdempotencyKey(request)
 	if !ok {
 		writeRecordError(w, http.StatusBadRequest, "invalid_request", "Idempotency-Key is required", nil)
@@ -247,13 +258,50 @@ func handleRecordImportDryRun(
 		return
 	}
 	plan, err := application.DryRun(request.Context(), portability.DryRunRequest{
-		Actor: actor, IdempotencyKey: key, Archive: body,
+		Actor:              actor,
+		IdempotencyKey:     key,
+		Archive:            body,
+		DestinationSubject: destination,
 	})
 	if err != nil {
 		writeRecordPortabilityError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, plan)
+}
+
+func recordImportDestinationQuery(request *http.Request) (records.SubjectReference, error) {
+	if request == nil || request.URL == nil {
+		return records.SubjectReference{}, portability.ErrInvalidImportRequest
+	}
+	values := request.URL.Query()
+	if len(values) != 2 {
+		return records.SubjectReference{}, portability.ErrInvalidImportRequest
+	}
+	const kindKey = "destination_subject_kind"
+	const idKey = "destination_subject_id"
+	kindValues, kindOK := values[kindKey]
+	idValues, idOK := values[idKey]
+	if !kindOK || !idOK || len(kindValues) != 1 || len(idValues) != 1 {
+		return records.SubjectReference{}, portability.ErrInvalidImportRequest
+	}
+	kindValue := strings.TrimSpace(kindValues[0])
+	idValue := strings.TrimSpace(idValues[0])
+	if kindValue == "" || idValue == "" {
+		return records.SubjectReference{}, portability.ErrInvalidImportRequest
+	}
+	destination := records.SubjectReference{
+		RegistryVersion: records.SubjectRegistryVersionV1,
+		Kind:            records.SubjectKind(kindValue),
+		Role:            records.RelationRoleAffected,
+		SourceID:        idValue,
+		Primary:         true,
+	}
+	if !records.ValidSubjectKind(destination.Kind) ||
+		!records.ValidSubjectSourceID(destination.Kind, destination.SourceID) {
+		return records.SubjectReference{}, portability.ErrInvalidImportRequest
+	}
+	return destination, nil
 }
 
 func handleRecordImportApply(

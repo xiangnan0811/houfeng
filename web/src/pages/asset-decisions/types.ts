@@ -248,7 +248,7 @@ export type AssetDecisionNextWorkItem = {
 
 // 投资组合主导
 export type AssetDecisionPortfolioLead = {
-  kind: 'work' | 'stable'
+  kind: 'work' | 'scoped-empty'
   tone: BadgeTone
   eyebrow: string
   title: string

@@ -54,11 +54,30 @@ export function buildShellSummaryModel(
 
   const abnormalCount =
     overview.abnormal_monitoring_instance_count + overview.abnormal_target_count
+  const unobservedCount = overview.unobserved_target_count
+
+  if (abnormalCount > 0 && unobservedCount > 0) {
+    return {
+      state: 'anomaly',
+      label: `运行异常 ${abnormalCount}，尚有目标无观测 ${unobservedCount}`,
+      generatedAt: overview.snapshot_generated_at,
+      showAnomalyCounts: true,
+    }
+  }
 
   if (abnormalCount > 0) {
     return {
       state: 'anomaly',
-      label: '系统摘要有异常',
+      label: `运行异常 ${abnormalCount}`,
+      generatedAt: overview.snapshot_generated_at,
+      showAnomalyCounts: true,
+    }
+  }
+
+  if (unobservedCount > 0) {
+    return {
+      state: 'unobserved',
+      label: '尚有目标无观测',
       generatedAt: overview.snapshot_generated_at,
       showAnomalyCounts: true,
     }
@@ -66,7 +85,7 @@ export function buildShellSummaryModel(
 
   return {
     state: 'clear',
-    label: '系统摘要无异常',
+    label: '当前运行异常计数为 0',
     generatedAt: overview.snapshot_generated_at,
     showAnomalyCounts: true,
   }

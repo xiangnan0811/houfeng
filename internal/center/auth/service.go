@@ -55,6 +55,9 @@ func (s *Service) Login(ctx context.Context, username, password, userAgent, clie
 	if err := VerifyPassword(u.PasswordHash, password); err != nil {
 		return Session{}, ErrInvalidCredentials
 	}
+	if u.DisabledAt != nil {
+		return Session{}, ErrInvalidCredentials
+	}
 
 	id, err := NewSessionID()
 	if err != nil {
@@ -99,7 +102,14 @@ func (s *Service) UserBySession(ctx context.Context, sessionID string) (User, er
 	if err != nil {
 		return User{}, err
 	}
-	return s.users.FindByID(ctx, sess.UserID)
+	u, err := s.users.FindByID(ctx, sess.UserID)
+	if err != nil {
+		return User{}, err
+	}
+	if u.DisabledAt != nil {
+		return User{}, ErrSessionExpired
+	}
+	return u, nil
 }
 
 func (s *Service) ChangePassword(ctx context.Context, userID, currentSessionID, oldPassword, newPassword string) error {
@@ -109,6 +119,9 @@ func (s *Service) ChangePassword(ctx context.Context, userID, currentSessionID, 
 	}
 	if err := VerifyPassword(u.PasswordHash, oldPassword); err != nil {
 		return ErrInvalidCredentials
+	}
+	if u.DisabledAt != nil {
+		return ErrSessionExpired
 	}
 	hash, err := HashPasswordWithCost(newPassword, s.passwordBcryptCost)
 	if err != nil {

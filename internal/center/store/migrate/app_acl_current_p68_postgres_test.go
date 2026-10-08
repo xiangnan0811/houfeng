@@ -1,6 +1,7 @@
 package migrate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 
 const appACLCurrentP68LastMigration = "0068_normalize_ip_quality_host_address_identity.sql"
 const appACLCurrentP69Migration = "0069_add_cpu_rates_valid.sql"
+const appACLCurrentP70Migration = "0070_add_record_import_destination_subject.sql"
+const appACLCurrentP71Migration = "0071_add_access_management.sql"
 
 type appACLCurrentP68History struct {
 	name     string
@@ -135,36 +138,34 @@ func runAppACLCurrentP68HistoryUpgrade(
 
 	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
 	if err != nil {
-		t.Fatalf("C68 to C69 convergence: %v", err)
+		t.Fatalf("C68 to C71 convergence: %v", err)
 	}
 	if successor.ManifestRevision != predecessor.ManifestRevision+1 || successor.PreviousManifestDigest != predecessor.ManifestDigest {
-		t.Fatalf("C68 to C69 successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
+		t.Fatalf("C68 to C71 successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
 	}
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
-		t.Fatalf("admit C69 runtime: %v", err)
+		t.Fatalf("admit C71 runtime: %v", err)
 	}
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
 	assertAppACLCurrentP68LedgerAppend(t, before.Ledger, after.Ledger)
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
-		t.Fatalf("C69 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
+		t.Fatalf("C71 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
 	if withLegacyCPU {
 		assertAppACLCurrentP68LegacyRowsAfterUpgrade(t, ctx, migratorDB)
 		assertAppACLCurrentP68CPUVerificationRows(t, ctx, migratorDB)
-		if !reflect.DeepEqual(before.Catalog, after.Catalog) {
-			t.Fatal("P68-only C69 upgrade changed effective ACL catalog")
-		}
+		assertAppACLCurrentP70CatalogDelta(t, before.Catalog, after.Catalog, fixture.runtimeRole)
 	}
 
 	beforeRepeat := after
 	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
 	if err != nil {
-		t.Fatalf("repeat C68 to C69 convergence: %v", err)
+		t.Fatalf("repeat C68 to C71 convergence: %v", err)
 	}
 	afterRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 	if repeated.ManifestDigest != successor.ManifestDigest || !reflect.DeepEqual(afterRepeat, beforeRepeat) {
-		t.Fatalf("C69 repeat changed durable state\nbefore: %#v\nafter:  %#v", beforeRepeat, afterRepeat)
+		t.Fatalf("C71 repeat changed durable state\nbefore: %#v\nafter:  %#v", beforeRepeat, afterRepeat)
 	}
 }
 
@@ -175,17 +176,150 @@ func runAppACLCurrentP68OnlyUpgrade(t *testing.T, profile appACLCurrentReleasedP
 
 func assertAppACLCurrentP68LedgerAppend(t *testing.T, before, after []appACLCurrentPostgresLedgerRow) {
 	t.Helper()
-	if len(after) != len(before)+1 || !reflect.DeepEqual(after[:len(before)], before) {
-		t.Fatalf("C69 ledger did not preserve its predecessor prefix\nbefore: %#v\nafter:  %#v", before, after)
+	if len(after) != len(before)+3 || !reflect.DeepEqual(after[:len(before)], before) {
+		t.Fatalf("C71 ledger did not preserve its predecessor prefix\nbefore: %#v\nafter:  %#v", before, after)
 	}
-	count := 0
+	cpuCount, destinationCount, accessManagementCount := 0, 0, 0
 	for _, row := range after {
-		if row.Name == appACLCurrentP69Migration {
-			count++
+		switch row.Name {
+		case appACLCurrentP69Migration:
+			cpuCount++
+		case appACLCurrentP70Migration:
+			destinationCount++
+		case appACLCurrentP71Migration:
+			accessManagementCount++
 		}
 	}
-	if count != 1 || after[len(after)-1].Name != appACLCurrentP69Migration {
-		t.Fatalf("C69 ledger tail/count = %q/%d, want one final 0069 row", after[len(after)-1].Name, count)
+	if cpuCount != 1 || destinationCount != 1 || accessManagementCount != 1 || after[len(after)-1].Name != appACLCurrentP71Migration {
+		t.Fatalf("C71 ledger tail/count = %q/%d/%d/%d, want one each 0069/0070/0071 row",
+			after[len(after)-1].Name, cpuCount, destinationCount, accessManagementCount)
+	}
+}
+
+func assertAppACLCurrentP70CatalogDelta(
+	t *testing.T,
+	before, after AppACLEffectiveCatalogSnapshotR1,
+	runtimeRole string,
+) {
+	t.Helper()
+	beforePrivileges := make(map[AppACLEffectiveCatalogPrivilegeObservationR1]struct{}, len(before.DirectPrivileges))
+	for _, privilege := range before.DirectPrivileges {
+		beforePrivileges[privilege] = struct{}{}
+	}
+	additions := make(map[AppACLEffectiveCatalogPrivilegeObservationR1]struct{})
+	for _, privilege := range after.DirectPrivileges {
+		if _, present := beforePrivileges[privilege]; !present {
+			additions[privilege] = struct{}{}
+		}
+	}
+	want := make(map[AppACLEffectiveCatalogPrivilegeObservationR1]struct{})
+	for _, privilege := range accessManagementAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
+		want[AppACLEffectiveCatalogPrivilegeObservationR1{
+			Grantee:        runtimeRole,
+			ObjectClass:    privilege.ObjectClass,
+			SchemaName:     privilege.SchemaName,
+			ObjectIdentity: privilege.ObjectIdentity,
+			ColumnName:     privilege.ColumnName,
+			Privilege:      privilege.Privilege,
+			GrantOption:    privilege.GrantOption,
+		}] = struct{}{}
+	}
+	if !reflect.DeepEqual(additions, want) {
+		t.Fatalf("C71 direct ACL additions = %#v, want exact 0071 four-tuple delta %#v", additions, want)
+	}
+}
+
+func appACLCurrentC70PostgresProfile(t *testing.T) appACLCurrentReleasedPostgresProfileData {
+	t.Helper()
+	profileFS := appACLCurrentTransitionTestFS(t)
+	for name := range profileFS {
+		if name > appACLCurrentP70Migration {
+			delete(profileFS, name)
+		}
+	}
+	profileFragments := make([]AppACLCurrentMigrationFragment, 0, len(appACLCurrentMigrationFragments))
+	for _, fragment := range appACLCurrentMigrationFragments {
+		if fragment.Migration <= appACLCurrentP70Migration {
+			profileFragments = append(profileFragments, cloneAppACLCurrentMigrationFragment(fragment))
+		}
+	}
+	profileSource, err := compileAppACLCurrentSourceContract(profileFS, profileFragments)
+	if err != nil {
+		t.Fatalf("compile independently frozen C70 source fixture: %v", err)
+	}
+	if len(profileSource.sources.names) != 71 || profileSource.sources.names[len(profileSource.sources.names)-1] != appACLCurrentP70Migration {
+		t.Fatalf("C70 source fixture shape = %d/%q, want 71/%q", len(profileSource.sources.names), profileSource.sources.names[len(profileSource.sources.names)-1], appACLCurrentP70Migration)
+	}
+	if !bytes.Equal(profileSource.sources.canonicalSet, appACLCurrentC70MigrationGolden) {
+		t.Fatal("C70 PostgreSQL fixture source differs from the independently frozen pre-C71 golden")
+	}
+	fixedContract, err := compileAppACLCurrentCatalogContract(
+		profileSource,
+		appACLCurrentTransitionDatabase,
+		appACLCurrentTransitionBindings,
+		appACLCurrentTransitionMigrator,
+	)
+	if err != nil {
+		t.Fatalf("compile independently frozen C70 privilege fixture: %v", err)
+	}
+	privileges, err := CanonicalPrivilegeSetBodyV1(fixedContract.RoleBindings, fixedContract.Privileges)
+	if err != nil {
+		t.Fatalf("encode independently frozen C70 privilege fixture: %v", err)
+	}
+	if !bytes.Equal(privileges, appACLCurrentC70PrivilegeGolden) {
+		t.Fatal("C70 PostgreSQL fixture privileges differ from the independently frozen pre-C71 golden")
+	}
+	return appACLCurrentReleasedPostgresProfileData{
+		fs:              profileFS,
+		fragments:       profileFragments,
+		source:          profileSource,
+		privilegeGolden: privileges,
+	}
+}
+
+func testPostgresIntegrationAppACLCurrentP70Upgrade(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	profile := appACLCurrentC70PostgresProfile(t)
+	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
+	migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	predecessor, _, _ := seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, profile)
+	_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
+	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+	runtimeDB := fixture.openRolePool(t, ctx, fixture.runtimeRole)
+	assertAppACLCurrentRuntimeRejectsPredecessor(t, ctx, runtimeDB)
+
+	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	if err != nil {
+		t.Fatalf("C70 to C71 P70 convergence: %v", err)
+	}
+	if successor.ManifestRevision != predecessor.ManifestRevision+1 || successor.PreviousManifestDigest != predecessor.ManifestDigest {
+		t.Fatalf("C70 to C71 P70 successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
+	}
+	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
+		t.Fatalf("admit C71 runtime after P70: %v", err)
+	}
+	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
+	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
+		t.Fatalf("C70 to C71 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
+	}
+	if len(after.Ledger) != len(before.Ledger)+1 ||
+		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
+		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP71Migration {
+		t.Fatalf("C70 to C71 ledger tail = %#v, want predecessor prefix plus one 0071 row", after.Ledger)
+	}
+	assertAppACLCurrentP70CatalogDelta(t, before.Catalog, after.Catalog, fixture.runtimeRole)
+
+	beforeRepeat := after
+	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
+	if err != nil {
+		t.Fatalf("repeat C70 to C71 P70 convergence: %v", err)
+	}
+	afterRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
+	if repeated.ManifestDigest != successor.ManifestDigest || !reflect.DeepEqual(afterRepeat, beforeRepeat) {
+		t.Fatalf("C70 to C71 P70 repeat changed durable state\nbefore: %#v\nafter:  %#v", beforeRepeat, afterRepeat)
 	}
 }
 

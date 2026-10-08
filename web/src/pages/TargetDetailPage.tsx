@@ -716,7 +716,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       probeFormRequestRef.current += 1
       setProbeCreateOpen(false)
       setProbeCreateError(null)
-      setProbeMutationError('ProbeItem 包含当前 V1 表单不支持的配置字段，不能安全编辑。')
+      setProbeMutationError('探测项包含当前 V1 表单不支持的配置字段，不能安全编辑。')
       return
     }
 
@@ -768,7 +768,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       setProbeCreateError(
         describeError(
           validationError,
-          probeFormMode.kind === 'edit' ? '保存 ProbeItem 失败' : '创建 ProbeItem 失败',
+          probeFormMode.kind === 'edit' ? '保存探测项失败' : '创建探测项失败',
         ),
       )
       return
@@ -814,7 +814,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       setProbeCreateError(
         describeError(
           submitError,
-          probeFormMode.kind === 'edit' ? '保存 ProbeItem 失败' : '创建 ProbeItem 失败',
+          probeFormMode.kind === 'edit' ? '保存探测项失败' : '创建探测项失败',
         ),
       )
     } finally {
@@ -869,7 +869,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       ) {
         return
       }
-      setProbeMutationError(describeError(error, 'ProbeItem 操作失败'))
+      setProbeMutationError(describeError(error, '探测项操作失败'))
     } finally {
       const isCurrentRowMutation = probeRowMutationRequestRef.current === requestId
       if (isCurrentRowMutation) {
@@ -936,7 +936,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       ) {
         return
       }
-      setProbeMutationError(describeError(error, 'ProbeItem 操作失败'))
+      setProbeMutationError(describeError(error, '探测项操作失败'))
     } finally {
       const isCurrentRowMutation = probeRowMutationRequestRef.current === requestId
       if (isCurrentRowMutation) {

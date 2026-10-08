@@ -1,4 +1,4 @@
-import type { User } from '../../src/lib/auth-client'
+import type { RuntimeCapabilities, User } from '../../src/lib/auth-client'
 import type {
   AssetDomainRecord,
   AssetDecisionOverview,
@@ -41,12 +41,36 @@ import {
 
 import { apiRouteKey, type ApiFixtureProfile } from './contracts'
 
+const ENABLED_RUNTIME_CAPABILITIES: RuntimeCapabilities = {
+  records: true,
+  comparison: true,
+  portability: true,
+}
+
 const AUTHENTICATED_USER = {
   user_id: 'u_e2e',
   username: 'e2e-admin',
   role: 'admin',
   display_name: 'E2E Admin',
+  runtime_capabilities: ENABLED_RUNTIME_CAPABILITIES,
+  management_capabilities: { access: false },
 } satisfies User
+
+export function authenticatedUser(
+  capabilities: RuntimeCapabilities = ENABLED_RUNTIME_CAPABILITIES,
+): User {
+  const runtime_capabilities = capabilities.records
+    ? capabilities
+    : { records: false, comparison: false, portability: false }
+  return { ...AUTHENTICATED_USER, runtime_capabilities }
+}
+
+const RECORD_ACCESS_GROUPS_MINE = {
+  [apiRouteKey('GET', '/api/record-access-groups/mine')]: {
+    status: 200,
+    body: { items: [] },
+  },
+} satisfies ApiFixtureProfile
 
 const RECORD_NOTIFICATION = {
   notification_id: `rnt_${'a'.repeat(64)}`,
@@ -91,7 +115,7 @@ const SUBSCRIPTION = {
   base_currency: 'CNY',
   exchange_rate: 7,
   exchange_rate_date: '2026-07-10',
-  exchange_rate_stale: false,
+  exchange_rate_status: 'fresh',
   budget_status: 'ok',
   next_reminder_at: '2026-07-20T00:00:00Z',
   started_at: '2026-07-01',
@@ -305,20 +329,27 @@ export const unauthenticatedProfile = {
 export function authenticatedProfile(
   routes: ApiFixtureProfile = {},
   dashboard: DashboardOverview = dashboardOverviewFixture(),
+  capabilities: RuntimeCapabilities = ENABLED_RUNTIME_CAPABILITIES,
 ): ApiFixtureProfile {
+  const user = authenticatedUser(capabilities)
   return {
     [apiRouteKey('GET', '/api/auth/me')]: {
       status: 200,
-      body: AUTHENTICATED_USER,
+      body: user,
     },
     [apiRouteKey('GET', '/api/dashboard')]: {
       status: 200,
       body: dashboard,
     },
-    [apiRouteKey('GET', '/api/record-notifications/unread-count')]: {
-      status: 200,
-      body: { unread_count: 1 },
-    },
+    ...(user.runtime_capabilities.records
+      ? {
+          [apiRouteKey('GET', '/api/record-notifications/unread-count')]: {
+            status: 200,
+            body: { unread_count: 1 },
+          },
+          ...RECORD_ACCESS_GROUPS_MINE,
+        }
+      : {}),
     ...routes,
   }
 }
@@ -768,7 +799,7 @@ export function dashboardPopulatedProfile(now = Date.now()): ApiFixtureProfile {
     currency: 'USD',
     renewal_decision: 'keep',
     lifecycle_status: 'active',
-    exchange_rate_stale: false,
+    exchange_rate_status: index === 3 ? 'missing' as const : 'fresh' as const,
   }))
   return dashboardProfile({
     dashboard,
@@ -837,7 +868,7 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
     case '/targets':
       return authenticatedProfile({
         [apiRouteKey('GET', '/api/targets')]: { status: 200, body: [] },
-        [apiRouteKey('GET', '/api/targets?scope=all')]: { status: 200, body: [] },
+        [apiRouteKey('GET', '/api/targets?scope=retired')]: { status: 200, body: [] },
         [apiRouteKey('GET', '/api/targets/sparklines?metrics=latency&window=24h&downsample=24')]: {
           status: 200,
           body: TARGET_SPARKLINES,
@@ -903,6 +934,10 @@ export function coreRouteProfile(path: CoreRoutePath): ApiFixtureProfile {
         [apiRouteKey('GET', '/api/subscriptions/statistics?window=year')]: {
           status: 200,
           body: SUBSCRIPTION_STATISTICS,
+        },
+        [apiRouteKey('GET', '/api/subscriptions/exchange-rates/status')]: {
+          status: 200,
+          body: { items: [] },
         },
       })
     case '/settings':
@@ -1614,6 +1649,7 @@ export function comparisonWorkbenchProfile(options: {
   }
 
   return authenticatedProfile({
+    ...recordEvidenceRoutes(['evs_cmpleft', 'evs_cmpright']),
     [apiRouteKey('POST', '/api/evidence/comparison-candidates')]: {
       status: 200,
       body: {
@@ -2180,7 +2216,7 @@ function insightCostRow(row: InsightVPSRow): SubscriptionOverview['vps_costs'][n
     base_currency: 'CNY',
     exchange_rate: 7,
     exchange_rate_date: '2026-07-10',
-    exchange_rate_stale: false,
+    exchange_rate_status: 'fresh',
     renew_at: renewAt,
     status: 'active',
     payment_method: 'card',
@@ -2246,7 +2282,7 @@ export function subscriptionInsightsProfile(): ApiFixtureProfile {
     currency: 'USD',
     renewal_decision: row.renewal_decision,
     lifecycle_status: 'active',
-    exchange_rate_stale: row.vps_id === 'vps_002',
+    exchange_rate_status: row.vps_id === 'vps_002' ? 'stale' as const : 'fresh' as const,
   })).sort((left, right) => String(left.renew_at).localeCompare(String(right.renew_at)))
   return authenticatedProfile({
     [apiRouteKey('GET', '/api/subscriptions')]: { status: 200, body: [SUBSCRIPTION] },
@@ -2271,5 +2307,6 @@ export function subscriptionInsightsProfile(): ApiFixtureProfile {
       }),
     },
     [apiRouteKey('GET', '/api/subscriptions/statistics?window=year')]: { status: 200, body: statistics },
+    [apiRouteKey('GET', '/api/subscriptions/exchange-rates/status')]: { status: 200, body: { items: [] } },
   })
 }

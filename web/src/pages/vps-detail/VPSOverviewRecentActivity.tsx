@@ -21,6 +21,7 @@ type Props = {
   heading?: string
   assetName?: string
   vpsId?: string
+  platformDisabled?: boolean
 }
 
 export function VPSOverviewRecentActivity({
@@ -33,8 +34,19 @@ export function VPSOverviewRecentActivity({
   heading = '最近活动',
   assetName = '',
   vpsId = '',
+  platformDisabled = false,
 }: Props) {
   const location = useLocation()
+  if (platformDisabled) {
+    return (
+      <section className="vps-overview-recent" aria-label={heading || '最近活动'}>
+        <div className="vps-overview-recent__header">
+          {heading ? <h2 id="vps-overview-recent-title">{heading}</h2> : null}
+        </div>
+        <p className="vps-overview-recent__empty">未启用</p>
+      </section>
+    )
+  }
   const visible = items.slice(0, limit)
   const readKind = overviewSourceReadKind(section)
   const failedRead = readKind === 'timeout' || readKind === 'unavailable'

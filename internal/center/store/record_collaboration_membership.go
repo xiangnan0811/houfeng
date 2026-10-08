@@ -47,7 +47,8 @@ func (reader *postgresCollaborationMembershipReader) ReadMemberActor(
 	err := tx.QueryRow(ctx, `
 		select role
 		from public.users
-		where user_id = $1`, userID).Scan(&role)
+		where user_id = $1
+		  and disabled_at is null`, userID).Scan(&role)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return recordauth.ActorScope{}, recordcollaboration.ErrMembershipDenied
 	}

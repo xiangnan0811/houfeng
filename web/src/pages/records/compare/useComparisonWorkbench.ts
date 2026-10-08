@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { ApiError } from '../../../lib/apiRequest'
@@ -21,11 +21,18 @@ import type {
 } from '../../../lib/types'
 import { emptyRecordDraftPayload } from '../recordPayload'
 import {
+  COMPARISON_QUERY_PARAM,
+  addFixedComparisonItem,
+  canonicalComparisonURLState,
+  confirmComparisonSnapshotItems,
   comparisonKindFromURL,
   comparisonKindKey,
   comparisonSearchParams,
   defaultComparisonMetric,
   parseComparisonSearchParams,
+  removeFixedComparisonItem,
+  replaceFixedComparisonItems,
+  type ComparisonBasketResult,
   type ComparisonQueryParse,
   type ComparisonURLFixedItem,
   type ComparisonURLState,
@@ -45,11 +52,16 @@ export type ComparisonWorkbenchState = Readonly<{
   savedRecordId: string | null
   saveBlocked: boolean
   cancelled: boolean
+  selectionError: string | null
 }>
 
 export type ComparisonWorkbenchCommands = Readonly<{
   replaceQuery: (state: ComparisonURLState) => void
   confirmCandidates: (items: ComparisonURLFixedItem[]) => void
+  addFixedItem: (item: ComparisonURLFixedItem) => void
+  removeFixedItem: (key: string) => void
+  replaceFixedItems: (items: ComparisonURLFixedItem[]) => void
+  clearFixedItems: () => void
   setBaseline: (index: number) => void
   setAlignment: (alignment: ComparisonAlignment) => void
   setWindow: (from: string, to: string) => void
@@ -58,7 +70,6 @@ export type ComparisonWorkbenchCommands = Readonly<{
   selectKind: (kind: string, metric?: string) => void
   setTitle: (title: string) => void
   setConclusion: (conclusion: string) => void
-  setSaveSubjects: (subjects: ComparisonSubjectRef[]) => void
   save: () => Promise<void>
   cancel: () => void
 }>
@@ -92,18 +103,31 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
   const [settled, setSettled] = useState<SettledWorkbench | null>(null)
   const [title, setTitle] = useState('')
   const [conclusion, setConclusion] = useState('')
-  const [saveSubjects, setSaveSubjects] = useState<ComparisonSubjectRef[]>(
-    query.ok && query.state.mode === 'candidate' ? query.state.subjects ?? [] : [],
-  )
   const [saving, setSaving] = useState(false)
   const [savedRecordId, setSavedRecordId] = useState<string | null>(null)
+  const [selectionError, setSelectionError] = useState<string | null>(null)
   const [cancelKey, setCancelKey] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
+  const saveAbortRef = useRef<AbortController | null>(null)
+  const saveGenerationRef = useRef(0)
   const cancelKeyRef = useRef<string | null>(null)
   const queryRef = useRef(query)
   const saveAttemptRef = useRef<SaveAttempt | null>(null)
   const requestKey = query.ok ? JSON.stringify(query.state) : query.reason
-  queryRef.current = query
+  const requestKeyRef = useRef(requestKey)
+  const previousQueryRef = useRef(query)
+  // History and external URL writes change requestKey without commitQuery.
+  // Drop the visible save while rendering. The layout effect retires the
+  // generation before passive effects, so the next draft microtask cannot publish.
+  const [trackedQuery, setTrackedQuery] = useState({ requestKey, query })
+  if (trackedQuery.requestKey !== requestKey) {
+    const previousQuery = trackedQuery.query
+    setTrackedQuery({ requestKey, query })
+    if (!isPresentationOnlyQueryChange(previousQuery, query)) {
+      if (savedRecordId !== null) setSavedRecordId(null)
+      if (saving) setSaving(false)
+    }
+  }
   const tooFewItems = query.ok && query.state.mode === 'fixed' && (query.state.items?.length ?? 0) < 2
   const cancelled = cancelKey === requestKey
   const settledCurrent = settled?.requestKey === requestKey && !cancelled
@@ -112,6 +136,25 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
   const comparison = settledCurrent ? settled.comparison : null
   const error = settledCurrent ? settled.error : null
   const errorCode = settledCurrent ? settled.errorCode : null
+  const saveSubjects = comparison
+    ? subjectsFromComparison(comparison)
+    : query.ok && query.state.mode === 'candidate'
+      ? query.state.subjects ?? []
+      : []
+
+  useLayoutEffect(() => {
+    const previousQuery = previousQueryRef.current
+    const previousKey = requestKeyRef.current
+    queryRef.current = query
+    requestKeyRef.current = requestKey
+    previousQueryRef.current = query
+    if (previousKey === requestKey) return
+    if (isPresentationOnlyQueryChange(previousQuery, query)) return
+    // Basket commands already retire in commitQuery. History and external URL
+    // writes do not, so retire here before passive effects and microtasks.
+    saveGenerationRef.current += 1
+    saveAbortRef.current?.abort()
+  }, [query, requestKey])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -128,7 +171,7 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
       : loadComparison(current.state, controller.signal)
     void run
       .then((result) => {
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted || requestKeyRef.current !== requestKey) return
         if (result.kind === 'candidates') {
           setSettled({
             requestKey,
@@ -137,9 +180,6 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
             error: null,
             errorCode: null,
           })
-          setSaveSubjects((currentSubjects) => (
-            currentSubjects.length ? currentSubjects : current.state.subjects ?? []
-          ))
           return
         }
         setSettled({
@@ -149,16 +189,13 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
           error: null,
           errorCode: null,
         })
-        setSaveSubjects((currentSubjects) => (
-          currentSubjects.length ? currentSubjects : subjectsFromComparison(result.comparison)
-        ))
         const nextState = withDefaultKindAndMetric(current.state, result.comparison)
         if (nextState !== current.state) {
           setSearchParams(comparisonSearchParams(nextState), { replace: true })
         }
       })
       .catch((cause: unknown) => {
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted || requestKeyRef.current !== requestKey || isAbortError(cause)) return
         if (cause instanceof ApiError && cause.status === 404) {
           setSettled({
             requestKey,
@@ -180,12 +217,56 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
     return () => controller.abort()
   }, [requestKey, setSearchParams])
 
+  useEffect(() => () => {
+    saveAbortRef.current?.abort()
+    saveGenerationRef.current += 1
+  }, [])
+
   const saveBlocked = !comparison?.save_eligibility.eligible
     || !comparison.comparison_intent
     || comparison.save_eligibility.blockers.includes('snapshot_unreadable')
 
-  function replaceQuery(state: ComparisonURLState) {
+  function commitQuery(state: ComparisonURLState | null): boolean {
+    if (state == null) {
+      if (!query.ok && query.reason === 'missing') return false
+    } else if (
+      query.ok
+      && JSON.stringify(canonicalComparisonURLState(query.state)) === JSON.stringify(canonicalComparisonURLState(state))
+    ) {
+      return false
+    }
+    abortRef.current?.abort()
+    saveAbortRef.current?.abort()
+    saveGenerationRef.current += 1
+    setSavedRecordId(null)
+    setSaving(false)
+    if (state == null) {
+      const params = new URLSearchParams(searchParams)
+      params.delete(COMPARISON_QUERY_PARAM)
+      setSearchParams(params, { replace: true })
+      return true
+    }
     setSearchParams(comparisonSearchParams(state), { replace: true })
+    return true
+  }
+
+  function replaceQuery(state: ComparisonURLState) {
+    commitQuery(state)
+  }
+
+  function applyBasket(result: ComparisonBasketResult) {
+    if (!result.ok) {
+      setSelectionError(result.error)
+      return
+    }
+    if (!result.changed) return
+    setSelectionError(null)
+    commitQuery(result.state)
+  }
+
+  function writeBareURL() {
+    if (!commitQuery(null)) return
+    setSelectionError(null)
   }
 
   function patchFixed(mutator: (current: ComparisonURLState) => ComparisonURLState) {
@@ -195,9 +276,13 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
 
   async function save() {
     if (saveBlocked || !comparison?.comparison_intent || saving) return
+    const generation = saveGenerationRef.current
+    const intentToken = comparison.comparison_intent.token
+    const digest = comparison.digest
+    const controller = new AbortController()
+    saveAbortRef.current = controller
     setSaving(true)
     try {
-      const digest = comparison.digest
       if (!saveAttemptRef.current || saveAttemptRef.current.digest !== digest) {
         saveAttemptRef.current = readSaveAttempt(digest) ?? {
           digest,
@@ -210,23 +295,40 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
       const draft = await createRecordDraft({
         payload: comparisonSavePayload(options.userId, title, conclusion, saveSubjects),
       })
+      if (generation !== saveGenerationRef.current || controller.signal.aborted) return
       const created = await saveComparisonRecord({
         record_id: attempt.recordId,
         draft_id: draft.draft_id,
         draft_etag: draft.etag,
-        comparison_intent: comparison.comparison_intent.token,
-      }, attempt.idempotencyKey)
+        comparison_intent: intentToken,
+      }, attempt.idempotencyKey, controller.signal)
+      if (generation !== saveGenerationRef.current || controller.signal.aborted) return
       setSavedRecordId(created.record_id)
     } catch (cause) {
-      setSettled((current) => ({
-        requestKey,
-        candidates: current?.requestKey === requestKey ? current.candidates : null,
-        comparison: current?.requestKey === requestKey ? current.comparison : comparison,
-        error: cause instanceof Error ? cause.message : '另存失败',
-        errorCode: cause instanceof ApiError ? cause.code ?? null : null,
-      }))
+      if (generation !== saveGenerationRef.current || controller.signal.aborted || isAbortError(cause)) return
+      const message = cause instanceof Error ? cause.message : '另存失败'
+      const errorCode = cause instanceof ApiError ? cause.code ?? null : null
+      const retire = retiresComparisonSave(cause)
+      setSettled((current) => {
+        if (!retire && current && current.requestKey === requestKey) {
+          return {
+            requestKey,
+            candidates: current.candidates,
+            comparison: current.comparison,
+            error: message,
+            errorCode,
+          }
+        }
+        return {
+          requestKey,
+          candidates: null,
+          comparison: retire ? null : comparison,
+          error: message,
+          errorCode,
+        }
+      })
     } finally {
-      setSaving(false)
+      if (generation === saveGenerationRef.current) setSaving(false)
     }
   }
 
@@ -245,24 +347,29 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
       savedRecordId,
       saveBlocked,
       cancelled,
+      selectionError,
     },
     commands: {
       replaceQuery,
       confirmCandidates(items) {
-        if (!query.ok) return
-        replaceQuery({
-          version: query.state.version,
-          mode: 'fixed',
-          items,
-          baseline: 0,
-          alignment: query.state.alignment ?? 'actual_coverage',
-          requested_from: query.state.requested_from,
-          requested_to: query.state.requested_to,
-          tolerance_seconds: query.state.tolerance_seconds ?? 60,
-          ...(query.state.bucket_seconds != null ? { bucket_seconds: query.state.bucket_seconds } : {}),
-          ...(query.state.kind ? { kind: query.state.kind } : {}),
-          ...(query.state.metric ? { metric: query.state.metric } : {}),
-        })
+        applyBasket(confirmComparisonSnapshotItems(query.ok ? query.state : null, items))
+      },
+      addFixedItem(item) {
+        applyBasket(addFixedComparisonItem(query.ok ? query.state : null, item))
+      },
+      removeFixedItem(key) {
+        applyBasket(removeFixedComparisonItem(query.ok ? query.state : null, key))
+      },
+      replaceFixedItems(items) {
+        const result = replaceFixedComparisonItems(query.ok ? query.state : null, items)
+        if (result.ok && result.state == null) {
+          writeBareURL()
+          return
+        }
+        applyBasket(result)
+      },
+      clearFixedItems() {
+        writeBareURL()
       },
       setBaseline(index) {
         patchFixed((current) => ({ ...current, baseline: index }))
@@ -296,10 +403,12 @@ export function useComparisonWorkbench(options: UseComparisonWorkbenchOptions): 
       },
       setTitle,
       setConclusion,
-      setSaveSubjects,
       save,
       cancel() {
         abortRef.current?.abort()
+        saveAbortRef.current?.abort()
+        saveGenerationRef.current += 1
+        setSaving(false)
         cancelKeyRef.current = requestKey
         setCancelKey(requestKey)
       },
@@ -350,6 +459,37 @@ async function loadComparison(state: ComparisonURLState, signal: AbortSignal) {
   }
   const comparison = await evaluateFixedComparison(request, signal)
   return { kind: 'comparison' as const, comparison }
+}
+
+function isAbortError(cause: unknown): boolean {
+  return cause instanceof Error && cause.name === 'AbortError'
+}
+
+function retiresComparisonSave(cause: unknown): boolean {
+  if (!(cause instanceof ApiError)) return false
+  if (cause.status === 403 || cause.status === 404) return true
+  return cause.status === 422
+    && (cause.code === 'comparison_intent_invalid' || cause.code === 'comparison_intent_stale')
+}
+
+function isPresentationOnlyQueryChange(previous: ComparisonQueryParse, next: ComparisonQueryParse): boolean {
+  if (!previous.ok || !next.ok) return false
+  if (previous.state.mode !== 'fixed' || next.state.mode !== 'fixed') return false
+  const previousKind = previous.state.kind ?? ''
+  const nextKind = next.state.kind ?? ''
+  const previousMetric = previous.state.metric ?? ''
+  const nextMetric = next.state.metric ?? ''
+  if (previousKind === nextKind && previousMetric === nextMetric) return false
+  if (previousKind && previousKind !== nextKind) return false
+  if (previousMetric && previousMetric !== nextMetric) return false
+  return comparisonStateWithoutPresentation(previous.state) === comparisonStateWithoutPresentation(next.state)
+}
+
+function comparisonStateWithoutPresentation(state: ComparisonURLState): string {
+  const canonical = canonicalComparisonURLState(state)
+  delete canonical.kind
+  delete canonical.metric
+  return JSON.stringify(canonical)
 }
 
 function withDefaultKindAndMetric(

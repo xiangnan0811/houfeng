@@ -12,7 +12,7 @@ import { useAttachmentMetadata } from './attachments/useAttachmentMetadata'
 import { useRecordAttachmentUploads } from './attachments/useRecordAttachmentUploads'
 import type { EvidenceCaptureSubject, PendingEvidence } from './evidence/EvidenceCapturePicker'
 import { captureEvidencePreview, getEvidenceSnapshot } from '../../lib/recordsApi'
-import { evidenceKindLabel } from './evidence/evidencePresentation'
+import { evidenceKindLabel, presentGeneratedEvidenceTitle } from './evidence/evidencePresentation'
 import { useIdLookup } from './hooks/useIdLookup'
 import { listVPSAssets, listVPSMonitoringInstances } from '../../lib/api'
 import type { OtherEvidenceSourceLoaders } from './evidence/useOtherEvidenceSource'
@@ -194,7 +194,7 @@ function RecordWorkspaceSession({ mode, recordId, revisionId }: RecordWorkspaceP
         kind: 'evidence',
         id,
         // 不露出快照 ID：读到前显示“证据”，读到后显示“类型 · 标题”。
-        label: summary ? `${evidenceKindLabel(summary.kind)} · ${summary.title}` : '证据',
+        label: summary ? `${evidenceKindLabel(summary.kind)} · ${presentGeneratedEvidenceTitle(summary.title)}` : '证据',
         available: entry?.status !== 'unavailable',
         pending: !entry || entry.status === 'loading',
       }

@@ -38,5 +38,6 @@ export function settingsSubscriptionsProfile(options: { budgets?: SubscriptionMo
   return authenticatedProfile({
     [apiRouteKey('GET', '/api/subscriptions/settings')]: { status: 200, body: SUBSCRIPTION_COST_SETTINGS },
     [apiRouteKey('GET', '/api/subscription-monthly-budgets')]: { status: 200, body: options.budgets ?? MONTHLY_BUDGETS },
+    [apiRouteKey('GET', '/api/subscriptions/exchange-rates/status')]: { status: 200, body: { items: [] } },
   })
 }

@@ -111,8 +111,8 @@ export function TargetsBatchPanel({
           title="确认批量暂停目标"
           current={`将对已选的 ${selectedCount} 个目标执行暂停。`}
           result="操作后：已选目标运行状态变为暂停。"
-          impact="会停止这些目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。"
-          unchanged="不会删除历史事件、观测记录或 ProbeItem 配置。"
+          impact="会停止这些目标下所有探测项的执行，不再产生新的入口探测记录。"
+          unchanged="不会删除历史事件、观测记录或探测项配置。"
           confirmLabel="确认批量暂停"
           disabled={batchSubmitting}
           onConfirm={onConfirmBatchPause}
@@ -126,7 +126,7 @@ export function TargetsBatchPanel({
           current={`将对已选的 ${selectedCount} 个目标执行退役。`}
           result="操作后：已选目标退出默认工作集，变为退役对象。"
           impact="退役后不再作为活跃入口探测，需要恢复后才能继续观测。"
-          unchanged="不会删除历史观测、事件或 ProbeItem 配置。"
+          unchanged="不会删除历史观测、事件或探测项配置。"
           confirmLabel="确认批量退役"
           disabled={batchSubmitting}
           onConfirm={onConfirmBatchArchive}

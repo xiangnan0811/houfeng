@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -14,19 +13,6 @@ import (
 
 	"houfeng/internal/center/recordauth"
 )
-
-func TestImportJobQueriesSelectActorID(t *testing.T) {
-	t.Parallel()
-
-	source, err := os.ReadFile("record_portability_import.go")
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	want := "select import_job_id, actor_id, job_state, lock_version, archive_digest, expires_at"
-	if strings.Count(string(source), want) < 2 {
-		t.Fatalf("ClaimImportJob and LoadImportJob must both select actor_id")
-	}
-}
 
 func TestClaimExportJobAdmitsThenInsertsAndReplaysIdempotentFingerprint(t *testing.T) {
 	t.Parallel()

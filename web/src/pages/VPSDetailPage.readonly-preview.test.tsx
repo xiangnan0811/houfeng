@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import * as api from '../lib/api'
+import * as authContext from '../lib/auth-context'
 import * as recordsApi from '../lib/recordsApi'
 import type {
   AssetDomainRecord,
@@ -188,6 +189,23 @@ describe('VPSDetailPage readonly preview workbench', () => {
   })
 
   beforeEach(() => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: true, portability: true },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
     vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
     vi.spyOn(api, 'listSubscriptions').mockResolvedValue([])
     vi.spyOn(api, 'listVPSServices').mockResolvedValue([serviceFixture()])

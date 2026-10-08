@@ -1276,6 +1276,291 @@ describe('useRecordDraft', () => {
     expect(result.current.state.payload.title).toBe('')
   })
 
+  it('clears the protected shell while buffer deletion is still pending and does not resurrect it on unmount', async () => {
+    api.getRecord
+      .mockResolvedValueOnce(recordDetailFixture())
+      .mockRejectedValueOnce(new ApiError(404, 'gone'))
+    const inner = memoryDraftBufferStore()
+    const key = draftBufferKey('usr_1', 'rec_001')
+    await writeUnsyncedDraft(inner, {
+      key,
+      userId: 'usr_1',
+      recordId: 'rec_001',
+      payload: { ...emptyRecordDraftPayload('usr_1'), body_markdown: 'stored secret', attachment_ids: ['att_stored'] },
+      updatedAt: Date.now(),
+    })
+    let releaseDelete: () => void = () => undefined
+    const deleteGate = new Promise<void>((resolve) => {
+      releaseDelete = resolve
+    })
+    let markDeleteStarted: () => void = () => undefined
+    const deleteStarted = new Promise<void>((resolve) => {
+      markDeleteStarted = resolve
+    })
+    const writes: string[] = []
+    const store = {
+      get: (lookup: string) => inner.get(lookup),
+      list: () => inner.list(),
+      async set(value: Parameters<typeof inner.set>[0]) {
+        writes.push(value.payload.body_markdown)
+        await inner.set(value)
+      },
+      async delete(lookup: string) {
+        markDeleteStarted()
+        await deleteGate
+        await inner.delete(lookup)
+      },
+    }
+    const { result, unmount } = renderHook(() => useRecordDraft({
+      mode: 'edit',
+      recordId: 'rec_001',
+      userId: 'usr_1',
+      store,
+    }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => {
+      result.current.commands.patchPayload({
+        body_markdown: 'typed secret',
+        attachment_ids: ['att_typed'],
+      })
+    })
+    writes.length = 0
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await deleteStarted
+    })
+
+    expect(result.current.state.status).toBe('revoked')
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.payload.attachment_ids).toEqual([])
+    expect(result.current.state.record).toBeNull()
+    expect(result.current.state.draft).toBeNull()
+    expect(result.current.state.revision).toBeNull()
+    await expect(readUnsyncedDraft(inner, key)).resolves.toMatchObject({
+      payload: { body_markdown: 'stored secret', attachment_ids: ['att_stored'] },
+    })
+
+    unmount()
+    expect(writes).not.toContain('typed secret')
+    await expect(readUnsyncedDraft(inner, key)).resolves.toMatchObject({
+      payload: { body_markdown: 'stored secret' },
+    })
+
+    releaseDelete()
+    await act(async () => {
+      await deleteGate
+    })
+    await expect(readUnsyncedDraft(inner, key)).resolves.toBeUndefined()
+    expect(writes).not.toContain('typed secret')
+  })
+
+  it('keeps the shell revoked when buffer deletion is rejected and does not write it back on unmount', async () => {
+    api.getRecord
+      .mockResolvedValueOnce(recordDetailFixture())
+      .mockRejectedValueOnce(new ApiError(403, 'forbidden'))
+    const inner = memoryDraftBufferStore()
+    const key = draftBufferKey('usr_1', 'rec_001')
+    await writeUnsyncedDraft(inner, {
+      key,
+      userId: 'usr_1',
+      recordId: 'rec_001',
+      payload: { ...emptyRecordDraftPayload('usr_1'), body_markdown: 'stored secret', attachment_ids: ['att_stored'] },
+      updatedAt: Date.now(),
+    })
+    let rejectDelete: (error: Error) => void = () => undefined
+    const deleteGate = new Promise<void>((_resolve, reject) => {
+      rejectDelete = reject
+    })
+    let markDeleteStarted: () => void = () => undefined
+    const deleteStarted = new Promise<void>((resolve) => {
+      markDeleteStarted = resolve
+    })
+    const writes: string[] = []
+    const store = {
+      get: (lookup: string) => inner.get(lookup),
+      list: () => inner.list(),
+      async set(value: Parameters<typeof inner.set>[0]) {
+        writes.push(value.payload.body_markdown)
+        await inner.set(value)
+      },
+      async delete(lookup: string) {
+        markDeleteStarted()
+        await deleteGate
+        await inner.delete(lookup)
+      },
+    }
+    const { result, unmount } = renderHook(() => useRecordDraft({
+      mode: 'edit',
+      recordId: 'rec_001',
+      userId: 'usr_1',
+      store,
+    }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => {
+      result.current.commands.patchPayload({
+        body_markdown: 'typed secret',
+        attachment_ids: ['att_typed'],
+      })
+    })
+    writes.length = 0
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      await deleteStarted
+    })
+
+    expect(result.current.state.status).toBe('revoked')
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.payload.attachment_ids).toEqual([])
+    expect(result.current.state.record).toBeNull()
+
+    unmount()
+    expect(writes).not.toContain('typed secret')
+    rejectDelete(new Error('indexeddb blocked'))
+    await act(async () => {
+      await Promise.resolve()
+    })
+    await expect(readUnsyncedDraft(inner, key)).resolves.toMatchObject({
+      payload: { body_markdown: 'stored secret', attachment_ids: ['att_stored'] },
+    })
+    expect(writes).not.toContain('typed secret')
+  })
+
+  it('does not let a late buffer read restore a record after authorization is revoked', async () => {
+    const inner = memoryDraftBufferStore()
+    const key = draftBufferKey('usr_1', 'rec_001')
+    await writeUnsyncedDraft(inner, {
+      key,
+      userId: 'usr_1',
+      recordId: 'rec_001',
+      payload: { ...emptyRecordDraftPayload('usr_1'), title: 'late secret', body_markdown: 'late secret' },
+      updatedAt: Date.now(),
+    })
+    let releaseRead: () => void = () => undefined
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve
+    })
+    let reads = 0
+    const store = {
+      async get(lookup: string) {
+        reads += 1
+        await readGate
+        return inner.get(lookup)
+      },
+      set: (value: Parameters<typeof inner.set>[0]) => inner.set(value),
+      delete: (lookup: string) => inner.delete(lookup),
+      list: () => inner.list(),
+    }
+    api.getRecord
+      .mockResolvedValueOnce(recordDetailFixture())
+      .mockRejectedValueOnce(new ApiError(404, 'gone'))
+    const { result } = renderHook(() => useRecordDraft({
+      mode: 'edit',
+      recordId: 'rec_001',
+      userId: 'usr_1',
+      store,
+    }))
+    await waitFor(() => expect(reads).toBe(1))
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('revoked'))
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.record).toBeNull()
+
+    releaseRead()
+    await act(async () => {
+      await readGate
+      await Promise.resolve()
+    })
+    expect(result.current.state.status).toBe('revoked')
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.payload.title).toBe('')
+    expect(result.current.state.record).toBeNull()
+    expect(result.current.state.draft).toBeNull()
+  })
+
+  it('still applies a publication refresh while authorization holds', async () => {
+    api.getRecord
+      .mockResolvedValueOnce(recordDetailFixture())
+      .mockResolvedValueOnce(publishedRevision())
+    api.createRecordDraft.mockResolvedValue(draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+    api.createRecordRevision.mockResolvedValue({ record_id: 'rec_001' })
+    const store = memoryDraftBufferStore()
+    const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    await act(async () => {
+      await expect(result.current.commands.publish()).resolves.toBe(true)
+    })
+    expect(result.current.state.status).toBe('ready')
+    expect(result.current.state.record?.current_revision_id).toBe('rrv_published')
+    expect(result.current.state.revision?.revision_id).toBe('rrv_published')
+    expect(result.current.state.payload.body_markdown).toBe('published secret')
+    expect(result.current.state.payload.attachment_ids).toEqual(['att_published'])
+    expect(result.current.state.draft).toBeNull()
+  })
+
+  it('does not apply a publication refresh that settles after authorization is revoked', async () => {
+    const held = holdDeletes()
+    const { publishing, result } = await revokeDuringPublicationRefresh(held)
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.payload.attachment_ids).toEqual([])
+
+    await act(async () => {
+      held.resolveRefresh(publishedRevision())
+      await Promise.resolve()
+    })
+    expect(result.current.state.status).toBe('revoked')
+    expect(result.current.state.message).toBe('gone')
+    expect(result.current.state.record).toBeNull()
+    expect(result.current.state.revision).toBeNull()
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.payload.attachment_ids).toEqual([])
+    expect(JSON.stringify(result.current.state)).not.toContain('published secret')
+    expect(JSON.stringify(result.current.state)).not.toContain('att_published')
+
+    let published = false
+    await act(async () => {
+      held.releaseDelete()
+      published = await publishing
+    })
+    expect(published).toBe(true)
+    expect(result.current.state.status).toBe('revoked')
+    expect(result.current.state.record).toBeNull()
+    expect(result.current.state.revision).toBeNull()
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.payload.attachment_ids).toEqual([])
+    expect(JSON.stringify(result.current.state)).not.toContain('published secret')
+  })
+
+  it('does not reopen a revoked workspace when publication cleanup fails after the late refresh', async () => {
+    const held = holdDeletes()
+    const { publishing, result } = await revokeDuringPublicationRefresh(held)
+
+    await act(async () => {
+      held.resolveRefresh(publishedRevision())
+      await Promise.resolve()
+    })
+    expect(result.current.state.status).toBe('revoked')
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.record).toBeNull()
+
+    let published = false
+    await act(async () => {
+      held.rejectDelete(new Error('indexeddb blocked'))
+      published = await publishing
+    })
+    expect(published).toBe(true)
+    expect(result.current.state.status).toBe('revoked')
+    expect(result.current.state.message).toBe('gone')
+    expect(result.current.state.record).toBeNull()
+    expect(result.current.state.revision).toBeNull()
+    expect(result.current.state.draft).toBeNull()
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.payload.attachment_ids).toEqual([])
+    expect(JSON.stringify(result.current.state)).not.toContain('published secret')
+    expect(JSON.stringify(result.current.state)).not.toContain('indexeddb blocked')
+  })
+
   it('revokes when the tab becomes visible and the record is no longer authorized', async () => {
     api.getRecord
       .mockResolvedValueOnce(recordDetailFixture())
@@ -1293,6 +1578,47 @@ describe('useRecordDraft', () => {
     })
     await waitFor(() => expect(result.current.state.status).toBe('revoked'))
     expect(result.current.state.payload.body_markdown).toBe('')
+  })
+
+  it('clears an edited body, its attachments, and the local buffer when a visible edit is revoked', async () => {
+    api.getRecord
+      .mockResolvedValueOnce(recordDetailFixture())
+      .mockRejectedValueOnce(new ApiError(404, 'gone'))
+    const store = memoryDraftBufferStore()
+    const { result, unmount } = renderHook(() => useRecordDraft({
+      mode: 'edit',
+      recordId: 'rec_001',
+      userId: 'usr_1',
+      store,
+    }))
+    await waitFor(() => expect(result.current.state.status).toBe('ready'))
+    act(() => {
+      result.current.commands.patchPayload({
+        body_markdown: 'secret body',
+        attachment_ids: ['att_secret'],
+      })
+    })
+    await writeUnsyncedDraft(store, {
+      key: draftBufferKey('usr_1', 'rec_001'),
+      userId: 'usr_1',
+      recordId: 'rec_001',
+      payload: {
+        ...result.current.state.payload,
+        body_markdown: 'secret body',
+        attachment_ids: ['att_secret'],
+      },
+      updatedAt: Date.now(),
+    })
+
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await waitFor(() => expect(result.current.state.status).toBe('revoked'))
+    expect(result.current.state.payload.body_markdown).toBe('')
+    expect(result.current.state.payload.attachment_ids).toEqual([])
+    await expect(readUnsyncedDraft(store, draftBufferKey('usr_1', 'rec_001'))).resolves.toBeUndefined()
+    unmount()
+    await expect(readUnsyncedDraft(store, draftBufferKey('usr_1', 'rec_001'))).resolves.toBeUndefined()
   })
 
   it('revokes on a persisted pageshow when the record is no longer authorized', async () => {
@@ -1686,6 +2012,101 @@ describe('useRecordDraft', () => {
     expect(result.current.state.record?.current.revision_id).toBe('rrv_002')
   })
 })
+
+function publishedRevision() {
+  return recordDetailFixture({
+    current_revision_id: 'rrv_published',
+    lock_version: 9,
+    current: recordRevisionFixture({
+      revision_id: 'rrv_published',
+      title: 'published secret',
+      body_markdown: 'published secret',
+      attachment_ids: ['att_published'],
+    }),
+  })
+}
+
+function holdDeletes() {
+  let releaseDelete: () => void = () => undefined
+  let rejectDelete: (error: Error) => void = () => undefined
+  const gate = new Promise<void>((resolve, reject) => {
+    releaseDelete = resolve
+    rejectDelete = reject
+  })
+  const inner = memoryDraftBufferStore()
+  let markStarted: () => void = () => undefined
+  const started = new Promise<void>((resolve) => {
+    markStarted = resolve
+  })
+  let resolveRefresh: (value: ReturnType<typeof publishedRevision>) => void = () => undefined
+  const refresh = new Promise<ReturnType<typeof publishedRevision>>((resolve) => {
+    resolveRefresh = resolve
+  })
+  // 保存草稿会先删掉本地缓冲，发布后的刷新读取还没开始。只停住那次读取之后的删除。
+  let gateDeletes = false
+  const store = {
+    get: (lookup: string) => inner.get(lookup),
+    list: () => inner.list(),
+    set: (value: Parameters<typeof inner.set>[0]) => inner.set(value),
+    async delete(lookup: string) {
+      if (!gateDeletes) {
+        await inner.delete(lookup)
+        return
+      }
+      markStarted()
+      await gate
+      await inner.delete(lookup)
+    },
+  }
+  return {
+    store,
+    started,
+    refresh,
+    holdFurtherDeletes: () => {
+      gateDeletes = true
+    },
+    releaseDelete: () => releaseDelete(),
+    rejectDelete: (error: Error) => rejectDelete(error),
+    resolveRefresh: (value: ReturnType<typeof publishedRevision>) => resolveRefresh(value),
+  }
+}
+
+async function revokeDuringPublicationRefresh(held: ReturnType<typeof holdDeletes>) {
+  api.getRecord.mockResolvedValueOnce(recordDetailFixture())
+  api.createRecordDraft.mockResolvedValue(draftFixture({ record_id: 'rec_001', base_revision_id: 'rrv_001' }))
+  api.createRecordRevision.mockResolvedValue({ record_id: 'rec_001' })
+  const { result } = renderHook(() => useRecordDraft({ mode: 'edit', recordId: 'rec_001', userId: 'usr_1', store: held.store }))
+  await waitFor(() => expect(result.current.state.status).toBe('ready'))
+  api.getRecord.mockImplementationOnce(() => {
+    held.holdFurtherDeletes()
+    return held.refresh
+  })
+  api.getRecord.mockRejectedValueOnce(new ApiError(404, 'gone'))
+  act(() => {
+    result.current.commands.patchPayload({
+      body_markdown: 'typed secret',
+      attachment_ids: ['att_typed'],
+    })
+  })
+  let publishing: Promise<boolean> = Promise.resolve(false)
+  // 发布停在未完成的刷新读取上。waitFor 会关掉 act 环境，不能和这次未完成的更新套在同一个 act 里。
+  await act(async () => {
+    publishing = result.current.commands.publish()
+    for (let turn = 0; turn < 20 && api.getRecord.mock.calls.length < 2; turn += 1) {
+      await Promise.resolve()
+    }
+  })
+  await waitFor(() => expect(api.getRecord).toHaveBeenCalledTimes(2))
+  await act(async () => {
+    document.dispatchEvent(new Event('visibilitychange'))
+    for (let turn = 0; turn < 20; turn += 1) {
+      await Promise.resolve()
+    }
+  })
+  await held.started
+  await waitFor(() => expect(result.current.state.status).toBe('revoked'))
+  return { publishing, result }
+}
 
 function pendingEvidence(captureIntentId: string, recordId = 'rec_allocated'): PublishEvidence {
   return { record_id: recordId, capture_intent_id: captureIntentId, valid_until: new Date(Date.now() + 10 * 60_000).toISOString() }

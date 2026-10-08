@@ -35,7 +35,7 @@ function deferredResponse() {
 
 function probeActionButton(action: string, probeItemId = 'pb_001') {
   return screen.getByRole('button', {
-    name: new RegExp(`^${action} ProbeItem ${probeItemId}\\b`),
+    name: new RegExp(`^${action} 探测项 ${probeItemId}\\b`),
   })
 }
 
@@ -70,6 +70,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['公开'],
           note: '',
@@ -170,13 +172,13 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByText('保持观察')).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '近期延迟' }).closest('section')).toHaveClass('monitoring-detail-section')
     expect(screen.getByRole('button', { name: '资料维护' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '探测方式' }).closest('section')).toHaveClass('monitoring-detail-section')
+    expect(screen.getByRole('heading', { name: '探测项' }).closest('section')).toHaveClass('monitoring-detail-section')
     expect(screen.queryByRole('heading', { name: '当前异常' })).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '近期事件' }).closest('section')).toHaveClass('monitoring-detail-section')
     expect(screen.getByText('HTTP')).toBeInTheDocument()
     expect(screen.getByText('83 ms')).toBeInTheDocument()
     expect(screen.getByText('200')).toBeInTheDocument()
-    expect(screen.queryByText('目标尚未配置 ProbeItem')).not.toBeInTheDocument()
+    expect(screen.queryByText('目标尚未配置探测项')).not.toBeInTheDocument()
     expect(screen.queryByText('事件与 incident 仍由后续切片接入，这里先保留版位。')).not.toBeInTheDocument()
     expect(document.querySelector('.watchtower-danger')).toBeNull()
 
@@ -229,6 +231,8 @@ describe('TargetDetailPage', () => {
             host: 'trend.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -357,6 +361,8 @@ describe('TargetDetailPage', () => {
             target_type: 'service',
             host: 'empty.example.com',
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -395,7 +401,7 @@ describe('TargetDetailPage', () => {
       screen.getByRole('heading', { name: '近 24h 尚未配置探测' }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('添加至少一种 ProbeItem 后才会产生延迟样本。'),
+      screen.getByText('添加至少一种探测项后才会产生延迟样本。'),
     ).toBeInTheDocument()
   })
 
@@ -411,6 +417,8 @@ describe('TargetDetailPage', () => {
             target_type: 'service',
             host: 'cache.example.com',
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -441,7 +449,7 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置探测项')).toBeInTheDocument(),
     )
     expect(screen.getByText('请为该入口添加至少一种观测方式。')).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '当前异常' })).not.toBeInTheDocument()
@@ -450,7 +458,7 @@ describe('TargetDetailPage', () => {
     expect(screen.getByText('未发现新的状态变更事件')).toBeInTheDocument()
   })
 
-  it('creates an HTTP ProbeItem from the empty state and appends it to the list', async () => {
+  it('creates an HTTP 探测项 from the empty state and appends it to the list', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -461,6 +469,8 @@ describe('TargetDetailPage', () => {
           host: 'cache.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -509,13 +519,13 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置探测项')).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
-    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '创建 ProbeItem' })).toBeInTheDocument()
-    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+    fireEvent.click(screen.getAllByRole('button', { name: '添加探测项' })[0]!)
+    expect(screen.getByRole('dialog', { name: '探测项表单' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建探测项' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('探测项类型'), {
       target: { value: 'http' },
     })
     fireEvent.change(screen.getByLabelText('HTTP 协议'), {
@@ -539,10 +549,10 @@ describe('TargetDetailPage', () => {
     fireEvent.change(screen.getByLabelText('频率档位'), {
       target: { value: '1m' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建探测项' }))
 
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
-    expect(screen.queryByRole('dialog', { name: 'ProbeItem 表单抽屉' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '探测项表单' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_002/probe-items', {
       method: 'POST',
       headers: {
@@ -566,7 +576,7 @@ describe('TargetDetailPage', () => {
     })
   })
 
-  it('defaults a created TLS ProbeItem frequency to 6h after switching the probe kind', async () => {
+  it('defaults a created TLS 探测项 frequency to 6h after switching the probe kind', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -577,6 +587,8 @@ describe('TargetDetailPage', () => {
           host: 'cache.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -623,11 +635,11 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置探测项')).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
-    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+    fireEvent.click(screen.getAllByRole('button', { name: '添加探测项' })[0]!)
+    fireEvent.change(screen.getByLabelText('探测项类型'), {
       target: { value: 'tls' },
     })
     expect(screen.getByLabelText('频率档位')).toHaveValue('6h')
@@ -640,7 +652,7 @@ describe('TargetDetailPage', () => {
     fireEvent.change(screen.getByLabelText('超时秒数'), {
       target: { value: '5' },
     })
-    fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建探测项' }))
 
     await waitFor(() => expect(screen.getByText('TLS')).toBeInTheDocument())
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_002/probe-items', {
@@ -677,6 +689,8 @@ describe('TargetDetailPage', () => {
             host: 'cache.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -704,29 +718,29 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置探测项')).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '添加探测项' })[0]!)
     expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
 
-    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+    fireEvent.change(screen.getByLabelText('探测项类型'), {
       target: { value: 'tls' },
     })
     expect(screen.getByLabelText('频率档位')).toHaveValue('6h')
 
-    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+    fireEvent.change(screen.getByLabelText('探测项类型'), {
       target: { value: 'http' },
     })
     expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
 
-    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+    fireEvent.change(screen.getByLabelText('探测项类型'), {
       target: { value: 'tcp' },
     })
     expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
   })
 
-  it('resets ProbeItem drawer drafts and validation errors when cancelled', async () => {
+  it('resets 探测项 drawer drafts and validation errors when cancelled', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -737,6 +751,8 @@ describe('TargetDetailPage', () => {
           host: 'cache.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -764,28 +780,28 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toBeInTheDocument(),
+      expect(screen.getAllByRole('button', { name: '添加探测项' })[0]!).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
-    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '添加探测项' })[0]!)
+    expect(screen.getByRole('dialog', { name: '探测项表单' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('端口'), { target: { value: '' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
-    const openDrawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    fireEvent.click(screen.getByRole('button', { name: '创建探测项' }))
+    const openDrawer = screen.getByRole('dialog', { name: '探测项表单' })
     expect(within(openDrawer).getByText('端口必须为正整数。')).toBeInTheDocument()
 
     fireEvent.click(within(openDrawer).getByRole('button', { name: '关闭' }))
-    expect(screen.queryByRole('dialog', { name: 'ProbeItem 表单抽屉' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '探测项表单' })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(5)
 
-    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
-    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: '添加探测项' })[0]!)
+    expect(screen.getByRole('dialog', { name: '探测项表单' })).toBeInTheDocument()
     expect(screen.queryByText('端口必须为正整数。')).not.toBeInTheDocument()
     expect(screen.getByLabelText('端口')).toHaveValue('443')
-    expect(screen.getByLabelText('Probe 类型')).toHaveValue('tcp')
+    expect(screen.getByLabelText('探测项类型')).toHaveValue('tcp')
   })
 
-  it('keeps ProbeItem creation validation errors inside the probe drawer', async () => {
+  it('keeps 探测项 creation validation errors inside the probe drawer', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -795,6 +811,8 @@ describe('TargetDetailPage', () => {
           target_type: 'service',
           host: 'cache.example.com',
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -823,21 +841,21 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() =>
       expect(
-        screen.getByRole('button', { name: '添加 ProbeItem' }),
+        screen.getAllByRole('button', { name: '添加探测项' })[0]!,
       ).toBeInTheDocument(),
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '添加 ProbeItem' }))
+    fireEvent.click(screen.getAllByRole('button', { name: '添加探测项' })[0]!)
     fireEvent.change(screen.getByLabelText('端口'), { target: { value: '' } })
-    fireEvent.click(screen.getByRole('button', { name: '创建 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '创建探测项' }))
 
-    const drawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    const drawer = screen.getByRole('dialog', { name: '探测项表单' })
     expect(within(drawer).getByText('端口必须为正整数。')).toBeInTheDocument()
-    expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument()
+    expect(screen.getByText('目标尚未配置探测项')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
-  it('edits an existing ProbeItem and replaces the row after save', async () => {
+  it('edits an existing 探测项 and replaces the row after save', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -848,6 +866,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -914,10 +934,10 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
     fireEvent.click(probeActionButton('编辑'))
-    const drawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    const drawer = screen.getByRole('dialog', { name: '探测项表单' })
     expect(drawer).toBeInTheDocument()
-    expect(within(drawer).getByText('ProbeItem 编辑')).toBeInTheDocument()
-    expect(within(drawer).getByRole('heading', { name: /编辑 ProbeItem/ })).toBeInTheDocument()
+    expect(within(drawer).getByText('探测项编辑')).toBeInTheDocument()
+    expect(within(drawer).getByRole('heading', { name: /编辑探测项/ })).toBeInTheDocument()
     expect(screen.getByLabelText('HTTP 路径')).toHaveValue('/healthz')
 
     fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/ready' } })
@@ -925,10 +945,10 @@ describe('TargetDetailPage', () => {
     fireEvent.change(screen.getByLabelText('期望状态码终点'), { target: { value: '204' } })
     fireEvent.change(screen.getByLabelText('超时秒数'), { target: { value: '8' } })
     fireEvent.change(screen.getByLabelText('频率档位'), { target: { value: '5m' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存探测项' }))
 
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: /编辑探测项/ })).not.toBeInTheDocument(),
     )
     expect(screen.getAllByText(/path: \/ready/).length).toBeGreaterThan(0)
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
@@ -954,7 +974,7 @@ describe('TargetDetailPage', () => {
     })
   })
 
-  it('surfaces a 409 ProbeItem save error under StrictMode instead of staying on 正在保存', async () => {
+  it('surfaces a 409 探测项 save error under StrictMode instead of staying on 正在保存', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
       const path = raw.replace(/^https?:\/\/[^/]+/, '').split('?')[0]
@@ -970,6 +990,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -1027,10 +1049,10 @@ describe('TargetDetailPage', () => {
     })
 
     fireEvent.click(probeActionButton('编辑'))
-    const drawer = await screen.findByRole('dialog', { name: 'ProbeItem 表单抽屉' })
-    expect(within(drawer).getByRole('button', { name: '保存 ProbeItem' })).toBeEnabled()
+    const drawer = await screen.findByRole('dialog', { name: '探测项表单' })
+    expect(within(drawer).getByRole('button', { name: '保存探测项' })).toBeEnabled()
     fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/stale' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存探测项' }))
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
@@ -1039,7 +1061,7 @@ describe('TargetDetailPage', () => {
       ),
     )
     await waitFor(() => expect(within(drawer).getByRole('alert')).toHaveTextContent('合成写入拒绝'))
-    expect(screen.getByRole('button', { name: '保存 ProbeItem' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '保存探测项' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: '正在保存...' })).not.toBeInTheDocument()
   })
 
@@ -1056,6 +1078,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -1104,21 +1128,21 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('HTTP')).toBeInTheDocument())
 
     fireEvent.click(probeActionButton('编辑'))
-    expect(screen.getByRole('heading', { name: /编辑 ProbeItem/ })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /编辑探测项/ })).toBeInTheDocument()
     expect(screen.getByLabelText('频率档位')).toHaveValue('15m')
 
-    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+    fireEvent.change(screen.getByLabelText('探测项类型'), {
       target: { value: 'tls' },
     })
     expect(screen.getByLabelText('频率档位')).toHaveValue('15m')
 
-    fireEvent.change(screen.getByLabelText('Probe 类型'), {
+    fireEvent.change(screen.getByLabelText('探测项类型'), {
       target: { value: 'tcp' },
     })
     expect(screen.getByLabelText('频率档位')).toHaveValue('15m')
   })
 
-  it('blocks edit when an existing ProbeItem contains unsupported config fields', async () => {
+  it('blocks edit when an existing 探测项 contains unsupported config fields', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -1129,6 +1153,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -1180,13 +1206,13 @@ describe('TargetDetailPage', () => {
     fireEvent.click(probeActionButton('编辑'))
 
     expect(
-      screen.getByText('ProbeItem 包含当前 V1 表单不支持的配置字段，不能安全编辑。'),
+      screen.getByText('探测项包含当前 V1 表单不支持的配置字段，不能安全编辑。'),
     ).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /编辑探测项/ })).not.toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
-  it('keeps row ProbeItem actions disabled while a form save is pending', async () => {
+  it('keeps row 探测项 actions disabled while a form save is pending', async () => {
     const saveResponse = deferredResponse()
     const fetchMock = vi
       .fn()
@@ -1198,6 +1224,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -1248,25 +1276,25 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(probeActionButton('编辑'))
     fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/ready' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存探测项' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6))
 
-    const pendingDrawer = screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })
+    const pendingDrawer = screen.getByRole('dialog', { name: '探测项表单' })
     expect(within(pendingDrawer).getByRole('button', { name: '正在保存…' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toBeDisabled()
+    expect(screen.getAllByRole('button', { name: '添加探测项' })[0]!).toBeDisabled()
     expect(probeActionButton('编辑')).toBeDisabled()
     expect(probeActionButton('停用')).toBeDisabled()
     expect(probeActionButton('删除')).toBeDisabled()
 
     fireEvent.click(within(pendingDrawer).getByRole('button', { name: '关闭' }))
-    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '探测项表单' })).toBeInTheDocument()
     fireEvent.keyDown(document, { key: 'Escape' })
-    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '探测项表单' })).toBeInTheDocument()
     const overlay = document.body.querySelector('.modal-overlay')
     expect(overlay).not.toBeNull()
     fireEvent.click(overlay!)
-    expect(screen.getByRole('dialog', { name: 'ProbeItem 表单抽屉' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog', { name: '探测项表单' })).toBeInTheDocument()
 
     saveResponse.resolve(
       mockJSONResponse({
@@ -1288,13 +1316,13 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: /编辑探测项/ })).not.toBeInTheDocument(),
     )
-    expect(screen.queryByRole('dialog', { name: 'ProbeItem 表单抽屉' })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '添加 ProbeItem' })).not.toBeDisabled()
+    expect(screen.queryByRole('dialog', { name: '探测项表单' })).not.toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '添加探测项' })[0]!).not.toBeDisabled()
   })
 
-  it('serializes row ProbeItem mutations across multiple rows', async () => {
+  it('serializes row 探测项 mutations across multiple rows', async () => {
     const rowUpdate = deferredResponse()
     const fetchMock = vi
       .fn()
@@ -1306,6 +1334,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -1403,7 +1433,7 @@ describe('TargetDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
-  it('disables a ProbeItem with a full update and preserves the existing config', async () => {
+  it('disables a 探测项 with a full update and preserves the existing config', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -1414,6 +1444,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -1505,7 +1537,7 @@ describe('TargetDetailPage', () => {
     })
   })
 
-  it('uses an inline stateful confirmation before deleting a ProbeItem', async () => {
+  it('uses an inline stateful confirmation before deleting a 探测项', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi
       .fn()
@@ -1517,6 +1549,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -1562,12 +1596,12 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(probeActionButton('删除'))
 
-    const confirmation = screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })
+    const confirmation = screen.getByRole('alertdialog', { name: '确认删除探测项' })
     expect(confirmation).toBeInTheDocument()
-    expect(screen.getByText('当前：这条 ProbeItem 仍属于当前目标。')).toBeInTheDocument()
+    expect(screen.getByText('当前：这条探测项仍属于当前目标。')).toBeInTheDocument()
     expect(screen.getByText('操作后：这条观测方式会被移除。')).toBeInTheDocument()
     expect(
-      screen.getByText('仅用于误建场景。删除后该 ProbeItem 不再产生新的观测记录。'),
+      screen.getByText('仅用于误建场景。删除后该探测项不再产生新的观测记录。'),
     ).toBeInTheDocument()
     expect(
       screen.getByText('不会删除目标，也不会删除既有事件或历史观测记录。'),
@@ -1578,14 +1612,14 @@ describe('TargetDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(5)
 
     fireEvent.click(probeActionButton('删除'))
-    fireEvent.click(screen.getByRole('button', { name: '确认删除 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认删除探测项' }))
 
     expect(confirmSpy).not.toHaveBeenCalled()
     await waitFor(() =>
-      expect(screen.getByText('目标尚未配置 ProbeItem')).toBeInTheDocument(),
+      expect(screen.getByText('目标尚未配置探测项')).toBeInTheDocument(),
     )
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: '添加 ProbeItem' })).toHaveFocus(),
+      expect(screen.getAllByRole('button', { name: '添加探测项' })[0]!).toHaveFocus(),
     )
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
       method: 'DELETE',
@@ -1595,7 +1629,7 @@ describe('TargetDetailPage', () => {
     })
   })
 
-  it('keeps ProbeItem errors local and leaves delete confirmation visible when delete fails', async () => {
+  it('keeps 探测项 errors local and leaves delete confirmation visible when delete fails', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     const fetchMock = vi
       .fn()
@@ -1607,6 +1641,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: [],
           note: '',
@@ -1658,16 +1694,16 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
 
     fireEvent.click(probeActionButton('删除'))
-    fireEvent.click(screen.getByRole('button', { name: '确认删除 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认删除探测项' }))
 
     expect(confirmSpy).not.toHaveBeenCalled()
     await waitFor(() => expect(screen.getByText('delete failed')).toBeInTheDocument())
-    expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: '确认删除探测项' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '探测方式' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '探测项' })).toBeInTheDocument()
   })
 
-  it('prevents opening a ProbeItem delete confirmation while a runtime confirmation is active', async () => {
+  it('prevents opening a 探测项 delete confirmation while a runtime confirmation is active', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -1680,6 +1716,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -1727,10 +1765,10 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('alertdialog', { name: '确认暂停目标监控' })).toBeInTheDocument()
     expect(probeActionButton('删除')).toBeDisabled()
     fireEvent.click(probeActionButton('删除'))
-    expect(screen.queryByRole('alertdialog', { name: '确认删除 ProbeItem' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '确认删除探测项' })).not.toBeInTheDocument()
   })
 
-  it('prevents opening a runtime confirmation while a ProbeItem delete confirmation is active', async () => {
+  it('prevents opening a runtime confirmation while a 探测项 delete confirmation is active', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -1743,6 +1781,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -1787,7 +1827,7 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(probeActionButton('删除'))
 
-    expect(screen.getByRole('alertdialog', { name: '确认删除 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: '确认删除探测项' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '暂停' })).toBeDisabled()
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     expect(screen.getByRole('button', { name: '退役' })).toBeDisabled()
@@ -1795,7 +1835,7 @@ describe('TargetDetailPage', () => {
     expect(screen.queryByRole('alertdialog', { name: '确认暂停目标监控' })).not.toBeInTheDocument()
   })
 
-  it('ignores stale ProbeItem save results after switching to another target route', async () => {
+  it('ignores stale 探测项 save results after switching to another target route', async () => {
     const tg001Target = deferredResponse()
     const tg001ProbeItems = deferredResponse()
     const tg001Runtime = deferredResponse()
@@ -1839,6 +1879,8 @@ describe('TargetDetailPage', () => {
         host: 'blog.example.com',
         base_port: 443,
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '启用',
         labels: [],
         note: '',
@@ -1879,7 +1921,7 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(probeActionButton('编辑'))
     fireEvent.change(screen.getByLabelText('HTTP 路径'), { target: { value: '/stale' } })
-    fireEvent.click(screen.getByRole('button', { name: '保存 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存探测项' }))
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(6))
 
@@ -1894,6 +1936,8 @@ describe('TargetDetailPage', () => {
         target_type: 'service',
         host: 'cache.example.com',
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '启用',
         labels: [],
         note: '',
@@ -1949,7 +1993,7 @@ describe('TargetDetailPage', () => {
     )
 
     await waitFor(() =>
-      expect(screen.queryByRole('heading', { name: /编辑 ProbeItem/ })).not.toBeInTheDocument(),
+      expect(screen.queryByRole('heading', { name: /编辑探测项/ })).not.toBeInTheDocument(),
     )
     expect(screen.getByText('Cache')).toBeInTheDocument()
     expect(screen.getByText('TCP')).toBeInTheDocument()
@@ -1970,6 +2014,8 @@ describe('TargetDetailPage', () => {
             host: 'pay.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: ['core'],
             note: '',
@@ -2040,7 +2086,7 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Payments' })).toBeInTheDocument(),
     )
 
-    expect(screen.getByRole('heading', { name: '探测方式' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '探测项' })).toBeInTheDocument()
     expect(screen.getByText('origin timeout')).toBeInTheDocument()
     expect(screen.getByText('活跃异常暂不可用')).toBeInTheDocument()
     expect(screen.getByText('incidents unavailable')).toBeInTheDocument()
@@ -2100,6 +2146,8 @@ describe('TargetDetailPage', () => {
         target_type: 'service',
         host: 'cache.example.com',
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '启用',
         labels: ['infra'],
         note: '',
@@ -2155,7 +2203,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument(),
     )
-    expect(screen.getByRole('heading', { name: '探测方式' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '探测项' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Blog' })).not.toBeInTheDocument()
 
     tg001Target.resolve(
@@ -2166,6 +2214,8 @@ describe('TargetDetailPage', () => {
         host: 'blog.example.com',
         base_port: 443,
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '启用',
         labels: ['public'],
         note: '',
@@ -2276,6 +2326,8 @@ describe('TargetDetailPage', () => {
           target_type: 'service',
           host: 'legacy.example.com',
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           lifecycle_status: 'retired', run_status: '暂停',
           labels: ['legacy'],
           note: '',
@@ -2304,6 +2356,8 @@ describe('TargetDetailPage', () => {
           target_type: 'service',
           host: 'legacy.example.com',
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '暂停',
           labels: ['legacy'],
           note: '',
@@ -2356,6 +2410,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['public'],
           note: '',
@@ -2385,6 +2441,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '暂停',
           labels: ['public'],
           note: '',
@@ -2417,9 +2475,9 @@ describe('TargetDetailPage', () => {
     expect(screen.getByText('当前：目标运行状态为启用。')).toBeInTheDocument()
     expect(screen.getByText('操作后：目标运行状态变为暂停。')).toBeInTheDocument()
     expect(
-      screen.getByText('会停止该目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。'),
+      screen.getByText('会停止该目标下所有探测项的执行，不再产生新的入口探测记录。'),
     ).toBeInTheDocument()
-    expect(screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。')).toBeInTheDocument()
+    expect(screen.getByText('不会删除历史事件、观测记录或探测项配置。')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '暂停' })).toHaveFocus())
     expect(fetchMock).toHaveBeenCalledTimes(5)
@@ -2452,6 +2510,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['public'],
           note: '',
@@ -2516,6 +2576,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['public'],
           note: '',
@@ -2545,6 +2607,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           lifecycle_status: 'retired', run_status: '暂停',
           labels: ['public'],
           note: '',
@@ -2578,7 +2642,7 @@ describe('TargetDetailPage', () => {
     expect(screen.getByText('操作后：目标退出当前工作集，生命周期变为已退役，运行控制保持暂停。')).toBeInTheDocument()
     expect(screen.getByText('退役后不会继续作为活跃目标参与观测、异常判定或通知。')).toBeInTheDocument()
     expect(
-      screen.getByText('不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'),
+      screen.getByText('不会删除历史事件、观测记录或探测项配置。后续可恢复到暂停。'),
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     await waitFor(() => expect(screen.getByRole('button', { name: '退役' })).toHaveFocus())
@@ -2614,6 +2678,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['public'],
           note: '',
@@ -2675,6 +2741,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: ['public'],
             note: '',
@@ -2704,6 +2772,8 @@ describe('TargetDetailPage', () => {
             target_type: 'service',
             host: 'cache.example.com',
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '暂停',
             labels: ['infra'],
             note: '',
@@ -2766,6 +2836,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: ['public'],
             note: '',
@@ -2795,6 +2867,8 @@ describe('TargetDetailPage', () => {
             target_type: 'service',
             host: 'cache.example.com',
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '暂停',
             labels: ['infra'],
             note: '',
@@ -2843,7 +2917,7 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('button', { name: '退役' })).not.toHaveFocus()
   })
 
-  it('ignores a stale confirmed ProbeItem delete after switching to a different target route', async () => {
+  it('ignores a stale confirmed 探测项 delete after switching to a different target route', async () => {
     const deleteAction = deferredResponse()
 
     vi.stubGlobal(
@@ -2858,6 +2932,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -2896,6 +2972,8 @@ describe('TargetDetailPage', () => {
             target_type: 'service',
             host: 'cache.example.com',
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '暂停',
             labels: [],
             note: '',
@@ -2923,7 +3001,7 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('TCP')).toBeInTheDocument())
 
     fireEvent.click(probeActionButton('删除'))
-    fireEvent.click(screen.getByRole('button', { name: '确认删除 ProbeItem' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认删除探测项' }))
     fireEvent.click(screen.getByRole('button', { name: 'switch target' }))
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
@@ -2932,11 +3010,11 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Cache' })).toBeInTheDocument())
     expect(screen.queryByText('delete failed')).not.toBeInTheDocument()
-    expect(screen.queryByRole('alertdialog', { name: '确认删除 ProbeItem' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog', { name: '确认删除探测项' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '恢复' })).not.toHaveFocus()
     fireEvent.click(screen.getByRole('button', { name: '资料维护' }))
     expect(screen.getByRole('button', { name: '退役' })).not.toHaveFocus()
-    expect(screen.getByRole('button', { name: '添加 ProbeItem' })).not.toHaveFocus()
+    expect(screen.getAllByRole('button', { name: '添加探测项' })[0]!).not.toHaveFocus()
   })
 
   it('ignores a stale runtime-action error after switching to a different target route', async () => {
@@ -2954,6 +3032,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: ['public'],
             note: '',
@@ -2983,6 +3063,8 @@ describe('TargetDetailPage', () => {
             target_type: 'service',
             host: 'cache.example.com',
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '暂停',
             labels: ['infra'],
             note: '',
@@ -3048,6 +3130,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: ['公开'],
             note: '   ',
@@ -3103,6 +3187,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           group: 'prod',
           labels: ['公开'],
@@ -3133,6 +3219,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           group: 'core',
           labels: ['alpha', 'beta'],
@@ -3208,6 +3296,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['公开'],
           note: '现网入口',
@@ -3273,6 +3363,8 @@ describe('TargetDetailPage', () => {
             host: 'blog.example.com',
             base_port: 443,
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: ['公开'],
             note: '现网入口',
@@ -3330,6 +3422,8 @@ describe('TargetDetailPage', () => {
         host: 'blog.example.com',
         base_port: 443,
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '启用',
         labels: ['alpha', 'beta'],
         note: '新的备注',
@@ -3350,6 +3444,8 @@ describe('TargetDetailPage', () => {
         target_type: 'service',
         host: 'cache.example.com',
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '暂停',
         labels: ['内部'],
         note: '缓存入口',
@@ -3380,6 +3476,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['公开'],
           note: '现网入口',
@@ -3440,6 +3538,8 @@ describe('TargetDetailPage', () => {
         host: 'blog.example.com',
         base_port: 443,
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '维护中',
         labels: ['公开'],
         note: '现网入口',
@@ -3463,6 +3563,8 @@ describe('TargetDetailPage', () => {
         host: 'blog.example.com',
         base_port: 443,
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '启用',
         labels: ['alpha', 'beta'],
         note: '新的备注',
@@ -3495,6 +3597,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['公开'],
           note: '现网入口',
@@ -3555,6 +3659,8 @@ describe('TargetDetailPage', () => {
         host: 'blog.example.com',
         base_port: 443,
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '启用',
         labels: ['alpha', 'beta'],
         note: '新的备注',
@@ -3579,6 +3685,8 @@ describe('TargetDetailPage', () => {
         host: 'blog.example.com',
         base_port: 443,
         execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         run_status: '维护中',
         labels: ['公开'],
         note: '现网入口',
@@ -3608,7 +3716,9 @@ describe('TargetDetailPage', () => {
             name: 'No Issues',
             target_type: 'service',
             host: 'no-issues.example.com',
-            execution_monitoring_instance_labels: [],
+            execution_monitoring_instance_labels: ['edge'],
+            enabled_probe_count: 0,
+            matching_executor_count: 2,
             run_status: '启用',
             labels: [],
             note: '',
@@ -3642,7 +3752,11 @@ describe('TargetDetailPage', () => {
     expect(screen.getByRole('banner', { name: '目标身份与操作' })).not.toHaveTextContent('正常')
     expect(screen.queryByText('未发现活跃异常')).not.toBeInTheDocument()
     expect(document.querySelector('.watchtower-danger')).not.toBeInTheDocument()
-    expect(document.querySelector('.observability-notice')).toHaveTextContent('覆盖缺口')
+    expect(screen.getByText('未配置启用探测项')).toBeInTheDocument()
+    expect(screen.getByText('启用探测项')).toBeInTheDocument()
+    expect(screen.getByText('可接收实例')).toBeInTheDocument()
+    expect(screen.queryByText('缺少执行监控实例标签')).not.toBeInTheDocument()
+    expect(screen.queryByText('覆盖缺口')).not.toBeInTheDocument()
   })
 
   it('renders the danger zone with summary and status badge when active incidents exist', async () => {
@@ -3657,6 +3771,8 @@ describe('TargetDetailPage', () => {
             target_type: 'service',
             host: 'has-issues.example.com',
             execution_monitoring_instance_labels: [],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: [],
             note: '',
@@ -3712,7 +3828,7 @@ describe('TargetDetailPage', () => {
     expect(within(history).getByRole('tab', { name: '历史异常' })).toHaveAttribute('aria-selected', 'true')
   })
 
-  it('keeps ProbeItem evidence default-visible while secondary details stay collapsed', async () => {
+  it('keeps 探测项 evidence default-visible while secondary details stay collapsed', async () => {
     vi.stubGlobal(
       'fetch',
       vi
@@ -3724,6 +3840,8 @@ describe('TargetDetailPage', () => {
             target_type: 'service',
             host: 'collapsed.example.com',
             execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
             run_status: '启用',
             labels: ['test'],
             note: '',
@@ -3789,7 +3907,7 @@ describe('TargetDetailPage', () => {
       expect(screen.getByRole('heading', { name: 'Collapsed Target' })).toBeInTheDocument(),
     )
 
-    const probeSection = screen.getByRole('heading', { name: '探测方式' }).closest('section')
+    const probeSection = screen.getByRole('heading', { name: '探测项' }).closest('section')
     expect(probeSection).toHaveClass('monitoring-detail-section')
     expect(probeSection).not.toHaveClass('watchtower-secondary')
     expect(within(probeSection as HTMLElement).getByText('TCP')).toBeInTheDocument()
@@ -3823,6 +3941,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['公开'],
           note: '',
@@ -3929,6 +4049,8 @@ describe('TargetDetailPage', () => {
           host: 'blog.example.com',
           base_port: 443,
           execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
           run_status: '启用',
           labels: ['公开'],
           note: '',
@@ -4033,6 +4155,8 @@ describe('TargetDetailPage', () => {
       host: 'blog.example.com',
       base_port: 443,
       execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
       run_status: '暂停',
       labels: ['public'],
       note: '',
@@ -4134,6 +4258,8 @@ describe('TargetDetailPage', () => {
       host: 'archived.example.com',
       base_port: 443,
       execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
       lifecycle_status: 'retired', run_status: '暂停',
       labels: ['legacy'],
       note: '',
@@ -4234,6 +4360,8 @@ describe('TargetDetailPage', () => {
       host: 'solo.example.com',
       base_port: 443,
       execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
       run_status: '启用',
       labels: ['public'],
       note: '',
@@ -4313,6 +4441,8 @@ describe('TargetDetailPage', () => {
       host: 'stale.example.com',
       base_port: 443,
       execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
       run_status: '启用',
       labels: ['public'],
       note: '',
@@ -4423,6 +4553,8 @@ describe('TargetDetailPage', () => {
       host: 'archive.example.com',
       base_port: 443,
       execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
       run_status: '启用',
       labels: ['public'],
       note: '',
@@ -4591,6 +4723,8 @@ describe('TargetDetailPage', () => {
       host: 'stale.example.com',
       base_port: 443,
       execution_monitoring_instance_labels: ['edge'],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
       run_status: status,
       labels: ['public'],
       note: '',

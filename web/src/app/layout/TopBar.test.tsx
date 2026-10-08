@@ -6,14 +6,21 @@ import { ThemeProvider } from '../../lib/theme-context'
 import { invalidateRecordNotificationUnreadCount } from '../../lib/recordInboxUnreadApi'
 import { TopBar } from './TopBar'
 
-const sync = { state: 'clear' as const, label: '系统摘要无异常' }
-const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
+const sync = { state: 'clear' as const, label: '当前运行异常计数为 0' }
+const user = {
+  user_id: 'u1',
+  username: 'admin',
+  role: 'admin',
+  display_name: '',
+  runtime_capabilities: { records: true, comparison: true, portability: true },
+  management_capabilities: { access: false },
+}
 
-function renderTopBar(entry: InitialEntry = '/') {
+function renderTopBar(entry: InitialEntry = '/', currentUser: typeof user | null = user) {
   return render(
     <MemoryRouter initialEntries={[entry]}>
       <ThemeProvider>
-        <TopBar sync={sync} user={user} />
+        <TopBar sync={sync} user={currentUser} />
       </ThemeProvider>
     </MemoryRouter>,
   )
@@ -37,6 +44,17 @@ describe('TopBar theme menu', () => {
     vi.unstubAllGlobals()
     localStorage.clear()
     document.documentElement.className = ''
+  })
+
+  it('does not fetch record notifications when the records platform is off', () => {
+    const fetchMock = vi.mocked(fetch)
+    renderTopBar('/', {
+      ...user,
+      runtime_capabilities: { records: false, comparison: false, portability: false },
+    })
+    expect(screen.queryByRole('link', { name: /记录通知/ })).not.toBeInTheDocument()
+    expect(screen.getByLabelText('全局搜索')).toHaveAttribute('placeholder', '搜索 VPS、IP…')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('links to the private record inbox and renders its bounded unread count', async () => {

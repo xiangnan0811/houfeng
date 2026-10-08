@@ -337,20 +337,234 @@ export function comparisonSeriesMetrics(series: readonly ComparisonSeries[]): st
   return metrics
 }
 
+export const COMPARISON_FIXED_ITEM_LIMIT = 6
+
+export const COMPARISON_SELECTION_LIMIT_ERROR =
+  `最多比较 ${COMPARISON_FIXED_ITEM_LIMIT} 项，超出的选择已拒绝。`
+
+export type ComparisonBasketResult =
+  | { ok: false; error: string }
+  | { ok: true; changed: boolean; state: ComparisonURLState | null }
+
+/** `snapshot:<id>` or `revision:<record_id>:<revision_id>`. Revision evidence selection is not part of the key. */
+export function comparisonFixedItemKey(item: ComparisonURLFixedItem): string {
+  if ('snapshot_id' in item) return `snapshot:${item.snapshot_id}`
+  return `revision:${item.record_id}:${item.revision_id}`
+}
+
+function uniqueTrimmedIDs(ids: readonly string[] | undefined): string[] {
+  if (!ids?.length) return []
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const raw of ids) {
+    const id = raw.trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    unique.push(id)
+  }
+  return unique
+}
+
+function normalizeComparisonFixedItem(item: ComparisonURLFixedItem): ComparisonURLFixedItem | null {
+  if ('snapshot_id' in item) {
+    const id = item.snapshot_id.trim()
+    return id ? { snapshot_id: id } : null
+  }
+  const recordID = item.record_id.trim()
+  const revisionID = item.revision_id.trim()
+  if (!recordID || !revisionID) return null
+  const snapshotIDs = uniqueTrimmedIDs(item.snapshot_ids)
+  return snapshotIDs.length
+    ? { record_id: recordID, revision_id: revisionID, snapshot_ids: snapshotIDs }
+    : { record_id: recordID, revision_id: revisionID }
+}
+
+function dedupeFixedItems(items: readonly ComparisonURLFixedItem[]): ComparisonURLFixedItem[] {
+  const ordered: ComparisonURLFixedItem[] = []
+  const indexByKey = new Map<string, number>()
+  for (const raw of items) {
+    const item = normalizeComparisonFixedItem(raw)
+    if (!item) continue
+    const key = comparisonFixedItemKey(item)
+    const existing = indexByKey.get(key)
+    if (existing == null) {
+      indexByKey.set(key, ordered.length)
+      ordered.push(item)
+      continue
+    }
+    if (!('snapshot_id' in item)) ordered[existing] = item
+  }
+  return ordered
+}
+
+function fixedItemsOf(current: ComparisonURLState | null): ComparisonURLFixedItem[] {
+  return current?.mode === 'fixed' ? current.items ?? [] : []
+}
+
+function withFixedSelection(
+  current: ComparisonURLState | null,
+  items: ComparisonURLFixedItem[],
+  baseline: number,
+  nowMs: number,
+): ComparisonURLState {
+  if (current?.mode === 'fixed') return { ...current, items, baseline }
+  const window = current
+    ? { requested_from: current.requested_from, requested_to: current.requested_to }
+    : defaultComparisonWindow(nowMs)
+  return {
+    version: COMPARISON_URL_VERSION,
+    mode: 'fixed',
+    items,
+    baseline,
+    alignment: current?.alignment ?? 'actual_coverage',
+    ...window,
+    tolerance_seconds: current?.tolerance_seconds ?? 60,
+    ...(current?.bucket_seconds != null ? { bucket_seconds: current.bucket_seconds } : {}),
+    ...(current?.kind ? { kind: current.kind } : {}),
+    ...(current?.metric ? { metric: current.metric } : {}),
+  }
+}
+
+function basketResult(
+  current: ComparisonURLState | null,
+  next: ComparisonURLState | null,
+): ComparisonBasketResult {
+  if (next == null) {
+    return current == null
+      ? { ok: true, changed: false, state: null }
+      : { ok: true, changed: true, state: null }
+  }
+  if (
+    current
+    && JSON.stringify(canonicalComparisonURLState(current)) === JSON.stringify(canonicalComparisonURLState(next))
+  ) {
+    return { ok: true, changed: false, state: current }
+  }
+  return { ok: true, changed: true, state: next }
+}
+
+function baselineAfterRemoval(length: number, baseline: number, removeIndex: number): number {
+  const nextLength = length - 1
+  if (nextLength <= 0) return 0
+  if (removeIndex < baseline) return baseline - 1
+  if (removeIndex > baseline) return baseline
+  return Math.min(baseline, nextLength - 1)
+}
+
+function baselineAfterReplace(
+  previous: readonly ComparisonURLFixedItem[],
+  previousBaseline: number,
+  next: readonly ComparisonURLFixedItem[],
+): number {
+  if (next.length === 0) return 0
+  const currentBaseline = previous[previousBaseline]
+  if (currentBaseline) {
+    const key = comparisonFixedItemKey(currentBaseline)
+    const kept = next.findIndex((item) => comparisonFixedItemKey(item) === key)
+    if (kept >= 0) return kept
+  }
+  return Math.min(Math.max(previousBaseline, 0), next.length - 1)
+}
+
+export function addFixedComparisonItem(
+  current: ComparisonURLState | null,
+  item: ComparisonURLFixedItem,
+  nowMs = Date.now(),
+): ComparisonBasketResult {
+  const normalized = normalizeComparisonFixedItem(item)
+  if (!normalized) return { ok: true, changed: false, state: current }
+  const items = fixedItemsOf(current)
+  const key = comparisonFixedItemKey(normalized)
+  const existing = items.findIndex((entry) => comparisonFixedItemKey(entry) === key)
+  if (existing >= 0) {
+    if ('snapshot_id' in normalized) return { ok: true, changed: false, state: current }
+    const nextItems = items.slice()
+    nextItems[existing] = normalized
+    const baseline = current?.mode === 'fixed' ? current.baseline ?? 0 : 0
+    return basketResult(current, withFixedSelection(current, nextItems, baseline, nowMs))
+  }
+  if (items.length >= COMPARISON_FIXED_ITEM_LIMIT) {
+    return { ok: false, error: COMPARISON_SELECTION_LIMIT_ERROR }
+  }
+  const baseline = items.length === 0 || current?.mode !== 'fixed' ? 0 : current.baseline ?? 0
+  return basketResult(current, withFixedSelection(current, [...items, normalized], baseline, nowMs))
+}
+
+export function removeFixedComparisonItem(
+  current: ComparisonURLState | null,
+  key: string,
+): ComparisonBasketResult {
+  if (current?.mode !== 'fixed') return { ok: true, changed: false, state: current }
+  const items = current.items ?? []
+  const index = items.findIndex((item) => comparisonFixedItemKey(item) === key)
+  if (index < 0) return { ok: true, changed: false, state: current }
+  const nextItems = items.filter((_, itemIndex) => itemIndex !== index)
+  if (nextItems.length === 0) return { ok: true, changed: true, state: null }
+  const baseline = baselineAfterRemoval(items.length, current.baseline ?? 0, index)
+  return basketResult(current, { ...current, items: nextItems, baseline })
+}
+
+export function replaceFixedComparisonItems(
+  current: ComparisonURLState | null,
+  items: readonly ComparisonURLFixedItem[],
+  nowMs = Date.now(),
+): ComparisonBasketResult {
+  const nextItems = dedupeFixedItems(items)
+  if (nextItems.length > COMPARISON_FIXED_ITEM_LIMIT) {
+    return { ok: false, error: COMPARISON_SELECTION_LIMIT_ERROR }
+  }
+  if (nextItems.length === 0) {
+    return current == null
+      ? { ok: true, changed: false, state: null }
+      : { ok: true, changed: true, state: null }
+  }
+  const baseline = baselineAfterReplace(
+    fixedItemsOf(current),
+    current?.mode === 'fixed' ? current.baseline ?? 0 : 0,
+    nextItems,
+  )
+  return basketResult(current, withFixedSelection(current, nextItems, baseline, nowMs))
+}
+
+export function clearFixedComparisonItems(current: ComparisonURLState | null): ComparisonBasketResult {
+  if (current == null) return { ok: true, changed: false, state: null }
+  return { ok: true, changed: true, state: null }
+}
+
+export function confirmComparisonSnapshotItems(
+  current: ComparisonURLState | null,
+  items: readonly ComparisonURLFixedItem[],
+  nowMs = Date.now(),
+): ComparisonBasketResult {
+  const snapshots: ComparisonURLFixedItem[] = []
+  const seen = new Set<string>()
+  for (const raw of items) {
+    if ('snapshot_id' in raw) {
+      const id = raw.snapshot_id.trim()
+      if (!id || seen.has(id)) continue
+      seen.add(id)
+      snapshots.push({ snapshot_id: id })
+      continue
+    }
+    for (const id of uniqueTrimmedIDs(raw.snapshot_ids)) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      snapshots.push({ snapshot_id: id })
+    }
+  }
+  if (snapshots.length > COMPARISON_FIXED_ITEM_LIMIT) {
+    return { ok: false, error: COMPARISON_SELECTION_LIMIT_ERROR }
+  }
+  if (snapshots.length === 0) return { ok: true, changed: false, state: current }
+  return replaceFixedComparisonItems(current, snapshots, nowMs)
+}
+
 export function comparisonEntryHref(input: {
   items?: ComparisonURLFixedItem[]
   subjects?: ComparisonSubjectRef[]
   now?: number
 }): string {
   const window = defaultComparisonWindow(input.now)
-  if (input.subjects && input.subjects.length >= 2) {
-    return comparisonHref({
-      version: COMPARISON_URL_VERSION,
-      mode: 'candidate',
-      subjects: input.subjects,
-      ...window,
-    })
-  }
   if (input.items?.length) {
     return comparisonHref({
       version: COMPARISON_URL_VERSION,
@@ -359,6 +573,14 @@ export function comparisonEntryHref(input: {
       baseline: 0,
       alignment: 'actual_coverage',
       tolerance_seconds: 60,
+      ...window,
+    })
+  }
+  if (input.subjects && input.subjects.length >= 2) {
+    return comparisonHref({
+      version: COMPARISON_URL_VERSION,
+      mode: 'candidate',
+      subjects: input.subjects,
       ...window,
     })
   }

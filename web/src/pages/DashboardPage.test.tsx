@@ -158,9 +158,13 @@ describe('DashboardPage', () => {
       },
     })
 
-    const evidence = await screen.findByRole('region', { name: '观测证据' })
-    expect(within(evidence).getByLabelText('异常监控实例 2')).toBeInTheDocument()
-    expect(within(evidence).getByLabelText('其中严重监控实例 1')).toBeInTheDocument()
+    const judgementRail = await screen.findByRole('region', { name: '判断摘要' })
+    expect(within(judgementRail).getByRole('link', { name: /异常总数 2（严重已包含）/ })).toBeInTheDocument()
+    expect(within(judgementRail).queryByRole('link', { name: /异常总数 3/ })).not.toBeInTheDocument()
+    const evidence = screen.getByRole('region', { name: '观测证据' })
+    expect(within(evidence).getByText(/来源：工作台摘要/)).toBeInTheDocument()
+    expect(within(evidence).getByText(/已有历史观测不推断当前健康/)).toBeInTheDocument()
+    expect(within(evidence).queryByLabelText('异常监控实例 2')).not.toBeInTheDocument()
     expect(within(evidence).queryByLabelText('异常监控实例 3')).not.toBeInTheDocument()
   })
 
@@ -347,7 +351,7 @@ describe('DashboardPage', () => {
       currency: 'USD',
       renewal_decision: 'keep',
       lifecycle_status: 'active',
-      exchange_rate_stale: false,
+      exchange_rate_status: 'fresh' as const,
     }))
     renderDashboard({
       dashboard: {
@@ -411,7 +415,7 @@ describe('DashboardPage', () => {
       currency: 'USD',
       renewal_decision: 'keep',
       lifecycle_status: 'active',
-      exchange_rate_stale: false,
+      exchange_rate_status: 'fresh' as const,
     }))
     renderDashboard({ subscription: { body: subscriptionOverviewFixture({ upcoming_renewals: renewals }) } })
 
@@ -436,7 +440,7 @@ describe('DashboardPage', () => {
             currency: 'USD',
             renewal_decision: 'keep',
             lifecycle_status: 'active',
-            exchange_rate_stale: false,
+            exchange_rate_status: 'fresh',
           }],
         }),
       },

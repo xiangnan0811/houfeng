@@ -58,7 +58,7 @@ func (request vpsSubscriptionCreateRequest) toCreateInput(vpsID string) (subscri
 	}, true
 }
 
-func SubscriptionsCollection(repo subscriptions.Repository, costSvc ...*subscriptioncosts.Service) http.Handler {
+func SubscriptionsCollection(repo subscriptions.Repository, costSvc *subscriptioncosts.Service, refresher ExchangeRateRefreshRequester) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -79,8 +79,8 @@ func SubscriptionsCollection(repo subscriptions.Repository, costSvc ...*subscrip
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
-			if len(costSvc) > 0 && costSvc[0] != nil {
-				costRows, err := costSvc[0].ListCostRows(r.Context())
+			if costSvc != nil {
+				costRows, err := costSvc.ListCostRows(r.Context())
 				if err != nil {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
@@ -101,7 +101,7 @@ func SubscriptionsCollection(repo subscriptions.Repository, costSvc ...*subscrip
 				return
 			}
 
-			writeSubscriptionCreate(w, r, repo, input)
+			writeSubscriptionCreate(w, r, repo, input, refresher)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
@@ -121,7 +121,7 @@ func mergeSubscriptionCosts(records []subscriptions.Record, costs []subscription
 			record.BaseCurrency = cost.BaseCurrency
 			record.ExchangeRate = cost.ExchangeRate
 			record.ExchangeRateDate = cost.ExchangeRateDate
-			record.ExchangeRateStale = cost.ExchangeRateStale
+			record.ExchangeRateStatus = string(cost.ExchangeRateStatus)
 			record.BudgetStatus = string(cost.BudgetStatus)
 			record.NextReminderAt = cost.NextReminderAt
 		}
@@ -133,7 +133,7 @@ func mergeSubscriptionCosts(records []subscriptions.Record, costs []subscription
 	return merged
 }
 
-func VPSSubscriptions(repo subscriptions.Repository) http.Handler {
+func VPSSubscriptions(repo subscriptions.Repository, refresher ExchangeRateRefreshRequester) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		vpsID, ok := parseVPSSubresourcePath(r.URL.Path, "subscriptions")
 		if !ok {
@@ -178,14 +178,14 @@ func VPSSubscriptions(repo subscriptions.Repository) http.Handler {
 				return
 			}
 
-			writeSubscriptionCreate(w, r, repo, input)
+			writeSubscriptionCreate(w, r, repo, input, refresher)
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
 }
 
-func writeSubscriptionCreate(w http.ResponseWriter, r *http.Request, repo subscriptions.Repository, input subscriptions.CreateInput) {
+func writeSubscriptionCreate(w http.ResponseWriter, r *http.Request, repo subscriptions.Repository, input subscriptions.CreateInput, refresher ExchangeRateRefreshRequester) {
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
 	if _, err := subscriptions.NormalizeIdempotencyKey(key); err != nil {
 		writeCodedError(w, http.StatusBadRequest, "invalid idempotency key", "invalid_idempotency_key")
@@ -221,6 +221,9 @@ func writeSubscriptionCreate(w http.ResponseWriter, r *http.Request, repo subscr
 		writeError(w, http.StatusInternalServerError, "internal server error")
 		return
 	}
+	if refresher != nil {
+		refresher.RequestRefresh(false)
+	}
 	if replayed {
 		writeJSON(w, http.StatusOK, record)
 		return
@@ -228,7 +231,7 @@ func writeSubscriptionCreate(w http.ResponseWriter, r *http.Request, repo subscr
 	writeJSON(w, http.StatusCreated, record)
 }
 
-func SubscriptionItem(repo subscriptions.Repository) http.Handler {
+func SubscriptionItem(repo subscriptions.Repository, refresher ExchangeRateRefreshRequester) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		subscriptionID := strings.TrimPrefix(r.URL.Path, "/api/subscriptions/")
 		subscriptionID = strings.Trim(subscriptionID, "/")
@@ -282,6 +285,9 @@ func SubscriptionItem(repo subscriptions.Repository) http.Handler {
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
+			}
+			if refresher != nil && (input.Currency.Set || (input.Status.Set && input.Status.Value == subscriptions.DefaultStatus)) {
+				refresher.RequestRefresh(false)
 			}
 			writeJSON(w, http.StatusOK, record)
 		default:

@@ -491,7 +491,14 @@ func startFakeClamAVServer(t *testing.T, network string, handler func(net.Conn) 
 	t.Helper()
 	address := "127.0.0.1:0"
 	if network == "unix" {
-		address = filepath.Join(t.TempDir(), "clamd.sock")
+		socketDir, err := os.MkdirTemp(os.TempDir(), "ca-")
+		if err != nil {
+			t.Fatalf("create fake ClamAV Unix socket directory: %v", err)
+		}
+		t.Cleanup(func() {
+			_ = os.RemoveAll(socketDir)
+		})
+		address = filepath.Join(socketDir, "s")
 	}
 	listener, err := net.Listen(network, address)
 	if err != nil {

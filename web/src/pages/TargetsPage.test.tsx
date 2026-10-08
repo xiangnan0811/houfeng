@@ -31,11 +31,14 @@ function targetRecord(overrides: Record<string, unknown> = {}) {
     host: 'api.example.com',
     base_port: 443,
     execution_monitoring_instance_labels: ['edge'],
+    lifecycle_status: 'active',
     run_status: '启用',
     labels: ['public'],
     note: '',
     current_health_status: '正常',
     current_active_incident_count: 0,
+    enabled_probe_count: 1,
+    matching_executor_count: 1,
     last_success_at: '2026-04-26T09:00:00Z',
     last_failure_at: '2026-04-26T08:00:00Z',
     current_primary_issue_summary: '',
@@ -67,8 +70,11 @@ function renderTargets(path = '/targets') {
 function listFetch(records: ReturnType<typeof targetRecord>[]) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url === '/api/targets?scope=all' && init?.method !== 'POST') {
-      return mockJSONResponse(records)
+    if (url === '/api/targets' && init?.method !== 'POST') {
+      return mockJSONResponse(records.filter((record) => record.lifecycle_status !== 'retired'))
+    }
+    if (url === '/api/targets?scope=retired' && init?.method !== 'POST') {
+      return mockJSONResponse(records.filter((record) => record.lifecycle_status === 'retired'))
     }
     if (url.includes('/runtime/')) {
       return mockJSONResponse(records[0] ?? targetRecord())
@@ -88,7 +94,7 @@ describe('TargetsPage', () => {
   it('creates the first target and navigates to its detail page', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([])).mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(
         mockJSONResponse(
           {
@@ -99,6 +105,8 @@ describe('TargetsPage', () => {
             base_port: 443,
             execution_monitoring_instance_labels: ['edge', 'core'],
             run_status: '启用',
+            enabled_probe_count: 1,
+            matching_executor_count: 1,
             labels: ['public'],
             note: 'primary blog',
             current_health_status: '正常',
@@ -150,7 +158,7 @@ describe('TargetsPage', () => {
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     await waitFor(() => expect(screen.getByText('target detail route')).toBeInTheDocument())
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/targets', {
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/targets', {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -173,7 +181,7 @@ describe('TargetsPage', () => {
   })
 
   it('keeps target creation errors inside the create drawer', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([])).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -195,11 +203,11 @@ describe('TargetsPage', () => {
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     expect(within(createDrawer).getByText('执行监控实例标签至少需要填写一个。')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('uses Chinese-first validation for base port', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([]))
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([])).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -223,11 +231,11 @@ describe('TargetsPage', () => {
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
     expect(within(createDrawer).getByText('基础端口必须为正整数。')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('resets stale create drawer state when cancelled from the drawer', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([targetRecord()]))
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([targetRecord()])).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -262,7 +270,7 @@ describe('TargetsPage', () => {
   it('keeps failed target creation API errors local while preserving the loaded list', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([targetRecord()]))
+      .mockResolvedValueOnce(mockJSONResponse([targetRecord()])).mockResolvedValueOnce(mockJSONResponse([]))
       .mockResolvedValueOnce(mockJSONResponse({ error: 'target already exists' }, 409))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -286,14 +294,14 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(within(createDrawer).getByText('target already exists')).toBeInTheDocument())
     expect(screen.getByText('Existing API')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '入口探测' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('does not navigate from a late target creation response after leaving the page', async () => {
     const createResponse = deferred<Response>()
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([])).mockResolvedValueOnce(mockJSONResponse([]))
       .mockReturnValueOnce(createResponse.promise)
     vi.stubGlobal('fetch', fetchMock)
 
@@ -319,7 +327,7 @@ describe('TargetsPage', () => {
     fireEvent.change(within(createDrawer).getByLabelText('执行监控实例标签'), { target: { value: 'edge' } })
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
 
     fireEvent.click(screen.getByRole('link', { name: '离开目标页' }))
     await waitFor(() => expect(screen.getByText('left targets route')).toBeInTheDocument())
@@ -334,6 +342,8 @@ describe('TargetsPage', () => {
             host: 'blog.example.com',
             execution_monitoring_instance_labels: ['edge'],
             run_status: '启用',
+            enabled_probe_count: 1,
+            matching_executor_count: 1,
             labels: [],
             note: '',
             current_health_status: '正常',
@@ -357,7 +367,7 @@ describe('TargetsPage', () => {
     const createResponse = deferred<Response>()
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce(mockJSONResponse([]))
+      .mockResolvedValueOnce(mockJSONResponse([])).mockResolvedValueOnce(mockJSONResponse([]))
       .mockReturnValueOnce(createResponse.promise)
     vi.stubGlobal('fetch', fetchMock)
 
@@ -381,7 +391,7 @@ describe('TargetsPage', () => {
     fireEvent.change(within(createDrawer).getByLabelText('执行监控实例标签'), { target: { value: 'edge' } })
     fireEvent.click(within(createDrawer).getByRole('button', { name: '创建目标' }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
     expect(within(createDrawer).getByRole('button', { name: '正在创建…' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: '新建目标' }))
@@ -435,7 +445,7 @@ describe('TargetsPage', () => {
           target_type: 'china_reference',
         }),
       ]),
-    )
+    ).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -448,6 +458,11 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.getByText('Service Blog')).toBeInTheDocument())
     expect(screen.getByText('China Reference')).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: '服务' })).toHaveValue('service')
+    expect(screen.getByRole('option', { name: '国内参考' })).toHaveValue('china_reference')
+    expect(screen.getAllByText('服务').some((node) => node.classList.contains('probe-kind'))).toBe(true)
+    expect(screen.getAllByText('国内参考').some((node) => node.classList.contains('probe-kind'))).toBe(true)
+    expect(document.querySelector('.probe-kind')?.textContent).not.toBe('service')
 
     fireEvent.change(screen.getByLabelText('类型'), { target: { value: 'service' } })
 
@@ -471,7 +486,7 @@ describe('TargetsPage', () => {
           current_health_status: '告警',
         }),
       ]),
-    )
+    ).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -487,6 +502,88 @@ describe('TargetsPage', () => {
     expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
   })
 
+  it('keeps unobserved targets out of the abnormal deep link and opens view=unobserved', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({
+        target_id: 'tg_alert',
+        name: 'Failing API',
+        current_health_status: '告警',
+      }),
+      targetRecord({
+        target_id: 'tg_quiet',
+        name: 'Quiet API',
+        current_health_status: '数据不可用',
+        last_success_at: undefined,
+        last_failure_at: undefined,
+      }),
+      targetRecord({
+        target_id: 'tg_paused_unknown',
+        name: 'Paused Unknown API',
+        run_status: '暂停',
+        current_health_status: '数据不可用',
+        last_success_at: undefined,
+        last_failure_at: undefined,
+      }),
+    ]))
+
+    const abnormalView = renderTargets('/targets?abnormal=1')
+    await waitFor(() => expect(screen.getByText('Failing API')).toBeInTheDocument())
+    expect(screen.queryByText('Quiet API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paused Unknown API')).not.toBeInTheDocument()
+    abnormalView.unmount()
+
+    renderTargets('/targets?view=unobserved')
+    await waitFor(() => expect(screen.getByText('Quiet API')).toBeInTheDocument())
+    expect(screen.getByText('数据不可用', { selector: '.badge' }).className).not.toMatch(/tone--/)
+    expect(screen.queryByText('Failing API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paused Unknown API')).not.toBeInTheDocument()
+    expect(screen.getByText('已匹配实例，尚无样本')).toBeInTheDocument()
+  })
+
+  it('filters 数据不可用 without treating it as a known abnormality', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({ target_id: 'tg_normal', name: 'Healthy API' }),
+      targetRecord({
+        target_id: 'tg_unknown',
+        name: 'Unknown API',
+        current_health_status: '数据不可用',
+        last_success_at: undefined,
+        last_failure_at: undefined,
+      }),
+    ]))
+    renderTargets()
+    await waitFor(() => expect(screen.getByText('Healthy API')).toBeInTheDocument())
+    fireEvent.change(screen.getByLabelText('健康'), { target: { value: '数据不可用' } })
+    await waitFor(() => expect(screen.queryByText('Healthy API')).not.toBeInTheDocument())
+    expect(screen.getByText('Unknown API')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /异常/ }))
+    await waitFor(() => expect(screen.queryByText('Unknown API')).not.toBeInTheDocument())
+  })
+
+  it('suggests existing monitoring instance labels and still accepts a future label', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/targets' || url === '/api/targets?scope=retired') return mockJSONResponse([])
+      if (url === '/api/monitoring-instances?scope=active') {
+        return mockJSONResponse([
+          { labels: ['edge', 'core'] },
+          { labels: ['edge'] },
+        ])
+      }
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTargets()
+    fireEvent.click(await screen.findByRole('button', { name: '新建第一个目标' }))
+    const dialog = await screen.findByRole('dialog', { name: '创建目标' })
+    fireEvent.focus(within(dialog).getByLabelText('执行监控实例标签'))
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'edge' }))
+    const input = within(dialog).getByLabelText('执行监控实例标签')
+    expect(input).toHaveValue('edge')
+    fireEvent.change(input, { target: { value: 'edge, not-yet-used' } })
+    expect(input).toHaveValue('edge, not-yet-used')
+  })
+
   it('focuses coverage-gap targets from the quick-view tab instead of a header count', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(
       mockJSONResponse([
@@ -498,10 +595,18 @@ describe('TargetsPage', () => {
         targetRecord({
           target_id: 'tg_gap',
           name: 'Coverage Gap API',
+          execution_monitoring_instance_labels: ['future-label'],
+          matching_executor_count: 0,
+        }),
+        targetRecord({
+          target_id: 'tg_future_labels',
+          name: 'Future Labels API',
           execution_monitoring_instance_labels: [],
+          enabled_probe_count: 1,
+          matching_executor_count: 1,
         }),
       ]),
-    )
+    ).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -519,6 +624,8 @@ describe('TargetsPage', () => {
 
     await waitFor(() => expect(screen.queryByText('Covered API')).not.toBeInTheDocument())
     expect(screen.getByText('Coverage Gap API')).toBeInTheDocument()
+    expect(screen.queryByText('Future Labels API')).not.toBeInTheDocument()
+    expect(screen.getByText('没有可接收该任务的实例')).toBeInTheDocument()
   })
 
   it('uses run_status=暂停 from Dashboard deep links as the initial target filter', async () => {
@@ -531,7 +638,7 @@ describe('TargetsPage', () => {
           run_status: '暂停',
         }),
       ]),
-    )
+    ).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -548,16 +655,25 @@ describe('TargetsPage', () => {
   })
 
   it('uses lifecycle_status=retired from Dashboard deep links as the initial target filter', async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(
-      mockJSONResponse([
-        targetRecord({ target_id: 'tg_enabled', name: 'Enabled API' }),
-        targetRecord({
-          target_id: 'tg_archived',
-          name: 'Archived API',
-          lifecycle_status: 'retired', run_status: '暂停',
-        }),
-      ]),
-    )
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/targets' && init?.method !== 'POST') {
+        return mockJSONResponse([
+          targetRecord({ target_id: 'tg_enabled', name: 'Enabled API' }),
+        ])
+      }
+      if (url === '/api/targets?scope=retired') {
+        return mockJSONResponse([
+          targetRecord({
+            target_id: 'tg_retired',
+            name: 'Archived API',
+            lifecycle_status: 'retired',
+            run_status: '暂停',
+          }),
+        ])
+      }
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -571,6 +687,29 @@ describe('TargetsPage', () => {
     await waitFor(() => expect(screen.getByText('Archived API')).toBeInTheDocument())
 
     expect(screen.queryByText('Enabled API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Archived Carrier Only')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('tab', { name: /全部/ }))
+    await waitFor(() => expect(screen.getByText('Enabled API')).toBeInTheDocument())
+    expect(screen.getByText('Archived API')).toBeInTheDocument()
+    expect(screen.queryByText('Archived Carrier Only')).not.toBeInTheDocument()
+    const urls = fetchMock.mock.calls.map(([url]) => String(url))
+    expect(urls).toContain('/api/targets')
+    expect(urls).toContain('/api/targets?scope=retired')
+    expect(urls).not.toContain('/api/targets?scope=all')
+  })
+
+  it('does not paint a successful collection when the other bulk list fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/targets') return mockJSONResponse([targetRecord({ name: 'Current API' })])
+      if (url === '/api/targets?scope=retired') return mockJSONResponse({ error: 'retired unavailable' }, 503)
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    }))
+    renderTargets()
+
+    expect(await screen.findByRole('heading', { name: '目标列表不可用' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '候风尚未配置任何观测目标' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Current API')).not.toBeInTheDocument()
   })
 
   it('filters by health via the FilterSelect', async () => {
@@ -587,7 +726,7 @@ describe('TargetsPage', () => {
           current_health_status: '告警',
         }),
       ]),
-    )
+    ).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -615,7 +754,7 @@ describe('TargetsPage', () => {
         mockJSONResponse([
           targetRecord({ target_id: 'tg_click', name: 'Blog' }),
         ]),
-      ),
+      ).mockResolvedValueOnce(mockJSONResponse([])),
     )
 
     render(
@@ -651,7 +790,7 @@ describe('TargetsPage', () => {
   it('keeps the persistent create target dialog open on Escape and restores focus after explicit close', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValueOnce(mockJSONResponse([targetRecord()])),
+      vi.fn().mockResolvedValueOnce(mockJSONResponse([targetRecord()])).mockResolvedValueOnce(mockJSONResponse([])),
     )
 
     render(
@@ -706,7 +845,7 @@ describe('TargetsPage', () => {
           targetRecord({ target_id: 'tg_001', name: 'API A' }),
           targetRecord({ target_id: 'tg_002', name: 'API B' }),
         ]),
-      ),
+      ).mockResolvedValueOnce(mockJSONResponse([])),
     )
 
     render(
@@ -743,7 +882,7 @@ describe('TargetsPage', () => {
         mockJSONResponse([
           targetRecord({ target_id: 'tg_no_data', name: 'New Target' }),
         ]),
-      ),
+      ).mockResolvedValueOnce(mockJSONResponse([])),
     )
 
     render(
@@ -816,8 +955,11 @@ describe('TargetsPage', () => {
   it('rejects batch 进入维护 on shared targets with error directing to detail page', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url === '/api/targets?scope=all' && init?.method !== 'POST') {
+      if (url === '/api/targets' && init?.method !== 'POST') {
         return mockJSONResponse([targetRecord({ target_id: 'tg_shared_batch', name: 'Shared Target' })])
+      }
+      if (url === '/api/targets?scope=retired' && init?.method !== 'POST') {
+        return mockJSONResponse([])
       }
       if (url.includes('/lifecycle-review')) {
         return mockJSONResponse({
@@ -1047,7 +1189,8 @@ describe('TargetsPage', () => {
       targetRecord({
         target_id: 'tg_gap',
         name: 'Coverage Gap API',
-        execution_monitoring_instance_labels: [],
+        execution_monitoring_instance_labels: ['future-label'],
+        enabled_probe_count: 0,
       }),
     ]))
     renderTargets()
@@ -1074,6 +1217,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /覆盖缺口/ }))
     await waitFor(() => expect(screen.getByText('Coverage Gap API')).toBeInTheDocument())
+    expect(screen.getByText('未配置启用探测项')).toBeInTheDocument()
     expect(screen.queryByText('Archived API')).not.toBeInTheDocument()
     expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
 

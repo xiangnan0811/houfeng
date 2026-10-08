@@ -36,44 +36,65 @@ func TestOverviewBudgetRiskUsesCurrentCompleteness(t *testing.T) {
 	current90 := 90.0
 	current1080 := 1080.0
 	current120 := 120.0
+	currentZero := 0.0
 	tests := []struct {
 		name                string
 		rows                []CostRow
 		missing             []MissingSubscriptionAsset
 		wantTotalMonthly    float64
 		wantCurrentUnknown  int
+		wantCurrentMissing  int
+		wantCurrentStale    int
 		wantArchivedUnknown int
 		wantStatus          BudgetStatus
 		wantMonthlySpend    *float64
 		wantYearlySpend     *float64
 	}{
 		{
-			name:               "current missing exchange rate at warning subtotal",
-			rows:               []CostRow{{VPSID: "known", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &current90}, {VPSID: "missing-rate", LifecycleStatus: "active", Currency: "EUR", BaseCurrency: "CNY"}},
-			wantTotalMonthly:   90,
-			wantCurrentUnknown: 1,
+			name: "current missing exchange rate at warning subtotal",
+			rows: []CostRow{
+				{VPSID: "known", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &current90, ExchangeRateStatus: ExchangeRateStatusIdentity},
+				{VPSID: "missing-rate", LifecycleStatus: "active", Currency: "EUR", BaseCurrency: "CNY", ExchangeRateStatus: ExchangeRateStatusMissing},
+			},
+			wantTotalMonthly: 90, wantCurrentUnknown: 1, wantCurrentMissing: 1,
 		},
 		{
-			name:               "current missing exchange rate retains proven over",
-			rows:               []CostRow{{VPSID: "known", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &current120}, {VPSID: "missing-rate", LifecycleStatus: "active", Currency: "EUR", BaseCurrency: "CNY"}},
-			wantTotalMonthly:   120,
-			wantCurrentUnknown: 1,
-			wantStatus:         BudgetStatusOver,
+			name: "current missing exchange rate retains proven over",
+			rows: []CostRow{
+				{VPSID: "known", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &current120, ExchangeRateStatus: ExchangeRateStatusIdentity},
+				{VPSID: "missing-rate", LifecycleStatus: "active", Currency: "EUR", BaseCurrency: "CNY", ExchangeRateStatus: ExchangeRateStatusMissing},
+			},
+			wantTotalMonthly: 120, wantCurrentUnknown: 1, wantCurrentMissing: 1,
+			wantStatus: BudgetStatusOver,
 		},
 		{
 			name:               "current missing subscription at warning subtotal",
-			rows:               []CostRow{{VPSID: "known", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &current90}},
+			rows:               []CostRow{{VPSID: "known", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &current90, ExchangeRateStatus: ExchangeRateStatusIdentity}},
 			missing:            []MissingSubscriptionAsset{{VPSID: "missing-subscription", LifecycleStatus: "active"}},
 			wantTotalMonthly:   90,
 			wantCurrentUnknown: 1,
 		},
 		{
 			name:               "current missing subscription retains proven over",
-			rows:               []CostRow{{VPSID: "known", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &current120}},
+			rows:               []CostRow{{VPSID: "known", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &current120, ExchangeRateStatus: ExchangeRateStatusIdentity}},
 			missing:            []MissingSubscriptionAsset{{VPSID: "missing-subscription", LifecycleStatus: "active"}},
 			wantTotalMonthly:   120,
 			wantCurrentUnknown: 1,
 			wantStatus:         BudgetStatusOver,
+		},
+		{
+			name:             "current stale rate keeps numeric amount known",
+			rows:             []CostRow{{VPSID: "stale-rate", LifecycleStatus: "active", Currency: "EUR", BaseCurrency: "CNY", MonthlyPriceBase: &current90, ExchangeRateStatus: ExchangeRateStatusStale}},
+			wantTotalMonthly: 90,
+			wantCurrentStale: 1,
+			wantStatus:       BudgetStatusWarning,
+			wantMonthlySpend: &current90,
+			wantYearlySpend:  &current1080,
+		},
+		{
+			name:               "identity zero is known",
+			rows:               []CostRow{{VPSID: "identity-zero", LifecycleStatus: "active", Currency: "CNY", BaseCurrency: "CNY", MonthlyPriceBase: &currentZero, ExchangeRateStatus: ExchangeRateStatusIdentity}},
+			wantCurrentUnknown: 0,
 		},
 		{
 			name: "archived gaps do not affect complete current warning",
@@ -121,6 +142,12 @@ func TestOverviewBudgetRiskUsesCurrentCompleteness(t *testing.T) {
 			}
 			if got.CurrentUnknownAmountCount != tt.wantCurrentUnknown {
 				t.Fatalf("current_unknown_amount_count = %d, want %d", got.CurrentUnknownAmountCount, tt.wantCurrentUnknown)
+			}
+			if got.CurrentMissingRateCount != tt.wantCurrentMissing {
+				t.Fatalf("current_missing_rate_count = %d, want %d", got.CurrentMissingRateCount, tt.wantCurrentMissing)
+			}
+			if got.CurrentStaleRateCount != tt.wantCurrentStale {
+				t.Fatalf("current_stale_rate_count = %d, want %d", got.CurrentStaleRateCount, tt.wantCurrentStale)
 			}
 			if got.ArchivedUnknownAmountCount != tt.wantArchivedUnknown {
 				t.Fatalf("archived_unknown_amount_count = %d, want %d", got.ArchivedUnknownAmountCount, tt.wantArchivedUnknown)

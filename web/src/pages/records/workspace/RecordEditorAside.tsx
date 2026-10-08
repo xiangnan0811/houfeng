@@ -1,4 +1,5 @@
 import { Button, Input, Select } from '../../../components/atoms'
+import { RecordVisibilityFields } from './RecordVisibilityFields'
 import { RecordRevisionCollaborationControls } from '../../../components/RecordRevisionCollaborationControls'
 import type { RecordCollaborationMemberOption } from '../../../components/RecordRevisionCollaborationControls'
 import type { RecordBusinessStatus, RecordDraftPayload, RecordRevision, RecordType } from '../../../lib/types'
@@ -53,16 +54,10 @@ export function RecordEditorAside({ payload, baseline, members, materials, onPat
             </Select>
           ) : null}
           <Input label="影响级别" value={payload.impact_level} onChange={(event) => onPatch({ impact_level: event.target.value })} />
-          <Select
-            label="可见性"
-            value={payload.visibility.kind}
-            onChange={(event) => onPatch({
-              visibility: { ...payload.visibility, kind: event.target.value as 'project' | 'restricted' },
-            })}
-          >
-            <option value="project">项目内</option>
-            <option value="restricted">受限</option>
-          </Select>
+          <RecordVisibilityFields
+            visibility={payload.visibility}
+            onChange={(visibility) => onPatch({ visibility })}
+          />
           <div className="record-form-grid__wide">
             <Input
               label="主体 ID"

@@ -90,7 +90,7 @@ type Record struct {
 	BaseCurrency        string     `json:"base_currency,omitempty"`
 	ExchangeRate        *float64   `json:"exchange_rate,omitempty"`
 	ExchangeRateDate    *Date      `json:"exchange_rate_date,omitempty"`
-	ExchangeRateStale   bool       `json:"exchange_rate_stale,omitempty"`
+	ExchangeRateStatus  string     `json:"exchange_rate_status,omitempty"`
 	BudgetStatus        string     `json:"budget_status,omitempty"`
 	NextReminderAt      *time.Time `json:"next_reminder_at,omitempty"`
 	CreatedAt           time.Time  `json:"created_at"`

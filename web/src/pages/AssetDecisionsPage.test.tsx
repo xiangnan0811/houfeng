@@ -122,7 +122,7 @@ describe('Asset Decisions route and composition workflows', () => {
       'GET /api/vps?renewal_decision=unreviewed',
     ])
   })
-  it('shows a quiet stable state without promoting templates or manual groups', async () => {
+  it('shows a quiet scoped-empty state without promoting templates or manual groups', async () => {
     const fetchMock = vi.fn()
     mockInitialWorkbench(fetchMock, {
       overviewBody: overview({
@@ -157,16 +157,168 @@ describe('Asset Decisions route and composition workflows', () => {
     )
 
     const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
-    expect(within(commandSummary).getByRole('heading', { name: '当前没有需要处理的组合决策' })).toBeInTheDocument()
+    expect(within(commandSummary).getByRole('heading', { name: '当前视图暂无组合决策' })).toBeInTheDocument()
+    expect(within(commandSummary).getByText('全局资产组合 · 需要决策 · 30 天续费窗口')).toBeInTheDocument()
     expect(within(commandSummary).queryByRole('button', { name: /处理|使用模板|继续组合|打开决策组/ })).not.toBeInTheDocument()
-    // 合同：无待办时不渲染统计卡与警示色。
+    // 合同：空态时不渲染统计卡与警示色，遵守 scoped-empty 中立契约。
     expect(within(commandSummary).queryByLabelText('资产组合决策当前事实')).not.toBeInTheDocument()
     expect(commandSummary).toHaveClass('asset-decision-command-summary--quiet')
+    expect(commandSummary).toHaveClass('asset-decision-command-summary--neutral')
     expect(commandSummary.querySelector('[class*="asset-decision-focus__item--"]')).toBeNull()
     expect(within(commandSummary).queryByText(/主备取舍模板|欧洲主备手工组合/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前视图暂无决策组' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '场景与组合' })).not.toBeInTheDocument()
+
+    const supportStrip = screen.getByRole('navigation', { name: '资产决策辅助入口' })
+    const queueBtn = getSecondaryWorkbenchButton(supportStrip, '单台队列')
+    expect(queueBtn).not.toHaveAttribute('aria-expanded')
+    expect(queueBtn).toHaveAttribute('title', '查看单台队列（暂无待处理）')
+    expect(within(queueBtn).getByText('查看单台队列')).toBeInTheDocument()
+
+    // 辅助导航各按钮均可见呈现 actionLabel 交互词
+    for (const actionLabel of ['打开记录', '打开场景', '查看续费', '查看单台队列'] as const) {
+      expect(within(supportStrip).getByText(actionLabel)).toBeInTheDocument()
+    }
+
     expectNoAssetDecisionPageEnglishNoise()
+  })
+
+  it('renders scoped-empty contract with active filter chips and neutral styling', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      overviewBody: overview({
+        group_count: 0,
+        member_vps_count: 0,
+        needs_decision_count: 0,
+        renewal_group_count: 0,
+        top_groups: [],
+      }),
+      groupsBody: [],
+      recordsBody: [],
+      manualGroupsBody: [],
+      templatesBody: [],
+      renewalEvidenceBody: [],
+      subscriptionsBody: [],
+      unreviewedBody: [],
+      migrateBody: [],
+      cancelBody: [],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/asset-decisions?view=needs_decision&renew_within_days=30&provider_id=pv_001']}>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
+    expect(within(commandSummary).getByRole('heading', { name: '当前视图暂无组合决策' })).toBeInTheDocument()
+    expect(within(commandSummary).getByText('服务商 pv_001')).toBeInTheDocument()
+    expect(within(commandSummary).queryByRole('button', { name: /处理|使用模板|继续组合|打开决策组/ })).not.toBeInTheDocument()
+    expect(commandSummary).toHaveClass('asset-decision-command-summary--quiet')
+    expect(commandSummary).toHaveClass('asset-decision-command-summary--neutral')
+    expect(screen.getByRole('heading', { name: '当前视图暂无决策组' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '查看需要决策' })).not.toBeInTheDocument()
+  })
+
+  it('preserves the empty group CTA when under partial error rather than scoped-empty', async () => {
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      overviewBody: overview({
+        group_count: 0,
+        member_vps_count: 0,
+        needs_decision_count: 0,
+        renewal_group_count: 0,
+        cost_group_count: 0,
+        evidence_group_count: 0,
+      }),
+      groupsBody: [],
+      recordsBody: [],
+      manualGroupsBody: [],
+      templatesBody: [],
+      renewalEvidenceBody: [],
+      subscriptionsBody: [],
+      unreviewedBody: [],
+      migrateBody: [],
+      cancelBody: [],
+      routes: [
+        {
+          url: '/api/asset-decisions/records?view=needs_decision&renew_within_days=30',
+          body: { error: 'records unavailable' },
+          status: 500,
+        },
+      ],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
+    expect(within(commandSummary).getByRole('heading', { name: '部分资产决策证据不可用' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '当前视图暂无决策组' })).toBeInTheDocument()
+    // 局部错误空组保留恢复 CTA
+    expect(screen.getByRole('button', { name: '查看需要决策' })).toBeInTheDocument()
+  })
+
+  it('proves no empty verdict until all contributing sources have settled', async () => {
+    let resolveGroups!: () => void
+    const groupsPending = new Promise<void>((resolve) => {
+      resolveGroups = resolve
+    })
+
+    const fetchMock = vi.fn()
+    mockInitialWorkbench(fetchMock, {
+      overviewBody: overview({
+        group_count: 0,
+        member_vps_count: 0,
+        needs_decision_count: 0,
+        renewal_group_count: 0,
+        top_groups: [],
+      }),
+      groupsBody: [],
+      recordsBody: [],
+      manualGroupsBody: [],
+      templatesBody: [],
+      renewalEvidenceBody: [],
+      subscriptionsBody: [],
+      unreviewedBody: [],
+      migrateBody: [],
+      cancelBody: [],
+    })
+
+    const baseImpl = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (url.includes('/api/asset-decisions/groups?view=needs_decision')) {
+        return groupsPending.then(() => baseImpl(url, init))
+      }
+      return baseImpl(url, init)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <AssetDecisionsPage />
+      </MemoryRouter>,
+    )
+
+    // While groups are still loading, lead shows neutral waiting, never false empty
+    const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
+    expect(within(commandSummary).getByRole('heading', { name: '正在评估组合决策…' })).toBeInTheDocument()
+    expect(within(commandSummary).queryByRole('heading', { name: '当前视图暂无组合决策' })).not.toBeInTheDocument()
+    expect(within(commandSummary).queryByText('无待处理决策')).not.toBeInTheDocument()
+
+    // Settle the delayed groups source
+    resolveGroups()
+
+    // After all contributing sources settle, the true scoped-empty verdict appears
+    await waitFor(() => {
+      expect(within(commandSummary).getByRole('heading', { name: '当前视图暂无组合决策' })).toBeInTheDocument()
+    })
+    expect(within(commandSummary).queryByRole('heading', { name: '正在评估组合决策…' })).not.toBeInTheDocument()
   })
   it('keeps legacy single_queue URLs on the portfolio workbench and points to the support queue', async () => {
     const fetchMock = vi.fn()

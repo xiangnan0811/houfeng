@@ -9,6 +9,7 @@ export type TargetFilterState = {
   labels: string[]
   executionLabels: string[]
   abnormal: boolean
+  unobserved: boolean
   coverageGap: boolean
 }
 

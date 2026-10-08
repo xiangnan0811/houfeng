@@ -26,11 +26,20 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+// RuntimeCapabilities describes the effective routes enabled by this Center.
+type RuntimeCapabilities struct {
+	Records     bool `json:"records"`
+	Comparison  bool `json:"comparison"`
+	Portability bool `json:"portability"`
+}
+
 type meResponse struct {
-	UserID      string `json:"user_id"`
-	Username    string `json:"username"`
-	Role        string `json:"role"`
-	DisplayName string `json:"display_name"`
+	UserID                 string                      `json:"user_id"`
+	Username               string                      `json:"username"`
+	Role                   string                      `json:"role"`
+	DisplayName            string                      `json:"display_name"`
+	ManagementCapabilities auth.ManagementCapabilities `json:"management_capabilities"`
+	RuntimeCapabilities    RuntimeCapabilities         `json:"runtime_capabilities"`
 }
 
 type changePasswordRequest struct {
@@ -276,7 +285,10 @@ func LoginWithOptions(svc AuthService, opts LoginOptions) http.HandlerFunc {
 		}
 		limiter.recordSuccess(username, ip)
 		auth.SetSessionCookie(w, sess.SessionID, sess.ExpiresAt)
-		writeJSON(w, http.StatusOK, meResponse{UserID: sess.UserID})
+		writeJSON(w, http.StatusOK, struct {
+			UserID                 string                      `json:"user_id"`
+			ManagementCapabilities auth.ManagementCapabilities `json:"management_capabilities"`
+		}{UserID: sess.UserID, ManagementCapabilities: sess.ManagementCapabilities})
 	}
 }
 
@@ -296,7 +308,9 @@ func Logout(svc AuthService) http.HandlerFunc {
 }
 
 // Me handles GET /api/auth/me.
-func Me(svc AuthService) http.HandlerFunc {
+func Me(svc AuthService, capabilities RuntimeCapabilities) http.HandlerFunc {
+	capabilities.Comparison = capabilities.Records && capabilities.Comparison
+	capabilities.Portability = capabilities.Records && capabilities.Portability
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -309,14 +323,20 @@ func Me(svc AuthService) http.HandlerFunc {
 		}
 		u, err := svc.UserBySession(r.Context(), id)
 		if err != nil {
-			writeError(w, http.StatusUnauthorized, "unauthenticated")
+			if errors.Is(err, auth.ErrSessionNotFound) || errors.Is(err, auth.ErrSessionExpired) || errors.Is(err, auth.ErrUserNotFound) {
+				writeError(w, http.StatusUnauthorized, "unauthenticated")
+			} else {
+				writeError(w, http.StatusServiceUnavailable, "identity temporarily unavailable")
+			}
 			return
 		}
 		writeJSON(w, http.StatusOK, meResponse{
-			UserID:      u.UserID,
-			Username:    u.Username,
-			Role:        u.Role,
-			DisplayName: u.DisplayName,
+			UserID:                 u.UserID,
+			Username:               u.Username,
+			Role:                   u.Role,
+			DisplayName:            u.DisplayName,
+			ManagementCapabilities: u.ManagementCapabilities(),
+			RuntimeCapabilities:    capabilities,
 		})
 	}
 }
@@ -347,6 +367,8 @@ func ChangePassword(svc AuthService) http.HandlerFunc {
 			switch {
 			case errors.Is(err, auth.ErrInvalidCredentials):
 				writeError(w, http.StatusUnauthorized, "old password incorrect")
+			case errors.Is(err, auth.ErrSessionNotFound), errors.Is(err, auth.ErrSessionExpired):
+				writeError(w, http.StatusUnauthorized, "unauthenticated")
 			case errors.Is(err, auth.ErrPasswordTooShort), errors.Is(err, auth.ErrPasswordTooLong), errors.Is(err, auth.ErrPasswordTooWeak):
 				writeError(w, http.StatusBadRequest, "new password invalid")
 			default:

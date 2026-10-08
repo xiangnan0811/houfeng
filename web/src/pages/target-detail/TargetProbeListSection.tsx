@@ -59,15 +59,15 @@ export function TargetProbeListSection({
         disabled={addDisabled || probeFormOpen}
         onClick={onOpenCreate}
       >
-        添加 ProbeItem
+        添加探测项
       </Button>
     </div>
   )
 
   return (
-    <section className="monitoring-detail-section target-probe-section" aria-label="探测方式">
+    <section className="monitoring-detail-section target-probe-section" aria-label="探测项">
       <header className="monitoring-detail-section__head">
-        <h2>探测方式</h2>
+        <h2>探测项</h2>
         {aside ?? defaultAside}
       </header>
       {probeMutationError ? (

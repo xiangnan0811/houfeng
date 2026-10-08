@@ -2,10 +2,12 @@ import type { ReactNode } from 'react'
 
 import type { VPSOverview } from '../../lib/types'
 import {
-  overviewMonitoringSupportingDetail,
+  overviewMonitoringSupportingPresentation,
   overviewOverallPresentation,
   overviewSummaryCellLabel,
   overviewSummaryDetailLabel,
+  overviewSummaryDetailPresentation,
+  overviewUnmatchedStatus,
   type OverviewObservationTone,
 } from '../../lib/vpsOverviewPresentation'
 import { VPSObservationRows, type VPSObservationRowModel } from './VPSObservationRows'
@@ -139,10 +141,14 @@ export function VPSOverviewSummaryGrid({
           tone: observationTone(key, cell.status) || undefined,
           explanation: null as string | null,
         }
-    const mappedDetail = cell.detail ? overviewSummaryDetailLabel(key, cell.detail) : ''
+    const detailPresentation = cell.detail
+      ? overviewSummaryDetailPresentation(key, cell.detail)
+      : { summary: '', diagnostics: [] }
+    const mappedDetail = detailPresentation.summary
     let statusLabel = presented.label
     let statusTone = presented.tone
     let detailText = presented.explanation || mappedDetail
+    let diagnostics = key === 'monitoring' ? [] : detailPresentation.diagnostics
     const sourceLabel = label === '监控关联' ? '监控' : label
     let hideDetail = !presented.explanation
       && (
@@ -151,13 +157,14 @@ export function VPSOverviewSummaryGrid({
         || (key === 'ip_quality' && duplicateEmptyIP(statusLabel, detailText))
       )
     if (key === 'monitoring') {
-      const supporting = overviewMonitoringSupportingDetail(
-        mappedDetail,
+      const supporting = overviewMonitoringSupportingPresentation(
+        cell.detail ?? '',
         statusLabel,
         monitoringInstanceCount,
       )
-      detailText = supporting
-      hideDetail = !supporting || supporting === statusLabel
+      detailText = supporting.text
+      diagnostics = supporting.diagnostics
+      hideDetail = !supporting.text || supporting.text === statusLabel
     }
 
     let retained = false
@@ -175,7 +182,9 @@ export function VPSOverviewSummaryGrid({
         || EMPTY_CONFIG_LABELS[mappedDetail]
         || EMPTY_CONFIG_LABELS[cell.detail ?? ''],
       )
-      const retainedConclusion = overviewSourceHasRetainedEvidence(statusLabel)
+      const retainedResult = statusTone === 'ok' || statusTone === 'notice' || statusTone === 'alert'
+      const retainedConclusion = retainedResult
+        && overviewSourceHasRetainedEvidence(statusLabel)
         && !EMPTY_CONFIG_LABELS[statusLabel]
         && !EMPTY_IP_LABELS[statusLabel]
       const hasHistory = overviewSourceReadKind(cell.section) === 'disabled_history'
@@ -193,7 +202,7 @@ export function VPSOverviewSummaryGrid({
         } else if (hasHistory) {
           retained = true
           if (emptyConfig) hideDetail = true
-        } else if (!emptyStatus && overviewSourceHasRetainedEvidence(statusLabel)) {
+        } else if (retainedResult && !emptyStatus && overviewSourceHasRetainedEvidence(statusLabel)) {
           retained = true
           detailText = ''
           hideDetail = true
@@ -215,6 +224,8 @@ export function VPSOverviewSummaryGrid({
     }
 
     const allowRetry = retryable && (cell.section.state === 'stale' || knownFailure)
+    const unmatchedStatus = overviewUnmatchedStatus(key, cell.status)
+    if (unmatchedStatus) diagnostics = [...diagnostics, { label: '原始状态', detail: unmatchedStatus }]
     return {
       key,
       project: label,
@@ -222,6 +233,7 @@ export function VPSOverviewSummaryGrid({
       conclusion: statusLabel,
       conclusionTone: statusTone || '',
       description: hideDetail ? '' : detailText,
+      ...(diagnostics.length > 0 ? { diagnostics } : {}),
       ...(compactEmpty ? {} : { section: cell.section }),
       sourceLabel,
       retained,

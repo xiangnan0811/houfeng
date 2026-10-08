@@ -137,6 +137,41 @@ describe('buildDashboardModel', () => {
     },
   )
 
+  it('keeps unobserved targets out of the abnormal total and links them on their own', () => {
+    const onlyUnobserved = readyModel({
+      overview: remoteSuccess(
+        dashboardOverviewFixture({ unobserved_target_count: 3 }),
+        DASHBOARD_FIXTURE_LOADED_AT,
+      ),
+    })
+    expect(onlyUnobserved.mode).toBe('stable')
+    expect(onlyUnobserved.observability.abnormalTotal).toBe(0)
+    expect(onlyUnobserved.observability.unobservedTargetCount).toBe(3)
+    expect(onlyUnobserved.title).toBe('尚有目标无观测')
+    expect(onlyUnobserved.judgements.find((item) => item.id === 'observability')).toMatchObject({
+      value: '3',
+      to: '/targets?view=unobserved',
+    })
+    expect(onlyUnobserved.primaryAction.to).toBe('/vps')
+
+    const both = readyModel({
+      overview: remoteSuccess(
+        dashboardOverviewFixture({
+          abnormal_target_count: 2,
+          severe_target_count: 1,
+          unobserved_target_count: 4,
+        }),
+        DASHBOARD_FIXTURE_LOADED_AT,
+      ),
+    })
+    expect(both.mode).toBe('critical')
+    expect(both.observability.abnormalTotal).toBe(2)
+    expect(both.observability.unobservedTargetCount).toBe(4)
+    expect(both.primaryAction).toEqual({ label: '处理严重异常', to: '/events?severity=严重' })
+    expect(both.judgements.find((item) => item.id === 'observability')?.to).toBe('/events?severity=严重')
+    expect(both.judgements.find((item) => item.id === 'assets')?.label).not.toBe('尚无观测')
+  })
+
   it('routes target-only abnormal state to the target work queue', () => {
     const model = readyModel({
       overview: remoteSuccess(
@@ -196,6 +231,64 @@ describe('buildDashboardModel', () => {
       label: '资产决策待核对',
       to: '/asset-decisions?view=needs_decision&renew_within_days=30',
     })
+  })
+
+  it('keeps unknown subscription money out of a zero total and a zero budget', () => {
+    const allUnknown = readyModel({
+      subscription: remoteSuccess(subscriptionOverviewFixture({
+        active_subscription_count: 2,
+        total_monthly_cost: 0,
+        total_yearly_cost: 0,
+        budget_risk_count: 0,
+        current_unknown_amount_count: 2,
+        current_missing_rate_count: 2,
+        vps_costs: [],
+      }), DASHBOARD_FIXTURE_LOADED_AT),
+    })
+    expect(allUnknown.billingEvidence.title).toBe('金额待核对')
+    expect(allUnknown.billingEvidence.completeness).toBe('金额待核对')
+    expect(allUnknown.billingEvidence.detail).toContain('预算风险 0')
+    expect(allUnknown.billingEvidence.detail).toContain('待核对 2')
+    expect(allUnknown.billingEvidence.detail).toContain('缺汇率 2')
+    expect(allUnknown.judgements.find((item) => item.id === 'billing')).toMatchObject({
+      value: '金额待核对',
+      tone: 'notice',
+    })
+
+    const partial = readyModel({
+      subscription: remoteSuccess(subscriptionOverviewFixture({
+        total_monthly_cost: 40,
+        budget_risk_count: 0,
+        current_unknown_amount_count: 1,
+        current_missing_rate_count: 1,
+      }), DASHBOARD_FIXTURE_LOADED_AT),
+    })
+    expect(partial.billingEvidence.title).toBe('CNY 40.00/月')
+    expect(partial.billingEvidence.completeness).toBe('已知金额小计（另有 1 项待核对）')
+    expect(partial.billingEvidence.completeness).not.toContain('已完整折算')
+
+    const trueZero = readyModel({
+      subscription: remoteSuccess(subscriptionOverviewFixture({
+        active_subscription_count: 1,
+        total_monthly_cost: 0,
+        total_yearly_cost: 0,
+        current_unknown_amount_count: 0,
+        current_stale_rate_count: 0,
+      }), DASHBOARD_FIXTURE_LOADED_AT),
+    })
+    expect(trueZero.billingEvidence.title).toBe('CNY 0.00/月')
+    expect(trueZero.billingEvidence.completeness).toBe('订阅摘要金额已完整折算')
+
+    const stale = readyModel({
+      subscription: remoteSuccess(subscriptionOverviewFixture({
+        total_monthly_cost: 12,
+        current_stale_rate_count: 1,
+        current_unknown_amount_count: 0,
+      }), DASHBOARD_FIXTURE_LOADED_AT),
+    })
+    expect(stale.billingEvidence.title).toBe('CNY 12.00/月')
+    expect(stale.billingEvidence.completeness).toBe('汇率过期 1 项，金额仍按过期汇率计入')
+    expect(stale.billingEvidence.detail).toContain('汇率过期 1')
   })
 
   it('preserves overview loading and error as explicit model states', () => {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -148,6 +149,7 @@ type LinkedCreateWireIdentity struct {
 	Labels      []string `json:"labels"`
 	Note        string   `json:"note"`
 	LinkNote    string   `json:"link_note"`
+	ClearFields []string `json:"clear_fields,omitempty"`
 }
 
 type UpdateMetadataInput struct {
@@ -354,13 +356,13 @@ func NormalizeCreateInput(input CreateInput) CreateInput {
 }
 
 func ValidateCreateInput(input CreateInput) error {
-	if strings.TrimSpace(input.DisplayName) == "" || strings.TrimSpace(input.Region) == "" || strings.TrimSpace(input.City) == "" || strings.TrimSpace(input.Provider) == "" {
+	if strings.TrimSpace(input.DisplayName) == "" {
 		return fmt.Errorf("%w: required metadata is missing", ErrInvalidCreateInput)
 	}
 	if !IsValidLifecycleStatus(input.LifecycleStatus) {
 		return fmt.Errorf("%w: invalid lifecycle_status", ErrInvalidCreateInput)
 	}
-	return nil
+	return ValidateCreateInputMetadata(input)
 }
 
 func ValidateCreateInputMetadata(input CreateInput) error {
@@ -376,11 +378,33 @@ func NormalizeLinkedCreateWireIdentity(input LinkedCreateWireIdentity) LinkedCre
 	input.Labels = normalizeLabels(input.Labels)
 	input.Note = strings.TrimSpace(input.Note)
 	input.LinkNote = strings.TrimSpace(input.LinkNote)
+	input.ClearFields = normalizeClearFields(input.ClearFields)
 	return input
 }
 
 func ValidateLinkedCreateWireIdentity(input LinkedCreateWireIdentity) error {
-	return validateCreateMetadata(input.Labels, input.Note)
+	if err := validateCreateMetadata(input.Labels, input.Note); err != nil {
+		return err
+	}
+	for _, field := range input.ClearFields {
+		switch field {
+		case "region":
+			if input.Region != "" {
+				return fmt.Errorf("%w: clear_fields conflicts with region", ErrInvalidCreateInput)
+			}
+		case "city":
+			if input.City != "" {
+				return fmt.Errorf("%w: clear_fields conflicts with city", ErrInvalidCreateInput)
+			}
+		case "provider":
+			if input.Provider != "" {
+				return fmt.Errorf("%w: clear_fields conflicts with provider", ErrInvalidCreateInput)
+			}
+		default:
+			return fmt.Errorf("%w: invalid clear_fields value", ErrInvalidCreateInput)
+		}
+	}
+	return nil
 }
 
 func validateCreateMetadata(labels []string, note string) error {
@@ -396,6 +420,24 @@ func validateCreateMetadata(labels []string, note string) error {
 		return fmt.Errorf("%w: note is too long", ErrInvalidCreateInput)
 	}
 	return nil
+}
+
+func normalizeClearFields(fields []string) []string {
+	if len(fields) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for _, raw := range fields {
+		field := strings.TrimSpace(raw)
+		if _, exists := seen[field]; exists {
+			continue
+		}
+		seen[field] = struct{}{}
+		normalized = append(normalized, field)
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
 func normalizeLabels(labels []string) []string {

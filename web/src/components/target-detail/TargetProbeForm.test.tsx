@@ -41,10 +41,10 @@ describe('TargetProbeForm', () => {
       />,
     )
 
-    expect(screen.getByText('ProbeItem 创建')).toBeInTheDocument()
+    expect(screen.getByText('探测项创建')).toBeInTheDocument()
     expect(screen.getByLabelText('端口')).toBeInTheDocument()
     expect(screen.getByLabelText('频率档位')).toHaveValue('5s')
-    expect(screen.getByRole('button', { name: '创建 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '创建探测项' })).toBeInTheDocument()
   })
 
   it('renders HTTP-specific fields when probeKind is http', () => {
@@ -75,8 +75,8 @@ describe('TargetProbeForm', () => {
       />,
     )
 
-    expect(screen.getByText('ProbeItem 编辑')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '保存 ProbeItem' })).toBeInTheDocument()
+    expect(screen.getByText('探测项编辑')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存探测项' })).toBeInTheDocument()
     expect(screen.getByText('端口必须为正整数。')).toBeInTheDocument()
   })
 
@@ -93,7 +93,7 @@ describe('TargetProbeForm', () => {
       />,
     )
 
-    fireEvent.change(screen.getByLabelText('Probe 类型'), { target: { value: 'tls' } })
+    fireEvent.change(screen.getByLabelText('探测项类型'), { target: { value: 'tls' } })
     expect(onProbeKindChange).toHaveBeenCalledWith('tls')
   })
 })

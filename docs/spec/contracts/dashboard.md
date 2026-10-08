@@ -11,6 +11,9 @@
 - 异常与严重运行统计只计管理中 VPS 的已接入、启用实例；维护、暂停、待接入、退役不作为运行异常。
 - 运行关注队列、全局/分组计数及异常关联 VPS 计数先按绑定和可信在线证据投影健康：绑定非「已绑定」为「绑定待确认」，缺少可信在线时间或健康证据为「数据不可用」。即使 incident 存储摘要仍为「正常」，也必须进入关注集合；原始或回填心跳不能替代可信在线证据。
 - Target 当前可见性要求其生命周期为 `active`，通过未结束的服务/域名关联判断 VPS 归属。共享探测只要仍有管理中的承载关联就保留。
+- 当前可见目标包括无当前承载关联的目标；存在承载关联时，至少一条关联须属于 active VPS。目标健康读取按退役、暂停、维护、无成功/失败时间、存储健康的顺序投影，不改写 incident 摘要。
+- `unobserved_target_count` 独立统计当前可见、启用、`last_success_at` 与 `last_failure_at` 均为空的目标。异常目标仅统计同一可见/启用范围内具有任一观测时间且存储健康为关注、告警或严重的目标；严重是异常子集。全局、分组、异常预览与关联 VPS 聚合使用同一集合，`limit` 不限制任何计数。
+- 目标无观测与已知异常分别表达，不将无观测加入异常；监控实例既有绑定待确认/数据不足关注集合不变。已有样本的新鲜度不在此投影中新增阈值，历史正常及零异常计数都不是当前健康保证。
 - 成本口径：管理中 VPS 的 active subscriptions `monthly_price` 按币种求和；已归档潜在扣费在成本页单列，不进入当前资产预计成本。
 - `no_renewal_vps_count` 统计决定不续费的管理中 VPS；`archived_vps_count` 统计归档资产；`auto_renew_check_vps_count` 统计决定不续费但服务商自动续费仍为 unchecked/enabled 的资产；`pending_followup_count` 统计待核对事项。续费意向与生命周期、服务商核对事实彼此独立。
 - 该查询不得改变 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target、Agent、VPS、subscription 或 link 记录。

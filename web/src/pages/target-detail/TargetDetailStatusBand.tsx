@@ -77,7 +77,7 @@ export function TargetDetailStatusBand({
   return (
     <dl className="target-detail-status-band" aria-label="目标状态">
       <div className="target-detail-status-band__item">
-        <dt>探测方式</dt>
+        <dt>探测项</dt>
         <dd>{probeCoverage(probeItems)}</dd>
       </div>
       <div className="target-detail-status-band__item">

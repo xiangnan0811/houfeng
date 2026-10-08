@@ -64,7 +64,7 @@ import type {
   SubscriptionCostSettingsUpdateInput,
   SubscriptionMonthlyBudgetRecord,
   SettingsUpdateInput,
-  ExchangeRateRefreshResult,
+  ExchangeRateStatusSnapshot,
   SubscriptionListFilter,
   SubscriptionOverview,
   SubscriptionRecord,
@@ -843,8 +843,18 @@ export function updateSubscriptionCostSettings(input: SubscriptionCostSettingsUp
   return requestJSON<SubscriptionCostSettings>('/api/subscriptions/settings', jsonBodyInit('PUT', input))
 }
 
-export function refreshSubscriptionExchangeRates() {
-  return postJSON<ExchangeRateRefreshResult>('/api/subscriptions/exchange-rates/refresh')
+export function getSubscriptionExchangeRateStatus(signal?: AbortSignal) {
+  return requestJSON<ExchangeRateStatusSnapshot>(
+    '/api/subscriptions/exchange-rates/status',
+    signal ? { signal } : undefined,
+  )
+}
+
+export function refreshSubscriptionExchangeRates(signal?: AbortSignal) {
+  return requestJSON<ExchangeRateStatusSnapshot>('/api/subscriptions/exchange-rates/refresh', {
+    method: 'POST',
+    ...(signal ? { signal } : {}),
+  })
 }
 
 export function listSubscriptionBudgets(filter?: { scope_type?: string; scope_id?: string; enabled?: boolean | null }) {

@@ -108,13 +108,13 @@ export function TargetRuntimeControls({
             }
             impact={
               pendingConfirmation.action === 'pause'
-                ? '会停止该目标下所有 ProbeItem 的执行，不再产生新的入口探测记录。'
+                ? '会停止该目标下所有探测项的执行，不再产生新的入口探测记录。'
                 : '退役后不会继续作为活跃目标参与观测、异常判定或通知。'
             }
             unchanged={
               pendingConfirmation.action === 'pause'
-                ? '不会删除历史事件、观测记录或 ProbeItem 配置。'
-                : '不会删除历史事件、观测记录或 ProbeItem 配置。后续可恢复到暂停。'
+                ? '不会删除历史事件、观测记录或探测项配置。'
+                : '不会删除历史事件、观测记录或探测项配置。后续可恢复到暂停。'
             }
             confirmLabel={
               pendingConfirmation.action === 'pause' ? '确认暂停目标' : '确认退役'

@@ -5,7 +5,13 @@ import { LoginPage } from './LoginPage'
 import { ApiError } from '../lib/api'
 import * as authCtx from '../lib/auth-context'
 
-const baseAuth = { logout: vi.fn(), refresh: vi.fn() }
+const baseAuth = {
+  logout: vi.fn(),
+  refresh: vi.fn(),
+  retry: vi.fn(),
+  status: 'anonymous' as const,
+  error: null,
+}
 
 function mockAuth(login = vi.fn().mockResolvedValue(undefined)) {
   vi.spyOn(authCtx, 'useAuth').mockReturnValue({

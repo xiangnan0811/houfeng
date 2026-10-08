@@ -5,13 +5,14 @@ import { Modal } from '../components/atoms/Modal'
 import { TabPanel, Tabs } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { ApiError, getSettings, updateSettings } from '../lib/api'
+import { managementAccessForSession } from '../lib/auth-client'
+import { useAuth } from '../lib/auth-context'
+import { AccessManagementSection } from './settings/AccessManagementSection'
 import type {
   FeishuSettingsInput,
-  MonitoringInstanceLabelOverrideRule,
+  IncidentDefaults,
   SettingsRecord,
   SettingsUpdateInput,
-  TargetLabelOverrideRule,
-  TargetTypeOverrideRule,
 } from '../lib/types'
 import { FeishuSettingsSection } from './settings/FeishuSettingsSection'
 import { FrequencyDefaultsSection } from './settings/FrequencyDefaultsSection'
@@ -22,6 +23,13 @@ import { RetentionPolicySection } from './settings/RetentionPolicySection'
 import { SubscriptionSettingsSection } from './settings/SubscriptionSettingsSection'
 import { TelegramSettingsSection } from './settings/TelegramSettingsSection'
 import { ThemeSettingsSection } from './settings/ThemeSettingsSection'
+import {
+  buildMonitoringOverrideDrafts,
+  buildTargetLabelOverrideDrafts,
+  buildTargetTypeOverrideDrafts,
+  comparableSettingsForm,
+  compileOverrideRules,
+} from './settings/overrideRulesModel'
 import type { SettingsFormState } from './settings/types'
 
 const SETTINGS_TABS = [
@@ -29,6 +37,7 @@ const SETTINGS_TABS = [
   { value: 'notification', label: '通知' },
   { value: 'monitoring', label: '监控策略' },
   { value: 'subscriptions', label: '订阅' },
+  { value: 'access', label: '用户与权限' },
   { value: 'advanced', label: '高级' },
 ] as const
 
@@ -48,8 +57,6 @@ function describeError(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message
   return fallback
 }
-
-function formatJSON(value: unknown) { return JSON.stringify(value, null, 2) }
 
 function buildFormState(settings: SettingsRecord): SettingsFormState {
   return {
@@ -89,9 +96,9 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
       load5Warning: String(settings.incident_defaults.load5_warning),
       load5Critical: String(settings.incident_defaults.load5_critical),
     },
-    monitoringInstanceLabelOverridesText: formatJSON(settings.override_rules.monitoring_instance_labels),
-    targetTypeOverridesText: formatJSON(settings.override_rules.target_types),
-    targetLabelOverridesText: formatJSON(settings.override_rules.target_labels),
+    monitoringInstanceLabelOverrides: buildMonitoringOverrideDrafts(settings.override_rules.monitoring_instance_labels),
+    targetTypeOverrides: buildTargetTypeOverrideDrafts(settings.override_rules.target_types),
+    targetLabelOverrides: buildTargetLabelOverrideDrafts(settings.override_rules.target_labels),
     retentionPolicy: {
       rawLayerDays: String(settings.retention_policy.raw_layer_days),
       aggregateLayerDays: String(settings.retention_policy.aggregate_layer_days),
@@ -153,11 +160,6 @@ function parseCommaList(value: string, label: string) {
   return Array.from(new Set(items))
 }
 
-function parseOverrideRuleArray<T>(value: string, label: string): T[] {
-  try { const p = JSON.parse(value); if (!Array.isArray(p)) throw 0; return p as T[] }
-  catch { throw new Error(`${label}必须是 JSON 数组。`) }
-}
-
 type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram' | 'feishu'> & {
   telegram: { chat_id: string; runtime_managed: boolean; bot_token?: string }
   feishu: FeishuSettingsInput
@@ -197,6 +199,14 @@ function buildIncidentDefaults(f: SettingsFormState) {
   return incidentDefaults
 }
 
+function readGlobalIncident(form: SettingsFormState): IncidentDefaults | null {
+  try {
+    return buildIncidentDefaults(form)
+  } catch {
+    return null
+  }
+}
+
 function buildIPQualitySettings(f: SettingsFormState) {
   const frequencySeconds = parsePositiveInteger(f.ipQuality.frequencySeconds, 'IP 质量采集周期')
   if (frequencySeconds < 60) throw new Error('IP 质量采集周期必须至少为 60 秒。')
@@ -232,16 +242,22 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
     feishu.webhook_url = feishuWebhookUrl
   }
 
+  const incidentDefaults = buildIncidentDefaults(form)
+  const compiled = compileOverrideRules({
+    monitoring: form.monitoringInstanceLabelOverrides,
+    targetTypes: form.targetTypeOverrides,
+    targetLabels: form.targetLabelOverrides,
+    globalIncident: incidentDefaults,
+  })
+  if (compiled.errors.length > 0) {
+    throw new Error(compiled.errors[0]?.message ?? '覆盖规则无效。')
+  }
   const common = {
     feishu,
     host_sample_frequency_tier: form.hostSampleFrequencyTier,
     probe_frequency_defaults: { tcp: form.probeFrequencyDefaults.tcp, http: form.probeFrequencyDefaults.http, tls: form.probeFrequencyDefaults.tls },
-    incident_defaults: buildIncidentDefaults(form),
-    override_rules: {
-      monitoring_instance_labels: parseOverrideRuleArray<MonitoringInstanceLabelOverrideRule>(form.monitoringInstanceLabelOverridesText, '监控实例标签覆盖'),
-      target_types: parseOverrideRuleArray<TargetTypeOverrideRule>(form.targetTypeOverridesText, '目标类型覆盖'),
-      target_labels: parseOverrideRuleArray<TargetLabelOverrideRule>(form.targetLabelOverridesText, '目标标签覆盖'),
-    },
+    incident_defaults: incidentDefaults,
+    override_rules: compiled.rules,
     retention_policy: {
       raw_layer_days: parseRawRetentionDays(form.retentionPolicy.rawLayerDays),
       aggregate_layer_days: parsePositiveInteger(form.retentionPolicy.aggregateLayerDays, '聚合层天数'),
@@ -252,12 +268,16 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
 }
 
 export function SettingsPage() {
+  const auth = useAuth()
+  const canManage = managementAccessForSession(auth)
+  const capabilityPending = auth.loading || auth.status === 'loading'
   const [searchParams, setSearchParams] = useSearchParams()
   const [state, setState] = useState<State>({
     loading: true, saving: false, error: null, saveError: null, saveSuccess: null, settings: null, form: null,
   })
   const rawTab = searchParams.get('tab')
   const activeTab: SettingsTab = rawTab && SETTINGS_TAB_VALUES.has(rawTab) ? (rawTab as SettingsTab) : 'appearance'
+  const visibleTabs = canManage ? SETTINGS_TABS : SETTINGS_TABS.filter((tab) => tab.value !== 'access')
   const [modalState, setModalState] = useState<'closed' | 'select' | 'configure-telegram' | 'configure-feishu'>('closed')
   const [channelDraft, setChannelDraft] = useState<SettingsFormState | null>(null)
   const [activeChannels, setActiveChannels] = useState<Set<NotificationChannel>>(new Set())
@@ -269,7 +289,7 @@ export function SettingsPage() {
   const isDirty =
     !!state.settings &&
     !!state.form &&
-    JSON.stringify(buildFormState(state.settings)) !== JSON.stringify(state.form)
+    JSON.stringify(comparableSettingsForm(buildFormState(state.settings))) !== JSON.stringify(comparableSettingsForm(state.form))
 
   useEffect(() => {
     if (state.settings && state.form) {
@@ -279,7 +299,7 @@ export function SettingsPage() {
   }, [state.settings, state.form])
 
   useEffect(() => {
-    if (activeTab === 'subscriptions' || systemSettingsLoaded) return
+    if (activeTab === 'subscriptions' || activeTab === 'access' || systemSettingsLoaded) return
     let cancelled = false
     setState((current) => ({ ...current, loading: true, error: null }))
     getSettings()
@@ -290,7 +310,7 @@ export function SettingsPage() {
 
   const systemSettings = state.settings
   const systemForm = state.form
-  const systemTabActive = activeTab !== 'subscriptions'
+  const systemTabActive = activeTab !== 'subscriptions' && activeTab !== 'access'
 
   if (systemTabActive && state.loading) return <PageState kind="loading" title="正在加载设置…" />
   if (systemTabActive && (state.error || !systemSettings || !systemForm)) return <PageState kind="error" title="设置不可用" description={state.error ?? '未获取到设置数据'} />
@@ -388,12 +408,33 @@ export function SettingsPage() {
           variant="pill"
           value={activeTab}
           onChange={requestTab}
-          items={SETTINGS_TABS}
+          items={visibleTabs}
         />
       </div>
 
+      {activeTab === 'access' && !canManage ? (
+        capabilityPending ? (
+          <PageState kind="loading" title="正在确认管理能力…" surface="empty" compact />
+        ) : auth.status === 'error' ? (
+          <PageState
+            kind="error"
+            title="能力读取失败"
+            description="暂时无法确认管理能力，不会打开用户与权限目录。"
+            action={<button type="button" className="btn sm secondary" onClick={() => void auth.retry()}>重试</button>}
+            surface="empty"
+            compact
+          />
+        ) : (
+          <section className="settings-section" aria-labelledby="access-forbidden-title">
+            <h2 className="ss-title" id="access-forbidden-title">无权管理用户与权限</h2>
+            <p className="ss-desc">当前账号没有用户与权限管理能力。管理入口不会打开目录。</p>
+          </section>
+        )
+      ) : (
       <TabPanel idBase="settings-sections" value={activeTab}>
-        {activeTab === 'subscriptions' ? (
+        {activeTab === 'access' ? (
+          <AccessManagementSection />
+        ) : activeTab === 'subscriptions' ? (
           <SubscriptionSettingsSection />
         ) : systemSettings && systemForm ? (
           <form className="settings-system-form" onSubmit={handleSubmit}>
@@ -467,7 +508,12 @@ export function SettingsPage() {
           {activeTab === 'advanced' && (
             <div className="settings-section">
               <OverrideRulesSection
-                form={systemForm}
+                monitoringInstanceLabelOverrides={systemForm.monitoringInstanceLabelOverrides}
+                targetTypeOverrides={systemForm.targetTypeOverrides}
+                targetLabelOverrides={systemForm.targetLabelOverrides}
+                globalHostFrequency={systemForm.hostSampleFrequencyTier}
+                globalProbeDefaults={systemForm.probeFrequencyDefaults}
+                globalIncident={readGlobalIncident(systemForm)}
                 onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
               />
             </div>
@@ -486,6 +532,7 @@ export function SettingsPage() {
           </form>
         ) : null}
       </TabPanel>
+      )}
 
       {systemSettings && systemForm ? (
         <Modal

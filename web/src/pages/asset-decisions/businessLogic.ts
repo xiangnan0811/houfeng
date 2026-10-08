@@ -40,6 +40,7 @@ import type {
   RenewalWindow,
   ScenarioTemplatesState,
 } from './types'
+import { exchangeRateNeedsAttention } from '../subscriptions/exchangeRatePresentation'
 import {
   buildVPSQualityIssues,
   daysUntilDate,
@@ -54,7 +55,7 @@ export function hasCancellationAttention(row: DecisionQueueItem): boolean {
 }
 
 export function subscriptionCostAttention(subscription: SubscriptionRecord | null): boolean {
-  return Boolean(subscription?.exchange_rate_stale)
+  return exchangeRateNeedsAttention(subscription?.exchange_rate_status)
 }
 
 export function filterDecisionQueue(
@@ -85,27 +86,67 @@ export function buildSecondaryNavItems(
   const recordIssues = recordsState.records.reduce((count, record) => (
     count + (record.followup_blocked_count ?? 0) + (record.execution_readback?.needs_evidence_count ?? 0)
   ), 0)
-  const scenarioMeta = [
-    templatesState.loading ? '模板 ...' : templatesState.error ? '模板不可用' : `模板 ${templatesState.templates.length}`,
-    manualGroupsState.loading ? '组合 ...' : manualGroupsState.error ? '组合不可用' : `组合 ${manualGroupsState.groups.length}`,
-  ].join(' · ')
+  const recordSummary = recordsState.loading
+    ? '读取中'
+    : recordsState.error
+      ? '不可用'
+      : recordIssues > 0
+        ? `待复核 ${recordIssues}`
+        : '可回看'
+
+  const templateMeta = templatesState.loading
+    ? '模板 ...'
+    : templatesState.error
+      ? '模板不可用'
+      : `模板 ${templatesState.templates.length} 个`
+  const manualMeta = manualGroupsState.loading
+    ? '组合 ...'
+    : manualGroupsState.error
+      ? '组合不可用'
+      : `组合 ${manualGroupsState.groups.length} 组`
+  const scenarioMeta = templatesState.loading && manualGroupsState.loading
+    ? '读取中'
+    : templatesState.error && manualGroupsState.error
+      ? '不可用'
+      : `${templateMeta} · ${manualMeta}`
+  const scenarioSummary = templatesState.error || manualGroupsState.error
+    ? '部分不可用'
+    : templatesState.loading || manualGroupsState.loading
+      ? '读取中'
+      : '按需打开'
+
   const renewalMeta = queueState.renewalsLoading
     ? '读取中'
     : queueState.renewalsError
       ? '不可用'
       : `${queueState.renewals.length} 条`
+  const renewalSummary = queueState.renewalsLoading
+    ? '读取中'
+    : queueState.renewalsError
+      ? '不可用'
+      : queueState.renewals.length > 0
+        ? '有临近项'
+        : '无临近项'
+
   const singleQueueMeta = queueState.queueLoading
     ? '读取中'
     : queueState.queueError
       ? '不可用'
-      : `${visibleDecisionQueueCount} / ${totalDecisionQueue}`
+      : `${visibleDecisionQueueCount} / ${totalDecisionQueue} 台`
+  const singleQueueSummary = queueState.queueLoading
+    ? '读取中'
+    : queueState.queueError
+      ? '不可用'
+      : totalDecisionQueue > 0
+        ? '可逐台处理'
+        : '暂无待处理'
 
   return [
     {
       value: 'records',
       eyebrow: '历史记录',
       title: '保存记录',
-      summary: recordIssues > 0 ? `待复核 ${recordIssues}` : '可回看',
+      summary: recordSummary,
       meta: recordMeta,
       actionLabel: '打开记录',
       tone: recordsState.error ? 'alert' : recordIssues > 0 ? 'notice' : 'normal',
@@ -114,7 +155,7 @@ export function buildSecondaryNavItems(
       value: 'scenarios',
       eyebrow: '场景',
       title: '场景与组合',
-      summary: manualGroupsState.error || templatesState.error ? '部分不可用' : '按需打开',
+      summary: scenarioSummary,
       meta: scenarioMeta,
       actionLabel: '打开场景',
       tone: manualGroupsState.error || templatesState.error ? 'alert' : 'normal',
@@ -123,7 +164,7 @@ export function buildSecondaryNavItems(
       value: 'renewals',
       eyebrow: '续费事实',
       title: '续费窗口',
-      summary: queueState.renewals.length > 0 ? '有临近项' : '无临近项',
+      summary: renewalSummary,
       meta: renewalMeta,
       actionLabel: '查看续费',
       tone: queueState.renewalsError ? 'alert' : queueState.renewals.length > 0 ? 'notice' : 'normal',
@@ -132,7 +173,7 @@ export function buildSecondaryNavItems(
       value: 'single_queue',
       eyebrow: '单台辅助',
       title: '单台队列',
-      summary: totalDecisionQueue > 0 ? '可逐台处理' : '暂无待处理',
+      summary: singleQueueSummary,
       meta: singleQueueMeta,
       actionLabel: '查看单台队列',
       tone: queueState.queueError ? 'alert' : totalDecisionQueue > 0 ? 'notice' : 'normal',
@@ -187,6 +228,14 @@ export function buildAssetDecisionPageModel(input: AssetDecisionPageModelInput) 
     if (member.current_fact_found && member.vps?.vps_id) vpsByID.set(member.vps.vps_id, member.vps)
   }
 
+  const sourcesLoading = Boolean(
+    input.portfolioState.groupsLoading ||
+    input.recordsState.loading ||
+    input.portfolioState.overviewLoading ||
+    input.manualGroupsState.loading ||
+    input.templatesState.loading,
+  )
+
   return {
     vpsByID,
     selectedRecordAssessment: input.recordDetail
@@ -202,6 +251,7 @@ export function buildAssetDecisionPageModel(input: AssetDecisionPageModelInput) 
       nextWorkItems,
       closedLoopMetrics,
       input.contextFilterChips,
+      sourcesLoading,
     ),
     closedLoopPartialErrors: [
       sourceErrors.overview ? '组合概览' : '',
@@ -234,7 +284,7 @@ function queuePriority(
   if (vps.renewal_decision === 'unreviewed') priority += 500
   if (renewalDue) priority += 300
   if (vps.renewal_decision === 'cancel') priority += 180
-  if (subscription?.exchange_rate_stale) priority += 60
+  if (exchangeRateNeedsAttention(subscription?.exchange_rate_status)) priority += 60
   if (vps.active_monitoring_instance_link_count <= 0) priority += 90
   if (!subscription) priority += 80
   return priority + qualityIssues.length * 8
@@ -450,7 +500,7 @@ function portfolioRiskLabel(metrics: ClosedLoopMetrics): string {
   if (gapCount > 0) return `资料缺口 ${gapCount}`
   if (metrics.readbackOpenCount > 0) return `待回读 ${metrics.readbackOpenCount}`
   if (metrics.recordActiveCount > 0) return `跟进中 ${metrics.recordActiveCount}`
-  return '闭环稳定'
+  return '无待处理决策'
 }
 
 /**
@@ -480,6 +530,7 @@ export function buildPortfolioLead(
   nextWorkItems: AssetDecisionNextWorkItem[],
   metrics: ClosedLoopMetrics,
   contextChips: ContextFilterChip[],
+  sourcesLoading = false,
 ): AssetDecisionPortfolioLead {
   const first = nextWorkItems[0]
   const contextLabel = portfolioContextLabel(contextChips, view, renewalWindow)
@@ -518,12 +569,25 @@ export function buildPortfolioLead(
     }
   }
   if (metrics.partialErrorCount === 0) {
+    if (sourcesLoading) {
+      return {
+        kind: 'scoped-empty',
+        tone: 'neutral',
+        eyebrow: '读取中',
+        title: '正在评估组合决策…',
+        summary: '正在汇总决策组、执行回读与场景事实，请稍候…',
+        contextLabel,
+        riskLabel: '读取中',
+        evidenceLabel,
+        renewalLabel: renewalLabelText,
+      }
+    }
     return {
-      kind: 'stable',
-      tone: 'normal',
+      kind: 'scoped-empty',
+      tone: 'neutral',
       eyebrow: '当前判断',
-      title: '当前没有需要处理的组合决策',
-      summary: '已加载视图内暂无待处理项；历史记录、场景模板和单台队列可按需打开。',
+      title: '当前视图暂无组合决策',
+      summary: '当前筛选与视图范围内暂无待处理组合决策；历史记录、场景模板和单台队列可按需查看。',
       contextLabel,
       riskLabel,
       evidenceLabel,

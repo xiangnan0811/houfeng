@@ -57,7 +57,7 @@ var targetSelectColumnNames = []string{
 	"updated_at",
 }
 
-const targetSelectColumns = `
+const targetSelectColumnsBase = `
 	lifecycle_status,
 	target_id,
 	name,
@@ -76,6 +76,8 @@ const targetSelectColumns = `
 	current_primary_issue_summary,
 	created_at,
 	updated_at`
+
+var targetSelectColumns = targetSelectColumnsBase + ",\n\t" + targetCoverageProjectionSQL("targets")
 
 const probeItemSelectColumns = `
 	probe_item_id,
@@ -118,27 +120,21 @@ func scanTarget(row targetScanner) (targets.TargetRecord, error) {
 		&record.CurrentPrimaryIssueSummary,
 		&record.CreatedAt,
 		&record.UpdatedAt,
+		&record.EnabledProbeCount,
+		&record.MatchingExecutorCount,
 	); err != nil {
 		return targets.TargetRecord{}, err
 	}
-	switch {
-	case record.LifecycleStatus == targets.LifecycleRetired:
-		record.CurrentHealthStatus = "已退役"
-	case record.RunStatus == targets.RunStatusPaused:
-		record.CurrentHealthStatus = "暂停"
-	case record.RunStatus == targets.RunStatusMaintenance:
-		record.CurrentHealthStatus = "维护中"
-	case record.LastSuccessAt == nil && record.LastFailureAt == nil:
-		record.CurrentHealthStatus = "数据不可用"
-	}
+	record.CurrentHealthStatus = projectTargetHealth(record)
 	return record, nil
 }
 
 func qualifiedTargetSelectColumns(alias string) string {
-	parts := make([]string, 0, len(targetSelectColumnNames))
+	parts := make([]string, 0, len(targetSelectColumnNames)+2)
 	for _, column := range targetSelectColumnNames {
 		parts = append(parts, alias+"."+column)
 	}
+	parts = append(parts, targetCoverageProjectionSQL(alias))
 	return strings.Join(parts, ",\n\t\t")
 }
 
@@ -172,27 +168,7 @@ func (r *PostgresTargetRepository) ListTargetsByScope(ctx context.Context, scope
 	if !ok {
 		return nil, fmt.Errorf("invalid target list scope")
 	}
-	filter := `lifecycle_status = 'active' and (not exists (
-			select 1
-			from (
-				select vps_id, target_id from asset_service_associations where target_id is not null and ended_at is null
-				union all
-				select vps_id, target_id from asset_domain_associations where target_id is not null and ended_at is null
-			) a
-			where a.target_id = targets.target_id
-		)
-		or exists (
-			select 1
-			from (
-				select vps_id, target_id from asset_service_associations where target_id is not null and ended_at is null
-				union all
-				select vps_id, target_id from asset_domain_associations where target_id is not null and ended_at is null
-			) a
-			join vps_assets v on v.vps_id = a.vps_id
-			where a.target_id = targets.target_id
-			  and v.lifecycle_status = 'active'
-		)
-		)`
+	filter := targetCurrentVisibilitySQL("targets")
 	switch scope {
 	case targets.ListScopeRetired:
 		filter = "lifecycle_status = 'retired'"

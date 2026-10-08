@@ -5,6 +5,7 @@ import {
   TARGET_HEALTH_STATUS_FILTER_OPTIONS,
   TARGET_RUN_STATUS_FILTER_OPTIONS,
   TARGET_TYPE_OPTIONS,
+  targetTypeLabel,
 } from './targetHelpers'
 import type { TargetFilterOption, TargetFilterState } from './types'
 
@@ -32,7 +33,7 @@ export function TargetsFilterPanel({
     <>
       {filterState.type ? (
         <FilterChip
-          label={`类型: ${filterState.type}`}
+          label={`类型: ${targetTypeLabel(filterState.type)}`}
           onRemove={() => onSingleFilterChange('type', null)}
         />
       ) : null}

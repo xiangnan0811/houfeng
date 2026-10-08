@@ -4,7 +4,7 @@ import { UserChip } from './UserChip'
 
 export interface SidebarProps {
   user: User
-  anomalyCounts: { monitoring: number; targets: number }
+  anomalyCounts: { monitoring: number; targets: number; unobservedTargets: number }
   collapsed: boolean
   onToggle: () => void
   onLogout: () => void
@@ -48,10 +48,21 @@ export function Sidebar({
         <SidebarNavGroup id="sidebar-group-observability" label="观测">
           <SidebarNavItem to="/monitoring" label="监控" badge={anomalyCounts.monitoring} icon={<svg viewBox="0 0 16 16"><path d="M2 8h3l2-4 2 8 2-4h3"/></svg>} />
           <SidebarNavItem to="/targets" label="入口探测" badge={anomalyCounts.targets} icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/></svg>} />
+          {anomalyCounts.unobservedTargets > 0 ? (
+            <SidebarNavItem
+              to="/targets?view=unobserved"
+              label="尚无观测"
+              badge={anomalyCounts.unobservedTargets}
+              badgeKind="unobserved"
+              icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2L10 10"/></svg>}
+            />
+          ) : null}
           <SidebarNavItem to="/events" label="事件" icon={<svg viewBox="0 0 16 16"><path d="M9 2L4 9h4l-1 5 5-7H8l1-5z"/></svg>} />
         </SidebarNavGroup>
         <SidebarNavGroup id="sidebar-group-records" label="记录">
-          <SidebarNavItem to="/records" label="运维记录" icon={<svg viewBox="0 0 16 16"><path d="M4 2h6l2 2v10H4z"/><path d="M6 6h4M6 9h4M6 12h2"/></svg>} />
+          {user.runtime_capabilities.records ? (
+            <SidebarNavItem to="/records" label="运维记录" icon={<svg viewBox="0 0 16 16"><path d="M4 2h6l2 2v10H4z"/><path d="M6 6h4M6 9h4M6 12h2"/></svg>} />
+          ) : null}
           <SidebarNavItem to="/command-audit" label="命令审计" icon={<svg viewBox="0 0 16 16"><path d="M3 5l3 3-3 3M8 11h5"/></svg>} />
         </SidebarNavGroup>
         <div className="nav-group nav-group--end">
@@ -79,11 +90,13 @@ interface SidebarNavItemProps {
   label: string
   icon: React.ReactNode
   badge?: number
+  badgeKind?: 'abnormal' | 'unobserved'
   end?: boolean
 }
 
-function SidebarNavItem({ to, label, icon, badge, end }: SidebarNavItemProps) {
-  const accessibleLabel = badge != null && badge > 0 ? `${label}，${badge} 个异常` : label
+function SidebarNavItem({ to, label, icon, badge, badgeKind = 'abnormal', end }: SidebarNavItemProps) {
+  const badgeText = badgeKind === 'unobserved' ? `${badge} 个尚无观测` : `${badge} 个异常`
+  const accessibleLabel = badge != null && badge > 0 ? `${label}，${badgeText}` : label
 
   return (
     <NavLink

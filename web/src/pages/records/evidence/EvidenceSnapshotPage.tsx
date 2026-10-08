@@ -3,13 +3,15 @@ import { Link, useLocation, useParams } from 'react-router-dom'
 
 import { Badge, Button, Timestamp } from '../../../components/atoms'
 import { PageState } from '../../../components/PageState'
+import { capabilityFlagsForSession } from '../../../lib/auth-client'
+import { useAuth } from '../../../lib/auth-context'
 import { ApiError } from '../../../lib/apiRequest'
 import { getEvidenceSnapshot } from '../../../lib/recordsApi'
 import type { EvidenceSnapshotRead } from '../../../lib/types'
 import { comparisonEntryHref } from '../compare/comparisonQueryState'
 import { decideRegisteredEvidenceRender } from './EvidenceRendererRegistry'
 import { EvidenceTechnicalDetails } from './EvidenceTechnicalDetails'
-import { evidenceKindLabel, identityTypeLabel, QUALITY_BADGE_LABELS, qualityTone } from './evidencePresentation'
+import { evidenceKindLabel, identityTypeLabel, presentGeneratedEvidenceTitle, QUALITY_BADGE_LABELS, qualityTone } from './evidencePresentation'
 import '../RecordWorkspace.css'
 
 type LoadState =
@@ -49,6 +51,8 @@ function identityLabel(identity: EvidenceSnapshotRead['subject']): string {
 }
 
 export function EvidenceSnapshotPage() {
+  const auth = useAuth()
+  const { comparison } = capabilityFlagsForSession(auth)
   const { evidenceId } = useParams()
   const location = useLocation()
   const snapshotId = evidenceId?.trim() ?? ''
@@ -136,7 +140,7 @@ export function EvidenceSnapshotPage() {
           <EvidenceMark />
           <div className="record-identity__copy">
             <div className="record-identity__title-row">
-              <h1 className="page__title">{snapshot.title.trim() || '证据快照'}</h1>
+              <h1 className="page__title">{presentGeneratedEvidenceTitle(snapshot.title) || '证据快照'}</h1>
               <div className="record-identity__badges">
                 <Badge variant="info">{evidenceKindLabel(snapshot.kind)}</Badge>
                 <Badge variant="info" tone={qualityTone(snapshot.quality.status)}>
@@ -170,13 +174,15 @@ export function EvidenceSnapshotPage() {
           {subjectHref ? (
             <Link className="btn md secondary" to={subjectHref} state={location.state}>返回主体证据</Link>
           ) : null}
-          <Link
-            className="btn md secondary"
-            to={comparisonEntryHref({ items: [{ snapshot_id: snapshot.snapshot_id }] })}
-            state={location.state}
-          >
-            横向比较
-          </Link>
+          {comparison ? (
+            <Link
+              className="btn md secondary"
+              to={comparisonEntryHref({ items: [{ snapshot_id: snapshot.snapshot_id }] })}
+              state={location.state}
+            >
+              横向比较
+            </Link>
+          ) : null}
         </div>
       </header>
 

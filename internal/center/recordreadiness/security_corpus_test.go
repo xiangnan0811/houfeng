@@ -1,9 +1,7 @@
 package recordreadiness
 
 import (
-	"bytes"
 	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -38,32 +36,7 @@ func TestRequiredSecurityCorpusTestsAreClosedOrderedAndPresent(t *testing.T) {
 	}
 
 	root := filepath.Join("..", "..", "..")
-	present := map[string]string{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if entry.IsDir() {
-			name := entry.Name()
-			if name == ".git" || name == "node_modules" || name == "web" || name == "bin" || name == "dist" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, "_test.go") {
-			return nil
-		}
-		payload, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		for _, testName := range want {
-			if bytes.Contains(payload, []byte("func "+testName+"(")) {
-				present[testName] = path
-			}
-		}
-		return nil
-	})
+	present, err := findRepositoryTestNames(root, want)
 	if err != nil {
 		t.Fatalf("walk tests: %v", err)
 	}

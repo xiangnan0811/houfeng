@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"testing/fstest"
@@ -29,10 +30,12 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("runtime_update_acl_drift", testPostgresIntegrationAppACLCurrentRuntimeUpdateDrift)
 	t.Run("p67_upgrade", testPostgresIntegrationAppACLCurrentP67Upgrade)
 	t.Run("p68_upgrade", testPostgresIntegrationAppACLCurrentP68Upgrade)
+	t.Run("p70_upgrade", testPostgresIntegrationAppACLCurrentP70Upgrade)
 	t.Run("registered_settings_presence_matrix", testPostgresIntegrationAppACLCurrentSettingsPresenceMatrix)
 	t.Run("missing_settings_predecessor_suffixes", testPostgresIntegrationAppACLCurrentMissingSettingsPredecessorSuffixes)
 	t.Run("missing_settings_p67_rollback_and_drift", testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift)
 	t.Run("missing_settings_concurrent_initialization", testPostgresIntegrationAppACLCurrentMissingSettingsConcurrentInitialization)
+	t.Run("missing_settings_snapshot_fence", testPostgresIntegrationAppACLCurrentMissingSettingsSnapshotFence)
 }
 
 func testPostgresIntegrationAppACLCurrentP67Upgrade(t *testing.T) {
@@ -637,6 +640,131 @@ func testPostgresIntegrationAppACLCurrentMissingSettingsConcurrentInitialization
 		t.Fatalf("admit concurrent missing-settings successor runtime: %v", err)
 	}
 	assertSingleIntValue(t, ctx, seedDB, `select count(*)::int from public.schema_migrations where name = '0068_normalize_ip_quality_host_address_identity.sql'`, 1)
+}
+
+func testPostgresIntegrationAppACLCurrentMissingSettingsSnapshotFence(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	fixture := newExactAppACLCurrentSuccessorPostgresFixture(t, ctx)
+	seedDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	predecessor, _, _ := seedAppACLCurrentReleasedGenesis(
+		t,
+		ctx,
+		fixture,
+		seedDB,
+		appACLCurrentReleasedPostgresProfile(t, "0067_refactor_vps_monitoring_lifecycle.sql"),
+	)
+	if _, err := seedDB.Exec(ctx, `delete from public.center_settings where settings_id = 'center'`); err != nil {
+		t.Fatalf("delete snapshot-fence missing-settings singleton: %v", err)
+	}
+
+	staleDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	staleTx, err := staleDB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		t.Fatalf("begin stale snapshot-fence transaction: %v", err)
+	}
+	defer func() {
+		_ = staleTx.Rollback(ctx)
+	}()
+	var staleRevision int64
+	if err := staleTx.QueryRow(ctx, `
+		select manifest_revision
+		from public.app_acl_manifest_head
+		where singleton
+	`).Scan(&staleRevision); err != nil {
+		t.Fatalf("establish stale snapshot-fence head snapshot: %v", err)
+	}
+	if staleRevision != int64(predecessor.ManifestRevision) {
+		t.Fatalf("stale snapshot-fence revision = %d, want predecessor %d", staleRevision, predecessor.ManifestRevision)
+	}
+
+	firstDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	first, err := ConvergeAppACLCurrent(ctx, firstDB, fixture.runtimeRole, fixture.adminRole)
+	if err != nil {
+		t.Fatalf("first snapshot-fence convergence: %v", err)
+	}
+	if first.ManifestRevision != predecessor.ManifestRevision+1 {
+		t.Fatalf("first snapshot-fence successor revision = %d, want %d", first.ManifestRevision, predecessor.ManifestRevision+1)
+	}
+
+	retryDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
+	dependencies := defaultAppACLCurrentConvergenceDependencies()
+	headLocks := 0
+	readCatalogCalls := 0
+	originalReadHeadForUpdate := dependencies.readHeadForUpdate
+	dependencies.readHeadForUpdate = func(ctx context.Context, tx pgx.Tx) (*AppACLManifestHeadV1, error) {
+		headLocks++
+		return originalReadHeadForUpdate(ctx, tx)
+	}
+	originalReadCatalog := dependencies.readCatalog
+	dependencies.readCatalog = func(ctx context.Context, tx pgx.Tx, input appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error) {
+		readCatalogCalls++
+		return originalReadCatalog(ctx, tx, input)
+	}
+	attempts := 0
+	begin := func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+		attempts++
+		if attempts == 1 {
+			return staleTx, nil
+		}
+		return retryDB.BeginTx(ctx, options)
+	}
+	recovered, err := convergeAppACLCurrentWithDependencies(
+		ctx,
+		begin,
+		fixture.runtimeRole,
+		fixture.adminRole,
+		migrations.FS,
+		appACLCurrentMigrationFragments,
+		dependencies,
+	)
+	if err != nil {
+		t.Fatalf("stale snapshot-fence convergence retry: %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("snapshot-fence convergence attempts = %d, want exactly 2", attempts)
+	}
+	if headLocks != 1 {
+		t.Fatalf("snapshot-fence predecessor head locks = %d, want exactly 1 before retry", headLocks)
+	}
+	if readCatalogCalls != 1 {
+		t.Fatalf("snapshot-fence catalog reads = %d, want exactly 1 after retry", readCatalogCalls)
+	}
+	if recovered.ManifestDigest != first.ManifestDigest {
+		t.Fatalf("snapshot-fence recovered manifest digest = %x, first = %x", recovered.ManifestDigest, first.ManifestDigest)
+	}
+
+	runtimeIdentifier := pgx.Identifier{fixture.runtimeRole}.Sanitize()
+	if _, err := seedDB.Exec(ctx, `grant delete on table public.record_access_groups to `+runtimeIdentifier); err != nil {
+		t.Fatalf("grant negative-control unexpected group DELETE: %v", err)
+	}
+	negativeAttempts := 0
+	negativeDependencies := defaultAppACLCurrentConvergenceDependencies()
+	_, err = convergeAppACLCurrentWithDependencies(
+		ctx,
+		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
+			negativeAttempts++
+			return firstDB.BeginTx(ctx, options)
+		},
+		fixture.runtimeRole,
+		fixture.adminRole,
+		migrations.FS,
+		appACLCurrentMigrationFragments,
+		negativeDependencies,
+	)
+	if err == nil ||
+		!strings.Contains(err.Error(), "unexpected") ||
+		!strings.Contains(err.Error(), "record_access_groups") {
+		t.Fatalf("negative-control unexpected group DELETE error = %v, want strict catalog rejection", err)
+	}
+	if negativeAttempts != 1 {
+		t.Fatalf("negative-control catalog rejection attempts = %d, want exactly 1", negativeAttempts)
+	}
+	if isAppACLConvergenceRetryable(err) {
+		t.Fatalf("negative-control catalog rejection unexpectedly classified retryable: %v", err)
+	}
 }
 
 func testPostgresIntegrationAppACLCurrentFreshAndRuntime(t *testing.T) {

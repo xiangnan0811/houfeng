@@ -54,7 +54,7 @@ const EXPECTED_MONITORING_CREATE_BODY = {
   provider: 'Example Cloud',
   labels: ['edge'],
   note: '',
-  link_note: 'created from vps detail',
+  link_note: '',
 } satisfies CreateVPSMonitoringInstanceInput
 
 const MONITORING_CREATE_BODY_KEYS = [

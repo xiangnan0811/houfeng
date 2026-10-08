@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import type { SubjectActivityItem } from '../lib/types'
+import type { SubjectActivityItem, SubjectActivitySourceStatus } from '../lib/types'
 import { timelineChannel } from './timelineChannel'
 import { UnifiedTimeline } from './UnifiedTimeline'
 
@@ -96,10 +96,49 @@ describe('UnifiedTimeline', () => {
       '/evidence/evs_001',
     )
     expect(screen.getByText(/覆盖 full/)).toBeInTheDocument()
-    expect(screen.getByText(/命令审计：过期（lagging）/)).toBeInTheDocument()
+    expect(screen.getByText('命令审计：过期')).toBeInTheDocument()
+    expect(screen.getByText('命令审计：过期').closest('details')).toBeNull()
+    const lagging = screen.getByText('lagging').closest('details')
+    expect(lagging).not.toHaveAttribute('open')
+    expect(screen.getByRole('heading', { name: '探针快照' })).toBeInTheDocument()
     expect(document.querySelector('.unified-timeline__mark--human')).not.toBeNull()
     expect(document.querySelector('.unified-timeline__mark--system')).not.toBeNull()
     expect(document.querySelector('.unified-timeline__mark--evidence')).not.toBeNull()
+  })
+
+  it('maps a generated monitoring title and folds an unknown source code', () => {
+    render(
+      <MemoryRouter>
+        <UnifiedTimeline
+          items={[item({
+            activity_id: 'act_generated',
+            event_kind: 'evidence_captured',
+            source_kind: 'evidence_snapshot',
+            presentation: { version: 1, title: 'Monitoring events' },
+            evidence_snapshot_id: 'evs_events',
+          }), item({
+            activity_id: 'act_user',
+            event_kind: 'record_created',
+            source_kind: 'record_domain',
+            presentation: { version: 1, title: '夜班手工标题' },
+            record_id: 'rec_user',
+          })]}
+          sourceStatuses={[{
+            source_kind: 'widget_feed' as SubjectActivitySourceStatus['source_kind'],
+            state: 'lagging',
+            reason_code: 'boom',
+          }]}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('heading', { name: '监控事件' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Monitoring events' })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '夜班手工标题' })).toBeInTheDocument()
+    expect(screen.getByText('未知来源：状态未知')).toBeInTheDocument()
+    const details = screen.getByText(/widget_feed/).closest('details')
+    expect(details).not.toHaveAttribute('open')
+    expect(details).toHaveTextContent('lagging')
+    expect(details).toHaveTextContent('boom')
   })
 
   it('labels a human item without revision as 查看记录', () => {

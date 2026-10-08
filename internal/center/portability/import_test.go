@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -26,11 +27,13 @@ func TestPortabilityDryRunWritesNoDomainRowsAndRemaps(t *testing.T) {
 		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 		Payload: []byte("# Disk notes\n\nRecovered.\n"),
 	}})
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-1", Archive: archive,
-	})
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-1", Archive: archive})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
+	}
+	if preview.DestinationSubject.SubjectKind != testImportDestination().Kind ||
+		preview.DestinationSubject.SubjectID != testImportDestination().SourceID {
+		t.Fatalf("destination subject = %#v", preview.DestinationSubject)
 	}
 	if importer.writes != 0 {
 		t.Fatalf("DryRun wrote %d domain rows", importer.writes)
@@ -39,9 +42,7 @@ func TestPortabilityDryRunWritesNoDomainRowsAndRemaps(t *testing.T) {
 		preview.Remaps[0].TargetID == "rec_source01" {
 		t.Fatalf("remaps = %#v", preview.Remaps)
 	}
-	replay, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-1", Archive: archive,
-	})
+	replay, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-1", Archive: archive})
 	if err != nil || replay.PlanID != preview.PlanID {
 		t.Fatalf("DryRun replay = %#v %v", replay, err)
 	}
@@ -50,14 +51,171 @@ func TestPortabilityDryRunWritesNoDomainRowsAndRemaps(t *testing.T) {
 	}
 }
 
+func TestPortabilityDryRunEncodesEmptyOptionalCollectionsAsArrays(t *testing.T) {
+	t.Parallel()
+
+	service, _, _ := mustImportService(t)
+	archive := mustImportArchive(t, []ArchiveEntry{{
+		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
+		Payload: []byte("# Disk notes\n\nRecovered.\n"),
+	}})
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-empty-collections", Archive: archive})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if preview.Quarantine == nil || len(preview.Quarantine) != 0 || preview.Remaps == nil {
+		t.Fatalf("DryRun collections = remaps:%#v quarantine:%#v", preview.Remaps, preview.Quarantine)
+	}
+	remapsJSON, quarantineJSON := importPlanCollectionJSON(t, preview)
+	if quarantineJSON != "[]" || len(remapsJSON) == 0 || remapsJSON[0] != '[' {
+		t.Fatalf("DryRun JSON remaps=%s quarantine=%s", remapsJSON, quarantineJSON)
+	}
+	replay, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-empty-collections", Archive: archive})
+	if err != nil {
+		t.Fatalf("DryRun(replay) error = %v", err)
+	}
+	if replay.Quarantine == nil || len(replay.Quarantine) != 0 {
+		t.Fatalf("replay quarantine = %#v", replay.Quarantine)
+	}
+	_, replayQuarantineJSON := importPlanCollectionJSON(t, replay)
+	if replayQuarantineJSON != "[]" {
+		t.Fatalf("replay quarantine JSON = %s", replayQuarantineJSON)
+	}
+
+	expiresAt := time.Date(2026, 8, 21, 13, 0, 0, 0, time.UTC)
+	job := store.RecordImportJob{JobState: store.RecordImportJobStatePlanned, LockVersion: 2}
+	nilView := service.planView(job, store.RecordImportPlan{
+		ImportPlanID: "rip_nil", ExpiresAt: expiresAt,
+	}, nil)
+	if nilView.Remaps == nil || nilView.Quarantine == nil {
+		t.Fatalf("nil inputs = %#v", nilView)
+	}
+	nilRemaps, nilQuarantine := importPlanCollectionJSON(t, nilView)
+	if nilRemaps != "[]" || nilQuarantine != "[]" {
+		t.Fatalf("nil inputs JSON remaps=%s quarantine=%s", nilRemaps, nilQuarantine)
+	}
+	emptyView := service.planView(job, store.RecordImportPlan{
+		ImportPlanID: "rip_empty",
+		Remaps:       []store.ImportRemap{},
+		ExpiresAt:    expiresAt,
+	}, []QuarantinedEvidence{})
+	emptyRemaps, emptyQuarantine := importPlanCollectionJSON(t, emptyView)
+	if emptyRemaps != "[]" || emptyQuarantine != "[]" {
+		t.Fatalf("empty inputs JSON remaps=%s quarantine=%s", emptyRemaps, emptyQuarantine)
+	}
+	populated := service.planView(job, store.RecordImportPlan{
+		ImportPlanID: "rip_items",
+		Remaps:       []store.ImportRemap{{EntityKind: "record", SourceID: "rec_source01", TargetID: "rec_local01"}},
+		ExpiresAt:    expiresAt,
+	}, []QuarantinedEvidence{{
+		Kind: "vendor.unknown", Schema: "vendor.unknown/v1", Digest: "aa", ByteSize: 8, Reason: "cannot interpret",
+	}})
+	if len(populated.Remaps) != 1 || len(populated.Quarantine) != 1 || populated.Quarantine[0].Digest != "aa" {
+		t.Fatalf("populated = %#v", populated)
+	}
+	populatedRemaps, populatedQuarantine := importPlanCollectionJSON(t, populated)
+	if populatedRemaps == "[]" || populatedRemaps == "null" || populatedQuarantine == "[]" || populatedQuarantine == "null" {
+		t.Fatalf("populated JSON remaps=%s quarantine=%s", populatedRemaps, populatedQuarantine)
+	}
+}
+
+func TestPortabilityImportPreservesUnsupportedReferenceWarning(t *testing.T) {
+	t.Parallel()
+
+	service, importer, _ := mustImportService(t)
+	const sourceAttachmentID = "att_2d42319db90a83ee"
+	archive := mustImportArchive(t, []ArchiveEntry{{
+		Path: "records/rec_2b7e5ea569779425/document.md", Classification: ArchiveClassMarkdown,
+		Payload: []byte("# Records 附件评论与迁移验收\n\n# 真实链路验收\n\n本记录验证附件扫描、读取、评论和导入导出。\n\n<!-- houfeng-ref:v1 attachment " + sourceAttachmentID + " -->\n[records-attachment-fixture.zip](houfeng-attachment:" + sourceAttachmentID + ")\n\n## 不可用材料\n\n- attachment `" + sourceAttachmentID + "`：unsupported\n"),
+	}})
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-unsupported-reference", Archive: archive})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if importer.writes != 0 {
+		t.Fatalf("DryRun wrote %d domain rows", importer.writes)
+	}
+	body := service.importPlans[preview.PlanID].documents[0].Body
+	if !strings.Contains(body, "records-attachment-fixture.zip") ||
+		!strings.Contains(body, "## 不可用材料") ||
+		!strings.Contains(body, "unsupported") {
+		t.Fatalf("unsupported material text was lost: %q", body)
+	}
+	if strings.Contains(body, "houfeng-ref:v1 attachment "+sourceAttachmentID) ||
+		strings.Contains(body, "houfeng-attachment:"+sourceAttachmentID) {
+		t.Fatalf("unsupported reference kept an active source binding: %q", body)
+	}
+}
+
+func TestPortabilityImportRebindsIncludedAttachmentReference(t *testing.T) {
+	t.Parallel()
+
+	service, _, _ := mustImportService(t)
+	const sourceAttachmentID = "att_source00001"
+	archive := mustImportArchive(t, []ArchiveEntry{{
+		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
+		Payload: []byte("# Disk notes\n\n<!-- houfeng-ref:v1 attachment " + sourceAttachmentID + " -->\n[notes.txt](houfeng-attachment:" + sourceAttachmentID + ")\n"),
+	}, {
+		Path:           "records/rec_source01/attachments/" + sourceAttachmentID + "/notes.txt",
+		Classification: ArchiveClassAttachment, Payload: []byte("notes"),
+	}})
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-included-reference", Archive: archive})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	var targetAttachmentID string
+	remaps := make([]store.ImportRemap, 0, len(preview.Remaps))
+	for _, remap := range preview.Remaps {
+		remaps = append(remaps, store.ImportRemap{
+			EntityKind: remap.EntityKind, SourceID: remap.SourceID, TargetID: remap.TargetID,
+		})
+		if remap.EntityKind == "attachment" && remap.SourceID == sourceAttachmentID {
+			targetAttachmentID = remap.TargetID
+		}
+	}
+	if targetAttachmentID == "" {
+		t.Fatalf("attachment remap missing: %#v", preview.Remaps)
+	}
+	body := service.importPlans[preview.PlanID].documents[0].Body
+	if !strings.Contains(body, "<!-- houfeng-ref:v1 attachment "+targetAttachmentID+" -->") ||
+		!strings.Contains(body, "[notes.txt](houfeng-attachment:"+targetAttachmentID+")") {
+		t.Fatalf("included reference was not rebound: %q", body)
+	}
+	if strings.Contains(body, "houfeng-ref:v1 attachment "+sourceAttachmentID) ||
+		strings.Contains(body, "houfeng-attachment:"+sourceAttachmentID) {
+		t.Fatalf("included reference kept source binding: %q", body)
+	}
+	rebound, err := rebindArchive(archive, remaps, testImportDestination())
+	if err != nil {
+		t.Fatalf("rebindArchive() error = %v", err)
+	}
+	if got := rebound.documents[0].Body; got != body {
+		t.Fatalf("rebound body = %q, cached plan body = %q", got, body)
+	}
+}
+
+func importPlanCollectionJSON(t *testing.T, view ImportPlanView) (remaps, quarantine string) {
+	t.Helper()
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	var body struct {
+		Remaps     json.RawMessage `json:"remaps"`
+		Quarantine json.RawMessage `json:"quarantine"`
+	}
+	if err := json.Unmarshal(encoded, &body); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	return string(body.Remaps), string(body.Quarantine)
+}
+
 func TestPortabilityImportRejectsHostileAndUntrustedMembers(t *testing.T) {
 	t.Parallel()
 
 	service, _, _ := mustImportService(t)
 	actor := portabilityTestActor(t)
-	if _, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: actor, IdempotencyKey: "import-hostile", Archive: []byte("PK\x03\x04truncated"),
-	}); !errors.Is(err, ErrInvalidArchive) {
+	if _, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: actor, IdempotencyKey: "import-hostile", Archive: []byte("PK\x03\x04truncated")}); !errors.Is(err, ErrInvalidArchive) {
 		t.Fatalf("hostile zip error = %v", err)
 	}
 	untrusted, err := WriteArchiveV1([]ArchiveEntry{{
@@ -69,9 +227,7 @@ func TestPortabilityImportRejectsHostileAndUntrustedMembers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteArchiveV1() error = %v", err)
 	}
-	if _, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: actor, IdempotencyKey: "import-auth", Archive: untrusted,
-	}); !errors.Is(err, ErrUntrustedImportContent) {
+	if _, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: actor, IdempotencyKey: "import-auth", Archive: untrusted}); !errors.Is(err, ErrUntrustedImportContent) {
 		t.Fatalf("untrusted error = %v", err)
 	}
 	checkpoint, err := WriteArchiveV1([]ArchiveEntry{{
@@ -83,9 +239,7 @@ func TestPortabilityImportRejectsHostileAndUntrustedMembers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteArchiveV1(checkpoint) error = %v", err)
 	}
-	if _, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: actor, IdempotencyKey: "import-checkpoint", Archive: checkpoint,
-	}); !errors.Is(err, ErrUntrustedImportContent) {
+	if _, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: actor, IdempotencyKey: "import-checkpoint", Archive: checkpoint}); !errors.Is(err, ErrUntrustedImportContent) {
 		t.Fatalf("checkpoint error = %v", err)
 	}
 }
@@ -104,9 +258,7 @@ func TestPortabilityImportQuarantinesOptionalEvidenceAndBlocksRequiredUnknown(t 
 	if err != nil {
 		t.Fatalf("WriteArchiveV1() error = %v", err)
 	}
-	if _, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: actor, IdempotencyKey: "import-required", Archive: blocked,
-	}); !errors.Is(err, ErrImportSchemaBlocked) {
+	if _, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: actor, IdempotencyKey: "import-required", Archive: blocked}); !errors.Is(err, ErrImportSchemaBlocked) {
 		t.Fatalf("required unknown error = %v", err)
 	}
 	optional, err := WriteArchiveV1([]ArchiveEntry{{
@@ -118,9 +270,7 @@ func TestPortabilityImportQuarantinesOptionalEvidenceAndBlocksRequiredUnknown(t 
 	if err != nil {
 		t.Fatalf("WriteArchiveV1(optional) error = %v", err)
 	}
-	if _, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: actor, IdempotencyKey: "import-optional", Archive: optional,
-	}); !errors.Is(err, ErrImportSchemaBlocked) {
+	if _, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: actor, IdempotencyKey: "import-optional", Archive: optional}); !errors.Is(err, ErrImportSchemaBlocked) {
 		t.Fatalf("archive optional:true unknown schema error = %v, want ErrImportSchemaBlocked", err)
 	}
 }
@@ -130,13 +280,11 @@ func TestPortabilityApplyIsIdempotentAndHonorsCASAndRebuild(t *testing.T) {
 
 	service, importer, _ := mustImportService(t)
 	rebuilder := service.rebuilder.(*importRebuildStub)
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-apply",
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-apply",
 		Archive: mustImportArchive(t, []ArchiveEntry{{
 			Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 			Payload: []byte("# Disk notes\n"),
-		}}),
-	})
+		}})})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -173,9 +321,7 @@ func TestPortabilityApplyReadsStagedArchiveAfterCacheAndLeaseDrop(t *testing.T) 
 		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 		Payload: []byte("# Disk notes\n"),
 	}})
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-staged", Archive: archive,
-	})
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-staged", Archive: archive})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -218,18 +364,14 @@ func TestPortabilityApplyRejectsOriginTombstone(t *testing.T) {
 		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 		Payload: []byte("# Disk notes\nSee https://example.com and do not delete this.\n"),
 	}})
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-tombstone",
-		Archive: archive,
-	})
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-tombstone",
+		Archive: archive})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
 	imports.tombstone(sha256.Sum256(archive))
-	if _, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-tombstone-again",
-		Archive: archive,
-	}); !errors.Is(err, ErrOriginTombstoned) {
+	if _, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-tombstone-again",
+		Archive: archive}); !errors.Is(err, ErrOriginTombstoned) {
 		t.Fatalf("DryRun(tombstone) error = %v", err)
 	}
 	if _, err := service.Apply(context.Background(), ApplyRequest{
@@ -257,10 +399,8 @@ func TestPortabilityDryRunRejectsExistingOrigin(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("InsertOrigin() error = %v", err)
 	}
-	if _, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-origin-preview",
-		Archive: archive,
-	}); !errors.Is(err, ErrImportOriginConflict) {
+	if _, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-origin-preview",
+		Archive: archive}); !errors.Is(err, ErrImportOriginConflict) {
 		t.Fatalf("DryRun(existing origin) error = %v", err)
 	}
 	if importer.writes != 0 {
@@ -277,12 +417,81 @@ func mustImportArchive(t *testing.T, entries []ArchiveEntry) []byte {
 	return raw
 }
 
+func testImportDestination() records.SubjectReference {
+	return records.SubjectReference{
+		RegistryVersion: records.SubjectRegistryVersionV1,
+		Kind:            records.SubjectKindTarget,
+		Role:            records.RelationRoleAffected,
+		SourceID:        "tg_0123456789abcdef",
+		Primary:         true,
+	}
+}
+
+type importTestSubjectAdapter struct{}
+
+func (importTestSubjectAdapter) Kind() records.SubjectKind {
+	return records.SubjectKindTarget
+}
+
+func (importTestSubjectAdapter) Resolve(
+	_ context.Context,
+	actor recordauth.ActorScope,
+	reference records.SubjectReference,
+) (records.ResolvedSubject, error) {
+	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
+		Version:        recordauth.VisibilityScopeVersionV1,
+		Kind:           recordauth.VisibilityKindProject,
+		ProjectID:      actor.ProjectID,
+		PolicyVersion:  recordauth.PolicyVersionV1,
+		PolicyRevision: 1,
+	})
+	if err != nil {
+		return records.ResolvedSubject{}, err
+	}
+	authorization, err := recordauth.NormalizeSourceAuthorization(recordauth.SourceAuthorization{
+		Version:      recordauth.SourceAuthorizationVersionV1,
+		Kind:         recordauth.SourceKindTarget,
+		SourceID:     reference.SourceID,
+		State:        recordauth.SourceStateLive,
+		CaptureScope: visibility,
+		CurrentScope: &visibility,
+	})
+	if err != nil {
+		return records.ResolvedSubject{}, err
+	}
+	identity, err := records.NewSubjectIdentitySnapshot(reference.Kind, map[string]string{
+		"display_name": "test target",
+	})
+	if err != nil {
+		return records.ResolvedSubject{}, err
+	}
+	return records.ResolvedSubject{
+		ProjectID:            actor.ProjectID,
+		StableID:             reference.SourceID,
+		IdentitySnapshot:     identity,
+		LiveRoute:            "/targets/" + reference.SourceID,
+		CaptureAuthorization: authorization,
+	}, nil
+}
+
+func mustTestImportSubjectRegistry(t *testing.T) records.SubjectAdapterRegistry {
+	t.Helper()
+	registry, err := records.NewSubjectAdapterRegistry([]records.SubjectSourceAdapter{
+		importTestSubjectAdapter{},
+	})
+	if err != nil {
+		t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
+	}
+	return registry
+}
+
 func mustImportService(t *testing.T) (*Service, *importWriterStub, *memoryImportRepository) {
 	t.Helper()
 	base, _ := mustPortabilityService(t, portabilityHarness{enabled: true, document: records.ExportDocument{
 		RecordID: "rec_export1", RevisionID: "rrv_export1", Title: "x", BodyMarkdown: "x\n",
 		AuthorizationEpoch: 1, LockVersion: 1,
 	}})
+	base.subjects = mustTestImportSubjectRegistry(t)
 	writer := &importWriterStub{}
 	rebuilder := &importRebuildStub{}
 	imports := newMemoryImportRepository()
@@ -419,14 +628,15 @@ func (repository *memoryImportRepository) ClaimImportJob(_ context.Context, inpu
 	defer repository.mu.Unlock()
 	if existingID, ok := repository.byKey[input.ActorID+"/"+input.IdempotencyKey]; ok {
 		job := repository.jobs[existingID]
-		if job.ArchiveDigest != input.ArchiveDigest {
+		if job.ArchiveDigest != input.ArchiveDigest || job.DestinationSubject != input.DestinationSubject {
 			return store.RecordImportJob{}, store.ErrRecordImportCASConflict
 		}
 		return job, nil
 	}
 	job := store.RecordImportJob{
 		ImportJobID: "rij_memory1", ActorID: input.ActorID, JobState: store.RecordImportJobStateQuarantined,
-		LockVersion: 1, ArchiveDigest: input.ArchiveDigest, ExpiresAt: input.ExpiresAt,
+		LockVersion: 1, ArchiveDigest: input.ArchiveDigest, DestinationSubject: input.DestinationSubject,
+		ExpiresAt: input.ExpiresAt,
 	}
 	repository.jobs[job.ImportJobID] = job
 	repository.byKey[input.ActorID+"/"+input.IdempotencyKey] = job.ImportJobID
@@ -436,13 +646,16 @@ func (repository *memoryImportRepository) ClaimImportJob(_ context.Context, inpu
 func (repository *memoryImportRepository) SaveImportPlan(_ context.Context, input store.SaveRecordImportPlanInput) (store.RecordImportPlan, error) {
 	repository.mu.Lock()
 	defer repository.mu.Unlock()
+	job, ok := repository.jobs[input.ImportJobID]
+	if !ok || job.DestinationSubject != input.DestinationSubject {
+		return store.RecordImportPlan{}, store.ErrRecordImportCASConflict
+	}
 	plan := store.RecordImportPlan{
 		ImportPlanID: "rip_memory1", ImportJobID: input.ImportJobID, PlanDigest: input.PlanDigest,
 		ObjectCount: input.ObjectCount, RemapCount: input.RemapCount, Remaps: input.Remaps,
-		Documents: input.Documents, ExpiresAt: input.ExpiresAt,
+		Documents: input.Documents, DestinationSubject: input.DestinationSubject, ExpiresAt: input.ExpiresAt,
 	}
 	repository.plans[plan.ImportPlanID] = plan
-	job := repository.jobs[input.ImportJobID]
 	job.PlanID = plan.ImportPlanID
 	repository.jobs[input.ImportJobID] = job
 	return plan, nil
@@ -596,9 +809,7 @@ func TestOfficialArchiveRoundTripAllowsDocumentURLsAndWritesKnownEvidence(t *tes
 		t.Fatalf("ReadAll() error = %v", err)
 	}
 
-	plan, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "official-import", Archive: raw,
-	})
+	plan, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "official-import", Archive: raw})
 	if err != nil {
 		t.Fatalf("DryRun(official archive) error = %v", err)
 	}
@@ -630,16 +841,14 @@ func TestPortabilityApplyIsAtomicAcrossDocuments(t *testing.T) {
 
 	service, importer, _ := mustImportService(t)
 	importer.failOn = 2
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-atomic",
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-atomic",
 		Archive: mustImportArchive(t, []ArchiveEntry{{
 			Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 			Payload: []byte("# A\n"),
 		}, {
 			Path: "records/rec_source02/document.md", Classification: ArchiveClassMarkdown,
 			Payload: []byte("# B\n"),
-		}}),
-	})
+		}})})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -650,6 +859,115 @@ func TestPortabilityApplyIsAtomicAcrossDocuments(t *testing.T) {
 	}
 	if importer.writes != 0 {
 		t.Fatalf("partial apply wrote %d records", importer.writes)
+	}
+}
+func TestPortabilityApplyMapsFinalRevisionDestinationErrorsWithoutAdvancement(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		resolveErr error
+		wantErr    error
+	}{
+		{name: "missing", resolveErr: store.ErrRecordSubjectNotFound, wantErr: ErrExportUnauthorized},
+		{name: "unavailable", resolveErr: store.ErrRecordSubjectUnavailable, wantErr: ErrExportUnavailable},
+		{name: "denied", resolveErr: recordauth.ErrDenied, wantErr: ErrExportUnauthorized},
+		{name: "invalid", resolveErr: records.ErrInvalidResolvedSubject, wantErr: ErrExportUnavailable},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			actor := portabilityTestActor(t)
+			destination := testImportDestination()
+			subjectAdapter := newFinalRecheckImportSubjectAdapter(t, actor, destination, test.resolveErr)
+			subjects, err := records.NewSubjectAdapterRegistry([]records.SubjectSourceAdapter{subjectAdapter})
+			if err != nil {
+				t.Fatalf("NewSubjectAdapterRegistry() error = %v", err)
+			}
+			service, _, imports := mustImportService(t)
+			service.subjects = subjects
+
+			revisionStore := &finalRecheckRevisionCommitStore{}
+			revisionService, err := records.NewRevisionService(
+				subjects,
+				finalRecheckCurrentAuthorizationStub{},
+				revisionStore,
+			)
+			if err != nil {
+				t.Fatalf("NewRevisionService() error = %v", err)
+			}
+			application, err := records.NewApplication(
+				finalRecheckReadStub{},
+				revisionService,
+				finalRecheckLifecycleStub{},
+				finalRecheckDraftStub{},
+				records.ApplicationOptions{
+					IdempotencyOwnerID: "portability-final-recheck-test",
+					OwnerLeaseDuration: time.Minute,
+					IdempotencyTTL:     time.Hour,
+					OutboxTTL:          time.Hour,
+				},
+			)
+			if err != nil {
+				t.Fatalf("NewApplication() error = %v", err)
+			}
+			service.importer = application
+
+			archive := mustImportArchive(t, []ArchiveEntry{
+				{
+					Path:           "records/rec_source_final_recheck/document.md",
+					Classification: ArchiveClassMarkdown,
+					Payload:        []byte("# Final recheck\n"),
+				},
+			})
+			preview, err := service.DryRun(context.Background(), DryRunRequest{
+				DestinationSubject: destination,
+				Actor:              actor,
+				IdempotencyKey:     "final-recheck-" + test.name,
+				Archive:            archive,
+			})
+			if err != nil {
+				t.Fatalf("DryRun() error = %v", err)
+			}
+			result, err := service.Apply(context.Background(), ApplyRequest{
+				Actor: actor, PlanID: preview.PlanID, LockVersion: preview.LockVersion,
+			})
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("Apply() error = %v, want %v", err, test.wantErr)
+			}
+			if len(result.RecordIDs) != 0 {
+				t.Fatalf("Apply() result = %#v, want no record IDs", result)
+			}
+			if subjectAdapter.calls != 3 {
+				t.Fatalf("subject Resolve calls = %d, want dry-run, apply, and final revision recheck", subjectAdapter.calls)
+			}
+			if revisionStore.calls != 0 {
+				t.Fatalf("revision commits = %d, want zero after final recheck failure", revisionStore.calls)
+			}
+
+			plan, err := imports.LoadImportPlan(context.Background(), preview.PlanID)
+			if err != nil {
+				t.Fatalf("LoadImportPlan() error = %v", err)
+			}
+			job, err := imports.LoadImportJob(context.Background(), plan.ImportJobID)
+			if err != nil {
+				t.Fatalf("LoadImportJob() error = %v", err)
+			}
+			if job.JobState != store.RecordImportJobStatePlanned {
+				t.Fatalf("job state = %q, want planned", job.JobState)
+			}
+			if _, err := imports.LoadOrigin(context.Background(), sha256.Sum256(archive)); !errors.Is(err, store.ErrRecordImportNotFound) {
+				t.Fatalf("LoadOrigin() error = %v, want no origin", err)
+			}
+			service.mu.Lock()
+			cached := service.importPlans[preview.PlanID]
+			service.mu.Unlock()
+			if cached.jobState != store.RecordImportJobStatePlanned || len(cached.applied) != 0 {
+				t.Fatalf("cached import state = %#v, want planned with no applied records", cached)
+			}
+		})
 	}
 }
 
@@ -726,9 +1044,7 @@ func TestOfficialArchiveWithEvidenceSnapshotIDsDryRunsAndApplies(t *testing.T) {
 		t.Fatalf("ReadAll() error = %v", err)
 	}
 
-	plan, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "official-evidence-import", Archive: raw,
-	})
+	plan, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "official-evidence-import", Archive: raw})
 	if err != nil {
 		t.Fatalf("DryRun(official evidence archive) error = %v", err)
 	}
@@ -776,9 +1092,7 @@ func TestOfficialArchiveRejectsRawEvidenceJSONThatApplyCannotPersist(t *testing.
 		Path: "records/rec_source01/evidence/evs_rawexport01.json", Classification: ArchiveClassEvidenceJSON,
 		Payload: exported.Bytes,
 	}})
-	if _, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-raw-evidence", Archive: archive,
-	}); !errors.Is(err, ErrUntrustedImportContent) {
+	if _, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-raw-evidence", Archive: archive}); !errors.Is(err, ErrUntrustedImportContent) {
 		t.Fatalf("DryRun(raw evidence) = %v, want ErrUntrustedImportContent", err)
 	}
 	if importer.writes != 0 {
@@ -806,9 +1120,7 @@ func TestOfficialArchiveWrapMissAppliesWithoutEmptySuccessSnapshots(t *testing.T
 		t.Fatalf("Preview() error = %v", err)
 	}
 	raw := mustReadPreviewPayload(t, service, preview)
-	plan, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-wrap-miss", Archive: raw,
-	})
+	plan, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-wrap-miss", Archive: raw})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -836,9 +1148,7 @@ func TestOfficialArchiveApplyPutsKnownEvidenceOnFinishingRequest(t *testing.T) {
 	service, importer, _ := mustOfficialFidelityImportService(t, comparisonSnapshot, probeSnapshot, probeDescriptor)
 
 	raw := mustExportOfficialFidelityArchive(t, service)
-	plan, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "official-fidelity-import", Archive: raw,
-	})
+	plan, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "official-fidelity-import", Archive: raw})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -881,9 +1191,7 @@ func TestOfficialArchiveApplyPutsKnownEvidenceOnFinishingRequest(t *testing.T) {
 	}
 
 	blocked, importerBlocked, _ := mustOfficialFidelityImportService(t, comparisonSnapshot, probeSnapshot, probeDescriptor)
-	blockedPlan, err := blocked.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "official-fidelity-tombstone-preview", Archive: raw,
-	})
+	blockedPlan, err := blocked.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "official-fidelity-tombstone-preview", Archive: raw})
 	if err != nil {
 		t.Fatalf("DryRun(pre-tombstone) error = %v", err)
 	}
@@ -933,13 +1241,11 @@ func TestPortabilityApplyFailClosedWhenLoadedActorMissing(t *testing.T) {
 	t.Parallel()
 
 	service, importer, imports := mustImportService(t)
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-missing-actor",
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-missing-actor",
 		Archive: mustImportArchive(t, []ArchiveEntry{{
 			Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 			Payload: []byte("# A\n"),
-		}}),
-	})
+		}})})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -961,13 +1267,11 @@ func TestPortabilityApplyRejectsForeignActorOnAppliedReplay(t *testing.T) {
 	t.Parallel()
 
 	service, _, _ := mustImportService(t)
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-applied-actor",
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-applied-actor",
 		Archive: mustImportArchive(t, []ArchiveEntry{{
 			Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 			Payload: []byte("# A\n"),
-		}}),
-	})
+		}})})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -993,13 +1297,11 @@ func TestPortabilityApplyOriginFailureLeavesNoRecordsAndStaysRetryable(t *testin
 	t.Parallel()
 
 	service, importer, imports := mustImportService(t)
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-origin-fail",
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-origin-fail",
 		Archive: mustImportArchive(t, []ArchiveEntry{{
 			Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 			Payload: []byte("# A\n"),
-		}}),
-	})
+		}})})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -1032,10 +1334,8 @@ func TestPortabilityApplyRejectsExistingOriginBeforeWriting(t *testing.T) {
 		Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 		Payload: []byte("# A\n"),
 	}})
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-origin-exists",
-		Archive: archive,
-	})
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-origin-exists",
+		Archive: archive})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -1060,13 +1360,11 @@ func TestPortabilityApplyRejectsZeroLockAndForeignActor(t *testing.T) {
 	t.Parallel()
 
 	service, _, _ := mustImportService(t)
-	preview, err := service.DryRun(context.Background(), DryRunRequest{
-		Actor: portabilityTestActor(t), IdempotencyKey: "import-guards",
+	preview, err := service.DryRun(context.Background(), DryRunRequest{DestinationSubject: testImportDestination(), Actor: portabilityTestActor(t), IdempotencyKey: "import-guards",
 		Archive: mustImportArchive(t, []ArchiveEntry{{
 			Path: "records/rec_source01/document.md", Classification: ArchiveClassMarkdown,
 			Payload: []byte("# A\n"),
-		}}),
-	})
+		}})})
 	if err != nil {
 		t.Fatalf("DryRun() error = %v", err)
 	}
@@ -1269,4 +1567,177 @@ func mustExportOfficialFidelityArchive(t *testing.T, service *Service) []byte {
 		t.Fatalf("Preview() error = %v", err)
 	}
 	return mustReadPreviewPayload(t, service, preview)
+}
+
+type finalRecheckImportSubjectAdapter struct {
+	reference records.SubjectReference
+	resolved  records.ResolvedSubject
+	finalErr  error
+	calls     int
+}
+
+func newFinalRecheckImportSubjectAdapter(
+	t *testing.T,
+	actor recordauth.ActorScope,
+	reference records.SubjectReference,
+	finalErr error,
+) *finalRecheckImportSubjectAdapter {
+	t.Helper()
+	visibility, err := recordauth.NormalizeVisibilityScope(recordauth.VisibilityScope{
+		Version:        recordauth.VisibilityScopeVersionV1,
+		Kind:           recordauth.VisibilityKindProject,
+		ProjectID:      actor.ProjectID,
+		PolicyVersion:  recordauth.PolicyVersionV1,
+		PolicyRevision: 1,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeVisibilityScope() error = %v", err)
+	}
+	authorization, err := recordauth.NormalizeSourceAuthorization(recordauth.SourceAuthorization{
+		Version:      recordauth.SourceAuthorizationVersionV1,
+		Kind:         recordauth.SourceKindTarget,
+		SourceID:     reference.SourceID,
+		State:        recordauth.SourceStateLive,
+		CaptureScope: visibility,
+		CurrentScope: &visibility,
+	})
+	if err != nil {
+		t.Fatalf("NormalizeSourceAuthorization() error = %v", err)
+	}
+	identity, err := records.NewSubjectIdentitySnapshot(reference.Kind, map[string]string{
+		"display_name": "final recheck target",
+	})
+	if err != nil {
+		t.Fatalf("NewSubjectIdentitySnapshot() error = %v", err)
+	}
+	return &finalRecheckImportSubjectAdapter{
+		reference: reference,
+		resolved: records.ResolvedSubject{
+			ProjectID:            actor.ProjectID,
+			StableID:             reference.SourceID,
+			IdentitySnapshot:     identity,
+			LiveRoute:            "/targets/" + reference.SourceID,
+			CaptureAuthorization: authorization,
+		},
+		finalErr: finalErr,
+	}
+}
+
+func (adapter *finalRecheckImportSubjectAdapter) Kind() records.SubjectKind {
+	return records.SubjectKindTarget
+}
+
+func (adapter *finalRecheckImportSubjectAdapter) Resolve(
+	_ context.Context,
+	_ recordauth.ActorScope,
+	reference records.SubjectReference,
+) (records.ResolvedSubject, error) {
+	adapter.calls++
+	if reference != adapter.reference {
+		return records.ResolvedSubject{}, records.ErrInvalidSubjectReference
+	}
+	if adapter.calls >= 3 {
+		return records.ResolvedSubject{}, adapter.finalErr
+	}
+	return adapter.resolved, nil
+}
+
+type finalRecheckCurrentAuthorizationStub struct{}
+
+func (finalRecheckCurrentAuthorizationStub) ResolveCurrentRecordAuthorization(
+	context.Context,
+	recordauth.ActorScope,
+	string,
+) (records.CurrentRecordAuthorization, error) {
+	return records.CurrentRecordAuthorization{}, records.ErrRecordNotFound
+}
+
+type finalRecheckRevisionCommitStore struct {
+	calls int
+}
+
+func (stub *finalRecheckRevisionCommitStore) CommitRevision(
+	ctx context.Context,
+	command records.RevisionCommitCommand,
+) (records.RevisionCommitResult, error) {
+	results, err := stub.CommitRevisions(ctx, []records.RevisionCommitCommand{command})
+	if err != nil {
+		return records.RevisionCommitResult{}, err
+	}
+	return results[0], nil
+}
+
+func (stub *finalRecheckRevisionCommitStore) CommitRevisions(
+	_ context.Context,
+	commands []records.RevisionCommitCommand,
+) ([]records.RevisionCommitResult, error) {
+	stub.calls++
+	results := make([]records.RevisionCommitResult, 0, len(commands))
+	for _, command := range commands {
+		results = append(results, records.RevisionCommitResult{
+			RecordID: command.RecordID, RevisionID: "rrv_final_recheck", RevisionNo: 1, Created: true,
+		})
+	}
+	return results, nil
+}
+
+func (stub *finalRecheckRevisionCommitStore) CommitRevisionsFinishing(
+	ctx context.Context,
+	commands []records.RevisionCommitCommand,
+	_ records.RevisionCommitFinish,
+) ([]records.RevisionCommitResult, error) {
+	return stub.CommitRevisions(ctx, commands)
+}
+
+type finalRecheckReadStub struct{}
+
+func (finalRecheckReadStub) GetRecord(context.Context, records.RecordGetRequest) (records.Record, error) {
+	return records.Record{}, records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckReadStub) ListRecords(context.Context, records.RecordListRequest) (records.RecordListResult, error) {
+	return records.RecordListResult{}, records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckReadStub) GetRevision(context.Context, records.RecordRevisionGetRequest) (records.RecordRevision, error) {
+	return records.RecordRevision{}, records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckReadStub) ListRevisions(context.Context, records.RecordRevisionListRequest) ([]records.RecordRevision, error) {
+	return nil, records.ErrInvalidApplicationRequest
+}
+
+type finalRecheckLifecycleStub struct{}
+
+func (finalRecheckLifecycleStub) ChangeLifecycle(
+	context.Context,
+	records.RecordLifecycleRequest,
+) (records.RecordLifecycleResult, error) {
+	return records.RecordLifecycleResult{}, records.ErrInvalidApplicationRequest
+}
+
+type finalRecheckDraftStub struct{}
+
+func (finalRecheckDraftStub) ReadDraft(context.Context, records.DraftReadRequest) (records.Draft, error) {
+	return records.Draft{}, records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckDraftStub) ListDrafts(context.Context, records.DraftListRequest) (records.DraftListResult, error) {
+	return records.DraftListResult{}, records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckDraftStub) CreateDraft(context.Context, records.DraftCreateRequest) (records.Draft, error) {
+	return records.Draft{}, records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckDraftStub) PatchDraft(context.Context, records.DraftPatchRequest) (records.Draft, error) {
+	return records.Draft{}, records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckDraftStub) DiscardDraft(context.Context, records.DraftDiscardRequest) error {
+	return records.ErrInvalidApplicationRequest
+}
+
+func (finalRecheckDraftStub) PreparePublish(context.Context, records.DraftPublishRequest) (records.Draft, error) {
+	return records.Draft{}, records.ErrInvalidApplicationRequest
 }

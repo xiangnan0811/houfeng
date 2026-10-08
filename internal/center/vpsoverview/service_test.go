@@ -337,6 +337,87 @@ func TestServiceGetDegradesActivityTimeout(t *testing.T) {
 	}
 }
 
+func TestServiceGetActivityAvailabilityAffectsJudgementSources(t *testing.T) {
+	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name                  string
+		activityErr           error
+		wantReason            string
+		wantSourceUnavailable bool
+	}{
+		{
+			name:                  "records disabled",
+			activityErr:           ErrActivityDisabled,
+			wantReason:            "records_disabled",
+			wantSourceUnavailable: false,
+		},
+		{
+			name:                  "activity genuinely unavailable",
+			activityErr:           errors.New("activity backend unavailable"),
+			wantReason:            "activity_unavailable",
+			wantSourceUnavailable: true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sources := &fakeSources{bundle: SourceBundle{
+				Identity: Identity{
+					VPSID: "vps_7c2a4e18b09d5f31", Labels: []string{}, UpdatedAt: now,
+					LifecycleStatus: "active", RenewalDecision: "keep",
+				},
+				MonitoringSection:   SectionState{State: SectionReady},
+				MonitoringHealth:    "正常",
+				MonitoringStatus:    "启用",
+				IPSection:           SectionState{State: SectionReady},
+				IPStatus:            "not_configured",
+				RenewalSection:      SectionState{State: SectionReady},
+				RenewalStatus:       "keep",
+				ActiveSubscriptions: 1,
+				Facts:               []Fact{},
+				Relations:           []RelationSummary{},
+			}}
+			service, err := NewServiceWithClock(
+				sources,
+				&fakeActivity{err: test.activityErr},
+				func() time.Time { return now },
+				time.Second,
+			)
+			if err != nil {
+				t.Fatalf("NewServiceWithClock: %v", err)
+			}
+			overview, err := service.Get(context.Background(), Request{
+				Actor: testOverviewActor(t), VPSID: "vps_7c2a4e18b09d5f31",
+			})
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			section := overview.RecentActivity.Section
+			if section.State != SectionUnavailable || section.ReasonCode != test.wantReason {
+				t.Fatalf("activity section = %#v, want unavailable reason %q", section, test.wantReason)
+			}
+			if overview.RecentActivity.Items == nil {
+				t.Fatal("activity items must be a non-nil empty collection")
+			}
+
+			foundSourceUnavailable := false
+			for _, anomaly := range overview.Anomalies {
+				if anomaly.RuleID == RuleSourceUnavailable {
+					foundSourceUnavailable = true
+					if !test.wantSourceUnavailable {
+						t.Fatalf("disabled activity contaminated core anomalies: %#v", overview.Anomalies)
+					}
+					if anomaly.Detail != "activity" {
+						t.Fatalf("source-unavailable detail = %q, want activity", anomaly.Detail)
+					}
+				}
+			}
+			if foundSourceUnavailable != test.wantSourceUnavailable {
+				t.Fatalf("source-unavailable anomaly = %v, want %v; anomalies = %#v",
+					foundSourceUnavailable, test.wantSourceUnavailable, overview.Anomalies)
+			}
+		})
+	}
+}
+
 func TestServiceGetUsesActivitySubjectVPS(t *testing.T) {
 	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
 	var got activity.ListRequest

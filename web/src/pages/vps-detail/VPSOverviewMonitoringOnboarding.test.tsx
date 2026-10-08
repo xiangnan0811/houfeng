@@ -429,6 +429,8 @@ describe('VPSOverviewMonitoringOnboarding', () => {
     renderHarness({ onRefresh: refresh })
 
     await openZeroLinkForm()
+    expect(screen.getByRole('textbox', { name: '关联备注' })).toHaveValue('')
+    expect(screen.getByText('区域、城市和服务商复制自当前 VPS。创建后为独立副本，之后修改 VPS 不会更新此监控实例。')).toBeInTheDocument()
     await submitCreate()
 
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
@@ -440,8 +442,9 @@ describe('VPSOverviewMonitoringOnboarding', () => {
       provider: 'Example Cloud',
       labels: ['edge', 'prod'],
       note: 'asset note',
-      link_note: 'created from vps detail',
+      link_note: '',
     }, expect.any(String))
+    expect(create.mock.calls[0]?.[1]).not.toHaveProperty('clear_fields')
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(
       '/monitoring/mi_new?onboarding=1&return_vps=vps_a',
     ))
@@ -512,6 +515,147 @@ describe('VPSOverviewMonitoringOnboarding', () => {
 
     await waitFor(() => expect(keys).toHaveLength(2))
     expect(keys[0]).toBe(keys[1])
+  })
+
+  it('posts empty unknown identity fields without placeholders or clear_fields', async () => {
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue({
+      ...detailFixture('vps_a'),
+      region: '',
+      country: '',
+      city: '',
+      datacenter: '',
+      provider_name: '',
+    })
+    const create = vi.spyOn(api, 'createVPSMonitoringInstance').mockResolvedValue(createdFixture())
+    renderHarness()
+
+    await openZeroLinkForm()
+    expect(screen.getByRole('textbox', { name: '区域' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: '城市' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: '服务商' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: '关联备注' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: '区域' })).toHaveAttribute('placeholder', '未知')
+    expect(screen.getByRole('textbox', { name: '监控实例名称' })).toHaveValue('东京边缘')
+    expect(screen.getByRole('textbox', { name: '标签' })).toHaveValue('edge, prod')
+    expect(screen.getByRole('textbox', { name: '监控备注' })).toHaveValue('asset note')
+    expect(screen.queryByDisplayValue('未确认')).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue('未关联服务商')).not.toBeInTheDocument()
+    expect(screen.queryByDisplayValue('created from vps detail')).not.toBeInTheDocument()
+    await submitCreate()
+
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+    expect(create).toHaveBeenCalledWith('vps_a', {
+      display_name: '东京边缘',
+      group: '',
+      region: '',
+      city: '',
+      provider: '',
+      labels: ['edge', 'prod'],
+      note: 'asset note',
+      link_note: '',
+    }, expect.any(String))
+    expect(Object.keys(create.mock.calls[0]?.[1] ?? {})).toEqual([
+      'display_name',
+      'group',
+      'region',
+      'city',
+      'provider',
+      'labels',
+      'note',
+      'link_note',
+    ])
+  })
+
+  it('rotates the idempotency key when clear intent changes and drops it after refill', async () => {
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture('vps_a'))
+    const keys: string[] = []
+    const bodies: unknown[] = []
+    vi.spyOn(api, 'createVPSMonitoringInstance')
+      .mockImplementationOnce(async (_vpsId, input, key) => {
+        keys.push(key)
+        bodies.push(input)
+        throw new TypeError('Failed to fetch')
+      })
+      .mockImplementationOnce(async (_vpsId, input, key) => {
+        keys.push(key)
+        bodies.push(input)
+        throw new TypeError('Failed to fetch')
+      })
+      .mockImplementationOnce(async (_vpsId, input, key) => {
+        keys.push(key)
+        bodies.push(input)
+        return createdFixture()
+      })
+    renderHarness()
+
+    await openZeroLinkForm()
+    await submitCreate()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch')
+    fireEvent.change(screen.getByRole('textbox', { name: '服务商' }), { target: { value: '' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '区域' }), { target: { value: '  ' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '城市' }), { target: { value: '' } })
+    await submitCreate()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch')
+    fireEvent.change(screen.getByRole('textbox', { name: '区域' }), { target: { value: '关东' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '城市' }), { target: { value: '千代田' } })
+    fireEvent.change(screen.getByRole('textbox', { name: '服务商' }), { target: { value: '本地' } })
+    await submitCreate()
+
+    await waitFor(() => expect(keys).toHaveLength(3))
+    expect(keys[0]).not.toBe(keys[1])
+    expect(keys[1]).not.toBe(keys[2])
+    expect(bodies[0]).not.toHaveProperty('clear_fields')
+    expect(bodies[1]).toMatchObject({
+      display_name: '东京边缘',
+      group: '',
+      region: '',
+      city: '',
+      provider: '',
+      labels: ['edge', 'prod'],
+      note: 'asset note',
+      link_note: '',
+      clear_fields: ['city', 'provider', 'region'],
+    })
+    expect(bodies[2]).toMatchObject({
+      display_name: '东京边缘',
+      group: '',
+      region: '关东',
+      city: '千代田',
+      provider: '本地',
+      labels: ['edge', 'prod'],
+      note: 'asset note',
+      link_note: '',
+    })
+    expect(bodies[2]).not.toHaveProperty('clear_fields')
+  })
+
+  it('reuses the idempotency key when retrying the same explicit clear after a lost response', async () => {
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture('vps_a'))
+    const keys: string[] = []
+    const bodies: unknown[] = []
+    vi.spyOn(api, 'createVPSMonitoringInstance')
+      .mockImplementationOnce(async (_vpsId, input, key) => {
+        keys.push(key)
+        bodies.push(input)
+        throw new TypeError('Failed to fetch')
+      })
+      .mockImplementationOnce(async (_vpsId, _input, key) => {
+        keys.push(key)
+        bodies.push(_input)
+        return createdFixture()
+      })
+    renderHarness()
+
+    await openZeroLinkForm()
+    fireEvent.change(screen.getByRole('textbox', { name: '区域' }), { target: { value: '' } })
+    await submitCreate()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch')
+    await submitCreate()
+
+    await waitFor(() => expect(keys).toHaveLength(2))
+    expect(keys[0]).toBe(keys[1])
+    expect(bodies[0]).toEqual(bodies[1])
+    expect(bodies[0]).toMatchObject({ region: '', clear_fields: ['region'] })
   })
 
   it('rotates the idempotency key after the request body changes', async () => {

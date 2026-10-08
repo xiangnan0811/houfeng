@@ -1,7 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import * as authContext from '../../lib/auth-context'
 import type { RecordDetail } from '../../lib/types'
 import { RecordSearchPage } from './RecordSearchPage'
 
@@ -82,6 +83,26 @@ function renderPage(initialEntry = '/records') {
 }
 
 describe('RecordSearchPage', () => {
+  beforeEach(() => {
+    vi.spyOn(authContext, 'useAuth').mockReturnValue({
+      user: {
+        user_id: 'u1',
+        username: 'admin',
+        role: 'admin',
+        display_name: '',
+        runtime_capabilities: { records: true, comparison: true, portability: true },
+        management_capabilities: { access: false },
+      },
+      loading: false,
+      status: 'ready',
+      error: null,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refresh: vi.fn(),
+      retry: vi.fn(),
+    })
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
   })

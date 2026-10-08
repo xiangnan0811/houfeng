@@ -26,4 +26,17 @@ describe('ComparabilityReview', () => {
     expect(screen.getByRole('heading', { name: '可比性审查' })).toBeInTheDocument()
     expect(screen.getByText(/仅元数据，无数值比较/)).toBeInTheDocument()
   })
+
+  it('keeps an unknown comparability code inside closed diagnostics', () => {
+    render(<ComparabilityReview comparison={{
+      ...comparison,
+      review: [{ item_index: 0, reason: 'widget_code' as typeof comparison.review[number]['reason'] }],
+    }} />)
+    const judgement = screen.getByText('不兼容')
+    expect(judgement.closest('details')).toBeNull()
+    const raw = screen.getByText('widget_code')
+    const details = raw.closest('details')
+    expect(details).not.toBeNull()
+    expect(details).not.toHaveAttribute('open')
+  })
 })

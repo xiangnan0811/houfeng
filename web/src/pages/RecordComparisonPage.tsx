@@ -1,14 +1,19 @@
+import { useState } from 'react'
+
 import { Button } from '../components/atoms'
 import { PageState } from '../components/PageState'
 import { useAuth } from '../lib/auth-context'
 import type { ComparisonPairwise } from '../lib/types'
 import { ComparabilityReview } from './records/compare/ComparabilityReview'
+import { comparisonEvidenceKindLabel, presentComparisonReason } from './records/compare/comparisonLabels'
 import { ComparisonConditions } from './records/compare/ComparisonConditions'
 import { ComparisonKindPanel } from './records/compare/ComparisonKindPanel'
 import { ComparisonMatrix } from './records/compare/ComparisonMatrix'
+import { ComparisonObjectDialog } from './records/compare/ComparisonObjectDialog'
 import { ComparisonSaveRecord } from './records/compare/ComparisonSaveRecord'
 import { ComparisonSelectionBasket } from './records/compare/ComparisonSelectionBasket'
 import { ComparisonTrendChart } from './records/compare/ComparisonTrendChart'
+import { defaultComparisonWindow, type ComparisonURLFixedItem } from './records/compare/comparisonQueryState'
 import { useComparisonWorkbench } from './records/compare/useComparisonWorkbench'
 import { formatDateTime } from '../lib/format'
 import './records/RecordWorkspace.css'
@@ -32,14 +37,15 @@ function formatPairwiseDifference(entry: ComparisonPairwise): string {
     }).length
     const equality = values.equal === true ? '相等' : '有差值'
     return [
-      `${entry.kind}/v${entry.schema_version}：${equality}`,
+      `${comparisonEvidenceKindLabel(entry.kind)}：${equality}`,
       `匹配 ${matched ?? 0} 桶`,
       `基准未匹配 ${unmatchedBaseline ?? 0}`,
       `候选项未匹配 ${unmatchedItem ?? 0}`,
       changed > 0 ? `差值 ${changed} 桶` : '',
     ].filter(Boolean).join('，')
   }
-  return `${entry.kind}/v${entry.schema_version}：${entry.compatible ? '兼容' : entry.reason || '不兼容'}`
+  const reason = presentComparisonReason(entry.reason).label
+  return `${comparisonEvidenceKindLabel(entry.kind)}：${entry.compatible ? '兼容' : reason}`
 }
 
 function numberish(value: unknown): number | null {
@@ -64,12 +70,20 @@ function windowLabel(from: string, to: string): string {
 export function RecordComparisonPage() {
   const { user } = useAuth()
   const { state, commands } = useComparisonWorkbench({ userId: user?.user_id ?? '' })
+  const [pickerOpen, setPickerOpen] = useState(false)
   const query = state.query.ok ? state.query.state : null
+  const linkProblem = state.query.ok ? null : state.query.reason
   const activeKind = query?.kind
   const activeMetric = query?.metric
   const showSeries = Boolean(activeKind?.startsWith('monitoring.host') || activeKind?.startsWith('monitoring.probe'))
   const itemCount = query?.mode === 'fixed' ? query.items?.length ?? 0 : 0
   const comparison = state.comparison
+  const fallbackWindow = defaultComparisonWindow()
+  const evidenceFrom = query?.requested_from ?? fallbackWindow.requested_from
+  const evidenceTo = query?.requested_to ?? fallbackWindow.requested_to
+  const basketSnapshotIds = query?.mode === 'fixed'
+    ? (query.items ?? []).flatMap((item) => 'snapshot_id' in item ? [item.snapshot_id] : [])
+    : []
 
   return (
     <div className="page record-page record-compare">
@@ -100,20 +114,24 @@ export function RecordComparisonPage() {
         </div>
       </header>
 
-      {!state.query.ok ? (
-        <PageState
-          kind="empty"
-          title="从选择篮开始"
-          description="链接已损坏或版本未知，请从记录或证据重新选择 2–6 项。"
-        />
+      {linkProblem ? (
+        <ComparisonLinkState reason={linkProblem} onAdd={() => setPickerOpen(true)} />
       ) : null}
 
       <div className="record-compare__layout">
         <div className="record-compare__side">
           <ComparisonSelectionBasket
             query={query}
+            linkProblem={linkProblem}
             candidates={state.candidates}
+            selectionError={pickerOpen ? null : state.selectionError}
             onConfirm={commands.confirmCandidates}
+            onRemove={commands.removeFixedItem}
+            onClear={commands.clearFixedItems}
+            {...(query ? { onAdd: () => setPickerOpen(true) } : {})}
+            onReviseSnapshots={(item, snapshotIds) => {
+              commands.addFixedItem(revisionWithSnapshots(item, snapshotIds))
+            }}
           />
           {query ? (
             <ComparisonConditions
@@ -201,6 +219,15 @@ export function RecordComparisonPage() {
             </section>
           ) : null}
 
+          <ComparisonObjectDialog
+            open={pickerOpen}
+            onClose={() => setPickerOpen(false)}
+            from={evidenceFrom}
+            to={evidenceTo}
+            basketSnapshotIds={basketSnapshotIds}
+            selectionError={state.selectionError}
+            onAdd={commands.addFixedItem}
+          />
           <ComparisonSaveRecord
             blocked={state.saveBlocked}
             {...(state.saveBlocked ? {
@@ -217,6 +244,53 @@ export function RecordComparisonPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+function revisionWithSnapshots(
+  item: Extract<ComparisonURLFixedItem, { record_id: string }>,
+  snapshotIds: string[],
+): ComparisonURLFixedItem {
+  return snapshotIds.length
+    ? { record_id: item.record_id, revision_id: item.revision_id, snapshot_ids: snapshotIds }
+    : { record_id: item.record_id, revision_id: item.revision_id }
+}
+
+function ComparisonLinkState({
+  reason,
+  onAdd,
+}: {
+  reason: 'missing' | 'invalid' | 'unknown_version'
+  onAdd: () => void
+}) {
+  const action = <Button size="lg" onClick={onAdd}>添加对象</Button>
+  if (reason === 'missing') {
+    return (
+      <PageState
+        kind="empty"
+        title="比较篮是空的"
+        description="添加 2–6 个证据后再比较。"
+        action={action}
+      />
+    )
+  }
+  if (reason === 'unknown_version') {
+    return (
+      <PageState
+        kind="error"
+        title="不支持的比较链接版本"
+        description="当前客户端打不开这个版本的比较链接。可以重新添加对象。"
+        action={action}
+      />
+    )
+  }
+  return (
+    <PageState
+      kind="error"
+      title="比较链接已损坏"
+      description="这条比较链接无法读取。可以重新添加对象。"
+      action={action}
+    />
   )
 }
 

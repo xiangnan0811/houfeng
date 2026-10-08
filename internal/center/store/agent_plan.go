@@ -30,7 +30,9 @@ const selectAgentPlanMonitoringInstanceLabelsSQL = `
 		coalesce(
 			cs.ip_quality_settings,
 			'{"enabled":true,"frequency_seconds":86400,"timeout_seconds":15,"services":["netflix","chatgpt","youtube-premium","amazon-prime-video","disney-plus","tiktok","reddit"]}'::jsonb
-		) as ip_quality_settings
+		) as ip_quality_settings,
+		coalesce(cs.probe_frequency_defaults, '{}'::jsonb) as probe_frequency_defaults,
+		coalesce(cs.incident_defaults, '{}'::jsonb) as incident_defaults
 	from monitoring_instances n
 	left join center_settings cs on cs.settings_id = $2
 	where n.monitoring_instance_id = $1`
@@ -67,6 +69,8 @@ type PostgresAgentPlanRepository struct {
 
 type agentPlanSettingsSnapshot struct {
 	HostSampleFrequencyTier string
+	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults
+	IncidentDefaults        centersettings.IncidentDefaults
 	OverrideRules           centersettings.OverrideRules
 	IPQuality               centersettings.IPQualitySettings
 }
@@ -83,22 +87,44 @@ func (r *PostgresAgentPlanRepository) BuildSyncPlan(ctx context.Context, monitor
 
 func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, monitoringInstanceID string) (agentplan.SyncPlan, error) {
 	var (
-		labels             []string
-		lifecycleStatus    string
-		monitoringStatus   string
-		hostSampleTier     string
-		overrideRulesJSON  []byte
-		settingsRowPresent bool
-		archived           bool
-		ipQualityJSON      []byte
+		labels                     []string
+		lifecycleStatus            string
+		monitoringStatus           string
+		hostSampleTier             string
+		overrideRulesJSON          []byte
+		settingsRowPresent         bool
+		archived                   bool
+		ipQualityJSON              []byte
+		probeFrequencyDefaultsJSON []byte
+		incidentDefaultsJSON       []byte
 	)
-	if err := queryer.QueryRow(ctx, selectAgentPlanMonitoringInstanceLabelsSQL, monitoringInstanceID, centersettings.SingletonID).Scan(&labels, &lifecycleStatus, &monitoringStatus, &hostSampleTier, &overrideRulesJSON, &settingsRowPresent, &archived, &ipQualityJSON); errors.Is(err, pgx.ErrNoRows) {
+	if err := queryer.QueryRow(ctx, selectAgentPlanMonitoringInstanceLabelsSQL, monitoringInstanceID, centersettings.SingletonID).Scan(
+		&labels,
+		&lifecycleStatus,
+		&monitoringStatus,
+		&hostSampleTier,
+		&overrideRulesJSON,
+		&settingsRowPresent,
+		&archived,
+		&ipQualityJSON,
+		&probeFrequencyDefaultsJSON,
+		&incidentDefaultsJSON,
+	); errors.Is(err, pgx.ErrNoRows) {
 		return agentplan.SyncPlan{}, monitoringinstances.ErrMonitoringInstanceNotFound
 	} else if err != nil {
 		return agentplan.SyncPlan{}, fmt.Errorf("query labels for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
 
-	settings, err := resolveAgentPlanSettings(settingsRowPresent, labels, hostSampleTier, overrideRulesJSON, ipQualityJSON)
+	settings, err := resolveAgentPlanSettings(
+		settingsRowPresent,
+		labels,
+		hostSampleTier,
+		overrideRulesJSON,
+		ipQualityJSON,
+		probeFrequencyDefaultsJSON,
+		incidentDefaultsJSON,
+	)
+
 	if err != nil {
 		return agentplan.SyncPlan{}, fmt.Errorf("resolve sync-plan settings for monitoring instance %q: %w", monitoringInstanceID, err)
 	}
@@ -166,11 +192,22 @@ func buildSyncPlan(ctx context.Context, queryer agentPlanQueryer, monitoringInst
 	return plan, nil
 }
 
-func resolveAgentPlanSettings(settingsRowPresent bool, monitoringInstanceLabels []string, hostSampleTier string, overrideRulesJSON []byte, ipQualityJSON []byte) (agentPlanSettingsSnapshot, error) {
+func resolveAgentPlanSettings(
+	settingsRowPresent bool,
+	monitoringInstanceLabels []string,
+	hostSampleTier string,
+	overrideRulesJSON []byte,
+	ipQualityJSON []byte,
+	probeFrequencyDefaultsJSON []byte,
+	incidentDefaultsJSON []byte,
+) (agentPlanSettingsSnapshot, error) {
+	defaults := centersettings.Default()
 	settings := agentPlanSettingsSnapshot{
-		HostSampleFrequencyTier: centersettings.Default().HostSampleFrequencyTier,
-		OverrideRules:           centersettings.Default().OverrideRules,
-		IPQuality:               centersettings.Default().IPQuality,
+		HostSampleFrequencyTier: defaults.HostSampleFrequencyTier,
+		ProbeFrequencyDefaults:  defaults.ProbeFrequencyDefaults,
+		IncidentDefaults:        defaults.IncidentDefaults,
+		OverrideRules:           defaults.OverrideRules,
+		IPQuality:               defaults.IPQuality,
 	}
 	if !settingsRowPresent {
 		settings.HostSampleFrequencyTier = legacyHostSampleFrequencyTier(monitoringInstanceLabels)
@@ -179,11 +216,26 @@ func resolveAgentPlanSettings(settingsRowPresent bool, monitoringInstanceLabels 
 	if hostSampleTier != "" {
 		settings.HostSampleFrequencyTier = hostSampleTier
 	}
-	if len(overrideRulesJSON) == 0 {
-		return settings, nil
+	if len(probeFrequencyDefaultsJSON) > 0 {
+		var probeDefaults centersettings.ProbeFrequencyDefaults
+		if err := decodeSettingsJSON(probeFrequencyDefaultsJSON, &probeDefaults); err != nil {
+			return agentPlanSettingsSnapshot{}, fmt.Errorf("decode probe frequency defaults: %w", err)
+		}
+		settings.ProbeFrequencyDefaults = probeDefaults
 	}
-	if err := decodeSettingsJSON(overrideRulesJSON, &settings.OverrideRules); err != nil {
-		return agentPlanSettingsSnapshot{}, fmt.Errorf("decode override rules: %w", err)
+	if len(incidentDefaultsJSON) > 0 {
+		var incidentDefaults centersettings.IncidentDefaults
+		if err := decodeSettingsJSON(incidentDefaultsJSON, &incidentDefaults); err != nil {
+			return agentPlanSettingsSnapshot{}, fmt.Errorf("decode incident defaults: %w", err)
+		}
+		settings.IncidentDefaults = incidentDefaults
+	}
+	if len(overrideRulesJSON) > 0 {
+		var overrideRules centersettings.OverrideRules
+		if err := decodeSettingsJSON(overrideRulesJSON, &overrideRules); err != nil {
+			return agentPlanSettingsSnapshot{}, fmt.Errorf("decode override rules: %w", err)
+		}
+		settings.OverrideRules = overrideRules
 	}
 	if len(ipQualityJSON) > 0 {
 		if err := decodeSettingsJSON(ipQualityJSON, &settings.IPQuality); err != nil {
@@ -192,16 +244,20 @@ func resolveAgentPlanSettings(settingsRowPresent bool, monitoringInstanceLabels 
 	}
 	validated, err := centersettings.Validate(centersettings.CenterSettings{
 		HostSampleFrequencyTier: settings.HostSampleFrequencyTier,
-		ProbeFrequencyDefaults:  centersettings.Default().ProbeFrequencyDefaults,
-		IncidentDefaults:        centersettings.Default().IncidentDefaults,
+		ProbeFrequencyDefaults:  settings.ProbeFrequencyDefaults,
+		IncidentDefaults:        settings.IncidentDefaults,
 		OverrideRules:           settings.OverrideRules,
-		RetentionPolicy:         centersettings.Default().RetentionPolicy,
-		SubscriptionCost:        centersettings.Default().SubscriptionCost,
+		RetentionPolicy:         defaults.RetentionPolicy,
+		SubscriptionCost:        defaults.SubscriptionCost,
 		IPQuality:               settings.IPQuality,
 	})
 	if err != nil {
 		return agentPlanSettingsSnapshot{}, err
 	}
+	settings.HostSampleFrequencyTier = validated.HostSampleFrequencyTier
+	settings.ProbeFrequencyDefaults = validated.ProbeFrequencyDefaults
+	settings.IncidentDefaults = validated.IncidentDefaults
+	settings.OverrideRules = validated.OverrideRules
 	settings.IPQuality = validated.IPQuality
 	return settings, nil
 }

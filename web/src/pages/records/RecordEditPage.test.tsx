@@ -24,15 +24,28 @@ const api = vi.hoisted(() => ({
   getEvidenceSnapshot: vi.fn(),
 }))
 
-vi.mock('../../lib/auth-context', () => ({
-  useAuth: () => ({
-    user: { user_id: 'usr_1', username: 'admin', role: 'admin', display_name: '管理员' },
+vi.mock('../../lib/auth-context', () => {
+  const auth = {
+    user: {
+      user_id: 'usr_1',
+      username: 'admin',
+      role: 'admin',
+      display_name: '管理员',
+      runtime_capabilities: { records: true, comparison: true, portability: true },
+      management_capabilities: { access: false },
+    },
     loading: false,
+    status: 'ready' as const,
+    error: null,
     login: vi.fn(),
     logout: vi.fn(),
     refresh: vi.fn(),
-  }),
-}))
+    retry: vi.fn(),
+  }
+  return {
+    useAuth: () => auth,
+  }
+})
 
 vi.mock('../../lib/recordsApi', () => api)
 vi.mock('../../lib/recordCollaborationApi', () => ({

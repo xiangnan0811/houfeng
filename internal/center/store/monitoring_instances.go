@@ -986,9 +986,6 @@ func (r *PostgresMonitoringInstanceRepository) CreateLinkedMonitoringInstanceIde
 	if err := rejectRetiredLinkedMonitoringInstanceCreate(input); err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
 	}
-	if err := monitoringinstances.ValidateCreateInputMetadata(input); err != nil {
-		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
-	}
 	if err := rejectActiveMonitoringLink(ctx, tx, vpsID); err != nil {
 		return monitoringinstances.Record{}, assetlinks.Record{}, false, err
 	}
@@ -1074,20 +1071,29 @@ func deriveLinkedMonitoringInstanceCreateInput(
 	if len(labels) == 0 {
 		labels = defaults.Labels
 	}
-	linkNote := wire.LinkNote
-	if linkNote == "" {
-		linkNote = "created from vps detail"
+	region := firstLinkedMonitoringNonEmpty(wire.Region, defaults.Region, defaults.Country)
+	city := firstLinkedMonitoringNonEmpty(wire.City, defaults.City, defaults.Datacenter)
+	provider := firstLinkedMonitoringNonEmpty(wire.Provider, defaults.ProviderName)
+	for _, field := range wire.ClearFields {
+		switch field {
+		case "region":
+			region = ""
+		case "city":
+			city = ""
+		case "provider":
+			provider = ""
+		}
 	}
 	return monitoringinstances.CreateInput{
 		DisplayName:     firstLinkedMonitoringNonEmpty(wire.DisplayName, defaults.DisplayName, vpsID),
 		Group:           wire.Group,
-		Region:          firstLinkedMonitoringNonEmpty(wire.Region, defaults.Region, defaults.Country, "未确认"),
-		City:            firstLinkedMonitoringNonEmpty(wire.City, defaults.City, defaults.Datacenter, "未确认"),
-		Provider:        firstLinkedMonitoringNonEmpty(wire.Provider, defaults.ProviderName, "未关联服务商"),
+		Region:          region,
+		City:            city,
+		Provider:        provider,
 		LifecycleStatus: monitoringinstances.LifecyclePendingEnrollment,
 		Labels:          labels,
 		Note:            firstLinkedMonitoringNonEmpty(wire.Note, defaults.Note),
-	}, linkNote
+	}, wire.LinkNote
 }
 
 func firstLinkedMonitoringNonEmpty(values ...string) string {

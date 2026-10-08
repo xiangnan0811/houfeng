@@ -101,9 +101,10 @@ func (f *fakeSessions) CreateIfPasswordHash(_ context.Context, expectedHash stri
 	f.state.mu.Lock()
 	defer f.state.mu.Unlock()
 	u, ok := f.state.users[s.UserID]
-	if !ok || u.PasswordHash != expectedHash {
+	if !ok || u.PasswordHash != expectedHash || u.DisabledAt != nil {
 		return Session{}, ErrInvalidCredentials
 	}
+	s.ManagementCapabilities = u.ManagementCapabilities()
 	issuedAt := now().UTC().Truncate(time.Microsecond)
 	if u.PasswordChangedAt.After(issuedAt) {
 		issuedAt = u.PasswordChangedAt
@@ -121,6 +122,9 @@ func (f *fakeSessions) ChangePasswordIfHash(_ context.Context, userID, currentSe
 	u, ok := f.state.users[userID]
 	if !ok {
 		return ErrUserNotFound
+	}
+	if u.DisabledAt != nil {
+		return ErrSessionNotFound
 	}
 	if u.PasswordHash != expectedHash {
 		return ErrInvalidCredentials
@@ -164,6 +168,10 @@ func (f *fakeSessions) TouchWithUserLock(_ context.Context, sessionID string, no
 	if !ok {
 		return Session{}, ErrUserNotFound
 	}
+	if u.DisabledAt != nil {
+		delete(f.byID, sessionID)
+		return Session{}, ErrSessionExpired
+	}
 	checkedAt := now().UTC().Truncate(time.Microsecond)
 	if !s.ExpiresAt.After(checkedAt) || s.IssuedAt.Before(u.PasswordChangedAt) {
 		delete(f.byID, sessionID)
@@ -176,6 +184,7 @@ func (f *fakeSessions) TouchWithUserLock(_ context.Context, sessionID string, no
 	if u.PasswordChangedAt.After(baseline) {
 		baseline = u.PasswordChangedAt
 	}
+	s.ManagementCapabilities = u.ManagementCapabilities()
 	s.LastSeenAt = baseline
 	s.ExpiresAt = baseline.Add(ttl)
 	f.byID[sessionID] = s
@@ -192,6 +201,9 @@ func (f *fakeSessions) ValidateSession(_ context.Context, sessionID string, now 
 	u, ok := f.state.users[s.UserID]
 	if !ok {
 		return ErrUserNotFound
+	}
+	if u.DisabledAt != nil {
+		return ErrSessionExpired
 	}
 	checkedAt := now().UTC().Truncate(time.Microsecond)
 	if !s.ExpiresAt.After(checkedAt) || (!s.IssuedAt.IsZero() && s.IssuedAt.Before(u.PasswordChangedAt)) {
@@ -271,6 +283,36 @@ func TestServiceLoginSuccess(t *testing.T) {
 	}
 	if sess.IssuedAt.IsZero() || sess.ExpiresAt.IsZero() {
 		t.Fatalf("repository did not populate timestamps: %+v", sess)
+	}
+}
+func TestServiceLoginDisabledUserCannotCreateSessionAndExistingSessionIsRejected(t *testing.T) {
+	svc, users, sessions := newTestService(t)
+	user := mustSeed(t, users, "admin", "correct-horse-battery")
+	user.IsSupervisor = true
+	users.byID[user.UserID] = user
+
+	session, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", "")
+	if err != nil {
+		t.Fatalf("initial Login: %v", err)
+	}
+	if !session.ManagementCapabilities.Access {
+		t.Fatalf("management_capabilities = %+v, want access=true", session.ManagementCapabilities)
+	}
+
+	disabledAt := time.Date(2026, 4, 29, 12, 1, 0, 0, time.UTC)
+	user.DisabledAt = &disabledAt
+	users.byID[user.UserID] = user
+	if _, err := svc.Login(context.Background(), "admin", "correct-horse-battery", "", ""); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("disabled Login = %v, want ErrInvalidCredentials", err)
+	}
+	if _, err := svc.Touch(context.Background(), session.SessionID); !errors.Is(err, ErrSessionExpired) {
+		t.Fatalf("disabled Touch = %v, want ErrSessionExpired", err)
+	}
+	if _, ok := sessions.byID[session.SessionID]; ok {
+		t.Fatal("disabled session remained persisted")
+	}
+	if err := svc.ValidateSession(context.Background(), session.SessionID); !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("ValidateSession after disabled Touch = %v, want ErrSessionNotFound", err)
 	}
 }
 

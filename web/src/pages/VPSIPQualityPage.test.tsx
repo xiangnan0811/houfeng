@@ -200,11 +200,15 @@ describe('VPSIPQualityPage', () => {
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('正在采集最新 IP 质量'))
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('本次采集失败，仍展示上一份有效报告'))
-    expect(screen.getByRole('status')).toHaveTextContent('lookup timeout')
+    expect(screen.getByRole('status')).toHaveTextContent('检测请求超时，未能获取最新数据')
+    const details = screen.getByRole('status').querySelector('details')
+    expect(details).not.toBeNull()
+    expect(details).not.toHaveAttribute('open')
+    expect(details).toHaveTextContent('lookup timeout')
     expect(screen.getByLabelText('报告身份')).toHaveTextContent('192.0.2.1')
   })
 
-  it('shows why collection is unavailable in the empty state', async () => {
+  it('shows why collection is unavailable in the empty state and links to workbench with explicit vpsId', async () => {
     const fetchMock = routeFetch([
       { path: '/api/vps/vps_001/ip-quality', responses: [{ body: emptyReportBody }] },
       { path: '/api/vps/vps_001/ip-quality/collect', responses: [{ body: { enabled: true, available: false, unavailable_reason: 'no_monitoring_instance' } }] },
@@ -214,11 +218,12 @@ describe('VPSIPQualityPage', () => {
     renderPage()
 
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('该 VPS 尚未接入监控 agent'))
+    expect(within(screen.getByRole('status')).getByRole('link', { name: '前往监控工作台' })).toHaveAttribute('href', '/vps/vps_001?workbench=monitoring')
     expect(screen.getByRole('button', { name: '立即采集' })).toBeDisabled()
     expect(screen.queryByText('0.0.0.0')).not.toBeInTheDocument()
   })
 
-  it('shows the server reason after a rejected collection request', async () => {
+  it('shows the server reason after a rejected collection request and links to actual MI with valid returnVPS', async () => {
     const fetchMock = routeFetch([
       { path: '/api/vps/vps_001/ip-quality', responses: [{ body: ipQualityReportBody }] },
       {
@@ -237,7 +242,9 @@ describe('VPSIPQualityPage', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '立即采集' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '立即采集' }))
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('监控已暂停'))
+    expect(within(screen.getByRole('status')).getByRole('link', { name: '前往监控实例' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
     expect(screen.getByRole('button', { name: '立即采集' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: /恢复/ })).not.toBeInTheDocument()
   })
 
   it('loads a historical report detail when report_id is present', async () => {

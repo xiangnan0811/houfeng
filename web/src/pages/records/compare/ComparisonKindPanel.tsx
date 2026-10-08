@@ -1,5 +1,7 @@
 import { SegmentedControl } from '../../../components/atoms'
 import type { ComparisonEvaluateResponse } from '../../../lib/types'
+import { metricLabel } from '../evidence/evidencePresentation'
+import { comparisonEvidenceKindLabel } from './comparisonLabels'
 import {
   comparisonKindKey,
   comparisonSeriesMetrics,
@@ -15,10 +17,10 @@ type Props = {
 }
 
 export function ComparisonKindPanel({ comparison, activeKind, metric, onSelect }: Props) {
-  const items = comparison.available_kinds.map((key) => {
-    const label = comparisonKindKey(key)
-    return { value: label, label }
-  })
+  const items = comparison.available_kinds.map((key) => ({
+    value: comparisonKindKey(key),
+    label: comparisonEvidenceKindLabel(key.kind),
+  }))
   const fallback = items[0]
   if (!fallback) {
     return <p className="record-muted" role="status">没有兼容的证据类型可比较。</p>
@@ -42,7 +44,7 @@ export function ComparisonKindPanel({ comparison, activeKind, metric, onSelect }
       {isHostOrProbeKind(value) && fallbackMetric ? (
         <SegmentedControl
           label="比较指标"
-          items={metrics.map((item) => ({ value: item, label: item }))}
+          items={metrics.map((item) => ({ value: item, label: metricLabel(item) }))}
           value={selectedMetric ?? fallbackMetric}
           onChange={(next) => onSelect(value, next)}
         />

@@ -78,18 +78,21 @@ await createVPSSubscription(vpsId, input, subscriptionIdempotencyKeyRef.current)
 #### 2. Signatures
 
 - Frontend APIs: `getSubscriptionOverview()`、`getSubscriptionStatistics(window)`、`getSubscriptionSettings()`、`updateSubscriptionSettings(input)`、`refreshSubscriptionExchangeRates()`、`listSubscriptionBudgets(filter?)`、`createSubscriptionBudget(input)`、`patchSubscriptionBudget(input)`、`listSubscriptions(filter?)`。
-- Frontend types mirror center JSON snake_case: `monthly_price_base`、`yearly_price_base`、`base_currency`、`exchange_rate`、`exchange_rate_date`、`exchange_rate_stale`、`budget_status`、`next_reminder_at`。
+- Frontend types mirror center JSON snake_case: `monthly_price_base`、`yearly_price_base`、`base_currency`、`exchange_rate`、`exchange_rate_date`、`exchange_rate_status`、`budget_status`、`next_reminder_at`。汇率状态为 `identity|fresh|stale|missing`，不保留旧布尔字段。
 - Routes: `/subscriptions` 是完整工作台；`/vps/:id` 只展示单台成本卡；`/asset-decisions` 只展示成本信号；Dashboard 只展示高信号摘要。
 
 #### 3. Contracts
 
 - `/subscriptions` 初始加载 overview、statistics、budgets、settings、subscriptions、VPS 列表。局部请求失败必须显示局部错误，不得把失败当成真实空态。
-- 订阅列表的 derived cost 字段只读展示。创建/编辑订阅仍只提交账单事实，不提交 `monthly_price_base`、`budget_status`、`exchange_rate_stale` 或 `next_reminder_at`。
+- 订阅列表的 derived cost 字段只读展示。创建/编辑订阅仍只提交账单事实，不提交 `monthly_price_base`、`budget_status`、`exchange_rate_status` 或 `next_reminder_at`。
 - Settings 表单不显示 Fixer key 明文；空 key 输入在 UI 中默认表示不修改，显式清除需要单独确认或后续专用动作。
 - 预算 UI 可先支持创建和总览；如果新增编辑/禁用交互，必须使用 PATCH，并保持 omitted 和 `null` limit 语义。
 - VPS 成本卡只展示当前订阅证据：原币种价格、base 月/年成本、续费日、预算状态、提醒状态、汇率状态。订阅读取失败时显示未知/错误，不得标成真实缺订阅。
 - Asset Decisions 成本信号只能作为 VPS 决策证据：临近续费、超预算、缺订阅、取消/迁移但仍可能续费。主操作仍回到 VPS 详情或 VPS 决策 drawer。
 - Dashboard 只显示总成本、未来续费、预算风险、汇率异常等高信号入口；不得加入预算编辑、汇率设置、订阅明细表或完整图表。
+- 订阅摘要、Dashboard、成本饼图、排行与构成图统一按 `current_unknown_amount_count` 限定金额：存在未知时显示“已知金额小计（另有 N 项待核对）”，占比仅指已知金额；全部未知显示金额待核对，不显示零总额。真实零是已知金额，无订阅且无缺口可显示完整零。预算风险为零不证明金额完整。
+- `current_missing_rate_count` 与 `current_stale_rate_count` 分开展示；missing 的换算金额为 null，stale 的已有数值继续显示并明确过期，identity 不显示缺失或过期。
+- 汇率状态读取使用受保护 GET `/api/subscriptions/exchange-rates/status`；POST refresh 的 202 与 `{items}` 只代表受理，不再消费同步成功/失败数量。页面展示 queued/running/failed 及人工重试；有在途任务时，仅页面可见期间短轮询状态，隐藏/卸载停止并取消在途请求，成功后重读成本概览。设置页刷新沿用同一状态合同，不清除未保存配置或预算草稿。
 
 #### 4. Validation & Error Matrix
 
@@ -99,7 +102,7 @@ await createVPSSubscription(vpsId, input, subscriptionIdempotencyKeyRef.current)
 | settings failed | 汇率与提醒设置区显示错误，订阅明细不被清空 |
 | exchange refresh failed | 显示失败结果或错误，不泄露 provider secret |
 | budget list empty | 显示可创建预算的空态，不标记所有订阅超预算 |
-| subscription has stale exchange | 行内和摘要显示汇率异常，成本字段可为 stale/null |
+| subscription has stale exchange | 行内和摘要明确过期；已有换算数值继续显示，缺汇率则单独为 missing/null |
 | VPS scoped subscriptions failed | VPS 成本卡显示读取失败，不显示真实缺订阅 |
 | Dashboard subscription summary failed | Dashboard 降级为摘要不可用，完整操作仍在 `/subscriptions` |
 

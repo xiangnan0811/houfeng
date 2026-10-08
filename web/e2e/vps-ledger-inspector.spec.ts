@@ -30,7 +30,7 @@ const subscriptions = rows.slice(0, 7).map((row, index) => ({
   subscription_id: `sub_${index}`, vps_id: row.vps_id, price: 5 + index * 4, currency: 'USD',
   billing_cycle: 'monthly', billing_months: 1, billing_period_unit: 'month', billing_period_length: 1,
   monthly_price: 5 + index * 4, monthly_price_base: (5 + index * 4) * 7, yearly_price_base: (5 + index * 4) * 84,
-  base_currency: 'CNY', exchange_rate: 7, exchange_rate_date: calendarDate(-1), exchange_rate_stale: false,
+  base_currency: 'CNY', exchange_rate: 7, exchange_rate_date: calendarDate(-1), exchange_rate_status: 'fresh',
   budget_status: 'ok', next_reminder_at: null, started_at: '2026-01-01', renew_at: calendarDate(index * 12 + 2),
   auto_renew: true, auto_renew_cancelled: false, renewal_mode: 'auto', status: 'active', payment_method: 'card',
   display_name: `${row.display_name} 订阅`, cost_category: 'compute', labels: [], note: '',

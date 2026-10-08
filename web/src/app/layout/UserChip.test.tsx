@@ -3,7 +3,14 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 import { UserChip } from './UserChip'
 
-const user = { user_id: 'u1', username: 'admin', role: 'admin', display_name: '' }
+const user = {
+  user_id: 'u1',
+  username: 'admin',
+  role: 'admin',
+  display_name: '',
+  runtime_capabilities: { records: true, comparison: true, portability: true },
+  management_capabilities: { access: false },
+}
 
 function renderUserChip(onLogout = vi.fn(), onChangePassword = vi.fn()) {
   render(
@@ -135,6 +142,8 @@ describe('UserChip', () => {
       username: 'qa-env-cluster-admin-operator-2026@houfeng-test.internal',
       role: 'admin',
       display_name: 'QA 测试环境自动化运维管理员',
+      runtime_capabilities: { records: true, comparison: true, portability: true },
+      management_capabilities: { access: false },
     }
     render(
       <MemoryRouter>

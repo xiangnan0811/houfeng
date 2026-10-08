@@ -102,10 +102,10 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 			case when s.currency = $2 then 1::float8 else lr.rate::float8 end,
 			case when s.currency = $2 then current_date else lr.rate_date end,
 			case
-				when s.currency = $2 then false
-				when lr.rate is null then true
-				when lr.fetched_at < now() - ($3::integer * interval '1 hour') then true
-				else false
+				when s.currency = $2 then 'identity'
+				when lr.rate is null then 'missing'
+				when lr.fetched_at < now() - ($3::integer * interval '1 hour') then 'stale'
+				else 'fresh'
 			end,
 			s.renew_at,
 			nr.next_reminder_at,
@@ -141,6 +141,8 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 		var exchangeRate pgtype.Float8
 		var exchangeRateDate *time.Time
 		var renewAt *time.Time
+		var nextReminderAt *time.Time
+		var exchangeRateStatus string
 		if err := rows.Scan(
 			&record.SubscriptionID,
 			&record.VPSID,
@@ -158,9 +160,9 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 			&record.BaseCurrency,
 			&exchangeRate,
 			&exchangeRateDate,
-			&record.ExchangeRateStale,
+			&exchangeRateStatus,
 			&renewAt,
-			&record.NextReminderAt,
+			&nextReminderAt,
 			&record.Status,
 			&record.PaymentMethod,
 			&record.Country,
@@ -176,7 +178,9 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 		record.YearlyPriceBase = nullableFloat(yearlyPriceBase)
 		record.ExchangeRate = nullableFloat(exchangeRate)
 		record.ExchangeRateDate = subscriptions.DateFromTimePtr(exchangeRateDate)
+		record.ExchangeRateStatus = subscriptioncosts.ExchangeRateStatus(exchangeRateStatus)
 		record.RenewAt = subscriptions.DateFromTimePtr(renewAt)
+		record.NextReminderAt = nextReminderAt
 		records = append(records, record)
 	}
 	if err := rows.Err(); err != nil {
@@ -823,30 +827,111 @@ func (r *PostgresSubscriptionCostRepository) UpsertMonthlyBudgets(ctx context.Co
 	return records, nil
 }
 
-func (r *PostgresSubscriptionCostRepository) ListActiveCurrencies(ctx context.Context) ([]string, error) {
+func (r *PostgresSubscriptionCostRepository) ListActiveExchangeRatePairs(ctx context.Context, settings centersettings.SubscriptionCostSettings) ([]subscriptioncosts.ExchangeRatePair, error) {
 	rows, err := r.db.Query(ctx, `
-		select distinct currency
-		from subscriptions
-		join vps_assets v on v.vps_id = subscriptions.vps_id
-		where status = 'active'
-		  and v.lifecycle_status = 'active'
-		order by currency asc`)
+		with active_currencies as (
+			select distinct s.currency
+			from subscriptions s
+			join vps_assets v on v.vps_id = s.vps_id
+			where s.status = 'active'
+			  and v.lifecycle_status = 'active'
+		)
+		select
+			$1::text,
+			$2::text,
+			ac.currency,
+			latest.rate_id,
+			latest.rate::float8,
+			latest.rate_date,
+			latest.fetched_at,
+			latest.error_summary,
+			latest.created_at,
+			latest.updated_at,
+			case
+				when ac.currency = $2 then 'identity'
+				when latest.rate is null then 'missing'
+				when latest.fetched_at < now() - ($3::integer * interval '1 hour') then 'stale'
+				else 'fresh'
+			end
+		from active_currencies ac
+		left join lateral (
+			select
+				er.rate_id,
+				er.rate,
+				er.rate_date,
+				er.fetched_at,
+				er.error_summary,
+				er.created_at,
+				er.updated_at
+			from subscription_exchange_rates er
+			where er.provider = $1
+			  and er.base_currency = $2
+			  and er.quote_currency = ac.currency
+			order by er.fetched_at desc, er.rate_date desc
+			limit 1
+		) latest on true
+		order by ac.currency asc`,
+		settings.ExchangeRateProvider,
+		settings.BaseCurrency,
+		settings.ExchangeRateStaleAfterHours,
+	)
 	if err != nil {
-		return nil, fmt.Errorf("query active subscription currencies: %w", err)
+		return nil, fmt.Errorf("query active exchange rate pairs: %w", err)
 	}
 	defer rows.Close()
-	currencies := make([]string, 0)
+
+	pairs := make([]subscriptioncosts.ExchangeRatePair, 0)
 	for rows.Next() {
-		var currency string
-		if err := rows.Scan(&currency); err != nil {
-			return nil, fmt.Errorf("scan active subscription currency: %w", err)
+		var pair subscriptioncosts.ExchangeRatePair
+		var rateID pgtype.Text
+		var rate pgtype.Float8
+		var rateDate *time.Time
+		var fetchedAt *time.Time
+		var errorSummary pgtype.Text
+		var createdAt *time.Time
+		var updatedAt *time.Time
+		var rateStatus string
+		if err := rows.Scan(
+			&pair.Provider,
+			&pair.BaseCurrency,
+			&pair.QuoteCurrency,
+			&rateID,
+			&rate,
+			&rateDate,
+			&fetchedAt,
+			&errorSummary,
+			&createdAt,
+			&updatedAt,
+			&rateStatus,
+		); err != nil {
+			return nil, fmt.Errorf("scan active exchange rate pair: %w", err)
 		}
-		currencies = append(currencies, currency)
+		pair.RateStatus = subscriptioncosts.ExchangeRateStatus(rateStatus)
+		if rateID.Valid && rate.Valid && rateDate != nil && fetchedAt != nil {
+			record := &subscriptioncosts.ExchangeRateRecord{
+				RateID:        rateID.String,
+				Provider:      pair.Provider,
+				BaseCurrency:  pair.BaseCurrency,
+				QuoteCurrency: pair.QuoteCurrency,
+				Rate:          rate.Float64,
+				RateDate:      subscriptions.NewDate(*rateDate),
+				FetchedAt:     fetchedAt.UTC(),
+				ErrorSummary:  errorSummary.String,
+			}
+			if createdAt != nil {
+				record.CreatedAt = createdAt.UTC()
+			}
+			if updatedAt != nil {
+				record.UpdatedAt = updatedAt.UTC()
+			}
+			pair.LatestRate = record
+		}
+		pairs = append(pairs, pair)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate active subscription currencies: %w", err)
+		return nil, fmt.Errorf("iterate active exchange rate pairs: %w", err)
 	}
-	return currencies, nil
+	return pairs, nil
 }
 
 func (r *PostgresSubscriptionCostRepository) UpsertExchangeRate(ctx context.Context, input subscriptioncosts.ExchangeRateUpsert) (subscriptioncosts.ExchangeRateRecord, error) {
@@ -878,7 +963,6 @@ func (r *PostgresSubscriptionCostRepository) UpsertExchangeRate(ctx context.Cont
 			rate::float8,
 			rate_date,
 			fetched_at,
-			false,
 			error_summary,
 			created_at,
 			updated_at`,
@@ -1133,7 +1217,6 @@ func scanSubscriptionExchangeRate(row subscriptionExchangeRateScanner) (subscrip
 		&record.Rate,
 		&rateDate,
 		&record.FetchedAt,
-		&record.Stale,
 		&record.ErrorSummary,
 		&record.CreatedAt,
 		&record.UpdatedAt,

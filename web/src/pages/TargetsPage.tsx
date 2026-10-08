@@ -37,13 +37,19 @@ import {
   countArchivedTargets,
   countCoverageGapTargets,
   countPausedTargets,
+  countUnobservedTargets,
+  combineCurrentAndRetiredTargets,
   describeError,
   distinctSorted,
   initialCreateForm,
   parseMultiValue,
+  isAbnormalTarget,
   isCoverageGapTarget,
+  isUnobservedTarget,
   targetAttentionBadges,
-  targetIssueSummary,
+  targetCoverageNotices,
+  targetCoverageSummary,
+  targetTypePresentation,
 } from './targets/targetHelpers'
 import type {
   CreateTargetFormState,
@@ -55,7 +61,22 @@ const TARGET_LIST_COLUMN_WIDTHS = [40, 180, 72, 168, 150, 120, 140]
 const TARGET_LIST_HEADERS = ['', '目标', '类型', 'Host', '健康', '资产上下文', '近 24h 延迟'] as const
 const TAB_OWNED_RUN_STATUS = new Set(['暂停'])
 
-type TargetQuickView = 'all' | 'abnormal' | 'paused' | 'archived' | 'coverage'
+type TargetQuickView = 'all' | 'abnormal' | 'unobserved' | 'paused' | 'archived' | 'coverage'
+
+function TargetTypeCell({ value }: { value: string }) {
+  const presented = targetTypePresentation(value)
+  return (
+    <span className="probe-kind">
+      {presented.label}
+      {presented.raw ? (
+        <details>
+          <summary>诊断信息</summary>
+          <span>{presented.raw}</span>
+        </details>
+      ) : null}
+    </span>
+  )
+}
 
 export function TargetsPage() {
   const navigate = useNavigate()
@@ -87,10 +108,10 @@ export function TargetsPage() {
 
   useEffect(() => {
     let cancelled = false
-    listTargets('all')
-      .then((result) => {
+    Promise.all([listTargets('current'), listTargets('retired')])
+      .then(([currentTargets, retiredTargets]) => {
         if (cancelled) return
-        setTargets(result)
+        setTargets(combineCurrentAndRetiredTargets(currentTargets, retiredTargets))
         setLoading(false)
       })
       .catch((value: unknown) => {
@@ -206,6 +227,7 @@ export function TargetsPage() {
       labels: parseMultiValue(searchParams.get('labels')),
       executionLabels: parseMultiValue(searchParams.get('execution_labels')),
       abnormal: searchParams.get('abnormal') === '1',
+      unobserved: searchParams.get('view') === 'unobserved',
       coverageGap: searchParams.get('coverage_gap') === '1',
     }),
     [searchParams],
@@ -223,7 +245,7 @@ export function TargetsPage() {
   const filteredTargets = useMemo(() => {
     return targets.filter((target) => {
       if (filterState.lifecycle && target.lifecycle_status !== filterState.lifecycle) return false
-      if (target.lifecycle_status === 'retired' && (filterState.runStatus || filterState.abnormal || filterState.coverageGap)) return false
+      if (target.lifecycle_status === 'retired' && (filterState.runStatus || filterState.abnormal || filterState.unobserved || filterState.coverageGap)) return false
       if (filterState.group && target.group !== filterState.group) return false
       if (filterState.type && target.target_type !== filterState.type) return false
       if (filterState.runStatus && target.run_status !== filterState.runStatus) return false
@@ -238,13 +260,15 @@ export function TargetsPage() {
         )
         if (!hasAll) return false
       }
-      if (filterState.abnormal && target.current_health_status === '正常') return false
+      if (filterState.abnormal && !isAbnormalTarget(target)) return false
+      if (filterState.unobserved && !isUnobservedTarget(target)) return false
       if (filterState.coverageGap && !isCoverageGapTarget(target)) return false
       return true
     })
   }, [targets, filterState])
 
   const abnormalTargetCount = useMemo(() => countAbnormalTargets(targets), [targets])
+  const unobservedTargetCount = useMemo(() => countUnobservedTargets(targets), [targets])
   const pausedTargetCount = useMemo(() => countPausedTargets(targets), [targets])
   const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
   const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
@@ -264,15 +288,17 @@ export function TargetsPage() {
     filterState.type || filterState.health || filterState.runStatus || filterState.lifecycle || filterState.group,
   )
   const navigationLocked = pendingBatchAction !== null || batchSubmitting
-  const quickView: TargetQuickView = filterState.coverageGap
-    ? 'coverage'
-    : filterState.abnormal
-      ? 'abnormal'
-      : filterState.runStatus === '暂停'
-        ? 'paused'
-        : filterState.lifecycle === 'retired'
-          ? 'archived'
-          : 'all'
+  const quickView: TargetQuickView = filterState.unobserved
+    ? 'unobserved'
+    : filterState.coverageGap
+      ? 'coverage'
+      : filterState.abnormal
+        ? 'abnormal'
+        : filterState.runStatus === '暂停'
+          ? 'paused'
+          : filterState.lifecycle === 'retired'
+            ? 'archived'
+            : 'all'
 
   async function runBatchOnIds(action: TargetRuntimeAction, ids: string[]) {
     setBatchSubmitting(true)
@@ -305,10 +331,13 @@ export function TargetsPage() {
     setFrozenBatchIds(null)
     setSelectedIds([])
     try {
-      const updated = await listTargets('all')
-      setTargets(updated)
+      const [currentTargets, retiredTargets] = await Promise.all([
+        listTargets('current'),
+        listTargets('retired'),
+      ])
+      setTargets(combineCurrentAndRetiredTargets(currentTargets, retiredTargets))
     } catch {
-      /* keep current rows */
+      /* keep current rows; a failed collection is not an empty list */
     }
   }
 
@@ -348,12 +377,18 @@ export function TargetsPage() {
         const next = new URLSearchParams(current)
         const tabOwnedRunStatus = TAB_OWNED_RUN_STATUS.has(next.get('run_status') ?? '')
         next.delete('lifecycle_status')
+        next.delete('view')
         if (view === 'all') {
           next.delete('abnormal')
           next.delete('coverage_gap')
           if (tabOwnedRunStatus) next.delete('run_status')
         } else if (view === 'abnormal') {
           next.set('abnormal', '1')
+          next.delete('coverage_gap')
+          if (tabOwnedRunStatus) next.delete('run_status')
+        } else if (view === 'unobserved') {
+          next.set('view', 'unobserved')
+          next.delete('abnormal')
           next.delete('coverage_gap')
           if (tabOwnedRunStatus) next.delete('run_status')
         } else if (view === 'paused') {
@@ -446,7 +481,7 @@ export function TargetsPage() {
           kind="empty"
           surface="empty"
           title="候风尚未配置任何观测目标"
-          description="创建第一个目标后，可以继续为它配置 ProbeItem。"
+          description="创建第一个目标后，可以继续为它配置探测项。"
           action={
             <button type="button" className="btn md primary" onClick={() => openCreateDrawer()}>
               新建第一个目标
@@ -468,6 +503,7 @@ export function TargetsPage() {
                 items={[
                   { value: 'all', label: '全部', count: targets.length },
                   { value: 'abnormal', label: '异常', count: abnormalTargetCount },
+                  { value: 'unobserved', label: '尚无观测', count: unobservedTargetCount },
                   { value: 'paused', label: '暂停', count: pausedTargetCount },
                   { value: 'archived', label: '退役', count: archivedTargetCount },
                   { value: 'coverage', label: '覆盖缺口', count: coverageGapTargetCount },
@@ -558,7 +594,8 @@ export function TargetsPage() {
                     const assetContext = targetAssetContexts.get(target.target_id)
                     const primaryContext = assetContextPrimarySummary(assetContext)
                     const badges = targetAttentionBadges(target)
-                    const summary = targetIssueSummary(target)
+                    const coverageNotes = targetCoverageNotices(target)
+                    const issue = target.lifecycle_status === 'retired' ? '' : target.current_primary_issue_summary.trim()
                     return (
                       <Fragment key={target.target_id}>
                         {/* a11y-allow-nonsemantic-click: keyboard-complete-row */}
@@ -601,7 +638,7 @@ export function TargetsPage() {
                             </div>
                           </div>
                         </td>
-                        <td><span className="probe-kind">{target.target_type}</span></td>
+                        <td><TargetTypeCell value={target.target_type} /></td>
                         <td className="mono">
                           {target.group ? <span className="targets-table__group">{target.group} · </span> : null}
                           <Hostname>{hostDisplay}</Hostname>
@@ -624,8 +661,12 @@ export function TargetsPage() {
                             ) : (
                               <span className="targets-table__health-quiet">—</span>
                             )}
-                            {summary && !badges.some((badge) => badge.label === summary) ? (
-                              <span className="targets-table__issue-summary" title={summary}>{summary}</span>
+                            <span className="targets-table__issue-summary">{targetCoverageSummary(target)}</span>
+                            {coverageNotes.map((notice) => (
+                              <span key={notice.key} className="targets-table__issue-summary">{notice.title}</span>
+                            ))}
+                            {issue ? (
+                              <span className="targets-table__issue-summary" title={issue}>{issue}</span>
                             ) : null}
                           </div>
                         </td>
