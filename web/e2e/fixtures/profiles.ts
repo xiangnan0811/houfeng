@@ -65,6 +65,13 @@ export function authenticatedUser(
   return { ...AUTHENTICATED_USER, runtime_capabilities }
 }
 
+const RECORD_ACCESS_GROUPS_MINE = {
+  [apiRouteKey('GET', '/api/record-access-groups/mine')]: {
+    status: 200,
+    body: { items: [] },
+  },
+} satisfies ApiFixtureProfile
+
 const RECORD_NOTIFICATION = {
   notification_id: `rnt_${'a'.repeat(64)}`,
   record_id: 'rec_e2e001',
@@ -340,6 +347,7 @@ export function authenticatedProfile(
             status: 200,
             body: { unread_count: 1 },
           },
+          ...RECORD_ACCESS_GROUPS_MINE,
         }
       : {}),
     ...routes,
