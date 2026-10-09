@@ -45,6 +45,18 @@ export function VPSSubscriptionForm({
     <form id={formId} className="vps-form" onSubmit={onSubmit} aria-busy={submitting}>
       <p className="vps-context">{detail.display_name}</p>
 
+      <VPSFormSection title="名称">
+        <div className="vps-wide">
+          {/* 未改过时沿用 VPS 名称；清空表示不命名，不会被再次填回。 */}
+          <Input
+            label="订阅名称"
+            value={draft.displayName ?? detail.display_name}
+            onChange={(event) => update('displayName', event.target.value)}
+          />
+        </div>
+        <p className="vps-form-hint">默认使用 VPS 名称，可改为套餐或账单名，例如“东京 2C4G 年付”。</p>
+      </VPSFormSection>
+
       <VPSFormSection title="金额">
         <div className="vps-inline">
           <Input

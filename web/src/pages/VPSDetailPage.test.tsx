@@ -559,6 +559,41 @@ describe('VPSDetailPage gate', () => {
     expect(screen.getByRole('status')).toHaveClass('asset-operation-feedback--floating')
   })
 
+  it('names a new subscription after the VPS unless the user renames or clears it', async () => {
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    const detail = detailFixture()
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detail)
+    const create = vi.spyOn(api, 'createVPSSubscription').mockResolvedValue(subscriptionFixture())
+    const openDialog = async () => {
+      fireEvent.click(await screen.findByRole('button', { name: '管理' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
+      return screen.findByRole('dialog', { name: '新增订阅事实' })
+    }
+    const submit = async (dialog: HTMLElement) => {
+      fireEvent.change(within(dialog).getByRole('spinbutton', { name: '价格' }), { target: { value: '9' } })
+      fireEvent.click(within(dialog).getByRole('button', { name: '新增订阅' }))
+      await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    }
+
+    renderDetail()
+    let dialog = await openDialog()
+    expect(within(dialog).getByRole('textbox', { name: '订阅名称' })).toHaveValue(detail.display_name)
+    await submit(dialog)
+    expect(create).toHaveBeenLastCalledWith('vps_001', expect.objectContaining({ display_name: detail.display_name }), expect.any(String))
+
+    dialog = await openDialog()
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '订阅名称' }), { target: { value: '  东京 2C4G 年付 ' } })
+    await submit(dialog)
+    expect(create).toHaveBeenLastCalledWith('vps_001', expect.objectContaining({ display_name: '东京 2C4G 年付' }), expect.any(String))
+
+    dialog = await openDialog()
+    fireEvent.change(within(dialog).getByRole('textbox', { name: '订阅名称' }), { target: { value: '' } })
+    // 清空后保持为空，不被 VPS 名称填回。
+    expect(within(dialog).getByRole('textbox', { name: '订阅名称' })).toHaveValue('')
+    await submit(dialog)
+    expect(create).toHaveBeenLastCalledWith('vps_001', expect.objectContaining({ display_name: '' }), expect.any(String))
+  })
+
   it('fills the start date with the local today only when the user asks', async () => {
     vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
     vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture())

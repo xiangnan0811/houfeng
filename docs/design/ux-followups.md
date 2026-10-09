@@ -13,23 +13,6 @@ v1.19.0 体验走查中，有一部分修复已随 v1.20.0（PR #586）发布，
 
 ## 需先改合同的事项（方案已定）
 
-### C1 VPS 范围新增订阅支持名称
-
-- 状态：待实施（采用方案 A）
-- 现象：从 VPS 详情新增的订阅显示为“未命名订阅”。
-- 依据：
-  - `POST /api/vps/{vps_id}/subscriptions` 只接受 `internal/center/http/handlers/vps_subscription_create_fields.json`
-    中的 13 个账单字段，并且拒绝未知字段；
-  - 幂等摘要覆盖规范化后的完整 `CreateInput`；
-  - 字段清单、Go DTO 与 TypeScript 类型由契约测试保证三方一致（`subscriptions.md:304-393`）。
-- 方案：
-  - 请求增加可选的 `display_name`（字符串，裁剪空白后可为空）；
-  - 同步字段清单、`vpsSubscriptionCreateRequest`、`toCreateInput`、TypeScript DTO 与契约测试；
-  - 名称进入幂等摘要：同一个 key 换名称返回 409 `idempotency_key_reused`；
-  - 前端表单增加“名称”，默认预填 VPS 名称，用户可修改。
-- 同步：`subscriptions.md` 幂等与 VPS 范围创建场景、`subscriptions-web.md`。
-- 验收：Go 单测、契约正反用例、Postgres 集成测试（同名重放 200，换名 409）、前端单测、e2e。
-
 ### C2 移动端监控筛选折叠
 
 - 状态：待实施

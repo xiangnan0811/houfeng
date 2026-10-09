@@ -782,7 +782,7 @@ export function VPSOverviewManagementActions({
     setMutationError(null)
     let input
     try {
-      input = buildSubscriptionInput(subscriptionDraft)
+      input = buildSubscriptionInput(subscriptionDraft, detail.display_name)
     } catch (error: unknown) {
       setMutationError(describeManagementError(error, '订阅输入无效'))
       return

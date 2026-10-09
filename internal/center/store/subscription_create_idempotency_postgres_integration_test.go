@@ -89,6 +89,54 @@ func TestCreateSubscriptionIdempotentReplayAfterLostResponseKeepsOneRow(t *testi
 	}
 }
 
+func TestCreateSubscriptionIdempotentDisplayNameIsPartOfTheRequest(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	pool := openTemporarySubscriptionIdempotencyPostgresSchema(t, ctx)
+	vpsRepo := NewPostgresVPSAssetRepository(pool)
+	subRepo := NewPostgresSubscriptionRepository(pool)
+
+	vps, err := vpsRepo.CreateVPSAsset(ctx, vpsassets.CreateInput{
+		DisplayName:     "Named Create",
+		LifecycleStatus: vpsassets.LifecycleActive,
+		UsageStatus:     vpsassets.UsageInUse,
+	})
+	if err != nil {
+		t.Fatalf("CreateVPSAsset error type = %T", err)
+	}
+	named := func(name string) subscriptions.CreateInput {
+		return subscriptions.CreateInput{VPSID: vps.VPSID, Price: 12, Currency: "USD", BillingMonths: 1, DisplayName: name}
+	}
+	const key = "named-sub-001"
+
+	first, _, err := subRepo.CreateSubscriptionIdempotent(ctx, named("东京主机"), key)
+	if err != nil {
+		t.Fatalf("first CreateSubscriptionIdempotent error type = %T", err)
+	}
+	if first.DisplayName != "东京主机" {
+		t.Fatalf("stored display name matches = %t", first.DisplayName == "东京主机")
+	}
+	// 只差首尾空白时 normalize 后是同一份请求，按重放返回原记录。
+	replay, replayed, err := subRepo.CreateSubscriptionIdempotent(ctx, named("  东京主机 "), key)
+	if err != nil || !replayed || replay.SubscriptionID != first.SubscriptionID {
+		t.Fatalf("whitespace replay err/replayed/same id = %T/%t/%t", err, replayed, replay.SubscriptionID == first.SubscriptionID)
+	}
+	if _, _, err := subRepo.CreateSubscriptionIdempotent(ctx, named("大阪主机"), key); !errors.Is(err, subscriptions.ErrIdempotencyKeyReused) {
+		t.Fatalf("renamed replay sentinel/error type = %t/%T", errors.Is(err, subscriptions.ErrIdempotencyKeyReused), err)
+	}
+
+	var count int
+	var storedName string
+	if err := pool.QueryRow(ctx, `select count(*), max(display_name) from subscriptions where vps_id = $1`, vps.VPSID).Scan(&count, &storedName); err != nil {
+		t.Fatalf("count subscriptions error type = %T", err)
+	}
+	if count != 1 || storedName != "东京主机" {
+		t.Fatalf("one row/name matches = %t/%t", count == 1, storedName == "东京主机")
+	}
+}
+
 func openTemporarySubscriptionIdempotencyPostgresSchema(t *testing.T, ctx context.Context) *pgxpool.Pool {
 	t.Helper()
 

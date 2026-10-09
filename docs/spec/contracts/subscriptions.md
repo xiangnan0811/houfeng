@@ -48,7 +48,7 @@
 
 #### 2. Signatures
 
-- HTTP: `POST /api/subscriptions` 与 `POST /api/vps/{vps_id}/subscriptions` 均要求 header `Idempotency-Key: <8..128 characters>`。collection body 是完整 `CreateInput`；scoped body 是账单事实 DTO `vpsSubscriptionCreateRequest`，拒绝未知字段。
+- HTTP: `POST /api/subscriptions` 与 `POST /api/vps/{vps_id}/subscriptions` 均要求 header `Idempotency-Key: <8..128 characters>`。collection body 是完整 `CreateInput`；scoped body 是账单事实 DTO `vpsSubscriptionCreateRequest`（含可选的订阅名称 `display_name`），拒绝未知字段。
 - Store: `CreateSubscriptionIdempotent(ctx, input, idempotencyKey) (record, replayed, error)`。
 - DB: `subscription_create_idempotency(idempotency_key text primary key, request_digest text, subscription_id text references subscriptions on delete cascade, created_at timestamptz)`。
 
@@ -84,7 +84,7 @@
 
 - Domain unit: key 长度/字符边界；normalize 后 digest 稳定；任一业务字段变化都会改变 digest。
 - Handler: 真实周期字段可解码；缺 key 400；replay 200；reused key 409 且 code 稳定。
-- PostgreSQL integration: 模拟丢失 201 后 replay，断言 subscription 与 receipt 各一行；不同 digest 冲突不写入。
+- PostgreSQL integration（`scripts/test-business-postgres.sh` 锚点）: 模拟丢失 201 后 replay，断言 subscription 与 receipt 各一行；不同 digest 冲突不写入；名称落库，仅首尾空白不同按重放返回，换名称返回 `ErrIdempotencyKeyReused` 且不新增行。
 - Migration/ACL: table、FK/check/index 存在；APP role 只有 `select` / `insert`。
 
 #### 7. Wrong vs Correct
@@ -317,7 +317,7 @@ message := sensitiveProviderErrorPattern.ReplaceAllString(err.Error(), "$1=[reda
   - `auto_renew_cancelled: boolean`
   - `payment_method: string`
   - `note: string`
-- Optional/non-null fields: `billing_period_unit: string`、`billing_period_length: number`、`renewal_mode: string`。
+- Optional/non-null fields: `billing_period_unit: string`、`billing_period_length: number`、`renewal_mode: string`、`display_name: string`（订阅名称，normalize 时裁剪空白，空串表示不命名；与其他业务字段一样进入幂等 digest，同一 key 换名称返回 409 `idempotency_key_reused`）。
 - Optional/nullable date fields: `started_at: date | null`、`renew_at: date | null`。
 
 ### 3. Contracts
@@ -349,7 +349,8 @@ message := sensitiveProviderErrorPattern.ReplaceAllString(err.Error(), "$1=[reda
 | `price: 0`、两个 boolean 为 `false` | 算已提供，原值进入 domain input |
 | `payment_method: ""`、`note: ""` | 算已提供；现有 normalize 可 trim，但 presence 校验不得拒绝 |
 | required 字段已提供但业务值非法 | 由现有 `NormalizeCreateInput` / `ValidateCreateInput` 返回 `400 invalid input` |
-| body 包含 collection-only 或未知字段 | `400 invalid json`，保持 strict decode |
+| body 包含 collection-only 或未知字段 | `400 invalid json`，保持 strict decode；`display_name` 属于 scoped DTO，不再是 collection-only |
+| 同一 `Idempotency-Key` 仅 `display_name` 不同 | `409 idempotency_key_reused`，不新增行 |
 | exported DTO field 缺少/使用空 JSON 名称 | contract parser 失败；不得静默从 manifest 比较中省略该 wire field |
 | unknown named pointer 的底层元素恰为受支持 date/scalar | Go mirror 在解引用前失败；不得按 element 猜测合法 nullable 字段 |
 | anonymous embedded field 未精确标记 `json:"-"` | Go 与 TS mirror 都失败；不得静默省略 encoding/json 可见的 promoted wire surface |
@@ -381,7 +382,7 @@ message := sensitiveProviderErrorPattern.ReplaceAllString(err.Error(), "$1=[reda
 ### 6. Tests Required
 
 - Real-handler table tests：逐个删除八个 required key，再逐个发送 null；断言 HTTP 400 和 repository 调用数为 0。
-- Real-handler table tests：三个 optional-non-null 字段逐个 null 均 400；两种 nullable date 的 missing/null 均成功且映射 nil。
+- Real-handler table tests：四个 optional-non-null 字段逐个 null 均 400；两种 nullable date 的 missing/null 均成功且映射 nil。
 - Mapping test：完整 wrapper request 的每个字段都精确进入 `CreateInput`，防止新增/重排字段漏映射。
 - Required-tag enforcement test：从 struct tag 枚举 required 字段，证明每个 tagged field 的 `.Set=false` 都被 runtime boundary 拒绝；只设置 required fields 时 optional fields 不会被误判 required。
 - Contract tests：manifest、Go request、TypeScript DTO 的 name/type/required/nullable 完全一致，并有 unknown named Go DTO type、TypeScript union、requiredness 与 date nullability drift negative cases。

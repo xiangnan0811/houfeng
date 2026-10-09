@@ -432,6 +432,7 @@ func TestVPSSubscriptionsCreateRejectsNullOptionalNonNullableFields(t *testing.T
 		"billing_period_unit",
 		"billing_period_length",
 		"renewal_mode",
+		"display_name",
 	}
 
 	for _, field := range optionalNonNullableFields {
@@ -585,6 +586,56 @@ func TestVPSSubscriptionsCreatesBillingFactWithoutUserStatus(t *testing.T) {
 	}
 	if body.SubscriptionID != "sub_001" || body.VPSID != "vps_001" {
 		t.Fatalf("body = %#v, want created scoped subscription", body)
+	}
+}
+
+func TestVPSSubscriptionsCreateCarriesTrimmedDisplayName(t *testing.T) {
+	repo := &fakeSubscriptionRepository{createSubscriptionResult: subscriptions.Record{SubscriptionID: "sub_001", VPSID: "vps_001"}}
+	handler := handlers.VPSSubscriptions(repo, nil)
+	payload := validVPSSubscriptionCreatePayload()
+	payload["display_name"] = "  东京主机月付  "
+	req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
+	req.Header.Set("Idempotency-Key", "named-sub-vps-001")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusCreated, recorder.Body.String())
+	}
+	if repo.createSubscriptionInput.DisplayName != "东京主机月付" {
+		t.Fatalf("create display name = %q, want trimmed name", repo.createSubscriptionInput.DisplayName)
+	}
+}
+
+func TestVPSSubscriptionsCreateRejectsSameKeyWithDifferentDisplayName(t *testing.T) {
+	repo := &fakeSubscriptionRepository{createSubscriptionResult: subscriptions.Record{SubscriptionID: "sub_001", VPSID: "vps_001"}}
+	handler := handlers.VPSSubscriptions(repo, nil)
+	send := func(name string) *httptest.ResponseRecorder {
+		t.Helper()
+		payload := validVPSSubscriptionCreatePayload()
+		payload["display_name"] = name
+		req := httptest.NewRequest(http.MethodPost, "/api/vps/vps_001/subscriptions", strings.NewReader(marshalVPSSubscriptionCreatePayload(t, payload)))
+		req.Header.Set("Idempotency-Key", "rename-sub-001")
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	if first := send("东京主机"); first.Code != http.StatusCreated {
+		t.Fatalf("first status = %d, want %d; body=%s", first.Code, http.StatusCreated, first.Body.String())
+	}
+	// 名称是业务输入的一部分：同一个 key 换名称必须冲突，不能静默返回旧名称的订阅。
+	second := send("大阪主机")
+	if second.Code != http.StatusConflict {
+		t.Fatalf("renamed replay status = %d, want %d; body=%s", second.Code, http.StatusConflict, second.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(second.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if body["code"] != "idempotency_key_reused" {
+		t.Fatalf("code = %q, want idempotency_key_reused; body=%#v", body["code"], body)
 	}
 }
 

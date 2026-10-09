@@ -25,6 +25,7 @@ type vpsSubscriptionCreateRequest struct {
 	RenewalMode         subscriptions.OptionalString `json:"renewal_mode"`
 	PaymentMethod       subscriptions.OptionalString `json:"payment_method" required:"true"`
 	Note                subscriptions.OptionalString `json:"note" required:"true"`
+	DisplayName         subscriptions.OptionalString `json:"display_name"`
 }
 
 func (request vpsSubscriptionCreateRequest) toCreateInput(vpsID string) (subscriptions.CreateInput, bool) {
@@ -55,6 +56,7 @@ func (request vpsSubscriptionCreateRequest) toCreateInput(vpsID string) (subscri
 		Status:              subscriptions.DefaultStatus,
 		PaymentMethod:       request.PaymentMethod.Value,
 		Note:                request.Note.Value,
+		DisplayName:         request.DisplayName.Value,
 	}, true
 }
 
