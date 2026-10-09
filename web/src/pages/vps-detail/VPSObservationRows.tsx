@@ -40,6 +40,7 @@ const TONE_TO_BADGE: Record<string, BadgeTone> = {
 }
 
 // 窄屏键值堆叠时，没有内容的单元不能只剩一个标签占行；桌面表格仍保留该列以维持对齐。
+// 隐藏的单元会离开无障碍树，所以表头与单元都写固定的 aria-colindex，剩余单元不会被读成前一列。
 function cellClass(base: string, hasContent: boolean): string {
   return hasContent ? base : `${base} vps-observation__cell--empty`
 }
@@ -58,16 +59,17 @@ export function VPSObservationRows({
     <div
       className={['vps-observation', multiAction ? 'vps-observation--multi-action' : ''].filter(Boolean).join(' ')}
       role="table"
+      aria-colcount={5}
       {...(labelledBy ? { 'aria-labelledby': labelledBy } : ariaLabel ? { 'aria-label': ariaLabel } : {})}
     >
 
 
       <div className="vps-observation__head vps-observation__cols" role="row">
-        <span role="columnheader">项目</span>
-        <span role="columnheader">主要结论</span>
-        <span role="columnheader">说明</span>
-        <span role="columnheader">数据时间</span>
-        <span role="columnheader">操作</span>
+        <span role="columnheader" aria-colindex={1}>项目</span>
+        <span role="columnheader" aria-colindex={2}>主要结论</span>
+        <span role="columnheader" aria-colindex={3}>说明</span>
+        <span role="columnheader" aria-colindex={4}>数据时间</span>
+        <span role="columnheader" aria-colindex={5}>操作</span>
       </div>
       {rows.map((row) => {
         const sourceLabel = row.sourceLabel || row.project
@@ -101,10 +103,10 @@ export function VPSObservationRows({
             aria-label={row.ariaLabel || row.project}
           >
             <div className="vps-observation__row vps-observation__cols" role="row">
-              <div className="vps-observation__project" role="cell" data-label="项目">
+              <div className="vps-observation__project" role="cell" aria-colindex={1} data-label="项目">
                 <span className="vps-observation__slot">{row.project}</span>
               </div>
-              <div className="vps-observation__conclusion" role="cell" data-label="主要结论">
+              <div className="vps-observation__conclusion" role="cell" aria-colindex={2} data-label="主要结论">
                 <span className="vps-observation__slot">
                   {conclusion ? (
                     <Badge variant="state" tone={conclusionBadgeTone}>{conclusion}</Badge>
@@ -114,6 +116,7 @@ export function VPSObservationRows({
               <div
                 className={cellClass('vps-observation__description vps-overview-summary__detail', hasDescription)}
                 role="cell"
+                aria-colindex={3}
                 data-label="说明"
               >
                 <span className="vps-observation__slot">
@@ -133,7 +136,7 @@ export function VPSObservationRows({
                   ) : null}
                 </span>
               </div>
-              <div className={cellClass('vps-observation__time', hasTime)} role="cell" data-label="数据时间">
+              <div className={cellClass('vps-observation__time', hasTime)} role="cell" aria-colindex={4} data-label="数据时间">
                 <span className="vps-observation__slot">
                   {showFreshnessBadge ? (
                     <Badge variant="state" tone={section?.state === 'stale' ? 'notice' : 'alert'}>{stateLabel}</Badge>
@@ -152,7 +155,7 @@ export function VPSObservationRows({
                 </span>
               </div>
 
-              <div className={cellClass('vps-observation__action', hasAction)} role="cell" data-label="操作">
+              <div className={cellClass('vps-observation__action', hasAction)} role="cell" aria-colindex={5} data-label="操作">
                 <span className="vps-observation__slot">
                   {row.action}
                   {showRetry && row.onRetry ? (

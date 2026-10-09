@@ -32,6 +32,18 @@ describe('VPSObservationRows', () => {
     expect(full.querySelectorAll('.vps-observation__cell--empty')).toHaveLength(0)
   })
 
+  it('pins every cell to its column so hidden empty cells do not shift header association', () => {
+    render(<VPSObservationRows ariaLabel="运行观测" rows={[{ key: 'bare', project: 'IP 质量', conclusion: '未检测' }]} />)
+
+    const table = screen.getByRole('table', { name: '运行观测' })
+    expect(table).toHaveAttribute('aria-colcount', '5')
+    const headers = new Map(screen.getAllByRole('columnheader').map((header) => [header.getAttribute('aria-colindex'), header.textContent]))
+    expect(headers.size).toBe(5)
+    for (const cell of screen.getByRole('rowgroup', { name: 'IP 质量' }).querySelectorAll<HTMLElement>('[role="cell"]')) {
+      expect(headers.get(cell.getAttribute('aria-colindex'))).toBe(cell.dataset.label)
+    }
+  })
+
   it('treats a ready source without any time as an empty data-time slot', () => {
     render(
       <VPSObservationRows

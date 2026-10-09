@@ -564,15 +564,22 @@ test('VPS overview runtime observation drops label-only slots at 390px', async (
   const table = page.getByRole('table', { name: '运行观测' })
   await expect(table.getByRole('row').first()).toBeAttached()
 
-  const slots = await table.evaluate((root) => Array.from(root.querySelectorAll<HTMLElement>('[role="cell"]'))
-    .filter((cell) => cell.getBoundingClientRect().height > 0)
-    .map((cell) => ({
-      label: cell.dataset.label ?? '',
-      filled: Boolean(cell.querySelector('.vps-observation__slot')?.childElementCount
-        || cell.querySelector('.vps-observation__slot')?.textContent?.trim()),
-    })))
+  const slots = await table.evaluate((root) => {
+    const headers = new Map(Array.from(root.querySelectorAll<HTMLElement>('[role="columnheader"]'))
+      .map((header) => [header.getAttribute('aria-colindex'), header.textContent?.trim() ?? '']))
+    return Array.from(root.querySelectorAll<HTMLElement>('[role="row"]:not(.vps-observation__secondary) > [role="cell"]'))
+      .filter((cell) => cell.getBoundingClientRect().height > 0)
+      .map((cell) => ({
+        label: cell.dataset.label ?? '',
+        header: headers.get(cell.getAttribute('aria-colindex')) ?? '',
+        filled: Boolean(cell.querySelector('.vps-observation__slot')?.childElementCount
+          || cell.querySelector('.vps-observation__slot')?.textContent?.trim()),
+      }))
+  })
   expect(slots.length).toBeGreaterThan(0)
   expect(slots.filter((slot) => !slot.filled)).toEqual([])
+  // 隐藏空单元后，剩余单元仍按固定列索引对应自己的表头。
+  expect(slots.filter((slot) => slot.header !== slot.label)).toEqual([])
   await expect(table.locator('.vps-observation__cell--empty').first()).toBeHidden()
 })
 

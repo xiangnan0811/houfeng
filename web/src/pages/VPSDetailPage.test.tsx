@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes, useLocation, useSearchParams } from 'react-router-dom'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import { ApiError } from '../lib/apiRequest'
 import * as authContext from '../lib/auth-context'
@@ -563,8 +563,17 @@ describe('VPSDetailPage gate', () => {
     vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
     vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture())
     const create = vi.spyOn(api, 'createVPSSubscription').mockResolvedValue(subscriptionFixture())
-    const now = new Date()
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    // 东八区 11 月 1 日凌晨，UTC 仍是 10 月 31 日：必须取本地日历日，不能用 toISOString 截取。
+    const originalTZ = process.env.TZ
+    process.env.TZ = 'Asia/Shanghai'
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-31T17:30:00Z'))
+    const today = '2026-11-01'
+    onTestFinished(() => {
+      vi.useRealTimers()
+      if (originalTZ === undefined) delete process.env.TZ
+      else process.env.TZ = originalTZ
+    })
 
     renderDetail()
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
