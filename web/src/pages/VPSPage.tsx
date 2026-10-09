@@ -576,7 +576,6 @@ function VPSInspector({
   currentInventoryHref: string
   subscriptionsError: string | null
   notice: string | null
-  /** 库存本身为空（不是筛选后为空）。 */
   onSelect: (vpsID: string) => void
 }) {
   const attention = row ? cancellationAttentionReason(row) : null
