@@ -22,6 +22,10 @@ type VPSSubscriptionFormProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }
 
+function localDateInputValue(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
 export function VPSSubscriptionForm({
   formId,
   detail,
@@ -115,6 +119,14 @@ export function VPSSubscriptionForm({
           />
         </div>
         {/* 未知日期保持为空，不替用户写入猜测值；VPS 已登记到期日时只提供一键填入。 */}
+        {/* 开始日期决定成本趋势入哪个月，补录时默认今天会把成本挤进当月，所以只在用户点击时填入。 */}
+        {!draft.startedAt ? (
+          <p className="vps-form-hint">
+            <button type="button" className="text-link" disabled={submitting} onClick={() => update('startedAt', localDateInputValue(new Date()))}>
+              开始日期填今天
+            </button>
+          </p>
+        ) : null}
         {vpsExpiry && draft.renewAt !== vpsExpiry ? (
           <p className="vps-form-hint">
             <button type="button" className="text-link" disabled={submitting} onClick={() => update('renewAt', vpsExpiry)}>

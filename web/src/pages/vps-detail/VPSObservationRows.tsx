@@ -39,6 +39,11 @@ const TONE_TO_BADGE: Record<string, BadgeTone> = {
   unknown: 'neutral',
 }
 
+// 窄屏键值堆叠时，没有内容的单元不能只剩一个标签占行；桌面表格仍保留该列以维持对齐。
+function cellClass(base: string, hasContent: boolean): string {
+  return hasContent ? base : `${base} vps-observation__cell--empty`
+}
+
 export function VPSObservationRows({
   rows,
   labelledBy,
@@ -78,6 +83,15 @@ export function VPSObservationRows({
           && !(retained && section?.state === 'unavailable')
         const conclusionBadgeTone = (row.conclusionTone && TONE_TO_BADGE[row.conclusionTone]) || 'neutral'
         const retryMode = row.retryMode ?? (section?.state === 'stale' ? 'refresh' : 'retry')
+        const showDescription = Boolean(description) && description !== conclusion
+        const hasDescription = showDescription || Boolean(row.diagnostics?.length)
+        const showRetry = degraded && Boolean(row.onRetry)
+        const hasAction = Boolean(row.action) || showRetry
+        // 与 VPSOverviewFreshnessTime（bare）的取值一致：有来源但还没有任何时间时，这一格是空的。
+        const timeValue = section
+          ? section.observed_at || row.time || (row.lastSuccessAt ?? section.last_success_at)
+          : row.time
+        const hasTime = showFreshnessBadge || Boolean(timeValue)
 
         return (
           <div
@@ -98,12 +112,12 @@ export function VPSObservationRows({
                 </span>
               </div>
               <div
-                className="vps-observation__description vps-overview-summary__detail"
+                className={cellClass('vps-observation__description vps-overview-summary__detail', hasDescription)}
                 role="cell"
                 data-label="说明"
               >
                 <span className="vps-observation__slot">
-                  {description && description !== conclusion ? description : null}
+                  {showDescription ? description : null}
                   {row.diagnostics && row.diagnostics.length > 0 ? (
                     <details className="vps-observation__diagnostic">
                       <summary>诊断信息</summary>
@@ -119,7 +133,7 @@ export function VPSObservationRows({
                   ) : null}
                 </span>
               </div>
-              <div className="vps-observation__time" role="cell" data-label="数据时间">
+              <div className={cellClass('vps-observation__time', hasTime)} role="cell" data-label="数据时间">
                 <span className="vps-observation__slot">
                   {showFreshnessBadge ? (
                     <Badge variant="state" tone={section?.state === 'stale' ? 'notice' : 'alert'}>{stateLabel}</Badge>
@@ -138,10 +152,10 @@ export function VPSObservationRows({
                 </span>
               </div>
 
-              <div className="vps-observation__action" role="cell" data-label="操作">
+              <div className={cellClass('vps-observation__action', hasAction)} role="cell" data-label="操作">
                 <span className="vps-observation__slot">
                   {row.action}
-                  {degraded && row.onRetry ? (
+                  {showRetry && row.onRetry ? (
                     <VPSOverviewFreshnessRetry
                       sourceLabel={sourceLabel}
                       onRetry={row.onRetry}

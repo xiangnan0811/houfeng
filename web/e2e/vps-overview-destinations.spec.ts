@@ -557,6 +557,25 @@ test('VPS overview resource row view affordance opens details and restores keybo
   await expect(dialog).toBeVisible()
 })
 
+test('VPS overview runtime observation drops label-only slots at 390px', async ({ api, page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  api.useProfile(vpsOverviewProfile())
+  await page.goto('/vps/vps_001')
+  const table = page.getByRole('table', { name: '运行观测' })
+  await expect(table.getByRole('row').first()).toBeAttached()
+
+  const slots = await table.evaluate((root) => Array.from(root.querySelectorAll<HTMLElement>('[role="cell"]'))
+    .filter((cell) => cell.getBoundingClientRect().height > 0)
+    .map((cell) => ({
+      label: cell.dataset.label ?? '',
+      filled: Boolean(cell.querySelector('.vps-observation__slot')?.childElementCount
+        || cell.querySelector('.vps-observation__slot')?.textContent?.trim()),
+    })))
+  expect(slots.length).toBeGreaterThan(0)
+  expect(slots.filter((slot) => !slot.filled)).toEqual([])
+  await expect(table.locator('.vps-observation__cell--empty').first()).toBeHidden()
+})
+
 test('VPS overview fails closed for malicious and mismatched destinations', async ({ api, page }) => {
   const malicious = [
     anomaly('monitoring.health.abnormal.v1', {

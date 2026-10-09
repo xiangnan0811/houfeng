@@ -559,6 +559,29 @@ describe('VPSDetailPage gate', () => {
     expect(screen.getByRole('status')).toHaveClass('asset-operation-feedback--floating')
   })
 
+  it('fills the start date with the local today only when the user asks', async () => {
+    vi.spyOn(recordsApi, 'getVPSOverview').mockResolvedValue(overviewFixture())
+    vi.spyOn(api, 'getVPSAsset').mockResolvedValue(detailFixture())
+    const create = vi.spyOn(api, 'createVPSSubscription').mockResolvedValue(subscriptionFixture())
+    const now = new Date()
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+
+    renderDetail()
+    fireEvent.click(await screen.findByRole('button', { name: '管理' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增订阅事实' })
+    expect(within(dialog).getByLabelText('开始日期')).toHaveValue('')
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '开始日期填今天' }))
+    expect(within(dialog).getByLabelText('开始日期')).toHaveValue(today)
+    expect(within(dialog).queryByRole('button', { name: '开始日期填今天' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('spinbutton', { name: '价格' }), { target: { value: '9' } })
+    fireEvent.click(screen.getByRole('button', { name: '新增订阅' }))
+
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    expect(create).toHaveBeenCalledWith('vps_001', expect.objectContaining({ started_at: today, renew_at: null }), expect.any(String))
+  })
+
   it.each(['monitoring', 'monitoring-instance-create'])(
     'opens the monitoring onboarding once for workbench=%s and consumes the query',
     async (workbench) => {

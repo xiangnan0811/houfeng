@@ -222,15 +222,18 @@ function deriveMode(
   return 'stable'
 }
 
+// count 是卡片大字：必须与 label 指同一件事，不能把 VPS 台数放在“待核对”标题下。
 function assetSignal(summary: DashboardAssetSummary): {
   label: string
   detail: string
+  count?: number
   action?: DashboardAction
   tone: DashboardTone
 } {
   if (summary.auto_renew_check_vps_count > 0 || summary.pending_followup_count > 0) {
     return {
       label: '资产跟进待核对',
+      count: summary.auto_renew_check_vps_count + summary.pending_followup_count,
       detail: `自动续费待核对 ${summary.auto_renew_check_vps_count} · 跟进事项 ${summary.pending_followup_count}`,
       action: {
         label: '核对资产跟进',
@@ -242,6 +245,7 @@ function assetSignal(summary: DashboardAssetSummary): {
   if (summary.unreviewed_vps_count > 0 || summary.no_renewal_vps_count > 0) {
     return {
       label: '资产决策待核对',
+      count: summary.unreviewed_vps_count + summary.no_renewal_vps_count,
       detail: `待决定 ${summary.unreviewed_vps_count} · 决定不续费 ${summary.no_renewal_vps_count} · 已归档 ${summary.archived_vps_count}`,
       action: {
         label: '进入资产组合决策',
@@ -253,6 +257,7 @@ function assetSignal(summary: DashboardAssetSummary): {
   if (summary.renewal_due_30d_vps_count > 0) {
     return {
       label: '续费窗口待核对',
+      count: summary.renewal_due_30d_vps_count,
       detail: `30 天内 ${summary.renewal_due_30d_vps_count} 台 VPS · ${summary.renewal_due_30d_subscription_count} 条订阅`,
       action: {
         label: '核对 30 天续费',
@@ -264,6 +269,7 @@ function assetSignal(summary: DashboardAssetSummary): {
   if (summary.unlinked_vps_count > 0 || summary.abnormal_linked_vps_count > 0) {
     return {
       label: '资产证据待补齐',
+      count: summary.unlinked_vps_count + summary.abnormal_linked_vps_count,
       detail: `未关联 ${summary.unlinked_vps_count} · 关联异常 ${summary.abnormal_linked_vps_count}`,
       action: {
         label: '补齐资产证据',
@@ -273,10 +279,18 @@ function assetSignal(summary: DashboardAssetSummary): {
     }
   }
   return {
-    label: 'VPS 清单已读取',
+    label: '已登记 VPS',
     detail: '当前聚合摘要没有待处理资产信号',
     tone: 'normal',
   }
+}
+
+function assetJudgementValue(
+  assetEvidence: DashboardAssetEvidence,
+  signal: ReturnType<typeof assetSignal>,
+): string {
+  if (assetEvidence.status === 'available' && signal.count != null) return `${signal.count}`
+  return assetEvidence.vpsCount == null ? '待确认' : `${assetEvidence.vpsCount}`
 }
 
 function buildAssetEvidence(
@@ -579,7 +593,7 @@ function evidenceJudgements(
     {
       id: 'assets',
       label: assetEvidence.status === 'available' ? signal.label : assetEvidence.title,
-      value: assetEvidence.vpsCount == null ? '待确认' : `${assetEvidence.vpsCount}`,
+      value: assetJudgementValue(assetEvidence, signal),
       detail: assetEvidence.status === 'unavailable'
         ? '资产是否为空仍待确认'
         : assetEvidence.detail,

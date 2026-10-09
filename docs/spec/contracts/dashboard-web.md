@@ -42,7 +42,7 @@ buildDashboardModel(input: {
 - `group_summaries` 中 `stale_target_count > 0` 的分组链接 `/targets?view=stale&group=<group>`，保留服务端分组名，空白分组的服务端名称 `未分组` 也原样进入 query。计数为零的分组不渲染，不得恢复按 Group 分布、第四张 KPI 或其它已删除的摘要 dump。
 - 下层证据 lane 保留来源、摘要生成/读取时间与金额完整性，不重复上层同组判断数字。未知目标使用中性状态，不由历史观测或摘要计数保证当前健康。
 - 每个 ready model 恰好一个 `primaryAction`。固定深链：critical → `/events?severity=严重`；abnormal → 有监控实例时 `/monitoring?abnormal=1`，否则 `/targets?abnormal=1`；maintenance → `/events?maintenance_only=1`；onboarding → `/vps`；stable → 真实资产 signal 的 `/asset-decisions?...`，无 signal 时 `/vps`。
-- 判断摘要固定三项（观测、资产、订阅），每项必须链接到其文案所指的承接工作流；不得出现“资产待核对”却固定跳 `/vps` 的链接漂移。
+- 判断摘要固定三项（观测、资产、订阅），每项必须链接到其文案所指的承接工作流；不得出现“资产待核对”却固定跳 `/vps` 的链接漂移。资产卡大字与标题指同一件事：跟进待核对取自动续费待核对与跟进事项之和，决策待核对取待决定与决定不续费之和，续费窗口取 30 天内待续费 VPS 台数，证据待补齐取未关联与关联异常之和；没有资产信号时标题为“已登记 VPS”、大字为 VPS 台数；VPS 清单读取中或不可用时沿用台数或“待确认”。
 - stable 只表示没有观测异常/维护/首次接入条件，不等于所有来源健康。stable + 资产待办显示 `资产判断等待核对`；stable + 局部请求失败使用 notice tone、标题 `部分事实待确认` 和信号 `局部数据不可用`，不得显示 `摘要无异常` 或 `当前没有紧急处理项`。
 - subscription 请求失败时可使用 `DashboardOverview.asset_summary.cost_by_currency` 作为较低精度 fallback，但必须同时展示来源、失败信息和 `snapshot_generated_at`；不能伪装成 subscription overview 同精度结果。
 - `snapshot_generated_at` 只能表达 `摘要生成`。VPS `loadedAt` 只能表达客户端完成读取的时间；两者都不是 Center health、agent heartbeat 或全链路同步证明。
