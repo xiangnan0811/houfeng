@@ -248,6 +248,7 @@ export function CommandAuditPage() {
         {!initialLoading && !visibleError && visibleItems.length === 0 ? (
           <PageState
             kind="empty"
+            surface="empty"
             eyebrow="命令审计"
             title="没有匹配的命令审计"
             description="当前时间范围和筛选条件下没有命令尝试。"

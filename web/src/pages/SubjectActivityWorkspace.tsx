@@ -236,6 +236,7 @@ export function SubjectActivityWorkspace({ view }: Props) {
         {state.status === 'empty' ? (
           <PageState
             kind="empty"
+            surface="empty"
             title={copy.emptyTitle}
             description={copy.emptyDescription}
           />

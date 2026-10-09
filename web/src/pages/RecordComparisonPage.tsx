@@ -268,6 +268,7 @@ function ComparisonLinkState({
     return (
       <PageState
         kind="empty"
+        surface="empty"
         title="比较篮是空的"
         description="添加 2–6 个证据后再比较。"
         action={action}

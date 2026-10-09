@@ -197,6 +197,7 @@ export function RecordDraftsPage() {
         {!loading && !error && drafts.length === 0 ? (
           <PageState
             kind="empty"
+            surface="empty"
             eyebrow="记录草稿"
             title="没有未发布的草稿"
             description="编辑记录时会自动保存草稿，从右上角新建记录即可开始。"

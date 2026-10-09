@@ -326,6 +326,16 @@ describe('VPSPage', () => {
     expect(within(reopened).getByLabelText('生命周期')).not.toHaveValue('testing')
   })
 
+  it.each(['ledger', 'workbench'])('shows one centered first-use state instead of an empty two-pane %s', async (workspace) => {
+    mockInventory([], [])
+    const { container } = mount(`/vps?workspace=${workspace}`)
+    const empty = (await screen.findByRole('heading', { name: '还没有录入 VPS' })).closest('section')!
+    expect(empty).toHaveClass('empty-state', 'page-state--empty')
+    expect(empty).toHaveTextContent('点击“创建第一台 VPS”录入后')
+    expect(screen.getByRole('button', { name: '创建第一台 VPS' })).toBeInTheDocument()
+    expect(container.querySelector('.vps-ledger, .vps-workbench, .vps-inspector')).toBeNull()
+  })
+
   it('opens the create dialog directly from the onboarding link and drops the one-shot flag', async () => {
     mockInventory([], [])
     mount('/vps?create=1&workspace=ledger')
