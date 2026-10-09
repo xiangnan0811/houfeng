@@ -8,6 +8,7 @@ import type {
 } from '../../lib/types'
 import { knownAmountNote, knownMonthlyAmount } from '../subscriptions/exchangeRatePresentation'
 import { DASHBOARD_LINKS, dashboardTargetsStaleLink } from './dashboardLinks'
+import { buildMonitoringCoverage, type DashboardMonitoringCoverage } from './dashboardCoverage'
 import type { RemoteState } from './dashboardRemoteState'
 
 export type DashboardMode =
@@ -108,6 +109,7 @@ export type DashboardReadyModel = {
   observability: DashboardObservabilityModel
   assetEvidence: DashboardAssetEvidence
   billingEvidence: DashboardBillingEvidence
+  monitoringCoverage: DashboardMonitoringCoverage | null
   degradations: DashboardDegradation[]
 }
 
@@ -662,6 +664,7 @@ export function buildDashboardModel(input: BuildDashboardModelInput): DashboardM
     observability,
     assetEvidence,
     billingEvidence,
+    monitoringCoverage: mode === 'onboarding' ? null : buildMonitoringCoverage(input.vps),
     degradations,
   }
 }

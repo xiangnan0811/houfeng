@@ -40,6 +40,18 @@ describe('buildDashboardModel', () => {
       label: '资产跟进待核对', value: '5', detail: '自动续费待核对 2 · 跟进事项 3', tone: 'alert',
     })
   })
+  it('derives monitoring coverage from active VPS only and degrades with the VPS list', () => {
+    const vps = remoteSuccess([
+      vpsAssetFixture({ vps_id: 'vps_a', active_monitoring_instance_link_count: 2 }),
+      vpsAssetFixture({ vps_id: 'vps_b', active_monitoring_instance_link_count: 0 }),
+      vpsAssetFixture({ vps_id: 'vps_old', lifecycle_status: 'archived', active_monitoring_instance_link_count: 1 }),
+    ], DASHBOARD_FIXTURE_LOADED_AT)
+    expect(readyModel({ vps }).monitoringCoverage).toEqual({ status: 'available', linked: 1, total: 2, loadedAt: DASHBOARD_FIXTURE_LOADED_AT })
+    expect(readyModel({ vps: remoteError('boom') }).monitoringCoverage).toEqual({ status: 'unavailable' })
+    const archivedOnly = remoteSuccess([vpsAssetFixture({ lifecycle_status: 'archived' })], DASHBOARD_FIXTURE_LOADED_AT)
+    expect(readyModel({ vps: archivedOnly }).monitoringCoverage).toBeNull()
+  })
+
   it('keeps the asset judgement number on the same subject as its label', () => {
     const vps = remoteSuccess(
       Array.from({ length: 8 }, (_, index) => vpsAssetFixture({ vps_id: `vps_${index}`, display_name: `vps-${index}` })),

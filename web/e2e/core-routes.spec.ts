@@ -344,5 +344,28 @@ test('Populated dashboard keeps bounded panels and one primary action on desktop
     const clippedNames = await page.locator('.dashboard-renewal__name :is(strong, small)').evaluateAll((elements) =>
       elements.filter((element) => element.scrollWidth > element.clientWidth + 1).map((element) => element.textContent))
     expect(clippedNames, label).toEqual([])
+    // 两栏时即将续费在右栏顶部；单栏时排在证据之前、最近动态在最后。
+    const renewalsBox = await page.getByRole('region', { name: '即将续费' }).boundingBox()
+    const observationBox = await page.getByRole('region', { name: '观测证据' }).boundingBox()
+    const activityBox = await page.getByRole('region', { name: '最近动态' }).boundingBox()
+    if (viewport.width > 1024) {
+      expect(renewalsBox!.x, label).toBeGreaterThan(observationBox!.x + observationBox!.width - 1)
+      expect(Math.abs(renewalsBox!.y - observationBox!.y), label).toBeLessThan(2)
+    } else {
+      expect(renewalsBox!.y + renewalsBox!.height, label).toBeLessThanOrEqual(observationBox!.y)
+      expect(activityBox!.y, label).toBeGreaterThan(observationBox!.y)
+    }
   }
+})
+
+test('Populated dashboard puts the renewal preview right after the judgements on a phone', async ({ api, page }) => {
+  api.useProfile(dashboardPopulatedProfile())
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/')
+  const judgements = await page.getByRole('region', { name: '判断摘要' }).boundingBox()
+  const renewals = await page.getByRole('region', { name: '即将续费' }).boundingBox()
+  const observation = await page.getByRole('region', { name: '观测证据' }).boundingBox()
+  expect(renewals!.y).toBeGreaterThan(judgements!.y + judgements!.height - 1)
+  expect(renewals!.y + renewals!.height).toBeLessThanOrEqual(observation!.y)
+  await expectNoDocumentOverflow(page)
 })
