@@ -1,6 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 
-import { Button } from '../../components/atoms'
+import { Button, Timestamp } from '../../components/atoms'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import type { VPSOverviewAnomaly, VPSOverviewAnomalyAction } from '../../lib/types'
 import {
@@ -15,11 +15,14 @@ import {
   resolveVPSOverviewAnomalyDestination,
   type VPSOverviewCommand,
 } from './vpsOverviewDestination'
+import { foldHeartbeatLoss } from './heartbeatLossPresentation'
 
 
 type Props = {
   vpsId: string
   anomalies: VPSOverviewAnomaly[]
+  /** 监控分区因心跳超时陈旧时的最后在线时间；存在时把健康异常与未关闭事件合并为“agent 已失联”。 */
+  heartbeatLostSince?: string | null
   onCommand: (command: VPSOverviewCommand) => void
 }
 
@@ -27,8 +30,11 @@ type Props = {
  * Healthy overviews must not mount this section at all — the parent gates on
  * `anomalies.length > 0` so query counts for anomaly chrome stay at zero.
  */
-export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
-  if (anomalies.length === 0) return null
+export function VPSOverviewAnomalies({ vpsId, anomalies: sourceAnomalies, heartbeatLostSince = null, onCommand }: Props) {
+  if (sourceAnomalies.length === 0) return null
+  const { anomalies, lostRuleId, foldedIncidents } = heartbeatLostSince
+    ? foldHeartbeatLoss(sourceAnomalies)
+    : { anomalies: sourceAnomalies, lostRuleId: null, foldedIncidents: null }
   const soleUnlinked = anomalies.length === 1 && anomalies[0]?.rule_id === 'monitoring.unlinked.v1'
   const soleTitle = anomalies[0]?.title ?? '需要关注'
 
@@ -47,6 +53,7 @@ export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
       <ul className="vps-overview-anomalies__list">
         {anomalies.map((anomaly) => {
           const unlinked = anomaly.rule_id === 'monitoring.unlinked.v1'
+          const lost = anomaly.rule_id === lostRuleId
           const unlinkedCopy = unlinked ? overviewUnlinkedAnomalyCopy(anomaly) : null
           const source = overviewAnomalySourcePresentation(anomaly.source)
           const sourceLabel = source.summary
@@ -56,6 +63,7 @@ export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
             : null
           const diagnostics: DiagnosticNote[] = [
             ...(unlinkedCopy?.diagnostics ?? detail?.diagnostics ?? []),
+            ...(lost && detail?.summary ? [{ label: '监控判断', detail: detail.summary }] : []),
             ...source.diagnostics,
           ]
           const showFallbackReason = Boolean(unlinkedCopy) && !(soleUnlinked && unlinkedCopy?.impact)
@@ -65,8 +73,12 @@ export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
             className={['vps-overview-anomalies__item', overviewAnomalySeverityClass(anomaly.severity)].filter(Boolean).join(' ')}
           >
             <div className="vps-overview-anomalies__body">
-              <h3 className="vps-overview-anomalies__item-title">{anomaly.title}</h3>
-              {unlinkedCopy ? (
+              <h3 className="vps-overview-anomalies__item-title">{lost ? 'agent 已失联' : anomaly.title}</h3>
+              {lost && heartbeatLostSince ? (
+                <p className="vps-overview-anomalies__detail">
+                  最后心跳 <Timestamp value={heartbeatLostSince} mode="both" />，此后没有收到新的监控数据。
+                </p>
+              ) : unlinkedCopy ? (
                 <>
                   {showFallbackReason ? <p className="vps-overview-anomalies__detail">{unlinkedCopy.reason}</p> : null}
                   {unlinkedCopy.impact ? <p className="vps-overview-anomalies__detail">{unlinkedCopy.impact}</p> : null}
@@ -108,6 +120,14 @@ export function VPSOverviewAnomalies({ vpsId, anomalies, onCommand }: Props) {
                   onCommand={onCommand}
                 />
               ))}
+              {lost && foldedIncidents?.primary_action ? (
+                <AnomalyAction
+                  vpsId={vpsId}
+                  ruleId={foldedIncidents.rule_id}
+                  action={foldedIncidents.primary_action}
+                  onCommand={onCommand}
+                />
+              ) : null}
             </div>
           </li>
           )

@@ -13,7 +13,7 @@ import {
 const RENEWAL_SOON_DAYS = 7
 
 function renewalDaysLabel(daysLeft: number): string {
-  if (daysLeft < 0) return '已过'
+  if (daysLeft < 0) return `逾期 ${Math.abs(daysLeft)} 天`
   if (daysLeft === 0) return '今天'
   return `${daysLeft} 天`
 }
@@ -52,32 +52,53 @@ export function DashboardRenewalsPanel({ panel }: { panel: DashboardRenewalPanel
         <p className="dashboard-panel__empty" role="status">正在读取订阅摘要…</p>
       ) : panel.status === 'unavailable' ? (
         <p className="dashboard-panel__empty">续费队列暂不可用：{panel.error}</p>
-      ) : panel.items.length === 0 ? (
-        <p className="dashboard-panel__empty">未来 {RENEWAL_QUEUE_WINDOW_DAYS} 天（UTC）内没有待续费的订阅。</p>
       ) : (
-        <ul className="dashboard-renewals" aria-label="即将续费的订阅">
-          {panel.items.map((item) => {
-            const soon = item.daysLeft <= RENEWAL_SOON_DAYS
-            return (
-              <li key={item.key}>
-                <Link className="dashboard-renewal" to={item.to}>
-                  <span className="dashboard-renewal__name">
-                    <strong>{item.name}</strong>
-                    <small>{item.provider || '未记录服务商'}</small>
-                  </span>
-                  <span className={`dashboard-renewal__days${soon ? ' dashboard-renewal__days--soon' : ''}`}>
-                    {renewalDaysLabel(item.daysLeft)}
-                  </span>
-                  <span className="dashboard-renewal__meta mono">
-                    {item.renewDate} · {renewalPriceLabel(item)}
-                  </span>
-                </Link>
-              </li>
-            )
-          })}
-        </ul>
+        <>
+          {panel.overdueCount > 0 ? (
+            <div className="dashboard-renewals__overdue">
+              <p className="dashboard-renewals__overdue-title">
+                <span>已逾期 {panel.overdueCount} 项</span>
+                <Link className="text-link" to={DASHBOARD_LINKS.subscriptions}>续费队列</Link>
+              </p>
+              <RenewalList items={panel.overdue} label="已逾期的订阅续费" />
+            </div>
+          ) : null}
+          {panel.items.length === 0 ? (
+            <p className="dashboard-panel__empty">未来 {RENEWAL_QUEUE_WINDOW_DAYS} 天（UTC）内没有待续费的订阅。</p>
+          ) : (
+            <RenewalList items={panel.items} label="即将续费的订阅" />
+          )}
+        </>
       )}
     </section>
+  )
+}
+
+function RenewalList({ items, label }: { items: DashboardRenewalItem[]; label: string }) {
+  return (
+    <ul className="dashboard-renewals" aria-label={label}>
+      {items.map((item) => {
+        const overdue = item.daysLeft < 0
+        const soon = !overdue && item.daysLeft <= RENEWAL_SOON_DAYS
+        const daysClass = overdue ? ' dashboard-renewal__days--overdue' : soon ? ' dashboard-renewal__days--soon' : ''
+        return (
+          <li key={item.key}>
+            <Link className="dashboard-renewal" to={item.to}>
+              <span className="dashboard-renewal__name">
+                <strong>{item.name}</strong>
+                <small>{item.provider || '未记录服务商'}</small>
+              </span>
+              <span className={`dashboard-renewal__days${daysClass}`}>
+                {renewalDaysLabel(item.daysLeft)}
+              </span>
+              <span className="dashboard-renewal__meta mono">
+                {item.renewDate} · {renewalPriceLabel(item)}
+              </span>
+            </Link>
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

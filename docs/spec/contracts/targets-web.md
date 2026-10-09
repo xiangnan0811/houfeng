@@ -24,6 +24,7 @@ Target 退役操作使用 `/runtime/archive`，将生命周期设为 `retired` �
 - Target 的 `last_success_at` / `last_failure_at` 只从 `result_kind=success/failure` 且 `maintenance_context=false`、`is_backfilled=false` 的实时探测观测按 `observed_at` 投影；原始观测仍保留，乱序到达不能使任一时间倒退。
 - TargetRecord 的只读 `enabled_probe_count` 表示配置为 enabled 的探测项数，暂停目标也保留配置事实。`matching_executor_count` 表示依照 Agent plan 标签交集和 archived/retired/paused 排除规则可接收任务的实例数；仅启用/维护目标可匹配，其余为零。列表与详情由后端一次聚合读取，不逐行请求。匹配不保证在线，不等于已有样本。
 - 创建目标时，执行标签与目标标签输入框中按 Enter（非输入法组字）只整理已输入的标签（去空白、去空项、统一为「, 」分隔），不提交表单。
+- 创建目标时，执行标签输入框获得焦点后读取一次当前监控实例，按 agent plan 同口径（任一标签重合，排除已归档、已退役和暂停监控的实例）在输入框下实时说明执行者；运行状态选「暂停」时只说明创建后暂时不会被探测，不点名执行者：「将由 A、B（等 N 台）执行」；没有实例带这些标签时提示创建后暂时不会被探测；还没有监控实例时引导先接入 agent；所有实例都没有标签时说明需要先在监控实例上补同名标签并链接 `/monitoring`。读取失败时不显示预览，不阻止创建。
 - 执行标签允许未来值；无启用探测项、无匹配实例、匹配但尚无样本分别解释。已有历史观测不保证当前健康。观测是否过期只消费服务器 `observation_freshness`，前端不另算阈值，也不把缺失字段当成 0。
 
 ## 观测新鲜度

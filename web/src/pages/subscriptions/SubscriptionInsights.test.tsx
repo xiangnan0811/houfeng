@@ -52,8 +52,10 @@ describe('renewal queue', () => {
 
   it('shows days left, highlights near renewals and labels each renewal decision', () => {
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date(2026, 9, 2, 10, 0))
+    // 系统时钟放在与摘要不同的 UTC 日：天数只能来自摘要。
+    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
     const onSelectVPS = renderInsights(overviewWith({
+      snapshot_generated_at: '2026-10-02T02:00:00Z',
       upcoming_renewals: [
         renewal('a', '2026-09-30', 'unreviewed'),
         renewal('b', '2026-10-06', 'keep', { exchange_rate_status: 'stale' }),
@@ -63,7 +65,7 @@ describe('renewal queue', () => {
     }))
     const rows = within(screen.getByRole('region', { name: '续费队列' })).getAllByRole('button')
     expect(rows.map((row) => row.getAttribute('data-urgency'))).toEqual(['overdue', 'soon', 'later', 'later'])
-    expect(rows[0]).toHaveTextContent('已过期 2 天')
+    expect(rows[0]).toHaveTextContent('已逾期 2 天')
     expect(rows[0]).toHaveTextContent('待决定')
     expect(rows[1]).toHaveTextContent('4 天后')
     expect(rows[1]).toHaveTextContent('汇率过期')
@@ -74,6 +76,57 @@ describe('renewal queue', () => {
     expect(rows[3]).toHaveTextContent('VPS d · Example Cloud')
     fireEvent.click(rows[2]!)
     expect(onSelectVPS).toHaveBeenCalledWith('vps_c')
+  })
+
+  it('lists overdue renewals ahead of the 90-day window with a separate count', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-20T12:00:00Z'))
+    renderInsights(overviewWith({
+      snapshot_generated_at: '2026-10-09T02:00:00Z',
+      overdue_renewals: [renewal('late', '2026-10-01', 'keep')],
+      overdue_renewal_count: 13,
+      upcoming_renewals: [renewal('soon', '2026-10-20', 'keep')],
+    }))
+    const rows = within(screen.getByRole('region', { name: '续费队列' })).getAllByRole('button')
+    expect(rows.map((row) => row.getAttribute('data-urgency'))).toEqual(['overdue', 'soon'])
+    expect(rows[0]).toHaveTextContent('已逾期 8 天')
+    expect(screen.getByText('已逾期 13 项 · 90 天内 1 项')).toBeInTheDocument()
+  })
+
+  it('measures overdue days from the summary UTC day, not the browser calendar', () => {
+    const originalTZ = process.env.TZ
+    try {
+      // 洛杉矶 2026-10-08 17:30 = UTC 2026-10-09 00:30：后端已把 10-08 列为逾期，本地日历仍是 10-08。
+      process.env.TZ = 'America/Los_Angeles'
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date('2026-10-09T00:30:00Z'))
+      // 时区切换必须生效：洛杉矶本地仍是 10-08，否则用例在 UTC 进程上会假通过。
+      expect(new Date().getTimezoneOffset()).toBe(420)
+      expect(new Date().getDate()).toBe(8)
+      renderInsights(overviewWith({
+        snapshot_generated_at: '2026-10-09T00:30:00Z',
+        overdue_renewals: [renewal('late', '2026-10-08', 'keep')],
+        overdue_renewal_count: 1,
+        upcoming_renewals: [],
+      }))
+      const rows = within(screen.getByRole('region', { name: '续费队列' })).getAllByRole('button')
+      expect(rows[0]).toHaveAttribute('data-urgency', 'overdue')
+      expect(rows[0]).toHaveTextContent('已逾期 1 天')
+    } finally {
+      if (originalTZ === undefined) delete process.env.TZ
+      else process.env.TZ = originalTZ
+    }
+  })
+
+  it('labels a capped 90-day window as a lower bound next to the overdue count', () => {
+    const upcoming = Array.from({ length: 12 }, (_, index) => renewal(`u${index}`, `2026-11-${String(index + 1).padStart(2, '0')}`, 'keep'))
+    renderInsights(overviewWith({
+      snapshot_generated_at: '2026-10-09T02:00:00Z',
+      overdue_renewals: [renewal('late', '2026-09-01', 'keep')],
+      overdue_renewal_count: 2,
+      upcoming_renewals: upcoming,
+    }))
+    expect(screen.getByText('已逾期 2 项 · 90 天内至少 12 项')).toBeInTheDocument()
   })
 
   it('collapses an empty queue into a single compact line', () => {

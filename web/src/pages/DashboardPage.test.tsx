@@ -438,6 +438,57 @@ describe('DashboardPage', () => {
     expect(within(screen.getByRole('list', { name: '即将续费的订阅' })).getAllByRole('link')).toHaveLength(5)
   })
 
+  it('warns when monitored objects have no notification channel', async () => {
+    renderDashboard({ dashboard: { body: dashboardOverviewFixture({ total_monitoring_instance_count: 1 }), status: 200 } })
+    const note = await screen.findByRole('note', { name: '未配置通知渠道' })
+    expect(note).toHaveTextContent('不会推送')
+    expect(within(note).getByRole('link', { name: '配置通知' })).toHaveAttribute('href', '/settings?tab=notification')
+  })
+
+  it('omits the notification warning once a channel is configured', async () => {
+    renderDashboard({
+      dashboard: {
+        body: dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { feishu_configured: true } }),
+        status: 200,
+      },
+    })
+    await screen.findByRole('heading', { name: '工作台' })
+    expect(screen.queryByRole('note', { name: '未配置通知渠道' })).not.toBeInTheDocument()
+  })
+
+  it('lists overdue renewals above the 90-day window and links the full queue', async () => {
+    renderDashboard({
+      subscription: {
+        body: subscriptionOverviewFixture({
+          snapshot_generated_at: '2026-10-09T08:00:00Z',
+          upcoming_renewals: [],
+          overdue_renewal_count: 4,
+          overdue_renewals: [{
+            subscription_id: 'sub_late',
+            vps_id: 'vps_late',
+            vps_display_name: 'ams-mail-08',
+            display_name: '',
+            provider_name: 'Example Cloud',
+            renew_at: '2026-10-01',
+            monthly_price_base: 20,
+            base_currency: 'CNY',
+            currency: 'USD',
+            renewal_decision: 'keep',
+            lifecycle_status: 'active',
+            exchange_rate_status: 'fresh',
+          }],
+        }),
+      },
+    })
+
+    const overdueList = await screen.findByRole('list', { name: '已逾期的订阅续费' })
+    expect(within(overdueList).getByRole('link')).toHaveTextContent('逾期 8 天')
+    expect(within(overdueList).getByRole('link')).toHaveAttribute('href', '/vps/vps_late')
+    expect(screen.getByText('已逾期 4 项')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '续费队列' })).toHaveAttribute('href', '/subscriptions')
+    expect(screen.getByText('未来 90 天（UTC）内没有待续费的订阅。')).toBeInTheDocument()
+  })
+
   it('labels renewal days as estimated when the subscription snapshot time is invalid', async () => {
     renderDashboard({
       subscription: {

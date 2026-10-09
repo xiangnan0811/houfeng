@@ -14,7 +14,8 @@ function row(index: number, renewAt: string | null, overrides: Parameters<typeof
 describe('buildInventoryOverview', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date(2026, 8, 29, 10, 0, 0))
+    // 剩余天数按 UTC 日历日：用 UTC 时刻，避免在 UTC+11 以东的机器上落到前一天。
+    vi.setSystemTime(new Date('2026-09-29T10:00:00Z'))
   })
   afterEach(() => {
     vi.useRealTimers()

@@ -2620,6 +2620,9 @@ export type SubscriptionOverview = {
   decision_attention_count: number
   missing_subscription_vps_count: number
   upcoming_renewals: SubscriptionRenewalQueueItem[]
+  /** 续费日早于 UTC 当天、且未决定不续费的订阅；最旧在前，最多 12 条，总数见 overdue_renewal_count。旧版 center 不返回。 */
+  overdue_renewals?: SubscriptionRenewalQueueItem[]
+  overdue_renewal_count?: number
   provider_breakdown: SubscriptionBreakdownItem[]
   currency_breakdown: SubscriptionBreakdownItem[]
   category_breakdown: SubscriptionBreakdownItem[]

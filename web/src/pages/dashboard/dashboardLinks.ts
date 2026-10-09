@@ -14,6 +14,7 @@ export const DASHBOARD_LINKS = {
   assetDecisionsEvidence: '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup',
   vps: '/vps',
   subscriptions: '/subscriptions',
+  notificationSettings: '/settings?tab=notification',
 } as const
 
 export function dashboardTargetsStaleLink(group?: string): string {

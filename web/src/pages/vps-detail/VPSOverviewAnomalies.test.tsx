@@ -44,6 +44,55 @@ describe('VPSOverviewAnomalies contract', () => {
     expect(container.querySelectorAll('.vps-overview-anomalies').length).toBe(0)
   })
 
+  it('folds heartbeat loss into one agent-lost item and keeps the incident entry', () => {
+    render(
+      <MemoryRouter>
+        <VPSOverviewAnomalies
+          vpsId="vps_001"
+          heartbeatLostSince="2026-10-09T04:36:59Z"
+          anomalies={[
+            anomaly({ detail: '最近 875 个心跳周期未收到心跳', primary_action: { id: 'open_monitoring', label: '查看监控', route: '/monitoring/mi_001' } }),
+            anomaly({
+              rule_id: 'monitoring.incidents.open.v1',
+              severity: 'warning',
+              title: '存在未关闭事件',
+              detail: '最近 875 个心跳周期未收到心跳',
+              primary_action: { id: 'open_incidents', label: '查看事件', route: '/events?object_type=monitoring_instance&object_id=mi_001' },
+            }),
+            anomaly({ rule_id: 'ip_quality.partial.v1', severity: 'notice', title: 'IP 质量采集不完整', source: 'ip_quality', primary_action: null }),
+          ]}
+          onCommand={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('heading', { name: 'agent 已失联' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '存在未关闭事件' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '监控异常' })).not.toBeInTheDocument()
+    expect(screen.getByText(/此后没有收到新的监控数据/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看监控' })).toHaveAttribute('href', '/monitoring/mi_001')
+    expect(screen.getByRole('link', { name: '查看事件' })).toHaveAttribute('href', '/events?object_type=monitoring_instance&object_id=mi_001')
+    expect(screen.getByRole('heading', { name: 'IP 质量采集不完整' })).toBeInTheDocument()
+  })
+
+  it('keeps the raw monitoring anomalies when the heartbeat is not stale', () => {
+    render(
+      <MemoryRouter>
+        <VPSOverviewAnomalies
+          vpsId="vps_001"
+          anomalies={[
+            anomaly(),
+            anomaly({ rule_id: 'monitoring.incidents.open.v1', severity: 'warning', title: '存在未关闭事件', primary_action: null }),
+          ]}
+          onCommand={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('heading', { name: '监控异常' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '存在未关闭事件' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'agent 已失联' })).not.toBeInTheDocument()
+  })
+
   it('renders allowlisted routes as links and exact commands as buttons', () => {
     const onCommand = vi.fn()
     render(

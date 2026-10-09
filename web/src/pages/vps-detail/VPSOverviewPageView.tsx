@@ -28,6 +28,7 @@ import {
 import { VPSDetailSectionNav } from './VPSDetailSectionNav'
 import { VPSManagementMenu } from './VPSManagementMenu'
 import { VPSOverviewAnomalies } from './VPSOverviewAnomalies'
+import { heartbeatLostSince } from './heartbeatLossPresentation'
 import { VPSOverviewFacts } from './VPSOverviewFacts'
 import { VPSOverviewFreshness } from './VPSOverviewFreshness'
 import { VPSOverviewIdentityHeader } from './VPSOverviewIdentityHeader'
@@ -163,7 +164,12 @@ export function VPSOverviewPageView({
       ) : null}
 
       {overview.anomalies.length > 0 ? (
-        <VPSOverviewAnomalies vpsId={vpsId} anomalies={overview.anomalies} onCommand={runCommand} />
+        <VPSOverviewAnomalies
+          vpsId={vpsId}
+          anomalies={overview.anomalies}
+          heartbeatLostSince={heartbeatLostSince(overview.summary.monitoring.section)}
+          onCommand={runCommand}
+        />
       ) : null}
 
       <div className="vps-detail-workspace__lead">

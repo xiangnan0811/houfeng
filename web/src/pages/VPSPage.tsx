@@ -39,6 +39,7 @@ import {
   isSubscriptionInRenewalWindow,
   lifecycleLabel,
   renewalLabel,
+  renewalTimingLabel,
   selectPrimarySubscription,
   subscriptionStatusLabel,
   usageLabel,
@@ -346,8 +347,18 @@ function renderRenewalDate(row: InventoryRow) {
   if (!row.subscription.renew_at) return <span className="vps-quiet-fact">无续费日</span>
   const days = daysUntilDate(row.subscription.renew_at)
   const date = formatDate(row.subscription.renew_at)
+  // 逾期直接写在屏幕上，不只放在悬停提示里；天数与后端同按 UTC 日历日。
+  if (days != null && days < 0) {
+    return (
+      <span className="vps-workbench__due vps-workbench__due--overdue">
+        <span className="vps-mono">{date}</span>
+        <span aria-hidden="true"><StatusGlyph state="alert" size="sm" /></span>
+        <span>{renewalTimingLabel(days)}</span>
+      </span>
+    )
+  }
   if (days != null && days <= 30) {
-    const dueLabel = days < 0 ? '续费已过期' : '30天内续费'
+    const dueLabel = '30天内续费'
     return (
       <span className="vps-workbench__due" title={dueLabel}>
         <StatusGlyph state="notice" size="sm" ariaLabel={dueLabel} />

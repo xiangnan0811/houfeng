@@ -443,6 +443,7 @@
 .vps-workbench__due,
 .vps-workbench__meta .vps-lifecycle{flex-direction:row-reverse}
 .vps-workbench__follow{margin-left:var(--space-2);white-space:nowrap}
+.vps-workbench__due--overdue{flex-direction:row;flex-wrap:wrap;color:var(--color-state-alert)}
 .vps-workbench .status-glyph--offline,
 .vps-accordion .status-glyph--offline{stroke:var(--text-muted)}
 .vps-workbench .vps-lifecycle,

@@ -278,6 +278,92 @@ describe('TargetsPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('previews which monitoring instances will run the target and guides unlabeled setups', async () => {
+    const instances = [
+      { monitoring_instance_id: 'mi_tokyo', display_name: 'tokyo-edge-01', labels: ['jp', 'edge'] },
+      { monitoring_instance_id: 'mi_paris', display_name: 'paris-01', labels: ['eu'] },
+    ]
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/monitoring-instances')) return mockJSONResponse(instances)
+      return mockJSONResponse([])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '新建第一个目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    const executionLabels = within(createDrawer).getByLabelText('执行监控实例标签')
+    fireEvent.focus(executionLabels)
+    expect(await within(createDrawer).findByRole('button', { name: 'jp' })).toBeInTheDocument()
+
+    fireEvent.change(executionLabels, { target: { value: 'edge, eu' } })
+    expect(within(createDrawer).getByText('将由 tokyo-edge-01、paris-01 执行。')).toBeInTheDocument()
+    fireEvent.change(executionLabels, { target: { value: 'us' } })
+    expect(within(createDrawer).getByText('目前没有监控实例带这些标签，创建后暂时不会被探测。')).toBeInTheDocument()
+    // 暂停目标不会分配给任何实例。
+    fireEvent.change(executionLabels, { target: { value: 'edge' } })
+    fireEvent.change(within(createDrawer).getByLabelText('运行状态'), { target: { value: '暂停' } })
+    expect(within(createDrawer).getByText('运行状态为暂停，创建后暂时不会被探测。')).toBeInTheDocument()
+  })
+
+  it('does not name paused, retired or archived monitoring instances as executors', async () => {
+    const instances = [
+      { monitoring_instance_id: 'mi_paused', display_name: 'paused-01', labels: ['edge'], monitoring_status: '暂停', lifecycle_status: '已接入' },
+      { monitoring_instance_id: 'mi_retired', display_name: 'retired-01', labels: ['edge'], monitoring_status: '启用', lifecycle_status: '已退役' },
+      { monitoring_instance_id: 'mi_archived', display_name: 'archived-01', labels: ['edge'], monitoring_status: '启用', lifecycle_status: '已接入', archived_at: '2026-10-01T00:00:00Z' },
+      { monitoring_instance_id: 'mi_live', display_name: 'live-01', labels: ['edge'], monitoring_status: '维护中', lifecycle_status: '已接入' },
+    ]
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (
+      String(input).startsWith('/api/monitoring-instances') ? mockJSONResponse(instances) : mockJSONResponse([])
+    )))
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '新建第一个目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    const executionLabels = within(createDrawer).getByLabelText('执行监控实例标签')
+    fireEvent.focus(executionLabels)
+    await within(createDrawer).findByRole('button', { name: 'edge' })
+    fireEvent.change(executionLabels, { target: { value: 'edge' } })
+    expect(within(createDrawer).getByText('将由 live-01 执行。')).toBeInTheDocument()
+  })
+
+  it('explains that existing monitoring instances still need labels', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/monitoring-instances')) {
+        return mockJSONResponse([{ monitoring_instance_id: 'mi_tokyo', display_name: 'tokyo-edge-01', labels: [] }])
+      }
+      return mockJSONResponse([])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '新建第一个目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    fireEvent.focus(within(createDrawer).getByLabelText('执行监控实例标签'))
+    const guidance = await within(createDrawer).findByText(/现有 1 台监控实例都还没有标签/)
+    expect(within(guidance).getByRole('link', { name: '监控实例' })).toHaveAttribute('href', '/monitoring')
+  })
+
   it('uses Chinese-first validation for base port', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([])).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)

@@ -422,6 +422,47 @@ describe('VPSPage', () => {
     expect(within(list).queryByRole('img', { name: /正常|离线|关注|告警|严重/ })).not.toBeInTheDocument()
   })
 
+  it('writes an overdue renewal out in the table row instead of hiding it in a tooltip', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-09T10:00:00Z'))
+    try {
+      mockInventory([vps], [{ ...subscription, renew_at: '2026-10-01' }])
+      mount('/vps?workspace=workbench')
+      await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+      const row = screen.getByRole('row', { name: /Tokyo Edge/ })
+      await waitFor(() => expect(row).toHaveTextContent('2026-10-01'))
+      expect(row).toHaveTextContent('已逾期 8 天')
+      expect(within(row).queryByTitle('续费已过期')).not.toBeInTheDocument()
+      expect(within(row).queryByRole('img', { name: '告警' })).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('decides overdue renewals on the UTC calendar like the backend queue', async () => {
+    const originalTZ = process.env.TZ
+    // 先切时区再装假时钟，并断言偏移确实生效，避免在 UTC 进程上假通过。
+    process.env.TZ = 'Asia/Shanghai'
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      // 上海 2026-10-09 07:00 = UTC 2026-10-08 23:00：续费日 10-08 在后端仍是“今天”，不是逾期。
+      vi.setSystemTime(new Date('2026-10-08T23:00:00Z'))
+      expect(new Date().getTimezoneOffset()).toBe(-480)
+      expect(new Date().getDate()).toBe(9)
+      mockInventory([vps], [{ ...subscription, renew_at: '2026-10-08' }])
+      mount('/vps?workspace=workbench')
+      await screen.findByRole('button', { name: '选择 Tokyo Edge' })
+      const row = screen.getByRole('row', { name: /Tokyo Edge/ })
+      await waitFor(() => expect(row).toHaveTextContent('2026-10-08'))
+      expect(row).not.toHaveTextContent('已逾期')
+      expect(within(row).queryByRole('img', { name: '告警' })).not.toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+      if (originalTZ === undefined) delete process.env.TZ
+      else process.env.TZ = originalTZ
+    }
+  })
+
   it('labels VPS without usage tags instead of rendering an empty usage badge', async () => {
     mockInventory([{ ...vps, usage_tags: [] }], [])
     mount('/vps?workspace=workbench&selected=vps_001')

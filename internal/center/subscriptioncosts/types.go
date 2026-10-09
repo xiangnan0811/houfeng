@@ -142,6 +142,8 @@ type Overview struct {
 	DecisionAttentionCount            int                        `json:"decision_attention_count"`
 	MissingSubscriptionVPSCount       int                        `json:"missing_subscription_vps_count"`
 	UpcomingRenewals                  []RenewalQueueItem         `json:"upcoming_renewals"`
+	OverdueRenewalCount               int                        `json:"overdue_renewal_count"`
+	OverdueRenewals                   []RenewalQueueItem         `json:"overdue_renewals"`
 	ProviderBreakdown                 []BreakdownItem            `json:"provider_breakdown"`
 	CurrencyBreakdown                 []BreakdownItem            `json:"currency_breakdown"`
 	CategoryBreakdown                 []BreakdownItem            `json:"category_breakdown"`

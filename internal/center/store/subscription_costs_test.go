@@ -78,6 +78,8 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsMarksInsufficient
 	}
 	for _, snippet := range []string{
 		"price_histories",
+		"when s.started_at is not null then s.started_at < (b.bucket_start + interval '1 month')::date",
+		"else s.created_at < (b.bucket_start + interval '1 month')",
 		"v.lifecycle_status = 'active'",
 		"to_monthly_price",
 		"from_monthly_price",

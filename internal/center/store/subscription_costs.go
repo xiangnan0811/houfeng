@@ -263,7 +263,13 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 					s.status
 				) as status
 			from buckets b
-			join subscriptions s on s.created_at < (b.bucket_start + interval '1 month')
+			-- 补录的存量订阅按用户填写的开始日期入桶；开始日期未知时才退回录入时间。
+			join subscriptions s on (
+				case
+					when s.started_at is not null then s.started_at < (b.bucket_start + interval '1 month')::date
+					else s.created_at < (b.bucket_start + interval '1 month')
+				end
+			)
 			join vps_assets v on v.vps_id = s.vps_id
 			where v.lifecycle_status = 'active'
 		)

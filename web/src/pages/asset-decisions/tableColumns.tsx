@@ -302,7 +302,7 @@ export function createMemberColumns(options: {
         return (
           <div className="asset-subscription-cell">
             <strong>{formatMoney(sub.monthly_price, sub.currency)}/月</strong>
-            {/* 续费日是日历日，原样显示，与按本地日历计算的剩余天数一致。 */}
+            {/* 续费日是日历日，原样显示；剩余天数按 UTC 日历日计算，与后端续费窗口一致。 */}
             <span>{formatDate(sub.renew_at)} {daysLeft != null ? `· ${daysLeft}天` : ''}</span>
             <SubscriptionStatusBadge value={sub.status} />
           </div>

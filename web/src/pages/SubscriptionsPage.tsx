@@ -43,7 +43,7 @@ import {
   type SubscriptionStatistics,
   type VPSAssetRecord,
 } from '../lib/types'
-import { daysUntilDate } from './assetPageUtils'
+import { daysUntilDate, renewalReferenceTime, renewalTimingLabel } from './assetPageUtils'
 import { ExchangeRateNoticeBody } from './subscriptions/ExchangeRateNoticeBody'
 import { exchangeRateStatusLabel, knownAmountNote, knownMonthlyAmount } from './subscriptions/exchangeRatePresentation'
 import { SubscriptionInsights, type SubscriptionBreakdownKind } from './subscriptions/SubscriptionInsights'
@@ -60,6 +60,8 @@ type PageState = {
   overviewLoading: boolean
   overviewError: string | null
   overview: SubscriptionOverview | null
+  /** 最近一次完成的摘要读取是否失败；只在请求结束时改变，重试进行中保持原值。 */
+  overviewLastReadFailed: boolean
   statisticsLoading: boolean
   statisticsError: string | null
   statistics: SubscriptionStatistics | null
@@ -90,6 +92,7 @@ const INITIAL_PAGE: PageState = {
   overviewLoading: true,
   overviewError: null,
   overview: null,
+  overviewLastReadFailed: false,
   statisticsLoading: true,
   statisticsError: null,
   statistics: null,
@@ -573,6 +576,7 @@ export function SubscriptionsPage() {
           overviewLoading: false,
           overviewError: null,
           overview,
+          overviewLastReadFailed: false,
         }))
         readStatusRef.current()
       })
@@ -582,6 +586,7 @@ export function SubscriptionsPage() {
           ...current,
           overviewLoading: false,
           overviewError: describeError(err, '加载成本概览失败'),
+          overviewLastReadFailed: true,
         }))
       })
     return () => { cancelled = true }
@@ -795,6 +800,9 @@ export function SubscriptionsPage() {
   ].filter((chip): chip is { key: string; label: string; clear: () => void } => chip != null)
 
   const overview = state.overview
+  // 明细的剩余天数与顶部 30 天计数、洞察队列取同一个“今天”：优先用订阅摘要生成时刻，摘要不可用时退回页面打开时刻。
+  // 重新加载期间沿用上一份摘要，避免天数在请求往返中跳动；尚无摘要或最近一次读取失败（直到重试成功）才退回页面时刻。
+  const referenceNow = renewalReferenceTime(overview?.snapshot_generated_at, overview != null && !state.overviewLastReadFailed, now)
   const knownAmount = knownMonthlyAmount({
     activeSubscriptionCount: overview?.active_subscription_count ?? 0,
     totalMonthlyCost: overview?.total_monthly_cost ?? 0,
@@ -997,9 +1005,10 @@ export function SubscriptionsPage() {
                     </thead>
                     <tbody>
                       {visibleSubscriptions.map((s) => {
-                        const daysLeft = daysUntilDate(s.renew_at, new Date(now))
-                        // 与 VPS 列表、续费窗口和后端「30 天续费」口径一致：含第 30 天。
+                        const daysLeft = daysUntilDate(s.renew_at, referenceNow)
+                        // 与 VPS 列表、续费窗口和后端「30 天续费」口径一致：含第 30 天，按 UTC 日历日。
                         const isUrgent = daysLeft != null && daysLeft <= 30
+                        const isOverdue = daysLeft != null && daysLeft < 0
                         const rateLabel = exchangeRateStatusLabel(s.exchange_rate_status)
                         return (
                           <tr className="data-table__row" key={s.subscription_id}>
@@ -1028,8 +1037,9 @@ export function SubscriptionsPage() {
                             </td>
                             <td className={`data-table__cell mono${isUrgent ? ' text-warn' : ''}`}>
                               <span className="subscription-table-signal">
-                                <StatusGlyph state={isUrgent ? 'notice' : 'normal'} size="sm" />
+                                <span aria-hidden="true"><StatusGlyph state={isOverdue ? 'alert' : isUrgent ? 'notice' : 'normal'} size="sm" /></span>
                                 {formatDate(s.renew_at)}
+                                {isOverdue ? <small className="subscription-table-signal__overdue">{renewalTimingLabel(daysLeft)}</small> : null}
                               </span>
                             </td>
                             <td className="data-table__cell">
