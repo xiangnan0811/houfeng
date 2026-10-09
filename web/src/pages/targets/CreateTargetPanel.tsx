@@ -10,6 +10,7 @@ import {
   parseLabels,
 } from './targetHelpers'
 import type { CreateTargetFormState } from './types'
+import { ExecutorLabelAssign } from './ExecutorLabelAssign'
 
 type CreateTargetPanelProps = {
   form: CreateTargetFormState
@@ -31,19 +32,27 @@ export function CreateTargetPanel({
   onSubmit,
   onFieldChange,
 }: CreateTargetPanelProps) {
-  const [executors, setExecutors] = useState<ExecutorCandidate[] | null>(null)
+  const [instances, setInstances] = useState<MonitoringInstanceRecord[] | null>(null)
   const suggestionsRequested = useRef(false)
+  const executionLabelsRef = useRef<HTMLInputElement>(null)
+  const receivers = instances?.filter(canReceiveProbes) ?? null
+  const executors = receivers?.map(executorCandidate) ?? null
   const labelSuggestions = distinctSorted((executors ?? []).flatMap((instance) => instance.labels))
+  const executionLabels = parseLabels(form.executionMonitoringInstanceLabels)
+  const targetPaused = form.runStatus === '暂停'
+  const assignLabel = executionLabels[0]
+  const canAssign = Boolean(receivers && receivers.length > 0 && assignLabel && !targetPaused)
+    && !(executors ?? []).some((instance) => instance.labels.some((label) => executionLabels.includes(label)))
 
   function loadLabelSuggestions() {
     if (suggestionsRequested.current) return
     suggestionsRequested.current = true
     void listMonitoringInstances('active')
-      .then((instances) => {
-        setExecutors(instances.filter(canReceiveProbes).map(executorCandidate))
+      .then((records) => {
+        setInstances(records)
       })
       .catch(() => {
-        setExecutors(null)
+        setInstances(null)
       })
   }
 
@@ -130,6 +139,7 @@ export function CreateTargetPanel({
           <label>
             <span className="target-create-drawer__label--required">执行监控实例标签</span>
             <input
+              ref={executionLabelsRef}
               name="executionMonitoringInstanceLabels"
               aria-label="执行监控实例标签"
               aria-required="true"
@@ -146,8 +156,26 @@ export function CreateTargetPanel({
           {executors ? (
             <ExecutorPreview
               executors={executors}
-              labels={parseLabels(form.executionMonitoringInstanceLabels)}
-              targetPaused={form.runStatus === '暂停'}
+              labels={executionLabels}
+              targetPaused={targetPaused}
+            />
+          ) : null}
+          {receivers ? (
+            <ExecutorLabelAssign
+              active={canAssign}
+              contextKey={`${executionLabels.join(',')}|${form.runStatus}`}
+              label={assignLabel ?? ''}
+              candidates={receivers}
+              onAssigned={(updated) => {
+                setInstances((current) => current?.map((instance) => (
+                  instance.monitoring_instance_id === updated.monitoring_instance_id ? updated : instance
+                )) ?? current)
+                // 加标签后这组按钮会消失，焦点回到执行标签输入框。
+                executionLabelsRef.current?.focus()
+              }}
+              onUnavailable={(instanceId) => setInstances((current) => current?.filter((instance) => (
+                instance.monitoring_instance_id !== instanceId
+              )) ?? current)}
             />
           ) : null}
           {labelSuggestions.length > 0 ? (
@@ -274,8 +302,8 @@ function ExecutorPreview({ executors, labels, targetPaused }: { executors: Execu
   if (executors.every((instance) => instance.labels.length === 0)) {
     return (
       <span className="target-create-drawer__executors" role="status">
-        现有 {executors.length} 台监控实例都还没有标签。可先在这里填一个标签，再到
-        <Link to="/monitoring">监控实例</Link>上补同名标签。
+        现有 {executors.length} 台监控实例都还没有标签。先在这里填一个标签，再给其中一台加上同名标签，或到
+        <Link to="/monitoring">监控实例</Link>上补。
       </span>
     )
   }

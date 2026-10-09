@@ -32,21 +32,6 @@ v1.19.0 体验走查中，有一部分修复已随 v1.20.0（PR #586）发布，
   首次使用（库存为空）和筛选后为空分别使用不同文案。
 - 验收：各页面空状态单测与三档视口截图。
 
-### C4 入口探测：显式给监控实例加标签
-
-- 状态：待实施
-- 现象：首台监控实例没有标签，新用户创建探测目标时没有可选的执行标签。
-- 已有：创建目标时的执行者预览与引导（`targets-web.md:28`）；已有实例标签会列为可点击选项，点击即追加到执行标签
-  （`CreateTargetPanel.tsx` 的“已有监控实例标签”组）。缺口只在实例都没有标签时。
-- 约束：**不做静默的自动默认标签**。执行实例按标签交集匹配，统一默认标签会让所有写了它的目标从全部 VPS 发起探测，
-  扩大出站流量和探测来源。
-- 方案：
-  - 实例都没有标签时，提供“给实例 X 加上标签 Y”按钮，调用现有的监控实例标签修改接口，用户确认后才写入；
-  - 可选：接入抽屉完成后建议一个标签。
-- 代码：`web/src/pages/targets/CreateTargetPanel.tsx`（`ExecutorPreview`）。
-- 同步：`targets-web.md:28`，以及所用实例标签接口所在的合同。
-- 验收：单测覆盖加标签的确认、取消与失败；e2e 覆盖“无标签 → 加标签 → 预览出现执行者”。
-
 ### C5 工作台：覆盖率并入观测证据，窄屏前移即将续费
 
 - 状态：待实施
@@ -100,6 +85,22 @@ v1.19.0 体验走查中，有一部分修复已随 v1.20.0（PR #586）发布，
 - 结论：不为此新增 `first_fetched_at`，因为补录月份本来就不会有当时的缓存，加字段解决不了问题。
 - 方向：如需精确，按日期回补历史汇率。默认提供方 Frankfurter（`internal/center/settings/types.go:172`）的公开 API
   支持按日期查询；Fixer 的历史端点受套餐限制。实施前需核实，并评估回补的触发时机、限流和失败降级。
+
+## 实施中发现的问题
+
+### B1 监控实例资料编辑的并发令牌会被同步刷新
+
+- 状态：待实施（先在真实安装上复现确认）
+- 发现：实施 C4 时经双审确认，`PATCH /api/monitoring-instances/{id}` 的 `If-Match` 比较的是 `updated_at`
+  （`internal/center/store/monitoring_instances.go` 的 `UpdateMonitoringInstanceMetadata`），而同步批次、在线信号与事件摘要都会把 `updated_at`
+  改成 `now()`（`sync_batches.go` 的 `advanceMonitoringInstanceSyncState`、`agent_live_signals.go`、`incidents.go`），
+  默认心跳间隔 5 秒（`internal/center/settings/types.go`）。
+- 影响：监控详情页的资料保存（group / labels / note）使用页面状态里的 `updated_at`。实例记录只在进入页面时读取，
+  只有命令执行中的轮询与管理复核会回写令牌；因此
+  在线实例上停留超过一个心跳周期后保存，大概率返回 409 `metadata conflict`。创建目标的加标签流程已用“写入前重读 + 冲突重试一次”规避。
+- 方向：为资料字段单独维护版本（例如 `metadata_updated_at` 或递增 `metadata_version`），只有资料写入才推进，`If-Match` 改比较它；
+  同步不再影响资料编辑。需迁移、更新 `monitoring-web.md:143` 与 monitoring 合同，并补“同步推进后保存仍成功、并发资料编辑仍 409”的
+  Postgres 与前端回归。
 
 ## 待定的产品建议
 
