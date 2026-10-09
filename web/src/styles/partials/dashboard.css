@@ -62,8 +62,12 @@
 .dashboard-stale-groups a span:first-child{min-width:0;overflow-wrap:anywhere}
 
 /* 桌面两栏：左侧观测与资产证据，右侧续费与最近动态；窄于 1024px 时单栏堆叠。 */
-.dashboard-workspace{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr);gap:var(--space-4);align-items:start;min-width:0}
-.dashboard-workspace__main,.dashboard-workspace__side{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.dashboard-workspace{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr);grid-template-rows:auto 1fr;grid-template-areas:"main renewals" "main activity";gap:var(--space-4);align-items:start;min-width:0}
+.dashboard-workspace__main{grid-area:main;display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.dashboard-workspace__renewals{grid-area:renewals;min-width:0}
+.dashboard-workspace__activity{grid-area:activity;min-width:0}
+.dashboard-coverage{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1) var(--space-2)}
+.dashboard-coverage small{flex-basis:100%;color:var(--text-muted)}
 .dashboard-evidence-lane,.dashboard-panel{display:flex;flex-direction:column;gap:var(--space-3);min-width:0;padding:var(--space-4);border:var(--border-w) solid var(--panel-border);border-radius:var(--radius-3);background:var(--panel-bg);box-shadow:var(--shadow-soft)}
 .dashboard-evidence-lane__header,.dashboard-panel__header{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);min-width:0}
 .dashboard-evidence-lane__header h2,.dashboard-panel__header h2{margin:0;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-body-size);font-weight:var(--type-h2-weight)}

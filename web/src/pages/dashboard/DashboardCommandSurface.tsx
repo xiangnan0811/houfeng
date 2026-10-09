@@ -7,6 +7,7 @@ import type {
   DashboardReadyModel,
   DashboardTone,
 } from './dashboardModel'
+import type { DashboardMonitoringCoverage } from './dashboardCoverage'
 import { DASHBOARD_LINKS } from './dashboardLinks'
 import { DashboardActivityPanel, DashboardRenewalsPanel } from './DashboardPanels'
 import { trendTotal, type DashboardActivityItem, type DashboardRenewalPanel } from './dashboardPanels'
@@ -184,7 +185,11 @@ export function DashboardCommandSurface({
         ))}
       </section>
 
+      {/* DOM 顺序即单栏顺序：可行动的即将续费排在证据之前；两栏时由 grid 区域放回右栏。 */}
       <div className="dashboard-workspace">
+      <div className="dashboard-workspace__renewals">
+        <DashboardRenewalsPanel panel={renewals} />
+      </div>
       <div className="dashboard-workspace__main">
         <section className="dashboard-evidence-lane" aria-labelledby="dashboard-observation-title">
           <div className="dashboard-evidence-lane__header">
@@ -197,6 +202,7 @@ export function DashboardCommandSurface({
             摘要生成 <Timestamp value={model.snapshotGeneratedAt} mode="absolute" />
           </p>
           <p>已有历史观测不推断当前健康。</p>
+          {model.monitoringCoverage ? <MonitoringCoverageFact coverage={model.monitoringCoverage} /> : null}
           {observation.unobservedTargetCount > 0 && model.mode !== 'stable' ? (
             <Link to={DASHBOARD_LINKS.targetsUnobserved}>
               尚无观测 <MonoDigits>{observation.unobservedTargetCount}</MonoDigits>
@@ -277,11 +283,33 @@ export function DashboardCommandSurface({
           </div>
         </section>
       </div>
-      <div className="dashboard-workspace__side">
-        <DashboardRenewalsPanel panel={renewals} />
+      <div className="dashboard-workspace__activity">
         <DashboardActivityPanel items={activity} />
       </div>
       </div>
     </section>
+  )
+}
+
+// 覆盖事实来自 VPS 清单，单独标注来源与读取时间，不与工作台摘要的时间混用。
+function MonitoringCoverageFact({ coverage }: { coverage: DashboardMonitoringCoverage }) {
+  if (coverage.status === 'loading') {
+    return <p className="dashboard-coverage">监控覆盖读取中…</p>
+  }
+  if (coverage.status === 'unavailable') {
+    return <p className="dashboard-coverage">监控覆盖暂不可用：VPS 清单读取失败。</p>
+  }
+  return (
+    <p className="dashboard-coverage">
+      <span>
+        监控覆盖：在用 VPS 中 <MonoDigits>{coverage.linked}</MonoDigits>/<MonoDigits>{coverage.total}</MonoDigits> 台已关联监控实例
+      </span>
+      {coverage.linked < coverage.total ? (
+        <Link className="text-link" to={DASHBOARD_LINKS.vpsUnlinked}>查看未关联</Link>
+      ) : null}
+      <small>
+        来源：VPS 清单 · 读取于 <Timestamp value={coverage.loadedAt} mode="absolute" />
+      </small>
+    </p>
   )
 }

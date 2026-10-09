@@ -2,7 +2,7 @@
 @media (max-width:1024px){
   .dashboard-decision-surface{padding:var(--space-5)}
   .dashboard-decision-surface__header{grid-template-columns:minmax(0,1fr) minmax(calc(var(--space-12) * 3.5),calc(var(--space-12) * 4.5))}
-  .dashboard-workspace{grid-template-columns:minmax(0,1fr)}
+  .dashboard-workspace{grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-template-areas:"renewals" "main" "activity"}
 }
 
 @media (max-width:640px){

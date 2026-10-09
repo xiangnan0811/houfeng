@@ -13,6 +13,7 @@ export const DASHBOARD_LINKS = {
   assetDecisionsRenewal: '/asset-decisions?view=renewal&renew_within_days=30',
   assetDecisionsEvidence: '/asset-decisions?view=evidence&renew_within_days=30&scenario=evidence_cleanup',
   vps: '/vps',
+  vpsUnlinked: '/vps?workspace=workbench&view=unlinked',
   /** 进入 VPS 页并直接打开创建对话框。 */
   vpsCreate: '/vps?create=1',
   subscriptions: '/subscriptions',

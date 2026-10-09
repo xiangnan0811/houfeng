@@ -438,6 +438,41 @@ describe('DashboardPage', () => {
     expect(within(screen.getByRole('list', { name: '即将续费的订阅' })).getAllByRole('link')).toHaveLength(5)
   })
 
+  it('states monitoring coverage of active VPS in the observation lane with its own source', async () => {
+    renderDashboard({
+      vps: {
+        body: [
+          vpsAssetFixture({ vps_id: 'vps_a', active_monitoring_instance_link_count: 1 }),
+          vpsAssetFixture({ vps_id: 'vps_b', active_monitoring_instance_link_count: 0 }),
+          vpsAssetFixture({ vps_id: 'vps_c', active_monitoring_instance_link_count: 0 }),
+          vpsAssetFixture({ vps_id: 'vps_old', lifecycle_status: 'archived', active_monitoring_instance_link_count: 0 }),
+        ],
+        status: 200,
+      },
+    })
+    const lane = (await screen.findByRole('heading', { name: '观测证据' })).closest('section')!
+    const coverage = within(lane).getByText(/监控覆盖：在用 VPS 中/).closest('p')!
+    expect(coverage).toHaveTextContent('监控覆盖：在用 VPS 中 1/3 台已关联监控实例')
+    expect(coverage).toHaveTextContent('来源：VPS 清单')
+    expect(within(coverage).getByRole('link', { name: '查看未关联' })).toHaveAttribute('href', '/vps?workspace=workbench&view=unlinked')
+  })
+
+  it('degrades monitoring coverage when the VPS list fails instead of showing 0/M', async () => {
+    renderDashboard({ vps: { body: { error: 'vps unavailable' }, status: 503 } })
+    const lane = (await screen.findByRole('heading', { name: '观测证据' })).closest('section')!
+    expect(await within(lane).findByText('监控覆盖暂不可用：VPS 清单读取失败。')).toBeInTheDocument()
+    expect(within(lane).queryByRole('link', { name: '查看未关联' })).not.toBeInTheDocument()
+  })
+
+  it('places the renewal preview before the evidence lanes in reading order', async () => {
+    renderDashboard()
+    const renewals = await screen.findByRole('heading', { name: '即将续费' })
+    const observation = screen.getByRole('heading', { name: '观测证据' })
+    const activity = screen.getByRole('heading', { name: '最近动态' })
+    expect(renewals.compareDocumentPosition(observation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(observation.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('warns when monitored objects have no notification channel', async () => {
     renderDashboard({ dashboard: { body: dashboardOverviewFixture({ total_monitoring_instance_count: 1 }), status: 200 } })
     const note = await screen.findByRole('note', { name: '未配置通知渠道' })
