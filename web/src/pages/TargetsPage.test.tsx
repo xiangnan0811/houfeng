@@ -307,10 +307,18 @@ describe('TargetsPage', () => {
     expect(within(createDrawer).getByText('将由 tokyo-edge-01、paris-01 执行。')).toBeInTheDocument()
     fireEvent.change(executionLabels, { target: { value: 'us' } })
     expect(within(createDrawer).getByText('目前没有监控实例带这些标签，创建后暂时不会被探测。')).toBeInTheDocument()
+    // 已有标签但都不匹配时，同样可以显式给某台实例加上第一个执行标签。
+    const assign = within(createDrawer).getByRole('group', { name: '给监控实例加标签' })
+    expect(within(assign).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      '给 tokyo-edge-01 加上「us」',
+      '给 paris-01 加上「us」',
+    ])
     // 暂停目标不会分配给任何实例。
     fireEvent.change(executionLabels, { target: { value: 'edge' } })
     fireEvent.change(within(createDrawer).getByLabelText('运行状态'), { target: { value: '暂停' } })
     expect(within(createDrawer).getByText('运行状态为暂停，创建后暂时不会被探测。')).toBeInTheDocument()
+    fireEvent.change(executionLabels, { target: { value: 'us' } })
+    expect(within(createDrawer).queryByRole('group', { name: '给监控实例加标签' })).not.toBeInTheDocument()
   })
 
   it('does not name paused, retired or archived monitoring instances as executors', async () => {
@@ -362,6 +370,66 @@ describe('TargetsPage', () => {
     fireEvent.focus(within(createDrawer).getByLabelText('执行监控实例标签'))
     const guidance = await within(createDrawer).findByText(/现有 1 台监控实例都还没有标签/)
     expect(within(guidance).getByRole('link', { name: '监控实例' })).toHaveAttribute('href', '/monitoring')
+  })
+
+  it('adds the execution label to a chosen instance only after explicit confirmation', async () => {
+    const tokyo = {
+      monitoring_instance_id: 'mi_tokyo',
+      display_name: 'tokyo-edge-01',
+      group: 'apac',
+      labels: [] as string[],
+      note: 'keep this note',
+      updated_at: '2026-10-09T08:00:00Z',
+    }
+    const patches: Array<{ body: unknown; ifMatch: string | null }> = []
+    let failNext = true
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/monitoring-instances/mi_tokyo' && init?.method === 'PATCH') {
+        patches.push({ body: JSON.parse(String(init.body)), ifMatch: new Headers(init.headers).get('If-Match') })
+        if (failNext) {
+          failNext = false
+          return mockJSONResponse({ error: '监控实例资料已被修改，请刷新后重试' }, 412)
+        }
+        return mockJSONResponse({ ...tokyo, labels: ['jp'], updated_at: '2026-10-09T08:05:00Z' })
+      }
+      if (url.startsWith('/api/monitoring-instances')) return mockJSONResponse([tokyo])
+      return mockJSONResponse([])
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '新建第一个目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    const executionLabels = within(createDrawer).getByLabelText('执行监控实例标签')
+    fireEvent.focus(executionLabels)
+    await within(createDrawer).findByText(/现有 1 台监控实例都还没有标签/)
+    fireEvent.change(executionLabels, { target: { value: 'jp' } })
+
+    const assign = within(createDrawer).getByRole('group', { name: '给监控实例加标签' })
+    fireEvent.click(within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' }))
+    expect(within(assign).getByText(/加上后，它也会执行其他带这个标签的目标/)).toBeInTheDocument()
+    // 取消不写入。
+    fireEvent.click(within(assign).getByRole('button', { name: '取消' }))
+    expect(patches).toHaveLength(0)
+
+    fireEvent.click(within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' }))
+    fireEvent.click(within(assign).getByRole('button', { name: '确认添加' }))
+    expect(await within(assign).findByRole('alert')).toHaveTextContent('监控实例资料已被修改，请刷新后重试')
+
+    fireEvent.click(within(assign).getByRole('button', { name: '确认添加' }))
+    expect(await within(createDrawer).findByText('将由 tokyo-edge-01 执行。')).toBeInTheDocument()
+    expect(within(createDrawer).queryByRole('group', { name: '给监控实例加标签' })).not.toBeInTheDocument()
+    expect(patches).toHaveLength(2)
+    expect(patches[1]).toEqual({
+      body: { group: 'apac', labels: ['jp'], note: 'keep this note' },
+      ifMatch: '"2026-10-09T08:00:00Z"',
+    })
   })
 
   it('uses Chinese-first validation for base port', async () => {
