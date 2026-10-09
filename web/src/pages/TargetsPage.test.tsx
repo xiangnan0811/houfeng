@@ -500,6 +500,14 @@ describe('TargetsPage', () => {
     if (nextLabel === 'kr') {
       expect(within(createDrawer).getByRole('button', { name: '给 tokyo-edge-01 加上「kr」' })).toBeEnabled()
     }
+    // 切回原来的上下文也不恢复旧确认，需要重新选择实例。
+    if (_case === 'a paused target') {
+      fireEvent.change(within(createDrawer).getByLabelText('运行状态'), { target: { value: '启用' } })
+    } else {
+      fireEvent.change(executionLabels, { target: { value: 'jp' } })
+    }
+    expect(within(createDrawer).queryByRole('button', { name: '确认添加' })).not.toBeInTheDocument()
+    expect(within(createDrawer).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' })).toBeEnabled()
   })
 
   it('does not retry an archived instance as a version conflict and drops it from the candidates', async () => {

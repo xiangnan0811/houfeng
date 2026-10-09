@@ -74,6 +74,13 @@ export function ExecutorLabelAssign({
   const confirmRef = useRef<HTMLButtonElement>(null)
   const focusTriggerRef = useRef<string | null>(null)
   const descriptionId = useId()
+  // 确认只属于发起时的上下文（可执行且同一标签）；上下文一变就作废，切回来也不恢复旧确认。
+  const context = active ? label : null
+  const [confirmContext, setConfirmContext] = useState(context)
+  if (confirmContext !== context) {
+    setConfirmContext(context)
+    if (pending) setPending(null)
+  }
 
   // 确认只对发起时的标签有效；标签变了就回到候选列表，不沿用旧确认。
   const confirming = active && pending && pending.label === label
