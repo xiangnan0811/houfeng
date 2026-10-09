@@ -249,6 +249,35 @@ describe('TargetsPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps the create form open when Enter is pressed inside a label field', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([])).mockResolvedValueOnce(mockJSONResponse([]))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '新建第一个目标' })).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '新建第一个目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    const executionLabels = within(createDrawer).getByLabelText('执行监控实例标签')
+    fireEvent.change(executionLabels, { target: { value: ' edge ，core,, ' } })
+
+    expect(fireEvent.keyDown(executionLabels, { key: 'Enter' })).toBe(false)
+    expect(executionLabels).toHaveValue('edge, core')
+    const targetLabels = within(createDrawer).getByLabelText('目标标签')
+    fireEvent.change(targetLabels, { target: { value: 'public' } })
+    expect(fireEvent.keyDown(targetLabels, { key: 'Enter' })).toBe(false)
+    expect(screen.getByRole('dialog', { name: '创建目标' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('uses Chinese-first validation for base port', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(mockJSONResponse([])).mockResolvedValueOnce(mockJSONResponse([]))
     vi.stubGlobal('fetch', fetchMock)

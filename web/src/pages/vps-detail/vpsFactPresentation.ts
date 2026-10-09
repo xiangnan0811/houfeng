@@ -1,4 +1,5 @@
 import type { VPSOverviewFact as ModernFact, VPSOverviewIdentity } from '../../lib/types'
+import { formatDateTime } from '../../lib/format'
 import { overviewImportanceLabel } from '../../lib/vpsOverviewPresentation'
 export type VPSFactDisplay = {
   key: string
@@ -67,9 +68,10 @@ export function modernOverviewFactRows(
     const independentFacts: Array<[string, string, string | undefined]> = [
       ['validity_mode', '资源有效期', identity.validity_mode ? (identity.validity_mode === 'fixed' ? (identity.expires_at || '到期日未知') : identity.validity_mode === 'unlimited' ? '无固定期限' : '未知') : undefined],
       ['auto_renew_check', '服务商自动续费', identity.auto_renew_check ? ({ unchecked: '尚未核对', enabled: '已开启', disabled: '已关闭', never_enabled: '从未开启', unsupported: '不支持' }[identity.auto_renew_check] ?? '尚未核对') : undefined],
-      ['auto_renew_checked_at', '自动续费核对时间', identity.auto_renew_checked_at ?? undefined],
+      ['auto_renew_checked_at', '自动续费核对时间', identity.auto_renew_checked_at ? formatDateTime(identity.auto_renew_checked_at) : undefined],
       ['renewal_reason', '续费意向原因', identity.renewal_reason || undefined],
-      ['renewal_review_at', '续费意向复核时间', identity.renewal_review_at ?? undefined],
+      // 复核时间按日期录入，只显示 UTC 日期部分，不暴露原始 ISO 字符串。
+      ['renewal_review_at', '续费意向复核时间', identity.renewal_review_at ? identity.renewal_review_at.slice(0, 10) : undefined],
       ['acquisition_source', '获取来源', identity.acquisition_source || undefined],
     ]
     for (const [key, label, value] of independentFacts) {

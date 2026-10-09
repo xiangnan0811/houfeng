@@ -28,6 +28,8 @@ describe('modernOverviewFactRows', () => {
     expect(rows.find((row) => row.key === 'validity_mode')?.value).toBe('2027-01-31')
     expect(rows.find((row) => row.key === 'auto_renew_check')?.value).toBe('已关闭')
     expect(rows.find((row) => row.key === 'renewal_reason')?.value).toBe('迁移后结束使用')
+    expect(rows.find((row) => row.key === 'auto_renew_checked_at')?.value).toMatch(/^2026\/09\/2[56] \d{2}:\d{2}$/)
+    expect(rows.find((row) => row.key === 'renewal_review_at')?.value).toBe('2026-10-01')
     expect(modernOverviewFactRows([], { ...identity, validity_mode: 'unlimited' }).find((row) => row.key === 'validity_mode')?.value).toBe('无固定期限')
   })
   it('adds identity product, importance, and labels without inventing a note', () => {

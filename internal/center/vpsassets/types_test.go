@@ -78,6 +78,18 @@ func TestValidateCreateInput(t *testing.T) {
 		{name: "invalid renewal decision", input: CreateInput{DisplayName: "Tokyo Edge", LifecycleStatus: LifecycleActive, UsageStatus: UsageInUse, RenewalDecision: "later"}, want: ErrInvalidVPSAssetInput},
 		{name: "low ssh port", input: CreateInput{DisplayName: "Tokyo Edge", LifecycleStatus: LifecycleActive, UsageStatus: UsageInUse, SSHPort: -1}, want: ErrInvalidVPSAssetInput},
 		{name: "high ssh port", input: CreateInput{DisplayName: "Tokyo Edge", LifecycleStatus: LifecycleActive, UsageStatus: UsageInUse, SSHPort: 65536}, want: ErrInvalidVPSAssetInput},
+		{name: "valid addresses", input: CreateInput{DisplayName: "Tokyo Edge", IPv4: " 203.0.113.10 ", IPv6: "2001:db8::10"}},
+		{name: "short ipv4", input: CreateInput{DisplayName: "Tokyo Edge", IPv4: "999.1.1"}, want: ErrInvalidVPSAssetInput},
+		{name: "out of range ipv4", input: CreateInput{DisplayName: "Tokyo Edge", IPv4: "256.1.1.1"}, want: ErrInvalidVPSAssetInput},
+		{name: "ipv6 in ipv4 field", input: CreateInput{DisplayName: "Tokyo Edge", IPv4: "2001:db8::10"}, want: ErrInvalidVPSAssetInput},
+		{name: "ipv4 in ipv6 field", input: CreateInput{DisplayName: "Tokyo Edge", IPv6: "203.0.113.10"}, want: ErrInvalidVPSAssetInput},
+		{name: "hostname in ipv4 field", input: CreateInput{DisplayName: "Tokyo Edge", IPv4: "edge.example.com"}, want: ErrInvalidVPSAssetInput},
+		{name: "ipv4-mapped ipv6 stays ipv6", input: CreateInput{DisplayName: "Tokyo Edge", IPv6: "::ffff:192.0.2.1"}},
+		{name: "ipv4-mapped hex form stays ipv6", input: CreateInput{DisplayName: "Tokyo Edge", IPv6: "::ffff:c000:201"}},
+		{name: "ipv4-mapped in ipv4 field", input: CreateInput{DisplayName: "Tokyo Edge", IPv4: "::ffff:192.0.2.1"}, want: ErrInvalidVPSAssetInput},
+		{name: "ipv6 zone", input: CreateInput{DisplayName: "Tokyo Edge", IPv6: "fe80::1%eth0"}, want: ErrInvalidVPSAssetInput},
+		{name: "ipv4 leading zero", input: CreateInput{DisplayName: "Tokyo Edge", IPv4: "192.0.2.01"}, want: ErrInvalidVPSAssetInput},
+		{name: "unicode white space trimmed", input: CreateInput{DisplayName: "Tokyo Edge", IPv4: "\u0085203.0.113.10\u3000"}},
 	}
 
 	for _, tt := range tests {

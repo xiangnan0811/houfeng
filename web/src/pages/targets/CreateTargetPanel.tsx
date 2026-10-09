@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 
 import { listMonitoringInstances } from '../../lib/api'
 import {
@@ -42,6 +42,16 @@ export function CreateTargetPanel({
       .catch(() => {
         setLabelSuggestions([])
       })
+  }
+
+  // 标签框里按 Enter 只整理已输入的标签，不提交整张表单。
+  function commitLabelsOnEnter(
+    event: KeyboardEvent<HTMLInputElement>,
+    field: 'executionMonitoringInstanceLabels' | 'labels',
+  ) {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+    event.preventDefault()
+    onFieldChange(field, parseLabels(event.currentTarget.value).join(', '))
   }
 
   function appendExecutionLabel(label: string) {
@@ -118,6 +128,7 @@ export function CreateTargetPanel({
               value={form.executionMonitoringInstanceLabels}
               aria-describedby="target-execution-label-hint"
               onFocus={loadLabelSuggestions}
+              onKeyDown={(event) => commitLabelsOnEnter(event, 'executionMonitoringInstanceLabels')}
               onChange={(event) => onFieldChange('executionMonitoringInstanceLabels', event.target.value)}
             />
           </label>
@@ -176,6 +187,7 @@ export function CreateTargetPanel({
             <input
               name="labels"
               value={form.labels}
+              onKeyDown={(event) => commitLabelsOnEnter(event, 'labels')}
               onChange={(event) => onFieldChange('labels', event.target.value)}
             />
           </label>

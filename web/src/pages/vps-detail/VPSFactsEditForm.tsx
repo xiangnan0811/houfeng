@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
+import { trimHostAddress } from '../../lib/hostAddress'
 import type { ProviderRecord } from '../../lib/types'
 import { CountryCombo } from './CountryCombo'
 import type { FactEditFormState } from './types'
@@ -28,9 +29,9 @@ type VPSFactsEditFormProps = {
 }
 
 function hasCustomSSH(draft: FactEditFormState) {
-  const host = draft.sshHost.trim()
+  const host = trimHostAddress(draft.sshHost)
   const port = draft.sshPort.trim()
-  const ipv4 = draft.ipv4.trim()
+  const ipv4 = trimHostAddress(draft.ipv4)
   return (Boolean(host) && host !== ipv4) || (Boolean(port) && port !== '22')
 }
 
@@ -114,12 +115,12 @@ export function VPSFactsEditForm({
   function updateSSHHostDiffers(checked: boolean) {
     setSSHHostDiffers(checked)
     if (!checked) return
-    const host = draft.sshHost.trim()
+    const host = trimHostAddress(draft.sshHost)
     const port = String(draft.sshPort).trim()
     if (!host || !port) {
       onDraftChange({
         ...draft,
-        sshHost: host ? draft.sshHost : draft.ipv4.trim(),
+        sshHost: host ? draft.sshHost : trimHostAddress(draft.ipv4),
         sshPort: port ? draft.sshPort : '22',
       })
     }

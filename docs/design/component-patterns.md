@@ -8,7 +8,7 @@ Current reusable patterns include:
 
 - `Button`, `Badge`, `Card`, `Input`, `Toggle`, and `Tabs` for ordinary controls;
 - `Sparkline`, `MetricChart`, `TrendArrow`, and `StatusGlyph` for compact runtime evidence;
-- `MonoDigits`, `Hostname`, and `Timestamp` for technical facts (`Timestamp mode="both"` shows one date when the relative form has already fallen back to the absolute date);
+- `MonoDigits`, `Hostname`, and `Timestamp` for technical facts (`Timestamp mode="both"` shows one date when the relative form has already fallen back to the absolute date; future instants such as credential expiry read “N 分钟后”, and only |Δ| < 5s reads 刚刚);
 - `ScrollRegion` for wide tables: a named, keyboard-focusable region whose scroll hint appears only while the content actually overflows;
 - `DataTable` for dense list scanning;
 - `Drawer` for advanced filters and scoped edit flows;

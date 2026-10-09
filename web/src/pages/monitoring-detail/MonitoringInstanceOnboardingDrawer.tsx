@@ -285,7 +285,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
             </div>
             <dl className="monitoring-detail-onboarding__facts">
               <div>
-                <dt>过期</dt>
+                <dt>过期时间</dt>
                 <dd>
                   <Timestamp value={issue.expires_at} mode="both" />
                 </dd>

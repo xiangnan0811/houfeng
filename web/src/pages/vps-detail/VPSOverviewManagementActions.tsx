@@ -592,7 +592,7 @@ export function VPSOverviewManagementActions({
     }
     let input
     try {
-      input = buildFactEditInput(factDraft)
+      input = buildFactEditInput(factDraft, { ipv4: detail.ipv4, ipv6: detail.ipv6 })
     } catch (error: unknown) {
       setMutationError(describeManagementError(error, 'VPS 基础信息输入无效'))
       return

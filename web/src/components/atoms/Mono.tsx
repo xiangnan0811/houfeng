@@ -70,17 +70,19 @@ function formatAbsolute(d: Date): string {
   return `${y}/${m}/${day} ${h}:${mi}`
 }
 
+// 未来时间（如一次性凭据的过期时刻）用“…后”，不能落进“刚刚”被读成已经发生。
 function formatRelative(target: Date, ref: Date): string {
   const diffMs = ref.getTime() - target.getTime()
-  const sec = Math.round(diffMs / 1000)
+  const suffix = diffMs < 0 ? '后' : '前'
+  const sec = Math.round(Math.abs(diffMs) / 1000)
   if (sec < 5) return '刚刚'
-  if (sec < 60) return `${sec} 秒前`
+  if (sec < 60) return `${sec} 秒${suffix}`
   const min = Math.round(sec / 60)
-  if (min < 60) return `${min} 分钟前`
+  if (min < 60) return `${min} 分钟${suffix}`
   const hr = Math.round(min / 60)
-  if (hr < 24) return `${hr} 小时前`
+  if (hr < 24) return `${hr} 小时${suffix}`
   const day = Math.round(hr / 24)
-  if (day < 30) return `${day} 天前`
+  if (day < 30) return `${day} 天${suffix}`
   return formatAbsolute(target)
 }
 

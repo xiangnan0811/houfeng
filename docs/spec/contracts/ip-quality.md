@@ -91,7 +91,7 @@
 - 地址 fallback 的报告身份与无 active link 资产身份分别在已过滤的 MATERIALIZED CTE 中计算；JOIN 只比较已解析值，避免对每个报告/资产组合重复执行 parser。assigned view 与 Overview 同步这一计算边界，不以新增索引或历史回填替代。
 - Overview 的窄 summary 不新增字段：先按原排序选定最新归属报告，再检查 fallback 是否被另一台无 active link 的 VPS 同址命中。选定报告归属歧义时返回无 summary，沿用 `missing` 缺口提示，不把其 risk/partial/stale 归给该 VPS，也不得跳过它改用更旧的唯一归属报告；最新报告唯一归属与 active-link 分支的既有结果保持不变。
 - Go/SQL host identity 解析均 trim Unicode White_Space，拒绝 CIDR、zone、端口、短 IPv4、前导零及越界十进制 octet；合法 unspecified 可解析，既有业务过滤不变。无效文本不参与 fallback，但不妨碍 active-link 归属。Agent 候选只在存在不同有效地址时确认冲突；出口不一致 evidence 需 success、非 ambiguous、有效报告地址和至少一个有效当前地址。
-- VPS PATCH 仅改变地址表示不新增 IP history；真实地址改变仍记史。任一侧不可解析时按 trim 后原文比较，修正/删除非法旧地址也记史。独立创建 IP history 使用同一无变化判定；四个历史地址字段保留原文。VPS 输入仍 trim-only，不新增 API 拒绝规则，不放宽 evidence 地址族校验。
+- VPS PATCH 仅改变地址表示不新增 IP history；真实地址改变仍记史。任一侧不可解析时按 trim 后原文比较，修正/删除非法旧地址也记史。独立创建 IP history 使用同一无变化判定；四个历史地址字段保留原文。VPS create/导入拒绝非空的非法地址；PATCH 只在地址按本条无变化判定确有改变时才校验格式，并在版本前提检查之后执行，未改动（含只差首尾空白）的存量非法原文不被拒绝（见 assets 合同）。不放宽 evidence 地址族校验。
 - 用户侧 read model（`ip_quality_assigned_vps_reports` / `ip_quality_latest_vps_summaries`）只能包含真实 IP 事实：`status in ('success','partial')`、`ip_address <> '0.0.0.0'`、`ip_version in (4,6)`。原始 failure 报告继续保存在 `ip_quality_reports` 供诊断，但 VPS API、VPS 列表/详情和资产决策不得展示这些 failure 占位事实。
 - 历史详情 API 必须按 VPS assignment 规则读取 selected report，响应中必须同时返回该 report 的 `summary`、`latest_report`、provider rows、service rows；不能只返回 row 细节而让前端历史视图空态或退回 latest summary。
 - 最新与历史详情各自在单个 `REPEATABLE READ READ ONLY` transaction 中读取归属、摘要、报告及 children（最新入口还包含最多 30 条 history）。最新入口以摘要的 ReportID 固定身份，历史入口以请求 ID 固定身份；并发入库、link 或地址/共享地址变化只影响后续请求，不能拼接两个快照。
