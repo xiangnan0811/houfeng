@@ -27,6 +27,20 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.20.1](https://github.com/xiangnan0811/houfeng/compare/v1.20.0...v1.20.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **ux:** 窄屏运行观测去掉空行、资产判断大字对齐标题、开始日期一键填今天 ([0d9a90d](https://github.com/xiangnan0811/houfeng/commit/0d9a90dd7332b6434b2742d15f4021467cf5db2a))
+* **ux:** 记录体验走查后续事项并完成合同内小修复 ([50e245e](https://github.com/xiangnan0811/houfeng/commit/50e245e15a5e2cf3397aece18b74a4977c062658))
+* **ux:** 运行观测固定列索引，开始日期测试钉住时区，修正后续事项文档依据 ([7fcb803](https://github.com/xiangnan0811/houfeng/commit/7fcb8037db873ad1864df8d73650419003902919))
+
+
+### Documentation
+
+* **design:** 记录体验走查后续事项与已定方案 ([221bf8e](https://github.com/xiangnan0811/houfeng/commit/221bf8e483ab999d4682f8e4d74c4ed4ce4df165))
+
 ## [1.20.0](https://github.com/xiangnan0811/houfeng/compare/v1.19.0...v1.20.0) (2026-10-09)
 
 
