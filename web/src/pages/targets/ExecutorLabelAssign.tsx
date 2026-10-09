@@ -27,26 +27,43 @@ async function appendLabel(instanceId: string, label: string): Promise<Monitorin
         { expectedUpdatedAt: current.updated_at },
       )
     } catch (error: unknown) {
-      if (!(error instanceof ApiError && error.status === 409) || attempt >= ASSIGN_ATTEMPTS) throw error
+      if (!isMetadataConflict(error) || attempt >= ASSIGN_ATTEMPTS) throw error
     }
   }
 }
 
+// 409 还可能是实例已归档；只有资料版本冲突才值得重读重试。
+function isMetadataConflict(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 409 && error.message === 'metadata conflict'
+}
+
+function isInstanceGone(error: unknown): boolean {
+  return error instanceof ApiError
+    && (error.status === 404 || (error.status === 409 && error.message === 'archived monitoring instance'))
+}
+
 function describeAssignError(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409) return '实例资料正在更新，没有加上标签，请再确认一次。'
+  if (isMetadataConflict(error)) return '实例资料正在更新，没有加上标签，请再确认一次。'
+  if (isInstanceGone(error)) return '这台实例已归档或不存在，已从候选中移除。'
   return describeError(error, '添加标签失败')
 }
 
 // 没有实例带执行标签时，让用户显式给某台实例加上该标签；不做静默的默认标签，
 // 否则所有写了同一标签的目标都会从这台实例发起探测。
+// 只要有可执行实例就保持挂载：标签清空、改成已匹配的标签或目标改为暂停时，候选区隐藏，
+// 但进行中的请求结果（尤其是失败）仍要显示，不能随组件卸载丢失。
 export function ExecutorLabelAssign({
+  active,
   label,
   candidates,
   onAssigned,
+  onUnavailable,
 }: {
+  active: boolean
   label: string
   candidates: MonitoringInstanceRecord[]
   onAssigned: (updated: MonitoringInstanceRecord) => void
+  onUnavailable: (instanceId: string) => void
 }) {
   const [pending, setPending] = useState<PendingAssign | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -59,7 +76,7 @@ export function ExecutorLabelAssign({
   const descriptionId = useId()
 
   // 确认只对发起时的标签有效；标签变了就回到候选列表，不沿用旧确认。
-  const confirming = pending && pending.label === label
+  const confirming = active && pending && pending.label === label
     ? candidates.find((instance) => instance.monitoring_instance_id === pending.instanceId) ?? null
     : null
 
@@ -95,6 +112,10 @@ export function ExecutorLabelAssign({
     } catch (caught: unknown) {
       if (!mountedRef.current || requestRef.current !== requestId) return
       setError(`给 ${instanceName(instance)} 加上「${requestedLabel}」失败：${describeAssignError(caught)}`)
+      if (isInstanceGone(caught)) {
+        setPending(null)
+        onUnavailable(instance.monitoring_instance_id)
+      }
     } finally {
       if (mountedRef.current && requestRef.current === requestId) setSubmitting(false)
     }
@@ -107,10 +128,11 @@ export function ExecutorLabelAssign({
   }
 
   const shown = candidates.slice(0, ASSIGN_CANDIDATE_LIMIT)
+  if (!active && !error) return null
 
   return (
     <span ref={groupRef} className="target-create-drawer__label-assign" role="group" aria-label="给监控实例加标签">
-      {confirming ? (
+      {!active ? null : confirming ? (
         <>
           <span id={descriptionId} className="target-create-drawer__executors" role="status">
             确认给 {instanceName(confirming)} 加上「{label}」？加上后，它也会执行其他带这个标签的目标。

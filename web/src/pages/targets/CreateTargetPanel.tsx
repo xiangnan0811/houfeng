@@ -160,9 +160,10 @@ export function CreateTargetPanel({
               targetPaused={targetPaused}
             />
           ) : null}
-          {canAssign && receivers && assignLabel ? (
+          {receivers ? (
             <ExecutorLabelAssign
-              label={assignLabel}
+              active={canAssign}
+              label={assignLabel ?? ''}
               candidates={receivers}
               onAssigned={(updated) => {
                 setInstances((current) => current?.map((instance) => (
@@ -171,6 +172,9 @@ export function CreateTargetPanel({
                 // 加标签后这组按钮会消失，焦点回到执行标签输入框。
                 executionLabelsRef.current?.focus()
               }}
+              onUnavailable={(instanceId) => setInstances((current) => current?.filter((instance) => (
+                instance.monitoring_instance_id !== instanceId
+              )) ?? current)}
             />
           ) : null}
           {labelSuggestions.length > 0 ? (

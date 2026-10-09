@@ -92,10 +92,11 @@ v1.19.0 体验走查中，有一部分修复已随 v1.20.0（PR #586）发布，
 
 - 状态：待实施（先在真实安装上复现确认）
 - 发现：实施 C4 时经双审确认，`PATCH /api/monitoring-instances/{id}` 的 `If-Match` 比较的是 `updated_at`
-  （`internal/center/store/monitoring_instances.go` 的 `UpdateMetadata`），而同步批次、在线信号与事件摘要都会把 `updated_at`
+  （`internal/center/store/monitoring_instances.go` 的 `UpdateMonitoringInstanceMetadata`），而同步批次、在线信号与事件摘要都会把 `updated_at`
   改成 `now()`（`sync_batches.go` 的 `advanceMonitoringInstanceSyncState`、`agent_live_signals.go`、`incidents.go`），
   默认心跳间隔 5 秒（`internal/center/settings/types.go`）。
-- 影响：监控详情页的资料保存（group / labels / note）使用页面加载时的 `updated_at`（详情页只在命令执行中轮询），
+- 影响：监控详情页的资料保存（group / labels / note）使用页面状态里的 `updated_at`。实例记录只在进入页面时读取，
+  只有命令执行中的轮询与管理复核会回写令牌；因此
   在线实例上停留超过一个心跳周期后保存，大概率返回 409 `metadata conflict`。创建目标的加标签流程已用“写入前重读 + 冲突重试一次”规避。
 - 方向：为资料字段单独维护版本（例如 `metadata_updated_at` 或递增 `metadata_version`），只有资料写入才推进，`If-Match` 改比较它；
   同步不再影响资料编辑。需迁移、更新 `monitoring-web.md:143` 与 monitoring 合同，并补“同步推进后保存仍成功、并发资料编辑仍 409”的
