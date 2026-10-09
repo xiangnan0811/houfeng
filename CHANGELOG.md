@@ -27,6 +27,24 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.21.0](https://github.com/xiangnan0811/houfeng/compare/v1.20.1...v1.21.0) (2026-10-09)
+
+
+### Features
+
+* **subscriptions:** VPS 范围新增订阅支持名称 ([e2b2e91](https://github.com/xiangnan0811/houfeng/commit/e2b2e91dd784d0f29a8fb0a48bcb401a577b8d1c))
+* **subscriptions:** VPS 范围新增订阅支持名称，默认沿用 VPS 名称 ([2f20a3a](https://github.com/xiangnan0811/houfeng/commit/2f20a3a182ad3c26a76bf35068f7e9217c1f0c94))
+* **targets:** 创建目标时可显式给监控实例加上执行标签 ([93e3f26](https://github.com/xiangnan0811/houfeng/commit/93e3f26163d1bbd572f3464b703a36709471f037))
+* **targets:** 创建目标时可显式给监控实例加上执行标签 ([cbab710](https://github.com/xiangnan0811/houfeng/commit/cbab7108b0c14dec0706385931c4a71edd6dcb8e))
+
+
+### Bug Fixes
+
+* **targets:** 加标签写入前重读实例并在冲突时重试，补确认态焦点与读屏说明 ([e4dabbf](https://github.com/xiangnan0811/houfeng/commit/e4dabbf562fd02efb3e1bb3dc6e80767023002da))
+* **targets:** 加标签区在实例列表读到后保持挂载，区分版本冲突与实例已归档 ([233c6f5](https://github.com/xiangnan0811/houfeng/commit/233c6f560659b9325db47fb4f7046c0cd15ec338))
+* **targets:** 待确认的加标签操作随完整执行标签与运行状态作废 ([24eb7ce](https://github.com/xiangnan0811/houfeng/commit/24eb7ce30e96e1986cb717e9bbf7f9a470513fc7))
+* **targets:** 执行标签或运行状态变化后作废待确认的加标签操作 ([9b005d5](https://github.com/xiangnan0811/houfeng/commit/9b005d57c31a40b9fe482d2873278be7dccba867))
+
 ## [1.20.1](https://github.com/xiangnan0811/houfeng/compare/v1.20.0...v1.20.1) (2026-10-09)
 
 
