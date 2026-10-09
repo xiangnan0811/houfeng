@@ -68,3 +68,55 @@ func TestPostgresIntegrationSubscriptionCostBackfilledStartMonth(t *testing.T) {
 		t.Fatalf("buckets = %v, want %v", got, want)
 	}
 }
+
+// 非基准币种的补录月份早于首次取得汇率时，按此后最早的汇率估算并标 rate_estimated，不再整月缺测；
+// 从未取得汇率的币种仍标 data_insufficient。
+func TestPostgresIntegrationSubscriptionCostEstimatesPreRateMonths(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	pool := openTemporaryAssetLifecyclePostgresSchema(t, ctx)
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("fixture SQL: %v", err)
+		}
+	}
+	exec(`insert into vps_assets (vps_id, display_name, lifecycle_status, usage_status, renewal_decision)
+		values ('vps_fx', 'fx', 'active', 'in_use', 'keep')`)
+	exec(`insert into subscriptions (
+			subscription_id, vps_id, price, currency, billing_cycle, billing_months,
+			monthly_price, status, started_at, created_at
+		) values
+			('sub_fx_usd', 'vps_fx', 10, 'USD', 'monthly', 1, 10, 'active', '2026-08-01', '2026-10-09T03:00:00Z'),
+			('sub_fx_jpy', 'vps_fx', 100, 'JPY', 'monthly', 1, 100, 'active', '2026-10-01', '2026-10-09T03:00:00Z')`)
+	exec(`insert into subscription_exchange_rates (rate_id, provider, base_currency, quote_currency, rate, rate_date, fetched_at)
+		values
+			('rate_fx_usd_first', 'frankfurter', 'CNY', 'USD', 7, '2026-10-05', '2026-10-05T00:00:00Z'),
+			('rate_fx_usd_later', 'frankfurter', 'CNY', 'USD', 8, '2026-10-08', '2026-10-08T00:00:00Z')`)
+
+	repo := NewPostgresSubscriptionCostRepository(pool)
+	now := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	buckets, err := repo.ListCostMonthBuckets(ctx, centersettings.SubscriptionCostSettings{BaseCurrency: "CNY", ExchangeRateProvider: "frankfurter"}, 3, now)
+	if err != nil {
+		t.Fatalf("ListCostMonthBuckets() error = %v", err)
+	}
+	type point struct {
+		Bucket       string
+		Cost         float64
+		Estimated    bool
+		Insufficient bool
+	}
+	got := make([]point, 0, len(buckets))
+	for _, bucket := range buckets {
+		got = append(got, point{bucket.Bucket, bucket.MonthlyCost, bucket.RateEstimated, bucket.DataInsufficient})
+	}
+	want := []point{
+		{"2026-08", 70, true, false},
+		{"2026-09", 70, true, false},
+		// 10 月已有当月取得的汇率（最新为 8），不算估算；JPY 从未取得汇率，整月仍标不足。
+		{"2026-10", 80, false, true},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buckets = %+v, want %+v", got, want)
+	}
+}

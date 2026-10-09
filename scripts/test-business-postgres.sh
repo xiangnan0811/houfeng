@@ -31,6 +31,7 @@ anchors=(
   TestPostgresIntegrationResourcePressureWindows
   TestVPSAddressValidationPostgres
   TestPostgresIntegrationSubscriptionCostBackfilledStartMonth
+  TestPostgresIntegrationSubscriptionCostEstimatesPreRateMonths
 )
 selector="^($(IFS='|'; printf '%s' "${anchors[*]}"))$"
 anchors_json=$(printf '%s\n' "${anchors[@]}" | jq -R . | jq -s .)

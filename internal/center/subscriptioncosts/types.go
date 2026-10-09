@@ -199,6 +199,9 @@ type SeriesPoint struct {
 	BudgetCurrency   string   `json:"budget_currency,omitempty"`
 	BudgetWarningPct int      `json:"budget_warning_pct,omitempty"`
 	DataInsufficient bool     `json:"data_insufficient"`
+	// RateEstimated 表示该月有非基准币种订阅在当月末之前没有汇率记录，按此后最早的汇率记录估算。
+	// 汇率缓存同一 rate_date 刷新会覆盖 fetched_at，所以它不保证当时确实从未取得过汇率。
+	RateEstimated bool `json:"rate_estimated"`
 }
 
 type MonthlyBudgetRecord struct {

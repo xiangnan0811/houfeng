@@ -2639,6 +2639,8 @@ export type SubscriptionSeriesPoint = {
   budget_currency?: string
   budget_warning_pct?: number
   data_insufficient: boolean
+  /** 该月有非基准币种订阅在月末之前没有汇率记录，按此后最早的汇率估算。旧版 center 不返回。 */
+  rate_estimated?: boolean
 }
 
 export type SubscriptionStatistics = {

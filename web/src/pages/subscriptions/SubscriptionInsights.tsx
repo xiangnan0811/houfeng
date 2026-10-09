@@ -175,6 +175,7 @@ export function SubscriptionInsights({
   })
   const costBuckets = statistics?.cost_month_buckets ?? []
   const hasInsufficientTrendData = costBuckets.some((bucket) => bucket.data_insufficient)
+  const hasEstimatedRates = costBuckets.some((bucket) => bucket.rate_estimated)
   const hasTrend = !hasInsufficientTrendData &&
     costBuckets.length >= 2 &&
     costBuckets.some((bucket) => bucket.monthly_cost > 0 || (bucket.budget_limit ?? 0) > 0)
@@ -190,7 +191,9 @@ export function SubscriptionInsights({
             <div className="subscription-panel-heading">
               <h3 className="subscription-panel-title">月成本与月预算</h3>
               <span className="subscription-panel-meta">
-                {statisticsLoading ? '加载中' : `管理中资产 · 最近 ${costBuckets.length} 个月`}
+                {statisticsLoading
+                  ? '加载中'
+                  : `管理中资产 · 最近 ${costBuckets.length} 个月${hasEstimatedRates ? ' · 部分月份缺少当时的汇率记录，按此后最早的汇率估算' : ''}`}
               </span>
             </div>
             {hasTrend && !statisticsError ? <BudgetCostTrendLegend /> : null}

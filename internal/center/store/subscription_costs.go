@@ -280,6 +280,7 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 					when st.status <> 'active' then 0
 					when st.currency = $2 then st.monthly_price
 					when lr.rate is not null then st.monthly_price * lr.rate
+					when er_first.rate is not null then st.monthly_price * er_first.rate
 					else null
 				end
 			)::numeric, 4)::float8, 0::float8) as monthly_cost,
@@ -287,7 +288,14 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 				where st.status = 'active'
 				  and st.currency <> $2
 				  and lr.rate is null
-			) > 0 as data_insufficient
+				  and er_first.rate is null
+			) > 0 as data_insufficient,
+			count(*) filter (
+				where st.status = 'active'
+				  and st.currency <> $2
+				  and lr.rate is null
+				  and er_first.rate is not null
+			) > 0 as rate_estimated
 		from buckets b
 		left join states st on st.bucket_start = b.bucket_start
 		left join lateral (
@@ -300,6 +308,17 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 			order by er.fetched_at desc, er.rate_date desc
 			limit 1
 		) lr on st.currency <> $2
+		-- 月末之前没有该币对的汇率记录时（常见于补录的历史月份），按此后最早的汇率记录估算并单独标注，而不是整月缺测。
+		left join lateral (
+			select er.rate::float8
+			from subscription_exchange_rates er
+			where er.provider = $1
+			  and er.base_currency = $2
+			  and er.quote_currency = st.currency
+			  and er.fetched_at >= (b.bucket_start + interval '1 month')
+			order by er.fetched_at asc, er.rate_date asc
+			limit 1
+		) er_first on st.currency <> $2 and lr.rate is null
 		group by b.bucket_start
 		order by b.bucket_start asc`,
 		settings.ExchangeRateProvider,
@@ -315,7 +334,7 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 	records := make([]subscriptioncosts.SeriesPoint, 0, months)
 	for rows.Next() {
 		var record subscriptioncosts.SeriesPoint
-		if err := rows.Scan(&record.Bucket, &record.MonthlyCost, &record.DataInsufficient); err != nil {
+		if err := rows.Scan(&record.Bucket, &record.MonthlyCost, &record.DataInsufficient, &record.RateEstimated); err != nil {
 			return nil, fmt.Errorf("scan subscription cost month bucket: %w", err)
 		}
 		records = append(records, record)

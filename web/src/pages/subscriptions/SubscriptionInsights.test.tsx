@@ -248,3 +248,19 @@ describe('cost trend gap', () => {
     expect(screen.queryByText(/bucket/i)).not.toBeInTheDocument()
   })
 })
+
+describe('cost trend estimation note', () => {
+  it('draws the trend and states which months use the earliest later exchange rate', () => {
+    const bucket = (month: string, cost: number, estimated: boolean) => ({ bucket: month, monthly_cost: cost, renewal_count: 0, data_insufficient: false, rate_estimated: estimated })
+    const statistics = {
+      window: 'year', base_currency: 'CNY', total_monthly_cost: 80, total_yearly_cost: 960,
+      provider_breakdown: [], currency_breakdown: [], category_breakdown: [], payment_breakdown: [], region_breakdown: [],
+      cost_month_buckets: [bucket('2026-08', 70, true), bucket('2026-09', 70, true), bucket('2026-10', 80, false)],
+      renewal_month_buckets: [], budget_statuses: [],
+    }
+    render(<MemoryRouter><SubscriptionInsights overview={overviewWith({})} overviewLoading={false} overviewError={null} statistics={statistics} statisticsLoading={false} statisticsError={null} onRetryStatistics={vi.fn()} baseCurrency="CNY" breakdownKind="provider" onBreakdownKindChange={vi.fn()} onSelectVPS={vi.fn()} /></MemoryRouter>)
+    expect(screen.getByText(/部分月份缺少当时的汇率记录，按此后最早的汇率估算/)).toBeInTheDocument()
+    expect(screen.queryByText('历史成本数据不足')).not.toBeInTheDocument()
+  })
+})
+

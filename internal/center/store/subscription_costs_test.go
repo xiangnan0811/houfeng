@@ -33,21 +33,23 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsMarksInsufficient
 			seenArgs = append([]any(nil), args...)
 			return &fakeSubscriptionCostRows{rows: []fakeSubscriptionCostScan{
 				{scan: func(dest ...any) error {
-					if len(dest) != 3 {
-						t.Fatalf("scan destinations = %d, want 3", len(dest))
+					if len(dest) != 4 {
+						t.Fatalf("scan destinations = %d, want 4", len(dest))
 					}
 					*(dest[0].(*string)) = "2025-07"
 					*(dest[1].(*float64)) = 90
 					*(dest[2].(*bool)) = false
+					*(dest[3].(*bool)) = true
 					return nil
 				}},
 				{scan: func(dest ...any) error {
-					if len(dest) != 3 {
-						t.Fatalf("scan destinations = %d, want 3", len(dest))
+					if len(dest) != 4 {
+						t.Fatalf("scan destinations = %d, want 4", len(dest))
 					}
 					*(dest[0].(*string)) = "2025-08"
 					*(dest[1].(*float64)) = 0
 					*(dest[2].(*bool)) = true
+					*(dest[3].(*bool)) = false
 					return nil
 				}},
 			}}, nil
@@ -64,7 +66,7 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsMarksInsufficient
 	if len(got) != 2 {
 		t.Fatalf("ListCostMonthBuckets() returned %d rows, want 2", len(got))
 	}
-	if got[0].Bucket != "2025-07" || got[0].MonthlyCost != 90 || got[0].DataInsufficient {
+	if got[0].Bucket != "2025-07" || got[0].MonthlyCost != 90 || got[0].DataInsufficient || !got[0].RateEstimated {
 		t.Fatalf("first bucket = %#v, want complete 2025-07 monthly cost", got[0])
 	}
 	if got[1].Bucket != "2025-08" || !got[1].DataInsufficient {
@@ -89,6 +91,8 @@ func TestPostgresSubscriptionCostRepositoryListCostMonthBucketsMarksInsufficient
 		"from_status",
 		"data_insufficient",
 		"lr.rate is null",
+		"er_first.rate is not null",
+		"rate_estimated",
 		"else null",
 	} {
 		if !strings.Contains(seenSQL, snippet) {
