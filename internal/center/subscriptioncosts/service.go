@@ -126,6 +126,7 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 		MissingSubscriptionVPSCount:       len(missing),
 		MissingSubscriptionAssets:         missing,
 		UpcomingRenewals:                  make([]RenewalQueueItem, 0),
+		OverdueRenewals:                   make([]RenewalQueueItem, 0),
 		ProviderBreakdown: breakdown(rows, func(row CostRow) (string, string) {
 			return emptyAs(row.ProviderID, row.ProviderName, "未记录服务商"), emptyAs(row.ProviderName, row.ProviderID, "未记录服务商")
 		}),
@@ -180,6 +181,10 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 			if days >= 0 && days <= 90 {
 				overview.UpcomingRenewals = append(overview.UpcomingRenewals, renewalQueueItem(row))
 			}
+			// 逾期不进 90 天窗口，单独成队；已决定不续费的订阅登记日只是到期日，不算逾期待办。
+			if days < 0 && row.RenewalDecision != "cancel" {
+				overview.OverdueRenewals = append(overview.OverdueRenewals, renewalQueueItem(row))
+			}
 		}
 	}
 
@@ -188,6 +193,11 @@ func (s *Service) GetOverview(ctx context.Context) (Overview, error) {
 	sortRenewalQueue(overview.UpcomingRenewals)
 	if len(overview.UpcomingRenewals) > 12 {
 		overview.UpcomingRenewals = overview.UpcomingRenewals[:12]
+	}
+	sortRenewalQueue(overview.OverdueRenewals)
+	overview.OverdueRenewalCount = len(overview.OverdueRenewals)
+	if len(overview.OverdueRenewals) > 12 {
+		overview.OverdueRenewals = overview.OverdueRenewals[:12]
 	}
 	return overview, nil
 }

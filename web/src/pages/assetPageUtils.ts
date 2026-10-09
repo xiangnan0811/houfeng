@@ -49,22 +49,49 @@ export function subscriptionStatusLabel(value: SubscriptionStatus | string): str
   return SUBSCRIPTION_STATUS_LABELS[value as SubscriptionStatus] ?? value
 }
 
-// 续费日等 YYYY-MM-DD 是日历日：按本地日期解析。`new Date('2026-10-14')` 会当作 UTC 零点，
-// 在 UTC 以西的时区落到前一天。
-function parseCalendarDate(value: string): Date {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : new Date(value)
+const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/
+
+// 续费日等 YYYY-MM-DD 是日历日；带时间（含偏移）的值按瞬间折算到 UTC 日期。非法月日（如 02-30）视为无效，不顺延。
+function utcCalendarDay(value: string): number | null {
+  const match = CALENDAR_DATE.exec(value)
+  if (match) {
+    const year = Number(match[1])
+    const month = Number(match[2]) - 1
+    const day = Number(match[3])
+    const date = new Date(Date.UTC(year, month, day))
+    return date.getUTCFullYear() === year && date.getUTCMonth() === month && date.getUTCDate() === day
+      ? date.getTime()
+      : null
+  }
+  if (!ISO_DATE_TIME.test(value)) return null
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return null
+  return Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate())
 }
 
-export function daysUntilDate(value?: string | null, now: Date = new Date()): number | null {
+/**
+ * 续费剩余天数与后端 90 天窗口、30 天计数、overdue_renewals 和 renewal.overdue.v1 同口径：
+ * 续费日与“今天”都取 UTC 日历日，不随浏览器时区在午夜前后多算或少算一天。
+ * now 可传摘要生成时刻，使列表与摘要同一天。
+ */
+export function daysUntilDate(value?: string | null, now: Date | number = Date.now()): number | null {
   if (!value) return null
-  const date = parseCalendarDate(value)
-  if (Number.isNaN(date.getTime())) return null
+  const target = utcCalendarDay(value)
+  const reference = new Date(now)
+  if (target == null || Number.isNaN(reference.getTime())) return null
+  const today = Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate())
+  return Math.round((target - today) / MS_PER_DAY)
+}
 
-  // 按 UTC 序数比较本地日历日，夏令时 23/25 小时的日子不会多算或少算一天。
-  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
-  const targetDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
-  return Math.round((targetDay - today) / MS_PER_DAY)
+/**
+ * 续费天数的参考“今天”：订阅摘要可用时取其生成时刻，与摘要计数同一天；摘要不可用
+ * （尚无摘要、读取失败但仍保留旧摘要、时间无效）时退回调用方给的页面时刻。
+ */
+export function renewalReferenceTime(snapshotGeneratedAt: string | null | undefined, snapshotUsable: boolean, fallback: number): number {
+  if (!snapshotUsable) return fallback
+  const snapshotAt = Date.parse(snapshotGeneratedAt ?? '')
+  return Number.isNaN(snapshotAt) ? fallback : snapshotAt
 }
 
 /** 两周内的续费需要尽快处理，日期旁的剩余天数高亮。 */
@@ -80,7 +107,7 @@ export function renewalUrgency(days: number | null, soonDays: number = RENEWAL_S
 
 export function renewalTimingLabel(days: number | null): string {
   if (days == null) return '尚无续费日'
-  if (days < 0) return `已过期 ${Math.abs(days)} 天`
+  if (days < 0) return `已逾期 ${Math.abs(days)} 天`
   if (days === 0) return '今天续费'
   return `${days} 天后`
 }

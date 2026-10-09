@@ -373,6 +373,9 @@ func (r *PostgresVPSAssetRepository) PatchVPSAsset(ctx context.Context, vpsID st
 	if conflict := vpsAssetPreconditionConflict(current, input.ExpectedUpdatedAt); conflict != nil {
 		return vpsassets.Record{}, conflict
 	}
+	if err := validateChangedVPSAddresses(current, input); err != nil {
+		return vpsassets.Record{}, err
+	}
 
 	record, err := patchOrdinaryVPSAssetRow(ctx, tx, vpsID, input)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -447,6 +450,9 @@ func (r *PostgresVPSAssetRepository) patchVPSAssetWithHistoryAndOptionalSubscrip
 	}
 	if conflict := vpsAssetPreconditionConflict(current, input.ExpectedUpdatedAt); conflict != nil {
 		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, conflict
+	}
+	if err := validateChangedVPSAddresses(current, input); err != nil {
+		return vpsassets.Record{}, vpsassets.RenewalSubscriptionLinkage{}, err
 	}
 
 	record, err := patchOrdinaryVPSAssetRow(ctx, tx, vpsID, input)
@@ -654,6 +660,20 @@ func patchRequiresVPSAssetHistory(input vpsassets.PatchInput) bool {
 		input.SSHUser.Set ||
 		input.OSName.Set ||
 		input.Virtualization.Set
+}
+
+// validateChangedVPSAddresses 必须在版本前提检查之后调用：过期表单回传旧地址时应先得到 409 冲突，
+// 而不是 400。整表单编辑会原样回传地址，改动判定与 IP history 同用 ipidentity.Changed
+// （不可解析时按 trim 后原文比较），存量非法文本不阻塞其他字段的保存。
+func validateChangedVPSAddresses(current vpsassets.Record, input vpsassets.PatchInput) error {
+	changedIPv4, changedIPv6 := "", ""
+	if input.IPv4.Set && ipidentity.Changed(current.IPv4, input.IPv4.Value) {
+		changedIPv4 = input.IPv4.Value
+	}
+	if input.IPv6.Set && ipidentity.Changed(current.IPv6, input.IPv6.Value) {
+		changedIPv6 = input.IPv6.Value
+	}
+	return vpsassets.ValidateHostAddresses(changedIPv4, changedIPv6)
 }
 
 func validateMergedVPSAssetPatch(current vpsassets.Record, input vpsassets.PatchInput) error {

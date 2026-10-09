@@ -8,7 +8,7 @@ Current reusable patterns include:
 
 - `Button`, `Badge`, `Card`, `Input`, `Toggle`, and `Tabs` for ordinary controls;
 - `Sparkline`, `MetricChart`, `TrendArrow`, and `StatusGlyph` for compact runtime evidence;
-- `MonoDigits`, `Hostname`, and `Timestamp` for technical facts (`Timestamp mode="both"` shows one date when the relative form has already fallen back to the absolute date);
+- `MonoDigits`, `Hostname`, and `Timestamp` for technical facts (`Timestamp mode="both"` shows one date when the relative form has already fallen back to the absolute date; future instants such as credential expiry read “N 分钟后”, and only |Δ| < 5s reads 刚刚);
 - `ScrollRegion` for wide tables: a named, keyboard-focusable region whose scroll hint appears only while the content actually overflows;
 - `DataTable` for dense list scanning;
 - `Drawer` for advanced filters and scoped edit flows;
@@ -24,6 +24,7 @@ Shared control conventions:
 - State colour carries meaning: accent bars, borders and badges reflect the current value (for example a count greater than zero), never a fixed per-card colour.
 - Empty states use a solid panel (`.empty-state`) or, inside an existing card, a recessed fill (`--panel-bg-muted`) without a second dashed frame. `PageState kind="empty"` shows no default eyebrow; pass `eyebrow` only when it adds information.
 - Direct children of a `.filter-bar__controls-row` (and one wrapper `div` level, such as the monitoring search) — `FilterSelect` / `FilterMultiSelect` / `FilterSearchSelect` and hand-written `.filter-select` text filters — render as compact chips: the dimension name is a visible prefix inside the same bordered control ("健康 全部 ▾") and is part of the control's accessible name, select chips are sized by their current value while text/date inputs keep a fixed width (`filter-select__control--text`), popovers stay at least 16rem wide, and an applied value (including non-empty text) adds `is-filtered` for an accent highlight alongside the changed visible value. Use the default "全部" placeholder there instead of repeating the dimension ("全部健康"); keep placeholders that name a real default (for example "最近 30 天"). Additive selects that append each pick to a removable list (record search 类型/状态分组/生命周期) reset after each pick and label their empty option truthfully — "全部" when nothing is selected, "已选 N" otherwise — with `is-filtered` while N > 0. Every filter stays visible; drawers, forms and popover contents keep the label-above layout, and rows without chips keep their original bottom alignment.
+- A failed submission never strands focus on `body`: validation errors move focus to the offending field, and a failed login returns focus to the selected password field with the error linked via `aria-describedby`.
 - `.text-link` keeps a visible underline by default so links mixed into text (including `dd`/`span` fact rows) are not distinguished by color alone. Only links that stand alone as a section-header action ("查看…" next to a heading) add `text-link--action`, which hides the underline at rest and shows it on hover/focus.
 
 Do not add a new atom because an old design document named one. Add one only when current code has repeated behavior, clear ownership, and tests or usage that justify the abstraction.
@@ -44,7 +45,7 @@ This is guidance, not a page freeze. A page may change structure when the curren
 ## Shell navigation
 
 - The sidebar lists every destination in always-open named groups instead of hiding frequently used pages behind a "更多" disclosure: 工作台, then 资产 (VPS, 订阅, 服务商, 资产决策, 归档), 观测 (监控, 入口探测, 事件), 记录 (运维记录, 命令审计), with 设置 pinned to the bottom. Each group is a `role="group"` labelled by its visible heading; collapsed and narrow rails hide the headings and separate groups with a divider.
-- Every destination has a distinct icon; do not reuse one glyph for two destinations.
+- Every destination has a distinct icon; do not reuse one glyph for two destinations. Exactly one destination is current at a time: the 尚无观测 / 观测过期 shortcuts are current only for their `/targets?view=` query, and 入口探测 covers the remaining `/targets` paths (including a shortcut view whose item is not shown); path matching follows the router (case-insensitive, trailing slash allowed).
 - The top-bar global search shows a search icon and its keyboard shortcut (`⌘K` on Apple platforms, `Ctrl K` elsewhere, exposed via `aria-keyshortcuts`). On narrow screens (≤760px) the page title keeps priority: the search rests as a 44px magnifier, expands across the top bar while its input or results hold focus (click, Tab or the shortcut), and collapses back when focus leaves while keeping any typed query (signalled by an accent border); the shortcut hint is hidden.
 - Viewports up to 1100px (tablets) start with the collapsed icon rail so content keeps its width; crossing that breakpoint resets to the width's default, and the toggle still expands the sidebar. The toggle is named by its action (折叠侧边栏 / 展开侧边栏) with `aria-expanded`. At 760px and below the fixed narrow rail applies.
 

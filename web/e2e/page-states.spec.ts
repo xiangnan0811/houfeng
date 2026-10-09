@@ -138,7 +138,7 @@ const DASHBOARD_MODES = [
     }),
     vps: [],
     action: '创建第一台 VPS',
-    href: '/vps',
+    href: '/vps?create=1',
   },
   {
     name: 'stable',

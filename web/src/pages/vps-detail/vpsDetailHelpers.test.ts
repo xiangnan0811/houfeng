@@ -80,6 +80,17 @@ describe('fact draft 3-way merge', () => {
     expect(rows.map((row) => row.field)).not.toContain('区域')
   })
 
+  it('keeps a local address fix that only differs by a non-Go-trimmed character', () => {
+    const baseDetail = detailFixture({ ipv4: '\ufeff203.0.113.10' })
+    const latest = detailFixture({ ipv4: '\ufeff203.0.113.10', note: '他人更新备注' })
+    const base = detailToFactEditForm(baseDetail)
+    const draft = edit(base, { ipv4: '203.0.113.10' })
+
+    const merged = mergeFactDraftWithLatest(base, draft, latest)
+    expect(merged.ipv4).toBe('203.0.113.10')
+    expect(merged.note).toBe('他人更新备注')
+  })
+
   it('does not overwrite concurrent labels, IPv4, or SSH host with stale local values', () => {
     const baseDetail = detailFixture()
     const latest = detailFixture({
@@ -219,6 +230,32 @@ describe('independent VPS facts', () => {
     expect(input.expires_at).toBe('2027-01-01')
     expect(input).not.toHaveProperty('usage_status')
     expect(input).not.toHaveProperty('renewal_decision')
+  })
+
+  it('rejects malformed addresses but keeps unchanged legacy text editable', () => {
+    const draft = detailToFactEditForm(detailFixture())
+    expect(() => buildFactEditInput({ ...draft, ipv4: '999.1.1' })).toThrow('IPv4 地址格式不正确')
+    expect(() => buildFactEditInput({ ...draft, ipv4: '192.0.2.01' })).toThrow('IPv4 地址格式不正确')
+    expect(() => buildFactEditInput({ ...draft, ipv4: '2001:db8::1' })).toThrow('IPv4 地址格式不正确')
+    expect(() => buildFactEditInput({ ...draft, ipv6: '192.0.2.1' })).toThrow('IPv6 地址格式不正确')
+    expect(() => buildFactEditInput({ ...draft, ipv6: 'fe80::1%eth0' })).toThrow('IPv6 地址格式不正确')
+    expect(buildFactEditInput({ ...draft, ipv4: ' 203.0.113.10 ', ipv6: '2001:db8::10' })).toMatchObject({ ipv4: '203.0.113.10', ipv6: '2001:db8::10' })
+    expect(buildFactEditInput({ ...draft, ipv4: '999.1.1', note: '只改备注' }, { ipv4: '999.1.1', ipv6: '' }).ipv4).toBe('999.1.1')
+    // 只差首尾空白的存量非法文本仍视为未改动。
+    expect(buildFactEditInput({ ...draft, ipv4: ' 999.1.1 ', note: '只改备注' }, { ipv4: '999.1.1 ', ipv6: '' }).ipv4).toBe('999.1.1')
+  })
+
+  it('shares address vectors and white-space rules with center', () => {
+    const draft = detailToFactEditForm(detailFixture())
+    expect(buildFactEditInput({ ...draft, ipv6: '::ffff:192.0.2.1' }).ipv6).toBe('::ffff:192.0.2.1')
+    expect(buildFactEditInput({ ...draft, ipv6: '::ffff:c000:201' }).ipv6).toBe('::ffff:c000:201')
+    expect(() => buildFactEditInput({ ...draft, ipv4: '::ffff:192.0.2.1' })).toThrow('IPv4 地址格式不正确')
+    // Go TrimSpace 去掉 U+0085 / U+3000，但不去掉 U+FEFF；前端同口径。
+    expect(buildFactEditInput({ ...draft, ipv4: '\u0085203.0.113.10\u3000' }).ipv4).toBe('203.0.113.10')
+    expect(() => buildFactEditInput({ ...draft, ipv4: '\ufeff203.0.113.10' })).toThrow('IPv4 地址格式不正确')
+    // 只有 Go 会裁掉的空白时，地址与 SSH Host 都视为空，不能绕过必填判定。
+    expect(() => buildFactEditInput({ ...draft, ipv4: '\u0085', sshHost: '\u0085' })).toThrow('IPv4 或 SSH Host 至少需要填写一个')
+    expect(buildFactEditInput({ ...draft, ipv4: '\u0085203.0.113.10', sshHost: '\u0085203.0.113.10' }).ssh_host).toBe('203.0.113.10')
   })
 
   it('clears a stale date for unlimited validity and requires a fixed date', () => {

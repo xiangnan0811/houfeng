@@ -8,7 +8,7 @@ import { useVisibleRefresh } from '../lib/useVisibleRefresh'
 import type { DashboardOverview, SubscriptionOverview, VPSAssetRecord } from '../lib/types'
 import { DashboardCommandSurface } from './dashboard/DashboardCommandSurface'
 import { buildDashboardModel } from './dashboard/dashboardModel'
-import { buildRecentActivity, buildRenewalPanel, incidentTrend } from './dashboard/dashboardPanels'
+import { buildRecentActivity, buildRenewalPanel, incidentTrend, notificationChannelGap } from './dashboard/dashboardPanels'
 import {
   remoteError,
   remoteLoading,
@@ -176,6 +176,7 @@ export function DashboardPage() {
         renewals={buildRenewalPanel(resources.subscription)}
         supportingLoading={supportingLoading}
         overviewRefreshFailed={resources.overviewRefreshFailed}
+        notificationGap={overview ? notificationChannelGap(overview) : false}
         {...(model.degradations.length > 0
           ? { onRetrySupporting: retrySupportingResources }
           : {})}

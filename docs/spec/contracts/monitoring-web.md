@@ -328,7 +328,7 @@ listCommandAudits({ cursor: nextCursor })
 - 已接入实例和已退役实例的重新接入均由用户显式生成命令触发：先调用 `binding/reset` 建立新的接入阶段，再签发安装命令；仅打开抽屉不重置。已退役实例要求所属 VPS 管理中，后端同时确认无其他当前实例。旧会话仅保留最小在线证据权限，不恢复采集和命令。
 - 所属 VPS 已归档时只查看监控历史，不提供采集控制、命令、资料修改或接入。恢复 VPS 不自动恢复历史实例；重新接入必须再次显式进行。
 - 详情提供按需加载的接入阶段历史，读取 `/api/monitoring-instances/{id}/phases`，展示会话权限、指纹摘要、起止时间及最后可信在线。旧的仅在线证据会话可在结束后继续产生在线证据，不能将其当成采集恢复；不展示凭据或原始指纹。
-- 管理审查、安装命令和动作响应继续绑定实例 ID、请求代次与当前页面身份；旧对象慢响应不得改变新对象，过期预览不得自动重新提交。关闭接入抽屉后刷新实例与管理审查。
+- 管理审查、安装命令和动作响应继续绑定实例 ID、请求代次与当前页面身份；旧对象慢响应不得改变新对象，过期预览不得自动重新提交。关闭接入抽屉后刷新实例与管理审查。接入抽屉不外露实例/VPS 内部 ID（标题已写实例名称）。签发命令后抽屉立即读取一次会话列表（`/phases`）作为基线，之后每 5 秒例行读取一次；每次签发同一时刻只保留一个在途请求，上一次签发遗留的请求不阻塞新签发，其迟到响应被忽略。只有不在基线中、`started_at` 不早于命令 `issued_at`（均为服务端时间）、能力为 full 且已连上的会话才判定接入完成——此前命令建立的会话、降级的旧会话以及与签发并发而在签发返回前提交的接入都已在基线里，不会被误认；基线读取失败时以第一次成功读取为基线，宁可不自动推进；此时显示“接入完成”、隐藏命令且不再提供重新生成（避免重置刚建立的绑定）。命令生成后“完成并返回 VPS / 查看监控实例”为主操作，重新生成降为次操作，并提示窗口会自动检测首次心跳。
 - 回归覆盖 `MonitoringPage.test.tsx`、`MonitoringDetailPage.test.tsx`、`MonitoringDetailManagementMenu.test.tsx`、`MonitoringInstanceOnboardingDrawer.test.tsx` 与 `VPSOverviewMonitoringOnboarding.test.tsx`：退役入口消失、历史排除、稳定重试键、归档所属对象禁用、显式新阶段、归属异常拒绝与异步请求归属。
 
 ### Monitoring 列表工作台状态
@@ -370,7 +370,7 @@ MonitoringPage 是运行证据扫描页。主路径是 attention tabs → 可见
 
  The detail column fills the same `.main` well as `/monitoring`; it is not a centered 1600px reading column. Eight equal tiles: CPU, memory (used + swap), disk, Inode, load 1/5/15, I/O wait + disk busy, network in+out, disk read+write. Wide consoles are 4×2, medium 2×4, narrow one column. Plot height is a fixed 200px and does not grow with the viewport. Dual-series tiles share one vertical scale and aligned hover. CPU and I/O wait are never stacked on one axis. Snapshot notes under memory are available and capacity only; swap is a line. Disk notes keep capacity only.
 
-Each tile sits on the page ground with a real border and a 2px top edge that takes the warning/alert/critical color when the current value crosses a threshold. They are not the old uppercase `watchtower-metric-card` tiles and not unframed plots inside one mural.
+Each tile sits on the page ground with a real border and a 2px top edge that takes the warning/alert/critical color when the current value crosses a threshold. The tile header keeps the title (ellipsized, full hint on hover) and the current value on the first row and moves the series legend to its own second row; tiles without a legend reserve that row so plots in one row stay aligned, and dual-series values never overlap the title. The same section padding variables apply when target detail reuses these sections. They are not the old uppercase `watchtower-metric-card` tiles and not unframed plots inside one mural.
 
 Percentage plots mark their warning level with a 1px dashed warning line and no filled band. Data-scaled plots draw only the threshold lines that fall inside their axis and label only the topmost, and their axis follows the data with no artificial lower bound.
 

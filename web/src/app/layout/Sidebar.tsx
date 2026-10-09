@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { Link, matchPath, NavLink, useLocation, type Location } from 'react-router-dom'
 import type { User } from '../../lib/auth-client'
 import { UserChip } from './UserChip'
 
@@ -9,6 +9,18 @@ export interface SidebarProps {
   onToggle: () => void
   onLogout: () => void
   onChangePassword: () => void
+}
+
+// NavLink 只按路径判断激活，带 ?view= 的入口探测快捷项会与“入口探测”同时高亮；
+// 这里按 view 区分，保证同一时刻只有一个导航项处于当前页。
+// 与路由同口径：大小写不敏感、允许尾斜杠。
+function targetsView(location: Location): string | null {
+  if (!matchPath({ path: '/targets', end: true }, location.pathname)) return null
+  return new URLSearchParams(location.search).get('view')
+}
+
+function isTargetsPath(location: Location): boolean {
+  return matchPath({ path: '/targets', end: false }, location.pathname) != null
 }
 
 // 全部入口按“资产 / 观测 / 记录”分组常驻展开，不再把常用页面收进“更多”。
@@ -47,13 +59,24 @@ export function Sidebar({
         </SidebarNavGroup>
         <SidebarNavGroup id="sidebar-group-observability" label="观测">
           <SidebarNavItem to="/monitoring" label="监控" badge={anomalyCounts.monitoring} icon={<svg viewBox="0 0 16 16"><path d="M2 8h3l2-4 2 8 2-4h3"/></svg>} />
-          <SidebarNavItem to="/targets" label="入口探测" badge={anomalyCounts.targets} icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/></svg>} />
+          <SidebarNavItem
+            to="/targets"
+            label="入口探测"
+            badge={anomalyCounts.targets}
+            activeWhen={(location) => {
+              const view = targetsView(location)
+              if (view === 'unobserved' && anomalyCounts.unobservedTargets > 0) return false
+              if (view === 'stale' && anomalyCounts.staleTargets > 0) return false
+              return isTargetsPath(location)
+            }}
+            icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/></svg>} />
           {anomalyCounts.unobservedTargets > 0 ? (
             <SidebarNavItem
               to="/targets?view=unobserved"
               label="尚无观测"
               badge={anomalyCounts.unobservedTargets}
               badgeKind="unobserved"
+              activeWhen={(location) => targetsView(location) === 'unobserved'}
               icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2L10 10"/></svg>}
             />
           ) : null}
@@ -63,6 +86,7 @@ export function Sidebar({
               label="观测过期"
               badge={anomalyCounts.staleTargets}
               badgeKind="stale"
+              activeWhen={(location) => targetsView(location) === 'stale'}
               icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 8l2.2 1.4M8 4.8V8"/></svg>}
             />
           ) : null}
@@ -101,9 +125,12 @@ interface SidebarNavItemProps {
   badge?: number
   badgeKind?: 'abnormal' | 'unobserved' | 'stale'
   end?: boolean
+  /** 需要同时比较查询参数时提供；未提供时沿用 NavLink 的路径匹配。 */
+  activeWhen?: (location: Location) => boolean
 }
 
-function SidebarNavItem({ to, label, icon, badge, badgeKind = 'abnormal', end }: SidebarNavItemProps) {
+function SidebarNavItem({ to, label, icon, badge, badgeKind = 'abnormal', end, activeWhen }: SidebarNavItemProps) {
+  const location = useLocation()
   const badgeText = badgeKind === 'unobserved'
     ? `${badge} 个尚无观测`
     : badgeKind === 'stale'
@@ -111,6 +138,26 @@ function SidebarNavItem({ to, label, icon, badge, badgeKind = 'abnormal', end }:
       : `${badge} 个异常`
   const accessibleLabel = badge != null && badge > 0 ? `${label}，${badgeText}` : label
 
+  const content = (
+    <>
+      {icon}
+      <span className="nav-text">{label}</span>
+      {badge != null && badge > 0 && <span className={badgeKind === 'abnormal' ? 'nav-badge' : `nav-badge nav-badge--${badgeKind}`}>{badge}</span>}
+    </>
+  )
+  if (activeWhen) {
+    const active = activeWhen(location)
+    return (
+      <Link
+        to={to}
+        aria-label={accessibleLabel}
+        {...(active ? { 'aria-current': 'page' as const } : {})}
+        className={`nav-item${active ? ' active' : ''}`}
+      >
+        {content}
+      </Link>
+    )
+  }
   return (
     <NavLink
       to={to}
@@ -118,9 +165,7 @@ function SidebarNavItem({ to, label, icon, badge, badgeKind = 'abnormal', end }:
       aria-label={accessibleLabel}
       className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
     >
-      {icon}
-      <span className="nav-text">{label}</span>
-      {badge != null && badge > 0 && <span className={badgeKind === 'abnormal' ? 'nav-badge' : `nav-badge nav-badge--${badgeKind}`}>{badge}</span>}
+      {content}
     </NavLink>
   )
 }

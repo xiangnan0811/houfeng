@@ -35,6 +35,7 @@ export function VPSSubscriptionForm({
     onDraftChange({ ...draft, [key]: value })
     onFeedbackClear()
   }
+  const vpsExpiry = detail.validity_mode === 'fixed' && detail.expires_at ? detail.expires_at.slice(0, 10) : ''
 
   return (
     <form id={formId} className="vps-form" onSubmit={onSubmit} aria-busy={submitting}>
@@ -113,6 +114,14 @@ export function VPSSubscriptionForm({
             onChange={(event) => update('renewAt', event.target.value)}
           />
         </div>
+        {/* 未知日期保持为空，不替用户写入猜测值；VPS 已登记到期日时只提供一键填入。 */}
+        {vpsExpiry && draft.renewAt !== vpsExpiry ? (
+          <p className="vps-form-hint">
+            <button type="button" className="text-link" disabled={submitting} onClick={() => update('renewAt', vpsExpiry)}>
+              使用 VPS 到期日 {vpsExpiry}
+            </button>
+          </p>
+        ) : null}
       </VPSFormSection>
 
       <VPSFormSection title="支付">

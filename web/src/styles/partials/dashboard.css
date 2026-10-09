@@ -104,6 +104,11 @@
 .dashboard-renewal__name small{min-width:0;color:var(--text-muted);font-size:12px;overflow-wrap:anywhere}
 .dashboard-renewal__days{color:var(--text-primary);font-family:var(--font-mono);font-size:var(--type-small-size);font-weight:600;text-align:right}
 .dashboard-renewal__days--soon{color:var(--color-state-notice)}
+.dashboard-renewal__days--overdue{color:var(--color-state-alert)}
+/* 逾期是已发生的待办，放在 90 天窗口之前，用细分隔与窗口列表区分。 */
+.dashboard-renewals__overdue{display:flex;flex-direction:column;gap:var(--space-1);padding-bottom:var(--space-2);margin-bottom:var(--space-2);border-bottom:var(--border-w) solid var(--border)}
+.dashboard-renewals__overdue-title{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);margin:0;padding:0 var(--space-1);color:var(--color-state-alert);font-size:var(--type-small-size);font-weight:600}
+.dashboard-renewals__overdue-title .text-link{font-size:12px;font-weight:400}
 .dashboard-renewal__meta{grid-column:1/-1;color:var(--text-muted);font-size:12px;overflow-wrap:anywhere}
 
 /* 最近动态：纵向时间线，状态色标出异常开始/恢复。 */

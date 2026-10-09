@@ -702,6 +702,45 @@ func TestServiceOverviewRenewalWindowSharesSnapshotInstant(t *testing.T) {
 	}
 }
 
+// 逾期续费不进 90 天窗口，单独成队并给出总数；决定不续费的订阅不算逾期待办。
+func TestServiceOverviewListsOverdueRenewalsSeparately(t *testing.T) {
+	ctx := context.Background()
+	service, repo := newTestService()
+	service.now = func() time.Time { return time.Date(2026, 10, 9, 8, 0, 0, 0, time.UTC) }
+	monthly := 10.0
+	row := func(id, renewAt, decision string) CostRow {
+		return CostRow{SubscriptionID: id, VPSID: "vps_" + id, Currency: "CNY", MonthlyPriceBase: &monthly, BaseCurrency: "CNY", RenewAt: datePtr(t, renewAt), LifecycleStatus: "active", RenewalDecision: decision}
+	}
+	repo.rows = []CostRow{
+		row("sub_recent", "2026-10-08", "keep"),
+		row("sub_oldest", "2026-09-01", "unreviewed"),
+		row("sub_cancel", "2026-09-15", "cancel"),
+		row("sub_today", "2026-10-09", "keep"),
+	}
+	for i := 0; i < 12; i++ {
+		repo.rows = append(repo.rows, row("sub_bulk_"+strconv.Itoa(10+i), "2026-10-05", "keep"))
+	}
+
+	overview, err := service.GetOverview(ctx)
+	if err != nil {
+		t.Fatalf("GetOverview() error = %v", err)
+	}
+	if overview.OverdueRenewalCount != 14 || len(overview.OverdueRenewals) != 12 {
+		t.Fatalf("overdue = count %d rows %d, want 14/12", overview.OverdueRenewalCount, len(overview.OverdueRenewals))
+	}
+	if overview.OverdueRenewals[0].SubscriptionID != "sub_oldest" {
+		t.Fatalf("overdue[0] = %s, want oldest first", overview.OverdueRenewals[0].SubscriptionID)
+	}
+	for _, item := range overview.OverdueRenewals {
+		if item.SubscriptionID == "sub_cancel" || item.SubscriptionID == "sub_today" {
+			t.Fatalf("overdue queue included %s", item.SubscriptionID)
+		}
+	}
+	if len(overview.UpcomingRenewals) != 1 || overview.UpcomingRenewals[0].SubscriptionID != "sub_today" {
+		t.Fatalf("upcoming = %#v, want only sub_today", overview.UpcomingRenewals)
+	}
+}
+
 func TestServiceStatisticsReturnsCostMonthBuckets(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 2, 9, 0, 0, 0, time.UTC)

@@ -527,6 +527,11 @@ describe('TargetDetailPage', () => {
       expect(screen.getByText('目标尚未配置探测项')).toBeInTheDocument(),
     )
 
+    // 对话框底部有显式“取消”，关闭后可重新打开。
+    fireEvent.click(screen.getAllByRole('button', { name: '添加探测项' })[0]!)
+    fireEvent.click(within(screen.getByRole('dialog', { name: '探测项表单' })).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '探测项表单' })).not.toBeInTheDocument()
+
     fireEvent.click(screen.getAllByRole('button', { name: '添加探测项' })[0]!)
     expect(screen.getByRole('dialog', { name: '探测项表单' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '创建探测项' })).toBeInTheDocument()

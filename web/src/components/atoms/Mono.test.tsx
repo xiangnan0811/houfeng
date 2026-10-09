@@ -57,6 +57,19 @@ describe('Timestamp', () => {
     expect(span.textContent).toMatch(/分钟前/)
   })
 
+  it('renders future times as “…后” instead of “刚刚”', () => {
+    const soon = render(<Timestamp value="2026-04-30T16:30:00Z" mode="both" now={ref} />)
+    expect(soon.container.querySelector('.timestamp--both')!.textContent).toMatch(/^30 分钟后 · \d{4}\/\d{2}\/\d{2}/)
+    soon.unmount()
+
+    const later = render(<Timestamp value="2026-05-02T16:00:00Z" mode="relative" now={ref} />)
+    expect(later.container.querySelector('.timestamp--relative')!.textContent).toBe('2 天后')
+    later.unmount()
+
+    const edge = render(<Timestamp value="2026-04-30T16:00:03Z" mode="relative" now={ref} />)
+    expect(edge.container.querySelector('.timestamp--relative')!.textContent).toBe('刚刚')
+  })
+
   it('renders both forms for recent times and a single date once relative falls back to absolute', () => {
     const recent = render(<Timestamp value="2026-04-30T15:33:00Z" mode="both" now={ref} />)
     expect(recent.container.querySelector('.timestamp--both')!.textContent).toMatch(/^27 分钟前 · 2026\/04\/30/)

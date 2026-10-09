@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Badge, type BadgeTone } from '../../components/atoms'
@@ -30,19 +31,25 @@ function decisionTone(value: string): BadgeTone {
 export function RenewalQueue({
   items,
   baseCurrency,
+  snapshotGeneratedAt,
   onSelectVPS,
 }: {
   items: SubscriptionRenewalQueueItem[]
   baseCurrency: string
+  /** 订阅摘要生成时刻；剩余天数与后端 90 天窗口、逾期队列取同一个 UTC“今天”，无效时退回当前时间。 */
+  snapshotGeneratedAt?: string
   onSelectVPS: (vpsID: string) => void
 }) {
+  const [mountedAt] = useState(Date.now)
+  const generatedAt = Date.parse(snapshotGeneratedAt ?? '')
+  const now = Number.isNaN(generatedAt) ? mountedAt : generatedAt
   if (items.length === 0) {
     return <InsightEmpty title="暂无临近续费" detail="未来 90 天没有需要处理的订阅续费。" />
   }
   return (
     <div className="subscription-renewal-queue subscription-panel-scroll" role="region" tabIndex={0} aria-label="续费队列">
       {items.map((item) => {
-        const days = daysUntilDate(item.renew_at)
+        const days = daysUntilDate(item.renew_at, now)
         const title = item.display_name || item.vps_display_name || item.vps_id
         const rateLabel = exchangeRateStatusLabel(item.exchange_rate_status)
         const meta = [

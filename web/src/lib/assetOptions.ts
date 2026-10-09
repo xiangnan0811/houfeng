@@ -44,12 +44,18 @@ export const COMMON_CURRENCY_OPTIONS: LabeledOption[] = [
 
 export const COMMON_PAYMENT_METHOD_OPTIONS: LabeledOption[] = [
   { value: 'PayPal', label: 'PayPal', icon: 'PP' },
-  { value: 'Alipay', label: 'Alipay', icon: 'Ali' },
-  { value: 'WeChat', label: 'WeChat', icon: 'Wx' },
-  { value: 'Credit Card', label: 'Credit Card', icon: 'Card' },
+  { value: 'Alipay', label: '支付宝', icon: 'Ali' },
+  { value: 'WeChat', label: '微信支付', icon: 'Wx' },
+  { value: 'Credit Card', label: '信用卡', icon: 'Card' },
   { value: 'USDT', label: 'USDT', icon: 'USDT' },
-  { value: 'Bonus', label: 'Bonus / 余额', icon: 'Bonus' },
+  { value: 'Bonus', label: '赠送额度 / 余额', icon: 'Bonus' },
 ]
+
+/** 支付方式存储值保持英文以兼容既有数据；界面显示常用值的中文名，自定义值原样显示。 */
+export function paymentMethodLabel(value: string | null | undefined): string {
+  const trimmed = (value ?? '').trim()
+  return COMMON_PAYMENT_METHOD_OPTIONS.find((option) => option.value === trimmed)?.label ?? trimmed
+}
 
 export const BILLING_PERIOD_UNIT_OPTIONS: Array<LabeledOption & { value: BillingPeriodUnit }> = [
   { value: 'day', label: '天', icon: 'D' },

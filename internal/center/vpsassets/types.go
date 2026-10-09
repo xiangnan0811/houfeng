@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"houfeng/internal/center/ipquality"
+	"houfeng/internal/ipidentity"
 )
 
 var ErrVPSAssetNotFound = errors.New("vps asset not found")
@@ -462,6 +463,9 @@ func ValidateCreateInput(input CreateInput) error {
 	if !IsValidSSHPort(input.SSHPort) {
 		return fmt.Errorf("%w: ssh_port must be between 1 and 65535", ErrInvalidVPSAssetInput)
 	}
+	if err := ValidateHostAddresses(input.IPv4, input.IPv6); err != nil {
+		return err
+	}
 	return ValidateIndependentFacts(input.ValidityMode, input.ExpiresAt, input.AutoRenewCheck, input.AutoRenewCheckedAt)
 }
 
@@ -707,6 +711,29 @@ func IsCancellationRenewalDecision(decision RenewalDecision) bool {
 
 func IsValidSSHPort(port int) bool {
 	return port >= 1 && port <= 65535
+}
+
+// IsValidIPv4 只接受点分四段 IPv4；空值表示未填写，由调用方决定是否允许。
+func IsValidIPv4(value string) bool {
+	addr, ok := ipidentity.Parse(value)
+	return ok && addr.Is4()
+}
+
+// IsValidIPv6 接受 IPv6（含 IPv4-mapped），拒绝普通 IPv4 和带 zone 的地址。
+func IsValidIPv6(value string) bool {
+	addr, ok := ipidentity.Parse(value)
+	return ok && addr.Is6()
+}
+
+// ValidateHostAddresses 校验新写入的地址文本；既有存量文本不在这里回溯拒绝。
+func ValidateHostAddresses(ipv4, ipv6 string) error {
+	if ipv4 != "" && !IsValidIPv4(ipv4) {
+		return fmt.Errorf("%w: ipv4 must be a dotted-quad IPv4 address", ErrInvalidVPSAssetInput)
+	}
+	if ipv6 != "" && !IsValidIPv6(ipv6) {
+		return fmt.Errorf("%w: ipv6 must be an IPv6 address", ErrInvalidVPSAssetInput)
+	}
+	return nil
 }
 
 func IsValidValidityMode(value string) bool {

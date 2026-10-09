@@ -2620,6 +2620,9 @@ export type SubscriptionOverview = {
   decision_attention_count: number
   missing_subscription_vps_count: number
   upcoming_renewals: SubscriptionRenewalQueueItem[]
+  /** 续费日早于 UTC 当天、且未决定不续费的订阅；最旧在前，最多 12 条，总数见 overdue_renewal_count。旧版 center 不返回。 */
+  overdue_renewals?: SubscriptionRenewalQueueItem[]
+  overdue_renewal_count?: number
   provider_breakdown: SubscriptionBreakdownItem[]
   currency_breakdown: SubscriptionBreakdownItem[]
   category_breakdown: SubscriptionBreakdownItem[]
@@ -2636,6 +2639,8 @@ export type SubscriptionSeriesPoint = {
   budget_currency?: string
   budget_warning_pct?: number
   data_insufficient: boolean
+  /** 该月有非基准币种订阅在月末之前没有汇率记录，按此后最早的汇率估算。旧版 center 不返回。 */
+  rate_estimated?: boolean
 }
 
 export type SubscriptionStatistics = {

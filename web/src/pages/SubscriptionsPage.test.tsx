@@ -202,6 +202,7 @@ type SubscriptionFetchOptions = {
   statistics?: SubscriptionStatistics
   statisticsError?: string
   statisticsErrorOnce?: string
+  overviewOverrides?: Partial<SubscriptionOverview>
 }
 
 function setupSubscriptionFetch({
@@ -213,6 +214,7 @@ function setupSubscriptionFetch({
   statistics,
   statisticsError,
   statisticsErrorOnce,
+  overviewOverrides = {},
 }: SubscriptionFetchOptions = {}) {
   let currentSubscriptions = subscriptions
   let failNextSubscriptions = subscriptionsErrorOnce
@@ -271,7 +273,7 @@ function setupSubscriptionFetch({
     }
     if (url === '/api/subscriptions/overview') {
       if (overviewError) return Promise.resolve(mockJSONResponse({ error: overviewError }, 500))
-      return Promise.resolve(mockJSONResponse(overviewFor(currentSubscriptions)))
+      return Promise.resolve(mockJSONResponse(overviewFor(currentSubscriptions, overviewOverrides)))
     }
     if (url === '/api/subscriptions/statistics?window=year') {
       if (statisticsErrorOnce) {
@@ -382,14 +384,17 @@ describe('SubscriptionsPage', () => {
 
   it('highlights renewals within 30 calendar days, including day 30', async () => {
     vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date(2026, 9, 2, 12, 0))
+    vi.setSystemTime(new Date('2026-10-05T12:00:00Z'))
     try {
       setupSubscriptionFetch({
         subscriptions: [
           { ...subscription, subscription_id: 'sub_d29', renew_at: '2026-10-31' },
           { ...subscription, subscription_id: 'sub_d30', renew_at: '2026-11-01' },
           { ...subscription, subscription_id: 'sub_d31', renew_at: '2026-11-02' },
+          { ...subscription, subscription_id: 'sub_late', renew_at: '2026-09-24' },
         ],
+        // 明细与摘要取同一个“今天”：摘要生成于 UTC 10-02，页面时钟已是 10-05。
+        overviewOverrides: { snapshot_generated_at: '2026-10-02T04:00:00Z' },
       })
       render(
         <MemoryRouter initialEntries={['/subscriptions?view=details']}>
@@ -400,10 +405,119 @@ describe('SubscriptionsPage', () => {
       const cell = (date: string) => screen.getByText(date).closest('td')
       expect(cell('2026-10-31')).toHaveClass('text-warn')
       expect(cell('2026-11-01')).toHaveClass('text-warn')
+      // 按页面时钟（10-05）11-02 只剩 28 天会被高亮；不高亮证明明细用的是摘要的 10-02。
       expect(cell('2026-11-02')).not.toHaveClass('text-warn')
+      // 逾期在单元格里直接写出，不只靠颜色或悬停提示。
+      expect(cell('2026-09-24')).toHaveTextContent('已逾期 8 天')
+      expect(cell('2026-10-31')).not.toHaveTextContent('已逾期')
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('keeps the summary day while the overview reloads and drops it once the refresh fails', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-05T12:00:00Z'))
+    try {
+      let overviewRequests = 0
+      let overviewResponder: (() => Promise<Response>) | null = null
+      let failReload!: () => void
+      const reload = new Promise<Response>((resolve) => { failReload = () => resolve(mockJSONResponse({ error: 'overview unavailable' }, 500)) })
+      const fetchMock = setupSubscriptionFetch({
+        subscriptions: [
+          { ...subscription, subscription_id: 'sub_d31', renew_at: '2026-11-02' },
+          { ...subscription, subscription_id: 'sub_late', renew_at: '2026-10-01', display_name: '逾期账单' },
+        ],
+        overviewOverrides: { snapshot_generated_at: '2026-10-02T04:00:00Z' },
+      })
+      const original = fetchMock.getMockImplementation()!
+      fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+        const method = init?.method ?? 'GET'
+        if (url === '/api/subscriptions/overview') {
+          overviewRequests += 1
+          if (overviewResponder) return overviewResponder()
+          if (overviewRequests > 1) return reload
+        }
+        if (url === '/api/subscriptions/exchange-rates/refresh' && method === 'POST') {
+          return Promise.resolve(mockJSONResponse({
+            items: [{ provider: 'frankfurter', base_currency: 'CNY', quote_currency: 'USD', rate_status: 'fresh', refresh_status: 'idle', attempt_count: 1 }],
+          }, 202))
+        }
+        if (url === '/api/subscriptions/exchange-rates/status' && method === 'GET') {
+          return Promise.resolve(mockJSONResponse({ items: [] }))
+        }
+        return original(url, init)
+      })
+      render(<MemoryRouter initialEntries={['/subscriptions?view=details']}><SubscriptionsPage /></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText('2026-11-02')).toBeInTheDocument())
+      const cell = () => screen.getByText('2026-11-02').closest('td')
+      // 相对摘要日 10-02 是 31 天，不高亮。
+      expect(cell()).not.toHaveClass('text-warn')
+
+      await waitFor(() => expect(screen.getByRole('button', { name: '刷新汇率' })).toBeEnabled())
+      fireEvent.click(screen.getByRole('button', { name: '刷新汇率' }))
+      await waitFor(() => expect(overviewRequests).toBe(2))
+      // 重新加载中仍按旧摘要日计算，不跳动。
+      expect(cell()).not.toHaveClass('text-warn')
+
+      failReload()
+      // 刷新失败后旧摘要不可用：退回页面打开日 10-05，只剩 28 天，进入 30 天高亮。
+      await waitFor(() => expect(cell()).toHaveClass('text-warn'))
+
+      // 失败后重试：请求进行中仍按页面日，不提前恢复旧摘要；成功后才切回新摘要。
+      let finishRetry!: () => void
+      overviewResponder = () => new Promise<Response>((resolve) => {
+        finishRetry = () => resolve(mockJSONResponse(overviewFor([{ ...subscription, renew_at: '2026-11-02' }], { snapshot_generated_at: '2026-10-04T04:00:00Z' })))
+      })
+      const lateCell = () => screen.getByText('2026-10-01').closest('td')
+      // 逾期天数能区分三个候选“今天”：旧摘要 10-02 为 1 天，页面日 10-05 为 4 天，新摘要 10-04 为 3 天。
+      expect(lateCell()).toHaveTextContent('已逾期 4 天')
+      fireEvent.click(await screen.findByRole('button', { name: '重试概览' }))
+      await waitFor(() => expect(overviewRequests).toBe(3))
+      expect(lateCell()).toHaveTextContent('已逾期 4 天')
+      finishRetry()
+      await waitFor(() => expect(lateCell()).toHaveTextContent('已逾期 3 天'))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('falls back to the page-open day when the subscription overview is unavailable', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-05T12:00:00Z'))
+    try {
+      setupSubscriptionFetch({
+        subscriptions: [{ ...subscription, subscription_id: 'sub_d28', renew_at: '2026-11-02' }],
+        overviewError: 'overview unavailable',
+      })
+      render(
+        <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+          <SubscriptionsPage />
+        </MemoryRouter>,
+      )
+      await waitFor(() => expect(screen.getByText('2026-11-02')).toBeInTheDocument())
+      expect(screen.getByText('2026-11-02').closest('td')).toHaveClass('text-warn')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('shows the VPS name once for an unnamed subscription and keeps both lines for a named one', async () => {
+    setupSubscriptionFetch({
+      subscriptions: [
+        { ...subscription, subscription_id: 'sub_unnamed', display_name: '' },
+        { ...subscription, subscription_id: 'sub_named', display_name: '主账单', renew_at: '2026-12-01' },
+      ],
+    })
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+    const named = await screen.findByRole('button', { name: '主账单' })
+    expect(named.closest('tr')).toHaveTextContent('Tokyo Edge')
+    const unnamedRow = screen.getByRole('button', { name: 'Tokyo Edge' }).closest('tr')!
+    expect(within(unnamedRow).getAllByText('Tokyo Edge')).toHaveLength(1)
   })
 
   it('shows no-VPS prerequisite with link to VPS page', async () => {

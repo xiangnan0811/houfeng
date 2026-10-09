@@ -83,6 +83,13 @@ export function RecordSearchPage() {
     [rawSearchKey],
   )
   const appliedFilterKey = useMemo(() => recordSearchFilterKey(parsedFilters), [parsedFilters])
+  // 排序与每页条数不算筛选：无关键词和条件时的空结果说明“还没有记录”，而不是“没有匹配”。
+  const hasNarrowingFilters = useMemo(() => {
+    const params = new URLSearchParams(appliedFilterKey)
+    params.delete('sort')
+    params.delete('limit')
+    return params.toString() !== ''
+  }, [appliedFilterKey])
   const appliedFilters = useMemo(
     () => recordSearchFiltersFromSearchParams(new URLSearchParams(appliedFilterKey)),
     [appliedFilterKey],
@@ -300,8 +307,8 @@ export function RecordSearchPage() {
           <PageState
             kind="empty"
             eyebrow="运维记录"
-            title="没有匹配的记录"
-            description="调整关键词或筛选条件后再试。"
+            title={hasNarrowingFilters ? '没有匹配的记录' : '还没有运维记录'}
+            description={hasNarrowingFilters ? '调整关键词或筛选条件后再试。' : '点击右上角“新建记录”，或从 VPS 详情记录一次运维操作。'}
           />
         ) : null}
         {visibleRecords.length > 0 ? (

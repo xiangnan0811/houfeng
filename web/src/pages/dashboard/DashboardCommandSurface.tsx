@@ -20,6 +20,8 @@ type DashboardCommandSurfaceProps = {
   supportingLoading: boolean
   onRetrySupporting?: () => void
   overviewRefreshFailed?: boolean
+  /** 有观测对象但没有可用通知渠道，失联与告警不会推送。 */
+  notificationGap?: boolean
 }
 
 function glyphState(tone: DashboardTone) {
@@ -107,6 +109,7 @@ export function DashboardCommandSurface({
   supportingLoading,
   onRetrySupporting,
   overviewRefreshFailed = false,
+  notificationGap = false,
 }: DashboardCommandSurfaceProps) {
   const observation = model.observability
   const billingUnavailable = model.billingEvidence.status === 'unavailable'
@@ -162,6 +165,16 @@ export function DashboardCommandSurface({
           >
             {supportingLoading ? '重试中…' : '重试局部数据'}
           </button>
+        </div>
+      ) : null}
+
+      {notificationGap ? (
+        <div className="dashboard-degradation dashboard-notification-gap" role="note" aria-label="未配置通知渠道">
+          <div>
+            <strong>未配置通知渠道</strong>
+            <span>主机失联和告警只会显示在页面里，不会推送给你。</span>
+          </div>
+          <Link className="btn sm secondary" to={DASHBOARD_LINKS.notificationSettings}>配置通知</Link>
         </div>
       ) : null}
 

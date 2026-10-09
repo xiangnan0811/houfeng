@@ -44,6 +44,7 @@
 - 列表默认 `asset_scope=current`，只返回管理中资源；`archived` 返回归档资源，`all` 返回全部。可按 `usage_tag` 精确匹配任意一个用途；旧 `usage_status` 查询参数返回 400。
 - VPS 是业务状态主体，Subscription 是账单事实，MonitoringInstance 是运行观测。普通 CRUD 不得改变监控、命令、探测或订阅。
 - `ssh_port` 默认为 22，范围 1..65535。`archived_at` 只能由生命周期动作派生。
+- `ipv4` 非空时必须是点分四段 IPv4，`ipv6` 非空时必须是 IPv6（可为 IPv4-mapped，不带 zone），解析口径同 `internal/ipidentity`。create 与导入校验全部非空地址；PATCH 先做 `If-Match` 版本前提检查（过期表单得到 409 冲突而非 400），再只校验按 `ipidentity.Changed` 判定确有改变的地址（不可解析时两侧按 Unicode White_Space trim 后比较），存量非法文本原样或只差首尾空白回传时不阻塞其他字段保存。`ssh_host` 可以是主机名，不做地址校验。Web 共享事实表单在提交前给出中文格式提示，地址 trim 使用与 Go `strings.TrimSpace` 相同的空白集合，规则相同。
 - `PATCH /api/vps/{id}` 对实际变更要求 `If-Match`；读取当前行后合并输入，校验有效期与核对时间成对事实，避免部分更新产生矛盾。
 - 归档后允许窄范围补充 `auto_renew_check/auto_renew_checked_at`、`renewal_reason/renewal_review_at` 和 note；名称、用途、生命周期等仍不可普通修改。核对与补充修订同事务写入 `experience_logs` 的 before/after，不能借补录恢复资源。
 - 续费意向变更保留 `renewal_decisions` 历史。保存 cancel 不调用订阅自动续费更新，也不改变用途。

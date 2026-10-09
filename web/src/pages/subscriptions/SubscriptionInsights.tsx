@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useState } from 'react'
 
+import { paymentMethodLabel } from '../../lib/assetOptions'
 import { TabPanel, Tabs } from '../../components/atoms'
 import type {
   SubscriptionBreakdownItem,
@@ -41,13 +42,14 @@ export type SubscriptionInsightsProps = {
   onSelectVPS: (vpsID: string) => void
 }
 
+// 分类色不复用状态色：同色系重复会让图例对不上扇区，黄色还会被读成警示。
 const DONUT_COLORS = [
-  'var(--accent)',
-  'var(--color-state-normal)',
-  'var(--color-state-notice)',
-  'var(--accent-2)',
-  'var(--color-state-maintenance)',
-  'var(--text-muted)',
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-4)',
+  'var(--chart-5)',
+  'var(--chart-6)',
 ]
 
 const BREAKDOWN_TABS = [
@@ -113,9 +115,25 @@ function breakdownItems(statistics: SubscriptionStatistics | null, kind: Subscri
   if (!statistics) return []
   if (kind === 'category') return statistics.category_breakdown
   if (kind === 'currency') return statistics.currency_breakdown
-  if (kind === 'payment') return statistics.payment_breakdown ?? []
+  // 支付方式按存储值聚合，显示时换成中文名。
+  if (kind === 'payment') return (statistics.payment_breakdown ?? []).map((item) => ({ ...item, label: paymentMethodLabel(item.label) }))
   if (kind === 'region') return statistics.region_breakdown ?? []
   return statistics.provider_breakdown
+}
+
+/** 后端 subscriptioncosts 对 90 天续费队列最多返回 12 条（与工作台同一上限）。 */
+const RENEWAL_QUEUE_CAP = 12
+
+// 逾期与 90 天窗口分开计数：逾期总数来自后端，列表最多返回 12 条。
+function renewalQueueMeta(overview: SubscriptionOverview | null | undefined): string {
+  const upcomingLength = overview?.upcoming_renewals?.length ?? 0
+  // 90 天队列由后端截断为最多 12 条，达到上限时只能说“至少”。
+  const capped = upcomingLength >= RENEWAL_QUEUE_CAP
+  const overdue = overview?.overdue_renewal_count ?? overview?.overdue_renewals?.length ?? 0
+  if (overdue === 0) return capped ? `至少 ${upcomingLength} 项` : `${upcomingLength} 项`
+  return capped
+    ? `已逾期 ${overdue} 项 · 90 天内至少 ${upcomingLength} 项`
+    : `已逾期 ${overdue} 项 · 90 天内 ${upcomingLength} 项`
 }
 
 function handleKeyActivate(event: KeyboardEvent, run: () => void) {
@@ -160,6 +178,7 @@ export function SubscriptionInsights({
   })
   const costBuckets = statistics?.cost_month_buckets ?? []
   const hasInsufficientTrendData = costBuckets.some((bucket) => bucket.data_insufficient)
+  const hasEstimatedRates = costBuckets.some((bucket) => bucket.rate_estimated)
   const hasTrend = !hasInsufficientTrendData &&
     costBuckets.length >= 2 &&
     costBuckets.some((bucket) => bucket.monthly_cost > 0 || (bucket.budget_limit ?? 0) > 0)
@@ -175,7 +194,9 @@ export function SubscriptionInsights({
             <div className="subscription-panel-heading">
               <h3 className="subscription-panel-title">月成本与月预算</h3>
               <span className="subscription-panel-meta">
-                {statisticsLoading ? '加载中' : `管理中资产 · 最近 ${costBuckets.length} 个月`}
+                {statisticsLoading
+                  ? '加载中'
+                  : `管理中资产 · 最近 ${costBuckets.length} 个月${hasEstimatedRates ? ' · 部分月份缺少当时的汇率记录，按此后最早的汇率估算' : ''}`}
               </span>
             </div>
             {hasTrend && !statisticsError ? <BudgetCostTrendLegend /> : null}
@@ -362,14 +383,19 @@ export function SubscriptionInsights({
         <div className="subscription-insight-panel subscription-insight-panel--renewal">
           <div className="subscription-panel-header">
             <h3 className="subscription-panel-title">续费队列</h3>
-            <span className="subscription-panel-meta">{overviewReady ? `${overview?.upcoming_renewals?.length ?? 0} 项` : (overviewLoading ? '加载中' : '不可用')}</span>
+            <span className="subscription-panel-meta">{overviewReady ? renewalQueueMeta(overview) : (overviewLoading ? '加载中' : '不可用')}</span>
           </div>
           {overviewLoading ? (
             <InsightEmpty title="正在加载续费队列" busy />
           ) : overviewError ? (
             <InsightEmpty title="续费队列不可用" detail={overviewError} />
           ) : (
-            <RenewalQueue items={overview?.upcoming_renewals ?? []} baseCurrency={baseCurrency} onSelectVPS={onSelectVPS} />
+            <RenewalQueue
+              items={[...(overview?.overdue_renewals ?? []), ...(overview?.upcoming_renewals ?? [])]}
+              baseCurrency={baseCurrency}
+              {...(overview?.snapshot_generated_at ? { snapshotGeneratedAt: overview.snapshot_generated_at } : {})}
+              onSelectVPS={onSelectVPS}
+            />
           )}
         </div>
       </div>

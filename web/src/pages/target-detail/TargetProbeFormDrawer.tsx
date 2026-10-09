@@ -64,6 +64,9 @@ export function TargetProbeFormDrawer({
       footer={
         <div className="watchtower-form-footer">
           {error ? <p className="create-form__error" role="alert">{error}</p> : null}
+          <Button type="button" variant="secondary" disabled={submitting} onClick={handleClose}>
+            取消
+          </Button>
           <Button type="submit" form={formId} disabled={submitting}>
             {submitLabel}
           </Button>

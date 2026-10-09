@@ -1,11 +1,11 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
 import { Modal, Hostname, MonoDigits, Timestamp } from '../../components/atoms'
 import { CollapsibleSection } from '../../components/CollapsibleSection'
-import { ApiError, issueMonitoringInstanceInstallCommand, resetMonitoringInstanceBinding } from '../../lib/api'
+import { ApiError, issueMonitoringInstanceInstallCommand, listMonitoringInstancePhases, resetMonitoringInstanceBinding } from '../../lib/api'
 import { useCopyToClipboard } from '../../lib/useCopyToClipboard'
-import type { MonitoringInstanceInstallCommandIssue, MonitoringInstanceRecord } from '../../lib/types'
+import type { MonitoringInstanceInstallCommandIssue, MonitoringInstancePhase, MonitoringInstanceRecord } from '../../lib/types'
 
 const MANUAL_TOKEN_PLACEHOLDER = '<30-minute enrollment token>'
 const MANUAL_SERVER_PLACEHOLDER = '<center public base URL>'
@@ -70,7 +70,11 @@ type IssueState = {
   error: string | null
   hidden: boolean
   copyStatus: 'idle' | 'copied' | 'failed'
+  /** 本次签发之后才开始、已连上的完整会话；与签发绑定，重新生成时清空。 */
+  connectedSession: MonitoringInstancePhase | null
 }
+
+const ONBOARDING_POLL_INTERVAL_MS = 5000
 
 const EMPTY_ISSUE_STATE: IssueState = {
   issue: null,
@@ -78,6 +82,15 @@ const EMPTY_ISSUE_STATE: IssueState = {
   error: null,
   hidden: false,
   copyStatus: 'idle',
+  connectedSession: null,
+}
+
+// 以会话身份判断接入：完整（采集与命令）会话、已收到可信在线信号、开始时间不早于签发时间。
+// 调用方还会排除签发后基线里已有的会话（与签发并发提交的旧接入可能晚于 issued_at 开始）。
+function isSessionFromIssue(phase: MonitoringInstancePhase, issuedAt: string): boolean {
+  const started = Date.parse(phase.started_at)
+  const issued = Date.parse(issuedAt)
+  return phase.capability === 'full' && phase.ever_connected && Number.isFinite(started) && Number.isFinite(issued) && started >= issued
 }
 
 export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, onClose, returnVPSId, mode = 'connect' }: Props) {
@@ -136,6 +149,43 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
     )
   }
 
+  // 抽屉打开且已签发命令时轮询会话列表；找到新会话即停止。在途标记按每次签发独立：例行轮询在本次签发的请求
+  // 在途时跳过；上一次签发遗留的请求即使挂起也不阻塞新签发，其迟到响应因已取消而被忽略。
+  // 签发后立即读一次作为基线：基线里已有的会话（包括与签发并发、在签发返回前提交的旧接入）一律不算本次接入。
+  // 基线读取失败时以第一次成功读取为准——宁可不自动推进，也不把旧会话当成新接入。
+  const pollIssue = open && state.connectedSession === null ? state.issue : null
+  useEffect(() => {
+    if (!pollIssue) return
+    let cancelled = false
+    let inFlight = false
+    let baseline: Set<string> | null = null
+    const read = () => {
+      if (cancelled || inFlight) return
+      inFlight = true
+      listMonitoringInstancePhases(subjectId)
+        .then((phases) => {
+          if (cancelled) return
+          if (baseline === null) {
+            baseline = new Set(phases.map((phase) => phase.session_id))
+            return
+          }
+          const known = baseline
+          const session = phases.find((phase) => !known.has(phase.session_id) && isSessionFromIssue(phase, pollIssue.issued_at))
+          if (session) {
+            setState((current) => (current.issue === pollIssue ? { ...current, connectedSession: session } : current))
+          }
+        })
+        .catch(() => undefined)
+        .finally(() => { inFlight = false })
+    }
+    read()
+    const interval = setInterval(read, ONBOARDING_POLL_INTERVAL_MS)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [pollIssue, subjectId])
+
   function handleRequestClose() {
     if (busyRef.current) return
     onClose()
@@ -166,7 +216,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
       const copied = await copy(issue.command)
       if (!isLiveIssue(requestId, subjectId)) return
       busyRef.current = false
-      setState({ issue, busy: false, error: null, hidden: false, copyStatus: copied ? 'copied' : 'failed' })
+      setState({ issue, busy: false, error: null, hidden: false, copyStatus: copied ? 'copied' : 'failed', connectedSession: null })
     } catch (error: unknown) {
       if (!isLiveIssue(requestId, subjectId)) return
       busyRef.current = false
@@ -196,7 +246,9 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
   const primaryLabel = issue
     ? isUpgrade ? '重新生成升级/重新接入命令' : '重新生成安装命令'
     : isUpgrade ? '生成升级/重新接入命令' : '生成一键安装命令'
-  const canShowCommand = issue !== null && !hidden
+  // 接入完成后不再提供“重新生成”，避免误点重置刚建立的绑定。
+  const connectedSinceIssue = issue !== null && state.connectedSession !== null
+  const canShowCommand = issue !== null && !hidden && !connectedSinceIssue
   const completeLabel = returnVPSId ? '完成并返回 VPS' : '完成并查看监控实例'
 
   return (
@@ -214,16 +266,19 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               <MonoDigits>{error}</MonoDigits>
             </p>
           ) : null}
-          <button
-            type="button"
-            className="btn md primary"
-            disabled={busy || enrollmentBlocked}
-            onClick={() => void handleIssue()}
-          >
-            {busy ? '正在生成…' : primaryLabel}
-          </button>
+          {connectedSinceIssue ? null : (
+            <button
+              type="button"
+              className={`btn md ${issue ? 'secondary' : 'primary'}`}
+              disabled={busy || enrollmentBlocked}
+              onClick={() => void handleIssue()}
+            >
+              {busy ? '正在生成…' : primaryLabel}
+            </button>
+          )}
           {issue ? (
-            <button type="button" className="btn md secondary" disabled={busy} onClick={handleComplete}>
+            // 命令生成后主操作是“完成”；重新生成会使刚复制的命令失效，降为次操作。
+            <button type="button" className="btn md primary" disabled={busy} onClick={handleComplete}>
               {completeLabel}
             </button>
           ) : null}
@@ -232,15 +287,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
     >
       <div className="monitoring-detail-onboarding">
         {requiresNewSession ? <p>生成重新接入命令将开始新的接入阶段。已有会话仅保留在线证据权限；采集与命令需要新凭据。</p> : null}
-        <p className="monitoring-detail-dialog__subject">
-          <Hostname>{monitoringInstance.monitoring_instance_id}</Hostname>
-          {returnVPSId ? (
-            <>
-              {' · 返回 VPS '}
-              <Hostname>{returnVPSId}</Hostname>
-            </>
-          ) : null}
-        </p>
+        {/* 标题已写明实例名称；内部 ID 不在接入步骤里外露，完成后的去向写在主操作上。 */}
         {enrollmentBlocked ? (
           <p role="alert">所属 VPS 未处于管理中，不能重新接入。请从 VPS 详情核对生命周期。</p>
         ) : null}
@@ -255,10 +302,19 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
         <p className="monitoring-detail-onboarding__secret">
           {isUpgrade
             ? '命令由 center 签发，用于在已接入主机上升级或重新接入，不会新建监控实例。'
-            : '命令由 center 签发，使用公开访问地址，不会从浏览器猜测生产 URL。'}
+            : '命令已包含本系统的公开访问地址，在目标主机上直接执行即可。'}
           {' '}命令含 30 分钟一次性接入令牌，不要写入工单、聊天、日志或截图。重新生成会使上一条立即失效。
         </p>
-        {issue && hidden ? (
+        {connectedSinceIssue ? (
+          <p className="monitoring-detail-onboarding__status" role="status">
+            已收到新 agent 会话的心跳（<Timestamp value={state.connectedSession?.last_trusted_online_at ?? state.connectedSession?.started_at ?? null} mode="both" />），接入完成。
+          </p>
+        ) : issue ? (
+          <p className="monitoring-detail-onboarding__hint" role="status">
+            执行命令后，本窗口会自动检测首次心跳。
+          </p>
+        ) : null}
+        {issue && hidden && !connectedSinceIssue ? (
           <button
             type="button"
             className="btn sm secondary"
@@ -285,7 +341,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
             </div>
             <dl className="monitoring-detail-onboarding__facts">
               <div>
-                <dt>过期</dt>
+                <dt>过期时间</dt>
                 <dd>
                   <Timestamp value={issue.expires_at} mode="both" />
                 </dd>
@@ -314,7 +370,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
               已保存，隐藏命令
             </button>
           </div>
-        ) : issue && hidden ? (
+        ) : issue && hidden && !connectedSinceIssue ? (
           <p className="monitoring-detail-onboarding__secret">
             安装命令已隐藏。本抽屉会话内可重新展开；关闭或过期后请重新生成。
           </p>

@@ -7,7 +7,7 @@ import type { RecordWorkspaceState } from '../hooks/useRecordDraft'
 import { comparisonEntryHref, comparisonSubjectsFromSources } from '../compare/comparisonQueryState'
 import { RECORD_LIFECYCLE_LABELS, RECORD_TYPE_LABELS } from '../recordLabels'
 import { BUSINESS_STATUS_LABELS } from '../recordWorkspaceModel'
-import { displaySubject, impactTone, statusGroupTone, subjectLabel } from './recordPresentation'
+import { displaySubject, impactLevelLabel, impactTone, statusGroupTone, subjectLabel } from './recordPresentation'
 
 type RecordWorkspaceHeaderProps = {
   state: RecordWorkspaceState
@@ -98,7 +98,7 @@ export function RecordWorkspaceHeader({
                   <Badge variant="info" tone={statusGroupTone(published?.status_group)}>{businessStatus}</Badge>
                 ) : null}
                 {payload.impact_level ? (
-                  <Badge variant="info" tone={impactTone(payload.impact_level)}>影响 {payload.impact_level}</Badge>
+                  <Badge variant="info" tone={impactTone(payload.impact_level)}>影响 {impactLevelLabel(payload.impact_level)}</Badge>
                 ) : null}
                 {archived && state.record ? (
                   <Badge variant="info" tone="maintenance">{RECORD_LIFECYCLE_LABELS[state.record.lifecycle]}</Badge>

@@ -519,6 +519,8 @@ export function SettingsPage() {
             </div>
           )}
 
+          {/* 外观是即时生效的本地偏好；只有其他分区有未保存修改（或刚保存完的结果）时才在这里显示保存栏。 */}
+          {activeTab !== 'appearance' || isDirty || state.saveSuccess || state.saveError ? (
           <div className="settings-save-footer">
             {isDirty && <span className="settings-save-footer__hint">有未保存的修改</span>}
             <div>
@@ -529,6 +531,7 @@ export function SettingsPage() {
               {state.saving ? '保存中…' : '保存设置'}
             </button>
           </div>
+          ) : null}
           </form>
         ) : null}
       </TabPanel>

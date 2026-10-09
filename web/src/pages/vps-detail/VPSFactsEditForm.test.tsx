@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { ProviderRecord } from '../../lib/types'
 import type { FactEditFormState } from './types'
 import { VPSFactsEditForm } from './VPSFactsEditForm'
 
@@ -93,10 +94,61 @@ describe('VPSFactsEditForm', () => {
     }))
   })
 
-  it('offers multiple purposes without replacing the existing selection', () => {
-    const { onDraftChange } = renderForm(draftFixture({ usageTags: '自定义用途' }))
-    fireEvent.click(screen.getByRole('button', { name: '备用' }))
-    expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ usageTags: '自定义用途, 备用' }))
+  it('labels provider options by name and region, adding the ID only for duplicate names', () => {
+    const provider = (id: string, name: string, country: string): ProviderRecord => ({
+      provider_id: id, name, website: '', panel_url: '', account_hint: '', country, note: '', rating: null, labels: [],
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    })
+    render(
+      <MemoryRouter>
+        <VPSFactsEditForm
+          formId="vps-facts-form"
+          draft={draftFixture()}
+          providers={[provider('pv_a', 'Hetzner', 'DE'), provider('pv_b', 'Vultr', ''), provider('pv_c', 'Vultr', 'JP')]}
+          providersLoading={false}
+          providersError={null}
+          submitting={false}
+          onDraftChange={vi.fn()}
+          onSubmit={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+    const options = within(screen.getByRole('combobox', { name: '资产服务商' })).getAllByRole('option').map((option) => option.textContent)
+    expect(options).toEqual(['未关联服务商', 'Hetzner · DE', 'Vultr · pv_b', 'Vultr · JP · pv_c'])
+  })
+
+  it('toggles purposes against the live draft without dropping other selections', () => {
+    function Harness() {
+      const [draft, setDraft] = useState(draftFixture({ usageTags: '自定义用途' }))
+      return (
+        <MemoryRouter>
+          <VPSFactsEditForm
+            formId="vps-facts-form"
+            draft={draft}
+            providers={[]}
+            providersLoading={false}
+            providersError={null}
+            submitting={false}
+            onDraftChange={setDraft}
+            onSubmit={vi.fn()}
+          />
+        </MemoryRouter>
+      )
+    }
+    render(<Harness />)
+    const usage = screen.getByRole('textbox', { name: '用途' })
+    const chips = screen.getByRole('group', { name: '快捷选项' })
+    expect(within(chips).getByRole('button', { name: '自定义用途' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(chips).getByRole('button', { name: '备用' })).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(within(chips).getByRole('button', { name: '备用' }))
+    expect(usage).toHaveValue('自定义用途, 备用')
+    expect(within(chips).getByRole('button', { name: '备用' })).toHaveAttribute('aria-pressed', 'true')
+
+    // 再次点击已选用途只取消它自己，保留其他用途。
+    fireEvent.click(within(chips).getByRole('button', { name: '自定义用途' }))
+    expect(usage).toHaveValue('备用')
+    expect(within(chips).getByRole('button', { name: '备用' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('hides IPv6 and SSH boxes until enabled and does not erase values when hiding', () => {

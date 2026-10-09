@@ -39,6 +39,7 @@ import {
   isSubscriptionInRenewalWindow,
   lifecycleLabel,
   renewalLabel,
+  renewalTimingLabel,
   selectPrimarySubscription,
   subscriptionStatusLabel,
   usageLabel,
@@ -346,8 +347,18 @@ function renderRenewalDate(row: InventoryRow) {
   if (!row.subscription.renew_at) return <span className="vps-quiet-fact">无续费日</span>
   const days = daysUntilDate(row.subscription.renew_at)
   const date = formatDate(row.subscription.renew_at)
+  // 逾期直接写在屏幕上，不只放在悬停提示里；天数与后端同按 UTC 日历日。
+  if (days != null && days < 0) {
+    return (
+      <span className="vps-workbench__due vps-workbench__due--overdue">
+        <span className="vps-mono">{date}</span>
+        <span aria-hidden="true"><StatusGlyph state="alert" size="sm" /></span>
+        <span>{renewalTimingLabel(days)}</span>
+      </span>
+    )
+  }
   if (days != null && days <= 30) {
-    const dueLabel = days < 0 ? '续费已过期' : '30天内续费'
+    const dueLabel = '30天内续费'
     return (
       <span className="vps-workbench__due" title={dueLabel}>
         <StatusGlyph state="notice" size="sm" ariaLabel={dueLabel} />
@@ -556,6 +567,7 @@ function VPSInspector({
   currentInventoryHref,
   subscriptionsError,
   notice,
+  inventoryEmpty = false,
   onSelect,
 }: {
   row: InventoryRow | null
@@ -565,6 +577,8 @@ function VPSInspector({
   currentInventoryHref: string
   subscriptionsError: string | null
   notice: string | null
+  /** 库存本身为空（不是筛选后为空）。 */
+  inventoryEmpty?: boolean
   onSelect: (vpsID: string) => void
 }) {
   const attention = row ? cancellationAttentionReason(row) : null
@@ -582,7 +596,6 @@ function VPSInspector({
                 <h2 className="vps-inspector__title">{row.vps.display_name}</h2>
                 <p className="vps-inspector__status">
                   <LifecycleBadge value={row.vps.lifecycle_status} />
-                  <span className="vps-dotted__sep" aria-hidden="true">·</span>
                   <RenewalBadge value={row.vps.renewal_decision} />
                 </p>
               </div>
@@ -605,7 +618,7 @@ function VPSInspector({
         ) : visibleRows.length === 0 ? (
           <>
             {notice ? <p className="vps-overview__notice">{notice}</p> : null}
-            <p className="vps-inspector__empty">暂无匹配的 VPS</p>
+            <p className="vps-inspector__empty">{inventoryEmpty ? '还没有 VPS，录入第一台后这里会显示续费排期与分布。' : '暂无匹配的 VPS'}</p>
           </>
         ) : (
           <VPSInventoryOverview overview={overview} notice={notice} onSelect={onSelect} />
@@ -764,7 +777,11 @@ export function VPSPage() {
   const [state, setState] = useState<PageState>(INITIAL_PAGE_STATE)
   const usageSuggestions = useMemo(() => [...new Set(state.vps.flatMap((vps) => vps.usage_tags ?? []))].sort(), [state.vps])
   const usageOptions = useMemo(() => [...new Set([...usageSuggestions, ...(filters.usage_tag ? [filters.usage_tag] : [])])].map((tag) => ({ value: tag, label: tag })), [usageSuggestions, filters.usage_tag])
-  const [createOpen, setCreateOpen] = useState(false)
+  // 工作台“创建第一台 VPS”带 ?create=1 进入时直接打开创建对话框，不必再点一次同名按钮。
+  const createRequested = searchParams.get('create') === '1'
+  const [createOpen, setCreateOpen] = useState(createRequested)
+  // 已在 /vps 时经客户端导航带上 create=1，组件不会重新挂载：在渲染时据参数打开，随后由下方 effect 移除参数。
+  if (createRequested && !createOpen) setCreateOpen(true)
   const [accordionOpen, setAccordionOpen] = useState(false)
   const [inventoryReloadKey, setInventoryReloadKey] = useState(0)
   const [providersReloadKey, setProvidersReloadKey] = useState(0)
@@ -773,6 +790,14 @@ export function VPSPage() {
   useEffect(() => {
     if (urlWorkspace) writeStoredWorkspace(urlWorkspace)
   }, [urlWorkspace])
+
+  // create 只是一次性的打开意图：消费后从地址中移除，刷新或返回时不会再次弹出。
+  useEffect(() => {
+    if (!createRequested) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('create')
+    setSearchParams(next, { replace: true, state: location.state })
+  }, [createRequested, searchParams, setSearchParams, location.state])
 
   useEffect(() => {
     let cancelled = false
@@ -1234,14 +1259,8 @@ export function VPSPage() {
                         </span>
                         <span className="vps-ledger__item-st">
                           <LifecycleBadge value={row.vps.lifecycle_status} />
-                          {' · '}
                           <RenewalBadge value={row.vps.renewal_decision} />
-                          {attention ? (
-                            <>
-                              {' · '}
-                              <span className="vps-ledger__item-attention">{attention}</span>
-                            </>
-                          ) : null}
+                          {attention ? <span className="vps-ledger__item-attention">{attention}</span> : null}
                         </span>
                       </button>
                     )
@@ -1257,6 +1276,7 @@ export function VPSPage() {
               currentInventoryHref={currentInventoryHref}
               subscriptionsError={state.subscriptionsError}
               notice={inspectorNoticeText}
+              inventoryEmpty={!state.inventoryLoading && state.inventoryError == null && state.vps.length === 0}
               onSelect={setSelected}
             />
           </div>

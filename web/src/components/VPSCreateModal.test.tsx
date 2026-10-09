@@ -232,9 +232,50 @@ describe('VPSCreateModal', () => {
     expect(footer).toBeInstanceOf(HTMLElement)
     expect(within(footer as HTMLElement).getByRole('alert')).toHaveTextContent('VPS 名称不能为空。')
     expect(modal.querySelector('.modal-body')).not.toHaveTextContent('VPS 名称不能为空。')
+    // 校验失败后焦点移到出错字段，而不是落到 body。
+    expect(within(modal).getByLabelText('VPS 名称')).toHaveFocus()
     fireEvent.change(within(modal).getByLabelText('VPS 名称'), { target: { value: 'No Address' } })
     fireEvent.click(within(modal).getByRole('button', { name: '创建 VPS' }))
     expect(within(footer as HTMLElement).getByRole('alert')).toHaveTextContent('IPv4 或 SSH Host 至少需要填写一个。')
+    expect(within(modal).getByLabelText('IPv4')).toHaveFocus()
+  })
+
+  it('reveals a hidden invalid IPv6 field before moving focus to it', async () => {
+    renderModal()
+    const modal = screen.getByRole('dialog', { name: '添加 VPS' })
+    fireEvent.change(within(modal).getByLabelText('VPS 名称'), { target: { value: 'Hidden IPv6' } })
+    fireEvent.change(within(modal).getByLabelText('IPv4'), { target: { value: '203.0.113.9' } })
+    const toggle = within(modal).getByRole('checkbox', { name: '启用 IPv6' })
+    fireEvent.click(toggle)
+    fireEvent.change(within(modal).getByRole('textbox', { name: 'IPv6 地址' }), { target: { value: 'not-an-ipv6' } })
+    // 隐藏后值仍保留并参与校验。
+    fireEvent.click(toggle)
+    const details = modal.querySelector('details')!
+    details.open = false
+
+    fireEvent.click(within(modal).getByRole('button', { name: '创建 VPS' }))
+    expect(within(modal).getByRole('alert')).toHaveTextContent('IPv6 地址格式不正确')
+    expect(details.open).toBe(true)
+    expect(toggle).toBeChecked()
+    await waitFor(() => expect(within(modal).getByRole('textbox', { name: 'IPv6 地址' })).toHaveFocus())
+  })
+
+  it('reveals a hidden empty SSH port without refilling it or clearing the error', async () => {
+    renderModal()
+    const modal = screen.getByRole('dialog', { name: '添加 VPS' })
+    fireEvent.change(within(modal).getByLabelText('VPS 名称'), { target: { value: 'Hidden port' } })
+    fireEvent.change(within(modal).getByLabelText('IPv4'), { target: { value: '203.0.113.9' } })
+    const toggle = within(modal).getByRole('checkbox', { name: '单独填写 SSH' })
+    fireEvent.click(toggle)
+    fireEvent.change(within(modal).getByRole('spinbutton', { name: 'SSH 端口' }), { target: { value: '' } })
+    fireEvent.click(toggle)
+
+    fireEvent.click(within(modal).getByRole('button', { name: '创建 VPS' }))
+    await waitFor(() => expect(within(modal).getByRole('spinbutton', { name: 'SSH 端口' })).toHaveFocus())
+    // 只切换可见性：端口仍为空，不被默认值 22 覆盖，错误提示保留。
+    expect(within(modal).getByRole('spinbutton', { name: 'SSH 端口' })).toHaveValue(null)
+    expect(toggle).toBeChecked()
+    expect(within(modal).getByRole('alert')).toHaveTextContent('SSH 端口必须为 1 到 65535')
   })
 
   it('surfaces provider catalog unavailability without removing unassociated or snapshot fields', () => {

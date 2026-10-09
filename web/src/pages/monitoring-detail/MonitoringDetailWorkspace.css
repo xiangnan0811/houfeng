@@ -76,10 +76,12 @@
 .monitoring-detail-chart--alert{border-top-color:var(--color-state-alert)}
 .monitoring-detail-chart--critical{border-top-color:var(--color-state-critical)}
 .monitoring-detail-commands__item:focus-visible,.monitoring-detail-chart:focus-within{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
-.monitoring-detail-chart__head{display:flex;align-items:baseline;gap:8px;min-width:0}
-.monitoring-detail-chart__title{flex:1 1 auto;min-width:0;margin:0;color:var(--text-primary);font-size:var(--monitoring-detail-helper-size);font-weight:600;line-height:1.3;white-space:nowrap}
-.monitoring-detail-chart__legend{display:inline-flex;flex:0 0 auto;flex-wrap:wrap;align-items:center;gap:6px 8px;color:var(--text-secondary);font-size:11px;line-height:1.2}
-.monitoring-detail-chart__current{flex:0 0 auto;min-width:0;text-align:right}
+/* 标题与当前值同一行，图例另起一行：双序列卡片（网络、磁盘读写）在窄卡片里不再互相挤压；
+   无图例的卡片也保留图例行高度，同一排图表的绘图区上沿保持对齐。 */
+.monitoring-detail-chart__head{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:auto minmax(14px,auto);align-items:baseline;gap:4px 8px;min-width:0}
+.monitoring-detail-chart__title{grid-row:1;grid-column:1;min-width:0;margin:0;overflow:hidden;color:var(--text-primary);font-size:var(--monitoring-detail-helper-size);font-weight:600;line-height:1.3;text-overflow:ellipsis;white-space:nowrap}
+.monitoring-detail-chart__legend{grid-row:2;grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-width:0;color:var(--text-secondary);font-size:11px;line-height:1.2}
+.monitoring-detail-chart__current{grid-row:1;grid-column:2;min-width:0;text-align:right}
 .monitoring-detail-chart__legend-item{display:inline-flex;align-items:center;gap:5px}
 .monitoring-detail-chart__legend-swatch{display:inline-block;width:12px;height:3px;border-radius:1px}
 .monitoring-detail-chart__legend-swatch--down{background:var(--chart-stroke)}
@@ -223,7 +225,8 @@
 }
 /* Target observation workspace. Chart plates and notice wells come from
  * MonitoringDetailWorkspace.css; this file lays out identity and latency. */
-.target-detail-route{--monitoring-detail-title-size:22px;--monitoring-detail-module-size:15px;--monitoring-detail-body-size:14px;--monitoring-detail-helper-size:12px;--monitoring-detail-helper-size-strong:13px;--monitoring-detail-chart-h:140px;width:100%;display:flex;flex-direction:column;gap:14px;min-width:0;color:var(--text-primary)}
+/* 目标详情复用 monitoring-detail-section，需同时提供其内边距、圆角与锚点偏移变量，否则区块失去内边距。 */
+.target-detail-route{--monitoring-detail-pad:16px;--monitoring-detail-gap:14px;--monitoring-detail-leading:1.45;--monitoring-detail-action-min:28px;--monitoring-detail-radius:var(--radius-3);--monitoring-detail-topbar-offset:calc(var(--shell-topbar-min-height) + var(--space-3));--monitoring-detail-title-size:22px;--monitoring-detail-module-size:15px;--monitoring-detail-body-size:14px;--monitoring-detail-helper-size:12px;--monitoring-detail-helper-size-strong:13px;--monitoring-detail-chart-h:140px;width:100%;display:flex;flex-direction:column;gap:14px;min-width:0;color:var(--text-primary)}
 .target-detail-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px 16px;min-width:0}
 .target-detail-header__identity{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1 1 auto}
 .target-detail-header__title-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;min-width:0}

@@ -17,6 +17,7 @@ import {
   normalizePaymentMethod,
   normalizeRenewalMode,
 } from '../../lib/assetOptions'
+import { isValidIPv4, isValidIPv6, trimHostAddress } from '../../lib/hostAddress'
 import { parseLabels, renewalLabel } from '../assetPageUtils'
 import type {
   DecisionDraftState,
@@ -290,14 +291,16 @@ function normalizeFactEditField(form: FactEditFormState, key: keyof FactEditForm
     case 'region':
     case 'city':
     case 'datacenter':
-    case 'ipv4':
-    case 'ipv6':
-    case 'sshHost':
     case 'sshUser':
     case 'osName':
     case 'virtualization':
     case 'note':
       return form[key].trim()
+    // 地址与主机按 center 的空白口径比较，冲突合并与提交判定保持一致。
+    case 'ipv4':
+    case 'ipv6':
+    case 'sshHost':
+      return trimHostAddress(form[key])
     case 'providerID':
       return form.providerID.trim()
     case 'sshPort': {
@@ -386,12 +389,24 @@ export function decisionDraftAlreadySatisfied(
   return compareDecisionDraft(draft, latest).length === 0
 }
 
-export function buildFactEditInput(form: FactEditFormState) {
+// original 为编辑前的已存地址：未改动的存量地址不重新校验，与 center 只校验改动地址一致。
+export function buildFactEditInput(form: FactEditFormState, original?: { ipv4: string; ipv6: string }) {
   if (form.displayName.trim() === '') {
     throw new Error('VPS 名称不能为空。')
   }
-  if (!form.ipv4.trim() && !form.sshHost.trim()) {
+  // 地址与主机都按 center 的空白口径 trim（Go strings.TrimSpace），必填判定、比较与提交用同一结果。
+  const ipv4 = trimHostAddress(form.ipv4)
+  const sshHost = trimHostAddress(form.sshHost)
+  if (!ipv4 && !sshHost) {
     throw new Error('IPv4 或 SSH Host 至少需要填写一个。')
+  }
+  // 只差首尾空白的存量文本视为未改动。
+  if (ipv4 && ipv4 !== trimHostAddress(original?.ipv4 ?? '') && !isValidIPv4(ipv4)) {
+    throw new Error('IPv4 地址格式不正确，应为四段 0–255 的数字，例如 203.0.113.10。')
+  }
+  const ipv6 = trimHostAddress(form.ipv6)
+  if (ipv6 && ipv6 !== trimHostAddress(original?.ipv6 ?? '') && !isValidIPv6(ipv6)) {
+    throw new Error('IPv6 地址格式不正确，例如 2001:db8::10。')
   }
   const sshPort = Number.parseInt(form.sshPort.trim(), 10)
   if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) {
@@ -412,9 +427,9 @@ export function buildFactEditInput(form: FactEditFormState) {
     region: form.region.trim(),
     city: form.city.trim(),
     datacenter: form.datacenter.trim(),
-    ipv4: form.ipv4.trim(),
-    ipv6: form.ipv6.trim(),
-    ssh_host: form.sshHost.trim(),
+    ipv4,
+    ipv6,
+    ssh_host: sshHost,
     ssh_port: sshPort,
     ssh_user: form.sshUser.trim(),
     os_name: form.osName.trim(),

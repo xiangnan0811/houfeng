@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -514,12 +515,22 @@ func assertIPQualityAddressIdentityVPSPatchHistory(t *testing.T, ctx context.Con
 	}
 	assertIPQualityIdentityHistoryCount(t, ctx, pool, vpsID, 0)
 
-	patches := []string{"2001:db8::11", "legacy-invalid-ip", "2001:db8::12", ""}
-	for _, value := range patches {
+	patch := func(value string) {
+		t.Helper()
 		if _, err := repository.PatchVPSAsset(ctx, vpsID, vpsassets.PatchInput{IPv6: vpsassets.PatchString(value)}); err != nil {
 			t.Fatalf("PATCH IPv6 %q: %v", value, err)
 		}
 	}
+	patch("2001:db8::11")
+	// 新写入的非法地址会被拒绝；升级前已存入的非法文本用 SQL 模拟，修正与删除它仍要记史。
+	if _, err := repository.PatchVPSAsset(ctx, vpsID, vpsassets.PatchInput{IPv6: vpsassets.PatchString("legacy-invalid-ip")}); !errors.Is(err, vpsassets.ErrInvalidVPSAssetInput) {
+		t.Fatalf("PATCH malformed IPv6 = %v, want invalid input", err)
+	}
+	if _, err := pool.Exec(ctx, `update public.vps_assets set ipv6 = 'legacy-invalid-ip' where vps_id = $1`, vpsID); err != nil {
+		t.Fatalf("seed legacy invalid IPv6: %v", err)
+	}
+	patch("2001:db8::12")
+	patch("")
 	stored, err := repository.GetVPSAsset(ctx, vpsID)
 	if err != nil {
 		t.Fatalf("read patched VPS asset: %v", err)
@@ -554,12 +565,11 @@ func assertIPQualityAddressIdentityVPSPatchHistory(t *testing.T, ctx context.Con
 	if err := rows.Err(); err != nil {
 		t.Fatalf("iterate VPS IP history: %v", err)
 	}
-	if len(got) != 4 {
-		t.Fatalf("VPS IP history rows = %d, want 4 (no row for equivalent representation)", len(got))
+	if len(got) != 3 {
+		t.Fatalf("VPS IP history rows = %d, want 3 (no row for equivalent representation or the SQL-seeded legacy value)", len(got))
 	}
 	want := map[historyValue]bool{
 		{fromIPv4: "198.51.100.61", toIPv4: "198.51.100.61", fromIPv6: representation, toIPv6: "2001:db8::11"}:      true,
-		{fromIPv4: "198.51.100.61", toIPv4: "198.51.100.61", fromIPv6: "2001:db8::11", toIPv6: "legacy-invalid-ip"}: true,
 		{fromIPv4: "198.51.100.61", toIPv4: "198.51.100.61", fromIPv6: "legacy-invalid-ip", toIPv6: "2001:db8::12"}: true,
 		{fromIPv4: "198.51.100.61", toIPv4: "198.51.100.61", fromIPv6: "2001:db8::12", toIPv6: ""}:                  true,
 	}

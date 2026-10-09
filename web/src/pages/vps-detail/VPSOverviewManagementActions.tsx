@@ -79,6 +79,7 @@ import {
   INITIAL_VALIDITY_EXTENSION_DRAFT,
   mergeFactDraftWithLatest,
 } from './vpsDetailHelpers'
+import { focusFactFieldForError } from './factFieldFocus'
 import { VPSArchiveConfirmDialog } from './VPSArchiveConfirmDialog'
 import { VPSVersionConflictBanner } from './VPSVersionConflictBanner'
 import { vpsLifecycleConfirmationCopy } from './vpsLifecycleConfirmationCopy'
@@ -592,9 +593,11 @@ export function VPSOverviewManagementActions({
     }
     let input
     try {
-      input = buildFactEditInput(factDraft)
+      input = buildFactEditInput(factDraft, { ipv4: detail.ipv4, ipv6: detail.ipv6 })
     } catch (error: unknown) {
-      setMutationError(describeManagementError(error, 'VPS 基础信息输入无效'))
+      const message = describeManagementError(error, 'VPS 基础信息输入无效')
+      setMutationError(message)
+      focusFactFieldForError(formId, message)
       return
     }
 
@@ -799,8 +802,8 @@ export function VPSOverviewManagementActions({
       const refreshed = await onOverviewRefresh()
       if (!submissionIsCurrent(generation)) return
       setPageFeedback(refreshed
-        ? { tone: 'success', message: '订阅账单事实已创建，概览已刷新。' }
-        : { tone: 'warning', message: '订阅账单事实已创建，但概览刷新失败，请稍后手动重试。' })
+        ? { tone: 'success', message: '订阅已添加，概览已刷新。' }
+        : { tone: 'warning', message: '订阅已添加，但概览刷新失败，请稍后手动重试。' })
       management.closePanel()
       queueMicrotask(() => managementTriggerRef.current?.focus())
     } catch (error: unknown) {
@@ -1176,10 +1179,11 @@ export function VPSOverviewManagementActions({
         </p>
       ) : null}
       {pageFeedback && panel === null ? (
+        // 反馈挂在详情页末尾；悬浮在视口底部，关闭对话框后不必滚到页底才能看到结果。
         <p
           className={pageFeedback.tone === 'warning'
-            ? 'asset-operation-feedback asset-operation-feedback--notice'
-            : 'asset-operation-feedback'}
+            ? 'asset-operation-feedback asset-operation-feedback--notice asset-operation-feedback--floating'
+            : 'asset-operation-feedback asset-operation-feedback--floating'}
           role="status"
         >
           {pageFeedback.message}

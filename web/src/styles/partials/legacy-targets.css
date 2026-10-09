@@ -10,6 +10,11 @@
 .target-probe-drawer__form .target-probe-drawer__check input{width:auto;flex:none}
 .target-probe-drawer__form .create-form__error,.target-probe-drawer__form .page-form-actions,.target-probe-drawer__form .target-probe-drawer__eyebrow{grid-column:1 / -1;margin:0}
 .target-create-drawer__form > p{margin:0}
+.target-create-drawer__form input,.target-create-drawer__form select,.target-create-drawer__form textarea{font-size:var(--type-field-size)}
+.target-create-drawer__form .sub{display:block;margin-top:var(--space-1);color:var(--text-muted);font-size:12px;line-height:var(--type-small-leading)}
+.target-create-drawer__label--required::after{content:' *';color:var(--color-state-critical)}
+.target-create-drawer__executors{display:block;margin-top:var(--space-1);color:var(--text-secondary);font-size:12px;line-height:var(--type-small-leading)}
+.target-create-drawer__executors--warn{color:var(--warn)}
 .target-create-drawer__form textarea{min-height:96px;resize:vertical}
 .targets-table .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:var(--text-primary)}
 .targets-table .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

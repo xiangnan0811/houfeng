@@ -8,6 +8,7 @@ import {
   buildRenewalPanel,
   calendarDaysBetween,
   incidentTrend,
+  notificationChannelGap,
   trendTotal,
   utcCalendarDate,
 } from './dashboardPanels'
@@ -113,6 +114,25 @@ describe('buildRenewalPanel', () => {
     expect(panel.items[1]).toMatchObject({ renewDate: '2026-10-05', daysLeft: 6 })
   })
 
+  it('previews overdue renewals separately with the backend total', () => {
+    const overdue = [renewal(7, '2026-09-20'), renewal(8, '2026-09-01'), renewal(9, '2026-09-25'), renewal(10, '2026-09-28')]
+    const panel = buildRenewalPanel(remoteSuccess(subscriptionOverviewFixture({
+      upcoming_renewals: [renewal(1, '2026-10-01')],
+      overdue_renewals: overdue,
+      overdue_renewal_count: 15,
+    }), new Date(NOW).toISOString()), NOW)
+    expect(panel.status).toBe('ready')
+    if (panel.status !== 'ready') return
+    expect(panel.overdueCount).toBe(15)
+    expect(panel.overdue.map((item) => [item.key, item.daysLeft])).toEqual([['sub_8', -28], ['sub_7', -9], ['sub_9', -4]])
+    expect(panel.count).toBe(1)
+  })
+
+  it('treats a center without overdue fields as having no overdue renewals', () => {
+    const panel = buildRenewalPanel(remoteSuccess(subscriptionOverviewFixture({ upcoming_renewals: [] }), new Date(NOW).toISOString()), NOW)
+    expect(panel).toMatchObject({ status: 'ready', overdue: [], overdueCount: 0 })
+  })
+
   it('marks a queue at the backend cap as possibly truncated', () => {
     const renewals = Array.from({ length: RENEWAL_QUEUE_CAP }, (_, index) => renewal(index, `2026-10-${String(index + 1).padStart(2, '0')}`))
     const panel = buildRenewalPanel(remoteSuccess(subscriptionOverviewFixture({ upcoming_renewals: renewals }), new Date(NOW).toISOString()), NOW)
@@ -139,6 +159,8 @@ describe('buildRenewalPanel', () => {
       const renewals = [renewal(1, '2026-09-29'), renewal(2, '2026-09-30'), renewal(3, '2026-12-28')]
       // 东八区 2026-09-30 00:30 = UTC 2026-09-29 16:30：后端仍把 09-29 算作今天；浏览器接收时间已是次日。
       process.env.TZ = 'Asia/Shanghai'
+      // 时区切换必须生效，否则在 UTC 进程上会假通过。
+      expect(new Date('2026-09-29T16:30:00Z').getDate()).toBe(30)
       const shanghaiAfterMidnight = buildRenewalPanel(remoteSuccess(
         subscriptionOverviewFixture({ upcoming_renewals: renewals, snapshot_generated_at: '2026-09-29T16:30:00Z' }),
         '2026-09-30T00:00:05Z',
@@ -146,6 +168,7 @@ describe('buildRenewalPanel', () => {
       expect(shanghaiAfterMidnight.status === 'ready' ? shanghaiAfterMidnight.items.map((item) => item.daysLeft) : null).toEqual([0, 1, 90])
       // 美西 2026-09-29 17:00 = UTC 2026-09-30 00:00：窗口远端仍是第 90 天；客户端时钟慢一天也不影响。
       process.env.TZ = 'America/Los_Angeles'
+      expect(new Date('2026-09-30T00:00:00Z').getDate()).toBe(29)
       const laEvening = buildRenewalPanel(remoteSuccess(
         subscriptionOverviewFixture({
           upcoming_renewals: renewals.slice(1).concat(renewal(4, '2026-12-29')),
@@ -200,5 +223,19 @@ describe('incidentTrend', () => {
     expect(incidentTrend(dashboardOverviewFixture({ new_incident_trend_24h: [1, 2, 3] }))).toBeNull()
     const trend = Array.from({ length: 24 }, (_, index) => index % 2)
     expect(incidentTrend(dashboardOverviewFixture({ new_incident_trend_24h: trend }))).toEqual(trend)
+  })
+})
+
+describe('notificationChannelGap', () => {
+  it('flags observed objects without any notification channel', () => {
+    expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 1 }))).toBe(true)
+    expect(notificationChannelGap(dashboardOverviewFixture({ total_target_count: 2 }))).toBe(true)
+  })
+
+  it('stays quiet before anything is observed or once a channel is configured', () => {
+    expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 0, total_target_count: 0 }))).toBe(false)
+    expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { telegram_configured: true } }))).toBe(false)
+    expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { telegram_runtime_managed: true } }))).toBe(false)
+    expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { feishu_configured: true } }))).toBe(false)
   })
 })

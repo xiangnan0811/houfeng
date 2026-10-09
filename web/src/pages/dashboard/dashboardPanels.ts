@@ -41,6 +41,8 @@ export type DashboardRenewalItem = {
  */
 export const RENEWAL_QUEUE_WINDOW_DAYS = 90
 export const RENEWAL_QUEUE_CAP = 12
+/** 逾期是待办而不是预告，单独列在窗口之前，最多预览 3 项，完整列表在订阅页续费队列。 */
+export const OVERDUE_PREVIEW_LIMIT = 3
 
 export type DashboardRenewalPanel =
   | { status: 'loading' }
@@ -50,6 +52,9 @@ export type DashboardRenewalPanel =
     items: DashboardRenewalItem[]
     count: number
     capped: boolean
+    /** 续费日已过、未决定不续费的订阅，最多预览 OVERDUE_PREVIEW_LIMIT 项；不属于 90 天窗口。 */
+    overdue: DashboardRenewalItem[]
+    overdueCount: number
     /** 摘要生成时间无效、剩余天数按浏览器接收时间估算时为 true，界面需标明。 */
     estimated: boolean
   }
@@ -116,25 +121,52 @@ export function buildRenewalPanel(
   const generatedAt = Date.parse(subscription.value.snapshot_generated_at)
   const estimated = now == null && Number.isNaN(generatedAt)
   const today = utcCalendarDate(now ?? (estimated ? Date.parse(subscription.loadedAt) : generatedAt))
+  const baseCurrency = subscription.value.base_currency
   const queue = subscription.value.upcoming_renewals
-  const dated = queue
+  const dated = datedRenewals(queue)
+  const items = dated
+    .slice(0, DASHBOARD_PANEL_LIMIT)
+    .map((entry) => renewalItem(entry, today, baseCurrency))
+  const overdueQueue = subscription.value.overdue_renewals ?? []
+  const overdue = datedRenewals(overdueQueue)
+    .slice(0, OVERDUE_PREVIEW_LIMIT)
+    .map((entry) => renewalItem(entry, today, baseCurrency))
+  const overdueCount = subscription.value.overdue_renewal_count ?? overdueQueue.length
+  return { status: 'ready', items, count: dated.length, capped: queue.length >= RENEWAL_QUEUE_CAP, estimated, overdue, overdueCount }
+}
+
+type DatedRenewal = { item: SubscriptionRenewalQueueItem; renewDate: string }
+
+function datedRenewals(queue: SubscriptionRenewalQueueItem[]): DatedRenewal[] {
+  return queue
     .map((item) => ({ item, renewDate: (item.renew_at ?? '').slice(0, 10) }))
     .filter(({ renewDate }) => calendarDayNumber(renewDate) != null)
-  const items = [...dated]
     .sort((left, right) => left.renewDate.localeCompare(right.renewDate))
-    .slice(0, DASHBOARD_PANEL_LIMIT)
-    .map(({ item, renewDate }) => ({
-      key: item.subscription_id,
-      name: item.display_name || item.vps_display_name || item.vps_id,
-      provider: item.provider_name,
-      renewDate,
-      daysLeft: calendarDaysBetween(today, renewDate) ?? 0,
-      monthlyPrice: item.monthly_price_base ?? null,
-      rateStatus: item.exchange_rate_status,
-      currency: item.base_currency || subscription.value.base_currency,
-      to: `/vps/${encodeURIComponent(item.vps_id)}`,
-    }))
-  return { status: 'ready', items, count: dated.length, capped: queue.length >= RENEWAL_QUEUE_CAP, estimated }
+}
+
+function renewalItem({ item, renewDate }: DatedRenewal, today: string, baseCurrency: string): DashboardRenewalItem {
+  return {
+    key: item.subscription_id,
+    name: item.display_name || item.vps_display_name || item.vps_id,
+    provider: item.provider_name,
+    renewDate,
+    daysLeft: calendarDaysBetween(today, renewDate) ?? 0,
+    monthlyPrice: item.monthly_price_base ?? null,
+    rateStatus: item.exchange_rate_status,
+    currency: item.base_currency || baseCurrency,
+    to: `/vps/${encodeURIComponent(item.vps_id)}`,
+  }
+}
+
+/**
+ * 已有监控实例或探测目标、却没有任何可用通知渠道时为 true：失联与告警只会留在页面里。
+ * 只读布尔配置摘要（dashboard notification_status），不推断渠道是否真的送达。
+ */
+export function notificationChannelGap(overview: DashboardOverview): boolean {
+  const observed = overview.total_monitoring_instance_count > 0 || overview.total_target_count > 0
+  const status = overview.notification_status
+  const configured = status.telegram_configured || status.telegram_runtime_managed || status.feishu_configured
+  return observed && !configured
 }
 
 /** 近 24 小时新增异常合计，用于指标卡的可访问描述。 */

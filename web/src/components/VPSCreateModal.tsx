@@ -9,6 +9,7 @@ import {
 } from '../lib/types'
 import type { FactEditFormState } from '../pages/vps-detail/types'
 import { VPSFactsEditForm } from '../pages/vps-detail/VPSFactsEditForm'
+import { focusFactFieldForError } from '../pages/vps-detail/factFieldFocus'
 import { buildFactEditInput } from '../pages/vps-detail/vpsDetailHelpers'
 
 function describeError(error: unknown, fallback: string): string {
@@ -105,7 +106,9 @@ export function VPSCreateModal({
     try {
       input = buildCreateInput(form)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : '输入无效')
+      const message = err instanceof Error ? err.message : '输入无效'
+      setError(message)
+      focusFactFieldForError('vps-create-form', message)
       return
     }
     setSubmitting(true)
@@ -155,12 +158,13 @@ export function VPSCreateModal({
       </Button>
     </>
   )
-  const footer = error ? (
+  // 有无错误都保持同一结构，出现错误时按钮不会被重新挂载而丢失焦点。
+  const footer = (
     <div className="vps-dialog-feedback">
-      <p className="vps-form-error" role="alert">{error}</p>
+      {error ? <p className="vps-form-error" role="alert">{error}</p> : null}
       <div className="modal__actions">{actions}</div>
     </div>
-  ) : actions
+  )
 
   return (
     <Modal
