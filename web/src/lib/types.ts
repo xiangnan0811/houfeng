@@ -347,6 +347,37 @@ export type TargetType = 'service' | 'china_reference'
 
 export type TargetRunStatus = '启用' | '维护中' | '暂停'
 
+export type TargetObservationFreshnessState =
+  | 'inactive'
+  | 'uncovered'
+  | 'unobserved'
+  | 'pending'
+  | 'fresh'
+  | 'partial'
+  | 'stale'
+
+export type ProbeObservationFreshnessState = 'pending' | 'fresh' | 'stale'
+
+export type ProbeObservationFreshness = {
+  probe_item_id: string
+  state: ProbeObservationFreshnessState
+  effective_frequency_tier: FrequencyTier
+  stale_after_seconds: number
+  last_observed_at: string | null
+  expected_since: string
+  deadline_at: string
+}
+
+export type TargetObservationFreshness = {
+  state: TargetObservationFreshnessState
+  evaluated_at: string
+  enabled_probe_count: number
+  fresh_probe_count: number
+  pending_probe_count: number
+  stale_probe_count: number
+  probes: ProbeObservationFreshness[]
+}
+
 export type TargetRecord = {
   target_id: string
   lifecycle_status: 'active' | 'retired'
@@ -362,6 +393,7 @@ export type TargetRecord = {
   current_health_status: string
   current_active_incident_count: number
   enabled_probe_count: number
+  observation_freshness: TargetObservationFreshness
   matching_executor_count: number
   last_success_at?: string
   last_failure_at?: string
@@ -514,6 +546,7 @@ export type DashboardOverview = {
   abnormal_monitoring_instance_count: number
   abnormal_target_count: number
   unobserved_target_count: number
+  stale_target_count: number
   severe_monitoring_instance_count: number
   severe_target_count: number
   maintenance_monitoring_instance_count: number
@@ -553,6 +586,7 @@ export type DashboardGroupSummary = {
   abnormal_target_count: number
   unobserved_target_count: number
   severe_monitoring_instance_count: number
+  stale_target_count: number
   severe_target_count: number
   maintenance_monitoring_instance_count: number
   maintenance_target_count: number
@@ -612,6 +646,7 @@ export type DashboardTargetSummary = {
   run_status: string
   group: string
   current_health_status: IncidentSeverity
+  observation_freshness: TargetObservationFreshness
   last_success_at?: string
   last_failure_at?: string
   current_active_incident_count: number

@@ -9,6 +9,7 @@ import {
 } from './dashboardRemoteState'
 import {
   DASHBOARD_FIXTURE_LOADED_AT,
+  dashboardGroupSummaryFixture,
   dashboardOverviewFixture,
   subscriptionOverviewFixture,
   vpsAssetFixture,
@@ -303,5 +304,41 @@ describe('buildDashboardModel', () => {
       vps: remoteLoading(),
       subscription: remoteLoading(),
     })).toEqual({ status: 'error', error: 'dashboard unavailable' })
+  })
+
+  it('keeps stale targets out of the abnormal total and retains the group on stale links', () => {
+    const onlyStale = readyModel({
+      overview: remoteSuccess(dashboardOverviewFixture({
+        stale_target_count: 2,
+        group_summaries: [
+          dashboardGroupSummaryFixture({ group: 'edge', stale_target_count: 2 }),
+          dashboardGroupSummaryFixture({ group: '未分组', stale_target_count: 0 }),
+        ],
+      }), DASHBOARD_FIXTURE_LOADED_AT),
+    })
+    expect(onlyStale.mode).toBe('stable')
+    expect(onlyStale.title).toBe('观测已过期')
+    expect(onlyStale.observability.abnormalTotal).toBe(0)
+    expect(onlyStale.observability.staleTargetCount).toBe(2)
+    expect(onlyStale.judgements.find((item) => item.id === 'observability')).toMatchObject({
+      value: '2',
+      to: '/targets?view=stale',
+    })
+    expect(onlyStale.observability.staleGroups).toEqual([
+      { group: 'edge', staleTargetCount: 2, to: '/targets?view=stale&group=edge' },
+    ])
+
+    const overlap = readyModel({
+      overview: remoteSuccess(dashboardOverviewFixture({
+        abnormal_target_count: 2,
+        unobserved_target_count: 1,
+        stale_target_count: 2,
+      }), DASHBOARD_FIXTURE_LOADED_AT),
+    })
+    expect(overlap.mode).toBe('abnormal')
+    expect(overlap.observability.abnormalTotal).toBe(2)
+    expect(overlap.observability.staleTargetCount).toBe(2)
+    expect(overlap.observability.unobservedTargetCount).toBe(1)
+    expect(overlap.judgements.find((item) => item.id === 'observability')?.value).toBe('2')
   })
 })

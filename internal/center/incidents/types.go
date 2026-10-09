@@ -73,6 +73,7 @@ type DashboardOverview struct {
 	AbnormalMonitoringInstanceCount          int                                  `json:"abnormal_monitoring_instance_count"`
 	AbnormalTargetCount                      int                                  `json:"abnormal_target_count"`
 	UnobservedTargetCount                    int                                  `json:"unobserved_target_count"`
+	StaleTargetCount                         int                                  `json:"stale_target_count"`
 	SevereMonitoringInstanceCount            int                                  `json:"severe_monitoring_instance_count"`
 	SevereTargetCount                        int                                  `json:"severe_target_count"`
 	MaintenanceMonitoringInstanceCount       int                                  `json:"maintenance_monitoring_instance_count"`
@@ -106,6 +107,7 @@ type DashboardGroupSummary struct {
 	AbnormalMonitoringInstanceCount    int    `json:"abnormal_monitoring_instance_count"`
 	AbnormalTargetCount                int    `json:"abnormal_target_count"`
 	UnobservedTargetCount              int    `json:"unobserved_target_count"`
+	StaleTargetCount                   int    `json:"stale_target_count"`
 	SevereMonitoringInstanceCount      int    `json:"severe_monitoring_instance_count"`
 	SevereTargetCount                  int    `json:"severe_target_count"`
 	MaintenanceMonitoringInstanceCount int    `json:"maintenance_monitoring_instance_count"`
@@ -154,18 +156,19 @@ type DashboardMonitoringInstanceSummary struct {
 }
 
 type DashboardTargetSummary struct {
-	TargetID                   string     `json:"target_id"`
-	Name                       string     `json:"name"`
-	TargetType                 string     `json:"target_type"`
-	Host                       string     `json:"host"`
-	BasePort                   *int       `json:"base_port,omitempty"`
-	RunStatus                  string     `json:"run_status"`
-	Group                      string     `json:"group"`
-	CurrentHealthStatus        string     `json:"current_health_status"`
-	LastSuccessAt              *time.Time `json:"last_success_at,omitempty"`
-	LastFailureAt              *time.Time `json:"last_failure_at,omitempty"`
-	CurrentActiveIncidentCount int        `json:"current_active_incident_count"`
-	CurrentPrimaryIssueSummary string     `json:"current_primary_issue_summary"`
+	TargetID                   string                             `json:"target_id"`
+	Name                       string                             `json:"name"`
+	TargetType                 string                             `json:"target_type"`
+	Host                       string                             `json:"host"`
+	BasePort                   *int                               `json:"base_port,omitempty"`
+	RunStatus                  string                             `json:"run_status"`
+	Group                      string                             `json:"group"`
+	CurrentHealthStatus        string                             `json:"current_health_status"`
+	ObservationFreshness       targets.TargetObservationFreshness `json:"observation_freshness"`
+	LastSuccessAt              *time.Time                         `json:"last_success_at,omitempty"`
+	LastFailureAt              *time.Time                         `json:"last_failure_at,omitempty"`
+	CurrentActiveIncidentCount int                                `json:"current_active_incident_count"`
+	CurrentPrimaryIssueSummary string                             `json:"current_primary_issue_summary"`
 }
 
 type NotificationRecordWrite struct {

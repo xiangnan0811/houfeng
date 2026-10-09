@@ -595,8 +595,99 @@ def asset_workflow_monitoring_instances() -> list[dict[str, object]]:
     ]
 
 
+
+SAMPLE_STALE_AFTER_SECONDS = 910  # 5m tier x 3, floored at 60s, plus a 10s timeout
+INACTIVE_TARGET_RUN_STATUSES = {"暂停", "维护中", "已归档"}
+
+
+def _iso_plus_seconds(value: str, seconds: int) -> str:
+    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return (parsed + dt.timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+
+
+def _later_iso(left: str, right: str) -> str:
+    return left if left >= right else right
+
+
+def _sample_observation_freshness(target: dict[str, object]) -> dict[str, object]:
+    """Paused, maintenance, and archived samples are inactive. Enabled samples
+    with no success/failure history are unobserved. Enabled samples that already
+    have history are fresh. Old timestamps are not reinterpreted as stale.
+    """
+    evaluated_at = str(target.get("updated_at") or target.get("created_at") or iso_timestamp(0))
+    last_success = target.get("last_success_at")
+    last_failure = target.get("last_failure_at")
+    observations = [str(value) for value in (last_success, last_failure) if isinstance(value, str) and value]
+    last_observed = None
+    if observations:
+        last_observed = observations[0]
+        for value in observations[1:]:
+            last_observed = _later_iso(last_observed, value)
+    enabled_probe_count = 1
+    run_status = str(target.get("run_status") or "")
+    lifecycle_status = str(target.get("lifecycle_status") or "")
+    if lifecycle_status == "retired" or run_status in INACTIVE_TARGET_RUN_STATUSES:
+        state = "inactive"
+    elif enabled_probe_count == 0:
+        state = "uncovered"
+    elif last_observed is None:
+        state = "unobserved"
+    else:
+        state = "fresh"
+    if state in {"inactive", "uncovered"}:
+        return {
+            "state": state,
+            "evaluated_at": evaluated_at,
+            "enabled_probe_count": enabled_probe_count if state == "inactive" else 0,
+            "fresh_probe_count": 0,
+            "pending_probe_count": 0,
+            "stale_probe_count": 0,
+            "probes": [],
+        }
+    probe_state = "fresh" if state == "fresh" else "pending"
+    anchor = last_observed or evaluated_at
+    return {
+        "state": state,
+        "evaluated_at": evaluated_at,
+        "enabled_probe_count": enabled_probe_count,
+        "fresh_probe_count": enabled_probe_count if probe_state == "fresh" else 0,
+        "pending_probe_count": enabled_probe_count if probe_state == "pending" else 0,
+        "stale_probe_count": 0,
+        "probes": [
+            {
+                "probe_item_id": f"{target.get('target_id')}_probe_1",
+                "state": probe_state,
+                "effective_frequency_tier": "5m",
+                "stale_after_seconds": SAMPLE_STALE_AFTER_SECONDS,
+                "last_observed_at": last_observed,
+                "expected_since": anchor,
+                "deadline_at": _iso_plus_seconds(_later_iso(evaluated_at, anchor), SAMPLE_STALE_AFTER_SECONDS),
+            }
+        ],
+    }
+
+
+def _with_sample_observation_freshness(targets: list[dict[str, object]]) -> list[dict[str, object]]:
+    for target in targets:
+        target["observation_freshness"] = _sample_observation_freshness(target)
+    return targets
+
+
+def _sample_stale_target_count(targets: list[dict[str, object]]) -> int:
+    total = 0
+    for target in targets:
+        if str(target.get("run_status") or "") != "启用":
+            continue
+        if not target.get("last_success_at") and not target.get("last_failure_at"):
+            continue
+        freshness = target.get("observation_freshness")
+        if isinstance(freshness, dict) and int(freshness.get("stale_probe_count") or 0) > 0:
+            total += 1
+    return total
+
+
 def asset_workflow_targets() -> list[dict[str, object]]:
-    return [
+    return _with_sample_observation_freshness([
         {
             "target_id": "target_api_core",
             "name": "legacy-api.example.test",
@@ -631,7 +722,7 @@ def asset_workflow_targets() -> list[dict[str, object]]:
             "created_at": iso_timestamp(-100),
             "updated_at": iso_timestamp(-1),
         },
-    ]
+    ])
 
 
 def asset_workflow_monitoring_instance_sparklines() -> dict[str, object]:
@@ -2274,6 +2365,7 @@ def asset_workflow_dashboard() -> dict[str, object]:
         "total_target_count": 5,
         "abnormal_monitoring_instance_count": 1,
         "abnormal_target_count": 1,
+        "stale_target_count": 0,
         "severe_monitoring_instance_count": 0,
         "severe_target_count": 0,
         "maintenance_monitoring_instance_count": 0,
@@ -2292,6 +2384,7 @@ def asset_workflow_dashboard() -> dict[str, object]:
                 "target_count": 5,
                 "abnormal_monitoring_instance_count": 1,
                 "abnormal_target_count": 1,
+                "stale_target_count": 0,
                 "severe_monitoring_instance_count": 0,
                 "severe_target_count": 0,
                 "maintenance_monitoring_instance_count": 0,
@@ -2817,7 +2910,7 @@ def observability_support_monitoring_instances() -> list[dict[str, object]]:
 
 
 def observability_support_targets() -> list[dict[str, object]]:
-    return [
+    return _with_sample_observation_freshness([
         {
             "target_id": "target_api_core",
             "name": "api-core.example.test",
@@ -2932,7 +3025,7 @@ def observability_support_targets() -> list[dict[str, object]]:
             "created_at": iso_timestamp(-12),
             "updated_at": iso_timestamp_hours_ago(12),
         },
-    ]
+    ])
 
 
 def observability_support_events() -> list[dict[str, object]]:
@@ -3105,6 +3198,7 @@ def observability_support_dashboard() -> dict[str, object]:
                 "target_count": len(group_targets),
                 "abnormal_monitoring_instance_count": sum(1 for monitoring_instance in group_monitoring_instances if monitoring_instance["current_health_status"] != "正常"),
                 "abnormal_target_count": sum(1 for target in group_targets if target["current_health_status"] != "正常"),
+                "stale_target_count": _sample_stale_target_count(group_targets),
                 "severe_monitoring_instance_count": sum(1 for monitoring_instance in group_monitoring_instances if monitoring_instance["current_health_status"] == "严重"),
                 "severe_target_count": sum(1 for target in group_targets if target["current_health_status"] == "严重"),
                 "maintenance_monitoring_instance_count": sum(1 for monitoring_instance in group_monitoring_instances if monitoring_instance["monitoring_status"] == "维护中"),
@@ -3118,6 +3212,7 @@ def observability_support_dashboard() -> dict[str, object]:
         "total_target_count": len(targets),
         "abnormal_monitoring_instance_count": len(abnormal_monitoring_instances),
         "abnormal_target_count": len(abnormal_targets),
+        "stale_target_count": _sample_stale_target_count(targets),
         "severe_monitoring_instance_count": sum(1 for monitoring_instance in monitoring if monitoring_instance["current_health_status"] == "严重"),
         "severe_target_count": sum(1 for target in targets if target["current_health_status"] == "严重"),
         "maintenance_monitoring_instance_count": sum(1 for monitoring_instance in monitoring if monitoring_instance["monitoring_status"] == "维护中"),
@@ -3178,6 +3273,7 @@ def observability_support_dashboard() -> dict[str, object]:
                 "run_status": target["run_status"],
                 "group": target["group"],
                 "current_health_status": target["current_health_status"],
+                "observation_freshness": target["observation_freshness"],
                 "last_success_at": target["last_success_at"],
                 "last_failure_at": target["last_failure_at"],
                 "current_active_incident_count": target["current_active_incident_count"],

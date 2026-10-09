@@ -5,11 +5,12 @@ import {
   TargetProbeList,
   type PendingProbeConfirmation,
 } from '../../components/target-detail'
-import type { ProbeItemRecord, ProbeObservation } from '../../lib/types'
+import type { ProbeItemRecord, ProbeObservation, ProbeObservationFreshness } from '../../lib/types'
 
 type TargetProbeListSectionProps = {
   probeItems: ProbeItemRecord[]
   observationsByProbe: Map<string, ProbeObservation[]>
+  freshnessByProbe: Map<string, ProbeObservationFreshness>
   aside?: ReactNode
   actionsDisabled: boolean
   pendingProbeConfirmation: PendingProbeConfirmation | null
@@ -32,6 +33,7 @@ type TargetProbeListSectionProps = {
 export function TargetProbeListSection({
   probeItems,
   observationsByProbe,
+  freshnessByProbe,
   aside,
   actionsDisabled,
   pendingProbeConfirmation,
@@ -78,6 +80,7 @@ export function TargetProbeListSection({
       <TargetProbeList
         probeItems={probeItems}
         observationsByProbe={observationsByProbe}
+        freshnessByProbe={freshnessByProbe}
         actionsDisabled={actionsDisabled}
         pendingProbeConfirmation={pendingProbeConfirmation}
         confirmationCardDisabled={confirmationCardDisabled}

@@ -9,6 +9,7 @@ import type {
   TargetRecord,
   VPSAssetRecord,
 } from '../../../lib/types'
+import { targetObservationFixture } from '../../../lib/targetObservationFixture'
 import { useComparisonObjectPicker } from './useComparisonObjectPicker'
 
 const api = vi.hoisted(() => ({
@@ -32,6 +33,36 @@ vi.mock('../../../lib/recordsApi', () => ({
 
 const FROM = '2026-07-01T00:00:00Z'
 const TO = '2026-07-02T00:00:00Z'
+
+function comparisonTarget(targetId: string, name: string, host: string): TargetRecord {
+  const updatedAt = '2026-07-01T00:00:00Z'
+  return {
+    target_id: targetId,
+    lifecycle_status: 'active',
+    name,
+    target_type: 'service',
+    host,
+    execution_monitoring_instance_labels: [],
+    run_status: '启用',
+    group: '',
+    labels: [],
+    note: '',
+    current_health_status: '正常',
+    current_active_incident_count: 0,
+    enabled_probe_count: 1,
+    observation_freshness: targetObservationFixture({
+      target_id: targetId,
+      run_status: '启用',
+      lifecycle_status: 'active',
+      evaluated_at: updatedAt,
+      enabled_probe_count: 1,
+    }),
+    matching_executor_count: 1,
+    current_primary_issue_summary: '',
+    created_at: updatedAt,
+    updated_at: updatedAt,
+  }
+}
 
 function vps(id: string, name: string): VPSAssetRecord {
   return { vps_id: id, display_name: name, provider_name: '甲云', region: '东京' } as VPSAssetRecord
@@ -111,7 +142,7 @@ describe('useComparisonObjectPicker', () => {
     vi.clearAllMocks()
     api.vps.mockResolvedValue([vps('vps_a', '边缘甲'), vps('vps_b', '边缘乙')])
     api.instances.mockResolvedValue([{ monitoring_instance_id: 'mi_a', display_name: '监控甲' } as MonitoringInstanceRecord])
-    api.targets.mockResolvedValue([{ target_id: 'tg_a', name: '入口甲', host: 'a.example' } as TargetRecord])
+    api.targets.mockResolvedValue([comparisonTarget('tg_a', '入口甲', 'a.example')])
     api.activity.mockResolvedValue(activity(['evs_a']))
     api.snapshot.mockImplementation(async (id: string) => snapshot(id))
   })

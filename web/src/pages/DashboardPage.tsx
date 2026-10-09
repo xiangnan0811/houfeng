@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { PageState } from '../components/PageState'
 import { getSubscriptionOverview, listVPSAssets } from '../lib/api'
 import { ApiError } from '../lib/apiRequest'
 import { getDashboard } from '../lib/observabilityApi'
+import { useVisibleRefresh } from '../lib/useVisibleRefresh'
 import type { DashboardOverview, SubscriptionOverview, VPSAssetRecord } from '../lib/types'
 import { DashboardCommandSurface } from './dashboard/DashboardCommandSurface'
 import { buildDashboardModel } from './dashboard/dashboardModel'
@@ -19,42 +20,70 @@ type DashboardResources = {
   overview: RemoteState<DashboardOverview>
   vps: RemoteState<VPSAssetRecord[]>
   subscription: RemoteState<SubscriptionOverview>
+  overviewRefreshFailed: boolean
 }
 
 const INITIAL_RESOURCES: DashboardResources = {
   overview: remoteLoading(),
   vps: remoteLoading(),
   subscription: remoteLoading(),
+  overviewRefreshFailed: false,
 }
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof ApiError ? error.message : fallback
 }
 
+function clearsDashboardOverview(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403 || error.status === 404)
+}
+
+function overviewFailureMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return '授权失败'
+  if (error instanceof ApiError && error.status === 404) return '工作台不存在'
+  return errorMessage(error, fallback)
+}
+
 export function DashboardPage() {
   const [resources, setResources] = useState<DashboardResources>(INITIAL_RESOURCES)
-  const [overviewReloadKey, setOverviewReloadKey] = useState(0)
   const [supportingReloadKey, setSupportingReloadKey] = useState(0)
+  const loadOverview = useCallback(async ({ isCurrent }: { isCurrent: () => boolean }) => {
+    try {
+      const overview = await getDashboard()
+      if (!isCurrent()) return
+      setResources((current) => ({
+        ...current,
+        overview: remoteSuccess(overview, new Date().toISOString()),
+        overviewRefreshFailed: false,
+      }))
+    } catch (error: unknown) {
+      if (!isCurrent()) return
+      if (clearsDashboardOverview(error)) {
+        setResources((current) => ({
+          ...current,
+          overview: remoteError(overviewFailureMessage(error, '加载工作台失败')),
+          overviewRefreshFailed: false,
+        }))
+        return
+      }
+      const message = overviewFailureMessage(error, '加载工作台失败')
+      setResources((current) => {
+        if (current.overview.status === 'success') {
+          return { ...current, overviewRefreshFailed: true }
+        }
+        return {
+          ...current,
+          overview: remoteError(message),
+          overviewRefreshFailed: false,
+        }
+      })
+    }
+  }, [])
+  const { refresh: refreshOverview, invalidate: invalidateOverview } = useVisibleRefresh(loadOverview)
 
   useEffect(() => {
-    let cancelled = false
-    getDashboard()
-      .then((overview) => {
-        if (cancelled) return
-        setResources((current) => ({
-          ...current,
-          overview: remoteSuccess(overview, new Date().toISOString()),
-        }))
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return
-        setResources((current) => ({
-          ...current,
-          overview: remoteError(errorMessage(error, '加载工作台失败')),
-        }))
-      })
-    return () => { cancelled = true }
-  }, [overviewReloadKey])
+    void refreshOverview()
+  }, [refreshOverview])
 
   useEffect(() => {
     let cancelled = false
@@ -93,8 +122,13 @@ export function DashboardPage() {
   }, [supportingReloadKey])
 
   function retryOverview() {
-    setResources((current) => ({ ...current, overview: remoteLoading() }))
-    setOverviewReloadKey((current) => current + 1)
+    invalidateOverview()
+    setResources((current) => ({
+      ...current,
+      overview: remoteLoading(),
+      overviewRefreshFailed: false,
+    }))
+    void refreshOverview()
   }
 
   function retrySupportingResources() {
@@ -141,6 +175,7 @@ export function DashboardPage() {
         activity={overview ? buildRecentActivity(overview) : []}
         renewals={buildRenewalPanel(resources.subscription)}
         supportingLoading={supportingLoading}
+        overviewRefreshFailed={resources.overviewRefreshFailed}
         {...(model.degradations.length > 0
           ? { onRetrySupporting: retrySupportingResources }
           : {})}

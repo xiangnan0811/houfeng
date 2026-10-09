@@ -73,6 +73,7 @@ function baseOverview(overrides: Record<string, unknown> = {}) {
     abnormal_monitoring_instance_count: 0,
     abnormal_target_count: 0,
     unobserved_target_count: 0,
+    stale_target_count: 0,
     severe_monitoring_instance_count: 0,
     severe_target_count: 0,
     maintenance_monitoring_instance_count: 0,
@@ -571,7 +572,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       const syncEl = document.querySelector('.tp-sync')
       expect(syncEl).toHaveClass('tp-sync--stale')
-      expect(syncEl).toHaveAttribute('title', '系统摘要已过期')
+      expect(syncEl).toHaveAttribute('title', '更新失败，显示上次结果')
     })
     expect(screen.getByText(/系统摘要生成于/)).toBeInTheDocument()
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
@@ -590,6 +591,115 @@ describe('AppShell', () => {
       expect(syncEl).toHaveAttribute('title', '系统摘要不可用')
     })
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+  })
+
+  it('shows stale targets as their own count and hides them when the snapshot expires', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-25T08:30:00Z'))
+    stubDashboardFetch(vi.fn().mockResolvedValue(mockJSONResponse(baseOverview({
+      snapshot_generated_at: '2026-04-25T08:30:00Z',
+      abnormal_target_count: 2,
+      unobserved_target_count: 1,
+      stale_target_count: 3,
+    }))))
+    renderAuthenticatedAppShell()
+    await act(async () => {})
+
+    expect(document.querySelector('.tp-sync')).toHaveAttribute('title', '运行异常 2，尚有目标无观测 1，观测过期 3')
+    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).toHaveAttribute('href', '/targets')
+    expect(screen.getByRole('link', { name: '尚无观测，1 个尚无观测' })).toHaveAttribute('href', '/targets?view=unobserved')
+    expect(screen.getByRole('link', { name: '观测过期，3 个观测过期' })).toHaveAttribute('href', '/targets?view=stale')
+    expect(screen.queryByRole('link', { name: /5 个异常/ })).not.toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(5 * 60_000 + 1)
+    })
+    expect(document.querySelector('.tp-sync')).toHaveAttribute('title', '系统摘要已过期')
+    expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+  })
+
+  it('refreshes a visible summary every 30 seconds and skips hidden focus or interval wakes', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-25T08:30:00Z'))
+    const fetchMock = vi.fn().mockResolvedValue(mockJSONResponse(baseOverview({
+      snapshot_generated_at: '2026-04-25T08:30:00Z',
+      stale_target_count: 1,
+    })))
+    stubDashboardFetch(fetchMock)
+    renderAuthenticatedAppShell()
+    await act(async () => {})
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    fireEvent(document, new Event('visibilitychange'))
+    fireEvent(window, new Event('focus'))
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('clears the previous summary after an authorization or not-found refresh', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(baseOverview({ abnormal_target_count: 2, stale_target_count: 4 })))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'missing' }, 404))
+    stubDashboardFetch(fetchMock)
+    renderAuthenticatedAppShell()
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: '观测过期，4 个观测过期' })).toBeInTheDocument()
+    })
+
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => {
+      expect(document.querySelector('.tp-sync')).toHaveAttribute('title', '系统摘要不可用')
+    })
+    expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+    expect(screen.queryByText('更新失败，显示上次结果')).not.toBeInTheDocument()
+  })
+
+  it('ignores a late summary after the signed-in user changes', async () => {
+    let resolveFirst: (response: Response) => void = () => {}
+    const first = new Promise<Response>((resolve) => {
+      resolveFirst = resolve
+    })
+    const fetchMock = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockResolvedValue(mockJSONResponse(baseOverview({ stale_target_count: 1 })))
+    stubDashboardFetch(fetchMock)
+    const auth = {
+      ...baseAuth,
+      user,
+      loading: false,
+    }
+    vi.spyOn(authCtx, 'useAuth').mockImplementation(() => auth)
+    const view = render(
+      <MemoryRouter>
+        <AppShell />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    auth.user = { ...user, user_id: 'u2', username: 'other' }
+    view.rerender(
+      <MemoryRouter>
+        <AppShell />
+      </MemoryRouter>,
+    )
+    resolveFirst(mockJSONResponse(baseOverview({
+      abnormal_target_count: 9,
+      stale_target_count: 5,
+    })))
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: '观测过期，1 个观测过期' })).toBeInTheDocument()
+    })
+    expect(screen.getByText('other')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /9 个异常/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /5 个观测过期/ })).not.toBeInTheDocument()
   })
 
   it('renders nothing when no authenticated user', () => {

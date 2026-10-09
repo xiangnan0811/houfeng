@@ -47,7 +47,7 @@ function installFetch(me: { mode: MeMode; body?: ReturnType<typeof userBody> }) 
       if (me.mode === 'anonymous') return Promise.resolve(jsonResponse({ error: 'unauthenticated' }, 401))
       return Promise.resolve(jsonResponse(me.body ?? userBody({ records: true, comparison: true, portability: true })))
     }
-    if (path === '/api/dashboard') return Promise.resolve(jsonResponse(dashboardOverviewFixture()))
+    if (path === '/api/dashboard') return Promise.resolve(jsonResponse(dashboardOverviewFixture({ stale_target_count: 0 })))
     if (path === '/api/vps') return Promise.resolve(jsonResponse([]))
     if (path === '/api/subscriptions/overview') return Promise.resolve(jsonResponse({}))
     if (path === '/api/records/search') {

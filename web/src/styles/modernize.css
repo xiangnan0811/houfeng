@@ -83,6 +83,10 @@ summary:focus-visible,
 .topbar .tp-sync--unobserved{background:var(--text-secondary)}
 .topbar .tp-sync--stale{background:var(--color-state-notice)}
 .topbar .tp-sync--unavailable{background:var(--color-state-critical)}
+.topbar .tp-sync--notice{background:var(--color-state-notice)}
+.nav-item .nav-badge--stale{background:color-mix(in srgb, var(--color-state-notice) 16%, transparent);color:var(--color-state-notice)}
+.sidebar-collapsed .nav-item .nav-badge--stale{background:var(--color-state-notice)}
 @media (max-width: 760px){
 .topbar .tp-sync-summary__copy{display:none}
+.nav-item .nav-badge--stale{background:var(--color-state-notice)}
 }

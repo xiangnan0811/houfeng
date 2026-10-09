@@ -23,7 +23,7 @@ describe('Sidebar', () => {
       <MemoryRouter>
         <Sidebar
           user={user}
-          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0 }}
+          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0, staleTargets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -56,7 +56,7 @@ describe('Sidebar', () => {
       <MemoryRouter>
         <Sidebar
           user={user}
-          anomalyCounts={{ monitoring: 3, targets: 1, unobservedTargets: 0 }}
+          anomalyCounts={{ monitoring: 3, targets: 1, unobservedTargets: 0, staleTargets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -80,7 +80,7 @@ describe('Sidebar', () => {
       <MemoryRouter>
         <Sidebar
           user={user}
-          anomalyCounts={{ monitoring: 0, targets: 2, unobservedTargets: 4 }}
+          anomalyCounts={{ monitoring: 0, targets: 2, unobservedTargets: 4, staleTargets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -93,12 +93,34 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).not.toHaveTextContent('4')
   })
 
+  it('links stale targets separately from abnormal and unobserved counts', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar
+          user={user}
+          anomalyCounts={{ monitoring: 0, targets: 2, unobservedTargets: 4, staleTargets: 2 }}
+          collapsed={false}
+          onToggle={() => {}}
+          onLogout={() => {}}
+          onChangePassword={() => {}}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).toHaveAttribute('href', '/targets')
+    expect(screen.getByRole('link', { name: '尚无观测，4 个尚无观测' })).toHaveAttribute('href', '/targets?view=unobserved')
+    const stale = screen.getByRole('link', { name: '观测过期，2 个观测过期' })
+    expect(stale).toHaveAttribute('href', '/targets?view=stale')
+    expect(stale.querySelector('.nav-badge')).toHaveClass('nav-badge--stale')
+    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).not.toHaveTextContent('4')
+    expect(screen.queryByRole('link', { name: /4 个异常/ })).not.toBeInTheDocument()
+  })
+
   it('omits count badges when zero', () => {
     const { container } = render(
       <MemoryRouter>
         <Sidebar
           user={user}
-          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0 }}
+          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0, staleTargets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -114,7 +136,7 @@ describe('Sidebar', () => {
       <MemoryRouter>
         <Sidebar
           user={user}
-          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0 }}
+          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0, staleTargets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -132,7 +154,7 @@ describe('Sidebar', () => {
       <MemoryRouter initialEntries={['/records']}>
         <Sidebar
           user={user}
-          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0 }}
+          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0, staleTargets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -151,7 +173,7 @@ describe('Sidebar', () => {
       <MemoryRouter>
         <Sidebar
           user={recordsOffUser}
-          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0 }}
+          anomalyCounts={{ monitoring: 0, targets: 0, unobservedTargets: 0, staleTargets: 0 }}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}

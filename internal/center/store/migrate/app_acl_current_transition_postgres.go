@@ -253,11 +253,19 @@ func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
-	// 0071 adds access-management ACL only, while 0070 adds nullable
-	// destination-subject columns and 0069 adds CPU validity schema. These
-	// non-heartbeat migrations must be stripped from the terminal suffix before
-	// policy-shape classification below.
+	// 0072 adds freshness columns without APP ACL changes. 0071 adds
+	// access-management ACL only, while 0070 adds nullable destination-subject
+	// columns and 0069 adds CPU validity schema. These non-heartbeat migrations
+	// must be stripped from the terminal suffix before policy-shape classification.
 	successorNames := transition.successor.names
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0072_add_target_observation_freshness.sql" {
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0072_add_target_observation_freshness.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0071_add_access_management.sql" {
 		successorNames = successorNames[:n-1]
 	}
@@ -306,9 +314,12 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 	}
 	switch {
 	case len(successorNames) == 0:
-		// P69 carries only 0070 and 0071; P70 carries only 0071. P68 and
-		// earlier profiles still carry their historical suffixes.
-		if transition.profile == appACLCurrentProfileP69 || transition.profile == appACLCurrentProfileP70 {
+		// P69 carries 0070, 0071, and 0072; P70 carries 0071 and 0072;
+		// P71 carries only 0072. The terminal non-policy suffixes have
+		// already been stripped above.
+		if transition.profile == appACLCurrentProfileP69 ||
+			transition.profile == appACLCurrentProfileP70 ||
+			transition.profile == appACLCurrentProfileP71 {
 			return false, nil
 		}
 		if !addressIdentityMigrationPending && !cpuRatesMigrationPending {

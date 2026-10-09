@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { Outlet } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { ChangePasswordModal } from './ChangePasswordModal'
@@ -6,6 +6,7 @@ import { TopBar } from './TopBar'
 import { useAuth } from '../../lib/auth-context'
 import { ApiError } from '../../lib/apiRequest'
 import { getDashboard } from '../../lib/observabilityApi'
+import { useVisibleRefresh } from '../../lib/useVisibleRefresh'
 import type { User } from '../../lib/auth-client'
 import { PRODUCT_FULL_NAME_ZH } from '../metadata'
 import {
@@ -28,6 +29,16 @@ const LazyVPSWriteRegistryProvider = lazy(async () => {
   const { VPSWriteRegistryProvider } = await import('../../lib/vpsWriteRegistry-context')
   return { default: VPSWriteRegistryProvider }
 })
+
+function clearsShellSummary(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403 || error.status === 404)
+}
+
+function shellSummaryErrorMessage(error: unknown): string {
+  if (error instanceof ApiError && (error.status === 401 || error.status === 403)) return '授权失败'
+  if (error instanceof ApiError && error.status === 404) return '系统摘要不存在'
+  return error instanceof ApiError ? error.message : '读取系统摘要失败'
+}
 
 export function AppShell() {
   const { user, logout } = useAuth()
@@ -60,63 +71,38 @@ function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
   const [dashboardSummary, setDashboardSummary] =
     useState<DashboardSummaryState>(INITIAL_DASHBOARD_SUMMARY)
   const [summaryNow, setSummaryNow] = useState(() => Date.now())
-  const mountedRef = useRef(false)
-  const summaryRequestRef = useRef<ReturnType<typeof getDashboard> | null>(null)
-
-  const refreshDashboardSummary = useCallback(() => {
-    if (summaryRequestRef.current) return summaryRequestRef.current
-
-    const request = getDashboard()
-    summaryRequestRef.current = request
-    request
-      .then((overview) => {
-        if (!mountedRef.current) return
-        setSummaryNow(Date.now())
+  const loadDashboardSummary = useCallback(async ({ isCurrent }: { isCurrent: () => boolean }) => {
+    try {
+      const overview = await getDashboard()
+      if (!isCurrent()) return
+      setSummaryNow(Date.now())
+      setDashboardSummary({
+        status: 'success',
+        error: null,
+        overview,
+      })
+    } catch (error: unknown) {
+      if (!isCurrent()) return
+      if (clearsShellSummary(error)) {
         setDashboardSummary({
-          status: 'success',
-          error: null,
-          overview,
-        })
-      })
-      .catch((error: unknown) => {
-        if (!mountedRef.current) return
-        const message = error instanceof ApiError ? error.message : '读取系统摘要失败'
-        setSummaryNow(Date.now())
-        setDashboardSummary((current) => ({
           status: 'error',
-          error: message,
-          overview: current.overview,
-        }))
-      })
-      .finally(() => {
-        if (summaryRequestRef.current === request) summaryRequestRef.current = null
-      })
-
-    return request
+          error: shellSummaryErrorMessage(error),
+          overview: null,
+        })
+        return
+      }
+      setDashboardSummary((current) => ({
+        status: 'error',
+        error: shellSummaryErrorMessage(error),
+        overview: current.overview,
+      }))
+    }
   }, [])
+  const { refresh } = useVisibleRefresh(loadDashboardSummary, { refreshKey: user.user_id })
 
   useEffect(() => {
-    mountedRef.current = true
-
-    function refreshFromVisiblePage() {
-      setSummaryNow(Date.now())
-      void refreshDashboardSummary()
-    }
-
-    function handleVisibilityChange() {
-      if (document.visibilityState === 'visible') refreshFromVisiblePage()
-    }
-
-    void refreshDashboardSummary()
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', refreshFromVisiblePage)
-
-    return () => {
-      mountedRef.current = false
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', refreshFromVisiblePage)
-    }
-  }, [refreshDashboardSummary])
+    void refresh()
+  }, [refresh])
 
   const generatedAt = dashboardSummary.overview?.snapshot_generated_at
   useEffect(() => {
@@ -138,8 +124,9 @@ function AuthenticatedAppShell({ user, logout }: AuthenticatedAppShellProps) {
         monitoring: dashboardSummary.overview.abnormal_monitoring_instance_count,
         targets: dashboardSummary.overview.abnormal_target_count,
         unobservedTargets: dashboardSummary.overview.unobserved_target_count,
+        staleTargets: dashboardSummary.overview.stale_target_count,
       }
-    : { monitoring: 0, targets: 0, unobservedTargets: 0 }
+    : { monitoring: 0, targets: 0, unobservedTargets: 0, staleTargets: 0 }
 
   return (
     <>

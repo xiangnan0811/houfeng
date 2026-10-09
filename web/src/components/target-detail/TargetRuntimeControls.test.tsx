@@ -1,20 +1,21 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { targetObservationFixture } from '../../lib/targetObservationFixture'
 import { TargetRuntimeControls } from './TargetRuntimeControls'
 import type { TargetRecord } from '../../lib/types'
 
 function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
-  return {
+  const record = {
     target_id: 'tg_001',
     name: 'Blog',
-    target_type: 'service',
+    target_type: 'service' as const,
     host: 'blog.example.com',
-    execution_monitoring_instance_labels: [],
-    lifecycle_status: 'active',
-    run_status: '启用',
+    execution_monitoring_instance_labels: [] as string[],
+    lifecycle_status: 'active' as const,
+    run_status: '启用' as const,
     group: '',
-    labels: [],
+    labels: [] as string[],
     note: '',
     current_health_status: '正常',
     current_active_incident_count: 0,
@@ -24,6 +25,18 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
     created_at: '2026-04-20T00:00:00Z',
     updated_at: '2026-04-24T09:05:00Z',
     ...overrides,
+  }
+  return {
+    ...record,
+    observation_freshness: overrides.observation_freshness ?? targetObservationFixture({
+      target_id: record.target_id,
+      run_status: record.run_status,
+      lifecycle_status: record.lifecycle_status,
+      evaluated_at: record.updated_at,
+      enabled_probe_count: record.enabled_probe_count,
+      ...(record.last_success_at ? { last_success_at: record.last_success_at } : {}),
+      ...(record.last_failure_at ? { last_failure_at: record.last_failure_at } : {}),
+    }),
   }
 }
 

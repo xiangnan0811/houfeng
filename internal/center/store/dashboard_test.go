@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/incidents"
+	"houfeng/internal/center/targets"
 )
 
 func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T) {
@@ -17,8 +19,15 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	lastHeartbeat := now.Add(-5 * time.Minute)
 	lastSuccess := now.Add(-10 * time.Minute)
 	lastFailure := now.Add(-2 * time.Minute)
-	repo := &PostgresDashboardRepository{db: fakeDashboardQueryer{
+	repo := newFakeDashboardRepository(fakeDashboardQueryer{
 		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "select override_rules") {
+				return fakeRow{scan: func(dest ...any) error {
+					*(dest[0].(*[]byte)) = []byte(`{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]}`)
+					*(dest[1].(*[]byte)) = []byte(`{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true}`)
+					return nil
+				}}
+			}
 			if strings.Contains(sql, "from center_settings") {
 				return fakeRow{scan: func(dest ...any) error {
 					*(dest[0].(*bool)) = true
@@ -64,6 +73,34 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 		},
 		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
 			switch {
+			case strings.Contains(sql, "last_live_observed_at"):
+				targetID := "tg_001"
+				targetType := "service"
+				targetGroup := "production"
+				probeID := "pb_001"
+				probeKind := "http"
+				frequencyTier := "1m"
+				timeoutSeconds := 5
+				targetReset := now.Add(-time.Hour)
+				probeReset := now.Add(-time.Hour)
+				lastLive := lastFailure
+				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = targetID
+					*(dest[1].(*string)) = "active"
+					*(dest[2].(*string)) = "启用"
+					*(dest[3].(*string)) = targetType
+					*(dest[4].(*[]string)) = []string{"edge"}
+					*(dest[5].(*string)) = targetGroup
+					*(dest[6].(*bool)) = true
+					*(dest[7].(*time.Time)) = targetReset
+					*(dest[8].(**string)) = &probeID
+					*(dest[9].(**string)) = &probeKind
+					*(dest[10].(**string)) = &frequencyTier
+					*(dest[11].(**int)) = &timeoutSeconds
+					*(dest[12].(**time.Time)) = &probeReset
+					*(dest[13].(**time.Time)) = &lastLive
+					return nil
+				}}}}, nil
 			case strings.Contains(sql, "monitoring_instance_groups"):
 				return &fakeDashboardRows{rows: []fakeDashboardScan{{scan: func(dest ...any) error {
 					*(dest[0].(*string)) = "production"
@@ -149,7 +186,7 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 				return &fakeDashboardRows{}, nil
 			}
 		},
-	}}
+	})
 
 	overview, err := repo.GetDashboardOverview(context.Background(), 10)
 	if err != nil {
@@ -160,6 +197,9 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	}
 	if overview.AbnormalMonitoringInstanceCount != 2 || overview.UnobservedTargetCount != 2 || overview.SevereMonitoringInstanceCount != 1 || overview.RecentRecoveryCount != 2 {
 		t.Fatalf("overview = %#v, want abnormal=2, unobserved targets=2, severe=1 and populated recovery count", overview)
+	}
+	if overview.StaleTargetCount != 1 {
+		t.Fatalf("stale target count = %d, want one target with stale probe evidence", overview.StaleTargetCount)
 	}
 	if overview.SevereMonitoringInstanceCount > overview.AbnormalMonitoringInstanceCount {
 		t.Fatalf("monitoring instance counts = abnormal %d / severe %d, severe must remain a subset of abnormal", overview.AbnormalMonitoringInstanceCount, overview.SevereMonitoringInstanceCount)
@@ -178,6 +218,9 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	}
 	if overview.GroupSummaries[0].MonitoringInstanceCount != 3 || overview.GroupSummaries[0].TargetCount != 2 || overview.GroupSummaries[0].UnobservedTargetCount != 1 {
 		t.Fatalf("GroupSummaries[0] = %#v, want full monitoringInstance/target/unobserved counts", overview.GroupSummaries[0])
+	}
+	if overview.GroupSummaries[0].StaleTargetCount != 1 {
+		t.Fatalf("GroupSummaries[0].StaleTargetCount = %d, want one stale production target", overview.GroupSummaries[0].StaleTargetCount)
 	}
 	if !overview.NotificationStatus.TelegramConfigured || !overview.NotificationStatus.TelegramRuntimeManaged || !overview.NotificationStatus.TelegramRuntimeApplyActive {
 		t.Fatalf("NotificationStatus = %#v, want configured runtime-managed telegram", overview.NotificationStatus)
@@ -215,12 +258,93 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if overview.AbnormalTargets[0].BasePort == nil || *overview.AbnormalTargets[0].BasePort != 443 || overview.AbnormalTargets[0].LastFailureAt == nil {
 		t.Fatalf("AbnormalTargets[0] = %#v, want base port and failure timestamp", overview.AbnormalTargets[0])
 	}
+	if overview.AbnormalTargets[0].ObservationFreshness.State != "stale" ||
+		overview.AbnormalTargets[0].ObservationFreshness.StaleProbeCount != 1 {
+		t.Fatalf("AbnormalTargets[0].ObservationFreshness = %#v, want attached stale projection", overview.AbnormalTargets[0].ObservationFreshness)
+	}
 	if len(overview.NewIncidentTrend24h) != 24 || len(overview.RecoveryTrend24h) != 24 {
 		t.Fatalf("trend lens = (%d,%d), want (24,24)", len(overview.NewIncidentTrend24h), len(overview.RecoveryTrend24h))
 	}
 	// Spot-check the synthetic per-bucket pattern from the fake (i%5, i%3).
 	if overview.NewIncidentTrend24h[5] != 0 || overview.RecoveryTrend24h[5] != 2 {
 		t.Fatalf("trend[5] = (%d,%d), want (0,2)", overview.NewIncidentTrend24h[5], overview.RecoveryTrend24h[5])
+	}
+}
+
+func TestPostgresDashboardRepositoryPropagatesFreshnessLoadErrors(t *testing.T) {
+	repo := newFakeDashboardRepository(fakeDashboardQueryer{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "select override_rules") {
+				return fakeRow{scan: func(dest ...any) error {
+					return errors.New("invalid override rules")
+				}}
+			}
+			t.Fatalf("unexpected QueryRow SQL: %s", sql)
+			return fakeRow{scan: func(dest ...any) error { return nil }}
+		},
+		query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+			t.Fatal("Query() should not be called after freshness load failure")
+			return nil, nil
+		},
+	})
+
+	_, err := repo.GetDashboardOverview(context.Background(), 10)
+	if err == nil || !strings.Contains(err.Error(), "load dashboard target observation freshness") {
+		t.Fatalf("GetDashboardOverview() error = %v, want freshness load context", err)
+	}
+}
+
+func TestApplyStaleDashboardGroupCountsMatchesPostgresBtrim(t *testing.T) {
+	t.Parallel()
+	groups := []incidents.DashboardGroupSummary{
+		{Group: "\tproduction\t"},
+		{Group: "\u00a0production\u00a0"},
+		{Group: "production"},
+		{Group: "未分组"},
+	}
+	projections := map[string]targetFreshnessProjection{
+		"tab": {
+			Group: "\tproduction\t",
+			Freshness: targets.TargetObservationFreshness{
+				State:           "stale",
+				StaleProbeCount: 1,
+			},
+		},
+		"nbsp": {
+			Group: "\u00a0production\u00a0",
+			Freshness: targets.TargetObservationFreshness{
+				State:           "partial",
+				StaleProbeCount: 1,
+			},
+		},
+		"spaces": {
+			Group: "  production  ",
+			Freshness: targets.TargetObservationFreshness{
+				State:           "stale",
+				StaleProbeCount: 1,
+			},
+		},
+		"blank": {
+			Group: " \t ",
+			Freshness: targets.TargetObservationFreshness{
+				State:           "stale",
+				StaleProbeCount: 1,
+			},
+		},
+	}
+
+	applyStaleDashboardGroupCounts(groups, projections)
+	if groups[0].StaleTargetCount != 1 {
+		t.Fatalf("tab-padded group stale count = %d, want 1", groups[0].StaleTargetCount)
+	}
+	if groups[1].StaleTargetCount != 1 {
+		t.Fatalf("NBSP-padded group stale count = %d, want 1", groups[1].StaleTargetCount)
+	}
+	if groups[2].StaleTargetCount != 1 {
+		t.Fatalf("ASCII-space-normalized group stale count = %d, want 1", groups[2].StaleTargetCount)
+	}
+	if groups[3].StaleTargetCount != 0 {
+		t.Fatalf("tab-containing blank group stale count = %d, want 0 because PostgreSQL btrim preserves tabs", groups[3].StaleTargetCount)
 	}
 }
 
@@ -620,6 +744,22 @@ func (f fakeDashboardQueryer) QueryRow(ctx context.Context, sql string, args ...
 func (f fakeDashboardQueryer) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	return f.query(ctx, sql, args...)
 }
+
+func newFakeDashboardRepository(queryer fakeDashboardQueryer) *PostgresDashboardRepository {
+	return &PostgresDashboardRepository{
+		db: queryer,
+		beginTx: func(context.Context, pgx.TxOptions) (dashboardReadTx, error) {
+			return &fakeDashboardReadTx{fakeDashboardQueryer: queryer}, nil
+		},
+	}
+}
+
+type fakeDashboardReadTx struct {
+	fakeDashboardQueryer
+}
+
+func (*fakeDashboardReadTx) Commit(context.Context) error   { return nil }
+func (*fakeDashboardReadTx) Rollback(context.Context) error { return nil }
 
 type fakeDashboardScan struct{ scan func(dest ...any) error }
 

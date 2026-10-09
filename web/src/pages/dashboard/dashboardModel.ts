@@ -7,7 +7,7 @@ import type {
   VPSAssetRecord,
 } from '../../lib/types'
 import { knownAmountNote, knownMonthlyAmount } from '../subscriptions/exchangeRatePresentation'
-import { DASHBOARD_LINKS } from './dashboardLinks'
+import { DASHBOARD_LINKS, dashboardTargetsStaleLink } from './dashboardLinks'
 import type { RemoteState } from './dashboardRemoteState'
 
 export type DashboardMode =
@@ -71,12 +71,20 @@ export type DashboardAttentionItem = {
   incidentCount: number
 }
 
+export type DashboardStaleGroupLink = {
+  group: string
+  staleTargetCount: number
+  to: string
+}
+
 export type DashboardObservabilityModel = {
   abnormalMonitoringCount: number
   severeMonitoringCount: number
   abnormalTargetCount: number
   severeTargetCount: number
   unobservedTargetCount: number
+  staleTargetCount: number
+  staleGroups: DashboardStaleGroupLink[]
   abnormalTotal: number
   severeTotal: number
   maintenanceTotal: number
@@ -144,7 +152,7 @@ function buildAttentionItems(overview: DashboardOverview): DashboardAttentionIte
     id: item.target_id,
     kind: 'target',
     name: item.name,
-    detail: item.current_primary_issue_summary || '暂无关键异常摘要',
+    detail: targetAttentionDetail(item),
     meta: `${item.host}${item.base_port == null ? '' : `:${item.base_port}`}`,
     to: `/targets/${item.target_id}`,
     tone: toneForSeverity(item.current_health_status),
@@ -160,6 +168,11 @@ function buildAttentionItems(overview: DashboardOverview): DashboardAttentionIte
     .slice(0, 3)
 }
 
+function targetAttentionDetail(item: DashboardOverview['abnormal_targets'][number]): string {
+  const issue = item.current_primary_issue_summary || '暂无关键异常摘要'
+  return item.observation_freshness.stale_probe_count > 0 ? `${issue} · 观测已过期` : issue
+}
+
 function buildObservability(overview: DashboardOverview): DashboardObservabilityModel {
   const abnormalMonitoringCount = overview.abnormal_monitoring_instance_count
   const abnormalTargetCount = overview.abnormal_target_count
@@ -172,6 +185,14 @@ function buildObservability(overview: DashboardOverview): DashboardObservability
     abnormalTargetCount,
     severeTargetCount,
     unobservedTargetCount: overview.unobserved_target_count,
+    staleTargetCount: overview.stale_target_count,
+    staleGroups: overview.group_summaries
+      .filter((group) => group.stale_target_count > 0)
+      .map((group) => ({
+        group: group.group,
+        staleTargetCount: group.stale_target_count,
+        to: dashboardTargetsStaleLink(group.group),
+      })),
     abnormalTotal: abnormalMonitoringCount + abnormalTargetCount,
     severeTotal: severeMonitoringCount + severeTargetCount,
     maintenanceTotal:
@@ -394,6 +415,15 @@ function buildPrimaryAction(
   }
 }
 
+function stableFactSummary(observability: DashboardObservabilityModel): string {
+  const unobserved = observability.unobservedTargetCount > 0
+  const stale = observability.staleTargetCount > 0
+  if (unobserved && stale) return '资产待核对、无观测与观测过期分别保留。'
+  if (unobserved) return '资产待核对与无观测目标分别保留。'
+  if (stale) return '资产待核对与观测过期分别保留。'
+  return '当前运行异常计数为 0。具体事实和操作由对应工作台承接。'
+}
+
 function modeCopy(
   mode: DashboardMode,
   primaryAction: DashboardAction,
@@ -432,19 +462,31 @@ function modeCopy(
     }
   }
   const assetAttention = primaryAction.label !== '核对 VPS 库存'
-  if (!assetAttention && observability.unobservedTargetCount > 0) {
+  if (!assetAttention && (observability.unobservedTargetCount > 0 || observability.staleTargetCount > 0)) {
+    if (observability.unobservedTargetCount > 0 && observability.staleTargetCount > 0) {
+      return {
+        tone: 'notice',
+        title: '尚有目标无观测',
+        summary: '已知运行异常计数为 0。无观测与观测过期分别列出，不并入异常。',
+      }
+    }
+    if (observability.unobservedTargetCount > 0) {
+      return {
+        tone: 'notice',
+        title: '尚有目标无观测',
+        summary: '已知运行异常计数为 0。无观测目标单独列出，不并入异常。',
+      }
+    }
     return {
       tone: 'notice',
-      title: '尚有目标无观测',
-      summary: '已知运行异常计数为 0。无观测目标单独列出，不并入异常。',
+      title: '观测已过期',
+      summary: '已知运行异常计数为 0。观测过期单独列出，不并入异常。',
     }
   }
   return {
     tone: assetAttention ? 'notice' : 'normal',
     title: assetAttention ? '资产判断等待核对' : '当前没有紧急处理项',
-    summary: observability.unobservedTargetCount > 0
-      ? '资产待核对与无观测目标分别保留。'
-      : '当前运行异常计数为 0。具体事实和操作由对应工作台承接。',
+    summary: stableFactSummary(observability),
   }
 }
 
@@ -502,6 +544,16 @@ function observabilityJudgement(
       detail: '不计入已知运行异常',
       to: DASHBOARD_LINKS.targetsUnobserved,
       tone: 'neutral',
+    }
+  }
+  if (observability.staleTargetCount > 0) {
+    return {
+      id: 'observability',
+      label: '观测过期',
+      value: `${observability.staleTargetCount}`,
+      detail: '不计入已知运行异常',
+      to: DASHBOARD_LINKS.targetsStale,
+      tone: 'notice',
     }
   }
   return {

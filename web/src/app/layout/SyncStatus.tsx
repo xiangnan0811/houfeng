@@ -6,6 +6,7 @@ export type ShellSummaryStatus =
   | 'clear'
   | 'anomaly'
   | 'unobserved'
+  | 'notice'
   | 'stale'
   | 'unavailable'
 

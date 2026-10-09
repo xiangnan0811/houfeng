@@ -18,8 +18,10 @@ import type {
   ProbeItemRecord,
   ProbeKind,
   ProbeObservation,
+  ProbeObservationFreshness,
   StateChangeEventRecord,
   GlobalActionConfirmation,
+  TargetObservationFreshness,
   TargetRecord,
 } from '../../lib/types'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
@@ -27,6 +29,7 @@ import { TargetDetailNotices } from './TargetDetailNotices'
 import { TargetDetailRecentEvents } from './TargetDetailRecentEvents'
 import { TargetDetailStatusBand } from './TargetDetailStatusBand'
 import '../monitoring-detail/MonitoringDetailWorkspace.css'
+import './TargetDetailFreshness.css'
 import { TargetHistoryDrawer } from './TargetHistoryDrawer'
 import { TargetLifecycleSection } from './TargetLifecycleSection'
 import { TargetMetadataSection } from './TargetMetadataSection'
@@ -60,6 +63,9 @@ type TargetDetailPageBodyProps = {
   onRetryEvents: () => void
   recentObservations: ProbeObservation[]
   observationsByProbe: Map<string, ProbeObservation[]>
+  observationFreshness: TargetObservationFreshness
+  freshnessByProbe: Map<string, ProbeObservationFreshness>
+  projectionRefreshFailedAt: string | null
   runtimeSubmitting: boolean
   runtimeError: string | null
   reviewGeneration?: number
@@ -96,11 +102,13 @@ type TargetDetailPageBodyProps = {
   metadataSubmitting: boolean
   metadataError: string | null
   metadataForm: MetadataFormState
+  metadataCanRebase: boolean
   onMetadataGroupChange: (value: string) => void
   onMetadataLabelChange: (value: string) => void
   onMetadataNoteChange: (value: string) => void
   onStartMetadataEdit: () => void
   onCancelMetadataEdit: () => void
+  onRebaseMetadata: () => void
   onMetadataSubmit: (event: FormEvent<HTMLFormElement>) => void
   probeMutationBusyId: string | null
   pendingProbeConfirmation: PendingProbeConfirmation | null
@@ -139,6 +147,9 @@ export function TargetDetailPageBody({
   onRetryEvents,
   recentObservations,
   observationsByProbe,
+  observationFreshness,
+  freshnessByProbe,
+  projectionRefreshFailedAt,
   runtimeSubmitting,
   runtimeError,
   reviewGeneration = 0,
@@ -169,11 +180,13 @@ export function TargetDetailPageBody({
   metadataSubmitting,
   metadataError,
   metadataForm,
+  metadataCanRebase,
   onMetadataGroupChange,
   onMetadataLabelChange,
   onMetadataNoteChange,
   onStartMetadataEdit,
   onCancelMetadataEdit,
+  onRebaseMetadata,
   onMetadataSubmit,
   probeMutationBusyId,
   pendingProbeConfirmation,
@@ -239,6 +252,7 @@ export function TargetDetailPageBody({
         />
         <TargetDetailStatusBand
           probeItems={probeItems}
+          observationFreshness={observationFreshness}
           latestObservationAt={latestRuntimeObservationAt}
           assetContext={assetContext}
           assetContextError={assetContextError}
@@ -263,6 +277,7 @@ export function TargetDetailPageBody({
         incidentsRetrying={incidentsRetrying}
         onRetryIncidents={onRetryIncidents}
         runtimeError={pendingRuntimeConfirmation ? null : runtimeError}
+        projectionRefreshFailedAt={projectionRefreshFailedAt}
         onOpenEvents={() => onOpenHistory('incidents')}
       />
 
@@ -282,6 +297,7 @@ export function TargetDetailPageBody({
       <TargetProbeListSection
         probeItems={probeItems}
         observationsByProbe={observationsByProbe}
+        freshnessByProbe={freshnessByProbe}
         actionsDisabled={probeActionsDisabled}
         pendingProbeConfirmation={pendingProbeConfirmation}
         confirmationCardDisabled={probeCreateSubmitting || probeRowMutationBusy}
@@ -326,11 +342,13 @@ export function TargetDetailPageBody({
             noteDraft={metadataForm.note}
             submitting={metadataSubmitting}
             error={metadataError}
+            canRebase={metadataCanRebase}
             onGroupDraftChange={onMetadataGroupChange}
             onLabelDraftChange={onMetadataLabelChange}
             onNoteDraftChange={onMetadataNoteChange}
             onStartEdit={onStartMetadataEdit}
             onCancelEdit={onCancelMetadataEdit}
+            onRebase={onRebaseMetadata}
             onSubmit={onMetadataSubmit}
           />
 

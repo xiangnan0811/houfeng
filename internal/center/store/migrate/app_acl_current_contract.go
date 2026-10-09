@@ -61,6 +61,16 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	cpuRatesValidAppACLCurrentMigrationFragment(),
 	recordImportDestinationSubjectAppACLCurrentMigrationFragment(),
 	accessManagementAppACLCurrentMigrationFragment(),
+	targetObservationFreshnessAppACLCurrentMigrationFragment(),
+}
+
+func targetObservationFreshnessAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0072_add_target_observation_freshness.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return nil
+		},
+	}
 }
 
 func accessManagementAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {

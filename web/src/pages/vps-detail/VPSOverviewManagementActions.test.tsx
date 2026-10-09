@@ -17,6 +17,7 @@ import type {
   VPSMonitoringInstanceLinkRecord,
   VPSMonitoringInstanceSummary,
 } from '../../lib/types'
+import { targetObservationFixture } from '../../lib/targetObservationFixture'
 import { useVPSManagementController } from './hooks/useVPSManagementController'
 import { VPSOverviewManagementActions } from './VPSOverviewManagementActions'
 import { createVPSWriteOwnerStore, type VPSWriteOwnerStore } from './vpsWriteOwnerStore'
@@ -63,15 +64,15 @@ async function openArchiveDialog() {
 }
 
 function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
-  return {
+  const record = {
     target_id: 'tgt_1',
     name: 'Web Target',
-    target_type: 'service',
+    target_type: 'service' as const,
     host: '192.0.2.1',
     base_port: 80,
     execution_monitoring_instance_labels: [],
-    lifecycle_status: 'active',
-    run_status: '启用',
+    lifecycle_status: 'active' as const,
+    run_status: '启用' as const,
     group: '',
     labels: [],
     note: '',
@@ -83,6 +84,18 @@ function targetRecord(overrides: Partial<TargetRecord> = {}): TargetRecord {
     created_at: '2026-08-20T00:00:00Z',
     updated_at: '2026-08-20T00:00:00Z',
     ...overrides,
+  }
+  return {
+    ...record,
+    observation_freshness: overrides.observation_freshness ?? targetObservationFixture({
+      target_id: record.target_id,
+      run_status: record.run_status,
+      lifecycle_status: record.lifecycle_status,
+      evaluated_at: record.updated_at,
+      enabled_probe_count: record.enabled_probe_count,
+      last_success_at: record.last_success_at,
+      last_failure_at: record.last_failure_at,
+    }),
   }
 }
 

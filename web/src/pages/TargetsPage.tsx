@@ -1,4 +1,4 @@
-import { Fragment, type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 
 import { Badge, ColumnResizeHandle, Modal, Hostname, MonoDigits, Tabs, Timestamp, isInteractiveRowTarget } from '../components/atoms'
@@ -19,6 +19,7 @@ import {
   resumeTarget,
 } from '../lib/api'
 import { requiresSharedImpactConfirmation } from '../lib/assetLifecycle'
+import { useVisibleRefresh, type VisibleRefreshContext } from '../lib/useVisibleRefresh'
 import type { AssetContextForTarget, CreateTargetInput, TargetRecord, TargetSparklinesResponse } from '../lib/types'
 import {
   assetContextHasAttention,
@@ -37,6 +38,7 @@ import {
   countArchivedTargets,
   countCoverageGapTargets,
   countPausedTargets,
+  countStaleTargets,
   countUnobservedTargets,
   combineCurrentAndRetiredTargets,
   describeError,
@@ -45,9 +47,13 @@ import {
   parseMultiValue,
   isAbnormalTarget,
   isCoverageGapTarget,
+  isStaleTarget,
+  isTargetListInvalidatingError,
   isUnobservedTarget,
+  targetMatchesGroup,
   targetAttentionBadges,
   targetCoverageNotices,
+  targetKnownHealthNote,
   targetCoverageSummary,
   targetTypePresentation,
 } from './targets/targetHelpers'
@@ -57,11 +63,11 @@ import type {
   TargetRuntimeAction,
 } from './targets/types'
 
-const TARGET_LIST_COLUMN_WIDTHS = [40, 180, 72, 168, 150, 120, 140]
+const TARGET_LIST_COLUMN_WIDTHS = [40, 180, 72, 168, 210, 120, 140]
 const TARGET_LIST_HEADERS = ['', '目标', '类型', 'Host', '健康', '资产上下文', '近 24h 延迟'] as const
 const TAB_OWNED_RUN_STATUS = new Set(['暂停'])
 
-type TargetQuickView = 'all' | 'abnormal' | 'unobserved' | 'paused' | 'archived' | 'coverage'
+type TargetQuickView = 'all' | 'abnormal' | 'unobserved' | 'stale' | 'paused' | 'archived' | 'coverage'
 
 function TargetTypeCell({ value }: { value: string }) {
   const presented = targetTypePresentation(value)
@@ -98,6 +104,15 @@ export function TargetsPage() {
   const [batchError, setBatchError] = useState<string | null>(null)
   const [targetAssetContexts, setTargetAssetContexts] = useState<Map<string, AssetContextForTarget>>(new Map())
   const [targetAssetContextError, setTargetAssetContextError] = useState<string | null>(null)
+  const retiredRef = useRef<TargetRecord[] | null>(null)
+  const pendingCurrentRef = useRef<TargetRecord[] | null>(null)
+  const initialDoneRef = useRef(false)
+  const mutationRef = useRef(false)
+  const pairedReadRef = useRef(false)
+  const retiredSnapshotStaleRef = useRef(false)
+  const snapshotAtRef = useRef<string | null>(null)
+  const [refreshFailureAt, setRefreshFailureAt] = useState<string | null>(null)
+  const [retiredSnapshotStale, setRetiredSnapshotStale] = useState(false)
 
   useEffect(() => {
     mountedRef.current = true
@@ -106,24 +121,116 @@ export function TargetsPage() {
     }
   }, [])
 
+  const publishList = useCallback((currentTargets: TargetRecord[], retiredTargets: TargetRecord[]) => {
+    const at = new Date().toISOString()
+    snapshotAtRef.current = at
+    pendingCurrentRef.current = currentTargets
+    retiredRef.current = retiredTargets
+    retiredSnapshotStaleRef.current = false
+    initialDoneRef.current = true
+    setRetiredSnapshotStale(false)
+    setRefreshFailureAt(null)
+    setError(null)
+    setTargets(combineCurrentAndRetiredTargets(currentTargets, retiredTargets))
+    setLoading(false)
+  }, [])
+
+  const failInitialLoad = useCallback((value: unknown) => {
+    if (initialDoneRef.current) return
+    initialDoneRef.current = true
+    setTargets([])
+    setRefreshFailureAt(null)
+    setError(value instanceof ApiError ? value.message : '加载目标列表失败')
+    setLoading(false)
+  }, [])
+
+  const invalidateDisplayedList = useCallback((value: unknown) => {
+    retiredSnapshotStaleRef.current = false
+    setRetiredSnapshotStale(false)
+    pendingCurrentRef.current = []
+    retiredRef.current = []
+    snapshotAtRef.current = null
+    setRefreshFailureAt(null)
+    setTargets([])
+    setError(value instanceof ApiError ? value.message : '加载目标列表失败')
+    setLoading(false)
+  }, [])
+
+  const refreshCurrent = useCallback(async (context: VisibleRefreshContext) => {
+    if (pairedReadRef.current) {
+      const [currentResult, retiredResult] = await Promise.allSettled([
+        listTargets('current'),
+        listTargets('retired'),
+      ])
+      if (!context.isCurrent() || mutationRef.current || !mountedRef.current) return
+      pairedReadRef.current = false
+      if (currentResult.status === 'fulfilled' && retiredResult.status === 'fulfilled') {
+        publishList(currentResult.value, retiredResult.value)
+        return
+      }
+      const failures = [currentResult, retiredResult].flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : [],
+      )
+      const invalidating = failures.find((failure) => isTargetListInvalidatingError(failure))
+      if (invalidating) {
+        invalidateDisplayedList(invalidating)
+        return
+      }
+      retiredSnapshotStaleRef.current = true
+      setRetiredSnapshotStale(true)
+      setRefreshFailureAt(snapshotAtRef.current)
+      return
+    }
+
+    try {
+      const currentTargets = await listTargets('current')
+      if (!context.isCurrent() || mutationRef.current || !mountedRef.current) return
+      if (retiredSnapshotStaleRef.current) {
+        setRefreshFailureAt(snapshotAtRef.current)
+        return
+      }
+      pendingCurrentRef.current = currentTargets
+      if (retiredRef.current == null) return
+      publishList(currentTargets, retiredRef.current)
+    } catch (value: unknown) {
+      if (!context.isCurrent() || mutationRef.current || !mountedRef.current) return
+      if (!initialDoneRef.current) {
+        failInitialLoad(value)
+        return
+      }
+      if (isTargetListInvalidatingError(value)) {
+        invalidateDisplayedList(value)
+        return
+      }
+      setRefreshFailureAt(snapshotAtRef.current)
+    }
+  }, [failInitialLoad, invalidateDisplayedList, publishList])
+
+  const { refresh, invalidate } = useVisibleRefresh(refreshCurrent, {
+    enabled: !batchSubmitting,
+  })
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
   useEffect(() => {
     let cancelled = false
-    Promise.all([listTargets('current'), listTargets('retired')])
-      .then(([currentTargets, retiredTargets]) => {
-        if (cancelled) return
-        setTargets(combineCurrentAndRetiredTargets(currentTargets, retiredTargets))
-        setLoading(false)
+    listTargets('retired')
+      .then((retiredTargets) => {
+        if (cancelled || !mountedRef.current) return
+        retiredRef.current = retiredTargets
+        if (mutationRef.current || initialDoneRef.current || pendingCurrentRef.current == null) return
+        publishList(pendingCurrentRef.current, retiredTargets)
       })
       .catch((value: unknown) => {
-        if (cancelled) return
-        setError(value instanceof ApiError ? value.message : '加载目标列表失败')
-        setLoading(false)
+        if (cancelled || !mountedRef.current || mutationRef.current) return
+        failInitialLoad(value)
       })
-
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [failInitialLoad, publishList])
 
   useEffect(() => {
     let cancelled = false
@@ -200,6 +307,7 @@ export function TargetsPage() {
     createRequestRef.current = requestId
     setCreateSubmitting(true)
     try {
+      invalidate()
       const created = await createTarget(payload)
       if (!mountedRef.current || createRequestRef.current !== requestId) return
       setTargets((current) => [
@@ -228,6 +336,7 @@ export function TargetsPage() {
       executionLabels: parseMultiValue(searchParams.get('execution_labels')),
       abnormal: searchParams.get('abnormal') === '1',
       unobserved: searchParams.get('view') === 'unobserved',
+      stale: searchParams.get('view') === 'stale',
       coverageGap: searchParams.get('coverage_gap') === '1',
     }),
     [searchParams],
@@ -245,8 +354,8 @@ export function TargetsPage() {
   const filteredTargets = useMemo(() => {
     return targets.filter((target) => {
       if (filterState.lifecycle && target.lifecycle_status !== filterState.lifecycle) return false
-      if (target.lifecycle_status === 'retired' && (filterState.runStatus || filterState.abnormal || filterState.unobserved || filterState.coverageGap)) return false
-      if (filterState.group && target.group !== filterState.group) return false
+      if (target.lifecycle_status === 'retired' && (filterState.runStatus || filterState.abnormal || filterState.unobserved || filterState.stale || filterState.coverageGap)) return false
+      if (filterState.group && !targetMatchesGroup(target, filterState.group)) return false
       if (filterState.type && target.target_type !== filterState.type) return false
       if (filterState.runStatus && target.run_status !== filterState.runStatus) return false
       if (filterState.health && target.current_health_status !== filterState.health) return false
@@ -262,6 +371,7 @@ export function TargetsPage() {
       }
       if (filterState.abnormal && !isAbnormalTarget(target)) return false
       if (filterState.unobserved && !isUnobservedTarget(target)) return false
+      if (filterState.stale && !isStaleTarget(target)) return false
       if (filterState.coverageGap && !isCoverageGapTarget(target)) return false
       return true
     })
@@ -269,6 +379,7 @@ export function TargetsPage() {
 
   const abnormalTargetCount = useMemo(() => countAbnormalTargets(targets), [targets])
   const unobservedTargetCount = useMemo(() => countUnobservedTargets(targets), [targets])
+  const staleTargetCount = useMemo(() => countStaleTargets(targets), [targets])
   const pausedTargetCount = useMemo(() => countPausedTargets(targets), [targets])
   const archivedTargetCount = useMemo(() => countArchivedTargets(targets), [targets])
   const coverageGapTargetCount = useMemo(() => countCoverageGapTargets(targets), [targets])
@@ -290,17 +401,21 @@ export function TargetsPage() {
   const navigationLocked = pendingBatchAction !== null || batchSubmitting
   const quickView: TargetQuickView = filterState.unobserved
     ? 'unobserved'
-    : filterState.coverageGap
-      ? 'coverage'
-      : filterState.abnormal
-        ? 'abnormal'
-        : filterState.runStatus === '暂停'
-          ? 'paused'
-          : filterState.lifecycle === 'retired'
-            ? 'archived'
-            : 'all'
+    : filterState.stale
+      ? 'stale'
+      : filterState.coverageGap
+        ? 'coverage'
+        : filterState.abnormal
+          ? 'abnormal'
+          : filterState.runStatus === '暂停'
+            ? 'paused'
+            : filterState.lifecycle === 'retired'
+              ? 'archived'
+              : 'all'
 
   async function runBatchOnIds(action: TargetRuntimeAction, ids: string[]) {
+    invalidate()
+    mutationRef.current = true
     setBatchSubmitting(true)
     setBatchError(null)
     setPendingBatchAction(null)
@@ -327,17 +442,27 @@ export function TargetsPage() {
       }
     }
     if (failCount > 0) setBatchError(`${failCount}/${ids.length} 个目标失败`)
-    setBatchSubmitting(false)
     setFrozenBatchIds(null)
     setSelectedIds([])
+    pairedReadRef.current = true
+    invalidate()
+    mutationRef.current = false
+    setBatchSubmitting(false)
     try {
-      const [currentTargets, retiredTargets] = await Promise.all([
-        listTargets('current'),
-        listTargets('retired'),
-      ])
-      setTargets(combineCurrentAndRetiredTargets(currentTargets, retiredTargets))
+      await refresh()
     } catch {
-      /* keep current rows; a failed collection is not an empty list */
+      /* refreshCurrent keeps the previous rows when either paired read fails */
+    }
+  }
+
+  async function retryPairedListSnapshot() {
+    if (mutationRef.current || !retiredSnapshotStaleRef.current) return
+    pairedReadRef.current = true
+    invalidate()
+    try {
+      await refresh()
+    } catch {
+      /* refreshCurrent keeps the previous rows when either paired read fails */
     }
   }
 
@@ -388,6 +513,11 @@ export function TargetsPage() {
           if (tabOwnedRunStatus) next.delete('run_status')
         } else if (view === 'unobserved') {
           next.set('view', 'unobserved')
+          next.delete('abnormal')
+          next.delete('coverage_gap')
+          if (tabOwnedRunStatus) next.delete('run_status')
+        } else if (view === 'stale') {
+          next.set('view', 'stale')
           next.delete('abnormal')
           next.delete('coverage_gap')
           if (tabOwnedRunStatus) next.delete('run_status')
@@ -490,6 +620,16 @@ export function TargetsPage() {
         />
       ) : (
         <>
+          {refreshFailureAt ? (
+            <p className="asset-operation-feedback asset-operation-feedback--notice" role="status">
+              更新失败，显示上次结果 <Timestamp value={refreshFailureAt} mode="both" />
+              {retiredSnapshotStale ? (
+                <button type="button" className="btn sm ghost" onClick={() => void retryPairedListSnapshot()}>
+                  重试
+                </button>
+              ) : null}
+            </p>
+          ) : null}
           <div className="monitoring-page__tools">
             <div className="monitoring-page__views">
               <Tabs
@@ -504,6 +644,7 @@ export function TargetsPage() {
                   { value: 'all', label: '全部', count: targets.length },
                   { value: 'abnormal', label: '异常', count: abnormalTargetCount },
                   { value: 'unobserved', label: '尚无观测', count: unobservedTargetCount },
+                  { value: 'stale', label: '观测过期', count: staleTargetCount },
                   { value: 'paused', label: '暂停', count: pausedTargetCount },
                   { value: 'archived', label: '退役', count: archivedTargetCount },
                   { value: 'coverage', label: '覆盖缺口', count: coverageGapTargetCount },
@@ -596,6 +737,7 @@ export function TargetsPage() {
                     const badges = targetAttentionBadges(target)
                     const coverageNotes = targetCoverageNotices(target)
                     const issue = target.lifecycle_status === 'retired' ? '' : target.current_primary_issue_summary.trim()
+                    const healthNote = targetKnownHealthNote(target)
                     return (
                       <Fragment key={target.target_id}>
                         {/* a11y-allow-nonsemantic-click: keyboard-complete-row */}
@@ -667,6 +809,9 @@ export function TargetsPage() {
                             ))}
                             {issue ? (
                               <span className="targets-table__issue-summary" title={issue}>{issue}</span>
+                            ) : null}
+                            {healthNote ? (
+                              <span className="targets-table__issue-summary">{healthNote}</span>
                             ) : null}
                           </div>
                         </td>

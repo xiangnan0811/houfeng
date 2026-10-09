@@ -24,42 +24,42 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 	if err != nil {
 		t.Fatalf("compileAppACLCurrentTransitions() error = %v", err)
 	}
-	if len(transitions) != 8 {
-		t.Fatalf("compiled transition count = %d, want the P62, P64, P63, P66, P67, P68, P69 and P70 profiles", len(transitions))
+	if len(transitions) != 9 {
+		t.Fatalf("compiled transition count = %d, want the P62, P64, P63, P66, P67, P68, P69, P70 and P71 profiles", len(transitions))
 	}
 	p63 := transitions[2]
 	if p63.profile != appACLCurrentProfileP63 || len(p63.predecessor.sources.names) != 64 ||
 		!bytes.Equal(p63.predecessor.sources.canonicalSet, appACLCurrentV0796MigrationGolden) ||
 		!bytes.Equal(p63.predecessorPrivilegeBody, appACLCurrentV0796PrivilegeGolden) ||
-		!equalStringSlices(p63.successor.names, []string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql", "0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql"}) {
+		!equalStringSlices(p63.successor.names, []string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql", "0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}) {
 		t.Fatal("compiled P63 profile differs from independent v0.79.6 release goldens or expected suffix")
 	}
 	p66 := transitions[3]
 	if p66.profile != appACLCurrentProfileP66 || len(p66.predecessor.sources.names) != 67 ||
 		!bytes.Equal(p66.predecessor.sources.canonicalSet, appACLCurrentV0804MigrationGolden) ||
 		!bytes.Equal(p66.predecessorPrivilegeBody, appACLCurrentV0804PrivilegeGolden) ||
-		!equalStringSlices(p66.successor.names, []string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql"}) {
+		!equalStringSlices(p66.successor.names, []string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}) {
 		t.Fatal("compiled P66 profile differs from independent v0.80.4 release goldens or expected suffix")
 	}
 	p67 := transitions[4]
 	if p67.profile != appACLCurrentProfileP67 || len(p67.predecessor.sources.names) != 68 ||
 		!bytes.Equal(p67.predecessor.sources.canonicalSet, appACLCurrentV1153MigrationGolden) ||
 		!bytes.Equal(p67.predecessorPrivilegeBody, appACLCurrentV1153PrivilegeGolden) ||
-		!equalStringSlices(p67.successor.names, []string{"0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql"}) {
+		!equalStringSlices(p67.successor.names, []string{"0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}) {
 		t.Fatal("compiled P67 profile differs from independent v1.15.3 release goldens or expected suffix")
 	}
 	p68 := transitions[5]
 	if p68.profile != appACLCurrentProfileP68 || len(p68.predecessor.sources.names) != 69 ||
 		!bytes.Equal(p68.predecessor.sources.canonicalSet, appACLCurrentV1157MigrationGolden) ||
 		!bytes.Equal(p68.predecessorPrivilegeBody, appACLCurrentV1157PrivilegeGolden) ||
-		!equalStringSlices(p68.successor.names, []string{"0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql"}) {
+		!equalStringSlices(p68.successor.names, []string{"0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}) {
 		t.Fatal("compiled P68 profile differs from the independent v1.15.7 C68 goldens or expected suffix")
 	}
 	p69 := transitions[6]
 	if p69.profile != appACLCurrentProfileP69 || len(p69.predecessor.sources.names) != 70 ||
 		p69.predecessor.sources.names[69] != "0069_add_cpu_rates_valid.sql" ||
-		!equalStringSlices(p69.successor.names, []string{"0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql"}) {
-		t.Fatal("compiled P69 profile does not represent the C69 predecessor and 0070→0071 successor")
+		!equalStringSlices(p69.successor.names, []string{"0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}) {
+		t.Fatal("compiled P69 profile does not represent the C69 predecessor and 0070→0071→0072 successor")
 	}
 	if !bytes.Equal(p69.predecessorPrivilegeBody, p68.predecessorPrivilegeBody) {
 		t.Fatal("P69 C69 predecessor privilege body differs from the unchanged P68 privilege body")
@@ -72,11 +72,22 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		p70.predecessor.sources.names[70] != "0070_add_record_import_destination_subject.sql" ||
 		!bytes.Equal(p70.predecessor.sources.canonicalSet, appACLCurrentC70MigrationGolden) ||
 		!bytes.Equal(p70.predecessorPrivilegeBody, appACLCurrentC70PrivilegeGolden) ||
-		!equalStringSlices(p70.successor.names, []string{"0071_add_access_management.sql"}) {
-		t.Fatal("compiled P70 profile does not represent the independently frozen C70 predecessor and 0071 successor")
+		!equalStringSlices(p70.successor.names, []string{"0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}) {
+		t.Fatal("compiled P70 profile does not represent the independently frozen C70 predecessor and 0071→0072 successor")
 	}
 	if got := len(appACLCurrentTransitionDefinitions[7].predecessorManifestDigestGolden); got != 0 {
 		t.Fatalf("P70 predecessor manifest digest golden length = %d, want no role-bound digest golden", got)
+	}
+	p71 := transitions[8]
+	if p71.profile != appACLCurrentProfileP71 || len(p71.predecessor.sources.names) != 72 ||
+		p71.predecessor.sources.names[71] != "0071_add_access_management.sql" ||
+		!bytes.Equal(p71.predecessor.sources.canonicalSet, appACLCurrentC71MigrationGolden) ||
+		!bytes.Equal(p71.predecessorPrivilegeBody, appACLCurrentC71PrivilegeGolden) ||
+		!equalStringSlices(p71.successor.names, []string{"0072_add_target_observation_freshness.sql"}) {
+		t.Fatal("compiled P71 profile does not represent the independently captured C71 predecessor and 0072 successor")
+	}
+	if got := len(appACLCurrentTransitionDefinitions[8].predecessorManifestDigestGolden); got != 0 {
+		t.Fatalf("P71 predecessor manifest digest golden length = %d, want no role-bound digest golden", got)
 	}
 
 	p62, p64 := transitions[0], transitions[1]
@@ -99,6 +110,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		"0069_add_cpu_rates_valid.sql",
 		"0070_add_record_import_destination_subject.sql",
 		"0071_add_access_management.sql",
+		"0072_add_target_observation_freshness.sql",
 	}; !equalStringSlices(got, want) {
 		t.Fatalf("P62 successor migrations = %#v, want %#v", got, want)
 	}
@@ -116,6 +128,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		"0069_add_cpu_rates_valid.sql",
 		"0070_add_record_import_destination_subject.sql",
 		"0071_add_access_management.sql",
+		"0072_add_target_observation_freshness.sql",
 	}; !equalStringSlices(got, want) {
 		t.Fatalf("P64 successor migrations = %#v, want %#v", got, want)
 	}
@@ -283,8 +296,30 @@ func TestAppACLCurrentTransitionCompilerRejectsUnapprovedPrivilegeDelta(t *testi
 		if err != nil {
 			t.Fatalf("compile current source with additional grant: %v", err)
 		}
+		if _, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions); err == nil {
+			t.Fatal("compileAppACLCurrentTransitions() accepted an additional privilege in the frozen C71 predecessor")
+		}
+	})
+	t.Run("additional grant on C72 freshness fragment", func(t *testing.T) {
+		fragments := cloneAppACLCurrentMigrationFragmentsForTransitionTest(appACLCurrentMigrationFragments)
+		fragmentIndex := appACLCurrentTransitionFragmentIndex(t, fragments, "0072_add_target_observation_freshness.sql")
+		originalPrivileges := fragments[fragmentIndex].Privileges
+		fragments[fragmentIndex].Privileges = func(databaseName string) []AppACLPrivilege {
+			privileges := originalPrivileges(databaseName)
+			return append(privileges, AppACLPrivilege{
+				Subject:        AppACLSubjectCenterRuntime,
+				ObjectClass:    AppACLObjectClassTable,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: "asset_services",
+				Privilege:      AppACLPrivilegeDelete,
+			})
+		}
+		current, err := compileAppACLCurrentSourceContract(migrations.FS, fragments)
+		if err != nil {
+			t.Fatalf("compile current source with additional 0072 grant: %v", err)
+		}
 		if _, err := compileAppACLCurrentTransitions(current, appACLCurrentTransitionDefinitions); err == nil || !strings.Contains(strings.ToLower(err.Error()), "exactly") {
-			t.Fatalf("compileAppACLCurrentTransitions() error = %v, want exact-delta rejection", err)
+			t.Fatalf("compileAppACLCurrentTransitions() error = %v, want exact current-delta rejection", err)
 		}
 	})
 

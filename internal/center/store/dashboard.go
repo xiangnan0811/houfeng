@@ -46,12 +46,26 @@ type dashboardQueryer interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
+type dashboardReadTx interface {
+	dashboardQueryer
+	Commit(context.Context) error
+	Rollback(context.Context) error
+}
+
 type PostgresDashboardRepository struct {
-	db dashboardQueryer
+	db      dashboardQueryer
+	beginTx func(context.Context, pgx.TxOptions) (dashboardReadTx, error)
 }
 
 func NewPostgresDashboardRepository(db *pgxpool.Pool) *PostgresDashboardRepository {
-	return &PostgresDashboardRepository{db: db}
+	repo := &PostgresDashboardRepository{}
+	if db != nil {
+		repo.db = db
+		repo.beginTx = func(ctx context.Context, options pgx.TxOptions) (dashboardReadTx, error) {
+			return db.BeginTx(ctx, options)
+		}
+	}
+	return repo
 }
 
 func dashboardCurrentMonitoringInstanceVisibilitySQL(alias string) string {
@@ -85,37 +99,69 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 	if limit <= 0 {
 		limit = 10
 	}
+	if r == nil || r.beginTx == nil {
+		return incidents.DashboardOverview{}, errors.New("dashboard overview requires transaction support")
+	}
 
-	overview, err := loadDashboardCounts(ctx, r.db)
+	tx, err := r.beginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return incidents.DashboardOverview{}, fmt.Errorf("begin dashboard overview read transaction: %w", err)
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	now := time.Now().UTC()
+	queryer := dashboardQueryer(tx)
+	freshness, err := loadTargetFreshness(ctx, queryer, nil, now)
+	if err != nil {
+		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard target observation freshness: %w", err)
+	}
+
+	overview, err := loadDashboardCounts(ctx, queryer)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard counts: %w", err)
 	}
-	overview.SnapshotGeneratedAt = time.Now().UTC()
-	overview.GroupSummaries, err = loadDashboardGroupSummaries(ctx, r.db)
+	overview.SnapshotGeneratedAt = now
+	overview.StaleTargetCount = countStaleDashboardTargets(freshness)
+
+	overview.GroupSummaries, err = loadDashboardGroupSummaries(ctx, queryer)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard group summaries: %w", err)
 	}
-	overview.NotificationStatus, err = loadDashboardNotificationStatus(ctx, r.db)
+	applyStaleDashboardGroupCounts(overview.GroupSummaries, freshness)
+
+	overview.NotificationStatus, err = loadDashboardNotificationStatus(ctx, queryer)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard notification status: %w", err)
 	}
-	overview.AssetSummary, err = loadDashboardAssetSummary(ctx, r.db)
+	overview.AssetSummary, err = loadDashboardAssetSummary(ctx, queryer)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard asset summary: %w", err)
 	}
-	overview.AbnormalMonitoringInstances, err = loadAbnormalMonitoringInstanceSummaries(ctx, r.db, limit)
+	overview.AbnormalMonitoringInstances, err = loadAbnormalMonitoringInstanceSummaries(ctx, queryer, limit)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard abnormal monitoring instances: %w", err)
 	}
-	overview.AbnormalTargets, err = loadAbnormalTargetSummaries(ctx, r.db, limit)
+	overview.AbnormalTargets, err = loadAbnormalTargetSummaries(ctx, queryer, limit)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard abnormal targets: %w", err)
 	}
-	overview.NewIncidentTrend24h, overview.RecoveryTrend24h, err = loadDashboardTrends24h(ctx, r.db)
+	for index := range overview.AbnormalTargets {
+		projection, ok := freshness[overview.AbnormalTargets[index].TargetID]
+		if !ok {
+			return incidents.DashboardOverview{}, fmt.Errorf("dashboard target %q missing observation freshness projection", overview.AbnormalTargets[index].TargetID)
+		}
+		overview.AbnormalTargets[index].ObservationFreshness = projection.Freshness
+	}
+	overview.NewIncidentTrend24h, overview.RecoveryTrend24h, err = loadDashboardTrends24h(ctx, queryer)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard trends: %w", err)
 	}
-	events, err := r.ListEvents(ctx, EventsFilter{Limit: limit})
+	events, err := loadDashboardEvents(ctx, queryer, EventsFilter{Limit: limit})
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard recent events: %w", err)
 	}
@@ -132,7 +178,45 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 			CreatedAt:     event.CreatedAt,
 		})
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return incidents.DashboardOverview{}, fmt.Errorf("commit dashboard overview read transaction: %w", err)
+	}
 	return overview, nil
+}
+
+// isStaleDashboardTarget mirrors the dashboard stale-target contract: only
+// observed targets in a stale or partially stale state enter this collection.
+func isStaleDashboardTarget(projection targetFreshnessProjection) bool {
+	if projection.Freshness.StaleProbeCount == 0 {
+		return false
+	}
+	return projection.Freshness.State == "stale" || projection.Freshness.State == "partial"
+}
+
+func countStaleDashboardTargets(projections map[string]targetFreshnessProjection) int {
+	count := 0
+	for _, projection := range projections {
+		if isStaleDashboardTarget(projection) {
+			count++
+		}
+	}
+	return count
+}
+
+func applyStaleDashboardGroupCounts(groups []incidents.DashboardGroupSummary, projections map[string]targetFreshnessProjection) {
+	staleByGroup := make(map[string]int)
+	for _, projection := range projections {
+		if isStaleDashboardTarget(projection) {
+			group := strings.Trim(projection.Group, " ")
+			if group == "" {
+				group = "未分组"
+			}
+			staleByGroup[group]++
+		}
+	}
+	for index := range groups {
+		groups[index].StaleTargetCount = staleByGroup[groups[index].Group]
+	}
 }
 
 func loadAbnormalMonitoringInstanceSummaries(ctx context.Context, queryer dashboardQueryer, limit int) ([]incidents.DashboardMonitoringInstanceSummary, error) {
@@ -596,6 +680,10 @@ func loadDashboardAssetCostByCurrency(ctx context.Context, queryer dashboardQuer
 }
 
 func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter EventsFilter) ([]EventListItem, error) {
+	return loadDashboardEvents(ctx, r.db, filter)
+}
+
+func loadDashboardEvents(ctx context.Context, queryer dashboardQueryer, filter EventsFilter) ([]EventListItem, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 50
@@ -679,7 +767,7 @@ func (r *PostgresDashboardRepository) ListEvents(ctx context.Context, filter Eve
 	}
 	query += fmt.Sprintf(" order by %s desc limit $%d", monitoringEventOccurredAtSQL("e"), limitArg)
 
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := queryer.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query events list: %w", err)
 	}

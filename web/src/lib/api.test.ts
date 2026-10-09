@@ -131,6 +131,7 @@ import type {
   SubscriptionMonthlyBudgetRecord,
 } from './types'
 import { appRoutes } from '../app/router'
+import { targetObservationFixture } from './targetObservationFixture'
 
 function mockResponse(status: number, body: string) {
   return {
@@ -378,6 +379,7 @@ describe('api helpers', () => {
       abnormal_monitoring_instance_count: 1,
       abnormal_target_count: 2,
       unobserved_target_count: 0,
+      stale_target_count: 0,
       severe_monitoring_instance_count: 0,
       severe_target_count: 1,
       maintenance_monitoring_instance_count: 1,
@@ -398,6 +400,7 @@ describe('api helpers', () => {
           abnormal_target_count: 2,
           unobserved_target_count: 0,
           severe_monitoring_instance_count: 0,
+          stale_target_count: 0,
           severe_target_count: 1,
           maintenance_monitoring_instance_count: 1,
           maintenance_target_count: 0,
@@ -1952,6 +1955,13 @@ describe('api helpers', () => {
       group: 'prod-group',
       labels: ['public', 'external'],
       enabled_probe_count: 1,
+      observation_freshness: targetObservationFixture({
+        target_id: 'tg_001',
+        run_status: '启用',
+        lifecycle_status: 'active',
+        evaluated_at: '2026-04-27T09:20:00Z',
+        enabled_probe_count: 1,
+      }),
       matching_executor_count: 1,
       note: 'updated target note',
       current_health_status: '正常',
@@ -1993,6 +2003,13 @@ describe('api helpers', () => {
       group: 'prod-group',
       labels: ['public'],
       enabled_probe_count: 1,
+      observation_freshness: targetObservationFixture({
+        target_id: 'tg_001',
+        run_status: '启用',
+        lifecycle_status: 'active',
+        evaluated_at: '2026-04-27T09:20:00Z',
+        enabled_probe_count: 1,
+      }),
       matching_executor_count: 1,
       note: 'updated target note',
       current_health_status: '正常',
@@ -2038,6 +2055,13 @@ describe('api helpers', () => {
       lifecycle_status: 'active',
       ...requestBody,
       enabled_probe_count: 1,
+      observation_freshness: targetObservationFixture({
+        target_id: 'tg_new',
+        run_status: '启用',
+        lifecycle_status: 'active',
+        evaluated_at: '2026-04-27T09:00:00Z',
+        enabled_probe_count: 1,
+      }),
       matching_executor_count: 1,
       current_health_status: '正常',
       current_active_incident_count: 0,
@@ -2613,6 +2637,13 @@ describe('api helpers', () => {
       run_status: '暂停',
       labels: [],
       enabled_probe_count: 1,
+      observation_freshness: targetObservationFixture({
+        target_id: 'tg_001',
+        run_status: '暂停',
+        lifecycle_status: 'active',
+        evaluated_at: '2026-04-26T09:20:00Z',
+        enabled_probe_count: 1,
+      }),
       matching_executor_count: 0,
       note: '',
       current_health_status: '正常',

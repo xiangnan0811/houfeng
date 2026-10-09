@@ -31,7 +31,7 @@
 .targets-table__trend-value{font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:9px;color:var(--text-secondary);line-height:1}
 .targets-table__trends-empty{font-size:var(--type-small-size);color:var(--text-muted);font-style:italic}
 .targets-table .targets-table__issue-count{color:var(--text-primary);font-weight:600;flex-shrink:0}
-.targets-table .targets-table__issue-summary{font-size:var(--type-small-size);color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.targets-table .targets-table__issue-summary{font-size:var(--type-small-size);color:var(--text-secondary);white-space:normal;overflow-wrap:anywhere;min-width:0}
 .target-maintenance-list{margin-top:0}
 .target-activity-actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-2);flex-wrap:wrap}
 .target-probe-section{min-width:0;max-width:100%}

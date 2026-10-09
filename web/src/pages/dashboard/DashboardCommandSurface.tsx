@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { MonoDigits, Sparkline, StatusGlyph, Timestamp } from '../../components/atoms'
 import type {
   DashboardJudgement,
+  DashboardObservabilityModel,
   DashboardReadyModel,
   DashboardTone,
 } from './dashboardModel'
@@ -18,6 +19,7 @@ type DashboardCommandSurfaceProps = {
   renewals: DashboardRenewalPanel
   supportingLoading: boolean
   onRetrySupporting?: () => void
+  overviewRefreshFailed?: boolean
 }
 
 function glyphState(tone: DashboardTone) {
@@ -32,6 +34,7 @@ function signalLabel(model: DashboardReadyModel): string {
   if (model.mode === 'abnormal') return '异常'
   if (model.mode === 'maintenance') return '维护'
   if (model.title === '尚有目标无观测') return '尚有目标无观测'
+  if (model.title === '观测已过期') return '观测已过期'
   if (model.mode === 'stable' && model.tone === 'normal') return '当前运行异常计数为 0'
   if (model.mode === 'stable') return '待核对'
   return model.title
@@ -64,6 +67,38 @@ function JudgementItem({ item, trend }: { item: DashboardJudgement; trend: numbe
   )
 }
 
+function StaleObservationFacts({
+  observation,
+  ownsGlobalCount,
+}: {
+  observation: DashboardObservabilityModel
+  ownsGlobalCount: boolean
+}) {
+  const showGlobal = observation.staleTargetCount > 0 && !ownsGlobalCount
+  if (!showGlobal && observation.staleGroups.length === 0) return null
+  return (
+    <div className="dashboard-stale-facts">
+      {showGlobal ? (
+        <Link to={DASHBOARD_LINKS.targetsStale} aria-label={`观测过期 ${observation.staleTargetCount}`}>
+          观测过期 <MonoDigits>{observation.staleTargetCount}</MonoDigits>
+        </Link>
+      ) : null}
+      {observation.staleGroups.length > 0 ? (
+        <ul className="dashboard-stale-groups" aria-label="分组观测过期">
+          {observation.staleGroups.map((group) => (
+            <li key={group.group}>
+              <Link to={group.to} aria-label={`${group.group} 观测过期 ${group.staleTargetCount}`}>
+                <span>{group.group}</span>
+                <MonoDigits>{group.staleTargetCount}</MonoDigits>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
 export function DashboardCommandSurface({
   model,
   incidentTrend,
@@ -71,6 +106,7 @@ export function DashboardCommandSurface({
   renewals,
   supportingLoading,
   onRetrySupporting,
+  overviewRefreshFailed = false,
 }: DashboardCommandSurfaceProps) {
   const observation = model.observability
   const billingUnavailable = model.billingEvidence.status === 'unavailable'
@@ -104,6 +140,13 @@ export function DashboardCommandSurface({
           </Link>
         </section>
       </header>
+
+      {overviewRefreshFailed ? (
+        <p className="dashboard-refresh-failure" role="status">
+          更新失败，显示上次结果
+          <Timestamp value={model.snapshotGeneratedAt} mode="absolute" />
+        </p>
+      ) : null}
 
       {onRetrySupporting ? (
         <div className="dashboard-degradation" role="status" aria-label="局部数据不可用">
@@ -146,6 +189,10 @@ export function DashboardCommandSurface({
               尚无观测 <MonoDigits>{observation.unobservedTargetCount}</MonoDigits>
             </Link>
           ) : null}
+          <StaleObservationFacts
+            observation={observation}
+            ownsGlobalCount={model.judgements.some((item) => item.id === 'observability' && item.to === DASHBOARD_LINKS.targetsStale)}
+          />
           {observation.attentionItems.length === 0 ? (
             <p className="dashboard-evidence-lane__empty">
               {model.mode === 'onboarding'
