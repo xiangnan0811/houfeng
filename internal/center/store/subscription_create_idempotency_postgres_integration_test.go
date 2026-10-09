@@ -116,7 +116,7 @@ func TestCreateSubscriptionIdempotentDisplayNameIsPartOfTheRequest(t *testing.T)
 		t.Fatalf("first CreateSubscriptionIdempotent error type = %T", err)
 	}
 	if first.DisplayName != "东京主机" {
-		t.Fatalf("stored display name = %q, want 东京主机", first.DisplayName)
+		t.Fatalf("stored display name matches = %t", first.DisplayName == "东京主机")
 	}
 	// 只差首尾空白时 normalize 后是同一份请求，按重放返回原记录。
 	replay, replayed, err := subRepo.CreateSubscriptionIdempotent(ctx, named("  东京主机 "), key)
@@ -124,7 +124,7 @@ func TestCreateSubscriptionIdempotentDisplayNameIsPartOfTheRequest(t *testing.T)
 		t.Fatalf("whitespace replay err/replayed/same id = %T/%t/%t", err, replayed, replay.SubscriptionID == first.SubscriptionID)
 	}
 	if _, _, err := subRepo.CreateSubscriptionIdempotent(ctx, named("大阪主机"), key); !errors.Is(err, subscriptions.ErrIdempotencyKeyReused) {
-		t.Fatalf("renamed replay error = %v, want idempotency key reused", err)
+		t.Fatalf("renamed replay sentinel/error type = %t/%T", errors.Is(err, subscriptions.ErrIdempotencyKeyReused), err)
 	}
 
 	var count int
@@ -133,7 +133,7 @@ func TestCreateSubscriptionIdempotentDisplayNameIsPartOfTheRequest(t *testing.T)
 		t.Fatalf("count subscriptions error type = %T", err)
 	}
 	if count != 1 || storedName != "东京主机" {
-		t.Fatalf("subscription rows/name = %d/%q, want one row named 东京主机", count, storedName)
+		t.Fatalf("one row/name matches = %t/%t", count == 1, storedName == "东京主机")
 	}
 }
 
