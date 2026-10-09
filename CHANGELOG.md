@@ -27,6 +27,22 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.20.0](https://github.com/xiangnan0811/houfeng/compare/v1.19.0...v1.20.0) (2026-10-09)
+
+
+### Features
+
+* **ux:** 简化接入与录入流程，收敛开发者用语与内部 ID ([014ea68](https://github.com/xiangnan0811/houfeng/commit/014ea68af9182224988ab4f3c7f08dad5c638922))
+* **ux:** 逾期续费、补录成本趋势、失联表达与探测执行者引导 ([967bc45](https://github.com/xiangnan0811/houfeng/commit/967bc45e03a7c39f31d32615083781dd5df24d15))
+
+
+### Bug Fixes
+
+* **subscriptions:** 补录外币月份按此后最早汇率估算，不再整段不画趋势 ([05b1f65](https://github.com/xiangnan0811/houfeng/commit/05b1f65850ada6ac80e8f555dc975477a4764eba))
+* **ux:** 修正未来时间、地址校验与标签输入等走查问题 ([2f1bae2](https://github.com/xiangnan0811/houfeng/commit/2f1bae23ec1a86f1a5f0a58c278f3d05a6212d06))
+* **ux:** 修正走查发现的视觉缺陷 ([f0d8362](https://github.com/xiangnan0811/houfeng/commit/f0d8362af6ea01e0a13e6e020a3a00ca0e1fc4bf))
+* **ux:** 落实 v1.19.0 体验走查修复 ([040783b](https://github.com/xiangnan0811/houfeng/commit/040783b75240c6e2cd923c7401e9f77e5f476e39))
+
 ## [1.19.0](https://github.com/xiangnan0811/houfeng/compare/v1.18.0...v1.19.0) (2026-10-09)
 
 
