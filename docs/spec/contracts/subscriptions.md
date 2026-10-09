@@ -48,7 +48,7 @@
 
 #### 2. Signatures
 
-- HTTP: `POST /api/subscriptions` 与 `POST /api/vps/{vps_id}/subscriptions` 均要求 header `Idempotency-Key: <8..128 characters>`。collection body 是完整 `CreateInput`；scoped body 是账单事实 DTO `vpsSubscriptionCreateRequest`，拒绝未知字段。
+- HTTP: `POST /api/subscriptions` 与 `POST /api/vps/{vps_id}/subscriptions` 均要求 header `Idempotency-Key: <8..128 characters>`。collection body 是完整 `CreateInput`；scoped body 是账单事实 DTO `vpsSubscriptionCreateRequest`（含可选的订阅名称 `display_name`），拒绝未知字段。
 - Store: `CreateSubscriptionIdempotent(ctx, input, idempotencyKey) (record, replayed, error)`。
 - DB: `subscription_create_idempotency(idempotency_key text primary key, request_digest text, subscription_id text references subscriptions on delete cascade, created_at timestamptz)`。
 
@@ -317,7 +317,7 @@ message := sensitiveProviderErrorPattern.ReplaceAllString(err.Error(), "$1=[reda
   - `auto_renew_cancelled: boolean`
   - `payment_method: string`
   - `note: string`
-- Optional/non-null fields: `billing_period_unit: string`、`billing_period_length: number`、`renewal_mode: string`。
+- Optional/non-null fields: `billing_period_unit: string`、`billing_period_length: number`、`renewal_mode: string`、`display_name: string`（订阅名称，normalize 时裁剪空白，空串表示不命名；与其他业务字段一样进入幂等 digest，同一 key 换名称返回 409 `idempotency_key_reused`）。
 - Optional/nullable date fields: `started_at: date | null`、`renew_at: date | null`。
 
 ### 3. Contracts
@@ -349,7 +349,8 @@ message := sensitiveProviderErrorPattern.ReplaceAllString(err.Error(), "$1=[reda
 | `price: 0`、两个 boolean 为 `false` | 算已提供，原值进入 domain input |
 | `payment_method: ""`、`note: ""` | 算已提供；现有 normalize 可 trim，但 presence 校验不得拒绝 |
 | required 字段已提供但业务值非法 | 由现有 `NormalizeCreateInput` / `ValidateCreateInput` 返回 `400 invalid input` |
-| body 包含 collection-only 或未知字段 | `400 invalid json`，保持 strict decode |
+| body 包含 collection-only 或未知字段 | `400 invalid json`，保持 strict decode；`display_name` 属于 scoped DTO，不再是 collection-only |
+| 同一 `Idempotency-Key` 仅 `display_name` 不同 | `409 idempotency_key_reused`，不新增行 |
 | exported DTO field 缺少/使用空 JSON 名称 | contract parser 失败；不得静默从 manifest 比较中省略该 wire field |
 | unknown named pointer 的底层元素恰为受支持 date/scalar | Go mirror 在解引用前失败；不得按 element 猜测合法 nullable 字段 |
 | anonymous embedded field 未精确标记 `json:"-"` | Go 与 TS mirror 都失败；不得静默省略 encoding/json 可见的 promoted wire surface |

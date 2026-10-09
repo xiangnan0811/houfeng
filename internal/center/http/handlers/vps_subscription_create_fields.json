@@ -11,5 +11,6 @@
   {"name": "auto_renew_cancelled", "type": "boolean", "required": true, "nullable": false},
   {"name": "renewal_mode", "type": "string", "required": false, "nullable": false},
   {"name": "payment_method", "type": "string", "required": true, "nullable": false},
-  {"name": "note", "type": "string", "required": true, "nullable": false}
+  {"name": "note", "type": "string", "required": true, "nullable": false},
+  {"name": "display_name", "type": "string", "required": false, "nullable": false}
 ]

@@ -2445,6 +2445,7 @@ export type CreateVPSSubscriptionInput = {
   renewal_mode?: RenewalMode | string
   payment_method: string
   note: string
+  display_name?: string
 }
 
 export type UpdateSubscriptionInput = Partial<CreateSubscriptionInput>

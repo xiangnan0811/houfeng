@@ -119,6 +119,8 @@ export type MonitoringInstanceCreateDraftState = {
 }
 
 export type SubscriptionDraftState = {
+  /** null 表示用户还没改过名称，表单与提交沿用 VPS 名称。 */
+  displayName: string | null
   price: string
   currency: string
   customCurrency: string

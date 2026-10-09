@@ -19,7 +19,7 @@ const TS_SOURCE_PATH = resolve(TEST_DIRECTORY, 'types.ts')
 
 type ExtraCollectionField = Extract<
   keyof CreateVPSSubscriptionInput,
-  'vps_id' | 'status' | 'display_name' | 'cost_category' | 'labels' | 'trial_ends_at' | 'ends_at'
+  'vps_id' | 'status' | 'cost_category' | 'labels' | 'trial_ends_at' | 'ends_at'
 >
 const _noCollectionFields: ExtraCollectionField extends never ? true : never = true
 

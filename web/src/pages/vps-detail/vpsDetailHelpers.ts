@@ -71,6 +71,7 @@ export const INITIAL_SERVICE_DRAFT: ServiceDraftState = {
 }
 
 export const INITIAL_SUBSCRIPTION_DRAFT: SubscriptionDraftState = {
+  displayName: null,
   price: '',
   currency: 'USD',
   customCurrency: '',
@@ -135,7 +136,7 @@ export const INITIAL_DOMAIN_DRAFT: DomainDraftState = {
   note: '',
 }
 
-export function buildSubscriptionInput(form: SubscriptionDraftState): CreateVPSSubscriptionInput {
+export function buildSubscriptionInput(form: SubscriptionDraftState, defaultName = ''): CreateVPSSubscriptionInput {
   const price = Number.parseFloat(form.price.trim())
   if (!Number.isFinite(price) || price < 0) {
     throw new Error('价格必须为非负数字。')
@@ -167,6 +168,7 @@ export function buildSubscriptionInput(form: SubscriptionDraftState): CreateVPSS
     renewal_mode: renewalMode,
     payment_method: paymentMethod,
     note: form.note.trim(),
+    display_name: (form.displayName ?? defaultName).trim(),
   }
 }
 
