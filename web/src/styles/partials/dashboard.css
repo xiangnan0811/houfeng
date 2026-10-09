@@ -54,6 +54,13 @@
 .dashboard-degradation span{color:var(--text-secondary);font-size:var(--type-small-size);line-height:var(--type-small-leading)}
 .dashboard-degradation .btn{flex:0 0 auto}
 
+.dashboard-refresh-failure{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-2);margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:var(--type-small-leading)}
+.dashboard-stale-facts{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-2);min-width:0}
+.dashboard-stale-facts>a{color:inherit}
+.dashboard-stale-groups{display:flex;flex-direction:column;gap:var(--space-1);width:100%;margin:0;padding:0;list-style:none}
+.dashboard-stale-groups a{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-3);min-width:0;padding:var(--space-1) 0;color:inherit;text-decoration:none}
+.dashboard-stale-groups a span:first-child{min-width:0;overflow-wrap:anywhere}
+
 /* 桌面两栏：左侧观测与资产证据，右侧续费与最近动态；窄于 1024px 时单栏堆叠。 */
 .dashboard-workspace{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,1fr);gap:var(--space-4);align-items:start;min-width:0}
 .dashboard-workspace__main,.dashboard-workspace__side{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}

@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { targetObservationFixture } from '../lib/targetObservationFixture'
 import { TargetDetailPage } from './TargetDetailPage'
 
 vi.mock('../lib/readOnlyPreview', () => ({
@@ -40,6 +41,13 @@ describe('TargetDetailPage read-only preview', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+            observation_freshness: targetObservationFixture({
+              target_id: 'tg_001',
+              run_status: '启用',
+              lifecycle_status: 'active',
+              evaluated_at: '2026-04-24T09:05:00Z',
+              enabled_probe_count: 1,
+            }),
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',

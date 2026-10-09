@@ -8,7 +8,12 @@ import {
   Timestamp,
 } from '../atoms'
 import { formatConfigSummary, formatLatency } from '../../lib/format'
-import type { ProbeItemRecord, ProbeObservation } from '../../lib/types'
+import type { ProbeItemRecord, ProbeObservation, ProbeObservationFreshness } from '../../lib/types'
+import {
+  probeDeadlinePrefix,
+  probeFreshnessStateLabel,
+  probeFreshnessTone,
+} from './observationFreshness'
 import { probeItemObservationEmptyCopy } from './probeObservationGap'
 
 export type PendingProbeConfirmation = {
@@ -59,6 +64,12 @@ function ProbeLatestResult({
   return (
     <span className="target-probe-table__result">
       <span>{result.label}</span>
+      {observation.maintenance_context ? (
+        <span className="target-probe-table__qualifier">维护上下文</span>
+      ) : null}
+      {observation.is_backfilled ? (
+        <span className="target-probe-table__qualifier">回填记录</span>
+      ) : null}
       {observation.latency_ms != null ? (
         <>
           <span aria-hidden>·</span>
@@ -86,9 +97,55 @@ function ProbeLatestResult({
   )
 }
 
+function ProbeFreshnessCells({
+  enabled,
+  freshness,
+}: {
+  enabled: boolean
+  freshness: ProbeObservationFreshness | undefined
+}) {
+  if (!enabled) {
+    return {
+      state: <span className="target-probe-table__muted">已停用</span>,
+      cadence: <span className="target-probe-table__muted">—</span>,
+      observed: <span className="target-probe-table__muted">—</span>,
+      deadline: <span className="target-probe-table__muted">—</span>,
+    }
+  }
+  if (!freshness) {
+    return {
+      state: <span className="target-probe-table__muted">—</span>,
+      cadence: <span className="target-probe-table__muted">—</span>,
+      observed: <span className="target-probe-table__muted">—</span>,
+      deadline: <span className="target-probe-table__muted">—</span>,
+    }
+  }
+  return {
+    state: (
+      <StatusBadge
+        label={probeFreshnessStateLabel(freshness.state)}
+        tone={probeFreshnessTone(freshness.state)}
+      />
+    ),
+    cadence: <MonoDigits>{freshness.effective_frequency_tier}</MonoDigits>,
+    observed: freshness.last_observed_at ? (
+      <Timestamp value={freshness.last_observed_at} mode="relative" />
+    ) : (
+      <span className="target-probe-table__muted">暂无有效观测</span>
+    ),
+    deadline: (
+      <span className="target-probe-table__freshness">
+        <span>{probeDeadlinePrefix(freshness.state)}</span>
+        <Timestamp value={freshness.deadline_at} mode="absolute" />
+      </span>
+    ),
+  }
+}
+
 type TargetProbeListProps = {
   probeItems: ProbeItemRecord[]
   observationsByProbe: Map<string, ProbeObservation[]>
+  freshnessByProbe: Map<string, ProbeObservationFreshness>
   actionsDisabled: boolean
   pendingProbeConfirmation: PendingProbeConfirmation | null
   confirmationCardDisabled: boolean
@@ -105,6 +162,7 @@ type TargetProbeListProps = {
 export function TargetProbeList({
   probeItems,
   observationsByProbe,
+  freshnessByProbe,
   actionsDisabled,
   pendingProbeConfirmation,
   confirmationCardDisabled,
@@ -153,12 +211,34 @@ export function TargetProbeList({
     {
       key: 'status',
       label: '状态',
-      render: (probeItem) => <StatusBadge label={probeItem.enabled ? '启用' : '停用'} />,
+      render: (probeItem) => (
+        <StatusBadge label={probeItem.enabled ? '启用' : '已停用'} tone={probeItem.enabled ? 'green' : 'slate'} />
+      ),
+    },
+    {
+      key: 'observation',
+      label: '观测',
+      render: (probeItem) => (
+        ProbeFreshnessCells({
+          enabled: probeItem.enabled,
+          freshness: freshnessByProbe.get(probeItem.probe_item_id),
+        }).state
+      ),
     },
     {
       key: 'frequency',
       label: '频率',
       render: (probeItem) => <MonoDigits>{probeItem.frequency_tier}</MonoDigits>,
+    },
+    {
+      key: 'effective-frequency',
+      label: '有效周期',
+      render: (probeItem) => (
+        ProbeFreshnessCells({
+          enabled: probeItem.enabled,
+          freshness: freshnessByProbe.get(probeItem.probe_item_id),
+        }).cadence
+      ),
     },
     {
       key: 'latest-result',
@@ -178,6 +258,26 @@ export function TargetProbeList({
         if (observation) return <Timestamp value={observation.observed_at} mode="relative" />
         return <span className="target-probe-table__muted">—</span>
       },
+    },
+    {
+      key: 'last-valid',
+      label: '最近有效观测',
+      render: (probeItem) => (
+        ProbeFreshnessCells({
+          enabled: probeItem.enabled,
+          freshness: freshnessByProbe.get(probeItem.probe_item_id),
+        }).observed
+      ),
+    },
+    {
+      key: 'deadline',
+      label: '期限',
+      render: (probeItem) => (
+        ProbeFreshnessCells({
+          enabled: probeItem.enabled,
+          freshness: freshnessByProbe.get(probeItem.probe_item_id),
+        }).deadline
+      ),
     },
     {
       key: 'actions',

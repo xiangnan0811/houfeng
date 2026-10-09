@@ -1,5 +1,6 @@
 import type {
   DashboardAssetSummary,
+  DashboardGroupSummary,
   DashboardNotificationStatus,
   DashboardOverview,
   SubscriptionOverview,
@@ -47,6 +48,7 @@ export function dashboardOverviewFixture(
     abnormal_monitoring_instance_count: 0,
     abnormal_target_count: 0,
     unobserved_target_count: 0,
+    stale_target_count: 0,
     severe_monitoring_instance_count: 0,
     severe_target_count: 0,
     maintenance_monitoring_instance_count: 0,
@@ -65,6 +67,25 @@ export function dashboardOverviewFixture(
     abnormal_monitoring_instances: overrides.abnormal_monitoring_instances ?? [],
     abnormal_targets: overrides.abnormal_targets ?? [],
     recent_events: overrides.recent_events ?? [],
+  }
+}
+
+export function dashboardGroupSummaryFixture(
+  overrides: Partial<DashboardGroupSummary> = {},
+): DashboardGroupSummary {
+  return {
+    group: 'edge',
+    monitoring_instance_count: 1,
+    target_count: 2,
+    abnormal_monitoring_instance_count: 0,
+    abnormal_target_count: 0,
+    unobserved_target_count: 0,
+    severe_monitoring_instance_count: 0,
+    stale_target_count: 0,
+    severe_target_count: 0,
+    maintenance_monitoring_instance_count: 0,
+    maintenance_target_count: 0,
+    ...overrides,
   }
 }
 

@@ -1,9 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { targetObservationFixture } from '../lib/targetObservationFixture'
 import { DashboardPage } from './DashboardPage'
 import {
+  dashboardGroupSummaryFixture,
   dashboardOverviewFixture,
   subscriptionOverviewFixture,
   vpsAssetFixture,
@@ -77,7 +79,13 @@ async function primaryAction() {
 
 describe('DashboardPage', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      value: 'visible',
+    })
   })
 
   it.each([
@@ -312,6 +320,13 @@ describe('DashboardPage', () => {
             run_status: '启用',
             group: 'prod',
             current_health_status: '严重',
+            observation_freshness: targetObservationFixture({
+              target_id: 'tg_001',
+              run_status: '启用',
+              lifecycle_status: 'active',
+              evaluated_at: '2026-07-10T06:25:00Z',
+              last_failure_at: '2026-07-10T06:22:00Z',
+            }),
             last_failure_at: '2026-07-10T06:22:00Z',
             current_active_incident_count: 1,
             current_primary_issue_summary: 'HTTPS 探测连续失败',
@@ -457,5 +472,160 @@ describe('DashboardPage', () => {
     expect(await screen.findByText(/续费队列暂不可用/)).toBeInTheDocument()
     expect(screen.queryByRole('list', { name: '即将续费的订阅' })).not.toBeInTheDocument()
     expect(screen.queryByText(/内没有待续费的订阅/)).not.toBeInTheDocument()
+  })
+
+  it('links stale targets separately from abnormal counts and keeps the group', async () => {
+    renderDashboard({
+      dashboard: {
+        body: dashboardOverviewFixture({
+          abnormal_target_count: 2,
+          stale_target_count: 2,
+          group_summaries: [
+            dashboardGroupSummaryFixture({ group: 'edge', stale_target_count: 2 }),
+            dashboardGroupSummaryFixture({ group: '未分组', stale_target_count: 0 }),
+          ],
+        }),
+      },
+    })
+
+    const judgementRail = await screen.findByRole('region', { name: '判断摘要' })
+    expect(within(judgementRail).getByRole('link', { name: /观测异常：2/ })).toBeInTheDocument()
+    expect(within(judgementRail).queryByRole('link', { name: /观测异常：4/ })).not.toBeInTheDocument()
+    const evidence = screen.getByRole('region', { name: '观测证据' })
+    expect(within(evidence).getByRole('link', { name: '观测过期 2' })).toHaveAttribute('href', '/targets?view=stale')
+    expect(within(evidence).getByRole('link', { name: 'edge 观测过期 2' })).toHaveAttribute('href', '/targets?view=stale&group=edge')
+    expect(within(evidence).queryByRole('link', { name: /未分组/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '按 Group 分布' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the last dashboard snapshot when a later read fails', async () => {
+    let dashboardCalls = 0
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/dashboard') {
+        dashboardCalls += 1
+        if (dashboardCalls === 1) {
+          return Promise.resolve(mockJSONResponse(dashboardOverviewFixture({
+            abnormal_target_count: 2,
+            stale_target_count: 3,
+            snapshot_generated_at: '2026-07-10T06:25:00Z',
+          })))
+        }
+        return Promise.resolve(mockJSONResponse({ error: 'dashboard unavailable' }, 503))
+      }
+      if (url === '/api/vps') return Promise.resolve(mockJSONResponse([vpsAssetFixture()]))
+      if (url === '/api/subscriptions/overview') return Promise.resolve(mockJSONResponse(subscriptionOverviewFixture()))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('link', { name: '观测过期 3' })).toBeInTheDocument()
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('更新失败，显示上次结果'))
+    expect(screen.getByRole('link', { name: /观测异常：2/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '观测过期 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '工作台不可用' })).not.toBeInTheDocument()
+    expect(screen.queryByText('最新')).not.toBeInTheDocument()
+  })
+
+  it('clears the dashboard after an authorization or not-found refresh', async () => {
+    let dashboardCalls = 0
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/dashboard') {
+        dashboardCalls += 1
+        if (dashboardCalls === 1) {
+          return Promise.resolve(mockJSONResponse(dashboardOverviewFixture({ stale_target_count: 2 })))
+        }
+        return Promise.resolve(mockJSONResponse({ error: 'missing' }, 404))
+      }
+      if (url === '/api/vps') return Promise.resolve(mockJSONResponse([vpsAssetFixture()]))
+      if (url === '/api/subscriptions/overview') return Promise.resolve(mockJSONResponse(subscriptionOverviewFixture()))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('link', { name: /观测过期：2/ })).toBeInTheDocument()
+    fireEvent(window, new Event('focus'))
+    expect(await screen.findByRole('heading', { name: '工作台不可用' })).toBeInTheDocument()
+    expect(screen.getByText('工作台不存在')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /观测过期/ })).not.toBeInTheDocument()
+    expect(screen.queryByText('更新失败，显示上次结果')).not.toBeInTheDocument()
+  })
+
+  it('refreshes the visible dashboard every 30 seconds and skips the hidden interval', async () => {
+    vi.useFakeTimers()
+    let dashboardCalls = 0
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/dashboard') {
+        dashboardCalls += 1
+        return Promise.resolve(mockJSONResponse(dashboardOverviewFixture({
+          stale_target_count: dashboardCalls,
+        })))
+      }
+      if (url === '/api/vps') return Promise.resolve(mockJSONResponse([vpsAssetFixture()]))
+      if (url === '/api/subscriptions/overview') return Promise.resolve(mockJSONResponse(subscriptionOverviewFixture()))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+    await act(async () => {})
+    expect(dashboardCalls).toBe(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+    })
+    expect(dashboardCalls).toBe(2)
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' })
+    fireEvent(document, new Event('visibilitychange'))
+    fireEvent(window, new Event('focus'))
+    await act(async () => {
+      vi.advanceTimersByTime(30_000)
+    })
+    expect(dashboardCalls).toBe(2)
+  })
+
+  it('does not apply a dashboard response after the page unmounts', async () => {
+    let resolveDashboard: (response: Response) => void = () => {}
+    const pending = new Promise<Response>((resolve) => {
+      resolveDashboard = resolve
+    })
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/dashboard') return pending
+      if (url === '/api/vps') return Promise.resolve(mockJSONResponse([vpsAssetFixture()]))
+      if (url === '/api/subscriptions/overview') return Promise.resolve(mockJSONResponse(subscriptionOverviewFixture()))
+      return Promise.resolve(mockJSONResponse({ error: `unhandled ${url}` }, 404))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const view = render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+    view.unmount()
+    resolveDashboard(mockJSONResponse(dashboardOverviewFixture({
+      abnormal_target_count: 9,
+      stale_target_count: 9,
+    })))
+    await act(async () => {})
+    expect(screen.queryByRole('heading', { name: '工作台' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: /观测过期/ })).not.toBeInTheDocument()
   })
 })

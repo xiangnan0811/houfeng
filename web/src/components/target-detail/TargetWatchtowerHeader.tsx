@@ -3,6 +3,7 @@ import { Button } from '../atoms/Button'
 import { formatLabelList } from '../../lib/format'
 import type { TargetRecord } from '../../lib/types'
 import { targetControlBadge, targetHealthBadge, targetTypePresentation } from '../../pages/targets/targetHelpers'
+import { showsLatestKnownHealth } from './observationFreshness'
 import type { TargetRuntimeAction } from './TargetRuntimeControls'
 
 const RUNTIME_ACTION_BUTTONS_BY_RUN_STATUS: Record<
@@ -71,6 +72,9 @@ export function TargetWatchtowerHeader({
           ) : null}
           {healthBadge ? (
             <Badge variant="state" tone={healthBadge.tone}>{healthBadge.label}</Badge>
+          ) : null}
+          {showsLatestKnownHealth(target) ? (
+            <span className="target-detail-header__health-caption">最近已知健康</span>
           ) : null}
           {readOnly ? <span className="monitoring-detail-readonly">只读预览</span> : null}
         </div>

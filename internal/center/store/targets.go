@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -192,8 +193,9 @@ func (r *PostgresTargetRepository) ListTargetsByScope(ctx context.Context, scope
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate targets: %w", err)
 	}
+	rows.Close()
 
-	return records, nil
+	return hydrateTargetRecords(ctx, r.db, records, time.Now().UTC())
 }
 
 func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, targetID string, input targets.UpdateMetadataInput) (targets.TargetRecord, error) {
@@ -240,6 +242,10 @@ func (r *PostgresTargetRepository) UpdateTargetMetadata(ctx context.Context, tar
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("update target metadata %q: %w", targetID, err)
 	}
+	record, err = hydrateTargetRecord(ctx, tx, record, time.Now().UTC())
+	if err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("hydrate target metadata %q: %w", targetID, err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("commit target metadata update %q: %w", targetID, err)
 	}
@@ -256,6 +262,10 @@ func (r *PostgresTargetRepository) GetTarget(ctx context.Context, targetID strin
 	}
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("query target %q: %w", targetID, err)
+	}
+	record, err = hydrateTargetRecord(ctx, r.db, record, time.Now().UTC())
+	if err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("hydrate target %q: %w", targetID, err)
 	}
 	return record, nil
 }
@@ -353,6 +363,10 @@ func (r *PostgresTargetRepository) CreateTarget(ctx context.Context, input targe
 	))
 	if err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("create target: %w", err)
+	}
+	record, err = hydrateTargetRecord(ctx, tx, record, time.Now().UTC())
+	if err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("hydrate created target: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("commit create target: %w", err)
@@ -636,6 +650,10 @@ func (r *PostgresTargetRepository) runTargetLifecycleAction(ctx context.Context,
 	if err != nil {
 		return targets.TargetRecord{}, err
 	}
+	record, err = hydrateTargetRecord(ctx, tx, record, time.Now().UTC())
+	if err != nil {
+		return targets.TargetRecord{}, fmt.Errorf("hydrate target %s response for %q: %w", action, targetID, err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return targets.TargetRecord{}, fmt.Errorf("commit target %s transaction for %q: %w", action, targetID, err)
 	}
@@ -668,10 +686,18 @@ func transitionTargetTx(ctx context.Context, tx pgx.Tx, targetID, action string)
 		return record, false, err
 	}
 
+	// The transaction may have waited for the graph lock; clock_timestamp in the
+	// guarded write keeps the reset boundary at the actual transition.
+	resetFreshness := spec.runStatus == targets.RunStatusEnabled && current.RunStatus != targets.RunStatusEnabled
+
 	record, err := scanTarget(tx.QueryRow(ctx, `
 		update targets
 		set control_revision=control_revision+1, run_status = $2,
 			lifecycle_status = $4,
+			freshness_reset_at = case
+				when $5 then clock_timestamp()
+				else freshness_reset_at
+			end,
 			updated_at = now()
 		where target_id = $1
 			and run_status = $3
@@ -680,6 +706,7 @@ func transitionTargetTx(ctx context.Context, tx pgx.Tx, targetID, action string)
 		spec.runStatus,
 		current.RunStatus,
 		spec.lifecycleStatus,
+		resetFreshness,
 	))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return targets.TargetRecord{}, false, fmt.Errorf("%w: target %q changed run status during %s", ErrInvalidTargetRuntimeTransition, targetID, action)
@@ -795,6 +822,8 @@ func (r *PostgresTargetRepository) CreateProbeItem(ctx context.Context, targetID
 	return record, nil
 }
 
+// Use the database wall clock for a new probe generation rather than a
+// transaction-start timestamp.
 func (r *PostgresTargetRepository) UpdateProbeItem(ctx context.Context, targetID string, probeItemID string, input targets.UpdateProbeItemInput) (targets.ProbeItemRecord, error) {
 	config := input.Config
 	if len(config) == 0 {
@@ -808,6 +837,13 @@ func (r *PostgresTargetRepository) UpdateProbeItem(ctx context.Context, targetID
 			frequency_tier = $5,
 			timeout_seconds = $6,
 			config = $7::jsonb,
+			freshness_reset_at = case
+				when (enabled = false and $4 = true)
+					or probe_kind is distinct from $3
+					or config is distinct from $7::jsonb
+				then clock_timestamp()
+				else freshness_reset_at
+			end,
 			updated_at = now()
 		where target_id = $1
 			and probe_item_id = $2

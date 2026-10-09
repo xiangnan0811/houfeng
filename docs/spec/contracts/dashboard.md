@@ -12,8 +12,8 @@
 - 运行关注队列、全局/分组计数及异常关联 VPS 计数先按绑定和可信在线证据投影健康：绑定非「已绑定」为「绑定待确认」，缺少可信在线时间或健康证据为「数据不可用」。即使 incident 存储摘要仍为「正常」，也必须进入关注集合；原始或回填心跳不能替代可信在线证据。
 - Target 当前可见性要求其生命周期为 `active`，通过未结束的服务/域名关联判断 VPS 归属。共享探测只要仍有管理中的承载关联就保留。
 - 当前可见目标包括无当前承载关联的目标；存在承载关联时，至少一条关联须属于 active VPS。目标健康读取按退役、暂停、维护、无成功/失败时间、存储健康的顺序投影，不改写 incident 摘要。
-- `unobserved_target_count` 独立统计当前可见、启用、`last_success_at` 与 `last_failure_at` 均为空的目标。异常目标仅统计同一可见/启用范围内具有任一观测时间且存储健康为关注、告警或严重的目标；严重是异常子集。全局、分组、异常预览与关联 VPS 聚合使用同一集合，`limit` 不限制任何计数。
-- 目标无观测与已知异常分别表达，不将无观测加入异常；监控实例既有绑定待确认/数据不足关注集合不变。已有样本的新鲜度不在此投影中新增阈值，历史正常及零异常计数都不是当前健康保证。
+- `unobserved_target_count` 独立统计当前可见、启用、`last_success_at` 与 `last_failure_at` 均为空的目标。`stale_target_count` 独立统计当前可见、启用、至少有目标成功/失败历史且 `observation_freshness.stale_probe_count > 0` 的目标；等待新观测、无探测项、未观测和非当前目标不计入过期集合。异常目标仅统计同一可见/启用范围内具有任一观测时间且存储健康为关注、告警或严重的目标；严重是异常子集。全局、分组、异常预览与关联 VPS 聚合使用同一集合，`limit` 不限制任何计数。
+- 目标观测新鲜度由 Center 使用启用探测项的有效周期和超时统一计算：`max(3 × effective_frequency, 60s) + timeout`；目标详情和异常预览复用同一投影。它不改变 `last_success_at`/`last_failure_at`、incident 健康、异常/严重集合或通知语义，历史正常但当前证据过期仍是最近已知健康而非当前正常。
 - 成本口径：管理中 VPS 的 active subscriptions `monthly_price` 按币种求和；已归档潜在扣费在成本页单列，不进入当前资产预计成本。
 - `no_renewal_vps_count` 统计决定不续费的管理中 VPS；`archived_vps_count` 统计归档资产；`auto_renew_check_vps_count` 统计决定不续费但服务商自动续费仍为 unchecked/enabled 的资产；`pending_followup_count` 统计待核对事项。续费意向与生命周期、服务商核对事实彼此独立。
 - 该查询不得改变 `monitoring_instances.provider`、monitoring instance lifecycle / monitoring / health、Target、Agent、VPS、subscription 或 link 记录。
@@ -34,13 +34,16 @@
 - Frontend API: `getDashboard(): Promise<DashboardOverview>`。
 - Frontend type: `web/src/lib/types.ts` 的 `DashboardOverview`，字段保持 center JSON snake_case。
 - Asset summary field: `DashboardOverview.asset_summary`，类型为 `DashboardAssetSummary`。
+- `DashboardOverview.stale_target_count` 与 `DashboardGroupSummary.stale_target_count` 是整数；`DashboardTargetSummary.observation_freshness` 是服务器统一评估的目标/探测项投影，字段名称保持 center JSON snake_case，禁止前端自算阈值。
 
 #### 3. Contracts
 
-- `limit` 只限制 `abnormal_monitoring_instances`、`abnormal_targets` 和 `recent_events`；不得限制全局计数、`group_summaries` 或 `notification_status`。
-- `snapshot_generated_at` 是 Center 生成 overview 的时间，只能被展示为 dashboard 生成时间。
-- `abnormal_monitoring_instance_count` / `abnormal_target_count` 分别是对应 severe 集合的超集；`severe_*_count` 不能被前端再次加到 abnormal 总数。相同集合关系也适用于 `group_summaries` 中的 abnormal/severe 字段。
-- `group_summaries` 必须由后端基于全量 `monitoring_instances` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce。
+- `limit` 只限制 `abnormal_monitoring_instances`、`abnormal_targets` 和 `recent_events`；不得限制全局计数、`stale_target_count`、`group_summaries` 或 `notification_status`。
+- `snapshot_generated_at` 是 Center 生成 overview 的时间，只能被展示为 dashboard 生成时间；同一次读取的 freshness projection 使用同一个评估时刻。
+- `GetDashboardOverview` 必须在真实 PostgreSQL `READ ONLY, REPEATABLE READ` 事务内完成 freshness、全局/分组计数、异常预览、趋势、通知、资产与最近事件的全部读取；事务无法开始、任一读取失败或提交失败都必须失败关闭，生产路径不得回退为非事务读取。
+- `abnormal_monitoring_instance_count` / `abnormal_target_count` 分别是对应 severe 集合的超集；`severe_*_count` 不能被前端再次加到 abnormal 总数。相同集合关系也适用于 `group_summaries` 中的 abnormal/severe 字段。`stale_target_count` 与异常/严重计数独立，重叠目标只各计一次。
+- `group_summaries` 必须由后端基于全量 `monitoring_instances` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce；每个分组的 `stale_target_count` 也来自全量当前目标 freshness projection，不受 `limit` 影响。
+- 分组归一必须与 SQL `btrim("group")` 一致，仅去除 U+0020 ASCII 空格；tab、NBSP 等字符不得被 Go 的 `TrimSpace` 折叠。
 - `notification_status` 只能包含配置布尔摘要，不包含 Telegram token/chat id 或 Feishu webhook URL。
 - `asset_summary` 只能包含聚合摘要：`renewal_due_30d_subscription_count`、`renewal_due_30d_vps_count`、`unreviewed_vps_count`、`no_renewal_vps_count`、`archived_vps_count`、`auto_renew_check_vps_count`、`pending_followup_count`、`unlinked_vps_count`、`abnormal_linked_vps_count`、`cost_by_currency[]`。`cost_by_currency[]` 只包含 `currency`、`monthly_total`、`yearly_total`。
 - 库存完整度计数必须来自后端 contract：待接入监控实例、暂停监控实例、退役监控实例、暂停目标、归档目标。
@@ -53,8 +56,10 @@
 | `limit` 缺失 | handler 使用默认 limit |
 | `limit <= 0` 或非数字 | handler 返回 400 |
 | dashboard store 查询失败 | handler 返回 500，store error 用 `%w` 包装上下文 |
+| freshness projection 查询/解析失败 | overview 读取失败并返回 500；不得用零值 stale 计数或伪造 freshness |
 | abnormal=2、severe=1 | JSON 原样返回 2/1；前端异常总数保持 2 |
-| `center_settings` singleton 缺失 | `notification_status` 全 false，不返回错误 |
+| stale target 与 abnormal target 重叠 | 两个独立字段/集合均保留，stale 不加入 abnormal，也不被 severe 重复计数 |
+| `center_settings` singleton 缺失 | `notification_status` 全 false；freshness override 等价空 overrides，不返回错误 |
 | `group_summaries` 为空 | Dashboard 显示空态，不制造 `未分组 0` |
 | Asset Ledger 表为空 | `asset_summary` 返回 0 计数与空 `cost_by_currency`，Dashboard 显示低权重空态 |
 
@@ -70,8 +75,8 @@
 
 #### 6. Tests Required
 
-- Go store test: abnormal=2/severe=1 的集合关系、新计数字段、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary。
-- Go handler test: abnormal/severe snake_case 字段保持 2/1、severe 不大于 abnormal，且不泄露敏感通知字段。
+- Go store test: abnormal=2/severe=1 的集合关系、新计数字段、`stale_target_count` 与分组 freshness 计数、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary/stale count；覆盖 stale 与 abnormal 重叠而不改变既有 health 语义，并验证 read-only repeatable-read 事务下并发可见性/分组移动保持单一快照，以及 tab/NBSP group 的 SQL `btrim` 归一一致。
+- Go handler test: abnormal/severe/stale snake_case 字段保持独立，severe 不大于 abnormal，且不泄露敏感通知字段。
 - Frontend type/API fixture: `DashboardOverview` fixture 覆盖新增字段；新增 `asset_summary` 时必须同步 AppShell、DashboardPage、api test fixtures。
 - DashboardPage test: 生成时间、五 mode 唯一主行动/deep link、abnormal/severe 不重复、VPS false-empty、局部 fallback，以及不展开第四张 KPI、Group、API facts、资产明细 dump 或无上限事件列表；`recent_events` 只作最多 5 条的有界“最近动态”预览（沿用事件流默认的回填排除，入口链接不加时间过滤），细节见 [Dashboard Web 合同](dashboard-web.md)。
 - AppShell test: 共享 dashboard fixture 与新增 contract 保持兼容。

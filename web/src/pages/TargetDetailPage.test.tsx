@@ -76,6 +76,7 @@ describe('TargetDetailPage', () => {
           labels: ['公开'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -237,6 +238,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -367,6 +369,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -423,6 +426,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -475,6 +479,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -593,6 +598,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -695,6 +701,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -757,6 +764,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -817,6 +825,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -872,6 +881,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -996,6 +1006,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -1084,6 +1095,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -1159,6 +1171,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -1230,6 +1243,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -1340,6 +1354,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -1430,7 +1445,6 @@ describe('TargetDetailPage', () => {
 
     await waitFor(() => expect(probeActionButton('启用', 'pb_001')).toBeEnabled())
     expect(probeActionButton('停用', 'pb_002')).toBeEnabled()
-    expect(fetchMock).toHaveBeenCalledTimes(6)
   })
 
   it('disables a 探测项 with a full update and preserves the existing config', async () => {
@@ -1450,6 +1464,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -1513,7 +1528,7 @@ describe('TargetDetailPage', () => {
 
     fireEvent.click(probeActionButton('停用'))
 
-    await waitFor(() => expect(screen.getByText('停用')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getAllByText('已停用').length).toBeGreaterThan(0))
     expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/targets/tg_001/probe-items/pb_001', {
       method: 'PUT',
       headers: {
@@ -1555,6 +1570,7 @@ describe('TargetDetailPage', () => {
           labels: [],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           current_primary_issue_summary: '',
           created_at: '2026-04-20T00:00:00Z',
@@ -1631,30 +1647,37 @@ describe('TargetDetailPage', () => {
 
   it('keeps 探测项 errors local and leaves delete confirmation visible when delete fails', async () => {
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        mockJSONResponse({
-          target_id: 'tg_001',
-          name: 'Blog',
-          target_type: 'service',
-          host: 'blog.example.com',
-          base_port: 443,
-          execution_monitoring_instance_labels: ['edge'],
-          enabled_probe_count: 1,
-          matching_executor_count: 1,
-          run_status: '启用',
-          labels: [],
-          note: '',
-          current_health_status: '正常',
-          current_active_incident_count: 0,
-          current_primary_issue_summary: '',
-          created_at: '2026-04-20T00:00:00Z',
-          updated_at: '2026-04-24T09:05:00Z',
-        }),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse([
+    const target = {
+      target_id: 'tg_001',
+      name: 'Blog',
+      target_type: 'service',
+      host: 'blog.example.com',
+      base_port: 443,
+      execution_monitoring_instance_labels: ['edge'],
+      enabled_probe_count: 1,
+      matching_executor_count: 1,
+      run_status: '启用',
+      labels: [],
+      note: '',
+      current_health_status: '正常',
+      observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
+      current_active_incident_count: 0,
+      current_primary_issue_summary: '',
+      created_at: '2026-04-20T00:00:00Z',
+      updated_at: '2026-04-24T09:05:00Z',
+    }
+    let targetReads = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : 'url' in input ? input.url : String(input)
+      const method = init?.method ?? 'GET'
+      if (method === 'PUT' && url.includes('/probe-items/')) {
+        return mockJSONResponse({ error: 'update failed' }, 503)
+      }
+      if (method === 'DELETE' && url.includes('/probe-items/')) {
+        return mockJSONResponse({ error: 'delete failed' }, 503)
+      }
+      if (url.includes('/probe-items')) {
+        return mockJSONResponse([
           {
             probe_item_id: 'pb_001',
             target_id: 'tg_001',
@@ -1666,15 +1689,17 @@ describe('TargetDetailPage', () => {
             created_at: '2026-04-21T00:00:00Z',
             updated_at: '2026-04-21T00:00:00Z',
           },
-        ]),
-      )
-      .mockResolvedValueOnce(
-        mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] }),
-      )
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse([]))
-      .mockResolvedValueOnce(mockJSONResponse({ error: 'update failed' }, 503))
-      .mockResolvedValueOnce(mockJSONResponse({ error: 'delete failed' }, 503))
+        ])
+      }
+      if (url.includes('/runtime-facts')) {
+        return mockJSONResponse({ target_id: 'tg_001', latest_probe_observations: [] })
+      }
+      if (url === '/api/targets/tg_001') {
+        targetReads += 1
+        return mockJSONResponse(target)
+      }
+      return mockJSONResponse([])
+    })
     vi.stubGlobal('fetch', fetchMock)
 
     render(
@@ -1693,10 +1718,12 @@ describe('TargetDetailPage', () => {
     await waitFor(() => expect(screen.getByText('update failed')).toBeInTheDocument())
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
 
+    const readsBeforeDelete = targetReads
     fireEvent.click(probeActionButton('删除'))
     fireEvent.click(screen.getByRole('button', { name: '确认删除探测项' }))
 
     expect(confirmSpy).not.toHaveBeenCalled()
+    await waitFor(() => expect(targetReads).toBeGreaterThan(readsBeforeDelete))
     await waitFor(() => expect(screen.getByText('delete failed')).toBeInTheDocument())
     expect(screen.getByRole('alertdialog', { name: '确认删除探测项' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Blog' })).toBeInTheDocument()
@@ -1722,6 +1749,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -1787,6 +1815,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -1885,6 +1914,7 @@ describe('TargetDetailPage', () => {
         labels: [],
         note: '',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         current_primary_issue_summary: '',
         created_at: '2026-04-20T00:00:00Z',
@@ -1942,6 +1972,7 @@ describe('TargetDetailPage', () => {
         labels: [],
         note: '',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         current_primary_issue_summary: '',
         created_at: '2026-04-20T00:00:00Z',
@@ -2020,6 +2051,7 @@ describe('TargetDetailPage', () => {
             labels: ['core'],
             note: '',
             current_health_status: '告警',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 1,
             last_success_at: '2026-04-24T09:00:00Z',
             last_failure_at: '2026-04-24T09:04:00Z',
@@ -2152,6 +2184,7 @@ describe('TargetDetailPage', () => {
         labels: ['infra'],
         note: '',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         last_success_at: '2026-04-24T10:00:00Z',
         last_failure_at: '2026-04-24T08:00:00Z',
@@ -2220,6 +2253,7 @@ describe('TargetDetailPage', () => {
         labels: ['public'],
         note: '',
         current_health_status: '严重',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 1,
         last_success_at: '2026-04-24T09:00:00Z',
         last_failure_at: '2026-04-24T09:04:00Z',
@@ -2332,6 +2366,7 @@ describe('TargetDetailPage', () => {
           labels: ['legacy'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -2362,6 +2397,7 @@ describe('TargetDetailPage', () => {
           labels: ['legacy'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -2416,6 +2452,7 @@ describe('TargetDetailPage', () => {
           labels: ['public'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -2447,6 +2484,7 @@ describe('TargetDetailPage', () => {
           labels: ['public'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -2516,6 +2554,7 @@ describe('TargetDetailPage', () => {
           labels: ['public'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -2582,6 +2621,7 @@ describe('TargetDetailPage', () => {
           labels: ['public'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -2613,6 +2653,7 @@ describe('TargetDetailPage', () => {
           labels: ['public'],
           note: '',
           current_active_incident_count: 0,
+          observation_freshness: { state: 'inactive', evaluated_at: '2026-04-24T09:20:00Z', enabled_probe_count: 1, fresh_probe_count: 0, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
           current_primary_issue_summary: '',
@@ -2684,6 +2725,7 @@ describe('TargetDetailPage', () => {
           labels: ['public'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -2747,6 +2789,7 @@ describe('TargetDetailPage', () => {
             labels: ['public'],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T09:00:00Z',
             last_failure_at: '2026-04-24T08:30:00Z',
@@ -2778,6 +2821,7 @@ describe('TargetDetailPage', () => {
             labels: ['infra'],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T10:00:00Z',
             last_failure_at: '2026-04-24T08:00:00Z',
@@ -2842,6 +2886,7 @@ describe('TargetDetailPage', () => {
             labels: ['public'],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T09:00:00Z',
             last_failure_at: '2026-04-24T08:30:00Z',
@@ -2873,6 +2918,7 @@ describe('TargetDetailPage', () => {
             labels: ['infra'],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T10:00:00Z',
             last_failure_at: '2026-04-24T08:00:00Z',
@@ -2938,6 +2984,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -2978,6 +3025,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -3038,6 +3086,7 @@ describe('TargetDetailPage', () => {
             labels: ['public'],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T09:00:00Z',
             last_failure_at: '2026-04-24T08:30:00Z',
@@ -3069,6 +3118,7 @@ describe('TargetDetailPage', () => {
             labels: ['infra'],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T10:00:00Z',
             last_failure_at: '2026-04-24T08:00:00Z',
@@ -3136,6 +3186,7 @@ describe('TargetDetailPage', () => {
             labels: ['公开'],
             note: '   ',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T09:00:00Z',
             last_failure_at: '2026-04-24T08:30:00Z',
@@ -3194,6 +3245,7 @@ describe('TargetDetailPage', () => {
           labels: ['公开'],
           note: '现网入口',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -3226,6 +3278,7 @@ describe('TargetDetailPage', () => {
           labels: ['alpha', 'beta'],
           note: '新的备注',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -3302,6 +3355,7 @@ describe('TargetDetailPage', () => {
           labels: ['公开'],
           note: '现网入口',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -3369,6 +3423,7 @@ describe('TargetDetailPage', () => {
             labels: ['公开'],
             note: '现网入口',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             last_success_at: '2026-04-24T09:00:00Z',
             last_failure_at: '2026-04-24T08:30:00Z',
@@ -3428,6 +3483,7 @@ describe('TargetDetailPage', () => {
         labels: ['alpha', 'beta'],
         note: '新的备注',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         last_success_at: '2026-04-24T09:00:00Z',
         last_failure_at: '2026-04-24T08:30:00Z',
@@ -3450,6 +3506,7 @@ describe('TargetDetailPage', () => {
         labels: ['内部'],
         note: '缓存入口',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         current_primary_issue_summary: '',
         created_at: '2026-04-20T00:00:00Z',
@@ -3482,6 +3539,7 @@ describe('TargetDetailPage', () => {
           labels: ['公开'],
           note: '现网入口',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -3544,6 +3602,7 @@ describe('TargetDetailPage', () => {
         labels: ['公开'],
         note: '现网入口',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         last_success_at: '2026-04-24T09:00:00Z',
         last_failure_at: '2026-04-24T08:30:00Z',
@@ -3569,6 +3628,7 @@ describe('TargetDetailPage', () => {
         labels: ['alpha', 'beta'],
         note: '新的备注',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         last_success_at: '2026-04-24T09:00:00Z',
         last_failure_at: '2026-04-24T08:30:00Z',
@@ -3603,6 +3663,7 @@ describe('TargetDetailPage', () => {
           labels: ['公开'],
           note: '现网入口',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: '2026-04-24T08:30:00Z',
@@ -3665,6 +3726,7 @@ describe('TargetDetailPage', () => {
         labels: ['alpha', 'beta'],
         note: '新的备注',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         last_success_at: '2026-04-24T09:00:00Z',
         last_failure_at: '2026-04-24T08:30:00Z',
@@ -3691,6 +3753,7 @@ describe('TargetDetailPage', () => {
         labels: ['公开'],
         note: '现网入口',
         current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
         current_active_incident_count: 0,
         last_success_at: '2026-04-24T09:00:00Z',
         last_failure_at: '2026-04-24T08:30:00Z',
@@ -3723,6 +3786,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -3777,6 +3841,7 @@ describe('TargetDetailPage', () => {
             labels: [],
             note: '',
             current_health_status: '告警',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 3,
             current_primary_issue_summary: 'HTTP 探测持续失败',
             created_at: '2026-04-20T00:00:00Z',
@@ -3846,6 +3911,7 @@ describe('TargetDetailPage', () => {
             labels: ['test'],
             note: '',
             current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
             current_active_incident_count: 0,
             current_primary_issue_summary: '',
             created_at: '2026-04-20T00:00:00Z',
@@ -3947,6 +4013,7 @@ describe('TargetDetailPage', () => {
           labels: ['公开'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: null,
@@ -4055,6 +4122,7 @@ describe('TargetDetailPage', () => {
           labels: ['公开'],
           note: '',
           current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
           current_active_incident_count: 0,
           last_success_at: '2026-04-24T09:00:00Z',
           last_failure_at: null,
@@ -4161,6 +4229,7 @@ describe('TargetDetailPage', () => {
       labels: ['public'],
       note: '',
       current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
       current_active_incident_count: 0,
       last_success_at: '2026-04-24T09:00:00Z',
       last_failure_at: '2026-04-24T08:30:00Z',
@@ -4264,6 +4333,7 @@ describe('TargetDetailPage', () => {
       labels: ['legacy'],
       note: '',
       current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
       current_active_incident_count: 0,
       last_success_at: '2026-04-24T09:00:00Z',
       last_failure_at: '2026-04-24T08:30:00Z',
@@ -4366,6 +4436,7 @@ describe('TargetDetailPage', () => {
       labels: ['public'],
       note: '',
       current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
       current_active_incident_count: 0,
       last_success_at: '2026-04-24T09:00:00Z',
       last_failure_at: '2026-04-24T08:30:00Z',
@@ -4447,6 +4518,7 @@ describe('TargetDetailPage', () => {
       labels: ['public'],
       note: '',
       current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
       current_active_incident_count: 0,
       last_success_at: '2026-04-24T09:00:00Z',
       last_failure_at: '2026-04-24T08:30:00Z',
@@ -4559,6 +4631,7 @@ describe('TargetDetailPage', () => {
       labels: ['public'],
       note: '',
       current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
       current_active_incident_count: 0,
       last_success_at: '2026-04-24T09:00:00Z',
       last_failure_at: '2026-04-24T08:30:00Z',
@@ -4729,6 +4802,7 @@ describe('TargetDetailPage', () => {
       labels: ['public'],
       note: '',
       current_health_status: '正常',
+          observation_freshness: { state: 'fresh', evaluated_at: '2026-04-24T09:05:00Z', enabled_probe_count: 1, fresh_probe_count: 1, pending_probe_count: 0, stale_probe_count: 0, probes: [] },
       current_active_incident_count: 0,
       last_success_at: '2026-04-24T09:00:00Z',
       last_failure_at: '2026-04-24T08:30:00Z',

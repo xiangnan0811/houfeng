@@ -28,6 +28,7 @@ import type {
   VPSMonitoringInstanceSummary,
   VPSOverview,
 } from '../../src/lib/types'
+import { targetObservationFixture } from '../../src/lib/targetObservationFixture'
 import {
   COMPARISON_URL_VERSION,
   comparisonHref,
@@ -328,7 +329,7 @@ export const unauthenticatedProfile = {
 
 export function authenticatedProfile(
   routes: ApiFixtureProfile = {},
-  dashboard: DashboardOverview = dashboardOverviewFixture(),
+  dashboard: DashboardOverview = dashboardOverviewFixture({ stale_target_count: 0 }),
   capabilities: RuntimeCapabilities = ENABLED_RUNTIME_CAPABILITIES,
 ): ApiFixtureProfile {
   const user = authenticatedUser(capabilities)
@@ -726,6 +727,7 @@ export function dashboardPopulatedProfile(now = Date.now()): ApiFixtureProfile {
     abnormal_monitoring_instance_count: 2,
     severe_monitoring_instance_count: 1,
     abnormal_target_count: 1,
+    stale_target_count: 0,
     abnormal_monitoring_instances: [
       {
         monitoring_instance_id: 'mi_fra',
@@ -765,6 +767,14 @@ export function dashboardPopulatedProfile(now = Date.now()): ApiFixtureProfile {
       run_status: '启用',
       group: 'prod',
       current_health_status: '告警',
+      observation_freshness: targetObservationFixture({
+        target_id: 'tg_edge',
+        run_status: '启用',
+        lifecycle_status: 'active',
+        evaluated_at: iso(-2 * 60 * 1000),
+        enabled_probe_count: 1,
+        last_failure_at: iso(-5 * 60 * 1000),
+      }),
       last_failure_at: iso(-5 * 60 * 1000),
       current_active_incident_count: 1,
       current_primary_issue_summary: 'HTTPS 响应超过 2 秒',

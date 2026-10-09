@@ -21,6 +21,7 @@
     ],
     "observability": [
       "src/pages/monitoring-detail/MonitoringDetailWorkspace.css",
+      "src/pages/target-detail/TargetDetailFreshness.css",
       "src/styles/partials/legacy-events.css",
       "src/styles/partials/legacy-observability.css",
       "src/styles/partials/legacy-onboarding.css",

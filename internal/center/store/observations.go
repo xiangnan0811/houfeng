@@ -173,7 +173,10 @@ func recordObservationBatch(ctx context.Context, exec sqlExec, batch observation
 		}
 	}
 
-	return projectTargetProbeObservations(ctx, exec, batch.ProbeObservations)
+	if err := projectTargetProbeObservations(ctx, exec, batch.ProbeObservations); err != nil {
+		return err
+	}
+	return projectProbeLiveObservations(ctx, exec, batch.ProbeObservations)
 }
 
 type targetObservationProjection struct {
@@ -245,6 +248,67 @@ func projectTargetProbeObservations(ctx context.Context, exec sqlExec, writes []
 		}
 		if _, err := exec.Exec(ctx, projectTargetObservationSQL, targetID, successAt, failureAt); err != nil {
 			return fmt.Errorf("project target observations for %q: %w", targetID, err)
+		}
+	}
+	return nil
+}
+
+const projectProbeLiveObservationSQL = `
+	update probe_items
+	set last_live_observed_at = greatest(coalesce(last_live_observed_at, $3::timestamptz), $3::timestamptz)
+	where target_id = $1
+	  and probe_item_id = $2
+	  and (last_live_observed_at is null or last_live_observed_at < $3::timestamptz)`
+
+type probeLiveObservationKey struct {
+	targetID    string
+	probeItemID string
+}
+
+// projectProbeLiveObservations advances each probe's live observation
+// projection once per target/probe pair. The effective timestamp is capped at
+// receipt time so an agent clock ahead of the center cannot extend freshness.
+// The SQL scope and monotonic predicate keep this projection safe when a
+// delayed or concurrent batch arrives after a newer observation.
+func projectProbeLiveObservations(ctx context.Context, exec sqlExec, writes []observations.ProbeObservationWrite) error {
+	projections := make(map[probeLiveObservationKey]time.Time)
+	for _, observation := range writes {
+		if observation.MaintenanceContext || observation.IsBackfilled {
+			continue
+		}
+		switch observation.ResultKind {
+		case agentapi.ProbeResultSuccess, agentapi.ProbeResultFailure:
+		default:
+			continue
+		}
+
+		effectiveAt := observation.ObservedAt
+		if observation.ReceivedAt.Before(effectiveAt) {
+			effectiveAt = observation.ReceivedAt
+		}
+		key := probeLiveObservationKey{
+			targetID:    observation.TargetID,
+			probeItemID: observation.ProbeItemID,
+		}
+		if previous, ok := projections[key]; !ok || effectiveAt.After(previous) {
+			projections[key] = effectiveAt
+		}
+	}
+
+	keys := make([]probeLiveObservationKey, 0, len(projections))
+	for key := range projections {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].targetID != keys[j].targetID {
+			return keys[i].targetID < keys[j].targetID
+		}
+		return keys[i].probeItemID < keys[j].probeItemID
+	})
+
+	for _, key := range keys {
+		if _, err := exec.Exec(ctx, projectProbeLiveObservationSQL, key.targetID, key.probeItemID, projections[key]); err != nil {
+			return fmt.Errorf("project probe live observation for target %q probe %q: %w", key.targetID, key.probeItemID, err)
 		}
 	}
 	return nil

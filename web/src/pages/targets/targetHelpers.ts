@@ -116,6 +116,27 @@ export function isUnobservedTarget(target: TargetRecord) {
     && !target.last_failure_at
 }
 
+/** Current, enabled, previously observed, and at least one stale probe. Pending without stale stays out. */
+export function isStaleTarget(target: TargetRecord): boolean {
+  return isCurrentListTarget(target)
+    && target.run_status === '启用'
+    && hasTargetObservation(target)
+    && target.observation_freshness.stale_probe_count > 0
+}
+
+/** Dashboard normalizes a blank group to this name. The list query uses it unchanged. */
+export const UNGROUPED_TARGET_GROUP = '未分组'
+
+/** Exact group match. A blank or whitespace group also matches the dashboard name 未分组. */
+export function targetMatchesGroup(target: TargetRecord, group: string): boolean {
+  if (target.group === group) return true
+  return group === UNGROUPED_TARGET_GROUP && target.group.trim() === ''
+}
+
+export function isTargetListInvalidatingError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 401 || error.status === 403 || error.status === 404)
+}
+
 function isAssignableTarget(target: TargetRecord) {
   return isCurrentListTarget(target) && (target.run_status === '启用' || target.run_status === '维护中')
 }
@@ -141,12 +162,55 @@ export function targetHealthBadge(target: TargetRecord): TargetAttentionBadge | 
   return { label: target.current_health_status, tone }
 }
 
-/** Control and health stay independent. 正常 stays quiet. */
+function showsFreshnessHint(target: TargetRecord): boolean {
+  return target.lifecycle_status !== 'retired' && target.run_status === '启用'
+}
+
+/** Server freshness only. Inactive, paused, maintenance, and retired keep the control badge. */
+export function targetFreshnessBadge(target: TargetRecord): TargetAttentionBadge | null {
+  if (!showsFreshnessHint(target)) return null
+  const freshness = target.observation_freshness
+  switch (freshness.state) {
+    case 'inactive':
+      return null
+    case 'fresh':
+      return { label: '观测新鲜', tone: 'normal' }
+    case 'pending':
+      return { label: '等待新观测', tone: 'notice' }
+    case 'partial':
+      return freshness.stale_probe_count > 0
+        ? { label: '部分观测过期', tone: 'alert' }
+        : { label: '部分探测项等待观测', tone: 'notice' }
+    case 'stale':
+      return { label: '观测已过期', tone: 'alert' }
+    case 'unobserved':
+      return { label: '尚无观测', tone: 'neutral' }
+    case 'uncovered':
+      return { label: '未配置启用探测项', tone: 'notice' }
+    default: {
+      const unexpected: never = freshness.state
+      return unexpected
+    }
+  }
+}
+
+/** Last-known health wording. Historical 正常 that is no longer fresh is not called 当前正常. */
+export function targetKnownHealthNote(target: TargetRecord): string | null {
+  if (!showsFreshnessHint(target) || target.observation_freshness.state === 'inactive') return null
+  if (target.current_health_status === '正常' && target.observation_freshness.state !== 'fresh') {
+    return '最近一次正常，当前证据不足'
+  }
+  if (KNOWN_ABNORMAL_HEALTH.has(target.current_health_status)) return '最近已知健康'
+  return null
+}
+
+/** Control and health stay independent. 正常 stays quiet. Freshness is a separate hint. */
 export function targetAttentionBadges(target: TargetRecord): TargetAttentionBadge[] {
   const control = targetControlBadge(target)
   const health = targetHealthBadge(target)
+  const freshness = targetFreshnessBadge(target)
   if (target.lifecycle_status === 'retired') return control ? [control] : []
-  return [control, health].filter((badge): badge is TargetAttentionBadge => badge !== null)
+  return [control, health, freshness].filter((badge): badge is TargetAttentionBadge => badge !== null)
 }
 
 export function targetCoverageSummary(target: TargetRecord) {
@@ -195,6 +259,10 @@ export function countAbnormalTargets(targets: TargetRecord[]) {
 
 export function countUnobservedTargets(targets: TargetRecord[]) {
   return targets.filter(isUnobservedTarget).length
+}
+
+export function countStaleTargets(targets: TargetRecord[]) {
+  return targets.filter(isStaleTarget).length
 }
 
 export function countPausedTargets(targets: TargetRecord[]) {

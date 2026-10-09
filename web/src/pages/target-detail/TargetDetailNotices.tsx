@@ -3,6 +3,8 @@ import type { ReactNode } from 'react'
 import { ObservabilityNotice, type ObservabilityTone } from '../../components/observability'
 import { Button } from '../../components/atoms/Button'
 import { MonoDigits } from '../../components/atoms/Mono'
+import { Timestamp } from '../../components/atoms'
+import { historicalNormalEvidenceNotice, targetFreshnessLabel } from '../../components/target-detail/observationFreshness'
 import { formatElapsedSince } from '../../lib/format'
 import type { ActiveIncidentRecord, TargetRecord } from '../../lib/types'
 import { targetCoverageNotices } from '../targets/targetHelpers'
@@ -43,6 +45,7 @@ type Props = {
   incidentsRetrying?: boolean
   onRetryIncidents?: () => void
   runtimeError: string | null
+  projectionRefreshFailedAt: string | null
   onOpenEvents: () => void
 }
 
@@ -53,6 +56,7 @@ export function TargetDetailNotices({
   incidentsRetrying = false,
   onRetryIncidents,
   runtimeError,
+  projectionRefreshFailedAt,
   onOpenEvents,
 }: Props) {
   const rows: Array<{ key: string; node: ReactNode }> = []
@@ -163,6 +167,51 @@ export function TargetDetailNotices({
           mark="运行控制"
           title={runtimeError}
           role="alert"
+        />
+      ),
+    })
+  }
+  const evidenceNotice = historicalNormalEvidenceNotice(target)
+  if (evidenceNotice) {
+    rows.push({
+      key: 'historical-normal',
+      node: (
+        <NoticeRow
+          tone="notice"
+          mark="最近已知"
+          title={evidenceNotice}
+          detail="健康状态保留最近一次已知结果，当前观测证据不足。"
+        />
+      ),
+    })
+  }
+  const freshnessLabel = targetFreshnessLabel(target.observation_freshness)
+  if (freshnessLabel && target.observation_freshness.stale_probe_count > 0 && target.current_active_incident_count > 0) {
+    rows.push({
+      key: 'freshness-overlap',
+      node: (
+        <NoticeRow
+          tone="alert"
+          mark="观测"
+          title={freshnessLabel}
+          detail="活跃异常仍以最近已知健康为准。"
+        />
+      ),
+    })
+  }
+  if (projectionRefreshFailedAt) {
+    rows.push({
+      key: 'projection-refresh',
+      node: (
+        <NoticeRow
+          tone="notice"
+          mark="更新失败"
+          title="更新失败，显示上次结果"
+          detail={
+            <>
+              <Timestamp value={projectionRefreshFailedAt} mode="absolute" />
+            </>
+          }
         />
       ),
     })

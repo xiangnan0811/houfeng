@@ -62,27 +62,48 @@ var allowedFrequencyTiers = map[string]struct{}{
 	FrequencyTier6h:  {},
 }
 
+type TargetObservationFreshness struct {
+	State             string                      `json:"state"`
+	EvaluatedAt       time.Time                   `json:"evaluated_at"`
+	EnabledProbeCount int                         `json:"enabled_probe_count"`
+	FreshProbeCount   int                         `json:"fresh_probe_count"`
+	PendingProbeCount int                         `json:"pending_probe_count"`
+	StaleProbeCount   int                         `json:"stale_probe_count"`
+	Probes            []ProbeObservationFreshness `json:"probes"`
+}
+
+type ProbeObservationFreshness struct {
+	ProbeItemID            string     `json:"probe_item_id"`
+	State                  string     `json:"state"`
+	EffectiveFrequencyTier string     `json:"effective_frequency_tier"`
+	StaleAfterSeconds      int        `json:"stale_after_seconds"`
+	LastObservedAt         *time.Time `json:"last_observed_at"`
+	ExpectedSince          time.Time  `json:"expected_since"`
+	DeadlineAt             time.Time  `json:"deadline_at"`
+}
+
 type TargetRecord struct {
-	LifecycleStatus                   string     `json:"lifecycle_status"`
-	TargetID                          string     `json:"target_id"`
-	Name                              string     `json:"name"`
-	TargetType                        string     `json:"target_type"`
-	Host                              string     `json:"host"`
-	BasePort                          *int       `json:"base_port,omitempty"`
-	ExecutionMonitoringInstanceLabels []string   `json:"execution_monitoring_instance_labels"`
-	RunStatus                         string     `json:"run_status"`
-	Group                             string     `json:"group"`
-	Labels                            []string   `json:"labels"`
-	Note                              string     `json:"note"`
-	CurrentHealthStatus               string     `json:"current_health_status"`
-	CurrentActiveIncidentCount        int        `json:"current_active_incident_count"`
-	EnabledProbeCount                 int        `json:"enabled_probe_count"`
-	MatchingExecutorCount             int        `json:"matching_executor_count"`
-	LastSuccessAt                     *time.Time `json:"last_success_at,omitempty"`
-	LastFailureAt                     *time.Time `json:"last_failure_at,omitempty"`
-	CurrentPrimaryIssueSummary        string     `json:"current_primary_issue_summary"`
-	CreatedAt                         time.Time  `json:"created_at"`
-	UpdatedAt                         time.Time  `json:"updated_at"`
+	LifecycleStatus                   string                     `json:"lifecycle_status"`
+	TargetID                          string                     `json:"target_id"`
+	Name                              string                     `json:"name"`
+	TargetType                        string                     `json:"target_type"`
+	Host                              string                     `json:"host"`
+	BasePort                          *int                       `json:"base_port,omitempty"`
+	ExecutionMonitoringInstanceLabels []string                   `json:"execution_monitoring_instance_labels"`
+	RunStatus                         string                     `json:"run_status"`
+	Group                             string                     `json:"group"`
+	Labels                            []string                   `json:"labels"`
+	Note                              string                     `json:"note"`
+	CurrentHealthStatus               string                     `json:"current_health_status"`
+	CurrentActiveIncidentCount        int                        `json:"current_active_incident_count"`
+	EnabledProbeCount                 int                        `json:"enabled_probe_count"`
+	ObservationFreshness              TargetObservationFreshness `json:"observation_freshness"`
+	MatchingExecutorCount             int                        `json:"matching_executor_count"`
+	LastSuccessAt                     *time.Time                 `json:"last_success_at,omitempty"`
+	LastFailureAt                     *time.Time                 `json:"last_failure_at,omitempty"`
+	CurrentPrimaryIssueSummary        string                     `json:"current_primary_issue_summary"`
+	CreatedAt                         time.Time                  `json:"created_at"`
+	UpdatedAt                         time.Time                  `json:"updated_at"`
 }
 
 type LifecycleReview struct {

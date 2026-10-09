@@ -18,6 +18,7 @@ function overview(overrides: Partial<DashboardOverview> = {}): DashboardOverview
     abnormal_monitoring_instance_count: 0,
     abnormal_target_count: 0,
     unobserved_target_count: 0,
+    stale_target_count: 0,
     severe_monitoring_instance_count: 0,
     severe_target_count: 0,
     maintenance_monitoring_instance_count: 0,
@@ -117,8 +118,54 @@ describe('buildShellSummaryModel', () => {
       ),
     ).toEqual({
       state: 'stale',
-      label: '系统摘要已过期',
+      label: '更新失败，显示上次结果',
       generatedAt: lastOverview.snapshot_generated_at,
+      showAnomalyCounts: false,
+    })
+  })
+
+  it('lists abnormal, unobserved, and stale counts separately', () => {
+    expect(buildShellSummaryModel(success(overview({ stale_target_count: 2 })), NOW)).toMatchObject({
+      state: 'notice',
+      label: '观测过期 2',
+      showAnomalyCounts: true,
+    })
+    expect(buildShellSummaryModel(success(overview({
+      abnormal_target_count: 2,
+      stale_target_count: 2,
+    })), NOW)).toMatchObject({
+      state: 'anomaly',
+      label: '运行异常 2，观测过期 2',
+      showAnomalyCounts: true,
+    })
+    expect(buildShellSummaryModel(success(overview({
+      abnormal_monitoring_instance_count: 1,
+      abnormal_target_count: 2,
+      unobserved_target_count: 3,
+      stale_target_count: 4,
+    })), NOW)).toMatchObject({
+      state: 'anomaly',
+      label: '运行异常 3，尚有目标无观测 3，观测过期 4',
+    })
+    expect(buildShellSummaryModel(success(overview({
+      unobserved_target_count: 4,
+      stale_target_count: 2,
+    })), NOW)).toMatchObject({
+      state: 'unobserved',
+      label: '尚有目标无观测 4，观测过期 2',
+    })
+    expect(buildShellSummaryModel(success(), NOW).label).toBe('当前运行异常计数为 0')
+  })
+
+  it('hides target stale counts when the system snapshot itself is stale', () => {
+    const generatedAt = new Date(NOW - SHELL_SUMMARY_FRESHNESS_MS).toISOString()
+    expect(buildShellSummaryModel(success(overview({
+      snapshot_generated_at: generatedAt,
+      abnormal_target_count: 2,
+      stale_target_count: 5,
+    })), NOW)).toMatchObject({
+      state: 'stale',
+      label: '系统摘要已过期',
       showAnomalyCounts: false,
     })
   })

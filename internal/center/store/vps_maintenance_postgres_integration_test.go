@@ -52,18 +52,39 @@ func TestVPSMaintenancePostgresSharedOverlapAndManualOverride(t *testing.T) {
 			t.Fatalf("%s control=%s want=%s", id, got, want)
 		}
 	}
+	reset := func() time.Time {
+		t.Helper()
+		var got time.Time
+		if err := pool.QueryRow(ctx, `select freshness_reset_at from targets where target_id='maint_shared'`).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
 	start("maint_a", false)
+	initialReset := reset()
 	status("maint_shared", "启用")
 	status("maint_paused", "暂停")
 	end("maint_a")
+	if got := reset(); !got.Equal(initialReset) {
+		t.Fatalf("no-op maintenance exit reset=%v want unchanged %v", got, initialReset)
+	}
 	start("maint_a", true)
 	start("maint_b", true)
+	sharedReset := reset()
 	end("maint_a")
 	status("maint_shared", "维护中")
+	if got := reset(); !got.Equal(sharedReset) {
+		t.Fatalf("earlier shared maintenance exit reset=%v want unchanged %v", got, sharedReset)
+	}
 	end("maint_b")
 	status("maint_shared", "启用")
+	finalReset := reset()
+	if !finalReset.After(sharedReset) {
+		t.Fatalf("final shared maintenance exit reset=%v want after %v", finalReset, sharedReset)
+	}
 	start("maint_a", true)
 	start("maint_b", true)
+	supersededReset := reset()
 	// Model a later explicit same-value maintenance setting: it must outlive
 	// both VPS-owned holds, just as an explicit pause would.
 	if _, err = pool.Exec(ctx, `update targets set control_revision=control_revision+1 where target_id='maint_shared'`); err != nil {
@@ -72,6 +93,9 @@ func TestVPSMaintenancePostgresSharedOverlapAndManualOverride(t *testing.T) {
 	end("maint_a")
 	end("maint_b")
 	status("maint_shared", "维护中")
+	if got := reset(); !got.Equal(supersededReset) {
+		t.Fatalf("superseded maintenance exit reset=%v want unchanged %v", got, supersededReset)
+	}
 	status("maint_paused", "暂停")
 	if _, err = repo.End(ctx, "maint_b", vpsmaintenance.EndInput{Reason: "retry"}, "operator"); !errors.Is(err, vpsmaintenance.ErrConflict) {
 		t.Fatalf("duplicate end=%v", err)

@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 
 import {
@@ -7,6 +7,7 @@ import {
   type PendingProbeConfirmation,
   type TargetRuntimeAction,
 } from '../components/target-detail'
+import { freshnessByProbeId } from '../components/target-detail/observationFreshness'
 import {
   ApiError,
   archiveTarget,
@@ -36,6 +37,7 @@ import type {
   GlobalActionConfirmation,
   UpdateProbeItemInput,
 } from '../lib/types'
+import { useVisibleRefresh } from '../lib/useVisibleRefresh'
 import { TargetDetailPageBody } from './target-detail/TargetDetailPageBody'
 import { TargetDetailLoading } from './target-detail/TargetDetailLoading'
 import { TargetDetailUnavailable } from './target-detail/TargetDetailUnavailable'
@@ -101,6 +103,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const [metadataSubmitting, setMetadataSubmitting] = useState(false)
   const [metadataError, setMetadataError] = useState<string | null>(null)
   const [metadataForm, setMetadataForm] = useState<MetadataFormState>({ group: '', labels: '', note: '' })
+  const [metadataBaselineUpdatedAt, setMetadataBaselineUpdatedAt] = useState<string | null>(null)
   const [pendingProbeConfirmation, setPendingProbeConfirmation] =
     useState<PendingProbeConfirmation | null>(null)
   const [probeCreateForm, setProbeCreateForm] = useState<ProbeCreateFormState>(
@@ -134,10 +137,80 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     error: string | null
   }>({ requestedTargetId: null, context: null, error: null })
   const assetContextLoadedForRef = useRef<string | null>(null)
+  const [projectionRefreshFailedAt, setProjectionRefreshFailedAt] = useState<string | null>(null)
+  const projectionGenerationRef = useRef(0)
+  const projectionMutationRef = useRef(0)
+
+  const refreshTargetProjection = useCallback(async (context: { isCurrent: () => boolean }) => {
+    const requestedId = currentRouteTargetIdRef.current
+    if (!requestedId) return
+    if (projectionMutationRef.current > 0) return
+    const generation = projectionGenerationRef.current
+    try {
+      const next = await getTarget(requestedId)
+      if (!context.isCurrent()) return
+      if (!isMountedRef.current || currentRouteTargetIdRef.current !== requestedId) return
+      if (projectionGenerationRef.current !== generation || projectionMutationRef.current > 0) return
+      setProjectionRefreshFailedAt(null)
+      setState((current) => {
+        if (current.requestedTargetId !== requestedId || current.target == null) return current
+        if (current.target.target_id !== next.target_id) return current
+        return { ...current, target: next, error: null }
+      })
+    } catch (refreshError: unknown) {
+      if (!context.isCurrent()) return
+      if (!isMountedRef.current || currentRouteTargetIdRef.current !== requestedId) return
+      if (projectionGenerationRef.current !== generation || projectionMutationRef.current > 0) return
+      if (
+        refreshError instanceof ApiError
+        && (refreshError.status === 401 || refreshError.status === 403 || refreshError.status === 404)
+      ) {
+        setProjectionRefreshFailedAt(null)
+        setState((current) => ({
+          ...current,
+          requestedTargetId: requestedId,
+          error: refreshError.status === 404 ? '目标不存在' : describeError(refreshError, '加载目标详情失败'),
+          target: null,
+          probeItems: [],
+          runtimeFacts: null,
+        }))
+        return
+      }
+      setProjectionRefreshFailedAt(new Date().toISOString())
+    }
+  }, [])
+
+  const projectionWatchEnabled = Boolean(
+    targetId && state.requestedTargetId === targetId && state.target && state.error == null,
+  )
+  const { refresh: refreshProjection, invalidate: invalidateProjection } = useVisibleRefresh(
+    refreshTargetProjection,
+    { enabled: projectionWatchEnabled, refreshKey: targetId ?? 'missing' },
+  )
+  const refreshProjectionRef = useRef(refreshProjection)
+  const invalidateProjectionRef = useRef(invalidateProjection)
+  refreshProjectionRef.current = refreshProjection
+  invalidateProjectionRef.current = invalidateProjection
+
+  function beginProjectionMutation() {
+    projectionGenerationRef.current += 1
+    projectionMutationRef.current += 1
+    invalidateProjectionRef.current()
+    return currentRouteTargetIdRef.current
+  }
+
+  function endProjectionMutation(actionTargetId: string | null) {
+    projectionMutationRef.current = Math.max(0, projectionMutationRef.current - 1)
+    if (!isMountedRef.current) return
+    if (currentRouteTargetIdRef.current !== actionTargetId) return
+    if (projectionMutationRef.current > 0) return
+    void refreshProjectionRef.current()
+  }
 
   useEffect(() => {
     currentRouteTargetIdRef.current = targetId ?? null
     metadataRequestRef.current += 1
+    setMetadataBaselineUpdatedAt(null)
   }, [targetId])
 
   useEffect(() => {
@@ -244,6 +317,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         setMetadataEditing(false)
         setMetadataSubmitting(false)
         setMetadataError(null)
+        setMetadataBaselineUpdatedAt(null)
         setMetadataForm({
           group: target.group || '',
           labels: target.labels.join(', '),
@@ -415,6 +489,10 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
   const hasCurrentActivity = state.requestedActivityTargetId === targetId
   const error = isCurrentTarget ? state.error : null
   const target = isCurrentTarget ? state.target : null
+  const freshnessByProbe = useMemo(
+    () => freshnessByProbeId(target ? target.observation_freshness.probes : []),
+    [target],
+  )
   const probeItems = isCurrentTarget ? state.probeItems : []
   const incidents = hasCurrentActivity ? state.incidents : []
   const incidentsError = hasCurrentActivity ? state.incidentsError : null
@@ -550,8 +628,11 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     if (!target || !targetId) return
 
     const actionTargetId = targetId
+    const expectedUpdatedAt = metadataBaselineUpdatedAt
+    if (!expectedUpdatedAt) return
     const requestId = metadataRequestRef.current + 1
     metadataRequestRef.current = requestId
+    const projectionTargetId = beginProjectionMutation()
     setMetadataSubmitting(true)
     setMetadataError(null)
 
@@ -564,7 +645,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
           note: metadataForm.note.trim(),
         },
         {
-          expectedUpdatedAt: target.updated_at,
+          expectedUpdatedAt,
         },
       )
       if (
@@ -593,6 +674,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         labels: updated.labels.join(', '),
         note: updated.note,
       })
+      setMetadataBaselineUpdatedAt(null)
       setMetadataEditing(false)
     } catch (metadataError) {
       if (
@@ -613,7 +695,14 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       ) {
         setMetadataSubmitting(false)
       }
+      endProjectionMutation(projectionTargetId)
     }
+  }
+
+  function rebaseMetadataDraft() {
+    if (!target || !metadataEditing || metadataSubmitting || metadataBaselineUpdatedAt == null) return
+    setMetadataBaselineUpdatedAt(target.updated_at)
+    setMetadataError(null)
   }
 
   async function handleRuntimeAction(
@@ -629,6 +718,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     }
 
     const actionTargetId = target.target_id
+    const projectionTargetId = beginProjectionMutation()
     setRuntimeSubmitting(true)
     setRuntimeError(null)
 
@@ -690,6 +780,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       ) {
         setRuntimeSubmitting(false)
       }
+      endProjectionMutation(projectionTargetId)
     }
   }
 
@@ -777,6 +868,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     const requestId = probeFormRequestRef.current + 1
     probeFormRequestRef.current = requestId
     probeFormSubmittingRef.current = true
+    const projectionTargetId = beginProjectionMutation()
     setProbeCreateError(null)
     setProbeMutationError(null)
     setProbeCreateSubmitting(true)
@@ -822,6 +914,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
         probeFormSubmittingRef.current = false
         setProbeCreateSubmitting(false)
       }
+      endProjectionMutation(projectionTargetId)
     }
   }
 
@@ -840,6 +933,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     const requestId = probeRowMutationRequestRef.current + 1
     probeRowMutationRequestRef.current = requestId
     probeRowMutationInFlightRef.current = true
+    const projectionTargetId = beginProjectionMutation()
     setProbeMutationBusyId(probeItem.probe_item_id)
     setProbeMutationError(null)
 
@@ -883,6 +977,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       ) {
         setProbeMutationBusyId(null)
       }
+      endProjectionMutation(projectionTargetId)
     }
   }
 
@@ -903,6 +998,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
     const requestId = probeRowMutationRequestRef.current + 1
     probeRowMutationRequestRef.current = requestId
     probeRowMutationInFlightRef.current = true
+    const projectionTargetId = beginProjectionMutation()
     setProbeMutationBusyId(probeItem.probe_item_id)
     setProbeMutationError(null)
 
@@ -950,6 +1046,7 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       ) {
         setProbeMutationBusyId(null)
       }
+      endProjectionMutation(projectionTargetId)
     }
   }
 
@@ -976,6 +1073,9 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       onRetryEvents={retryEvents}
       recentObservations={recentObservations}
       observationsByProbe={observationsByProbe}
+      observationFreshness={target.observation_freshness}
+      freshnessByProbe={freshnessByProbe}
+      projectionRefreshFailedAt={projectionRefreshFailedAt}
       runtimeSubmitting={runtimeSubmitting}
       runtimeError={runtimeError}
       reviewGeneration={reviewGeneration}
@@ -1021,9 +1121,15 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       onMetadataGroupChange={(value) => updateMetadataField('group', value)}
       onMetadataLabelChange={(value) => updateMetadataField('labels', value)}
       onMetadataNoteChange={(value) => updateMetadataField('note', value)}
+      metadataCanRebase={
+        metadataEditing
+        && metadataBaselineUpdatedAt != null
+        && metadataBaselineUpdatedAt !== target.updated_at
+      }
       onStartMetadataEdit={() => {
         setMetadataEditing(true)
         setMetadataError(null)
+        setMetadataBaselineUpdatedAt(target.updated_at)
         setMetadataForm({
           group: target.group || '',
           labels: target.labels.join(', '),
@@ -1033,12 +1139,14 @@ function TargetDetailPageContent({ targetId }: { targetId?: string }) {
       onCancelMetadataEdit={() => {
         setMetadataEditing(false)
         setMetadataError(null)
+        setMetadataBaselineUpdatedAt(null)
         setMetadataForm({
           group: target.group || '',
           labels: target.labels.join(', '),
           note: target.note,
         })
       }}
+      onRebaseMetadata={rebaseMetadataDraft}
       onMetadataSubmit={handleMetadataSave}
       probeMutationBusyId={probeMutationBusyId}
       pendingProbeConfirmation={pendingProbeConfirmation}

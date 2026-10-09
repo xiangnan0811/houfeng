@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 
 import { GlobalSearch } from './GlobalSearch'
 import * as api from '../../lib/api'
+import { targetObservationFixture } from '../../lib/targetObservationFixture'
 import type { GlobalRecordSearchHit } from '../../pages/records/globalRecordSearch'
 
 const searchRecordsForGlobalSearch = vi.hoisted(() => vi.fn())
@@ -88,6 +89,13 @@ const mockTargets = [
     current_health_status: '正常',
     current_active_incident_count: 0,
     enabled_probe_count: 1,
+    observation_freshness: targetObservationFixture({
+      target_id: 'tg_001',
+      run_status: '启用',
+      lifecycle_status: 'active',
+      evaluated_at: '2026-04-30T08:00:00Z',
+      enabled_probe_count: 1,
+    }),
     matching_executor_count: 1,
     current_primary_issue_summary: '',
     created_at: '2026-04-20T00:00:00Z',

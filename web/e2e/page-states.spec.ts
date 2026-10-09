@@ -37,6 +37,13 @@ function controlledPromise(): { promise: Promise<void>; resolve: () => void } {
   }
 }
 
+function dashboardStateOverview(
+  overrides: Parameters<typeof dashboardOverviewFixture>[0] = {},
+) {
+  // These page states describe monitoring and maintenance, not stale probes.
+  return dashboardOverviewFixture({ stale_target_count: 0, ...overrides })
+}
+
 function dashboardStateProfile(options: {
   overview?: DashboardOverview
   vps?: readonly VPSAssetRecord[]
@@ -47,7 +54,7 @@ function dashboardStateProfile(options: {
   return authenticatedProfile({
     [apiRouteKey('GET', '/api/dashboard')]: {
       status: 200,
-      body: options.overview ?? dashboardOverviewFixture(),
+      body: options.overview ?? dashboardStateOverview(),
       ...(options.dashboardWaitFor ? { waitFor: options.dashboardWaitFor } : {}),
     },
     [apiRouteKey('GET', '/api/vps')]: {
@@ -99,7 +106,7 @@ function providersStateProfile(options: {
 const DASHBOARD_MODES = [
   {
     name: 'critical',
-    overview: dashboardOverviewFixture({
+    overview: dashboardStateOverview({
       abnormal_monitoring_instance_count: 2,
       severe_monitoring_instance_count: 1,
     }),
@@ -108,7 +115,7 @@ const DASHBOARD_MODES = [
   },
   {
     name: 'abnormal',
-    overview: dashboardOverviewFixture({
+    overview: dashboardStateOverview({
       abnormal_monitoring_instance_count: 1,
       severe_monitoring_instance_count: 0,
     }),
@@ -117,7 +124,7 @@ const DASHBOARD_MODES = [
   },
   {
     name: 'maintenance',
-    overview: dashboardOverviewFixture({
+    overview: dashboardStateOverview({
       maintenance_monitoring_instance_count: 1,
     }),
     action: '查看维护事件',
@@ -125,7 +132,7 @@ const DASHBOARD_MODES = [
   },
   {
     name: 'onboarding',
-    overview: dashboardOverviewFixture({
+    overview: dashboardStateOverview({
       total_monitoring_instance_count: 0,
       total_target_count: 0,
     }),
@@ -135,7 +142,7 @@ const DASHBOARD_MODES = [
   },
   {
     name: 'stable',
-    overview: dashboardOverviewFixture(),
+    overview: dashboardStateOverview(),
     action: '核对 VPS 库存',
     href: '/vps',
   },
@@ -176,7 +183,7 @@ for (const mode of DASHBOARD_MODES) {
 
 test('does not turn a VPS 503 into Dashboard onboarding', async ({ api, page }) => {
   api.useProfile(dashboardStateProfile({
-    overview: dashboardOverviewFixture({
+    overview: dashboardStateOverview({
       total_monitoring_instance_count: 0,
       total_target_count: 0,
     }),

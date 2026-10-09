@@ -188,6 +188,14 @@ type commandAuditActorResponse struct {
 - 创建服务、域名或关联已有对象时，Target 是否接受当前关联只按 `lifecycle_status` 判断；`retired` 返回 409，即使对象本身为暂停、退役或未知。失败不留下新对象或关联。服务、域名对象状态的独立修订不恢复探测，也不重开或结束关联。
 - 直接运行控制动作增加 `control_revision`，即使重复设置相同值，也保护用户后续设置不被先前 VPS 维护结束覆盖。
 
+### Target 观测新鲜度后端投影
+
+- `TargetRecord.observation_freshness` 与 Dashboard 的 Target 摘要使用同一个服务端投影；它独立于 `current_health_status` / incident，不会自动创建、恢复或修改 incident。
+- 当前可见且运行 `启用` 的 Target 按全部 enabled ProbeItem 覆盖判断：任一 enabled probe 过期即为 stale；同一 probe 任一执行者有合格实时结果即可。无 enabled probe 为 `uncovered`，从未有 Target 成功/失败历史的对象整体仍为 `unobserved`。
+- 每个 probe 的期限为 `max(3 × 实际生效频率, 60 秒) + timeout_seconds`。实际频率复用 Agent plan 的 type/label 覆盖优先级；`freshness_reset_at` 划分 Target/Probe 代际，旧结果保留作历史但不能跨 reset 证明当前 fresh。`observed_at` 以 Center 收到时间封顶。
+- Target 从暂停或维护实际进入 `启用` 时才开启新的观测代际；VPS 维护只有在最后一个仍有效的、未被 revision 取代的 hold 实际恢复目标为 `启用` 时才重置 `freshness_reset_at`。重置时间取已取得图锁和目标行锁后的数据库实际墙上时钟；重复/无变化、较早共享 hold 结束或被后续直接控制取代的结束不得重置。ProbeItem 重新启用、种类或配置变化也在受保护写入边界取实际墙上时钟重置；频率/超时及目标 metadata 变化不重置。
+- `stale_target_count` 只计当前可见、启用、已有历史且至少一个 probe stale 的对象；pending 或无历史对象不混入过期集合。读取配置、频率或投影异常必须报错，不以 fresh 或零计数兜底。
+
 ### 验收
 
 覆盖不可转移归属、一个当前实例约束、默认列表排除退役/归档、退役重试幂等性与新请求冲突、旧会话仅保留在线证据、显式重新接入同 ID 新会话、命令取消审计、目标生命周期与控制分离、维护/暂停/未接入不冒充健康。归档连续 180 分钟检查和事务边界由资产生命周期合同定义。

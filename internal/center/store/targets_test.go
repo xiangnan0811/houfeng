@@ -127,7 +127,10 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 				committed bool
 			)
 			tx := &fakeTargetTx{
-				queryRow: func(_ context.Context, _ string, args ...any) pgx.Row {
+				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+					if strings.Contains(sql, "select override_rules") {
+						return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+					}
 					queryRows++
 					status := tt.sourceStatus
 					if queryRows == 3 {
@@ -138,7 +141,22 @@ func TestTargetRuntimeControlTransitionsWriteEvents(t *testing.T) {
 						return nil
 					}}
 				},
-				query: func(context.Context, string, ...any) (pgx.Rows, error) {
+				query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+					if strings.Contains(sql, "left join probe_items") {
+						return &fakeTargetRows{
+							hasRow: true,
+							scan: func(dest ...any) error {
+								scanTargetFreshnessDestinations(dest, targets.TargetRecord{
+									TargetID:        tt.targetID,
+									LifecycleStatus: tt.sourceLifecycle,
+									RunStatus:       tt.returnedStatus,
+									TargetType:      targets.TargetTypeService,
+									UpdatedAt:       eventAt,
+								})
+								return nil
+							},
+						}, nil
+					}
 					return &fakeTargetRows{}, nil
 				},
 				exec: func(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -286,15 +304,26 @@ func TestDeleteProbeItemScopesByTargetAndProbeItem(t *testing.T) {
 func TestUpdateProbeItemReturnsProbeItemNotFoundWhenTargetExists(t *testing.T) {
 	t.Parallel()
 
-	repo := &PostgresTargetRepository{db: fakeTargetDB{queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
-		if strings.Contains(sql, "update probe_items") {
-			return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
-		}
-		return fakeTargetRow{scan: func(dest ...any) error {
-			scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: "tg_001"})
-			return nil
-		}}
-	}}}
+	repo := &PostgresTargetRepository{db: fakeTargetDB{
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "select override_rules") {
+				return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			}
+			if strings.Contains(sql, "update probe_items") {
+				return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			}
+			return fakeTargetRow{scan: func(dest ...any) error {
+				scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: "tg_001"})
+				return nil
+			}}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if strings.Contains(sql, "left join probe_items") {
+				return fakeTargetFreshnessRows("tg_001"), nil
+			}
+			return &fakeTargetRows{}, nil
+		},
+	}}
 
 	_, err := repo.UpdateProbeItem(context.Background(), "tg_001", "pb_missing", targets.UpdateProbeItemInput{
 		ProbeKind:      targets.ProbeKindTCP,
@@ -333,11 +362,20 @@ func TestDeleteProbeItemReturnsProbeItemNotFoundWhenTargetExists(t *testing.T) {
 		exec: func(_ context.Context, _ string, _ ...any) (pgconn.CommandTag, error) {
 			return pgconn.NewCommandTag("DELETE 0"), nil
 		},
-		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+		queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
+			if strings.Contains(sql, "select override_rules") {
+				return fakeTargetRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+			}
 			return fakeTargetRow{scan: func(dest ...any) error {
 				scanTargetRecordDestinations(dest, targets.TargetRecord{TargetID: "tg_001"})
 				return nil
 			}}
+		},
+		query: func(_ context.Context, sql string, _ ...any) (pgx.Rows, error) {
+			if strings.Contains(sql, "left join probe_items") {
+				return fakeTargetFreshnessRows("tg_001"), nil
+			}
+			return &fakeTargetRows{}, nil
 		},
 	}}
 
@@ -458,17 +496,43 @@ func TestProjectTargetHealthPrecedence(t *testing.T) {
 	}
 }
 
-type fakeTargetRows struct{}
+type fakeTargetRows struct {
+	hasRow bool
+	scan   func(dest ...any) error
+}
 
 func (r *fakeTargetRows) Close()                                       {}
 func (r *fakeTargetRows) Err() error                                   { return nil }
 func (r *fakeTargetRows) CommandTag() pgconn.CommandTag                { return pgconn.NewCommandTag("SELECT 0") }
 func (r *fakeTargetRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
-func (r *fakeTargetRows) Next() bool                                   { return false }
-func (r *fakeTargetRows) Scan(...any) error                            { return nil }
-func (r *fakeTargetRows) Values() ([]any, error)                       { return nil, nil }
-func (r *fakeTargetRows) RawValues() [][]byte                          { return nil }
-func (r *fakeTargetRows) Conn() *pgx.Conn                              { return nil }
+func (r *fakeTargetRows) Next() bool {
+	if !r.hasRow {
+		return false
+	}
+	r.hasRow = false
+	return true
+}
+func (r *fakeTargetRows) Scan(dest ...any) error {
+	if r.scan == nil {
+		return nil
+	}
+	return r.scan(dest...)
+}
+func (r *fakeTargetRows) Values() ([]any, error) { return nil, nil }
+func (r *fakeTargetRows) RawValues() [][]byte    { return nil }
+func (r *fakeTargetRows) Conn() *pgx.Conn        { return nil }
+func fakeTargetFreshnessRows(targetID string) pgx.Rows {
+	return &fakeTargetRows{
+		hasRow: true,
+		scan: func(dest ...any) error {
+			scanTargetFreshnessDestinations(dest, targets.TargetRecord{
+				TargetID:   targetID,
+				TargetType: targets.TargetTypeService,
+			})
+			return nil
+		},
+	}
+}
 
 type fakeTargetDB struct {
 	queryRow func(context.Context, string, ...any) pgx.Row
@@ -584,6 +648,16 @@ func scanTargetRecordDestinations(dest []any, record targets.TargetRecord) {
 	*(dest[16].(*time.Time)) = record.UpdatedAt
 	*(dest[17].(*int)) = record.EnabledProbeCount
 	*(dest[18].(*int)) = record.MatchingExecutorCount
+}
+func scanTargetFreshnessDestinations(dest []any, record targets.TargetRecord) {
+	*(dest[0].(*string)) = record.TargetID
+	*(dest[1].(*string)) = record.LifecycleStatus
+	*(dest[2].(*string)) = record.RunStatus
+	*(dest[3].(*string)) = record.TargetType
+	*(dest[4].(*[]string)) = append([]string(nil), record.Labels...)
+	*(dest[5].(*string)) = record.Group
+	*(dest[6].(*bool)) = record.LastSuccessAt != nil || record.LastFailureAt != nil
+	*(dest[7].(*time.Time)) = record.UpdatedAt
 }
 
 func cloneIntPtr(value *int) *int {

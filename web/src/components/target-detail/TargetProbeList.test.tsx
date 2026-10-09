@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { TargetProbeList } from './TargetProbeList'
-import type { ProbeItemRecord, ProbeObservation } from '../../lib/types'
+import type { ProbeItemRecord, ProbeObservation, ProbeObservationFreshness } from '../../lib/types'
 
 function probeItem(overrides: Partial<ProbeItemRecord> = {}): ProbeItemRecord {
   return {
@@ -54,6 +54,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[]}
+        freshnessByProbe={new Map()}
         observationsByProbe={new Map()}
         actionsDisabled={false}
         pendingProbeConfirmation={null}
@@ -69,6 +70,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem()]}
+        freshnessByProbe={new Map()}
         observationsByProbe={new Map([['pb_001', [observation()]]])}
         actionsDisabled={false}
         pendingProbeConfirmation={null}
@@ -88,6 +90,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem()]}
+        freshnessByProbe={new Map()}
         observationsByProbe={new Map()}
         actionsDisabled={false}
         pendingProbeConfirmation={null}
@@ -107,6 +110,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem()]}
+        freshnessByProbe={new Map()}
         observationsByProbe={new Map()}
         actionsDisabled={false}
         pendingProbeConfirmation={{ probeItemId: 'pb_001', action: 'delete' }}
@@ -125,6 +129,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem()]}
+        freshnessByProbe={new Map()}
         observationsByProbe={
           new Map([
             [
@@ -173,6 +178,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem()]}
+        freshnessByProbe={new Map()}
         observationsByProbe={
           new Map([[
             'pb_001',
@@ -206,6 +212,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem({ probe_item_id: 'pb_quiet' })]}
+        freshnessByProbe={new Map()}
         observationsByProbe={new Map()}
         actionsDisabled={false}
         pendingProbeConfirmation={null}
@@ -216,7 +223,7 @@ describe('TargetProbeList', () => {
 
     expect(screen.getByRole('table')).toBeInTheDocument()
     expect(screen.getByText('尚无观测')).toBeInTheDocument()
-    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
   })
 
   it('renders an "添加 Probe" CTA button in the empty state when onAddProbe is provided', () => {
@@ -224,6 +231,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[]}
+        freshnessByProbe={new Map()}
         observationsByProbe={new Map()}
         actionsDisabled={false}
         pendingProbeConfirmation={null}
@@ -243,6 +251,7 @@ describe('TargetProbeList', () => {
     render(
       <TargetProbeList
         probeItems={[probeItem({ probe_kind: 'tls' })]}
+        freshnessByProbe={new Map()}
         observationsByProbe={
           new Map([
             [
@@ -265,5 +274,74 @@ describe('TargetProbeList', () => {
     )
 
     expect(screen.getByText('13 天')).toBeInTheDocument()
+  })
+
+  it('shows mixed probe freshness separately from raw maintenance results and disabled rows', () => {
+    const httpFreshness: ProbeObservationFreshness = {
+      probe_item_id: 'pb_http',
+      state: 'stale',
+      effective_frequency_tier: '1m',
+      stale_after_seconds: 185,
+      last_observed_at: '2026-04-24T09:00:00Z',
+      expected_since: '2026-04-24T08:00:00Z',
+      deadline_at: '2026-04-24T09:03:05Z',
+    }
+    const tlsFreshness: ProbeObservationFreshness = {
+      probe_item_id: 'pb_tls',
+      state: 'fresh',
+      effective_frequency_tier: '6h',
+      stale_after_seconds: 64805,
+      last_observed_at: '2026-04-24T10:00:00Z',
+      expected_since: '2026-04-24T08:00:00Z',
+      deadline_at: '2026-04-25T04:00:05Z',
+    }
+    render(
+      <TargetProbeList
+        probeItems={[
+          probeItem({ probe_item_id: 'pb_http', probe_kind: 'http', frequency_tier: '5m' }),
+          probeItem({ probe_item_id: 'pb_tls', probe_kind: 'tls', frequency_tier: '15m', config: { port: 443 } }),
+          probeItem({ probe_item_id: 'pb_off', probe_kind: 'tcp', enabled: false, config: { port: 80 } }),
+        ]}
+        freshnessByProbe={new Map([
+          ['pb_http', httpFreshness],
+          ['pb_tls', tlsFreshness],
+        ])}
+        observationsByProbe={new Map([
+          ['pb_http', [observation({
+            probe_item_id: 'pb_http',
+            observed_at: '2026-04-24T12:00:00Z',
+            maintenance_context: true,
+            is_backfilled: true,
+          })]],
+        ])}
+        actionsDisabled={false}
+        pendingProbeConfirmation={null}
+        confirmationCardDisabled={false}
+        {...noopHandlers}
+      />,
+    )
+
+    const httpRow = screen.getByText('HTTP').closest('tr')
+    const tlsRow = screen.getByText('TLS').closest('tr')
+    const disabledRow = screen.getByText('TCP').closest('tr')
+    expect(httpRow).not.toBeNull()
+    expect(tlsRow).not.toBeNull()
+    expect(disabledRow).not.toBeNull()
+    expect(within(httpRow as HTMLElement).getByText('观测已过期')).toBeInTheDocument()
+    expect(within(httpRow as HTMLElement).getByText('1m')).toBeInTheDocument()
+    expect(within(httpRow as HTMLElement).getByText('5m')).toBeInTheDocument()
+    expect(within(httpRow as HTMLElement).getByText('过期于')).toBeInTheDocument()
+    expect(within(httpRow as HTMLElement).getByText('成功')).toBeInTheDocument()
+    expect(within(httpRow as HTMLElement).getByText('维护上下文')).toBeInTheDocument()
+    expect(within(httpRow as HTMLElement).getByText('回填记录')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '最近结果' })).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: '最近有效观测' })).toBeInTheDocument()
+    expect(within(tlsRow as HTMLElement).getByText('观测新鲜')).toBeInTheDocument()
+    expect(within(tlsRow as HTMLElement).getByText('6h')).toBeInTheDocument()
+    expect(within(tlsRow as HTMLElement).getByText('有效至')).toBeInTheDocument()
+    expect(within(disabledRow as HTMLElement).getAllByText('已停用').length).toBeGreaterThan(0)
+    expect(within(disabledRow as HTMLElement).queryByText('等待新观测')).not.toBeInTheDocument()
+    expect(within(disabledRow as HTMLElement).queryByText('观测已过期')).not.toBeInTheDocument()
+    expect(within(disabledRow as HTMLElement).queryByText('观测新鲜')).not.toBeInTheDocument()
   })
 })

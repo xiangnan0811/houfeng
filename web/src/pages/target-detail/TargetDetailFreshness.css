@@ -1,0 +1,11 @@
+.target-detail-status-band__freshness{grid-column:1 / -1;display:flex;flex-direction:column;gap:4px;min-width:0;margin-top:8px;padding-top:8px;border-top:var(--border-w) solid var(--border)}
+.target-detail-status-band__freshness dt{color:var(--text-muted);font-size:var(--monitoring-detail-helper-size);font-weight:400;line-height:1.4}
+.target-detail-status-band__freshness dd{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;min-width:0;margin:0;color:var(--text-primary);font-size:var(--monitoring-detail-helper-size-strong);line-height:1.4}
+.target-detail-header__health-caption{color:var(--text-muted);font-size:var(--monitoring-detail-helper-size);line-height:1.4}
+.target-detail-route .target-probe-table{min-width:64rem}
+.target-probe-table__freshness{display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0;max-width:16rem}
+.target-probe-table__qualifier{color:var(--text-muted);font-size:var(--monitoring-detail-helper-size)}
+@media (max-width: 760px){
+.target-detail-status-band__freshness{margin-top:0;padding-top:8px}
+.target-detail-route .target-probe-table{min-width:52rem}
+}

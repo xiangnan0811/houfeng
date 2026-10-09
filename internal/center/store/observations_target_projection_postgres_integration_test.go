@@ -66,6 +66,7 @@ func TestPostgresIntegrationObservationBatchProjectsEligibleTargetTimestamps(t *
 		t.Fatalf("record eligible observation batch: %v", err)
 	}
 	assertTargetObservationTimestamps(t, ctx, pool, "tg_observation_projection", &successAt, &failureAt)
+	assertProbeLiveObservationTimestamp(t, ctx, pool, "tg_observation_projection", "pb_observation_projection", &failureAt)
 
 	staleSuccessAt := successAt.Add(-time.Minute)
 	staleFailureAt := failureAt.Add(-time.Minute)
@@ -78,6 +79,7 @@ func TestPostgresIntegrationObservationBatchProjectsEligibleTargetTimestamps(t *
 		t.Fatalf("record out-of-order observation batch: %v", err)
 	}
 	assertTargetObservationTimestamps(t, ctx, pool, "tg_observation_projection", &successAt, &failureAt)
+	assertProbeLiveObservationTimestamp(t, ctx, pool, "tg_observation_projection", "pb_observation_projection", &failureAt)
 
 	if err := repository.RecordBatch(ctx, observations.BatchWrite{
 		ProbeObservations: []observations.ProbeObservationWrite{
@@ -88,6 +90,7 @@ func TestPostgresIntegrationObservationBatchProjectsEligibleTargetTimestamps(t *
 		t.Fatalf("record excluded observation batch: %v", err)
 	}
 	assertTargetObservationTimestamps(t, ctx, pool, "tg_observation_excluded", nil, nil)
+	assertProbeLiveObservationTimestamp(t, ctx, pool, "tg_observation_excluded", "pb_observation_excluded", nil)
 
 	var rawExcludedCount int
 	if err := pool.QueryRow(ctx, `
@@ -253,6 +256,8 @@ func TestPostgresIntegrationObservationBatchConcurrentTargetProjectionOrder(t *t
 
 	assertTargetObservationTimestamps(t, ctx, pool, targetA, &successA, &failureA)
 	assertTargetObservationTimestamps(t, ctx, pool, targetB, &successB, &failureB)
+	assertProbeLiveObservationTimestamp(t, ctx, pool, targetA, "pb_observation_projection_order_a", &failureA)
+	assertProbeLiveObservationTimestamp(t, ctx, pool, targetB, "pb_observation_projection_order_b", &successB)
 
 	var rawCount int
 	if err := pool.QueryRow(ctx, `
@@ -431,6 +436,22 @@ func assertTargetObservationTimestamps(t *testing.T, ctx context.Context, pool *
 	}
 	if !sameOptionalTimestamp(gotSuccess, wantSuccess) || !sameOptionalTimestamp(gotFailure, wantFailure) {
 		t.Fatalf("target %q timestamps = (%v, %v), want (%v, %v)", targetID, gotSuccess, gotFailure, wantSuccess, wantFailure)
+	}
+}
+
+func assertProbeLiveObservationTimestamp(t *testing.T, ctx context.Context, pool *pgxpool.Pool, targetID, probeItemID string, want *time.Time) {
+	t.Helper()
+	var got *time.Time
+	if err := pool.QueryRow(ctx, `
+		select last_live_observed_at
+		from probe_items
+		where target_id = $1
+		  and probe_item_id = $2
+	`, targetID, probeItemID).Scan(&got); err != nil {
+		t.Fatalf("read probe %q live observation timestamp: %v", probeItemID, err)
+	}
+	if !sameOptionalTimestamp(got, want) {
+		t.Fatalf("probe %q live observation timestamp = %v, want %v", probeItemID, got, want)
 	}
 }
 

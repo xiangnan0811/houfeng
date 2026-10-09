@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type * as ApiModule from '../lib/api'
 import { listTargetSparklines } from '../lib/api'
+import { targetObservationFixture } from '../lib/targetObservationFixture'
+import { VISIBLE_REFRESH_INTERVAL_MS } from '../lib/useVisibleRefresh'
 import { TargetsPage } from './TargetsPage'
 
 vi.mock('../lib/api', async (importOriginal) => {
@@ -23,28 +25,57 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
-function targetRecord(overrides: Record<string, unknown> = {}) {
+function observationFreshness(overrides: Record<string, unknown> = {}) {
   return {
-    target_id: 'tg_001',
+    state: 'fresh',
+    evaluated_at: '2026-04-26T09:05:00Z',
+    enabled_probe_count: 1,
+    fresh_probe_count: 1,
+    pending_probe_count: 0,
+    stale_probe_count: 0,
+    probes: [],
+    ...overrides,
+  }
+}
+
+function targetRecord(overrides: Record<string, unknown> = {}) {
+  const { observation_freshness: freshnessOverride, ...rest } = overrides
+  const targetId = typeof rest.target_id === 'string' ? rest.target_id : 'tg_001'
+  const runStatus = typeof rest.run_status === 'string' ? rest.run_status : '启用'
+  const lifecycleStatus = typeof rest.lifecycle_status === 'string' ? rest.lifecycle_status : 'active'
+  const enabledProbeCount = typeof rest.enabled_probe_count === 'number' ? rest.enabled_probe_count : 1
+  const lastSuccessAt = 'last_success_at' in rest ? rest.last_success_at as string | undefined : '2026-04-26T09:00:00Z'
+  const lastFailureAt = 'last_failure_at' in rest ? rest.last_failure_at as string | undefined : '2026-04-26T08:00:00Z'
+  return {
+    target_id: targetId,
     name: 'Existing API',
     target_type: 'service',
     host: 'api.example.com',
     base_port: 443,
     execution_monitoring_instance_labels: ['edge'],
-    lifecycle_status: 'active',
-    run_status: '启用',
+    lifecycle_status: lifecycleStatus,
+    run_status: runStatus,
     labels: ['public'],
     note: '',
     current_health_status: '正常',
     current_active_incident_count: 0,
-    enabled_probe_count: 1,
+    enabled_probe_count: enabledProbeCount,
     matching_executor_count: 1,
-    last_success_at: '2026-04-26T09:00:00Z',
-    last_failure_at: '2026-04-26T08:00:00Z',
+    last_success_at: lastSuccessAt,
+    last_failure_at: lastFailureAt,
     current_primary_issue_summary: '',
     created_at: '2026-04-20T00:00:00Z',
     updated_at: '2026-04-26T09:05:00Z',
-    ...overrides,
+    observation_freshness: freshnessOverride ?? targetObservationFixture({
+      target_id: targetId,
+      run_status: runStatus,
+      lifecycle_status: lifecycleStatus,
+      evaluated_at: '2026-04-26T09:05:00Z',
+      enabled_probe_count: enabledProbeCount,
+      last_success_at: lastSuccessAt,
+      last_failure_at: lastFailureAt,
+    }),
+    ...rest,
   }
 }
 
@@ -89,6 +120,11 @@ function listFetch(records: ReturnType<typeof targetRecord>[]) {
 describe('TargetsPage', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.useRealTimers()
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
   })
 
   it('creates the first target and navigates to its detail page', async () => {
@@ -114,6 +150,13 @@ describe('TargetsPage', () => {
             current_primary_issue_summary: '',
             created_at: '2026-04-27T09:00:00Z',
             updated_at: '2026-04-27T09:00:00Z',
+            observation_freshness: observationFreshness({
+              state: 'pending',
+              evaluated_at: '2026-04-27T09:00:00Z',
+              fresh_probe_count: 0,
+              pending_probe_count: 1,
+              stale_probe_count: 0,
+            }),
           },
           201,
         ),
@@ -1217,7 +1260,7 @@ describe('TargetsPage', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: /覆盖缺口/ }))
     await waitFor(() => expect(screen.getByText('Coverage Gap API')).toBeInTheDocument())
-    expect(screen.getByText('未配置启用探测项')).toBeInTheDocument()
+    expect(screen.getAllByText('未配置启用探测项').length).toBeGreaterThan(0)
     expect(screen.queryByText('Archived API')).not.toBeInTheDocument()
     expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
 
@@ -1227,5 +1270,534 @@ describe('TargetsPage', () => {
     expect(screen.getByText('Paused API')).toBeInTheDocument()
     expect(screen.getByText('Archived API')).toBeInTheDocument()
     expect(screen.getByText('Coverage Gap API')).toBeInTheDocument()
+  })
+
+  it('keeps stale targets independent of abnormal, unobserved, paused, and retired rows', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({ target_id: 'tg_fresh', name: 'Healthy API', group: 'edge' }),
+      targetRecord({
+        target_id: 'tg_alert_fresh',
+        name: 'Failing Fresh',
+        group: 'edge',
+        current_health_status: '告警',
+        current_primary_issue_summary: 'TLS 证书即将过期',
+      }),
+      targetRecord({
+        target_id: 'tg_alert_stale',
+        name: 'Failing Stale',
+        group: 'edge',
+        current_health_status: '告警',
+        current_primary_issue_summary: 'HTTP 探测持续失败',
+        observation_freshness: observationFreshness({ state: 'stale', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+      targetRecord({
+        target_id: 'tg_normal_stale',
+        name: 'Normal Stale',
+        group: 'core',
+        observation_freshness: observationFreshness({ state: 'stale', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+      targetRecord({
+        target_id: 'tg_pending',
+        name: 'Pending API',
+        group: 'edge',
+        observation_freshness: observationFreshness({ state: 'pending', fresh_probe_count: 0, pending_probe_count: 1, stale_probe_count: 0 }),
+      }),
+      targetRecord({
+        target_id: 'tg_partial',
+        name: 'Partial Wait',
+        group: 'edge',
+        observation_freshness: observationFreshness({ state: 'partial', fresh_probe_count: 1, pending_probe_count: 1, stale_probe_count: 0 }),
+      }),
+      targetRecord({
+        target_id: 'tg_never',
+        name: 'Never Observed',
+        group: 'edge',
+        current_health_status: '数据不可用',
+        last_success_at: undefined,
+        last_failure_at: undefined,
+        observation_freshness: observationFreshness({ state: 'unobserved', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+      targetRecord({
+        target_id: 'tg_paused',
+        name: 'Paused Stale',
+        group: 'edge',
+        run_status: '暂停',
+        observation_freshness: observationFreshness({ state: 'inactive', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+      targetRecord({
+        target_id: 'tg_retired',
+        name: 'Retired Stale',
+        group: 'edge',
+        lifecycle_status: 'retired',
+        run_status: '暂停',
+        observation_freshness: observationFreshness({ state: 'inactive', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+    ]))
+    renderTargets()
+    await waitFor(() => expect(screen.getByText('Healthy API')).toBeInTheDocument())
+    expect(screen.getByRole('tab', { name: '异常 2' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '观测过期 2' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '观测过期 2' }))
+    await waitFor(() => expect(screen.getByText('Failing Stale')).toBeInTheDocument())
+    expect(screen.getByText('Normal Stale')).toBeInTheDocument()
+    expect(screen.getByText('HTTP 探测持续失败')).toBeInTheDocument()
+    expect(screen.getByText('最近已知健康')).toBeInTheDocument()
+    expect(screen.getAllByText('观测已过期')).toHaveLength(2)
+    expect(screen.getByText('最近一次正常，当前证据不足')).toBeInTheDocument()
+    expect(screen.queryByText('当前正常')).not.toBeInTheDocument()
+    expect(screen.queryByText('Failing Fresh')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pending API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Partial Wait')).not.toBeInTheDocument()
+    expect(screen.queryByText('Never Observed')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paused Stale')).not.toBeInTheDocument()
+    expect(screen.queryByText('Retired Stale')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '异常 2' }))
+    await waitFor(() => expect(screen.getByText('Failing Fresh')).toBeInTheDocument())
+    expect(screen.getByText('Failing Stale')).toBeInTheDocument()
+    expect(screen.getByText('TLS 证书即将过期')).toBeInTheDocument()
+    expect(screen.queryByText('Normal Stale')).not.toBeInTheDocument()
+  })
+
+  it('opens view=stale directly, keeps the group filter, and shows an empty stale result', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({ target_id: 'tg_fresh', name: 'Healthy API', group: 'edge' }),
+      targetRecord({
+        target_id: 'tg_stale',
+        name: 'Edge Stale',
+        group: 'edge',
+        observation_freshness: observationFreshness({ state: 'stale', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+      targetRecord({
+        target_id: 'tg_other',
+        name: 'Core Stale',
+        group: 'core',
+        observation_freshness: observationFreshness({ state: 'partial', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+      targetRecord({ target_id: 'tg_paused', name: 'Paused API', group: 'edge', run_status: '暂停' }),
+    ]))
+    renderTargets('/targets?view=stale&group=edge')
+    await waitFor(() => expect(screen.getByText('Edge Stale')).toBeInTheDocument())
+    expect(screen.getByText('分组: edge')).toBeInTheDocument()
+    expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Core Stale')).not.toBeInTheDocument()
+    expect(screen.queryByText('Paused API')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: '全部 4' }))
+    await waitFor(() => expect(screen.getByText('Healthy API')).toBeInTheDocument())
+    expect(screen.getByText('分组: edge')).toBeInTheDocument()
+    expect(screen.getByText('Edge Stale')).toBeInTheDocument()
+    expect(screen.getByText('Paused API')).toBeInTheDocument()
+    expect(screen.queryByText('Core Stale')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('tab', { name: /观测过期/ }))
+    await waitFor(() => expect(screen.queryByText('Healthy API')).not.toBeInTheDocument())
+    expect(screen.getByText('Edge Stale')).toBeInTheDocument()
+    expect(screen.queryByText('Paused API')).not.toBeInTheDocument()
+  })
+
+  it('matches a blank group when the stale link uses 未分组', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({
+        target_id: 'tg_blank',
+        name: 'Blank Group Stale',
+        group: '',
+        observation_freshness: observationFreshness({ state: 'stale', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+      targetRecord({
+        target_id: 'tg_named',
+        name: 'Named Group Stale',
+        group: 'edge',
+        observation_freshness: observationFreshness({ state: 'stale', fresh_probe_count: 0, stale_probe_count: 1 }),
+      }),
+      targetRecord({ target_id: 'tg_fresh', name: 'Blank Fresh', group: '   ' }),
+    ]))
+    renderTargets('/targets?view=stale&group=' + encodeURIComponent('未分组'))
+    await waitFor(() => expect(screen.getByText('Blank Group Stale')).toBeInTheDocument())
+    expect(screen.queryByText('Named Group Stale')).not.toBeInTheDocument()
+    expect(screen.queryByText('Blank Fresh')).not.toBeInTheDocument()
+    expect(screen.getByText('分组: 未分组')).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '观测过期 2' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('tab', { name: /异常/, selected: true })).not.toBeInTheDocument()
+  })
+
+  it('shows the empty stale view without dropping the last list on a later empty filter', async () => {
+    vi.stubGlobal('fetch', listFetch([
+      targetRecord({ target_id: 'tg_fresh', name: 'Healthy API' }),
+    ]))
+    renderTargets()
+    await waitFor(() => expect(screen.getByText('Healthy API')).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('tab', { name: '观测过期' }))
+    expect(await screen.findByText('没有匹配当前筛选的目标')).toBeInTheDocument()
+    expect(screen.queryByText('Healthy API')).not.toBeInTheDocument()
+  })
+
+  it('refreshes only the current list while visible and keeps the snapshot after a network failure', async () => {
+    vi.useFakeTimers()
+    let currentCalls = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/targets') {
+        currentCalls += 1
+        if (currentCalls === 1) return mockJSONResponse([targetRecord({ name: 'Blog' })])
+        return mockJSONResponse({ error: 'unavailable' }, 503)
+      }
+      if (url === '/api/targets?scope=retired') return mockJSONResponse([])
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTargets()
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('Blog'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(screen.getByText('Blog')).toBeInTheDocument()
+    const retiredCalls = () => fetchMock.mock.calls.filter(([input]) => String(input) === '/api/targets?scope=retired').length
+    expect(retiredCalls()).toBe(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VISIBLE_REFRESH_INTERVAL_MS)
+    })
+    expect(currentCalls).toBe(2)
+    expect(retiredCalls()).toBe(1)
+    expect(screen.getByText('Blog')).toBeInTheDocument()
+    const notice = screen.getByText(/更新失败，显示上次结果/)
+    expect(notice.closest('p')?.querySelector('.timestamp')).not.toBeNull()
+    expect(notice.closest('p')).not.toHaveTextContent('最新')
+    expect(screen.getByRole('tab', { name: /全部/ })).toBeInTheDocument()
+  })
+
+  it('does not refresh while hidden and refreshes the current list on focus', async () => {
+    vi.useFakeTimers()
+    let currentCalls = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/targets') {
+        currentCalls += 1
+        return mockJSONResponse([targetRecord({ name: 'Blog' })])
+      }
+      if (url === '/api/targets?scope=retired') return mockJSONResponse([])
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTargets()
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('Blog'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(currentCalls).toBe(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'hidden',
+    })
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'))
+      window.dispatchEvent(new Event('focus'))
+      await vi.advanceTimersByTimeAsync(VISIBLE_REFRESH_INTERVAL_MS)
+    })
+    expect(currentCalls).toBe(1)
+
+    Object.defineProperty(document, 'visibilityState', {
+      configurable: true,
+      get: () => 'visible',
+    })
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(currentCalls).toBe(2)
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === '/api/targets?scope=retired')).toHaveLength(1)
+  })
+
+  it('clears the list when a visible refresh is unauthorized or not found', async () => {
+    vi.useFakeTimers()
+    for (const status of [401, 404]) {
+      let currentCalls = 0
+      const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === '/api/targets') {
+          currentCalls += 1
+          if (currentCalls === 1) return mockJSONResponse([targetRecord({ name: 'Blog' })])
+          return mockJSONResponse({ error: 'missing' }, status)
+        }
+        if (url === '/api/targets?scope=retired') return mockJSONResponse([])
+        return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const view = renderTargets()
+      for (let attempt = 0; attempt < 20 && !screen.queryByText('Blog'); attempt += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0)
+        })
+      }
+      expect(screen.getByText('Blog')).toBeInTheDocument()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(VISIBLE_REFRESH_INTERVAL_MS)
+      })
+      expect(screen.getByRole('heading', { name: '目标列表不可用' })).toBeInTheDocument()
+      expect(screen.queryByText('Blog')).not.toBeInTheDocument()
+      expect(screen.queryByText(/更新失败，显示上次结果/)).not.toBeInTheDocument()
+      view.unmount()
+    }
+  })
+
+  it('does not apply an in-flight periodic read over the post-mutation list', async () => {
+    vi.useFakeTimers()
+    const gate = deferred<Response>()
+    let currentCalls = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/targets' && init?.method !== 'POST') {
+        currentCalls += 1
+        if (currentCalls === 1) return mockJSONResponse([targetRecord({ target_id: 'tg_001', name: 'Before' })])
+        if (currentCalls === 2) return gate.promise
+        return mockJSONResponse([targetRecord({ target_id: 'tg_001', name: 'After Mutation' })])
+      }
+      if (url === '/api/targets?scope=retired') return mockJSONResponse([])
+      if (url.includes('/lifecycle-review')) {
+        return mockJSONResponse({ dependency_impacts: [], preview_digest: 'target-digest' })
+      }
+      if (url.includes('/runtime/')) return mockJSONResponse(targetRecord({ target_id: 'tg_001', name: 'After Mutation' }))
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTargets()
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('Before'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VISIBLE_REFRESH_INTERVAL_MS)
+    })
+    expect(currentCalls).toBe(2)
+
+    fireEvent.click(screen.getByLabelText('选择 Before'))
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '进入维护' }))
+    for (
+      let attempt = 0;
+      attempt < 20 && !fetchMock.mock.calls.some(([input]) => String(input).includes('/runtime/enter-maintenance'));
+      attempt += 1
+    ) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(screen.getByText('Before')).toBeInTheDocument()
+    expect(screen.queryByText('After Mutation')).not.toBeInTheDocument()
+
+    await act(async () => {
+      gate.resolve(mockJSONResponse([targetRecord({ target_id: 'tg_001', name: 'Obsolete' })]))
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('After Mutation'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(screen.getByText('After Mutation')).toBeInTheDocument()
+    expect(screen.queryByText('Obsolete')).not.toBeInTheDocument()
+    expect(screen.queryByText('Before')).not.toBeInTheDocument()
+  })
+
+  it('keeps the last complete snapshot when the retired read fails after archive', async () => {
+    vi.useFakeTimers()
+    let currentCalls = 0
+    let retiredCalls = 0
+    let retiredMode: 'empty' | 'fail' | 'recovered' = 'empty'
+    const active = targetRecord({ target_id: 'tg_archive', name: 'Blog' })
+    const retired = targetRecord({
+      target_id: 'tg_archive',
+      name: 'Blog',
+      lifecycle_status: 'retired',
+      run_status: '暂停',
+    })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/targets' && init?.method !== 'POST') {
+        currentCalls += 1
+        return mockJSONResponse(currentCalls === 1 ? [active] : [])
+      }
+      if (url === '/api/targets?scope=retired') {
+        retiredCalls += 1
+        if (retiredMode === 'fail') return mockJSONResponse({ error: 'retired unavailable' }, 503)
+        if (retiredMode === 'recovered') return mockJSONResponse([retired])
+        return mockJSONResponse([])
+      }
+      if (url.includes('/lifecycle-review')) {
+        return mockJSONResponse({ dependency_impacts: [], preview_digest: 'target-digest' })
+      }
+      if (url.includes('/runtime/archive')) {
+        retiredMode = 'fail'
+        return mockJSONResponse(retired)
+      }
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTargets()
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('Blog'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(retiredCalls).toBe(1)
+
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认批量退役' }))
+    for (let attempt = 0; attempt < 20 && !screen.queryByText(/更新失败，显示上次结果/); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+
+    expect(screen.getByText('Blog')).toBeInTheDocument()
+    expect(screen.queryByText('已退役')).not.toBeInTheDocument()
+    const notice = screen.getByText(/更新失败，显示上次结果/)
+    expect(notice.closest('p')?.querySelector('.timestamp')).not.toBeNull()
+    expect(currentCalls).toBe(2)
+    expect(retiredCalls).toBe(2)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VISIBLE_REFRESH_INTERVAL_MS)
+    })
+    expect(currentCalls).toBe(3)
+    expect(retiredCalls).toBe(2)
+    expect(screen.getByText('Blog')).toBeInTheDocument()
+    expect(screen.queryByText('已退役')).not.toBeInTheDocument()
+    expect(screen.getByText(/更新失败，显示上次结果/)).toBeInTheDocument()
+
+    retiredMode = 'recovered'
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('已退役'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(retiredCalls).toBe(3)
+    expect(screen.getByText('Blog')).toBeInTheDocument()
+    expect(screen.getByText('已退役')).toBeInTheDocument()
+    expect(screen.queryByText(/更新失败，显示上次结果/)).not.toBeInTheDocument()
+  })
+
+  it('clears the list when a paired post-archive read is unauthorized', async () => {
+    vi.useFakeTimers()
+    let currentCalls = 0
+    let retiredMode: 'empty' | 'unauthorized' = 'empty'
+    const active = targetRecord({ target_id: 'tg_archive', name: 'Blog' })
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/targets' && init?.method !== 'POST') {
+        currentCalls += 1
+        return mockJSONResponse(currentCalls === 1 ? [active] : [])
+      }
+      if (url === '/api/targets?scope=retired') {
+        if (retiredMode === 'unauthorized') return mockJSONResponse({ error: 'unauthenticated' }, 401)
+        return mockJSONResponse([])
+      }
+      if (url.includes('/lifecycle-review')) {
+        return mockJSONResponse({ dependency_impacts: [], preview_digest: 'target-digest' })
+      }
+      if (url.includes('/runtime/archive')) {
+        retiredMode = 'unauthorized'
+        return mockJSONResponse(active)
+      }
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderTargets()
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('Blog'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认批量退役' }))
+    for (let attempt = 0; attempt < 20 && !screen.queryByRole('heading', { name: '目标列表不可用' }); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(screen.getByRole('heading', { name: '目标列表不可用' })).toBeInTheDocument()
+    expect(screen.queryByText('Blog')).not.toBeInTheDocument()
+    expect(screen.queryByText(/更新失败，显示上次结果/)).not.toBeInTheDocument()
+  })
+
+  it('keeps the last complete snapshot when the current read fails after archive', async () => {
+    vi.useFakeTimers()
+    let retiredCalls = 0
+    let mode: 'initial' | 'failed' | 'recovered' = 'initial'
+    const active = targetRecord({ target_id: 'tg_archive', name: 'Blog' })
+    const retired = targetRecord({
+      target_id: 'tg_archive',
+      name: 'Blog',
+      lifecycle_status: 'retired',
+      run_status: '暂停',
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/targets' && init?.method !== 'POST') {
+        if (mode === 'failed') return mockJSONResponse({ error: 'unavailable' }, 503)
+        if (mode === 'recovered') return mockJSONResponse([])
+        return mockJSONResponse([active])
+      }
+      if (url === '/api/targets?scope=retired') {
+        retiredCalls += 1
+        if (mode === 'initial') return mockJSONResponse([])
+        return mockJSONResponse([retired])
+      }
+      if (url.includes('/lifecycle-review')) {
+        return mockJSONResponse({ dependency_impacts: [], preview_digest: 'target-digest' })
+      }
+      if (url.includes('/runtime/archive')) {
+        mode = 'failed'
+        return mockJSONResponse(retired)
+      }
+      return mockJSONResponse({ error: `unexpected ${url}` }, 500)
+    }))
+    renderTargets()
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('Blog'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    fireEvent.click(screen.getByLabelText('选择 Blog'))
+    fireEvent.click(screen.getByRole('button', { name: '批量操作' }))
+    fireEvent.click(screen.getByRole('button', { name: '退役' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认批量退役' }))
+    for (let attempt = 0; attempt < 20 && !screen.queryByText(/更新失败，显示上次结果/); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(screen.getByText('Blog')).toBeInTheDocument()
+    expect(screen.queryByText('已退役')).not.toBeInTheDocument()
+    expect(retiredCalls).toBe(2)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(VISIBLE_REFRESH_INTERVAL_MS)
+    })
+    expect(retiredCalls).toBe(2)
+    expect(screen.getByText('Blog')).toBeInTheDocument()
+    expect(screen.getByText(/更新失败，显示上次结果/)).toBeInTheDocument()
+
+    mode = 'recovered'
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    for (let attempt = 0; attempt < 20 && !screen.queryByText('已退役'); attempt += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+    }
+    expect(retiredCalls).toBe(3)
+    expect(screen.getByText('已退役')).toBeInTheDocument()
+    expect(screen.queryByText(/更新失败，显示上次结果/)).not.toBeInTheDocument()
   })
 })

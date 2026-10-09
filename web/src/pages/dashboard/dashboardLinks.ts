@@ -7,6 +7,7 @@ export const DASHBOARD_LINKS = {
   monitoringAbnormal: '/monitoring?abnormal=1',
   targetsAbnormal: '/targets?abnormal=1',
   targetsUnobserved: '/targets?view=unobserved',
+  targetsStale: '/targets?view=stale',
   assetDecisionsNeedsDecision: '/asset-decisions?view=needs_decision&renew_within_days=30',
   assetDecisionsMigrationRetirement: '/asset-decisions?view=needs_decision&renew_within_days=30&scenario=migration_retirement',
   assetDecisionsRenewal: '/asset-decisions?view=renewal&renew_within_days=30',
@@ -14,3 +15,9 @@ export const DASHBOARD_LINKS = {
   vps: '/vps',
   subscriptions: '/subscriptions',
 } as const
+
+export function dashboardTargetsStaleLink(group?: string): string {
+  const params = new URLSearchParams({ view: 'stale' })
+  if (group) params.set('group', group)
+  return `/targets?${params.toString()}`
+}

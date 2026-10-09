@@ -35,10 +35,11 @@ buildDashboardModel(input: {
 
 #### 3. Contracts
 
-- 失败不得再用 `[]` / `null` 表示。`overview` 失败是可重试整页 error；VPS / subscription 失败是局部 degradation，并保留已成功的 Dashboard 摘要。
-- mode 优先级固定为 `critical -> abnormal -> maintenance -> onboarding -> stable`。`onboarding` 只在 VPS 请求 `success([])` 且 `total_monitoring_instance_count === 0`、`total_target_count === 0` 时成立；VPS loading/error 永远不能触发首次接入。
-- `abnormal_*_count` 已包含 `severe_*_count`。总异常只允许 `abnormal_monitoring_instance_count + abnormal_target_count`；严重只做优先级分层，禁止把 severe 再加进 abnormal。
-- `unobserved_target_count` 使用后端全量计数并链接 `/targets?view=unobserved`，不改变已有异常深链。已知异常为零但无观测非零时表达“尚有目标无观测”；二者均零仅表达“当前运行异常计数为 0”。同时存在则分开展示，资产待核对仍是独立事实。
+- 失败不得再用 `[]` / `null` 表示。首次 `overview` 失败，以及之后的 401、403、404，是可重试整页 error，并清除已显示的摘要。已有成功摘要后的普通网络失败保留该摘要和 `snapshot_generated_at`，显示“更新失败，显示上次结果”，不把计数改成 0，也不称为最新。VPS / subscription 失败仍是局部 degradation，并保留已成功的 Dashboard 摘要。
+- mode 优先级固定为 `critical -> abnormal -> maintenance -> onboarding -> stable`。`onboarding` 只在 VPS 请求 `success([])` 且 `total_monitoring_instance_count === 0`、`total_target_count === 0` 时成立；VPS loading/error 永远不能触发首次接入。观测过期不改变该优先级，也不创建或恢复 incident。
+- `abnormal_*_count` 已包含 `severe_*_count`。总异常只允许 `abnormal_monitoring_instance_count + abnormal_target_count`；严重只做优先级分层，禁止把 severe 再加进 abnormal。`stale_target_count` 与异常、无观测分别计数，重叠目标不得相加。
+- `unobserved_target_count` 使用后端全量计数并链接 `/targets?view=unobserved`。`stale_target_count` 使用后端全量计数并链接 `/targets?view=stale`。已知异常、无观测、观测过期都为零时，才使用“当前运行异常计数为 0”；任一非零都单独列出。资产待核对仍是独立事实。
+- `group_summaries` 中 `stale_target_count > 0` 的分组链接 `/targets?view=stale&group=<group>`，保留服务端分组名，空白分组的服务端名称 `未分组` 也原样进入 query。计数为零的分组不渲染，不得恢复按 Group 分布、第四张 KPI 或其它已删除的摘要 dump。
 - 下层证据 lane 保留来源、摘要生成/读取时间与金额完整性，不重复上层同组判断数字。未知目标使用中性状态，不由历史观测或摘要计数保证当前健康。
 - 每个 ready model 恰好一个 `primaryAction`。固定深链：critical → `/events?severity=严重`；abnormal → 有监控实例时 `/monitoring?abnormal=1`，否则 `/targets?abnormal=1`；maintenance → `/events?maintenance_only=1`；onboarding → `/vps`；stable → 真实资产 signal 的 `/asset-decisions?...`，无 signal 时 `/vps`。
 - 判断摘要固定三项（观测、资产、订阅），每项必须链接到其文案所指的承接工作流；不得出现“资产待核对”却固定跳 `/vps` 的链接漂移。
@@ -48,13 +49,14 @@ buildDashboardModel(input: {
 - 首屏保留一个 command surface、一个 `今日第一步`、三项判断摘要（以指标卡呈现，观测卡可在后端返回 24 个逐小时桶时附 `new_incident_trend_24h` 趋势，否则不画趋势）和两条证据 lane；桌面两栏布局中，右栏另有两块**有界预览**：`即将续费`（来自 subscription overview 的 `upcoming_renewals`，该队列由后端按 UTC 日窗口 `[当天, 当天+90]` 筛选且最多返回 12 条：按续费日升序最多预览 5 项，计数标注“未来 90 天（UTC）· N 项”，达到 12 条上限时写“至少 12 项”而不是总数；剩余天数与窗口同源，按续费日期与订阅摘要 `snapshot_generated_at` 所在 UTC 日期的日历差计算（后端 `subscriptioncosts` 以同一时刻确定窗口与生成时间，不用浏览器接收时间，避免跨 UTC 午夜或客户端时钟偏差；该字段无效时才退回接收时间，并在计数旁标注“天数按接收时间估算”），当天为“今天”，早于当天的兜底显示“已过”；空队列写“未来 90 天（UTC）内没有待续费的订阅”；缺折算金额时显示“金额待核对”，已有过期汇率数值可显示但必须标注“汇率过期”；链接订阅明细；subscription loading/error 时如实显示读取中/不可用，不得显示为“没有待续费”）和 `最近动态`（来自 `recent_events`，按时间倒序最多 5 项；`recent_events` 无时间下界，入口链接不带 `time_range`，避免旧事件点进后为空）。异常对象最多展示前三项；完整事件、资产、订阅明细仍交给对应路由。不得恢复独立的第四张 KPI、Group 摘要、系统快捷入口、无上限的事件/订阅列表或第二套 Dashboard workbench。
 - `abnormal_monitoring_instances` / `abnormal_targets` 只用于异常对象预览，不能推导全量 group/provider/region。`notification_status` 仍只能包含布尔配置摘要，不得暴露 token/chat id/webhook。
 - 账单判断和成本证据消费 `current_unknown_amount_count`、`current_missing_rate_count`、`current_stale_rate_count`。金额不完整时称已知金额小计，全部未知时称金额待核对；预算风险零不能替代完整性事实。金额原价为零且换算可用仍为已知零。
+- Dashboard overview 的初次读取和之后的可见刷新共用 `useVisibleRefresh`。可见时每 30 秒只刷新 overview；hidden 不请求；回到可见或 focus 立即刷新，并与在途请求去重。卸载后的迟到响应不得应用。VPS 与订阅摘要仍只在挂载和显式重试时读取。
 
 #### 4. Validation & Error Matrix
 
 | Condition | Expected behavior |
 | --- | --- |
 | overview loading | 整页显示 `正在加载工作台…` |
-| overview error | 整页显示 `工作台不可用` + retry，不渲染 command surface |
+| overview 首次失败或 401/403/404 | 整页显示 `工作台不可用` + retry，不保留上次摘要 |
 | VPS `success([])` 且观测库存为 0 | onboarding，唯一主行动 `创建第一台 VPS` |
 | VPS 503 且观测库存为 0 | 非 onboarding；显示 `部分事实待确认`、VPS 局部错误和 retry |
 | abnormal=2、severe=1 | critical；UI 异常总数仍为 2，严重为 1 |
@@ -62,6 +64,10 @@ buildDashboardModel(input: {
 | abnormal=0、maintenance>0 | maintenance；跳维护事件 |
 | subscription 503 | 页面保留；标明较低精度 Dashboard fallback，不制造 0 成本事实 |
 | stable + asset signal | mode 仍为 stable，但标题/信号和 primary action 表达真实资产待办 |
+| 成功后 overview 网络失败 | 保留 command surface、原计数和摘要生成时间，显示“更新失败，显示上次结果” |
+| stale 与 abnormal 重叠 | 异常总数不包含 stale；两条事实分别链接 |
+| 分组 `stale_target_count > 0` | 链接保留 group；零计数分组不出现 |
+| 可见 30 秒 | 再读一次 overview；hidden 不读 |
 
 #### 5. Good/Base/Bad Cases
 
@@ -76,8 +82,8 @@ buildDashboardModel(input: {
 
 #### 6. Tests Required
 
-- `dashboardModel.test.ts`: subset 计数、五 mode 优先级、VPS failure-not-onboarding、stable asset signal、fallback 来源、loading/error。
-- `DashboardPage.test.tsx`: 五 mode 唯一主行动及 deep link、禁止旧 surface、VPS 503、supporting retry、订阅 fallback、异常详情链接和可信标题；判断摘要固定 3 项，续费/动态预览各最多 5 项，subscription 503 时续费预览显示不可用。
+- `dashboardModel.test.ts`: subset 计数、五 mode 优先级、VPS failure-not-onboarding、stable asset signal、fallback 来源、loading/error，以及 stale 与 abnormal/unobserved 分开计数、分组链接保留 group。
+- `DashboardPage.test.tsx`: 五 mode 唯一主行动及 deep link、禁止旧 surface、VPS 503、supporting retry、订阅 fallback、异常详情链接和可信标题；判断摘要固定 3 项，续费/动态预览各最多 5 项，subscription 503 时续费预览显示不可用。另覆盖 stale 链接与重叠不加总、分组过期链接、网络失败保留上次摘要、401/404 清除、可见 30 秒刷新和隐藏不请求。
 - `dashboardPanels.test.ts`: 动态倒序与上限、状态色、续费 loading/error/ready、升序、窗口返回数与 12 条上限提示、以 `snapshot_generated_at` 为准的 UTC 日历剩余天数（用例内切换 `TZ` 覆盖东八区凌晨、美西傍晚与接收时间跨日）与日期截取、汇率过期金额、趋势长度校验。
 - `internal/center/subscriptioncosts/service_test.go`: 时钟在 UTC 午夜两侧交替时，续费窗口“今天”与 `snapshot_generated_at` 仍是同一天。
 - `internal/center/store/dashboard_test.go` 与 `internal/center/http/handlers/dashboard_test.go`: abnormal=2/severe=1，并断言 severe 不大于 abnormal。
@@ -119,6 +125,8 @@ type ShellSummaryStatus =
   | 'loading'
   | 'clear'
   | 'anomaly'
+  | 'unobserved'
+  | 'notice'
   | 'stale'
   | 'unavailable'
 
@@ -130,11 +138,11 @@ buildShellSummaryModel(summary: DashboardSummaryState, now: number): ShellSummar
 #### 3. Contracts
 
 - freshness 只以 `DashboardOverview.snapshot_generated_at` 与当前时刻比较；客户端请求完成时间不得冒充摘要生成时间。
-- fresh success 已知异常和无观测均为零时为 `clear / 当前运行异常计数为 0`；只有无观测时显示“尚有目标无观测”，不得使用正常绿色保证；有异常时表达运行异常，并独立表达同时存在的无观测。禁止使用“系统正常”“系统摘要无异常”“同步完成”或等价全链路健康文案。
-- snapshot 生成时间无效或达到 5 分钟窗口时为 `stale / 摘要已过期`。使用一次性 timeout 触发到期重算，不引入常驻 interval。
-- 初次请求失败且没有成功快照时为 `unavailable / 摘要不可用`；已有成功快照后的刷新失败保留该 overview 与原 `snapshot_generated_at`，但状态必须转为 `stale`。
-- 只有 `clear` / `anomaly` 可以把异常计数传给 Sidebar；`loading` / `stale` / `unavailable` 必须隐藏 nav badge，不能用 0 暗示无异常。
-- mount 请求一次；document 从 hidden 变为 visible 或 window focus 时刷新。visibility 与 focus 连续到达时共享同一 in-flight Promise，禁止重复发请求；本合同不启用轮询。
+- fresh success 在异常、无观测、观测过期都为零时为 `clear / 当前运行异常计数为 0`。非零项分别写成“运行异常 N”“尚有目标无观测”和“观测过期 N”，不得把 stale 加进异常。只有无观测时仍显示“尚有目标无观测”。只有观测过期时为 `notice`，不得使用表示系统摘要过期的 `stale`。禁止使用“系统正常”“系统摘要无异常”“同步完成”或等价全链路健康文案。
+- 系统摘要 freshness 只以 `snapshot_generated_at` 与当前时刻比较。生成时间无效或达到 5 分钟窗口时为 `stale / 系统摘要已过期`，并用一次性 timeout 触发到期重算。这与目标观测过期无关。
+- 初次请求失败且没有成功快照时为 `unavailable / 系统摘要不可用`。401、403、404 清除 overview，同样变为 unavailable，不得继续展示上次计数。已有成功快照后的普通网络失败保留 overview 与原 `snapshot_generated_at`，状态为 `stale`，文案为“更新失败，显示上次结果”。
+- 只有 `clear` / `anomaly` / `unobserved` / `notice` 可以把异常、无观测和观测过期计数传给 Sidebar。`loading` / `stale` / `unavailable` 必须隐藏 nav badge，不能用 0 暗示无异常或无过期。
+- 初次读取由调用方通过共享 `useVisibleRefresh().refresh()` 发起，并与后续读取共用同一 in-flight。页面可见时每 30 秒刷新一次；hidden 期间的 interval、visibility 与 focus 不发请求；回到 visible 或 focus 时立即刷新。连续唤醒共享同一个 in-flight Promise。5 分钟系统摘要到期仍是一次性 timeout，不另建第二条轮询。`refreshKey`、invalidate 或卸载使迟到回调的 `isCurrent()` 为 false，调用方不得应用该结果。
 - 顶栏必须同时提供状态形状/颜色、可见状态文案、服务端生成时间和可访问名称；窄视口隐藏可见副文案时，`role="status"` 的 `aria-label` 仍必须保留状态与生成时间。
 
 #### 4. Validation & Error Matrix
@@ -142,13 +150,18 @@ buildShellSummaryModel(summary: DashboardSummaryState, now: number): ShellSummar
 | Condition | Expected behavior |
 | --- | --- |
 | 首次请求 pending | `loading`；无 nav badge |
-| fresh snapshot，abnormal 与 unobserved 均为 0 | `clear`，显示“当前运行异常计数为 0”与服务端生成时间 |
-| fresh snapshot，abnormal 为 0、unobserved 大于 0 | 显示“尚有目标无观测”，独立链接无观测筛选 |
-| fresh snapshot，abnormal 总数大于 0 | `anomaly`，显示运行异常与真实 nav badge；无观测另外表达 |
-| snapshot 超过 5 分钟或时间无效 | `stale`；保留生成时间；隐藏 nav badge |
+| fresh snapshot，异常、无观测、观测过期均为 0 | `clear`，显示“当前运行异常计数为 0”与服务端生成时间 |
+| fresh snapshot，只有无观测 | 显示“尚有目标无观测”，独立链接无观测筛选 |
+| fresh snapshot，只有观测过期 | `notice`，显示“观测过期 N”，链接 `/targets?view=stale` |
+| fresh snapshot，异常、无观测、观测过期同时非零 | `anomaly`，三项分开列出，nav badge 不把 stale 加进异常 |
+| snapshot 超过 5 分钟或时间无效 | `stale / 系统摘要已过期`；保留生成时间；隐藏 nav badge，包括观测过期 |
 | 首次请求 503 | `unavailable`；不制造 0 计数 |
-| 成功后 focus refresh 503 | 保留上次 overview，转 `stale`，生成时间不改，隐藏 nav badge |
+| 成功后 focus refresh 503 | 保留上次 overview 与生成时间，文案“更新失败，显示上次结果”，隐藏 nav badge |
+| 成功后 refresh 401/403/404 | 清除 overview，`unavailable`，隐藏 nav badge |
+| 可见满 30 秒 | 再请求一次 `/api/dashboard` |
+| hidden 期间 interval 或 focus | 不新增请求 |
 | visible 与 focus 在请求未完成时连续触发 | 只新增一个 `/api/dashboard` 请求 |
+| 用户切换后旧请求才返回 | 不应用旧用户的计数 |
 
 #### 5. Good / Base / Bad Cases
 
@@ -156,12 +169,12 @@ buildShellSummaryModel(summary: DashboardSummaryState, now: number): ShellSummar
 - Base：页面隐藏期间摘要超过 5 分钟；一次性 timeout 将状态转 stale，恢复可见后再发一次刷新。
 - Bad：`getDashboard().catch(() => null)` 后显示“系统正常”或两个 0 badge。
 - Bad：刷新失败时清空 last success，或用 `new Date().toISOString()` 替换服务端 `snapshot_generated_at`。
-- Bad：同时监听 visibility/focus 却各自直接请求，或为了 freshness 引入常驻 interval。
+- Bad：同时监听 visibility/focus 却各自直接请求，或在隐藏页面继续 30 秒轮询；把目标观测过期写成“系统摘要已过期”。
 
 #### 6. Tests Required
 
-- `AppShell.test.tsx`：loading / clear / anomaly / stale / unavailable 五态；无“系统正常”；生成时间来自 fixture；stale/failure 隐藏 nav badge。
-- `AppShell.test.tsx`：fake timer 越过 5 分钟；hidden 不刷新；visible/focus 刷新；同一 in-flight 请求去重；刷新失败保留 last success。
+- `AppShell.test.tsx`：loading / clear / anomaly / notice / stale / unavailable；无“系统正常”；生成时间来自 fixture；系统摘要过期和刷新失败隐藏 nav badge；观测过期与异常分开。
+- `AppShell.test.tsx`：fake timer 越过 5 分钟；可见 30 秒刷新；hidden 的 interval/focus 不刷新；visible/focus 刷新；同一 in-flight 请求去重；网络失败保留 last success；401/404 清除；用户切换后的迟到响应不覆盖新用户。
 - 浏览器 sanity：核心路由在 `1440x1000`、`1024x768`、`390x900` 下状态/生成时间可访问、无 document 横向溢出、无 page/console error；用 mock 只能证明代表性前端渲染。
 
 #### 7. Wrong vs Correct
