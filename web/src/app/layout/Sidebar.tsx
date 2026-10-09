@@ -12,6 +12,11 @@ export interface SidebarProps {
 }
 
 // 与路由同口径：大小写不敏感、允许尾斜杠。
+// 侧栏宽度固定，同一行可能并排三个计数；超过两位数只显示 99+，完整数字保留在可访问名称里。
+function badgeCount(count: number): string {
+  return count > 99 ? '99+' : String(count)
+}
+
 function isTargetsPath(location: Location): boolean {
   return matchPath({ path: '/targets', end: false }, location.pathname) != null
 }
@@ -107,7 +112,7 @@ function TargetsNavItem({ abnormal, unobserved, stale }: { abnormal: number; uno
       >
         <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/></svg>
         <span className="nav-text">入口探测</span>
-        {abnormal > 0 ? <span className="nav-badge">{abnormal}</span> : null}
+        {abnormal > 0 ? <span className="nav-badge">{badgeCount(abnormal)}</span> : null}
       </Link>
       {gap ? (
         <span className="nav-subbadges">
@@ -118,7 +123,7 @@ function TargetsNavItem({ abnormal, unobserved, stale }: { abnormal: number; uno
               aria-label={`尚无观测，${unobserved} 个尚无观测`}
               title="尚无观测"
             >
-              {unobserved}
+              {badgeCount(unobserved)}
             </Link>
           ) : null}
           {stale > 0 ? (
@@ -128,7 +133,7 @@ function TargetsNavItem({ abnormal, unobserved, stale }: { abnormal: number; uno
               aria-label={`观测过期，${stale} 个观测过期`}
               title="观测过期"
             >
-              {stale}
+              {badgeCount(stale)}
             </Link>
           ) : null}
         </span>
@@ -152,7 +157,7 @@ function SidebarNavItem({ to, label, icon, badge, end }: SidebarNavItemProps) {
     <>
       {icon}
       <span className="nav-text">{label}</span>
-      {badge != null && badge > 0 && <span className="nav-badge">{badge}</span>}
+      {badge != null && badge > 0 && <span className="nav-badge">{badgeCount(badge)}</span>}
     </>
   )
   return (

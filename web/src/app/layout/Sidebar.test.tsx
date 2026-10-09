@@ -118,6 +118,25 @@ describe('Sidebar', () => {
     expect(screen.queryByRole('link', { name: /6 个异常|8 个异常/ })).not.toBeInTheDocument()
   })
 
+  it('caps visible counts at 99+ while keeping exact numbers in accessible names', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar
+          user={user}
+          anomalyCounts={{ monitoring: 120, targets: 1000, unobservedTargets: 1000, staleTargets: 100 }}
+          collapsed={false}
+          onToggle={() => {}}
+          onLogout={() => {}}
+          onChangePassword={() => {}}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '入口探测，1000 个异常，1000 个尚无观测，100 个观测过期' }).querySelector('.nav-badge')).toHaveTextContent('99+')
+    expect(screen.getByRole('link', { name: '尚无观测，1000 个尚无观测' })).toHaveTextContent('99+')
+    expect(screen.getByRole('link', { name: '观测过期，100 个观测过期' })).toHaveTextContent('99+')
+    expect(screen.getByRole('link', { name: '监控，120 个异常' }).querySelector('.nav-badge')).toHaveTextContent('99+')
+  })
+
   it('keeps the observation group items fixed whether or not gaps exist', () => {
     const labels = (anomalyCounts: { monitoring: number; targets: number; unobservedTargets: number; staleTargets: number }) => {
       const view = render(
