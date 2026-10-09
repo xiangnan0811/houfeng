@@ -457,6 +457,13 @@ describe('DashboardPage', () => {
     expect(within(coverage).getByRole('link', { name: '查看未关联' })).toHaveAttribute('href', '/vps?workspace=workbench&view=unlinked')
   })
 
+  it('degrades monitoring coverage when the VPS list fails instead of showing 0/M', async () => {
+    renderDashboard({ vps: { body: { error: 'vps unavailable' }, status: 503 } })
+    const lane = (await screen.findByRole('heading', { name: '观测证据' })).closest('section')!
+    expect(await within(lane).findByText('监控覆盖暂不可用：VPS 清单读取失败。')).toBeInTheDocument()
+    expect(within(lane).queryByRole('link', { name: '查看未关联' })).not.toBeInTheDocument()
+  })
+
   it('places the renewal preview before the evidence lanes in reading order', async () => {
     renderDashboard()
     const renewals = await screen.findByRole('heading', { name: '即将续费' })
