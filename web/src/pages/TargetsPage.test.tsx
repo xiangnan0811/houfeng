@@ -510,6 +510,36 @@ describe('TargetsPage', () => {
     expect(within(createDrawer).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' })).toBeEnabled()
   })
 
+  it.each([
+    ['run status', (drawer: HTMLElement) => fireEvent.change(within(drawer).getByLabelText('运行状态'), { target: { value: '维护中' } })],
+    ['another execution label', (drawer: HTMLElement) => fireEvent.change(within(drawer).getByLabelText('执行监控实例标签'), { target: { value: 'jp, kr' } })],
+  ])('drops a pending confirmation when the %s changes', async (_field, change) => {
+    const tokyo = { monitoring_instance_id: 'mi_tokyo', display_name: 'tokyo-edge-01', group: '', labels: [] as string[], note: '', updated_at: '2026-10-09T08:00:00Z' }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (
+      String(input).startsWith('/api/monitoring-instances') ? mockJSONResponse([tokyo]) : mockJSONResponse([])
+    )))
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '新建第一个目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    const executionLabels = within(createDrawer).getByLabelText('执行监控实例标签')
+    fireEvent.focus(executionLabels)
+    await within(createDrawer).findByText(/现有 1 台监控实例都还没有标签/)
+    fireEvent.change(executionLabels, { target: { value: 'jp' } })
+    fireEvent.click(within(createDrawer).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' }))
+    expect(within(createDrawer).getByRole('button', { name: '确认添加' })).toBeInTheDocument()
+
+    change(createDrawer)
+    expect(within(createDrawer).queryByRole('button', { name: '确认添加' })).not.toBeInTheDocument()
+    expect(within(createDrawer).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' })).toBeEnabled()
+  })
+
   it('does not retry an archived instance as a version conflict and drops it from the candidates', async () => {
     const tokyo = { monitoring_instance_id: 'mi_tokyo', display_name: 'tokyo-edge-01', group: '', labels: [] as string[], note: '', updated_at: '2026-10-09T08:00:00Z' }
     let patchCount = 0

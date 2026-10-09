@@ -54,12 +54,15 @@ function describeAssignError(error: unknown): string {
 // 但进行中的请求结果（尤其是失败）仍要显示，不能随组件卸载丢失。
 export function ExecutorLabelAssign({
   active,
+  contextKey,
   label,
   candidates,
   onAssigned,
   onUnavailable,
 }: {
   active: boolean
+  /** 执行标签与运行状态的组合；任一变化都作废待确认的操作。 */
+  contextKey: string
   label: string
   candidates: MonitoringInstanceRecord[]
   onAssigned: (updated: MonitoringInstanceRecord) => void
@@ -74,8 +77,8 @@ export function ExecutorLabelAssign({
   const confirmRef = useRef<HTMLButtonElement>(null)
   const focusTriggerRef = useRef<string | null>(null)
   const descriptionId = useId()
-  // 确认只属于发起时的上下文（可执行且同一标签）；上下文一变就作废，切回来也不恢复旧确认。
-  const context = active ? label : null
+  // 确认只属于发起时的上下文（执行标签与运行状态）；上下文一变就作废，切回来也不恢复旧确认。
+  const context = active ? contextKey : null
   const [confirmContext, setConfirmContext] = useState(context)
   if (confirmContext !== context) {
     setConfirmContext(context)

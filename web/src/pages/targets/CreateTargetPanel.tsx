@@ -163,6 +163,7 @@ export function CreateTargetPanel({
           {receivers ? (
             <ExecutorLabelAssign
               active={canAssign}
+              contextKey={`${executionLabels.join(',')}|${form.runStatus}`}
               label={assignLabel ?? ''}
               candidates={receivers}
               onAssigned={(updated) => {
