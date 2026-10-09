@@ -339,7 +339,7 @@ MonitoringPage 是运行证据扫描页。主路径是 attention tabs → 可见
 
 - Quick view 负责表达当前扫描主线，至少覆盖全部、异常、待接入、维护/暂停、绑定异常；维护/暂停视图必须同时包含 `monitoring_status === '维护中'` 与 `monitoring_status === '暂停'`，不要用单个 `run_status` 推断。
 - 筛选使用可见的 FilterBar 并即时应用；更新 URL 使用 replace，保留无关 query 和 history state。没有 Drawer draft 或 Apply 步骤。≤760px 时 FilterBar 启用窄屏收起：搜索、已生效筛选的 chip 与“筛选 (N)”按钮常驻，其余筛选点开后原位展开，仍即时应用（见 component-patterns）。
-- 高级筛选计数只统计已应用字段筛选，必须覆盖 lifecycle、health、monitoring/run status、group、region、labels、search 等会改变列表的维度；quick view 本身不混入字段筛选计数。
+- 窄屏“筛选 (N)”的 N 只统计已应用的字段筛选：health、run status、group、region、city、provider、lifecycle，以及每个 label 各计 1，与“清空所有”的判定同一组字段；搜索 `q` 在窄屏常驻可见，不计入 N；quick view 本身也不混入字段筛选计数。
 - 批量操作区默认隐藏；只有用户显式打开批量操作、已经选择全量/部分监控实例、存在待确认批量动作、提交中或错误需要展示时才出现。批量动作按钮仍必须以明确选择为前提，不因列表有数据而默认高亮。
 - MonitoringPage 不承载资产判断支撑面，也不展示 MonitoringInstance 资产上下文列；Hero 之后应直接进入 toolbar/filter/batch/table。资产侧判断导向资产决策页、VPS 库存 / 详情和结束使用并归档入口，Monitoring 列表只保留运行观测扫描职责。
 
