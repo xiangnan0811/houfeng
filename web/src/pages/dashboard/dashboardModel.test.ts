@@ -94,7 +94,7 @@ describe('buildDashboardModel', () => {
     })
 
     expect(model.mode).toBe('onboarding')
-    expect(model.primaryAction).toEqual({ label: '创建第一台 VPS', to: '/vps' })
+    expect(model.primaryAction).toEqual({ label: '创建第一台 VPS', to: '/vps?create=1' })
   })
 
   it.each([

@@ -30,6 +30,7 @@ export function IPQualitySettingsSection({ value, onChange }: IPQualitySettingsS
               value={value.frequencySeconds}
               onChange={(e) => onChange({ frequencySeconds: e.target.value })}
             /> 秒
+            <DurationHint seconds={value.frequencySeconds} />
           </span>
         </div>
         <div className="settings-row">
@@ -42,6 +43,7 @@ export function IPQualitySettingsSection({ value, onChange }: IPQualitySettingsS
               value={value.staleAfterSeconds}
               onChange={(e) => onChange({ staleAfterSeconds: e.target.value })}
             /> 秒
+            <DurationHint seconds={value.staleAfterSeconds} />
           </span>
         </div>
         <div className="settings-row">
@@ -73,4 +75,15 @@ export function IPQualitySettingsSection({ value, onChange }: IPQualitySettingsS
       </div>
     </>
   )
+}
+
+// 采集周期、过期窗口按秒保存（与 API 一致），旁边给出换算后的天/小时/分钟，避免手算 86400、604800。
+function DurationHint({ seconds }: { seconds: string }) {
+  const value = Number(seconds.trim())
+  if (!Number.isInteger(value) || value < 60) return null
+  const units: Array<[number, string]> = [[86400, '天'], [3600, '小时'], [60, '分钟']]
+  const [size, unit] = units.find(([unitSeconds]) => value >= unitSeconds) ?? units[2]!
+  const amount = value / size
+  const text = Number.isInteger(amount) ? `${amount} ${unit}` : `约 ${amount.toFixed(1)} ${unit}`
+  return <span className="settings-duration-hint">（{text}）</span>
 }

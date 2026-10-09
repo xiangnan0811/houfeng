@@ -2302,6 +2302,8 @@ export function subscriptionInsightsProfile(): ApiFixtureProfile {
     [apiRouteKey('GET', '/api/subscriptions/overview')]: {
       status: 200,
       body: subscriptionOverviewFixture({
+        // 续费队列以摘要生成时刻的 UTC 日为“今天”，与页面钉住的时钟一致。
+        snapshot_generated_at: SUBSCRIPTION_INSIGHTS_NOW.toISOString(),
         total_monthly_cost: total,
         total_yearly_cost: total * 12,
         active_subscription_count: 5,

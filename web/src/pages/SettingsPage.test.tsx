@@ -148,6 +148,25 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑' }))
   }
 
+  it('hides the save bar on the appearance tab until another section has unsaved edits', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockJSONResponse(settingsResponseBody)))
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    expect(screen.getByText(/选择后立即生效，无需保存/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
+
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('IP 质量采集周期秒数'), { target: { value: '172800' } })
+    switchTab('外观')
+    expect(screen.getByRole('button', { name: '保存设置' })).toBeInTheDocument()
+    expect(screen.getByText('有未保存的修改')).toBeInTheDocument()
+
+    // 在外观分区保存后，表单不再脏，但保存结果仍需可见。
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.queryByText('有未保存的修改')).not.toBeInTheDocument())
+    expect(document.querySelector('.settings-save-footer__message--success')).not.toBeNull()
+  })
+
   it('loads persisted settings into the required sections and keeps Telegram and retention copy truthful', async () => {
     vi.stubGlobal(
       'fetch',
@@ -163,6 +182,8 @@ describe('SettingsPage', () => {
     expect(screen.getByLabelText('当前监控实例主机样本频率')).toHaveValue('5s')
     expect(screen.getByRole('switch', { name: '启用 IP 质量采集' })).toBeChecked()
     expect(screen.getByLabelText('IP 质量采集周期秒数')).toHaveValue('86400')
+    // 秒数旁给出换算，免去手算。
+    expect(screen.getByLabelText('IP 质量采集周期秒数').parentElement).toHaveTextContent('（1 天）')
     expect(screen.getByLabelText('IP 质量采集服务集合')).toHaveValue('netflix, chatgpt, youtube-premium')
     expect(screen.getByLabelText('原始层保留天数')).toHaveValue('30')
     expect(screen.getByLabelText('聚合层保留天数')).toHaveValue('365')
@@ -401,6 +422,7 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('switch', { name: '启用 IP 质量采集' }))
     fireEvent.change(screen.getByLabelText('IP 质量采集周期秒数'), { target: { value: '259200' } })
     fireEvent.change(screen.getByLabelText('IP 质量过期窗口秒数'), { target: { value: '864000' } })
+    expect(screen.getByLabelText('IP 质量过期窗口秒数').parentElement).toHaveTextContent('（10 天）')
     fireEvent.change(screen.getByLabelText('IP 质量请求超时秒数'), { target: { value: '20' } })
     fireEvent.change(screen.getByLabelText('IP 质量采集服务集合'), { target: { value: 'netflix, chatgpt' } })
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))

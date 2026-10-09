@@ -108,6 +108,10 @@ describe('LoginPage', () => {
     await waitFor(() => expect(login).toHaveBeenCalledWith('admin', 'wrongpwd'))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('用户名或密码不正确')
+    // 失败后焦点回到密码框，并关联错误说明。
+    expect(screen.getByLabelText('密码')).toHaveFocus()
+    expect(screen.getByLabelText('密码')).toHaveAttribute('aria-invalid', 'true')
+    expect(screen.getByLabelText('密码')).toHaveAttribute('aria-describedby', 'login-error')
     expect(alert).not.toHaveTextContent('request failed')
     expect(alert).not.toHaveTextContent('backend detail')
   })

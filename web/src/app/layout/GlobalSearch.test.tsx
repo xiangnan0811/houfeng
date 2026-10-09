@@ -230,11 +230,15 @@ describe('GlobalSearch', () => {
 
     expect(screen.getAllByText('VPS').length).toBeGreaterThan(0)
     expect(screen.getAllByText('监控实例').length).toBeGreaterThan(0)
-    const vpsLink = screen.getByRole('option', { name: /Tokyo VPS/ })
+    const vpsLink = screen.getByRole('option', { name: /Tokyo VPS(?! 的订阅)/ })
     expect(vpsLink).toHaveAttribute('href', '/vps/vps_001')
     expect(vpsLink.tagName).toBe('A')
     expect(screen.getByRole('option', { name: /Tokyo Edge/ })).toHaveAttribute('href', '/monitoring/mi_001')
-    expect(screen.getByRole('option', { name: /sub_001/ })).toHaveAttribute('href', '/subscriptions?vps_id=vps_001&view=details')
+    // 订阅结果以所属 VPS 命名、金额注明月折算，不再以 sub_ 内部 ID 当标题。
+    const subscriptionOption = screen.getByRole('option', { name: /Tokyo VPS 的订阅/ })
+    expect(subscriptionOption).toHaveAttribute('href', '/subscriptions?vps_id=vps_001&view=details')
+    expect(subscriptionOption).toHaveTextContent('/月')
+    expect(subscriptionOption).not.toHaveTextContent('sub_001')
   })
 
   it('matches a target by host', async () => {
@@ -287,7 +291,7 @@ describe('GlobalSearch', () => {
     expect(screen.getAllByText('运维记录').length).toBeGreaterThan(0)
     expect(screen.getByRole('option', { name: /东京节点磁盘 IO 抖动/ }))
       .toHaveAttribute('href', '/records/rec_001')
-    expect(screen.getByRole('option', { name: /Tokyo VPS/ })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Tokyo VPS(?! 的订阅)/ })).toBeInTheDocument()
   })
 
   it('offers the way through to the full records result set', async () => {
@@ -474,7 +478,7 @@ describe('GlobalSearch', () => {
     const listbox = screen.getByRole('listbox', { name: '搜索结果' })
     expect(input).toHaveAttribute('aria-controls', listbox.id)
 
-    const firstOption = screen.getByRole('option', { name: /Tokyo VPS/ })
+    const firstOption = screen.getByRole('option', { name: /Tokyo VPS(?! 的订阅)/ })
     const secondOption = screen.getByRole('option', { name: /Tokyo Edge/ })
 
     // Initially first item is selected and announced
@@ -558,7 +562,7 @@ describe('GlobalSearch', () => {
     fireEvent.change(input, { target: { value: 'hetzner' } })
     pressEnter(input)
 
-    const first = await screen.findByRole('option', { name: /Tokyo VPS/ })
+    const first = await screen.findByRole('option', { name: /Tokyo VPS(?! 的订阅)/ })
     expect(first).toHaveAttribute('aria-selected', 'true')
     expect(input).toHaveAttribute('aria-activedescendant', first.id)
     expect(screen.getAllByRole('option').some((option) => option.getAttribute('href') === '/providers')).toBe(true)

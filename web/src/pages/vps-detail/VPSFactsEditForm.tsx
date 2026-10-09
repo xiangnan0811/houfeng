@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } fr
 import { Link } from 'react-router-dom'
 
 import { trimHostAddress } from '../../lib/hostAddress'
+import { REVEAL_FIELD_EVENT } from './factFieldFocus'
 import type { ProviderRecord } from '../../lib/types'
 import { CountryCombo } from './CountryCombo'
 import type { FactEditFormState } from './types'
@@ -26,6 +27,16 @@ type VPSFactsEditFormProps = {
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
   providerExtras?: ReactNode
   usageSuggestions?: string[]
+}
+
+// 服务商选项只显示名称与地区；内部 ID 仅在同名服务商需要区分时附上。
+function providerOptionLabel(provider: ProviderRecord, providers: ProviderRecord[]): string {
+  const parts = [provider.name]
+  if (provider.country) parts.push(provider.country)
+  if (providers.some((other) => other.provider_id !== provider.provider_id && other.name === provider.name)) {
+    parts.push(provider.provider_id)
+  }
+  return parts.join(' · ')
 }
 
 function parseUsageTags(value: string): string[] {
@@ -99,6 +110,13 @@ export function VPSFactsEditForm({
     return () => window.cancelAnimationFrame(frame)
   }, [scrollTarget])
 
+  // 校验失败需要聚焦被隐藏的字段时，只切换可见性，不走开关的默认值逻辑，草稿与错误提示保持不变。
+  function handleRevealRequest(event: Event) {
+    const target = (event as CustomEvent<string>).detail
+    if (target === 'ipv6') setIPv6Enabled(true)
+    if (target === 'ssh') setSSHHostDiffers(true)
+  }
+
   function handleProviderChange(providerID: string) {
     const provider = providers.find((item) => item.provider_id === providerID)
     onDraftChange({
@@ -147,7 +165,17 @@ export function VPSFactsEditForm({
         : '选择服务商会同步更新名称快照，仍可手动修正快照。'
 
   return (
-    <form id={formId} className="vps-facts-form" autoComplete="off" onSubmit={onSubmit}>
+    <form
+      id={formId}
+      className="vps-facts-form"
+      autoComplete="off"
+      onSubmit={onSubmit}
+      ref={(form) => {
+        if (!form) return undefined
+        form.addEventListener(REVEAL_FIELD_EVENT, handleRevealRequest)
+        return () => form.removeEventListener(REVEAL_FIELD_EVENT, handleRevealRequest)
+      }}
+    >
       <div className="stack">
         <label className="field">
           <span className="field__label">VPS 名称</span>
@@ -175,7 +203,7 @@ export function VPSFactsEditForm({
             <option value="">未关联服务商</option>
             {providers.map((provider) => (
               <option key={provider.provider_id} value={provider.provider_id}>
-                {provider.name} · {provider.country || '地区未填'} · {provider.provider_id}
+                {providerOptionLabel(provider, providers)}
               </option>
             ))}
           </select>
@@ -276,7 +304,7 @@ export function VPSFactsEditForm({
           <label className="field">
             <span className="field__label">有效期类型</span>
             <select className="input" value={draft.validityMode} disabled={submitting} onChange={(event) => onDraftChange({ ...draft, validityMode: event.target.value as FactEditFormState['validityMode'] })}>
-              <option value="unknown">未知</option>
+              <option value="unknown">暂不确定</option>
               <option value="fixed">固定到期日</option>
               <option value="unlimited">无固定期限</option>
             </select>
@@ -293,7 +321,7 @@ export function VPSFactsEditForm({
           <select className="input" value={draft.autoRenewCheck} disabled={submitting} onChange={(event) => onDraftChange({ ...draft, autoRenewCheck: event.target.value as FactEditFormState['autoRenewCheck'], autoRenewCheckedAt: event.target.value === 'unchecked' ? '' : new Date().toISOString() })}>
             {AUTO_RENEW_CHECK_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </select>
-          <span className="field__hint">按服务商控制台的实际设置填写。续费意向不会修改这一事实。{draft.autoRenewCheckedAt ? ` 核对于 ${new Date(draft.autoRenewCheckedAt).toLocaleString()}` : ''}</span>
+          <span className="field__hint">按服务商控制台的实际设置填写；修改续费意向不会改动这里。{draft.autoRenewCheckedAt ? ` 核对于 ${new Date(draft.autoRenewCheckedAt).toLocaleString()}` : ''}</span>
         </label>
 
         <label className="field">
@@ -345,7 +373,7 @@ export function VPSFactsEditForm({
               <span>启用 IPv6</span>
             </label>
           </div>
-          <label className="field" ref={ipv6FieldRef} hidden={!ipv6Enabled}>
+          <label className="field" ref={ipv6FieldRef} hidden={!ipv6Enabled} data-revealed-by="ipv6">
             <span className="field__label">IPv6 地址</span>
             <input
               className="input mono-input"
@@ -368,7 +396,7 @@ export function VPSFactsEditForm({
               <span>单独填写 SSH</span>
             </label>
           </div>
-          <div className="access__pair" ref={sshFieldsRef} hidden={!sshHostDiffers}>
+          <div className="access__pair" ref={sshFieldsRef} hidden={!sshHostDiffers} data-revealed-by="ssh">
             <label className="field">
               <span className="field__label">SSH Host</span>
               <input

@@ -15,6 +15,20 @@ export function statusGroupTone(group: RecordStatusGroup | undefined): BadgeTone
   return group ? STATUS_GROUP_TONES[group] : 'neutral'
 }
 
+// 影响级别在后端是自由文本；编辑器提供这四个常用值，存储值保持英文以兼容既有记录与筛选。
+export const IMPACT_LEVEL_OPTIONS = [
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+  { value: 'critical', label: '严重' },
+] as const
+
+/** 常用值显示中文，其他自定义值原样显示。 */
+export function impactLevelLabel(level: string): string {
+  const normalized = level.trim().toLowerCase()
+  return IMPACT_LEVEL_OPTIONS.find((option) => option.value === normalized)?.label ?? level
+}
+
 // 影响级别是自由文本；只把常见的高等级词映射成告警色，其余保持中性。
 export function impactTone(level: string): BadgeTone {
   const normalized = level.trim().toLowerCase()

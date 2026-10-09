@@ -90,15 +90,19 @@ function combine(
       })
     }
   }
+  // 订阅结果用订阅名或所属 VPS 名称呈现，不把 sub_/vps_ 内部 ID 当标题；金额写明是月折算。
+  const vpsNames = new Map(vpsAssets.map((vps) => [vps.vps_id, vps.display_name || vps.vps_id]))
   for (const subscription of subscriptions) {
-    if (matchesSubscription(subscription, q)) {
+    const vpsName = vpsNames.get(subscription.vps_id) ?? subscription.vps_id
+    if (matchesSubscription(subscription, vpsName, q)) {
+      const name = subscription.display_name?.trim()
       out.push({
         kind: 'subscription',
         id: subscription.subscription_id,
-        label: subscription.subscription_id,
+        label: name || `${vpsName} 的订阅`,
         hint: compactHint([
-          subscription.vps_id,
-          formatMoney(subscription.monthly_price, subscription.currency),
+          name ? vpsName : null,
+          `${formatMoney(subscription.monthly_price, subscription.currency)}/月`,
           subscription.renew_at ? `续费 ${formatDate(subscription.renew_at)}` : null,
         ]),
         to: `/subscriptions?vps_id=${encodeURIComponent(subscription.vps_id)}&view=details`,
@@ -156,8 +160,10 @@ function matchesProvider(provider: ProviderRecord, q: string): boolean {
   )
 }
 
-function matchesSubscription(subscription: SubscriptionRecord, q: string): boolean {
+function matchesSubscription(subscription: SubscriptionRecord, vpsName: string, q: string): boolean {
   return (
+    includesLower(subscription.display_name, q) ||
+    includesLower(vpsName, q) ||
     includesLower(subscription.subscription_id, q) ||
     includesLower(subscription.vps_id, q) ||
     includesLower(subscription.currency, q) ||

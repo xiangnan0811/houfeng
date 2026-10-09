@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useState } from 'react'
 
+import { paymentMethodLabel } from '../../lib/assetOptions'
 import { TabPanel, Tabs } from '../../components/atoms'
 import type {
   SubscriptionBreakdownItem,
@@ -114,7 +115,8 @@ function breakdownItems(statistics: SubscriptionStatistics | null, kind: Subscri
   if (!statistics) return []
   if (kind === 'category') return statistics.category_breakdown
   if (kind === 'currency') return statistics.currency_breakdown
-  if (kind === 'payment') return statistics.payment_breakdown ?? []
+  // 支付方式按存储值聚合，显示时换成中文名。
+  if (kind === 'payment') return (statistics.payment_breakdown ?? []).map((item) => ({ ...item, label: paymentMethodLabel(item.label) }))
   if (kind === 'region') return statistics.region_breakdown ?? []
   return statistics.provider_breakdown
 }

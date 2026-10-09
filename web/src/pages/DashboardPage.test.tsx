@@ -97,7 +97,7 @@ describe('DashboardPage', () => {
       }),
       vps: [] as VPSAssetRecord[],
       label: '创建第一台 VPS',
-      href: '/vps',
+      href: '/vps?create=1',
       heading: '建立第一条资产与观测链路',
     },
     {
@@ -232,7 +232,7 @@ describe('DashboardPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '重试局部数据' }))
 
-    expect(await screen.findByRole('link', { name: '创建第一台 VPS' })).toHaveAttribute('href', '/vps')
+    expect(await screen.findByRole('link', { name: '创建第一台 VPS' })).toHaveAttribute('href', '/vps?create=1')
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/dashboard')).toHaveLength(1)
     expect(fetchMock.mock.calls.filter(([url]) => String(url) === '/api/vps')).toHaveLength(2)
   })

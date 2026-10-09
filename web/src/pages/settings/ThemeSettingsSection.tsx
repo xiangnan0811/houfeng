@@ -79,7 +79,7 @@ export function ThemeSettingsSection() {
   return (
     <>
       <div className="ss-title">主题</div>
-      <div className="ss-desc">本地浏览器偏好，不影响其他操作员</div>
+      <div className="ss-desc">本地浏览器偏好，选择后立即生效，无需保存，不影响其他操作员</div>
       <div className="settings-row">
         <span className="sr-label">风格</span>
         <PresetPicker preset={preset} mode={mode} onChange={setPreset} />

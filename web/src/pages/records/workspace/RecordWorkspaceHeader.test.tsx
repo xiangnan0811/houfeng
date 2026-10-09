@@ -80,7 +80,7 @@ describe('RecordWorkspaceHeader', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Database outage' })).toBeInTheDocument()
     expect(screen.getByText('排障')).toBeInTheDocument()
     expect(screen.getByText('排查中')).toBeInTheDocument()
-    expect(screen.getByText('影响 high')).toHaveClass('tone--alert')
+    expect(screen.getByText('影响 高')).toHaveClass('tone--alert')
     expect(screen.getByText('VPS · VPS Alpha')).toBeInTheDocument()
     expect(screen.getByText('#4')).toBeInTheDocument()
     expect(screen.queryByText('尚未创建草稿')).not.toBeInTheDocument()

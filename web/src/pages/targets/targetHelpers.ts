@@ -233,7 +233,7 @@ export function targetCoverageNotices(target: TargetRecord): TargetCoverageNotic
     notices.push({
       key: 'matching-executors',
       title: '没有可接收该任务的实例',
-      detail: '按执行标签交集计算，并排除已归档、已退役和暂停的实例。',
+      detail: '执行标签与任一监控实例标签相同即可接收任务；已归档、已退役和暂停的实例不计入。',
     })
   }
   if (target.matching_executor_count > 0 && isUnobservedTarget(target)) {

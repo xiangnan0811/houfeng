@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { ProviderRecord } from '../../lib/types'
 import type { FactEditFormState } from './types'
 import { VPSFactsEditForm } from './VPSFactsEditForm'
 
@@ -91,6 +92,29 @@ describe('VPSFactsEditForm', () => {
     expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({
       usageTags: '自定义用途', validityMode: 'unlimited', autoRenewCheck: 'disabled', autoRenewCheckedAt: expect.stringMatching(/^\d{4}-/),
     }))
+  })
+
+  it('labels provider options by name and region, adding the ID only for duplicate names', () => {
+    const provider = (id: string, name: string, country: string): ProviderRecord => ({
+      provider_id: id, name, website: '', panel_url: '', account_hint: '', country, note: '', rating: null, labels: [],
+      created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    })
+    render(
+      <MemoryRouter>
+        <VPSFactsEditForm
+          formId="vps-facts-form"
+          draft={draftFixture()}
+          providers={[provider('pv_a', 'Hetzner', 'DE'), provider('pv_b', 'Vultr', ''), provider('pv_c', 'Vultr', 'JP')]}
+          providersLoading={false}
+          providersError={null}
+          submitting={false}
+          onDraftChange={vi.fn()}
+          onSubmit={vi.fn()}
+        />
+      </MemoryRouter>,
+    )
+    const options = within(screen.getByRole('combobox', { name: '资产服务商' })).getAllByRole('option').map((option) => option.textContent)
+    expect(options).toEqual(['未关联服务商', 'Hetzner · DE', 'Vultr · pv_b', 'Vultr · JP · pv_c'])
   })
 
   it('toggles purposes against the live draft without dropping other selections', () => {

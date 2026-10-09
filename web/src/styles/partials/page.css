@@ -100,6 +100,7 @@
 .asset-operation-field select{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding-right:30px;background-image:var(--select-caret);background-repeat:no-repeat;background-position:right 12px center;cursor:pointer}
 .asset-operation-form>.input-field{padding:0 var(--space-5) var(--space-4)}
 .asset-operation-feedback{padding:var(--space-3) var(--space-5);font-size:var(--type-small-size);color:var(--color-state-normal);background:color-mix(in srgb,var(--color-state-normal) 8%,transparent);border-top:var(--border-w) solid color-mix(in srgb,var(--color-state-normal) 20%,transparent)}
+.asset-operation-feedback--floating{position:sticky;bottom:var(--space-4);z-index:5;margin:var(--space-3) 0 0;border:var(--border-w) solid color-mix(in srgb,var(--color-state-normal) 30%,var(--border));border-radius:var(--radius-2);background:color-mix(in srgb,var(--color-state-normal) 10%,var(--surface-elevated));box-shadow:var(--shadow-overlay)}
 .asset-operation-feedback--error{color:var(--color-state-critical);background:color-mix(in srgb,var(--color-state-critical) 6%,transparent);border-top-color:color-mix(in srgb,var(--color-state-critical) 20%,transparent)}
 .asset-operation-actions{display:flex;align-items:center;justify-content:flex-end;gap:var(--space-3);padding:var(--space-4) var(--space-5);border-top:var(--border-w) solid var(--panel-border)}
 /* ===== LAYOUT COMPAT: Breadcrumb + Modal + GlobalSearch ===== */

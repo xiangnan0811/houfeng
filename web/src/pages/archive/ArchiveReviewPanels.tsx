@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
+import { paymentMethodLabel } from '../../lib/assetOptions'
 import { Badge, DataTable, MonoDigits, Timestamp, type BadgeTone } from '../../components/atoms'
 import { formatMoney } from '../../lib/format'
 import {
@@ -120,7 +121,7 @@ export function SubscriptionTable({ subscriptions }: { subscriptions: Subscripti
           label: '支付方式与说明',
           render: (subscription) => (
             <div className="asset-table__stack">
-              <span>{subscription.payment_method || '—'}</span>
+              <span>{paymentMethodLabel(subscription.payment_method) || '—'}</span>
               {subscription.note ? <small>{subscription.note}</small> : null}
             </div>
           ),

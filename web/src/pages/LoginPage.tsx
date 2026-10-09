@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
@@ -12,6 +12,7 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
   const [params] = useSearchParams()
+  const passwordRef = useRef<HTMLInputElement>(null)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -27,6 +28,9 @@ export function LoginPage() {
       } else {
         setError('登录服务异常，请检查服务状态或稍后重试')
       }
+      // 提交期间按钮被禁用，焦点会落到 body；失败后回到密码框并选中，便于直接重输。
+      passwordRef.current?.focus()
+      passwordRef.current?.select()
     } finally {
       setSubmitting(false)
     }
@@ -39,7 +43,7 @@ export function LoginPage() {
           <div className="login-page__brand-zh">候风</div>
           <div className="login-page__brand-en">舰队控制面</div>
         </div>
-        {error && <p className="login-page__error" role="alert">{error}</p>}
+        {error && <p id="login-error" className="login-page__error" role="alert">{error}</p>}
         <div className="login-page__field">
           <label htmlFor="login-username">用户名</label>
           <input
@@ -55,7 +59,10 @@ export function LoginPage() {
           <label htmlFor="login-password">密码</label>
           <input
             id="login-password"
+            ref={passwordRef}
             type="password"
+            aria-invalid={error === '用户名或密码不正确' || undefined}
+            aria-describedby={error ? 'login-error' : undefined}
             autoComplete="current-password"
             placeholder="••••••••"
             value={password}

@@ -58,7 +58,7 @@ buildDashboardModel(input: {
 | --- | --- |
 | overview loading | 整页显示 `正在加载工作台…` |
 | overview 首次失败或 401/403/404 | 整页显示 `工作台不可用` + retry，不保留上次摘要 |
-| VPS `success([])` 且观测库存为 0 | onboarding，唯一主行动 `创建第一台 VPS` |
+| VPS `success([])` 且观测库存为 0 | onboarding，唯一主行动 `创建第一台 VPS`，链接 `/vps?create=1`：VPS 页据此直接打开创建对话框（已在 VPS 页时经客户端导航带上该参数同样打开），并用 replace 移除这一次性参数 |
 | VPS 503 且观测库存为 0 | 非 onboarding；显示 `部分事实待确认`、VPS 局部错误和 retry |
 | abnormal=2、severe=1 | critical；UI 异常总数仍为 2，严重为 1 |
 | abnormal>0、severe=0 | abnormal；按异常主体跳 monitoring 或 targets |

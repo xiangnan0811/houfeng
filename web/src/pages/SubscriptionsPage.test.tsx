@@ -502,6 +502,24 @@ describe('SubscriptionsPage', () => {
     }
   })
 
+  it('shows the VPS name once for an unnamed subscription and keeps both lines for a named one', async () => {
+    setupSubscriptionFetch({
+      subscriptions: [
+        { ...subscription, subscription_id: 'sub_unnamed', display_name: '' },
+        { ...subscription, subscription_id: 'sub_named', display_name: '主账单', renew_at: '2026-12-01' },
+      ],
+    })
+    render(
+      <MemoryRouter initialEntries={['/subscriptions?view=details']}>
+        <SubscriptionsPage />
+      </MemoryRouter>,
+    )
+    const named = await screen.findByRole('button', { name: '主账单' })
+    expect(named.closest('tr')).toHaveTextContent('Tokyo Edge')
+    const unnamedRow = screen.getByRole('button', { name: 'Tokyo Edge' }).closest('tr')!
+    expect(within(unnamedRow).getAllByText('Tokyo Edge')).toHaveLength(1)
+  })
+
   it('shows no-VPS prerequisite with link to VPS page', async () => {
     setupSubscriptionFetch({ subscriptions: [], vpsRows: [] })
 

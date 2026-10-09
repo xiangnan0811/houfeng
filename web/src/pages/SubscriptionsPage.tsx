@@ -1017,10 +1017,11 @@ export function SubscriptionsPage() {
                                 <button type="button" className="subscription-name-button" onClick={() => startEdit(s)}>
                                   {s.display_name || vpsName(s.vps_id)}
                                 </button>
-                                <small>{vpsName(s.vps_id)}</small>
+                                {/* 订阅未命名时按钮已显示 VPS 名，不再重复一行。 */}
+                                {s.display_name ? <small>{vpsName(s.vps_id)}</small> : null}
                               </div>
                             </td>
-                            <td className="data-table__cell">{s.cost_category || '未分类'}</td>
+                            <td className="data-table__cell">{s.cost_category || <span className="text-muted">未分类</span>}</td>
                             <td className="data-table__cell">
                               <div className="subscription-tag-list">
                                 {(s.labels ?? []).length > 0 ? s.labels?.map((label) => <span key={label} className="asset-context-pill">{label}</span>) : <span className="text-muted">无标签</span>}

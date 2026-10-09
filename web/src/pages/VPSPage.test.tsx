@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
+import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { VPSPage } from './VPSPage'
@@ -324,6 +324,33 @@ describe('VPSPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '筛选' }))
     const reopened = await screen.findByRole('dialog', { name: 'VPS 高级筛选' })
     expect(within(reopened).getByLabelText('生命周期')).not.toHaveValue('testing')
+  })
+
+  it('opens the create dialog directly from the onboarding link and drops the one-shot flag', async () => {
+    mockInventory([], [])
+    mount('/vps?create=1&workspace=ledger')
+    expect(await screen.findByRole('dialog', { name: '添加 VPS' })).toBeInTheDocument()
+    await waitFor(() => expect(currentQuery().has('create')).toBe(false))
+    expect(currentQuery().get('workspace')).toBe('ledger')
+  })
+
+  it('opens the create dialog when create=1 arrives on an already mounted VPS page', async () => {
+    mockInventory([], [])
+    render(
+      <MemoryRouter initialEntries={['/vps?workspace=ledger']}>
+        <LocationProbe />
+        <Link to="/vps?create=1&workspace=ledger">去创建</Link>
+        <Routes>
+          <Route path="/vps" element={<VPSPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    await screen.findByRole('button', { name: '创建第一台 VPS' })
+    expect(screen.queryByRole('dialog', { name: '添加 VPS' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('link', { name: '去创建' }))
+    expect(await screen.findByRole('dialog', { name: '添加 VPS' })).toBeInTheDocument()
+    await waitFor(() => expect(currentQuery().has('create')).toBe(false))
+    expect(currentQuery().get('workspace')).toBe('ledger')
   })
 
   it('creates a VPS through the shared modal and opens its canonical detail with authored inputs', async () => {

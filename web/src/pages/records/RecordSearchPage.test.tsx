@@ -223,7 +223,7 @@ describe('RecordSearchPage', () => {
       .mockResolvedValueOnce(mockJSONResponse({ items: [searchResult()], generation: 7 }))
     vi.stubGlobal('fetch', fetchMock)
     renderPage()
-    await screen.findByText('没有匹配的记录')
+    await screen.findByText('还没有运维记录')
 
     const typeSelect = screen.getByLabelText('记录类型')
     expect(within(typeSelect).getByRole('option', { name: '全部' })).toBeInTheDocument()

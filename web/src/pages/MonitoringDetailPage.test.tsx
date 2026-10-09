@@ -4521,7 +4521,8 @@ describe('MonitoringDetailPage', () => {
 
     const drawer = await screen.findByRole('dialog', { name: '监控实例接入抽屉' })
     expect(within(drawer).getByRole('heading', { name: 'Tokyo Edge · 升级/重新接入 agent' })).toBeInTheDocument()
-    expect(within(drawer).getByText('mi_upgrade')).toBeInTheDocument()
+    // 接入步骤不外露内部实例 ID。
+    expect(within(drawer).queryByText('mi_upgrade')).not.toBeInTheDocument()
     expect(within(drawer).getByRole('button', { name: '生成升级/重新接入命令' })).toBeInTheDocument()
   })
 

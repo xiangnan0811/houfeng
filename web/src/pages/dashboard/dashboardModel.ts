@@ -273,7 +273,7 @@ function assetSignal(summary: DashboardAssetSummary): {
     }
   }
   return {
-    label: '资产主线已读取',
+    label: 'VPS 清单已读取',
     detail: '当前聚合摘要没有待处理资产信号',
     tone: 'normal',
   }
@@ -304,7 +304,7 @@ function buildAssetEvidence(
   return {
     status: 'available',
     title: vps.value.length === 0 ? 'VPS 清单为空' : `VPS ${vps.value.length} 台`,
-    detail: vps.value.length === 0 ? '接口已成功返回空清单' : signal.detail,
+    detail: vps.value.length === 0 ? '还没有录入 VPS' : signal.detail,
     source: 'vps-list',
     loadedAt: vps.loadedAt,
     vpsCount: vps.value.length,
@@ -395,7 +395,7 @@ function buildPrimaryAction(
   overview: DashboardOverview,
   observability: DashboardObservabilityModel,
 ): DashboardAction {
-  if (mode === 'onboarding') return { label: '创建第一台 VPS', to: DASHBOARD_LINKS.vps }
+  if (mode === 'onboarding') return { label: '创建第一台 VPS', to: DASHBOARD_LINKS.vpsCreate }
   if (mode === 'critical') return { label: '处理严重异常', to: DASHBOARD_LINKS.eventsSevere }
   if (mode === 'abnormal') {
     return {

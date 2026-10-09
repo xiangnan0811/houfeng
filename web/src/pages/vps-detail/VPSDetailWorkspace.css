@@ -250,6 +250,7 @@
 .vps-form-error{color:var(--color-state-critical)}
 .vps-form-notice{color:var(--color-state-normal)}
 .vps-form textarea.input{resize:vertical}
+.vps-form-hint{margin:var(--space-2) 0 0;font-size:var(--type-small-size)}
 .vps-inline > span,
 .vps-inline > .tg{flex:none}
 .vps-inline > .tg{align-self:flex-end;min-height:var(--control-min-height)}

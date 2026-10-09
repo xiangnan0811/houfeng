@@ -38,6 +38,7 @@ summary:focus-visible,
 .settings-row-group .settings-row{display:block;border-bottom:none;padding:0}
 .settings-row-group .settings-row .sr-label{display:block;margin-bottom:8px;font-size:12px;font-weight:500;color:var(--text-secondary);font-family:var(--font-sans);line-height:1.4}
 .settings-row-group .settings-row .sr-value{display:flex;align-items:center;gap:6px;flex-wrap:wrap;width:100%;font-family:inherit;color:var(--text-primary)}
+.settings-duration-hint{color:var(--text-muted);font-size:12px}
 /* 文本框/大输入保持通栏 */
 .settings-row-group .settings-row .input{width:100%}
 /* 数字类紧凑输入：固定紧凑宽度，数字右对齐等宽，聚焦高亮 */

@@ -15,7 +15,7 @@ import {
   patchPrimarySubject,
   typeSupportsBusinessStatus,
 } from '../recordWorkspaceModel'
-import { countClass } from './recordPresentation'
+import { countClass, IMPACT_LEVEL_OPTIONS } from './recordPresentation'
 
 type RecordEditorAsideProps = {
   payload: RecordDraftPayload
@@ -53,7 +53,15 @@ export function RecordEditorAside({ payload, baseline, members, materials, onPat
               ))}
             </Select>
           ) : null}
-          <Input label="影响级别" value={payload.impact_level} onChange={(event) => onPatch({ impact_level: event.target.value })} />
+          <Select label="影响级别" value={payload.impact_level} onChange={(event) => onPatch({ impact_level: event.target.value })}>
+            {IMPACT_LEVEL_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+            {/* 既有记录里的自定义级别保留为可选项，不在编辑时被静默改写。 */}
+            {payload.impact_level && !IMPACT_LEVEL_OPTIONS.some((option) => option.value === payload.impact_level) ? (
+              <option value={payload.impact_level}>{payload.impact_level}</option>
+            ) : null}
+          </Select>
           <RecordVisibilityFields
             visibility={payload.visibility}
             onChange={(visibility) => onPatch({ visibility })}

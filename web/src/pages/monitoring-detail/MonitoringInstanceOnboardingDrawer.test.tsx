@@ -94,6 +94,7 @@ describe('retired monitoring reenrollment', () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       if (String(input).endsWith('/binding/reset')) return mockJSONResponse({})
       if (String(input).endsWith('/install-command')) return mockJSONResponse(installIssue())
+      if (String(input).endsWith('/phases')) return mockJSONResponse([])
       throw new Error(`unexpected ${String(input)}`)
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -102,9 +103,11 @@ describe('retired monitoring reenrollment', () => {
     expect(fetchMock).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: '生成升级/重新接入命令' }))
     await screen.findByText('安装命令已自动复制到剪贴板。')
-    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+    // 先重置、再签发，签发成功后才读取一次会话基线。
+    await waitFor(() => expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       '/api/monitoring-instances/mi_001/binding/reset', '/api/monitoring-instances/mi_001/install-command',
-    ])
+      '/api/monitoring-instances/mi_001/phases',
+    ]))
   })
 
   it('blocks install command generation for an archived owner', () => {
@@ -143,6 +146,95 @@ describe('MonitoringInstanceOnboardingDrawer issue lifecycle', () => {
     copyMock.mockResolvedValue(true)
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it('makes completion primary after issuing and advances only for a new full session missing from the baseline', async () => {
+    // 与签发并发、在签发返回前提交的旧接入：开始时间晚于 issued_at，但出现在签发后的基线里。
+    const racing = { session_id: 's_racing', capability: 'full', fingerprint_hash: 'r', started_at: '2026-04-24T09:00:01Z', last_trusted_online_at: '2026-04-24T09:00:02Z', ever_connected: true }
+    let phases: unknown[] = [racing]
+    let phaseReads = 0
+    let releaseSlowRead: (() => void) | null = null
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if ((init?.method ?? 'GET') === 'POST' && path === '/api/monitoring-instances/mi_001/install-command') return mockJSONResponse(installIssue())
+      if (path === '/api/monitoring-instances/mi_001/phases') {
+        phaseReads += 1
+        // 第三次读取故意卡住：其间不应发起新的轮询。
+        if (phaseReads === 3) return new Promise<Response>((resolve) => { releaseSlowRead = () => resolve(mockJSONResponse(phases)) })
+        return mockJSONResponse(phases)
+      }
+      throw new Error(`unexpected ${path}`)
+    }))
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      render(<DrawerHarness monitoringInstance={instance()} open onClose={vi.fn()} />)
+      const drawer = screen.getByRole('dialog', { name: '监控实例接入抽屉' })
+      fireEvent.click(within(drawer).getByRole('button', { name: '生成一键安装命令' }))
+      const complete = await within(drawer).findByRole('button', { name: '完成并查看监控实例' })
+      expect(complete).toHaveClass('primary')
+      expect(within(drawer).getByRole('button', { name: '重新生成安装命令' })).toHaveClass('secondary')
+      expect(within(drawer).getByText('执行命令后，本窗口会自动检测首次心跳。')).toBeInTheDocument()
+      // 签发后立即读取一次作为基线。
+      await waitFor(() => expect(phaseReads).toBe(1))
+
+      // 基线里的会话、签发前开始的完整会话与降级的旧会话都不算本次接入。
+      phases = [
+        racing,
+        { session_id: 's_old_full', capability: 'full', fingerprint_hash: 'a', started_at: '2026-04-24T08:00:00Z', last_trusted_online_at: '2026-04-24T09:05:00Z', ever_connected: true },
+        { session_id: 's_degraded', capability: 'evidence_only', fingerprint_hash: 'b', started_at: '2026-04-24T09:01:00Z', last_trusted_online_at: '2026-04-24T09:05:00Z', ever_connected: true },
+      ]
+      await act(async () => { vi.advanceTimersByTime(5_000) })
+      expect(phaseReads).toBe(2)
+      expect(within(drawer).getByRole('button', { name: '重新生成安装命令' })).toBeInTheDocument()
+
+      await act(async () => { vi.advanceTimersByTime(5_000) })
+      expect(phaseReads).toBe(3)
+      await act(async () => { vi.advanceTimersByTime(15_000) })
+      expect(phaseReads).toBe(3)
+
+      phases = [...phases, { session_id: 's_new', capability: 'full', fingerprint_hash: 'c', started_at: '2026-04-24T09:02:00Z', last_trusted_online_at: '2026-04-24T09:03:00Z', ever_connected: true }]
+      await act(async () => { releaseSlowRead?.() })
+      expect(await within(drawer).findByText(/接入完成/)).toBeInTheDocument()
+      expect(within(drawer).queryByRole('button', { name: /重新生成/ })).not.toBeInTheDocument()
+      expect(drawer.querySelector('[aria-label="一键安装命令"]')).toBeNull()
+      expect(within(drawer).getByRole('button', { name: '完成并查看监控实例' })).toHaveClass('primary')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads a fresh session baseline right away after regenerating, even while an old read hangs', async () => {
+    let phaseReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if ((init?.method ?? 'GET') === 'POST' && path === '/api/monitoring-instances/mi_001/install-command') return mockJSONResponse(installIssue())
+      if (path === '/api/monitoring-instances/mi_001/phases') {
+        phaseReads += 1
+        // 第一次签发后的基线读取一直不返回。
+        if (phaseReads === 1) return new Promise<Response>(() => undefined)
+        return mockJSONResponse([])
+      }
+      throw new Error(`unexpected ${path}`)
+    }))
+    render(<DrawerHarness monitoringInstance={instance()} open onClose={vi.fn()} />)
+    const drawer = screen.getByRole('dialog', { name: '监控实例接入抽屉' })
+    fireEvent.click(within(drawer).getByRole('button', { name: '生成一键安装命令' }))
+    await waitFor(() => expect(phaseReads).toBe(1))
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const issueCalls = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/install-command')).length
+      fireEvent.click(await within(drawer).findByRole('button', { name: '重新生成安装命令' }))
+      // 新签发的基线读取不等旧请求结束；旧请求一直挂起也不阻塞之后的例行轮询。
+      for (let i = 0; i < 10 && (issueCalls() < 2 || phaseReads < 2); i += 1) {
+        await act(async () => { await Promise.resolve() })
+      }
+      expect(issueCalls()).toBe(2)
+      expect(phaseReads).toBe(2)
+      await act(async () => { vi.advanceTimersByTime(5_000) })
+      expect(phaseReads).toBe(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('blocks X, Escape, and backdrop dismissal while install command issue is pending', async () => {
