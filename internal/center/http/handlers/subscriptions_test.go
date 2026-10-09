@@ -626,8 +626,16 @@ func TestVPSSubscriptionsCreateRejectsSameKeyWithDifferentDisplayName(t *testing
 		t.Fatalf("first status = %d, want %d; body=%s", first.Code, http.StatusCreated, first.Body.String())
 	}
 	// 名称是业务输入的一部分：同一个 key 换名称必须冲突，不能静默返回旧名称的订阅。
-	if second := send("大阪主机"); second.Code != http.StatusConflict {
+	second := send("大阪主机")
+	if second.Code != http.StatusConflict {
 		t.Fatalf("renamed replay status = %d, want %d; body=%s", second.Code, http.StatusConflict, second.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(second.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if body["code"] != "idempotency_key_reused" {
+		t.Fatalf("code = %q, want idempotency_key_reused; body=%#v", body["code"], body)
 	}
 }
 

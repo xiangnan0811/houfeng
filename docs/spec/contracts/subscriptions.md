@@ -84,7 +84,7 @@
 
 - Domain unit: key 长度/字符边界；normalize 后 digest 稳定；任一业务字段变化都会改变 digest。
 - Handler: 真实周期字段可解码；缺 key 400；replay 200；reused key 409 且 code 稳定。
-- PostgreSQL integration: 模拟丢失 201 后 replay，断言 subscription 与 receipt 各一行；不同 digest 冲突不写入。
+- PostgreSQL integration（`scripts/test-business-postgres.sh` 锚点）: 模拟丢失 201 后 replay，断言 subscription 与 receipt 各一行；不同 digest 冲突不写入；名称落库，仅首尾空白不同按重放返回，换名称返回 `ErrIdempotencyKeyReused` 且不新增行。
 - Migration/ACL: table、FK/check/index 存在；APP role 只有 `select` / `insert`。
 
 #### 7. Wrong vs Correct
@@ -382,7 +382,7 @@ message := sensitiveProviderErrorPattern.ReplaceAllString(err.Error(), "$1=[reda
 ### 6. Tests Required
 
 - Real-handler table tests：逐个删除八个 required key，再逐个发送 null；断言 HTTP 400 和 repository 调用数为 0。
-- Real-handler table tests：三个 optional-non-null 字段逐个 null 均 400；两种 nullable date 的 missing/null 均成功且映射 nil。
+- Real-handler table tests：四个 optional-non-null 字段逐个 null 均 400；两种 nullable date 的 missing/null 均成功且映射 nil。
 - Mapping test：完整 wrapper request 的每个字段都精确进入 `CreateInput`，防止新增/重排字段漏映射。
 - Required-tag enforcement test：从 struct tag 枚举 required 字段，证明每个 tagged field 的 `.Set=false` 都被 runtime boundary 拒绝；只设置 required fields 时 optional fields 不会被误判 required。
 - Contract tests：manifest、Go request、TypeScript DTO 的 name/type/required/nullable 完全一致，并有 unknown named Go DTO type、TypeScript union、requiredness 与 date nullability drift negative cases。
