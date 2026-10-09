@@ -27,6 +27,21 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.22.0](https://github.com/xiangnan0811/houfeng/compare/v1.21.0...v1.22.0) (2026-10-09)
+
+
+### Features
+
+* **dashboard:** 观测证据写出监控覆盖，单栏时即将续费排在证据之前 ([761547f](https://github.com/xiangnan0811/houfeng/commit/761547ff182241f1d3a43d13cd89e1906fb32507))
+* **dashboard:** 观测证据写出监控覆盖，单栏时即将续费排在证据之前 ([c3131eb](https://github.com/xiangnan0811/houfeng/commit/c3131eb015d5ae95ac6ed6901f64ca691d311376))
+* **sidebar:** 尚无观测与观测过期改为入口探测上的分类徽标 ([406bfd6](https://github.com/xiangnan0811/houfeng/commit/406bfd696de50c3b982671d9fc0336d0e3b1b4ab))
+* **sidebar:** 尚无观测与观测过期改为入口探测上的分类徽标，导航条目固定 ([7cd74ac](https://github.com/xiangnan0811/houfeng/commit/7cd74acc81140a1b7f06666b1aaf72030f4bb3cb))
+
+
+### Bug Fixes
+
+* **sidebar:** 徽标计数超过两位显示 99+，入口探测整行只由行容器绘制背景 ([7ed6176](https://github.com/xiangnan0811/houfeng/commit/7ed617626591ed041bbbbf91d83031f01bb37344))
+
 ## [1.21.0](https://github.com/xiangnan0811/houfeng/compare/v1.20.1...v1.21.0) (2026-10-09)
 
 
