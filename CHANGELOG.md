@@ -27,6 +27,26 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.23.0](https://github.com/xiangnan0811/houfeng/compare/v1.22.0...v1.23.0) (2026-10-09)
+
+
+### Features
+
+* **filters:** 监控列表窄屏筛选收起为“筛选 (N)” ([b05b73b](https://github.com/xiangnan0811/houfeng/commit/b05b73b33f98dd3ae5518794fc52d702e7f24ab6))
+* **filters:** 监控列表窄屏筛选收起为“筛选 (N)”，搜索与已生效筛选常驻 ([60872c4](https://github.com/xiangnan0811/houfeng/commit/60872c462327e28b44f1092537e3e2e605efd02c))
+* **ux:** 统一列表级空状态，VPS 空库改为单一首次使用状态 ([acfada7](https://github.com/xiangnan0811/houfeng/commit/acfada7c60dd1ee8099145b6e4d048db24390a8e))
+* **ux:** 统一列表级空状态，VPS 空库改为单一首次使用状态 ([a284879](https://github.com/xiangnan0811/houfeng/commit/a284879798527d071b2aa0ee3144ecc6b29a7ccd))
+
+
+### Bug Fixes
+
+* **filters:** 窄屏筛选计数口径写入合同，补 chip 清除、键盘展开与高度回归 ([d5bced9](https://github.com/xiangnan0811/houfeng/commit/d5bced99c2a946016978bc7c628d12549adbf9ca))
+
+
+### Documentation
+
+* **ux:** 保留未合并的 C2 条目，理顺 VPS 筛选为空的窗格例外与空库描述 ([0b617b7](https://github.com/xiangnan0811/houfeng/commit/0b617b7216c789995446dc6a201c3aaa0e6d0cc9))
+
 ## [1.22.0](https://github.com/xiangnan0811/houfeng/compare/v1.21.0...v1.22.0) (2026-10-09)
 
 
