@@ -11,12 +11,10 @@ export interface SidebarProps {
   onChangePassword: () => void
 }
 
-// NavLink 只按路径判断激活，带 ?view= 的入口探测快捷项会与“入口探测”同时高亮；
-// 这里按 view 区分，保证同一时刻只有一个导航项处于当前页。
 // 与路由同口径：大小写不敏感、允许尾斜杠。
-function targetsView(location: Location): string | null {
-  if (!matchPath({ path: '/targets', end: true }, location.pathname)) return null
-  return new URLSearchParams(location.search).get('view')
+// 侧栏宽度固定，同一行可能并排三个计数；超过两位数只显示 99+，完整数字保留在可访问名称里。
+function badgeCount(count: number): string {
+  return count > 99 ? '99+' : String(count)
 }
 
 function isTargetsPath(location: Location): boolean {
@@ -59,37 +57,11 @@ export function Sidebar({
         </SidebarNavGroup>
         <SidebarNavGroup id="sidebar-group-observability" label="观测">
           <SidebarNavItem to="/monitoring" label="监控" badge={anomalyCounts.monitoring} icon={<svg viewBox="0 0 16 16"><path d="M2 8h3l2-4 2 8 2-4h3"/></svg>} />
-          <SidebarNavItem
-            to="/targets"
-            label="入口探测"
-            badge={anomalyCounts.targets}
-            activeWhen={(location) => {
-              const view = targetsView(location)
-              if (view === 'unobserved' && anomalyCounts.unobservedTargets > 0) return false
-              if (view === 'stale' && anomalyCounts.staleTargets > 0) return false
-              return isTargetsPath(location)
-            }}
-            icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/></svg>} />
-          {anomalyCounts.unobservedTargets > 0 ? (
-            <SidebarNavItem
-              to="/targets?view=unobserved"
-              label="尚无观测"
-              badge={anomalyCounts.unobservedTargets}
-              badgeKind="unobserved"
-              activeWhen={(location) => targetsView(location) === 'unobserved'}
-              icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2L10 10"/></svg>}
-            />
-          ) : null}
-          {anomalyCounts.staleTargets > 0 ? (
-            <SidebarNavItem
-              to="/targets?view=stale"
-              label="观测过期"
-              badge={anomalyCounts.staleTargets}
-              badgeKind="stale"
-              activeWhen={(location) => targetsView(location) === 'stale'}
-              icon={<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 8l2.2 1.4M8 4.8V8"/></svg>}
-            />
-          ) : null}
+          <TargetsNavItem
+            abnormal={anomalyCounts.targets}
+            unobserved={anomalyCounts.unobservedTargets}
+            stale={anomalyCounts.staleTargets}
+          />
           <SidebarNavItem to="/events" label="事件" icon={<svg viewBox="0 0 16 16"><path d="M9 2L4 9h4l-1 5 5-7H8l1-5z"/></svg>} />
         </SidebarNavGroup>
         <SidebarNavGroup id="sidebar-group-records" label="记录">
@@ -118,46 +90,76 @@ function SidebarNavGroup({ id, label, children }: { id: string; label: string; c
   )
 }
 
+// 尚无观测、观测过期是“入口探测”的分类徽标，不再作为随数据出现/消失的独立导航项，
+// 导航条目因此固定；所有 /targets 路径（含两个快捷视图）都由“入口探测”承接当前项。
+function TargetsNavItem({ abnormal, unobserved, stale }: { abnormal: number; unobserved: number; stale: number }) {
+  const location = useLocation()
+  const active = isTargetsPath(location)
+  const counts = [
+    abnormal > 0 ? `${abnormal} 个异常` : null,
+    unobserved > 0 ? `${unobserved} 个尚无观测` : null,
+    stale > 0 ? `${stale} 个观测过期` : null,
+  ].filter(Boolean)
+  // 窄栏只显示图标，分类徽标随之隐藏；主链接的名称带上全部计数，窄栏另用圆点提示。
+  const gap = unobserved > 0 || stale > 0
+  return (
+    <div className="nav-item-row">
+      <Link
+        to="/targets"
+        aria-label={counts.length > 0 ? `入口探测，${counts.join('，')}` : '入口探测'}
+        {...(active ? { 'aria-current': 'page' as const } : {})}
+        className={`nav-item${active ? ' active' : ''}${gap && abnormal === 0 ? ` nav-item--gap-${stale > 0 ? 'stale' : 'unobserved'}` : ''}`}
+      >
+        <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><circle cx="8" cy="8" r="2"/></svg>
+        <span className="nav-text">入口探测</span>
+        {abnormal > 0 ? <span className="nav-badge">{badgeCount(abnormal)}</span> : null}
+      </Link>
+      {gap ? (
+        <span className="nav-subbadges">
+          {unobserved > 0 ? (
+            <Link
+              to="/targets?view=unobserved"
+              className="nav-subbadge nav-subbadge--unobserved"
+              aria-label={`尚无观测，${unobserved} 个尚无观测`}
+              title="尚无观测"
+            >
+              {badgeCount(unobserved)}
+            </Link>
+          ) : null}
+          {stale > 0 ? (
+            <Link
+              to="/targets?view=stale"
+              className="nav-subbadge nav-subbadge--stale"
+              aria-label={`观测过期，${stale} 个观测过期`}
+              title="观测过期"
+            >
+              {badgeCount(stale)}
+            </Link>
+          ) : null}
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 interface SidebarNavItemProps {
   to: string
   label: string
   icon: React.ReactNode
   badge?: number
-  badgeKind?: 'abnormal' | 'unobserved' | 'stale'
   end?: boolean
-  /** 需要同时比较查询参数时提供；未提供时沿用 NavLink 的路径匹配。 */
-  activeWhen?: (location: Location) => boolean
 }
 
-function SidebarNavItem({ to, label, icon, badge, badgeKind = 'abnormal', end, activeWhen }: SidebarNavItemProps) {
-  const location = useLocation()
-  const badgeText = badgeKind === 'unobserved'
-    ? `${badge} 个尚无观测`
-    : badgeKind === 'stale'
-      ? `${badge} 个观测过期`
-      : `${badge} 个异常`
-  const accessibleLabel = badge != null && badge > 0 ? `${label}，${badgeText}` : label
+function SidebarNavItem({ to, label, icon, badge, end }: SidebarNavItemProps) {
+  const accessibleLabel = badge != null && badge > 0 ? `${label}，${badge} 个异常` : label
 
   const content = (
     <>
       {icon}
       <span className="nav-text">{label}</span>
-      {badge != null && badge > 0 && <span className={badgeKind === 'abnormal' ? 'nav-badge' : `nav-badge nav-badge--${badgeKind}`}>{badge}</span>}
+      {badge != null && badge > 0 && <span className="nav-badge">{badgeCount(badge)}</span>}
     </>
   )
-  if (activeWhen) {
-    const active = activeWhen(location)
-    return (
-      <Link
-        to={to}
-        aria-label={accessibleLabel}
-        {...(active ? { 'aria-current': 'page' as const } : {})}
-        className={`nav-item${active ? ' active' : ''}`}
-      >
-        {content}
-      </Link>
-    )
-  }
   return (
     <NavLink
       to={to}

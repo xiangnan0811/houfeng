@@ -418,6 +418,7 @@ describe('AppShell', () => {
     expect(syncEl).toHaveClass('tp-sync--loading')
     expect(syncEl).toHaveAttribute('title', '正在读取系统摘要')
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+    expect(document.querySelectorAll('.nav-subbadge')).toHaveLength(0)
   })
 
   it('marks loaded summaries with active anomalies as degraded', async () => {
@@ -478,7 +479,7 @@ describe('AppShell', () => {
     await waitFor(() => {
       expect(document.querySelector('.tp-sync')).toHaveAttribute('title', '运行异常 3，尚有目标无观测 4')
     })
-    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).toHaveAttribute('href', '/targets')
+    expect(screen.getByRole('link', { name: '入口探测，2 个异常，4 个尚无观测' })).toHaveAttribute('href', '/targets')
     expect(screen.getByRole('link', { name: '尚无观测，4 个尚无观测' })).toHaveAttribute('href', '/targets?view=unobserved')
     expect(screen.queryByRole('link', { name: /6 个异常/ })).not.toBeInTheDocument()
   })
@@ -505,6 +506,7 @@ describe('AppShell', () => {
     expect(syncEl).toHaveClass('tp-sync--stale')
     expect(syncEl).toHaveAttribute('title', '系统摘要已过期')
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+    expect(document.querySelectorAll('.nav-subbadge')).toHaveLength(0)
   })
 
   it('refreshes on visibility and focus while deduplicating an in-flight request', async () => {
@@ -576,6 +578,7 @@ describe('AppShell', () => {
     })
     expect(screen.getByText(/系统摘要生成于/)).toBeInTheDocument()
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+    expect(document.querySelectorAll('.nav-subbadge')).toHaveLength(0)
   })
 
   it('shows dashboard unavailable when the shell summary request fails', async () => {
@@ -591,6 +594,7 @@ describe('AppShell', () => {
       expect(syncEl).toHaveAttribute('title', '系统摘要不可用')
     })
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+    expect(document.querySelectorAll('.nav-subbadge')).toHaveLength(0)
   })
 
   it('shows stale targets as their own count and hides them when the snapshot expires', async () => {
@@ -606,7 +610,7 @@ describe('AppShell', () => {
     await act(async () => {})
 
     expect(document.querySelector('.tp-sync')).toHaveAttribute('title', '运行异常 2，尚有目标无观测 1，观测过期 3')
-    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).toHaveAttribute('href', '/targets')
+    expect(screen.getByRole('link', { name: '入口探测，2 个异常，1 个尚无观测，3 个观测过期' })).toHaveAttribute('href', '/targets')
     expect(screen.getByRole('link', { name: '尚无观测，1 个尚无观测' })).toHaveAttribute('href', '/targets?view=unobserved')
     expect(screen.getByRole('link', { name: '观测过期，3 个观测过期' })).toHaveAttribute('href', '/targets?view=stale')
     expect(screen.queryByRole('link', { name: /5 个异常/ })).not.toBeInTheDocument()
@@ -616,6 +620,7 @@ describe('AppShell', () => {
     })
     expect(document.querySelector('.tp-sync')).toHaveAttribute('title', '系统摘要已过期')
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+    expect(document.querySelectorAll('.nav-subbadge')).toHaveLength(0)
   })
 
   it('refreshes a visible summary every 30 seconds and skips hidden focus or interval wakes', async () => {
@@ -659,6 +664,7 @@ describe('AppShell', () => {
       expect(document.querySelector('.tp-sync')).toHaveAttribute('title', '系统摘要不可用')
     })
     expect(document.querySelectorAll('.nav-badge')).toHaveLength(0)
+    expect(document.querySelectorAll('.nav-subbadge')).toHaveLength(0)
     expect(screen.queryByText('更新失败，显示上次结果')).not.toBeInTheDocument()
   })
 

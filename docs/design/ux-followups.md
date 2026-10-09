@@ -43,17 +43,6 @@ v1.19.0 体验走查中，有一部分修复已随 v1.20.0（PR #586）发布，
 - 同步：`dashboard-web.md:43/49/91`，以及 `page-states.spec.ts`、`core-routes.spec.ts` 的顺序断言。
 - 验收：单测覆盖覆盖率文案与数据缺失时的降级；1024px 与 390px e2e 断言新顺序。
 
-### C6 侧栏观测徽标取代动态导航项
-
-- 状态：待实施
-- 现象：“尚无观测 / 观测过期”作为独立导航项，随数据出现和消失，导航条目会跳动。
-- 依据：`dashboard-web.md:41` 规定链接到 `/targets?view=unobserved|stale`，第 145 行规定哪些状态可以把计数传给 Sidebar
-  的 nav badge；`component-patterns.md:47` 的观测分组固定为 监控 / 入口探测 / 事件；第 48 行规定“尚无观测 / 观测过期”
-  是只在各自 `/targets?view=` 下成为当前项的快捷入口，其余 `/targets` 路径（含未显示的快捷视图）由“入口探测”承接。
-- 方案：改为挂在“入口探测”上的分类徽标（保留计数、可访问名称和两个深链），导航条目固定；
-  刚创建、尚未到首个探测周期的目标同样计入。loading / stale / unavailable 时照常隐藏徽标。
-- 同步：`dashboard-web.md:41/145`、`component-patterns.md:47/48`（改为徽标后当前项全部由“入口探测”承接）；`Sidebar.test.tsx`、`AppShell.test.tsx` 的链接断言。
-
 ## 单独立项
 
 ### P1 术语对照与文案改版

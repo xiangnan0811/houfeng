@@ -75,7 +75,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('1')).toHaveClass('nav-badge')
   })
 
-  it('links unobserved targets separately from the abnormal target badge', () => {
+  it('links unobserved targets as a badge on the fixed 入口探测 item', () => {
     render(
       <MemoryRouter>
         <Sidebar
@@ -88,9 +88,13 @@ describe('Sidebar', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).toHaveAttribute('href', '/targets')
-    expect(screen.getByRole('link', { name: '尚无观测，4 个尚无观测' })).toHaveAttribute('href', '/targets?view=unobserved')
-    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).not.toHaveTextContent('4')
+    const targets = screen.getByRole('link', { name: '入口探测，2 个异常，4 个尚无观测' })
+    expect(targets).toHaveAttribute('href', '/targets')
+    expect(targets).not.toHaveTextContent('4')
+    const unobserved = screen.getByRole('link', { name: '尚无观测，4 个尚无观测' })
+    expect(unobserved).toHaveAttribute('href', '/targets?view=unobserved')
+    expect(unobserved).toHaveClass('nav-subbadge', 'nav-subbadge--unobserved')
+    expect(unobserved).not.toHaveClass('nav-item')
   })
 
   it('links stale targets separately from abnormal and unobserved counts', () => {
@@ -106,13 +110,65 @@ describe('Sidebar', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).toHaveAttribute('href', '/targets')
+    expect(screen.getByRole('link', { name: '入口探测，2 个异常，4 个尚无观测，2 个观测过期' })).toHaveAttribute('href', '/targets')
     expect(screen.getByRole('link', { name: '尚无观测，4 个尚无观测' })).toHaveAttribute('href', '/targets?view=unobserved')
     const stale = screen.getByRole('link', { name: '观测过期，2 个观测过期' })
     expect(stale).toHaveAttribute('href', '/targets?view=stale')
-    expect(stale.querySelector('.nav-badge')).toHaveClass('nav-badge--stale')
-    expect(screen.getByRole('link', { name: '入口探测，2 个异常' })).not.toHaveTextContent('4')
-    expect(screen.queryByRole('link', { name: /4 个异常/ })).not.toBeInTheDocument()
+    expect(stale).toHaveClass('nav-subbadge--stale')
+    expect(screen.queryByRole('link', { name: /6 个异常|8 个异常/ })).not.toBeInTheDocument()
+  })
+
+  it('caps visible counts at 99+ while keeping exact numbers in accessible names', () => {
+    render(
+      <MemoryRouter>
+        <Sidebar
+          user={user}
+          anomalyCounts={{ monitoring: 120, targets: 1000, unobservedTargets: 1000, staleTargets: 100 }}
+          collapsed={false}
+          onToggle={() => {}}
+          onLogout={() => {}}
+          onChangePassword={() => {}}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '入口探测，1000 个异常，1000 个尚无观测，100 个观测过期' }).querySelector('.nav-badge')).toHaveTextContent('99+')
+    expect(screen.getByRole('link', { name: '尚无观测，1000 个尚无观测' })).toHaveTextContent('99+')
+    expect(screen.getByRole('link', { name: '观测过期，100 个观测过期' })).toHaveTextContent('99+')
+    expect(screen.getByRole('link', { name: '监控，120 个异常' }).querySelector('.nav-badge')).toHaveTextContent('99+')
+  })
+
+  it('keeps the observation group items fixed whether or not gaps exist', () => {
+    const labels = (anomalyCounts: { monitoring: number; targets: number; unobservedTargets: number; staleTargets: number }) => {
+      const view = render(
+        <MemoryRouter>
+          <Sidebar user={user} anomalyCounts={anomalyCounts} collapsed={false} onToggle={() => {}} onLogout={() => {}} onChangePassword={() => {}} />
+        </MemoryRouter>,
+      )
+      const items = within(screen.getByRole('group', { name: '观测' })).getAllByRole('link')
+        .filter((link) => link.classList.contains('nav-item'))
+        .map((link) => link.querySelector('.nav-text')?.textContent)
+      view.unmount()
+      return items
+    }
+    const empty = labels({ monitoring: 0, targets: 0, unobservedTargets: 0, staleTargets: 0 })
+    expect(empty).toEqual(['监控', '入口探测', '事件'])
+    expect(labels({ monitoring: 1, targets: 2, unobservedTargets: 3, staleTargets: 4 })).toEqual(empty)
+  })
+
+  it('marks the gap kind on 入口探测 for the icon rail only when there is no abnormal badge', () => {
+    const renderCounts = (anomalyCounts: { monitoring: number; targets: number; unobservedTargets: number; staleTargets: number }) => render(
+      <MemoryRouter>
+        <Sidebar user={user} anomalyCounts={anomalyCounts} collapsed onToggle={() => {}} onLogout={() => {}} onChangePassword={() => {}} />
+      </MemoryRouter>,
+    )
+    const stale = renderCounts({ monitoring: 0, targets: 0, unobservedTargets: 1, staleTargets: 1 })
+    expect(screen.getByRole('link', { name: /^入口探测/ })).toHaveClass('nav-item--gap-stale')
+    stale.unmount()
+    const unobserved = renderCounts({ monitoring: 0, targets: 0, unobservedTargets: 1, staleTargets: 0 })
+    expect(screen.getByRole('link', { name: /^入口探测/ })).toHaveClass('nav-item--gap-unobserved')
+    unobserved.unmount()
+    renderCounts({ monitoring: 0, targets: 2, unobservedTargets: 1, staleTargets: 1 })
+    expect(screen.getByRole('link', { name: /^入口探测/ }).className).not.toMatch(/nav-item--gap-/)
   })
 
   it('omits count badges when zero', () => {
@@ -168,13 +224,13 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: '工作台' })).not.toHaveClass('active')
   })
 
-  it('keeps a single active destination across target shortcut views', () => {
+  it('keeps 入口探测 as the single current destination on every target path', () => {
     const counts = { monitoring: 0, targets: 0, unobservedTargets: 2, staleTargets: 1 }
-    const renderAt = (entry: string, anomalyCounts = counts) => render(
+    const renderAt = (entry: string) => render(
       <MemoryRouter initialEntries={[entry]}>
         <Sidebar
           user={user}
-          anomalyCounts={anomalyCounts}
+          anomalyCounts={counts}
           collapsed={false}
           onToggle={() => {}}
           onLogout={() => {}}
@@ -182,33 +238,16 @@ describe('Sidebar', () => {
         />
       </MemoryRouter>,
     )
-    const activeLabels = () => screen.getAllByRole('link').filter((link) => link.classList.contains('active')).map((link) => link.querySelector('.nav-text')?.textContent)
+    const current = () => screen.getAllByRole('link').filter((link) => link.getAttribute('aria-current') === 'page')
 
-    const unobserved = renderAt('/targets?view=unobserved')
-    expect(activeLabels()).toEqual(['尚无观测'])
-    expect(screen.getByRole('link', { name: /尚无观测/ })).toHaveAttribute('aria-current', 'page')
-    unobserved.unmount()
-
-    const detail = renderAt('/targets/tg_001')
-    expect(activeLabels()).toEqual(['入口探测'])
-    detail.unmount()
-
-    const stale = renderAt('/targets?view=stale')
-    expect(activeLabels()).toEqual(['观测过期'])
-    expect(screen.getByRole('link', { name: /入口探测/ })).not.toHaveAttribute('aria-current')
-    stale.unmount()
-
-    // 与路由同口径：尾斜杠与大小写不影响当前项。
-    const trailing = renderAt('/targets/?view=stale')
-    expect(activeLabels()).toEqual(['观测过期'])
-    trailing.unmount()
-    const upper = renderAt('/TARGETS?view=unobserved')
-    expect(activeLabels()).toEqual(['尚无观测'])
-    upper.unmount()
-
-    // 快捷项不显示时，带 view 的地址仍归入“入口探测”。
-    renderAt('/targets?view=stale', { ...counts, staleTargets: 0 })
-    expect(activeLabels()).toEqual(['入口探测'])
+    // 与路由同口径：快捷视图、详情、尾斜杠与大小写都归入“入口探测”。
+    for (const entry of ['/targets?view=unobserved', '/targets?view=stale', '/targets/tg_001', '/targets/?view=stale', '/TARGETS?view=unobserved']) {
+      const view = renderAt(entry)
+      expect(current().map((link) => link.querySelector('.nav-text')?.textContent)).toEqual(['入口探测'])
+      expect(screen.getByRole('link', { name: /^尚无观测/ })).not.toHaveAttribute('aria-current')
+      expect(screen.getByRole('link', { name: /^观测过期/ })).not.toHaveAttribute('aria-current')
+      view.unmount()
+    }
   })
 
   it('hides only the records destination when the records platform is off', () => {
