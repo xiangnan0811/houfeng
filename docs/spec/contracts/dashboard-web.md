@@ -142,7 +142,7 @@ buildShellSummaryModel(summary: DashboardSummaryState, now: number): ShellSummar
 - fresh success 在异常、无观测、观测过期都为零时为 `clear / 当前运行异常计数为 0`。非零项分别写成“运行异常 N”“尚有目标无观测”和“观测过期 N”，不得把 stale 加进异常。只有无观测时仍显示“尚有目标无观测”。只有观测过期时为 `notice`，不得使用表示系统摘要过期的 `stale`。禁止使用“系统正常”“系统摘要无异常”“同步完成”或等价全链路健康文案。
 - 系统摘要 freshness 只以 `snapshot_generated_at` 与当前时刻比较。生成时间无效或达到 5 分钟窗口时为 `stale / 系统摘要已过期`，并用一次性 timeout 触发到期重算。这与目标观测过期无关。
 - 初次请求失败且没有成功快照时为 `unavailable / 系统摘要不可用`。401、403、404 清除 overview，同样变为 unavailable，不得继续展示上次计数。已有成功快照后的普通网络失败保留 overview 与原 `snapshot_generated_at`，状态为 `stale`，文案为“更新失败，显示上次结果”。
-- 只有 `clear` / `anomaly` / `unobserved` / `notice` 可以把异常、无观测和观测过期计数传给 Sidebar。`loading` / `stale` / `unavailable` 必须隐藏 nav badge，不能用 0 暗示无异常或无过期。
+- 只有 `clear` / `anomaly` / `unobserved` / `notice` 可以把异常、无观测和观测过期计数传给 Sidebar。`loading` / `stale` / `unavailable` 必须隐藏 nav badge（含“入口探测”旁的尚无观测/观测过期分类徽标），不能用 0 暗示无异常或无过期。无观测与观测过期计数以分类徽标链接挂在“入口探测”上，不再作为随数据出现的独立导航项（见 component-patterns）。
 - 初次读取由调用方通过共享 `useVisibleRefresh().refresh()` 发起，并与后续读取共用同一 in-flight。页面可见时每 30 秒刷新一次；hidden 期间的 interval、visibility 与 focus 不发请求；回到 visible 或 focus 时立即刷新。连续唤醒共享同一个 in-flight Promise。5 分钟系统摘要到期仍是一次性 timeout，不另建第二条轮询。`refreshKey`、invalidate 或卸载使迟到回调的 `isCurrent()` 为 false，调用方不得应用该结果。
 - 顶栏必须同时提供状态形状/颜色、可见状态文案、服务端生成时间和可访问名称；窄视口隐藏可见副文案时，`role="status"` 的 `aria-label` 仍必须保留状态与生成时间。
 
