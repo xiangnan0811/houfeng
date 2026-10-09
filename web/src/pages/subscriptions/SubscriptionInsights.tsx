@@ -41,13 +41,14 @@ export type SubscriptionInsightsProps = {
   onSelectVPS: (vpsID: string) => void
 }
 
+// 分类色不复用状态色：同色系重复会让图例对不上扇区，黄色还会被读成警示。
 const DONUT_COLORS = [
-  'var(--accent)',
-  'var(--color-state-normal)',
-  'var(--color-state-notice)',
-  'var(--accent-2)',
-  'var(--color-state-maintenance)',
-  'var(--text-muted)',
+  'var(--chart-1)',
+  'var(--chart-2)',
+  'var(--chart-3)',
+  'var(--chart-4)',
+  'var(--chart-5)',
+  'var(--chart-6)',
 ]
 
 const BREAKDOWN_TABS = [

@@ -593,7 +593,6 @@ function VPSInspector({
                 <h2 className="vps-inspector__title">{row.vps.display_name}</h2>
                 <p className="vps-inspector__status">
                   <LifecycleBadge value={row.vps.lifecycle_status} />
-                  <span className="vps-dotted__sep" aria-hidden="true">·</span>
                   <RenewalBadge value={row.vps.renewal_decision} />
                 </p>
               </div>
@@ -1245,14 +1244,8 @@ export function VPSPage() {
                         </span>
                         <span className="vps-ledger__item-st">
                           <LifecycleBadge value={row.vps.lifecycle_status} />
-                          {' · '}
                           <RenewalBadge value={row.vps.renewal_decision} />
-                          {attention ? (
-                            <>
-                              {' · '}
-                              <span className="vps-ledger__item-attention">{attention}</span>
-                            </>
-                          ) : null}
+                          {attention ? <span className="vps-ledger__item-attention">{attention}</span> : null}
                         </span>
                       </button>
                     )

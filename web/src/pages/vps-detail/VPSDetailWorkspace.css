@@ -83,20 +83,21 @@
 .vps-detail-workspace .vps-overview-freshness__times dd{display:grid;grid-template-columns:minmax(0, 1fr) auto;align-items:start;gap:8px;margin:0;min-width:0;color:var(--text-primary);font-size:var(--vps-detail-body-size);font-weight:400;line-height:1.45}
 .vps-detail-workspace .vps-overview-facts dd,
 .vps-detail-workspace .vps-detail-overview__facts dd{display:grid;grid-template-columns:minmax(0, 1fr) auto;align-items:start;gap:8px;margin:0;min-width:0;max-width:100%;justify-self:start;color:var(--text-primary);font-size:var(--vps-detail-body-size);font-weight:400;line-height:1.45}
-.vps-overview-facts__value{min-width:0;overflow-wrap:anywhere}
+.vps-overview-facts__value{min-width:0;align-self:baseline;overflow-wrap:anywhere}
 .vps-overview-facts__note{min-width:0;max-width:72ch;overflow-wrap:break-word;white-space:normal}
-.vps-overview-facts__copy{display:flex;align-items:center;justify-self:end;align-self:start}
+/* 复制按钮比文字行高，按文字基线与值的首行对齐；按钮在窄屏或触控下增高到 44px 也不会错位。 */
+.vps-overview-facts__copy{display:flex;align-items:baseline;justify-self:end;align-self:baseline}
 .vps-overview-facts__row--note{align-items:start}
 .vps-copy-value{display:inline-flex;align-items:center;flex:0 0 auto}
 .vps-observation{container-type:inline-size;display:flex;flex-direction:column}
-.vps-observation__cols{display:grid;grid-template-columns:5.5rem 8rem minmax(0, 1fr) 11rem 6.5rem;column-gap:14px;align-items:start;min-width:0}
+.vps-observation__cols{display:grid;grid-template-columns:5.5rem 8rem minmax(0, 1fr) 11rem 8.5rem;column-gap:14px;align-items:start;min-width:0}
 .vps-observation--multi-action .vps-observation__cols{grid-template-columns:5.5rem 8rem minmax(0, 1fr) 11rem 11rem}
 .vps-observation__head{color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4;padding-bottom:6px;border-bottom:var(--border-w) solid var(--border-muted)}
 .vps-observation__object{min-width:0;padding:8px 0;border-bottom:var(--border-w) solid var(--border-muted)}
 .vps-observation__project{color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4}
 .vps-observation__conclusion,
 .vps-observation__time,
-.vps-observation__action{min-width:0}
+.vps-observation__action{min-width:0;word-break:keep-all}
 .vps-observation__description{min-width:0;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong);line-height:1.45;overflow-wrap:anywhere}
 .vps-observation__time{color:var(--text-primary);font-size:var(--vps-detail-helper-size-strong);line-height:1.4}
 .vps-observation__time-success{color:var(--text-muted)}
@@ -280,7 +281,13 @@
 .vps-facts-form .field__hint{font-size:12px;color:var(--text-muted);overflow-wrap:anywhere}
 .vps-facts-form textarea.input{min-height:48px;resize:vertical;line-height:1.5}
 .vps-facts-form .input--name{font-weight:500}
-.vps-facts-form .mono-input{font-family:var(--font-mono);font-size:13px}
+.vps-facts-form .mono-input{font-family:var(--font-mono);font-size:var(--type-field-size)}
+.vps-facts-form__usage-chips{display:flex;flex-wrap:wrap;gap:var(--space-2);margin-top:var(--space-2)}
+.vps-facts-form__usage-chip{appearance:none;min-height:28px;padding:2px 10px;border:var(--border-w) solid var(--border);border-radius:999px;background:transparent;color:var(--text-secondary);font:inherit;font-size:var(--type-small-size);line-height:1.4;cursor:pointer;transition:background-color var(--dur-micro) var(--ease-calm),border-color var(--dur-micro) var(--ease-calm),color var(--dur-micro) var(--ease-calm)}
+.vps-facts-form__usage-chip:hover:not(:disabled){border-color:var(--panel-border-strong);color:var(--text-primary)}
+.vps-facts-form__usage-chip[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);color:var(--text-primary)}
+.vps-facts-form__usage-chip:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
+.vps-facts-form__usage-chip:disabled{cursor:not-allowed;opacity:.6}
 .vps-facts-form .field__label-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
 .vps-facts-form .id-sink{font-family:var(--font-mono);font-size:11px;color:var(--text-muted);overflow-wrap:anywhere}
 .vps-facts-form [hidden]{display:none!important}
@@ -479,9 +486,9 @@
 .vps-ledger__item:hover{background:var(--row-bg-hover)}
 .vps-ledger__item[aria-pressed='true']{border-left-color:var(--accent);background:var(--nav-active)}
 .vps-ledger__item-name{display:block;color:var(--text-primary);font-family:var(--font-sans);font-size:var(--type-h2-size);font-weight:var(--type-h2-weight)}
-.vps-ledger__item-line,
-.vps-ledger__item-st{display:block;margin-top:var(--space-1);color:var(--text-muted);font-size:var(--vps-aux)}
-.vps-ledger__item-st{color:var(--text-secondary)}
+.vps-ledger__item-line{display:block;margin-top:var(--space-1);color:var(--text-muted);font-size:var(--vps-aux)}
+/* 状态点文字与续费意向徽章之间用间距分隔，不再夹一个孤立的“·”。 */
+.vps-ledger__item-st{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:var(--space-1);color:var(--text-secondary);font-size:var(--vps-aux)}
 .vps-ledger__item-attention{color:var(--warn);font-weight:500}
 .vps-canvas .vps-quiet-fact{color:var(--text-muted);font-size:var(--vps-aux)}
 .vps-workbench .vps-quiet-fact,
@@ -493,7 +500,7 @@
 .vps-inspector__head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:var(--space-3) var(--space-4);margin-bottom:var(--space-5)}
 .vps-inspector__identity{flex:1 1 16rem;min-width:0}
 .vps-inspector__title{color:var(--text-primary);margin:0;font-family:var(--font-sans);font-size:var(--type-h1-size);font-weight:var(--type-h1-weight);line-height:var(--type-h1-leading)}
-.vps-inspector__status{display:flex;flex-wrap:wrap;align-items:center;margin:var(--space-2) 0 0;color:var(--text-secondary);font-size:13px;line-height:1.4}
+.vps-inspector__status{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:var(--space-2) 0 0;color:var(--text-secondary);font-size:13px;line-height:1.4}
 .vps-inspector__action{flex:0 0 auto}
 .vps-inspector__notice{margin:calc(var(--space-2) * -1) 0 var(--space-5)}
 .vps-inspector__groups,

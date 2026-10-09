@@ -71,9 +71,11 @@ export function CreateTargetPanel({
       <form className="target-create-drawer__form" onSubmit={onSubmit}>
         <p>
           <label>
-            目标名称
+            <span className="target-create-drawer__label--required">目标名称</span>
             <input
               name="name"
+              // 星号由 CSS 生成；显式名称让读屏只念字段名，不把装饰星号算进去。
+              aria-label="目标名称"
               value={form.name}
               onChange={(event) => onFieldChange('name', event.target.value)}
               required
@@ -103,9 +105,10 @@ export function CreateTargetPanel({
         </p>
         <p>
           <label>
-            主机地址
+            <span className="target-create-drawer__label--required">主机地址</span>
             <input
               name="host"
+              aria-label="主机地址"
               value={form.host}
               onChange={(event) => onFieldChange('host', event.target.value)}
               required
@@ -125,9 +128,11 @@ export function CreateTargetPanel({
         </p>
         <p>
           <label>
-            执行监控实例标签
+            <span className="target-create-drawer__label--required">执行监控实例标签</span>
             <input
               name="executionMonitoringInstanceLabels"
+              aria-label="执行监控实例标签"
+              aria-required="true"
               value={form.executionMonitoringInstanceLabels}
               aria-describedby="target-execution-label-hint"
               onFocus={loadLabelSuggestions}

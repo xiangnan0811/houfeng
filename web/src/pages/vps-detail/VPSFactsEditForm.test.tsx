@@ -93,10 +93,38 @@ describe('VPSFactsEditForm', () => {
     }))
   })
 
-  it('offers multiple purposes without replacing the existing selection', () => {
-    const { onDraftChange } = renderForm(draftFixture({ usageTags: '自定义用途' }))
-    fireEvent.click(screen.getByRole('button', { name: '备用' }))
-    expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ usageTags: '自定义用途, 备用' }))
+  it('toggles purposes against the live draft without dropping other selections', () => {
+    function Harness() {
+      const [draft, setDraft] = useState(draftFixture({ usageTags: '自定义用途' }))
+      return (
+        <MemoryRouter>
+          <VPSFactsEditForm
+            formId="vps-facts-form"
+            draft={draft}
+            providers={[]}
+            providersLoading={false}
+            providersError={null}
+            submitting={false}
+            onDraftChange={setDraft}
+            onSubmit={vi.fn()}
+          />
+        </MemoryRouter>
+      )
+    }
+    render(<Harness />)
+    const usage = screen.getByRole('textbox', { name: '用途' })
+    const chips = screen.getByRole('group', { name: '快捷选项' })
+    expect(within(chips).getByRole('button', { name: '自定义用途' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(chips).getByRole('button', { name: '备用' })).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(within(chips).getByRole('button', { name: '备用' }))
+    expect(usage).toHaveValue('自定义用途, 备用')
+    expect(within(chips).getByRole('button', { name: '备用' })).toHaveAttribute('aria-pressed', 'true')
+
+    // 再次点击已选用途只取消它自己，保留其他用途。
+    fireEvent.click(within(chips).getByRole('button', { name: '自定义用途' }))
+    expect(usage).toHaveValue('备用')
+    expect(within(chips).getByRole('button', { name: '备用' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('hides IPv6 and SSH boxes until enabled and does not erase values when hiding', () => {

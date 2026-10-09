@@ -168,6 +168,49 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: '工作台' })).not.toHaveClass('active')
   })
 
+  it('keeps a single active destination across target shortcut views', () => {
+    const counts = { monitoring: 0, targets: 0, unobservedTargets: 2, staleTargets: 1 }
+    const renderAt = (entry: string, anomalyCounts = counts) => render(
+      <MemoryRouter initialEntries={[entry]}>
+        <Sidebar
+          user={user}
+          anomalyCounts={anomalyCounts}
+          collapsed={false}
+          onToggle={() => {}}
+          onLogout={() => {}}
+          onChangePassword={() => {}}
+        />
+      </MemoryRouter>,
+    )
+    const activeLabels = () => screen.getAllByRole('link').filter((link) => link.classList.contains('active')).map((link) => link.querySelector('.nav-text')?.textContent)
+
+    const unobserved = renderAt('/targets?view=unobserved')
+    expect(activeLabels()).toEqual(['尚无观测'])
+    expect(screen.getByRole('link', { name: /尚无观测/ })).toHaveAttribute('aria-current', 'page')
+    unobserved.unmount()
+
+    const detail = renderAt('/targets/tg_001')
+    expect(activeLabels()).toEqual(['入口探测'])
+    detail.unmount()
+
+    const stale = renderAt('/targets?view=stale')
+    expect(activeLabels()).toEqual(['观测过期'])
+    expect(screen.getByRole('link', { name: /入口探测/ })).not.toHaveAttribute('aria-current')
+    stale.unmount()
+
+    // 与路由同口径：尾斜杠与大小写不影响当前项。
+    const trailing = renderAt('/targets/?view=stale')
+    expect(activeLabels()).toEqual(['观测过期'])
+    trailing.unmount()
+    const upper = renderAt('/TARGETS?view=unobserved')
+    expect(activeLabels()).toEqual(['尚无观测'])
+    upper.unmount()
+
+    // 快捷项不显示时，带 view 的地址仍归入“入口探测”。
+    renderAt('/targets?view=stale', { ...counts, staleTargets: 0 })
+    expect(activeLabels()).toEqual(['入口探测'])
+  })
+
   it('hides only the records destination when the records platform is off', () => {
     render(
       <MemoryRouter>

@@ -28,6 +28,15 @@ type VPSFactsEditFormProps = {
   usageSuggestions?: string[]
 }
 
+function parseUsageTags(value: string): string[] {
+  return [...new Set(value.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean))]
+}
+
+// 快捷用途可再次点击取消，避免只能手动删文字。
+function toggleUsageTag(tags: string[], tag: string): string[] {
+  return tags.includes(tag) ? tags.filter((value) => value !== tag) : [...tags, tag]
+}
+
 function hasCustomSSH(draft: FactEditFormState) {
   const host = trimHostAddress(draft.sshHost)
   const port = draft.sshPort.trim()
@@ -98,6 +107,8 @@ export function VPSFactsEditForm({
       providerName: provider ? provider.name : draft.providerName,
     })
   }
+
+  const currentUsageTags = parseUsageTags(draft.usageTags)
 
   function updateIPv4(value: string) {
     onDraftChange({
@@ -223,13 +234,22 @@ export function VPSFactsEditForm({
               })}
             />
             <span className="field__hint">可填写多个用途，用逗号分隔。</span>
-            <div className="asset-row__meta">
-              {[...new Set([...USAGE_SUGGESTIONS, ...usageSuggestions, ...draft.usageTags.split(/[,，]/).map((tag) => tag.trim()).filter(Boolean)])].map((tag) => (
-                <button key={tag} type="button" className="text-link" disabled={submitting} onClick={() => {
-                  const tags = draft.usageTags.split(/[,，]/).map((value) => value.trim()).filter(Boolean)
-                  onDraftChange({ ...draft, usageTags: [...new Set([...tags, tag])].join(', ') })
-                }}>{tag}</button>
-              ))}
+            <div className="vps-facts-form__usage-chips" role="group" aria-label="快捷选项">
+              {[...new Set([...USAGE_SUGGESTIONS, ...usageSuggestions, ...currentUsageTags])].map((tag) => {
+                const selected = currentUsageTags.includes(tag)
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    className="vps-facts-form__usage-chip"
+                    aria-pressed={selected}
+                    disabled={submitting}
+                    onClick={() => onDraftChange({ ...draft, usageTags: toggleUsageTag(currentUsageTags, tag).join(', ') })}
+                  >
+                    {tag}
+                  </button>
+                )
+              })}
             </div>
           </div>
           <div className="field">

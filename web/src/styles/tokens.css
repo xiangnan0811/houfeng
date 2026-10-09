@@ -60,6 +60,8 @@
   --control-bg:#151714;--control-border:rgba(232,230,223,0.11);--control-bg-hover:#1C1E1A;
   --panel-bg:#151714;--panel-border:rgba(232,230,223,0.09);--panel-bg-elevated:#1C1E1A;--panel-bg-muted:#0F110E;--panel-border-strong:rgba(232,230,223,0.16);
   --accent-strong:#B4D6C2;--text-disabled:rgba(168,169,156,0.38);
+  /* 分类图表色：互不重复，也不与本主题的状态色（正常/提醒/告警/严重/维护/离线）相同；第 6 色为“其他”的蓝灰。 */
+  --chart-1:#7FA8D9;--chart-2:#C9A0DC;--chart-3:#6CC3D5;--chart-4:#E39BC2;--chart-5:#A3A8E8;--chart-6:#6E7B8F;
 }
 .theme-houfeng-light{
   --color-scheme:light;
@@ -100,6 +102,8 @@
   --control-bg:#FFFFFF;--control-border:#D4D9D6;--control-bg-hover:#F3F5F4;
   --panel-bg:#FFFFFF;--panel-border:#D4D9D6;--panel-bg-elevated:#FFFFFF;--panel-bg-muted:#F3F5F4;--panel-border-strong:#C2C8C4;
   --accent-strong:#24483A;--text-disabled:rgba(91,96,92,0.40);
+  /* 分类图表色：互不重复，也不与本主题的状态色（正常/提醒/告警/严重/维护/离线）相同；第 6 色为“其他”的蓝灰。 */
+  --chart-1:#2D5E8C;--chart-2:#7A4A93;--chart-3:#0E7490;--chart-4:#A3367F;--chart-5:#4F55B0;--chart-6:#64748B;
 }
 /* 精密：冷灰底与靛蓝强调，对比更利落。 */
 .theme-precision-dark{
@@ -141,6 +145,8 @@
   --control-bg:#111218;--control-border:rgba(255,255,255,0.09);--control-bg-hover:#181A22;
   --panel-bg:#111218;--panel-border:rgba(255,255,255,0.07);--panel-bg-elevated:#181A22;--panel-bg-muted:#0C0D11;--panel-border-strong:rgba(255,255,255,0.13);
   --accent-strong:#A8AEFF;--text-disabled:rgba(161,165,181,0.36);
+  /* 分类图表色：互不重复，也不与本主题的状态色（正常/提醒/告警/严重/维护/离线）相同；第 6 色为“其他”的蓝灰。 */
+  --chart-1:#7FB2F0;--chart-2:#C9A0DC;--chart-3:#5AC8D6;--chart-4:#E39BD0;--chart-5:#8B93FF;--chart-6:#6E7B8F;
 }
 .theme-precision-light{
   --color-scheme:light;
@@ -181,6 +187,8 @@
   --control-bg:#FFFFFF;--control-border:#D8DCE3;--control-bg-hover:#F6F7F9;
   --panel-bg:#FFFFFF;--panel-border:#E3E6EC;--panel-bg-elevated:#FFFFFF;--panel-bg-muted:#F6F7F9;--panel-border-strong:#CDD2DB;
   --accent-strong:#3C41C4;--text-disabled:rgba(90,95,110,0.40);
+  /* 分类图表色：互不重复，也不与本主题的状态色（正常/提醒/告警/严重/维护/离线）相同；第 6 色为“其他”的蓝灰。 */
+  --chart-1:#1D4ED8;--chart-2:#7E22CE;--chart-3:#0E7490;--chart-4:#A3367F;--chart-5:#4F55E0;--chart-6:#64748B;
 }
 /* 观测台：终端式青绿与琥珀、2–5px 小圆角与网格底纹；仅深色，浅色回退候风浅色。 */
 .theme-observatory-dark{
@@ -224,4 +232,6 @@
   --control-bg:#0B1010;--control-border:rgba(61,214,181,0.14);--control-bg-hover:#111818;
   --panel-bg:#0B1010;--panel-border:rgba(61,214,181,0.11);--panel-bg-elevated:#111818;--panel-bg-muted:#080B0B;--panel-border-strong:rgba(61,214,181,0.20);
   --accent-strong:#6FE6CC;--text-disabled:rgba(143,166,160,0.36);
+  /* 分类图表色：互不重复，也不与本主题的状态色（正常/提醒/告警/严重/维护/离线）相同；第 6 色为“其他”的蓝灰。 */
+  --chart-1:#7AA7FF;--chart-2:#D59BF6;--chart-3:#5BC0EB;--chart-4:#F28FC7;--chart-5:#A6A9FF;--chart-6:#6E7B8F;
 }

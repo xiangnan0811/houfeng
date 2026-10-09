@@ -48,7 +48,7 @@
 - **表面 / 文本色**（按主题切换）：`--bg` / `--bg-sidebar` / `--surface` / `--surface-elevated` / `--surface-pressed` / `--border` / `--border-strong` / `--border-dashed` / `--text-primary` / `--text-secondary` / `--text-muted` / `--text-disabled`。
 - **强调色**：`--accent` / `--accent-strong` / `--accent-soft` / `--accent-border` / `--accent-2`。
 - **状态色**（**跨主题语义稳定**）：`--color-state-normal` / `--color-state-notice` / `--color-state-alert` / `--color-state-critical` / `--color-state-maintenance` / `--color-state-offline`。
-- **图表调色板**：`--chart-1` … `--chart-6`，sparkline / 趋势图按色序使用（参见 `web/src/components/atoms/Sparkline.tsx:23-33` 的 `TONE_VAR` 映射）。
+- **图表调色板**：`--chart-1` … `--chart-6` 是分类图表（如订阅成本环形图）的分类色，每个主题六色互不重复，也不与本主题任何状态色（含解析 `var()` 别名后）相同，第 6 色为“其他”的蓝灰，由 `src/styles/chartPalette.test.ts` 校验；单序列 sparkline / 趋势图仍按 `TONE_VAR` 映射状态色与 accent（参见 `web/src/components/atoms/Sparkline.tsx:48-58`）。
 
 **使用规则**：
 
@@ -371,4 +371,4 @@ select.input{appearance:none;-webkit-appearance:none;background-image:var(--sele
 - **状态色派生（`color-mix` + 状态令牌）**：`web/src/styles/partials/atoms.css` 的 `.tone--normal` / `.tone--alert` / `.tone--critical` 系列。
 - **多主题令牌覆盖**：`web/src/styles/tokens.css` 的 `:root, .theme-houfeng-dark` / `.theme-houfeng-light` / `.theme-precision-dark` / `.theme-precision-light` / `.theme-observatory-dark` 为五个运行时主题赋值，`observatory-light` 由运行时回退到 `houfeng-light`，组件代码无感知。
 - **严格 CSP 下的首屏主题预热**：`web/index.html` 同步加载同源 `web/public/theme-bootstrap.js`，其 allowlist 与映射与 `web/src/lib/theme.ts` 的 `themeClass` 保持一致。
-- **chart 调色板使用**：`web/src/components/atoms/Sparkline.tsx:23-33` 的 `TONE_VAR` 把状态色 / accent 映射到 `var(--color-state-*)` / `var(--accent*)`，没有任何 hex。
+- **chart 调色板使用**：`web/src/components/atoms/Sparkline.tsx:48-58` 的 `TONE_VAR` 把状态色 / accent 映射到 `var(--color-state-*)` / `var(--accent*)`，没有任何 hex。
