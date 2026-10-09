@@ -306,6 +306,7 @@ export function RecordSearchPage() {
         {!initialLoading && !visibleFailure && visibleRecords.length === 0 ? (
           <PageState
             kind="empty"
+            surface="empty"
             eyebrow="运维记录"
             title={hasNarrowingFilters ? '没有匹配的记录' : '还没有运维记录'}
             description={hasNarrowingFilters ? '调整关键词或筛选条件后再试。' : '点击右上角“新建记录”，或从 VPS 详情记录一次运维操作。'}

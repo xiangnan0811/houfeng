@@ -567,7 +567,6 @@ function VPSInspector({
   currentInventoryHref,
   subscriptionsError,
   notice,
-  inventoryEmpty = false,
   onSelect,
 }: {
   row: InventoryRow | null
@@ -578,7 +577,6 @@ function VPSInspector({
   subscriptionsError: string | null
   notice: string | null
   /** 库存本身为空（不是筛选后为空）。 */
-  inventoryEmpty?: boolean
   onSelect: (vpsID: string) => void
 }) {
   const attention = row ? cancellationAttentionReason(row) : null
@@ -618,7 +616,7 @@ function VPSInspector({
         ) : visibleRows.length === 0 ? (
           <>
             {notice ? <p className="vps-overview__notice">{notice}</p> : null}
-            <p className="vps-inspector__empty">{inventoryEmpty ? '还没有 VPS，录入第一台后这里会显示续费排期与分布。' : '暂无匹配的 VPS'}</p>
+            <p className="vps-inspector__empty">暂无匹配的 VPS</p>
           </>
         ) : (
           <VPSInventoryOverview overview={overview} notice={notice} onSelect={onSelect} />
@@ -993,9 +991,8 @@ export function VPSPage() {
     setFilterDrawerOpen(false)
   }
 
-  const listEmptyMessage = state.vps.length === 0
-    ? { title: '还没有录入 VPS 资产', detail: '先录入 VPS。' }
-    : { title: '当前筛选没有匹配 VPS', detail: searchQuery.trim() ? '改搜索或清空筛选。' : '清空筛选或新建 VPS。' }
+  // 库存为空时整个画布换成首次使用空状态；这里只处理筛选后为空。
+  const listEmptyMessage = { title: '当前筛选没有匹配 VPS', detail: searchQuery.trim() ? '改搜索或清空筛选。' : '清空筛选或新建 VPS。' }
   const inspectorNoticeText = inspectorNotice(selectedID)
   const selectedDetailHref = selectedRow ? vpsDetailHref(selectedRow.vps.vps_id, filters.view) : null
 
@@ -1071,7 +1068,11 @@ export function VPSPage() {
         </div>
       ) : null}
 
-      <div className="vps-canvas" data-workspace={workspace}>
+      <div
+        className="vps-canvas"
+        data-workspace={workspace}
+        {...(!state.inventoryLoading && !state.inventoryError && state.vps.length === 0 ? { 'data-empty': '' } : {})}
+      >
         {state.inventoryLoading ? (
           <div className="vps-canvas__state">
             <PageStateView kind="loading" title="正在加载 VPS…" surface="empty" compact />
@@ -1102,6 +1103,16 @@ export function VPSPage() {
               action={<button type="button" className="btn sm secondary" onClick={retrySubscriptions}>重试</button>}
               surface="empty"
               compact
+            />
+          </div>
+        ) : state.vps.length === 0 ? (
+          // 首次使用：库存为空时不铺两栏空白，统一用居中空状态指向创建入口。
+          <div className="vps-canvas__state">
+            <PageStateView
+              kind="empty"
+              surface="empty"
+              title="还没有录入 VPS"
+              description="点击“创建第一台 VPS”录入后，这里会显示清单、续费排期与分布。"
             />
           </div>
         ) : workspace === 'workbench' ? (
@@ -1276,7 +1287,6 @@ export function VPSPage() {
               currentInventoryHref={currentInventoryHref}
               subscriptionsError={state.subscriptionsError}
               notice={inspectorNoticeText}
-              inventoryEmpty={!state.inventoryLoading && state.inventoryError == null && state.vps.length === 0}
               onSelect={setSelected}
             />
           </div>
