@@ -30,6 +30,11 @@ test('create target dialog adds the execution label to an unlabeled instance aft
   api.useProfile({
     ...coreRouteProfile('/targets'),
     [apiRouteKey('GET', '/api/monitoring-instances?scope=active')]: { status: 200, body: [UNLABELED_INSTANCE] },
+    // 写入前重读：同步已把 updated_at 推进，If-Match 必须用重读到的值。
+    [apiRouteKey('GET', '/api/monitoring-instances/mi_tokyo')]: {
+      status: 200,
+      body: { ...UNLABELED_INSTANCE, updated_at: '2026-08-20T09:00:05Z' },
+    },
     [apiRouteKey('PATCH', '/api/monitoring-instances/mi_tokyo')]: {
       status: 200,
       body: { ...UNLABELED_INSTANCE, labels: ['jp'], updated_at: '2026-08-20T09:05:00Z' },
@@ -47,15 +52,20 @@ test('create target dialog adds the execution label to an unlabeled instance aft
 
   const assign = dialog.getByRole('group', { name: '给监控实例加标签' })
   await assign.getByRole('button', { name: '给 Tokyo Monitor 加上「jp」' }).click()
-  await expect(assign.getByText(/加上后，它也会执行其他带这个标签的目标/)).toBeVisible()
+  const confirm = assign.getByRole('button', { name: '确认添加' })
+  await expect(confirm).toBeFocused()
+  await expect(confirm).toHaveAccessibleDescription(/加上后，它也会执行其他带这个标签的目标/)
+  const confirmScan = await new AxeBuilder({ page }).include('[role="dialog"]').analyze()
+  expect(confirmScan.violations).toEqual([])
   const patch = page.waitForRequest((request) => request.method() === 'PATCH' && request.url().endsWith('/api/monitoring-instances/mi_tokyo'))
-  await assign.getByRole('button', { name: '确认添加' }).click()
+  await confirm.click()
   const request = await patch
   expect(request.postDataJSON()).toEqual({ group: 'edge', labels: ['jp'], note: 'first agent' })
-  expect(request.headers()['if-match']).toBe('"2026-08-20T09:00:00Z"')
+  expect(request.headers()['if-match']).toBe('"2026-08-20T09:00:05Z"')
 
   await expect(dialog.getByText('将由 Tokyo Monitor 执行。')).toBeVisible()
   await expect(assign).toHaveCount(0)
+  await expect(executionLabels).toBeFocused()
   const scan = await new AxeBuilder({ page }).include('[role="dialog"]').analyze()
   expect(scan.violations).toEqual([])
 })

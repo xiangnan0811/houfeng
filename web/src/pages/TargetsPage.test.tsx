@@ -381,17 +381,27 @@ describe('TargetsPage', () => {
       note: 'keep this note',
       updated_at: '2026-10-09T08:00:00Z',
     }
+    // 心跳与同步会不断刷新 updated_at：每次重读都拿到更新后的令牌。
+    let version = 0
+    const reads: string[] = []
     const patches: Array<{ body: unknown; ifMatch: string | null }> = []
-    let failNext = true
+    const conflicts = { remaining: 3 }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       if (url === '/api/monitoring-instances/mi_tokyo' && init?.method === 'PATCH') {
         patches.push({ body: JSON.parse(String(init.body)), ifMatch: new Headers(init.headers).get('If-Match') })
-        if (failNext) {
-          failNext = false
-          return mockJSONResponse({ error: '监控实例资料已被修改，请刷新后重试' }, 412)
+        if (conflicts.remaining > 0) {
+          conflicts.remaining -= 1
+          return mockJSONResponse({ error: 'metadata conflict' }, 409)
         }
-        return mockJSONResponse({ ...tokyo, labels: ['jp'], updated_at: '2026-10-09T08:05:00Z' })
+        return mockJSONResponse({ ...tokyo, labels: ['ops', 'jp'], updated_at: '2026-10-09T08:09:00Z' })
+      }
+      if (url === '/api/monitoring-instances/mi_tokyo') {
+        version += 1
+        const updatedAt = `2026-10-09T08:0${version}:00Z`
+        reads.push(updatedAt)
+        // 读取期间别处给实例加了 ops 标签，追加时必须保留。
+        return mockJSONResponse({ ...tokyo, labels: version > 1 ? ['ops'] : [], updated_at: updatedAt })
       }
       if (url.startsWith('/api/monitoring-instances')) return mockJSONResponse([tokyo])
       return mockJSONResponse([])
@@ -412,24 +422,74 @@ describe('TargetsPage', () => {
     fireEvent.change(executionLabels, { target: { value: 'jp' } })
 
     const assign = within(createDrawer).getByRole('group', { name: '给监控实例加标签' })
-    fireEvent.click(within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' }))
-    expect(within(assign).getByText(/加上后，它也会执行其他带这个标签的目标/)).toBeInTheDocument()
-    // 取消不写入。
+    const trigger = within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' })
+    fireEvent.click(trigger)
+    const confirm = within(assign).getByRole('button', { name: '确认添加' })
+    expect(confirm).toHaveFocus()
+    expect(confirm).toHaveAccessibleDescription(/加上后，它也会执行其他带这个标签的目标/)
+    // 取消不写入，焦点回到发起的实例按钮。
     fireEvent.click(within(assign).getByRole('button', { name: '取消' }))
     expect(patches).toHaveLength(0)
+    await waitFor(() => expect(within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' })).toHaveFocus())
 
+    // 两次尝试都冲突：给出中文说明，可以再确认。
     fireEvent.click(within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' }))
     fireEvent.click(within(assign).getByRole('button', { name: '确认添加' }))
-    expect(await within(assign).findByRole('alert')).toHaveTextContent('监控实例资料已被修改，请刷新后重试')
+    expect(await within(assign).findByRole('alert')).toHaveTextContent('给 tokyo-edge-01 加上「jp」失败：实例资料正在更新，没有加上标签，请再确认一次。')
+    expect(patches.map((patch) => patch.ifMatch)).toEqual(['"2026-10-09T08:01:00Z"', '"2026-10-09T08:02:00Z"'])
 
+    // 再次确认：第一次仍冲突，重读后用新令牌成功。
     fireEvent.click(within(assign).getByRole('button', { name: '确认添加' }))
     expect(await within(createDrawer).findByText('将由 tokyo-edge-01 执行。')).toBeInTheDocument()
     expect(within(createDrawer).queryByRole('group', { name: '给监控实例加标签' })).not.toBeInTheDocument()
-    expect(patches).toHaveLength(2)
-    expect(patches[1]).toEqual({
-      body: { group: 'apac', labels: ['jp'], note: 'keep this note' },
-      ifMatch: '"2026-10-09T08:00:00Z"',
+    expect(executionLabels).toHaveFocus()
+    expect(reads).toHaveLength(4)
+    expect(patches).toHaveLength(4)
+    expect(patches[3]).toEqual({
+      body: { group: 'apac', labels: ['ops', 'jp'], note: 'keep this note' },
+      ifMatch: '"2026-10-09T08:04:00Z"',
     })
+  })
+
+  it('keeps a failure visible when the execution label changes while adding', async () => {
+    const tokyo = { monitoring_instance_id: 'mi_tokyo', display_name: 'tokyo-edge-01', group: '', labels: [] as string[], note: '', updated_at: '2026-10-09T08:00:00Z' }
+    let releasePatch: () => void = () => undefined
+    const patchGate = new Promise<void>((resolve) => { releasePatch = resolve })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/monitoring-instances/mi_tokyo' && init?.method === 'PATCH') {
+        await patchGate
+        return mockJSONResponse({ error: 'monitoring instance not found' }, 404)
+      }
+      if (url === '/api/monitoring-instances/mi_tokyo') return mockJSONResponse(tokyo)
+      if (url.startsWith('/api/monitoring-instances')) return mockJSONResponse([tokyo])
+      return mockJSONResponse([])
+    }))
+
+    render(
+      <MemoryRouter initialEntries={['/targets']}>
+        <Routes>
+          <Route path="/targets" element={<TargetsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: '新建第一个目标' }))
+    const createDrawer = screen.getByRole('dialog', { name: '创建目标' })
+    const executionLabels = within(createDrawer).getByLabelText('执行监控实例标签')
+    fireEvent.focus(executionLabels)
+    await within(createDrawer).findByText(/现有 1 台监控实例都还没有标签/)
+    fireEvent.change(executionLabels, { target: { value: 'jp' } })
+    const assign = within(createDrawer).getByRole('group', { name: '给监控实例加标签' })
+    fireEvent.click(within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「jp」' }))
+    fireEvent.click(within(assign).getByRole('button', { name: '确认添加' }))
+    expect(await within(assign).findByRole('button', { name: '正在添加…' })).toBeDisabled()
+
+    // 请求进行中改了执行标签：确认态让位给新标签的候选，旧请求的失败仍要说清楚。
+    fireEvent.change(executionLabels, { target: { value: 'kr' } })
+    expect(within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「kr」' })).toBeDisabled()
+    await act(async () => { releasePatch() })
+    expect(await within(assign).findByRole('alert')).toHaveTextContent('给 tokyo-edge-01 加上「jp」失败：monitoring instance not found')
+    expect(within(assign).getByRole('button', { name: '给 tokyo-edge-01 加上「kr」' })).toBeEnabled()
   })
 
   it('uses Chinese-first validation for base port', async () => {

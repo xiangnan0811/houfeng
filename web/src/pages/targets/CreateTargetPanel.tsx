@@ -34,6 +34,7 @@ export function CreateTargetPanel({
 }: CreateTargetPanelProps) {
   const [instances, setInstances] = useState<MonitoringInstanceRecord[] | null>(null)
   const suggestionsRequested = useRef(false)
+  const executionLabelsRef = useRef<HTMLInputElement>(null)
   const receivers = instances?.filter(canReceiveProbes) ?? null
   const executors = receivers?.map(executorCandidate) ?? null
   const labelSuggestions = distinctSorted((executors ?? []).flatMap((instance) => instance.labels))
@@ -138,6 +139,7 @@ export function CreateTargetPanel({
           <label>
             <span className="target-create-drawer__label--required">执行监控实例标签</span>
             <input
+              ref={executionLabelsRef}
               name="executionMonitoringInstanceLabels"
               aria-label="执行监控实例标签"
               aria-required="true"
@@ -160,12 +162,15 @@ export function CreateTargetPanel({
           ) : null}
           {canAssign && receivers && assignLabel ? (
             <ExecutorLabelAssign
-              key={assignLabel}
               label={assignLabel}
               candidates={receivers}
-              onAssigned={(updated) => setInstances((current) => current?.map((instance) => (
-                instance.monitoring_instance_id === updated.monitoring_instance_id ? updated : instance
-              )) ?? current)}
+              onAssigned={(updated) => {
+                setInstances((current) => current?.map((instance) => (
+                  instance.monitoring_instance_id === updated.monitoring_instance_id ? updated : instance
+                )) ?? current)
+                // 加标签后这组按钮会消失，焦点回到执行标签输入框。
+                executionLabelsRef.current?.focus()
+              }}
             />
           ) : null}
           {labelSuggestions.length > 0 ? (

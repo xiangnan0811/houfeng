@@ -140,7 +140,7 @@ setInstallIssue(issue)
 
 #### Contracts
 
-- `MonitoringDetailPage` 把 `group`、`labels`、`note` 视为资料维护字段；保存必须走 `updateMonitoringInstanceMetadata(monitoringInstanceId, input, { expectedUpdatedAt })`，并通过 `If-Match` 使用当前 `updated_at`。创建目标对话框的“给实例加上执行标签”是同一接口的另一个调用方：只追加一个标签，原样带回 group 与 note，同样使用 `If-Match`（见 targets-web）。
+- `MonitoringDetailPage` 把 `group`、`labels`、`note` 视为资料维护字段；保存必须走 `updateMonitoringInstanceMetadata(monitoringInstanceId, input, { expectedUpdatedAt })`，并通过 `If-Match` 使用当前 `updated_at`。创建目标对话框的“给实例加上执行标签”是同一接口的另一个调用方：写入前重读实例，只追加一个标签，带回当前 group 与 note，`If-Match` 用重读到的 `updated_at`，409 时重读重试一次（见 targets-web）。
 - 运行控制、绑定接入确认、命令轮询、实时样本等非资料更新即使返回整条 `MonitoringInstanceRecord`，前端合并到当前 state 时也必须保留当前 `group`、`labels`、`note`。这些响应可能来自资料保存之前发出的请求，不能覆盖用户刚保存的资料。
 - 资料保存成功后只把 `group`、`labels`、`note`、`updated_at` 合并回当前监控实例，不能把保存响应里的运行态字段反向覆盖掉更新后的 `monitoring_status`、`binding_status`、`last_action` 或心跳事实。
 - 切换 `monitoringInstanceId` 时必须重建 metadata draft、清理提交中状态和错误，避免旧实例的资料草稿或错误泄漏到新实例。
