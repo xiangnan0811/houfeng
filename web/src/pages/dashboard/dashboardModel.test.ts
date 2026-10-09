@@ -37,8 +37,23 @@ describe('buildDashboardModel', () => {
     overview.asset_summary = { ...overview.asset_summary, auto_renew_check_vps_count: 2, pending_followup_count: 3, archived_vps_count: 1 }
     const model = readyModel({ overview: remoteSuccess(overview, DASHBOARD_FIXTURE_LOADED_AT) })
     expect(model.judgements.find((item) => item.id === 'assets')).toMatchObject({
-      detail: '自动续费待核对 2 · 跟进事项 3', tone: 'alert',
+      label: '资产跟进待核对', value: '5', detail: '自动续费待核对 2 · 跟进事项 3', tone: 'alert',
     })
+  })
+  it('keeps the asset judgement number on the same subject as its label', () => {
+    const vps = remoteSuccess(
+      Array.from({ length: 8 }, (_, index) => vpsAssetFixture({ vps_id: `vps_${index}`, display_name: `vps-${index}` })),
+      DASHBOARD_FIXTURE_LOADED_AT,
+    )
+    const judgement = (asset_summary: Partial<DashboardOverview['asset_summary']>) => readyModel({
+      vps,
+      overview: remoteSuccess(dashboardOverviewFixture({ asset_summary }), DASHBOARD_FIXTURE_LOADED_AT),
+    }).judgements.find((item) => item.id === 'assets')
+
+    expect(judgement({ unreviewed_vps_count: 2, no_renewal_vps_count: 1 })).toMatchObject({ label: '资产决策待核对', value: '3' })
+    expect(judgement({ renewal_due_30d_vps_count: 4, renewal_due_30d_subscription_count: 5 })).toMatchObject({ label: '续费窗口待核对', value: '4' })
+    expect(judgement({ unlinked_vps_count: 6, abnormal_linked_vps_count: 1 })).toMatchObject({ label: '资产证据待补齐', value: '7' })
+    expect(judgement({})).toMatchObject({ label: '已登记 VPS', value: '8' })
   })
   it('treats severe monitoring instances as a subset of abnormal instances', () => {
     const model = readyModel({

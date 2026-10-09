@@ -197,6 +197,7 @@
   .vps-observation__action::before{content:attr(data-label);grid-column:1;grid-row:1;color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4}
 .vps-observation__slot{grid-column:2;grid-row:1}
 .vps-observation__reason{grid-column:1}
+.vps-observation__cell--empty{display:none}
 }
 @media (pointer: coarse){
 .vps-overview-freshness__retry,

@@ -5,5 +5,6 @@
 - [产品与架构](product-and-architecture.md)：产品主体、拓扑、安全边界与可演进默认。
 - [界面语言](interface-language.md)：视觉密度、状态和证据表述。
 - [组件与页面原则](component-patterns.md)：复用、信息层次和页面职责。
+- [体验走查后续事项](ux-followups.md)：已确认方向、尚未实施的体验改进，完成后逐项删除。
 
 修改设计时同步受影响合同和验证证据；历史讨论通过 Git 追溯。
