@@ -103,12 +103,24 @@ export function MonitoringInstancesFilterPanel({
     </>
   )
 
+  // 搜索词不算在“筛选 (N)”里：搜索框在窄屏始终可见。
+  const activeFilterCount = [
+    filterState.health,
+    filterState.runStatus,
+    filterState.group,
+    filterState.region,
+    filterState.city,
+    filterState.provider,
+    filterState.lifecycle,
+  ].filter(Boolean).length + filterState.labels.length
+
   return (
     <FilterBar
       className="monitoring-page__filters"
       hasActiveFilters={hasActiveFilters}
       onClearAll={onClearAll}
       activeChips={activeChips}
+      narrowCollapse={{ activeCount: activeFilterCount }}
     >
       <FilterSelect
         label="健康"
@@ -166,7 +178,7 @@ export function MonitoringInstancesFilterPanel({
         disabled={disabled}
         onChange={(values) => onMultiFilterChange('labels', values)}
       />
-      <div className="monitoring-page__trailing-controls">
+      <div className="monitoring-page__trailing-controls filter-bar__keep">
         <label className={`filter-select monitoring-page__search-field${searchQuery ? ' is-filtered' : ''}`}>
           <span className="filter-select__label">搜索</span>
           <input
