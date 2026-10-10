@@ -160,7 +160,7 @@ if err != nil || authorization.Digest != input.CaptureAuthorization.Digest {
   引用；改名不改变成员或授权。名称 trim 后为 1–100 字符，项目内唯一，冲突为 409。
   旧成员无 user FK；添加必须确认目标账号存在、活跃且为 admin，停用目标返回 409
   `user_disabled`。移除只要求组存在和 user ID 格式合法，可清理悬空旧成员。
-- C72 在 C71 已完成主管理员/访问组结构的基础上追加 `0072_add_target_observation_freshness.sql` 的观测新鲜度列与投影默认值；C71 的 `0071_add_access_management.sql` 负责旧库用户、主管理员和访问组回填。旧库零用户留给 seed，单个 admin 提升为主管理员，多用户或唯一非 admin 整体失败回滚，不猜测初始身份。主管理员 CHECK 与 partial UNIQUE index 在数据库中保证唯一且活跃。升级遵循
+- C72 在 C71 已完成主管理员/访问组结构的基础上追加 `0072_add_target_observation_freshness.sql` 的观测新鲜度列与投影默认值，C73 再追加 `0073_add_monitoring_instance_metadata_version.sql` 的监控实例资料版本列，二者都不改变访问管理结构与权限；C71 的 `0071_add_access_management.sql` 负责旧库用户、主管理员和访问组回填。旧库零用户留给 seed，单个 admin 提升为主管理员，多用户或唯一非 admin 整体失败回滚，不猜测初始身份。主管理员 CHECK 与 partial UNIQUE index 在数据库中保证唯一且活跃。升级遵循
   [APP ACL current](../platform/app-acl-current.md)，Center runtime 不自行提权迁移。
 
 ### HTTP 与目录形状
@@ -218,7 +218,7 @@ sessionctx 取 user ID。请求拒绝未知字段，不接受客户端 role、su
 - store 的 `TestPostgresIntegrationAccessManagement*`：真实事务、并发 seed/登录/
   停用/重置边界、回滚、稳定成员 ID、A/B scope 撤销与恢复且 cookie 仍有效。
 - migrate 的同名前缀测试：零/单用户迁移与异常多用户回滚；APP ACL current 套件：
-  冻结 C70/C71 前驱、精确四 tuple 增量、0072 无 ACL 扩张、383 条 predecessor chain 和并发迁移序列化。
+  冻结 C70/C71/C72 前驱、精确四 tuple 增量、0072/0073 无 ACL 扩张、767 条 predecessor chain 和并发迁移序列化。
 - Web 行为测试覆盖 capability gating、异步成员归属、敏感草稿、project 清 grant、
   本人组选择、目录失败不丢 grant，以及撤权时先清空工作区再删 buffer（删除失败或未完成也不写回）。真实浏览器仍须以两个独立
   cookie jar 和产品管理 UI 验证，不得用测试、直接 ACL 写表或登出替代撤权验收。

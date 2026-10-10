@@ -33,6 +33,7 @@ function record(overrides: Partial<MonitoringInstanceRecord> = {}): MonitoringIn
     current_primary_issue_summary: '',
     created_at: '2026-04-26T09:00:00Z',
     updated_at: '2026-04-26T09:00:00Z',
+    metadata_updated_at: '2026-04-26T09:00:00Z',
     ...overrides,
   }
 }

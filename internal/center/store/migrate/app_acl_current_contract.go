@@ -62,6 +62,16 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	recordImportDestinationSubjectAppACLCurrentMigrationFragment(),
 	accessManagementAppACLCurrentMigrationFragment(),
 	targetObservationFreshnessAppACLCurrentMigrationFragment(),
+	monitoringInstanceMetadataVersionAppACLCurrentMigrationFragment(),
+}
+
+func monitoringInstanceMetadataVersionAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0073_add_monitoring_instance_metadata_version.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return nil
+		},
+	}
 }
 
 func targetObservationFreshnessAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {

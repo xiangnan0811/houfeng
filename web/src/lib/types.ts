@@ -27,6 +27,8 @@ export type MonitoringInstanceRecord = {
   archived_reason?: string
   created_at: string
   updated_at: string
+  /** 资料（group / labels / note）编辑的 If-Match 令牌；updated_at 会被同步推进，不能用于资料并发控制。 */
+  metadata_updated_at: string
 }
 
 export type MonitoringInstanceListScope = 'active' | 'retired' | 'all'

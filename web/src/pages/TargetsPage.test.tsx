@@ -381,7 +381,7 @@ describe('TargetsPage', () => {
       note: 'keep this note',
       updated_at: '2026-10-09T08:00:00Z',
     }
-    // 心跳与同步会不断刷新 updated_at：每次重读都拿到更新后的令牌。
+    // 心跳会刷新 updated_at（不影响资料令牌）；这里模拟别人在两次读取之间改了资料，资料令牌随之前进。
     let version = 0
     const reads: string[] = []
     const patches: Array<{ body: unknown; ifMatch: string | null }> = []
@@ -401,7 +401,7 @@ describe('TargetsPage', () => {
         const updatedAt = `2026-10-09T08:0${version}:00Z`
         reads.push(updatedAt)
         // 读取期间别处给实例加了 ops 标签，追加时必须保留。
-        return mockJSONResponse({ ...tokyo, labels: version > 1 ? ['ops'] : [], updated_at: updatedAt })
+        return mockJSONResponse({ ...tokyo, labels: version > 1 ? ['ops'] : [], updated_at: `2026-10-09T09:0${version}:30Z`, metadata_updated_at: updatedAt })
       }
       if (url.startsWith('/api/monitoring-instances')) return mockJSONResponse([tokyo])
       return mockJSONResponse([])

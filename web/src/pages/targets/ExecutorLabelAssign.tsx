@@ -7,7 +7,7 @@ import type { MonitoringInstanceRecord } from '../../lib/types'
 import { describeError } from './targetHelpers'
 
 const ASSIGN_CANDIDATE_LIMIT = 3
-// 同步与心跳会不断刷新实例的 updated_at；写入前重读一次，冲突时再重读重试一次。
+// 资料令牌 metadata_updated_at 只随资料写入推进；写入前仍重读一次，别人同时改了资料而冲突时再重读重试一次。
 const ASSIGN_ATTEMPTS = 2
 
 type PendingAssign = { instanceId: string; label: string }
@@ -24,7 +24,7 @@ async function appendLabel(instanceId: string, label: string): Promise<Monitorin
           labels,
           note: current.note,
         },
-        { expectedUpdatedAt: current.updated_at },
+        { expectedUpdatedAt: current.metadata_updated_at },
       )
     } catch (error: unknown) {
       if (!isMetadataConflict(error) || attempt >= ASSIGN_ATTEMPTS) throw error

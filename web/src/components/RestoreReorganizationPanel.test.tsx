@@ -118,6 +118,7 @@ function monitoringRecord(): MonitoringInstanceRecord {
     current_primary_issue_summary: '',
     created_at: '2026-08-20T00:00:00Z',
     updated_at: '2026-08-20T00:00:00Z',
+    metadata_updated_at: '2026-08-20T00:00:00Z',
   }
 }
 

@@ -24,16 +24,17 @@ const UNLABELED_INSTANCE = {
   current_primary_issue_summary: '',
   created_at: '2026-08-01T00:00:00Z',
   updated_at: '2026-08-20T09:00:00Z',
+  metadata_updated_at: '2026-08-20T09:00:00Z',
 } satisfies MonitoringInstanceRecord
 
 test('create target dialog adds the execution label to an unlabeled instance after confirmation', async ({ api, page }) => {
   api.useProfile({
     ...coreRouteProfile('/targets'),
     [apiRouteKey('GET', '/api/monitoring-instances?scope=active')]: { status: 200, body: [UNLABELED_INSTANCE] },
-    // 写入前重读：同步已把 updated_at 推进，If-Match 必须用重读到的值。
+    // 写入前重读：心跳推进了 updated_at，期间资料也被改过；If-Match 必须用重读到的资料令牌。
     [apiRouteKey('GET', '/api/monitoring-instances/mi_tokyo')]: {
       status: 200,
-      body: { ...UNLABELED_INSTANCE, updated_at: '2026-08-20T09:00:05Z' },
+      body: { ...UNLABELED_INSTANCE, updated_at: '2026-08-20T09:00:30Z', metadata_updated_at: '2026-08-20T09:00:05Z' },
     },
     [apiRouteKey('PATCH', '/api/monitoring-instances/mi_tokyo')]: {
       status: 200,

@@ -10,7 +10,7 @@ describe('trusted online evidence', () => {
       monitoring_instance_id: 'mi_one', display_name: '实例', group: '', region: '', city: '', provider: '',
       lifecycle_status: status === '已退役' ? '已退役' : '已接入', monitoring_status: '暂停', binding_status: '已绑定',
       labels: [], note: '', current_health_status: '正常', current_active_incident_count: 0, current_primary_issue_summary: '',
-      created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-26T00:00:00Z',
+      created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-26T00:00:00Z', metadata_updated_at: '2026-09-01T00:00:00Z',
       last_heartbeat_at: '2026-09-01T00:00:00Z', last_trusted_online_at: '2026-09-26T00:00:00Z',
     }
     const now = new Date('2026-09-26T00:00:05Z')

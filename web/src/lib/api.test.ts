@@ -1869,6 +1869,7 @@ describe('api helpers', () => {
       current_primary_issue_summary: '',
       created_at: '2026-04-27T09:00:00Z',
       updated_at: '2026-04-27T09:15:00Z',
+      metadata_updated_at: '2026-04-27T09:15:00Z',
     } satisfies MonitoringInstanceRecord
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
@@ -1917,6 +1918,7 @@ describe('api helpers', () => {
       current_primary_issue_summary: '',
       created_at: '2026-04-27T09:00:00Z',
       updated_at: '2026-04-27T09:15:00Z',
+      metadata_updated_at: '2026-04-27T09:15:00Z',
     } satisfies MonitoringInstanceRecord
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)
@@ -2491,6 +2493,7 @@ describe('api helpers', () => {
       archived_reason: '',
       created_at: '2026-04-26T09:00:00Z',
       updated_at: '2026-04-26T09:15:00Z',
+      metadata_updated_at: '2026-04-26T09:15:00Z',
     } satisfies MonitoringInstanceRecord
     const responseBody = {
       record,
@@ -2558,6 +2561,7 @@ describe('api helpers', () => {
       current_primary_issue_summary: '',
       created_at: '2026-04-26T09:00:00Z',
       updated_at: '2026-04-26T09:15:00Z',
+      metadata_updated_at: '2026-04-26T09:15:00Z',
     } satisfies MonitoringInstanceRecord
     const fetchMock = vi.fn().mockResolvedValue(mockResponse(200, JSON.stringify(responseBody)))
     vi.stubGlobal('fetch', fetchMock)

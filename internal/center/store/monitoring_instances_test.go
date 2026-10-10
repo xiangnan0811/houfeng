@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -821,8 +822,8 @@ func TestMonitoringInstanceOnboardingGetStateReturnsDerivedPhaseAndPendingMetada
 					CurrentHealthStatus:        monitoringinstances.HealthNormal,
 					LastHeartbeatAt:            &heartbeatAt,
 				})
-				*(dest[38].(*bool)) = true
-				*(dest[39].(*bool)) = false
+				*(dest[39].(*bool)) = true
+				*(dest[40].(*bool)) = false
 				return nil
 			}}
 		},
@@ -882,8 +883,8 @@ func TestMonitoringInstanceOnboardingGetStateScopesEvidenceToCurrentBindingGener
 					BindingEpochStartedAt: &bindingEpochStartedAt,
 					LastHeartbeatAt:       &staleHeartbeatAt,
 				})
-				*(dest[38].(*bool)) = false
 				*(dest[39].(*bool)) = false
+				*(dest[40].(*bool)) = false
 				return nil
 			}}
 		},
@@ -948,9 +949,9 @@ func TestUpdateMonitoringInstanceMetadata(t *testing.T) {
 	}}
 
 	record, err := repo.UpdateMonitoringInstanceMetadata(context.Background(), "mi_001", monitoringinstances.UpdateMetadataInput{
-		Labels:            []string{"edge", "core"},
-		Note:              "updated",
-		ExpectedUpdatedAt: &expectedUpdatedAt,
+		Labels:                    []string{"edge", "core"},
+		Note:                      "updated",
+		ExpectedMetadataUpdatedAt: &expectedUpdatedAt,
 	})
 	if err != nil {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() error = %v", err)
@@ -980,11 +981,15 @@ func TestUpdateMonitoringInstanceMetadata(t *testing.T) {
 	if !strings.Contains(gotSQL, "note") {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want note update", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "updated_at = now()") {
+	if !regexp.MustCompile(`(^|[^_])updated_at = now\(\)`).MatchString(gotSQL) {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want updated_at refresh", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "updated_at = $5") {
-		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want optimistic updated_at precondition", gotSQL)
+	// 前置条件只能比较资料令牌；用正则排除 metadata_updated_at 以外的 updated_at = $5。
+	if !strings.Contains(gotSQL, "and metadata_updated_at = $5") || regexp.MustCompile(`(^|[^_])updated_at = \$5`).MatchString(gotSQL) {
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want optimistic metadata_updated_at precondition only", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "metadata_updated_at = now()") {
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want metadata_updated_at refresh", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "archived_at is null") {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want archived_at guard", gotSQL)
@@ -1072,8 +1077,8 @@ func TestUpdateMonitoringInstanceMetadataMapsPreconditionMissToConflictWhenMonit
 			queryCount++
 			switch queryCount {
 			case 1:
-				if !strings.Contains(sql, "updated_at = $5") {
-					t.Fatalf("update SQL = %q, want updated_at precondition", sql)
+				if !strings.Contains(sql, "and metadata_updated_at = $5") || regexp.MustCompile(`(^|[^_])updated_at = \$5`).MatchString(sql) {
+					t.Fatalf("update SQL = %q, want metadata_updated_at precondition only", sql)
 				}
 				if len(args) != 5 {
 					t.Fatalf("update args = %#v, want five args (monitoring_instance_id, group, labels, note, expected_updated_at)", args)
@@ -1101,9 +1106,9 @@ func TestUpdateMonitoringInstanceMetadataMapsPreconditionMissToConflictWhenMonit
 	}}
 
 	_, err := repo.UpdateMonitoringInstanceMetadata(context.Background(), "mi_001", monitoringinstances.UpdateMetadataInput{
-		Labels:            []string{"edge"},
-		Note:              "updated",
-		ExpectedUpdatedAt: &expectedUpdatedAt,
+		Labels:                    []string{"edge"},
+		Note:                      "updated",
+		ExpectedMetadataUpdatedAt: &expectedUpdatedAt,
 	})
 	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceMetadataConflict) {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() error = %v, want ErrMonitoringInstanceMetadataConflict", err)
@@ -1466,8 +1471,8 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 					BindingStatus:        monitoringinstances.BindingUnbound,
 					UpdatedAt:            eventAt,
 				})
-				if len(dest) > 38 {
-					*(dest[38].(*string)) = monitoringinstances.BindingBound
+				if len(dest) > 39 {
+					*(dest[39].(*string)) = monitoringinstances.BindingBound
 				}
 				return nil
 			}}
@@ -2303,6 +2308,7 @@ func scanMonitoringInstanceRecordDestinations(dest []any, record monitoringinsta
 	*(dest[30].(*string)) = record.ArchivedReason
 	*(dest[31].(*time.Time)) = record.CreatedAt
 	*(dest[32].(*time.Time)) = record.UpdatedAt
+	*(dest[33].(*time.Time)) = record.MetadataUpdatedAt
 }
 func cloneTimePtr(value *time.Time) *time.Time {
 	if value == nil {

@@ -1223,6 +1223,7 @@ export function monitoringInstanceDetailProfile(monitoringInstanceId = 'mi_001')
     current_primary_issue_summary: '',
     created_at: '2026-08-01T00:00:00Z',
     updated_at: '2026-08-20T09:00:00Z',
+    metadata_updated_at: '2026-08-20T09:00:00Z',
   } satisfies MonitoringInstanceRecord
   const runtimeFacts24h = {
     monitoring_instance_id: monitoringInstanceId,
