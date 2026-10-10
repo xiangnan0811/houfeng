@@ -218,7 +218,7 @@ sessionctx 取 user ID。请求拒绝未知字段，不接受客户端 role、su
 - store 的 `TestPostgresIntegrationAccessManagement*`：真实事务、并发 seed/登录/
   停用/重置边界、回滚、稳定成员 ID、A/B scope 撤销与恢复且 cookie 仍有效。
 - migrate 的同名前缀测试：零/单用户迁移与异常多用户回滚；APP ACL current 套件：
-  冻结 C70/C71 前驱、精确四 tuple 增量、0072 无 ACL 扩张、383 条 predecessor chain 和并发迁移序列化。
+  冻结 C70/C71/C72 前驱、精确四 tuple 增量、0072/0073 无 ACL 扩张、767 条 predecessor chain 和并发迁移序列化。
 - Web 行为测试覆盖 capability gating、异步成员归属、敏感草稿、project 清 grant、
   本人组选择、目录失败不丢 grant，以及撤权时先清空工作区再删 buffer（删除失败或未完成也不写回）。真实浏览器仍须以两个独立
   cookie jar 和产品管理 UI 验证，不得用测试、直接 ACL 写表或登出替代撤权验收。

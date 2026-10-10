@@ -632,6 +632,16 @@ describe('MonitoringDetailPage', () => {
     expect(identityValue('分组')).toBe('core')
     expect(identityValue('标签')).toBe('edge · db')
     expect(identityValue('备注')).toBe('new note')
+
+    // 连续第二次保存必须用上一次保存返回的新资料令牌，否则会自撞 409。
+    openMetadataDialog()
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'second note' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => {
+      const patches = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')
+      expect(patches).toHaveLength(2)
+      expect(new Headers(patches[1]![1]!.headers).get('If-Match')).toBe('"2026-04-27T09:08:00Z"')
+    })
   })
 
   it('keeps detail metadata when runtime updates return stale metadata fields', async () => {

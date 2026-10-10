@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -983,8 +984,12 @@ func TestUpdateMonitoringInstanceMetadata(t *testing.T) {
 	if !strings.Contains(gotSQL, "updated_at = now()") {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want updated_at refresh", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "updated_at = $5") {
-		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want optimistic updated_at precondition", gotSQL)
+	// 前置条件只能比较资料令牌；用正则排除 metadata_updated_at 以外的 updated_at = $5。
+	if !strings.Contains(gotSQL, "and metadata_updated_at = $5") || regexp.MustCompile(`(^|[^_])updated_at = \$5`).MatchString(gotSQL) {
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want optimistic metadata_updated_at precondition only", gotSQL)
+	}
+	if !strings.Contains(gotSQL, "metadata_updated_at = now()") {
+		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want metadata_updated_at refresh", gotSQL)
 	}
 	if !strings.Contains(gotSQL, "archived_at is null") {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want archived_at guard", gotSQL)

@@ -20,6 +20,18 @@ func testPostgresIntegrationAppACLCurrentP72Upgrade(t *testing.T) {
 	migratorDB := fixture.openRolePool(t, ctx, fixture.migratorRole)
 	predecessorProfile := appACLCurrentReleasedPostgresProfile(t, "0072_add_target_observation_freshness.sql")
 	predecessor, _, _ := seedAppACLCurrentReleasedGenesis(t, ctx, fixture, migratorDB, predecessorProfile)
+	// C72 已有业务数据：升级必须把既有实例的资料令牌回填为原 updated_at。
+	if _, err := migratorDB.Exec(ctx, `
+		insert into public.vps_assets (vps_id, display_name, lifecycle_status, usage_status, renewal_decision)
+		values ('vps_p72_existing', 'P72 existing', 'active', 'in_use', 'keep');
+		insert into public.monitoring_instances (
+			monitoring_instance_id, display_name, region, city, provider, lifecycle_status,
+			monitoring_status, binding_status, vps_id, labels, note, updated_at
+		) values ('mi_p72_existing', 'P72 existing', 'HK', 'Hong Kong', 'Test Provider', '已接入', '启用', '未绑定',
+			'vps_p72_existing', '{edge}', 'keep', '2024-08-11 01:02:03.123456+00');
+	`); err != nil {
+		t.Fatalf("seed C72 monitoring instance: %v", err)
+	}
 
 	_, _, currentInput := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
@@ -57,6 +69,22 @@ func testPostgresIntegrationAppACLCurrentP72Upgrade(t *testing.T) {
 		t.Fatalf("C72 to C73 migration changed ACL state\nbefore direct/effective/column/default: %#v/%#v/%#v/%#v\nafter: %#v/%#v/%#v/%#v",
 			before.Catalog.DirectPrivileges, before.Catalog.EffectivePrivileges, before.Catalog.ColumnACLs, before.Catalog.DefaultACLs,
 			after.Catalog.DirectPrivileges, after.Catalog.EffectivePrivileges, after.Catalog.ColumnACLs, after.Catalog.DefaultACLs)
+	}
+
+	var backfilled, nullable bool
+	var columnDefault string
+	if err := migratorDB.QueryRow(ctx, `
+		select
+			(select metadata_updated_at = updated_at from public.monitoring_instances where monitoring_instance_id = 'mi_p72_existing'),
+			(select is_nullable = 'YES' from information_schema.columns
+			 where table_schema = 'public' and table_name = 'monitoring_instances' and column_name = 'metadata_updated_at'),
+			(select coalesce(column_default, '') from information_schema.columns
+			 where table_schema = 'public' and table_name = 'monitoring_instances' and column_name = 'metadata_updated_at')
+	`).Scan(&backfilled, &nullable, &columnDefault); err != nil {
+		t.Fatalf("read C73 metadata version column: %v", err)
+	}
+	if !backfilled || nullable || columnDefault != "now()" {
+		t.Fatalf("C73 metadata_updated_at backfilled/nullable/default = %t/%t/%q, want true/false/now()", backfilled, nullable, columnDefault)
 	}
 
 	beforeRepeat := after

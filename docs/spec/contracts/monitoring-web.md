@@ -142,7 +142,7 @@ setInstallIssue(issue)
 
 - `MonitoringDetailPage` 把 `group`、`labels`、`note` 视为资料维护字段；保存必须走 `updateMonitoringInstanceMetadata(monitoringInstanceId, input, { expectedUpdatedAt })`，并通过 `If-Match` 使用当前资料令牌 `metadata_updated_at`（不是会被心跳推进的 `updated_at`）；命令轮询等非资料回写合并记录时，资料字段与 `metadata_updated_at` 一起保留打开时的值。创建目标对话框的“给实例加上执行标签”是同一接口的另一个调用方：写入前重读实例，只追加一个标签，带回当前 group 与 note，`If-Match` 用重读到的 `metadata_updated_at`，资料冲突时重读重试一次（见 targets-web）。
 - 运行控制、绑定接入确认、命令轮询、实时样本等非资料更新即使返回整条 `MonitoringInstanceRecord`，前端合并到当前 state 时也必须保留当前 `group`、`labels`、`note`。这些响应可能来自资料保存之前发出的请求，不能覆盖用户刚保存的资料。
-- 资料保存成功后只把 `group`、`labels`、`note`、`updated_at` 合并回当前监控实例，不能把保存响应里的运行态字段反向覆盖掉更新后的 `monitoring_status`、`binding_status`、`last_action` 或心跳事实。
+- 资料保存成功后只把 `group`、`labels`、`note`、`updated_at`、`metadata_updated_at` 合并回当前监控实例（必须带上新资料令牌，否则连续第二次保存会用旧令牌 409），不能把保存响应里的运行态字段反向覆盖掉更新后的 `monitoring_status`、`binding_status`、`last_action` 或心跳事实。
 - 切换 `monitoringInstanceId` 时必须重建 metadata draft、清理提交中状态和错误，避免旧实例的资料草稿或错误泄漏到新实例。
 
 #### Tests Required
@@ -158,12 +158,13 @@ setMonitoringInstance(updated)
 ```
 
 ```tsx
-// 正确：非资料响应只更新运行态字段，保留当前资料字段。
+// 正确：非资料响应只更新运行态字段，保留当前资料字段及其令牌。
 setMonitoringInstance({
   ...updated,
   group: current.group,
   labels: current.labels,
   note: current.note,
+  metadata_updated_at: current.metadata_updated_at,
 })
 ```
 
