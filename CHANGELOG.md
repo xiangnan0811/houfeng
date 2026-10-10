@@ -27,6 +27,19 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.23.1](https://github.com/xiangnan0811/houfeng/compare/v1.23.0...v1.23.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **monitoring:** 资料编辑改用独立的 metadata_updated_at 作为 If-Match 令牌 ([29a83ab](https://github.com/xiangnan0811/houfeng/commit/29a83ab045810390f58f7ea4738184e1a1a59272))
+* **monitoring:** 资料编辑改用独立的资料令牌，心跳不再导致保存冲突 ([8735926](https://github.com/xiangnan0811/houfeng/commit/8735926e162cf4be6a9fcda223ab70d48a922d04))
+
+
+### Documentation
+
+* **design:** 记录术语对照表、历史汇率回补、B1 与 D1/D2 的确认结论 ([48c5e02](https://github.com/xiangnan0811/houfeng/commit/48c5e026d16fee7a4c206a5642aaad044117176b))
+
 ## [1.23.0](https://github.com/xiangnan0811/houfeng/compare/v1.22.0...v1.23.0) (2026-10-09)
 
 
