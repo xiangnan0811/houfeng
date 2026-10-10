@@ -14,7 +14,7 @@ const VIEWPORTS = [
 const CORE_ROUTES = [
   { name: 'Dashboard', path: '/', workflow: { role: 'link', name: '核对 VPS 库存' } },
   { name: 'VPS', path: '/vps', workflow: { role: 'link', name: '进入组合决策' } },
-  { name: 'Asset Decisions', path: '/asset-decisions', workflow: { role: 'heading', name: '决策组扫描' } },
+  { name: 'Asset Decisions', path: '/asset-decisions', workflow: { role: 'heading', name: '待决定的分组' } },
   { name: 'Monitoring', path: '/monitoring', workflow: { role: 'link', name: '从未关联 VPS 接入' } },
   { name: 'Targets', path: '/targets', workflow: { role: 'button', name: '新建目标' } },
   { name: 'Events', path: '/events', workflow: { role: 'button', name: '高级筛选' } },

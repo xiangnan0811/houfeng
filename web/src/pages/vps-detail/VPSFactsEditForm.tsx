@@ -161,8 +161,8 @@ export function VPSFactsEditForm({
     : providersError
       ? `服务商不可用：${providersError}`
       : providers.length === 0
-        ? '还没有服务商主数据，请先创建或保留名称快照。'
-        : '选择服务商会同步更新名称快照，仍可手动修正快照。'
+        ? '还没有服务商，可先创建或直接填写名称。'
+        : '选择服务商会同步更新名称，仍可手动修改。'
 
   return (
     <form
@@ -442,7 +442,7 @@ export function VPSFactsEditForm({
             </label>
           </div>
           <label className="field">
-            <span className="field__label">服务商名称快照</span>
+            <span className="field__label">VPS 上的服务商名称</span>
             <input
               className="input"
               value={draft.providerName}

@@ -500,7 +500,7 @@ export function manualGroupDetail(overrides: Record<string, unknown> = {}) {
     evidence_chips: [{ kind: 'carries_service', label: '承载服务', tone: 'normal' }],
     evidence_assessment: evidenceAssessment(),
     comparison_insight: comparisonInsight({
-      summary: '自定义组合中主力证据清晰，可保存记录',
+      summary: '自定义组合中主力证据清晰，可保存决定',
       lane_counts: [{ lane: 'primary', count: 1 }],
       priority_vps_ids: ['vps_primary'],
     }),
@@ -786,7 +786,7 @@ export function fetchRequestInventory(fetchMock: ReturnType<typeof vi.fn>, start
     .sort()
 }
 
-export type SecondaryWorkbenchLabel = '保存记录' | '场景与组合' | '续费窗口' | '单台队列'
+export type SecondaryWorkbenchLabel = '已保存的决定' | '自定义分组' | '续费窗口' | '逐台处理'
 
 export function getSecondaryWorkbenchButton(supportStrip: HTMLElement, label: SecondaryWorkbenchLabel) {
   return within(supportStrip).getByRole('button', { name: label })
@@ -829,7 +829,7 @@ export function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
   expect(within(dialog).queryByRole('button', { name: '保存为决策记录' })).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('详情二级面板')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '成员明细' })).not.toBeInTheDocument()
-  expect(within(dialog).queryByRole('button', { name: '保存记录面板' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '已保存的决定面板' })).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('决策组详情目录')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '成员取舍' })).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('关键成员摘要')).not.toBeInTheDocument()
@@ -840,7 +840,7 @@ export function expectAutomaticGroupDefaultCover(dialog: HTMLElement) {
   expect(within(dialog).queryByText('补证据候选：缺订阅和监控关联后再判断是否备用')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '处理' })).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '原始明细' })).not.toBeInTheDocument()
-  expect(within(dialog).queryByRole('button', { name: '数据底稿' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '完整明细' })).not.toBeInTheDocument()
 }
 
 
@@ -906,7 +906,7 @@ export function expectTemplateDefaultCover(dialog: HTMLElement) {
 
 export function expectSavedRecordDefaultCover(dialog: HTMLElement) {
   expectTabPanelRelationship(dialog, '决策记录详情分区')
-  const cover = within(dialog).getByLabelText('保存记录当前判断')
+  const cover = within(dialog).getByLabelText('已保存决定的当前判断')
   expect(cover).toBeInTheDocument()
   expectDecisionCoverDensity(cover)
   expect(within(dialog).getByRole('tab', { name: '概览' })).toBeInTheDocument()
@@ -915,14 +915,14 @@ export function expectSavedRecordDefaultCover(dialog: HTMLElement) {
   expect(within(dialog).queryByRole('button', { name: '执行跟进' })).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '成员跟进' })).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '来源复核' })).not.toBeInTheDocument()
-  expect(within(dialog).queryByLabelText('保存记录成员摘要')).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('已保存的决定成员摘要')).not.toBeInTheDocument()
   expect(within(dialog).queryByText('快照成员 1')).not.toBeInTheDocument()
   expect(within(dialog).queryByText('主力保留')).not.toBeInTheDocument()
   expect(within(dialog).queryByText(/Germany Primary|Germany Standby|fra-legacy-cancel|ams-core-01|sjc-edge-02/)).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('Germany Primary 跟进状态')).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('决策记录成员')).not.toBeInTheDocument()
   expect(within(dialog).queryByRole('button', { name: '原始成员' })).not.toBeInTheDocument()
-  expect(within(dialog).queryByRole('button', { name: '成员底稿' })).not.toBeInTheDocument()
+  expect(within(dialog).queryByRole('button', { name: '完整明细' })).not.toBeInTheDocument()
 }
 
 
@@ -958,7 +958,7 @@ export function expectNoDetailCoverWhileInTaskPanel(dialog: HTMLElement) {
   expect(within(dialog).queryByLabelText('决策组当前判断')).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('自定义组合当前判断')).not.toBeInTheDocument()
   expect(within(dialog).queryByLabelText('场景模板当前判断')).not.toBeInTheDocument()
-  expect(within(dialog).queryByLabelText('保存记录当前判断')).not.toBeInTheDocument()
+  expect(within(dialog).queryByLabelText('已保存决定的当前判断')).not.toBeInTheDocument()
 }
 
 export function expectSavedRecordMembersPanelIsCompact(dialog: HTMLElement) {
@@ -974,7 +974,7 @@ export function expectSavedRecordMembersPanelIsCompact(dialog: HTMLElement) {
 }
 
 export function openSavedRecordRawMembersPanel(dialog: HTMLElement): boolean {
-  const rawButton = within(dialog).queryByRole('button', { name: '查看成员底稿' })
+  const rawButton = within(dialog).queryByRole('button', { name: '查看完整明细' })
   if (!rawButton) return false
   fireEvent.click(rawButton)
   expect(within(dialog).getByLabelText('决策记录成员')).toBeInTheDocument()

@@ -85,8 +85,8 @@ test('asset decisions stay quiet without work and render auxiliary entries as on
   const tops = await items.evaluateAll((buttons) => buttons.map((button) => Math.round(button.getBoundingClientRect().top)))
   expect(new Set(tops).size).toBe(1)
 
-  await items.filter({ hasText: '单台队列' }).click()
-  const active = items.filter({ hasText: '单台队列' })
+  await items.filter({ hasText: '逐台处理' }).click()
+  const active = items.filter({ hasText: '逐台处理' })
   await expect(active).toHaveAttribute('aria-pressed', 'true')
   expect(await active.evaluate((button) => getComputedStyle(button).boxShadow)).not.toBe('none')
   await expectNoDocumentOverflow(page)

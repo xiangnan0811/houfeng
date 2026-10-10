@@ -120,7 +120,7 @@ export const VIEW_LABELS: Record<WorkbenchView, string> = {
   provider: '服务商组合',
   cost: '预算压力',
   evidence: '资料缺口',
-  single_queue: '单台队列',
+  single_queue: '逐台处理',
 }
 
 // 角色标签

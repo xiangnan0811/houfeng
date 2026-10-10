@@ -46,7 +46,7 @@ describe('Asset Decisions scenario template workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
     expect(templatesSection).not.toBeNull()
     expect(within(templatesSection!).getAllByRole('button', { name: '使用模板' })).toHaveLength(8)
@@ -92,7 +92,7 @@ describe('Asset Decisions scenario template workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     await waitFor(() => expect(screen.getAllByText('自定义主备模板').length).toBeGreaterThan(0))
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
     expect(templatesSection).not.toBeNull()
@@ -177,7 +177,7 @@ describe('Asset Decisions scenario template workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     await waitFor(() => expect(screen.getAllByText('自定义主备模板').length).toBeGreaterThan(0))
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
     fireEvent.click(within(templatesSection!).getByRole('button', { name: '使用模板' }))
@@ -254,7 +254,7 @@ describe('Asset Decisions scenario template workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     const templatesSection = screen.getByRole('heading', { name: '场景模板' }).closest('section')
     if (!templatesSection) throw new Error('scenario template section must exist')
     const templateCard = within(templatesSection).getByText('资料补齐').closest('li')

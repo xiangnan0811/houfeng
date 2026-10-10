@@ -94,7 +94,7 @@ describe('RecordFollowupRows', () => {
     expect(screen.queryByText('Node 4')).not.toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { name: '编辑跟进' })[0]!)
     expect(onEditMember).toHaveBeenCalledWith('vps_1')
-    fireEvent.click(screen.getByRole('button', { name: '查看成员底稿' }))
+    fireEvent.click(screen.getByRole('button', { name: '查看完整明细' }))
     expect(onShowRaw).toHaveBeenCalledOnce()
 
     rerender(

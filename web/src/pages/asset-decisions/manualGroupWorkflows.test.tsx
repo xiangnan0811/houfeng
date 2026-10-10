@@ -39,7 +39,7 @@ describe('Asset Decisions manual group workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     const manualSection = (await screen.findByRole('heading', { name: '自定义组合' })).closest('section')
     const trigger = within(manualSection!).getByRole('button', { name: '查看' })
     trigger.focus()
@@ -71,7 +71,7 @@ describe('Asset Decisions manual group workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     fireEvent.click(within(manualSection!).getByText("德国主备自定义组合"))
@@ -81,7 +81,7 @@ describe('Asset Decisions manual group workflows', () => {
     expect(memberDecisions.querySelectorAll('.asset-decision-member-row')).toHaveLength(3)
     expect(within(memberDecisions).getByText('Bulk Member 1')).toBeInTheDocument()
     expect(within(memberDecisions).queryByText('Bulk Member 8')).not.toBeInTheDocument()
-    expect(within(memberDecisions).getByText('另有 5 台在底稿中查看')).toBeInTheDocument()
+    expect(within(memberDecisions).getByText('另有 5 台在完整明细中查看')).toBeInTheDocument()
     fireEvent.click(within(memberDecisions).getByRole('button', { name: '查看成员数据' }))
     expect(within(dialog).getByLabelText('自定义组合成员对比')).toBeInTheDocument()
     expect(within(dialog).getByText('Bulk Member 8')).toBeInTheDocument()
@@ -92,12 +92,12 @@ describe('Asset Decisions manual group workflows', () => {
     fireEvent.click(within(removalConfirmation).getByRole('button', { name: '取消' }))
 
     fireEvent.click(within(dialog).getByRole('tab', { name: '概览' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
-    const saveMembers = within(dialog).getByLabelText('保存记录成员复核')
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存决定' }))
+    const saveMembers = within(dialog).getByLabelText('保存决定前的成员复核')
     expect(saveMembers.querySelectorAll('.asset-decision-save-member')).toHaveLength(3)
     expect(within(saveMembers).getByRole('button', { name: '编辑 Bulk Member 1 成员理由' })).toBeInTheDocument()
     expect(within(saveMembers).queryByRole('button', { name: '编辑 Bulk Member 8 成员理由' })).not.toBeInTheDocument()
-    expect(within(saveMembers).getByText('另有 5 台成员保留在保存底稿中')).toBeInTheDocument()
+    expect(within(saveMembers).getByText('另有 5 台成员保留在完整明细中')).toBeInTheDocument()
   })
   it('keeps a manual record draft aligned with member changes before saving', async () => {
     const initialManualDetail = manualGroupDetail()
@@ -148,13 +148,13 @@ describe('Asset Decisions manual group workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     fireEvent.click(within(manualSection!).getByText('德国主备自定义组合'))
 
     const dialog = await screen.findByRole('dialog', { name: '自定义资产组合详情' })
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存决定' }))
     fireEvent.change(within(dialog).getByLabelText('组合目标'), { target: { value: '保留主力并观察备用' } })
     fireEvent.click(within(dialog).getByRole('tab', { name: /成员/ }))
     fireEvent.click(within(dialog).getByRole('button', { name: '添加成员' }))
@@ -165,10 +165,10 @@ describe('Asset Decisions manual group workflows', () => {
 
     await waitFor(() => expect(screen.getByText('自定义组合成员已加入')).toBeInTheDocument())
     fireEvent.click(within(dialog).getByRole('tab', { name: '概览' }))
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存决定' }))
     expect(within(dialog).getByDisplayValue('保留主力并观察备用')).toBeInTheDocument()
     expect(within(dialog).getByRole('button', { name: '编辑 Germany Standby 成员理由' })).toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存决定' }))
 
     await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备自定义组合')).toBeInTheDocument())
     const recordCall = findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')
@@ -217,7 +217,7 @@ describe('Asset Decisions manual group workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     expect(manualSection).not.toBeNull()
@@ -243,13 +243,13 @@ describe('Asset Decisions manual group workflows', () => {
     expect(within(dialog).queryByRole('button', { name: '另存为模板' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '添加成员' })).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('button', { name: '原始明细' })).not.toBeInTheDocument()
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存决定' }))
     expect(within(dialog).queryAllByLabelText('角色')).toHaveLength(0)
     expect(within(dialog).queryAllByLabelText('动作')).toHaveLength(0)
     expect(within(dialog).queryAllByLabelText('理由')).toHaveLength(0)
     expect(within(dialog).getByRole('button', { name: '编辑 Germany Primary 成员理由' })).toBeInTheDocument()
     fireEvent.change(within(dialog).getByLabelText('组合目标'), { target: { value: '保留主力并观察备用' } })
-    fireEvent.click(within(dialog).getByRole('button', { name: '保存记录' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存决定' }))
 
     await waitFor(() => expect(screen.getByText('已保存组合决策记录：德国主备自定义组合')).toBeInTheDocument())
     expect(findFetchCall(fetchMock, '/api/asset-decisions/records', 'POST')).toEqual([
@@ -339,7 +339,7 @@ describe('Asset Decisions manual group workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     fireEvent.click(within(manualSection!).getByText("德国主备自定义组合"))
@@ -359,12 +359,12 @@ describe('Asset Decisions manual group workflows', () => {
 
     fireEvent.click(within(templateDialog).getByRole('button', { name: '关闭' }))
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '资产决策场景模板详情' })).not.toBeInTheDocument())
-    await openSecondaryWorkbench('保存记录')
-    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
+    await openSecondaryWorkbench('已保存的决定')
+    const recordsSection = screen.getByRole('heading', { name: '已保存的决定' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
     const recordDialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
     expectSavedRecordDefaultCover(recordDialog)
-    expect(within(recordDialog).getByLabelText('保存记录当前判断')).not.toHaveTextContent(longRecordSummary)
+    expect(within(recordDialog).getByLabelText('已保存决定的当前判断')).not.toHaveTextContent(longRecordSummary)
   })
   it('requires an internal confirmation step before removing a manual group member', async () => {
     const updatedManual = manualGroupDetail({
@@ -390,7 +390,7 @@ describe('Asset Decisions manual group workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('场景与组合')
+    await openSecondaryWorkbench('自定义分组')
     await waitFor(() => expect(screen.getAllByText('德国主备自定义组合').length).toBeGreaterThan(0))
     const manualSection = screen.getByRole('heading', { name: '自定义组合' }).closest('section')
     expect(manualSection).not.toBeNull()

@@ -3,7 +3,7 @@ import type { ArchiveReview } from '../../lib/types'
 
 export const NEVER_CONNECTED_EXPLANATION = '这台 VPS 从未接入过 Agent，不用等待 180 分钟安全观察。'
 export const NEVER_CONNECTED_CHECKBOX_LABEL = '这台 VPS 从未接入过 Agent。我已确认它不再使用。'
-export const ARCHIVE_IMPACT_NOTE = '只停止明确专属于这台 VPS 的探测；共享或归属不明确的探测会保留，并生成待核对事项。共享的服务和域名对象本身保留，只结束与这台 VPS 的关联。账单事实继续保留，服务商自动续费需要另外核对。运行异常按管理动作关闭，不发送自然恢复通知。'
+export const ARCHIVE_IMPACT_NOTE = '只停止明确专属于这台 VPS 的探测；共享或归属不明确的探测会保留，并生成待核对事项。共享的服务和域名对象本身保留，只结束与这台 VPS 的关联。账单信息继续保留，服务商自动续费需要另外核对。运行异常按管理动作关闭，不发送自然恢复通知。'
 
 const IMPACT_DUPLICATE_WARNINGS = new Set([
   '没有服务关联。',

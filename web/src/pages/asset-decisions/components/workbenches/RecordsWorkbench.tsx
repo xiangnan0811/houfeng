@@ -22,7 +22,7 @@ function readbackAttention(record: AssetDecisionRecordSummary): { label: string;
 
 export function RecordsWorkbench({ recordsState, onOpenRecord }: { recordsState: RecordsState; onOpenRecord: (recordID: string) => void }) {
   return (
-    <WorkbenchPanel title="保存记录" className="asset-workbench--records">
+    <WorkbenchPanel title="已保存的决定" className="asset-workbench--records">
       {recordsState.loading ? (
         <PageStateView kind="loading" title="正在加载决策记录…" surface="empty" compact />
       ) : recordsState.error ? (

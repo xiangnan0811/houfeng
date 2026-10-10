@@ -41,7 +41,7 @@ export function RecordDraftMemberRows({
   const memberPreview = previewItems(members)
 
   return (
-    <div className="asset-decision-save-members" aria-label="保存记录成员复核">
+    <div className="asset-decision-save-members" aria-label="保存决定前的成员复核">
       {memberPreview.visible.map((member) => {
         const memberDraft = draft.members[member.vpsID]
         const decidedRole = memberDraft?.decidedRole ?? member.fallbackRole
@@ -122,7 +122,7 @@ export function RecordDraftMemberRows({
       })}
       {memberPreview.hiddenCount > 0 && (
         <div className="asset-decision-preview-more" role="note">
-          另有 {memberPreview.hiddenCount} 台成员保留在保存底稿中
+          另有 {memberPreview.hiddenCount} 台成员保留在完整明细中
         </div>
       )}
     </div>

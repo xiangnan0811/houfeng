@@ -77,7 +77,8 @@ export function buildShellSummaryModel(
   if (staleCount > 0) {
     return { state: 'notice', label, generatedAt, showAnomalyCounts: true }
   }
-  return { state: 'clear', label, generatedAt, showAnomalyCounts: true }
+  // 零计数可见文字与非零形式“运行异常 N”同构；完整句子留给读屏。不得写成“系统正常”等健康结论。
+  return { state: 'clear', label, spokenLabel: '当前运行异常计数为 0', generatedAt, showAnomalyCounts: true }
 }
 
 function shellObservationLabel(
@@ -93,5 +94,5 @@ function shellObservationLabel(
       : '尚有目标无观测')
   }
   if (staleCount > 0) parts.push(`观测过期 ${staleCount}`)
-  return parts.length === 0 ? '当前运行异常计数为 0' : parts.join('，')
+  return parts.length === 0 ? '运行异常 0' : parts.join('，')
 }

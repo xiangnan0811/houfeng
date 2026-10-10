@@ -44,8 +44,8 @@ describe('Asset Decisions saved record workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('保存记录')
-    const recordsSection = (await screen.findByRole('heading', { name: '保存记录' })).closest('section')
+    await openSecondaryWorkbench('已保存的决定')
+    const recordsSection = (await screen.findByRole('heading', { name: '已保存的决定' })).closest('section')
     const trigger = within(recordsSection!).getByRole('button', { name: '查看' })
     if (via === 'button') {
       trigger.focus()
@@ -153,14 +153,14 @@ describe('Asset Decisions saved record workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('保存记录')
+    await openSecondaryWorkbench('已保存的决定')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '已保存的决定' }).closest('section')
     expect(recordsSection).not.toBeNull()
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
-    expect(within(dialog).getByLabelText('保存记录当前判断')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('已保存决定的当前判断')).toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '快照对比矩阵' })).not.toBeInTheDocument()
     expect(within(dialog).queryByText('GOAL')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('SAVED EVIDENCE')).not.toBeInTheDocument()
@@ -327,9 +327,9 @@ describe('Asset Decisions saved record workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('保存记录')
+    await openSecondaryWorkbench('已保存的决定')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '已保存的决定' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
@@ -341,7 +341,7 @@ describe('Asset Decisions saved record workflows', () => {
     expect(within(executionBoard).getByText('Record Bulk 6')).toBeInTheDocument()
     expect(within(executionBoard).getByText('Record Bulk 2')).toBeInTheDocument()
     expect(within(executionBoard).queryByText('Record Bulk 1')).not.toBeInTheDocument()
-    expect(within(executionBoard).getByText('另有 5 台在成员跟进或底稿中查看')).toBeInTheDocument()
+    expect(within(executionBoard).getByText('另有 5 台在成员跟进或完整明细中查看')).toBeInTheDocument()
   })
   it('maps execution plan subscription CTA without writing business assets', async () => {
     const evidenceRecord = decisionRecord({
@@ -385,9 +385,9 @@ describe('Asset Decisions saved record workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('保存记录')
+    await openSecondaryWorkbench('已保存的决定')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '已保存的决定' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
@@ -484,9 +484,9 @@ describe('Asset Decisions saved record workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('保存记录')
+    await openSecondaryWorkbench('已保存的决定')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '已保存的决定' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
@@ -554,17 +554,17 @@ describe('Asset Decisions saved record workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('保存记录')
+    await openSecondaryWorkbench('已保存的决定')
     await waitFor(() => expect(screen.getAllByText('德国主备取舍记录').length).toBeGreaterThan(0))
-    const recordsSection = screen.getByRole('heading', { name: '保存记录' }).closest('section')
+    const recordsSection = screen.getByRole('heading', { name: '已保存的决定' }).closest('section')
     fireEvent.click(within(recordsSection!).getByText("德国主备取舍记录"))
 
     const dialog = await screen.findByRole('dialog', { name: '德国主备取舍记录' })
-    expect(within(dialog).getByLabelText('保存记录当前判断')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('已保存决定的当前判断')).toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '快照对比矩阵' })).not.toBeInTheDocument()
     expect(within(dialog).queryByText('保存时未记录对比洞察；当前仍保留证据评估快照、成员判断、执行回读和执行编排。')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('快照成员 1')).not.toBeInTheDocument()
-    expect(within(dialog).queryByLabelText('保存记录成员摘要')).not.toBeInTheDocument()
+    expect(within(dialog).queryByLabelText('已保存的决定成员摘要')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('旧记录证据可用')).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('证据评估刻度')).not.toBeInTheDocument()
     expect(within(dialog).getByText(/草稿 · 跟进 0\/2 · 需补证据/)).toBeInTheDocument()

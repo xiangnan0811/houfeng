@@ -292,7 +292,7 @@ test('nested Modal closes one layer per Escape and preserves focus and body lock
   })
   await page.goto('/asset-decisions')
 
-  await page.getByRole('button', { name: '场景与组合' }).click()
+  await page.getByRole('button', { name: '自定义分组' }).click()
   const useTemplate = page.getByRole('button', { name: '使用模板' })
   await expect(useTemplate).toBeVisible()
   await useTemplate.focus()

@@ -145,19 +145,19 @@ export function buildSecondaryNavItems(
     {
       value: 'records',
       eyebrow: '历史记录',
-      title: '保存记录',
+      title: '已保存的决定',
       summary: recordSummary,
       meta: recordMeta,
-      actionLabel: '打开记录',
+      actionLabel: '查看',
       tone: recordsState.error ? 'alert' : recordIssues > 0 ? 'notice' : 'normal',
     },
     {
       value: 'scenarios',
       eyebrow: '场景',
-      title: '场景与组合',
+      title: '自定义分组',
       summary: scenarioSummary,
       meta: scenarioMeta,
-      actionLabel: '打开场景',
+      actionLabel: '查看',
       tone: manualGroupsState.error || templatesState.error ? 'alert' : 'normal',
     },
     {
@@ -172,10 +172,10 @@ export function buildSecondaryNavItems(
     {
       value: 'single_queue',
       eyebrow: '单台辅助',
-      title: '单台队列',
+      title: '逐台处理',
       summary: singleQueueSummary,
       meta: singleQueueMeta,
-      actionLabel: '查看单台队列',
+      actionLabel: '查看',
       tone: queueState.queueError ? 'alert' : totalDecisionQueue > 0 ? 'notice' : 'normal',
     },
   ]
@@ -411,7 +411,7 @@ export function deriveNextWorkItems(
           id: `record-drift-${record.record_id}`,
           kind: 'record_drift',
           tone: 'critical',
-          sourceLabel: '保存记录',
+          sourceLabel: '已保存的决定',
           kindLabel: '事实漂移',
           title: record.title,
           summary: readback.summary || '当前事实与已保存判断不一致，需要复核执行闭环。',
@@ -425,7 +425,7 @@ export function deriveNextWorkItems(
           id: `record-blocked-${record.record_id}`,
           kind: 'record_blocked',
           tone: 'critical',
-          sourceLabel: '保存记录',
+          sourceLabel: '已保存的决定',
           kindLabel: '跟进阻塞',
           title: record.title,
           summary: readback.summary || '记录中仍有成员阻塞，需要人工解除或调整跟进路径。',
@@ -439,7 +439,7 @@ export function deriveNextWorkItems(
           id: `record-needs-evidence-${record.record_id}`,
           kind: 'record_needs_evidence',
           tone: 'alert',
-          sourceLabel: '保存记录',
+          sourceLabel: '已保存的决定',
           kindLabel: '回读缺证据',
           title: record.title,
           summary: readback.summary || '当前记录仍有证据缺口，先补齐资料再推进判断。',
@@ -493,12 +493,12 @@ function portfolioContextLabel(chips: ContextFilterChip[], view: MainWorkbenchVi
  * 生成组合风险标签
  */
 function portfolioRiskLabel(metrics: ClosedLoopMetrics): string {
-  if (metrics.partialErrorCount > 0) return '证据待确认'
-  if (metrics.readbackDriftCount > 0) return `事实漂移 ${metrics.readbackDriftCount}`
-  if (metrics.readbackBlockedCount > 0) return `阻塞 ${metrics.readbackBlockedCount}`
+  if (metrics.partialErrorCount > 0) return '部分数据未读到'
+  if (metrics.readbackDriftCount > 0) return `与决定不符 ${metrics.readbackDriftCount}`
+  if (metrics.readbackBlockedCount > 0) return `受阻 ${metrics.readbackBlockedCount}`
   const gapCount = metrics.readbackNeedsEvidenceCount + metrics.evidenceGapGroupCount
-  if (gapCount > 0) return `资料缺口 ${gapCount}`
-  if (metrics.readbackOpenCount > 0) return `待回读 ${metrics.readbackOpenCount}`
+  if (gapCount > 0) return `缺资料 ${gapCount}`
+  if (metrics.readbackOpenCount > 0) return `待核对结果 ${metrics.readbackOpenCount}`
   if (metrics.recordActiveCount > 0) return `跟进中 ${metrics.recordActiveCount}`
   return '无待处理决策'
 }
@@ -587,7 +587,7 @@ export function buildPortfolioLead(
       tone: 'neutral',
       eyebrow: '当前判断',
       title: '当前视图暂无组合决策',
-      summary: '当前筛选与视图范围内暂无待处理组合决策；历史记录、场景模板和单台队列可按需查看。',
+      summary: '当前筛选与视图范围内暂无待处理组合决策；已保存的决定、自定义分组和逐台处理可按需查看。',
       contextLabel,
       riskLabel,
       evidenceLabel,
@@ -599,7 +599,7 @@ export function buildPortfolioLead(
     tone: 'alert',
     eyebrow: '当前判断',
     title: '部分资产决策证据不可用',
-    summary: '请先查看局部错误边界；已加载的自动组、记录和单台辅助队列仍可继续处理。',
+    summary: '部分数据未读到；已加载的分组、已保存的决定和逐台处理仍可继续处理。',
     actionLabel: '查看已加载决策组',
     contextLabel,
     riskLabel,
@@ -666,7 +666,7 @@ export function buildManualGroupProgress(detail: AssetDecisionManualGroupDetail)
   ]
   const doneCount = items.filter((item) => item.done).length
   return {
-    readinessLabel: readyToRecord ? '可保存记录' : doneCount >= 3 ? '接近可保存' : '继续整理',
+    readinessLabel: readyToRecord ? '可保存决定' : doneCount >= 3 ? '接近可保存' : '继续整理',
     readinessTone: readyToRecord ? 'normal' : doneCount >= 3 ? 'maintenance' : 'alert',
     readyToRecord,
     doneCount,

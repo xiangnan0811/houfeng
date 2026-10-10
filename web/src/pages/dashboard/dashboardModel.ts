@@ -437,7 +437,7 @@ function stableFactSummary(observability: DashboardObservabilityModel): string {
   if (unobserved && stale) return '资产待核对、无观测与观测过期分别保留。'
   if (unobserved) return '资产待核对与无观测目标分别保留。'
   if (stale) return '资产待核对与观测过期分别保留。'
-  return '当前运行异常计数为 0。具体事实和操作由对应工作台承接。'
+  return '运行异常 0。具体事实和操作在对应页面处理。'
 }
 
 function modeCopy(
@@ -453,7 +453,7 @@ function modeCopy(
     return {
       tone: 'notice',
       title: '建立第一条资产与观测链路',
-      summary: 'VPS 清单已确认为空；先登记服务器主体，再补账单事实并接入 agent。',
+      summary: 'VPS 清单已确认为空；先登记服务器，再补账单信息并接入 agent。',
     }
   }
   if (mode === 'critical') {
@@ -576,7 +576,7 @@ function observabilityJudgement(
     id: 'observability',
     label: '观测状态',
     value: '0',
-    detail: '当前运行异常计数为 0',
+    detail: '运行异常 0',
     to: DASHBOARD_LINKS.events24h,
     tone: 'normal',
   }

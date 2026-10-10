@@ -32,12 +32,12 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 
 - `AssetDecisionsPage.tsx` 是薄 composition coordinator：只组合七个 controller、纯 model、两个 workbench 与五个 modal；不得 import `lib/api`、调用 router hook / `useEffect`、解析响应或构造 request body。展示组件不得 import controller/API，controller 之间不得互相 import。
 - 同值 filter 的新对象 identity 表示 revalidation，不是新业务状态：四个 filtered GET 必须照常发出，但已有 settled overview/list 保持 `loading=false`、错误与 rows 可见，入口 DOM 不卸载。filter key、external revision 或 local retry 变化才进入 loading；返回结果仍以 cancelled flag 防止旧响应覆盖当前 state。
-- Asset Decisions 首屏必须是组合优先的单主路径：`portfolio command summary` → 次级工作区入口 → `决策组扫描`。默认页面不得恢复 `决策路径`、`下一步导览`、记录表、场景模板、自定义组合、续费 evidence 或单台队列作为同权常驻 section；也不得把单台续费队列重新提升为主视觉主体。
+- Asset Decisions 首屏必须是组合优先的单主路径：`portfolio command summary` → 次级工作区入口 → `待决定的分组`。默认页面不得恢复 `决策路径`、`下一步导览`、记录表、场景模板、自定义组合、续费 evidence 或单台队列作为同权常驻 section；也不得把单台续费队列重新提升为主视觉主体。
 - Asset Decisions 顶部必须先展示 portfolio command summary：从当前已加载的记录回读、自动组、自定义组合和模板中派生第一行动，并展示组合范围、续费窗口、执行闭环风险、evidence source 状态和 context filter 摘要。该 summary 是处理顺序导览，不是 KPI 卡片墙；不得把单台队列数量提升为主指标，也不得因为某来源失败而伪造无问题。
 - 无可处理项只表示当前筛选和窗口的 `scoped-empty`：显示中立的“当前视图暂无组合决策”和可见范围，不推断健康或闭环稳定，不显示主工作动作。参与判断的来源尚在首次读取时先显示等待评估，不提前宣布空态；局部错误保持独立不可用语义。次级入口保留可见操作词和计数单位，读取中/不可用不得伪装成零。
 - Asset Decisions 的记录、场景/模板、续费 evidence、单台队列必须通过受控的次级工作区进入；默认 `secondaryWorkbench=null`，同一时间最多展开一个次级区。用户点击入口或 URL 深链可展开对应区：`record_id -> records`，`manual_group_id|template_id -> scenarios`，`view=renewal -> renewals`，legacy `view=single_queue -> single_queue`。`group_id` 只打开自动组详情，不要求展开次级区。
 - 次级工作区切换和关闭只影响本地展开状态，不主动删除 `view`、`renew_within_days`、`provider_id`、`vps_id`、`country`、`region`、`city`、`scenario` 等筛选上下文。打开对象参数只触发读取和展示，不触发创建、PATCH 或业务对象写入。
-- portfolio command summary、决策组扫描和次级入口的指标只能从当前已加载 rows 派生，例如自动组数量、进行中自定义组合、未关闭记录、readback drift/blocked/needs_evidence/open、预算压力和资料缺口。任一来源加载失败时只显示局部不可用提示并跳过该来源的工作项；风险标签必须降级为 `证据待确认` 或等价未知态，不得把失败解释成无问题、已对齐、已闭环、`证据稳定` 或真实资料缺口。
+- portfolio command summary、待决定的分组和次级入口的指标只能从当前已加载 rows 派生，例如自动组数量、进行中自定义组合、未关闭记录、readback drift/blocked/needs_evidence/open、预算压力和资料缺口。任一来源加载失败时只显示局部不可用提示并跳过该来源的工作项；风险标签必须降级为 `部分数据未读到` 或等价未知态（可见风险副标按优先级为：与决定不符 N、受阻 N、缺资料 N、待核对结果 N、跟进中 N，均无时为“无待处理决策”），不得把失败解释成无问题、已对齐、已闭环、`证据稳定` 或真实资料缺口。
 - 已保存组合决策必须作为次级工作区展示，承接“保存本次判断、回看当时证据、推进记录状态”的用户任务，但不得取代自动组发现入口。
 - 自定义组合必须作为自动组发现和已保存记录之间的 scenario surface：自动组回答“系统发现哪些组合问题”，自定义组合回答“用户正在比较哪些真实场景”，记录回答“某一次判断和后续跟进是什么”。自定义组合可编辑 title/goal/note/scenario/status 与成员 intended role/action/reason/note/sort，不得修改 VPS / Subscription / MonitoringInstance / Target。
 - 场景模板是 scenario surface 的入口层，位于自动组和自定义组合附近，视觉权重低于自动组列表。模板只启动场景或从手工组合保存 blueprint；内置模板不允许编辑，自定义模板只能改模板元数据/归档状态。模板失败只影响模板 surface 或模板 modal，不影响自动组、手工组合、记录、续费 evidence 和单台队列。
@@ -45,14 +45,14 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - 组详情必须展示成员 VPS 基础事实、主订阅、服务 / 域名 / Target / 监控摘要、`suggested_role`、`suggested_action` 和 evidence chips。建议只能帮助扫描和排序，不得自动提交 keep / migrate / cancel。
 - `evidence_assessment` 的视觉层级高于零散 evidence chips、低于组合事实本身：组列表展示判断尺度，组详情展示组级和成员级评估，记录详情展示保存时证据快照。UI 文案必须表达“证据质量 / 决策压力 / 准备度”，不得把 `decision_bias` 写成自动执行承诺。
 - `decision_recommendation` 的视觉层级与 evidence assessment 相邻但更偏“下一步提示”：列表里保持短摘要，详情里展示下一步和理由/阻塞 chips。不得在前端根据 recommendation 自动调用 `PATCH /api/vps/*`、`PATCH /api/asset-decisions/records/*` 或其他业务对象写接口。
-- `comparison_insight` 的视觉层级用于“为什么这组资产要这么取舍”，但资产决策弹窗不能再把它渲染成默认展开的报告矩阵：组卡只展示短比较结论、lane counts 和 priority VPS；自动组、自定义组合和记录详情统一走 `Cover -> Directory -> Task Panel -> Raw` 分层。普通 `members` / `save` / `execution` / `source` 面板只能展示当前任务所需的短摘要、role/action、少量信号和单一主动作；完整 rank/lane、成本/产品、承载/监控、状态/续费、证据源、strength/risk/gap chips 和宽表事实只能进入 `raw` / `底稿` 入口。不得恢复 `GROUP TO SCENARIO`、`EVIDENCE MATRIX`、`证据矩阵` 或类似 heading 作为普通详情面板。
+- `comparison_insight` 的视觉层级用于“为什么这组资产要这么取舍”，但资产决策弹窗不能再把它渲染成默认展开的报告矩阵：组卡只展示短比较结论、lane counts 和 priority VPS；自动组、自定义组合和记录详情统一走 `Cover -> Directory -> Task Panel -> Raw` 分层。普通 `members` / `save` / `execution` / `source` 面板只能展示当前任务所需的短摘要、role/action、少量信号和单一主动作；完整 rank/lane、成本/产品、承载/监控、状态/续费、证据源、strength/risk/gap chips 和宽表事实只能进入 `raw` / `完整明细` 入口。不得恢复 `GROUP TO SCENARIO`、`EVIDENCE MATRIX`、`证据矩阵` 或类似 heading 作为普通详情面板。
 - 组详情可以把当前自动组创建为自定义组合，也可以直接保存当前自动组为决策记录。默认层只展示短判断和主动作；保存表单只在 `save` 面板出现，并允许编辑标题、组合目标、状态，以及逐个展开成员的决定角色、决定动作和理由。保存成功后展示记录详情，而不是继续停留在只读组详情中。
 - 组详情的场景推进分岔只能作为短入口表达：`直接保存记录` 适用于当前自动组已经就是本次判断范围，`先创建自定义组合` 适用于还需要补成员、目标或人工语境。分岔不得带长解释块，不新增执行路径，不写业务对象。
 - 自定义组合详情必须隔离 `members` / `edit` / `add` / `save` / `raw` 面板：成员扫描只展示当前 facts 回读后的短判断和成员意图对照；组合属性表单、VPS 选择器新增成员、成员意图编辑和保存为决策记录入口各自在对应面板出现，不得混排。完整 comparison lane、facts、evidence gap 和 current fact missing 只能在 raw/底稿面板兜底；保存记录必须发送 `source_type=manual_group`，并使用当前成员 intended role/action/reason 作为默认决定值。
-- 记录详情默认必须先展示保存记录短封面；`查看详情` 进入目录后，`execution` 只做记录状态推进和可执行成员预览，`members` 只做成员跟进状态/备注维护，`source` 只做来源复核入口，`raw` / `成员底稿` 才展示成员判断、证据快照、当前事实和完整宽表。复核来源只能打开已有来源 detail，不能自动恢复缺失来源、创建组合或执行业务写入。成员动作里的 `cancel` / `open_archive_preview` 只能渲染到 `/vps/{id}?workbench=archive` 的跳转入口。
+- 记录详情默认必须先展示保存记录短封面；`查看详情` 进入目录后，`execution` 只做记录状态推进和可执行成员预览，`members` 只做成员跟进状态/备注维护，`source` 只做来源复核入口，`raw` / `完整明细` 才展示成员判断、证据快照、当前事实和完整宽表。复核来源只能打开已有来源 detail，不能自动恢复缺失来源、创建组合或执行业务写入。成员动作里的 `cancel` / `open_archive_preview` 只能渲染到 `/vps/{id}?workbench=archive` 的跳转入口。
 - 记录详情必须展示成员级跟进状态、备注与最后更新时间；单个成员保存跟进时只 PATCH 该成员 `vps_id`、`followup_status`、`followup_note`，成功后刷新当前记录详情与已保存记录列表的跟进计数。成员跟进状态只表达“组合判断后的执行记忆”，不能隐式修改记录级状态，也不能触发 VPS、Subscription、MonitoringInstance 或 Target 写操作。
 - 已保存记录列表可以低权重展示 `execution_plan` 摘要、lane 计数、actionable / blocked 计数；点击仍只打开记录详情，不直接跳业务页。
-- 记录详情的执行编排只能出现在 `execution` 面板，按 `cancel_retire / migration / keep_observe / evidence / review` lane 分组展示少量预览成员、lane summary、readback badge、issue chips、下一步 CTA 和快速跟进按钮。当前事实块和完整成员底稿只能在 `raw` / `成员底稿` 查看；board 不取代自动组主 surface，也不批量执行。
+- 记录详情的执行编排只能出现在 `execution` 面板，按 `cancel_retire / migration / keep_observe / evidence / review` lane 分组展示少量预览成员、lane summary、readback badge、issue chips、下一步 CTA 和快速跟进按钮。当前事实块和完整成员明细只能在 `raw` / `完整明细` 查看；board 不取代自动组主 surface，也不批量执行。
 - 执行编排 CTA 的 URL 映射只能在前端本地完成：`open_archive_preview -> /vps/{id}?workbench=archive`，`open_subscription_context -> /subscriptions?vps_id={id}`，`open_vps_detail -> /vps/{id}`，`review_record` 留在当前记录详情复核或提供普通 VPS 详情入口。
 - 快速跟进按钮只能调用 `PATCH /api/asset-decisions/records/{record_id}` 更新成员 followup；不得自动 PATCH record status，也不得调用 VPS、Subscription、MonitoringInstance、Target 写接口。`completed` 记录若当前 facts drift，仍必须展示 drift/readback/plan，不能因为人工状态完成而隐藏问题。
 - 单台决策编辑在 group detail drawer 或底部单台辅助队列中完成，使用 `AssetDecisionWorkPanel` 与 `PATCH /api/vps/{id}`。成功 notice 留在页面可见 surface 内；决定不续费提示独立核对服务商自动续费，不修改订阅自动续费事实。无订阅仍可保存资源有效期和续费意向。
@@ -75,7 +75,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | Condition | Expected behavior |
 | --- | --- |
 | Asset Decisions evidence-boundary explanation grows long | 保持优先级队列为主 surface，证据边界用 `<details>` / 低权重说明承载，不抢占主视觉 |
-| `/asset-decisions` default route renders | 首屏显示 portfolio command summary、次级入口和 `决策组扫描`；不渲染旧常驻 `决策路径`、`下一步导览`、记录、场景、续费 evidence 或单台队列 section |
+| `/asset-decisions` default route renders | 首屏显示 portfolio command summary、次级入口和 `待决定的分组`；不渲染旧常驻 `决策路径`、`下一步导览`、记录、场景、续费 evidence 或单台队列 section |
 | URL has `record_id` / `manual_group_id` / `template_id` / `view=renewal` / legacy `view=single_queue` | 自动展开对应次级工作区，并保留筛选上下文；`group_id` 只打开自动组详情 |
 | `/api/asset-decisions/overview` 或 groups list failed | 组合工作台显示局部错误；底部单台队列和 renewal evidence 可按各自 API 独立加载 |
 | group detail missing / 404 | Drawer 显示决策组不存在或已变化，允许返回列表；不得制造空 group |
@@ -91,7 +91,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 | save record from manual group | POST records 带 `source_type=manual_group`；成功后关闭自定义组合详情并打开记录详情 |
 | create decision record 404 | 显示自动组已变化 / 不存在的保存错误，要求用户刷新组列表，不在前端补造记录 |
 | saved decision records failed | 已保存组合决策 surface 显示局部错误；自动组、续费 evidence 和单台队列继续独立可用 |
-| records / groups / manual groups / templates 部分来源失败 | portfolio command summary 显示 `证据待确认` 或等价未知态，不生成事实漂移 / 阻塞 / 缺证据工作项，也不显示 `闭环稳定` |
+| records / groups / manual groups / templates 部分来源失败 | portfolio command summary 显示 `部分数据未读到` 或等价未知态，不生成事实漂移 / 阻塞 / 缺证据工作项，也不显示 `闭环稳定` |
 | record detail missing / 404 | 记录详情 modal 显示记录不存在，不制造空记录 |
 | patch record status failed | 错误留在记录详情 modal 内，不改变本地状态，也不触发 VPS/订阅状态修改 |
 | patch record member follow-up failed | 错误留在记录详情 modal 内，不改变成员本地状态，不触发 VPS/订阅/监控/Target 写操作 |
@@ -119,8 +119,8 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - Good: `/asset-decisions?view=provider&provider_id=pv_001&template_id=adt_builtin_provider_review` 首屏展示 provider 上下文 chip，并自动打开服务商评估模板；关闭模板后仍保留 provider 筛选。
 - Good: 聚焦某行“查看”后打开 group/manual/record Modal；open key 让四个 filtered GET revalidate，但列表节点保持连接，Escape 关闭后焦点回同一行入口且 body 解锁。
 - Good: `/asset-decisions` 默认首屏只展示当前组合判断、四个次级入口和自动组扫描；记录、场景、续费事实和单台辅助队列只有用户点击或深链时才展开。
-- Good: `/asset-decisions?view=single_queue&renew_within_days=30` 承接旧链接并打开单台辅助队列，但 portfolio command summary 与决策组扫描仍是页面框架。
-- Good: 决策记录接口失败时，页面保留已加载自动组，不生成 readback 工作项，portfolio 风险显示 `证据待确认`，不显示 `闭环稳定`。
+- Good: `/asset-decisions?view=single_queue&renew_within_days=30` 承接旧链接并打开逐台处理队列，但 portfolio command summary 与待决定的分组仍是页面框架。
+- Good: 决策记录接口失败时，页面保留已加载自动组，不生成 readback 工作项，portfolio 风险显示 `部分数据未读到`，不显示 `闭环稳定` 或 `执行无偏差`。
 - Good: 打开决策组后，同组 VPS 可以比较主订阅、服务 / 域名 / Target / 监控数量、建议角色和 evidence chips；点击单台 `处理` 仍提交原有 VPS renewal decision PATCH。
 - Good: 打开自动组后创建自定义组合，页面刷新自定义组合列表并打开新组合详情；用户能继续编辑组合目标、场景和成员意图。
 - Good: 自定义组合详情通过 VPS selector 新增成员，保存成员 intended action/reason 只调用 `/api/asset-decisions/manual-groups/{id}/members`，不写 VPS / Subscription / MonitoringInstance / Target。
@@ -156,7 +156,7 @@ Asset Ledger 的列表页可以把现有 VPS 与 Subscription contract 在前端
 - `templateWorkflows.test.tsx`: 必须用未经类型工厂收窄的真实 JSON fixture 覆盖空内置模板创建响应（至少 `members:[]`、`evidence_chips:null`），断言成功 notice、新组合 modal 和空成员面同时存在，且没有未捕获 render error。
 - `assetDecisionArchitectureContract.test.ts`: TypeScript AST synthetic + repository fixtures 覆盖七个 controller entry、API owner 白名单、唯一 router owner、禁止依赖边、无 `*PageContent` 替身、page/controller/global/effect 预算；错误必须报告路径、行与 forbidden symbol/edge/budget。
 - `web/e2e/asset-decision-workbenches.spec.ts`：固定浏览器时钟与 fixture 同一日，1440/1024/390 下四个次级工作区全部行可见、无文档横向溢出、宽屏单行 / 窄屏名称独占一行、名称与次要信息均有可见宽度，760/820/920 中间宽度下名称不被挤成零宽且操作不越出卡片，回读徽章、模板全集、续费剩余天数与无内部 ID、队列位置去重与归档入口等扫描事实正确，以及五个运行时主题的 settled axe。
-- `web/e2e/accessibility.spec.ts` / `visual-contracts.spec.ts`：真实 Chromium 覆盖 Asset nested confirmation 逐层 Escape/inert/body lock/focus restore，以及 390px“场景与组合”命令完整可达；staging real lane 对已有自定义模板只打开确认并取消，禁止发送 template mutation。
+- `web/e2e/accessibility.spec.ts` / `visual-contracts.spec.ts`：真实 Chromium 覆盖 Asset nested confirmation 逐层 Escape/inert/body lock/focus restore，以及 390px“自定义分组”命令完整可达；staging real lane 对已有自定义模板只打开确认并取消，禁止发送 template mutation。
 - `SubscriptionsPage.test.tsx`: `vps_id` URL context、`create=1` 自动打开/预填、关闭创建表单保留 `vps_id` 并移除 `create=1`。
 
 #### 7. Wrong vs Correct
@@ -229,15 +229,15 @@ Decision-heavy pages (asset decisions, detail pages with decision boards) follow
 具体回归以完整用户任务与可达性为主，旧 marker 缺失不能单独证明任务完成；以下安全和完整集合规则继续适用。
 
 - **决策类页面信息层级契约**（适用 `/asset-decisions` 及同类决策/工作台页面）：
-  1. **默认层只回答一个问题**：“现在最该处理什么？”——一个主判断 + 一个主动作。无待办时显示一行稳定提示（只有标题，无眉题与解释段落），不渲染 CTA、警示色、统计卡，判断占满整行。有待办时的统计卡色条只随实际数值表达状态（如闭环异常大于 0 才用危险色、续费组大于 0 才用提示色），不按卡片固定着色。
-  2. **次级层是扫描列表**：每项一行，身份 + 状态 + 单一入口，无解释句。辅助入口（历史/模板/续费事实/单台队列）默认收起为工具条，桌面一行、移动端 2×2，点击展开对应单一面板；工具条是面板底色的一条轨道，选中项抬起（抬起底色 + 阴影 + 描边），状态只由各项徽章表达（同时作为按钮描述），不加彩色边框；证据状态仅在全部证据源可用时用正常色；轨道不用凹槽底色，以保证状态徽章在全部主题下达到 AA 对比度。
+  1. **默认层只回答一个问题**：“现在最该处理什么？”——一个主判断 + 一个主动作。无待办时显示一行稳定提示（只有标题，无眉题与解释段落），不渲染 CTA、警示色、统计卡，判断占满整行。有待办时的统计卡色条只随实际数值表达状态（如执行偏差大于 0 才用危险色、续费组大于 0 才用提示色），不按卡片固定着色。
+  2. **次级层是扫描列表**：每项一行，身份 + 状态 + 单一入口，无解释句。辅助入口（已保存的决定/自定义分组/续费窗口/逐台处理，操作词为“查看”或“查看续费”）默认收起为工具条，桌面一行、移动端 2×2，点击展开对应单一面板；工具条是面板底色的一条轨道，选中项抬起（抬起底色 + 阴影 + 描边），状态只由各项徽章表达（同时作为按钮描述），不加彩色边框；数据来源格在全部来源可用时写“已全部读取”并用正常色，部分来源失败写“部分不可用”，读取中写“读取中”；轨道不用凹槽底色，以保证状态徽章在全部主题下达到 AA 对比度。
   3. **详情层是弹窗**：弹窗内 ≤3 个 Tab，每个 Tab 单一任务。默认 Tab 只含对象名 + 一句判断 + 主动作。API 长文案（`comparison_insight.summary`、`execution_readback.summary` 等）裁成短判断，不原样展示。
   4. **底稿层是原始数据**：成员全量、宽表、执行细节默认折叠，显式进入。成员预览使用明确的“查看全部”入口，完整成员和写入 payload 不得丢失。
   5. **文案零解释**：无说明性段落；eyebrow 全中文或去除（不渲染 `PORTFOLIO`/`RENEWAL`/`WORKBENCH` 等英文噪声）；字段含义靠标签和占位符自解释。内部 ID（`adg_`/`admg_`/`adr_`/`adt_`）、后端 group type 机器值不进入用户可见层。
   6. **弹窗内容面不透明**：`var(--surface-elevated)`，overlay 半透明，底层页面文字不得透进弹窗。
   7. **测试以用户任务为正向断言**（能在 ≤3 步内完成 X），辅以行数守护；不以“旧 marker 不出现”为唯一标准。
   8. **可维护集合不得静默截断**：场景模板、自定义组合、决策记录等带详情/维护命令的集合，只有在同一 surface 提供可访问的分页、筛选或“查看全部”入口时才能限制首屏数量。不得对 controller 返回值直接固定 `slice(0, N)` 后丢弃其余项；场景模板 API 固定先返回 7 个内置模板再返回 custom templates，固定截断会让 custom 状态维护入口永久不可达。模板 workflow 回归必须覆盖“7 个内置 + 至少 1 个 custom”全部可见且 custom 可打开。
-  9. **次级工作区是卡片 + 扫描列表**：保存记录、场景与组合、续费窗口、单台队列各为一张卡片，标题与工具条入口同名，不带眉题，不重复工具条已有计数；列表不使用横向滚动宽表，每项一行（列对齐）；按卡片自身宽度（而非视口）折行为名称独占一行、其余信息换到下一行，列最多的单台队列更早折行，名称可省略但不得被压成零宽，次要信息与操作不得被裁出卡片。鼠标可点整行：行先聚焦行内主入口再触发它，弹窗关闭后焦点回到该入口；键盘与读屏走行内显式入口（`查看` / `使用模板` / VPS 名称），不增加额外 Tab 停靠。样式落在 assets owner 的 `legacy-assets.css`，不新建组件 CSS。保存记录行展示标题、来源视图、状态、回读徽章（drift / blocked / needs_evidence 带计数，已对齐 / 待回读 / 不活跃不显示，未知状态原样显示）、跟进进度和本地更新日期；模板行只标 `内置` 与非生效状态，成员数大于 0 才显示；续费行展示日历日与剩余天数（两周内高亮、过期区分）、VPS 名称链接、续费方式、金额（月付不同于原价时补充），生效中不显示状态徽章，内部 ID 不进入可见层，组合判断入口只在标题行出现一次；单台队列行展示 VPS 名称（打开 VPS）、去重后的服务商与位置、续费意向、续费日期与剩余天数（续费窗口内高亮）或 `缺订阅` 入口、基准月成本与汇率过期标记、仅在未关联时出现的监控提示，以及 `处理` / `结束使用并归档`。
+  9. **次级工作区是卡片 + 扫描列表**：已保存的决定、自定义分组、续费窗口、逐台处理各为一张卡片，标题与工具条入口同名，不带眉题，不重复工具条已有计数；列表不使用横向滚动宽表，每项一行（列对齐）；按卡片自身宽度（而非视口）折行为名称独占一行、其余信息换到下一行，列最多的逐台处理更早折行，名称可省略但不得被压成零宽，次要信息与操作不得被裁出卡片。鼠标可点整行：行先聚焦行内主入口再触发它，弹窗关闭后焦点回到该入口；键盘与读屏走行内显式入口（`查看` / `使用模板` / VPS 名称），不增加额外 Tab 停靠。样式落在 assets owner 的 `legacy-assets.css`，不新建组件 CSS。保存记录行展示标题、来源视图、状态、回读徽章（drift / blocked / needs_evidence 带计数，已对齐 / 待回读 / 不活跃不显示，未知状态原样显示）、跟进进度和本地更新日期；模板行只标 `内置` 与非生效状态，成员数大于 0 才显示；续费行展示日历日与剩余天数（两周内高亮、过期区分）、VPS 名称链接、续费方式、金额（月付不同于原价时补充），生效中不显示状态徽章，内部 ID 不进入可见层，组合判断入口只在标题行出现一次；逐台处理行展示 VPS 名称（打开 VPS）、去重后的服务商与位置、续费意向、续费日期与剩余天数（续费窗口内高亮）或 `缺订阅` 入口、基准月成本与汇率过期标记、仅在未关联时出现的监控提示，以及 `处理` / `结束使用并归档`。
 
 
 库存、归档和关联输入要求见 [资产 Web 合同](assets-web.md)。

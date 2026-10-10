@@ -395,7 +395,7 @@ export function renderMemberDecisionRows(members: ComparisonMatrixMember[], opti
           })}
           {memberPreview.hiddenCount > 0 && (
             <div className="asset-decision-preview-more" role="note">
-              <span>另有 {memberPreview.hiddenCount} 台在底稿中查看</span>
+              <span>另有 {memberPreview.hiddenCount} 台在完整明细中查看</span>
               {options.hiddenAction}
             </div>
           )}

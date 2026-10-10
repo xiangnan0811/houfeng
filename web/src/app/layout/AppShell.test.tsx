@@ -457,7 +457,9 @@ describe('AppShell', () => {
       expect(syncEl).toHaveClass('tp-sync--clear')
       expect(syncEl).toHaveAttribute('title', '当前运行异常计数为 0')
     })
-    expect(screen.getByText('当前运行异常计数为 0')).toBeInTheDocument()
+    // 可见文字缩短为“运行异常 0”，读屏名称与 title 保留完整句子。
+    expect(screen.getByText('运行异常 0')).toBeInTheDocument()
+    expect(document.querySelector('.tp-sync-summary')).toHaveAttribute('aria-label', expect.stringMatching(/^当前运行异常计数为 0，系统摘要生成于/))
     expect(screen.queryByText('系统摘要无异常')).not.toBeInTheDocument()
     expect(screen.getByText(/系统摘要生成于/)).toBeInTheDocument()
     expect(document.querySelector('.layout')).not.toHaveTextContent('系统正常')

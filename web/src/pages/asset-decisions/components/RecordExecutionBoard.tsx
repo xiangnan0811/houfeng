@@ -149,7 +149,7 @@ export function RecordExecutionBoard({
       </div>
       {executionPreview.hiddenCount > 0 && (
         <div className="asset-decision-preview-more" role="note">
-          另有 {executionPreview.hiddenCount} 台在成员跟进或底稿中查看
+          另有 {executionPreview.hiddenCount} 台在成员跟进或完整明细中查看
         </div>
       )}
     </section>

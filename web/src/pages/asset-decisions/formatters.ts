@@ -580,14 +580,14 @@ type ClosedLoopMetrics = {
 }
 
 export function portfolioRiskLabel(metrics: ClosedLoopMetrics): string {
-  if (metrics.partialErrorCount > 0) return '证据待确认'
-  if (metrics.readbackDriftCount > 0) return `事实漂移 ${metrics.readbackDriftCount}`
-  if (metrics.readbackBlockedCount > 0) return `阻塞 ${metrics.readbackBlockedCount}`
+  if (metrics.partialErrorCount > 0) return '部分数据未读到'
+  if (metrics.readbackDriftCount > 0) return `与决定不符 ${metrics.readbackDriftCount}`
+  if (metrics.readbackBlockedCount > 0) return `受阻 ${metrics.readbackBlockedCount}`
   const gapCount = metrics.readbackNeedsEvidenceCount + metrics.evidenceGapGroupCount
-  if (gapCount > 0) return `资料缺口 ${gapCount}`
-  if (metrics.readbackOpenCount > 0) return `待回读 ${metrics.readbackOpenCount}`
+  if (gapCount > 0) return `缺资料 ${gapCount}`
+  if (metrics.readbackOpenCount > 0) return `待核对结果 ${metrics.readbackOpenCount}`
   if (metrics.recordActiveCount > 0) return `跟进中 ${metrics.recordActiveCount}`
-  return '闭环稳定'
+  return '执行无偏差'
 }
 
 export function portfolioEvidenceLabel(overview?: AssetDecisionOverview | null): string {

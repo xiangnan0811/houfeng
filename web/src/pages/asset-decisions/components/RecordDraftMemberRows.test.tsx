@@ -45,7 +45,7 @@ describe('RecordDraftMemberRows', () => {
 
     expect(screen.getByText('Node 1')).toBeInTheDocument()
     expect(screen.queryByText('Node 4')).not.toBeInTheDocument()
-    expect(screen.getByText('另有 1 台成员保留在保存底稿中')).toBeInTheDocument()
+    expect(screen.getByText('另有 1 台成员保留在完整明细中')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '编辑 Node 1 成员理由' }))
     expect(onEditMember).toHaveBeenCalledWith('vps_1')
 

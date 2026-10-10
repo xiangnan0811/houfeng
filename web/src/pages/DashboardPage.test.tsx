@@ -395,7 +395,7 @@ describe('DashboardPage', () => {
     expect(renewalLinks).toHaveLength(5)
     expect(renewalLinks[0]).toHaveAttribute('href', '/vps/vps_0')
     expect(renewalLinks[0]).toHaveTextContent('Plan 0')
-    expect(screen.getByText('未来 90 天（UTC）· 7 项')).toBeInTheDocument()
+    expect(screen.getByText('未来 90 天 · 7 项')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '订阅明细' })).toHaveAttribute('href', '/subscriptions?view=details')
 
     const activity = screen.getByRole('list', { name: '最近状态变化' })
@@ -434,7 +434,7 @@ describe('DashboardPage', () => {
     }))
     renderDashboard({ subscription: { body: subscriptionOverviewFixture({ upcoming_renewals: renewals }) } })
 
-    expect(await screen.findByText('未来 90 天（UTC）· 至少 12 项')).toBeInTheDocument()
+    expect(await screen.findByText('未来 90 天 · 至少 12 项')).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: '即将续费的订阅' })).getAllByRole('link')).toHaveLength(5)
   })
 
@@ -521,7 +521,7 @@ describe('DashboardPage', () => {
     expect(within(overdueList).getByRole('link')).toHaveAttribute('href', '/vps/vps_late')
     expect(screen.getByText('已逾期 4 项')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '续费队列' })).toHaveAttribute('href', '/subscriptions')
-    expect(screen.getByText('未来 90 天（UTC）内没有待续费的订阅。')).toBeInTheDocument()
+    expect(screen.getByText('未来 90 天内没有待续费的订阅。')).toBeInTheDocument()
   })
 
   it('labels renewal days as estimated when the subscription snapshot time is invalid', async () => {
@@ -547,7 +547,7 @@ describe('DashboardPage', () => {
       },
     })
 
-    expect(await screen.findByText('未来 90 天（UTC）· 1 项 · 天数按接收时间估算')).toBeInTheDocument()
+    expect(await screen.findByText('未来 90 天 · 1 项 · 天数按接收时间估算')).toBeInTheDocument()
   })
 
   it('keeps the renewal preview honest when the subscription overview fails', async () => {

@@ -35,7 +35,7 @@ const MOBILE_COMMANDS = [
   {
     name: 'Asset scenario workspace',
     path: '/asset-decisions',
-    command: (page: Page) => page.getByRole('button', { name: '场景与组合' }),
+    command: (page: Page) => page.getByRole('button', { name: '自定义分组' }),
   },
   {
     name: 'Provider decision link',

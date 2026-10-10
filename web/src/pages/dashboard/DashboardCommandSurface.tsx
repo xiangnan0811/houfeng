@@ -38,7 +38,7 @@ function signalLabel(model: DashboardReadyModel): string {
   if (model.mode === 'maintenance') return '维护'
   if (model.title === '尚有目标无观测') return '尚有目标无观测'
   if (model.title === '观测已过期') return '观测已过期'
-  if (model.mode === 'stable' && model.tone === 'normal') return '当前运行异常计数为 0'
+  if (model.mode === 'stable' && model.tone === 'normal') return '运行异常 0'
   if (model.mode === 'stable') return '待核对'
   return model.title
 }

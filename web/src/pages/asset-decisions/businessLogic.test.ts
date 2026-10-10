@@ -311,7 +311,7 @@ describe('Asset Decisions portfolio model', () => {
     expect(lead.actionLabel).toBeUndefined()
     expect(lead.title).not.toContain('健康')
     expect(lead.title).not.toContain('稳定')
-    expect(lead.riskLabel).not.toBe('闭环稳定')
+    expect(lead.riskLabel).not.toBe('执行无偏差')
     expect(lead.riskLabel).not.toBe('暂无异常')
     expect(lead.riskLabel).toBe('无待处理决策')
 
@@ -339,7 +339,7 @@ describe('Asset Decisions portfolio model', () => {
       kind: 'work',
       tone: 'alert',
       title: '部分资产决策证据不可用',
-      riskLabel: '证据待确认',
+      riskLabel: '部分数据未读到',
     })
 
     const loadingLead = buildPortfolioLead(
@@ -373,10 +373,10 @@ describe('Asset Decisions portfolio model', () => {
       0,
       0,
     )
-    expect(loadingItems[0]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '打开记录' })
-    expect(loadingItems[1]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '打开场景' })
+    expect(loadingItems[0]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '查看' })
+    expect(loadingItems[1]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '查看' })
     expect(loadingItems[2]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '查看续费' })
-    expect(loadingItems[3]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '查看单台队列' })
+    expect(loadingItems[3]).toMatchObject({ meta: '读取中', summary: '读取中', actionLabel: '查看' })
     for (const item of loadingItems) {
       expect(item.meta).not.toContain('0')
       expect(item.summary).not.toContain('无临近项')
@@ -433,7 +433,7 @@ describe('Asset Decisions composed page model', () => {
     } as AssetDecisionManualGroupDetail
 
     expect(buildManualGroupProgress(ready)).toMatchObject({
-      readinessLabel: '可保存记录',
+      readinessLabel: '可保存决定',
       readyToRecord: true,
       doneCount: 5,
       totalCount: 5,

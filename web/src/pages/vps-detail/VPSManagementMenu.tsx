@@ -28,7 +28,7 @@ const ITEMS: Array<{
 }> = [
   { panel: 'facts', label: '编辑事实', group: 'business' },
   { panel: 'decision', label: '续费决策', group: 'business' },
-  { panel: 'subscription', label: '订阅事实', group: 'business' },
+  { panel: 'subscription', label: '订阅', group: 'business' },
   { panel: 'validity-extension', label: '延长有效期', group: 'business' },
   { panel: 'monitoring-instance-evidence', label: '监控实例', group: 'runtime' },
   { panel: 'services-detail', label: '服务', group: 'relations' },

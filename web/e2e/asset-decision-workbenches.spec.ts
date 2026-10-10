@@ -17,10 +17,10 @@ const THEMES = [
 ] as const
 
 const PANELS = [
-  { entry: '保存记录', list: '已保存组合决策', rows: 4 },
-  { entry: '场景与组合', list: '场景模板', rows: 9 },
+  { entry: '已保存的决定', list: '已保存组合决策', rows: 4 },
+  { entry: '自定义分组', list: '场景模板', rows: 9 },
   { entry: '续费窗口', list: '续费窗口', rows: 4 },
-  { entry: '单台队列', list: '单台辅助队列', rows: 6 },
+  { entry: '逐台处理', list: '逐台处理队列', rows: 6 },
 ] as const
 
 async function openWorkbench(page: Page, entry: string): Promise<Locator> {
@@ -83,7 +83,7 @@ for (const width of WIDTHS) {
   })
 }
 
-// 中间宽度下列多的单台队列要按卡片宽度提前折行：名称不被挤成零宽，操作留在卡片内。
+// 中间宽度下列多的逐台处理要按卡片宽度提前折行：名称不被挤成零宽，操作留在卡片内。
 // ≤1100px 侧栏默认收起；820/920 另测手动展开侧栏后最窄的卡片。
 const MID_LAYOUTS = [
   { width: 760, sidebar: 'collapsed' },
@@ -122,9 +122,9 @@ test('asset decision workbenches surface the facts each scan row needs', async (
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoDecisions(page)
 
-  // 保存记录：只有需要复核的回读状态上徽章，已对齐记录不加噪声。
-  const records = (await openWorkbench(page, '保存记录')).getByRole('list', { name: '已保存组合决策' }).getByRole('listitem')
-  await expect(records.nth(0)).toContainText('阻塞 1')
+  // 已保存的决定：只有需要复核的回读状态上徽章，已对齐记录不加噪声。
+  const records = (await openWorkbench(page, '已保存的决定')).getByRole('list', { name: '已保存组合决策' }).getByRole('listitem')
+  await expect(records.nth(0)).toContainText('受阻 1')
   await expect(records.nth(0)).toContainText('跟进 1/4')
   await expect(records.nth(0)).toContainText('2026-09-30')
   await expect(records.nth(1)).toContainText('需补证据 1')
@@ -132,8 +132,8 @@ test('asset decision workbenches surface the facts each scan row needs', async (
   await expect(records.nth(3)).toContainText('已完成')
   await expect(records.nth(3).locator('.badge')).toHaveCount(1)
 
-  // 场景与组合：7 个内置 + 2 个自定义模板全部可达，生效中的模板不标“启用”。
-  const scenarios = await openWorkbench(page, '场景与组合')
+  // 自定义分组：7 个内置 + 2 个自定义模板全部可达，生效中的模板不标“启用”。
+  const scenarios = await openWorkbench(page, '自定义分组')
   const templates = scenarios.getByRole('list', { name: '场景模板' }).getByRole('listitem')
   await expect(templates.filter({ hasText: '内置' })).toHaveCount(7)
   await expect(scenarios).not.toContainText('启用')
@@ -152,9 +152,9 @@ test('asset decision workbenches surface the facts each scan row needs', async (
   await expect(renewals).not.toContainText('sub_')
   await expect(renewals.getByRole('link', { name: '查看续费取舍组' })).toHaveCount(1)
 
-  // 单台队列：位置去重、缺订阅入口、汇率过期标记与归档入口。
-  const queue = await openWorkbench(page, '单台队列')
-  const queueRows = queue.getByRole('list', { name: '单台辅助队列' }).getByRole('listitem')
+  // 逐台处理：位置去重、缺订阅入口、汇率过期标记与归档入口。
+  const queue = await openWorkbench(page, '逐台处理')
+  const queueRows = queue.getByRole('list', { name: '逐台处理队列' }).getByRole('listitem')
   const tokyo = queueRows.filter({ hasText: 'Tokyo Edge' })
   await expect(tokyo).toContainText('Example Cloud · JP · Tokyo')
   await expect(tokyo).not.toContainText('Tokyo · Tokyo')
@@ -181,8 +181,8 @@ for (const theme of THEMES) {
       const panel = await openWorkbench(page, panelSpec.entry)
       // 等列表 settled 再扫描，避免只扫到加载态。
       await expect(panel.getByRole('list', { name: panelSpec.list }).getByRole('listitem')).toHaveCount(panelSpec.rows)
-      // 场景与组合由模板与自定义组合两个请求组成，两边都 settled 才扫描。
-      if (panelSpec.entry === '场景与组合') {
+      // 自定义分组由模板与自定义组合两个请求组成，两边都 settled 才扫描。
+      if (panelSpec.entry === '自定义分组') {
         await expect(panel.getByRole('list', { name: '自定义资产组合' }).getByRole('listitem')).toHaveCount(3)
       }
       const result = await new AxeBuilder({ page }).include('.asset-workbench').analyze()

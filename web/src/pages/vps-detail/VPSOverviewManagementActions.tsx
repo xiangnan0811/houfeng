@@ -1335,8 +1335,8 @@ export function VPSOverviewManagementActions({
       <VPSDetailDialog
         open={subscriptionOpen}
         onClose={closePanel}
-        title="新增订阅事实"
-        ariaLabel="新增订阅事实"
+        title="新增订阅"
+        ariaLabel="新增订阅"
         template="form"
         size="lg"
         persistent={submitting}
@@ -1345,7 +1345,7 @@ export function VPSOverviewManagementActions({
         ) : undefined}
       >
         <div className="vps-detail-modal">
-          {detailLoading ? <p role="status">正在加载订阅事实…</p> : null}
+          {detailLoading ? <p role="status">正在加载订阅…</p> : null}
           {detailError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{detailError}</p> : null}
           {detailError ? <Button onClick={retryLoad}>重试加载</Button> : null}
           {detail ? (
@@ -1463,7 +1463,7 @@ export function VPSOverviewManagementActions({
         ) : undefined}
       >
         <div className="vps-detail-modal">
-          {detailLoading || subscriptionsLoading ? <p role="status">正在加载订阅事实…</p> : null}
+          {detailLoading || subscriptionsLoading ? <p role="status">正在加载订阅…</p> : null}
           {detailError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{detailError}</p> : null}
           {subscriptionsError ? <p className="asset-operation-feedback asset-operation-feedback--error" role="alert">{subscriptionsError}</p> : null}
           {detailError || subscriptionsError ? <Button onClick={retryLoad}>重试加载</Button> : null}
