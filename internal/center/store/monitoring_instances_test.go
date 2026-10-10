@@ -981,7 +981,7 @@ func TestUpdateMonitoringInstanceMetadata(t *testing.T) {
 	if !strings.Contains(gotSQL, "note") {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want note update", gotSQL)
 	}
-	if !strings.Contains(gotSQL, "updated_at = now()") {
+	if !regexp.MustCompile(`(^|[^_])updated_at = now\(\)`).MatchString(gotSQL) {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() SQL = %q, want updated_at refresh", gotSQL)
 	}
 	// 前置条件只能比较资料令牌；用正则排除 metadata_updated_at 以外的 updated_at = $5。
@@ -1077,8 +1077,8 @@ func TestUpdateMonitoringInstanceMetadataMapsPreconditionMissToConflictWhenMonit
 			queryCount++
 			switch queryCount {
 			case 1:
-				if !strings.Contains(sql, "updated_at = $5") {
-					t.Fatalf("update SQL = %q, want updated_at precondition", sql)
+				if !strings.Contains(sql, "and metadata_updated_at = $5") || regexp.MustCompile(`(^|[^_])updated_at = \$5`).MatchString(sql) {
+					t.Fatalf("update SQL = %q, want metadata_updated_at precondition only", sql)
 				}
 				if len(args) != 5 {
 					t.Fatalf("update args = %#v, want five args (monitoring_instance_id, group, labels, note, expected_updated_at)", args)

@@ -63,8 +63,9 @@ func TestPostgresIntegrationMonitoringMetadataVersionIgnoresSyncAdvances(t *test
 	if err != nil {
 		t.Fatalf("save with the token read before the sync: %v", err)
 	}
-	if !saved.MetadataUpdatedAt.After(token) || len(saved.Labels) != 1 || saved.Labels[0] != "jp" {
-		t.Fatalf("saved metadata token advanced/labels = %t/%v", saved.MetadataUpdatedAt.After(token), saved.Labels)
+	if !saved.MetadataUpdatedAt.After(token) || !saved.UpdatedAt.After(synced.UpdatedAt) || len(saved.Labels) != 1 || saved.Labels[0] != "jp" {
+		t.Fatalf("saved metadata token advanced/updated_at advanced/labels = %t/%t/%v",
+			saved.MetadataUpdatedAt.After(token), saved.UpdatedAt.After(synced.UpdatedAt), saved.Labels)
 	}
 
 	// 资料已被别人改过：旧令牌冲突，且不写入。
