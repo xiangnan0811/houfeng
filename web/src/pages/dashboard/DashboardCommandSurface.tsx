@@ -7,6 +7,7 @@ import type {
   DashboardReadyModel,
   DashboardTone,
 } from './dashboardModel'
+import { ZERO_ANOMALY_SPOKEN } from './dashboardModel'
 import type { DashboardMonitoringCoverage } from './dashboardCoverage'
 import { DASHBOARD_LINKS } from './dashboardLinks'
 import { DashboardActivityPanel, DashboardRenewalsPanel } from './DashboardPanels'
@@ -50,7 +51,7 @@ function JudgementItem({ item, trend }: { item: DashboardJudgement; trend: numbe
     <Link
       className={`dashboard-judgement dashboard-judgement--${item.tone}`}
       to={item.to}
-      aria-label={`${item.label}：${item.value}；${item.detail}${trendSummary ? `；${trendSummary}` : ''}`}
+      aria-label={`${item.label}：${item.value}；${item.spokenDetail ?? item.detail}${trendSummary ? `；${trendSummary}` : ''}`}
     >
       <span className="dashboard-judgement__label">
         <span className="dashboard-judgement__glyph" aria-hidden="true">
@@ -125,7 +126,12 @@ export function DashboardCommandSurface({
           <div className="dashboard-decision-surface__meta">
             <span className="dashboard-decision-surface__signal">
               <StatusGlyph state={model.tone} size="sm" />
-              {signalLabel(model)}
+              {signalLabel(model) === '运行异常 0' ? (
+                <>
+                  <span aria-hidden="true">运行异常 0</span>
+                  <span className="visually-hidden">{ZERO_ANOMALY_SPOKEN}</span>
+                </>
+              ) : signalLabel(model)}
             </span>
             <span className="dashboard-decision-surface__generated">
               摘要生成 <Timestamp value={model.snapshotGeneratedAt} mode="absolute" />

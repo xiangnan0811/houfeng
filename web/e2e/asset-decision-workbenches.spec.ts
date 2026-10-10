@@ -122,13 +122,13 @@ test('asset decision workbenches surface the facts each scan row needs', async (
   await page.setViewportSize({ width: 1440, height: 900 })
   await gotoDecisions(page)
 
-  // 已保存的决定：只有需要复核的回读状态上徽章，已对齐记录不加噪声。
+  // 已保存的决定：只有需要复核的回读状态上徽章，与决定一致的记录不加噪声。
   const records = (await openWorkbench(page, '已保存的决定')).getByRole('list', { name: '已保存组合决策' }).getByRole('listitem')
   await expect(records.nth(0)).toContainText('受阻 1')
   await expect(records.nth(0)).toContainText('跟进 1/4')
   await expect(records.nth(0)).toContainText('2026-09-30')
-  await expect(records.nth(1)).toContainText('需补证据 1')
-  await expect(records.nth(2)).toContainText('有漂移 2')
+  await expect(records.nth(1)).toContainText('缺资料 1')
+  await expect(records.nth(2)).toContainText('与决定不符 2')
   await expect(records.nth(3)).toContainText('已完成')
   await expect(records.nth(3).locator('.badge')).toHaveCount(1)
 

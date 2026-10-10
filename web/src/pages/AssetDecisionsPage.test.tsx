@@ -700,6 +700,6 @@ describe('Asset Decisions route and composition workflows', () => {
     expect(screen.getByText('决策记录暂不可用，当前只展示已成功加载的事实。')).toBeInTheDocument()
     expect(within(commandSummary).getByRole('heading', { name: '部分资产决策证据不可用' })).toBeInTheDocument()
     expect(within(commandSummary).getByText('部分数据未读到')).toBeInTheDocument()
-    expect(within(commandSummary).queryByText('执行无偏差')).not.toBeInTheDocument()
+    expect(within(commandSummary).queryByText('无待处理决策')).not.toBeInTheDocument()
   })
 })

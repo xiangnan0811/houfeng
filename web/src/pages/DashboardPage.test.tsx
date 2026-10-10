@@ -473,6 +473,16 @@ describe('DashboardPage', () => {
     expect(observation.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  it('shortens the zero-anomaly wording on screen but keeps the full sentence for screen readers', async () => {
+    renderDashboard({ dashboard: { body: dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { feishu_configured: true } }), status: 200 } })
+    const surface = await screen.findByRole('region', { name: '工作台决策面' })
+    const signal = surface.querySelector('.dashboard-decision-surface__signal')!
+    expect(signal).toHaveTextContent('运行异常 0')
+    expect(within(signal as HTMLElement).getByText('当前运行异常计数为 0')).toHaveClass('visually-hidden')
+    expect(screen.getByRole('link', { name: /^观测状态：0；当前运行异常计数为 0/ })).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('系统正常')
+  })
+
   it('warns when monitored objects have no notification channel', async () => {
     renderDashboard({ dashboard: { body: dashboardOverviewFixture({ total_monitoring_instance_count: 1 }), status: 200 } })
     const note = await screen.findByRole('note', { name: '未配置通知渠道' })

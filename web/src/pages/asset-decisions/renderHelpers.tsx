@@ -56,7 +56,7 @@ export function renderReadbackBadge(readback?: { status: AssetDecisionExecutionR
   if (!status) {
     return (
       <Badge variant="state" tone="neutral">
-        等待回读
+        等待核对结果
       </Badge>
     )
   }

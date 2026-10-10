@@ -7,7 +7,7 @@ import type { RecordsState } from '../../types'
 import { localDay } from './workbenchFormat'
 import { ScanName, ScanRow, WorkbenchPanel } from './WorkbenchPanel'
 
-// 已对齐 / 待回读 / 不活跃是安静状态，不占视觉；需要复核的状态带计数；未知状态原样显示，不当作已对齐。
+// 与决定一致 / 待核对结果 / 不活跃是安静状态，不占视觉；需要复核的状态带计数；未知状态原样显示，不当作已对齐。
 const QUIET_READBACK = new Set(['aligned', 'open', 'inactive'])
 
 function readbackAttention(record: AssetDecisionRecordSummary): { label: string; tone: BadgeTone } | null {

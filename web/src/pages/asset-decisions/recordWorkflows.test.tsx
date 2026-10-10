@@ -166,7 +166,7 @@ describe('Asset Decisions saved record workflows', () => {
     expect(within(dialog).queryByText('SAVED EVIDENCE')).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('证据评估刻度')).not.toBeInTheDocument()
     expectSavedRecordDefaultCover(dialog)
-    expect(within(dialog).getByText(/草稿 · 跟进 0\/2 · 需补证据/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/草稿 · 跟进 0\/2 · 缺资料/)).toBeInTheDocument()
     expect(within(dialog).queryByText('执行编排')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('heading', { name: '来源与当前闭环' })).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('Germany Primary 跟进状态')).not.toBeInTheDocument()
@@ -268,7 +268,7 @@ describe('Asset Decisions saved record workflows', () => {
       },
     ])
     expect(within(primaryFollowupRow).getByLabelText('跟进备注')).toHaveValue('等待迁移窗口')
-    expect(within(dialog).getAllByText('有漂移').length).toBeGreaterThan(0)
+    expect(within(dialog).getAllByText('与决定不符').length).toBeGreaterThan(0)
     expect(within(dialog).queryByText('仍有 active 订阅')).not.toBeInTheDocument()
     expect(within(dialog).queryByRole('link', { name: '打开结束使用并归档工作台' })).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('tab', { name: /执行/ }))
@@ -567,7 +567,7 @@ describe('Asset Decisions saved record workflows', () => {
     expect(within(dialog).queryByLabelText('已保存的决定成员摘要')).not.toBeInTheDocument()
     expect(within(dialog).queryByText('旧记录证据可用')).not.toBeInTheDocument()
     expect(within(dialog).queryByLabelText('证据评估刻度')).not.toBeInTheDocument()
-    expect(within(dialog).getByText(/草稿 · 跟进 0\/2 · 需补证据/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/草稿 · 跟进 0\/2 · 缺资料/)).toBeInTheDocument()
     // Tab navigation replaces detail directory
     expect(within(dialog).queryByText('旧记录证据可用')).not.toBeInTheDocument()
     fireEvent.click(within(dialog).getByRole('tab', { name: /执行/ }))

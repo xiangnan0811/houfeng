@@ -55,8 +55,8 @@ describe('RecordsWorkbench', () => {
     render(<RecordsWorkbench recordsState={{ loading: false, error: null, records: [drift, aligned, legacy, future] }} onOpenRecord={onOpenRecord} />)
 
     const rows = within(screen.getByRole('list', { name: '已保存组合决策' })).getAllByRole('listitem')
-    expect(rows[0]).toHaveTextContent('有漂移 2')
-    expect(within(rows[1]!).queryAllByText(/已对齐|待回读/)).toHaveLength(0)
+    expect(rows[0]).toHaveTextContent('与决定不符 2')
+    expect(within(rows[1]!).queryAllByText(/与决定一致|待核对结果/)).toHaveLength(0)
     expect(rows[2]).toHaveTextContent('旧记录')
     expect(rows[3]).toHaveTextContent('future_review_required')
 
