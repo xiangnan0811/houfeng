@@ -27,6 +27,29 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.24.0](https://github.com/xiangnan0811/houfeng/compare/v1.23.1...v1.24.0) (2026-10-10)
+
+
+### Features
+
+* **ux:** 按确认的术语对照表改写资产决策、工作台与 VPS 文案 ([77aa9d5](https://github.com/xiangnan0811/houfeng/commit/77aa9d540a1bb1720339c3921afbb8d954877b87))
+* **ux:** 按确认的术语对照表改写资产决策、工作台与 VPS 文案 ([0a83162](https://github.com/xiangnan0811/houfeng/commit/0a8316295472eda20db0cd82c32014731c817235))
+* **vps:** 手机宽度的表格视图改为紧凑卡片 ([297f44a](https://github.com/xiangnan0811/houfeng/commit/297f44aba285b48fcbf5a1c43713b666015782b2))
+* **vps:** 手机宽度的表格视图改为紧凑卡片 ([20183ae](https://github.com/xiangnan0811/houfeng/commit/20183ae5bca5742b124efb8d78d2d20b01a7ec44))
+
+
+### Bug Fixes
+
+* **ux:** 回读徽章与风险副标统一用词，工作台零计数保留完整读屏句 ([8adc104](https://github.com/xiangnan0811/houfeng/commit/8adc10464a703b3a9e247c42cbd49137d66d33c1))
+* **ux:** 回读等待态与两份计数摘要统一用词，合同说明概览副标是汇总计数 ([9603d8a](https://github.com/xiangnan0811/houfeng/commit/9603d8a1eeff0a9565813fab3e13e49fe3689d16))
+* **vps:** 展开区空规格弱化显示并按分隔符分段，紧凑卡片回归改为可见性断言 ([0b2da6d](https://github.com/xiangnan0811/houfeng/commit/0b2da6d1cc44211636cb3ed5c33f0527d6ac9414))
+* **vps:** 紧凑卡片显示续费价，展开区在手机上补回规格，回归锁住卡片上的提示 ([a37a1d4](https://github.com/xiangnan0811/houfeng/commit/a37a1d4e0f17e3e136a6d7f6795dfe3a4c0b33cd))
+
+
+### Documentation
+
+* **asset-decisions:** 写明缺少回读字段时列表不显示徽章、详情写等待核对结果 ([e3a1707](https://github.com/xiangnan0811/houfeng/commit/e3a1707b7b32941c5369a14e55ee7fb2dc360219))
+
 ## [1.23.1](https://github.com/xiangnan0811/houfeng/compare/v1.23.0...v1.23.1) (2026-10-10)
 
 
