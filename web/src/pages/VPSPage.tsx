@@ -666,6 +666,11 @@ function VPSQuickFacts({ row, subscriptionsError }: { row: InventoryRow; subscri
           <dd className={placeParts.length === 1 && placeParts[0] === '位置缺失' ? 'vps-quiet-fact' : undefined}>
             <DottedLine parts={placeParts} />
           </dd>
+          {/* 手机紧凑卡片隐藏了“位置与规格”列，规格在展开区补回；宽屏行内已有，不重复。 */}
+          <dt className="vps-workbench__compact-only">规格</dt>
+          <dd className={vpsSpecParts(vps)[0] === '规格未填写' ? 'vps-workbench__compact-only vps-quiet-fact' : 'vps-workbench__compact-only'}>
+            <DottedLine parts={vpsSpecParts(vps)} />
+          </dd>
         </dl>
       </section>
       <section className="vps-accordion__group">
@@ -1210,6 +1215,15 @@ export function VPSPage() {
                                   </span>
                                 ) : null}
                               </div>
+                              {row.subscription ? (
+                                // 手机紧凑卡片才显示续费价；宽屏的价格在展开区与目录检查器里。
+                                <div className="vps-workbench__meta vps-workbench__compact-only">
+                                  {compactParts([
+                                    formatMoney(row.subscription.price, row.subscription.currency),
+                                    periodLabel(row.subscription.billing_period_unit, row.subscription.billing_period_length, row.subscription.billing_months),
+                                  ]).join(' · ')}
+                                </div>
+                              ) : null}
                             </td>
                             <td>
                               <div className="vps-workbench__kicker">监控与证据</div>
