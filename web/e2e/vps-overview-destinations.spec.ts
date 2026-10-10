@@ -86,6 +86,7 @@ const CREATED_MONITORING_INSTANCE = {
   current_primary_issue_summary: '',
   created_at: '2026-08-29T00:00:00Z',
   updated_at: '2026-08-29T00:00:00Z',
+  metadata_updated_at: '2026-08-29T00:00:00Z',
   link: {
     link_id: 'link_created',
     vps_id: 'vps_001',

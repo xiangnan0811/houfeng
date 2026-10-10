@@ -253,11 +253,20 @@ func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
-	// 0072 adds freshness columns without APP ACL changes. 0071 adds
+	// 0073 adds the monitoring-instance metadata version and 0072 adds
+	// freshness columns, both without APP ACL changes. 0071 adds
 	// access-management ACL only, while 0070 adds nullable destination-subject
 	// columns and 0069 adds CPU validity schema. These non-heartbeat migrations
 	// must be stripped from the terminal suffix before policy-shape classification.
 	successorNames := transition.successor.names
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0073_add_monitoring_instance_metadata_version.sql" {
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0073_add_monitoring_instance_metadata_version.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0072_add_target_observation_freshness.sql" {
 		successorNames = successorNames[:n-1]
 	}
@@ -314,12 +323,13 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 	}
 	switch {
 	case len(successorNames) == 0:
-		// P69 carries 0070, 0071, and 0072; P70 carries 0071 and 0072;
-		// P71 carries only 0072. The terminal non-policy suffixes have
-		// already been stripped above.
+		// P69 carries 0070 through 0073; P70 carries 0071 through 0073;
+		// P71 carries 0072 and 0073; P72 carries only 0073. The terminal
+		// non-policy suffixes have already been stripped above.
 		if transition.profile == appACLCurrentProfileP69 ||
 			transition.profile == appACLCurrentProfileP70 ||
-			transition.profile == appACLCurrentProfileP71 {
+			transition.profile == appACLCurrentProfileP71 ||
+			transition.profile == appACLCurrentProfileP72 {
 			return false, nil
 		}
 		if !addressIdentityMigrationPending && !cpuRatesMigrationPending {

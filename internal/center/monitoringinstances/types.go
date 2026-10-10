@@ -124,6 +124,9 @@ type Record struct {
 	ArchivedReason             string          `json:"archived_reason,omitempty"`
 	CreatedAt                  time.Time       `json:"created_at"`
 	UpdatedAt                  time.Time       `json:"updated_at"`
+	// MetadataUpdatedAt 只随 group / labels / note 的写入推进，是资料编辑 If-Match 的令牌；
+	// updated_at 还会被同步、在线信号与事件摘要推进，不能用于资料并发控制。
+	MetadataUpdatedAt time.Time `json:"metadata_updated_at"`
 }
 
 type CreateInput struct {
@@ -153,10 +156,10 @@ type LinkedCreateWireIdentity struct {
 }
 
 type UpdateMetadataInput struct {
-	Group             *string    `json:"group,omitempty"`
-	Labels            []string   `json:"labels"`
-	Note              string     `json:"note"`
-	ExpectedUpdatedAt *time.Time `json:"-"`
+	Group                     *string    `json:"group,omitempty"`
+	Labels                    []string   `json:"labels"`
+	Note                      string     `json:"note"`
+	ExpectedMetadataUpdatedAt *time.Time `json:"-"`
 }
 
 type ManagementVPSLink struct {

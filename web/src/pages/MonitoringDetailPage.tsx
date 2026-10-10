@@ -746,7 +746,8 @@ export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitori
           note: metadataForm.note.trim(),
         },
         {
-          expectedUpdatedAt: monitoringInstance.updated_at,
+          // 资料令牌只随资料写入推进，心跳与同步不会让它过期。
+          expectedUpdatedAt: monitoringInstance.metadata_updated_at,
         },
       )
       if (
@@ -767,6 +768,7 @@ export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitori
                 labels: updated.labels,
                 note: updated.note,
                 updated_at: updated.updated_at,
+                metadata_updated_at: updated.metadata_updated_at,
               }
             : current.monitoringInstance,
       }))

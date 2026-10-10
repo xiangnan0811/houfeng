@@ -131,12 +131,14 @@ export function pauseConfirmationCurrent(monitoringInstance: MonitoringInstanceR
     : '当前：监控运行状态为启用。'
 }
 
+// 资料字段与它们的令牌一起保留：编辑中的资料仍按打开时的版本提交，别人改过资料时才会冲突。
 export function mergeNonMetadataMonitoringInstanceRecord<T extends MonitoringInstanceRecord>(current: MonitoringInstanceRecord, updated: T): T {
   return {
     ...updated,
     group: current.group,
     labels: current.labels,
     note: current.note,
+    metadata_updated_at: current.metadata_updated_at,
   }
 }
 

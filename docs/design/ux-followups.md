@@ -65,22 +65,6 @@ v1.19.0 体验走查中，有一部分修复已随 v1.20.0（PR #586）发布，
 - 已确认方案：后台任务为“补录月份缺少月末前汇率”的币对按月末日期回补历史汇率并写入缓存，每次运行限制回补月数；
   只对 Frankfurter 回补，Fixer 维持现状；回补失败时趋势沿用现有的“按此后最早汇率估算”标注。
 
-## 实施中发现的问题
-
-### B1 监控实例资料编辑的并发令牌会被同步刷新
-
-- 状态：待实施（2026-10-10 确认采用独立资料版本）
-- 发现：实施 C4 时经双审确认，`PATCH /api/monitoring-instances/{id}` 的 `If-Match` 比较的是 `updated_at`
-  （`internal/center/store/monitoring_instances.go` 的 `UpdateMonitoringInstanceMetadata`），而同步批次、在线信号与事件摘要都会把 `updated_at`
-  改成 `now()`（`sync_batches.go` 的 `advanceMonitoringInstanceSyncState`、`agent_live_signals.go`、`incidents.go`），
-  默认心跳间隔 5 秒（`internal/center/settings/types.go`）。
-- 影响：监控详情页的资料保存（group / labels / note）使用页面状态里的 `updated_at`。实例记录只在进入页面时读取，
-  只有命令执行中的轮询与管理复核会回写令牌；因此
-  在线实例上停留超过一个心跳周期后保存，大概率返回 409 `metadata conflict`。创建目标的加标签流程已用“写入前重读 + 冲突重试一次”规避。
-- 方向：为资料字段单独维护版本（例如 `metadata_updated_at` 或递增 `metadata_version`），只有资料写入才推进，`If-Match` 改比较它；
-  同步不再影响资料编辑。需迁移、更新 `monitoring-web.md:143` 与 monitoring 合同，并补“同步推进后保存仍成功、并发资料编辑仍 409”的
-  Postgres 与前端回归。
-
 ## 产品建议
 
 | 编号 | 事项 | 推荐 | 待决定 |

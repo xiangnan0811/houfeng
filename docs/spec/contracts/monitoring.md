@@ -187,6 +187,7 @@ type commandAuditActorResponse struct {
 - Target 显式动作沿用 `POST /api/targets/{id}/runtime/archive`（置 retired + 暂停）和 `/runtime/restore-to-paused`（置 active + 暂停）；动作重算共享依赖并校验 preview digest/确认。恢复不重开服务、域名关联，不启用探测；退役状态禁止普通维护、暂停、恢复运行操作。历史列表必须提供显式恢复入口。
 - 创建服务、域名或关联已有对象时，Target 是否接受当前关联只按 `lifecycle_status` 判断；`retired` 返回 409，即使对象本身为暂停、退役或未知。失败不留下新对象或关联。服务、域名对象状态的独立修订不恢复探测，也不重开或结束关联。
 - 直接运行控制动作增加 `control_revision`，即使重复设置相同值，也保护用户后续设置不被先前 VPS 维护结束覆盖。
+- 资料字段（`group`、`labels`、`note`）的并发令牌是 `metadata_updated_at`（迁移 `0073` 回填为既有 `updated_at`，非空，默认 `now()`）。`PATCH /api/monitoring-instances/{id}` 的 `If-Match` 只与它比较，资料写入同时推进 `updated_at` 与 `metadata_updated_at`；同步批次、在线信号、事件摘要、运行控制等写入只推进 `updated_at`，不得让资料编辑因心跳而 409 `metadata conflict`。别人先写入资料时旧令牌仍返回 409，不写入。
 
 ### Target 观测新鲜度后端投影
 

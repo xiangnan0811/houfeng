@@ -90,7 +90,8 @@ const monitoringInstanceSelectColumns = `
 	archived_at,
 	archived_reason,
 	created_at,
-	updated_at`
+	updated_at,
+	metadata_updated_at`
 
 type monitoringInstanceScanner interface {
 	Scan(dest ...any) error
@@ -140,6 +141,7 @@ var monitoringInstanceSelectColumnNames = []string{
 	"archived_reason",
 	"created_at",
 	"updated_at",
+	"metadata_updated_at",
 }
 
 func scanMonitoringInstance(row monitoringInstanceScanner) (monitoringinstances.Record, error) {
@@ -180,6 +182,7 @@ func scanMonitoringInstance(row monitoringInstanceScanner) (monitoringinstances.
 		&record.ArchivedReason,
 		&record.CreatedAt,
 		&record.UpdatedAt,
+		&record.MetadataUpdatedAt,
 	); err != nil {
 		return monitoringinstances.Record{}, err
 	}
@@ -283,6 +286,7 @@ func scanMonitoringInstanceWithPreviousState(row monitoringInstanceScanner) (mon
 		&record.ArchivedReason,
 		&record.CreatedAt,
 		&record.UpdatedAt,
+		&record.MetadataUpdatedAt,
 		&priorState,
 	); err != nil {
 		return monitoringinstances.Record{}, "", err
@@ -338,6 +342,7 @@ func scanMonitoringInstanceOnboarding(row monitoringInstanceScanner) (monitoring
 		&record.ArchivedReason,
 		&record.CreatedAt,
 		&record.UpdatedAt,
+		&record.MetadataUpdatedAt,
 		&hasHostSample,
 		&hasAcceptedObservation,
 	); err != nil {
@@ -834,10 +839,10 @@ func (r *PostgresMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(
 	}
 	args = append(args, input.Labels, input.Note)
 	precondition := ""
-	if input.ExpectedUpdatedAt != nil {
-		args = append(args, *input.ExpectedUpdatedAt)
+	if input.ExpectedMetadataUpdatedAt != nil {
+		args = append(args, *input.ExpectedMetadataUpdatedAt)
 		precondition = `
-		  and updated_at = $5`
+		  and metadata_updated_at = $5`
 	}
 
 	record, err := scanMonitoringInstance(tx.QueryRow(ctx, `
@@ -845,7 +850,8 @@ func (r *PostgresMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(
 		set "group" = coalesce($2, "group"),
 		    labels = $3,
 		    note = $4,
-		    updated_at = now()
+		    updated_at = now(),
+		    metadata_updated_at = now()
 		where monitoring_instance_id = $1`+precondition+`
 		  and archived_at is null
 		returning `+monitoringInstanceSelectColumns, args...))
@@ -860,7 +866,7 @@ func (r *PostgresMonitoringInstanceRepository) UpdateMonitoringInstanceMetadata(
 		if archived {
 			return monitoringinstances.Record{}, monitoringinstances.ErrArchivedMonitoringInstance
 		}
-		if input.ExpectedUpdatedAt != nil {
+		if input.ExpectedMetadataUpdatedAt != nil {
 			return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceMetadataConflict
 		}
 		return monitoringinstances.Record{}, monitoringinstances.ErrMonitoringInstanceNotFound

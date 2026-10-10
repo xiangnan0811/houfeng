@@ -160,7 +160,7 @@ if err != nil || authorization.Digest != input.CaptureAuthorization.Digest {
   引用；改名不改变成员或授权。名称 trim 后为 1–100 字符，项目内唯一，冲突为 409。
   旧成员无 user FK；添加必须确认目标账号存在、活跃且为 admin，停用目标返回 409
   `user_disabled`。移除只要求组存在和 user ID 格式合法，可清理悬空旧成员。
-- C72 在 C71 已完成主管理员/访问组结构的基础上追加 `0072_add_target_observation_freshness.sql` 的观测新鲜度列与投影默认值；C71 的 `0071_add_access_management.sql` 负责旧库用户、主管理员和访问组回填。旧库零用户留给 seed，单个 admin 提升为主管理员，多用户或唯一非 admin 整体失败回滚，不猜测初始身份。主管理员 CHECK 与 partial UNIQUE index 在数据库中保证唯一且活跃。升级遵循
+- C72 在 C71 已完成主管理员/访问组结构的基础上追加 `0072_add_target_observation_freshness.sql` 的观测新鲜度列与投影默认值，C73 再追加 `0073_add_monitoring_instance_metadata_version.sql` 的监控实例资料版本列，二者都不改变访问管理结构与权限；C71 的 `0071_add_access_management.sql` 负责旧库用户、主管理员和访问组回填。旧库零用户留给 seed，单个 admin 提升为主管理员，多用户或唯一非 admin 整体失败回滚，不猜测初始身份。主管理员 CHECK 与 partial UNIQUE index 在数据库中保证唯一且活跃。升级遵循
   [APP ACL current](../platform/app-acl-current.md)，Center runtime 不自行提权迁移。
 
 ### HTTP 与目录形状

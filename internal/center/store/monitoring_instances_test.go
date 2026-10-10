@@ -821,8 +821,8 @@ func TestMonitoringInstanceOnboardingGetStateReturnsDerivedPhaseAndPendingMetada
 					CurrentHealthStatus:        monitoringinstances.HealthNormal,
 					LastHeartbeatAt:            &heartbeatAt,
 				})
-				*(dest[38].(*bool)) = true
-				*(dest[39].(*bool)) = false
+				*(dest[39].(*bool)) = true
+				*(dest[40].(*bool)) = false
 				return nil
 			}}
 		},
@@ -882,8 +882,8 @@ func TestMonitoringInstanceOnboardingGetStateScopesEvidenceToCurrentBindingGener
 					BindingEpochStartedAt: &bindingEpochStartedAt,
 					LastHeartbeatAt:       &staleHeartbeatAt,
 				})
-				*(dest[38].(*bool)) = false
 				*(dest[39].(*bool)) = false
+				*(dest[40].(*bool)) = false
 				return nil
 			}}
 		},
@@ -948,9 +948,9 @@ func TestUpdateMonitoringInstanceMetadata(t *testing.T) {
 	}}
 
 	record, err := repo.UpdateMonitoringInstanceMetadata(context.Background(), "mi_001", monitoringinstances.UpdateMetadataInput{
-		Labels:            []string{"edge", "core"},
-		Note:              "updated",
-		ExpectedUpdatedAt: &expectedUpdatedAt,
+		Labels:                    []string{"edge", "core"},
+		Note:                      "updated",
+		ExpectedMetadataUpdatedAt: &expectedUpdatedAt,
 	})
 	if err != nil {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() error = %v", err)
@@ -1101,9 +1101,9 @@ func TestUpdateMonitoringInstanceMetadataMapsPreconditionMissToConflictWhenMonit
 	}}
 
 	_, err := repo.UpdateMonitoringInstanceMetadata(context.Background(), "mi_001", monitoringinstances.UpdateMetadataInput{
-		Labels:            []string{"edge"},
-		Note:              "updated",
-		ExpectedUpdatedAt: &expectedUpdatedAt,
+		Labels:                    []string{"edge"},
+		Note:                      "updated",
+		ExpectedMetadataUpdatedAt: &expectedUpdatedAt,
 	})
 	if !errors.Is(err, monitoringinstances.ErrMonitoringInstanceMetadataConflict) {
 		t.Fatalf("UpdateMonitoringInstanceMetadata() error = %v, want ErrMonitoringInstanceMetadataConflict", err)
@@ -1466,8 +1466,8 @@ func TestBindingResetClearsActiveAndPendingBindingState(t *testing.T) {
 					BindingStatus:        monitoringinstances.BindingUnbound,
 					UpdatedAt:            eventAt,
 				})
-				if len(dest) > 38 {
-					*(dest[38].(*string)) = monitoringinstances.BindingBound
+				if len(dest) > 39 {
+					*(dest[39].(*string)) = monitoringinstances.BindingBound
 				}
 				return nil
 			}}
@@ -2303,6 +2303,7 @@ func scanMonitoringInstanceRecordDestinations(dest []any, record monitoringinsta
 	*(dest[30].(*string)) = record.ArchivedReason
 	*(dest[31].(*time.Time)) = record.CreatedAt
 	*(dest[32].(*time.Time)) = record.UpdatedAt
+	*(dest[33].(*time.Time)) = record.MetadataUpdatedAt
 }
 func cloneTimePtr(value *time.Time) *time.Time {
 	if value == nil {

@@ -1011,8 +1011,8 @@ func TestMonitoringInstanceItemPatchMetadataReturnsUpdatedRecord(t *testing.T) {
 	if repo.updateMonitoringInstanceMetadataInput.Note != "updated" {
 		t.Fatalf("update note = %q, want %q", repo.updateMonitoringInstanceMetadataInput.Note, "updated")
 	}
-	if repo.updateMonitoringInstanceMetadataInput.ExpectedUpdatedAt == nil || !repo.updateMonitoringInstanceMetadataInput.ExpectedUpdatedAt.Equal(expectedUpdatedAt) {
-		t.Fatalf("expected updated_at = %v, want %s", repo.updateMonitoringInstanceMetadataInput.ExpectedUpdatedAt, expectedUpdatedAt.Format(time.RFC3339Nano))
+	if repo.updateMonitoringInstanceMetadataInput.ExpectedMetadataUpdatedAt == nil || !repo.updateMonitoringInstanceMetadataInput.ExpectedMetadataUpdatedAt.Equal(expectedUpdatedAt) {
+		t.Fatalf("expected updated_at = %v, want %s", repo.updateMonitoringInstanceMetadataInput.ExpectedMetadataUpdatedAt, expectedUpdatedAt.Format(time.RFC3339Nano))
 	}
 
 	var body monitoringinstances.Record

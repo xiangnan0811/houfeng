@@ -112,6 +112,7 @@ function createdFixture(id = 'mi_new'): CreateVPSMonitoringInstanceResponse {
     current_primary_issue_summary: '',
     created_at: '2026-08-29T00:00:00Z',
     updated_at: '2026-08-29T00:00:00Z',
+    metadata_updated_at: '2026-08-29T00:00:00Z',
     link: {
       link_id: 'link_new',
       vps_id: 'vps_a',

@@ -550,7 +550,9 @@ describe('MonitoringDetailPage', () => {
       current_health_status: '正常',
       current_active_incident_count: 0,
       current_primary_issue_summary: '',
+      // 心跳把 updated_at 推到 09:05，资料令牌仍停在上次资料写入的 09:00。
       updated_at: '2026-04-27T09:05:00Z',
+      metadata_updated_at: '2026-04-27T09:00:00Z',
     })
     const updatedRecord = {
       ...initialRecord,
@@ -558,6 +560,7 @@ describe('MonitoringDetailPage', () => {
       labels: ['edge', 'db'],
       note: 'new note',
       updated_at: '2026-04-27T09:08:00Z',
+      metadata_updated_at: '2026-04-27T09:08:00Z',
     }
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
@@ -618,7 +621,7 @@ describe('MonitoringDetailPage', () => {
         headers: {
           Accept: 'application/json',
           'Content-Type': 'application/json',
-          'If-Match': '"2026-04-27T09:05:00Z"',
+          'If-Match': '"2026-04-27T09:00:00Z"',
         },
         cache: 'no-store',
         credentials: 'include',

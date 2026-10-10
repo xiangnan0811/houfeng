@@ -80,7 +80,7 @@ func MonitoringInstanceItem(repo monitoringinstances.Repository) http.Handler {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
-			input.ExpectedUpdatedAt = expectedUpdatedAt
+			input.ExpectedMetadataUpdatedAt = expectedUpdatedAt
 			input = normalizeUpdateMetadataInput(input)
 			if !isValidUpdateMetadataInput(input) {
 				writeError(w, http.StatusBadRequest, "invalid input")

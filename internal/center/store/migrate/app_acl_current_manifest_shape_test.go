@@ -192,6 +192,32 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 	if len(allTestChains) != 383 {
 		t.Fatalf("independent C72 predecessor chain cases = %d, want 383", len(allTestChains))
 	}
+	c73Chains := append([]struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{}, allTestChains...)
+	allTestChains = append(allTestChains, struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{
+		name:     "P72",
+		profiles: []appACLCurrentProfileID{appACLCurrentProfileP72},
+	})
+	for _, tc := range c73Chains {
+		allTestChains = append(allTestChains, struct {
+			name     string
+			profiles []appACLCurrentProfileID
+		}{
+			name:     "C72-" + tc.name,
+			profiles: append(append([]appACLCurrentProfileID(nil), tc.profiles...), appACLCurrentProfileP72),
+		})
+	}
+	if len(allTestChains) != 767 {
+		t.Fatalf("independent C73 predecessor chain cases = %d, want 767", len(allTestChains))
+	}
+	if len(allTestChains) != len(appACLCurrentAcceptedPredecessorProfileChains) {
+		t.Fatalf("test chain cases = %d, production accepted chains = %d", len(allTestChains), len(appACLCurrentAcceptedPredecessorProfileChains))
+	}
 
 	for _, tc := range allTestChains {
 		tc := tc
@@ -259,14 +285,14 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 				currentPrivileges,
 			)
 			if err != nil {
-				t.Fatalf("classify C72 successor: %v", err)
+				t.Fatalf("classify C73 successor: %v", err)
 			}
 			if successorShape.kind != appACLCurrentManifestShapeSuccessor ||
 				successorShape.latest.ManifestDigest != successor.ManifestDigest ||
 				successorShape.transition == nil ||
 				successorShape.transition.profile != lastProfile {
 				t.Fatalf(
-					"C72 successor shape = %#v, want kind %d/latest %x/profile %d",
+					"C73 successor shape = %#v, want kind %d/latest %x/profile %d",
 					successorShape,
 					appACLCurrentManifestShapeSuccessor,
 					successor.ManifestDigest,
