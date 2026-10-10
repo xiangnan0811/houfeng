@@ -192,7 +192,7 @@ export function RecordDetailModal({
               </div>
               <div className="asset-decision-record-continuity__state">
                 <Badge variant="state" tone={readbackStatusTone(recordDetailState.detail.execution_readback?.status)}>
-                  {recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}
+                  {recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待核对结果'}
                 </Badge>
                 <Badge variant="count" tone={recordDetailState.detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
                   可推进 {recordDetailState.detail.execution_plan?.actionable_count ?? 0}

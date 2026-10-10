@@ -526,7 +526,7 @@ export function recordCoverSummary(detail: AssetDecisionRecordDetail): string {
 }
 
 export function recordCoverMeta(detail: AssetDecisionRecordDetail): string {
-  const readback = detail.execution_readback?.status ? READBACK_STATUS_LABELS[detail.execution_readback.status] : '等待回读'
+  const readback = detail.execution_readback?.status ? READBACK_STATUS_LABELS[detail.execution_readback.status] : '等待核对结果'
   return `${RECORD_STATUS_LABELS[detail.status]} · 跟进 ${recordFollowupDoneCount(detail)}/${detail.member_count} · ${readback}`
 }
 

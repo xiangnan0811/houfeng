@@ -354,14 +354,15 @@ function recordFollowupOpenCount(record: AssetDecisionRecordSummary): number {
  * 生成回读计数摘要
  */
 function readbackCountSummary(readback?: AssetDecisionRecordSummary['execution_readback']): string {
-  if (!readback) return '等待回读'
+  // 与 formatters.readbackCountSummary 同一套词。
+  if (!readback) return '等待核对结果'
   const parts = [
-    readback.drift_count > 0 ? `漂移 ${readback.drift_count}` : '',
-    readback.blocked_count > 0 ? `阻塞 ${readback.blocked_count}` : '',
-    readback.needs_evidence_count > 0 ? `缺口 ${readback.needs_evidence_count}` : '',
-    readback.open_count > 0 ? `待处理 ${readback.open_count}` : '',
+    readback.drift_count > 0 ? `与决定不符 ${readback.drift_count}` : '',
+    readback.blocked_count > 0 ? `受阻 ${readback.blocked_count}` : '',
+    readback.needs_evidence_count > 0 ? `缺资料 ${readback.needs_evidence_count}` : '',
+    readback.open_count > 0 ? `待核对结果 ${readback.open_count}` : '',
   ].filter(Boolean)
-  return parts.length > 0 ? parts.join(' · ') : `对齐 ${readback.aligned_count ?? 0}`
+  return parts.length > 0 ? parts.join(' · ') : `与决定一致 ${readback.aligned_count ?? 0}`
 }
 
 /**
