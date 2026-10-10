@@ -668,7 +668,9 @@ function VPSQuickFacts({ row, subscriptionsError }: { row: InventoryRow; subscri
           </dd>
           {/* 手机紧凑卡片隐藏了“位置与规格”列，规格在展开区补回；宽屏行内已有，不重复。 */}
           <dt className="vps-workbench__compact-only">规格</dt>
-          <dd className="vps-workbench__compact-only">{vpsSpecLabel(vps)}</dd>
+          <dd className={vpsSpecParts(vps)[0] === '规格未填写' ? 'vps-workbench__compact-only vps-quiet-fact' : 'vps-workbench__compact-only'}>
+            <DottedLine parts={vpsSpecParts(vps)} />
+          </dd>
         </dl>
       </section>
       <section className="vps-accordion__group">
