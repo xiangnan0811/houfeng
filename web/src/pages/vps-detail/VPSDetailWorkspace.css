@@ -585,9 +585,15 @@
 .vps-ledger__dir{flex-basis:280px;width:280px}
 }
 @container vps-canvas (max-width: 24rem){
-.vps-workbench__row{grid-template-columns:minmax(0,1fr);grid-template-areas:'id' 'place' 'status' 'renewal' 'evidence'}
-.vps-workbench__row td:nth-child(4){padding-bottom:6px}
-.vps-workbench__row td:nth-child(5){padding-bottom:10px}
+/* 手机紧凑卡片：名称 + 地址/服务商，下一行状态与续费；位置规格、用途与监控证据在展开后查看。 */
+.vps-workbench__row{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);grid-template-areas:'id id' 'status renewal'}
+.vps-workbench__row td:nth-child(2),
+  .vps-workbench__row td:nth-child(5),
+  .vps-workbench__row td:nth-child(3) .vps-workbench__meta,
+  .vps-workbench__kicker{display:none}
+.vps-workbench__row td:nth-child(1){padding-bottom:2px}
+.vps-workbench__row td:nth-child(3),
+  .vps-workbench__row td:nth-child(4){padding-top:2px;padding-bottom:10px}
 }
 @media (max-width: 720px){
 .vps-page__search{flex-basis:100%;max-width:none}
