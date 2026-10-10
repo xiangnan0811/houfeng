@@ -501,7 +501,7 @@ describe('VPSDetailPage gate', () => {
       renewal_review_at: null,
     }, { expectedUpdatedAt: '2026-08-20T00:00:00Z' })
     expect(screen.getByRole('status')).toHaveTextContent('续费决策已更新，概览已刷新。未找到 active 订阅。')
-    expect(screen.queryByRole('link', { name: '新增订阅事实' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '新增订阅' })).not.toBeInTheDocument()
   })
 
   it('creates a subscription fact from the overview management menu', async () => {
@@ -512,9 +512,9 @@ describe('VPSDetailPage gate', () => {
     renderDetail()
 
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '订阅' }))
 
-    const dialog = await screen.findByRole('dialog', { name: '新增订阅事实' })
+    const dialog = await screen.findByRole('dialog', { name: '新增订阅' })
     fireEvent.change(screen.getByRole('spinbutton', { name: '价格' }), {
       target: { value: '12.5' },
     })
@@ -542,8 +542,8 @@ describe('VPSDetailPage gate', () => {
 
     renderDetail()
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
-    const dialog = await screen.findByRole('dialog', { name: '新增订阅事实' })
+    fireEvent.click(screen.getByRole('menuitem', { name: '订阅' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增订阅' })
     expect(within(dialog).getByLabelText('续费日期')).toHaveValue('')
     expect(within(dialog).getByLabelText('开始日期')).toHaveValue('')
 
@@ -566,8 +566,8 @@ describe('VPSDetailPage gate', () => {
     const create = vi.spyOn(api, 'createVPSSubscription').mockResolvedValue(subscriptionFixture())
     const openDialog = async () => {
       fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-      fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
-      return screen.findByRole('dialog', { name: '新增订阅事实' })
+      fireEvent.click(screen.getByRole('menuitem', { name: '订阅' }))
+      return screen.findByRole('dialog', { name: '新增订阅' })
     }
     const submit = async (dialog: HTMLElement) => {
       fireEvent.change(within(dialog).getByRole('spinbutton', { name: '价格' }), { target: { value: '9' } })
@@ -612,8 +612,8 @@ describe('VPSDetailPage gate', () => {
 
     renderDetail()
     fireEvent.click(await screen.findByRole('button', { name: '管理' }))
-    fireEvent.click(screen.getByRole('menuitem', { name: '订阅事实' }))
-    const dialog = await screen.findByRole('dialog', { name: '新增订阅事实' })
+    fireEvent.click(screen.getByRole('menuitem', { name: '订阅' }))
+    const dialog = await screen.findByRole('dialog', { name: '新增订阅' })
     expect(within(dialog).getByLabelText('开始日期')).toHaveValue('')
 
     fireEvent.click(within(dialog).getByRole('button', { name: '开始日期填今天' }))

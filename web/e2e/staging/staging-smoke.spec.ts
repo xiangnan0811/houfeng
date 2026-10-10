@@ -352,7 +352,7 @@ async function restoreRawLayerDays(
 }
 
 async function exerciseCustomTemplateCancel(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '场景与组合' }).click()
+  await page.getByRole('button', { name: '自定义分组' }).click()
   const cards = page.getByRole('list', { name: '场景模板' }).getByRole('listitem')
   await expect(cards.first()).toBeVisible()
 

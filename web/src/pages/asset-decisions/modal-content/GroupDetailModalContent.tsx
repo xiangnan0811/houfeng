@@ -116,7 +116,7 @@ export function GroupDetailModal({
               { value: 'overview', label: '概览' },
               {
                 value: groupDetailPanel === 'raw' ? 'raw' : 'members',
-                label: groupDetailPanel === 'raw' ? '底稿' : '成员',
+                label: groupDetailPanel === 'raw' ? '完整明细' : '成员',
                 count: detailState.detail.members.length,
               },
               {
@@ -186,19 +186,19 @@ export function GroupDetailModal({
                 },
                 hiddenAction: (
                   <button className="btn-text sm secondary" type="button" onClick={() => onSetGroupDetailPanel('raw')}>
-                    查看数据底稿
+                    查看完整明细
                   </button>
                 ),
               },
             ),
           )}
-          {groupDetailPanel === 'save' && recordDraft && renderDetailPanel('保存记录',
+          {groupDetailPanel === 'save' && recordDraft && renderDetailPanel('保存决定',
             <form className="asset-decision-record-form" onSubmit={onSubmitRecordSave}>
               <div className="asset-decision-record-form__header">
                 {renderCompactTaskHeader('保存组合决策记录', `成员 ${detailState.detail.members.length}`)}
                 <div className="asset-decision-member-actions">
                   <button className="btn md primary" type="submit" disabled={recordSaving}>
-                    {recordSaving ? '保存中…' : '保存记录'}
+                    {recordSaving ? '保存中…' : '保存决定'}
                   </button>
                   <button className="btn md secondary" type="button" onClick={onCancelRecordSave} disabled={recordSaving}>
                     取消
@@ -252,7 +252,7 @@ export function GroupDetailModal({
               />
             </form>,
           )}
-          {groupDetailPanel === 'raw' && renderDetailPanel('数据底稿',
+          {groupDetailPanel === 'raw' && renderDetailPanel('完整明细',
             <div className="asset-table-scroll" role="region" aria-label="决策组成员对比" tabIndex={0}>
               <DataTable
                 className="asset-table asset-decision-members-table"

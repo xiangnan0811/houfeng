@@ -101,11 +101,11 @@ export const FOLLOWUP_STATUS_LABELS: Record<AssetDecisionFollowupStatus, string>
 }
 
 export const READBACK_STATUS_LABELS: Record<AssetDecisionExecutionReadbackStatus, string> = {
-  open: '待回读',
-  aligned: '已对齐',
-  drift: '有漂移',
-  blocked: '阻塞',
-  needs_evidence: '需补证据',
+  open: '待核对结果',
+  aligned: '与决定一致',
+  drift: '与决定不符',
+  blocked: '受阻',
+  needs_evidence: '缺资料',
   inactive: '不活跃',
 }
 
@@ -292,14 +292,14 @@ export function recordFollowupOpenCount(record: AssetDecisionRecordSummary): num
 }
 
 export function readbackCountSummary(readback?: AssetDecisionRecordExecutionReadback): string {
-  if (!readback) return '等待回读'
+  if (!readback) return '等待核对结果'
   const parts = [
-    readback.drift_count > 0 ? `漂移 ${readback.drift_count}` : '',
-    readback.blocked_count > 0 ? `阻塞 ${readback.blocked_count}` : '',
-    readback.needs_evidence_count > 0 ? `缺口 ${readback.needs_evidence_count}` : '',
-    readback.open_count > 0 ? `待处理 ${readback.open_count}` : '',
+    readback.drift_count > 0 ? `与决定不符 ${readback.drift_count}` : '',
+    readback.blocked_count > 0 ? `受阻 ${readback.blocked_count}` : '',
+    readback.needs_evidence_count > 0 ? `缺资料 ${readback.needs_evidence_count}` : '',
+    readback.open_count > 0 ? `待核对结果 ${readback.open_count}` : '',
   ].filter(Boolean)
-  return parts.length > 0 ? parts.join(' · ') : `对齐 ${readback.aligned_count ?? 0}`
+  return parts.length > 0 ? parts.join(' · ') : `与决定一致 ${readback.aligned_count ?? 0}`
 }
 
 export function executionPlanCountSummary(plan?: AssetDecisionRecordExecutionPlan): string {
@@ -526,7 +526,7 @@ export function recordCoverSummary(detail: AssetDecisionRecordDetail): string {
 }
 
 export function recordCoverMeta(detail: AssetDecisionRecordDetail): string {
-  const readback = detail.execution_readback?.status ? READBACK_STATUS_LABELS[detail.execution_readback.status] : '等待回读'
+  const readback = detail.execution_readback?.status ? READBACK_STATUS_LABELS[detail.execution_readback.status] : '等待核对结果'
   return `${RECORD_STATUS_LABELS[detail.status]} · 跟进 ${recordFollowupDoneCount(detail)}/${detail.member_count} · ${readback}`
 }
 
@@ -580,14 +580,14 @@ type ClosedLoopMetrics = {
 }
 
 export function portfolioRiskLabel(metrics: ClosedLoopMetrics): string {
-  if (metrics.partialErrorCount > 0) return '证据待确认'
-  if (metrics.readbackDriftCount > 0) return `事实漂移 ${metrics.readbackDriftCount}`
-  if (metrics.readbackBlockedCount > 0) return `阻塞 ${metrics.readbackBlockedCount}`
+  if (metrics.partialErrorCount > 0) return '部分数据未读到'
+  if (metrics.readbackDriftCount > 0) return `与决定不符 ${metrics.readbackDriftCount}`
+  if (metrics.readbackBlockedCount > 0) return `受阻 ${metrics.readbackBlockedCount}`
   const gapCount = metrics.readbackNeedsEvidenceCount + metrics.evidenceGapGroupCount
-  if (gapCount > 0) return `资料缺口 ${gapCount}`
-  if (metrics.readbackOpenCount > 0) return `待回读 ${metrics.readbackOpenCount}`
+  if (gapCount > 0) return `缺资料 ${gapCount}`
+  if (metrics.readbackOpenCount > 0) return `待核对结果 ${metrics.readbackOpenCount}`
   if (metrics.recordActiveCount > 0) return `跟进中 ${metrics.recordActiveCount}`
-  return '闭环稳定'
+  return '无待处理决策'
 }
 
 export function portfolioEvidenceLabel(overview?: AssetDecisionOverview | null): string {

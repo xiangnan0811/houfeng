@@ -120,7 +120,7 @@ export const VIEW_LABELS: Record<WorkbenchView, string> = {
   provider: '服务商组合',
   cost: '预算压力',
   evidence: '资料缺口',
-  single_queue: '单台队列',
+  single_queue: '逐台处理',
 }
 
 // 角色标签
@@ -186,11 +186,11 @@ export const FOLLOWUP_STATUS_LABELS: Record<AssetDecisionFollowupStatus, string>
 
 // 回读状态标签
 export const READBACK_STATUS_LABELS: Record<AssetDecisionExecutionReadbackStatus, string> = {
-  open: '待回读',
-  aligned: '已对齐',
-  drift: '有漂移',
-  blocked: '阻塞',
-  needs_evidence: '需补证据',
+  open: '待核对结果',
+  aligned: '与决定一致',
+  drift: '与决定不符',
+  blocked: '受阻',
+  needs_evidence: '缺资料',
   inactive: '不活跃',
 }
 

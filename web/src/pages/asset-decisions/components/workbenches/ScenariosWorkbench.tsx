@@ -94,7 +94,7 @@ function ManualGroupList({ manualGroupsState, onOpenManualGroup }: Pick<Scenario
 
 export function ScenariosWorkbench(props: ScenariosWorkbenchProps) {
   return (
-    <WorkbenchPanel title="场景与组合" className="asset-workbench--scenarios">
+    <WorkbenchPanel title="自定义分组" className="asset-workbench--scenarios">
       <div className="asset-workbench__columns">
         <section className="asset-workbench__group" aria-labelledby="asset-workbench-templates">
           <h3 className="asset-workbench__subtitle" id="asset-workbench-templates">场景模板</h3>

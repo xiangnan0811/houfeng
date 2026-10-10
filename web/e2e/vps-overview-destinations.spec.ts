@@ -251,7 +251,7 @@ const PANEL_COMMANDS = [
       'renewal.subscription.missing.v1',
       { id: 'open_subscription', label: '管理订阅' },
     ),
-    dialog: '订阅事实',
+    dialog: '新增订阅',
   },
   {
     name: 'renewal decision',

@@ -74,7 +74,8 @@ describe('buildShellSummaryModel', () => {
   it('keeps known abnormalities and unobserved targets as separate fresh facts', () => {
     expect(buildShellSummaryModel(success(), NOW)).toMatchObject({
       state: 'clear',
-      label: '当前运行异常计数为 0',
+      label: '运行异常 0',
+      spokenLabel: '当前运行异常计数为 0',
       showAnomalyCounts: true,
     })
     expect(buildShellSummaryModel(success(overview({ abnormal_target_count: 2 })), NOW))
@@ -154,7 +155,7 @@ describe('buildShellSummaryModel', () => {
       state: 'unobserved',
       label: '尚有目标无观测 4，观测过期 2',
     })
-    expect(buildShellSummaryModel(success(), NOW).label).toBe('当前运行异常计数为 0')
+    expect(buildShellSummaryModel(success(), NOW).label).toBe('运行异常 0')
   })
 
   it('hides target stale counts when the system snapshot itself is stale', () => {

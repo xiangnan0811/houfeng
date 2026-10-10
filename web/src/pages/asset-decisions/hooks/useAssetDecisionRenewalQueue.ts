@@ -162,7 +162,7 @@ export function useAssetDecisionRenewalQueue({
         setSettledQueue({
           revision,
           retryRevision: queueRetryRevision,
-          error: describeError(error, '加载 VPS 单台队列失败'),
+          error: describeError(error, '加载逐台处理队列失败'),
           subscriptions: [],
           unreviewed: [],
           cancel: [],

@@ -285,7 +285,7 @@ describe('VPSCreateModal', () => {
     expect(within(modal).getByRole('combobox', { name: '资产服务商' })).toHaveValue('')
     expect(within(modal).getByRole('button', { name: '新建服务商' })).toBeEnabled()
     fireEvent.click(within(modal).getByText('可选设置'))
-    expect(within(modal).getByLabelText('服务商名称快照')).toBeInTheDocument()
+    expect(within(modal).getByLabelText('VPS 上的服务商名称')).toBeInTheDocument()
   })
 
   it('disables the provider select while the catalog is loading', () => {

@@ -124,7 +124,7 @@ export function TargetDetailNotices({
       node: (
         <NoticeRow
           tone="notice"
-          mark="执行覆盖"
+          mark="执行者"
           title={notice.title}
           detail={notice.detail}
         />

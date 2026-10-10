@@ -86,10 +86,10 @@ export function SingleQueueWorkbench(props: SingleQueueWorkbenchProps) {
   ] satisfies Array<{ value: DecisionQueueView; label: string; count: number }>
 
   return (
-    <WorkbenchPanel title="单台队列" id="single-vps-queue" className="asset-workbench--queue">
+    <WorkbenchPanel title="逐台处理" id="single-vps-queue" className="asset-workbench--queue">
       <div className="asset-workbench__tabs">
         <Tabs
-          label="单台辅助队列视图"
+          label="逐台处理视图"
           idBase="asset-decision-queue"
           items={queueTabs}
           value={queueView}
@@ -99,9 +99,9 @@ export function SingleQueueWorkbench(props: SingleQueueWorkbenchProps) {
       </div>
       <TabPanel idBase="asset-decision-queue" value={queueView} className="asset-decision-tab-panel">
         {queueState.queueLoading ? (
-          <PageStateView kind="loading" title="正在加载单台队列…" surface="empty" compact />
+          <PageStateView kind="loading" title="正在加载逐台处理…" surface="empty" compact />
         ) : queueState.queueError ? (
-          <PageStateView kind="error" title="单台队列不可用" surface="empty" compact />
+          <PageStateView kind="error" title="逐台处理不可用" surface="empty" compact />
         ) : visibleDecisionQueue.length === 0 ? (
           <PageStateView
             kind="empty"
@@ -119,7 +119,7 @@ export function SingleQueueWorkbench(props: SingleQueueWorkbenchProps) {
             compact
           />
         ) : (
-          <ul className="asset-scan-list asset-scan-list--queue" aria-label="单台辅助队列">
+          <ul className="asset-scan-list asset-scan-list--queue" aria-label="逐台处理队列">
             {visibleDecisionQueue.map((item) => (
               <QueueRow
                 key={item.vps.vps_id}

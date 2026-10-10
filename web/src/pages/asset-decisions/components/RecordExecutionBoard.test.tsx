@@ -166,7 +166,7 @@ describe('RecordExecutionBoard', () => {
     fireEvent.click(screen.getByRole('button', { name: '复核记录' }))
     expect(onReviewRecord).toHaveBeenCalledWith(rows[2])
     expect(screen.queryByText('Node 4')).not.toBeInTheDocument()
-    expect(screen.getByText('另有 1 台在成员跟进或底稿中查看')).toBeInTheDocument()
+    expect(screen.getByText('另有 1 台在成员跟进或完整明细中查看')).toBeInTheDocument()
   })
 
   it('emits the quick completed follow-up for an aligned member', () => {

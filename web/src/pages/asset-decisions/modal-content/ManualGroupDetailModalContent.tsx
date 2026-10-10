@@ -144,7 +144,7 @@ export function ManualGroupDetailModal({
             idBase="asset-manual-group-detail"
             items={[
               { value: 'overview', label: '概览' },
-              { value: manualDetailPanel === 'add' || manualDetailPanel === 'raw' ? manualDetailPanel : 'members', label: manualDetailPanel === 'add' ? '添加' : manualDetailPanel === 'raw' ? '底稿' : '成员', count: manualDetailState.detail.members.length },
+              { value: manualDetailPanel === 'add' || manualDetailPanel === 'raw' ? manualDetailPanel : 'members', label: manualDetailPanel === 'add' ? '添加' : manualDetailPanel === 'raw' ? '完整明细' : '成员', count: manualDetailState.detail.members.length },
               { value: manualDetailPanel === 'save' ? 'save' : 'edit', label: manualDetailPanel === 'save' ? '保存' : '编辑' },
             ]}
             value={manualDetailPanel}
@@ -184,7 +184,7 @@ export function ManualGroupDetailModal({
                 type="button"
                 onClick={() => onStartManualRecordSave(manualDetailState.detail!)}
               >
-                保存记录
+                保存决定
               </button>
             ),
           })}
@@ -371,13 +371,13 @@ export function ManualGroupDetailModal({
           </form>,
           )}
 
-          {manualDetailPanel === 'save' && recordDraft && recordDraft.sourceType === 'manual_group' && renderDetailPanel('保存记录',
+          {manualDetailPanel === 'save' && recordDraft && recordDraft.sourceType === 'manual_group' && renderDetailPanel('保存决定',
             <form className="asset-decision-record-form" onSubmit={onSubmitRecordSave}>
               <div className="asset-decision-record-form__header">
                 {renderCompactTaskHeader('保存自定义组合决策', `成员 ${manualDetailState.detail.members.length}`)}
                 <div className="asset-decision-member-actions">
                   <button className="btn md primary" type="submit" disabled={recordSaving}>
-                    {recordSaving ? '保存中…' : '保存记录'}
+                    {recordSaving ? '保存中…' : '保存决定'}
                   </button>
                   <button className="btn md secondary" type="button" onClick={onCancelRecordSave} disabled={recordSaving}>
                     取消

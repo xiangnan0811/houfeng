@@ -120,7 +120,7 @@ export function RecordDetailModal({
             items={[
               { value: 'overview', label: '概览' },
               { value: recordDetailPanel === 'source' ? 'source' : 'execution', label: recordDetailPanel === 'source' ? '来源' : '执行', count: recordDetailState.detail.execution_plan?.actionable_count ?? 0 },
-              { value: recordDetailPanel === 'raw' ? 'raw' : 'members', label: recordDetailPanel === 'raw' ? '底稿' : '成员', count: recordDetailState.detail.members.length },
+              { value: recordDetailPanel === 'raw' ? 'raw' : 'members', label: recordDetailPanel === 'raw' ? '完整明细' : '成员', count: recordDetailState.detail.members.length },
             ]}
             value={recordDetailPanel}
             onChange={(value) => onSetRecordDetailPanel(value as RecordDetailPanel)}
@@ -131,7 +131,7 @@ export function RecordDetailModal({
             className="asset-decision-tab-panel"
           >
           {recordDetailPanel === 'overview' && renderDetailCommand({
-            ariaLabel: '保存记录当前判断',
+            ariaLabel: '已保存决定的当前判断',
             title: '当前记录',
             summary: recordCoverSummary(recordDetailState.detail),
             footer: <span className="asset-decision-detail-command__context">{recordCoverMeta(recordDetailState.detail)}</span>,
@@ -179,7 +179,7 @@ export function RecordDetailModal({
               />
               {recordDetailState.detail.members.length > ASSET_DECISION_DETAIL_PREVIEW_LIMIT && (
                 <button className="btn-text sm secondary" type="button" onClick={() => onSetRecordDetailPanel('raw')}>
-                  查看成员底稿
+                  查看完整明细
                 </button>
               )}
             </>,
@@ -192,7 +192,7 @@ export function RecordDetailModal({
               </div>
               <div className="asset-decision-record-continuity__state">
                 <Badge variant="state" tone={readbackStatusTone(recordDetailState.detail.execution_readback?.status)}>
-                  {recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待回读'}
+                  {recordDetailState.detail.execution_readback?.status ? READBACK_STATUS_LABELS[recordDetailState.detail.execution_readback.status] : '等待核对结果'}
                 </Badge>
                 <Badge variant="count" tone={recordDetailState.detail.execution_plan?.actionable_count > 0 ? 'maintenance' : 'normal'}>
                   可推进 {recordDetailState.detail.execution_plan?.actionable_count ?? 0}
@@ -218,13 +218,13 @@ export function RecordDetailModal({
               {recordDetailState.detail.members.length <= ASSET_DECISION_DETAIL_PREVIEW_LIMIT && (
                 <div className="asset-operation-actions">
                   <button className="btn-text sm secondary" type="button" onClick={() => onSetRecordDetailPanel('raw')}>
-                    查看成员底稿
+                    查看完整明细
                   </button>
                 </div>
               )}
             </>,
           )}
-          {recordDetailPanel === 'raw' && renderDetailPanel('成员底稿',
+          {recordDetailPanel === 'raw' && renderDetailPanel('完整明细',
             <div className="asset-table-scroll" role="region" aria-label="决策记录成员" tabIndex={0}>
               <DataTable
                 className="asset-table asset-decision-record-members-table"

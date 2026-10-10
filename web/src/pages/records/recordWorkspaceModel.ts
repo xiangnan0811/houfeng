@@ -42,7 +42,7 @@ const TYPE_TEMPLATES: Record<RecordType, string> = {
   maintenance: '## 计划\n\n## 执行\n\n## 验证\n',
   migration: '## 范围\n\n## 步骤\n\n## 回滚\n',
   provider_communication: '## 诉求\n\n## 往来\n\n## 结论\n',
-  billing: '## 账单事实\n\n## 处理\n\n## 结论\n',
+  billing: '## 账单信息\n\n## 处理\n\n## 结论\n',
   important_finding: '## 发现\n\n## 影响\n\n## 后续\n',
   note: '## 备忘\n',
 }

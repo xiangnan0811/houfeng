@@ -80,7 +80,7 @@ export function PortfolioWorkbench({
 
   function renderDecisionGroupCards(groups: AssetDecisionGroupSummary[]) {
     return (
-      <div className="asset-decision-group-cards" aria-label="决策组扫描列表">
+      <div className="asset-decision-group-cards" aria-label="待决定的分组列表">
         {groups.map((group, index) => {
           const assessment = group.evidence_assessment
           const hasOperationalRisk = group.cancellation_attention_count > 0
@@ -158,13 +158,21 @@ export function PortfolioWorkbench({
               <strong>{portfolioState.overviewLoading ? '...' : portfolioState.overviewError ? '不可用' : overview?.renewal_group_count ?? 0}</strong>
             </div>
             <div className={`asset-decision-focus__item${closedLoopAnomalies > 0 ? ' asset-decision-focus__item--critical' : partialErrorCount > 0 ? ' asset-decision-focus__item--alert' : ''}`}>
-              <span>闭环异常</span>
+              <span>执行偏差</span>
               <strong>{closedLoopAnomalies}</strong>
               {(closedLoopAnomalies > 0 || partialErrorCount > 0) && <small>{portfolioLead.riskLabel}</small>}
             </div>
             <div className={`asset-decision-focus__item${overview && allSourcesAvailable(overview.source_availability) ? ' asset-decision-focus__item--normal' : ''}`}>
-              <span>证据状态</span>
-              <strong>{portfolioState.overviewLoading ? '...' : portfolioState.overviewError ? '不可用' : overview ? '已聚合' : '等待'}</strong>
+              <span>数据来源</span>
+              <strong>
+                {portfolioState.overviewLoading
+                  ? '读取中'
+                  : portfolioState.overviewError
+                    ? '不可用'
+                    : overview
+                      ? allSourcesAvailable(overview.source_availability) ? '已全部读取' : '部分不可用'
+                      : '读取中'}
+              </strong>
             </div>
           </div>
         )}
@@ -180,8 +188,7 @@ export function PortfolioWorkbench({
         <section className="page-panel asset-decision-command">
           <div className="asset-decision-board__header">
             <div>
-              <p className="section-heading__eyebrow">组合扫描</p>
-              <h2 className="section-heading__title">决策组扫描</h2>
+              <h2 className="section-heading__title">待决定的分组</h2>
             </div>
             <div className="asset-decision-board__tools">
               <div className="asset-decision-window">

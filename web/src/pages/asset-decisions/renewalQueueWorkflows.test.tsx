@@ -38,12 +38,12 @@ describe('Asset Decisions renewal queue workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('单台队列')
+    await openSecondaryWorkbench('逐台处理')
     await waitFor(() => expect(screen.getAllByText('Tokyo Review').length).toBeGreaterThan(0))
-    const singleQueue = screen.getByRole('heading', { name: '单台队列' }).closest('section')
+    const singleQueue = screen.getByRole('heading', { name: '逐台处理' }).closest('section')
     expect(singleQueue).not.toBeNull()
     if (!singleQueue) throw new Error('single queue section must be rendered')
-    expectTabPanelRelationship(singleQueue, '单台辅助队列视图')
+    expectTabPanelRelationship(singleQueue, '逐台处理视图')
     const firstQueueAction = within(singleQueue).getAllByRole('button', { name: '处理' })[0]
     if (!firstQueueAction) throw new Error('single queue must expose a primary action')
     fireEvent.click(firstQueueAction)
@@ -91,10 +91,10 @@ describe('Asset Decisions renewal queue workflows', () => {
       </MemoryRouter>,
     )
 
-    await openSecondaryWorkbench('单台队列')
+    await openSecondaryWorkbench('逐台处理')
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(10))
     const mutationStart = fetchMock.mock.calls.length
-    const singleQueue = screen.getByRole('heading', { name: '单台队列' }).closest('section')
+    const singleQueue = screen.getByRole('heading', { name: '逐台处理' }).closest('section')
     if (!singleQueue) throw new Error('single queue section must be rendered')
     const firstQueueAction = within(singleQueue).getAllByRole('button', { name: '处理' })[0]
     if (!firstQueueAction) throw new Error('single queue must expose a primary action')
@@ -142,11 +142,11 @@ describe('Asset Decisions renewal queue workflows', () => {
     await openSecondaryWorkbench('续费窗口')
     expect(screen.getByRole('heading', { name: '续费候选不可用' })).toBeInTheDocument()
     expect(screen.getAllByText(/subscription evidence unavailable/).length).toBeGreaterThan(0)
-    const groupList = screen.getByRole('heading', { name: '决策组扫描' }).closest('section')
+    const groupList = screen.getByRole('heading', { name: '待决定的分组' }).closest('section')
     expect(groupList).not.toBeNull()
     expect(within(groupList!).queryByText('缺订阅')).not.toBeInTheDocument()
     expect(within(groupList!).queryByText('暂无证据标签')).not.toBeInTheDocument()
     expect(within(groupList!).queryByText('证据稳定')).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '单台队列不可用' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '逐台处理不可用' })).not.toBeInTheDocument()
   })
 })

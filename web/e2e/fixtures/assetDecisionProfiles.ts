@@ -232,7 +232,7 @@ const RECORDS = [
   record({ id: 'adr_004', title: '低价备份机退役', status: 'completed', view: 'cost', members: 3, done: 3, blocked: 0, readback: 'aligned', drift: 0, needsEvidence: 0, updated: '2026-09-02T12:00:00Z' }),
 ]
 
-/** 资产决策：四个次级工作区（记录、场景与组合、续费窗口、单台队列）均有数据。 */
+/** 资产决策：四个次级工作区（记录、自定义分组、续费窗口、逐台处理）均有数据。 */
 export function assetDecisionWorkbenchesProfile(): ApiFixtureProfile {
   const base = coreRouteProfile('/asset-decisions')
   const window30 = SUBSCRIPTIONS.filter((row) => row.renew_at! <= calendarDate(30))

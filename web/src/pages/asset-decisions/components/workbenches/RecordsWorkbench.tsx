@@ -7,7 +7,7 @@ import type { RecordsState } from '../../types'
 import { localDay } from './workbenchFormat'
 import { ScanName, ScanRow, WorkbenchPanel } from './WorkbenchPanel'
 
-// 已对齐 / 待回读 / 不活跃是安静状态，不占视觉；需要复核的状态带计数；未知状态原样显示，不当作已对齐。
+// 与决定一致 / 待核对结果 / 不活跃是安静状态，不占视觉；需要复核的状态带计数；未知状态原样显示，不当作已对齐。
 const QUIET_READBACK = new Set(['aligned', 'open', 'inactive'])
 
 function readbackAttention(record: AssetDecisionRecordSummary): { label: string; tone: BadgeTone } | null {
@@ -22,7 +22,7 @@ function readbackAttention(record: AssetDecisionRecordSummary): { label: string;
 
 export function RecordsWorkbench({ recordsState, onOpenRecord }: { recordsState: RecordsState; onOpenRecord: (recordID: string) => void }) {
   return (
-    <WorkbenchPanel title="保存记录" className="asset-workbench--records">
+    <WorkbenchPanel title="已保存的决定" className="asset-workbench--records">
       {recordsState.loading ? (
         <PageStateView kind="loading" title="正在加载决策记录…" surface="empty" compact />
       ) : recordsState.error ? (

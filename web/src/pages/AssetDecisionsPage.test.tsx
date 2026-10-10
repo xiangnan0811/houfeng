@@ -61,16 +61,16 @@ describe('Asset Decisions route and composition workflows', () => {
     expect(supportStrip).toHaveClass('asset-decision-support-strip')
     const secondaryButtons = within(supportStrip).getAllByRole('button')
     expect(secondaryButtons).toHaveLength(4)
-    for (const label of ['保存记录', '场景与组合', '续费窗口', '单台队列'] as const) {
+    for (const label of ['已保存的决定', '自定义分组', '续费窗口', '逐台处理'] as const) {
       const button = getSecondaryWorkbenchButton(supportStrip, label)
       expect(button).toBeInTheDocument()
       expect(button).toHaveAttribute('aria-pressed', 'false')
     }
     expect(normalizedText(supportStrip).length).toBeLessThanOrEqual(160)
     expect(within(supportStrip).queryByText(/回看判断与执行回读|管理比较篮子和启动模板|只读订阅窗口事实|保留单台续费处理/)).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '待决定的分组' })).toBeInTheDocument()
     expectTabPanelRelationship(document.body, '资产决策组合视图')
-    const groupQueue = screen.getByLabelText('决策组扫描列表')
+    const groupQueue = screen.getByLabelText('待决定的分组列表')
     expect(groupQueue).toBeInTheDocument()
     expect(screen.queryByText(/当前视图：/)).not.toBeInTheDocument()
     expect(screen.queryByText(/自动组只读派生/)).not.toBeInTheDocument()
@@ -85,7 +85,7 @@ describe('Asset Decisions route and composition workflows', () => {
     expect(within(groupQueue).queryByText('证据强')).not.toBeInTheDocument()
     expect(within(groupQueue).queryByText(/服务 2 · 域名 1 · Target 1\/1/)).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '自定义组合' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '保存记录' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '已保存的决定' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '场景模板' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '续费窗口' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: '单台待处理队列' })).not.toBeInTheDocument()
@@ -167,18 +167,17 @@ describe('Asset Decisions route and composition workflows', () => {
     expect(commandSummary.querySelector('[class*="asset-decision-focus__item--"]')).toBeNull()
     expect(within(commandSummary).queryByText(/主备取舍模板|欧洲主备手工组合/)).not.toBeInTheDocument()
     expect(screen.getByRole('heading', { name: '当前视图暂无决策组' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: '场景与组合' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: '自定义分组' })).not.toBeInTheDocument()
 
     const supportStrip = screen.getByRole('navigation', { name: '资产决策辅助入口' })
-    const queueBtn = getSecondaryWorkbenchButton(supportStrip, '单台队列')
+    const queueBtn = getSecondaryWorkbenchButton(supportStrip, '逐台处理')
     expect(queueBtn).not.toHaveAttribute('aria-expanded')
-    expect(queueBtn).toHaveAttribute('title', '查看单台队列（暂无待处理）')
-    expect(within(queueBtn).getByText('查看单台队列')).toBeInTheDocument()
+    expect(queueBtn).toHaveAttribute('title', '查看（暂无待处理）')
+    expect(within(queueBtn).getByText('查看')).toBeInTheDocument()
 
     // 辅助导航各按钮均可见呈现 actionLabel 交互词
-    for (const actionLabel of ['打开记录', '打开场景', '查看续费', '查看单台队列'] as const) {
-      expect(within(supportStrip).getByText(actionLabel)).toBeInTheDocument()
-    }
+    expect(within(supportStrip).getAllByText('查看')).toHaveLength(3)
+    expect(within(supportStrip).getByText('查看续费')).toBeInTheDocument()
 
     expectNoAssetDecisionPageEnglishNoise()
   })
@@ -331,12 +330,12 @@ describe('Asset Decisions route and composition workflows', () => {
       </MemoryRouter>,
     )
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '决策组扫描' })).toBeInTheDocument())
-    expect(screen.queryByRole('tab', { name: /单台队列/ })).not.toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: '单台队列' })).toBeInTheDocument()
-    const singleQueueButton = await findSecondaryWorkbenchButton('单台队列')
+    await waitFor(() => expect(screen.getByRole('heading', { name: '待决定的分组' })).toBeInTheDocument())
+    expect(screen.queryByRole('tab', { name: /逐台处理/ })).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '逐台处理' })).toBeInTheDocument()
+    const singleQueueButton = await findSecondaryWorkbenchButton('逐台处理')
     expect(singleQueueButton).toHaveAttribute('aria-pressed', 'true')
-    const singleQueue = screen.getByRole('heading', { name: '单台队列' }).closest('section') as HTMLElement
+    const singleQueue = screen.getByRole('heading', { name: '逐台处理' }).closest('section') as HTMLElement
     const firstQueueAction = within(singleQueue).getAllByRole('button', { name: '处理' })[0]
     if (!firstQueueAction) throw new Error('single queue must expose a primary action')
     fireEvent.click(firstQueueAction)
@@ -347,36 +346,36 @@ describe('Asset Decisions route and composition workflows', () => {
   it('auto-expands the matching secondary workbench for supported deep links', async () => {
     const cases: Array<{
       entry: string
-      activeButton: '保存记录' | '场景与组合' | '续费窗口'
+      activeButton: '已保存的决定' | '自定义分组' | '续费窗口'
       visibleHeading: string
       expectedDialog?: string
       route?: MockFetchRoute
     }> = [
       {
         entry: '/asset-decisions?record_id=adr_001',
-        activeButton: '保存记录',
-        visibleHeading: '保存记录',
+        activeButton: '已保存的决定',
+        visibleHeading: '已保存的决定',
         expectedDialog: '德国主备取舍记录',
         route: { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
       },
       {
         entry: '/asset-decisions?view=renewal&renew_within_days=30&record_id=adr_001',
-        activeButton: '保存记录',
-        visibleHeading: '保存记录',
+        activeButton: '已保存的决定',
+        visibleHeading: '已保存的决定',
         expectedDialog: '德国主备取舍记录',
         route: { url: '/api/asset-decisions/records/adr_001', body: decisionRecord() },
       },
       {
         entry: '/asset-decisions?manual_group_id=admg_001',
-        activeButton: '场景与组合',
-        visibleHeading: '场景与组合',
+        activeButton: '自定义分组',
+        visibleHeading: '自定义分组',
         expectedDialog: '自定义资产组合详情',
         route: { url: '/api/asset-decisions/manual-groups/admg_001', body: manualGroupDetail() },
       },
       {
         entry: '/asset-decisions?template_id=adt_builtin_primary_standby',
-        activeButton: '场景与组合',
-        visibleHeading: '场景与组合',
+        activeButton: '自定义分组',
+        visibleHeading: '自定义分组',
         expectedDialog: '资产决策场景模板详情',
         route: { url: '/api/asset-decisions/scenario-templates/adt_builtin_primary_standby', body: scenarioTemplate() },
       },
@@ -423,13 +422,13 @@ describe('Asset Decisions route and composition workflows', () => {
     )
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '续费窗口' })).toBeInTheDocument())
-    fireEvent.click(await findSecondaryWorkbenchButton('保存记录'))
-    await waitFor(() => expect(screen.getByRole('heading', { name: '保存记录' })).toBeInTheDocument())
-    expect(await findSecondaryWorkbenchButton('保存记录')).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(await findSecondaryWorkbenchButton('已保存的决定'))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '已保存的决定' })).toBeInTheDocument())
+    expect(await findSecondaryWorkbenchButton('已保存的决定')).toHaveAttribute('aria-pressed', 'true')
 
-    fireEvent.click(await findSecondaryWorkbenchButton('场景与组合'))
-    await waitFor(() => expect(screen.getByRole('heading', { name: '场景与组合' })).toBeInTheDocument())
-    expect(await findSecondaryWorkbenchButton('场景与组合')).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(await findSecondaryWorkbenchButton('自定义分组'))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '自定义分组' })).toBeInTheDocument())
+    expect(await findSecondaryWorkbenchButton('自定义分组')).toHaveAttribute('aria-pressed', 'true')
   })
   it('carries cross-page context filters into visible chips and asset-decision queries', async () => {
     const fetchMock = vi.fn()
@@ -523,10 +522,10 @@ describe('Asset Decisions route and composition workflows', () => {
 
     const commandSummary = await screen.findByLabelText('资产组合决策当前判断')
     expect(within(commandSummary).getByRole('heading', { name: /事实漂移/ })).toBeInTheDocument()
-    // 闭环异常存在时，风险标签必须随异常数字一起显示，说明具体异常类型
-    const anomalyItem = within(commandSummary).getByText('闭环异常').closest('.asset-decision-focus__item')
+    // 执行偏差存在时，风险标签必须随异常数字一起显示，说明具体异常类型
+    const anomalyItem = within(commandSummary).getByText('执行偏差').closest('.asset-decision-focus__item')
     expect(anomalyItem).not.toBeNull()
-    expect(within(anomalyItem as HTMLElement).getByText(/事实漂移/)).toBeInTheDocument()
+    expect(within(anomalyItem as HTMLElement).getByText(/与决定不符/)).toBeInTheDocument()
     // 有异常时才标红；组合组数本身不带状态色。
     expect(anomalyItem).toHaveClass('asset-decision-focus__item--critical')
     expect(within(commandSummary).getByText('组合组数').closest('.asset-decision-focus__item')?.className).toBe('asset-decision-focus__item')
@@ -657,12 +656,12 @@ describe('Asset Decisions route and composition workflows', () => {
     const currentFacts = screen.getByLabelText('资产组合决策当前事实')
     expect(within(currentFacts).getByText('组合组数')).toBeInTheDocument()
     expect(within(currentFacts).getByText('3')).toBeInTheDocument()
-    // 色条随实际数值：续费组 1 → 提示色；该夹具闭环异常大于 0 → 危险色（优先于局部错误）；证据源均可用 → 正常色。
+    // 色条随实际数值：续费组 1 → 提示色；该夹具执行偏差大于 0 → 危险色（优先于局部错误）；证据源均可用 → 正常色。
     const factClass = (label: string) => within(currentFacts).getByText(label).closest('.asset-decision-focus__item')?.className
     expect(factClass('组合组数')).toBe('asset-decision-focus__item')
     expect(factClass('续费组')).toContain('asset-decision-focus__item--notice')
-    expect(factClass('闭环异常')).toContain('asset-decision-focus__item--critical')
-    expect(factClass('证据状态')).toContain('asset-decision-focus__item--normal')
+    expect(factClass('执行偏差')).toContain('asset-decision-focus__item--critical')
+    expect(factClass('数据来源')).toContain('asset-decision-focus__item--normal')
     expect(screen.getByText('自动组暂不可用，当前只展示已成功加载的事实。')).toBeInTheDocument()
   })
   it('does not invent readback next-work items when saved records fail to load', async () => {
@@ -700,7 +699,7 @@ describe('Asset Decisions route and composition workflows', () => {
     expect(within(commandSummary).queryByText('回读缺证据')).not.toBeInTheDocument()
     expect(screen.getByText('决策记录暂不可用，当前只展示已成功加载的事实。')).toBeInTheDocument()
     expect(within(commandSummary).getByRole('heading', { name: '部分资产决策证据不可用' })).toBeInTheDocument()
-    expect(within(commandSummary).getByText('证据待确认')).toBeInTheDocument()
-    expect(within(commandSummary).queryByText('闭环稳定')).not.toBeInTheDocument()
+    expect(within(commandSummary).getByText('部分数据未读到')).toBeInTheDocument()
+    expect(within(commandSummary).queryByText('无待处理决策')).not.toBeInTheDocument()
   })
 })

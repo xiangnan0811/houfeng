@@ -204,9 +204,9 @@ export function RecordFollowupRows({
       })}
       {memberPreview.hiddenCount > 0 && (
         <div className="asset-decision-preview-more" role="note">
-          <span>另有 {memberPreview.hiddenCount} 台在成员底稿中查看</span>
+          <span>另有 {memberPreview.hiddenCount} 台在完整明细中查看</span>
           <button className="btn-text sm secondary" type="button" onClick={onShowRaw}>
-            查看成员底稿
+            查看完整明细
           </button>
         </div>
       )}

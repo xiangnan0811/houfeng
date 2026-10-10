@@ -395,7 +395,7 @@ describe('DashboardPage', () => {
     expect(renewalLinks).toHaveLength(5)
     expect(renewalLinks[0]).toHaveAttribute('href', '/vps/vps_0')
     expect(renewalLinks[0]).toHaveTextContent('Plan 0')
-    expect(screen.getByText('未来 90 天（UTC）· 7 项')).toBeInTheDocument()
+    expect(screen.getByText('未来 90 天 · 7 项')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '订阅明细' })).toHaveAttribute('href', '/subscriptions?view=details')
 
     const activity = screen.getByRole('list', { name: '最近状态变化' })
@@ -434,7 +434,7 @@ describe('DashboardPage', () => {
     }))
     renderDashboard({ subscription: { body: subscriptionOverviewFixture({ upcoming_renewals: renewals }) } })
 
-    expect(await screen.findByText('未来 90 天（UTC）· 至少 12 项')).toBeInTheDocument()
+    expect(await screen.findByText('未来 90 天 · 至少 12 项')).toBeInTheDocument()
     expect(within(screen.getByRole('list', { name: '即将续费的订阅' })).getAllByRole('link')).toHaveLength(5)
   })
 
@@ -471,6 +471,16 @@ describe('DashboardPage', () => {
     const activity = screen.getByRole('heading', { name: '最近动态' })
     expect(renewals.compareDocumentPosition(observation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(observation.compareDocumentPosition(activity) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('shortens the zero-anomaly wording on screen but keeps the full sentence for screen readers', async () => {
+    renderDashboard({ dashboard: { body: dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { feishu_configured: true } }), status: 200 } })
+    const surface = await screen.findByRole('region', { name: '工作台决策面' })
+    const signal = surface.querySelector('.dashboard-decision-surface__signal')!
+    expect(signal).toHaveTextContent('运行异常 0')
+    expect(within(signal as HTMLElement).getByText('当前运行异常计数为 0')).toHaveClass('visually-hidden')
+    expect(screen.getByRole('link', { name: /^观测状态：0；当前运行异常计数为 0/ })).toBeInTheDocument()
+    expect(document.body).not.toHaveTextContent('系统正常')
   })
 
   it('warns when monitored objects have no notification channel', async () => {
@@ -521,7 +531,7 @@ describe('DashboardPage', () => {
     expect(within(overdueList).getByRole('link')).toHaveAttribute('href', '/vps/vps_late')
     expect(screen.getByText('已逾期 4 项')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '续费队列' })).toHaveAttribute('href', '/subscriptions')
-    expect(screen.getByText('未来 90 天（UTC）内没有待续费的订阅。')).toBeInTheDocument()
+    expect(screen.getByText('未来 90 天内没有待续费的订阅。')).toBeInTheDocument()
   })
 
   it('labels renewal days as estimated when the subscription snapshot time is invalid', async () => {
@@ -547,7 +557,7 @@ describe('DashboardPage', () => {
       },
     })
 
-    expect(await screen.findByText('未来 90 天（UTC）· 1 项 · 天数按接收时间估算')).toBeInTheDocument()
+    expect(await screen.findByText('未来 90 天 · 1 项 · 天数按接收时间估算')).toBeInTheDocument()
   })
 
   it('keeps the renewal preview honest when the subscription overview fails', async () => {

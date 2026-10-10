@@ -25,11 +25,11 @@ function renewalPriceLabel(item: DashboardRenewalItem): string {
   return amount
 }
 
-function PanelHeader({ id, title, meta, link }: { id: string; title: string; meta?: string; link: { to: string; label: string } }) {
+function PanelHeader({ id, title, meta, metaTitle, link }: { id: string; title: string; meta?: string; metaTitle?: string; link: { to: string; label: string } }) {
   return (
     <div className="dashboard-panel__header">
       <h2 id={id}>{title}</h2>
-      {meta ? <span className="dashboard-panel__meta">{meta}</span> : null}
+      {meta ? <span className="dashboard-panel__meta" {...(metaTitle ? { title: metaTitle } : {})}>{meta}</span> : null}
       <Link className="text-link text-link--action dashboard-panel__link" to={link.to}>{link.label}</Link>
     </div>
   )
@@ -43,7 +43,9 @@ export function DashboardRenewalsPanel({ panel }: { panel: DashboardRenewalPanel
         title="即将续费"
         {...(panel.status === 'ready'
           ? {
-            meta: `未来 ${RENEWAL_QUEUE_WINDOW_DAYS} 天（UTC）· ${panel.capped ? `至少 ${panel.count}` : panel.count} 项${panel.estimated ? ' · 天数按接收时间估算' : ''}`,
+            meta: `未来 ${RENEWAL_QUEUE_WINDOW_DAYS} 天 · ${panel.capped ? `至少 ${panel.count}` : panel.count} 项${panel.estimated ? ' · 天数按接收时间估算' : ''}`,
+            // 窗口与天数按 UTC 日计算；可见文字不再挂“（UTC）”，悬停说明。
+            metaTitle: '按 UTC 日计算',
           }
           : {})}
         link={{ to: `${DASHBOARD_LINKS.subscriptions}?view=details`, label: '订阅明细' }}
@@ -64,7 +66,7 @@ export function DashboardRenewalsPanel({ panel }: { panel: DashboardRenewalPanel
             </div>
           ) : null}
           {panel.items.length === 0 ? (
-            <p className="dashboard-panel__empty">未来 {RENEWAL_QUEUE_WINDOW_DAYS} 天（UTC）内没有待续费的订阅。</p>
+            <p className="dashboard-panel__empty">未来 {RENEWAL_QUEUE_WINDOW_DAYS} 天内没有待续费的订阅。</p>
           ) : (
             <RenewalList items={panel.items} label="即将续费的订阅" />
           )}

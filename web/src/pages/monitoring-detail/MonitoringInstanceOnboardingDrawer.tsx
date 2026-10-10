@@ -19,7 +19,7 @@ HOUFENG_AGENT_BUFFER_MAX_BYTES=67108864`
 const manualTokenSnippet = `printf '%s' '${MANUAL_TOKEN_PLACEHOLDER}' | sudo tee /etc/houfeng-agent/token >/dev/null`
 
 const installSteps = [
-  '生成 center 签发的一键命令',
+  '生成一键安装命令',
   '在目标主机的 root 或 sudo shell 粘贴执行',
   '回到本页等待首次同步',
 ]
@@ -301,7 +301,7 @@ export function MonitoringInstanceOnboardingDrawer({ monitoringInstance, open, o
         </ol>
         <p className="monitoring-detail-onboarding__secret">
           {isUpgrade
-            ? '命令由 center 签发，用于在已接入主机上升级或重新接入，不会新建监控实例。'
+            ? '命令由候风中心生成，用于在已接入主机上升级或重新接入，不会新建监控实例。'
             : '命令已包含本系统的公开访问地址，在目标主机上直接执行即可。'}
           {' '}命令含 30 分钟一次性接入令牌，不要写入工单、聊天、日志或截图。重新生成会使上一条立即失效。
         </p>
