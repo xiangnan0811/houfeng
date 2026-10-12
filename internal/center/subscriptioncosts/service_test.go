@@ -1102,6 +1102,9 @@ type fakeSubscriptionCostRepo struct {
 	upsertMonthlyBudgetInputs []UpsertMonthlyBudgetInput
 	pairs                     []ExchangeRatePair
 	upserts                   []ExchangeRateUpsert
+	missingMonthEnd           []MonthEndExchangeRateRequest
+	missingMonthEndMonths     int
+	monthEndUpserts           []MonthEndExchangeRateUpsert
 	candidates                []ReminderCandidate
 	deliveryKeys              map[string]string
 	deliveryAttempts          int
@@ -1238,6 +1241,30 @@ func (r *fakeSubscriptionCostRepo) UpsertExchangeRate(_ context.Context, input E
 		RateDate:      input.RateDate,
 		FetchedAt:     input.FetchedAt,
 	}, nil
+}
+
+func (r *fakeSubscriptionCostRepo) ListMissingMonthEndExchangeRates(_ context.Context, _ centersettings.SubscriptionCostSettings, months int, _ time.Time) ([]MonthEndExchangeRateRequest, error) {
+	r.missingMonthEndMonths = months
+	// 与真实查询一致：已回补的月份不再列出。
+	pending := make([]MonthEndExchangeRateRequest, 0, len(r.missingMonthEnd))
+	for _, request := range r.missingMonthEnd {
+		filled := false
+		for _, upsert := range r.monthEndUpserts {
+			if upsert.QuoteCurrency == request.QuoteCurrency && upsert.MonthEnd.Time.Equal(request.MonthEnd.Time) {
+				filled = true
+				break
+			}
+		}
+		if !filled {
+			pending = append(pending, request)
+		}
+	}
+	return pending, nil
+}
+
+func (r *fakeSubscriptionCostRepo) UpsertMonthEndExchangeRate(_ context.Context, input MonthEndExchangeRateUpsert) error {
+	r.monthEndUpserts = append(r.monthEndUpserts, input)
+	return nil
 }
 
 func (r *fakeSubscriptionCostRepo) ListReminderCandidates(context.Context, centersettings.SubscriptionCostSettings, []int) ([]ReminderCandidate, error) {

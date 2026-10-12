@@ -127,6 +127,7 @@ const subscriptionCostEvidenceSQL = `
 			and er.base_currency = cfg.base_currency
 			and er.quote_currency = s.currency
 			and er.fetched_at < $3
+			and er.month_end_for is null
 		order by er.fetched_at desc, er.rate_date desc, er.rate_id desc
 		limit 1
 	), observed as (
@@ -201,7 +202,7 @@ const subscriptionBudgetEvidenceSQL = `
 		left join lateral (
 			select rate
 			from subscription_exchange_rates er
-				where er.provider = cfg.rate_provider and er.base_currency = cfg.base_currency and er.quote_currency = st.currency and er.fetched_at < $2
+				where er.provider = cfg.rate_provider and er.base_currency = cfg.base_currency and er.quote_currency = st.currency and er.fetched_at < $2 and er.month_end_for is null
 			order by er.fetched_at desc, er.rate_date desc, er.rate_id desc
 			limit 1
 		) er on st.currency <> cfg.base_currency

@@ -256,7 +256,7 @@ func TestAdmitAppACLCurrentRuntimeRejectsAllPredecessorsAndAcceptsRegisteredTarg
 	}
 }
 
-func TestAdmitAppACLCurrentRuntimeRejectsC68AndAdmitsC73WithoutWrites(t *testing.T) {
+func TestAdmitAppACLCurrentRuntimeRejectsC68AndAdmitsC74WithoutWrites(t *testing.T) {
 	source, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
 	if err != nil {
 		t.Fatal(err)
@@ -282,7 +282,7 @@ func TestAdmitAppACLCurrentRuntimeRejectsC68AndAdmitsC73WithoutWrites(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	c73, err := NewAppACLManifestPersistedV1(
+	c74, err := NewAppACLManifestPersistedV1(
 		2,
 		appACLCurrentTransitionMigrator,
 		c68.ManifestDigest,
@@ -332,12 +332,12 @@ func TestAdmitAppACLCurrentRuntimeRejectsC68AndAdmitsC73WithoutWrites(t *testing
 		}
 	})
 
-	t.Run("admits C73 with one read-only catalog verification", func(t *testing.T) {
+	t.Run("admits C74 with one read-only catalog verification", func(t *testing.T) {
 		snapshot := base
-		snapshot.Manifests = []AppACLManifestPersistedV1{c68, c73}
+		snapshot.Manifests = []AppACLManifestPersistedV1{c68, c74}
 		snapshot.Head = &AppACLManifestHeadV1{
-			ManifestRevision: c73.ManifestRevision,
-			ManifestDigest:   c73.ManifestDigest,
+			ManifestRevision: c74.ManifestRevision,
+			ManifestDigest:   c74.ManifestDigest,
 		}
 		tx := &fakeAppACLRuntimeAdmissionTx{}
 		catalogReads := 0
@@ -363,13 +363,13 @@ func TestAdmitAppACLCurrentRuntimeRejectsC68AndAdmitsC73WithoutWrites(t *testing
 			},
 		)
 		if err != nil {
-			t.Fatalf("C73 runtime admission error = %v", err)
+			t.Fatalf("C74 runtime admission error = %v", err)
 		}
 		if catalogReads != 1 || tx.commitCalls != 1 || tx.rollbackCalls != 1 {
-			t.Fatalf("C73 runtime admission lifecycle = catalog reads %d, commit %d, rollback %d; want 1/1/1", catalogReads, tx.commitCalls, tx.rollbackCalls)
+			t.Fatalf("C74 runtime admission lifecycle = catalog reads %d, commit %d, rollback %d; want 1/1/1", catalogReads, tx.commitCalls, tx.rollbackCalls)
 		}
 		if beginOptions.IsoLevel != pgx.RepeatableRead || beginOptions.AccessMode != pgx.ReadOnly {
-			t.Fatalf("C73 runtime admission transaction options = %#v, want REPEATABLE READ READ ONLY", beginOptions)
+			t.Fatalf("C74 runtime admission transaction options = %#v, want REPEATABLE READ READ ONLY", beginOptions)
 		}
 	})
 }

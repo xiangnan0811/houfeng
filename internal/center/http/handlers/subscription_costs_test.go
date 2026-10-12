@@ -96,6 +96,14 @@ func (r *fakeSubscriptionCostRepository) UpsertExchangeRate(context.Context, sub
 	return subscriptioncosts.ExchangeRateRecord{}, nil
 }
 
+func (r *fakeSubscriptionCostRepository) ListMissingMonthEndExchangeRates(context.Context, centersettings.SubscriptionCostSettings, int, time.Time) ([]subscriptioncosts.MonthEndExchangeRateRequest, error) {
+	return nil, nil
+}
+
+func (r *fakeSubscriptionCostRepository) UpsertMonthEndExchangeRate(context.Context, subscriptioncosts.MonthEndExchangeRateUpsert) error {
+	return nil
+}
+
 func (r *fakeSubscriptionCostRepository) ListReminderCandidates(context.Context, centersettings.SubscriptionCostSettings, []int) ([]subscriptioncosts.ReminderCandidate, error) {
 	return nil, nil
 }

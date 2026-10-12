@@ -31,31 +31,32 @@ func testPostgresIntegrationAppACLCurrentP71Upgrade(t *testing.T) {
 
 	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
 	if err != nil {
-		t.Fatalf("C71 to C73 convergence: %v", err)
+		t.Fatalf("C71 to C74 convergence: %v", err)
 	}
 	if successor.ManifestRevision != predecessor.ManifestRevision+1 || successor.PreviousManifestDigest != predecessor.ManifestDigest {
-		t.Fatalf("C71 to C73 successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
+		t.Fatalf("C71 to C74 successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
 	}
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
-		t.Fatalf("admit C73 runtime: %v", err)
+		t.Fatalf("admit C74 runtime: %v", err)
 	}
 
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
-		t.Fatalf("C73 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
+		t.Fatalf("C74 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
-	if len(after.Ledger) != len(before.Ledger)+2 ||
+	if len(after.Ledger) != len(before.Ledger)+3 ||
 		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
-		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP72Migration ||
-		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP73Migration {
-		t.Fatalf("C73 ledger tail = %#v, want predecessor prefix plus 0072 and 0073 rows", after.Ledger)
+		after.Ledger[len(after.Ledger)-3].Name != appACLCurrentP72Migration ||
+		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP73Migration ||
+		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP74Migration {
+		t.Fatalf("C74 ledger tail = %#v, want predecessor prefix plus 0072, 0073 and 0074 rows", after.Ledger)
 	}
 	if !reflect.DeepEqual(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges) ||
 		!reflect.DeepEqual(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) {
-		t.Fatalf("C71 to C73 migration changed ACL state\nbefore direct/effective/column/default: %#v/%#v/%#v/%#v\nafter: %#v/%#v/%#v/%#v",
+		t.Fatalf("C71 to C74 migration changed ACL state\nbefore direct/effective/column/default: %#v/%#v/%#v/%#v\nafter: %#v/%#v/%#v/%#v",
 			before.Catalog.DirectPrivileges, before.Catalog.EffectivePrivileges, before.Catalog.ColumnACLs, before.Catalog.DefaultACLs,
 			after.Catalog.DirectPrivileges, after.Catalog.EffectivePrivileges, after.Catalog.ColumnACLs, after.Catalog.DefaultACLs)
 	}
@@ -63,10 +64,10 @@ func testPostgresIntegrationAppACLCurrentP71Upgrade(t *testing.T) {
 	beforeRepeat := after
 	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
 	if err != nil {
-		t.Fatalf("repeat C71 to C73 convergence: %v", err)
+		t.Fatalf("repeat C71 to C74 convergence: %v", err)
 	}
 	afterRepeat := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 	if repeated.ManifestDigest != successor.ManifestDigest || !reflect.DeepEqual(afterRepeat, beforeRepeat) {
-		t.Fatalf("C73 repeat changed durable state\nbefore: %#v\nafter:  %#v", beforeRepeat, afterRepeat)
+		t.Fatalf("C74 repeat changed durable state\nbefore: %#v\nafter:  %#v", beforeRepeat, afterRepeat)
 	}
 }

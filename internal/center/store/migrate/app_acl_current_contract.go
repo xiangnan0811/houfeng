@@ -63,6 +63,16 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	accessManagementAppACLCurrentMigrationFragment(),
 	targetObservationFreshnessAppACLCurrentMigrationFragment(),
 	monitoringInstanceMetadataVersionAppACLCurrentMigrationFragment(),
+	subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment(),
+}
+
+func subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0074_add_subscription_exchange_rate_month_end.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return nil
+		},
+	}
 }
 
 func monitoringInstanceMetadataVersionAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {

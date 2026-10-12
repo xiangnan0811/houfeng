@@ -63,8 +63,28 @@ func (p *HTTPExchangeRateProvider) FetchRate(ctx context.Context, quoteCurrency,
 	}
 }
 
+// FetchRateOn 取不晚于 date 的最近一个交易日汇率，只有 Frankfurter 支持。
+func (p *HTTPExchangeRateProvider) FetchRateOn(ctx context.Context, quoteCurrency, baseCurrency string, date subscriptions.Date) (FetchedExchangeRate, error) {
+	quoteCurrency = strings.ToUpper(strings.TrimSpace(quoteCurrency))
+	baseCurrency = strings.ToUpper(strings.TrimSpace(baseCurrency))
+	if quoteCurrency == "" || baseCurrency == "" || quoteCurrency == baseCurrency || date.Time.IsZero() {
+		return FetchedExchangeRate{}, fmt.Errorf("%w: invalid historical exchange rate request", ErrInvalidInput)
+	}
+	if p.kind != "frankfurter" {
+		return FetchedExchangeRate{}, fmt.Errorf("%w: %s does not support historical exchange rates", ErrInvalidInput, p.kind)
+	}
+	return p.fetchFrankfurterOn(ctx, quoteCurrency, baseCurrency, date.Time.Format(subscriptions.DateLayout))
+}
+
 func (p *HTTPExchangeRateProvider) fetchFrankfurter(ctx context.Context, quoteCurrency, baseCurrency string) (FetchedExchangeRate, error) {
+	return p.fetchFrankfurterOn(ctx, quoteCurrency, baseCurrency, "")
+}
+
+func (p *HTTPExchangeRateProvider) fetchFrankfurterOn(ctx context.Context, quoteCurrency, baseCurrency, date string) (FetchedExchangeRate, error) {
 	endpoint := strings.TrimRight(p.baseURL, "/") + "/rate/" + url.PathEscape(quoteCurrency) + "/" + url.PathEscape(baseCurrency)
+	if date != "" {
+		endpoint += "?" + url.Values{"date": []string{date}}.Encode()
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return FetchedExchangeRate{}, fmt.Errorf("build frankfurter request: %w", err)
