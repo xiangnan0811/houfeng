@@ -17,11 +17,18 @@ import { formatDate, formatMoney, formatOptional } from '../lib/format'
 import { periodLabel, renewalModeFromLegacy, renewalModeLabel } from '../lib/assetOptions'
 import { overviewImportanceLabel } from '../lib/vpsOverviewPresentation'
 import {
+  isKnownHealthStatus,
+  monitoringInstanceEffectiveHealth,
+  monitoringInstanceGlyphState,
+  monitoringInstanceHasHeartbeatEvidence,
+} from './monitoring/monitoringHelpers'
+import {
   VPS_LIFECYCLE_STATUS_LABELS,
   VPS_RENEWAL_DECISION_LABELS,
   type ProviderRecord,
   type SubscriptionRecord,
   type VPSAssetRecord,
+  type VPSCurrentMonitoringSummary,
   type VPSLifecycleStatus,
   type VPSRenewalDecision,
 } from '../lib/types'
@@ -691,6 +698,13 @@ function VPSQuickFacts({ row, subscriptionsError }: { row: InventoryRow; subscri
       <section className="vps-accordion__group">
         <h2 className="vps-accordion__group-title">监控与证据</h2>
         <dl className="vps-accordion__dl">
+          {vps.current_monitoring ? (
+            // 紧凑卡片隐藏了监控列，展开区补回状态；宽屏行内已有，不重复。
+            <>
+              <dt className="vps-workbench__compact-only">监控状态</dt>
+              <dd className="vps-workbench__compact-only"><CurrentMonitoringMark monitoring={vps.current_monitoring} /></dd>
+            </>
+          ) : null}
           <dt>监控实例</dt>
           <dd>
             {monitoringLinked ? (
@@ -764,6 +778,30 @@ function VPSWorkbenchAccordionRow({
 }
 
 
+
+/**
+ * 运行操作状态（已退役 / 待接入 / 维护中 / 暂停）沿用监控页同一函数的结论；其余按可信心跳判定：
+ * 从未收到心跳是「未收到心跳」，心跳越过失联阈值是「失联」（最后一次健康结论不再代表现在，
+ * 健康是否可用都一样），心跳新鲜时才显示健康词或「未知」。
+ */
+function currentMonitoringState(monitoring: VPSCurrentMonitoringSummary): { label: string; glyph: HealthState } {
+  const health = monitoringInstanceEffectiveHealth(monitoring)
+  if (health !== '未知' && !isKnownHealthStatus(health)) return { label: health, glyph: monitoringInstanceGlyphState(monitoring) }
+  if (!monitoringInstanceHasHeartbeatEvidence(monitoring)) return { label: '未收到心跳', glyph: 'offline' }
+  if (monitoring.heartbeat_stale) return { label: '失联', glyph: 'offline' }
+  return { label: health, glyph: monitoringInstanceGlyphState(monitoring) }
+}
+
+/** 状态点仅作装饰，文字说明状态。 */
+function CurrentMonitoringMark({ monitoring }: { monitoring: VPSCurrentMonitoringSummary }) {
+  const state = currentMonitoringState(monitoring)
+  return (
+    <span className="vps-lifecycle">
+      <span aria-hidden="true"><StatusGlyph state={state.glyph} size="sm" /></span>
+      监控 {state.label}
+    </span>
+  )
+}
 
 export function VPSPage() {
   const navigate = useNavigate()
@@ -1228,7 +1266,9 @@ export function VPSPage() {
                             <td>
                               <div className="vps-workbench__kicker">监控与证据</div>
                               <div className={linked ? 'vps-workbench__line' : 'vps-workbench__line vps-workbench__line--quiet'}>
-                                {linked ? '监控 ' + row.vps.active_monitoring_instance_link_count : '未关联监控'}
+                                {row.vps.current_monitoring ? (
+                                  <CurrentMonitoringMark monitoring={row.vps.current_monitoring} />
+                                ) : linked ? '监控 ' + row.vps.active_monitoring_instance_link_count : '未关联监控'}
                               </div>
                               <div className="vps-workbench__meta">
                                 <IPQualityBadge

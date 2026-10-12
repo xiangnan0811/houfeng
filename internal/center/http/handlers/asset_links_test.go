@@ -129,14 +129,16 @@ type fakeAssetLinkRepository struct {
 	unlinkMonitoringInstanceVPSID       string
 	unlinkMonitoringInstanceInput       assetlinks.UnlinkInput
 	listMonitoringInstancesForVPSResult []assetlinks.MonitoringInstanceSummary
-	listMonitoringInstancesForVPSErr    error
-	listMonitoringInstancesForVPSID     string
-	listVPSForMonitoringInstanceResult  []assetlinks.VPSSummary
-	listVPSForMonitoringInstanceErr     error
-	listVPSForMonitoringInstanceID      string
-	countActiveLinksForVPSVal           int
-	countActiveLinksForVPSErr           error
-	countActiveLinksForVPSID            string
+	// 按 VPS 返回不同结果；为空时所有 VPS 共用 listMonitoringInstancesForVPSResult。
+	listMonitoringInstancesForVPSResultByID map[string][]assetlinks.MonitoringInstanceSummary
+	listMonitoringInstancesForVPSErr        error
+	listMonitoringInstancesForVPSID         string
+	listVPSForMonitoringInstanceResult      []assetlinks.VPSSummary
+	listVPSForMonitoringInstanceErr         error
+	listVPSForMonitoringInstanceID          string
+	countActiveLinksForVPSVal               int
+	countActiveLinksForVPSErr               error
+	countActiveLinksForVPSID                string
 }
 
 func (f *fakeAssetLinkRepository) LinkMonitoringInstance(_ context.Context, vpsID string, input assetlinks.LinkInput) (assetlinks.Record, error) {
@@ -159,6 +161,9 @@ func (f *fakeAssetLinkRepository) UnlinkMonitoringInstance(_ context.Context, vp
 
 func (f *fakeAssetLinkRepository) ListMonitoringInstancesForVPS(_ context.Context, vpsID string) ([]assetlinks.MonitoringInstanceSummary, error) {
 	f.listMonitoringInstancesForVPSID = vpsID
+	if f.listMonitoringInstancesForVPSResultByID != nil {
+		return f.listMonitoringInstancesForVPSResultByID[vpsID], f.listMonitoringInstancesForVPSErr
+	}
 	return f.listMonitoringInstancesForVPSResult, f.listMonitoringInstancesForVPSErr
 }
 

@@ -1042,6 +1042,8 @@ export type VPSAssetRecord = {
   labels: string[]
   note: string
   active_monitoring_instance_link_count: number
+  /** 当前（未退役）监控实例的状态事实；没有当前实例时缺省。状态文案与监控页同一函数推导。 */
+  current_monitoring?: VPSCurrentMonitoringSummary
   running_monitoring_instance_count?: number
   running_target_count?: number
   ip_quality_summary?: IPQualitySummary | null
@@ -3941,4 +3943,15 @@ export type RenameAccessGroupInput = {
 
 export type ResetAccessUserPasswordInput = {
   password: string
+}
+
+export type VPSCurrentMonitoringSummary = {
+  monitoring_instance_id: string
+  lifecycle_status: string
+  monitoring_status: string
+  binding_status: string
+  current_health_status: string
+  last_trusted_online_at: string | null
+  /** 最近可信心跳已越过与事件评估相同的失联阈值（后端按持久化心跳策略判定）；没有心跳时为 false。 */
+  heartbeat_stale: boolean
 }

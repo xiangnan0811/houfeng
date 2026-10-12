@@ -76,45 +76,47 @@ const (
 )
 
 type Record struct {
-	VPSID                             string                 `json:"vps_id"`
-	DisplayName                       string                 `json:"display_name"`
-	ProviderID                        *string                `json:"provider_id"`
-	ProviderName                      string                 `json:"provider_name"`
-	ProductName                       string                 `json:"product_name"`
-	OrderRef                          string                 `json:"order_ref"`
-	Country                           string                 `json:"country"`
-	Region                            string                 `json:"region"`
-	City                              string                 `json:"city"`
-	Datacenter                        string                 `json:"datacenter"`
-	IPv4                              string                 `json:"ipv4"`
-	IPv6                              string                 `json:"ipv6"`
-	SSHHost                           string                 `json:"ssh_host"`
-	SSHPort                           int                    `json:"ssh_port"`
-	SSHUser                           string                 `json:"ssh_user"`
-	OSName                            string                 `json:"os_name"`
-	Virtualization                    string                 `json:"virtualization"`
-	LifecycleStatus                   LifecycleStatus        `json:"lifecycle_status"`
-	UsageStatus                       UsageStatus            `json:"-"`
-	UsageTags                         []string               `json:"usage_tags"`
-	ValidityMode                      string                 `json:"validity_mode"`
-	ExpiresAt                         *string                `json:"expires_at"`
-	AutoRenewCheck                    string                 `json:"auto_renew_check"`
-	AutoRenewCheckedAt                *time.Time             `json:"auto_renew_checked_at"`
-	RenewalReason                     string                 `json:"renewal_reason"`
-	RenewalReviewAt                   *time.Time             `json:"renewal_review_at"`
-	AcquisitionSource                 string                 `json:"acquisition_source"`
-	RenewalDecision                   RenewalDecision        `json:"renewal_decision"`
-	Importance                        string                 `json:"importance"`
-	Labels                            []string               `json:"labels"`
-	Note                              string                 `json:"note"`
-	ActiveMonitoringInstanceLinkCount int                    `json:"active_monitoring_instance_link_count"`
-	RunningMonitoringInstanceCount    int                    `json:"running_monitoring_instance_count"`
-	RunningTargetCount                int                    `json:"running_target_count"`
-	IPQualitySummary                  *ipquality.Summary     `json:"ip_quality_summary,omitempty"`
-	CreatedAt                         time.Time              `json:"created_at"`
-	UpdatedAt                         time.Time              `json:"updated_at"`
-	ArchivedAt                        *time.Time             `json:"archived_at"`
-	ArchivedStateSnapshot             *ArchivedStateSnapshot `json:"archived_state_snapshot"`
+	VPSID                             string          `json:"vps_id"`
+	DisplayName                       string          `json:"display_name"`
+	ProviderID                        *string         `json:"provider_id"`
+	ProviderName                      string          `json:"provider_name"`
+	ProductName                       string          `json:"product_name"`
+	OrderRef                          string          `json:"order_ref"`
+	Country                           string          `json:"country"`
+	Region                            string          `json:"region"`
+	City                              string          `json:"city"`
+	Datacenter                        string          `json:"datacenter"`
+	IPv4                              string          `json:"ipv4"`
+	IPv6                              string          `json:"ipv6"`
+	SSHHost                           string          `json:"ssh_host"`
+	SSHPort                           int             `json:"ssh_port"`
+	SSHUser                           string          `json:"ssh_user"`
+	OSName                            string          `json:"os_name"`
+	Virtualization                    string          `json:"virtualization"`
+	LifecycleStatus                   LifecycleStatus `json:"lifecycle_status"`
+	UsageStatus                       UsageStatus     `json:"-"`
+	UsageTags                         []string        `json:"usage_tags"`
+	ValidityMode                      string          `json:"validity_mode"`
+	ExpiresAt                         *string         `json:"expires_at"`
+	AutoRenewCheck                    string          `json:"auto_renew_check"`
+	AutoRenewCheckedAt                *time.Time      `json:"auto_renew_checked_at"`
+	RenewalReason                     string          `json:"renewal_reason"`
+	RenewalReviewAt                   *time.Time      `json:"renewal_review_at"`
+	AcquisitionSource                 string          `json:"acquisition_source"`
+	RenewalDecision                   RenewalDecision `json:"renewal_decision"`
+	Importance                        string          `json:"importance"`
+	Labels                            []string        `json:"labels"`
+	Note                              string          `json:"note"`
+	ActiveMonitoringInstanceLinkCount int             `json:"active_monitoring_instance_link_count"`
+	RunningMonitoringInstanceCount    int             `json:"running_monitoring_instance_count"`
+	RunningTargetCount                int             `json:"running_target_count"`
+	// CurrentMonitoring 是当前（未退役）监控实例的状态事实，供列表显示与监控页同口径的状态；没有当前实例时为空。
+	CurrentMonitoring     *CurrentMonitoringSummary `json:"current_monitoring,omitempty"`
+	IPQualitySummary      *ipquality.Summary        `json:"ip_quality_summary,omitempty"`
+	CreatedAt             time.Time                 `json:"created_at"`
+	UpdatedAt             time.Time                 `json:"updated_at"`
+	ArchivedAt            *time.Time                `json:"archived_at"`
+	ArchivedStateSnapshot *ArchivedStateSnapshot    `json:"archived_state_snapshot"`
 }
 
 type ArchivedStateSnapshot struct {
@@ -819,4 +821,17 @@ func cloneTime(value *time.Time) *time.Time {
 	}
 	cloned := *value
 	return &cloned
+}
+
+// CurrentMonitoringSummary 只携带推导监控状态所需的原始事实，状态文案由前端与监控页同一函数推导，
+// 不在这里提前写成“在线/健康”结论。
+type CurrentMonitoringSummary struct {
+	MonitoringInstanceID string     `json:"monitoring_instance_id"`
+	LifecycleStatus      string     `json:"lifecycle_status"`
+	MonitoringStatus     string     `json:"monitoring_status"`
+	BindingStatus        string     `json:"binding_status"`
+	CurrentHealthStatus  string     `json:"current_health_status"`
+	LastTrustedOnlineAt  *time.Time `json:"last_trusted_online_at"`
+	// HeartbeatStale 表示最近可信心跳已越过与事件评估相同的失联阈值；没有心跳时为 false。
+	HeartbeatStale bool `json:"heartbeat_stale"`
 }

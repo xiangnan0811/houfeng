@@ -5,11 +5,14 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"houfeng/internal/center/assetlinks"
+	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/renewals"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 )
@@ -20,6 +23,10 @@ type vpsRunningTargetCounter interface {
 
 type vpsIPQualitySummaryRepository interface {
 	ListLatestSummariesForVPS(context.Context, []string) (map[string]ipquality.Summary, error)
+}
+
+type vpsHeartbeatPolicySource interface {
+	GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
 }
 
 type vpsExperienceLogRepository interface {
@@ -36,6 +43,7 @@ func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler 
 	var linkRepo assetlinks.Repository
 	var targetCounter vpsRunningTargetCounter
 	var ipQualityRepo vpsIPQualitySummaryRepository
+	var heartbeatPolicySource vpsHeartbeatPolicySource
 	for _, dep := range optionalDeps {
 		switch typed := dep.(type) {
 		case assetlinks.Repository:
@@ -44,6 +52,8 @@ func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler 
 			targetCounter = typed
 		case vpsIPQualitySummaryRepository:
 			ipQualityRepo = typed
+		case vpsHeartbeatPolicySource:
+			heartbeatPolicySource = typed
 		}
 	}
 
@@ -80,8 +90,9 @@ func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler 
 				return
 			}
 			if linkRepo != nil {
+				freshness := newVPSHeartbeatFreshness(heartbeatPolicySource)
 				for i := range records {
-					if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, &records[i]); err != nil {
+					if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, freshness, &records[i]); err != nil {
 						writeError(w, http.StatusInternalServerError, "internal server error")
 						return
 					}
@@ -117,7 +128,7 @@ func VPSCollection(repo vpsassets.Repository, optionalDeps ...any) http.Handler 
 				return
 			}
 			if linkRepo != nil {
-				if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, &record); err != nil {
+				if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, newVPSHeartbeatFreshness(heartbeatPolicySource), &record); err != nil {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
@@ -133,6 +144,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 	var linkRepo assetlinks.Repository
 	var targetCounter vpsRunningTargetCounter
 	var ipQualityRepo vpsIPQualitySummaryRepository
+	var heartbeatPolicySource vpsHeartbeatPolicySource
 	for _, dep := range optionalDeps {
 		switch typed := dep.(type) {
 		case assetlinks.Repository:
@@ -141,6 +153,8 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 			targetCounter = typed
 		case vpsIPQualitySummaryRepository:
 			ipQualityRepo = typed
+		case vpsHeartbeatPolicySource:
+			heartbeatPolicySource = typed
 		}
 	}
 
@@ -177,6 +191,12 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				}
 				record.ActiveMonitoringInstanceLinkCount = countCurrentVPSMonitoringInstances(monitoringInstanceLinks)
 				record.RunningMonitoringInstanceCount = countRunningVPSMonitoringInstances(record.LifecycleStatus, monitoringInstanceLinks)
+				currentMonitoring, err := currentVPSMonitoringSummary(r.Context(), monitoringInstanceLinks, newVPSHeartbeatFreshness(heartbeatPolicySource))
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "internal server error")
+					return
+				}
+				record.CurrentMonitoring = currentMonitoring
 				runningTargetCount, countErr := countRunningVPSTargets(r.Context(), targetCounter, record.LifecycleStatus, record.VPSID)
 				if countErr != nil {
 					writeError(w, http.StatusInternalServerError, "internal server error")
@@ -247,7 +267,7 @@ func VPSItem(repo vpsassets.Repository, optionalDeps ...any) http.Handler {
 				return
 			}
 			if linkRepo != nil {
-				if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, &record); err != nil {
+				if err := enrichVPSAssetRuntimeSummary(r.Context(), linkRepo, targetCounter, newVPSHeartbeatFreshness(heartbeatPolicySource), &record); err != nil {
 					writeError(w, http.StatusInternalServerError, "internal server error")
 					return
 				}
@@ -268,13 +288,17 @@ func writeVPSInputError(w http.ResponseWriter, err error) {
 	writeError(w, http.StatusBadRequest, "invalid input")
 }
 
-func enrichVPSAssetRuntimeSummary(ctx context.Context, linkRepo assetlinks.Repository, targetCounter vpsRunningTargetCounter, record *vpsassets.Record) error {
+func enrichVPSAssetRuntimeSummary(ctx context.Context, linkRepo assetlinks.Repository, targetCounter vpsRunningTargetCounter, freshness *vpsHeartbeatFreshness, record *vpsassets.Record) error {
 	monitoringInstanceLinks, err := linkRepo.ListMonitoringInstancesForVPS(ctx, record.VPSID)
 	if err != nil {
 		return err
 	}
 	record.ActiveMonitoringInstanceLinkCount = countCurrentVPSMonitoringInstances(monitoringInstanceLinks)
 	record.RunningMonitoringInstanceCount = countRunningVPSMonitoringInstances(record.LifecycleStatus, monitoringInstanceLinks)
+	record.CurrentMonitoring, err = currentVPSMonitoringSummary(ctx, monitoringInstanceLinks, freshness)
+	if err != nil {
+		return err
+	}
 	record.RunningTargetCount, err = countRunningVPSTargets(ctx, targetCounter, record.LifecycleStatus, record.VPSID)
 	if err != nil {
 		return err
@@ -308,6 +332,65 @@ func countRunningVPSMonitoringInstances(lifecycle vpsassets.LifecycleStatus, mon
 		}
 	}
 	return running
+}
+
+// 每台 VPS 最多一个未退役实例（数据库部分唯一索引保证），取它的状态事实。
+func currentVPSMonitoringSummary(ctx context.Context, links []assetlinks.MonitoringInstanceSummary, freshness *vpsHeartbeatFreshness) (*vpsassets.CurrentMonitoringSummary, error) {
+	for _, link := range links {
+		if !link.IsCurrent || link.LifecycleStatus == monitoringinstances.LifecycleRetired {
+			continue
+		}
+		stale, err := freshness.stale(ctx, link.LastTrustedOnlineAt)
+		if err != nil {
+			return nil, err
+		}
+		return &vpsassets.CurrentMonitoringSummary{
+			MonitoringInstanceID: link.MonitoringInstanceID,
+			LifecycleStatus:      link.LifecycleStatus,
+			MonitoringStatus:     link.MonitoringStatus,
+			BindingStatus:        link.BindingStatus,
+			CurrentHealthStatus:  link.CurrentHealthStatus,
+			LastTrustedOnlineAt:  link.LastTrustedOnlineAt,
+			HeartbeatStale:       stale,
+		}, nil
+	}
+	return nil, nil
+}
+
+// vpsHeartbeatFreshness 与 VPS 总览、事件评估使用同一份持久化心跳策略（未保存时用默认值），
+// 每个请求最多读取一次设置，并且只在确有心跳需要判定时才读取。
+type vpsHeartbeatFreshness struct {
+	source vpsHeartbeatPolicySource
+	now    time.Time
+	policy *incidents.HeartbeatIncidentPolicy
+}
+
+func newVPSHeartbeatFreshness(source vpsHeartbeatPolicySource) *vpsHeartbeatFreshness {
+	return &vpsHeartbeatFreshness{source: source, now: time.Now().UTC()}
+}
+
+func (f *vpsHeartbeatFreshness) stale(ctx context.Context, lastTrustedOnlineAt *time.Time) (bool, error) {
+	if lastTrustedOnlineAt == nil || lastTrustedOnlineAt.IsZero() {
+		return false, nil
+	}
+	if f.policy == nil {
+		defaults := centersettings.Default().IncidentDefaults
+		if f.source != nil {
+			persisted, exists, err := f.source.GetPersistedIncidentDefaults(ctx)
+			if err != nil {
+				return false, err
+			}
+			if exists {
+				defaults = persisted
+			}
+		}
+		policy, err := incidents.HeartbeatIncidentPolicyFromSettings(centersettings.CenterSettings{IncidentDefaults: defaults})
+		if err != nil {
+			return false, err
+		}
+		f.policy = &policy
+	}
+	return incidents.HeartbeatIsStale(f.now, *lastTrustedOnlineAt, *f.policy), nil
 }
 
 func countCurrentVPSMonitoringInstances(links []assetlinks.MonitoringInstanceSummary) int {

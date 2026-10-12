@@ -336,6 +336,44 @@ describe('VPSPage', () => {
     expect(container.querySelector('.vps-ledger, .vps-workbench, .vps-inspector')).toBeNull()
   })
 
+  it('shows the current monitoring state in the table with the same wording as the monitoring page', async () => {
+    const monitoring = (overrides: Record<string, unknown>) => ({
+      monitoring_instance_id: 'mi_001',
+      lifecycle_status: '已接入',
+      monitoring_status: '启用',
+      binding_status: '已绑定',
+      current_health_status: '正常',
+      last_trusted_online_at: '2026-05-09T08:00:00Z',
+      heartbeat_stale: false,
+      ...overrides,
+    })
+    mockInventory([
+      { ...vps, active_monitoring_instance_link_count: 1, current_monitoring: monitoring({ current_health_status: '告警' }) },
+      { ...missingFactsVPS, vps_id: 'vps_paused', display_name: 'Paused Box', active_monitoring_instance_link_count: 1, current_monitoring: monitoring({ monitoring_status: '暂停' }) },
+      { ...missingFactsVPS, vps_id: 'vps_silent', display_name: 'Silent Box', active_monitoring_instance_link_count: 1, current_monitoring: monitoring({ last_trusted_online_at: null, current_health_status: '数据不可用' }) },
+      { ...missingFactsVPS, vps_id: 'vps_stale', display_name: 'Stale Box', active_monitoring_instance_link_count: 1, current_monitoring: monitoring({ heartbeat_stale: true }) },
+      { ...missingFactsVPS, vps_id: 'vps_stale_paused', display_name: 'Quiet Box', active_monitoring_instance_link_count: 1, current_monitoring: monitoring({ heartbeat_stale: true, monitoring_status: '暂停' }) },
+      { ...missingFactsVPS, vps_id: 'vps_fresh_unknown', display_name: 'Fresh Unknown Box', active_monitoring_instance_link_count: 1, current_monitoring: monitoring({ current_health_status: '数据不可用' }) },
+      { ...missingFactsVPS, vps_id: 'vps_stale_unknown', display_name: 'Stale Unknown Box', active_monitoring_instance_link_count: 1, current_monitoring: monitoring({ current_health_status: '数据不可用', heartbeat_stale: true }) },
+      { ...missingFactsVPS, vps_id: 'vps_none', display_name: 'Bare Box', active_monitoring_instance_link_count: 0 },
+    ], [])
+    mount('/vps?workspace=workbench')
+
+    const rowFor = async (name: string) => (await screen.findByRole('button', { name: '选择 ' + name })).closest('tr')!
+    expect(await rowFor('Tokyo Edge')).toHaveTextContent('监控 告警')
+    expect(await rowFor('Paused Box')).toHaveTextContent('监控 暂停')
+    // 没有可信在线证据时不推断健康，并与“失联”区分。
+    expect(await rowFor('Silent Box')).toHaveTextContent('监控 未收到心跳')
+    // 健康暂不可用时：心跳新鲜是“未知”，心跳过期仍是“失联”。
+    expect(await rowFor('Fresh Unknown Box')).toHaveTextContent('监控 未知')
+    expect(await rowFor('Stale Unknown Box')).toHaveTextContent('监控 失联')
+    // 心跳越过失联阈值时，最后一次“正常”不再代表现在；暂停是操作者主动停止，不报失联。
+    expect(await rowFor('Stale Box')).toHaveTextContent('监控 失联')
+    expect(await rowFor('Stale Box')).not.toHaveTextContent('监控 正常')
+    expect(await rowFor('Quiet Box')).toHaveTextContent('监控 暂停')
+    expect(await rowFor('Bare Box')).toHaveTextContent('未关联监控')
+  })
+
   it('opens the create dialog directly from the onboarding link and drops the one-shot flag', async () => {
     mockInventory([], [])
     mount('/vps?create=1&workspace=ledger')
