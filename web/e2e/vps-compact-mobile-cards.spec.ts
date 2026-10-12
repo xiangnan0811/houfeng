@@ -13,7 +13,14 @@ function compactProfile() {
       status: 200,
       body: [
         // 已逾期、已决定不续费且自动续费未核对：提示必须留在紧凑卡片上。
-        vpsAssetFixture({ renewal_decision: 'cancel', auto_renew_check: 'unchecked', product_name: '2C4G', os_name: 'Debian 12', virtualization: 'KVM' }),
+        vpsAssetFixture({
+          renewal_decision: 'cancel', auto_renew_check: 'unchecked', product_name: '2C4G', os_name: 'Debian 12', virtualization: 'KVM',
+          // 心跳已越过失联阈值：紧凑卡片隐藏监控列后，展开区仍要能看到“失联”。
+          current_monitoring: {
+            monitoring_instance_id: 'mi_001', lifecycle_status: '已接入', monitoring_status: '启用', binding_status: '已绑定',
+            current_health_status: '正常', last_trusted_online_at: '2026-05-09T08:00:00Z', heartbeat_stale: true,
+          },
+        }),
         vpsAssetFixture({ vps_id: 'vps_002', display_name: 'Osaka Spare', active_monitoring_instance_link_count: 0, product_name: '', os_name: '', virtualization: '' }),
       ],
     },
@@ -46,11 +53,14 @@ test('the VPS table view collapses each machine into a compact card on a phone a
 
   await row.locator('.vps-workbench__name').click()
   const accordion = page.locator('.vps-workbench__accordion').first()
-  for (const label of ['位置', '规格', '用途', '监控实例', 'IP 质量']) {
+  for (const label of ['位置', '规格', '用途', '监控状态', '监控实例', 'IP 质量']) {
     await expect(accordion.getByText(label, { exact: true })).toBeVisible()
   }
-  await expect(accordion.locator('dd.vps-workbench__compact-only')).toBeVisible()
-  await expect(accordion.locator('dd.vps-workbench__compact-only')).toHaveText(/2C4G\s*·\s*Debian 12\s*·\s*KVM/)
+  const compactFacts = accordion.locator('dd.vps-workbench__compact-only')
+  await expect(compactFacts.first()).toBeVisible()
+  await expect(compactFacts.first()).toHaveText(/2C4G\s*·\s*Debian 12\s*·\s*KVM/)
+  await expect(compactFacts.last()).toBeVisible()
+  await expect(compactFacts.last()).toHaveText('监控 失联')
 
   await rows.nth(1).locator('.vps-workbench__name').click()
   const spare = page.locator('.vps-workbench__accordion').first()
@@ -60,10 +70,14 @@ test('the VPS table view collapses each machine into a compact card on a phone a
   await expect(spare.locator('dd.vps-workbench__compact-only')).toHaveText('规格未填写')
 })
 
-test('the expanded row does not repeat the spec on desktop where the row already shows it', async ({ api, page }) => {
+test('the expanded row does not repeat the spec or monitoring state on desktop where the row already shows them', async ({ api, page }) => {
   api.useProfile(compactProfile())
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/vps?workspace=workbench')
   await page.locator('.vps-workbench__row').first().locator('.vps-workbench__name').click()
-  await expect(page.locator('.vps-workbench__accordion').first().getByText('规格', { exact: true })).toBeHidden()
+  const accordion = page.locator('.vps-workbench__accordion').first()
+  await expect(accordion.getByText('规格', { exact: true })).toBeHidden()
+  await expect(accordion.getByText('监控状态', { exact: true })).toBeHidden()
+  // 宽屏下状态在行内的监控与证据列。
+  await expect(page.locator('.vps-workbench__row').first().locator('td').nth(4).getByText('监控 失联')).toBeVisible()
 })

@@ -74,13 +74,17 @@ export function isKnownHealthStatus(status: string): boolean {
   return KNOWN_HEALTH[status] !== undefined
 }
 
+/** 推导监控状态所需的最小事实；VPS 列表的当前实例摘要也满足它。 */
+export type MonitoringHealthFacts = Pick<MonitoringInstanceRecord, 'lifecycle_status' | 'monitoring_status' | 'binding_status' | 'current_health_status'>
+  & { archived_at?: string | null; last_trusted_online_at?: string | null }
+
 /** Online evidence is distinct from lifecycle, collection control and health. */
-export function monitoringInstanceHasHeartbeatEvidence(monitoringInstance: MonitoringInstanceRecord): boolean {
+export function monitoringInstanceHasHeartbeatEvidence(monitoringInstance: MonitoringHealthFacts): boolean {
   return parseHeartbeatTimestamp(monitoringInstance.last_trusted_online_at ?? undefined) != null
 }
 
 export function monitoringInstanceEffectiveHealth(
-  monitoringInstance: MonitoringInstanceRecord,
+  monitoringInstance: MonitoringHealthFacts,
   hasHeartbeat = monitoringInstanceHasHeartbeatEvidence(monitoringInstance),
 ): string {
   if (monitoringInstance.archived_at || monitoringInstance.lifecycle_status === '已退役') return '已退役'
@@ -95,7 +99,7 @@ export function monitoringInstanceEffectiveHealth(
 }
 
 export function monitoringInstanceGlyphState(
-  monitoringInstance: MonitoringInstanceRecord,
+  monitoringInstance: MonitoringHealthFacts,
   hasHeartbeat = monitoringInstanceHasHeartbeatEvidence(monitoringInstance),
 ): HealthState {
   return KNOWN_HEALTH[monitoringInstanceEffectiveHealth(monitoringInstance, hasHeartbeat)] ?? 'offline'

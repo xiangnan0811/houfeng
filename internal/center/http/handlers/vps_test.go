@@ -14,6 +14,7 @@ import (
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/renewals"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 	"houfeng/internal/contracts/agentapi"
@@ -264,6 +265,134 @@ func TestVPSCollectionDefaultsToCurrentAssetScope(t *testing.T) {
 	}
 	if repo.listVPSAssetsFilter.AssetScope != vpsassets.AssetScopeCurrent {
 		t.Fatalf("asset scope = %q, want current", repo.listVPSAssetsFilter.AssetScope)
+	}
+}
+
+func TestVPSCollectionCarriesCurrentMonitoringFactsOnlyForTheCurrentInstance(t *testing.T) {
+	now := time.Date(2026, time.May, 9, 13, 0, 0, 0, time.UTC)
+	online := now.Add(-time.Minute)
+	repo := &fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{{
+		VPSID: "vps_001", DisplayName: "Tokyo Edge", SSHPort: 22,
+		LifecycleStatus: vpsassets.LifecycleActive, UsageStatus: vpsassets.UsageInUse, RenewalDecision: vpsassets.RenewalKeep,
+		CreatedAt: now, UpdatedAt: now,
+	}}}
+	linkRepo := &fakeAssetLinkRepository{listMonitoringInstancesForVPSResult: []assetlinks.MonitoringInstanceSummary{{
+		MonitoringInstanceID: "mi_old", LifecycleStatus: "已退役", CurrentHealthStatus: "已退役", LinkedAt: now,
+	}, {
+		MonitoringInstanceID: "mi_001", LifecycleStatus: "已接入", MonitoringStatus: "启用", BindingStatus: "已绑定",
+		CurrentHealthStatus: "告警", LastTrustedOnlineAt: &online, IsCurrent: true, LinkedAt: now,
+	}}}
+
+	recorder := httptest.NewRecorder()
+	handlers.VPSCollection(repo, linkRepo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/vps", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var body []vpsassets.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	got := body[0].CurrentMonitoring
+	if got == nil || got.MonitoringInstanceID != "mi_001" || got.CurrentHealthStatus != "告警" || got.BindingStatus != "已绑定" ||
+		got.LastTrustedOnlineAt == nil || !got.LastTrustedOnlineAt.Equal(online) {
+		t.Fatalf("current_monitoring = %#v, want facts of the current instance mi_001", got)
+	}
+
+	retiredOnly := &fakeAssetLinkRepository{listMonitoringInstancesForVPSResult: []assetlinks.MonitoringInstanceSummary{{
+		MonitoringInstanceID: "mi_old", LifecycleStatus: "已退役", LinkedAt: now,
+	}}}
+	recorder = httptest.NewRecorder()
+	handlers.VPSCollection(repo, retiredOnly).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/vps", nil))
+	if strings.Contains(recorder.Body.String(), "current_monitoring") {
+		t.Fatalf("body = %s, want no current_monitoring without a current instance", recorder.Body.String())
+	}
+}
+
+type fakeVPSHeartbeatPolicySource struct {
+	defaults centersettings.IncidentDefaults
+	exists   bool
+	err      error
+	calls    int
+}
+
+func (f *fakeVPSHeartbeatPolicySource) GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error) {
+	f.calls++
+	return f.defaults, f.exists, f.err
+}
+
+func TestVPSCurrentMonitoringMarksStaleHeartbeatWithThePersistedIncidentPolicy(t *testing.T) {
+	now := time.Now().UTC()
+	// 持久化策略 60 秒 × 12 = 12 分钟；5 分钟前的心跳按默认策略（约 60 秒）会被误判为失联。
+	persisted := centersettings.Default().IncidentDefaults
+	persisted.HeartbeatIntervalSeconds = 60
+	persisted.StaleThresholdIntervals = 12
+	recent := now.Add(-5 * time.Minute)
+	old := now.Add(-30 * time.Minute)
+	record := func(id string) vpsassets.Record {
+		return vpsassets.Record{
+			VPSID: id, DisplayName: id, SSHPort: 22,
+			LifecycleStatus: vpsassets.LifecycleActive, UsageStatus: vpsassets.UsageInUse, RenewalDecision: vpsassets.RenewalKeep,
+			CreatedAt: now, UpdatedAt: now,
+		}
+	}
+	repo := &fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{record("vps_recent"), record("vps_old"), record("vps_waiting")}}
+	linkRepo := &fakeAssetLinkRepository{listMonitoringInstancesForVPSResultByID: map[string][]assetlinks.MonitoringInstanceSummary{
+		"vps_recent":  {{MonitoringInstanceID: "mi_recent", LifecycleStatus: "已接入", MonitoringStatus: "启用", BindingStatus: "已绑定", CurrentHealthStatus: "正常", LastTrustedOnlineAt: &recent, IsCurrent: true, LinkedAt: now}},
+		"vps_old":     {{MonitoringInstanceID: "mi_old", LifecycleStatus: "已接入", MonitoringStatus: "启用", BindingStatus: "已绑定", CurrentHealthStatus: "正常", LastTrustedOnlineAt: &old, IsCurrent: true, LinkedAt: now}},
+		"vps_waiting": {{MonitoringInstanceID: "mi_waiting", LifecycleStatus: "已接入", MonitoringStatus: "启用", BindingStatus: "已绑定", CurrentHealthStatus: "数据不可用", IsCurrent: true, LinkedAt: now}},
+	}}
+	policySource := &fakeVPSHeartbeatPolicySource{defaults: persisted, exists: true}
+
+	recorder := httptest.NewRecorder()
+	handlers.VPSCollection(repo, linkRepo, policySource).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/vps", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	var body []vpsassets.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response body: %v", err)
+	}
+	staleByID := map[string]bool{}
+	for _, item := range body {
+		if item.CurrentMonitoring == nil {
+			t.Fatalf("%s current_monitoring = nil, want current instance facts", item.VPSID)
+		}
+		staleByID[item.VPSID] = item.CurrentMonitoring.HeartbeatStale
+	}
+	if staleByID["vps_recent"] || !staleByID["vps_old"] || staleByID["vps_waiting"] {
+		t.Fatalf("heartbeat_stale = %#v, want only vps_old stale under the persisted policy", staleByID)
+	}
+	if policySource.calls != 1 {
+		t.Fatalf("policy reads = %d, want one read per list request", policySource.calls)
+	}
+	if !strings.Contains(recorder.Body.String(), `"heartbeat_stale":false`) {
+		t.Fatalf("body = %s, want heartbeat_stale always present on current_monitoring", recorder.Body.String())
+	}
+
+	// 没有任何心跳时不读取策略；读取策略失败不能悄悄当作“未失联”。
+	waitingOnly := &fakeVPSAssetRepository{listVPSAssetsResult: []vpsassets.Record{record("vps_waiting")}}
+	unread := &fakeVPSHeartbeatPolicySource{err: errors.New("settings unavailable")}
+	recorder = httptest.NewRecorder()
+	handlers.VPSCollection(waitingOnly, linkRepo, unread).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/vps", nil))
+	if recorder.Code != http.StatusOK || unread.calls != 0 {
+		t.Fatalf("status = %d policy reads = %d, want 200 without reading policy when no heartbeat exists", recorder.Code, unread.calls)
+	}
+	recorder = httptest.NewRecorder()
+	handlers.VPSCollection(repo, linkRepo, unread).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/vps", nil))
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d when the heartbeat policy cannot be read", recorder.Code, http.StatusInternalServerError)
+	}
+
+	itemRepo := &fakeVPSAssetRepository{getVPSAssetResult: record("vps_old")}
+	recorder = httptest.NewRecorder()
+	handlers.VPSItem(itemRepo, linkRepo, &fakeVPSHeartbeatPolicySource{defaults: persisted, exists: true}).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/vps/vps_old", nil))
+	var detail vpsassets.Record
+	if err := json.Unmarshal(recorder.Body.Bytes(), &detail); err != nil {
+		t.Fatalf("unmarshal detail body: %v", err)
+	}
+	if recorder.Code != http.StatusOK || detail.CurrentMonitoring == nil || !detail.CurrentMonitoring.HeartbeatStale {
+		t.Fatalf("detail status = %d current_monitoring = %#v, want stale current instance", recorder.Code, detail.CurrentMonitoring)
 	}
 }
 

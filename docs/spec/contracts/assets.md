@@ -96,7 +96,7 @@
 - active link 定义为 `unlinked_at is null`。`idx_vps_monitoring_instance_links_pair_active` 必须保证同一 `(vps_id, monitoring_instance_id)` 同时最多一条 active link。
 - unlink 必须写 `unlinked_at`，不得物理删除；如果提供 note，只更新 link note，不改 MonitoringInstance 或 VPS 业务字段。
 - link / unlink 不得改写 `monitoring_instances.provider`、MonitoringInstance `lifecycle_status`、`monitoring_status`、`current_health_status`、Target、Agent 或 subscription。
-- VPS item/list API 可以补 `active_monitoring_instance_link_count`，VPS detail 可以返回 active MonitoringInstance 摘要；这些摘要通过 `internal/center/assetlinks.Repository` 查询，不要把 MonitoringInstance 查询 SQL 塞进 `store/vps_assets.go`。
+- VPS item/list API 可以补 `active_monitoring_instance_link_count`，VPS detail 可以返回 active MonitoringInstance 摘要；item/list 在有当前（未退役、`is_current`）监控实例时另带 `current_monitoring`：只含该实例的 `monitoring_instance_id`、`lifecycle_status`、`monitoring_status`、`binding_status`、`current_health_status`（store 已投影）、`last_trusted_online_at` 原始事实，以及 `heartbeat_stale`——最近可信心跳是否越过失联阈值，阈值与 VPS 总览、事件评估同一份持久化 `incident_defaults`（未保存时用默认值），每个请求最多读一次设置且只在确有心跳时读取，读取失败按 500 返回而不是当作未失联；没有当前实例时省略该字段。它不写“在线/健康”结论，文案由前端推导；这些摘要通过 `internal/center/assetlinks.Repository` 查询，不要把 MonitoringInstance 查询 SQL 塞进 `store/vps_assets.go`。
 - MonitoringInstance 侧 VPS 摘要使用独立 `/api/monitoring-instances/{monitoring_instance_id}/vps` 查询，不把资产字段混入基础 `monitoringinstances.Record`。
 
 ## VPS-scoped MonitoringInstance creation
