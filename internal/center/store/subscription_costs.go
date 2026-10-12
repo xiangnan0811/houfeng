@@ -47,6 +47,7 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 			from subscription_exchange_rates
 			where provider = $1
 			  and base_currency = $2
+			  and month_end_for is null
 			order by provider, base_currency, quote_currency, fetched_at desc, rate_date desc
 		),
 			reminder_windows as (
@@ -189,11 +190,9 @@ func (r *PostgresSubscriptionCostRepository) ListCostRows(ctx context.Context, s
 	return records, nil
 }
 
-func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Context, settings centersettings.SubscriptionCostSettings, months int, now time.Time) ([]subscriptioncosts.SeriesPoint, error) {
-	if months <= 0 {
-		return []subscriptioncosts.SeriesPoint{}, nil
-	}
-	rows, err := r.db.Query(ctx, `
+// subscriptionCostMonthStatesSQL 定义成本趋势的月份桶与每月订阅状态（价格、币种、状态按价格历史回放）。
+// 参数：$1 汇率提供方，$2 基准币种，$3 当前时间，$4 月数。成本趋势与月末汇率回补共用，口径必须一致。
+const subscriptionCostMonthStatesSQL = `
 		with buckets as (
 			select generate_series(
 				date_trunc('month', $3::timestamptz) - (($4::integer - 1) * interval '1 month'),
@@ -272,30 +271,11 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 			)
 			join vps_assets v on v.vps_id = s.vps_id
 			where v.lifecycle_status = 'active'
-		)
-		select
-			to_char(b.bucket_start, 'YYYY-MM') as bucket,
-			coalesce(round(sum(
-				case
-					when st.status <> 'active' then 0
-					when st.currency = $2 then st.monthly_price
-					when lr.rate is not null then st.monthly_price * lr.rate
-					when er_first.rate is not null then st.monthly_price * er_first.rate
-					else null
-				end
-			)::numeric, 4)::float8, 0::float8) as monthly_cost,
-			count(*) filter (
-				where st.status = 'active'
-				  and st.currency <> $2
-				  and lr.rate is null
-				  and er_first.rate is null
-			) > 0 as data_insufficient,
-			count(*) filter (
-				where st.status = 'active'
-				  and st.currency <> $2
-				  and lr.rate is null
-				  and er_first.rate is not null
-			) > 0 as rate_estimated
+		)`
+
+// subscriptionCostMonthRatesSQL 为每个月份桶与订阅状态连接汇率：lr 当月末之前取得的实时汇率，
+// hr 回补的该月月末汇率，er_first 此后最早的实时汇率（估算）。
+const subscriptionCostMonthRatesSQL = `
 		from buckets b
 		left join states st on st.bucket_start = b.bucket_start
 		left join lateral (
@@ -305,10 +285,21 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 			  and er.base_currency = $2
 			  and er.quote_currency = st.currency
 			  and er.fetched_at < (b.bucket_start + interval '1 month')
+			  and er.month_end_for is null
 			order by er.fetched_at desc, er.rate_date desc
 			limit 1
 		) lr on st.currency <> $2
-		-- 月末之前没有该币对的汇率记录时（常见于补录的历史月份），按此后最早的汇率记录估算并单独标注，而不是整月缺测。
+		-- 当月末之前没有取得过汇率时，用后台按日期回补的该月月末汇率；它是当月真实汇率，不算估算。
+		left join lateral (
+			select er.rate::float8
+			from subscription_exchange_rates er
+			where er.provider = $1
+			  and er.base_currency = $2
+			  and er.quote_currency = st.currency
+			  and er.month_end_for = (b.bucket_start + interval '1 month - 1 day')::date
+			limit 1
+		) hr on st.currency <> $2 and lr.rate is null
+		-- 月末之前没有该币对的汇率记录、也还没回补到月末汇率时（常见于补录的历史月份），按此后最早的实时汇率估算并单独标注，而不是整月缺测。
 		left join lateral (
 			select er.rate::float8
 			from subscription_exchange_rates er
@@ -316,9 +307,43 @@ func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Co
 			  and er.base_currency = $2
 			  and er.quote_currency = st.currency
 			  and er.fetched_at >= (b.bucket_start + interval '1 month')
+			  and er.month_end_for is null
 			order by er.fetched_at asc, er.rate_date asc
 			limit 1
-		) er_first on st.currency <> $2 and lr.rate is null
+		) er_first on st.currency <> $2 and lr.rate is null and hr.rate is null`
+
+func (r *PostgresSubscriptionCostRepository) ListCostMonthBuckets(ctx context.Context, settings centersettings.SubscriptionCostSettings, months int, now time.Time) ([]subscriptioncosts.SeriesPoint, error) {
+	if months <= 0 {
+		return []subscriptioncosts.SeriesPoint{}, nil
+	}
+	rows, err := r.db.Query(ctx, subscriptionCostMonthStatesSQL+`
+		select
+			to_char(b.bucket_start, 'YYYY-MM') as bucket,
+			coalesce(round(sum(
+				case
+					when st.status <> 'active' then 0
+					when st.currency = $2 then st.monthly_price
+					when lr.rate is not null then st.monthly_price * lr.rate
+					when hr.rate is not null then st.monthly_price * hr.rate
+					when er_first.rate is not null then st.monthly_price * er_first.rate
+					else null
+				end
+			)::numeric, 4)::float8, 0::float8) as monthly_cost,
+			count(*) filter (
+				where st.status = 'active'
+				  and st.currency <> $2
+				  and lr.rate is null
+				  and hr.rate is null
+				  and er_first.rate is null
+			) > 0 as data_insufficient,
+			count(*) filter (
+				where st.status = 'active'
+				  and st.currency <> $2
+				  and lr.rate is null
+				  and hr.rate is null
+				  and er_first.rate is not null
+			) > 0 as rate_estimated
+`+subscriptionCostMonthRatesSQL+`
 		group by b.bucket_start
 		order by b.bucket_start asc`,
 		settings.ExchangeRateProvider,
@@ -892,6 +917,7 @@ func (r *PostgresSubscriptionCostRepository) ListActiveExchangeRatePairs(ctx con
 			where er.provider = $1
 			  and er.base_currency = $2
 			  and er.quote_currency = ac.currency
+			  and er.month_end_for is null
 			order by er.fetched_at desc, er.rate_date desc
 			limit 1
 		) latest on true
@@ -975,7 +1001,7 @@ func (r *PostgresSubscriptionCostRepository) UpsertExchangeRate(ctx context.Cont
 			fetched_at,
 			error_summary
 		) values ($1,$2,$3,$4,$5,$6,$7,$8)
-		on conflict (provider, base_currency, quote_currency, rate_date) do update
+		on conflict (provider, base_currency, quote_currency, rate_date) where month_end_for is null do update
 		set rate = excluded.rate,
 		    fetched_at = excluded.fetched_at,
 		    error_summary = excluded.error_summary,
@@ -1009,6 +1035,88 @@ func (r *PostgresSubscriptionCostRepository) UpsertExchangeRate(ctx context.Cont
 	return record, nil
 }
 
+// ListMissingMonthEndExchangeRates 列出成本趋势窗口内（不含当月）需要回补月末汇率的币对月份，
+// 与 ListCostMonthBuckets 共用月份与订阅状态口径；按月份从近到远排列，使分批回补先改善最近的月份。
+func (r *PostgresSubscriptionCostRepository) ListMissingMonthEndExchangeRates(ctx context.Context, settings centersettings.SubscriptionCostSettings, months int, now time.Time) ([]subscriptioncosts.MonthEndExchangeRateRequest, error) {
+	if months <= 0 {
+		return []subscriptioncosts.MonthEndExchangeRateRequest{}, nil
+	}
+	rows, err := r.db.Query(ctx, subscriptionCostMonthStatesSQL+`
+		select distinct
+			st.currency,
+			(b.bucket_start + interval '1 month - 1 day')::date as month_end
+`+subscriptionCostMonthRatesSQL+`
+		where b.bucket_start < date_trunc('month', $3::timestamptz)::date
+		  and st.status = 'active'
+		  and st.currency <> $2
+		  and lr.rate is null
+		  and hr.rate is null
+		order by month_end desc, st.currency asc`,
+		settings.ExchangeRateProvider,
+		settings.BaseCurrency,
+		now.UTC(),
+		months,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query missing month-end exchange rates: %w", err)
+	}
+	defer rows.Close()
+
+	records := []subscriptioncosts.MonthEndExchangeRateRequest{}
+	for rows.Next() {
+		var record subscriptioncosts.MonthEndExchangeRateRequest
+		var monthEnd time.Time
+		if err := rows.Scan(&record.QuoteCurrency, &monthEnd); err != nil {
+			return nil, fmt.Errorf("scan missing month-end exchange rate: %w", err)
+		}
+		record.MonthEnd = subscriptions.NewDate(monthEnd)
+		records = append(records, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate missing month-end exchange rates: %w", err)
+	}
+	return records, nil
+}
+
+func (r *PostgresSubscriptionCostRepository) UpsertMonthEndExchangeRate(ctx context.Context, input subscriptioncosts.MonthEndExchangeRateUpsert) error {
+	rateID, err := ids.New("sub_rate")
+	if err != nil {
+		return fmt.Errorf("generate subscription exchange rate id: %w", err)
+	}
+	_, err = r.db.Exec(ctx, `
+		insert into subscription_exchange_rates (
+			rate_id,
+			provider,
+			base_currency,
+			quote_currency,
+			rate,
+			rate_date,
+			fetched_at,
+			month_end_for
+		) values ($1,$2,$3,$4,$5,$6,$7,$8)
+		on conflict (provider, base_currency, quote_currency, month_end_for) where month_end_for is not null do update
+		set rate = excluded.rate,
+		    rate_date = excluded.rate_date,
+		    fetched_at = excluded.fetched_at,
+		    updated_at = now()`,
+		rateID,
+		input.Provider,
+		input.BaseCurrency,
+		input.QuoteCurrency,
+		input.Rate,
+		input.RateDate.Time,
+		input.FetchedAt,
+		input.MonthEnd.Time,
+	)
+	if err != nil {
+		if isSubscriptionCostInvalidPostgresError(err) {
+			return subscriptioncosts.ErrInvalidInput
+		}
+		return fmt.Errorf("upsert month-end subscription exchange rate: %w", err)
+	}
+	return nil
+}
+
 func (r *PostgresSubscriptionCostRepository) ListReminderCandidates(ctx context.Context, settings centersettings.SubscriptionCostSettings, offsets []int) ([]subscriptioncosts.ReminderCandidate, error) {
 	if len(offsets) == 0 {
 		return nil, nil
@@ -1028,6 +1136,7 @@ func (r *PostgresSubscriptionCostRepository) ListReminderCandidates(ctx context.
 			from subscription_exchange_rates
 			where provider = $2
 			  and base_currency = $3
+			  and month_end_for is null
 			order by provider, base_currency, quote_currency, fetched_at desc, rate_date desc
 		),
 		candidates as (

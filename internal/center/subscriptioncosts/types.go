@@ -78,6 +78,8 @@ type Repository interface {
 	UpsertMonthlyBudgets(context.Context, []UpsertMonthlyBudgetInput) ([]MonthlyBudgetRecord, error)
 	ListActiveExchangeRatePairs(context.Context, centersettings.SubscriptionCostSettings) ([]ExchangeRatePair, error)
 	UpsertExchangeRate(context.Context, ExchangeRateUpsert) (ExchangeRateRecord, error)
+	ListMissingMonthEndExchangeRates(context.Context, centersettings.SubscriptionCostSettings, int, time.Time) ([]MonthEndExchangeRateRequest, error)
+	UpsertMonthEndExchangeRate(context.Context, MonthEndExchangeRateUpsert) error
 	ListReminderCandidates(context.Context, centersettings.SubscriptionCostSettings, []int) ([]ReminderCandidate, error)
 	TryCreateReminderDelivery(context.Context, ReminderDeliveryInput) (string, bool, error)
 	UpdateReminderDelivery(context.Context, string, ReminderDeliveryUpdate) error
@@ -349,6 +351,25 @@ type ExchangeRateUpsert struct {
 	ErrorSummary  string
 }
 
+// MonthEndExchangeRateRequest 是需要回补月末汇率的币对月份：该月有计入成本趋势的外币订阅，
+// 但当月末之前没有取得过实时汇率，也还没有回补过该月月末汇率。
+type MonthEndExchangeRateRequest struct {
+	QuoteCurrency string
+	MonthEnd      subscriptions.Date
+}
+
+// MonthEndExchangeRateUpsert 写入按日期回补的月末汇率。它只供成本趋势使用，
+// 不参与“最新汇率”或“某时刻已知汇率”的选择。
+type MonthEndExchangeRateUpsert struct {
+	Provider      string
+	BaseCurrency  string
+	QuoteCurrency string
+	MonthEnd      subscriptions.Date
+	Rate          float64
+	RateDate      subscriptions.Date
+	FetchedAt     time.Time
+}
+
 type FetchedExchangeRate struct {
 	Rate     float64
 	RateDate subscriptions.Date
@@ -356,6 +377,12 @@ type FetchedExchangeRate struct {
 
 type ExchangeRateProvider interface {
 	FetchRate(context.Context, string, string) (FetchedExchangeRate, error)
+}
+
+// HistoricalExchangeRateProvider 按日期取汇率（返回不晚于该日期的最近一个交易日汇率）。
+// 只有 Frankfurter 实现；Fixer 的历史端点受套餐限制，不回补。
+type HistoricalExchangeRateProvider interface {
+	FetchRateOn(context.Context, string, string, subscriptions.Date) (FetchedExchangeRate, error)
 }
 
 type ReminderCandidate struct {

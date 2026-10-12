@@ -25,6 +25,13 @@ const (
 
 var exchangeRateRetryDelays = [...]time.Duration{5 * time.Second, 30 * time.Second, 120 * time.Second}
 
+const (
+	// 月末汇率回补与最长的成本趋势窗口一致：含当月共 12 个月，即当月之前的 11 个历史月份。
+	monthEndBackfillWindowMonths = 12
+	// 每轮最多回补的币对月份数；Frankfurter 免密钥但有防滥用限流，分批补齐。
+	monthEndBackfillPerRound = 6
+)
+
 type ExchangeRateWorker struct {
 	service                   *Service
 	interval                  time.Duration
@@ -37,6 +44,9 @@ type ExchangeRateWorker struct {
 	observedSettingsSignature string
 	settingsRoundPending      bool
 	wake                      chan struct{}
+	// monthEndFailures 记录本轮周期内回补失败的币对月份，下一次新一轮之前不再请求。
+	// 只由 Run 所在的顺序 lane 读写。
+	monthEndFailures map[string]struct{}
 }
 
 type exchangeRateTaskState struct {
@@ -72,6 +82,8 @@ func NewExchangeRateWorker(service *Service, logger *slog.Logger, interval time.
 		logger:   logger,
 		states:   make(map[string]*exchangeRateTaskState),
 		wake:     make(chan struct{}, 1),
+
+		monthEndFailures: make(map[string]struct{}),
 	}
 }
 
@@ -305,7 +317,85 @@ func (w *ExchangeRateWorker) runRound(ctx context.Context, trigger exchangeRateR
 			w.recordFailure(key, pair, err)
 		}
 	}
+	return w.backfillMonthEndRates(ctx, settings, newRound)
+}
+
+// backfillMonthEndRates 为成本趋势里“当月末之前没有取得过汇率”的外币月份，按月末日期回补历史汇率。
+// 只对 Frankfurter 回补（Fixer 维持按此后最早汇率估算）；每轮最多请求 monthEndBackfillPerRound 次；
+// 失败的币对月份在下一次新一轮（启动、12 小时周期、设置变化）之前不再请求，避免 30 秒对账反复请求
+// 同一个取不到的日期。它不改变实时币对的任务状态。
+func (w *ExchangeRateWorker) backfillMonthEndRates(ctx context.Context, settings centersettings.SubscriptionCostSettings, newRound bool) error {
+	if newRound {
+		w.monthEndFailures = make(map[string]struct{})
+	}
+	providerName := settings.ExchangeRateProvider
+	if providerName != string(centersettings.SubscriptionExchangeRateProviderFrankfurter) {
+		return nil
+	}
+	provider, ok := w.service.providers[providerName].(HistoricalExchangeRateProvider)
+	if !ok {
+		return nil
+	}
+	now := w.service.now().UTC()
+	requests, err := w.service.repo.ListMissingMonthEndExchangeRates(ctx, settings, monthEndBackfillWindowMonths, now)
+	if err != nil {
+		return fmt.Errorf("list missing month-end exchange rates: %w", err)
+	}
+	attempts := 0
+	for _, request := range requests {
+		if attempts >= monthEndBackfillPerRound {
+			break
+		}
+		key := monthEndBackfillKey(providerName, settings.BaseCurrency, request)
+		if _, failed := w.monthEndFailures[key]; failed {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		attempts++
+		if err := w.fetchMonthEndRate(ctx, provider, providerName, settings.BaseCurrency, request); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			w.monthEndFailures[key] = struct{}{}
+			w.logger.Warn("subscription month-end exchange rate backfill failed",
+				"quote_currency", request.QuoteCurrency,
+				"month_end", request.MonthEnd.Time.Format(subscriptions.DateLayout),
+				"err", sanitizeProviderError(err))
+		}
+	}
 	return nil
+}
+
+func (w *ExchangeRateWorker) fetchMonthEndRate(ctx context.Context, provider HistoricalExchangeRateProvider, providerName, baseCurrency string, request MonthEndExchangeRateRequest) error {
+	requestCtx, cancel := context.WithTimeout(ctx, exchangeRateFetchTimeout)
+	fetched, err := provider.FetchRateOn(requestCtx, request.QuoteCurrency, baseCurrency, request.MonthEnd)
+	cancel()
+	if err != nil {
+		return err
+	}
+	if fetched.Rate <= 0 || math.IsNaN(fetched.Rate) || math.IsInf(fetched.Rate, 0) {
+		return fmt.Errorf("exchange rate must be a finite positive number")
+	}
+	// 提供方返回不晚于请求日期的最近交易日；不在该月内说明该月没有这个币对的数据，不能冒充当月汇率。
+	monthStart := time.Date(request.MonthEnd.Time.Year(), request.MonthEnd.Time.Month(), 1, 0, 0, 0, 0, time.UTC)
+	if fetched.RateDate.Time.Before(monthStart) || fetched.RateDate.Time.After(request.MonthEnd.Time) {
+		return fmt.Errorf("provider returned no rate within the requested month")
+	}
+	return w.service.repo.UpsertMonthEndExchangeRate(ctx, MonthEndExchangeRateUpsert{
+		Provider:      providerName,
+		BaseCurrency:  baseCurrency,
+		QuoteCurrency: request.QuoteCurrency,
+		MonthEnd:      request.MonthEnd,
+		Rate:          fetched.Rate,
+		RateDate:      fetched.RateDate,
+		FetchedAt:     w.service.now().UTC(),
+	})
+}
+
+func monthEndBackfillKey(provider, baseCurrency string, request MonthEndExchangeRateRequest) string {
+	return provider + "|" + baseCurrency + "|" + request.QuoteCurrency + "|" + request.MonthEnd.Time.Format(subscriptions.DateLayout)
 }
 
 func (w *ExchangeRateWorker) syncActivePairsLocked(pairs []ExchangeRatePair, settings centersettings.SubscriptionCostSettings, now time.Time, newRound, workerDiscovery bool) {

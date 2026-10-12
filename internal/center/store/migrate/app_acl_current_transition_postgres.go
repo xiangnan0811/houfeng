@@ -253,12 +253,21 @@ func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
-	// 0073 adds the monitoring-instance metadata version and 0072 adds
-	// freshness columns, both without APP ACL changes. 0071 adds
+	// 0074 adds subscription month-end exchange rates, 0073 adds the
+	// monitoring-instance metadata version and 0072 adds freshness columns,
+	// all without APP ACL changes. 0071 adds
 	// access-management ACL only, while 0070 adds nullable destination-subject
 	// columns and 0069 adds CPU validity schema. These non-heartbeat migrations
 	// must be stripped from the terminal suffix before policy-shape classification.
 	successorNames := transition.successor.names
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0074_add_subscription_exchange_rate_month_end.sql" {
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0074_add_subscription_exchange_rate_month_end.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0073_add_monitoring_instance_metadata_version.sql" {
 		successorNames = successorNames[:n-1]
 	}
@@ -323,13 +332,15 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 	}
 	switch {
 	case len(successorNames) == 0:
-		// P69 carries 0070 through 0073; P70 carries 0071 through 0073;
-		// P71 carries 0072 and 0073; P72 carries only 0073. The terminal
-		// non-policy suffixes have already been stripped above.
+		// P69 carries 0070 through 0074; P70 carries 0071 through 0074;
+		// P71 carries 0072 through 0074; P72 carries 0073 and 0074; P73
+		// carries only 0074. The terminal non-policy suffixes have already
+		// been stripped above.
 		if transition.profile == appACLCurrentProfileP69 ||
 			transition.profile == appACLCurrentProfileP70 ||
 			transition.profile == appACLCurrentProfileP71 ||
-			transition.profile == appACLCurrentProfileP72 {
+			transition.profile == appACLCurrentProfileP72 ||
+			transition.profile == appACLCurrentProfileP73 {
 			return false, nil
 		}
 		if !addressIdentityMigrationPending && !cpuRatesMigrationPending {
