@@ -514,6 +514,7 @@ for (const contract of RELATION_PANELS) {
       ...vpsOverviewProfile(),
       [apiRouteKey('GET', '/api/targets')]: { status: 200, body: [] },
     })
+    if ('route' in contract.entry) await api.allowRuntimeStream('mi_001')
     await page.goto('/vps/vps_001')
 
     await page.getByRole('button', { name: contract.trigger, exact: true }).click()
@@ -530,6 +531,12 @@ for (const contract of RELATION_PANELS) {
       await expect(dialog.getByRole('button', { name: '解除关联', exact: true })).toHaveCount(0)
       await dialog.getByRole('button', { name: contract.entry.action, exact: true }).click()
       await expectLocation(page, contract.entry.route)
+      await expect(page.getByRole('heading', { name: 'Tokyo Monitor', exact: true, level: 1 })).toBeVisible()
+      await expect(page.getByRole('button', { name: '24h', exact: true })).toHaveAttribute('aria-pressed', 'true')
+      await expect.poll(async () => (await api.snapshotRuntimeStreamSockets()).filter(
+        (socket) => socket.monitoringInstanceId === 'mi_001' && socket.phase === 'open',
+      ).length).toBe(1)
+      await api.assertRuntimeStreamConnected('mi_001', false)
       expect(api.requestCount('POST', '/api/vps/vps_001/unlink-monitoring-instance')).toBe(0)
     } else {
       await dialog.getByRole('button', { name: contract.entry.action, exact: true }).click()

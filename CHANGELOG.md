@@ -27,6 +27,14 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.26.1](https://github.com/xiangnan0811/houfeng/compare/v1.26.0...v1.26.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **监控：** 所有趋势窗口自动刷新可信在线证据，修复详情页长期停留后误报心跳超时；24h、7d、30d 图表保持所选历史快照。([#609](https://github.com/xiangnan0811/houfeng/pull/609))
+* **监控：** 在线证据中断时明确标记上次读取结果并提供手动重试；已建立证据流的连接支持自动重连。
+
 ## [1.26.0](https://github.com/xiangnan0811/houfeng/compare/v1.25.0...v1.26.0) (2026-10-12)
 
 
