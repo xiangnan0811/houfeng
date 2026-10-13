@@ -27,6 +27,14 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.26.1](https://github.com/xiangnan0811/houfeng/compare/v1.26.0...v1.26.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **monitoring:** keep trusted online evidence fresh across detail windows ([f725923](https://github.com/xiangnan0811/houfeng/commit/f7259238944d7f4f8fbefb62be6290410537f2e8))
+* **monitoring:** keep trusted online evidence fresh across detail windows ([a3fbf9c](https://github.com/xiangnan0811/houfeng/commit/a3fbf9c690200fb08d41833929f7c4177b565086))
+
 ## [1.26.0](https://github.com/xiangnan0811/houfeng/compare/v1.25.0...v1.26.0) (2026-10-12)
 
 
