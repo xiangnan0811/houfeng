@@ -7,12 +7,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 
+	"houfeng/internal/center/auth"
 	"houfeng/internal/center/http/handlers"
 	"houfeng/internal/center/http/sessionctx"
 	"houfeng/internal/center/monitoringinstances"
@@ -55,6 +57,7 @@ func (v testRuntimeSessionValidator) ValidateSession(context.Context, string) er
 
 func runtimeStreamTestHandler(repo interface {
 	GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
+	GetMonitoringInstanceOnlineEvidence(context.Context, string) (runtimefacts.OnlineEvidenceStreamMessage, error)
 }, hub interface {
 	SubscribeHostSamples(string) runtimefacts.HostSampleSubscription
 }) http.Handler {
@@ -63,6 +66,25 @@ func runtimeStreamTestHandler(repo interface {
 		ctx := sessionctx.WithSessionID(r.Context(), "runtime-test-session")
 		handler.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (f *fakeMonitoringInstanceRepository) GetMonitoringInstanceOnlineEvidence(ctx context.Context, id string) (runtimefacts.OnlineEvidenceStreamMessage, error) {
+	record, err := f.GetMonitoringInstance(ctx, id)
+	return runtimefacts.OnlineEvidenceStreamMessage{
+		Type: "online_evidence", MonitoringInstanceID: id,
+		LastTrustedOnlineAt: record.LastTrustedOnlineAt, ReadAt: time.Now().UTC(),
+	}, err
+}
+
+func readInitialOnlineEvidence(t *testing.T, ctx context.Context, conn *websocket.Conn) {
+	t.Helper()
+	var message runtimefacts.OnlineEvidenceStreamMessage
+	if err := wsjson.Read(ctx, conn, &message); err != nil {
+		t.Fatalf("read initial online evidence: %v", err)
+	}
+	if message.Type != "online_evidence" || message.ReadAt.IsZero() {
+		t.Fatalf("initial message = %#v, want online evidence", message)
+	}
 }
 
 func TestMonitoringInstanceRuntimeFactsReturnsLatestHostSample(t *testing.T) {
@@ -423,6 +445,7 @@ func TestMonitoringInstanceRuntimeStreamSendsMatchingHostSamples(t *testing.T) {
 	}
 
 	var message runtimefacts.HostSampleStreamMessage
+	readInitialOnlineEvidence(t, ctx, conn)
 	if err := wsjson.Read(ctx, conn, &message); err != nil {
 		t.Fatalf("wsjson.Read() error = %v", err)
 	}
@@ -481,6 +504,7 @@ func TestMonitoringInstanceRuntimeStreamWritesAgentShapedSamplesWithZeroReceived
 	}
 
 	var message runtimefacts.HostSampleStreamMessage
+	readInitialOnlineEvidence(t, ctx, conn)
 	if err := wsjson.Read(ctx, conn, &message); err != nil {
 		t.Fatalf("wsjson.Read() error = %v", err)
 	}
@@ -578,6 +602,7 @@ func TestMonitoringInstanceRuntimeStreamDropsStaleAndFutureSamplesBeforeWriting(
 	}
 
 	var message runtimefacts.HostSampleStreamMessage
+	readInitialOnlineEvidence(t, ctx, conn)
 	if err := wsjson.Read(ctx, conn, &message); err != nil {
 		t.Fatalf("wsjson.Read() error = %v", err)
 	}
@@ -697,4 +722,132 @@ func agentShapedSyncingBatchWithHostSample(monitoringInstanceID string, cpuUsage
 
 func runtimefactsTestResult() syncing.Result {
 	return syncing.Result{Disposition: syncing.ResultDispositionRecorded, AcceptedAt: time.Date(2026, time.April, 24, 9, 0, 1, 0, time.UTC)}
+}
+
+type onlineEvidenceTestRepository struct {
+	readCount atomic.Int32
+	failure   error
+}
+
+func (r *onlineEvidenceTestRepository) GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error) {
+	return monitoringinstances.Record{MonitoringStatus: "暂停"}, nil
+}
+
+func (r *onlineEvidenceTestRepository) GetMonitoringInstanceOnlineEvidence(_ context.Context, id string) (runtimefacts.OnlineEvidenceStreamMessage, error) {
+	n := r.readCount.Add(1)
+	if n > 1 && r.failure != nil {
+		return runtimefacts.OnlineEvidenceStreamMessage{}, r.failure
+	}
+	readAt := time.Date(2026, 10, 13, 1, 0, int(n)*5, 0, time.UTC)
+	var onlineAt *time.Time
+	if n > 1 {
+		onlineAt = &readAt
+	}
+	return runtimefacts.OnlineEvidenceStreamMessage{
+		Type: "online_evidence", MonitoringInstanceID: id, LastTrustedOnlineAt: onlineAt, ReadAt: readAt,
+	}, nil
+}
+
+func TestMonitoringInstanceRuntimeStreamOnlineEvidenceWithoutSamples(t *testing.T) {
+	t.Parallel()
+	repo := &onlineEvidenceTestRepository{}
+	hub := &notifyingHostSampleHub{StreamHub: runtimefacts.NewStreamHub(), subscribed: make(chan string, 1)}
+	server := httptest.NewServer(runtimeStreamTestHandler(repo, hub))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/api/monitoring-instances/mi_001/runtime-stream?include_samples=false", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	var initial map[string]json.RawMessage
+	if err := wsjson.Read(ctx, conn, &initial); err != nil {
+		t.Fatal(err)
+	}
+	if len(initial) != 4 || string(initial["last_trusted_online_at"]) != "null" || string(initial["type"]) != `"online_evidence"` {
+		t.Fatalf("initial evidence = %s, want exactly four fields including null trusted timestamp", initial)
+	}
+	if err := hub.AfterSuccessfulSync(ctx, syncingBatchWithHostSample("mi_001", 42), runtimefactsTestResult()); err != nil {
+		t.Fatal(err)
+	}
+	var next runtimefacts.OnlineEvidenceStreamMessage
+	if err := wsjson.Read(ctx, conn, &next); err != nil {
+		t.Fatal(err)
+	}
+	if next.Type != "online_evidence" || next.MonitoringInstanceID != "mi_001" || next.LastTrustedOnlineAt == nil || !next.LastTrustedOnlineAt.Equal(next.ReadAt) {
+		t.Fatalf("next = %#v, want refreshed evidence independently of paused/unbound collection", next)
+	}
+	select {
+	case id := <-hub.subscribed:
+		t.Fatalf("evidence-only stream subscribed to samples for %s", id)
+	default:
+	}
+}
+
+func TestMonitoringInstanceRuntimeStreamClosesWhenEvidenceReadFails(t *testing.T) {
+	for _, failure := range []error{errors.New("database unavailable"), monitoringinstances.ErrMonitoringInstanceNotFound} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(runtimeStreamTestHandler(&onlineEvidenceTestRepository{failure: failure}, runtimefacts.NewStreamHub()))
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			defer cancel()
+			conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/api/monitoring-instances/mi_001/runtime-stream?include_samples=false", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer conn.CloseNow()
+			readInitialOnlineEvidence(t, ctx, conn)
+			var next runtimefacts.OnlineEvidenceStreamMessage
+			if err := wsjson.Read(ctx, conn, &next); err == nil || ctx.Err() != nil {
+				t.Fatalf("read after authority error = %v; ctx=%v, want prompt connection close", err, ctx.Err())
+			}
+		})
+	}
+}
+
+func TestMonitoringInstanceRuntimeStreamRejectsInvalidIncludeSamples(t *testing.T) {
+	for _, query := range []string{"include_samples=", "include_samples=0", "include_samples=false&include_samples=true"} {
+		recorder := httptest.NewRecorder()
+		runtimeStreamTestHandler(&fakeMonitoringInstanceRepository{}, runtimefacts.NewStreamHub()).ServeHTTP(recorder,
+			httptest.NewRequest(http.MethodGet, "/api/monitoring-instances/mi_001/runtime-stream?"+query, nil))
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("%s status=%d, want 400", query, recorder.Code)
+		}
+	}
+}
+
+type expiringRuntimeSessionValidator struct {
+	expired atomic.Bool
+}
+
+func (v *expiringRuntimeSessionValidator) ValidateSession(context.Context, string) error {
+	if v.expired.Load() {
+		return auth.ErrSessionExpired
+	}
+	return nil
+}
+
+func TestMonitoringInstanceRuntimeStreamClosesExpiredEvidenceOnlySession(t *testing.T) {
+	t.Parallel()
+	validator := &expiringRuntimeSessionValidator{}
+	handler := handlers.MonitoringInstanceRuntimeStream(&onlineEvidenceTestRepository{}, runtimefacts.NewStreamHub(), validator)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler.ServeHTTP(w, r.WithContext(sessionctx.WithSessionID(r.Context(), "expiring-session")))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/api/monitoring-instances/mi_001/runtime-stream?include_samples=false", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	readInitialOnlineEvidence(t, ctx, conn)
+	validator.expired.Store(true)
+	var next runtimefacts.OnlineEvidenceStreamMessage
+	if err := wsjson.Read(ctx, conn, &next); err == nil || ctx.Err() != nil {
+		t.Fatalf("read after session expired = %v; ctx=%v, want prompt close without another evidence message", err, ctx.Err())
+	}
 }

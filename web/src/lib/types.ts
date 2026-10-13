@@ -336,6 +336,13 @@ export type HostSampleStreamMessage = {
   received_at: string
 }
 
+export type OnlineEvidenceStreamMessage = {
+  type: 'online_evidence'
+  monitoring_instance_id: string
+  last_trusted_online_at: string | null
+  read_at: string
+}
+
 export type MonitoringInstanceRuntimeFacts = {
   monitoring_instance_id: string
   read_at?: string

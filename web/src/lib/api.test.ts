@@ -1894,6 +1894,9 @@ describe('api helpers', () => {
     expect(monitoringInstanceRuntimeStreamURL('mi/slash', 'https://center.example.com/base')).toBe(
       'wss://center.example.com/api/monitoring-instances/mi%2Fslash/runtime-stream',
     )
+    expect(monitoringInstanceRuntimeStreamURL('mi/slash', 'https://center.example.com/base', false)).toBe(
+      'wss://center.example.com/api/monitoring-instances/mi%2Fslash/runtime-stream?include_samples=false',
+    )
   })
 
   it('sends monitoring instance metadata optimistic preconditions when provided', async () => {

@@ -5,10 +5,12 @@ import { Timestamp } from '../../components/atoms'
 import type { HostSample, MonitoringInstanceRecord } from '../../lib/types'
 import { formatSampledUptime } from '../monitoring/monitoringHelpers'
 import type { HeartbeatFreshness } from '../monitoring/types'
+import type { OnlineEvidenceStatus } from './types'
 
 type Props = {
   monitoringInstance: MonitoringInstanceRecord
   heartbeatFreshness?: HeartbeatFreshness
+  onlineEvidenceStatus?: OnlineEvidenceStatus
   snapshotReadAt: Date | null
   sample: HostSample | null
 }
@@ -29,7 +31,7 @@ function heartbeatEvidence(
       ) : (
         <Timestamp value={at} mode="absolute" />
       )}
-      {freshness?.kind === 'stale' ? <span className="monitoring-detail-status__stale"> · 数据陈旧</span> : null}
+      {freshness?.kind === 'stale' ? <span className="monitoring-detail-status__stale"> · 心跳超时</span> : null}
       {freshness?.kind === 'policy-unavailable' ? ' · 新鲜度策略不可用' : null}
     </>
   )
@@ -38,6 +40,7 @@ function heartbeatEvidence(
 export function MonitoringDetailStatusBand({
   monitoringInstance,
   heartbeatFreshness,
+  onlineEvidenceStatus,
   snapshotReadAt,
   sample,
 }: Props) {
@@ -53,6 +56,9 @@ export function MonitoringDetailStatusBand({
       <StatusBadge label={monitoringInstance.lifecycle_status} />
       <span className="monitoring-detail-status__heartbeat">
         在线证据 {heartbeatEvidence(heartbeatFreshness, snapshotReadAt, monitoringInstance.last_trusted_online_at ?? undefined)}
+        {onlineEvidenceStatus && onlineEvidenceStatus !== 'current' ? (
+          <span> · {snapshotReadAt ? '上次读取结果，当前状态待确认' : '等待可信在线证据'}</span>
+        ) : null}
       </span>
       {sample ? (
         <span className="monitoring-detail-status__sample">

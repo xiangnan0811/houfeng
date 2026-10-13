@@ -18,6 +18,7 @@ function sortedKeys(value: unknown): string[] | null {
 type RuntimeStreamSocketRecord = {
   url: string
   monitoringInstanceId: string
+  includeSamples: boolean
   phase: 'connecting' | 'open' | 'error' | 'closed'
 }
 
@@ -46,6 +47,7 @@ export class ApiFixtureController {
       }).__houfengE2EPendingRuntimeStreams ??= new Set<string>())
       const allowed = new Set<string>(pending)
       const sockets: SocketRecord[] = []
+      const socketInstances: FixtureWebSocket[] = []
       const unexpected: string[] = []
 
       function runtimeStreamID(url: string): string | null {
@@ -60,8 +62,8 @@ export class ApiFixtureController {
         if (parsed.protocol !== expectedProtocol) return null
         if (parsed.hostname !== window.location.hostname || parsed.port !== window.location.port) return null
         const match = parsed.pathname.match(/^\/api\/monitoring-instances\/([^/]+)\/runtime-stream$/)
-        if (!match?.[1] || parsed.search !== '' || parsed.hash !== '') return null
-        const expectedURL = `${expectedProtocol}//${window.location.host}/api/monitoring-instances/${match[1]}/runtime-stream`
+        if (!match?.[1] || !['', '?include_samples=false'].includes(parsed.search) || parsed.hash !== '') return null
+        const expectedURL = `${expectedProtocol}//${window.location.host}/api/monitoring-instances/${match[1]}/runtime-stream${parsed.search}`
         if (url !== expectedURL) return null
         return match[1]
       }
@@ -79,6 +81,18 @@ export class ApiFixtureController {
           },
           sockets() {
             return sockets
+          },
+          deliver(id: string, message: unknown) {
+            for (const socket of socketInstances) {
+              if (socket.readyState === FixtureWebSocket.OPEN && socket.record.monitoringInstanceId === id) {
+                socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(message) }))
+              }
+            }
+          },
+          disconnect(id: string) {
+            for (const socket of socketInstances) {
+              if (socket.readyState === FixtureWebSocket.OPEN && socket.record.monitoringInstanceId === id) socket.close()
+            }
           },
           unexpected() {
             return unexpected
@@ -102,7 +116,7 @@ export class ApiFixtureController {
         onmessage: ((event: MessageEvent) => void) | null = null
         onerror: ((event: Event) => void) | null = null
         onclose: ((event: CloseEvent) => void) | null = null
-        private readonly record: SocketRecord
+        readonly record: SocketRecord
         private readonly listeners = new Map<string, Array<(event: Event) => void>>()
 
         constructor(url: string | URL) {
@@ -111,9 +125,11 @@ export class ApiFixtureController {
           this.record = {
             url: this.url,
             monitoringInstanceId,
+            includeSamples: !this.url.endsWith('?include_samples=false'),
             phase: 'connecting',
           }
           sockets.push(this.record)
+          socketInstances.push(this)
 
           if (!monitoringInstanceId || !isAllowed(monitoringInstanceId)) {
             unexpected.push(this.url)
@@ -198,10 +214,10 @@ export class ApiFixtureController {
     return this.page.evaluate(() => window.__houfengE2EWebSockets?.sockets() ?? [])
   }
 
-  async assertRuntimeStreamConnected(monitoringInstanceId: string): Promise<void> {
+  async assertRuntimeStreamConnected(monitoringInstanceId: string, includeSamples = true): Promise<void> {
     const pageURL = new URL(this.page.url())
     const sockets = await this.snapshotRuntimeStreamSockets()
-    const matches = sockets.filter((socket) => socket.monitoringInstanceId === monitoringInstanceId)
+    const matches = sockets.filter((socket) => socket.monitoringInstanceId === monitoringInstanceId && socket.phase !== 'closed')
     if (matches.length === 0) {
       throw new Error(`expected runtime stream socket for ${monitoringInstanceId}, got ${JSON.stringify(sockets)}`)
     }
@@ -210,7 +226,7 @@ export class ApiFixtureController {
     }
     for (const socket of matches) {
       const expectedProtocol = pageURL.protocol === 'https:' ? 'wss:' : 'ws:'
-      const expectedURL = `${expectedProtocol}//${pageURL.host}/api/monitoring-instances/${monitoringInstanceId}/runtime-stream`
+      const expectedURL = `${expectedProtocol}//${pageURL.host}/api/monitoring-instances/${monitoringInstanceId}/runtime-stream${includeSamples ? '' : '?include_samples=false'}`
       if (socket.url !== expectedURL) {
         throw new Error(`runtime stream socket ${socket.url} is not the exact raw owner URL`)
       }
@@ -227,6 +243,14 @@ export class ApiFixtureController {
         throw new Error(`runtime stream socket ${socket.url} path is not the exact owner`)
       }
     }
+  }
+
+  async sendRuntimeStreamMessage(monitoringInstanceId: string, message: unknown): Promise<void> {
+    await this.page.evaluate(({ id, message }) => window.__houfengE2EWebSockets?.deliver(id, message), { id: monitoringInstanceId, message })
+  }
+
+  async disconnectRuntimeStream(monitoringInstanceId: string): Promise<void> {
+    await this.page.evaluate((id) => window.__houfengE2EWebSockets?.disconnect(id), monitoringInstanceId)
   }
 
   async assertRuntimeStreamNotConnected(monitoringInstanceId: string): Promise<void> {
@@ -375,6 +399,8 @@ declare global {
       allow: (monitoringInstanceId: string) => void
       sockets: () => RuntimeStreamSocketRecord[]
       unexpected: () => string[]
+      deliver: (monitoringInstanceId: string, message: unknown) => void
+      disconnect: (monitoringInstanceId: string) => void
     }
   }
 }

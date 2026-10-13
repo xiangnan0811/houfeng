@@ -13,6 +13,15 @@ import (
 
 const hostSampleStreamBuffer = 16
 
+// OnlineEvidenceStreamMessage is independent of sample collection and its permissions.
+// ReadAt and LastTrustedOnlineAt are read together using the database clock.
+type OnlineEvidenceStreamMessage struct {
+	Type                 string     `json:"type"`
+	MonitoringInstanceID string     `json:"monitoring_instance_id"`
+	LastTrustedOnlineAt  *time.Time `json:"last_trusted_online_at"`
+	ReadAt               time.Time  `json:"read_at"`
+}
+
 type HostSampleStreamMessage struct {
 	Type                 string     `json:"type"`
 	MonitoringInstanceID string     `json:"monitoring_instance_id"`

@@ -280,6 +280,7 @@ test('VPS overview creates the first monitoring instance and reaches its onboard
   page,
 }) => {
   api.useProfile(firstMonitoringCreateProfile())
+  await api.allowRuntimeStream('mi_created')
   await page.goto('/vps/vps_001')
 
   await page.getByRole('button', { name: '创建并接入 agent' }).click()
@@ -310,7 +311,7 @@ test('VPS overview creates the first monitoring instance and reaches its onboard
     api.requestCount('GET', '/api/monitoring-instances/mi_created/runtime-facts?window=24h')
   )).toBeGreaterThan(0)
   await expect(page.getByRole('button', { name: '24h' })).toHaveAttribute('aria-pressed', 'true')
-  await api.assertRuntimeStreamNotConnected('mi_created')
+  await api.assertRuntimeStreamConnected('mi_created', false)
 
   await onboardingDrawer.getByRole('button', { name: '关闭' }).click()
   await expect(onboardingDrawer).toHaveCount(0)

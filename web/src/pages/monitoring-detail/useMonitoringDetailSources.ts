@@ -10,7 +10,7 @@ import {
 } from '../../lib/api'
 import { listEvents, listIncidents } from '../../lib/observabilityApi'
 import { resolveThresholds, type MetricThresholds } from '../../config/thresholds'
-import type { HostSample, HostSampleStreamMessage } from '../../lib/types'
+import type { HostSample, HostSampleStreamMessage, OnlineEvidenceStreamMessage } from '../../lib/types'
 import { readHeartbeatFreshnessPolicy } from '../monitoring/heartbeatFreshness'
 import type { HeartbeatFreshnessPolicy } from '../monitoring/types'
 import { INITIAL_MONITORING_DETAIL_STATE, describeError } from './monitoringDetailHelpers'
@@ -21,10 +21,12 @@ import {
   parseTimeWindow,
   runtimeFactsMatchWindow,
 } from './runtimeObservation'
-import type { MonitoringDetailPageState, RuntimeStreamStatus, TimeWindow } from './types'
+import type { MonitoringDetailPageState, OnlineEvidenceStatus, RuntimeStreamStatus, TimeWindow } from './types'
+import { acceptOnlineEvidence } from './onlineEvidence'
 
 const REALTIME_WINDOW_MS = 60 * 60 * 1000
 const RUNTIME_STREAM_RECONNECT_MS = 2000
+const ONLINE_EVIDENCE_TIMEOUT_MS = 15000
 
 function sampleKey(sample: HostSample): string {
   return `${sample.observed_at}::${sample.sync_batch_id}`
@@ -80,6 +82,13 @@ export function useMonitoringDetailSources({
   const [realtimeSamples, setRealtimeSamples] = useState<HostSample[]>([])
   const [runtimeStreamStatus, setRuntimeStreamStatus] = useState<RuntimeStreamStatus>('idle')
   const [runtimeStreamError, setRuntimeStreamError] = useState<string | null>(null)
+  const [streamReloadKey, setStreamReloadKey] = useState(0)
+  const [observationEpoch, setObservationEpoch] = useState(0)
+  const observationEpochRef = useRef(0)
+  const [onlineEvidence, setOnlineEvidence] = useState<OnlineEvidenceStreamMessage | null>(null)
+  const [onlineEvidenceStatus, setOnlineEvidenceStatus] = useState<OnlineEvidenceStatus>('connecting')
+  const onlineEvidenceRef = useRef<OnlineEvidenceStreamMessage | null>(null)
+  const evidenceEstablishedRef = useRef(false)
   const [thresholds, setThresholds] = useState<MetricThresholds | null>(null)
   const [heartbeatPolicy, setHeartbeatPolicy] = useState<HeartbeatFreshnessPolicy | null>(null)
   const [settingsResolved, setSettingsResolved] = useState(false)
@@ -112,6 +121,10 @@ export function useMonitoringDetailSources({
     setRealtimeSamples([])
     setRuntimeStreamStatus('idle')
     setRuntimeStreamError(null)
+    setOnlineEvidence(null)
+    onlineEvidenceRef.current = null
+    evidenceEstablishedRef.current = false
+    setOnlineEvidenceStatus('connecting')
     setLatestSample(null)
     latestSampleRef.current = null
     setSnapshotReadAt(null)
@@ -207,7 +220,11 @@ export function useMonitoringDetailSources({
         setLatestSample(nextLatest)
         if (requestedWindow === 'realtime') {
           if (nextLatest == null) setRealtimeSamples([])
-          else if (!(nextLatest === currentLatest && currentLatest != null)) {
+          else if (nextLatest === currentLatest && currentLatest != null) {
+            // The stream can arrive before the initial HTTP history. Keep its
+            // newer latest sample while still filling the requested hour.
+            setRealtimeSamples((current) => mergeRealtimeSamples(realtimeSeedSamples(runtimeFacts), current))
+          } else {
             setRealtimeSamples(realtimeSeedSamples(runtimeFacts))
           }
         }
@@ -222,75 +239,93 @@ export function useMonitoringDetailSources({
     }
   }, [monitoringInstanceId, timeWindow, runtimeReloadKey])
 
-  const realtimeRuntimeFactsReady =
-    loadedTimeWindow === 'realtime' &&
-    Boolean(state.runtimeFacts) &&
-    (!state.runtimeFacts?.window || state.runtimeFacts.window.key === 'realtime')
-
   useEffect(() => {
-    if (!monitoringInstanceId || timeWindow !== 'realtime' || !realtimeRuntimeFactsReady) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- realtime teardown: the socket state must fall back to idle as soon as the window is no longer realtime
-      setRuntimeStreamStatus('idle')
-      setRuntimeStreamError(null)
-      return
-    }
+    if (!monitoringInstanceId) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- new connection must receive evidence before restoring a current conclusion
+    setOnlineEvidenceStatus('connecting')
     if (typeof WebSocket === 'undefined') {
       setRuntimeStreamStatus('disconnected')
       setRuntimeStreamError('当前浏览器不支持 WebSocket')
+      setOnlineEvidenceStatus('unavailable')
       return
     }
 
     let closed = false
+    const connectionEpoch = observationEpochRef.current
     let socket: WebSocket | null = null
     let reconnectTimer: number | undefined
+    let firstSuccessfulOpenAt: number | null = null
+    let connectionOpenedAt: number | null = null
+    let lastEvidenceAt: number | null = null
+    let unavailable = false
 
-    const refreshSnapshot = () => {
-      getMonitoringInstanceRuntimeFacts(monitoringInstanceId, 'realtime')
-        .then((runtimeFacts) => {
-          if (closed || currentRouteMonitoringInstanceIdRef.current !== monitoringInstanceId) return
-          if (!runtimeFactsMatchWindow(runtimeFacts, 'realtime')) return
-          const readAt = parseReadAt(runtimeFacts.read_at)
-          setSnapshotReadAt(readAt)
-          const currentLatest = latestSampleRef.current
-          const nextLatest = applyHttpLatestSample(
-            currentLatest,
-            runtimeFacts.latest_host_sample,
-            monitoringInstanceId,
-            runtimeFacts.read_at,
-          )
-          latestSampleRef.current = nextLatest
-          setLatestSample(nextLatest)
-          if (nextLatest == null) setRealtimeSamples([])
-          else if (!(nextLatest === currentLatest && currentLatest != null)) {
-            setRealtimeSamples(realtimeSeedSamples(runtimeFacts))
-          }
-          setState((current) => ({
-            ...current,
-            runtimeFacts: {
-              ...runtimeFacts,
-              latest_host_sample: nextLatest,
-              recent_host_samples: runtimeFacts.recent_host_samples ?? [],
-            },
-          }))
-        })
-        .catch(() => {})
+    // Reuse the window request gate so disconnect reads, manual retry and
+    // binding resets cannot race or silently swallow a chart error.
+    const refreshSnapshot = () => setRuntimeReloadKey((key) => key + 1)
+
+    const interrupt = () => {
+      if (closed || unavailable) return
+      setOnlineEvidenceStatus('interrupted')
+      setRuntimeStreamStatus('disconnected')
+      const previous = socket
+      socket = null // Retire this generation before close can dispatch another event.
+      previous?.close()
+      if (timeWindow === 'realtime') refreshSnapshot()
+      if (evidenceEstablishedRef.current && reconnectTimer === undefined) {
+        reconnectTimer = window.setTimeout(() => {
+          reconnectTimer = undefined
+          connect(true)
+        }, RUNTIME_STREAM_RECONNECT_MS)
+      }
+    }
+
+    const checkExpiry = () => {
+      if (closed || unavailable) return
+      const now = Date.now()
+      if (!evidenceEstablishedRef.current && firstSuccessfulOpenAt !== null && now - firstSuccessfulOpenAt >= ONLINE_EVIDENCE_TIMEOUT_MS) {
+        unavailable = true
+        setOnlineEvidenceStatus('unavailable')
+        setRuntimeStreamStatus('disconnected')
+        if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
+        const previous = socket
+        socket = null
+        previous?.close()
+      } else if (socket && connectionOpenedAt !== null && now - (lastEvidenceAt ?? connectionOpenedAt) >= ONLINE_EVIDENCE_TIMEOUT_MS) {
+        interrupt()
+      }
     }
 
     const connect = (reconnect: boolean) => {
-      if (closed) return
+      if (closed || unavailable) return
       setRuntimeStreamStatus(reconnect ? 'reconnecting' : 'connecting')
       setRuntimeStreamError(null)
-      socket = new WebSocket(monitoringInstanceRuntimeStreamURL(monitoringInstanceId))
-      socket.onopen = () => {
-        if (closed) return
+      connectionOpenedAt = null
+      lastEvidenceAt = null
+      const connection = new WebSocket(monitoringInstanceRuntimeStreamURL(monitoringInstanceId, globalThis.location.origin, timeWindow === 'realtime'))
+      socket = connection
+      const isCurrent = () => !closed && socket === connection && observationEpochRef.current === connectionEpoch && currentRouteMonitoringInstanceIdRef.current === monitoringInstanceId
+      connection.onopen = () => {
+        if (!isCurrent()) return
+        connectionOpenedAt = Date.now()
+        if (firstSuccessfulOpenAt === null) firstSuccessfulOpenAt = connectionOpenedAt
         setRuntimeStreamStatus('connected')
         setRuntimeStreamError(null)
-        if (reconnect) refreshSnapshot()
       }
-      socket.onmessage = (event) => {
-        if (closed) return
+      connection.onmessage = (event) => {
+        if (!isCurrent()) return
         try {
           const message = JSON.parse(String(event.data)) as HostSampleStreamMessage
+          if (message.type as string === 'online_evidence') {
+            const next = acceptOnlineEvidence(onlineEvidenceRef.current, message, monitoringInstanceId)
+            if (next === onlineEvidenceRef.current) return
+            onlineEvidenceRef.current = next
+            setOnlineEvidence(next)
+            evidenceEstablishedRef.current = true
+            lastEvidenceAt = Date.now()
+            setOnlineEvidenceStatus('current')
+            return
+          }
+          if (timeWindow !== 'realtime') return
           if (message.type !== 'host_sample' || message.monitoring_instance_id !== monitoringInstanceId) return
           const sample = message.sample
           setLatestSample((current) => {
@@ -321,26 +356,31 @@ export function useMonitoringDetailSources({
           setRuntimeStreamError('实时数据解析失败')
         }
       }
-      socket.onerror = () => {
-        if (closed) return
+      connection.onerror = () => {
+        if (!isCurrent()) return
         setRuntimeStreamError('实时连接异常')
+        interrupt()
       }
-      socket.onclose = () => {
-        if (closed) return
-        setRuntimeStreamStatus('disconnected')
-        reconnectTimer = window.setTimeout(() => connect(true), RUNTIME_STREAM_RECONNECT_MS)
+      connection.onclose = () => {
+        if (!isCurrent()) return
+        interrupt()
       }
     }
 
     connect(false)
+    const expiryTimer = window.setInterval(checkExpiry, 1000)
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkExpiry()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
     return () => {
       closed = true
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer)
+      window.clearInterval(expiryTimer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       socket?.close()
-      setRuntimeStreamStatus('idle')
-      setRuntimeStreamError(null)
     }
-  }, [monitoringInstanceId, realtimeRuntimeFactsReady, timeWindow])
+  }, [monitoringInstanceId, observationEpoch, streamReloadKey, timeWindow])
 
   useEffect(() => {
     let cancelled = false
@@ -415,6 +455,13 @@ export function useMonitoringDetailSources({
   }
 
   function resetObservationEpoch() {
+    observationEpochRef.current += 1
+    onlineEvidenceRef.current = null
+    evidenceEstablishedRef.current = false
+    setOnlineEvidence(null)
+    setOnlineEvidenceStatus('connecting')
+    setObservationEpoch((key) => key + 1)
+    runtimeRequestRef.current += 1
     latestSampleRef.current = null
     setLatestSample(null)
     setRealtimeSamples([])
@@ -436,6 +483,9 @@ export function useMonitoringDetailSources({
     realtimeSamples,
     runtimeStreamStatus,
     runtimeStreamError,
+    onlineEvidence,
+    onlineEvidenceStatus,
+    retryOnlineEvidence: () => setStreamReloadKey((key) => key + 1),
     thresholds,
     heartbeatPolicy,
     settingsResolved,

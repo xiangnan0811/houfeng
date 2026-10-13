@@ -23,6 +23,7 @@ type hostSampleSubscriber interface {
 
 type monitoringInstanceGetter interface {
 	GetMonitoringInstance(context.Context, string) (monitoringinstances.Record, error)
+	GetMonitoringInstanceOnlineEvidence(context.Context, string) (runtimefacts.OnlineEvidenceStreamMessage, error)
 }
 
 type sessionValidator interface {
@@ -30,9 +31,10 @@ type sessionValidator interface {
 }
 
 const (
-	runtimeStreamSessionCheckInterval = 5 * time.Second
-	runtimeStreamAuthorityTimeout     = 2 * time.Second
-	runtimeStreamWriteTimeout         = 5 * time.Second
+	runtimeStreamSessionCheckInterval   = 5 * time.Second
+	runtimeStreamOnlineEvidenceInterval = 5 * time.Second
+	runtimeStreamAuthorityTimeout       = 2 * time.Second
+	runtimeStreamWriteTimeout           = 5 * time.Second
 )
 
 func MonitoringInstanceRuntimeFacts(repo runtimefacts.Repository) http.Handler {
@@ -114,6 +116,14 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 			writeError(w, http.StatusNotFound, "monitoring instance not found")
 			return
 		}
+		includeSamples := true
+		if values, present := r.URL.Query()["include_samples"]; present {
+			if len(values) != 1 || (values[0] != "true" && values[0] != "false") {
+				writeError(w, http.StatusBadRequest, "invalid include_samples: must be true or false")
+				return
+			}
+			includeSamples = values[0] == "true"
+		}
 		if repo == nil || hub == nil || validator == nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
@@ -137,7 +147,7 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 		}
 
 		instanceCtx, instanceCancel := context.WithTimeout(r.Context(), runtimeStreamAuthorityTimeout)
-		_, err = repo.GetMonitoringInstance(instanceCtx, monitoringInstanceID)
+		evidence, err := repo.GetMonitoringInstanceOnlineEvidence(instanceCtx, monitoringInstanceID)
 		instanceCancel()
 		if errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) {
 			writeError(w, http.StatusNotFound, "monitoring instance not found")
@@ -155,7 +165,10 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 
 		streamCtx, cancelStream := context.WithCancel(r.Context())
 		ctx := conn.CloseRead(streamCtx)
-		subscription := hub.SubscribeHostSamples(monitoringInstanceID)
+		var subscription runtimefacts.HostSampleSubscription
+		if includeSamples {
+			subscription = hub.SubscribeHostSamples(monitoringInstanceID)
+		}
 		watcherDone := make(chan struct{})
 		go func() {
 			defer close(watcherDone)
@@ -183,11 +196,34 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 			<-watcherDone
 			subscription.Close()
 		}()
+		writeMessage := func(message any) error {
+			checkCtx, checkCancel := context.WithTimeout(ctx, runtimeStreamAuthorityTimeout)
+			err := validator.ValidateSession(checkCtx, sessionID)
+			checkCancel()
+			if err != nil {
+				return err
+			}
+			writeCtx, writeCancel := context.WithTimeout(ctx, runtimeStreamWriteTimeout)
+			defer writeCancel()
+			return wsjson.Write(writeCtx, conn, message)
+		}
+		if err := writeMessage(evidence); err != nil {
+			return
+		}
+		evidenceTicker := time.NewTicker(runtimeStreamOnlineEvidenceInterval)
+		defer evidenceTicker.Stop()
 
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-evidenceTicker.C:
+				readCtx, readCancel := context.WithTimeout(ctx, runtimeStreamAuthorityTimeout)
+				evidence, err := repo.GetMonitoringInstanceOnlineEvidence(readCtx, monitoringInstanceID)
+				readCancel()
+				if err != nil || writeMessage(evidence) != nil {
+					return
+				}
 			case message, ok := <-subscription.Messages:
 				if !ok {
 					return
@@ -204,18 +240,7 @@ func MonitoringInstanceRuntimeStream(repo monitoringInstanceGetter, hub hostSamp
 				if !eligibleRuntimeStreamMessage(message, monitoringInstanceID, current, time.Now().UTC()) {
 					continue
 				}
-				checkCtx, checkCancel := context.WithTimeout(ctx, runtimeStreamAuthorityTimeout)
-				err = validator.ValidateSession(checkCtx, sessionID)
-				checkCancel()
-				if err != nil {
-					cancelStream()
-					conn.CloseNow()
-					return
-				}
-				writeCtx, writeCancel := context.WithTimeout(ctx, runtimeStreamWriteTimeout)
-				err = wsjson.Write(writeCtx, conn, message)
-				writeCancel()
-				if err != nil {
+				if err := writeMessage(message); err != nil {
 					return
 				}
 			}

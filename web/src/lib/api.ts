@@ -173,9 +173,10 @@ export function getMonitoringInstanceRuntimeFacts(monitoringInstanceId: string, 
   )
 }
 
-export function monitoringInstanceRuntimeStreamURL(monitoringInstanceId: string, origin = globalThis.location.origin) {
+export function monitoringInstanceRuntimeStreamURL(monitoringInstanceId: string, origin = globalThis.location.origin, includeSamples = true) {
   const url = new URL(`/api/monitoring-instances/${encodeURIComponent(monitoringInstanceId)}/runtime-stream`, origin)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  if (!includeSamples) url.searchParams.set('include_samples', 'false')
   return url.toString()
 }
 

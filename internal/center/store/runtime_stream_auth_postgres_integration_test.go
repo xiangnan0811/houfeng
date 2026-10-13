@@ -261,7 +261,7 @@ func (v *runtimeStreamAuthSlowValidator) ValidateSession(ctx context.Context, se
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if sequence == 3 {
+	if sequence == 4 {
 		select {
 		case <-v.releasePeriodic:
 		case <-ctx.Done():
@@ -274,7 +274,7 @@ func (v *runtimeStreamAuthSlowValidator) ValidateSession(ctx context.Context, se
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if sequence == 3 {
+	if sequence == 4 {
 		select {
 		case <-v.releaseResult:
 		case <-ctx.Done():
@@ -634,11 +634,46 @@ func readRuntimeStreamAuthMessage(t *testing.T, conn *websocket.Conn, timeout ti
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	var message runtimefacts.HostSampleStreamMessage
-	if err := wsjson.Read(ctx, conn, &message); err != nil {
-		t.Fatalf("read runtime stream sample: %v", err)
+	for {
+		var raw json.RawMessage
+		if err := wsjson.Read(ctx, conn, &raw); err != nil {
+			t.Fatalf("read runtime stream sample: %v", err)
+		}
+		var message runtimefacts.HostSampleStreamMessage
+		if err := json.Unmarshal(raw, &message); err != nil {
+			t.Fatal(err)
+		}
+		if message.Type == "online_evidence" {
+			validateRuntimeStreamAuthEvidence(t, raw)
+			continue
+		}
+		if message.Type != "host_sample" {
+			t.Fatalf("unexpected runtime stream type: %q", message.Type)
+		}
+		return message
 	}
-	return message
+}
+
+func validateRuntimeStreamAuthEvidence(t *testing.T, raw json.RawMessage) {
+	t.Helper()
+	var evidence runtimefacts.OnlineEvidenceStreamMessage
+	if err := json.Unmarshal(raw, &evidence); err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Type != "online_evidence" || evidence.MonitoringInstanceID != runtimeStreamAuthMonitoringID || evidence.ReadAt.IsZero() {
+		t.Fatalf("invalid online evidence: %#v", evidence)
+	}
+}
+
+func readRuntimeStreamAuthInitialEvidence(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var raw json.RawMessage
+	if err := wsjson.Read(ctx, conn, &raw); err != nil {
+		t.Fatalf("read initial online evidence: %v", err)
+	}
+	validateRuntimeStreamAuthEvidence(t, raw)
 }
 func waitRuntimeStreamAuthWriteGate(t *testing.T, listener *runtimeStreamAuthWriteGateListener, ctx context.Context) *runtimeStreamAuthWriteGateConn {
 	t.Helper()
@@ -651,7 +686,35 @@ func waitRuntimeStreamAuthWriteGate(t *testing.T, listener *runtimeStreamAuthWri
 	return nil
 }
 
-func waitRuntimeStreamAuthClosedSince(t *testing.T, conn *websocket.Conn, started time.Time, timeout time.Duration) {
+// Frames already written before revocation can remain queued on the transport.
+// Only online evidence read before the database-clock cutoff may be drained;
+// samples and evidence from a later database read still fail this assertion.
+func readRuntimeStreamAuthUntilClosed(conn *websocket.Conn, evidenceCutoff time.Time) error {
+	for {
+		var message struct {
+			Type                 string    `json:"type"`
+			MonitoringInstanceID string    `json:"monitoring_instance_id"`
+			ReadAt               time.Time `json:"read_at"`
+		}
+		if err := wsjson.Read(context.Background(), conn, &message); err != nil {
+			return err
+		}
+		if message.Type != "online_evidence" || message.MonitoringInstanceID != runtimeStreamAuthMonitoringID || message.ReadAt.IsZero() || message.ReadAt.After(evidenceCutoff) {
+			return nil
+		}
+	}
+}
+
+func runtimeStreamAuthDatabaseClock(t *testing.T, ctx context.Context, fixture *runtimeStreamAuthFixture) time.Time {
+	t.Helper()
+	var now time.Time
+	if err := fixture.pool.QueryRow(ctx, `select clock_timestamp()`).Scan(&now); err != nil {
+		t.Fatalf("read authority assertion database clock: %v", err)
+	}
+	return now
+}
+
+func waitRuntimeStreamAuthClosedSince(t *testing.T, conn *websocket.Conn, started time.Time, timeout time.Duration, evidenceCutoff time.Time) {
 	t.Helper()
 	remaining := time.Until(started.Add(timeout))
 	if remaining <= 0 {
@@ -659,8 +722,7 @@ func waitRuntimeStreamAuthClosedSince(t *testing.T, conn *websocket.Conn, starte
 	}
 	result := make(chan error, 1)
 	go func() {
-		var message runtimefacts.HostSampleStreamMessage
-		result <- wsjson.Read(context.Background(), conn, &message)
+		result <- readRuntimeStreamAuthUntilClosed(conn, evidenceCutoff)
 	}()
 	timer := time.NewTimer(remaining)
 	defer timer.Stop()
@@ -675,12 +737,11 @@ func waitRuntimeStreamAuthClosedSince(t *testing.T, conn *websocket.Conn, starte
 	}
 }
 
-func waitRuntimeStreamAuthClosed(t *testing.T, conn *websocket.Conn, timeout time.Duration) {
+func waitRuntimeStreamAuthClosed(t *testing.T, conn *websocket.Conn, timeout time.Duration, evidenceCutoff time.Time) {
 	t.Helper()
 	result := make(chan error, 1)
 	go func() {
-		var message runtimefacts.HostSampleStreamMessage
-		result <- wsjson.Read(context.Background(), conn, &message)
+		result <- readRuntimeStreamAuthUntilClosed(conn, evidenceCutoff)
 	}()
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
@@ -761,6 +822,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatal("A websocket connection is nil")
 	}
 	defer connA.Close(websocket.StatusNormalClosure, "")
+	readRuntimeStreamAuthInitialEvidence(t, connA)
 	waitRuntimeStreamAuthSubscription(t, fixture, ctx)
 	connB, response, err := dialRuntimeStreamAuth(t, server, cookieB)
 	if err != nil {
@@ -773,6 +835,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatal("B websocket connection is nil")
 	}
 	defer connB.Close(websocket.StatusNormalClosure, "")
+	readRuntimeStreamAuthInitialEvidence(t, connB)
 	waitRuntimeStreamAuthSubscription(t, fixture, ctx)
 	waitRuntimeStreamAuthValidation(t, validator.calls, ctx, 2)
 
@@ -800,6 +863,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 	if status := runtimeStreamAuthChangePassword(t, clientA, server.URL); status != http.StatusNoContent {
 		t.Fatalf("A change password status = %d, want 204", status)
 	}
+	bRevokedAt := runtimeStreamAuthDatabaseClock(t, ctx, fixture)
 	if status := runtimeStreamAuthProtectedStatus(t, clientB, server.URL); status != http.StatusUnauthorized {
 		t.Fatalf("B protected request after password change = %d, want 401", status)
 	}
@@ -811,7 +875,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 	if message := readRuntimeStreamAuthMessage(t, connA, 3*time.Second); message.Sample.SyncBatchID != "runtime-auth-revoked" {
 		t.Fatalf("A sample after B revocation = %q, want runtime-auth-revoked", message.Sample.SyncBatchID)
 	}
-	waitRuntimeStreamAuthClosed(t, connB, 3*time.Second)
+	waitRuntimeStreamAuthClosed(t, connB, 3*time.Second, bRevokedAt)
 	if err := connA.Close(websocket.StatusNormalClosure, "test complete"); err != nil {
 		t.Fatalf("close A websocket: %v", err)
 	}
@@ -833,11 +897,13 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatal("C websocket connection is nil")
 	}
 	defer connC.Close(websocket.StatusNormalClosure, "")
+	readRuntimeStreamAuthInitialEvidence(t, connC)
 	waitRuntimeStreamAuthSubscription(t, fixture, ctx)
 	waitRuntimeStreamAuthValidation(t, validator.calls, ctx, 1)
 	if status := runtimeStreamAuthLogout(t, clientC, server.URL); status != http.StatusNoContent {
 		t.Fatalf("C logout status = %d, want 204", status)
 	}
+	cRevokedAt := runtimeStreamAuthDatabaseClock(t, ctx, fixture)
 	if status := runtimeStreamAuthProtectedStatus(t, clientC, server.URL); status != http.StatusUnauthorized {
 		t.Fatalf("C protected request after logout = %d, want 401", status)
 	}
@@ -846,7 +912,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 	}
 	drainRuntimeStreamAuthValidations(validator.calls)
 	publishRuntimeStreamAuthSample(t, fixture, ctx, "runtime-auth-logout")
-	waitRuntimeStreamAuthClosed(t, connC, 3*time.Second)
+	waitRuntimeStreamAuthClosed(t, connC, 3*time.Second, cRevokedAt)
 
 	jarD, err := cookiejar.New(nil)
 	if err != nil {
@@ -865,6 +931,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatal("D websocket connection is nil")
 	}
 	defer connD.Close(websocket.StatusNormalClosure, "")
+	readRuntimeStreamAuthInitialEvidence(t, connD)
 	waitRuntimeStreamAuthSubscription(t, fixture, ctx)
 	waitRuntimeStreamAuthValidation(t, validator.calls, ctx, 1)
 	beforeD, present, err := readRuntimeStreamAuthSessionRow(ctx, fixture.pool, cookieD)
@@ -910,6 +977,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatal("E websocket connection is nil")
 	}
 	defer connE.Close(websocket.StatusNormalClosure, "")
+	readRuntimeStreamAuthInitialEvidence(t, connE)
 	waitRuntimeStreamAuthSubscription(t, fixture, ctx)
 	waitRuntimeStreamAuthValidation(t, validator.calls, ctx, 1)
 	sessionE, present, err := readRuntimeStreamAuthSessionRow(ctx, fixture.pool, cookieE)
@@ -919,8 +987,9 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 	drainRuntimeStreamAuthValidations(validator.calls)
 	expiryTriggeredAt := time.Now()
 	fixture.clock.Set(sessionE.ExpiresAt.Add(time.Microsecond))
+	eExpiredAt := runtimeStreamAuthDatabaseClock(t, ctx, fixture)
 	waitRuntimeStreamAuthValidation(t, validator.calls, ctx, 1)
-	waitRuntimeStreamAuthClosedSince(t, connE, expiryTriggeredAt, 10*time.Second)
+	waitRuntimeStreamAuthClosedSince(t, connE, expiryTriggeredAt, 10*time.Second, eExpiredAt)
 	if status := runtimeStreamAuthProtectedStatus(t, clientE, server.URL); status != http.StatusUnauthorized {
 		t.Fatalf("E protected request after natural expiry = %d, want 401", status)
 	}
@@ -959,12 +1028,14 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatal("F websocket connection is nil after validator recovery")
 	}
 	defer connF.Close(websocket.StatusNormalClosure, "")
+	readRuntimeStreamAuthInitialEvidence(t, connF)
 	waitRuntimeStreamAuthSubscription(t, fixture, ctx)
 	waitRuntimeStreamAuthValidation(t, validator.calls, ctx, 1)
 	validator.SetFailure(errors.New("runtime stream authority query failed"))
+	fFailedAt := runtimeStreamAuthDatabaseClock(t, ctx, fixture)
 	drainRuntimeStreamAuthValidations(validator.calls)
 	publishRuntimeStreamAuthSample(t, fixture, ctx, "runtime-auth-validator-failure")
-	waitRuntimeStreamAuthClosed(t, connF, 3*time.Second)
+	waitRuntimeStreamAuthClosed(t, connF, 3*time.Second, fFailedAt)
 	validator.SetFailure(nil)
 
 	slowJar, err := cookiejar.New(nil)
@@ -994,10 +1065,13 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatal("slow-write websocket connection is nil")
 	}
 	defer connSlow.Close(websocket.StatusNormalClosure, "")
+	readRuntimeStreamAuthInitialEvidence(t, connSlow)
 	gateConn := waitRuntimeStreamAuthWriteGate(t, gateListener, ctx)
 	slowSubscription := waitRuntimeStreamAuthTrackedSubscription(t, fixture, ctx)
 	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 1, "entry")
 	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 1, "result")
+	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 2, "entry")
+	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 2, "result")
 	gateConn.Arm()
 	timer := time.NewTimer(2 * time.Second)
 	select {
@@ -1007,14 +1081,14 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatalf("waiting to align slow-write stream before watcher tick: %v", ctx.Err())
 	}
 	publishRuntimeStreamAuthSample(t, fixture, ctx, "runtime-auth-slow-write")
-	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 2, "entry")
-	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 2, "result")
+	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 3, "entry")
+	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 3, "result")
 	select {
 	case <-gateConn.writeEntered:
 	case <-ctx.Done():
 		t.Fatalf("waiting for blocked runtime stream write: %v", ctx.Err())
 	}
-	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 3, "entry")
+	waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 4, "entry")
 	select {
 	case <-gateConn.released:
 		t.Fatal("runtime stream write released before periodic authority result")
@@ -1032,7 +1106,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 	default:
 	}
 	close(slowValidator.releasePeriodic)
-	periodicResult := waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 3, "result")
+	periodicResult := waitRuntimeStreamAuthValidationEvent(t, slowEvents, ctx, 4, "result")
 	if !errors.Is(periodicResult.err, auth.ErrSessionNotFound) {
 		t.Fatalf("slow-write periodic validation error = %v, want %v", periodicResult.err, auth.ErrSessionNotFound)
 	}
@@ -1073,6 +1147,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 	if connG == nil {
 		t.Fatal("G websocket connection is nil")
 	}
+	readRuntimeStreamAuthInitialEvidence(t, connG)
 	gSubscription := waitRuntimeStreamAuthTrackedSubscription(t, fixture, ctx)
 	waitRuntimeStreamAuthValidation(t, validator.calls, ctx, 1)
 	drainRuntimeStreamAuthValidations(validator.calls)
@@ -1105,6 +1180,7 @@ func TestPostgresIntegrationRuntimeStreamSessionRevocation(t *testing.T) {
 		t.Fatal("H websocket connection is nil")
 	}
 	defer connH.Close(websocket.StatusNormalClosure, "")
+	readRuntimeStreamAuthInitialEvidence(t, connH)
 	waitRuntimeStreamAuthValidation(t, validator.calls, ctx, 1)
-	waitRuntimeStreamAuthClosed(t, connH, 3*time.Second)
+	waitRuntimeStreamAuthClosed(t, connH, 3*time.Second, runtimeStreamAuthDatabaseClock(t, ctx, fixture))
 }
