@@ -748,6 +748,7 @@ func appACLCurrentConvergenceTestDependencies() appACLCurrentConvergenceDependen
 			return nil
 		},
 		verifyTransitionCurrent: func(context.Context, pgx.Tx, appACLCurrentTransition) error { return nil },
+		verifySweepColumn:       func(context.Context, pgx.Tx) error { return nil },
 		insertSuccessor: func(context.Context, pgx.Tx, AppACLManifestPersistedV1, []byte, []byte) (AppACLManifestPersistedV1, error) {
 			return AppACLManifestPersistedV1{}, nil
 		},

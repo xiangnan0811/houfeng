@@ -116,6 +116,25 @@ var appACLCurrentC73MigrationGolden = func() []byte {
 
 var appACLCurrentC73PrivilegeGolden = append([]byte(nil), appACLCurrentC72PrivilegeGolden...)
 
+// The C74 predecessor is the independently frozen C73 golden plus the
+// immutable 0074 checksum record; 0074 adds no APP ACL privileges, so the
+// C73 privilege golden is copied unchanged. These bytes are independent of
+// the current C75 source compiler.
+var appACLCurrentC74MigrationGolden = func() []byte {
+	body := append([]byte(nil), appACLCurrentC73MigrationGolden...)
+	body = append(body, 0, 0, 0, 49)
+	body = append(body, []byte("0074_add_subscription_exchange_rate_month_end.sql")...)
+	body = append(body, []byte{
+		0x3d, 0x79, 0x73, 0x64, 0x6b, 0xdd, 0xa6, 0x11,
+		0x30, 0x93, 0x01, 0xa4, 0xf9, 0x9e, 0x19, 0xfa,
+		0x48, 0xda, 0x10, 0xf3, 0x57, 0x49, 0xc5, 0x09,
+		0x88, 0xdb, 0x6a, 0xbe, 0x08, 0xbf, 0x0d, 0x13,
+	}...)
+	return body
+}()
+
+var appACLCurrentC74PrivilegeGolden = append([]byte(nil), appACLCurrentC73PrivilegeGolden...)
+
 // The C69 predecessor is the preserved terminal from the baseline source
 // tree. Its source golden is the independent C68 golden plus the immutable
 // 0069 checksum record; 0069 adds no APP ACL privileges, so the independent
@@ -164,6 +183,7 @@ const (
 	appACLCurrentProfileP71
 	appACLCurrentProfileP72
 	appACLCurrentProfileP73
+	appACLCurrentProfileP74
 )
 
 type appACLCurrentTransitionDefinition struct {
@@ -200,6 +220,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden:      appACLCurrentV0794MigrationGolden,
 		predecessorPrivilegeGolden:      appACLCurrentV0794PrivilegeGolden,
@@ -219,6 +240,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV0802MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0802PrivilegeGolden,
@@ -238,6 +260,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV0796MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0796PrivilegeGolden,
@@ -254,6 +277,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV0804MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0804PrivilegeGolden,
@@ -269,6 +293,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV1153MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV1153PrivilegeGolden,
@@ -283,6 +308,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV1157MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV1157PrivilegeGolden,
@@ -296,6 +322,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC69MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC69PrivilegeGolden,
@@ -308,6 +335,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC70MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC70PrivilegeGolden,
@@ -319,6 +347,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0072_add_target_observation_freshness.sql",
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC71MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC71PrivilegeGolden,
@@ -329,6 +358,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 		successorMigrations: []string{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC72MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC72PrivilegeGolden,
@@ -338,9 +368,19 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 		predecessorLastMigration: "0073_add_monitoring_instance_metadata_version.sql",
 		successorMigrations: []string{
 			"0074_add_subscription_exchange_rate_month_end.sql",
+			"0075_add_settings_deployment_overrides.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC73MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC73PrivilegeGolden,
+	},
+	{
+		profile:                  appACLCurrentProfileP74,
+		predecessorLastMigration: "0074_add_subscription_exchange_rate_month_end.sql",
+		successorMigrations: []string{
+			"0075_add_settings_deployment_overrides.sql",
+		},
+		predecessorMigrationGolden: appACLCurrentC74MigrationGolden,
+		predecessorPrivilegeGolden: appACLCurrentC74PrivilegeGolden,
 	},
 }
 
@@ -431,15 +471,24 @@ var appACLCurrentAcceptedPredecessorProfileChains = func() [][]appACLCurrentProf
 		c73Chains = append(c73Chains, withC72)
 	}
 
-	chains := make([][]appACLCurrentProfileID, 0, len(c73Chains)*2+1)
-	chains = append(chains, c73Chains...)
-	chains = append(chains, []appACLCurrentProfileID{appACLCurrentProfileP73})
+	c74Chains := make([][]appACLCurrentProfileID, 0, len(c73Chains)*2+1)
+	c74Chains = append(c74Chains, c73Chains...)
+	c74Chains = append(c74Chains, []appACLCurrentProfileID{appACLCurrentProfileP73})
 	for _, chain := range c73Chains {
-		withC73 := append([]appACLCurrentProfileID(nil), chain...)
-		withC73 = append(withC73, appACLCurrentProfileP73)
-		chains = append(chains, withC73)
+		withP73 := append([]appACLCurrentProfileID(nil), chain...)
+		withP73 = append(withP73, appACLCurrentProfileP73)
+		c74Chains = append(c74Chains, withP73)
 	}
-	return chains
+
+	c75Chains := make([][]appACLCurrentProfileID, 0, len(c74Chains)*2+1)
+	c75Chains = append(c75Chains, c74Chains...)
+	c75Chains = append(c75Chains, []appACLCurrentProfileID{appACLCurrentProfileP74})
+	for _, chain := range c74Chains {
+		withP74 := append([]appACLCurrentProfileID(nil), chain...)
+		withP74 = append(withP74, appACLCurrentProfileP74)
+		c75Chains = append(c75Chains, withP74)
+	}
+	return c75Chains
 }()
 
 func cloneAppACLCurrentTransitionDefinitions(source []appACLCurrentTransitionDefinition) []appACLCurrentTransitionDefinition {
@@ -461,8 +510,8 @@ func compileAppACLCurrentTransitions(
 	if len(definitions) == 0 {
 		return nil, fmt.Errorf("current APP ACL transition registry has no definitions")
 	}
-	if len(definitions) != 11 {
-		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64, P63, P66, P67, P68, P69, P70, P71, P72 and P73 profiles")
+	if len(definitions) != 12 {
+		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64, P63, P66, P67, P68, P69, P70, P71, P72, P73 and P74 profiles")
 	}
 	expectedDefinitions := cloneAppACLCurrentTransitionDefinitions(appACLCurrentTransitionDefinitions)
 	compiled := make([]appACLCurrentTransition, 0, len(definitions))
@@ -473,7 +522,7 @@ func compileAppACLCurrentTransitions(
 			definition.profile != appACLCurrentProfileP67 && definition.profile != appACLCurrentProfileP68 &&
 			definition.profile != appACLCurrentProfileP69 && definition.profile != appACLCurrentProfileP70 &&
 			definition.profile != appACLCurrentProfileP71 && definition.profile != appACLCurrentProfileP72 &&
-			definition.profile != appACLCurrentProfileP73 {
+			definition.profile != appACLCurrentProfileP73 && definition.profile != appACLCurrentProfileP74 {
 			return nil, fmt.Errorf("current APP ACL transition %d has unknown predecessor profile", index)
 		}
 		if _, duplicate := claimedProfiles[definition.profile]; duplicate {
@@ -561,7 +610,7 @@ func compileAppACLCurrentTransition(
 		return appACLCurrentTransition{}, fmt.Errorf("P62 predecessor manifest digest golden has invalid length")
 	}
 	if definition.profile != appACLCurrentProfileP62 && len(definition.predecessorManifestDigestGolden) != 0 {
-		return appACLCurrentTransition{}, fmt.Errorf("P63/P64/P66/P67/P68/P69/P70/P71/P72/P73 predecessor must support role-bound manifest identities")
+		return appACLCurrentTransition{}, fmt.Errorf("P63/P64/P66/P67/P68/P69/P70/P71/P72/P73/P74 predecessor must support role-bound manifest identities")
 	}
 	manifest, err := NewAppACLManifestPersistedV1(1, appACLCurrentTransitionMigrator, [32]byte{}, predecessor.sources.canonicalSet, predecessorPrivileges)
 	if err != nil {
@@ -631,26 +680,28 @@ func validateAppACLCurrentTransitionPrivilegeDelta(
 				Privilege:      AppACLPrivilegeUpdate,
 			}] = struct{}{}
 		}
-	case appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68, appACLCurrentProfileP69, appACLCurrentProfileP70, appACLCurrentProfileP71, appACLCurrentProfileP72, appACLCurrentProfileP73:
+	case appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68, appACLCurrentProfileP69, appACLCurrentProfileP70, appACLCurrentProfileP71, appACLCurrentProfileP72, appACLCurrentProfileP73, appACLCurrentProfileP74:
 	default:
 		return fmt.Errorf("registered APP transition has unknown predecessor profile %d", profile)
 	}
 	if profile != appACLCurrentProfileP67 && profile != appACLCurrentProfileP68 &&
 		profile != appACLCurrentProfileP69 && profile != appACLCurrentProfileP70 &&
 		profile != appACLCurrentProfileP71 && profile != appACLCurrentProfileP72 &&
-		profile != appACLCurrentProfileP73 {
+		profile != appACLCurrentProfileP73 && profile != appACLCurrentProfileP74 {
 		for _, privilege := range vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
 			expectedAdditions[privilege] = struct{}{}
 		}
 	}
 	if profile != appACLCurrentProfileP68 && profile != appACLCurrentProfileP69 &&
 		profile != appACLCurrentProfileP70 && profile != appACLCurrentProfileP71 &&
-		profile != appACLCurrentProfileP72 && profile != appACLCurrentProfileP73 {
+		profile != appACLCurrentProfileP72 && profile != appACLCurrentProfileP73 &&
+		profile != appACLCurrentProfileP74 {
 		for _, privilege := range ipQualityHostAddressIdentityAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
 			expectedAdditions[privilege] = struct{}{}
 		}
 	}
-	if profile != appACLCurrentProfileP71 && profile != appACLCurrentProfileP72 && profile != appACLCurrentProfileP73 {
+	if profile != appACLCurrentProfileP71 && profile != appACLCurrentProfileP72 &&
+		profile != appACLCurrentProfileP73 && profile != appACLCurrentProfileP74 {
 		for _, privilege := range accessManagementAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
 			expectedAdditions[privilege] = struct{}{}
 		}

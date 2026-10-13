@@ -32,7 +32,7 @@ func (fake *fakeIPQualityAvailability) IPQualityEnabled(context.Context) (bool, 
 	return fake.enabled, fake.err
 }
 
-func (fake *fakeIPQualityAvailability) GetPersistedIncidentDefaults(context.Context) (recordsettings.IncidentDefaults, bool, error) {
+func (fake *fakeIPQualityAvailability) GetEffectiveIncidentDefaults(context.Context) (recordsettings.IncidentDefaults, bool, error) {
 	fake.settingsCalls++
 	if fake.settingsErr != nil {
 		return recordsettings.IncidentDefaults{}, false, fake.settingsErr

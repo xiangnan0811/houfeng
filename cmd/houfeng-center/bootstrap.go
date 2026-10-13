@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -50,7 +48,6 @@ import (
 	"houfeng/internal/center/store/migrate"
 	"houfeng/internal/center/subscriptioncosts"
 	"houfeng/internal/center/syncing"
-	"houfeng/internal/center/targets"
 	"houfeng/internal/center/vpsoverview"
 )
 
@@ -94,7 +91,7 @@ type bootstrapDeps struct {
 	) (http.Handler, error)
 	seedInitialUser               func(context.Context, auth.UserRepository, config.CenterConfig) error
 	newSessionRepository          func(*pgxpool.Pool, []byte) (auth.SessionRepository, error)
-	newIncidentNotifier           func(config.CenterConfig, centersettings.Repository) incidentservice.Notifier
+	newIncidentNotifier           func(centersettings.NotificationSettingsSource) incidentservice.Notifier
 	newRouter                     func(centerhttp.RouterOptions) http.Handler
 	newApp                        func(string, http.Handler, ...centerapp.Worker) appRunner
 	recordPlatformAdmissionGate   store.AdmissionGate
@@ -103,10 +100,6 @@ type bootstrapDeps struct {
 
 type pgxPostgresDB struct {
 	pool *pgxpool.Pool
-}
-
-type settingsQueryer interface {
-	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
 type recordCollaborationRuntime struct {
@@ -127,7 +120,18 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		return nil, nil, fmt.Errorf("open postgres: %w", err)
 	}
 	if deps.recordSubjectTombstoneWitness == nil {
-		if witnessURL := strings.TrimSpace(os.Getenv("HOUFENG_DELETION_WITNESS_DATABASE_URL")); witnessURL != "" {
+		witnessURL := strings.TrimSpace(os.Getenv("HOUFENG_DELETION_WITNESS_DATABASE_URL"))
+		witnessApplication := config.DeploymentSettingApplicationInactive
+		if witnessURL != "" {
+			witnessApplication = config.DeploymentSettingApplicationStartup
+		}
+		cfg.DeploymentSettings = cfg.DeploymentSettings.WithConfiguredOnly(
+			"HOUFENG_DELETION_WITNESS_DATABASE_URL",
+			config.DeploymentSettingGroupDatabase,
+			witnessApplication,
+			witnessURL != "",
+		)
+		if witnessURL != "" {
 			witnessPool, err := pgxpool.New(ctx, witnessURL)
 			if err != nil {
 				db.Close()
@@ -182,10 +186,18 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	renewalDecisionRepo := store.NewPostgresRenewalDecisionRepository(db.Pool())
 	runtimeFactsRepo := store.NewPostgresRuntimeFactsRepository(db.Pool())
 	incidentRepo := store.NewPostgresIncidentRepository(db.Pool())
-	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool())
+	deploymentDefaults := centersettings.DeploymentDefaults{
+		Telegram: centersettings.TelegramSettings{
+			BotToken: cfg.TelegramBotToken,
+			ChatID:   cfg.TelegramChatID,
+		},
+		IncidentSweepIntervalSeconds: centersettings.NormalizeIncidentSweepInterval(cfg.IncidentSweepInterval),
+		IncidentSweepSource:          cfg.IncidentSweepSource,
+	}
+	dashboardRepo := store.NewPostgresDashboardRepository(db.Pool(), deploymentDefaults)
 	commandAuditRepo := store.NewPostgresCommandAuditRepository(db.Pool())
 	assetDecisionRepo := store.NewPostgresAssetDecisionRepository(db.Pool())
-	settingsRepo := store.NewPostgresSettingsRepository(db.Pool())
+	settingsRepo := store.NewPostgresSettingsRepository(db.Pool(), deploymentDefaults)
 	retentionRepo := store.NewPostgresRetentionRepository(db.Pool())
 	retentionWorker := retention.NewWorker(retentionRepo, settingsRepo, slog.Default(), retention.DefaultWorkerInterval)
 	receiverHealthObserver, err := deps.newReceiverHealthObserver(ctx, db.Pool())
@@ -196,26 +208,19 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	sparklinesRepo := store.NewPostgresMonitoringInstanceSparklinesRepository(db.Pool())
 	runtimeSummariesRepo := store.NewPostgresMonitoringInstanceRuntimeSummariesRepository(db.Pool())
 	targetSparklinesRepo := store.NewPostgresTargetSparklinesRepository(db.Pool())
-	notifierSettingsRepo := notifierSettingsRepository{repo: settingsRepo, db: db.Pool()}
-	settingsHandlerRepo := settingsPresentationRepository{
-		repo:                  settingsRepo,
-		queryer:               db.Pool(),
-		incidentSweepInterval: cfg.IncidentSweepInterval,
-	}
 	snapshotReader := incidentservice.NewPostgresSnapshotReader(db.Pool())
 	enrollmentSvc := enrollment.NewService(monitoringInstanceRepo)
 	syncRepo := store.NewPostgresSyncRepositoryWithTokenHMACKey(db.Pool(), cfg.SessionHMACKey)
 	streamHub := runtimefacts.NewStreamHub()
-	notifier := deps.newIncidentNotifier(cfg, notifierSettingsRepo)
+	notifier := deps.newIncidentNotifier(settingsRepo)
 	subscriptionDispatcher := incidentservice.NewSettingsAwareNotificationDispatcher(
-		notifierSettingsRepo,
+		settingsRepo,
 		func(botToken, chatID string) incidentservice.Notifier {
 			return notify.NewTelegramNotifier(botToken, chatID)
 		},
 		func(webhookURL string) incidentservice.Notifier {
 			return notify.NewFeishuNotifier(webhookURL)
 		},
-		nil,
 	)
 	subscriptionCostSvc := subscriptioncosts.NewService(subscriptionCostRepo, settingsRepo, map[string]subscriptioncosts.ExchangeRateProvider{
 		string(centersettings.SubscriptionExchangeRateProviderFrankfurter): subscriptioncosts.NewFrankfurterProvider(nil),
@@ -230,10 +235,10 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		snapshotReader,
 		incidentRepo,
 		notifier,
-		notifierSettingsRepo,
+		settingsRepo,
 		slog.Default(),
 		5*time.Second,
-		cfg.IncidentSweepInterval,
+		time.Duration(deploymentDefaults.IncidentSweepIntervalSeconds)*time.Second,
 	)
 	ipQualityCollectRequests := ipquality.NewCollectRequests(func() (string, error) { return ids.New("ipqc") })
 	syncSvc := syncing.NewService(syncRepo, syncing.NewCompositePostSyncProcessor(incidentSvc, streamHub)).
@@ -291,6 +296,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	var attachmentsHandler http.Handler
 	var evidenceMaintenance *centerevidence.MaintenanceWorker
 	if recordsEnabled {
+		reservedKeyPaths := comparisonReservedKeyPaths(&cfg)
 		recordsHandler, recordSearchHandler, recordActionsHandler, recordCommentsHandler, recordDraftsHandler, recordDeletionsHandler, evidenceHandler,
 			attachmentUploadsHandler, attachmentsHandler, collaborationRuntime, evidenceMaintenance, err = newRecordsHTTPHandlers(
 			db.Pool(),
@@ -310,7 +316,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 				AdmissionBudget:  cfg.ComparisonAdmissionBudget,
 				IntentKeyring:    cfg.ComparisonIntentKeyring,
 				IntentKeyID:      cfg.ComparisonIntentKeyID,
-				ReservedKeyPaths: comparisonReservedKeyPaths(cfg),
+				ReservedKeyPaths: reservedKeyPaths,
 			},
 		)
 		if err != nil {
@@ -355,7 +361,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		EventsHandler:                             handlers.Events(dashboardRepo),
 		CommandAuditsHandler:                      handlers.CommandAudits(commandAuditRepo),
 		IncidentsHandler:                          handlers.Incidents(incidentRepo),
-		SettingsHandler:                           handlers.Settings(settingsHandlerRepo, exchangeRateWorker),
+		SettingsHandler:                           handlers.Settings(settingsRepo, exchangeRateWorker, deploymentDefaults),
+		DeploymentSettingsHandler:                 handlers.DeploymentSettings(accessAdminSvc, cfg.DeploymentSettings),
 		RecordsEnabled:                            runtimeCapabilities.Records,
 		ComparisonEnabled:                         runtimeCapabilities.Comparison,
 		PortabilityEnabled:                        runtimeCapabilities.Portability,
@@ -779,17 +786,32 @@ func nilBootstrapAdmissionGate(gate store.AdmissionGate) bool {
 	}
 }
 
-func comparisonReservedKeyPaths(cfg config.CenterConfig) []string {
-	_ = cfg
+func comparisonReservedKeyPaths(cfg *config.CenterConfig) []string {
 	reserved := make([]string, 0, 2)
 	if path := strings.TrimSpace(os.Getenv("HOUFENG_SESSION_HMAC_KEY_FILE")); path != "" {
 		reserved = append(reserved, path)
 	}
-	if path := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DELETION_KEY_FILE")); path != "" {
-		reserved = append(reserved, path)
+	recordDeletionPath := strings.TrimSpace(os.Getenv("HOUFENG_RECORD_DELETION_KEY_FILE"))
+	backupHMACPath := strings.TrimSpace(os.Getenv("HOUFENG_BACKUP_HMAC_KEY_FILE"))
+	if cfg != nil {
+		cfg.DeploymentSettings = cfg.DeploymentSettings.WithConfiguredOnly(
+			"HOUFENG_RECORD_DELETION_KEY_FILE",
+			config.DeploymentSettingGroupRecords,
+			config.DeploymentSettingApplicationReservationOnly,
+			recordDeletionPath != "",
+		)
+		cfg.DeploymentSettings = cfg.DeploymentSettings.WithConfiguredOnly(
+			"HOUFENG_BACKUP_HMAC_KEY_FILE",
+			config.DeploymentSettingGroupRecords,
+			config.DeploymentSettingApplicationReservationOnly,
+			backupHMACPath != "",
+		)
 	}
-	if path := strings.TrimSpace(os.Getenv("HOUFENG_BACKUP_HMAC_KEY_FILE")); path != "" {
-		reserved = append(reserved, path)
+	if recordDeletionPath != "" {
+		reserved = append(reserved, recordDeletionPath)
+	}
+	if backupHMACPath != "" {
+		reserved = append(reserved, backupHMACPath)
 	}
 	return reserved
 }
@@ -1303,17 +1325,12 @@ func (d bootstrapDeps) withDefaults() bootstrapDeps {
 		}
 	}
 	if d.newIncidentNotifier == nil {
-		d.newIncidentNotifier = func(cfg config.CenterConfig, settingsRepo centersettings.Repository) incidentservice.Notifier {
-			var fallback incidentservice.Notifier
-			if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
-				fallback = notify.NewTelegramNotifier(cfg.TelegramBotToken, cfg.TelegramChatID)
-			}
+		d.newIncidentNotifier = func(source centersettings.NotificationSettingsSource) incidentservice.Notifier {
 			return incidentservice.NewSettingsAwareNotifier(
-				settingsRepo,
+				source,
 				func(botToken, chatID string) incidentservice.Notifier {
 					return notify.NewTelegramNotifier(botToken, chatID)
 				},
-				fallback,
 			)
 		}
 	}
@@ -1339,147 +1356,4 @@ func (p pgxPostgresDB) Close() {
 
 func (p pgxPostgresDB) Pool() *pgxpool.Pool {
 	return p.pool
-}
-
-type settingsPresentationRepository struct {
-	repo                  centersettings.Repository
-	queryer               settingsQueryer
-	incidentSweepInterval time.Duration
-}
-
-func (r settingsPresentationRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
-	record, err := r.repo.GetSettings(ctx)
-	if err != nil {
-		return centersettings.CenterSettings{}, err
-	}
-
-	persisted, err := r.hasPersistedSettings(ctx)
-	if err != nil {
-		return centersettings.CenterSettings{}, err
-	}
-	if persisted {
-		return record, nil
-	}
-
-	return applyEffectiveFreshInstallSettings(record, r.incidentSweepInterval), nil
-}
-
-func (r settingsPresentationRepository) MutateSettings(ctx context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
-	return r.repo.MutateSettings(ctx, mutate)
-}
-
-func (r settingsPresentationRepository) hasPersistedSettings(ctx context.Context) (bool, error) {
-	if r.queryer == nil {
-		return true, nil
-	}
-
-	var sentinel int
-	err := r.queryer.QueryRow(ctx, `
-		select 1
-		from center_settings
-		where settings_id = $1`, centersettings.SingletonID).Scan(&sentinel)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, fmt.Errorf("query persisted center settings presence: %w", err)
-	}
-	return true, nil
-}
-
-func applyEffectiveFreshInstallSettings(record centersettings.CenterSettings, incidentSweepInterval time.Duration) centersettings.CenterSettings {
-	record.IncidentDefaults.SweepIntervalSeconds = incidentSweepIntervalSeconds(incidentSweepInterval)
-	record.OverrideRules.MonitoringInstanceLabels = ensureLegacyCoreHostSampleOverride(record.OverrideRules.MonitoringInstanceLabels)
-	return record
-}
-
-func incidentSweepIntervalSeconds(interval time.Duration) int {
-	if interval <= 0 {
-		interval = 5 * time.Second
-	}
-	seconds := int(interval.Round(time.Second) / time.Second)
-	if seconds <= 0 {
-		return 5
-	}
-	return seconds
-}
-
-func ensureLegacyCoreHostSampleOverride(rules []centersettings.MonitoringInstanceLabelOverrideRule) []centersettings.MonitoringInstanceLabelOverrideRule {
-	const coreMonitoringInstanceLabel = "核心"
-	coreTier := targets.FrequencyTier5s
-
-	for i, rule := range rules {
-		if rule.Label != coreMonitoringInstanceLabel {
-			continue
-		}
-		if rule.Label == coreMonitoringInstanceLabel && rule.Overrides.HostSampleFrequencyTier != nil {
-			return rules
-		}
-
-		next := append([]centersettings.MonitoringInstanceLabelOverrideRule(nil), rules...)
-		next[i].Overrides.HostSampleFrequencyTier = &coreTier
-		return next
-	}
-
-	legacyRule := centersettings.MonitoringInstanceLabelOverrideRule{
-		Label: coreMonitoringInstanceLabel,
-		Overrides: centersettings.SettingsOverrideFields{
-			HostSampleFrequencyTier: &coreTier,
-		},
-	}
-
-	return append([]centersettings.MonitoringInstanceLabelOverrideRule{legacyRule}, rules...)
-}
-
-type notifierSettingsRepository struct {
-	repo centersettings.Repository
-	db   *pgxpool.Pool
-}
-
-func (r notifierSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
-	return r.repo.GetSettings(ctx)
-}
-
-func (r notifierSettingsRepository) MutateSettings(ctx context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
-	return r.repo.MutateSettings(ctx, mutate)
-}
-
-func (r notifierSettingsRepository) GetPersistedTelegramSettings(ctx context.Context) (centersettings.TelegramSettings, bool, error) {
-	var botToken string
-	var chatID string
-	var runtimeManaged bool
-	err := r.db.QueryRow(ctx, `
-		select telegram_bot_token, telegram_chat_id, telegram_runtime_managed
-		from center_settings
-		where settings_id = $1`, centersettings.SingletonID).Scan(&botToken, &chatID, &runtimeManaged)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return centersettings.TelegramSettings{}, false, nil
-	}
-	if err != nil {
-		return centersettings.TelegramSettings{}, false, fmt.Errorf("query persisted telegram settings: %w", err)
-	}
-	return centersettings.TelegramSettings{
-		BotToken:       strings.TrimSpace(botToken),
-		ChatID:         strings.TrimSpace(chatID),
-		RuntimeManaged: runtimeManaged,
-	}, true, nil
-}
-
-func (r notifierSettingsRepository) GetPersistedIncidentDefaults(ctx context.Context) (centersettings.IncidentDefaults, bool, error) {
-	var raw []byte
-	err := r.db.QueryRow(ctx, `
-		select incident_defaults
-		from center_settings
-		where settings_id = $1`, centersettings.SingletonID).Scan(&raw)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return centersettings.IncidentDefaults{}, false, nil
-	}
-	if err != nil {
-		return centersettings.IncidentDefaults{}, false, fmt.Errorf("query persisted incident defaults: %w", err)
-	}
-	var defaults centersettings.IncidentDefaults
-	if err := json.Unmarshal(raw, &defaults); err != nil {
-		return centersettings.IncidentDefaults{}, false, fmt.Errorf("decode persisted incident defaults: %w", err)
-	}
-	return defaults, true, nil
 }

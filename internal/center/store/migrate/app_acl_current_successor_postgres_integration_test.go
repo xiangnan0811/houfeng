@@ -42,6 +42,8 @@ func testPostgresIntegrationAppACLCurrentRegisteredSuccessor(t *testing.T) {
 			}
 			oldDependencies := defaultAppACLCurrentConvergenceDependencies()
 			oldDependencies.transitionDefinitions = nil
+			// The exact P62 oracle predates the C75 ownership-column contract.
+			oldDependencies.verifySweepColumn = func(context.Context, pgx.Tx) error { return nil }
 			predecessor, err := convergeAppACLCurrentWithDependencies(
 				ctx,
 				func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
@@ -328,6 +330,8 @@ func seedExactAppACLCurrentPredecessor(t *testing.T, ctx context.Context, global
 	}
 	oldDependencies := defaultAppACLCurrentConvergenceDependencies()
 	oldDependencies.transitionDefinitions = nil
+	// The exact P62 oracle predates the C75 ownership-column contract.
+	oldDependencies.verifySweepColumn = func(context.Context, pgx.Tx) error { return nil }
 	predecessor, err := convergeAppACLCurrentWithDependencies(
 		ctx,
 		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
@@ -494,6 +498,14 @@ func readAppACLCurrentSettingsExceptTransitionDigest(t *testing.T, ctx context.C
 		where settings_id = 'center'
 	`).Scan(&body); err != nil {
 		t.Fatalf("read center_settings non-transition fields: %v", err)
+	}
+	if !appACLCurrentSettingsJSONHasField(body, "incident_sweep_runtime_managed") {
+		var err error
+		normalized, err := appACLCurrentSettingsDeploymentOverrides(body)
+		if err != nil {
+			t.Fatalf("normalize expected deployment override settings digest: %v", err)
+		}
+		body = normalized
 	}
 	normalized, err := appACLCurrentLifecycleSettings(body)
 	if err != nil {

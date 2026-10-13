@@ -16,6 +16,7 @@ import (
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/auth"
 	"houfeng/internal/center/recordplatform"
+	centersettings "houfeng/internal/center/settings"
 )
 
 const (
@@ -40,12 +41,14 @@ type CenterConfig struct {
 	HTTPAddr                  string
 	WebDistDir                string
 	DatabaseURL               string
+	DatabaseRequireTLS        bool
 	PublicBaseURL             string
 	LogFile                   string
 	TelegramBotToken          string
 	TelegramChatID            string
 	TrustedProxies            []string
 	IncidentSweepInterval     time.Duration
+	IncidentSweepSource       centersettings.ConfigSource
 	InitialUsername           string
 	InitialPassword           string
 	InitialDisplayName        string
@@ -57,6 +60,8 @@ type CenterConfig struct {
 	RecordDeploymentID        string
 	RecordInstanceKind        string
 	RecordInstanceCapability  string
+
+	DeploymentSettings DeploymentSettingsSnapshot
 }
 
 type AttachmentConfig struct {
@@ -92,6 +97,10 @@ const (
 // LoadRecordPlatformMode parses the record-platform flags before any other
 // center configuration can resolve a URL or read a secret file.
 func LoadRecordPlatformMode() (RecordPlatformMode, error) {
+	return loadRecordPlatformFlags()
+}
+
+func loadRecordPlatformFlags() (RecordPlatformMode, error) {
 	recordsEnabled, err := boolEnvOrDefault("HOUFENG_RECORDS_ENABLED", false)
 	if err != nil {
 		return RecordPlatformModeLegacy, err
@@ -113,7 +122,7 @@ func LoadRecordPlatformMode() (RecordPlatformMode, error) {
 }
 
 func LoadCenterConfig() (CenterConfig, error) {
-	recordPlatformMode, err := LoadRecordPlatformMode()
+	recordPlatformMode, err := loadRecordPlatformFlags()
 	if err != nil {
 		return CenterConfig{}, err
 	}
@@ -145,6 +154,10 @@ func LoadCenterConfig() (CenterConfig, error) {
 	sweepInterval, err := durationEnvOrDefault("HOUFENG_INCIDENT_SWEEP_INTERVAL", defaultIncidentSweepInterval)
 	if err != nil {
 		return CenterConfig{}, err
+	}
+	sweepSource := centersettings.ConfigSourceDefault
+	if _, ok := os.LookupEnv("HOUFENG_INCIDENT_SWEEP_INTERVAL"); ok {
+		sweepSource = centersettings.ConfigSourceDeployment
 	}
 
 	publicBaseURL, err := optionalHTTPBaseURL("HOUFENG_PUBLIC_BASE_URL")
@@ -266,7 +279,7 @@ func LoadCenterConfig() (CenterConfig, error) {
 		return CenterConfig{}, fmt.Errorf("HOUFENG_PORTABILITY_ENABLED requires HOUFENG_RECORDS_ENABLED=true")
 	}
 
-	return CenterConfig{
+	cfg := CenterConfig{
 		RecordPlatformMode:        recordPlatformMode,
 		ComparisonEnabled:         comparisonEnabled,
 		ComparisonIntentKeyring:   comparisonIntentKeyring,
@@ -276,12 +289,14 @@ func LoadCenterConfig() (CenterConfig, error) {
 		HTTPAddr:                  httpAddr,
 		WebDistDir:                webDistDir,
 		DatabaseURL:               databaseURL,
+		DatabaseRequireTLS:        databaseRequireTLS,
 		PublicBaseURL:             publicBaseURL,
 		LogFile:                   logFile,
 		TelegramBotToken:          telegramBotToken,
 		TelegramChatID:            telegramChatID,
 		TrustedProxies:            trustedProxies,
 		IncidentSweepInterval:     sweepInterval,
+		IncidentSweepSource:       sweepSource,
 		InitialUsername:           initialUsername,
 		InitialPassword:           initialPassword,
 		InitialDisplayName:        initialDisplayName,
@@ -293,7 +308,9 @@ func LoadCenterConfig() (CenterConfig, error) {
 		RecordDeploymentID:        recordDeploymentID,
 		RecordInstanceKind:        recordInstanceKind,
 		RecordInstanceCapability:  recordInstanceCapability,
-	}, nil
+	}
+	cfg.DeploymentSettings = newDeploymentSettingSnapshot(cfg)
+	return cfg, nil
 }
 
 func LoadAttachmentConfig() (AttachmentConfig, error) {

@@ -222,7 +222,7 @@ func TestVPSStateRepairAssetDecisionReadbackUsesEffectiveReferences(t *testing.T
 
 	// Exercise the shared projections against the same real schema, including
 	// association ownership and the independent archived billing inventory.
-	dashboard, err := NewPostgresDashboardRepository(pool).GetDashboardOverview(ctx, 10)
+	dashboard, err := NewPostgresDashboardRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault}).GetDashboardOverview(ctx, 10)
 	if err != nil {
 		t.Fatalf("read lifecycle dashboard: %v", err)
 	}

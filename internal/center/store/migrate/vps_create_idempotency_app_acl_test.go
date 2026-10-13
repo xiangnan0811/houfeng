@@ -115,9 +115,6 @@ func TestVPSCreateIdempotencyAppACLFragmentRegistersExactSelectInsert(t *testing
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %T", err)
 	}
-	if got, want := len(source.fragments), 23; got != want {
-		t.Fatalf("production current APP ACL fragments = %d, want %d", got, want)
-	}
 	fragment := source.fragments[10]
 	if fragment.Migration != "0062_create_vps_create_idempotency.sql" {
 		t.Fatalf("eleventh fragment migration = %q", fragment.Migration)

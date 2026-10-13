@@ -13,6 +13,7 @@ import (
 )
 
 const appACLCurrentP74Migration = "0074_add_subscription_exchange_rate_month_end.sql"
+const appACLCurrentP75Migration = "0075_add_settings_deployment_overrides.sql"
 
 func testPostgresIntegrationAppACLCurrentP73Upgrade(t *testing.T) {
 	t.Helper()
@@ -41,24 +42,25 @@ func testPostgresIntegrationAppACLCurrentP73Upgrade(t *testing.T) {
 
 	successor, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
 	if err != nil {
-		t.Fatalf("C73 to C74 convergence: %v", err)
+		t.Fatalf("C73 to C75 convergence: %v", err)
 	}
 	if successor.ManifestRevision != predecessor.ManifestRevision+1 || successor.PreviousManifestDigest != predecessor.ManifestDigest {
-		t.Fatalf("C73 to C74 successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
+		t.Fatalf("C73 to C75 successor = %#v, want revision %d linked to predecessor", successor, predecessor.ManifestRevision+1)
 	}
 	if err := AdmitAppACLCurrentRuntime(ctx, runtimeDB); err != nil {
-		t.Fatalf("admit C74 runtime: %v", err)
+		t.Fatalf("admit C75 runtime: %v", err)
 	}
 
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
-		t.Fatalf("C74 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
+		t.Fatalf("C75 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
-	if len(after.Ledger) != len(before.Ledger)+1 ||
+	if len(after.Ledger) != len(before.Ledger)+2 ||
 		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
-		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP74Migration {
-		t.Fatalf("C74 ledger tail = %#v, want predecessor prefix plus one 0074 row", after.Ledger)
+		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP74Migration ||
+		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP75Migration {
+		t.Fatalf("C75 ledger tail = %#v, want predecessor prefix plus 0074 and 0075 rows", after.Ledger)
 	}
 	if !reflect.DeepEqual(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges) ||
 		!reflect.DeepEqual(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges) ||

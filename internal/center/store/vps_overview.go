@@ -33,7 +33,7 @@ type vpsOverviewIPQualitySource interface {
 
 type vpsOverviewIPQualityAvailability interface {
 	IPQualityEnabled(context.Context) (bool, error)
-	GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
+	GetEffectiveIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
 }
 
 type vpsOverviewSubscriptionSource interface {
@@ -129,7 +129,7 @@ func (repository *VPSOverviewRepository) LoadMonitoring(
 	if len(links) == 0 {
 		return monitoringSourceFromLinks(links), nil
 	}
-	defaults, exists, err := repository.availability.GetPersistedIncidentDefaults(ctx)
+	defaults, exists, err := repository.availability.GetEffectiveIncidentDefaults(ctx)
 	if err != nil {
 		return vpsoverview.MonitoringSource{}, err
 	}

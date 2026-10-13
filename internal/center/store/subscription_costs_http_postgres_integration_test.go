@@ -182,7 +182,7 @@ func TestPostgresIntegrationSubscriptionCostHF17HF18(t *testing.T) {
 	seedSubscriptionCostHF17Facts(t, ctx, fixture.pool)
 
 	costRepo := store.NewPostgresSubscriptionCostRepository(fixture.pool)
-	settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+	settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 	subscriptionRepo := store.NewPostgresSubscriptionRepository(fixture.pool)
 	costService := subscriptioncosts.NewService(costRepo, settingsRepo, nil)
 	authMiddleware := centerhttp.RequireSession(fixture.service, fixture.scope)
@@ -566,7 +566,7 @@ func TestPostgresIntegrationSubscriptionCostHF19(t *testing.T) {
 			seedSubscriptionCostHF19Facts(t, ctx, fixture.pool, scenario)
 
 			costRepo := store.NewPostgresSubscriptionCostRepository(fixture.pool)
-			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 			costService := subscriptioncosts.NewService(costRepo, settingsRepo, nil)
 			authMiddleware := centerhttp.RequireSession(fixture.service, fixture.scope)
 			router := centerhttp.New(centerhttp.RouterOptions{

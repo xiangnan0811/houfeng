@@ -33,8 +33,6 @@ function overview(overrides: Partial<DashboardOverview> = {}): DashboardOverview
     group_summaries: [],
     notification_status: {
       telegram_configured: false,
-      telegram_runtime_managed: false,
-      telegram_runtime_apply_active: false,
       feishu_configured: false,
     },
     asset_summary: {

@@ -272,13 +272,21 @@ func serveAccessAdminMineGroups(w http.ResponseWriter, r *http.Request, service 
 }
 
 func requireAccessAdminSupervisor(w http.ResponseWriter, r *http.Request, service *accessadmin.Service) (string, bool) {
+	return requireAccessAdminSupervisorWithUnavailableStatus(w, r, service, http.StatusServiceUnavailable)
+}
+
+func requireAccessAdminSupervisorWithUnavailableStatus(w http.ResponseWriter, r *http.Request, service *accessadmin.Service, unavailableStatus int) (string, bool) {
 	actorID, ok := sessionctx.UserIDFromContext(r.Context())
 	if !ok || strings.TrimSpace(actorID) == "" {
 		writeError(w, http.StatusUnauthorized, "unauthenticated")
 		return "", false
 	}
 	if err := service.AuthorizeSupervisor(r.Context(), actorID); err != nil {
-		writeAccessAdminError(w, err)
+		if errors.Is(err, accessadmin.ErrManagementUnavailable) {
+			writeCodedError(w, unavailableStatus, "management service unavailable", "management_unavailable")
+		} else {
+			writeAccessAdminError(w, err)
+		}
 		return "", false
 	}
 	return actorID, true

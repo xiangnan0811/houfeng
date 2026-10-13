@@ -34,6 +34,7 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("p71_upgrade", testPostgresIntegrationAppACLCurrentP71Upgrade)
 	t.Run("p72_upgrade", testPostgresIntegrationAppACLCurrentP72Upgrade)
 	t.Run("p73_upgrade", testPostgresIntegrationAppACLCurrentP73Upgrade)
+	t.Run("p74_upgrade", testPostgresIntegrationAppACLCurrentP74Upgrade)
 	t.Run("registered_settings_presence_matrix", testPostgresIntegrationAppACLCurrentSettingsPresenceMatrix)
 	t.Run("missing_settings_predecessor_suffixes", testPostgresIntegrationAppACLCurrentMissingSettingsPredecessorSuffixes)
 	t.Run("missing_settings_p67_rollback_and_drift", testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift)
@@ -303,12 +304,34 @@ func assertAppACLCurrentSettingsPresenceSnapshotEqual(
 	if !before.Present {
 		return
 	}
-	if !appACLCurrentJSONEqual(before.Raw, after.Raw) ||
+	beforeRaw, beforeExceptTransition := before.Raw, before.SettingsExceptTransition
+	if !appACLCurrentSettingsJSONHasField(before.Raw, "incident_sweep_runtime_managed") &&
+		appACLCurrentSettingsJSONHasField(after.Raw, "incident_sweep_runtime_managed") {
+		var err error
+		beforeRaw, err = appACLCurrentSettingsDeploymentOverrides(beforeRaw)
+		if err != nil {
+			t.Fatalf("normalize predecessor center_settings snapshot: %v", err)
+		}
+		beforeExceptTransition, err = appACLCurrentSettingsDeploymentOverrides(beforeExceptTransition)
+		if err != nil {
+			t.Fatalf("normalize predecessor center_settings non-transition snapshot: %v", err)
+		}
+	}
+	if !appACLCurrentJSONEqual(beforeRaw, after.Raw) ||
 		!appACLCurrentJSONEqual(before.IncidentDefaults, after.IncidentDefaults) ||
-		!appACLCurrentJSONEqual(before.SettingsExceptTransition, after.SettingsExceptTransition) ||
+		!appACLCurrentJSONEqual(beforeExceptTransition, after.SettingsExceptTransition) ||
 		!before.UpdatedAt.Equal(after.UpdatedAt) {
 		t.Fatalf("center_settings snapshot changed\nbefore: %#v\nafter: %#v", before, after)
 	}
+}
+
+func appACLCurrentSettingsJSONHasField(payload []byte, name string) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(payload, &fields) != nil {
+		return false
+	}
+	_, ok := fields[name]
+	return ok
 }
 
 func configureAppACLCurrentP67SettingsState(t *testing.T, ctx context.Context, db *pgxpool.Pool, state string) {

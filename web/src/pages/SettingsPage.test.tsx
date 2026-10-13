@@ -26,14 +26,28 @@ function mockJSONResponse(body: unknown, status = 200) {
   } as Response
 }
 
-const settingsResponseBody = {
-  telegram: {
+const deploymentTelegram = {
+  configured: true,
+  chat_id: 'chat-id',
+  token_present: true,
+  token_masked_summary: '****************oken',
+}
+
+function telegramResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    mode: 'inherit',
+    source: 'deployment',
+    active: true,
     chat_id: 'chat-id',
     token_present: true,
     token_masked_summary: '****************oken',
-    runtime_managed: false,
-    runtime_apply_active: false,
-  },
+    deployment: deploymentTelegram,
+    ...overrides,
+  }
+}
+
+const settingsResponseBody = {
+  telegram: telegramResponse(),
   feishu: {
     enabled: false,
     webhook_url_present: false,
@@ -107,6 +121,12 @@ const settingsResponseBody = {
     timeout_seconds: 15,
     services: ['netflix', 'chatgpt', 'youtube-premium'],
   },
+  incident_sweep: {
+    mode: 'inherit',
+    source: 'default',
+    deployment_seconds: 5,
+  },
+  settings_source: 'database',
   subscription_cost_settings: {
     base_currency: 'CNY',
     exchange_rate_provider: 'frankfurter',
@@ -176,9 +196,12 @@ describe('SettingsPage', () => {
     renderSettingsPage()
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    expect(screen.getByText(/本地浏览器偏好/)).toBeInTheDocument()
+    expect(screen.queryByText(/本分区保存在数据库中/)).not.toBeInTheDocument()
 
     // Switch to monitoring tab to check frequency
     switchTab('监控策略')
+    expect(screen.getByText(/本分区保存在数据库中/)).toBeInTheDocument()
     expect(screen.getByLabelText('当前监控实例主机样本频率')).toHaveValue('5s')
     expect(screen.getByRole('switch', { name: '启用 IP 质量采集' })).toBeChecked()
     expect(screen.getByLabelText('IP 质量采集周期秒数')).toHaveValue('86400')
@@ -192,17 +215,15 @@ describe('SettingsPage', () => {
     }
     expect(screen.getByText('IP 质量报告及脱敏后的原始结果长期保留。')).toBeInTheDocument()
 
-    // Switch to notification tab to check Telegram
-    await expandTelegram()
+    // Switch to notification tab to check Telegram. 编辑会进入覆盖草稿，这里只核对已生效摘要。
+    switchTab('通知')
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument())
 
-    expect(screen.getByLabelText('Telegram Chat ID')).toHaveValue('chat-id')
-    expect(
-      screen.getByText(
-        (_, node) =>
-          node?.textContent === '已配置 Telegram Bot Token：****************oken',
-      ),
-    ).toBeInTheDocument()
-    expect(screen.getByRole('switch', { name: '运行时接管' })).not.toBeChecked()
+    expect(screen.getByText(/当前生效：部署配置，已启用/)).toBeInTheDocument()
+    expect(screen.getByText(/部署基线：已配置/)).toBeInTheDocument()
+    expect(screen.getAllByText('****************oken').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '继承部署配置' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByLabelText('新的 Telegram Bot Token')).not.toBeInTheDocument()
 
     // Switch to advanced tab to check override rules
     switchTab('高级')
@@ -242,30 +263,42 @@ describe('SettingsPage', () => {
     expect(screen.getByText('达到 2N 时升级为告警，达到 4N 时升级为严重；恢复需连续 3 次非回填实时心跳。')).toBeInTheDocument()
     expect(screen.getByLabelText('失联判定阈值')).toHaveValue('20')
 
+    fireEvent.click(screen.getByRole('button', { name: '页面覆盖' }))
     fireEvent.change(screen.getByLabelText('扫描间隔秒数'), { target: { value: '10' } })
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+    const saved = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(saved).toMatchObject({
       incident_defaults: {
         stale_threshold_intervals: 20,
         sweep_interval_seconds: 10,
       },
+      incident_sweep_mode: 'override',
     })
+    expect(saved).not.toHaveProperty('telegram')
   })
 
-  it('keeps the runtime management toggle checked when persisted settings explicitly disable Telegram delivery', async () => {
+  it('keeps a disabled Telegram channel visible with its deployment baseline', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
         mockJSONResponse({
           ...settingsResponseBody,
-          telegram: {
+          telegram: telegramResponse({
+            mode: 'disabled',
+            source: 'default',
+            active: false,
             chat_id: '',
             token_present: false,
-            runtime_managed: true,
-            runtime_apply_active: false,
-          },
+            token_masked_summary: '',
+            deployment: {
+              configured: true,
+              chat_id: 'deploy-chat',
+              token_present: true,
+              token_masked_summary: '****ploy',
+            },
+          }),
         }),
       ),
     )
@@ -275,6 +308,11 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
 
     await expandTelegram()
+    expect(screen.getByRole('button', { name: '停用' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(/部署基线：已配置/)).toBeInTheDocument()
+    expect(screen.getByText(/deploy-chat/)).toBeInTheDocument()
+    expect(screen.getByText(/已停用/)).toBeInTheDocument()
+    expect(screen.queryByLabelText('新的 Telegram Bot Token')).not.toBeInTheDocument()
   })
 
   it('shows persisted Feishu webhook as masked write-only state', async () => {
@@ -349,11 +387,9 @@ describe('SettingsPage', () => {
 
     const payload = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
     expect(payload).not.toHaveProperty('subscription_cost_settings')
+    expect(payload).not.toHaveProperty('telegram')
+    expect(payload).not.toHaveProperty('incident_sweep_mode')
     expect(payload).toEqual({
-      telegram: {
-        chat_id: 'chat-id',
-        runtime_managed: false,
-      },
       feishu: {
         enabled: true,
       },
@@ -651,12 +687,11 @@ describe('SettingsPage', () => {
       .mockResolvedValueOnce(
         mockJSONResponse({
           ...settingsResponseBody,
-          telegram: {
-            ...settingsResponseBody.telegram,
-            runtime_managed: true,
+          telegram: telegramResponse({
+            mode: 'override',
+            source: 'database',
             token_masked_summary: '***************oken',
-            runtime_apply_active: true,
-          },
+          }),
           host_sample_frequency_tier: '1m',
           retention_policy: {
             ...settingsResponseBody.retention_policy,
@@ -671,20 +706,20 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
 
     await expandTelegram()
-    fireEvent.click(screen.getByRole('switch', { name: '运行时接管' }))
     fireEvent.change(screen.getByLabelText('新的 Telegram Bot Token'), {
       target: { value: 'replacement-token' },
     })
+    expect(screen.queryByText('replacement-token')).not.toBeInTheDocument()
     // 先保存 Telegram 替换 token（此举会清空草稿，避免跨 tab 未保存拦截）
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
       telegram: {
+        mode: 'override',
         bot_token: 'replacement-token',
-        chat_id: 'chat-id',
-        runtime_managed: true,
       },
     })
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body)).telegram).not.toHaveProperty('chat_id')
 
     switchTab('监控策略')
     fireEvent.change(screen.getByLabelText('当前监控实例主机样本频率'), {
@@ -698,17 +733,13 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
     const finalPayload = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))
     expect(finalPayload).toMatchObject({
-      telegram: {
-        chat_id: 'chat-id',
-        runtime_managed: true,
-      },
       host_sample_frequency_tier: '1m',
       retention_policy: {
         raw_layer_days: 45,
       },
     })
-    // token 已在首次保存时落地，二次保存不再重复携带
-    expect(finalPayload.telegram).not.toHaveProperty('bot_token')
+    expect(finalPayload).not.toHaveProperty('telegram')
+    expect(finalPayload).not.toHaveProperty('incident_sweep_mode')
   })
 
   it('warns before leaving a tab with unsaved changes and can discard', async () => {
@@ -739,13 +770,15 @@ describe('SettingsPage', () => {
       vi.fn().mockResolvedValue(
         mockJSONResponse({
           ...settingsResponseBody,
-          telegram: {
+          telegram: telegramResponse({
+            mode: 'inherit',
+            source: 'default',
+            active: false,
             chat_id: '',
             token_present: false,
             token_masked_summary: '',
-            runtime_managed: false,
-            runtime_apply_active: false,
-          },
+            deployment: { configured: false, chat_id: '', token_present: false },
+          }),
         }),
       ),
     )
@@ -837,12 +870,11 @@ describe('SettingsPage', () => {
       .mockResolvedValueOnce(
         mockJSONResponse({
           ...settingsResponseBody,
-          telegram: {
-            ...settingsResponseBody.telegram,
-            runtime_managed: true,
+          telegram: telegramResponse({
+            mode: 'override',
+            source: 'database',
             chat_id: 'new-chat-id',
-            runtime_apply_active: true,
-          },
+          }),
         }),
       )
     vi.stubGlobal('fetch', fetchMock)
@@ -852,7 +884,6 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
 
     await expandTelegram()
-    fireEvent.click(screen.getByRole('switch', { name: '运行时接管' }))
     fireEvent.change(screen.getByLabelText('Telegram Chat ID'), {
       target: { value: 'new-chat-id' },
     })
@@ -861,8 +892,8 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
       telegram: {
+        mode: 'override',
         chat_id: 'new-chat-id',
-        runtime_managed: true,
       },
       feishu: {
         enabled: false,
@@ -1221,25 +1252,29 @@ describe('SettingsPage', () => {
       .mockResolvedValueOnce(
         mockJSONResponse({
           ...settingsResponseBody,
-          telegram: {
+          telegram: telegramResponse({
+            mode: 'inherit',
+            source: 'default',
+            active: false,
             chat_id: '',
             token_present: false,
             token_masked_summary: '',
-            runtime_managed: false,
-            runtime_apply_active: false,
-          },
+            deployment: { configured: false, chat_id: '', token_present: false },
+          }),
         }),
       )
       .mockResolvedValueOnce(
         mockJSONResponse({
           ...settingsResponseBody,
-          telegram: {
+          telegram: telegramResponse({
+            mode: 'inherit',
+            source: 'default',
+            active: false,
             chat_id: '',
             token_present: false,
             token_masked_summary: '',
-            runtime_managed: false,
-            runtime_apply_active: false,
-          },
+            deployment: { configured: false, chat_id: '', token_present: false },
+          }),
         }),
       )
     vi.stubGlobal('fetch', fetchMock)
@@ -1263,12 +1298,10 @@ describe('SettingsPage', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
-      telegram: {
-        chat_id: '',
-        runtime_managed: false,
-      },
-    })
+    const dismissed = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(dismissed).not.toHaveProperty('telegram')
+    expect(JSON.stringify(dismissed)).not.toContain('draft-token')
+    expect(JSON.stringify(dismissed)).not.toContain('draft-chat')
   })
 
   it('hides user management and does not request the directory when the session cannot manage access', async () => {
@@ -1320,7 +1353,7 @@ describe('SettingsPage', () => {
         '/api/admin/record-access-groups',
       ]))
     })
-    expect(fetchMock.mock.calls.some(([url]) => url === '/api/settings' || url === '/api/record-access-groups/mine')).toBe(false)
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/settings' || url === '/api/settings/deployment' || url === '/api/record-access-groups/mine')).toBe(false)
   })
 
   it('confirms a dirty system form before opening user management', async () => {
@@ -1348,5 +1381,399 @@ describe('SettingsPage', () => {
       '/api/admin/users',
       '/api/admin/record-access-groups',
     ])))
+  })
+
+  it('confirms telegram restore as a draft and submits inherit only after save', async () => {
+    const initial = {
+      ...settingsResponseBody,
+      telegram: telegramResponse({ mode: 'override', source: 'database' }),
+    }
+    const restored = {
+      ...settingsResponseBody,
+      telegram: telegramResponse(),
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(initial))
+      .mockResolvedValueOnce(mockJSONResponse(restored))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('通知')
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Telegram 通知设置' })).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复部署配置' }))
+    expect(screen.getByRole('alertdialog', { name: '恢复部署配置' })).toHaveTextContent('保存后清除页面覆盖，重新使用部署配置。')
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByRole('button', { name: '页面覆盖' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(/当前生效：页面设置，已启用/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复部署配置' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认恢复' }))
+    expect(screen.getByRole('button', { name: '继承部署配置' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText(/当前生效：页面设置，已启用/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const saved = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(saved.telegram).toEqual({ mode: 'inherit' })
+    expect(await screen.findByText(/当前生效：部署配置，已启用/)).toBeInTheDocument()
+  })
+
+  it('keeps the telegram draft and effective summary when saving fails', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse({ error: 'invalid input' }, 400))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    await expandTelegram()
+    fireEvent.change(screen.getByLabelText('Telegram Chat ID'), { target: { value: 'kept-chat' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('invalid input'))
+    expect(screen.getByLabelText('Telegram Chat ID')).toHaveValue('kept-chat')
+    expect(screen.getByText(/当前生效：部署配置，已启用/)).toBeInTheDocument()
+    expect(screen.queryByText('设置已保存')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not let an older save replace a newer telegram draft', async () => {
+    let resolveSave: ((value: Response) => void) | undefined
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveSave = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    await expandTelegram()
+    fireEvent.change(screen.getByLabelText('Telegram Chat ID'), { target: { value: 'mid-chat' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    fireEvent.change(screen.getByLabelText('Telegram Chat ID'), { target: { value: 'newer-chat' } })
+    resolveSave?.(mockJSONResponse({
+      ...settingsResponseBody,
+      telegram: telegramResponse({ mode: 'override', source: 'database', chat_id: 'mid-chat' }),
+    }))
+    await waitFor(() => expect(screen.getByLabelText('Telegram Chat ID')).toHaveValue('newer-chat'))
+    expect(screen.queryByText('设置已保存')).not.toBeInTheDocument()
+  })
+
+  it('omits telegram and sweep ownership on the next save after a concurrent disable and sweep override when only a newer unrelated field changed', async () => {
+    let resolveSave: ((value: Response) => void) | undefined
+    const concurrent = {
+      ...settingsResponseBody,
+      telegram: telegramResponse({
+        mode: 'disabled',
+        source: 'database',
+        active: false,
+        chat_id: '',
+        token_present: false,
+        token_masked_summary: '',
+      }),
+      incident_defaults: { ...settingsResponseBody.incident_defaults, sweep_interval_seconds: 17 },
+      incident_sweep: { mode: 'override', source: 'database', deployment_seconds: 60 },
+      retention_policy: { raw_layer_days: 45, aggregate_layer_days: 365 },
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveSave = resolve }))
+      .mockResolvedValueOnce(mockJSONResponse(concurrent))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('原始层保留天数'), { target: { value: '45' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const submitted = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(submitted).not.toHaveProperty('telegram')
+    expect(submitted).not.toHaveProperty('incident_sweep_mode')
+    expect(submitted.retention_policy.raw_layer_days).toBe(45)
+    expect(submitted.incident_defaults.heartbeat_interval_seconds).toBe(5)
+    expect(submitted.incident_defaults.sweep_interval_seconds).toBe(5)
+
+    fireEvent.change(screen.getByLabelText('心跳间隔秒数'), { target: { value: '9' } })
+    resolveSave?.(mockJSONResponse(concurrent))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '保存设置' })).toBeEnabled()
+      expect(screen.getByLabelText('心跳间隔秒数')).toHaveValue('9')
+      expect(screen.getByLabelText('扫描间隔秒数')).toHaveValue('17')
+    })
+    expect(screen.getByLabelText('扫描间隔秒数')).not.toHaveAttribute('readonly')
+    expect(screen.getByRole('button', { name: '页面覆盖' })).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    const saved = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))
+    expect(saved).not.toHaveProperty('telegram')
+    expect(saved).not.toHaveProperty('incident_sweep_mode')
+    expect(saved.incident_defaults.heartbeat_interval_seconds).toBe(9)
+    expect(saved.incident_defaults.sweep_interval_seconds).toBe(17)
+    expect(saved.retention_policy).toEqual({ raw_layer_days: 45, aggregate_layer_days: 365 })
+  })
+
+  it('hides telegram after a saved restore when deployment is not configured', async () => {
+    const initial = {
+      ...settingsResponseBody,
+      telegram: telegramResponse({ mode: 'override', source: 'database' }),
+    }
+    const hidden = {
+      ...settingsResponseBody,
+      telegram: telegramResponse({
+        mode: 'inherit',
+        source: 'default',
+        active: false,
+        chat_id: '',
+        token_present: false,
+        token_masked_summary: '',
+        deployment: { configured: false, chat_id: '', token_present: false },
+      }),
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(initial))
+      .mockResolvedValueOnce(mockJSONResponse(hidden))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('通知')
+    fireEvent.click(screen.getByRole('button', { name: '恢复部署配置' }))
+    fireEvent.click(screen.getByRole('button', { name: '确认恢复' }))
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Telegram 通知设置' })).not.toBeInTheDocument())
+    expect(screen.getByRole('button', { name: '+ 新增通知渠道' })).toBeInTheDocument()
+  })
+
+  it('keeps inherited sweep seconds read-only until the page overrides them', async () => {
+    const inherited = {
+      ...settingsResponseBody,
+      incident_defaults: { ...settingsResponseBody.incident_defaults, sweep_interval_seconds: 60 },
+      incident_sweep: { mode: 'inherit', source: 'deployment', deployment_seconds: 60 },
+    }
+    const overridden = {
+      ...inherited,
+      incident_defaults: { ...inherited.incident_defaults, sweep_interval_seconds: 17 },
+      incident_sweep: { mode: 'override', source: 'database', deployment_seconds: 60 },
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(inherited))
+      .mockResolvedValueOnce(mockJSONResponse(overridden))
+      .mockResolvedValueOnce(mockJSONResponse(inherited))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+    const sweep = screen.getByLabelText('扫描间隔秒数')
+    expect(sweep).toHaveValue('60')
+    expect(sweep).toHaveAttribute('readonly')
+    expect(screen.getByText('当前来源：部署配置')).toBeInTheDocument()
+    fireEvent.change(sweep, { target: { value: '17' } })
+    expect(sweep).toHaveValue('60')
+
+    fireEvent.click(screen.getByRole('button', { name: '页面覆盖' }))
+    fireEvent.change(screen.getByLabelText('扫描间隔秒数'), { target: { value: '17' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      incident_sweep_mode: 'override',
+      incident_defaults: { sweep_interval_seconds: 17 },
+    })
+    await waitFor(() => expect(screen.getByText('当前来源：页面设置')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复部署配置' }))
+    expect(screen.getByLabelText('扫描间隔秒数')).toHaveValue('60')
+    expect(screen.getByLabelText('扫描间隔秒数')).toHaveAttribute('readonly')
+    expect(screen.getByText('当前来源：页面设置')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    const restored = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))
+    expect(restored.incident_sweep_mode).toBe('inherit')
+    expect(restored).not.toHaveProperty('telegram')
+  })
+
+  it('keeps a saved sweep override of 17 when inherit only shows the deployment interval', async () => {
+    const savedOverride = {
+      ...settingsResponseBody,
+      incident_defaults: { ...settingsResponseBody.incident_defaults, sweep_interval_seconds: 17 },
+      incident_sweep: { mode: 'override', source: 'database', deployment_seconds: 60 },
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(savedOverride))
+      .mockResolvedValueOnce(mockJSONResponse(savedOverride))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+    expect(screen.getByLabelText('扫描间隔秒数')).toHaveValue('17')
+    expect(screen.getByLabelText('扫描间隔秒数')).not.toHaveAttribute('readonly')
+
+    const sweepMode = screen.getByRole('group', { name: '扫描间隔配置方式' })
+    fireEvent.click(within(sweepMode).getByRole('button', { name: '继承部署' }))
+    expect(screen.getByLabelText('扫描间隔秒数')).toHaveValue('60')
+    expect(screen.getByLabelText('扫描间隔秒数')).toHaveAttribute('readonly')
+    expect(within(sweepMode).getByRole('button', { name: '继承部署' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(within(sweepMode).getByRole('button', { name: '页面覆盖' }))
+    expect(screen.getByLabelText('扫描间隔秒数')).toHaveValue('17')
+    expect(screen.getByLabelText('扫描间隔秒数')).not.toHaveAttribute('readonly')
+
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const saved = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(saved).not.toHaveProperty('incident_sweep_mode')
+    expect(saved).not.toHaveProperty('telegram')
+    expect(saved.incident_defaults.sweep_interval_seconds).toBe(17)
+  })
+
+  it.each(['', '0'])('restores inherited sweep while preserving an invalid override draft (%j)', async (invalidDraft) => {
+    const savedOverride = {
+      ...settingsResponseBody,
+      incident_defaults: { ...settingsResponseBody.incident_defaults, sweep_interval_seconds: 17 },
+      incident_sweep: { mode: 'override', source: 'database', deployment_seconds: 60 },
+    }
+    const inherited = {
+      ...savedOverride,
+      incident_defaults: { ...savedOverride.incident_defaults, sweep_interval_seconds: 60 },
+      incident_sweep: { mode: 'inherit', source: 'deployment', deployment_seconds: 60 },
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(mockJSONResponse(savedOverride))
+      .mockResolvedValueOnce(mockJSONResponse(inherited))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('扫描间隔秒数'), { target: { value: invalidDraft } })
+    fireEvent.click(screen.getByRole('button', { name: '恢复部署配置' }))
+    expect(screen.getByLabelText('扫描间隔秒数')).toHaveValue('60')
+    expect(screen.getByLabelText('扫描间隔秒数')).toHaveAttribute('readonly')
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.getByText('设置已保存')).toBeInTheDocument())
+    const saved = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(saved.incident_sweep_mode).toBe('inherit')
+    expect(saved.incident_defaults.sweep_interval_seconds).toBe(60)
+    expect(screen.getByText('当前来源：部署配置')).toBeInTheDocument()
+  })
+
+  const deploymentSnapshot = {
+    items: [
+      {
+        key: 'HOUFENG_HTTP_ADDR',
+        group: 'process',
+        source: 'environment',
+        value: '127.0.0.1:18080',
+        configured: true,
+        sensitive: false,
+        application: 'startup',
+      },
+      {
+        key: 'HOUFENG_DATABASE_URL',
+        group: 'database',
+        source: 'environment',
+        value: 'postgres://secret-user:secret-pass@db/houfeng',
+        configured: true,
+        sensitive: true,
+        application: 'startup',
+      },
+      {
+        key: 'HOUFENG_TELEGRAM_BOT_TOKEN',
+        group: 'notifications',
+        source: 'file',
+        value: null,
+        configured: true,
+        sensitive: true,
+        application: 'fallback',
+      },
+    ],
+  }
+
+  it('hides deployment configuration from a session that cannot manage access', async () => {
+    const fetchMock = vi.fn(() => Promise.reject(new Error('deployment must not fetch without management')))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage('/settings?tab=deployment')
+    expect(await screen.findByRole('heading', { name: '无权查看部署配置' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '部署配置' })).not.toBeInTheDocument()
+    expect(screen.queryByText('postgres://secret-user:secret-pass@db/houfeng')).not.toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps a failed deployment capability read closed', async () => {
+    const fetchMock = vi.fn(() => Promise.reject(new Error('deployment capability failure must not open the snapshot')))
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage('/settings?tab=deployment', { fail: true })
+    expect(await screen.findByRole('heading', { name: '能力读取失败' })).toBeInTheDocument()
+    expect(screen.getByText('暂时无法确认管理能力，不会打开部署配置。')).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('shows the startup deployment snapshot without a save action or secret values', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/settings/deployment') return Promise.resolve(mockJSONResponse(deploymentSnapshot))
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${url}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage('/settings?tab=deployment', { user: sessionUser(true) })
+    expect(await screen.findByRole('heading', { name: '进程' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '部署配置' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('监听地址')).toBeInTheDocument()
+    expect(screen.getByText('127.0.0.1:18080')).toBeInTheDocument()
+    expect(screen.getByText('HOUFENG_HTTP_ADDR')).toBeInTheDocument()
+    expect(screen.getAllByText('环境变量').length).toBeGreaterThan(0)
+    expect(screen.getByText('数据库连接')).toBeInTheDocument()
+    expect(screen.queryByText('postgres://secret-user:secret-pass@db/houfeng')).not.toBeInTheDocument()
+    expect(screen.getByText(/页面覆盖或停用后/)).toBeInTheDocument()
+    expect(screen.getByText(/需要重启才会反映到这里/)).toBeInTheDocument()
+    expect(screen.getByText('部署编排参数请在部署文件查看。')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/settings')).toBe(false)
+  })
+
+  it('shows a forbidden deployment snapshot when the server rejects the session', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/settings/deployment') return Promise.resolve(mockJSONResponse({ error: 'forbidden' }, 403))
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${url}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage('/settings?tab=deployment', { user: sessionUser(true) })
+    expect(await screen.findByRole('heading', { name: '无权查看部署配置' })).toBeInTheDocument()
+    expect(screen.queryByText('postgres://secret-user:secret-pass@db/houfeng')).not.toBeInTheDocument()
+    expect(screen.queryByText('forbidden')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
+  })
+
+  it('retries a failed deployment snapshot without treating the error as empty configuration', async () => {
+    let failed = true
+    const fetchMock = vi.fn((url: string) => {
+      if (url !== '/api/settings/deployment') return Promise.resolve(mockJSONResponse({ error: `unexpected ${url}` }, 500))
+      if (failed) return Promise.resolve(mockJSONResponse({ error: 'database password leaked' }, 500))
+      return Promise.resolve(mockJSONResponse(deploymentSnapshot))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage('/settings?tab=deployment', { user: sessionUser(true) })
+    expect(await screen.findByRole('heading', { name: '部署配置不可用' })).toBeInTheDocument()
+    expect(screen.getByText('部署配置暂时无法读取。')).toBeInTheDocument()
+    expect(screen.queryByText('database password leaked')).not.toBeInTheDocument()
+    expect(screen.queryByText('监听地址')).not.toBeInTheDocument()
+    failed = false
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+    expect(await screen.findByText('监听地址')).toBeInTheDocument()
+  })
+
+  it('asks before leaving unsaved system settings for the deployment tab', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url === '/api/settings') return Promise.resolve(mockJSONResponse(settingsResponseBody))
+      if (url === '/api/settings/deployment') return Promise.resolve(mockJSONResponse(deploymentSnapshot))
+      return Promise.resolve(mockJSONResponse({ error: `unexpected ${url}` }, 500))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderSettingsPage('/settings', { user: sessionUser(true) })
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+    fireEvent.change(screen.getByLabelText('原始层保留天数'), { target: { value: '45' } })
+    switchTab('部署配置')
+    expect(screen.getByRole('button', { name: '不保存' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '监控策略' })).toHaveAttribute('aria-selected', 'true')
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/settings/deployment')).toBe(false)
+    fireEvent.click(screen.getByRole('button', { name: '不保存' }))
+    await waitFor(() => expect(screen.getByRole('tab', { name: '部署配置' })).toHaveAttribute('aria-selected', 'true'))
+    expect(await screen.findByText('监听地址')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '保存设置' })).not.toBeInTheDocument()
   })
 })

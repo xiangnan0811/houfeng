@@ -19,6 +19,36 @@ const (
 
 var ErrInvalidSettings = errors.New("invalid center settings")
 
+type ConfigSource string
+
+const (
+	ConfigSourceDefault    ConfigSource = "default"
+	ConfigSourceDeployment ConfigSource = "deployment"
+	ConfigSourceDatabase   ConfigSource = "database"
+)
+
+type DeploymentDefaults struct {
+	Telegram                     TelegramSettings
+	IncidentSweepIntervalSeconds int
+	IncidentSweepSource          ConfigSource
+}
+
+type EffectiveSettingsMetadata struct {
+	Persisted           bool
+	TelegramSource      ConfigSource
+	IncidentSweepSource ConfigSource
+}
+
+type NotificationSettings struct {
+	Telegram         TelegramSettings
+	FeishuEnabled    bool
+	FeishuWebhookURL string
+}
+
+type NotificationSettingsSource interface {
+	GetNotificationSettings(context.Context) (NotificationSettings, error)
+}
+
 type MutateSettingsFunc func(current CenterSettings) (CenterSettings, error)
 
 type Repository interface {
@@ -27,16 +57,18 @@ type Repository interface {
 }
 
 type CenterSettings struct {
-	Telegram                TelegramSettings         `json:"telegram"`
-	FeishuEnabled           bool                     `json:"feishu_enabled"`
-	FeishuWebhookURL        string                   `json:"feishu_webhook_url"`
-	HostSampleFrequencyTier string                   `json:"host_sample_frequency_tier"`
-	ProbeFrequencyDefaults  ProbeFrequencyDefaults   `json:"probe_frequency_defaults"`
-	IncidentDefaults        IncidentDefaults         `json:"incident_defaults"`
-	OverrideRules           OverrideRules            `json:"override_rules"`
-	RetentionPolicy         RetentionPolicy          `json:"retention_policy"`
-	SubscriptionCost        SubscriptionCostSettings `json:"subscription_cost_settings"`
-	IPQuality               IPQualitySettings        `json:"ip_quality_settings"`
+	Telegram                    TelegramSettings          `json:"telegram"`
+	FeishuEnabled               bool                      `json:"feishu_enabled"`
+	FeishuWebhookURL            string                    `json:"feishu_webhook_url"`
+	HostSampleFrequencyTier     string                    `json:"host_sample_frequency_tier"`
+	ProbeFrequencyDefaults      ProbeFrequencyDefaults    `json:"probe_frequency_defaults"`
+	IncidentDefaults            IncidentDefaults          `json:"incident_defaults"`
+	IncidentSweepRuntimeManaged bool                      `json:"-"`
+	Effective                   EffectiveSettingsMetadata `json:"-"`
+	OverrideRules               OverrideRules             `json:"override_rules"`
+	RetentionPolicy             RetentionPolicy           `json:"retention_policy"`
+	SubscriptionCost            SubscriptionCostSettings  `json:"subscription_cost_settings"`
+	IPQuality                   IPQualitySettings         `json:"ip_quality_settings"`
 }
 
 type TelegramSettings struct {
@@ -257,6 +289,86 @@ func Default() CenterSettings {
 			Services:          append([]string(nil), defaultIPQualityServices...),
 		},
 	}
+}
+
+func NormalizeIncidentSweepInterval(interval time.Duration) int {
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	seconds := int(interval.Round(time.Second) / time.Second)
+	if seconds <= 0 {
+		return 5
+	}
+	return seconds
+}
+
+// FreshInstallDefaults returns the raw settings persisted by the first
+// mutation. Deployment values are applied only by ResolveEffectiveSettings.
+func FreshInstallDefaults() CenterSettings {
+	defaults := Default()
+	defaults.OverrideRules.MonitoringInstanceLabels = ensureLegacyCoreHostSampleOverride(nil)
+	return defaults
+}
+
+func ResolveTelegram(stored TelegramSettings, deployment TelegramSettings) TelegramSettings {
+	if stored.RuntimeManaged {
+		return stored
+	}
+	deployment.RuntimeManaged = false
+	return deployment
+}
+
+func ResolveEffectiveSettings(stored CenterSettings, deployment DeploymentDefaults) CenterSettings {
+	effective := stored
+	effective.Telegram = ResolveTelegram(stored.Telegram, deployment.Telegram)
+	if effective.Telegram.RuntimeManaged {
+		effective.Effective.TelegramSource = ConfigSourceDatabase
+	} else if effective.Telegram.Enabled() {
+		effective.Effective.TelegramSource = ConfigSourceDeployment
+	} else {
+		effective.Effective.TelegramSource = ConfigSourceDefault
+	}
+
+	if effective.IncidentSweepRuntimeManaged {
+		effective.Effective.IncidentSweepSource = ConfigSourceDatabase
+	} else {
+		seconds := deployment.IncidentSweepIntervalSeconds
+		if seconds <= 0 {
+			seconds = 5
+		}
+		effective.IncidentDefaults.SweepIntervalSeconds = seconds
+		source := deployment.IncidentSweepSource
+		if source != ConfigSourceDeployment {
+			source = ConfigSourceDefault
+		}
+		effective.Effective.IncidentSweepSource = source
+	}
+	return effective
+}
+
+func ensureLegacyCoreHostSampleOverride(rules []MonitoringInstanceLabelOverrideRule) []MonitoringInstanceLabelOverrideRule {
+	const coreMonitoringInstanceLabel = "核心"
+	coreTier := targets.FrequencyTier5s
+
+	for i, rule := range rules {
+		if rule.Label != coreMonitoringInstanceLabel {
+			continue
+		}
+		if rule.Overrides.HostSampleFrequencyTier != nil {
+			return rules
+		}
+		next := append([]MonitoringInstanceLabelOverrideRule(nil), rules...)
+		next[i].Overrides.HostSampleFrequencyTier = &coreTier
+		return next
+	}
+
+	legacyRule := MonitoringInstanceLabelOverrideRule{
+		Label: coreMonitoringInstanceLabel,
+		Overrides: SettingsOverrideFields{
+			HostSampleFrequencyTier: &coreTier,
+		},
+	}
+	return append([]MonitoringInstanceLabelOverrideRule{legacyRule}, rules...)
 }
 
 func Validate(input CenterSettings) (CenterSettings, error) {

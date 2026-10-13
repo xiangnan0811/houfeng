@@ -78,7 +78,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 
 	t.Run("severe iowait outranks lighter memory", func(t *testing.T) {
 		fixture := newRuntimeStreamAuthFixture(t)
-		settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+		settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 		setResourcePressureSettings(t, ctx, settingsRepo, targets.FrequencyTier1m, nil)
 		reference := time.Now().UTC().Truncate(time.Microsecond).Add(-2 * time.Hour)
 		latest := seedResourcePressureSeries(t, ctx, fixture.pool, reference.Add(-30*time.Minute), reference, time.Minute+time.Millisecond, func(_ int, _ time.Time, _ bool) resourcePressureSampleValues {
@@ -139,7 +139,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 		})
 		t.Run("invalid CPU marker blocks CPU but permits load alert", func(t *testing.T) {
 			fixture := newRuntimeStreamAuthFixture(t)
-			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 			setResourcePressureSettings(t, ctx, settingsRepo, targets.FrequencyTier1m, nil)
 			reference := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Minute)
 			latest := seedResourcePressureSeries(t, ctx, fixture.pool, reference.Add(-30*time.Minute), reference, time.Minute+time.Millisecond, func(_ int, _ time.Time, _ bool) resourcePressureSampleValues {
@@ -164,7 +164,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				fixture := newRuntimeStreamAuthFixture(t)
-				settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+				settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 				setResourcePressureSettings(t, ctx, settingsRepo, targets.FrequencyTier1m, nil)
 				reference := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Minute)
 				times := resourcePressureTimesWithGap(reference.Add(-15*time.Minute), reference, time.Minute, tc.gap)
@@ -192,7 +192,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 	t.Run("safe recovery, suppression, invalid evidence, and idempotency", func(t *testing.T) {
 		t.Run("live safe recovery sends once and preserves incident identity", func(t *testing.T) {
 			fixture := newRuntimeStreamAuthFixture(t)
-			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 			setResourcePressureSettings(t, ctx, settingsRepo, targets.FrequencyTier1m, nil)
 			activeReference := time.Now().UTC().Truncate(time.Microsecond).Add(-40 * time.Minute)
 			activeLatest := seedResourcePressureSeries(t, ctx, fixture.pool, activeReference.Add(-30*time.Minute), activeReference, time.Minute+time.Millisecond, func(_ int, _ time.Time, _ bool) resourcePressureSampleValues {
@@ -242,7 +242,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 
 		t.Run("latest maintenance recovery suppresses send", func(t *testing.T) {
 			fixture := newRuntimeStreamAuthFixture(t)
-			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+			settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 			setResourcePressureSettings(t, ctx, settingsRepo, targets.FrequencyTier1m, nil)
 			activeReference := time.Now().UTC().Truncate(time.Microsecond).Add(-40 * time.Minute)
 			activeLatest := seedResourcePressureSeries(t, ctx, fixture.pool, activeReference.Add(-30*time.Minute), activeReference, time.Minute+time.Millisecond, func(_ int, _ time.Time, _ bool) resourcePressureSampleValues {
@@ -286,7 +286,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				fixture := newRuntimeStreamAuthFixture(t)
-				settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+				settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 				setResourcePressureSettings(t, ctx, settingsRepo, targets.FrequencyTier1m, nil)
 				activeReference := time.Now().UTC().Truncate(time.Microsecond).Add(-40 * time.Minute)
 				activeLatest := seedResourcePressureSeries(t, ctx, fixture.pool, activeReference.Add(-30*time.Minute), activeReference, time.Minute+time.Millisecond, func(_ int, _ time.Time, _ bool) resourcePressureSampleValues {
@@ -323,7 +323,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 
 	t.Run("maintenance and backfill cannot bridge active coverage", func(t *testing.T) {
 		fixture := newRuntimeStreamAuthFixture(t)
-		settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+		settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 		setResourcePressureSettings(t, ctx, settingsRepo, targets.FrequencyTier1m, nil)
 		reference := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Minute)
 		times := resourcePressureTimesWithSuppressedBreak(reference.Add(-15*time.Minute), reference, time.Minute, 7)
@@ -340,7 +340,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 		// A window made entirely of suppressed rows is also not valid active
 		// evidence, even when every raw value is severe.
 		fixtureAllSuppressed := newRuntimeStreamAuthFixture(t)
-		settingsRepoAllSuppressed := store.NewPostgresSettingsRepository(fixtureAllSuppressed.pool)
+		settingsRepoAllSuppressed := store.NewPostgresSettingsRepository(fixtureAllSuppressed.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 		setResourcePressureSettings(t, ctx, settingsRepoAllSuppressed, targets.FrequencyTier1m, nil)
 		allSuppressedLatest := seedResourcePressureSeries(t, ctx, fixtureAllSuppressed.pool, reference.Add(-15*time.Minute), reference, time.Minute+time.Millisecond, func(_ int, _ time.Time, _ bool) resourcePressureSampleValues {
 			return resourcePressureSampleValues{cpu: 96, memory: 10, load5: 1, marker: new(true), backfilled: true}
@@ -408,7 +408,7 @@ func TestPostgresIntegrationResourcePressureWindows(t *testing.T) {
 		if _, err := fixture.pool.Exec(ctx, `update monitoring_instances set labels = $2 where monitoring_instance_id = $1`, runtimeStreamAuthMonitoringID, []string{resourcePressureLabel}); err != nil {
 			t.Fatalf("set cadence label: %v", err)
 		}
-		settingsRepo := store.NewPostgresSettingsRepository(fixture.pool)
+		settingsRepo := store.NewPostgresSettingsRepository(fixture.pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 		reference := time.Now().UTC().Truncate(time.Microsecond).Add(-time.Minute)
 		latest := seedResourcePressureSeries(t, ctx, fixture.pool, reference.Add(-30*time.Minute), reference, time.Minute+time.Millisecond, func(_ int, _ time.Time, _ bool) resourcePressureSampleValues {
 			return resourcePressureSampleValues{cpu: 96, memory: 10, load5: 1, marker: new(true)}

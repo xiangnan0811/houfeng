@@ -35,8 +35,6 @@ export function dashboardOverviewFixture(
   }
   const notificationStatus: DashboardNotificationStatus = {
     telegram_configured: false,
-    telegram_runtime_managed: false,
-    telegram_runtime_apply_active: false,
     feishu_configured: false,
     ...overrides.notification_status,
   }

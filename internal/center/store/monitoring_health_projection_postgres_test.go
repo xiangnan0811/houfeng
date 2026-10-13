@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	centersettings "houfeng/internal/center/settings"
 )
 
 func TestPostgresIntegrationMonitoringAttentionProjectsBindingAndEvidenceBeforeStoredHealth(t *testing.T) {
@@ -29,7 +31,7 @@ func TestPostgresIntegrationMonitoringAttentionProjectsBindingAndEvidenceBeforeS
 			t.Fatal(err)
 		}
 	}
-	got, err := NewPostgresDashboardRepository(pool).GetDashboardOverview(ctx, 10)
+	got, err := NewPostgresDashboardRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault}).GetDashboardOverview(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +87,7 @@ func TestPostgresIntegrationDashboardHistoricalInventoryUsesLifecycle(t *testing
 			t.Fatal(err)
 		}
 	}
-	got, err := NewPostgresDashboardRepository(pool).GetDashboardOverview(ctx, 10)
+	got, err := NewPostgresDashboardRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault}).GetDashboardOverview(ctx, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

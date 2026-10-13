@@ -333,6 +333,11 @@ func seedAppACLCurrentReleasedGenesis(
 	contract, privileges, input := appACLCurrentReleasedFixtureContract(t, fixture, profile)
 	dependencies := defaultAppACLCurrentConvergenceDependencies()
 	dependencies.transitionDefinitions = nil
+	// Frozen pre-C75 oracles have no deployment-ownership column. Keep their
+	// source-specific postconditions separate from the current target contract.
+	if _, hasSweepColumn := profile.source.sources.sources[appACLCurrentP75Migration]; !hasSweepColumn {
+		dependencies.verifySweepColumn = func(context.Context, pgx.Tx) error { return nil }
+	}
 	manifest, err := convergeAppACLCurrentWithDependencies(
 		ctx,
 		func(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {

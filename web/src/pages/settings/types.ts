@@ -1,8 +1,10 @@
 import type {
+  IncidentSweepMode,
   MonitoringInstanceLabelOverrideRule,
   ProbeFrequencyDefaults,
   TargetLabelOverrideRule,
   TargetTypeOverrideRule,
+  TelegramSettingsMode,
 } from '../../lib/types'
 
 export type SettingsIncidentDefaultsForm = {
@@ -111,7 +113,8 @@ export type OverrideRuleDraft = {
 export type SettingsFormState = {
   telegramBotToken: string
   telegramChatId: string
-  telegramRuntimeManaged: boolean
+  telegramMode: TelegramSettingsMode
+  incidentSweepMode: IncidentSweepMode
   feishuEnabled: boolean
   feishuWebhookPresent: boolean
   feishuWebhookUrl: string

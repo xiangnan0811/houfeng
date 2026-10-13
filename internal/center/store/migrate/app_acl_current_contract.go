@@ -64,11 +64,21 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	targetObservationFreshnessAppACLCurrentMigrationFragment(),
 	monitoringInstanceMetadataVersionAppACLCurrentMigrationFragment(),
 	subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment(),
+	settingsDeploymentOverridesAppACLCurrentMigrationFragment(),
 }
 
 func subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
 	return AppACLCurrentMigrationFragment{
 		Migration: "0074_add_subscription_exchange_rate_month_end.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return nil
+		},
+	}
+}
+
+func settingsDeploymentOverridesAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0075_add_settings_deployment_overrides.sql",
 		Privileges: func(string) []AppACLPrivilege {
 			return nil
 		},

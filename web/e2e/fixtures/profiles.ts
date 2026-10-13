@@ -151,11 +151,16 @@ const SUBSCRIPTION_STATISTICS = {
 
 const SETTINGS = {
   telegram: {
+    mode: 'inherit',
+    source: 'default',
+    active: false,
     chat_id: '',
     token_present: false,
-    token_masked_summary: '',
-    runtime_managed: false,
-    runtime_apply_active: false,
+    deployment: {
+      configured: false,
+      chat_id: '',
+      token_present: false,
+    },
   },
   feishu: {
     enabled: false,
@@ -213,6 +218,12 @@ const SETTINGS = {
     max_reminder_lead_days: 30,
     exchange_rate_stale_after_hours: 36,
   },
+  incident_sweep: {
+    mode: 'inherit',
+    source: 'default',
+    deployment_seconds: 5,
+  },
+  settings_source: 'default',
 } satisfies SettingsRecord
 
 const ASSET_DECISION_OVERVIEW = {

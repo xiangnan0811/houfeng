@@ -16,404 +16,380 @@ import (
 type fakeSettingsRepository struct {
 	getSettingsResult centersettings.CenterSettings
 	getSettingsErr    error
-	putSettingsResult centersettings.CenterSettings
-	putSettingsErr    error
-	putSettingsInput  centersettings.CenterSettings
-	putSettingsCalls  int
-}
-
-func TestSettingsHandlerRejectsRemovedLowFrequencyRetentionControls(t *testing.T) {
-	for _, body := range []string{
-		`{"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":365,"event_layer_days":1}}`,
-		`{"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":365,"notification_layer_days":1}}`,
-		`{"ip_quality_settings":{"raw_retention_days":1}}`,
-		`{"ip_quality_settings":{"history_retention_days":1}}`,
-	} {
-		repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
-		recorder := httptest.NewRecorder()
-		handlers.Settings(repo, nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body)))
-		if recorder.Code != http.StatusBadRequest || repo.putSettingsCalls != 0 {
-			t.Fatalf("removed TTL accepted: status %d calls %d body %s", recorder.Code, repo.putSettingsCalls, body)
-		}
-	}
-}
-
-type settingsHandlerResponse struct {
-	Telegram                telegramSettingsResponse              `json:"telegram"`
-	Feishu                  feishuSettingsResponse                `json:"feishu"`
-	HostSampleFrequencyTier string                                `json:"host_sample_frequency_tier"`
-	ProbeFrequencyDefaults  centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
-	IncidentDefaults        centersettings.IncidentDefaults       `json:"incident_defaults"`
-	OverrideRules           centersettings.OverrideRules          `json:"override_rules"`
-	RetentionPolicy         centersettings.RetentionPolicy        `json:"retention_policy"`
-	IPQualitySettings       centersettings.IPQualitySettings      `json:"ip_quality_settings"`
-}
-
-type feishuSettingsResponse struct {
-	Enabled                 bool   `json:"enabled"`
-	WebhookURL              string `json:"webhook_url"`
-	WebhookURLPresent       bool   `json:"webhook_url_present"`
-	WebhookURLMaskedSummary string `json:"webhook_url_masked_summary"`
-}
-
-type telegramSettingsResponse struct {
-	BotToken           string `json:"bot_token"`
-	ChatID             string `json:"chat_id"`
-	TokenPresent       bool   `json:"token_present"`
-	TokenMaskedSummary string `json:"token_masked_summary"`
-	RuntimeManaged     bool   `json:"runtime_managed"`
-	RuntimeApplyActive bool   `json:"runtime_apply_active"`
+	mutateSettingsErr error
+	mutateCalls       int
+	mutateInput       centersettings.CenterSettings
+	deployment        centersettings.DeploymentDefaults
 }
 
 func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
 	if f.getSettingsErr != nil {
 		return centersettings.CenterSettings{}, f.getSettingsErr
 	}
-	return f.getSettingsResult, nil
+	return centersettings.ResolveEffectiveSettings(f.getSettingsResult, f.deployment), nil
 }
 
 func (f *fakeSettingsRepository) MutateSettings(_ context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
-	f.putSettingsCalls++
+	f.mutateCalls++
 	next, err := mutate(f.getSettingsResult)
 	if err != nil {
 		return centersettings.CenterSettings{}, err
 	}
-	f.putSettingsInput = next
-	if f.putSettingsErr != nil {
-		return centersettings.CenterSettings{}, f.putSettingsErr
+	f.mutateInput = next
+	if f.mutateSettingsErr != nil {
+		return centersettings.CenterSettings{}, f.mutateSettingsErr
 	}
-	return f.putSettingsResult, nil
+	next.Effective.Persisted = true
+	f.getSettingsResult = next
+	return centersettings.ResolveEffectiveSettings(next, f.deployment), nil
 }
 
-func TestSettingsHandlerReturnsCurrentSettingsWithoutTelegramBotToken(t *testing.T) {
-	record := centersettings.Default()
-	record.Telegram.BotToken = "123456:ABCDEF-secret-token"
-	record.Telegram.ChatID = "chat-id"
-	record.Telegram.RuntimeManaged = false
-	record.FeishuEnabled = true
-	record.FeishuWebhookURL = "https://open.feishu.cn/open-apis/bot/v2/hook/full-secret-value"
-	repo := &fakeSettingsRepository{getSettingsResult: record}
-
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
-	}
-
-	var body settingsHandlerResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
-	}
-
-	if body.Telegram.BotToken != "" {
-		t.Fatalf("expected bot token to be redacted from response, got %q", body.Telegram.BotToken)
-	}
-	if !body.Telegram.TokenPresent {
-		t.Fatal("expected token_present to be true")
-	}
-	if body.Telegram.TokenMaskedSummary == "" {
-		t.Fatal("expected token_masked_summary to be set")
-	}
-	if strings.Contains(body.Telegram.TokenMaskedSummary, "secret-token") {
-		t.Fatalf("expected token_masked_summary to hide raw token, got %q", body.Telegram.TokenMaskedSummary)
-	}
-	if body.Telegram.RuntimeApplyActive {
-		t.Fatal("expected runtime_apply_active to stay false until persisted Telegram settings explicitly manage runtime")
-	}
-	if body.Telegram.RuntimeManaged {
-		t.Fatal("expected runtime_managed to stay false until persisted Telegram settings explicitly manage runtime")
-	}
-	if body.Feishu.WebhookURL != "" {
-		t.Fatalf("expected Feishu webhook URL to be redacted from response, got %q", body.Feishu.WebhookURL)
-	}
-	if !body.Feishu.WebhookURLPresent {
-		t.Fatal("expected feishu.webhook_url_present to be true")
-	}
-	if body.Feishu.WebhookURLMaskedSummary == "" || strings.Contains(body.Feishu.WebhookURLMaskedSummary, "full-secret-value") {
-		t.Fatalf("expected masked Feishu webhook summary, got %q", body.Feishu.WebhookURLMaskedSummary)
-	}
-	if body.HostSampleFrequencyTier != centersettings.Default().HostSampleFrequencyTier {
-		t.Fatalf("expected host sample frequency tier %q, got %q", centersettings.Default().HostSampleFrequencyTier, body.HostSampleFrequencyTier)
-	}
-	if body.IPQualitySettings.FrequencySeconds != centersettings.Default().IPQuality.FrequencySeconds {
-		t.Fatalf("expected ip quality frequency %d, got %d", centersettings.Default().IPQuality.FrequencySeconds, body.IPQualitySettings.FrequencySeconds)
-	}
+type settingsHandlerResponse struct {
+	Telegram         telegramSettingsResponse        `json:"telegram"`
+	IncidentDefaults centersettings.IncidentDefaults `json:"incident_defaults"`
+	IncidentSweep    incidentSweepResponse           `json:"incident_sweep"`
+	SettingsSource   string                          `json:"settings_source"`
 }
 
-func TestSettingsHandlerReturnsManagedTelegramDisableStateTruthfully(t *testing.T) {
-	record := centersettings.Default()
-	record.Telegram.RuntimeManaged = true
-	repo := &fakeSettingsRepository{getSettingsResult: record}
-
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
-	}
-
-	var body settingsHandlerResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
-	}
-
-	if !body.Telegram.RuntimeManaged {
-		t.Fatal("expected runtime_managed to stay true when persisted Telegram settings explicitly manage runtime")
-	}
-	if body.Telegram.RuntimeApplyActive {
-		t.Fatal("expected runtime_apply_active to stay false when persisted Telegram settings explicitly disable delivery")
-	}
+type telegramSettingsResponse struct {
+	Mode               string                     `json:"mode"`
+	Source             string                     `json:"source"`
+	Active             bool                       `json:"active"`
+	ChatID             string                     `json:"chat_id"`
+	TokenPresent       bool                       `json:"token_present"`
+	TokenMaskedSummary string                     `json:"token_masked_summary"`
+	Deployment         telegramDeploymentResponse `json:"deployment"`
 }
 
-func TestSettingsHandlerUpdatesSettingsOnPutWithoutEchoingTelegramBotToken(t *testing.T) {
-	current := centersettings.Default()
-	current.Telegram.BotToken = "current-token"
-	current.Telegram.ChatID = "chat-id"
-	current.Telegram.RuntimeManaged = false
-
-	updated := centersettings.Default()
-	updated.Telegram.BotToken = "bot-token"
-	updated.Telegram.ChatID = "chat-id"
-	updated.Telegram.RuntimeManaged = true
-	updated.HostSampleFrequencyTier = "5s"
-	updated.ProbeFrequencyDefaults.HTTP = "5s"
-	updated.IPQuality.Enabled = false
-	updated.IPQuality.FrequencySeconds = 259200
-	updated.IPQuality.StaleAfterSeconds = 864000
-	updated.IPQuality.TimeoutSeconds = 20
-	updated.IPQuality.Services = []string{"netflix", "chatgpt"}
-	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
-
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","runtime_managed":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30},"ip_quality_settings":{"enabled":false,"frequency_seconds":259200,"stale_after_seconds":864000,"timeout_seconds":20,"services":["netflix","chatgpt"]}}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
-	}
-	if repo.putSettingsInput.HostSampleFrequencyTier != "5s" {
-		t.Fatalf("expected persisted host sample frequency tier %q, got %q", "5s", repo.putSettingsInput.HostSampleFrequencyTier)
-	}
-	if repo.putSettingsInput.Telegram.BotToken != "bot-token" {
-		t.Fatalf("expected repository input bot token %q, got %q", "bot-token", repo.putSettingsInput.Telegram.BotToken)
-	}
-	if !repo.putSettingsInput.Telegram.RuntimeManaged {
-		t.Fatal("expected repository input runtime_managed to be true")
-	}
-	if repo.putSettingsInput.IPQuality.FrequencySeconds != 259200 {
-		t.Fatalf("expected repository input ip quality frequency 259200, got %d", repo.putSettingsInput.IPQuality.FrequencySeconds)
-	}
-	if repo.putSettingsInput.IPQuality.StaleAfterSeconds != 864000 {
-		t.Fatalf("expected repository input ip quality stale after 864000, got %d", repo.putSettingsInput.IPQuality.StaleAfterSeconds)
-	}
-	if len(repo.putSettingsInput.IPQuality.Services) != 2 || repo.putSettingsInput.IPQuality.Services[1] != "chatgpt" {
-		t.Fatalf("expected repository input ip quality services to preserve request, got %#v", repo.putSettingsInput.IPQuality.Services)
-	}
-
-	var body settingsHandlerResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("unmarshal response body: %v", err)
-	}
-	if body.Telegram.BotToken != "" {
-		t.Fatalf("expected bot token to be redacted from response, got %q", body.Telegram.BotToken)
-	}
-	if body.Telegram.ChatID != "chat-id" {
-		t.Fatalf("expected telegram chat id %q, got %q", "chat-id", body.Telegram.ChatID)
-	}
-	if !body.Telegram.TokenPresent {
-		t.Fatal("expected token_present to be true")
-	}
-	if !body.Telegram.RuntimeManaged {
-		t.Fatal("expected runtime_managed to be true once persisted Telegram settings explicitly manage runtime")
-	}
-	if !body.Telegram.RuntimeApplyActive {
-		t.Fatal("expected runtime_apply_active to be true once persisted Telegram settings drive the live notifier path")
-	}
-	if body.IPQualitySettings.Enabled {
-		t.Fatal("expected ip_quality_settings.enabled false in response")
-	}
-	if body.IPQualitySettings.TimeoutSeconds != 20 {
-		t.Fatalf("expected ip_quality_settings.timeout_seconds 20, got %d", body.IPQualitySettings.TimeoutSeconds)
-	}
-	if body.IPQualitySettings.StaleAfterSeconds != 864000 {
-		t.Fatalf("expected ip_quality_settings.stale_after_seconds 864000, got %d", body.IPQualitySettings.StaleAfterSeconds)
-	}
+type telegramDeploymentResponse struct {
+	Configured         bool   `json:"configured"`
+	ChatID             string `json:"chat_id"`
+	TokenPresent       bool   `json:"token_present"`
+	TokenMaskedSummary string `json:"token_masked_summary"`
 }
 
-func TestSettingsHandlerPreservesExistingTelegramTokenWhenBotTokenIsOmitted(t *testing.T) {
-	current := centersettings.Default()
-	current.Telegram.BotToken = "current-token"
-	current.Telegram.ChatID = "chat-id"
-	current.Telegram.RuntimeManaged = false
-
-	updated := centersettings.Default()
-	updated.Telegram.BotToken = "current-token"
-	updated.Telegram.ChatID = "chat-id"
-	updated.Telegram.RuntimeManaged = false
-	updated.HostSampleFrequencyTier = "5s"
-	repo := &fakeSettingsRepository{getSettingsResult: current, putSettingsResult: updated}
-
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"chat-id"},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
-	}
-	if repo.putSettingsInput.Telegram.BotToken != "current-token" {
-		t.Fatalf("expected existing bot token to be preserved, got %q", repo.putSettingsInput.Telegram.BotToken)
-	}
-	if repo.putSettingsInput.Telegram.ChatID != "chat-id" {
-		t.Fatalf("expected telegram chat id %q, got %q", "chat-id", repo.putSettingsInput.Telegram.ChatID)
-	}
-	if repo.putSettingsInput.Telegram.RuntimeManaged {
-		t.Fatal("expected omitted runtime_managed to preserve false for unrelated saves")
-	}
+type incidentSweepResponse struct {
+	Mode              string `json:"mode"`
+	Source            string `json:"source"`
+	DeploymentSeconds int    `json:"deployment_seconds"`
 }
 
-func TestSettingsHandlerPreservesEffectiveFreshInstallSettingsOnUnrelatedSave(t *testing.T) {
-	coreTier := "5s"
-	current := centersettings.Default()
-	current.IncidentDefaults.SweepIntervalSeconds = 90
-	current.OverrideRules.MonitoringInstanceLabels = []centersettings.MonitoringInstanceLabelOverrideRule{{
-		Label: "核心",
-		Overrides: centersettings.SettingsOverrideFields{
-			HostSampleFrequencyTier: &coreTier,
+type refreshRecorder struct{ calls int }
+
+func (r *refreshRecorder) RequestRefresh(bool) { r.calls++ }
+
+func testDeployment() centersettings.DeploymentDefaults {
+	return centersettings.DeploymentDefaults{
+		Telegram: centersettings.TelegramSettings{
+			BotToken: "123456:deployment-secret-token",
+			ChatID:   "deployment-chat",
 		},
-	}}
-
-	repo := &fakeSettingsRepository{
-		getSettingsResult: current,
-		putSettingsResult: current,
-	}
-
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"chat_id":"","runtime_managed":false},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":90,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[{"label":"核心","overrides":{"host_sample_frequency_tier":"5s"}}],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, recorder.Code)
-	}
-	if repo.putSettingsInput.IncidentDefaults.SweepIntervalSeconds != 90 {
-		t.Fatalf("SweepIntervalSeconds = %d, want %d", repo.putSettingsInput.IncidentDefaults.SweepIntervalSeconds, 90)
-	}
-	if repo.putSettingsInput.IncidentDefaults.StaleThresholdIntervals != 12 {
-		t.Fatalf("StaleThresholdIntervals = %d, want fresh-install default 12", repo.putSettingsInput.IncidentDefaults.StaleThresholdIntervals)
-	}
-	if len(repo.putSettingsInput.OverrideRules.MonitoringInstanceLabels) != 1 {
-		t.Fatalf("len(MonitoringInstanceLabelOverrides) = %d, want 1", len(repo.putSettingsInput.OverrideRules.MonitoringInstanceLabels))
-	}
-	if repo.putSettingsInput.OverrideRules.MonitoringInstanceLabels[0].Label != "核心" {
-		t.Fatalf("MonitoringInstanceLabelOverrides[0].Label = %q, want %q", repo.putSettingsInput.OverrideRules.MonitoringInstanceLabels[0].Label, "核心")
-	}
-	if repo.putSettingsInput.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier == nil {
-		t.Fatal("HostSampleFrequencyTier override = nil, want preserved legacy core override")
-	}
-	if *repo.putSettingsInput.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier != "5s" {
-		t.Fatalf(
-			"HostSampleFrequencyTier override = %q, want %q",
-			*repo.putSettingsInput.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier,
-			"5s",
-		)
+		IncidentSweepIntervalSeconds: 60,
+		IncidentSweepSource:          centersettings.ConfigSourceDeployment,
 	}
 }
 
-func TestSettingsHandlerRejectsUnknownFieldsOnPut(t *testing.T) {
-	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
-
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"bot-token","chat_id":"chat-id","unexpected":true},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
-	req.Header.Set("Content-Type", "application/json")
+func serveSettingsPut(handler http.Handler, body string) *httptest.ResponseRecorder {
 	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(recorder, request)
+	return recorder
+}
 
-	handler.ServeHTTP(recorder, req)
+func fullSettingsBody(t *testing.T, extras map[string]any) string {
+	t.Helper()
+	defaults := centersettings.FreshInstallDefaults()
+	body := map[string]any{
+		"feishu": map[string]any{
+			"enabled":     defaults.FeishuEnabled,
+			"webhook_url": defaults.FeishuWebhookURL,
+		},
+		"host_sample_frequency_tier": defaults.HostSampleFrequencyTier,
+		"probe_frequency_defaults":   defaults.ProbeFrequencyDefaults,
+		"incident_defaults":          defaults.IncidentDefaults,
+		"override_rules":             defaults.OverrideRules,
+		"retention_policy":           defaults.RetentionPolicy,
+	}
+	for key, value := range extras {
+		body[key] = value
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal full settings body: %v", err)
+	}
+	return string(encoded)
+}
 
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+func decodeSettingsResponse(t *testing.T, recorder *httptest.ResponseRecorder) settingsHandlerResponse {
+	t.Helper()
+	var response settingsHandlerResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode settings response: %v; body=%s", err, recorder.Body.String())
+	}
+	return response
+}
+
+func TestSettingsHandlerReturnsEffectiveDeploymentSnapshotWithoutSecrets(t *testing.T) {
+	deployment := testDeployment()
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.FreshInstallDefaults(), deployment: deployment}
+	handler := handlers.Settings(repo, nil, deployment)
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/settings", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want %d", recorder.Code, http.StatusOK)
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "private, no-store" {
+		t.Fatalf("Cache-Control = %q, want private, no-store", got)
+	}
+	response := decodeSettingsResponse(t, recorder)
+	if response.Telegram.Mode != "inherit" || response.Telegram.Source != string(centersettings.ConfigSourceDeployment) {
+		t.Fatalf("telegram mode/source = %q/%q, want inherit/deployment", response.Telegram.Mode, response.Telegram.Source)
+	}
+	if !response.Telegram.Active || response.Telegram.ChatID != deployment.Telegram.ChatID || !response.Telegram.TokenPresent {
+		t.Fatalf("telegram effective response = %#v, want active deployment channel", response.Telegram)
+	}
+	if response.Telegram.Deployment.ChatID != deployment.Telegram.ChatID || !response.Telegram.Deployment.Configured || !response.Telegram.Deployment.TokenPresent {
+		t.Fatalf("telegram deployment summary = %#v, want configured safe summary", response.Telegram.Deployment)
+	}
+	if strings.Contains(recorder.Body.String(), deployment.Telegram.BotToken) {
+		t.Fatalf("response leaked deployment token: %s", recorder.Body.String())
+	}
+	if response.IncidentSweep.Mode != "inherit" || response.IncidentSweep.Source != string(centersettings.ConfigSourceDeployment) || response.IncidentSweep.DeploymentSeconds != 60 {
+		t.Fatalf("incident sweep response = %#v, want deployment inheritance", response.IncidentSweep)
+	}
+	if response.SettingsSource != string(centersettings.ConfigSourceDefault) {
+		t.Fatalf("settings_source = %q, want default before persistence", response.SettingsSource)
+	}
+	for _, removed := range []string{"runtime_managed", "runtime_apply_active", "bot_token"} {
+		if strings.Contains(recorder.Body.String(), `"`+removed+`"`) {
+			t.Fatalf("response contains removed/raw field %q: %s", removed, recorder.Body.String())
+		}
+	}
+}
+
+func TestSettingsHandlerTelegramOverrideUsesCurrentEffectiveValuesAndModes(t *testing.T) {
+	deployment := testDeployment()
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.FreshInstallDefaults(), deployment: deployment}
+	refresh := &refreshRecorder{}
+	handler := handlers.Settings(repo, refresh, deployment)
+
+	recorder := serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"telegram": map[string]any{"mode": "override", "chat_id": "custom-chat"},
+	}))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("chat-only override status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("PUT Cache-Control = %q, want private, no-store", recorder.Header().Get("Cache-Control"))
+	}
+	if repo.mutateInput.Telegram.BotToken != deployment.Telegram.BotToken || repo.mutateInput.Telegram.ChatID != "custom-chat" || !repo.mutateInput.Telegram.RuntimeManaged {
+		t.Fatalf("chat-only override persisted = %#v, want deployment token + custom chat managed", repo.mutateInput.Telegram)
+	}
+	response := decodeSettingsResponse(t, recorder)
+	if response.Telegram.Mode != "override" || response.Telegram.Source != string(centersettings.ConfigSourceDatabase) || !response.Telegram.Active || response.Telegram.ChatID != "custom-chat" {
+		t.Fatalf("override response telegram = %#v", response.Telegram)
+	}
+	if strings.Contains(recorder.Body.String(), deployment.Telegram.BotToken) {
+		t.Fatalf("override response leaked raw token: %s", recorder.Body.String())
+	}
+
+	recorder = serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"telegram": map[string]any{"mode": "disabled"},
+	}))
+	if recorder.Code != http.StatusOK || repo.mutateInput.Telegram.BotToken != "" || repo.mutateInput.Telegram.ChatID != "" || !repo.mutateInput.Telegram.RuntimeManaged {
+		t.Fatalf("disabled mutation status/input = %d/%#v", recorder.Code, repo.mutateInput.Telegram)
+	}
+	response = decodeSettingsResponse(t, recorder)
+	if response.Telegram.Mode != "disabled" || response.Telegram.Active || response.Telegram.Source != string(centersettings.ConfigSourceDatabase) {
+		t.Fatalf("disabled response telegram = %#v", response.Telegram)
+	}
+
+	recorder = serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"telegram": map[string]any{"mode": "inherit"},
+	}))
+	if recorder.Code != http.StatusOK || repo.mutateInput.Telegram.RuntimeManaged || repo.mutateInput.Telegram.BotToken != "" || repo.mutateInput.Telegram.ChatID != "" {
+		t.Fatalf("inherit mutation status/input = %d/%#v", recorder.Code, repo.mutateInput.Telegram)
+	}
+	response = decodeSettingsResponse(t, recorder)
+	if response.Telegram.Mode != "inherit" || response.Telegram.Source != string(centersettings.ConfigSourceDeployment) || !response.Telegram.Active || response.Telegram.ChatID != deployment.Telegram.ChatID {
+		t.Fatalf("inherit response telegram = %#v", response.Telegram)
+	}
+	if refresh.calls != 3 {
+		t.Fatalf("refresh calls = %d, want 3 successful mutations", refresh.calls)
+	}
+}
+
+func TestSettingsHandlerRejectsInvalidTelegramModesAndCredentialsAtomically(t *testing.T) {
+	deployment := testDeployment()
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.FreshInstallDefaults(), deployment: deployment}
+	handler := handlers.Settings(repo, nil, deployment)
+	cases := []string{
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "inherit", "chat_id": "not-allowed"}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "inherit", "bot_token": nil}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "disabled", "bot_token": "not-allowed"}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "disabled", "chat_id": nil}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "override", "bot_token": ""}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "override", "chat_id": ""}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": ""}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "unknown"}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "override", "bot_token": "********oken"}}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "override", "bot_token": nil}}),
+		fullSettingsBody(t, map[string]any{"telegram": nil}),
+		`null`,
+		fullSettingsBody(t, map[string]any{"incident_sweep_mode": ""}),
+		fullSettingsBody(t, map[string]any{"telegram": map[string]any{"mode": "override", "unexpected": true}}),
+		fullSettingsBody(t, map[string]any{"runtime_managed": true}),
+	}
+	for _, body := range cases {
+		recorder := serveSettingsPut(handler, body)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("body %s status = %d, want 400", body, recorder.Code)
+		}
+	}
+	if repo.mutateCalls != 0 {
+		t.Fatalf("mutate calls = %d, want zero for rejected requests", repo.mutateCalls)
 	}
 }
 
 func TestSettingsHandlerRejectsOversizedPutBody(t *testing.T) {
-	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
-
-	handler := handlers.Settings(repo, nil)
-	body := `{"telegram":{"chat_id":"` + strings.Repeat("x", handlers.DefaultJSONBodyLimit) + `"}}`
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
-	}
-	if repo.putSettingsCalls != 0 {
-		t.Fatalf("putSettingsCalls = %d, want 0 because oversized body should not be persisted", repo.putSettingsCalls)
+	deployment := testDeployment()
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.FreshInstallDefaults(), deployment: deployment}
+	handler := handlers.Settings(repo, nil, deployment)
+	body := fullSettingsBody(t, map[string]any{
+		"telegram": map[string]any{"mode": "override", "chat_id": strings.Repeat("x", handlers.DefaultJSONBodyLimit)},
+	})
+	recorder := serveSettingsPut(handler, body)
+	if recorder.Code != http.StatusBadRequest || repo.mutateCalls != 0 {
+		t.Fatalf("oversized PUT status/calls = %d/%d, want 400/0", recorder.Code, repo.mutateCalls)
 	}
 }
 
-func TestSettingsHandlerMapsValidationFailureToBadRequest(t *testing.T) {
-	repo := &fakeSettingsRepository{
-		getSettingsResult: centersettings.Default(),
-		putSettingsErr:    errors.Join(centersettings.ErrInvalidSettings, errors.New("bad settings")),
+func TestSettingsHandlerSweepModesPreserveRawOwnership(t *testing.T) {
+	deployment := testDeployment()
+	current := centersettings.FreshInstallDefaults()
+	current.IncidentSweepRuntimeManaged = true
+	current.IncidentDefaults.SweepIntervalSeconds = 17
+	repo := &fakeSettingsRepository{getSettingsResult: current, deployment: deployment}
+	handler := handlers.Settings(repo, nil, deployment)
+
+	requested := centersettings.FreshInstallDefaults().IncidentDefaults
+	requested.SweepIntervalSeconds = 23
+	recorder := serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"incident_defaults":   requested,
+		"incident_sweep_mode": "override",
+	}))
+	if recorder.Code != http.StatusOK || !repo.mutateInput.IncidentSweepRuntimeManaged || repo.mutateInput.IncidentDefaults.SweepIntervalSeconds != 23 {
+		t.Fatalf("override sweep status/input = %d/%t/%d", recorder.Code, repo.mutateInput.IncidentSweepRuntimeManaged, repo.mutateInput.IncidentDefaults.SweepIntervalSeconds)
 	}
 
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"","chat_id":""},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
+	requested.SweepIntervalSeconds = 90
+	recorder = serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"incident_defaults": requested,
+	}))
+	if recorder.Code != http.StatusOK || !repo.mutateInput.IncidentSweepRuntimeManaged || repo.mutateInput.IncidentDefaults.SweepIntervalSeconds != 23 {
+		t.Fatalf("omitted sweep mode changed ownership/value: status=%d managed=%t sweep=%d", recorder.Code, repo.mutateInput.IncidentSweepRuntimeManaged, repo.mutateInput.IncidentDefaults.SweepIntervalSeconds)
+	}
 
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+	recorder = serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"incident_sweep_mode": "inherit",
+	}))
+	if recorder.Code != http.StatusOK || repo.mutateInput.IncidentSweepRuntimeManaged || repo.mutateInput.IncidentDefaults.SweepIntervalSeconds != centersettings.Default().IncidentDefaults.SweepIntervalSeconds {
+		t.Fatalf("inherit sweep status/input = %d/%t/%d", recorder.Code, repo.mutateInput.IncidentSweepRuntimeManaged, repo.mutateInput.IncidentDefaults.SweepIntervalSeconds)
+	}
+	response := decodeSettingsResponse(t, recorder)
+	if response.IncidentSweep.Mode != "inherit" ||
+		response.IncidentSweep.Source != string(centersettings.ConfigSourceDeployment) ||
+		response.IncidentSweep.DeploymentSeconds != 60 ||
+		response.IncidentDefaults.SweepIntervalSeconds != 60 {
+		t.Fatalf("inherit sweep response = %#v defaults=%#v", response.IncidentSweep, response.IncidentDefaults)
 	}
 }
 
-func TestSettingsHandlerRejectsTelegramTokenWithoutChatID(t *testing.T) {
-	repo := &fakeSettingsRepository{getSettingsResult: centersettings.Default()}
-
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader(`{"telegram":{"bot_token":"replacement-token","chat_id":""},"host_sample_frequency_tier":"5s","probe_frequency_defaults":{"tcp":"5s","http":"5s","tls":"6h"},"incident_defaults":{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true},"override_rules":{"monitoring_instance_labels":[],"target_types":[],"target_labels":[]},"retention_policy":{"raw_layer_days":30,"aggregate_layer_days":30}}`))
-	req.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, req)
-
-	if recorder.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
+func TestSettingsHandlerRejectsInvalidSweepModesAndKeepsAtomicity(t *testing.T) {
+	deployment := testDeployment()
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.FreshInstallDefaults(), deployment: deployment}
+	handler := handlers.Settings(repo, nil, deployment)
+	invalidDefaults := centersettings.FreshInstallDefaults().IncidentDefaults
+	invalidDefaults.SweepIntervalSeconds = 0
+	for _, body := range []string{
+		fullSettingsBody(t, map[string]any{"incident_sweep_mode": "override", "incident_defaults": invalidDefaults}),
+		fullSettingsBody(t, map[string]any{"incident_sweep_mode": "inherit", "incident_defaults": invalidDefaults}),
+		fullSettingsBody(t, map[string]any{"incident_sweep_mode": "unknown"}),
+		fullSettingsBody(t, map[string]any{"incident_sweep_mode": nil}),
+	} {
+		recorder := serveSettingsPut(handler, body)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("body %s status = %d, want 400", body, recorder.Code)
+		}
 	}
-	if repo.putSettingsCalls != 0 {
-		t.Fatalf("putSettingsCalls = %d, want 0 because repository should not be called", repo.putSettingsCalls)
+	if repo.mutateCalls != 0 {
+		t.Fatalf("mutate calls = %d, want zero for invalid sweep requests", repo.mutateCalls)
 	}
 }
 
-func TestSettingsHandlerMapsRepositoryFailureToInternalServerError(t *testing.T) {
-	repo := &fakeSettingsRepository{getSettingsErr: errors.New("boom")}
+func TestSettingsHandlerPreservesCurrentSettingsOnUnrelatedSave(t *testing.T) {
+	deployment := testDeployment()
+	current := centersettings.FreshInstallDefaults()
+	current.Telegram = centersettings.TelegramSettings{BotToken: "stored-token", ChatID: "stored-chat", RuntimeManaged: true}
+	current.IncidentSweepRuntimeManaged = true
+	current.IncidentDefaults.SweepIntervalSeconds = 17
+	current.SubscriptionCost.FixerAPIKey = "existing-secret"
+	repo := &fakeSettingsRepository{getSettingsResult: current, deployment: deployment}
+	handler := handlers.Settings(repo, nil, deployment)
 
-	handler := handlers.Settings(repo, nil)
-	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
-	recorder := httptest.NewRecorder()
+	recorder := serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"subscription_cost_settings": map[string]any{"base_currency": "USD"},
+	}))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("unrelated save status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	if repo.mutateInput.Telegram != current.Telegram || repo.mutateInput.IncidentSweepRuntimeManaged != current.IncidentSweepRuntimeManaged || repo.mutateInput.IncidentDefaults.SweepIntervalSeconds != 17 || repo.mutateInput.SubscriptionCost.FixerAPIKey != "existing-secret" {
+		t.Fatalf("unrelated save lost raw settings: %#v", repo.mutateInput)
+	}
+}
 
-	handler.ServeHTTP(recorder, req)
+func TestSettingsHandlerMapsRepositoryAndValidationFailures(t *testing.T) {
+	deployment := testDeployment()
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.FreshInstallDefaults(), mutateSettingsErr: errors.New("database unavailable"), deployment: deployment}
+	refresh := &refreshRecorder{}
+	handler := handlers.Settings(repo, refresh, deployment)
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
+	recorder := serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"subscription_cost_settings": map[string]any{"base_currency": "USD"},
+	}))
+	if recorder.Code != http.StatusInternalServerError || refresh.calls != 0 {
+		t.Fatalf("repository failure status/refresh = %d/%d, want 500/0", recorder.Code, refresh.calls)
+	}
+
+	repo.getSettingsErr = errors.New("database unavailable")
+	getRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(getRecorder, httptest.NewRequest(http.MethodGet, "/api/settings", nil))
+	if getRecorder.Code != http.StatusInternalServerError || getRecorder.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("GET repository failure status/cache = %d/%q", getRecorder.Code, getRecorder.Header().Get("Cache-Control"))
+	}
+}
+
+func TestSettingsHandlerRejectsRemovedRetentionControlsAndMethods(t *testing.T) {
+	deployment := testDeployment()
+	repo := &fakeSettingsRepository{getSettingsResult: centersettings.FreshInstallDefaults(), deployment: deployment}
+	handler := handlers.Settings(repo, nil, deployment)
+	for _, body := range []string{
+		fullSettingsBody(t, map[string]any{"retention_policy": map[string]any{"raw_layer_days": 30, "aggregate_layer_days": 365, "event_layer_days": 1}}),
+		fullSettingsBody(t, map[string]any{"retention_policy": map[string]any{"raw_layer_days": 30, "aggregate_layer_days": 365, "notification_layer_days": 1}}),
+		fullSettingsBody(t, map[string]any{"ip_quality_settings": map[string]any{"raw_retention_days": 1}}),
+		fullSettingsBody(t, map[string]any{"ip_quality_settings": map[string]any{"history_retention_days": 1}}),
+	} {
+		recorder := serveSettingsPut(handler, body)
+		if recorder.Code != http.StatusBadRequest || repo.mutateCalls != 0 {
+			t.Fatalf("removed field body %s status/calls = %d/%d", body, recorder.Code, repo.mutateCalls)
+		}
+	}
+	methodRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(methodRecorder, httptest.NewRequest(http.MethodPost, "/api/settings", nil))
+	if methodRecorder.Code != http.StatusMethodNotAllowed || methodRecorder.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("POST status/cache = %d/%q", methodRecorder.Code, methodRecorder.Header().Get("Cache-Control"))
 	}
 }

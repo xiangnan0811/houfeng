@@ -603,8 +603,6 @@ export type DashboardGroupSummary = {
 
 export type DashboardNotificationStatus = {
   telegram_configured: boolean
-  telegram_runtime_managed: boolean
-  telegram_runtime_apply_active: boolean
   feishu_configured: boolean
 }
 
@@ -695,12 +693,27 @@ export type IncidentListFilter = {
   limit?: number
 }
 
-export type SettingsTelegramResponse = {
+export type ConfigSource = 'default' | 'deployment' | 'database'
+
+export type TelegramSettingsMode = 'inherit' | 'override' | 'disabled'
+
+export type IncidentSweepMode = 'inherit' | 'override'
+
+export type SettingsTelegramDeployment = {
+  configured: boolean
   chat_id: string
   token_present: boolean
   token_masked_summary?: string
-  runtime_managed: boolean
-  runtime_apply_active: boolean
+}
+
+export type SettingsTelegramResponse = {
+  mode: TelegramSettingsMode
+  source: ConfigSource
+  active: boolean
+  chat_id: string
+  token_present: boolean
+  token_masked_summary?: string
+  deployment: SettingsTelegramDeployment
 }
 
 export type FeishuSettingsResponse = {
@@ -715,9 +728,47 @@ export type FeishuSettingsInput = {
 }
 
 export type SettingsTelegramInput = {
+  mode: TelegramSettingsMode
   bot_token?: string
-  chat_id: string
-  runtime_managed?: boolean
+  chat_id?: string
+}
+
+export type IncidentSweepSettings = {
+  mode: IncidentSweepMode
+  source: ConfigSource
+  deployment_seconds: number
+}
+
+export type DeploymentSettingGroup =
+  | 'process'
+  | 'database'
+  | 'notifications'
+  | 'monitoring'
+  | 'authentication'
+  | 'records'
+  | 'storage'
+
+export type DeploymentSettingSource = 'environment' | 'file' | 'default' | 'unset'
+
+export type DeploymentSettingApplication =
+  | 'startup'
+  | 'bootstrap_only'
+  | 'fallback'
+  | 'inactive'
+  | 'reservation_only'
+
+export type DeploymentSettingItem = {
+  key: string
+  group: DeploymentSettingGroup
+  source: DeploymentSettingSource
+  value: string | null
+  configured: boolean
+  sensitive: boolean
+  application: DeploymentSettingApplication
+}
+
+export type DeploymentSettingsSnapshot = {
+  items: DeploymentSettingItem[]
 }
 
 export type ProbeFrequencyDefaults = {
@@ -839,10 +890,12 @@ export type SettingsRecord = {
   host_sample_frequency_tier: string
   probe_frequency_defaults: ProbeFrequencyDefaults
   incident_defaults: IncidentDefaults
+  incident_sweep: IncidentSweepSettings
   override_rules: OverrideRules
   retention_policy: RetentionPolicy
   ip_quality_settings: IPQualitySettings
   subscription_cost_settings: SubscriptionCostSettings
+  settings_source: 'default' | 'database'
 }
 
 export type IPQualitySettings = {
@@ -2691,11 +2744,12 @@ export type ExchangeRateStatusSnapshot = {
 }
 
 export type SettingsUpdateInput = {
-  telegram: SettingsTelegramInput
+  telegram?: SettingsTelegramInput
   feishu: FeishuSettingsInput
   host_sample_frequency_tier: string
   probe_frequency_defaults: ProbeFrequencyDefaults
   incident_defaults: IncidentDefaults
+  incident_sweep_mode?: IncidentSweepMode
   override_rules: OverrideRules
   retention_policy: RetentionPolicy
   ip_quality_settings: IPQualitySettings

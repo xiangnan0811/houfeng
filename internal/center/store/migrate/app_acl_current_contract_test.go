@@ -61,6 +61,22 @@ func TestAccessManagementAppACLFragmentHasExactRuntimeDelta(t *testing.T) {
 		t.Fatalf("access-management fragment privileges = %#v, want exact four-tuple delta %#v", got, want)
 	}
 }
+func TestSettingsDeploymentOverridesAppACLFragmentIsEmpty(t *testing.T) {
+	fragment := settingsDeploymentOverridesAppACLCurrentMigrationFragment()
+	if fragment.Migration != "0075_add_settings_deployment_overrides.sql" {
+		t.Fatalf("fragment migration = %q, want 0075", fragment.Migration)
+	}
+	if len(fragment.Objects) != 0 || len(fragment.AuxiliaryPrivileges) != 0 || len(fragment.Functions) != 0 {
+		t.Fatalf("settings-deployment-overrides fragment managed objects/auxiliary privileges/functions = %#v/%#v/%#v, want none", fragment.Objects, fragment.AuxiliaryPrivileges, fragment.Functions)
+	}
+	if got := fragment.Privileges("houfeng"); len(got) != 0 {
+		t.Fatalf("settings-deployment-overrides fragment privileges = %#v, want empty", got)
+	}
+	if got := fragment.Privileges("other_database"); len(got) != 0 {
+		t.Fatalf("settings-deployment-overrides fragment privileges for another database = %#v, want empty", got)
+	}
+}
+
 func TestCompileAppACLCurrentSourceContractRejectsMissingFutureFragment(t *testing.T) {
 	fsys := appACLCurrentTestMigrationFS(t)
 	fsys["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}

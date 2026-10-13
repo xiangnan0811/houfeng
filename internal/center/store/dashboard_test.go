@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"houfeng/internal/center/incidents"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
 )
 
@@ -30,10 +31,11 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 			}
 			if strings.Contains(sql, "from center_settings") {
 				return fakeRow{scan: func(dest ...any) error {
-					*(dest[0].(*bool)) = true
-					*(dest[1].(*bool)) = true
+					*(dest[0].(*string)) = "stored-token"
+					*(dest[1].(*string)) = "stored-chat"
 					*(dest[2].(*bool)) = true
 					*(dest[3].(*bool)) = false
+					*(dest[4].(*string)) = ""
 					return nil
 				}}
 			}
@@ -222,8 +224,8 @@ func TestPostgresDashboardRepositoryReturnsOverviewAndRecentEvents(t *testing.T)
 	if overview.GroupSummaries[0].StaleTargetCount != 1 {
 		t.Fatalf("GroupSummaries[0].StaleTargetCount = %d, want one stale production target", overview.GroupSummaries[0].StaleTargetCount)
 	}
-	if !overview.NotificationStatus.TelegramConfigured || !overview.NotificationStatus.TelegramRuntimeManaged || !overview.NotificationStatus.TelegramRuntimeApplyActive {
-		t.Fatalf("NotificationStatus = %#v, want configured runtime-managed telegram", overview.NotificationStatus)
+	if !overview.NotificationStatus.TelegramConfigured {
+		t.Fatalf("NotificationStatus = %#v, want configured Telegram", overview.NotificationStatus)
 	}
 	if overview.NotificationStatus.FeishuConfigured {
 		t.Fatalf("NotificationStatus = %#v, want feishu unconfigured", overview.NotificationStatus)
@@ -485,7 +487,7 @@ func TestLoadDashboardNotificationStatus(t *testing.T) {
 				t.Fatal("Query() should not be called")
 				return nil, nil
 			},
-		})
+		}, centersettings.DeploymentDefaults{})
 		if err != nil {
 			t.Fatalf("loadDashboardNotificationStatus() error = %v", err)
 		}
@@ -494,20 +496,15 @@ func TestLoadDashboardNotificationStatus(t *testing.T) {
 		}
 	})
 
-	t.Run("configured settings row computes booleans only", func(t *testing.T) {
+	t.Run("inherited deployment settings are configured", func(t *testing.T) {
 		status, err := loadDashboardNotificationStatus(context.Background(), fakeDashboardQueryer{
-			queryRow: func(_ context.Context, sql string, _ ...any) pgx.Row {
-				if !strings.Contains(sql, "btrim(telegram_bot_token)") || !strings.Contains(sql, "btrim(feishu_webhook_url)") {
-					t.Fatalf("sql = %q, want trimmed notification configuration checks", sql)
-				}
-				if strings.Contains(sql, "telegram_bot_token,") || strings.Contains(sql, "telegram_chat_id,") || strings.Contains(sql, "feishu_webhook_url,") {
-					t.Fatalf("sql = %q, want booleans only without selecting secret values", sql)
-				}
+			queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
 				return fakeRow{scan: func(dest ...any) error {
-					*(dest[0].(*bool)) = true
-					*(dest[1].(*bool)) = true
-					*(dest[2].(*bool)) = true
-					*(dest[3].(*bool)) = true
+					*(dest[0].(*string)) = ""
+					*(dest[1].(*string)) = ""
+					*(dest[2].(*bool)) = false
+					*(dest[3].(*bool)) = false
+					*(dest[4].(*string)) = ""
 					return nil
 				}}
 			},
@@ -515,12 +512,80 @@ func TestLoadDashboardNotificationStatus(t *testing.T) {
 				t.Fatal("Query() should not be called")
 				return nil, nil
 			},
+		}, centersettings.DeploymentDefaults{
+			Telegram: centersettings.TelegramSettings{BotToken: "deployment-token", ChatID: "deployment-chat"},
 		})
 		if err != nil {
 			t.Fatalf("loadDashboardNotificationStatus() error = %v", err)
 		}
-		if !status.TelegramConfigured || !status.TelegramRuntimeManaged || !status.TelegramRuntimeApplyActive || !status.FeishuConfigured {
+		if !status.TelegramConfigured {
+			t.Fatalf("status = %#v, want inherited configured Telegram", status)
+		}
+	})
+	t.Run("managed disable ignores deployment settings", func(t *testing.T) {
+		status, err := loadDashboardNotificationStatus(context.Background(), fakeDashboardQueryer{
+			queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+				return fakeRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = ""
+					*(dest[1].(*string)) = ""
+					*(dest[2].(*bool)) = true
+					*(dest[3].(*bool)) = false
+					*(dest[4].(*string)) = ""
+					return nil
+				}}
+			},
+			query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+				t.Fatal("Query() should not be called")
+				return nil, nil
+			},
+		}, centersettings.DeploymentDefaults{
+			Telegram: centersettings.TelegramSettings{BotToken: "deployment-token", ChatID: "deployment-chat"},
+		})
+		if err != nil {
+			t.Fatalf("loadDashboardNotificationStatus() error = %v", err)
+		}
+		if status.TelegramConfigured {
+			t.Fatalf("status = %#v, want disabled Telegram", status)
+		}
+	})
+
+	t.Run("configured settings row computes booleans only", func(t *testing.T) {
+		status, err := loadDashboardNotificationStatus(context.Background(), fakeDashboardQueryer{
+			queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+				return fakeRow{scan: func(dest ...any) error {
+					*(dest[0].(*string)) = "stored-token"
+					*(dest[1].(*string)) = "stored-chat"
+					*(dest[2].(*bool)) = true
+					*(dest[3].(*bool)) = true
+					*(dest[4].(*string)) = "https://feishu.example.test/hook"
+					return nil
+				}}
+			},
+			query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+				t.Fatal("Query() should not be called")
+				return nil, nil
+			},
+		}, centersettings.DeploymentDefaults{})
+		if err != nil {
+			t.Fatalf("loadDashboardNotificationStatus() error = %v", err)
+		}
+		if !status.TelegramConfigured || !status.FeishuConfigured {
 			t.Fatalf("status = %#v, want all configured booleans", status)
+		}
+	})
+	t.Run("settings query errors surface", func(t *testing.T) {
+		wantErr := errors.New("database unavailable")
+		_, err := loadDashboardNotificationStatus(context.Background(), fakeDashboardQueryer{
+			queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
+				return fakeRow{scan: func(dest ...any) error { return wantErr }}
+			},
+			query: func(_ context.Context, _ string, _ ...any) (pgx.Rows, error) {
+				t.Fatal("Query() should not be called")
+				return nil, nil
+			},
+		}, centersettings.DeploymentDefaults{})
+		if !errors.Is(err, wantErr) {
+			t.Fatalf("loadDashboardNotificationStatus() error = %v, want %v", err, wantErr)
 		}
 	})
 }

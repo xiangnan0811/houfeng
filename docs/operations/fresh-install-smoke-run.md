@@ -108,6 +108,90 @@ Expected: HTTP 200 JSON response containing center health metadata.
 
 Stop the center at the end with `kill "$CENTER_PID"`. If you also start a local foreground/background agent through the troubleshooting appendix, stop it too.
 
+## Effective-settings, restart, and upgrade acceptance (local only)
+
+This subsection is an acceptance procedure for the deployment/page ownership
+boundary. Use a disposable local PostgreSQL database and a loopback Center
+(`127.0.0.1` on a task-specific port). Generate clearly fake Telegram tokens
+and chat IDs such as A/B sentinels; never use a real provider credential, a
+production database, or a production URL. Do not trigger an enabled Center
+notifier against the public Telegram endpoint; use the loopback harness below
+for delivery assertions, and do not add a Center environment variable or test
+backdoor for a fake provider.
+
+### Fresh row, effective reads, and real restart
+
+1. Start the Center with an empty settings singleton,
+   `HOUFENG_TELEGRAM_BOT_TOKEN=<fake-A>`,
+   `HOUFENG_TELEGRAM_CHAT_ID=<chat-A>`, and
+   `HOUFENG_INCIDENT_SWEEP_INTERVAL=60s`. Log in as a supervisor and read
+   `GET /api/settings`, `GET /api/dashboard`, and the deployment snapshot.
+   The settings response must show Telegram `mode=inherit`, effective
+   `source=deployment`, `active=true`, safe token presence/mask, and
+   `incident_sweep.mode=inherit` with `deployment_seconds=60`; the dashboard
+   must report only effective configured booleans. Query the disposable
+   database to confirm that GET did not create `center_settings`.
+2. Use the real Settings page (or a valid current full-form PUT fixture; do
+   not replay the masked GET response) to save Telegram `mode=override` with
+   only a changed chat ID and no `bot_token`, plus sweep
+   `incident_sweep_mode=override` with 17 seconds. The response and a direct
+   notification read must prove that the lock-local merge retained fake-A,
+   stored the new chat, and made sweep 17 page-owned. Saving an unrelated
+   subscription field in between must not import a token or change sweep
+   ownership.
+3. Stop this Center process and start a new process against the same
+   disposable database with fake-B/chat-B and
+   `HOUFENG_INCIDENT_SWEEP_INTERVAL=90s`. This is a real process restart, not
+   a second repository constructor. The override must still use fake-A/new
+   chat/17 seconds. The deployment summary may show B/90, but it must not
+   replace the effective database values.
+4. Save Telegram `mode=disabled`, stop/restart once more if needed, and verify
+   that the effective channel is inactive, Dashboard reports
+   `telegram_configured=false`, and incident plus subscription dispatches are
+   suppressed without contacting the loopback provider despite deployment B.
+   Save `mode=inherit` and sweep `incident_sweep_mode=inherit`; verify the
+   response now uses fake-B/chat-B and 90 seconds. The raw row must have empty
+   Telegram credentials and inherited ownership; a later restart with another
+   deployment value is allowed to change this effective state.
+5. Confirm strict failures with the same database: outer/body or optional
+   fields set to JSON `null`, blank/whitespace or masked override tokens,
+   half-configured override credentials, unknown/empty modes, and old
+   runtime-managed wire keys all return 400 and leave the row unchanged.
+   Confirm `Cache-Control: private, no-store` on GET/PUT and that raw
+   sentinels never appear in API errors, logs, or browser DOM.
+
+For notification delivery evidence, use a throwaway Go harness that calls the
+real repository/dispatcher and constructs
+`notify.NewTelegramNotifierWithBaseURL` with a loopback HTTP receiver. The
+receiver may return `{"ok":true}` and must assert the expected
+`/bot<fake-token>/sendMessage` path and chat ID for inherited, override,
+disabled, and restored states. This proves local HTTP-provider wiring only; it
+does not prove delivery by Telegram and must never send to Telegram.
+
+### Cold C74 migration and new-runtime preservation
+
+Use the repository's actual isolated C74 PostgreSQL fixture and migrator, not a
+test-only `CenterSettings` reconstruction or a repository re-instantiation:
+
+1. Start the old C74 Center/runtime against the disposable database, with an
+   existing settings row whose sweep is a non-default value (for example 17),
+   then stop **all old settings writers**.
+2. Run the real registered migrator from C74 to the new schema and inspect
+   the committed row. The migration must preserve the old sweep value and
+   mark the existing row page-owned; an absent singleton must remain absent.
+   Repeat the migrator and verify it does not rewrite the value/ownership.
+3. Start the new Center with deployment sweep 90 and fake-B credentials. A
+   migrated row still reads as page-owned 17 until an explicit inherit/reset;
+   only then does the new process use deployment 90. Exercise the deployment
+   snapshot endpoint with a supervisor and repeat it as a normal active admin:
+   the former receives only the allowlisted safe snapshot, while the latter
+   receives 403 and no values (unauthenticated is 401; non-GET is 405).
+
+Record local PostgreSQL, process, API, browser, migration, and loopback
+provider evidence separately. This subsection establishes neither CI nor
+release nor production acceptance; no step authorizes real Telegram traffic or
+production deployment.
+
 ## Step 0: Log in and keep a session cookie
 
 Protected application API routes require the session cookie. `/api/healthz`, public installer and agent token-authenticated routes, and authentication endpoints such as login have their own authentication semantics. Log in once and reuse the cookie jar for every protected center API call below.

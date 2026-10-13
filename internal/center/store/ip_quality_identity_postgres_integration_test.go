@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"houfeng/internal/ipidentity"
 
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/monitoringinstances"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/vpsassets"
 	"houfeng/internal/center/vpsoverview"
-	"houfeng/internal/ipidentity"
 )
 
 func TestPostgresIntegrationIPQualityAddressIdentity(t *testing.T) {
@@ -490,7 +491,7 @@ func newIPQualityAddressIdentityOverviewRepository(t *testing.T, pool *pgxpool.P
 		NewPostgresVPSAssetRepository(pool),
 		NewPostgresVPSMonitoringInstanceLinkRepository(pool),
 		NewPostgresIPQualityRepository(pool),
-		NewPostgresSettingsRepository(pool),
+		NewPostgresSettingsRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault}),
 		NewPostgresSubscriptionRepository(pool),
 		NewPostgresAssetServiceRepository(pool),
 		NewPostgresAssetDomainRepository(pool),

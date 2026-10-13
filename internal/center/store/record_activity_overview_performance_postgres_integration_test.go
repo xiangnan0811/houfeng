@@ -8,6 +8,7 @@ import (
 	"houfeng/internal/center/activity"
 	"houfeng/internal/center/recordauth"
 	centerrecords "houfeng/internal/center/records"
+	centersettings "houfeng/internal/center/settings"
 	overviewperftest "houfeng/internal/center/testsupport/vpsoverviewperf"
 	"houfeng/internal/center/vpsoverview"
 )
@@ -39,7 +40,7 @@ func TestPostgresIntegrationVPSOverviewPerformance(t *testing.T) {
 		vpsRepository,
 		NewPostgresVPSMonitoringInstanceLinkRepository(runtimePool),
 		NewPostgresIPQualityRepository(runtimePool),
-		NewPostgresSettingsRepository(runtimePool),
+		NewPostgresSettingsRepository(runtimePool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault}),
 		NewPostgresSubscriptionRepository(runtimePool),
 		NewPostgresAssetServiceRepository(runtimePool),
 		NewPostgresAssetDomainRepository(runtimePool),

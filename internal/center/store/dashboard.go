@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"houfeng/internal/center/incidents"
+	centersettings "houfeng/internal/center/settings"
 )
 
 type EventListItem struct {
@@ -53,12 +54,13 @@ type dashboardReadTx interface {
 }
 
 type PostgresDashboardRepository struct {
-	db      dashboardQueryer
-	beginTx func(context.Context, pgx.TxOptions) (dashboardReadTx, error)
+	db         dashboardQueryer
+	beginTx    func(context.Context, pgx.TxOptions) (dashboardReadTx, error)
+	deployment centersettings.DeploymentDefaults
 }
 
-func NewPostgresDashboardRepository(db *pgxpool.Pool) *PostgresDashboardRepository {
-	repo := &PostgresDashboardRepository{}
+func NewPostgresDashboardRepository(db *pgxpool.Pool, deployment centersettings.DeploymentDefaults) *PostgresDashboardRepository {
+	repo := &PostgresDashboardRepository{deployment: deployment}
 	if db != nil {
 		repo.db = db
 		repo.beginTx = func(ctx context.Context, options pgx.TxOptions) (dashboardReadTx, error) {
@@ -134,7 +136,7 @@ func (r *PostgresDashboardRepository) GetDashboardOverview(ctx context.Context, 
 	}
 	applyStaleDashboardGroupCounts(overview.GroupSummaries, freshness)
 
-	overview.NotificationStatus, err = loadDashboardNotificationStatus(ctx, queryer)
+	overview.NotificationStatus, err = loadDashboardNotificationStatus(ctx, queryer, r.deployment)
 	if err != nil {
 		return incidents.DashboardOverview{}, fmt.Errorf("load dashboard notification status: %w", err)
 	}
@@ -547,28 +549,15 @@ func loadDashboardGroupSummaries(ctx context.Context, queryer dashboardQueryer) 
 	return records, nil
 }
 
-func loadDashboardNotificationStatus(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardNotificationStatus, error) {
-	var status incidents.DashboardNotificationStatus
-	if err := queryer.QueryRow(ctx, `
-		select
-			btrim(telegram_bot_token) <> '' and btrim(telegram_chat_id) <> '',
-			telegram_runtime_managed,
-			telegram_runtime_managed and btrim(telegram_bot_token) <> '' and btrim(telegram_chat_id) <> '',
-			feishu_enabled and btrim(feishu_webhook_url) <> ''
-		from center_settings
-		where settings_id = 'center'
-	`).Scan(
-		&status.TelegramConfigured,
-		&status.TelegramRuntimeManaged,
-		&status.TelegramRuntimeApplyActive,
-		&status.FeishuConfigured,
-	); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return incidents.DashboardNotificationStatus{}, nil
-		}
+func loadDashboardNotificationStatus(ctx context.Context, queryer dashboardQueryer, deployment centersettings.DeploymentDefaults) (incidents.DashboardNotificationStatus, error) {
+	notification, err := loadNotificationSettings(ctx, queryer, deployment)
+	if err != nil {
 		return incidents.DashboardNotificationStatus{}, fmt.Errorf("query dashboard notification status: %w", err)
 	}
-	return status, nil
+	return incidents.DashboardNotificationStatus{
+		TelegramConfigured: notification.Telegram.Enabled(),
+		FeishuConfigured:   notification.FeishuEnabled && strings.TrimSpace(notification.FeishuWebhookURL) != "",
+	}, nil
 }
 
 func loadDashboardAssetSummary(ctx context.Context, queryer dashboardQueryer) (incidents.DashboardAssetSummary, error) {

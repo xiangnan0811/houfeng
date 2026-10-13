@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,6 +28,7 @@ const getCenterSettingsSQL = `
 			telegram_bot_token,
 			telegram_chat_id,
 			telegram_runtime_managed,
+			incident_sweep_runtime_managed,
 			feishu_enabled,
 			feishu_webhook_url,
 			host_sample_frequency_tier,
@@ -50,6 +52,7 @@ const insertDefaultCenterSettingsSQL = `
 			telegram_bot_token,
 			telegram_chat_id,
 			telegram_runtime_managed,
+			incident_sweep_runtime_managed,
 			feishu_enabled,
 			feishu_webhook_url,
 			host_sample_frequency_tier,
@@ -59,7 +62,7 @@ const insertDefaultCenterSettingsSQL = `
 			retention_policy,
 			subscription_cost_settings,
 			ip_quality_settings
-		) values ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb)
+		) values ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb)
 		on conflict (settings_id) do nothing`
 
 const updateCenterSettingsSQL = `
@@ -67,15 +70,16 @@ const updateCenterSettingsSQL = `
 		set telegram_bot_token = $2,
 			telegram_chat_id = $3,
 			telegram_runtime_managed = $4,
-			feishu_enabled = $5,
-			feishu_webhook_url = $6,
-			host_sample_frequency_tier = $7,
-			probe_frequency_defaults = $8::jsonb,
-			incident_defaults = $9::jsonb,
-			override_rules = $10::jsonb,
-			retention_policy = $11::jsonb,
-			subscription_cost_settings = $12::jsonb,
-			ip_quality_settings = $13::jsonb,
+			incident_sweep_runtime_managed = $5,
+			feishu_enabled = $6,
+			feishu_webhook_url = $7,
+			host_sample_frequency_tier = $8,
+			probe_frequency_defaults = $9::jsonb,
+			incident_defaults = $10::jsonb,
+			override_rules = $11::jsonb,
+			retention_policy = $12::jsonb,
+			subscription_cost_settings = $13::jsonb,
+			ip_quality_settings = $14::jsonb,
 			updated_at = now()
 		where settings_id = $1`
 
@@ -91,12 +95,13 @@ type settingsTx interface {
 }
 
 type PostgresSettingsRepository struct {
-	db      settingsQueryer
-	beginTx func(context.Context, pgx.TxOptions) (settingsTx, error)
+	db         settingsQueryer
+	beginTx    func(context.Context, pgx.TxOptions) (settingsTx, error)
+	deployment centersettings.DeploymentDefaults
 }
 
-func NewPostgresSettingsRepository(db *pgxpool.Pool) *PostgresSettingsRepository {
-	repo := &PostgresSettingsRepository{}
+func NewPostgresSettingsRepository(db *pgxpool.Pool, deployment centersettings.DeploymentDefaults) *PostgresSettingsRepository {
+	repo := &PostgresSettingsRepository{deployment: deployment}
 	if db != nil {
 		repo.db = db
 		repo.beginTx = func(ctx context.Context, options pgx.TxOptions) (settingsTx, error) {
@@ -107,6 +112,7 @@ func NewPostgresSettingsRepository(db *pgxpool.Pool) *PostgresSettingsRepository
 }
 
 var _ centersettings.Repository = (*PostgresSettingsRepository)(nil)
+var _ centersettings.NotificationSettingsSource = (*PostgresSettingsRepository)(nil)
 
 // IPQualityEnabled reads only the IP Quality enabled flag. It must not decode
 // the full settings document.
@@ -124,32 +130,42 @@ func (r *PostgresSettingsRepository) IPQualityEnabled(ctx context.Context) (bool
 	}
 	return enabled, nil
 }
-func (r *PostgresSettingsRepository) GetPersistedIncidentDefaults(ctx context.Context) (centersettings.IncidentDefaults, bool, error) {
+func (r *PostgresSettingsRepository) GetEffectiveIncidentDefaults(ctx context.Context) (centersettings.IncidentDefaults, bool, error) {
 	if ctx == nil || r == nil || r.db == nil {
-		return centersettings.IncidentDefaults{}, false, fmt.Errorf("query persisted incident defaults: invalid repository")
+		return centersettings.IncidentDefaults{}, false, fmt.Errorf("query effective incident defaults: invalid repository")
 	}
-	var raw []byte
+	var (
+		raw                 []byte
+		sweepRuntimeManaged bool
+	)
 	err := r.db.QueryRow(ctx, `
-		select incident_defaults
+		select incident_defaults, incident_sweep_runtime_managed
 		from center_settings
-		where settings_id = $1`, centersettings.SingletonID).Scan(&raw)
+		where settings_id = $1`, centersettings.SingletonID).Scan(&raw, &sweepRuntimeManaged)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return centersettings.IncidentDefaults{}, false, nil
+		effective := centersettings.ResolveEffectiveSettings(centersettings.FreshInstallDefaults(), r.deployment)
+		return effective.IncidentDefaults, false, nil
 	}
 	if err != nil {
-		return centersettings.IncidentDefaults{}, false, fmt.Errorf("query persisted incident defaults: %w", err)
+		return centersettings.IncidentDefaults{}, false, fmt.Errorf("query effective incident defaults: %w", err)
 	}
 	if len(raw) == 0 {
-		return centersettings.IncidentDefaults{}, false, nil
+		return centersettings.IncidentDefaults{}, true, fmt.Errorf("decode effective incident defaults: empty persisted value")
 	}
 	var defaults centersettings.IncidentDefaults
 	if err := decodeSettingsJSON(raw, &defaults); err != nil {
-		return centersettings.IncidentDefaults{}, true, fmt.Errorf("decode persisted incident defaults: %w", err)
+		return centersettings.IncidentDefaults{}, true, fmt.Errorf("decode effective incident defaults: %w", err)
 	}
-	if _, err := centersettings.ValidateIncidentDefaults(defaults); err != nil {
-		return centersettings.IncidentDefaults{}, true, fmt.Errorf("validate persisted incident defaults: %w", err)
+	defaults, err = centersettings.ValidateIncidentDefaults(defaults)
+	if err != nil {
+		return centersettings.IncidentDefaults{}, true, fmt.Errorf("validate effective incident defaults: %w", err)
 	}
-	return defaults, true, nil
+	effective := centersettings.ResolveEffectiveSettings(centersettings.CenterSettings{
+		IncidentDefaults:            defaults,
+		IncidentSweepRuntimeManaged: sweepRuntimeManaged,
+		Effective:                   centersettings.EffectiveSettingsMetadata{Persisted: true},
+	}, r.deployment)
+	return effective.IncidentDefaults, true, nil
 }
 
 func (r *PostgresSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
@@ -158,12 +174,64 @@ func (r *PostgresSettingsRepository) GetSettings(ctx context.Context) (centerset
 	}
 	record, err := scanSettingsRow(ctx, r.db, getCenterSettingsSQL, centersettings.SingletonID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return centersettings.Default(), nil
+		return centersettings.ResolveEffectiveSettings(centersettings.FreshInstallDefaults(), r.deployment), nil
 	}
 	if err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("query center settings: %w", err)
 	}
-	return record, nil
+	return centersettings.ResolveEffectiveSettings(record, r.deployment), nil
+}
+func (r *PostgresSettingsRepository) GetNotificationSettings(ctx context.Context) (centersettings.NotificationSettings, error) {
+	if ctx == nil || r == nil || r.db == nil {
+		return centersettings.NotificationSettings{}, fmt.Errorf("query notification settings: invalid repository")
+	}
+	return loadNotificationSettings(ctx, r.db, r.deployment)
+}
+
+func loadNotificationSettings(ctx context.Context, queryer settingsQueryer, deployment centersettings.DeploymentDefaults) (centersettings.NotificationSettings, error) {
+	if ctx == nil || queryer == nil {
+		return centersettings.NotificationSettings{}, fmt.Errorf("query notification settings: invalid queryer")
+	}
+	var (
+		botToken       string
+		chatID         string
+		runtimeManaged bool
+		feishuEnabled  bool
+		feishuWebhook  string
+	)
+	err := queryer.QueryRow(ctx, `
+		select telegram_bot_token, telegram_chat_id, telegram_runtime_managed,
+			feishu_enabled, feishu_webhook_url
+		from center_settings
+		where settings_id = $1`, centersettings.SingletonID).Scan(
+		&botToken,
+		&chatID,
+		&runtimeManaged,
+		&feishuEnabled,
+		&feishuWebhook,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return centersettings.NotificationSettings{
+			Telegram: centersettings.ResolveTelegram(centersettings.TelegramSettings{}, deployment.Telegram),
+		}, nil
+	}
+	if err != nil {
+		return centersettings.NotificationSettings{}, fmt.Errorf("query notification settings: %w", err)
+	}
+
+	storedTelegram := centersettings.TelegramSettings{
+		BotToken:       strings.TrimSpace(botToken),
+		ChatID:         strings.TrimSpace(chatID),
+		RuntimeManaged: runtimeManaged,
+	}
+	if runtimeManaged && ((storedTelegram.BotToken == "") != (storedTelegram.ChatID == "")) {
+		return centersettings.NotificationSettings{}, fmt.Errorf("stored telegram settings are incomplete")
+	}
+	return centersettings.NotificationSettings{
+		Telegram:         centersettings.ResolveTelegram(storedTelegram, deployment.Telegram),
+		FeishuEnabled:    feishuEnabled,
+		FeishuWebhookURL: strings.TrimSpace(feishuWebhook),
+	}, nil
 }
 
 func (r *PostgresSettingsRepository) MutateSettings(ctx context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
@@ -182,7 +250,7 @@ func (r *PostgresSettingsRepository) MutateSettings(ctx context.Context, mutate 
 		_ = tx.Rollback(ctx)
 	}()
 
-	defaults, err := settingsWriteArgs(centersettings.Default())
+	defaults, err := settingsWriteArgs(centersettings.FreshInstallDefaults())
 	if err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("encode default center settings: %w", err)
 	}
@@ -202,6 +270,9 @@ func (r *PostgresSettingsRepository) MutateSettings(ctx context.Context, mutate 
 	if err != nil {
 		return centersettings.CenterSettings{}, err
 	}
+	// The committed row is persisted even when a callback reconstructs the
+	// record instead of returning the lock-held value unchanged.
+	normalized.Effective.Persisted = true
 	values, err := settingsWriteArgs(normalized)
 	if err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("encode center settings: %w", err)
@@ -212,7 +283,7 @@ func (r *PostgresSettingsRepository) MutateSettings(ctx context.Context, mutate 
 	if err := tx.Commit(ctx); err != nil {
 		return centersettings.CenterSettings{}, fmt.Errorf("commit center settings mutation: %w", err)
 	}
-	return normalized, nil
+	return centersettings.ResolveEffectiveSettings(normalized, r.deployment), nil
 }
 
 func settingsWriteArgs(input centersettings.CenterSettings) ([]any, error) {
@@ -245,6 +316,7 @@ func settingsWriteArgs(input centersettings.CenterSettings) ([]any, error) {
 		input.Telegram.BotToken,
 		input.Telegram.ChatID,
 		input.Telegram.RuntimeManaged,
+		input.IncidentSweepRuntimeManaged,
 		input.FeishuEnabled,
 		input.FeishuWebhookURL,
 		input.HostSampleFrequencyTier,
@@ -259,21 +331,22 @@ func settingsWriteArgs(input centersettings.CenterSettings) ([]any, error) {
 
 func scanSettingsRow(ctx context.Context, queryer settingsQueryer, sql string, args ...any) (centersettings.CenterSettings, error) {
 	var (
-		settingsID               string
-		telegramBotToken         string
-		telegramChatID           string
-		telegramRuntimeManaged   bool
-		feishuEnabled            bool
-		feishuWebhookURL         string
-		hostSampleFrequencyTier  string
-		probeFrequencyDefaults   []byte
-		incidentDefaults         []byte
-		overrideRules            []byte
-		retentionPolicy          []byte
-		subscriptionCostSettings []byte
-		ipQualitySettings        []byte
-		createdAt                time.Time
-		updatedAt                time.Time
+		settingsID                  string
+		telegramBotToken            string
+		telegramChatID              string
+		telegramRuntimeManaged      bool
+		incidentSweepRuntimeManaged bool
+		feishuEnabled               bool
+		feishuWebhookURL            string
+		hostSampleFrequencyTier     string
+		probeFrequencyDefaults      []byte
+		incidentDefaults            []byte
+		overrideRules               []byte
+		retentionPolicy             []byte
+		subscriptionCostSettings    []byte
+		ipQualitySettings           []byte
+		createdAt                   time.Time
+		updatedAt                   time.Time
 	)
 
 	if err := queryer.QueryRow(ctx, sql, args...).Scan(
@@ -281,6 +354,7 @@ func scanSettingsRow(ctx context.Context, queryer settingsQueryer, sql string, a
 		&telegramBotToken,
 		&telegramChatID,
 		&telegramRuntimeManaged,
+		&incidentSweepRuntimeManaged,
 		&feishuEnabled,
 		&feishuWebhookURL,
 		&hostSampleFrequencyTier,
@@ -306,9 +380,11 @@ func scanSettingsRow(ctx context.Context, queryer settingsQueryer, sql string, a
 			ChatID:         telegramChatID,
 			RuntimeManaged: telegramRuntimeManaged,
 		},
-		FeishuEnabled:           feishuEnabled,
-		FeishuWebhookURL:        feishuWebhookURL,
-		HostSampleFrequencyTier: hostSampleFrequencyTier,
+		FeishuEnabled:               feishuEnabled,
+		FeishuWebhookURL:            feishuWebhookURL,
+		HostSampleFrequencyTier:     hostSampleFrequencyTier,
+		IncidentSweepRuntimeManaged: incidentSweepRuntimeManaged,
+		Effective:                   centersettings.EffectiveSettingsMetadata{Persisted: true},
 	}
 
 	if err := decodeSettingsJSON(probeFrequencyDefaults, &record.ProbeFrequencyDefaults); err != nil {

@@ -19,14 +19,15 @@ const appACLCurrentHeartbeatDefaultV0794 = `{"heartbeat_interval_seconds":5,"sta
 const appACLCurrentHeartbeatDefault = `{"heartbeat_interval_seconds":5,"stale_threshold_intervals":12,"sweep_interval_seconds":5,"notify_on_started":true,"notify_on_escalated":true,"notify_on_recovered":true}`
 
 type appACLCurrentTransitionPreflight struct {
-	heartbeatPolicyMigrationPending bool
-	lifecycleMigrationPending       bool
-	settingsRowPresent              bool
-	incidentDefaults                []byte
-	settingsSnapshot                []byte
-	settingsExceptTransition        []byte
-	updatedAt                       time.Time
-	staleThreshold                  int64
+	heartbeatPolicyMigrationPending             bool
+	lifecycleMigrationPending                   bool
+	settingsDeploymentOverridesMigrationPending bool
+	settingsRowPresent                          bool
+	incidentDefaults                            []byte
+	settingsSnapshot                            []byte
+	settingsExceptTransition                    []byte
+	updatedAt                                   time.Time
+	staleThreshold                              int64
 }
 
 func preflightAppACLCurrentTransitionInTx(
@@ -61,8 +62,9 @@ func preflightAppACLCurrentTransitionInTx(
 		}
 	}
 	snapshot := appACLCurrentTransitionPreflight{
-		heartbeatPolicyMigrationPending: heartbeatPolicyMigrationPending,
-		lifecycleMigrationPending:       appACLCurrentTransitionContainsMigration(transition, "0067_refactor_vps_monitoring_lifecycle.sql"),
+		heartbeatPolicyMigrationPending:             heartbeatPolicyMigrationPending,
+		lifecycleMigrationPending:                   appACLCurrentTransitionContainsMigration(transition, "0067_refactor_vps_monitoring_lifecycle.sql"),
+		settingsDeploymentOverridesMigrationPending: appACLCurrentTransitionContainsMigration(transition, "0075_add_settings_deployment_overrides.sql"),
 	}
 	err = tx.QueryRow(ctx, `
 			select incident_defaults,
@@ -127,6 +129,17 @@ func verifyAppliedAppACLCurrentTransitionSettings(
 	if !before.settingsRowPresent {
 		return nil
 	}
+	if before.settingsDeploymentOverridesMigrationPending {
+		var err error
+		before.settingsSnapshot, err = appACLCurrentSettingsDeploymentOverrides(before.settingsSnapshot)
+		if err != nil {
+			return err
+		}
+		before.settingsExceptTransition, err = appACLCurrentSettingsDeploymentOverrides(before.settingsExceptTransition)
+		if err != nil {
+			return err
+		}
+	}
 	if before.lifecycleMigrationPending {
 		var err error
 		before.settingsSnapshot, err = appACLCurrentLifecycleSettings(before.settingsSnapshot)
@@ -164,6 +177,21 @@ func verifyAppliedAppACLCurrentTransitionSettings(
 		return fmt.Errorf("registered APP transition changed custom incident defaults")
 	}
 	return nil
+}
+
+// Match only the exact settings transformation performed by 0075 for an
+// existing row. The migration's add-column default materializes true on old
+// rows while changing the column default to false for future inserts.
+func appACLCurrentSettingsDeploymentOverrides(payload []byte) ([]byte, error) {
+	var settings map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &settings); err != nil {
+		return nil, fmt.Errorf("decode deployment override transition settings: %w", err)
+	}
+	if settings == nil {
+		return nil, fmt.Errorf("deployment override transition settings must be an object")
+	}
+	settings["incident_sweep_runtime_managed"] = json.RawMessage("true")
+	return json.Marshal(settings)
 }
 
 // Match only the exact settings transformation performed by 0067. Other
@@ -216,6 +244,9 @@ func verifyCurrentAppACLCurrentTransitionInTx(
 	if err := verifyAppACLCurrentHeartbeatIndex(ctx, tx); err != nil {
 		return err
 	}
+	if err := verifyAppACLCurrentIncidentSweepRuntimeManagedColumn(ctx, tx); err != nil {
+		return fmt.Errorf("verify registered APP transition incident sweep ownership column: %w", err)
+	}
 	var incidentDefaults []byte
 	err := tx.QueryRow(ctx, `
 		select incident_defaults
@@ -238,6 +269,38 @@ func verifyCurrentAppACLCurrentTransitionInTx(
 	return nil
 }
 
+func verifyAppACLCurrentIncidentSweepRuntimeManagedColumn(ctx context.Context, tx pgx.Tx) error {
+	var isBoolean, notNull bool
+	var defaultExpression *string
+	err := tx.QueryRow(ctx, `
+		select attributes.atttypid = 'boolean'::regtype,
+		       attributes.attnotnull,
+		       pg_get_expr(defaults.adbin, defaults.adrelid)
+		from pg_catalog.pg_attribute attributes
+		join pg_catalog.pg_class relations
+		  on relations.oid = attributes.attrelid
+		join pg_catalog.pg_namespace namespaces
+		  on namespaces.oid = relations.relnamespace
+		left join pg_catalog.pg_attrdef defaults
+		  on defaults.adrelid = attributes.attrelid
+		 and defaults.adnum = attributes.attnum
+		where namespaces.nspname = 'public'
+		  and relations.relname = 'center_settings'
+		  and attributes.attname = 'incident_sweep_runtime_managed'
+		  and not attributes.attisdropped
+	`).Scan(&isBoolean, &notNull, &defaultExpression)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("center_settings incident_sweep_runtime_managed column is missing")
+	}
+	if err != nil {
+		return fmt.Errorf("read center_settings incident_sweep_runtime_managed column shape: %w", err)
+	}
+	if !isBoolean || !notNull || defaultExpression == nil || strings.TrimSpace(strings.ToLower(*defaultExpression)) != "false" {
+		return fmt.Errorf("center_settings incident_sweep_runtime_managed column must be boolean not null default false")
+	}
+	return nil
+}
+
 func validateHeartbeatAppACLCurrentTransition(transition appACLCurrentTransition) error {
 	_, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition)
 	return err
@@ -253,13 +316,24 @@ func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
-	// 0074 adds subscription month-end exchange rates, 0073 adds the
-	// monitoring-instance metadata version and 0072 adds freshness columns,
-	// all without APP ACL changes. 0071 adds
-	// access-management ACL only, while 0070 adds nullable destination-subject
-	// columns and 0069 adds CPU validity schema. These non-heartbeat migrations
-	// must be stripped from the terminal suffix before policy-shape classification.
+	// 0075 adds settings deployment ownership, 0074 adds subscription
+	// month-end exchange rates, 0073 adds the monitoring-instance metadata
+	// version and 0072 adds freshness columns, all without APP ACL changes.
+	// 0071 adds access-management ACL only, while 0070 adds nullable
+	// destination-subject columns and 0069 adds CPU validity schema. These
+	// non-heartbeat migrations must be stripped from the terminal suffix
+	// before policy-shape classification.
 	successorNames := transition.successor.names
+	settingsDeploymentOverridesMigrationPending := false
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0075_add_settings_deployment_overrides.sql" {
+		settingsDeploymentOverridesMigrationPending = true
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0075_add_settings_deployment_overrides.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0074_add_subscription_exchange_rate_month_end.sql" {
 		successorNames = successorNames[:n-1]
 	}
@@ -332,15 +406,19 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 	}
 	switch {
 	case len(successorNames) == 0:
-		// P69 carries 0070 through 0074; P70 carries 0071 through 0074;
-		// P71 carries 0072 through 0074; P72 carries 0073 and 0074; P73
-		// carries only 0074. The terminal non-policy suffixes have already
-		// been stripped above.
+		// P69 carries 0070 through 0075; P70 carries 0071 through 0075;
+		// P71 carries 0072 through 0075; P72 carries 0073 through 0075;
+		// P73 carries 0074 and 0075, and P74 carries only 0075. The
+		// terminal non-policy suffixes have already been stripped above.
+		if transition.profile == appACLCurrentProfileP74 && !settingsDeploymentOverridesMigrationPending {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
 		if transition.profile == appACLCurrentProfileP69 ||
 			transition.profile == appACLCurrentProfileP70 ||
 			transition.profile == appACLCurrentProfileP71 ||
 			transition.profile == appACLCurrentProfileP72 ||
-			transition.profile == appACLCurrentProfileP73 {
+			transition.profile == appACLCurrentProfileP73 ||
+			transition.profile == appACLCurrentProfileP74 {
 			return false, nil
 		}
 		if !addressIdentityMigrationPending && !cpuRatesMigrationPending {

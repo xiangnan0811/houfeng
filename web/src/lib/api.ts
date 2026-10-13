@@ -58,6 +58,7 @@ import type {
   MonitoringInstanceRuntimeSummariesResponse,
   ProbeItemRecord,
   ProviderRecord,
+  DeploymentSettingsSnapshot,
   SettingsRecord,
   SubscriptionBudgetRecord,
   SubscriptionCostSettings,
@@ -372,6 +373,13 @@ export function getTargetLifecycleReview(targetId: string) {
 
 export function getSettings() {
   return requestJSON<SettingsRecord>('/api/settings')
+}
+
+export function getDeploymentSettings(signal?: AbortSignal) {
+  return requestJSON<DeploymentSettingsSnapshot>(
+    '/api/settings/deployment',
+    signal ? { signal } : undefined,
+  )
 }
 
 export function updateSettings(settings: SettingsUpdateInput) {

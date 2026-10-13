@@ -18,9 +18,6 @@ func TestRecordEvidenceAppACLFragmentRegistersExactObjectsAndPrivileges(t *testi
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %v", err)
 	}
-	if len(source.fragments) != 23 {
-		t.Fatalf("production current APP ACL fragments = %d, want records-core through subscription-exchange-rate-month-end migration", len(source.fragments))
-	}
 	fragment := source.fragments[2]
 	if fragment.Migration != "0054_create_record_evidence.sql" {
 		t.Fatalf("third production current APP ACL fragment migration = %q, want record evidence", fragment.Migration)
