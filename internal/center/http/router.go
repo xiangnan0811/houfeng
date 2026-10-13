@@ -16,6 +16,7 @@ type RouterOptions struct {
 	CommandAuditsHandler                          stdhttp.Handler
 	IncidentsHandler                              stdhttp.Handler
 	SettingsHandler                               stdhttp.Handler
+	DeploymentSettingsHandler                     stdhttp.Handler
 	AccessAdminHandler                            stdhttp.Handler
 	RecordsEnabled                                bool
 	ComparisonEnabled                             bool
@@ -182,6 +183,19 @@ func New(opts RouterOptions) stdhttp.Handler {
 	}
 	if opts.IncidentsHandler != nil {
 		mux.Handle("/api/incidents", protect(opts.IncidentsHandler))
+	}
+	if opts.DeploymentSettingsHandler != nil {
+		handler := protect(opts.DeploymentSettingsHandler)
+		mux.Handle("/api/settings/deployment", stdhttp.HandlerFunc(func(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+			w.Header().Set("Cache-Control", "private, no-store")
+			if r.Method != stdhttp.MethodGet {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(stdhttp.StatusMethodNotAllowed)
+				_, _ = w.Write([]byte(`{"error":"method not allowed","code":"method_not_allowed"}`))
+				return
+			}
+			handler.ServeHTTP(w, r)
+		}))
 	}
 	if opts.SettingsHandler != nil {
 		mux.Handle("/api/settings", protect(opts.SettingsHandler))

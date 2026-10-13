@@ -179,6 +179,8 @@ record, replayed, err := repo.CreateSubscriptionIdempotent(ctx, input, idempoten
 - Frankfurter is the default provider; Fixer is configurable. Provider failures must not block subscription CRUD. 成功缓存的可用性与补取任务状态分离，不将失败或零汇率写入缓存。
 - 订阅成本设置与全局中心设置都必须通过同一 `MutateSettings` 原子入口修改：事务按 `READ COMMITTED` 初始化缺失的 `center` 单例、锁定并读取最新完整行、只调用一次 mutation callback、校验后写回完整设置并提交；提交前的 callback、校验或 SQL 失败整笔回滚。提交返回错误时结果可能未知（例如数据库已提交但响应丢失），必须向调用方返回失败，不得宣称一定回滚，也不得自动重放旧的完整设置。读取缺失行仍只返回默认值，不创建单例。
 - `PUT /api/settings` 与 `PUT /api/subscriptions/settings` 在 callback 内基于锁定后的最新值合并服务端省略字段，禁止先 `GET` 再使用旧快照写回。订阅成本的 `fixer_api_key` 省略时保留已存密钥，显式空字符串才清除；响应只公开 `fixer_configured` 与 masked summary，绝不回显明文。
+- 续费提醒不得自行读取环境 Telegram 或把部署 token 导入订阅 settings；它通过共享的 effective notification source / dispatcher 读取一次窄快照。继承模式使用当前启动快照，页面覆盖或停用优先级更高，订阅 settings 的其它分区保存不得改变 Telegram 或 sweep ownership。
+- effective notification source 读取失败时，reminder worker 不使用环境 fallback，也不能绕过页面停用；沿用既有 dedupe 后的 `failed` / `suppressed` delivery record 与安全错误语义。没有有效 channel 时仍记录 suppressed，不把配置状态当作 provider 送达成功。
 - `subscriptions` may hold billing facts such as display name, labels, category, trial/end dates, price, currency, cycle, renewal date, auto-renew, payment, and note. Monthly/yearly base costs, exchange rate metadata, budget status, and next reminder are read-model fields, not writable subscription facts.
 - 订阅创建的 header、错误、事务和 receipt 生命周期统一见 [幂等合同](#scenario-idempotent-vps-scoped-subscription-creation)。成本功能不另建创建或重放路径。
 - `CostRow`、订阅记录及续费队列统一返回 `exchange_rate_status: identity|fresh|stale|missing`，不再返回 `exchange_rate_stale`。同基准币种为 identity（原价 0 仍为已知 0）；缺汇率金额为 null；已有过期汇率继续返回数值并标 stale。当前概览分别返回 `current_missing_rate_count`、`current_stale_rate_count`，保留 `current_unknown_amount_count`；归档行不驱动补取。
@@ -258,6 +260,7 @@ Row-level `budget_status` is merged after all matching work: archived rows and r
 - Budget tests: all scope types, OK/warning/over/unknown, disabled budgets, PATCH null/omitted limits.
 - Reminder tests: default `14/7/1`, max lead filtering, repeated scan dedupe, cancelled/archived suppression, decision-attention reminders, fake clock/fake notifier.
 - Handler tests: overview, statistics, settings read/write, manual refresh, budget CRUD, extended subscription filters.
+- Reminder integration tests cover inherited deployment Telegram, database override, disabled/restore, source read failure with no fallback, and preservation of Telegram/sweep ownership during subscription-only settings mutations.
 - Frontend/API tests: workbench loading/error/empty states, multi-currency display, budget risk, exchange anomaly, reminder settings, VPS cost card, Asset Decisions cost signals, Dashboard high-signal summary.
 
 ### 7. Wrong vs Correct

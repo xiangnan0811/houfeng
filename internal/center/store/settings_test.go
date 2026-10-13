@@ -32,20 +32,21 @@ func TestCenterSettingsRepositoryGetSettingsReturnsDefaultsWithoutCreatingSingle
 	if err != nil {
 		t.Fatalf("GetSettings() error = %v", err)
 	}
-	if !reflect.DeepEqual(got, centersettings.Default()) {
-		t.Fatalf("GetSettings() = %#v, want %#v", got, centersettings.Default())
+	want := centersettings.ResolveEffectiveSettings(centersettings.FreshInstallDefaults(), centersettings.DeploymentDefaults{})
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GetSettings() = %#v, want %#v", got, want)
 	}
 	if queryCount != 1 {
 		t.Fatalf("queryCount = %d, want 1", queryCount)
 	}
 }
 
-func TestCenterSettingsRepositoryMutateSettingsCallsCallbackOnce(t *testing.T) {
+func TestCenterSettingsRepositoryMutationKeepsDeploymentDefaultsOutOfRawCallback(t *testing.T) {
 	t.Parallel()
 
 	current := centersettings.Default()
+	current.Effective.Persisted = true
 	updated := current
-	updated.HostSampleFrequencyTier = "1m"
 
 	tx := &fakeSettingsTx{
 		queryRow: func(_ context.Context, _ string, _ ...any) pgx.Row {
@@ -60,11 +61,14 @@ func TestCenterSettingsRepositoryMutateSettingsCallsCallbackOnce(t *testing.T) {
 		beginTx: func(context.Context, pgx.TxOptions) (settingsTx, error) {
 			return tx, nil
 		},
+		deployment: centersettings.DeploymentDefaults{
+			Telegram:                     centersettings.TelegramSettings{BotToken: "deployment-token", ChatID: "deployment-chat"},
+			IncidentSweepIntervalSeconds: 90,
+			IncidentSweepSource:          centersettings.ConfigSourceDeployment,
+		},
 	}
-	callbackCalls := 0
 
 	got, err := repo.MutateSettings(context.Background(), func(input centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-		callbackCalls++
 		if !reflect.DeepEqual(input, current) {
 			t.Fatalf("callback current = %#v, want %#v", input, current)
 		}
@@ -73,11 +77,12 @@ func TestCenterSettingsRepositoryMutateSettingsCallsCallbackOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MutateSettings() error = %v", err)
 	}
-	if callbackCalls != 1 {
-		t.Fatalf("callback calls = %d, want 1", callbackCalls)
-	}
-	if !reflect.DeepEqual(got, updated) {
-		t.Fatalf("MutateSettings() = %#v, want %#v", got, updated)
+	if got.Telegram.BotToken != "deployment-token" || got.Telegram.ChatID != "deployment-chat" ||
+		got.Telegram.RuntimeManaged || got.IncidentSweepRuntimeManaged ||
+		got.IncidentDefaults.SweepIntervalSeconds != 90 || !got.Effective.Persisted ||
+		got.Effective.TelegramSource != centersettings.ConfigSourceDeployment ||
+		got.Effective.IncidentSweepSource != centersettings.ConfigSourceDeployment {
+		t.Fatal("mutation response did not resolve the inherited deployment view")
 	}
 }
 
@@ -193,7 +198,7 @@ func TestCenterSettingsRepositoryGetSettingsReadsIPQualityEnabledLikeSyncPlan(t 
 				queryRow: func(context.Context, string, ...any) pgx.Row {
 					return fakeSettingsRow{scan: func(dest ...any) error {
 						scanCenterSettingsRow(dest, centersettings.Default())
-						*(dest[12].(*[]byte)) = []byte(test.raw)
+						*(dest[13].(*[]byte)) = []byte(test.raw)
 						return nil
 					}}
 				},
@@ -241,6 +246,154 @@ func TestCenterSettingsRepositoryGetSettingsPreservesExplicitFalseOverride(t *te
 	override := got.OverrideRules.MonitoringInstanceLabels[0].Overrides.IncidentDefaults
 	if override == nil || override.NotifyOnStarted == nil || *override.NotifyOnStarted {
 		t.Fatalf("GetSettings() notify_on_started = %#v, want explicit false pointer", override)
+	}
+}
+func TestLoadNotificationSettingsUsesDeploymentWhenSingletonMissing(t *testing.T) {
+	t.Parallel()
+
+	deployment := centersettings.DeploymentDefaults{
+		Telegram: centersettings.TelegramSettings{BotToken: "deployment-token", ChatID: "deployment-chat"},
+	}
+	repo := &PostgresSettingsRepository{
+		db: fakeSettingsQueryer{queryRow: func(context.Context, string, ...any) pgx.Row {
+			return fakeSettingsRow{scan: func(dest ...any) error { return pgx.ErrNoRows }}
+		}},
+		deployment: deployment,
+	}
+	got, err := repo.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("GetNotificationSettings() error = %v", err)
+	}
+	if got.Telegram.BotToken != "deployment-token" || got.Telegram.ChatID != "deployment-chat" || !got.Telegram.Enabled() {
+		t.Fatalf("notification settings = %#v, want deployment Telegram", got)
+	}
+}
+
+func TestLoadNotificationSettingsRejectsHalfConfiguredManagedTelegram(t *testing.T) {
+	t.Parallel()
+
+	repo := &PostgresSettingsRepository{
+		db: fakeSettingsQueryer{queryRow: func(context.Context, string, ...any) pgx.Row {
+			return fakeSettingsRow{scan: func(dest ...any) error {
+				*(dest[0].(*string)) = "stored-token"
+				*(dest[1].(*string)) = ""
+				*(dest[2].(*bool)) = true
+				*(dest[3].(*bool)) = false
+				*(dest[4].(*string)) = ""
+				return nil
+			}}
+		}},
+		deployment: centersettings.DeploymentDefaults{
+			Telegram: centersettings.TelegramSettings{BotToken: "deployment-token", ChatID: "deployment-chat"},
+		},
+	}
+	if _, err := repo.GetNotificationSettings(context.Background()); err == nil {
+		t.Fatal("GetNotificationSettings() error = nil, want half-configured managed Telegram failure")
+	}
+}
+
+func TestLoadNotificationSettingsHonorsManagedDisableWithoutDeploymentFallback(t *testing.T) {
+	t.Parallel()
+
+	deployment := centersettings.DeploymentDefaults{
+		Telegram: centersettings.TelegramSettings{BotToken: "deployment-token", ChatID: "deployment-chat"},
+	}
+	row := func(botToken, chatID string, managed bool) pgx.Row {
+		return fakeSettingsRow{scan: func(dest ...any) error {
+			*(dest[0].(*string)) = botToken
+			*(dest[1].(*string)) = chatID
+			*(dest[2].(*bool)) = managed
+			*(dest[3].(*bool)) = true
+			*(dest[4].(*string)) = "  https://feishu.example/hook  "
+			return nil
+		}}
+	}
+
+	disabledRepo := &PostgresSettingsRepository{
+		db:         fakeSettingsQueryer{queryRow: func(context.Context, string, ...any) pgx.Row { return row("", "", true) }},
+		deployment: deployment,
+	}
+	disabled, err := disabledRepo.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("disabled GetNotificationSettings() error = %v", err)
+	}
+	if disabled.Telegram.Enabled() || !disabled.Telegram.RuntimeManaged {
+		t.Fatalf("disabled Telegram = %#v, want managed disabled", disabled.Telegram)
+	}
+	if !disabled.FeishuEnabled || disabled.FeishuWebhookURL != "https://feishu.example/hook" {
+		t.Fatalf("Feishu settings = %#v, want trimmed enabled webhook", disabled)
+	}
+
+	inheritedRepo := &PostgresSettingsRepository{
+		db:         fakeSettingsQueryer{queryRow: func(context.Context, string, ...any) pgx.Row { return row("legacy-token", "", false) }},
+		deployment: deployment,
+	}
+	inherited, err := inheritedRepo.GetNotificationSettings(context.Background())
+	if err != nil {
+		t.Fatalf("inherited GetNotificationSettings() error = %v", err)
+	}
+	if inherited.Telegram.BotToken != deployment.Telegram.BotToken ||
+		inherited.Telegram.ChatID != deployment.Telegram.ChatID ||
+		inherited.Telegram.RuntimeManaged {
+		t.Fatalf("inherited Telegram = %#v, want deployment fallback", inherited.Telegram)
+	}
+}
+
+func TestLoadNotificationSettingsReturnsQueryErrors(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("database unavailable")
+	repo := &PostgresSettingsRepository{
+		db: fakeSettingsQueryer{queryRow: func(context.Context, string, ...any) pgx.Row {
+			return fakeSettingsRow{scan: func(dest ...any) error { return wantErr }}
+		}},
+	}
+	if _, err := repo.GetNotificationSettings(context.Background()); !errors.Is(err, wantErr) {
+		t.Fatalf("GetNotificationSettings() error = %v, want %v", err, wantErr)
+	}
+}
+func TestGetEffectiveIncidentDefaultsResolvesDeploymentSweepOwnership(t *testing.T) {
+	t.Parallel()
+
+	deployment := centersettings.DeploymentDefaults{
+		IncidentSweepIntervalSeconds: 90,
+		IncidentSweepSource:          centersettings.ConfigSourceDeployment,
+	}
+	makeRepo := func(scan func(...any) error) *PostgresSettingsRepository {
+		return &PostgresSettingsRepository{
+			db:         fakeSettingsQueryer{queryRow: func(context.Context, string, ...any) pgx.Row { return fakeSettingsRow{scan: scan} }},
+			deployment: deployment,
+		}
+	}
+	raw, err := json.Marshal(centersettings.Default().IncidentDefaults)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inheritedRepo := makeRepo(func(dest ...any) error {
+		*(dest[0].(*[]byte)) = raw
+		*(dest[1].(*bool)) = false
+		return nil
+	})
+	inherited, exists, err := inheritedRepo.GetEffectiveIncidentDefaults(context.Background())
+	if err != nil || !exists {
+		t.Fatalf("inherited GetEffectiveIncidentDefaults() = (%#v,%t,%v)", inherited, exists, err)
+	}
+	if inherited.SweepIntervalSeconds != 90 {
+		t.Fatalf("inherited sweep = %d, want 90", inherited.SweepIntervalSeconds)
+	}
+
+	overriddenRepo := makeRepo(func(dest ...any) error {
+		*(dest[0].(*[]byte)) = raw
+		*(dest[1].(*bool)) = true
+		return nil
+	})
+	overridden, exists, err := overriddenRepo.GetEffectiveIncidentDefaults(context.Background())
+	if err != nil || !exists {
+		t.Fatalf("overridden GetEffectiveIncidentDefaults() = (%#v,%t,%v)", overridden, exists, err)
+	}
+	if overridden.SweepIntervalSeconds != 5 {
+		t.Fatalf("overridden sweep = %d, want persisted 5", overridden.SweepIntervalSeconds)
 	}
 }
 
@@ -320,17 +473,18 @@ func scanCenterSettingsRow(dest []any, value centersettings.CenterSettings) {
 	*(dest[1].(*string)) = value.Telegram.BotToken
 	*(dest[2].(*string)) = value.Telegram.ChatID
 	*(dest[3].(*bool)) = value.Telegram.RuntimeManaged
-	*(dest[4].(*bool)) = value.FeishuEnabled
-	*(dest[5].(*string)) = value.FeishuWebhookURL
-	*(dest[6].(*string)) = value.HostSampleFrequencyTier
-	*(dest[7].(*[]byte)) = probeJSON
-	*(dest[8].(*[]byte)) = incidentJSON
-	*(dest[9].(*[]byte)) = overrideJSON
-	*(dest[10].(*[]byte)) = retentionJSON
-	*(dest[11].(*[]byte)) = subscriptionCostJSON
-	*(dest[12].(*[]byte)) = ipQualityJSON
+	*(dest[4].(*bool)) = value.IncidentSweepRuntimeManaged
+	*(dest[5].(*bool)) = value.FeishuEnabled
+	*(dest[6].(*string)) = value.FeishuWebhookURL
+	*(dest[7].(*string)) = value.HostSampleFrequencyTier
+	*(dest[8].(*[]byte)) = probeJSON
+	*(dest[9].(*[]byte)) = incidentJSON
+	*(dest[10].(*[]byte)) = overrideJSON
+	*(dest[11].(*[]byte)) = retentionJSON
+	*(dest[12].(*[]byte)) = subscriptionCostJSON
+	*(dest[13].(*[]byte)) = ipQualityJSON
 	createdAt := time.Date(2026, time.April, 26, 8, 0, 0, 0, time.UTC)
 	updatedAt := createdAt.Add(time.Minute)
-	*(dest[13].(*time.Time)) = createdAt
-	*(dest[14].(*time.Time)) = updatedAt
+	*(dest[14].(*time.Time)) = createdAt
+	*(dest[15].(*time.Time)) = updatedAt
 }

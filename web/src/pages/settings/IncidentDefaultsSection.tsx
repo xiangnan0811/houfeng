@@ -1,12 +1,35 @@
-import { Toggle } from '../../components/atoms'
+import { useId } from 'react'
+
+import { SegmentedControl, Toggle } from '../../components/atoms'
+import type { ConfigSource, IncidentSweepMode } from '../../lib/types'
 import type { SettingsIncidentDefaultsForm } from './types'
 
 type IncidentDefaultsSectionProps = {
   value: SettingsIncidentDefaultsForm
+  sweepMode: IncidentSweepMode
+  sweepSource: ConfigSource
+  deploymentSeconds: number
   onChange: (next: SettingsIncidentDefaultsForm) => void
+  onSweepModeChange: (mode: IncidentSweepMode) => void
 }
 
-export function IncidentDefaultsSection({ value, onChange }: IncidentDefaultsSectionProps) {
+function sourceLabel(source: ConfigSource): string {
+  if (source === 'deployment') return '部署配置'
+  if (source === 'database') return '页面设置'
+  return '程序默认'
+}
+
+export function IncidentDefaultsSection({
+  value,
+  sweepMode,
+  sweepSource,
+  deploymentSeconds,
+  onChange,
+  onSweepModeChange,
+}: IncidentDefaultsSectionProps) {
+  const sweepHintId = useId()
+  const sweepSeconds = sweepMode === 'inherit' ? String(deploymentSeconds) : value.sweepIntervalSeconds
+
   function update<K extends keyof SettingsIncidentDefaultsForm>(
     field: K,
     nextValue: SettingsIncidentDefaultsForm[K],
@@ -38,10 +61,47 @@ export function IncidentDefaultsSection({ value, onChange }: IncidentDefaultsSec
         <div className="settings-row">
           <span className="sr-label">扫描间隔</span>
           <span className="sr-value">
-            <input className="input input--compact" aria-label="扫描间隔秒数" inputMode="numeric" value={value.sweepIntervalSeconds} onChange={(e) => update('sweepIntervalSeconds', e.target.value)} /> s
+            <input
+              className="input input--compact"
+              aria-label="扫描间隔秒数"
+              aria-describedby={sweepHintId}
+              aria-readonly={sweepMode === 'inherit'}
+              readOnly={sweepMode === 'inherit'}
+              inputMode="numeric"
+              value={sweepSeconds}
+              onChange={(event) => {
+                if (sweepMode === 'inherit') return
+                update('sweepIntervalSeconds', event.target.value)
+              }}
+            /> s
           </span>
         </div>
       </div>
+      <div className="settings-row">
+        <span className="sr-label">扫描间隔配置</span>
+        <span className="sr-value settings-mode-control">
+          <SegmentedControl
+            label="扫描间隔配置方式"
+            value={sweepMode}
+            onChange={onSweepModeChange}
+            items={[
+              { value: 'inherit', label: '继承部署' },
+              { value: 'override', label: '页面覆盖' },
+            ]}
+          />
+          <span>当前来源：{sourceLabel(sweepSource)}</span>
+          {sweepMode === 'override' ? (
+            <button type="button" className="btn sm secondary" onClick={() => onSweepModeChange('inherit')}>
+              恢复部署配置
+            </button>
+          ) : null}
+        </span>
+      </div>
+      <p id={sweepHintId} className="telegram-settings__hint">
+        {sweepMode === 'inherit'
+          ? '当前显示部署间隔。要修改秒数，请先选择页面覆盖。'
+          : '保存后按这个秒数扫描，不再跟随部署间隔。'}
+      </p>
       <div className="settings-row">
         <span className="sr-label">通知触发</span>
         <span className="sr-value settings-toggles">

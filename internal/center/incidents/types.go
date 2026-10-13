@@ -115,10 +115,8 @@ type DashboardGroupSummary struct {
 }
 
 type DashboardNotificationStatus struct {
-	TelegramConfigured         bool `json:"telegram_configured"`
-	TelegramRuntimeManaged     bool `json:"telegram_runtime_managed"`
-	TelegramRuntimeApplyActive bool `json:"telegram_runtime_apply_active"`
-	FeishuConfigured           bool `json:"feishu_configured"`
+	TelegramConfigured bool `json:"telegram_configured"`
+	FeishuConfigured   bool `json:"feishu_configured"`
 }
 
 type DashboardAssetSummary struct {

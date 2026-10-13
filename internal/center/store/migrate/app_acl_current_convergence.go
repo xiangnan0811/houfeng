@@ -34,6 +34,7 @@ type appACLCurrentConvergenceDependencies struct {
 	applyDCL                func(context.Context, pgx.Tx, appACLEffectiveCatalogContract) error
 	readCatalog             func(context.Context, pgx.Tx, appACLEffectiveCatalogVerifierInput) (AppACLEffectiveCatalogSnapshotR1, error)
 	verifyCatalog           func(AppACLEffectiveCatalogSnapshotR1, appACLEffectiveCatalogVerifierInput) error
+	verifySweepColumn       func(context.Context, pgx.Tx) error
 	insertGenesis           func(context.Context, pgx.Tx, []byte, []byte, string) (AppACLManifestPersistedV1, error)
 	transitionDefinitions   []appACLCurrentTransitionDefinition
 	preflightTransition     func(context.Context, pgx.Tx, appACLCurrentTransition) (appACLCurrentTransitionPreflight, error)
@@ -68,6 +69,7 @@ func defaultAppACLCurrentConvergenceDependencies() appACLCurrentConvergenceDepen
 		verifyTransitionApplied: verifyAppliedAppACLCurrentTransitionInTx,
 		verifyTransitionCurrent: verifyCurrentAppACLCurrentTransitionInTx,
 		insertSuccessor:         insertAppACLManifestSuccessorV1,
+		verifySweepColumn:       verifyAppACLCurrentIncidentSweepRuntimeManagedColumn,
 	}
 }
 
@@ -303,6 +305,9 @@ func verifyExactAppACLCurrentInTx(
 		return shape.latest, nil
 	}
 	if shape.kind == appACLCurrentManifestShapeGenesis {
+		if err := dependencies.verifySweepColumn(ctx, tx); err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("verify current APP genesis incident sweep ownership column: %w", err)
+		}
 		return shape.latest, nil
 	}
 
@@ -419,6 +424,9 @@ func convergeFreshAppACLCurrentInTx(
 	if err := verifyAppACLCurrentConvergenceCatalog(ctx, tx, verifierInput, dependencies); err != nil {
 		return AppACLManifestPersistedV1{}, err
 	}
+	if err := dependencies.verifySweepColumn(ctx, tx); err != nil {
+		return AppACLManifestPersistedV1{}, fmt.Errorf("verify fresh APP genesis incident sweep ownership column: %w", err)
+	}
 	inserted, err := dependencies.insertGenesis(ctx, tx, source.sources.canonicalSet, compiledPrivileges, migratorRole)
 	if err != nil {
 		return AppACLManifestPersistedV1{}, err
@@ -534,6 +542,7 @@ func (dependencies appACLCurrentConvergenceDependencies) validate() error {
 		{name: "DCL applier", missing: dependencies.applyDCL == nil},
 		{name: "catalog reader", missing: dependencies.readCatalog == nil},
 		{name: "catalog verifier", missing: dependencies.verifyCatalog == nil},
+		{name: "incident sweep ownership column verifier", missing: dependencies.verifySweepColumn == nil},
 		{name: "manifest genesis inserter", missing: dependencies.insertGenesis == nil},
 		{name: "transition preflight", missing: dependencies.preflightTransition == nil},
 		{name: "applied transition verifier", missing: dependencies.verifyTransitionApplied == nil},

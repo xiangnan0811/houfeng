@@ -26,7 +26,7 @@ type vpsIPQualitySummaryRepository interface {
 }
 
 type vpsHeartbeatPolicySource interface {
-	GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
+	GetEffectiveIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
 }
 
 type vpsExperienceLogRepository interface {
@@ -376,7 +376,7 @@ func (f *vpsHeartbeatFreshness) stale(ctx context.Context, lastTrustedOnlineAt *
 	if f.policy == nil {
 		defaults := centersettings.Default().IncidentDefaults
 		if f.source != nil {
-			persisted, exists, err := f.source.GetPersistedIncidentDefaults(ctx)
+			persisted, exists, err := f.source.GetEffectiveIncidentDefaults(ctx)
 			if err != nil {
 				return false, err
 			}

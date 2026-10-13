@@ -44,7 +44,11 @@
 - `abnormal_monitoring_instance_count` / `abnormal_target_count` 分别是对应 severe 集合的超集；`severe_*_count` 不能被前端再次加到 abnormal 总数。相同集合关系也适用于 `group_summaries` 中的 abnormal/severe 字段。`stale_target_count` 与异常/严重计数独立，重叠目标只各计一次。
 - `group_summaries` 必须由后端基于全量 `monitoring_instances` + `targets` 计算，空白 group 归一为 `未分组`，前端不得从异常队列 reduce；每个分组的 `stale_target_count` 也来自全量当前目标 freshness projection，不受 `limit` 影响。
 - 分组归一必须与 SQL `btrim("group")` 一致，仅去除 U+0020 ASCII 空格；tab、NBSP 等字符不得被 Go 的 `TrimSpace` 折叠。
-- `notification_status` 只能包含配置布尔摘要，不包含 Telegram token/chat id 或 Feishu webhook URL。
+- `notification_status` is an effective-channel summary containing only the
+  booleans `telegram_configured` and `feishu_configured`. It is computed from
+  the narrow effective notification source in the same read-only,
+  repeatable-read transaction; it never contains Telegram token/chat ID or a
+  Feishu webhook, and it does not expose ownership fields.
 - `asset_summary` 只能包含聚合摘要：`renewal_due_30d_subscription_count`、`renewal_due_30d_vps_count`、`unreviewed_vps_count`、`no_renewal_vps_count`、`archived_vps_count`、`auto_renew_check_vps_count`、`pending_followup_count`、`unlinked_vps_count`、`abnormal_linked_vps_count`、`cost_by_currency[]`。`cost_by_currency[]` 只包含 `currency`、`monthly_total`、`yearly_total`。
 - 库存完整度计数必须来自后端 contract：待接入监控实例、暂停监控实例、退役监控实例、暂停目标、归档目标。
 - 退役监控与归档 Target 是历史库存计数，分别直接按 `monitoring_instances.lifecycle_status='已退役'` 和 `targets.lifecycle_status='retired'` 统计；不从已排除历史对象的当前运行集合计数，也不读取旧 Target `run_status='已归档'`。
@@ -57,9 +61,10 @@
 | `limit <= 0` 或非数字 | handler 返回 400 |
 | dashboard store 查询失败 | handler 返回 500，store error 用 `%w` 包装上下文 |
 | freshness projection 查询/解析失败 | overview 读取失败并返回 500；不得用零值 stale 计数或伪造 freshness |
+| effective notification settings read fails | overview returns 500; it does not fall back to deployment values or show a false “not configured” state |
 | abnormal=2、severe=1 | JSON 原样返回 2/1；前端异常总数保持 2 |
 | stale target 与 abnormal target 重叠 | 两个独立字段/集合均保留，stale 不加入 abnormal，也不被 severe 重复计数 |
-| `center_settings` singleton 缺失 | `notification_status` 全 false；freshness override 等价空 overrides，不返回错误 |
+| `center_settings` singleton missing | `notification_status` reflects effective deployment Telegram (so it may be configured when deployment credentials are complete); freshness override is equivalent to empty overrides, and no row is inserted |
 | `group_summaries` 为空 | Dashboard 显示空态，不制造 `未分组 0` |
 | Asset Ledger 表为空 | `asset_summary` 返回 0 计数与空 `cost_by_currency`，Dashboard 显示低权重空态 |
 
@@ -75,7 +80,7 @@
 
 #### 6. Tests Required
 
-- Go store test: abnormal=2/severe=1 的集合关系、新计数字段、`stale_target_count` 与分组 freshness 计数、全量 group SQL、settings 缺失时通知 false、`limit` 不影响 group summary/stale count；覆盖 stale 与 abnormal 重叠而不改变既有 health 语义，并验证 read-only repeatable-read 事务下并发可见性/分组移动保持单一快照，以及 tab/NBSP group 的 SQL `btrim` 归一一致。
+- Go store test: abnormal=2/severe=1 的集合关系、新计数字段、`stale_target_count` 与分组 freshness 计数、全量 group SQL、缺失 settings 行使用 effective deployment notification status（可为 configured）；`limit` 不影响 group summary/stale count；覆盖 stale 与 abnormal 重叠而不改变既有 health 语义，并验证 read-only repeatable-read 事务下并发可见性/分组移动保持单一快照，以及 tab/NBSP group 的 SQL `btrim` 归一一致。
 - Go handler test: abnormal/severe/stale snake_case 字段保持独立，severe 不大于 abnormal，且不泄露敏感通知字段。
 - Frontend type/API fixture: `DashboardOverview` fixture 覆盖新增字段；新增 `asset_summary` 时必须同步 AppShell、DashboardPage、api test fixtures。
 - DashboardPage test: 生成时间、五 mode 唯一主行动/deep link、abnormal/severe 不重复、VPS false-empty、局部 fallback，以及不展开第四张 KPI、Group、API facts、资产明细 dump 或无上限事件列表；`recent_events` 只作最多 5 条的有界“最近动态”预览（沿用事件流默认的回填排除，入口链接不加时间过滤），细节见 [Dashboard Web 合同](dashboard-web.md)。

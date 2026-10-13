@@ -144,11 +144,18 @@ function mockResponse(status: number, body: string) {
 
 const settingsResponseBody = {
   telegram: {
+    mode: 'inherit',
+    source: 'deployment',
+    active: true,
     chat_id: 'chat-id',
     token_present: true,
     token_masked_summary: '****************oken',
-    runtime_managed: false,
-    runtime_apply_active: false,
+    deployment: {
+      configured: true,
+      chat_id: 'chat-id',
+      token_present: true,
+      token_masked_summary: '****************oken',
+    },
   },
   feishu: {
     enabled: false,
@@ -231,10 +238,17 @@ const settingsResponseBody = {
     max_reminder_lead_days: 30,
     exchange_rate_stale_after_hours: 36,
   },
+  incident_sweep: {
+    mode: 'inherit',
+    source: 'default',
+    deployment_seconds: 5,
+  },
+  settings_source: 'database',
 } satisfies SettingsRecord
 
 const settingsUpdateBody = {
   telegram: {
+    mode: 'override',
     bot_token: 'bot-token',
     chat_id: 'chat-id',
   },
@@ -408,8 +422,6 @@ describe('api helpers', () => {
       ],
       notification_status: {
         telegram_configured: true,
-        telegram_runtime_managed: true,
-        telegram_runtime_apply_active: true,
         feishu_configured: false,
       },
       asset_summary: {

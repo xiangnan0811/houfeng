@@ -8,10 +8,12 @@ import { ApiError, getSettings, updateSettings } from '../lib/api'
 import { managementAccessForSession } from '../lib/auth-client'
 import { useAuth } from '../lib/auth-context'
 import { AccessManagementSection } from './settings/AccessManagementSection'
+import { DeploymentSettingsSection } from './settings/DeploymentSettingsSection'
 import type {
   FeishuSettingsInput,
   IncidentDefaults,
   SettingsRecord,
+  SettingsTelegramInput,
   SettingsUpdateInput,
 } from '../lib/types'
 import { FeishuSettingsSection } from './settings/FeishuSettingsSection'
@@ -37,8 +39,9 @@ const SETTINGS_TABS = [
   { value: 'notification', label: '通知' },
   { value: 'monitoring', label: '监控策略' },
   { value: 'subscriptions', label: '订阅' },
-  { value: 'access', label: '用户与权限' },
   { value: 'advanced', label: '高级' },
+  { value: 'deployment', label: '部署配置' },
+  { value: 'access', label: '用户与权限' },
 ] as const
 
 type SettingsTab = (typeof SETTINGS_TABS)[number]['value']
@@ -58,11 +61,22 @@ function describeError(error: unknown, fallback: string) {
   return fallback
 }
 
+function deploymentSweepSeconds(settings: SettingsRecord) {
+  const seconds = settings.incident_sweep.deployment_seconds
+  return Number.isInteger(seconds) && seconds > 0 ? seconds : 5
+}
+
+function persistedSettingsNote(source: SettingsRecord['settings_source']) {
+  if (source === 'database') return '本分区保存在数据库中。这里没有部署来源的字段会保持已保存的值。'
+  return '本分区尚未写入数据库，当前显示程序默认值。保存后才会持久化。'
+}
+
 function buildFormState(settings: SettingsRecord): SettingsFormState {
   return {
     telegramBotToken: '',
     telegramChatId: settings.telegram.chat_id,
-    telegramRuntimeManaged: settings.telegram.runtime_managed,
+    telegramMode: settings.telegram.mode,
+    incidentSweepMode: settings.incident_sweep.mode,
     feishuEnabled: settings.feishu.enabled,
     feishuWebhookPresent: settings.feishu.webhook_url_present,
     feishuWebhookUrl: '',
@@ -113,9 +127,16 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
   }
 }
 
+function telegramChannelVisible(settings: SettingsRecord, form: SettingsFormState) {
+  if (form.telegramMode === 'override' || form.telegramMode === 'disabled') return true
+  if (settings.telegram.mode === 'override' || settings.telegram.mode === 'disabled') return true
+  if (settings.telegram.deployment.configured) return true
+  return form.telegramBotToken.trim() !== ''
+}
+
 function deriveActiveChannels(settings: SettingsRecord, form: SettingsFormState) {
   const active = new Set<NotificationChannel>()
-  if (settings.telegram.token_present || settings.telegram.runtime_managed || form.telegramBotToken || form.telegramChatId) active.add('telegram')
+  if (telegramChannelVisible(settings, form)) active.add('telegram')
   if (form.feishuEnabled || form.feishuWebhookPresent || form.feishuWebhookUrl.trim()) active.add('feishu')
   return active
 }
@@ -160,16 +181,37 @@ function parseCommaList(value: string, label: string) {
   return Array.from(new Set(items))
 }
 
-type SettingsUpdateDraft = Omit<SettingsUpdateInput, 'telegram' | 'feishu'> & {
-  telegram: { chat_id: string; runtime_managed: boolean; bot_token?: string }
-  feishu: FeishuSettingsInput
+function buildTelegramUpdate(form: SettingsFormState, current: SettingsRecord): SettingsTelegramInput | undefined {
+  const mode = form.telegramMode
+  const token = form.telegramBotToken.trim()
+  const chatID = form.telegramChatId.trim()
+  const modeChanged = mode !== current.telegram.mode
+  const chatChanged = chatID !== current.telegram.chat_id
+  if (!modeChanged && token === '' && !chatChanged) return undefined
+  if (mode !== 'override') return modeChanged ? { mode } : undefined
+  if (token.includes('*')) throw new Error('Bot Token 不能使用掩码。')
+  if (chatID === '') throw new Error('页面覆盖需要填写 Chat ID。')
+  if (!current.telegram.token_present && token === '') throw new Error('页面覆盖需要提供 Bot Token。')
+  const telegram: SettingsTelegramInput = { mode: 'override' }
+  if (token !== '') telegram.bot_token = token
+  if (chatChanged) telegram.chat_id = chatID
+  return telegram
 }
 
-function buildIncidentDefaults(f: SettingsFormState) {
+function sweepModeChanged(form: SettingsFormState, current: SettingsRecord) {
+  if (form.incidentSweepMode !== current.incident_sweep.mode) return true
+  if (form.incidentSweepMode !== 'override') return false
+  return form.incidentDefaults.sweepIntervalSeconds.trim() !== String(current.incident_defaults.sweep_interval_seconds)
+}
+
+function buildIncidentDefaults(f: SettingsFormState, inheritedSweepSeconds: number) {
   const incidentDefaults = {
     heartbeat_interval_seconds: parsePositiveInteger(f.incidentDefaults.heartbeatIntervalSeconds, '心跳间隔'),
     stale_threshold_intervals: parsePositiveInteger(f.incidentDefaults.staleThresholdIntervals, '失联阈值'),
-    sweep_interval_seconds: parsePositiveInteger(f.incidentDefaults.sweepIntervalSeconds, '扫描间隔'),
+    sweep_interval_seconds: parsePositiveInteger(
+      f.incidentSweepMode === 'inherit' ? String(inheritedSweepSeconds) : f.incidentDefaults.sweepIntervalSeconds,
+      '扫描间隔',
+    ),
     notify_on_started: f.incidentDefaults.notifyOnStarted,
     notify_on_escalated: f.incidentDefaults.notifyOnEscalated,
     notify_on_recovered: f.incidentDefaults.notifyOnRecovered,
@@ -199,9 +241,9 @@ function buildIncidentDefaults(f: SettingsFormState) {
   return incidentDefaults
 }
 
-function readGlobalIncident(form: SettingsFormState): IncidentDefaults | null {
+function readGlobalIncident(form: SettingsFormState, inheritedSweepSeconds: number): IncidentDefaults | null {
   try {
-    return buildIncidentDefaults(form)
+    return buildIncidentDefaults(form, inheritedSweepSeconds)
   } catch {
     return null
   }
@@ -224,25 +266,15 @@ function buildIPQualitySettings(f: SettingsFormState) {
   }
 }
 
-function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): SettingsUpdateDraft {
-  const botToken = form.telegramBotToken.trim()
-  const chatId = form.telegramChatId.trim()
-  const rm = form.telegramRuntimeManaged
-  const hasToken = cur.telegram.token_present
-  const newToken = botToken !== ''
-
-  if (rm && !hasToken && !newToken) throw new Error('启用运行时接管前需提供 Bot Token。')
-  if (!newToken && !hasToken) { /* no token anywhere, that's fine */ }
-  else if (newToken && chatId === '') throw new Error('提供新 Bot Token 时需同时填写 Chat ID。')
-  else if (hasToken && rm && chatId === '') throw new Error('启用运行时接管时 Chat ID 不能为空。')
-
+function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): SettingsUpdateInput {
+  const telegram = buildTelegramUpdate(form, cur)
   const feishu: FeishuSettingsInput = { enabled: form.feishuEnabled }
   const feishuWebhookUrl = form.feishuWebhookUrl.trim()
   if (feishuWebhookUrl !== '') {
     feishu.webhook_url = feishuWebhookUrl
   }
 
-  const incidentDefaults = buildIncidentDefaults(form)
+  const incidentDefaults = buildIncidentDefaults(form, deploymentSweepSeconds(cur))
   const compiled = compileOverrideRules({
     monitoring: form.monitoringInstanceLabelOverrides,
     targetTypes: form.targetTypeOverrides,
@@ -252,7 +284,7 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
   if (compiled.errors.length > 0) {
     throw new Error(compiled.errors[0]?.message ?? '覆盖规则无效。')
   }
-  const common = {
+  const update: SettingsUpdateInput = {
     feishu,
     host_sample_frequency_tier: form.hostSampleFrequencyTier,
     probe_frequency_defaults: { tcp: form.probeFrequencyDefaults.tcp, http: form.probeFrequencyDefaults.http, tls: form.probeFrequencyDefaults.tls },
@@ -264,7 +296,51 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
     },
     ip_quality_settings: buildIPQualitySettings(form),
   }
-  return { ...common, telegram: { ...(newToken ? { bot_token: botToken } : {}), chat_id: chatId, runtime_managed: rm } }
+  if (telegram) update.telegram = telegram
+  if (sweepModeChanged(form, cur)) update.incident_sweep_mode = form.incidentSweepMode
+  return update
+}
+
+function rebaseRecord<T extends Record<string, string | boolean>>(submitted: T, live: T, response: T): T {
+  const next = { ...response }
+  for (const key of Object.keys(submitted) as (keyof T)[]) {
+    if (live[key] !== submitted[key]) next[key] = live[key]
+  }
+  return next
+}
+
+function rebaseAtomic<T>(submitted: T, live: T, response: T): T {
+  return JSON.stringify(live) === JSON.stringify(submitted) ? response : live
+}
+
+function rebaseSettingsForm(submitted: SettingsFormState, live: SettingsFormState, response: SettingsFormState): SettingsFormState {
+  const tokenEdited = live.telegramBotToken !== submitted.telegramBotToken
+  const telegramEdited = tokenEdited
+    || live.telegramMode !== submitted.telegramMode
+    || live.telegramChatId !== submitted.telegramChatId
+  const sweepEdited = live.incidentSweepMode !== submitted.incidentSweepMode
+    || live.incidentDefaults.sweepIntervalSeconds !== submitted.incidentDefaults.sweepIntervalSeconds
+  const incidentDefaults = rebaseRecord(submitted.incidentDefaults, live.incidentDefaults, response.incidentDefaults)
+  incidentDefaults.sweepIntervalSeconds = sweepEdited
+    ? live.incidentDefaults.sweepIntervalSeconds
+    : response.incidentDefaults.sweepIntervalSeconds
+  return {
+    telegramBotToken: tokenEdited ? live.telegramBotToken : '',
+    telegramChatId: telegramEdited ? live.telegramChatId : response.telegramChatId,
+    telegramMode: telegramEdited ? live.telegramMode : response.telegramMode,
+    incidentSweepMode: sweepEdited ? live.incidentSweepMode : response.incidentSweepMode,
+    feishuEnabled: live.feishuEnabled === submitted.feishuEnabled ? response.feishuEnabled : live.feishuEnabled,
+    feishuWebhookPresent: live.feishuWebhookPresent === submitted.feishuWebhookPresent ? response.feishuWebhookPresent : live.feishuWebhookPresent,
+    feishuWebhookUrl: live.feishuWebhookUrl !== submitted.feishuWebhookUrl ? live.feishuWebhookUrl : '',
+    hostSampleFrequencyTier: live.hostSampleFrequencyTier === submitted.hostSampleFrequencyTier ? response.hostSampleFrequencyTier : live.hostSampleFrequencyTier,
+    probeFrequencyDefaults: rebaseRecord(submitted.probeFrequencyDefaults, live.probeFrequencyDefaults, response.probeFrequencyDefaults),
+    incidentDefaults,
+    monitoringInstanceLabelOverrides: rebaseAtomic(submitted.monitoringInstanceLabelOverrides, live.monitoringInstanceLabelOverrides, response.monitoringInstanceLabelOverrides),
+    targetTypeOverrides: rebaseAtomic(submitted.targetTypeOverrides, live.targetTypeOverrides, response.targetTypeOverrides),
+    targetLabelOverrides: rebaseAtomic(submitted.targetLabelOverrides, live.targetLabelOverrides, response.targetLabelOverrides),
+    retentionPolicy: rebaseRecord(submitted.retentionPolicy, live.retentionPolicy, response.retentionPolicy),
+    ipQuality: rebaseRecord(submitted.ipQuality, live.ipQuality, response.ipQuality),
+  }
 }
 
 export function SettingsPage() {
@@ -277,13 +353,20 @@ export function SettingsPage() {
   })
   const rawTab = searchParams.get('tab')
   const activeTab: SettingsTab = rawTab && SETTINGS_TAB_VALUES.has(rawTab) ? (rawTab as SettingsTab) : 'appearance'
-  const visibleTabs = canManage ? SETTINGS_TABS : SETTINGS_TABS.filter((tab) => tab.value !== 'access')
+  const visibleTabs = canManage
+    ? SETTINGS_TABS
+    : SETTINGS_TABS.filter((tab) => tab.value !== 'access' && tab.value !== 'deployment')
   const [modalState, setModalState] = useState<'closed' | 'select' | 'configure-telegram' | 'configure-feishu'>('closed')
   const [channelDraft, setChannelDraft] = useState<SettingsFormState | null>(null)
   const [activeChannels, setActiveChannels] = useState<Set<NotificationChannel>>(new Set())
   const [expandedChannels, setExpandedChannels] = useState<Set<NotificationChannel>>(new Set())
   const [unsavedOpen, setUnsavedOpen] = useState(false)
+  const [restoreOpen, setRestoreOpen] = useState(false)
   const pendingTabRef = useRef<SettingsTab | null>(null)
+  const draftVersionRef = useRef(0)
+  const saveRequestRef = useRef(0)
+  const formRef = useRef<SettingsFormState | null>(null)
+  formRef.current = state.form
   const systemSettingsLoaded = state.settings !== null
 
   const isDirty =
@@ -292,37 +375,47 @@ export function SettingsPage() {
     JSON.stringify(comparableSettingsForm(buildFormState(state.settings))) !== JSON.stringify(comparableSettingsForm(state.form))
 
   useEffect(() => {
-    if (state.settings && state.form) {
-      const active = deriveActiveChannels(state.settings, state.form)
-      setActiveChannels((prev) => (prev.size === 0 ? active : prev))
-    }
-  }, [state.settings, state.form])
-
-  useEffect(() => {
-    if (activeTab === 'subscriptions' || activeTab === 'access' || systemSettingsLoaded) return
+    if (activeTab === 'subscriptions' || activeTab === 'access' || activeTab === 'deployment' || systemSettingsLoaded) return
     let cancelled = false
     setState((current) => ({ ...current, loading: true, error: null }))
     getSettings()
-      .then((settings) => { if (!cancelled) setState({ loading: false, saving: false, error: null, saveError: null, saveSuccess: null, settings, form: buildFormState(settings) }) })
+      .then((settings) => {
+        if (cancelled) return
+        const form = buildFormState(settings)
+        setState({ loading: false, saving: false, error: null, saveError: null, saveSuccess: null, settings, form })
+        setActiveChannels(deriveActiveChannels(settings, form))
+      })
       .catch((err: unknown) => { if (!cancelled) setState({ loading: false, saving: false, error: describeError(err, '加载设置失败'), saveError: null, saveSuccess: null, settings: null, form: null }) })
     return () => { cancelled = true }
   }, [activeTab, systemSettingsLoaded])
 
+  useEffect(() => () => { saveRequestRef.current += 1 }, [])
+
   const systemSettings = state.settings
   const systemForm = state.form
-  const systemTabActive = activeTab !== 'subscriptions' && activeTab !== 'access'
+  const systemTabActive = activeTab !== 'subscriptions' && activeTab !== 'access' && activeTab !== 'deployment'
+  const restrictedTab = activeTab === 'access' || activeTab === 'deployment' ? activeTab : null
 
   if (systemTabActive && state.loading) return <PageState kind="loading" title="正在加载设置…" />
   if (systemTabActive && (state.error || !systemSettings || !systemForm)) return <PageState kind="error" title="设置不可用" description={state.error ?? '未获取到设置数据'} />
 
+  function applyLoadedChannels(settings: SettingsRecord, form: SettingsFormState) {
+    const channels = deriveActiveChannels(settings, form)
+    setActiveChannels(channels)
+    setExpandedChannels((prev) => new Set(Array.from(prev).filter((channel) => channels.has(channel))))
+  }
   function patchForm(updater: (f: SettingsFormState) => SettingsFormState) {
+    draftVersionRef.current += 1
     setState((c) => ({ ...c, form: c.form ? updater(c.form) : c.form, saveError: null, saveSuccess: null }))
   }
   function closeModal() { setChannelDraft(null); setModalState('closed') }
   function backToSelect() { setChannelDraft(null); setModalState('select') }
   function openChannelConfig(ch: NotificationChannel) {
-    if (!state.form) return
-    setChannelDraft(state.form)
+    if (!state.form || !state.settings) return
+    const base = ch === 'telegram'
+      ? { ...state.form, telegramMode: 'override' as const, telegramBotToken: '', telegramChatId: state.settings.telegram.chat_id }
+      : state.form
+    setChannelDraft(base)
     setModalState(ch === 'telegram' ? 'configure-telegram' : 'configure-feishu')
   }
   function patchDraft(updater: (f: SettingsFormState) => SettingsFormState) {
@@ -332,6 +425,7 @@ export function SettingsPage() {
     })
   }
   function confirmChannel(ch: NotificationChannel) {
+    draftVersionRef.current += 1
     setState((c) => ({ ...c, form: channelDraft ?? c.form, saveError: null, saveSuccess: null }))
     setActiveChannels((p) => new Set(p).add(ch)); setExpandedChannels((p) => new Set(p).add(ch)); closeModal()
   }
@@ -341,21 +435,56 @@ export function SettingsPage() {
     else next.set('tab', tab)
     setSearchParams(next, { replace: true })
   }
+  function restoreTelegramDraft(form: SettingsFormState): SettingsFormState {
+    return {
+      ...form,
+      telegramMode: 'inherit',
+      telegramBotToken: '',
+      telegramChatId: state.settings?.telegram.deployment.chat_id ?? '',
+    }
+  }
+  function confirmTelegramRestore() {
+    if (modalState !== 'closed') setChannelDraft((draft) => (draft ? restoreTelegramDraft(draft) : draft))
+    else patchForm(restoreTelegramDraft)
+    setRestoreOpen(false)
+  }
+  function setSweepMode(mode: SettingsFormState['incidentSweepMode']) {
+    if (!state.settings || state.form?.incidentSweepMode === mode) return
+    // Inherit already renders deployment seconds read-only. Keep the override draft so switching back restores it.
+    patchForm((form) => ({ ...form, incidentSweepMode: mode }))
+  }
 
   async function saveSettings(): Promise<boolean> {
     if (!state.settings || !state.form) {
       setState((c) => ({ ...c, saveError: '系统设置尚未加载完成', saveSuccess: null }))
       return false
     }
-    let payload: SettingsUpdateDraft
+    let payload: SettingsUpdateInput
     try { payload = buildUpdateInput(state.form, state.settings) }
     catch (err) { setState((c) => ({ ...c, saveError: describeError(err, '校验失败'), saveSuccess: null })); return false }
+    const submittedForm = structuredClone(state.form)
+    const version = draftVersionRef.current
+    const request = ++saveRequestRef.current
     setState((c) => ({ ...c, saving: true, saveError: null, saveSuccess: null }))
     try {
       const updated = await updateSettings(payload)
-      setState((c) => ({ ...c, saving: false, settings: updated, form: buildFormState(updated), saveError: null, saveSuccess: '设置已保存' }))
+      if (request !== saveRequestRef.current) return false
+      if (draftVersionRef.current !== version) {
+        const responseForm = buildFormState(updated)
+        const form = rebaseSettingsForm(submittedForm, formRef.current ?? submittedForm, responseForm)
+        setState((c) => ({ ...c, saving: false, settings: updated, form, saveError: null, saveSuccess: null }))
+        applyLoadedChannels(updated, form)
+        return false
+      }
+      const form = buildFormState(updated)
+      setState((c) => ({ ...c, saving: false, settings: updated, form, saveError: null, saveSuccess: '设置已保存' }))
+      applyLoadedChannels(updated, form)
       return true
-    } catch (err) { setState((c) => ({ ...c, saving: false, saveError: describeError(err, '保存失败'), saveSuccess: null })); return false }
+    } catch (err) {
+      if (request !== saveRequestRef.current) return false
+      setState((c) => ({ ...c, saving: false, saveError: describeError(err, '保存失败'), saveSuccess: null }))
+      return false
+    }
   }
 
   function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -412,18 +541,25 @@ export function SettingsPage() {
         />
       </div>
 
-      {activeTab === 'access' && !canManage ? (
+      {restrictedTab && !canManage ? (
         capabilityPending ? (
           <PageState kind="loading" title="正在确认管理能力…" surface="empty" compact />
         ) : auth.status === 'error' ? (
           <PageState
             kind="error"
             title="能力读取失败"
-            description="暂时无法确认管理能力，不会打开用户与权限目录。"
+            description={restrictedTab === 'deployment'
+              ? '暂时无法确认管理能力，不会打开部署配置。'
+              : '暂时无法确认管理能力，不会打开用户与权限目录。'}
             action={<button type="button" className="btn sm secondary" onClick={() => void auth.retry()}>重试</button>}
             surface="empty"
             compact
           />
+        ) : restrictedTab === 'deployment' ? (
+          <section className="settings-section" aria-labelledby="deployment-forbidden-title">
+            <h2 className="ss-title" id="deployment-forbidden-title">无权查看部署配置</h2>
+            <p className="ss-desc">当前账号没有部署配置查看能力。部署概览不会打开。</p>
+          </section>
         ) : (
           <section className="settings-section" aria-labelledby="access-forbidden-title">
             <h2 className="ss-title" id="access-forbidden-title">无权管理用户与权限</h2>
@@ -434,6 +570,8 @@ export function SettingsPage() {
       <TabPanel idBase="settings-sections" value={activeTab}>
         {activeTab === 'access' ? (
           <AccessManagementSection />
+        ) : activeTab === 'deployment' ? (
+          <DeploymentSettingsSection />
         ) : activeTab === 'subscriptions' ? (
           <SubscriptionSettingsSection />
         ) : systemSettings && systemForm ? (
@@ -447,14 +585,27 @@ export function SettingsPage() {
           {activeTab === 'notification' && (
             <div className="settings-section">
               <div className="ss-title">通知通道</div>
-              <div className="ss-desc">Telegram / 飞书异常推送</div>
+              <div className="ss-desc">Telegram / 飞书异常推送。{persistedSettingsNote(systemSettings.settings_source)}</div>
               {activeChannels.has('telegram') && (
                 <TelegramSettingsSection
                   settings={systemSettings.telegram}
                   form={systemForm}
                   isExpanded={expandedChannels.has('telegram')}
-                  onToggleExpand={() => setExpandedChannels((p) => { const n = new Set(p); if (n.has('telegram')) n.delete('telegram'); else n.add('telegram'); return n })}
-                  onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
+                  onToggleExpand={() => {
+                    const expanding = !expandedChannels.has('telegram')
+                    setExpandedChannels((current) => {
+                      const next = new Set(current)
+                      if (expanding) next.add('telegram')
+                      else next.delete('telegram')
+                      return next
+                    })
+                    if (expanding && systemForm.telegramMode === 'inherit') {
+                      patchForm((form) => ({ ...form, telegramMode: 'override', telegramBotToken: '' }))
+                    }
+                  }}
+                  onExpand={() => setExpandedChannels((current) => new Set(current).add('telegram'))}
+                  onRequestRestore={() => setRestoreOpen(true)}
+                  onChange={(patch) => patchForm((form) => ({ ...form, ...patch }))}
                 />
               )}
               {activeChannels.has('feishu') && (
@@ -477,9 +628,14 @@ export function SettingsPage() {
           {activeTab === 'monitoring' && (
             <>
               <div className="settings-section">
+                <p className="ss-desc">{persistedSettingsNote(systemSettings.settings_source)}</p>
                 <IncidentDefaultsSection
                   value={systemForm.incidentDefaults}
-                  onChange={(next) => patchForm((f) => ({ ...f, incidentDefaults: next }))}
+                  sweepMode={systemForm.incidentSweepMode}
+                  sweepSource={systemSettings.incident_sweep.source}
+                  deploymentSeconds={deploymentSweepSeconds(systemSettings)}
+                  onChange={(next) => patchForm((form) => ({ ...form, incidentDefaults: next }))}
+                  onSweepModeChange={setSweepMode}
                 />
               </div>
               <div className="settings-section">
@@ -507,13 +663,14 @@ export function SettingsPage() {
 
           {activeTab === 'advanced' && (
             <div className="settings-section">
+              <p className="ss-desc">{persistedSettingsNote(systemSettings.settings_source)}</p>
               <OverrideRulesSection
                 monitoringInstanceLabelOverrides={systemForm.monitoringInstanceLabelOverrides}
                 targetTypeOverrides={systemForm.targetTypeOverrides}
                 targetLabelOverrides={systemForm.targetLabelOverrides}
                 globalHostFrequency={systemForm.hostSampleFrequencyTier}
                 globalProbeDefaults={systemForm.probeFrequencyDefaults}
-                globalIncident={readGlobalIncident(systemForm)}
+                globalIncident={readGlobalIncident(systemForm, deploymentSweepSeconds(systemSettings))}
                 onChange={(patch) => patchForm((f) => ({ ...f, ...patch }))}
               />
             </div>
@@ -583,7 +740,8 @@ export function SettingsPage() {
               wrapper="none"
               settings={systemSettings.telegram}
               form={channelDraft ?? systemForm}
-              onChange={(patch) => patchDraft((f) => ({ ...f, ...patch }))}
+              onRequestRestore={() => setRestoreOpen(true)}
+              onChange={(patch) => patchDraft((form) => ({ ...form, ...patch }))}
             />
           )}
           {modalState === 'configure-feishu' && (
@@ -596,6 +754,21 @@ export function SettingsPage() {
           )}
         </Modal>
       ) : null}
+
+      <Modal
+        open={restoreOpen}
+        onClose={() => setRestoreOpen(false)}
+        title="恢复部署配置"
+        dialogRole="alertdialog"
+        footer={
+          <>
+            <button type="button" className="btn md ghost" onClick={() => setRestoreOpen(false)}>取消</button>
+            <button type="button" className="btn md primary" onClick={confirmTelegramRestore}>确认恢复</button>
+          </>
+        }
+      >
+        <p>保存后清除页面覆盖，重新使用部署配置。</p>
+      </Modal>
 
       <Modal
         open={unsavedOpen}

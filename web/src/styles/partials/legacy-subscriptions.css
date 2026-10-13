@@ -195,7 +195,25 @@
 .subscription-form__span-2,.subscription-form__labels-wide,.subscription-form__note,.subscription-form__renewal{grid-column:1 / -1}
 }
 /* settings-subscriptions owner migration from misc.css */
+.settings-page{min-width:0}
 .settings-section{margin-bottom:24px;padding:18px;border:1px solid var(--border);border-radius:8px;background:var(--bg-card)}
+.deployment-settings{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.deployment-settings__intro,.deployment-settings__footer{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.5}
+.deployment-settings__meta{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-3);margin:var(--space-1) 0 0;color:var(--text-muted);font-size:var(--type-small-size);line-height:1.45;overflow-wrap:anywhere}
+.deployment-settings .settings-row,.deployment-settings .sr-value,.settings-mode-control{min-width:0;max-width:100%}
+.deployment-settings .sr-value{overflow-wrap:anywhere;white-space:normal}
+.settings-mode-control{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
+/* 窄屏时分段选项换行，停用等按钮留在控件内，不被分区裁切。 */
+.settings-page .settings-mode-control .tabs--pill{min-width:0;max-width:100%;flex-wrap:wrap;overflow:visible}
+.telegram-settings{min-width:0;max-width:100%}
+.telegram-settings .detail-section__header{flex-wrap:wrap;min-width:0}
+.telegram-settings .detail-section__header>*{min-width:0;max-width:100%}
+.telegram-settings .detail-section__aside{margin-left:auto;white-space:normal}
+.telegram-settings .detail-section__aside,.telegram-settings .settings-section-aside{min-width:0;max-width:100%}
+.telegram-settings .settings-section-aside{flex-wrap:wrap}
+.settings-secret-input{width:min(100%,24rem);max-width:100%;text-align:left}
+.telegram-settings__status{margin:0 0 var(--space-2);color:var(--text-primary);font-size:var(--type-small-size);line-height:1.5;overflow-wrap:anywhere}
+.telegram-settings__hint,.telegram-settings__baseline{margin:0;color:var(--text-secondary);font-size:var(--type-small-size);line-height:1.5;overflow-wrap:anywhere}
 .settings-section .ss-title{font-size:14px;font-weight:600;color:var(--t1);margin-bottom:4px}
 .settings-section .ss-desc{font-size:12px;color:var(--t3);margin-bottom:16px}
 .settings-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)}
@@ -227,6 +245,7 @@
 /* 窄屏设置行：标签在上、控件在下左对齐，避免标签被右侧控件挤成竖排。 */
 @media (max-width:760px){
 .settings-row{flex-direction:column;align-items:stretch;gap:8px}
+.settings-page .settings-mode-control .tabs--pill{width:100%}
 .theme-presets{justify-content:flex-start}
 }
 .input--compact{width:56px;padding:4px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px;background:var(--bg-inset);color:var(--t1);font-family:"IBM Plex Mono",monospace}
@@ -239,7 +258,8 @@ select.input--compact{width:auto;text-align:left;padding-right:18px}
 .sr-label-row{display:flex;align-items:center;justify-content:space-between;width:100%}
 /* 设置 › 订阅：成本基准沿用监控策略的紧凑字段；月预算一行一条，新增与编辑各自保存。 */
 .subscription-settings__head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2) var(--space-3);min-width:0}
-.subscription-settings__head .ss-title{margin:0;line-height:var(--type-h2-leading)}
+.subscription-settings__head .ss-title,.subscription-settings__head .ss-desc{margin:0;line-height:var(--type-h2-leading)}
+.subscription-settings__head .ss-desc{margin-top:var(--space-1);color:var(--text-secondary);font-size:var(--type-small-size);font-weight:400;line-height:1.5}
 .subscription-settings__head-actions{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:var(--space-2) var(--space-3);min-width:0}
 .subscription-settings__rate-notice{color:var(--text-secondary);font-size:var(--type-small-size);line-height:var(--type-small-leading)}
 .subscription-settings__rate-notice--success{color:var(--color-state-normal)}

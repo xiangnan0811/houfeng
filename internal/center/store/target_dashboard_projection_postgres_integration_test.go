@@ -7,11 +7,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"houfeng/internal/contracts/agentapi"
 
 	"houfeng/internal/center/incidents"
 	"houfeng/internal/center/observations"
+	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/targets"
-	"houfeng/internal/contracts/agentapi"
 )
 
 func TestPostgresIntegrationTargetDashboardProjectionAndCoverage(t *testing.T) {
@@ -159,7 +160,7 @@ func TestPostgresIntegrationTargetDashboardProjectionAndCoverage(t *testing.T) {
 		t.Fatalf("target detail coverage = (%d,%d), want (2,1)", shared.EnabledProbeCount, shared.MatchingExecutorCount)
 	}
 
-	dashboardRepo := NewPostgresDashboardRepository(pool)
+	dashboardRepo := NewPostgresDashboardRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 	limited, err := dashboardRepo.GetDashboardOverview(ctx, 1)
 	if err != nil {
 		t.Fatalf("load limited dashboard: %v", err)
@@ -386,7 +387,7 @@ func TestPostgresIntegrationTargetFreshness(t *testing.T) {
 	`, mixedTarget).Scan(&incidentsBefore); err != nil {
 		t.Fatalf("count mixed target incidents before dashboard: %v", err)
 	}
-	dashboardRepo := NewPostgresDashboardRepository(pool)
+	dashboardRepo := NewPostgresDashboardRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 	limited, err := dashboardRepo.GetDashboardOverview(ctx, 1)
 	if err != nil {
 		t.Fatalf("load limited freshness dashboard: %v", err)
@@ -726,7 +727,7 @@ func TestPostgresIntegrationTargetFreshnessRepeatableReadSnapshot(t *testing.T) 
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var txOptions pgx.TxOptions
-	repo := NewPostgresDashboardRepository(pool)
+	repo := NewPostgresDashboardRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault})
 	repo.beginTx = func(ctx context.Context, options pgx.TxOptions) (dashboardReadTx, error) {
 		txOptions = options
 		tx, err := pool.BeginTx(ctx, options)

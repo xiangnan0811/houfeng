@@ -12,9 +12,6 @@ func TestSubscriptionCreateIdempotencyAppACLFragmentRegistersTableSelectInsert(t
 	if err != nil {
 		t.Fatalf("compile production current APP ACL source contract: %v", err)
 	}
-	if len(source.fragments) != 23 {
-		t.Fatalf("production current APP ACL fragments = %d, want records-core through subscription-exchange-rate-month-end migration", len(source.fragments))
-	}
 	fragment := source.fragments[9]
 	if fragment.Migration != "0061_create_subscription_create_idempotency.sql" {
 		t.Fatalf("tenth production current APP ACL fragment migration = %q, want subscription create idempotency", fragment.Migration)

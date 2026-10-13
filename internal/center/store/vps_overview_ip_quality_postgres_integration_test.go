@@ -13,6 +13,7 @@ import (
 
 	"houfeng/internal/center/activity"
 	centerrecords "houfeng/internal/center/records"
+	centersettings "houfeng/internal/center/settings"
 	storemigrate "houfeng/internal/center/store/migrate"
 	"houfeng/internal/center/vpsassets"
 	"houfeng/internal/center/vpsoverview"
@@ -97,7 +98,7 @@ func assertOverviewDoesNotJudgeLeftoverIP(t *testing.T, overview vpsoverview.Ove
 
 func assertCheapIPQualityDisabled(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
 	t.Helper()
-	enabled, err := NewPostgresSettingsRepository(pool).IPQualityEnabled(ctx)
+	enabled, err := NewPostgresSettingsRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault}).IPQualityEnabled(ctx)
 	if err != nil {
 		t.Fatalf("IPQualityEnabled: %v", err)
 	}
@@ -189,7 +190,7 @@ func loadOverviewThroughBootstrapEquivalent(t *testing.T, ctx context.Context, p
 		vpsRepository,
 		NewPostgresVPSMonitoringInstanceLinkRepository(pool),
 		NewPostgresIPQualityRepository(pool),
-		NewPostgresSettingsRepository(pool),
+		NewPostgresSettingsRepository(pool, centersettings.DeploymentDefaults{IncidentSweepIntervalSeconds: 5, IncidentSweepSource: centersettings.ConfigSourceDefault}),
 		NewPostgresSubscriptionRepository(pool),
 		NewPostgresAssetServiceRepository(pool),
 		NewPostgresAssetDomainRepository(pool),

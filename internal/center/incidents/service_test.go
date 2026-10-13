@@ -404,12 +404,31 @@ func (f *fakeNotificationDispatcher) NotificationChannels(context.Context) []Not
 type fakeSettingsRepository struct {
 	getSettingsResult            centersettings.CenterSettings
 	getSettingsErr               error
-	persistedTelegram            centersettings.TelegramSettings
-	persistedExists              bool
-	persistedErr                 error
+	notificationSettingsResult   centersettings.NotificationSettings
+	notificationSettingsSet      bool
+	notificationSettingsErr      error
 	persistedIncidentDefaults    centersettings.IncidentDefaults
 	persistedIncidentExists      bool
 	persistedIncidentDefaultsErr error
+}
+
+type sequenceNotificationSource struct {
+	settings []centersettings.NotificationSettings
+	err      error
+	calls    int
+}
+
+func (s *sequenceNotificationSource) GetNotificationSettings(context.Context) (centersettings.NotificationSettings, error) {
+	s.calls++
+	if s.err != nil {
+		return centersettings.NotificationSettings{}, s.err
+	}
+	if len(s.settings) == 0 {
+		return centersettings.NotificationSettings{}, nil
+	}
+	settings := s.settings[0]
+	s.settings = s.settings[1:]
+	return settings, nil
 }
 
 type tracedSettingsRepository struct {
@@ -1691,17 +1710,21 @@ func (f *fakeSettingsRepository) GetSettings(context.Context) (centersettings.Ce
 	return f.getSettingsResult, nil
 }
 
-func (f *fakeSettingsRepository) GetPersistedTelegramSettings(context.Context) (centersettings.TelegramSettings, bool, error) {
-	if f.persistedErr != nil {
-		return centersettings.TelegramSettings{}, false, f.persistedErr
+func (f *fakeSettingsRepository) GetNotificationSettings(context.Context) (centersettings.NotificationSettings, error) {
+	if f.notificationSettingsErr != nil {
+		return centersettings.NotificationSettings{}, f.notificationSettingsErr
 	}
-	if !f.persistedExists {
-		return centersettings.TelegramSettings{}, false, nil
+	if f.notificationSettingsSet {
+		return f.notificationSettingsResult, nil
 	}
-	return f.persistedTelegram, true, nil
+	return centersettings.NotificationSettings{
+		Telegram:         f.getSettingsResult.Telegram,
+		FeishuEnabled:    f.getSettingsResult.FeishuEnabled,
+		FeishuWebhookURL: f.getSettingsResult.FeishuWebhookURL,
+	}, nil
 }
 
-func (f *fakeSettingsRepository) GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error) {
+func (f *fakeSettingsRepository) GetEffectiveIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error) {
 	if f.persistedIncidentDefaultsErr != nil {
 		return centersettings.IncidentDefaults{}, false, f.persistedIncidentDefaultsErr
 	}
@@ -2447,7 +2470,7 @@ func TestServiceSuppressesNotificationPerResolvedChannel(t *testing.T) {
 	}
 }
 
-func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testing.T) {
+func TestSettingsAwareNotifierSuppressesWhenTelegramIsDisabled(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
@@ -2455,12 +2478,9 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
 	}
 	writer := &fakeMutationWriter{}
-	fallbackNotifier := &fakeNotifier{}
-	settingsRepo := &fakeSettingsRepository{
-		getSettingsResult: centersettings.Default(),
-		persistedTelegram: centersettings.TelegramSettings{RuntimeManaged: true},
-		persistedExists:   true,
-	}
+	settings := centersettings.Default()
+	settings.Telegram = centersettings.TelegramSettings{RuntimeManaged: true}
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings}
 	buildCalls := 0
 	service := NewService(
 		monitoringInstanceRepo,
@@ -2470,7 +2490,7 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
 			buildCalls++
 			return &fakeNotifier{}
-		}, fallbackNotifier),
+		}),
 		slog.Default(),
 		30*time.Second,
 		time.Minute,
@@ -2489,97 +2509,9 @@ func TestSettingsAwareNotifierSuppressesWhenPersistedTelegramIsDisabled(t *testi
 	if buildCalls != 0 {
 		t.Fatalf("buildCalls = %d, want 0", buildCalls)
 	}
-	if len(fallbackNotifier.messages) != 0 {
-		t.Fatalf("fallbackNotifier.messages = %#v, want no env-fallback send when persisted Telegram is disabled", fallbackNotifier.messages)
-	}
 }
 
-func TestSettingsAwareNotifierUsesFallbackWhenFreshDBWouldAutoCreateDisabledDefaults(t *testing.T) {
-	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
-	targetRepo := &fakeTargetRepo{}
-	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
-	}
-	writer := &fakeMutationWriter{}
-	fallbackNotifier := &fakeNotifier{}
-	settingsRepo := &fakeSettingsRepository{
-		getSettingsResult: centersettings.Default(),
-		persistedExists:   false,
-	}
-	service := NewService(
-		monitoringInstanceRepo,
-		targetRepo,
-		snapshots,
-		writer,
-		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
-			return &fakeNotifier{}
-		}, fallbackNotifier),
-		slog.Default(),
-		30*time.Second,
-		time.Minute,
-	)
-	service.now = func() time.Time { return now }
-
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
-		t.Fatalf("AfterSuccessfulSync() error = %v", err)
-	}
-	if len(fallbackNotifier.messages) != 1 {
-		t.Fatalf("fallbackNotifier.messages = %#v, want one env-fallback send for fresh DB behavior", fallbackNotifier.messages)
-	}
-	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSent {
-		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSent)
-	}
-}
-
-func TestSettingsAwareNotifierUsesFallbackWhenPersistedTelegramIsNotManagingRuntime(t *testing.T) {
-	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
-	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
-	targetRepo := &fakeTargetRepo{}
-	snapshots := &fakeSnapshotReader{
-		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
-	}
-	writer := &fakeMutationWriter{}
-	fallbackNotifier := &fakeNotifier{}
-	settingsRepo := &fakeSettingsRepository{
-		persistedTelegram: centersettings.TelegramSettings{
-			BotToken:       "persisted-bot-token",
-			ChatID:         "persisted-chat-id",
-			RuntimeManaged: false,
-		},
-		persistedExists: true,
-	}
-	buildCalls := 0
-	service := NewService(
-		monitoringInstanceRepo,
-		targetRepo,
-		snapshots,
-		writer,
-		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
-			buildCalls++
-			return &fakeNotifier{}
-		}, fallbackNotifier),
-		slog.Default(),
-		30*time.Second,
-		time.Minute,
-	)
-	service.now = func() time.Time { return now }
-
-	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
-		t.Fatalf("AfterSuccessfulSync() error = %v", err)
-	}
-	if len(fallbackNotifier.messages) != 1 {
-		t.Fatalf("fallbackNotifier.messages = %#v, want one env-fallback send when persisted Telegram is not managing runtime", fallbackNotifier.messages)
-	}
-	if buildCalls != 0 {
-		t.Fatalf("buildCalls = %d, want 0", buildCalls)
-	}
-	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSent {
-		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSent)
-	}
-}
-
-func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
+func TestSettingsAwareNotifierSendsInheritedDeploymentTelegram(t *testing.T) {
 	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
 	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
 	targetRepo := &fakeTargetRepo{}
@@ -2589,26 +2521,22 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	writer := &fakeMutationWriter{}
 	liveNotifier := &fakeNotifier{}
 	settings := centersettings.Default()
-	settings.Telegram.BotToken = "persisted-bot-token"
-	settings.Telegram.ChatID = "persisted-chat-id"
-	settings.Telegram.RuntimeManaged = true
-	settingsRepo := &fakeSettingsRepository{
-		getSettingsResult: settings,
-		persistedTelegram: settings.Telegram,
-		persistedExists:   true,
+	settings.Telegram = centersettings.TelegramSettings{
+		BotToken:       "deployment-bot-token",
+		ChatID:         "deployment-chat-id",
+		RuntimeManaged: false,
 	}
-	var gotBotToken string
-	var gotChatID string
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings}
+	var gotBotToken, gotChatID string
 	service := NewService(
 		monitoringInstanceRepo,
 		targetRepo,
 		snapshots,
 		writer,
 		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
-			gotBotToken = botToken
-			gotChatID = chatID
+			gotBotToken, gotChatID = botToken, chatID
 			return liveNotifier
-		}, &fakeNotifier{}),
+		}),
 		slog.Default(),
 		30*time.Second,
 		time.Minute,
@@ -2618,11 +2546,8 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
 		t.Fatalf("AfterSuccessfulSync() error = %v", err)
 	}
-	if gotBotToken != settings.Telegram.BotToken {
-		t.Fatalf("got bot token = %q, want %q", gotBotToken, settings.Telegram.BotToken)
-	}
-	if gotChatID != settings.Telegram.ChatID {
-		t.Fatalf("got chat id = %q, want %q", gotChatID, settings.Telegram.ChatID)
+	if gotBotToken != settings.Telegram.BotToken || gotChatID != settings.Telegram.ChatID {
+		t.Fatalf("Telegram config = %q/%q, want inherited deployment %q/%q", gotBotToken, gotChatID, settings.Telegram.BotToken, settings.Telegram.ChatID)
 	}
 	if len(liveNotifier.messages) != 1 {
 		t.Fatalf("liveNotifier.messages = %#v, want one send", liveNotifier.messages)
@@ -2632,15 +2557,119 @@ func TestSettingsAwareNotifierUsesPersistedTelegramConfig(t *testing.T) {
 	}
 }
 
+func TestSettingsAwareNotifierUsesDatabaseTelegramConfig(t *testing.T) {
+	now := time.Date(2026, time.April, 25, 14, 0, 0, 0, time.UTC)
+	monitoringInstanceRepo := &fakeMonitoringInstanceRepo{getMonitoringInstanceResult: monitoringinstances.Record{MonitoringInstanceID: "mi_001", LastHeartbeatAt: &now}}
+	targetRepo := &fakeTargetRepo{}
+	snapshots := &fakeSnapshotReader{
+		hostSamples: map[string][]runtimefacts.HostSample{"mi_001": {{ObservedAt: now, DiskUsedPct: 92}}},
+	}
+	writer := &fakeMutationWriter{}
+	liveNotifier := &fakeNotifier{}
+	settings := centersettings.Default()
+	settings.Telegram = centersettings.TelegramSettings{
+		BotToken:       "database-bot-token",
+		ChatID:         "database-chat-id",
+		RuntimeManaged: true,
+	}
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings}
+	var gotBotToken, gotChatID string
+	service := NewService(
+		monitoringInstanceRepo,
+		targetRepo,
+		snapshots,
+		writer,
+		NewSettingsAwareNotifier(settingsRepo, func(botToken, chatID string) Notifier {
+			gotBotToken, gotChatID = botToken, chatID
+			return liveNotifier
+		}),
+		slog.Default(),
+		30*time.Second,
+		time.Minute,
+	)
+	service.now = func() time.Time { return now }
+
+	if err := service.AfterSuccessfulSync(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_001"}, syncing.Result{AcceptedAt: now}); err != nil {
+		t.Fatalf("AfterSuccessfulSync() error = %v", err)
+	}
+	if gotBotToken != settings.Telegram.BotToken || gotChatID != settings.Telegram.ChatID {
+		t.Fatalf("Telegram config = %q/%q, want database %q/%q", gotBotToken, gotChatID, settings.Telegram.BotToken, settings.Telegram.ChatID)
+	}
+	if len(liveNotifier.messages) != 1 {
+		t.Fatalf("liveNotifier.messages = %#v, want one send", liveNotifier.messages)
+	}
+	if writer.notifications[0][0].DeliveryStatus != DeliveryStatusSent {
+		t.Fatalf("DeliveryStatus = %q, want %q", writer.notifications[0][0].DeliveryStatus, DeliveryStatusSent)
+	}
+}
+
+func TestSettingsAwareNotifierRestoresInheritedDeploymentAfterDisabledOverride(t *testing.T) {
+	source := &sequenceNotificationSource{settings: []centersettings.NotificationSettings{
+		{Telegram: centersettings.TelegramSettings{BotToken: "override-token", ChatID: "override-chat", RuntimeManaged: true}},
+		{Telegram: centersettings.TelegramSettings{RuntimeManaged: true}},
+		{Telegram: centersettings.TelegramSettings{BotToken: "deployment-token-b", ChatID: "deployment-chat-b", RuntimeManaged: false}},
+	}}
+	var gotConfigs [][2]string
+	notifier := NewSettingsAwareNotifier(source, func(botToken, chatID string) Notifier {
+		gotConfigs = append(gotConfigs, [2]string{botToken, chatID})
+		return &fakeNotifier{}
+	})
+	dispatcher, ok := notifier.(NotificationDispatcher)
+	if !ok {
+		t.Fatal("NewSettingsAwareNotifier() result does not implement NotificationDispatcher")
+	}
+
+	first := dispatcher.Dispatch(context.Background(), "override")
+	second := dispatcher.Dispatch(context.Background(), "disabled")
+	third := dispatcher.Dispatch(context.Background(), "restored")
+	if len(first) != 1 || first[0].Status != DeliveryStatusSent {
+		t.Fatalf("override deliveries = %#v, want sent", first)
+	}
+	if len(second) != 1 || second[0].Status != DeliveryStatusSuppressed {
+		t.Fatalf("disabled deliveries = %#v, want suppressed", second)
+	}
+	if len(third) != 1 || third[0].Status != DeliveryStatusSent {
+		t.Fatalf("restored deliveries = %#v, want sent", third)
+	}
+	if source.calls != 3 {
+		t.Fatalf("notification settings calls = %d, want one per dispatch", source.calls)
+	}
+	if len(gotConfigs) != 2 || gotConfigs[0] != [2]string{"override-token", "override-chat"} || gotConfigs[1] != [2]string{"deployment-token-b", "deployment-chat-b"} {
+		t.Fatalf("notifier configs = %#v, want override and restored deployment snapshots", gotConfigs)
+	}
+}
+
+func TestSettingsAwareNotifierFailsClosedWhenSettingsUnavailable(t *testing.T) {
+	sourceErr := errors.New("database settings unavailable")
+	for name, source := range map[string]centersettings.NotificationSettingsSource{
+		"nil source":   nil,
+		"read failure": &sequenceNotificationSource{err: sourceErr},
+	} {
+		t.Run(name, func(t *testing.T) {
+			notifier := NewSettingsAwareNotifier(source, func(string, string) Notifier {
+				t.Fatal("Telegram notifier factory called after settings failure")
+				return nil
+			})
+			dispatcher := notifier.(NotificationDispatcher)
+			deliveries := dispatcher.Dispatch(context.Background(), "summary")
+			if len(deliveries) != 1 || deliveries[0].Status != DeliveryStatusFailed {
+				t.Fatalf("deliveries = %#v, want one failed delivery", deliveries)
+			}
+			if !errors.Is(deliveries[0].Error, errNotificationSettingsUnavailable) {
+				t.Fatalf("delivery error = %v, want safe settings-unavailable error", deliveries[0].Error)
+			}
+			if channels := notifier.(NotificationChannelResolver).NotificationChannels(context.Background()); len(channels) != 0 {
+				t.Fatalf("NotificationChannels() = %#v, want empty on settings failure", channels)
+			}
+		})
+	}
+}
+
 func TestSettingsAwareNotificationDispatcherSendsFeishuOnly(t *testing.T) {
 	settings := centersettings.Default()
 	settings.FeishuEnabled = true
 	settings.FeishuWebhookURL = "https://open.feishu.cn/open-apis/bot/v2/hook/test"
-	settingsRepo := &fakeSettingsRepository{
-		getSettingsResult: settings,
-		persistedTelegram: centersettings.TelegramSettings{RuntimeManaged: true},
-		persistedExists:   true,
-	}
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings}
 	feishuNotifier := &fakeNotifier{}
 	buildTelegramCalls := 0
 	var gotWebhookURL string
@@ -2654,7 +2683,6 @@ func TestSettingsAwareNotificationDispatcherSendsFeishuOnly(t *testing.T) {
 			gotWebhookURL = webhookURL
 			return feishuNotifier
 		},
-		&fakeNotifier{},
 	)
 
 	deliveries := dispatcher.Dispatch(context.Background(), "incident started")
@@ -2672,36 +2700,53 @@ func TestSettingsAwareNotificationDispatcherSendsFeishuOnly(t *testing.T) {
 		t.Fatalf("feishu messages = %#v, want one summary", feishuNotifier.messages)
 	}
 	if buildTelegramCalls != 0 {
-		t.Fatalf("buildTelegramCalls = %d, want 0 for disabled persisted Telegram", buildTelegramCalls)
+		t.Fatalf("buildTelegramCalls = %d, want 0 for disabled Telegram", buildTelegramCalls)
+	}
+}
+
+func TestSettingsAwareNotificationDispatcherSuppressesWhenNoEffectiveChannels(t *testing.T) {
+	dispatcher := NewSettingsAwareNotificationDispatcher(
+		&fakeSettingsRepository{getSettingsResult: centersettings.Default()},
+		func(string, string) Notifier {
+			t.Fatal("Telegram notifier factory called without an effective Telegram channel")
+			return nil
+		},
+		func(string) Notifier {
+			t.Fatal("Feishu notifier factory called without an effective Feishu channel")
+			return nil
+		},
+	)
+
+	deliveries := dispatcher.Dispatch(context.Background(), "incident started")
+	if len(deliveries) != 1 || deliveries[0].Status != DeliveryStatusSuppressed {
+		t.Fatalf("deliveries = %#v, want one suppressed delivery", deliveries)
+	}
+	if channels := dispatcher.(NotificationChannelResolver).NotificationChannels(context.Background()); len(channels) != 0 {
+		t.Fatalf("NotificationChannels() = %#v, want no effective channels", channels)
 	}
 }
 
 func TestSettingsAwareNotificationDispatcherSendsTelegramAndFeishu(t *testing.T) {
 	settings := centersettings.Default()
 	settings.Telegram = centersettings.TelegramSettings{
-		BotToken:       "persisted-bot-token",
-		ChatID:         "persisted-chat-id",
+		BotToken:       "database-bot-token",
+		ChatID:         "database-chat-id",
 		RuntimeManaged: true,
 	}
 	settings.FeishuEnabled = true
 	settings.FeishuWebhookURL = "https://open.feishu.cn/open-apis/bot/v2/hook/test"
-	settingsRepo := &fakeSettingsRepository{
-		getSettingsResult: settings,
-		persistedTelegram: settings.Telegram,
-		persistedExists:   true,
-	}
+	settingsRepo := &fakeSettingsRepository{getSettingsResult: settings}
 	telegramNotifier := &fakeNotifier{}
 	feishuNotifier := &fakeNotifier{err: errors.New("feishu failed")}
 	dispatcher := NewSettingsAwareNotificationDispatcher(
 		settingsRepo,
 		func(botToken, chatID string) Notifier {
 			if botToken != settings.Telegram.BotToken || chatID != settings.Telegram.ChatID {
-				t.Fatalf("telegram config = %q/%q, want persisted settings", botToken, chatID)
+				t.Fatalf("telegram config = %q/%q, want database settings", botToken, chatID)
 			}
 			return telegramNotifier
 		},
 		func(string) Notifier { return feishuNotifier },
-		&fakeNotifier{},
 	)
 
 	deliveries := dispatcher.Dispatch(context.Background(), "incident started")

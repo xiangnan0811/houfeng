@@ -130,7 +130,10 @@ export function SubscriptionSettingsSection() {
       <section className="settings-section subscription-settings__section" aria-labelledby={headingId}>
         <form onSubmit={handleSave} aria-labelledby={headingId}>
           <div className="subscription-settings__head">
-            <h2 className="ss-title" id={headingId}>成本基准与汇率</h2>
+            <div>
+              <h2 className="ss-title" id={headingId}>成本基准与汇率</h2>
+              <p className="ss-desc">成本基准、汇率和月预算保存在数据库中，不随部署配置变化。</p>
+            </div>
             <div className="subscription-settings__head-actions">
               {rateRefresh.notice ? (
                 <ExchangeRateNoticeBody

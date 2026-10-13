@@ -235,7 +235,7 @@ describe('notificationChannelGap', () => {
   it('stays quiet before anything is observed or once a channel is configured', () => {
     expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 0, total_target_count: 0 }))).toBe(false)
     expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { telegram_configured: true } }))).toBe(false)
-    expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { telegram_runtime_managed: true } }))).toBe(false)
+    expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { telegram_configured: false, feishu_configured: false } }))).toBe(true)
     expect(notificationChannelGap(dashboardOverviewFixture({ total_monitoring_instance_count: 1, notification_status: { feishu_configured: true } }))).toBe(false)
   })
 })

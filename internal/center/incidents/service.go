@@ -68,12 +68,8 @@ type SettingsRepository interface {
 	GetSettings(context.Context) (centersettings.CenterSettings, error)
 }
 
-type persistedTelegramSettingsSource interface {
-	GetPersistedTelegramSettings(context.Context) (centersettings.TelegramSettings, bool, error)
-}
-
-type persistedIncidentDefaultsSource interface {
-	GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
+type effectiveIncidentDefaultsSource interface {
+	GetEffectiveIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error)
 }
 
 type Notifier interface {
@@ -97,37 +93,42 @@ type NotificationChannelResolver interface {
 type SettingsAwareNotifierFactory func(botToken, chatID string) Notifier
 type FeishuNotifierFactory func(webhookURL string) Notifier
 
+// Keep source failures generic because delivery errors may be persisted or exposed in logs.
+var errNotificationSettingsUnavailable = errors.New("notification settings unavailable")
+
 type settingsAwareNotifier struct {
-	settingsRepo        SettingsRepository
+	settingsSource      centersettings.NotificationSettingsSource
 	newTelegramNotifier SettingsAwareNotifierFactory
 	newFeishuNotifier   FeishuNotifierFactory
-	fallback            Notifier
 }
 
-func NewSettingsAwareNotifier(settingsRepo SettingsRepository, newNotifier SettingsAwareNotifierFactory, fallback Notifier) Notifier {
-	if settingsRepo == nil {
-		return fallback
-	}
+func NewSettingsAwareNotifier(source centersettings.NotificationSettingsSource, newNotifier SettingsAwareNotifierFactory) Notifier {
 	return &settingsAwareNotifier{
-		settingsRepo:        settingsRepo,
+		settingsSource:      source,
 		newTelegramNotifier: newNotifier,
 		newFeishuNotifier: func(webhookURL string) Notifier {
 			return notify.NewFeishuNotifier(webhookURL)
 		},
-		fallback: fallback,
 	}
 }
 
-func NewSettingsAwareNotificationDispatcher(settingsRepo SettingsRepository, newTelegramNotifier SettingsAwareNotifierFactory, newFeishuNotifier FeishuNotifierFactory, fallback Notifier) NotificationDispatcher {
-	if settingsRepo == nil {
-		return notifierDispatcher{channel: NotificationChannelTelegram, notifier: fallback}
-	}
+func NewSettingsAwareNotificationDispatcher(source centersettings.NotificationSettingsSource, newTelegramNotifier SettingsAwareNotifierFactory, newFeishuNotifier FeishuNotifierFactory) NotificationDispatcher {
 	return &settingsAwareNotifier{
-		settingsRepo:        settingsRepo,
+		settingsSource:      source,
 		newTelegramNotifier: newTelegramNotifier,
 		newFeishuNotifier:   newFeishuNotifier,
-		fallback:            fallback,
 	}
+}
+
+func (n *settingsAwareNotifier) notificationSettings(ctx context.Context) (centersettings.NotificationSettings, error) {
+	if n == nil || n.settingsSource == nil {
+		return centersettings.NotificationSettings{}, errNotificationSettingsUnavailable
+	}
+	settings, err := n.settingsSource.GetNotificationSettings(ctx)
+	if err != nil {
+		return centersettings.NotificationSettings{}, errNotificationSettingsUnavailable
+	}
+	return settings, nil
 }
 
 func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error {
@@ -135,93 +136,49 @@ func (n *settingsAwareNotifier) Send(ctx context.Context, summary string) error 
 }
 
 func (n *settingsAwareNotifier) NotificationChannels(ctx context.Context) []NotificationChannel {
-	var telegramTelegram *centersettings.TelegramSettings
-	var telegramExists bool
-
-	if source, ok := n.settingsRepo.(persistedTelegramSettingsSource); ok {
-		t, exists, err := source.GetPersistedTelegramSettings(ctx)
-		if err == nil {
-			telegramTelegram = &t
-			telegramExists = exists
-		}
-	}
-
-	settings, err := n.settingsRepo.GetSettings(ctx)
+	settings, err := n.notificationSettings(ctx)
 	if err != nil {
-		if telegramTelegram != nil || n.fallback != nil {
-			return []NotificationChannel{NotificationChannelTelegram}
-		}
 		return nil
 	}
-	if telegramTelegram != nil {
-		settings.Telegram = *telegramTelegram
-	}
 
-	feishuConfigured := settings.FeishuEnabled && settings.FeishuWebhookURL != ""
 	channels := make([]NotificationChannel, 0, 2)
-	if telegramChannel(settings.Telegram, telegramExists, n.fallback != nil, feishuConfigured) {
+	if settings.Telegram.Enabled() {
 		channels = append(channels, NotificationChannelTelegram)
 	}
-	if feishuConfigured {
+	if settings.FeishuEnabled && strings.TrimSpace(settings.FeishuWebhookURL) != "" {
 		channels = append(channels, NotificationChannelFeishu)
 	}
 	return uniqueNotificationChannels(channels)
 }
 
 func (n *settingsAwareNotifier) Dispatch(ctx context.Context, summary string) []NotificationDelivery {
-	var telegramTelegram *centersettings.TelegramSettings
-	var telegramExists bool
-
-	if source, ok := n.settingsRepo.(persistedTelegramSettingsSource); ok {
-		t, exists, err := source.GetPersistedTelegramSettings(ctx)
-		if err == nil {
-			telegramTelegram = &t
-			telegramExists = exists
-		}
-	}
-
-	settings, err := n.settingsRepo.GetSettings(ctx)
+	settings, err := n.notificationSettings(ctx)
 	if err != nil {
-		if telegramTelegram != nil {
-			return []NotificationDelivery{n.dispatchTelegram(ctx, summary, *telegramTelegram, telegramExists)}
-		}
-		if n.fallback != nil {
-			return []NotificationDelivery{dispatchWithNotifier(ctx, NotificationChannelTelegram, n.fallback, summary)}
-		}
-		return []NotificationDelivery{{Channel: NotificationChannelTelegram, Status: DeliveryStatusFailed, Error: fmt.Errorf("get persisted center settings: %w", err)}}
+		return []NotificationDelivery{{
+			Channel: NotificationChannelTelegram,
+			Status:  DeliveryStatusFailed,
+			Error:   err,
+		}}
 	}
 
-	// Override Telegram settings with persisted-telegram source if available.
-	if telegramTelegram != nil {
-		settings.Telegram = *telegramTelegram
-	}
-
-	feishuConfigured := settings.FeishuEnabled && settings.FeishuWebhookURL != ""
 	deliveries := make([]NotificationDelivery, 0, 2)
-
-	telegramDelivery := n.dispatchTelegram(ctx, summary, settings.Telegram, true)
-	if telegramDelivery.Status != DeliveryStatusSuppressed || (!feishuConfigured && (telegramExists || settings.Telegram.RuntimeManaged)) {
-		deliveries = append(deliveries, telegramDelivery)
+	if settings.Telegram.Enabled() {
+		deliveries = append(deliveries, n.dispatchTelegram(ctx, summary, settings.Telegram))
 	}
-
-	if feishuConfigured {
+	if settings.FeishuEnabled && strings.TrimSpace(settings.FeishuWebhookURL) != "" {
 		deliveries = append(deliveries, n.dispatchFeishu(ctx, summary, settings.FeishuWebhookURL))
 	}
-
 	if len(deliveries) == 0 {
-		return []NotificationDelivery{{Channel: NotificationChannelTelegram, Status: DeliveryStatusSuppressed, Error: errNotificationSuppressed}}
+		return []NotificationDelivery{{
+			Channel: NotificationChannelTelegram,
+			Status:  DeliveryStatusSuppressed,
+			Error:   errNotificationSuppressed,
+		}}
 	}
-
 	return deliveries
 }
 
-func (n *settingsAwareNotifier) dispatchTelegram(ctx context.Context, summary string, telegram centersettings.TelegramSettings, exists bool) NotificationDelivery {
-	if !exists || !telegram.RuntimeManaged {
-		if n.fallback != nil {
-			return dispatchWithNotifier(ctx, NotificationChannelTelegram, n.fallback, summary)
-		}
-		return NotificationDelivery{Channel: NotificationChannelTelegram, Status: DeliveryStatusSuppressed, Error: errNotificationSuppressed}
-	}
+func (n *settingsAwareNotifier) dispatchTelegram(ctx context.Context, summary string, telegram centersettings.TelegramSettings) NotificationDelivery {
 	if !telegram.Enabled() {
 		return NotificationDelivery{Channel: NotificationChannelTelegram, Status: DeliveryStatusSuppressed, Error: errNotificationSuppressed}
 	}
@@ -297,13 +254,6 @@ func dispatchError(deliveries []NotificationDelivery) error {
 		return nil
 	}
 	return lastErr
-}
-
-func telegramChannel(settings centersettings.TelegramSettings, exists, hasFallback, feishuConfigured bool) bool {
-	if !exists || !settings.RuntimeManaged {
-		return hasFallback
-	}
-	return settings.Enabled() || !feishuConfigured
 }
 
 func notificationDispatcherFor(notifier Notifier) NotificationDispatcher {
@@ -928,8 +878,8 @@ func (s *Service) sweepIntervalFor(ctx context.Context) time.Duration {
 		return s.fallbackSweepInterval
 	}
 	var defaults centersettings.IncidentDefaults
-	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
-		persisted, exists, err := source.GetPersistedIncidentDefaults(ctx)
+	if source, ok := s.settingsRepo.(effectiveIncidentDefaultsSource); ok {
+		persisted, exists, err := source.GetEffectiveIncidentDefaults(ctx)
 		if err != nil || !exists {
 			return s.fallbackSweepInterval
 		}
@@ -993,8 +943,8 @@ func (s *Service) resolveIncidentPolicySnapshot(ctx context.Context) (incidentPo
 	}
 
 	var defaults centersettings.IncidentDefaults
-	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
-		persisted, exists, err := source.GetPersistedIncidentDefaults(ctx)
+	if source, ok := s.settingsRepo.(effectiveIncidentDefaultsSource); ok {
+		persisted, exists, err := source.GetEffectiveIncidentDefaults(ctx)
 		if err != nil {
 			return incidentPolicySnapshot{}, fmt.Errorf("read persisted incident defaults: %w", err)
 		}
@@ -1052,8 +1002,8 @@ func (s *Service) notificationPolicyFor(ctx context.Context) notificationPolicy 
 	if s.settingsRepo == nil {
 		return policy
 	}
-	if source, ok := s.settingsRepo.(persistedIncidentDefaultsSource); ok {
-		defaults, exists, err := source.GetPersistedIncidentDefaults(ctx)
+	if source, ok := s.settingsRepo.(effectiveIncidentDefaultsSource); ok {
+		defaults, exists, err := source.GetEffectiveIncidentDefaults(ctx)
 		if err == nil && exists {
 			return notificationPolicyFromDefaults(defaults)
 		}

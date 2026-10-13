@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -20,30 +22,29 @@ type settingsResponse struct {
 	HostSampleFrequencyTier  string                                `json:"host_sample_frequency_tier"`
 	ProbeFrequencyDefaults   centersettings.ProbeFrequencyDefaults `json:"probe_frequency_defaults"`
 	IncidentDefaults         centersettings.IncidentDefaults       `json:"incident_defaults"`
+	IncidentSweep            incidentSweepResponse                 `json:"incident_sweep"`
 	OverrideRules            centersettings.OverrideRules          `json:"override_rules"`
 	RetentionPolicy          centersettings.RetentionPolicy        `json:"retention_policy"`
 	SubscriptionCostSettings subscriptionCostSettingsResponse      `json:"subscription_cost_settings"`
 	IPQualitySettings        centersettings.IPQualitySettings      `json:"ip_quality_settings"`
+	SettingsSource           centersettings.ConfigSource           `json:"settings_source"`
 }
 
 type telegramSettingsResponse struct {
+	Mode               string                      `json:"mode"`
+	Source             centersettings.ConfigSource `json:"source"`
+	Active             bool                        `json:"active"`
+	ChatID             string                      `json:"chat_id"`
+	TokenPresent       bool                        `json:"token_present"`
+	TokenMaskedSummary string                      `json:"token_masked_summary,omitempty"`
+	Deployment         telegramDeploymentResponse  `json:"deployment"`
+}
+
+type telegramDeploymentResponse struct {
+	Configured         bool   `json:"configured"`
 	ChatID             string `json:"chat_id"`
 	TokenPresent       bool   `json:"token_present"`
 	TokenMaskedSummary string `json:"token_masked_summary,omitempty"`
-	RuntimeManaged     bool   `json:"runtime_managed"`
-	RuntimeApplyActive bool   `json:"runtime_apply_active"`
-}
-
-type settingsUpdateRequest struct {
-	Telegram                 telegramSettingsUpdateRequest          `json:"telegram"`
-	Feishu                   feishuSettingsUpdateRequest            `json:"feishu"`
-	HostSampleFrequencyTier  string                                 `json:"host_sample_frequency_tier"`
-	ProbeFrequencyDefaults   centersettings.ProbeFrequencyDefaults  `json:"probe_frequency_defaults"`
-	IncidentDefaults         centersettings.IncidentDefaults        `json:"incident_defaults"`
-	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
-	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
-	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
-	IPQualitySettings        *centersettings.IPQualitySettings      `json:"ip_quality_settings,omitempty"`
 }
 
 type feishuSettingsResponse struct {
@@ -52,15 +53,115 @@ type feishuSettingsResponse struct {
 	WebhookURLMaskedSummary string `json:"webhook_url_masked_summary,omitempty"`
 }
 
-type feishuSettingsUpdateRequest struct {
-	Enabled    *bool   `json:"enabled,omitempty"`
-	WebhookURL *string `json:"webhook_url,omitempty"`
+type incidentSweepResponse struct {
+	Mode              string                      `json:"mode"`
+	Source            centersettings.ConfigSource `json:"source"`
+	DeploymentSeconds int                         `json:"deployment_seconds"`
+}
+
+type settingsUpdateRequest struct {
+	Telegram                 *telegramSettingsUpdateRequest         `json:"telegram,omitempty"`
+	Feishu                   feishuSettingsUpdateRequest            `json:"feishu"`
+	HostSampleFrequencyTier  string                                 `json:"host_sample_frequency_tier"`
+	ProbeFrequencyDefaults   centersettings.ProbeFrequencyDefaults  `json:"probe_frequency_defaults"`
+	IncidentDefaults         centersettings.IncidentDefaults        `json:"incident_defaults"`
+	IncidentSweepMode        *string                                `json:"incident_sweep_mode,omitempty"`
+	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
+	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
+	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
+	IPQualitySettings        *centersettings.IPQualitySettings      `json:"ip_quality_settings,omitempty"`
+}
+
+// Only the newly optional Telegram block and sweep mode use raw messages here:
+// their omission must remain distinct from explicit null. The existing core
+// settings remain full-form value fields for compatibility with the settings
+// page contract.
+type settingsUpdateRequestWire struct {
+	Telegram                 json.RawMessage                        `json:"telegram"`
+	Feishu                   feishuSettingsUpdateRequest            `json:"feishu"`
+	HostSampleFrequencyTier  string                                 `json:"host_sample_frequency_tier"`
+	ProbeFrequencyDefaults   centersettings.ProbeFrequencyDefaults  `json:"probe_frequency_defaults"`
+	IncidentDefaults         centersettings.IncidentDefaults        `json:"incident_defaults"`
+	IncidentSweepMode        json.RawMessage                        `json:"incident_sweep_mode"`
+	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
+	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
+	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
+	IPQualitySettings        *centersettings.IPQualitySettings      `json:"ip_quality_settings,omitempty"`
+}
+
+func (request *settingsUpdateRequest) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return errors.New("settings request cannot be null")
+	}
+	var wire settingsUpdateRequestWire
+	if err := decodeJSONValue(bytes.NewReader(data), &wire); err != nil {
+		return err
+	}
+
+	decoded := settingsUpdateRequest{
+		Feishu:                   wire.Feishu,
+		HostSampleFrequencyTier:  wire.HostSampleFrequencyTier,
+		ProbeFrequencyDefaults:   wire.ProbeFrequencyDefaults,
+		IncidentDefaults:         wire.IncidentDefaults,
+		OverrideRules:            wire.OverrideRules,
+		RetentionPolicy:          wire.RetentionPolicy,
+		SubscriptionCostSettings: wire.SubscriptionCostSettings,
+		IPQualitySettings:        wire.IPQualitySettings,
+	}
+	if wire.Telegram != nil {
+		var telegram telegramSettingsUpdateRequest
+		if err := decodeOptionalSettingsJSON(wire.Telegram, &telegram); err != nil {
+			return err
+		}
+		decoded.Telegram = &telegram
+	}
+	if wire.IncidentSweepMode != nil {
+		var mode string
+		if err := decodeOptionalSettingsJSON(wire.IncidentSweepMode, &mode); err != nil {
+			return err
+		}
+		decoded.IncidentSweepMode = &mode
+	}
+
+	*request = decoded
+	return nil
+}
+
+func decodeOptionalSettingsJSON(raw json.RawMessage, dst any) error {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return errors.New("settings field cannot be null")
+	}
+	return decodeJSONValue(bytes.NewReader(raw), dst)
+}
+
+// optionalString records presence while rejecting null and non-string values.
+type optionalString struct {
+	Value string
+	Set   bool
+}
+
+func (value *optionalString) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return errors.New("settings string cannot be null")
+	}
+	var decoded string
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	value.Value = decoded
+	value.Set = true
+	return nil
 }
 
 type telegramSettingsUpdateRequest struct {
-	BotToken       *string `json:"bot_token,omitempty"`
-	ChatID         string  `json:"chat_id"`
-	RuntimeManaged *bool   `json:"runtime_managed,omitempty"`
+	Mode     optionalString `json:"mode"`
+	BotToken optionalString `json:"bot_token"`
+	ChatID   optionalString `json:"chat_id"`
+}
+
+type feishuSettingsUpdateRequest struct {
+	Enabled    *bool   `json:"enabled,omitempty"`
+	WebhookURL *string `json:"webhook_url,omitempty"`
 }
 
 type subscriptionCostSettingsResponse struct {
@@ -84,8 +185,9 @@ type subscriptionCostSettingsUpdateRequest struct {
 	ExchangeRateStaleAfterHours *int    `json:"exchange_rate_stale_after_hours,omitempty"`
 }
 
-func Settings(repo SettingsRepository, refresher ExchangeRateRefreshRequester) http.Handler {
+func Settings(repo SettingsRepository, refresher ExchangeRateRefreshRequester, deployment centersettings.DeploymentDefaults) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "private, no-store")
 		switch r.Method {
 		case http.MethodGet:
 			record, err := repo.GetSettings(r.Context())
@@ -93,20 +195,20 @@ func Settings(repo SettingsRepository, refresher ExchangeRateRefreshRequester) h
 				writeError(w, http.StatusInternalServerError, "internal server error")
 				return
 			}
-			writeJSON(w, http.StatusOK, newSettingsResponse(record))
+			writeJSON(w, http.StatusOK, newSettingsResponse(record, deployment))
 		case http.MethodPut:
 			var input settingsUpdateRequest
 			if err := decodeSettingsJSONBody(r, &input); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid json")
 				return
 			}
-			if input.Telegram.BotToken != nil && strings.TrimSpace(input.Telegram.ChatID) == "" {
+			if err := validateSettingsUpdateRequest(input); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid input")
 				return
 			}
 
 			record, err := repo.MutateSettings(r.Context(), func(current centersettings.CenterSettings) (centersettings.CenterSettings, error) {
-				return mergeSettingsUpdate(current, input), nil
+				return mergeSettingsUpdate(current, input, deployment)
 			})
 			if err != nil {
 				if errors.Is(err, centersettings.ErrInvalidSettings) {
@@ -119,46 +221,95 @@ func Settings(repo SettingsRepository, refresher ExchangeRateRefreshRequester) h
 			if refresher != nil {
 				refresher.RequestRefresh(false)
 			}
-			writeJSON(w, http.StatusOK, newSettingsResponse(record))
+			writeJSON(w, http.StatusOK, newSettingsResponse(record, deployment))
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 		}
 	})
 }
 
-func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUpdateRequest) centersettings.CenterSettings {
-	merged := centersettings.CenterSettings{
-		Telegram: centersettings.TelegramSettings{
-			BotToken:       current.Telegram.BotToken,
-			ChatID:         strings.TrimSpace(input.Telegram.ChatID),
-			RuntimeManaged: current.Telegram.RuntimeManaged,
-		},
-		FeishuEnabled:           current.FeishuEnabled,
-		FeishuWebhookURL:        current.FeishuWebhookURL,
-		HostSampleFrequencyTier: input.HostSampleFrequencyTier,
-		ProbeFrequencyDefaults:  input.ProbeFrequencyDefaults,
-		IncidentDefaults:        input.IncidentDefaults,
-		OverrideRules:           input.OverrideRules,
-		RetentionPolicy:         input.RetentionPolicy,
-		SubscriptionCost:        current.SubscriptionCost,
-		IPQuality:               current.IPQuality,
+func validateSettingsUpdateRequest(input settingsUpdateRequest) error {
+	if input.Telegram != nil {
+		mode := input.Telegram.Mode.Value
+		switch mode {
+		case "inherit", "disabled":
+			if input.Telegram.BotToken.Set || input.Telegram.ChatID.Set {
+				return centersettings.ErrInvalidSettings
+			}
+		case "override":
+			if input.Telegram.BotToken.Set {
+				token := strings.TrimSpace(input.Telegram.BotToken.Value)
+				if token == "" || strings.Contains(token, "*") {
+					return centersettings.ErrInvalidSettings
+				}
+			}
+			if input.Telegram.ChatID.Set && strings.TrimSpace(input.Telegram.ChatID.Value) == "" {
+				return centersettings.ErrInvalidSettings
+			}
+		default:
+			return centersettings.ErrInvalidSettings
+		}
 	}
 
-	if input.Telegram.BotToken != nil {
-		merged.Telegram.BotToken = strings.TrimSpace(*input.Telegram.BotToken)
+	if input.IncidentDefaults.SweepIntervalSeconds <= 0 {
+		return centersettings.ErrInvalidSettings
 	}
-	if input.Telegram.RuntimeManaged != nil {
-		merged.Telegram.RuntimeManaged = *input.Telegram.RuntimeManaged
+	if input.IncidentSweepMode != nil {
+		switch *input.IncidentSweepMode {
+		case "inherit":
+		case "override":
+			if input.IncidentDefaults.SweepIntervalSeconds <= 0 {
+				return centersettings.ErrInvalidSettings
+			}
+		default:
+			return centersettings.ErrInvalidSettings
+		}
 	}
-	if merged.Telegram.ChatID == "" {
-		merged.Telegram.BotToken = ""
+	return nil
+}
+
+func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUpdateRequest, deployment centersettings.DeploymentDefaults) (centersettings.CenterSettings, error) {
+	merged := current
+
+	if input.Telegram != nil {
+		switch input.Telegram.Mode.Value {
+		case "inherit":
+			merged.Telegram = centersettings.TelegramSettings{}
+		case "disabled":
+			merged.Telegram = centersettings.TelegramSettings{RuntimeManaged: true}
+		case "override":
+			effective := centersettings.ResolveTelegram(current.Telegram, deployment.Telegram)
+			token := strings.TrimSpace(effective.BotToken)
+			chatID := strings.TrimSpace(effective.ChatID)
+			if input.Telegram.BotToken.Set {
+				token = strings.TrimSpace(input.Telegram.BotToken.Value)
+			}
+			if input.Telegram.ChatID.Set {
+				chatID = strings.TrimSpace(input.Telegram.ChatID.Value)
+			}
+			if token == "" || chatID == "" {
+				return centersettings.CenterSettings{}, centersettings.ErrInvalidSettings
+			}
+			merged.Telegram = centersettings.TelegramSettings{
+				BotToken:       token,
+				ChatID:         chatID,
+				RuntimeManaged: true,
+			}
+		default:
+			return centersettings.CenterSettings{}, centersettings.ErrInvalidSettings
+		}
 	}
+
 	if input.Feishu.Enabled != nil {
 		merged.FeishuEnabled = *input.Feishu.Enabled
 	}
 	if input.Feishu.WebhookURL != nil {
 		merged.FeishuWebhookURL = strings.TrimSpace(*input.Feishu.WebhookURL)
 	}
+	merged.HostSampleFrequencyTier = input.HostSampleFrequencyTier
+	merged.ProbeFrequencyDefaults = input.ProbeFrequencyDefaults
+	merged.OverrideRules = input.OverrideRules
+	merged.RetentionPolicy = input.RetentionPolicy
 	if input.SubscriptionCostSettings != nil {
 		merged.SubscriptionCost = mergeSubscriptionCostSettingsUpdate(current.SubscriptionCost, *input.SubscriptionCostSettings)
 	}
@@ -166,32 +317,120 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 		merged.IPQuality = *input.IPQualitySettings
 	}
 
-	return merged
+	incidentDefaults := input.IncidentDefaults
+	if input.IncidentSweepMode != nil {
+		switch *input.IncidentSweepMode {
+		case "inherit":
+			incidentDefaults.SweepIntervalSeconds = centersettings.Default().IncidentDefaults.SweepIntervalSeconds
+			merged.IncidentSweepRuntimeManaged = false
+		case "override":
+			merged.IncidentSweepRuntimeManaged = true
+		}
+	} else {
+		// A full settings form may echo the currently displayed effective
+		// sweep. Without an explicit mode, preserve the lock-held raw value
+		// and ownership instead of turning that echo into an override.
+		incidentDefaults.SweepIntervalSeconds = current.IncidentDefaults.SweepIntervalSeconds
+		merged.IncidentSweepRuntimeManaged = current.IncidentSweepRuntimeManaged
+	}
+	merged.IncidentDefaults = incidentDefaults
+
+	return merged, nil
 }
 
-func newSettingsResponse(record centersettings.CenterSettings) settingsResponse {
-	tokenPresent := strings.TrimSpace(record.Telegram.BotToken) != ""
+func newSettingsResponse(record centersettings.CenterSettings, deployment centersettings.DeploymentDefaults) settingsResponse {
+	effective := centersettings.ResolveEffectiveSettings(record, deployment)
+	deploymentTelegram := deployment.Telegram
+	deploymentTelegram.BotToken = strings.TrimSpace(deploymentTelegram.BotToken)
+	deploymentTelegram.ChatID = strings.TrimSpace(deploymentTelegram.ChatID)
+	deploymentTelegram.RuntimeManaged = false
+
+	deploymentSweepSeconds := deployment.IncidentSweepIntervalSeconds
+	if deploymentSweepSeconds <= 0 {
+		deploymentSweepSeconds = centersettings.Default().IncidentDefaults.SweepIntervalSeconds
+	}
+	deploymentSweepSource := deployment.IncidentSweepSource
+	if deploymentSweepSource != centersettings.ConfigSourceDeployment {
+		deploymentSweepSource = centersettings.ConfigSourceDefault
+	}
+
+	telegramSource := effective.Effective.TelegramSource
+	if telegramSource == "" {
+		if effective.Telegram.RuntimeManaged {
+			telegramSource = centersettings.ConfigSourceDatabase
+		} else if effective.Telegram.Enabled() {
+			telegramSource = centersettings.ConfigSourceDeployment
+		} else {
+			telegramSource = centersettings.ConfigSourceDefault
+		}
+	}
+	incidentSweepSource := effective.Effective.IncidentSweepSource
+	if incidentSweepSource == "" {
+		if effective.IncidentSweepRuntimeManaged {
+			incidentSweepSource = centersettings.ConfigSourceDatabase
+		} else {
+			incidentSweepSource = deploymentSweepSource
+		}
+	}
+
 	return settingsResponse{
 		Telegram: telegramSettingsResponse{
-			ChatID:             record.Telegram.ChatID,
-			TokenPresent:       tokenPresent,
-			TokenMaskedSummary: maskTelegramBotToken(record.Telegram.BotToken),
-			RuntimeManaged:     record.Telegram.RuntimeManaged,
-			RuntimeApplyActive: record.Telegram.RuntimeManaged && record.Telegram.Enabled(),
+			Mode:               telegramMode(record.Telegram),
+			Source:             telegramSource,
+			Active:             effective.Telegram.Enabled(),
+			ChatID:             strings.TrimSpace(effective.Telegram.ChatID),
+			TokenPresent:       strings.TrimSpace(effective.Telegram.BotToken) != "",
+			TokenMaskedSummary: maskTelegramBotToken(effective.Telegram.BotToken),
+			Deployment: telegramDeploymentResponse{
+				Configured:         deploymentTelegram.Enabled(),
+				ChatID:             deploymentTelegram.ChatID,
+				TokenPresent:       strings.TrimSpace(deploymentTelegram.BotToken) != "",
+				TokenMaskedSummary: maskTelegramBotToken(deploymentTelegram.BotToken),
+			},
 		},
 		Feishu: feishuSettingsResponse{
-			Enabled:                 record.FeishuEnabled,
-			WebhookURLPresent:       strings.TrimSpace(record.FeishuWebhookURL) != "",
-			WebhookURLMaskedSummary: maskWebhookURL(record.FeishuWebhookURL),
+			Enabled:                 effective.FeishuEnabled,
+			WebhookURLPresent:       strings.TrimSpace(effective.FeishuWebhookURL) != "",
+			WebhookURLMaskedSummary: maskWebhookURL(effective.FeishuWebhookURL),
 		},
-		HostSampleFrequencyTier:  record.HostSampleFrequencyTier,
-		ProbeFrequencyDefaults:   record.ProbeFrequencyDefaults,
-		IncidentDefaults:         record.IncidentDefaults,
-		OverrideRules:            record.OverrideRules,
-		RetentionPolicy:          record.RetentionPolicy,
-		SubscriptionCostSettings: newSubscriptionCostSettingsResponse(record.SubscriptionCost),
-		IPQualitySettings:        record.IPQuality,
+		HostSampleFrequencyTier: effective.HostSampleFrequencyTier,
+		ProbeFrequencyDefaults:  effective.ProbeFrequencyDefaults,
+		IncidentDefaults:        effective.IncidentDefaults,
+		IncidentSweep: incidentSweepResponse{
+			Mode:              incidentSweepMode(record.IncidentSweepRuntimeManaged),
+			Source:            incidentSweepSource,
+			DeploymentSeconds: deploymentSweepSeconds,
+		},
+		OverrideRules:            effective.OverrideRules,
+		RetentionPolicy:          effective.RetentionPolicy,
+		SubscriptionCostSettings: newSubscriptionCostSettingsResponse(effective.SubscriptionCost),
+		IPQualitySettings:        effective.IPQuality,
+		SettingsSource:           settingsSource(effective),
 	}
+}
+
+func settingsSource(record centersettings.CenterSettings) centersettings.ConfigSource {
+	if record.Effective.Persisted {
+		return centersettings.ConfigSourceDatabase
+	}
+	return centersettings.ConfigSourceDefault
+}
+
+func telegramMode(record centersettings.TelegramSettings) string {
+	if !record.RuntimeManaged {
+		return "inherit"
+	}
+	if record.Enabled() {
+		return "override"
+	}
+	return "disabled"
+}
+
+func incidentSweepMode(runtimeManaged bool) string {
+	if runtimeManaged {
+		return "override"
+	}
+	return "inherit"
 }
 
 func mergeSubscriptionCostSettingsUpdate(current centersettings.SubscriptionCostSettings, input subscriptionCostSettingsUpdateRequest) centersettings.SubscriptionCostSettings {

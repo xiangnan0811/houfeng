@@ -1,5 +1,149 @@
 # 监控与命令审计合同
 
+## Effective deployment settings: bounded ownership and notification reads
+
+This contract covers only the two settings that may have a deployment source:
+Telegram credentials and `incident_defaults.sweep_interval_seconds`. It does
+not create a general environment-backed settings framework. All other settings
+keep their existing persisted-settings behavior.
+
+### Ownership, raw state, and effective state
+
+- `DeploymentDefaults` is an immutable startup snapshot. Its Telegram values
+  and sweep interval come from the successful configuration load; HTTP requests
+  never reread the environment or secret files. `ConfigSource` is limited to
+  `default`, `deployment`, and `database`.
+- The raw `center_settings` row retains Telegram ownership and credentials plus
+  the sweep ownership flag and raw seconds. `ResolveEffectiveSettings` is the
+  single pure boundary that overlays deployment values only when ownership is
+  inherited. A complete database Telegram override wins after restart,
+  process/repository recreation, and upgrade; a disabled database override
+  remains disabled even when deployment credentials exist.
+- `GET /api/settings` with no singleton returns `FreshInstallDefaults` resolved
+  against the startup snapshot, sets `settings_source: "default"`, and does
+  not insert a row. A missing row may therefore still report an effective
+  deployment Telegram channel and `source: "deployment"` (or `default` when
+  no deployment value is configured).
+- A settings mutation inserts defaults only inside its existing atomic write
+  path, locks the row, gives the callback the latest **raw** row, validates,
+  and updates the complete row before commit. The callback must not receive
+  deployment credentials mixed into a record that can be persisted. Saving an
+  unrelated partition (subscription cost, retention, host/probe settings,
+  etc.) preserves both ownership flags and raw Telegram/sweep values: it must
+  not import a deployment token or freeze the currently effective deployment
+  sweep.
+- `GetNotificationSettings` is a narrow read of Telegram and Feishu fields.
+  It trims credentials and resolves Telegram against the startup snapshot
+  without requiring the unrelated settings JSON to decode. A missing row means
+  deployment Telegram plus empty Feishu; a SQL/read error is an error, not an
+  empty/default success. A managed Telegram row with only one credential is
+  corrupt and fails closed; two empty credentials are the valid disabled state.
+- `GetEffectiveIncidentDefaults` resolves the sweep ownership from the same
+  startup snapshot. It returns effective defaults and `exists=false` for a
+  missing row; an existing row's raw sweep value is used when it is page-owned.
+
+Migration `0075_add_settings_deployment_overrides.sql` gives every existing
+settings row `incident_sweep_runtime_managed=true`, preserving its raw seconds
+and timestamps, then makes the column default `false` for future rows. It does
+not create a missing singleton, infer ownership from equality with a default,
+or change a saved `false` on repeat. The current migration/ACL transition must
+scan and compare this non-null ownership column as part of the full-row
+snapshot, verify its future default is `false`, and preserve a saved `false` on
+repeat; runtime settings reads do not become schema migration or seeding work.
+
+### Settings HTTP wire and strict mutation rules
+
+`GET` and `PUT /api/settings` keep the existing full-form core fields, but the
+deployment-aware fields have this safe shape (effective values are top-level):
+
+```json
+{
+  "telegram": {
+    "mode": "inherit",
+    "source": "deployment",
+    "active": true,
+    "chat_id": "chat-A",
+    "token_present": true,
+    "token_masked_summary": "********oken",
+    "deployment": {
+      "configured": true,
+      "chat_id": "chat-A",
+      "token_present": true,
+      "token_masked_summary": "********oken"
+    }
+  },
+  "incident_sweep": {
+    "mode": "inherit",
+    "source": "deployment",
+    "deployment_seconds": 60
+  },
+  "incident_defaults": { "sweep_interval_seconds": 60 },
+  "settings_source": "default"
+}
+```
+
+- `telegram.mode` is `inherit`, `override`, or `disabled`; `telegram.source`
+  reports the effective source. `active` means both effective Telegram
+  credentials are present, not that a provider accepted a delivery.
+  `deployment` is only a safe startup-baseline summary. Raw tokens never
+  appear in the response, errors, logs, or browser DOM.
+- `incident_sweep.mode` is `inherit` or `override`; its current effective
+  seconds remain in `incident_defaults.sweep_interval_seconds`.
+  `deployment_seconds` is the startup deployment value, normalized to the
+  same positive-second rule used by the runtime. `settings_source` is only
+  `default` or `database` for singleton provenance; it is not per-field
+  ownership history.
+- The existing `feishu` response remains safe (`enabled`,
+  `webhook_url_present`, and optional masked summary); it never returns the
+  raw webhook. Other settings keep their existing response shape and secret
+  masking rules.
+- Both methods send `Cache-Control: private, no-store`; unsupported methods
+  return 405, read failures return an explicit error, and failed writes do not
+  publish a partial response.
+- The `telegram` block and `incident_sweep_mode` are optional request fields.
+  Omitting either preserves the lock-held raw value and ownership. Explicit
+  JSON `null`, an outer `null` settings body, wrong types, unknown fields, and
+  unknown/empty modes are rejected. Legacy wire keys
+  `runtime_managed` and `runtime_apply_active` are not aliases and are
+  rejected by the strict decoder.
+- `inherit` rejects any supplied Telegram credential field, clears stored
+  credentials, and clears ownership. It is valid even when deployment Telegram
+  is not configured. `disabled` likewise rejects credential fields, clears
+  stored credentials, and sets ownership so deployment cannot fall back.
+- `override` is merged while the mutation row is locked. An omitted
+  `bot_token` or `chat_id` retains the corresponding **current effective**
+  value; this is not a client-side masked-token round trip. An explicit blank,
+  whitespace-only token, half-configured result, masked token, or `*`-bearing
+  secret is rejected. The final stored pair must be complete.
+- `incident_sweep_mode: "override"` uses the request's positive,
+  range-validated full-form sweep value and sets ownership. `"inherit"`
+  clears ownership and restores the raw program default; the effective value
+  then follows the current deployment snapshot. If the mode is omitted, the
+  echoed effective seconds do not implicitly create an override.
+- Any validation, callback, SQL, or commit error leaves the mutation atomic;
+  callers must not retry an old full snapshot as a substitute for the
+  lock-local merge.
+
+### Effective notification consumers and failure behavior
+
+Incidents, subscription reminders, and Dashboard all use the same narrow
+effective notification source. Telegram dispatch checks only effective
+`Enabled()` and therefore sends inherited deployment credentials; it does not
+silence a channel merely because ownership is inherited. Feishu still requires
+enabled plus a webhook.
+
+- A notification-source error never falls back to process environment values
+  and never re-enables a page-disabled channel. Dispatch returns the existing
+  failed-delivery shape with a safe error, while channel enumeration returns no
+  channels. Subscription reminder delivery keeps its existing dedupe and
+  suppressed/failed record semantics.
+- Dashboard `notification_status` exposes only effective
+  `telegram_configured` and `feishu_configured` booleans. A missing singleton
+  can report Telegram configured when the deployment snapshot is complete;
+  it is not equivalent to all-false. An actual settings/transaction read error
+  fails the dashboard read rather than being shown as “not configured”.
+
+
 ## MonitoringInstance command action durability, global audit, and output TTL
 
 ### 1. Scope / Trigger

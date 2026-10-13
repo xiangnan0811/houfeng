@@ -165,7 +165,7 @@ function renewalItem({ item, renewDate }: DatedRenewal, today: string, baseCurre
 export function notificationChannelGap(overview: DashboardOverview): boolean {
   const observed = overview.total_monitoring_instance_count > 0 || overview.total_target_count > 0
   const status = overview.notification_status
-  const configured = status.telegram_configured || status.telegram_runtime_managed || status.feishu_configured
+  const configured = status.telegram_configured || status.feishu_configured
   return observed && !configured
 }
 

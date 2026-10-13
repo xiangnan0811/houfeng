@@ -353,3 +353,137 @@ func TestAppACLCurrentTransitionHeartbeatSettingsTransformations(t *testing.T) {
 		t.Fatalf("custom heartbeat settings transformation was rejected: %v", err)
 	}
 }
+func TestAppACLCurrentTransitionDeploymentOverrideSuffixClassification(t *testing.T) {
+	t.Run("P74 suffix", func(t *testing.T) {
+		transition := appACLCurrentTransition{
+			profile: appACLCurrentProfileP74,
+			successor: migrationSourceSnapshot{names: []string{
+				"0075_add_settings_deployment_overrides.sql",
+			}},
+		}
+		if got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err != nil || got {
+			t.Fatalf("P74 heartbeat classification = %t, error = %v, want false/nil", got, err)
+		}
+	})
+	t.Run("P74 suffix is required", func(t *testing.T) {
+		transition := appACLCurrentTransition{
+			profile: appACLCurrentProfileP74,
+		}
+		if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err == nil {
+			t.Fatal("classifier accepted P74 without terminal 0075 successor")
+		}
+	})
+	t.Run("duplicate terminal 0075 suffix is rejected", func(t *testing.T) {
+		transition := appACLCurrentTransition{
+			profile: appACLCurrentProfileP74,
+			successor: migrationSourceSnapshot{names: []string{
+				"0075_add_settings_deployment_overrides.sql",
+				"0075_add_settings_deployment_overrides.sql",
+			}},
+		}
+		if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err == nil {
+			t.Fatal("classifier accepted duplicate terminal 0075 successor")
+		}
+	})
+	t.Run("P73 suffix strips terminal 0075", func(t *testing.T) {
+		transition := appACLCurrentTransition{
+			profile: appACLCurrentProfileP73,
+			successor: migrationSourceSnapshot{names: []string{
+				"0074_add_subscription_exchange_rate_month_end.sql",
+				"0075_add_settings_deployment_overrides.sql",
+			}},
+		}
+		if got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err != nil || got {
+			t.Fatalf("P73 heartbeat classification = %t, error = %v, want false/nil", got, err)
+		}
+	})
+	t.Run("interior 0075 suffix is rejected", func(t *testing.T) {
+		transition := appACLCurrentTransition{
+			profile: appACLCurrentProfileP74,
+			successor: migrationSourceSnapshot{names: []string{
+				"0075_add_settings_deployment_overrides.sql",
+				"0076_future.sql",
+			}},
+		}
+		if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err == nil {
+			t.Fatal("classifier accepted nonterminal 0075 successor")
+		}
+	})
+}
+
+func TestAppACLCurrentTransitionDeploymentOverrideSettingsTransformation(t *testing.T) {
+	beforeRaw := []byte(`{"settings_id":"center","incident_defaults":{"stale_threshold_intervals":20},"telegram_bot_token":"before","updated_at":"2025-01-02T03:04:05Z"}`)
+	beforeExcept := []byte(`{"settings_id":"center","telegram_bot_token":"before"}`)
+	afterRaw := []byte(`{"updated_at":"2025-01-02T03:04:05Z","telegram_bot_token":"before","incident_defaults":{"stale_threshold_intervals":20},"incident_sweep_runtime_managed":true,"settings_id":"center"}`)
+	afterExcept := []byte(`{"incident_sweep_runtime_managed":true,"settings_id":"center","telegram_bot_token":"before"}`)
+	before := appACLCurrentTransitionPreflight{
+		settingsDeploymentOverridesMigrationPending: true,
+		settingsRowPresent:                          true,
+		settingsSnapshot:                            beforeRaw,
+		settingsExceptTransition:                    beforeExcept,
+		incidentDefaults:                            []byte(`{"stale_threshold_intervals":20}`),
+		updatedAt:                                   time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC),
+	}
+	if err := verifyAppliedAppACLCurrentTransitionSettings(
+		before,
+		true,
+		before.incidentDefaults,
+		afterRaw,
+		afterExcept,
+		before.updatedAt,
+	); err != nil {
+		t.Fatalf("0075 existing-row settings transformation was rejected: %v", err)
+	}
+	if err := verifyAppliedAppACLCurrentTransitionSettings(
+		before,
+		true,
+		before.incidentDefaults,
+		[]byte(`{"settings_id":"center","incident_defaults":{"stale_threshold_intervals":20},"telegram_bot_token":"before","updated_at":"2025-01-02T03:04:05Z","incident_sweep_runtime_managed":false}`),
+		afterExcept,
+		before.updatedAt,
+	); err == nil || !strings.Contains(err.Error(), "changed settings without a heartbeat policy migration") {
+		t.Fatalf("0075 false ownership transformation error = %v, want exact settings rejection", err)
+	}
+	missing := before
+	missing.settingsRowPresent = false
+	if err := verifyAppliedAppACLCurrentTransitionSettings(missing, false, nil, nil, nil, time.Time{}); err != nil {
+		t.Fatalf("0075 missing-row settings transformation was rejected: %v", err)
+	}
+	t.Run("existing-row corruption remains fail closed", func(t *testing.T) {
+		for name, corrupted := range map[string][]byte{
+			"unrelated field":   []byte(`{"settings_id":"center","incident_defaults":{"stale_threshold_intervals":20},"telegram_bot_token":"tampered","updated_at":"2025-01-02T03:04:05Z","incident_sweep_runtime_managed":true}`),
+			"incident defaults": []byte(`{"settings_id":"center","incident_defaults":{"stale_threshold_intervals":21},"telegram_bot_token":"before","updated_at":"2025-01-02T03:04:05Z","incident_sweep_runtime_managed":true}`),
+			"updated_at":        []byte(`{"settings_id":"center","incident_defaults":{"stale_threshold_intervals":20},"telegram_bot_token":"before","updated_at":"2025-01-02T03:04:06Z","incident_sweep_runtime_managed":true}`),
+		} {
+			t.Run(name, func(t *testing.T) {
+				if err := verifyAppliedAppACLCurrentTransitionSettings(
+					before,
+					true,
+					before.incidentDefaults,
+					corrupted,
+					afterExcept,
+					before.updatedAt,
+				); err == nil || !strings.Contains(err.Error(), "changed settings without a heartbeat policy migration") {
+					t.Fatalf("0075 %s corruption error = %v, want exact settings rejection", name, err)
+				}
+			})
+		}
+	})
+	t.Run("explicit false repeat is preserved", func(t *testing.T) {
+		repeat := appACLCurrentTransitionPreflight{
+			settingsRowPresent:       true,
+			settingsSnapshot:         []byte(`{"settings_id":"center","incident_sweep_runtime_managed":false}`),
+			settingsExceptTransition: []byte(`{"settings_id":"center","incident_sweep_runtime_managed":false}`),
+		}
+		if err := verifyAppliedAppACLCurrentTransitionSettings(
+			repeat,
+			true,
+			nil,
+			repeat.settingsSnapshot,
+			repeat.settingsExceptTransition,
+			time.Time{},
+		); err != nil {
+			t.Fatalf("0075 repeat changed explicit false ownership: %v", err)
+		}
+	})
+}

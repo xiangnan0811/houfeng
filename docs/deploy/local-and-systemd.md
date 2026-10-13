@@ -125,7 +125,41 @@ HOUFENG_TELEGRAM_BOT_TOKEN=
 HOUFENG_TELEGRAM_CHAT_ID=
 ```
 
-`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, an initial password source, and `HOUFENG_SESSION_HMAC_KEY` are required for center startup. Use `HOUFENG_INITIAL_PASSWORD_FILE` instead of `HOUFENG_INITIAL_PASSWORD` when the password is provided by a file or secret mount; the file value takes precedence. Use `HOUFENG_SESSION_HMAC_KEY_FILE` instead of `HOUFENG_SESSION_HMAC_KEY` when the session HMAC secret is provided by a file or secret mount; the file value takes precedence. The session HMAC secret must be at least 32 bytes and must stay stable across restarts; rotating it invalidates existing browser sessions and any agent enrollment/sync token hashes already migrated to the HMAC format. `HOUFENG_PUBLIC_BASE_URL` is optional for center startup, but required to generate one-command install commands and to enable production Host allowlisting. Set it to the externally reachable absolute `http(s)` URL that target agents can access, for example `https://center.example.com` or `http://203.0.113.10:8080`; it must not include query or fragment, and the center normalizes trailing slashes when generating commands. `HOUFENG_TRUSTED_PROXIES` is optional and should only list the exact reverse-proxy CIDRs that are allowed to supply forwarded client IP headers; `0.0.0.0/0` and `::/0` are rejected. `HOUFENG_DATABASE_REQUIRE_TLS=true` makes startup reject database URLs without `sslmode=require`, `sslmode=verify-ca`, or `sslmode=verify-full`; enable it for external/production PostgreSQL. `HOUFENG_PASSWORD_BCRYPT_COST` defaults to Go bcrypt's default cost and can be raised after benchmarking login and password-change latency on the target host. `HOUFENG_LOG_FILE` is optional; when set, center writes application logs to both stdout and the configured file, and startup fails if the file cannot be opened. Telegram is disabled unless both Telegram values are set. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
+`HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, an initial password source, and `HOUFENG_SESSION_HMAC_KEY` are required for center startup. Use `HOUFENG_INITIAL_PASSWORD_FILE` instead of `HOUFENG_INITIAL_PASSWORD` when the password is provided by a file or secret mount; the file value takes precedence. Use `HOUFENG_SESSION_HMAC_KEY_FILE` instead of `HOUFENG_SESSION_HMAC_KEY` when the session HMAC secret is provided by a file or secret mount; the file value takes precedence. The session HMAC secret must be at least 32 bytes and must stay stable across restarts; rotating it invalidates existing browser sessions and any agent enrollment/sync token hashes already migrated to the HMAC format. `HOUFENG_PUBLIC_BASE_URL` is optional for center startup, but required to generate one-command install commands and to enable production Host allowlisting. Set it to the externally reachable absolute `http(s)` URL that target agents can access, for example `https://center.example.com` or `http://203.0.113.10:8080`; it must not include query or fragment, and the center normalizes trailing slashes when generating commands. `HOUFENG_TRUSTED_PROXIES` is optional and should only list the exact reverse-proxy CIDRs that are allowed to supply forwarded client IP headers; `0.0.0.0/0` and `::/0` are rejected. `HOUFENG_DATABASE_REQUIRE_TLS=true` makes startup reject database URLs without `sslmode=require`, `sslmode=verify-ca`, or `sslmode=verify-full`; enable it for external/production PostgreSQL. `HOUFENG_PASSWORD_BCRYPT_COST` defaults to Go bcrypt's default cost and can be raised after benchmarking login and password-change latency on the target host. `HOUFENG_LOG_FILE` is optional; when set, center writes application logs to both stdout and the configured file, and startup fails if the file cannot be opened. The deployment Telegram default is disabled unless both Telegram values are set; the effective channel may still be page-overridden, inherited, or explicitly disabled in the settings singleton. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
+
+`HOUFENG_TELEGRAM_BOT_TOKEN` and `HOUFENG_TELEGRAM_CHAT_ID` are deployment
+defaults, not a one-time import into the database. `HOUFENG_INCIDENT_SWEEP_INTERVAL`
+is likewise the deployment sweep default (normalized to positive whole
+seconds; an omitted value uses the program default of 5 seconds). Center
+captures these inputs in its successful startup snapshot; settings requests do
+not reread `.env`, secret mounts, or the process environment.
+
+When the settings singleton is absent, or its ownership is `inherit`, the
+effective Telegram and sweep values come from that startup snapshot. A page
+`override` persists its own Telegram pair or sweep seconds and wins after
+restart, process/repository recreation, and upgrade. `disabled` persists an
+explicit empty Telegram configuration and prevents deployment fallback.
+Restoring `inherit` clears the page-owned Telegram credentials, or resets the
+raw sweep value to the program default, so the next read uses the current
+deployment snapshot. Saving unrelated settings must not import a deployment
+token or turn an effective inherited sweep into a database override.
+
+`GET /api/settings` is read-only with respect to storage when no singleton
+exists: it returns resolved defaults without seeding a row. `PUT /api/settings`
+uses the locked latest row; an omitted Telegram block or sweep mode preserves
+the raw ownership/value, while explicit modes perform the documented
+inherit/override/disabled action. Both methods are private, `no-store`, and
+never return raw secrets. The deployment-settings overview
+(`GET /api/settings/deployment`) is supervisor-only and an immutable allowlist
+snapshot; it is not a writable environment editor.
+
+For an upgrade, stop old settings writers and follow the applicable migration
+contract before starting the new Center. The persisted ownership and values
+are the authority across the upgrade; changing deployment values takes effect
+only after the new process starts and only for inherited settings. Do not
+reconstruct a repository or import environment values as an upgrade
+substitute.
+
 
 Attachment storage has no implicit backend when Records runtime admission is enabled. `local` requires an absolute private directory that is neither `/` nor another broad system path. S3 deployments set `HOUFENG_ATTACHMENT_BLOB_BACKEND=s3`, endpoint, bucket, and TLS mode, and load credentials through `HOUFENG_ATTACHMENT_S3_ACCESS_KEY_FILE` and `HOUFENG_ATTACHMENT_S3_SECRET_KEY_FILE`; do not put credential values in the environment file. Center and processor must use the same immutable Blob backend and scanner settings.
 
@@ -417,44 +451,75 @@ Before upgrading, take a cold recovery point. Download `compose.yaml`,
 `compose.env.example` asset from the exact target tag. Review the new template
 against the private local `.env`, preserve the selected `COMPOSE_FILE` and its
 mode-specific value, and update `HOUFENG_IMAGE` to the matching immutable tag.
-Then run:
+Stop every old process that can write the application database before running
+the initializer: in Compose this is at least `houfeng` and
+`houfeng-content-processor`; also stop any separately supervised Center,
+importer, or Agent writer. Do not start the target Center while db-init is
+pending.
 
 ```bash
 docker compose config
 docker compose pull
-docker compose up -d
+docker compose stop houfeng houfeng-content-processor
+docker compose run --rm houfeng-secrets-init
+docker compose run --rm houfeng-db-init
+docker compose up -d houfeng houfeng-content-processor
 docker compose ps
 ```
 
+The stop-writers step is part of the cold upgrade boundary: do not let an old
+Center or processor write settings or business data while the scoped migrator
+is changing the schema, and do not use `docker compose up -d` before db-init.
+
 The database initializer applies only a forward transition explicitly supported
-by the target release before Center starts. The current APP migrator accepts only the exact released v0.79.4
-`0062_create_vps_create_idempotency.sql` revision-1 predecessor; it atomically
-applies `0063_tune_heartbeat_incident_policy.sql` and `0064_add_network_rates_valid.sql` and publishes revision 2.
-Fresh databases and exact current revision-2 repeats are also supported. A
-partial, checksum-drifted, unknown-prefix, null-head, or otherwise unknown
-database fails initialization; do not bypass db-init, run ad hoc SQL, or start
-Center manually.
+by the target release before Center starts. The exact contract is the
+[APP ACL current contract](../spec/contracts/platform/app-acl-current.md):
+the embedded current set is the frozen 52-source R1 prefix plus 24 registered
+post-R1 fragments, for 76 sources ending at
+`0075_add_settings_deployment_overrides.sql`; `0075` is an explicit empty
+fragment and adds no APP ACL. The current APP migrator accepts only a fresh
+C75 genesis, the 12 exact registered predecessor profiles
+`P62/P64/P63/P66/P67/P68/P69/P70/P71/P72/P73/P74` and their 3071 explicitly
+registered chains, or an exact C75 repeat. Every predecessor uses its
+registered suffix ending in `0075`; P74 uses `0075` only. The P74 predecessor
+is checked against the independently frozen C74 golden, and the C74→C75
+transition has no ACL delta.
+
+For `center_settings`, `0075` gives an existing row
+`incident_sweep_runtime_managed=true`, then fixes the column default at
+`false`; a missing singleton remains missing, a later new row defaults to
+`false`, and an explicit `false` is not changed by repeat. The transition
+verifies the full settings snapshot, existing fields, and timestamps, and
+requires the terminal column to be boolean `NOT NULL DEFAULT false`. Center
+runtime admission is a single `REPEATABLE READ READ ONLY` snapshot after
+db-init; it performs no DDL/DCL and never upgrades the database.
+
+A partial, checksum-drifted, unknown-prefix, unregistered-chain, null-head,
+or otherwise unknown database fails initialization; do not bypass db-init, run
+ad hoc SQL, or start Center manually.
 
 Before relying on that transition, rehearse both restoration of the complete
 cold recovery point and the target upgrade in an isolated Compose project that
 cannot publish production ports, join the production proxy network, reuse the
-production project name, or start a second Records authority. The rehearsal must
-verify the ledger/manifest chain, settings conversion or preservation, exact
-index shape, runtime admission, Records, and attachments, then remove only the
+production project name, or start a second Records authority. The rehearsal
+must verify the exact registered C75 ledger/manifest chain, P74/`p74_upgrade`
+settings cases, full settings/timestamp preservation, exact index shape,
+runtime no-DDL admission, Records, and attachments, then remove only the
 isolated rehearsal resources. A successful database-only dry run is not a cold
 restore rehearsal.
 
 Do not roll an older image back over a database already migrated by a newer
-incompatible release. For the current migration chain, image-only rollback after revision 2 is not
-supported: rollback means stopping the target stack and restoring the complete
-pre-upgrade cold recovery point together with its matching PostgreSQL,
-attachments, Records authority state, common Compose file, mode file, env
-contract, secrets, and old image set. Switching modes changes only
-`COMPOSE_FILE` and the mode-specific `HOUFENG_PROXY_NETWORK` value; always run
-`docker compose config` before `docker compose up -d`, and never replace or split
-the data/authority identity while switching. If db-init or any post-init
-admission/health check fails, keep Center and the authority stopped until the
-exact old stack has been restored and verified.
+incompatible release. For the current C75 migration chain, image-only rollback
+after a successor has been published is not supported: rollback means stopping
+the target stack and restoring the complete pre-upgrade cold recovery point
+together with its matching PostgreSQL, attachments, Records authority state,
+common Compose file, mode file, env contract, secrets, and old image set.
+Switching modes changes only `COMPOSE_FILE` and the mode-specific
+`HOUFENG_PROXY_NETWORK` value; always run `docker compose config` before
+`docker compose up -d`, and never replace or split the data/authority identity
+while switching. If db-init or any post-init admission/health check fails,
+keep Center and the authority stopped until the exact old stack has been
+restored and verified.
 
 Compose does not include the value behind an environment-sourced secret in its
 service configuration hash. A plain `docker compose up -d` therefore does not

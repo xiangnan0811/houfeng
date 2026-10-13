@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 
@@ -27,7 +26,6 @@ import (
 	"houfeng/internal/center/recordsearch"
 	centersettings "houfeng/internal/center/settings"
 	"houfeng/internal/center/store"
-	"houfeng/internal/center/targets"
 )
 
 func TestBootstrapCenterReturnsOpenPostgresError(t *testing.T) {
@@ -288,6 +286,9 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if gotRouterOptions.PortabilityEnabled || gotRouterOptions.RecordPortabilityHandler != nil {
 		t.Fatal("runtime PortabilityEnabled or handler is on, want default off")
 	}
+	if gotRouterOptions.DeploymentSettingsHandler == nil {
+		t.Fatal("deployment settings router handler is nil")
+	}
 	if !gotRouterOptions.RecordsEnabled || gotRouterOptions.RecordsHandler == nil ||
 		gotRouterOptions.SubjectActivityHandler == nil || gotRouterOptions.VPSOverviewHandler == nil ||
 		gotRouterOptions.RecordWatchesHandler == nil || gotRouterOptions.RecordInboxHandler == nil ||
@@ -438,8 +439,7 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	var gotOpts centerhttp.RouterOptions
 	var gotAddr string
 	var gotHandler http.Handler
-	var gotNotifierCfg config.CenterConfig
-	var gotSettingsRepo centersettings.Repository
+	var gotSettingsSource centersettings.NotificationSettingsSource
 	var gotSessionHMACKey []byte
 
 	builtApp, cleanup, err := bootstrapCenter(context.Background(), cfg, "dev", bootstrapDeps{
@@ -463,9 +463,8 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 			gotSessionHMACKey = append([]byte(nil), key...)
 			return fakeSessionRepository{}, nil
 		},
-		newIncidentNotifier: func(inputCfg config.CenterConfig, repo centersettings.Repository) incidentservice.Notifier {
-			gotNotifierCfg = inputCfg
-			gotSettingsRepo = repo
+		newIncidentNotifier: func(source centersettings.NotificationSettingsSource) incidentservice.Notifier {
+			gotSettingsSource = source
 			return &fakeIncidentNotifier{}
 		},
 		newRouter: func(opts centerhttp.RouterOptions) http.Handler {
@@ -756,14 +755,8 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 	if recorder.Code != http.StatusForbidden {
 		t.Fatalf("cross-site unsafe request status = %d, want 403", recorder.Code)
 	}
-	if gotNotifierCfg.TelegramBotToken != cfg.TelegramBotToken {
-		t.Fatalf("notifier seed bot token = %q, want %q", gotNotifierCfg.TelegramBotToken, cfg.TelegramBotToken)
-	}
-	if gotNotifierCfg.TelegramChatID != cfg.TelegramChatID {
-		t.Fatalf("notifier seed chat id = %q, want %q", gotNotifierCfg.TelegramChatID, cfg.TelegramChatID)
-	}
-	if gotSettingsRepo == nil {
-		t.Fatal("settings repo = nil, want runtime settings repository for notifier wiring")
+	if gotSettingsSource == nil {
+		t.Fatal("notification settings source = nil, want runtime settings repository for notifier wiring")
 	}
 	if string(gotSessionHMACKey) != string(cfg.SessionHMACKey) {
 		t.Fatalf("session HMAC key = %q, want configured key", string(gotSessionHMACKey))
@@ -1231,103 +1224,6 @@ func TestBootstrapWiresSeparateCommandAuditReadRepositoryAndHandler(t *testing.T
 	}
 }
 
-func TestSettingsPresentationRepositoryReturnsEffectiveFreshInstallSettings(t *testing.T) {
-	repo := &fakeCenterSettingsRepository{
-		getSettingsResult: centersettings.Default(),
-	}
-
-	got, err := (settingsPresentationRepository{
-		repo:                  repo,
-		queryer:               fakeSettingsQueryer{scanErr: pgx.ErrNoRows},
-		incidentSweepInterval: 90 * time.Second,
-	}).GetSettings(context.Background())
-	if err != nil {
-		t.Fatalf("GetSettings() error = %v", err)
-	}
-
-	if got.IncidentDefaults.SweepIntervalSeconds != 90 {
-		t.Fatalf("SweepIntervalSeconds = %d, want %d", got.IncidentDefaults.SweepIntervalSeconds, 90)
-	}
-	if len(got.OverrideRules.MonitoringInstanceLabels) != 1 {
-		t.Fatalf("len(MonitoringInstanceLabelOverrides) = %d, want 1", len(got.OverrideRules.MonitoringInstanceLabels))
-	}
-	if got.OverrideRules.MonitoringInstanceLabels[0].Label != "核心" {
-		t.Fatalf("MonitoringInstanceLabelOverrides[0].Label = %q, want %q", got.OverrideRules.MonitoringInstanceLabels[0].Label, "核心")
-	}
-	if got.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier == nil {
-		t.Fatal("HostSampleFrequencyTier override = nil, want legacy core override")
-	}
-	if *got.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier5s {
-		t.Fatalf(
-			"HostSampleFrequencyTier override = %q, want %q",
-			*got.OverrideRules.MonitoringInstanceLabels[0].Overrides.HostSampleFrequencyTier,
-			targets.FrequencyTier5s,
-		)
-	}
-}
-
-func TestSettingsPresentationRepositoryReturnsPersistedSettingsUnchanged(t *testing.T) {
-	record := centersettings.Default()
-	record.HostSampleFrequencyTier = targets.FrequencyTier15m
-	record.IncidentDefaults.SweepIntervalSeconds = 180
-
-	got, err := (settingsPresentationRepository{
-		repo:                  &fakeCenterSettingsRepository{getSettingsResult: record},
-		queryer:               fakeSettingsQueryer{},
-		incidentSweepInterval: 45 * time.Second,
-	}).GetSettings(context.Background())
-	if err != nil {
-		t.Fatalf("GetSettings() error = %v", err)
-	}
-
-	if got.HostSampleFrequencyTier != targets.FrequencyTier15m {
-		t.Fatalf("HostSampleFrequencyTier = %q, want %q", got.HostSampleFrequencyTier, targets.FrequencyTier15m)
-	}
-	if got.IncidentDefaults.SweepIntervalSeconds != 180 {
-		t.Fatalf("SweepIntervalSeconds = %d, want %d", got.IncidentDefaults.SweepIntervalSeconds, 180)
-	}
-	if len(got.OverrideRules.MonitoringInstanceLabels) != 0 {
-		t.Fatalf("len(MonitoringInstanceLabelOverrides) = %d, want 0", len(got.OverrideRules.MonitoringInstanceLabels))
-	}
-}
-
-func TestEnsureLegacyCoreHostSampleOverrideAugmentsExistingCoreRule(t *testing.T) {
-	rules := []centersettings.MonitoringInstanceLabelOverrideRule{{
-		Label: "核心",
-		Overrides: centersettings.SettingsOverrideFields{
-			ProbeFrequencyDefaults: &centersettings.ProbeFrequencyOverride{
-				HTTP: stringPtr(targets.FrequencyTier15m),
-			},
-		},
-	}}
-
-	got := ensureLegacyCoreHostSampleOverride(rules)
-
-	if len(got) != 1 {
-		t.Fatalf("len(rules) = %d, want 1", len(got))
-	}
-	if got[0].Overrides.HostSampleFrequencyTier == nil {
-		t.Fatal("HostSampleFrequencyTier override = nil, want legacy core override added in-place")
-	}
-	if *got[0].Overrides.HostSampleFrequencyTier != targets.FrequencyTier5s {
-		t.Fatalf(
-			"HostSampleFrequencyTier override = %q, want %q",
-			*got[0].Overrides.HostSampleFrequencyTier,
-			targets.FrequencyTier5s,
-		)
-	}
-	if got[0].Overrides.ProbeFrequencyDefaults == nil || got[0].Overrides.ProbeFrequencyDefaults.HTTP == nil {
-		t.Fatal("ProbeFrequencyDefaults.HTTP = nil, want existing override fields preserved")
-	}
-	if *got[0].Overrides.ProbeFrequencyDefaults.HTTP != targets.FrequencyTier15m {
-		t.Fatalf(
-			"ProbeFrequencyDefaults.HTTP = %q, want %q",
-			*got[0].Overrides.ProbeFrequencyDefaults.HTTP,
-			targets.FrequencyTier15m,
-		)
-	}
-}
-
 type fakePostgresDB struct {
 	closed bool
 }
@@ -1338,50 +1234,6 @@ func (f *fakePostgresDB) Close() {
 
 func (f *fakePostgresDB) Pool() *pgxpool.Pool {
 	return nil
-}
-
-type fakeSettingsQueryer struct {
-	scanErr error
-}
-
-func (f fakeSettingsQueryer) QueryRow(context.Context, string, ...any) pgx.Row {
-	return fakePGXRow{scanErr: f.scanErr}
-}
-
-type fakePGXRow struct {
-	scanErr error
-}
-
-func (r fakePGXRow) Scan(dest ...any) error {
-	if r.scanErr != nil {
-		return r.scanErr
-	}
-	if len(dest) > 0 {
-		if value, ok := dest[0].(*int); ok {
-			*value = 1
-		}
-	}
-	return nil
-}
-
-type fakeCenterSettingsRepository struct {
-	getSettingsResult centersettings.CenterSettings
-	getSettingsErr    error
-}
-
-func (f *fakeCenterSettingsRepository) GetSettings(context.Context) (centersettings.CenterSettings, error) {
-	if f.getSettingsErr != nil {
-		return centersettings.CenterSettings{}, f.getSettingsErr
-	}
-	return f.getSettingsResult, nil
-}
-
-func (f *fakeCenterSettingsRepository) MutateSettings(_ context.Context, mutate centersettings.MutateSettingsFunc) (centersettings.CenterSettings, error) {
-	return mutate(f.getSettingsResult)
-}
-
-func stringPtr(value string) *string {
-	return &value
 }
 
 type fakeApp struct{}

@@ -80,6 +80,128 @@ cpu_warning_pct: parsePositiveInteger(form.cpuWarningPct, 'CPU 关注')
 assertThreeLevelThresholdOrder('CPU', cpuWarning, cpuAlert, cpuCritical)
 ```
 
+### Effective settings and deployment snapshot Web contract
+
+#### 1. Scope / Trigger
+
+This section applies to `/api/settings`, the notification/monitoring
+settings sections, and the supervisor-only `/api/settings/deployment` tab. It
+covers only deployment defaults for Telegram and incident sweep; it does not
+turn the rest of the Settings form or browser appearance preferences into
+environment-backed configuration.
+
+#### 2. Signatures
+
+- `GET/PUT /api/settings` returns the existing full-form settings plus the
+  safe `telegram`, `incident_sweep`, and `settings_source` fields defined by
+  the [effective settings backend contract](monitoring.md#effective-deployment-settings-bounded-ownership-and-notification-reads).
+- `GET /api/settings/deployment` returns
+  `{ "items": [{ "key", "group", "source", "value", "configured",
+  "sensitive", "application" }] }`. `group` is one of
+  `process|database|notifications|monitoring|authentication|records|storage`;
+  `source` is `environment|file|default|unset`; `application` is
+  `startup|bootstrap_only|fallback|inactive|reservation_only`.
+- `value` is `string | null`; a sensitive item always uses `null`, while an
+  ordinary empty string is represented by `configured: false`. The snapshot
+  is an allowlist, not a reflection of `CenterConfig` or all environment keys.
+- `/api/settings/deployment` is read-only from the browser; `/api/settings`
+  keeps its authenticated GET/PUT mutation contract. Both endpoints use
+  `Cache-Control: private, no-store`. Deployment settings are available only
+  to an active supervisor through the server's current session check; hiding a
+  tab is not an authorization boundary.
+
+#### 3. Contracts
+
+- Settings response values are effective values, not an editable raw
+  snapshot. Telegram displays `mode`, effective `source`, `active`,
+  `chat_id`, `token_present`, an optional masked summary, and a safe
+  `deployment` baseline (`configured`, `chat_id`, `token_present`, optional
+  masked summary). It never renders a raw token. `active` means a complete
+  credential pair exists, not successful provider delivery.
+- The Telegram UI presents **继承部署配置 / 页面覆盖 / 停用**. A disabled
+  channel remains visible so it can be restored. The sweep control presents
+  **继承部署 / 页面覆盖** and uses `deployment_seconds` as the read-only
+  inherited value; no other incident field gains an environment override.
+  Switching to inherit must not discard the local override seconds: switching
+  back to override before saving restores that draft value.
+  While inherit is selected, validation and submission use the displayed deployment
+  seconds, not a preserved (possibly invalid) hidden override draft.
+- A frontend draft is not effective until the `PUT` succeeds. The form keeps
+  non-sensitive draft values and the current effective summary on cancel or a
+  failed save, but must not claim a failed draft is active. Switching tabs or
+  leaving the page uses the existing dirty-section protection. Disable and
+  restore are draft actions: restore confirms that saving will clear the page
+  override and reuse deployment values; it clears local token input before
+  submitting. The token input is always blank/password-typed and says that
+  leaving it blank retains the current effective token only for an override
+  merge; a masked summary is never a secret input.
+- `buildUpdateInput` sends `telegram` only when its mode/chat/token draft
+  differs from the loaded baseline, and sends `incident_sweep_mode` only when
+  sweep ownership or value differs. An omitted block therefore preserves
+  lock-held server state; the page must not serialize an effective deployment
+  token as a new database override. After save it re-derives active channels
+  from the fresh response instead of retaining a stale local `Set`.
+  If a save response arrives after a newer edit, rebase untouched draft fields
+  onto that response and retain only genuinely newer edits. Telegram credentials
+  and sweep ownership/value remain coherent groups; unrelated edits must not
+  convert another session's disabled channel or sweep override into inheritance.
+  Already-saved secret input is cleared rather than replayed on the next save.
+- The deployment tab has independent loading, error, retry, and cancellation
+  states, has no save button, and never joins the ordinary settings payload.
+  Direct navigation must show capability loading/error/forbidden states; a
+  normal active admin receives 403 from the API and no deployment values.
+- On narrow screens, Telegram status/edit actions and mode controls wrap within
+  their section; overflow clipping must not hide an action or mode choice.
+- The deployment response is an explicit allowlist snapshot from successful
+  process startup. It does not reflect later edits to `.env`, secret mounts,
+  Docker interpolation, or deployment files until a process restart. Secret
+  values are `null`; secret-file/keyring paths, raw DSNs, passwords, HMAC
+  material, webhook/token contents, and arbitrary environment variables are
+  never returned. Free-text endpoints are reduced to safe configured
+  summaries when their shape could contain credentials or query material.
+  `bootstrap_only` items explain that they affect only empty-user bootstrap;
+  `reservation_only` items are reserved paths/inputs, not proof a runtime
+  component loaded a key; `inactive` items are not presented as active
+  runtime settings.
+- `fallback` describes a deployment input that a notification/monitoring
+  consumer may use only when the settings ownership is inherited; it does not
+  override a database page choice.
+- Compose project names, image tags, proxy networks, database provisioning
+  passwords, and other orchestration inputs remain outside this endpoint; the
+  page directs operators to deployment files.
+- Existing privacy, local appearance, subscription persistence, and ordinary
+  settings boundaries remain unchanged. Deployment configuration is read-only
+  display, not a second writable settings form.
+
+#### 4. Validation & Error Matrix
+
+| Condition | Expected behavior |
+| --- | --- |
+| Settings GET/PUT succeeds | Effective source/mode and safe deployment summary are visible; no raw secret |
+| Telegram disable or restore is drafted then cancelled | No PUT; current effective state remains visible |
+| Save fails after a non-sensitive edit | Draft remains, effective summary does not change, retry is available |
+| Deployment tab loading/error/retry | Only the tab state changes; ordinary settings draft/payload is untouched |
+| Unauthenticated deployment request | 401 with no snapshot |
+| Active non-supervisor deployment request | 403 with no snapshot |
+| Non-GET deployment request | 405 |
+| Startup `.env` changes without restart | Snapshot remains unchanged |
+| deployment item is sensitive/inactive/bootstrap-only/reserved | Value is null or safe status; no content/path is disclosed |
+
+#### 5. Tests Required
+
+- Settings page tests cover inherit/override/disabled, omitted-token merge,
+  restore confirmation, cancellation, failed save, dirty tab protection,
+  effective-channel re-derivation, and sweep ownership/value payload
+  minimization.
+- Deployment page/API tests cover supervisor 200, unauthenticated 401,
+  normal-admin 403, non-GET 405, startup-source snapshot behavior, explicit
+  group/application allowlist, secret `value:null`, no DSN/path/key material,
+  inactive/bootstrap-only/reservation-only labeling, and retry/cancellation.
+- Browser acceptance uses the real loopback Center and isolated database,
+  including normal-admin denial; frontend fixtures cannot claim backend,
+  provider, restart, migration, or production acceptance.
+
+
 ### MonitoringInstance onboarding 一键安装数据流
 
 #### 1. Scope / Trigger

@@ -316,7 +316,7 @@ type fakeVPSHeartbeatPolicySource struct {
 	calls    int
 }
 
-func (f *fakeVPSHeartbeatPolicySource) GetPersistedIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error) {
+func (f *fakeVPSHeartbeatPolicySource) GetEffectiveIncidentDefaults(context.Context) (centersettings.IncidentDefaults, bool, error) {
 	f.calls++
 	return f.defaults, f.exists, f.err
 }

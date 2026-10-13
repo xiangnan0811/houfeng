@@ -51,10 +51,8 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 			MaintenanceTargetCount:             0,
 		}},
 		NotificationStatus: incidents.DashboardNotificationStatus{
-			TelegramConfigured:         true,
-			TelegramRuntimeManaged:     true,
-			TelegramRuntimeApplyActive: true,
-			FeishuConfigured:           false,
+			TelegramConfigured: true,
+			FeishuConfigured:   false,
 		},
 		AssetSummary: incidents.DashboardAssetSummary{
 			RenewalDue30dSubscriptionCount: 3,
@@ -171,8 +169,8 @@ func TestDashboardHandlerReturnsOverview(t *testing.T) {
 	if !ok {
 		t.Fatalf("body = %#v, want notification_status object", body)
 	}
-	if notificationStatus["telegram_configured"] != true || notificationStatus["telegram_runtime_apply_active"] != true || notificationStatus["feishu_configured"] != false {
-		t.Fatalf("notification status = %#v, want boolean-only snake_case status", notificationStatus)
+	if notificationStatus["telegram_configured"] != true || notificationStatus["feishu_configured"] != false {
+		t.Fatalf("notification status = %#v, want effective boolean-only snake_case status", notificationStatus)
 	}
 	for _, secretKey := range []string{"telegram_bot_token", "telegram_chat_id", "feishu_webhook_url", "TelegramConfigured"} {
 		if _, ok := notificationStatus[secretKey]; ok {

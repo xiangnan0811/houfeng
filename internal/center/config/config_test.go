@@ -9,6 +9,7 @@ import (
 
 	"houfeng/internal/center/attachments"
 	centerconfig "houfeng/internal/center/config"
+	centersettings "houfeng/internal/center/settings"
 )
 
 // setRequiredAuth sets the bcrypt-seed credentials so other Load* tests can
@@ -344,8 +345,8 @@ func TestLoadCenterConfigParsesOptionalIncidentAndTelegramSettings(t *testing.T)
 	if cfg.HTTPAddr != ":9090" || cfg.WebDistDir != "web/custom-dist" {
 		t.Fatalf("cfg = %#v, want parsed optional config", cfg)
 	}
-	if cfg.IncidentSweepInterval.Seconds() != 90 {
-		t.Fatalf("IncidentSweepInterval = %s, want 90s", cfg.IncidentSweepInterval)
+	if cfg.IncidentSweepInterval.Seconds() != 90 || cfg.IncidentSweepSource != centersettings.ConfigSourceDeployment {
+		t.Fatalf("Incident sweep = (%s,%q), want 90s/deployment", cfg.IncidentSweepInterval, cfg.IncidentSweepSource)
 	}
 	if cfg.LogFile != "/var/log/houfeng/center.log" {
 		t.Fatalf("LogFile = %q, want trimmed file path", cfg.LogFile)
@@ -355,6 +356,32 @@ func TestLoadCenterConfigParsesOptionalIncidentAndTelegramSettings(t *testing.T)
 	}
 	if len(cfg.TrustedProxies) != 2 || cfg.TrustedProxies[0] != "127.0.0.1/32" || cfg.TrustedProxies[1] != "10.0.0.0/8" {
 		t.Fatalf("TrustedProxies = %#v, want parsed CIDRs", cfg.TrustedProxies)
+	}
+}
+
+func TestLoadCenterConfigDefaultsIncidentSweepSourceWhenUnset(t *testing.T) {
+	setRequiredAuth(t)
+	t.Setenv("HOUFENG_DATABASE_URL", "postgres://example")
+	t.Setenv("HOUFENG_RECORDS_ENABLED", "false")
+	t.Setenv("HOUFENG_RECORD_PERMANENT_DELETE_ENABLED", "false")
+	previous, existed := os.LookupEnv("HOUFENG_INCIDENT_SWEEP_INTERVAL")
+	if err := os.Unsetenv("HOUFENG_INCIDENT_SWEEP_INTERVAL"); err != nil {
+		t.Fatalf("unset incident sweep interval: %v", err)
+	}
+	t.Cleanup(func() {
+		if existed {
+			_ = os.Setenv("HOUFENG_INCIDENT_SWEEP_INTERVAL", previous)
+		} else {
+			_ = os.Unsetenv("HOUFENG_INCIDENT_SWEEP_INTERVAL")
+		}
+	})
+
+	cfg, err := centerconfig.LoadCenterConfig()
+	if err != nil {
+		t.Fatalf("LoadCenterConfig() error = %v", err)
+	}
+	if cfg.IncidentSweepInterval != 5*time.Second || cfg.IncidentSweepSource != centersettings.ConfigSourceDefault {
+		t.Fatalf("Incident sweep = (%s,%q), want 5s/default", cfg.IncidentSweepInterval, cfg.IncidentSweepSource)
 	}
 }
 

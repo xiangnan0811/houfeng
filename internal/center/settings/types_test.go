@@ -813,3 +813,114 @@ func TestSettingsValidateTreatsZeroIPQualityAsExplicitDisable(t *testing.T) {
 		t.Fatalf("IPQuality = %#v, want remaining defaults filled in", got.IPQuality)
 	}
 }
+func TestFreshInstallDefaultsIncludesLegacyCoreOverride(t *testing.T) {
+	t.Parallel()
+
+	defaults := FreshInstallDefaults()
+	if len(defaults.OverrideRules.MonitoringInstanceLabels) != 1 {
+		t.Fatalf("fresh-install monitoring overrides = %#v, want one core rule", defaults.OverrideRules.MonitoringInstanceLabels)
+	}
+	rule := defaults.OverrideRules.MonitoringInstanceLabels[0]
+	if rule.Label != "核心" || rule.Overrides.HostSampleFrequencyTier == nil ||
+		*rule.Overrides.HostSampleFrequencyTier != targets.FrequencyTier5s {
+		t.Fatalf("fresh-install core rule = %#v, want 5s host tier", rule)
+	}
+}
+
+func TestNormalizeIncidentSweepIntervalRoundsAndDefaults(t *testing.T) {
+	t.Parallel()
+
+	for _, test := range []struct {
+		name     string
+		interval time.Duration
+		want     int
+	}{
+		{name: "negative defaults", interval: -time.Second, want: 5},
+		{name: "zero defaults", interval: 0, want: 5},
+		{name: "subsecond fallback", interval: 499 * time.Millisecond, want: 5},
+		{name: "half second rounds up", interval: 500 * time.Millisecond, want: 1},
+		{name: "one and a half seconds rounds up", interval: 1500 * time.Millisecond, want: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := NormalizeIncidentSweepInterval(test.interval)
+			if got != test.want {
+				t.Fatalf("NormalizeIncidentSweepInterval(%s) = %d, want %d", test.interval, got, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveEffectiveSettingsUsesDeploymentAndDatabaseOwnership(t *testing.T) {
+	t.Parallel()
+
+	deployment := DeploymentDefaults{
+		Telegram:                     TelegramSettings{BotToken: "deployment-token", ChatID: "deployment-chat"},
+		IncidentSweepIntervalSeconds: 60,
+		IncidentSweepSource:          ConfigSourceDeployment,
+	}
+
+	inherited := FreshInstallDefaults()
+	inherited.Effective.Persisted = false
+	got := ResolveEffectiveSettings(inherited, deployment)
+	if got.Telegram.BotToken != "deployment-token" || got.Telegram.ChatID != "deployment-chat" ||
+		got.Telegram.RuntimeManaged || got.Effective.TelegramSource != ConfigSourceDeployment {
+		t.Fatalf("inherited Telegram = %#v, source=%q", got.Telegram, got.Effective.TelegramSource)
+	}
+	if got.IncidentDefaults.SweepIntervalSeconds != 60 || got.Effective.IncidentSweepSource != ConfigSourceDeployment {
+		t.Fatalf("inherited sweep = %d source=%q", got.IncidentDefaults.SweepIntervalSeconds, got.Effective.IncidentSweepSource)
+	}
+
+	overridden := FreshInstallDefaults()
+	overridden.Effective.Persisted = true
+	overridden.Telegram = TelegramSettings{BotToken: "stored-token", ChatID: "stored-chat", RuntimeManaged: true}
+	overridden.IncidentSweepRuntimeManaged = true
+	overridden.IncidentDefaults.SweepIntervalSeconds = 17
+	got = ResolveEffectiveSettings(overridden, deployment)
+	if got.Telegram.BotToken != "stored-token" || got.Telegram.ChatID != "stored-chat" ||
+		got.Effective.TelegramSource != ConfigSourceDatabase {
+		t.Fatalf("overridden Telegram = %#v, source=%q", got.Telegram, got.Effective.TelegramSource)
+	}
+	if got.IncidentDefaults.SweepIntervalSeconds != 17 || got.Effective.IncidentSweepSource != ConfigSourceDatabase ||
+		!got.Effective.Persisted {
+		t.Fatalf("overridden sweep/meta = %d/%#v", got.IncidentDefaults.SweepIntervalSeconds, got.Effective)
+	}
+
+	disabled := FreshInstallDefaults()
+	disabled.Telegram.RuntimeManaged = true
+	disabled.IncidentSweepRuntimeManaged = true
+	disabled.IncidentDefaults.SweepIntervalSeconds = 5
+	got = ResolveEffectiveSettings(disabled, deployment)
+	if got.Telegram.Enabled() || got.Effective.TelegramSource != ConfigSourceDatabase {
+		t.Fatalf("disabled Telegram = %#v, source=%q", got.Telegram, got.Effective.TelegramSource)
+	}
+}
+
+func TestResolveEffectiveSettingsDefaultsSourcesAndPreservesRawInput(t *testing.T) {
+	t.Parallel()
+
+	stored := Default()
+	before, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatalf("json.Marshal(stored) error = %v", err)
+	}
+	got := ResolveEffectiveSettings(stored, DeploymentDefaults{})
+	if got.Effective.Persisted {
+		t.Fatal("effective missing-row defaults marked persisted")
+	}
+	if got.Effective.TelegramSource != ConfigSourceDefault || got.Effective.IncidentSweepSource != ConfigSourceDefault {
+		t.Fatalf("effective sources = %#v, want default/default", got.Effective)
+	}
+	if got.IncidentDefaults.SweepIntervalSeconds != 5 {
+		t.Fatalf("effective sweep = %d, want default 5", got.IncidentDefaults.SweepIntervalSeconds)
+	}
+	after, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatalf("json.Marshal(stored after resolve) error = %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("ResolveEffectiveSettings mutated raw input: before=%s after=%s", before, after)
+	}
+	if strings.Contains(string(after), "Effective") {
+		t.Fatalf("effective metadata leaked into settings JSON: %s", after)
+	}
+}
