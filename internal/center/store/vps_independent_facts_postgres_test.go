@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"houfeng/internal/center/renewals"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 )
@@ -124,5 +125,72 @@ func TestVPSAddressValidationPostgres(t *testing.T) {
 	fixed, err := repo.PatchVPSAsset(ctx, vps.VPSID, vpsassets.PatchInput{IPv4: vpsassets.PatchString(" 203.0.113.21 ")})
 	if err != nil || fixed.IPv4 != "203.0.113.21" {
 		t.Fatalf("valid ipv4 patch failed: %+v %v", fixed, err)
+	}
+}
+
+// 升级前存入的非法地址可以直接清空：清空是一次真实的地址变更，必须写入 IP 历史（来源取存量文本去掉首尾空白），
+// 不能因为旧值不可解析而被校验拦下；之后重复提交空值或只改其他字段都不再记史。
+func TestVPSClearLegacyInvalidAddressRecordsIPHistoryPostgres(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	pool := openTemporaryAssetLifecyclePostgresSchema(t, ctx)
+	repo := NewPostgresVPSAssetRepository(pool)
+	historyRepo := NewPostgresRenewalDecisionRepository(pool)
+	vps, err := repo.CreateVPSAsset(ctx, vpsassets.CreateInput{DisplayName: "legacy clear", IPv4: "203.0.113.30", IPv6: "2001:db8::30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `update vps_assets set ipv4=' 999.1.1 ', ipv6='not-an-ipv6' where vps_id=$1`, vps.VPSID); err != nil {
+		t.Fatal(err)
+	}
+	histories := func() []renewals.IPHistoryRecord {
+		t.Helper()
+		records, err := historyRepo.ListIPHistoriesForVPS(ctx, vps.VPSID)
+		if err != nil {
+			t.Fatalf("ListIPHistoriesForVPS() error = %v", err)
+		}
+		return records
+	}
+	before := len(histories())
+
+	cleared, err := repo.PatchVPSAsset(ctx, vps.VPSID, vpsassets.PatchInput{IPv4: vpsassets.PatchString("")})
+	if err != nil {
+		t.Fatalf("clearing legacy invalid ipv4 failed: %v", err)
+	}
+	if cleared.IPv4 != "" || cleared.IPv6 != "not-an-ipv6" {
+		t.Fatalf("after clearing ipv4 = %q ipv6 = %q, want empty ipv4 and untouched legacy ipv6", cleared.IPv4, cleared.IPv6)
+	}
+	records := histories()
+	if len(records) != before+1 {
+		t.Fatalf("ip histories after clearing ipv4 = %d, want %d", len(records), before+1)
+	}
+	if got := records[0]; got.FromIPv4 != "999.1.1" || got.ToIPv4 != "" || got.FromIPv6 != "not-an-ipv6" || got.ToIPv6 != "not-an-ipv6" {
+		t.Fatalf("latest ip history = %+v, want 999.1.1 -> empty with ipv6 carried unchanged", got)
+	}
+
+	// 整表单回传：IPv4 已为空、IPv6 仍是存量非法文本，只改备注时不校验未改动的地址，也不记史。
+	if _, err := repo.PatchVPSAsset(ctx, vps.VPSID, vpsassets.PatchInput{
+		IPv4: vpsassets.PatchString(""), IPv6: vpsassets.PatchString("not-an-ipv6"), Note: vpsassets.PatchString("cleared"),
+	}); err != nil {
+		t.Fatalf("resubmitting cleared ipv4 with legacy ipv6 failed: %v", err)
+	}
+	if got := len(histories()); got != before+1 {
+		t.Fatalf("ip histories after unchanged resubmit = %d, want %d", got, before+1)
+	}
+
+	// 存量非法 IPv6 同样可以清空并记史。
+	clearedIPv6, err := repo.PatchVPSAsset(ctx, vps.VPSID, vpsassets.PatchInput{IPv6: vpsassets.PatchString(" ")})
+	if err != nil {
+		t.Fatalf("clearing legacy invalid ipv6 failed: %v", err)
+	}
+	if clearedIPv6.IPv6 != "" {
+		t.Fatalf("after clearing ipv6 = %q, want empty", clearedIPv6.IPv6)
+	}
+	records = histories()
+	if len(records) != before+2 {
+		t.Fatalf("ip histories after clearing ipv6 = %d, want %d", len(records), before+2)
+	}
+	if got := records[0]; got.FromIPv6 != "not-an-ipv6" || got.ToIPv6 != "" || got.FromIPv4 != "" || got.ToIPv4 != "" {
+		t.Fatalf("latest ip history = %+v, want not-an-ipv6 -> empty", got)
 	}
 }

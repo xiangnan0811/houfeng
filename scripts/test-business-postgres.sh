@@ -30,6 +30,7 @@ anchors=(
   TestPostgresIntegrationCPUSamplingValidity
   TestPostgresIntegrationResourcePressureWindows
   TestVPSAddressValidationPostgres
+  TestVPSClearLegacyInvalidAddressRecordsIPHistoryPostgres
   TestPostgresIntegrationSubscriptionCostBackfilledStartMonth
   TestPostgresIntegrationSubscriptionCostEstimatesPreRateMonths
   TestPostgresIntegrationSubscriptionMonthEndRatesFeedOnlyTheTrend
