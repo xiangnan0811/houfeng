@@ -148,6 +148,13 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeFactsAndStreamEligibility(t
 		t.Fatalf("publish stream samples: %v", err)
 	}
 
+	var evidence runtimefacts.OnlineEvidenceStreamMessage
+	if err := wsjson.Read(streamCtx, conn, &evidence); err != nil {
+		t.Fatalf("read initial online evidence: %v", err)
+	}
+	if evidence.Type != "online_evidence" || evidence.MonitoringInstanceID != "mi_runtime_facts" || evidence.ReadAt.IsZero() {
+		t.Fatalf("initial online evidence = %#v", evidence)
+	}
 	var message runtimefacts.HostSampleStreamMessage
 	if err := wsjson.Read(streamCtx, conn, &message); err != nil {
 		t.Fatalf("read stream message: %v", err)

@@ -48,6 +48,7 @@ import type {
   HistoryTab,
   PendingBindingConfirmation,
   PendingRuntimeConfirmation,
+  OnlineEvidenceStatus,
   RuntimeStreamStatus,
   TimeWindow,
 } from './types'
@@ -99,6 +100,8 @@ type MonitoringDetailPageBodyProps = {
   latestSample: HostSample | null
   snapshotReadAt: Date | null
   heartbeatFreshness: HeartbeatFreshness
+  onlineEvidenceStatus: OnlineEvidenceStatus
+  onRetryOnlineEvidence: () => void
   runtimeFactsError: string | null
   runtimeFactsLoading: boolean
   onRetryRuntimeFacts: () => void
@@ -191,6 +194,8 @@ export function MonitoringDetailPageBody({
   latestSample,
   snapshotReadAt,
   heartbeatFreshness,
+  onlineEvidenceStatus,
+  onRetryOnlineEvidence,
   runtimeFactsError,
   runtimeFactsLoading,
   onRetryRuntimeFacts,
@@ -350,6 +355,7 @@ export function MonitoringDetailPageBody({
           <MonitoringDetailStatusBand
             monitoringInstance={monitoringInstance}
             heartbeatFreshness={heartbeatFreshness}
+            onlineEvidenceStatus={onlineEvidenceStatus}
             snapshotReadAt={snapshotReadAt}
             sample={sample}
           />
@@ -374,6 +380,8 @@ export function MonitoringDetailPageBody({
         onOpenBindingConflict={() => setBindingDialogOpen(true)}
         onOpenIncidentHistory={() => onOpenHistory('incidents')}
         heartbeatFreshness={heartbeatFreshness}
+        onlineEvidenceStatus={onlineEvidenceStatus}
+        onRetryOnlineEvidence={onRetryOnlineEvidence}
         snapshotReadAt={snapshotReadAt}
         sample={sample}
       />

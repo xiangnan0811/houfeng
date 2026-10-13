@@ -143,7 +143,7 @@ describe('MonitoringDetailNotices', () => {
     })
     expect(screen.getByText('心跳超时')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '查看事件' })).toBeInTheDocument()
-    expect(screen.queryByText('心跳与采样已落后')).not.toBeInTheDocument()
+    expect(screen.queryByText('可信心跳已超时')).not.toBeInTheDocument()
   })
 
   it('raises stale heartbeat into its own notice when no incident exists', () => {
@@ -152,8 +152,8 @@ describe('MonitoringDetailNotices', () => {
       sample: sample({ observed_at: '2026-04-24T04:00:00Z' }),
     })
     const notice = container.querySelector('.observability-notice--notice')
-    expect(notice).toHaveTextContent('数据陈旧')
-    expect(notice).toHaveTextContent('心跳与采样已落后')
+    expect(notice).toHaveTextContent('心跳超时')
+    expect(notice).toHaveTextContent('可信心跳已超时')
     expect(screen.queryByRole('button', { name: '查看事件' })).not.toBeInTheDocument()
   })
 

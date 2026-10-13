@@ -88,7 +88,9 @@ export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitori
     state,
     setState,
     latestSample,
-    snapshotReadAt,
+    onlineEvidence,
+    onlineEvidenceStatus,
+    retryOnlineEvidence,
     loadedTimeWindow,
     runtimeFactsError,
     runtimeFactsLoading,
@@ -1191,12 +1193,14 @@ export function MonitoringDetailPageContent({ monitoringInstanceId }: { monitori
       monitoringInstance={monitoringInstance}
       runtimeFacts={runtimeFacts}
       latestSample={latestSample}
-      snapshotReadAt={snapshotReadAt}
+      snapshotReadAt={onlineEvidence ? new Date(onlineEvidence.read_at) : null}
+      onlineEvidenceStatus={onlineEvidenceStatus}
+      onRetryOnlineEvidence={retryOnlineEvidence}
       heartbeatFreshness={classifyHeartbeatFreshness(
-        monitoringInstance.last_trusted_online_at ?? undefined,
+        (onlineEvidence ? onlineEvidence.last_trusted_online_at : monitoringInstance.last_trusted_online_at) ?? undefined,
         heartbeatPolicy,
-        snapshotReadAt ?? new Date(0),
-        Boolean(settingsResolved && snapshotReadAt),
+        onlineEvidence ? new Date(onlineEvidence.read_at) : new Date(0),
+        Boolean(settingsResolved && onlineEvidence && onlineEvidenceStatus === 'current'),
       )}
       runtimeFactsError={runtimeFactsError}
       runtimeFactsLoading={runtimeFactsLoading}

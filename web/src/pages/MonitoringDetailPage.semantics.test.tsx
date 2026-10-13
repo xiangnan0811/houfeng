@@ -217,6 +217,32 @@ afterEach(() => {
 })
 
 describe('MonitoringDetailPage source semantics', () => {
+  it('keeps a metadata draft and its concurrency token when online evidence advances', async () => {
+    vi.stubGlobal('WebSocket', MockRuntimeWebSocket)
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/monitoring-instances/mi_001') {
+        return mockJSONResponse(record({ metadata_updated_at: '2026-04-20T00:00:00Z', note: init?.method === 'PATCH' ? 'draft survives' : 'saved' }))
+      }
+      if (path.includes('/runtime-facts')) return mockJSONResponse(facts('24h'))
+      return mockJSONResponse([])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Tokyo Edge' })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole('button', { name: '管理' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '编辑分组、标签与备注' }))
+    fireEvent.change(screen.getByLabelText('备注'), { target: { value: 'draft survives' } })
+    act(() => {
+      MockRuntimeWebSocket.instances[0]?.emitOpen()
+      MockRuntimeWebSocket.instances[0]?.emitMessage({ type: 'online_evidence', monitoring_instance_id: 'mi_001', last_trusted_online_at: '2026-04-28T10:00:00Z', read_at: '2026-04-28T10:00:05Z' })
+    })
+    expect(screen.getByLabelText('备注')).toHaveValue('draft survives')
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(true))
+    const patch = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')?.[1]
+    expect(new Headers(patch?.headers).get('If-Match')).toBe('"2026-04-20T00:00:00Z"')
+  })
   it('keeps the record available and retries when runtime facts fail', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
@@ -361,8 +387,9 @@ describe('MonitoringDetailPage source semantics', () => {
     await waitFor(() => expect(MockRuntimeWebSocket.instances.length).toBe(1))
     const socket = MockRuntimeWebSocket.instances[0]
     if (!socket) throw new Error('expected websocket')
-    act(() => socket.emitOpen())
     act(() => {
+      socket.emitOpen()
+      socket.emitMessage({ type: 'online_evidence', monitoring_instance_id: 'mi_001', last_trusted_online_at: '2026-04-24T10:00:05Z', read_at: '2026-04-24T10:00:05Z' })
       socket.emitMessage({
         type: 'host_sample',
         monitoring_instance_id: 'mi_001',
@@ -401,6 +428,7 @@ describe('MonitoringDetailPage source semantics', () => {
   })
 
   it('marks stale heartbeat copy in the status band', async () => {
+    vi.stubGlobal('WebSocket', MockRuntimeWebSocket)
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
       if (path === '/api/monitoring-instances/mi_001') {
@@ -410,9 +438,14 @@ describe('MonitoringDetailPage source semantics', () => {
       return mockJSONResponse([])
     }))
     const { container } = renderPage()
-    await waitFor(() => expect(screen.getAllByText(/数据陈旧/).length).toBeGreaterThan(0))
-    expect(container.querySelector('.monitoring-detail-status__stale')).toHaveTextContent('数据陈旧')
-    expect(container.querySelector('.observability-notice--notice')).toHaveTextContent('心跳与采样已落后')
+    await waitFor(() => expect(MockRuntimeWebSocket.instances.length).toBe(1))
+    act(() => {
+      MockRuntimeWebSocket.instances[0]?.emitOpen()
+      MockRuntimeWebSocket.instances[0]?.emitMessage({ type: 'online_evidence', monitoring_instance_id: 'mi_001', last_trusted_online_at: '2026-04-24T09:00:00Z', read_at: '2026-04-24T10:00:05Z' })
+    })
+    await waitFor(() => expect(screen.getByText('可信心跳已超时')).toBeInTheDocument())
+    expect(container.querySelector('.monitoring-detail-status__stale')).toHaveTextContent('心跳超时')
+    expect(container.querySelector('.observability-notice--notice')).toHaveTextContent('可信心跳已超时')
   })
 
   it('does not copy sample time onto heartbeat when heartbeat is missing', async () => {

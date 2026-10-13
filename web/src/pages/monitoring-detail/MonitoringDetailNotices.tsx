@@ -6,6 +6,7 @@ import { MonoDigits, Timestamp } from '../../components/atoms/Mono'
 import { formatElapsedSince } from '../../lib/format'
 import type { ActiveIncidentRecord, HostSample, MonitoringInstanceRecord } from '../../lib/types'
 import type { HeartbeatFreshness } from '../monitoring/types'
+import type { OnlineEvidenceStatus } from './types'
 import { MONITORING_INSTANCE_BINDING_CONFLICT_STATUS } from './monitoringDetailConstants'
 
 type NoticeTone = ObservabilityTone
@@ -28,6 +29,8 @@ type Props = {
   onOpenBindingConflict: () => void
   onOpenIncidentHistory: () => void
   heartbeatFreshness?: HeartbeatFreshness
+  onlineEvidenceStatus?: OnlineEvidenceStatus
+  onRetryOnlineEvidence?: () => void
   snapshotReadAt: Date | null
   sample: HostSample | null
 }
@@ -104,6 +107,8 @@ export function MonitoringDetailNotices({
   onOpenBindingConflict,
   onOpenIncidentHistory,
   heartbeatFreshness,
+  onlineEvidenceStatus,
+  onRetryOnlineEvidence,
   snapshotReadAt,
   sample,
 }: Props) {
@@ -124,11 +129,15 @@ export function MonitoringDetailNotices({
     firstIncident?.severity,
   )
   const heartbeatCovered = showActiveIncidents && coversHeartbeat(incidentSummary, incidents)
-  const showStale = !retired && !unbound && heartbeatFreshness?.kind === 'stale' && !heartbeatCovered
-  const showMissingHeartbeat = !retired && !unbound && heartbeatFreshness?.kind === 'missing' && !heartbeatCovered
+  const evidenceCurrent = onlineEvidenceStatus === undefined || onlineEvidenceStatus === 'current'
+  const showStale = evidenceCurrent && !retired && !unbound && heartbeatFreshness?.kind === 'stale' && !heartbeatCovered
+  const showMissingHeartbeat = evidenceCurrent && !retired && !unbound && heartbeatFreshness?.kind === 'missing' && !heartbeatCovered
   const showMaintenance = monitoringInstance.monitoring_status === '维护中'
   const showPause = monitoringInstance.monitoring_status === '暂停'
+  const evidenceUnavailable = onlineEvidenceStatus === 'unavailable'
+  const evidenceInterrupted = onlineEvidenceStatus === 'interrupted'
   const hasAnyNotice =
+    evidenceUnavailable || evidenceInterrupted ||
     showBindingConflict ||
     showActiveIncidents ||
     showStale ||
@@ -145,6 +154,15 @@ export function MonitoringDetailNotices({
 
   return (
     <div className="observability-notices">
+      {evidenceUnavailable || evidenceInterrupted ? (
+        <NoticeRow
+          tone="notice"
+          mark="在线证据"
+          title={evidenceUnavailable ? '在线证据自动更新不可用' : '在线证据更新中断'}
+          detail={snapshotReadAt ? <>保留上次读取结果（<Timestamp value={snapshotReadAt.toISOString()} mode="absolute" />），当前在线状态待确认。</> : '当前在线状态待确认。'}
+          action={<Button variant="ghost" size="sm" aria-label="重试在线证据" onClick={onRetryOnlineEvidence}>重试在线证据</Button>}
+        />
+      ) : null}
       {showBindingConflict ? (
         <NoticeRow
           tone="alert"
@@ -194,8 +212,8 @@ export function MonitoringDetailNotices({
       {showStale ? (
         <NoticeRow
           tone="notice"
-          mark="数据陈旧"
-          title="心跳与采样已落后"
+          mark="心跳超时"
+          title="可信心跳已超时"
           detail={
             <>
               心跳 {relativeStamp(heartbeatAt, snapshotReadAt)}

@@ -189,6 +189,14 @@ type commandAuditActorResponse struct {
 - 直接运行控制动作增加 `control_revision`，即使重复设置相同值，也保护用户后续设置不被先前 VPS 维护结束覆盖。
 - 资料字段（`group`、`labels`、`note`）的并发令牌是 `metadata_updated_at`（迁移 `0073` 回填为既有 `updated_at`，非空，默认 `now()`）。`PATCH /api/monitoring-instances/{id}` 的 `If-Match` 只与它比较，资料写入同时推进 `updated_at` 与 `metadata_updated_at`；同步批次、在线信号、事件摘要、运行控制等写入只推进 `updated_at`，不得让资料编辑因心跳而 409 `metadata conflict`。别人先写入资料时旧令牌仍返回 409，不写入。
 
+### 监控详情在线证据流
+
+- `GET /api/monitoring-instances/{id}/runtime-stream` 是同源、持续会话授权的 WebSocket。可选 `include_samples=false` 仅订阅在线证据；省略或 `true` 保留原 `host_sample` 格式与采样订阅，非法值返回 400。
+- 新消息固定为 `{"type":"online_evidence","monitoring_instance_id":"…","last_trusted_online_at":null,"read_at":"…"}`；两个时间均为 RFC3339，可信在线时间允许 null。建立连接后立即发送，此后每 5 秒发送，不依赖采样到达或采集控制状态。每次用同一数据库查询读取实例持久化 `last_trusted_online_at` 和数据库实际当前时间 `read_at`，不得用进程时钟或样本时间替代。
+- 在线证据包含仅在线证据会话推进的事实；它不恢复采样或命令权限。采样仍执行当前实例绑定、指纹、绑定代际、观测/接收时间及浏览器会话校验。仅在线证据连接不启动采样订阅。
+- 单一发送循环串行写入全部消息，持续会话 watcher 不受采样繁忙或慢写影响。会话失效、实例不存在或任一权威读取错误关闭连接；不保留一个继续提供过期证据的连接。新消息可被旧前端忽略，不修改 Agent 协议、数据库结构、心跳超时策略或事件通知规则。
+- 回归须覆盖初始与周期消息、无样本/暂停/仅在线证据会话、nullable 在线时间、数据库时间来源、会话失效与数据库错误关闭、实例删除、采样身份与代际拒绝。投影须在真实 PostgreSQL 上验证；handler mock 不能替代持久化可信事实与数据库时钟证据。
+
 ### Target 观测新鲜度后端投影
 
 - `TargetRecord.observation_freshness` 与 Dashboard 的 Target 摘要使用同一个服务端投影；它独立于 `current_health_status` / incident，不会自动创建、恢复或修改 incident。

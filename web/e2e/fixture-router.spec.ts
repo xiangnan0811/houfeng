@@ -29,6 +29,22 @@ test('fails closed for an undeclared API request', async ({ page }) => {
   )
 })
 
+test('runtime fixture accepts exact evidence-only URL and rejects undeclared stream queries', async ({ page }) => {
+  const api = await installRouter(page)
+  api.useProfile(unauthenticatedProfile)
+  await api.allowRuntimeStream('mi_contract')
+  await page.goto('/login')
+  await page.evaluate(() => {
+    const base = `ws://${location.host}/api/monitoring-instances/mi_contract/runtime-stream`
+    new WebSocket(`${base}?include_samples=false`)
+    new WebSocket(`${base}?include_samples=false&extra=1`)
+  })
+  const sockets = await api.snapshotRuntimeStreamSockets()
+  expect(sockets.map((socket) => socket.phase)).toEqual(['open', 'error'])
+  expect(sockets[0]?.includeSamples).toBe(false)
+  await expect(api.assertRuntimeStreamsClean()).rejects.toThrow(/extra=1/)
+})
+
 test('requires every mutation fixture to declare its exact body keys', async ({ page }) => {
   const api = await installRouter(page)
   api.useProfile({

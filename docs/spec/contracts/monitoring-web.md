@@ -11,7 +11,7 @@
 ### Runtime WebSocket 持续会话授权
 
 - runtime stream 使用真实 Cookie 经 RequireSession 认证及授权后写入的可信 session context。握手前校验会话；缺 context 返回 401，缺 validator 或权威读取故障返回 500；不存在/过期会话返回 401。握手失败不启动订阅或 watcher，同源规则不变。
-- 已连接后每条满足原实例 fingerprint/epoch/time 条件的消息在写入前重新验证会话；实例与会话查询各最多 2 秒，socket 写入仍最多 5 秒。独立 watcher 每 5 秒执行不续期的会话验证，繁忙消息、空闲或慢写均不能绕过它。
+- 已连接后每条在线证据与满足原实例 fingerprint/epoch/time 条件的采样消息在写入前重新验证会话；实例/在线证据与会话查询各最多 2 秒，socket 写入仍最多 5 秒。独立 watcher 每 5 秒执行不续期的会话验证，繁忙消息、空闲或慢写均不能绕过它。
 - 撤销、自然过期或校验故障均取消 stream 并 CloseNow，正常调度下周期加查询最多 7 秒发起关闭，真实端到端验收给 10 秒上限。清理顺序为 cancel、强制关闭、等待 watcher 退出、关闭订阅；不等待 graceful close 握手。
 - 每次读取最新持久化 expiry，正常 HTTP 续期继续有效；改密保留当前 A 会话/连接，撤销 B 只关闭 B。被动验证不修改 last_seen_at/expires_at。已经通过校验并在途的旧帧不追回，不承诺撤销与网络发送全局原子；不持数据库锁跨网络。
 - 真实 PostgreSQL/RequireSession/WebSocket 回归必须观察首帧、撤销后连接终止、保留会话继续收到合法新样本，并覆盖空闲过期、续期、查询失败、客户端断开与订阅清理；不能用直接 handler mock 替代认证证据。
@@ -354,8 +354,18 @@ MonitoringPage 是运行证据扫描页。主路径是 attention tabs → 可见
 | 无选择且未打开批量操作 | 批量 bar 不渲染 |
 | 打开批量操作但未全选 | 显示范围/选择入口，不显示实际批量动作按钮 |
 
-- 监控详情默认使用 URL 中的历史窗口（缺省24h）；显式进入实时窗口后才连接同源 runtime-stream WebSocket，退出窗口或实例时关闭。连接状态、agent 心跳与主机采样是不同事实：在线状态仅使用 Center 持久化的 record.last_trusted_online_at，包含仅在线证据会话；样本与回填不得覆盖此字段，uptime 不由浏览器递增。命令抽屉在命令待完成时使用有界生命周期的轮询；不要据此给其他页面增加常驻轮询。
+- 监控详情默认使用 URL 中的历史窗口（缺省24h）；所有窗口都连接同源 runtime-stream WebSocket，每个实例最多一条连接。实时窗口订阅采样和在线证据；24h、7d、30d 使用 `include_samples=false` 仅更新页头在线证据，图表保持所选历史快照。切换窗口或实例关闭旧连接，并丢弃旧连接的迟到消息。连接状态、可信心跳与主机采样是独立事实：样本、回填和握手成功不能证明可信在线，uptime 不由浏览器递增。命令抽屉在命令待完成时使用有界生命周期的轮询；不要据此给其他页面增加常驻轮询。
 - 详情 record、runtime-facts、settings、异常、事件与关联各自维护请求代次和局部错误/重试；新窗口未成功读取前不能把旧窗口数据标成新窗口。runtime-facts.read_at 是快照读取时间；最新样本来自服务端当前绑定投影，历史桶可保留旧观测。空桶及 network_rates_valid 非 true 的网络证据保持缺测，有效零值保留。较新的权威空快照可以清除旧绑定样本；迟到的较旧快照不能覆盖其 read_at 之后已收到的新实时证据。
+
+### 监控详情在线证据刷新与中断
+
+- `online_evidence` 的固定格式、数据库时钟和权限边界见 [监控合同](monitoring.md#监控详情在线证据流)。单独保存 `last_trusted_online_at` 和 `read_at`；心跳年龄、心跳新鲜度、采样年龄统一参照最新在线证据 `read_at`。运行指标重读不得改变心跳判断参照时间；图表窗口与采样 uptime 仍使用其原始语义。
+- 只消费匹配实例、有效 RFC3339 时间及当前连接代次的消息；较旧读取快照不能回退已接受证据。在线证据不合并回资料记录，不覆盖 metadata draft、`metadata_updated_at`、运行并发令牌或管理确认。仅在线证据会话的在线时间允许推进，不据此恢复采样权限。
+- 沿用成功读取的心跳策略，默认 5 秒 × 12。正常证据流中达到阈值后的下一条消息显示“可信心跳已超时”与“心跳超时”；新可信心跳清除提示。详情分别显示心跳和采样年龄，不以心跳超时推断采样陈旧，也不新增采样陈旧阈值。
+- 断线或连续 15 秒没有有效在线证据显示“在线证据更新中断”，保留并明确标为上次读取结果，停止作为当前在线结论。已经收到过在线证据的连接按 2 秒间隔重连，重连后收到新证据才恢复判断。
+- 首次握手成功但 15 秒内没有在线证据显示“在线证据自动更新不可用”及手动重试；不得循环重连或猜测服务端版本。恢复到浏览器前台立即检查时效，过期连接重新建立。
+- 实时图表断线重读失败显示局部错误和重试入口，保留并标记旧图表；历史图表不随在线证据滚动。
+- 单元及 Chromium 回归覆盖受控四天长停留并持续心跳/采样、阈值边界和恢复、暂停/低频/仅在线证据/回填的独立性、断线与静默、首次无在线消息、前台恢复、窗口/实例切换、迟到响应、重新绑定和资料编辑。真实浏览器受控时钟不等于经过四天的现场观察；本地模拟、真实 PostgreSQL、真实后端会话验收分别报告。
 
 ## Monitoring detail diagnostics
 
@@ -367,7 +377,7 @@ MonitoringPage 是运行证据扫描页。主路径是 attention tabs → 可见
 
  Abnormal states use a filled notice well: 4px severity rail, tinted surface, mark + title + detail, and the action inside the well next to the copy (`查看事件`, `处置绑定冲突`). Binding conflict, active incidents, stale-without-incident, missing heartbeat on a bound instance, maintenance, pause, runtime-action error, and runtime-metric error share that surface. Never-bound stays the header CTA and does not add a missing-heartbeat well. Incident duration reads 已持续 N, not 持续 N 前. Provider-relation failures belong in the identity row, not here.
 
- The URL-backed default window is 24h, and the single range control sits in the resource-trend section head. It still governs the whole chart section. Only an explicit realtime window opens the runtime WebSocket; the connection word sits beside the control, and connection status is not heartbeat evidence.
+ The URL-backed default window is 24h, and the single range control sits in the resource-trend section head. It still governs the whole chart section. Every window opens the runtime WebSocket for online evidence; only realtime subscribes to samples. Historical charts retain their selected snapshot. The connection word sits beside the control, and connection status is not heartbeat evidence. Interrupted evidence is labelled as a previous read, with no current online conclusion.
 
  The detail column fills the same `.main` well as `/monitoring`; it is not a centered 1600px reading column. Eight equal tiles: CPU, memory (used + swap), disk, Inode, load 1/5/15, I/O wait + disk busy, network in+out, disk read+write. Wide consoles are 4×2, medium 2×4, narrow one column. Plot height is a fixed 200px and does not grow with the viewport. Dual-series tiles share one vertical scale and aligned hover. CPU and I/O wait are never stacked on one axis. Snapshot notes under memory are available and capacity only; swap is a line. Disk notes keep capacity only.
 
