@@ -32,8 +32,8 @@
 
 ### Bug Fixes
 
-* **monitoring:** keep trusted online evidence fresh across detail windows ([f725923](https://github.com/xiangnan0811/houfeng/commit/f7259238944d7f4f8fbefb62be6290410537f2e8))
-* **monitoring:** keep trusted online evidence fresh across detail windows ([a3fbf9c](https://github.com/xiangnan0811/houfeng/commit/a3fbf9c690200fb08d41833929f7c4177b565086))
+* **监控：** 所有趋势窗口自动刷新可信在线证据，修复详情页长期停留后误报心跳超时；24h、7d、30d 图表保持所选历史快照。([#609](https://github.com/xiangnan0811/houfeng/pull/609))
+* **监控：** 在线证据中断时明确标记上次读取结果并提供手动重试；已建立证据流的连接支持自动重连。
 
 ## [1.26.0](https://github.com/xiangnan0811/houfeng/compare/v1.25.0...v1.26.0) (2026-10-12)
 
