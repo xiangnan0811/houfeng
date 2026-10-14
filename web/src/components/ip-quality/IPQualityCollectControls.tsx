@@ -1,8 +1,9 @@
+import { useId } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Button } from '../atoms'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
-import { collectNotice, collectUnavailableLabel } from './ipQualityCollectPresentation'
+import { collectNotice, collectUnavailableLabel, type CollectNoticeView } from './ipQualityCollectPresentation'
 import type { IPQualityCollectController } from './useIPQualityCollect'
 
 type CollectButtonProps = {
@@ -10,39 +11,46 @@ type CollectButtonProps = {
   variant?: 'primary' | 'secondary'
 }
 
+// 立即采集始终是一整轮 IPv4 + IPv6，与当前查看的地址族无关。
 export function IPQualityCollectButton({ collect, variant = 'primary' }: CollectButtonProps) {
+  const hintId = useId()
   // 只读预览不提供写操作入口。
   if (READ_ONLY_PREVIEW) return null
   const unavailable = collect.status != null && !collect.status.available
   const busy = collect.submitting || collect.active
   const label = collect.submitting ? '正在发起…' : collect.active ? '采集中…' : '立即采集'
   return (
-    <Button
-      size="md"
-      variant={variant}
-      className={busy ? 'ipq-collect-button ipq-collect-button--busy' : 'ipq-collect-button'}
-      onClick={collect.start}
-      disabled={busy || unavailable}
-      aria-busy={busy || undefined}
-      title={unavailable ? collectUnavailableLabel(collect.status?.unavailable_reason) : undefined}
-    >
-      {busy ? <span className="ipq-pulse" aria-hidden="true" /> : null}
-      {label}
-    </Button>
+    <span className="ipq-collect">
+      <Button
+        size="md"
+        variant={variant}
+        className={busy ? 'ipq-collect-button ipq-collect-button--busy' : 'ipq-collect-button'}
+        onClick={collect.start}
+        disabled={busy || unavailable}
+        aria-busy={busy || undefined}
+        aria-describedby={hintId}
+        title={unavailable ? collectUnavailableLabel(collect.status?.unavailable_reason) : undefined}
+      >
+        {busy ? <span className="ipq-pulse" aria-hidden="true" /> : null}
+        {label}
+      </Button>
+      <span id={hintId} className="ipq-collect__hint">分别检测 IPv4 / IPv6</span>
+    </span>
   )
 }
 
 type CollectNoticeProps = {
   collect: IPQualityCollectController
+  view: CollectNoticeView
   now?: Date
   vpsId?: string | undefined
 }
 
 // 采集进度与结果条：只在有事可说时出现，不常驻解释文字。
-export function IPQualityCollectNotice({ collect, now = new Date(), vpsId }: CollectNoticeProps) {
+export function IPQualityCollectNotice({ collect, view, now = new Date(), vpsId }: CollectNoticeProps) {
   const notice = collect.error
     ? { tone: 'warning' as const, title: collect.error }
-    : collectNotice(collect.status, collect.watchedRequestId, now, vpsId)
+    : collectNotice(collect.status, collect.watchedRequestId, now, view, vpsId)
   if (!notice) return <div className="ipq-notice-slot" role="status" aria-live="polite" aria-label="IP 质量采集状态" />
 
   return (

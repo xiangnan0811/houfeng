@@ -6,6 +6,8 @@ import (
 	"errors"
 	"strings"
 	"time"
+
+	"houfeng/internal/contracts/agentapi"
 )
 
 var ErrInvalidIPQualityReport = errors.New("invalid ip quality report")
@@ -70,15 +72,15 @@ type ReportWrite struct {
 	RawJSON              json.RawMessage
 	CoverageJSON         json.RawMessage
 	DiagnosticsJSON      json.RawMessage
-	// CollectRequestID 取自 agent 原始 diagnostics_json，只用于完成内存中的立即采集请求，不单独入库。
-	CollectRequestID string
-	ProviderResults  []ProviderResultWrite
-	ServiceUnlocks   []ServiceUnlockWrite
+	// CollectionMetadata is read before diagnostics sanitization, for in-memory request coordination only.
+	CollectionMetadata agentapi.CollectionMetadata
+	ProviderResults    []ProviderResultWrite
+	ServiceUnlocks     []ServiceUnlockWrite
 }
 
 type Repository interface {
 	SaveReports(context.Context, []ReportWrite) error
-	GetVPSIPQuality(context.Context, string) (VPSReport, error)
+	GetVPSIPQuality(context.Context, string, int) (VPSReport, error)
 	GetVPSIPQualityReportDetail(context.Context, string, string) (VPSReport, error)
 	GetLatestVPSIPQualitySummary(context.Context, string) (*Summary, error)
 	ListLatestSummariesForVPS(context.Context, []string) (map[string]Summary, error)
@@ -107,11 +109,31 @@ type Summary struct {
 }
 
 type VPSReport struct {
-	Summary         *Summary             `json:"summary,omitempty"`
-	LatestReport    *Report              `json:"latest_report,omitempty"`
-	ProviderResults []ProviderResultRead `json:"provider_results"`
-	ServiceUnlocks  []ServiceUnlockRead  `json:"service_unlocks"`
-	History         []Summary            `json:"history"`
+	SelectedIPVersion int                  `json:"selected_ip_version"`
+	DefaultIPVersion  int                  `json:"default_ip_version"`
+	Families          []FamilyStatus       `json:"families"`
+	Summary           *Summary             `json:"summary,omitempty"`
+	LatestReport      *Report              `json:"latest_report,omitempty"`
+	ProviderResults   []ProviderResultRead `json:"provider_results"`
+	ServiceUnlocks    []ServiceUnlockRead  `json:"service_unlocks"`
+	History           []Summary            `json:"history"`
+}
+
+// FamilyStatus separates a terminal collection attempt from valid IP facts.
+type FamilyStatus struct {
+	IPVersion           int            `json:"ip_version"`
+	Availability        string         `json:"availability"`
+	LatestAttempt       *FamilyAttempt `json:"latest_attempt"`
+	LatestReportSummary *Summary       `json:"latest_report_summary"`
+}
+
+type FamilyAttempt struct {
+	ObservedAt      time.Time `json:"observed_at"`
+	Stale           bool      `json:"stale"`
+	ReportStatus    string    `json:"report_status"`
+	ErrorCode       string    `json:"error_code,omitempty"`
+	CollectionScope string    `json:"collection_scope"`
+	CollectionID    string    `json:"collection_id,omitempty"`
 }
 
 type Report struct {

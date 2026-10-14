@@ -543,6 +543,19 @@ describe('Records API transport', () => {
     await expect(getVPSOverview('vps_001')).resolves.toEqual(wire)
   })
 
+  it('keeps only a valid default IP-quality family on overview summary cells', async () => {
+    const wire = vpsOverviewResponse()
+    const raw = wire as unknown as { summary: Record<string, Record<string, unknown>> }
+    raw.summary.ip_quality!.ip_version = 6
+    raw.summary.monitoring!.ip_version = 5
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200, wire))
+
+    const overview = await getVPSOverview('vps_001')
+    expect(overview.summary.ip_quality.ip_version).toBe(6)
+    expect(overview.summary.monitoring).not.toHaveProperty('ip_version')
+    expect(overview.summary.renewal).not.toHaveProperty('ip_version')
+  })
+
   it('decodes the shared Go/TS machine-enum golden overview', async () => {
     const golden = JSON.parse(readFileSync(
       resolve(process.cwd(), '../internal/center/vpsoverview/testdata/overview.machine-enums.v1.json'),

@@ -57,15 +57,16 @@ func testPostgresIntegrationAppACLCurrentP72Upgrade(t *testing.T) {
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
 		t.Fatalf("C74 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
-	if len(after.Ledger) != len(before.Ledger)+3 ||
+	if len(after.Ledger) != len(before.Ledger)+4 ||
 		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
-		after.Ledger[len(after.Ledger)-3].Name != appACLCurrentP73Migration ||
-		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP74Migration ||
-		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP75Migration {
-		t.Fatalf("C75 ledger tail = %#v, want predecessor prefix plus 0073, 0074 and 0075 rows", after.Ledger)
+		after.Ledger[len(after.Ledger)-4].Name != appACLCurrentP73Migration ||
+		after.Ledger[len(after.Ledger)-3].Name != appACLCurrentP74Migration ||
+		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP75Migration ||
+		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP76Migration {
+		t.Fatalf("C76 ledger tail = %#v, want predecessor prefix plus 0073 through 0076", after.Ledger)
 	}
-	if !reflect.DeepEqual(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges) ||
-		!reflect.DeepEqual(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges) ||
+	if !appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
+		!appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) {
 		t.Fatalf("C72 to C74 migration changed ACL state\nbefore direct/effective/column/default: %#v/%#v/%#v/%#v\nafter: %#v/%#v/%#v/%#v",

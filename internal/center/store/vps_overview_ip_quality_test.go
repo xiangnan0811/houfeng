@@ -177,7 +177,7 @@ func TestLoadIPQualityEnabledUsesLatestSummaryOnly(t *testing.T) {
 
 	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.UTC)
 	ip := &fakeIPQuality{summary: &ipquality.Summary{
-		Status: "success", RiskLevel: "low", ObservedAt: now,
+		Status: "success", RiskLevel: "low", ObservedAt: now, IPVersion: 6,
 	}}
 	repo := testOverviewRepository(t, ip, &fakeIPQualityAvailability{enabled: true})
 	got, err := repo.LoadIPQuality(context.Background(), "vps_7c2a4e18b09d5f31")
@@ -190,7 +190,7 @@ func TestLoadIPQualityEnabledUsesLatestSummaryOnly(t *testing.T) {
 	if ip.summaryCalls != 1 {
 		t.Fatalf("GetLatestVPSIPQualitySummary calls = %d, want 1", ip.summaryCalls)
 	}
-	if got.Status != "success" || got.RiskLevel != "low" {
+	if got.Status != "success" || got.RiskLevel != "low" || got.IPVersion != 6 {
 		t.Fatalf("ip quality = %#v", got)
 	}
 }
@@ -369,5 +369,42 @@ func TestPostgresSettingsRepositoryIPQualityEnabledIsCheapExtract(t *testing.T) 
 	}
 	if !strings.Contains(joined, "ip_quality_settings") || !strings.Contains(joined, "enabled") {
 		t.Fatalf("sql = %s, want enabled extract from ip_quality_settings", sqls[0])
+	}
+}
+
+func TestOverviewIPQualityFamilyReachesSummaryWithoutInventingMissingFamily(t *testing.T) {
+	now := time.Date(2026, 8, 20, 8, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+		summary *ipquality.Summary
+		want    int
+	}{
+		{"IPv4 default facts", true, &ipquality.Summary{Status: "success", RiskLevel: "low", ObservedAt: now, IPVersion: 4}, 4},
+		{"IPv6 default facts", true, &ipquality.Summary{Status: "partial", ObservedAt: now, IPVersion: 6}, 6},
+		{"missing", true, nil, 0},
+		{"disabled leftover", false, &ipquality.Summary{Status: "success", ObservedAt: now, IPVersion: 6}, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ip := &fakeIPQuality{summary: tc.summary}
+			repo := testOverviewRepository(t, ip, &fakeIPQualityAvailability{enabled: tc.enabled})
+			service, err := vpsoverview.NewServiceWithClock(repo, &overviewActivityLister{}, func() time.Time { return now }, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := service.Get(context.Background(), vpsoverview.Request{Actor: testOverviewServiceActor(t), VPSID: "vps_7c2a4e18b09d5f31"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Summary.IPQuality.IPVersion != tc.want {
+				t.Fatalf("IP quality cell=%#v, want family %d", got.Summary.IPQuality, tc.want)
+			}
+			if got.Summary.Overall.IPVersion != 0 || got.Summary.Monitoring.IPVersion != 0 || got.Summary.Renewal.IPVersion != 0 {
+				t.Fatalf("family leaked to unrelated summary cells: %#v", got.Summary)
+			}
+			if !tc.enabled && ip.summaryCalls != 0 {
+				t.Fatal("disabled source queried facts")
+			}
+		})
 	}
 }

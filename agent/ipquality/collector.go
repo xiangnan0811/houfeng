@@ -3,11 +3,13 @@ package ipquality
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -24,23 +26,27 @@ const (
 )
 
 type Collector interface {
-	Collect(context.Context, *agentapi.IPQualityPlan, time.Time) agentapi.IPQualityReportPayload
+	Collect(context.Context, *agentapi.IPQualityPlan, time.Time) []agentapi.IPQualityReportPayload
 }
 
 type HTTPCollectorOptions struct {
-	Client       *http.Client
-	LookupURL    string
-	ServiceURL   string
-	AgentVersion string
-	Fingerprint  string
-	SyncBatchID  string
-	UserAgent    string
+	Client         *http.Client
+	Client4        *http.Client
+	Client6        *http.Client
+	LocalAddresses func() ([]netip.Addr, error)
+	LookupURL      string
+	ServiceURL     string
+	AgentVersion   string
+	Fingerprint    string
+	SyncBatchID    string
+	UserAgent      string
 }
 
 type HTTPCollector struct {
 	client         *http.Client
 	serviceClient4 *http.Client
 	serviceClient6 *http.Client
+	localAddresses func() ([]netip.Addr, error)
 	lookupURL      string
 	serviceURL     string
 	customLookup   bool
@@ -65,6 +71,16 @@ func NewHTTPCollector(opts HTTPCollectorOptions) *HTTPCollector {
 			serviceClient6 = directHTTPClient("tcp6")
 		}
 	}
+	if opts.Client4 != nil {
+		serviceClient4 = opts.Client4
+	}
+	if opts.Client6 != nil {
+		serviceClient6 = opts.Client6
+	}
+	localAddresses := opts.LocalAddresses
+	if localAddresses == nil {
+		localAddresses = usableLocalAddresses
+	}
 	if lookupURL == "" {
 		lookupURL = defaultLookupURL
 	}
@@ -77,6 +93,7 @@ func NewHTTPCollector(opts HTTPCollectorOptions) *HTTPCollector {
 		client:         client,
 		serviceClient4: serviceClient4,
 		serviceClient6: serviceClient6,
+		localAddresses: localAddresses,
 		lookupURL:      lookupURL,
 		serviceURL:     serviceURL,
 		customLookup:   customLookup,
@@ -112,11 +129,11 @@ func (c *HTTPCollector) WithMetadata(agentVersion, fingerprint, syncBatchID stri
 	return &cloned
 }
 
-func (c *HTTPCollector) Collect(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) agentapi.IPQualityReportPayload {
+func (c *HTTPCollector) Collect(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) []agentapi.IPQualityReportPayload {
 	if !c.customLookup {
 		return c.collectDefault(ctx, plan, observedAt)
 	}
-	return c.collectLegacy(ctx, plan, observedAt)
+	return []agentapi.IPQualityReportPayload{c.collectLegacy(ctx, plan, observedAt)}
 }
 
 func (c *HTTPCollector) collectLegacy(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) agentapi.IPQualityReportPayload {
@@ -189,57 +206,158 @@ func (c *HTTPCollector) collectLegacy(ctx context.Context, plan *agentapi.IPQual
 	return report
 }
 
-func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) agentapi.IPQualityReportPayload {
+// usableLocalAddresses retains private IPv4 and ULA addresses: NAT is not
+// evidence that a family is absent. Only UP non-loopback interfaces count.
+func usableLocalAddresses() ([]netip.Addr, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	var addresses []netip.Addr
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		values, err := iface.Addrs()
+		if err != nil {
+			return nil, err
+		}
+		for _, value := range values {
+			prefix, err := netip.ParsePrefix(value.String())
+			if err == nil && prefix.Addr().IsGlobalUnicast() {
+				addresses = append(addresses, prefix.Addr())
+			}
+		}
+	}
+	return addresses, nil
+}
+
+func familyPlaceholder(ipVersion int) string {
+	if ipVersion == 6 {
+		return "::"
+	}
+	return "0.0.0.0"
+}
+
+func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) []agentapi.IPQualityReportPayload {
 	startedAt := time.Now()
+	collectionID := rand.Text()
+	timeout := 15 * time.Second
+	if plan != nil && plan.TimeoutSeconds > 0 {
+		timeout = time.Duration(plan.TimeoutSeconds) * time.Second
+	}
+	collectCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	reports := make([]agentapi.IPQualityReportPayload, 2)
+	if plan == nil || !plan.Enabled {
+		for index, family := range [2]int{4, 6} {
+			reports[index] = agentapi.IPQualityReportPayload{
+				ObservedAt: observedAt.UTC(), IPAddress: familyPlaceholder(family), IPVersion: family,
+				AgentVersion: c.agentVersion, Fingerprint: c.fingerprint, SyncBatchID: c.syncBatchID,
+				Status: agentapi.IPQualityStatusFailure, ErrorCode: "disabled", ErrorSummary: "ip quality collection disabled",
+				DiagnosticsJSON: diagnosticsJSON(startedAt, nil, nil, family, agentapi.IPQualityFamilyUnknown, collectionID, false, nil),
+			}
+		}
+		return reports
+	}
+	addresses, addressErr := c.localAddresses()
+	availability := [2]string{agentapi.IPQualityFamilyUnavailable, agentapi.IPQualityFamilyUnavailable}
+	if addressErr != nil {
+		availability = [2]string{agentapi.IPQualityFamilyUnknown, agentapi.IPQualityFamilyUnknown}
+	} else {
+		for _, address := range addresses {
+			if !address.IsGlobalUnicast() {
+				continue
+			}
+			index := 1
+			if address.Is4() {
+				index = 0
+			}
+			availability[index] = agentapi.IPQualityFamilyAvailable
+		}
+	}
+	canonicalBudget, dependentBudget, _ := collectionBudgets(timeout)
+	providerSlots, serviceSlots := make(chan struct{}, 4), make(chan struct{}, 7)
+	canonicalSources, _ := defaultProviderSources()
+	canonicalCtx, canonicalCancel := context.WithTimeout(collectCtx, canonicalBudget)
+	var canonical [2][]providerSourceOutcome
+	var workers sync.WaitGroup
+	for index, family := range [2]int{4, 6} {
+		if availability[index] == agentapi.IPQualityFamilyUnavailable {
+			continue
+		}
+		workers.Add(1)
+		go func(index, family int) {
+			defer workers.Done()
+			familyCollector := *c
+			familyCollector.client = c.serviceHTTPClient(family)
+			canonical[index] = familyCollector.collectProviderSources(canonicalCtx, canonicalSources, "", minDuration(canonicalBudget, 5*time.Second), providerSlots, family)
+		}(index, family)
+	}
+	// A global barrier prevents dependent work from taking discovery slots.
+	workers.Wait()
+	canonicalCancel()
+	for index, family := range [2]int{4, 6} {
+		workers.Add(1)
+		go func(index, family int) {
+			defer workers.Done()
+			reports[index] = c.collectDefaultFamily(collectCtx, plan, observedAt, startedAt, collectionID, family, availability[index], canonical[index], dependentBudget, providerSlots, serviceSlots)
+		}(index, family)
+	}
+	workers.Wait()
+	return reports
+}
+
+func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time, startedAt time.Time, collectionID string, ipVersion int, availability string, canonicalOutcomes []providerSourceOutcome, dependentBudget time.Duration, providerSlots, serviceSlots chan struct{}) agentapi.IPQualityReportPayload {
 	report := agentapi.IPQualityReportPayload{
 		ObservedAt:   observedAt.UTC(),
 		AgentVersion: c.agentVersion,
 		Fingerprint:  c.fingerprint,
 		SyncBatchID:  c.syncBatchID,
-		IPAddress:    "0.0.0.0",
-		IPVersion:    4,
+		IPAddress:    familyPlaceholder(ipVersion),
+		IPVersion:    ipVersion,
 		Status:       agentapi.IPQualityStatusFailure,
 	}
-	if plan == nil || !plan.Enabled {
-		report.ErrorCode = "disabled"
-		report.ErrorSummary = "ip quality collection disabled"
+	canonicalSources, targetDependentSources := defaultProviderSources()
+	if availability == agentapi.IPQualityFamilyUnavailable {
+		report.ErrorCode = "address_family_unavailable"
+		report.ErrorSummary = "no usable local address for this IP family"
+		for _, source := range append(canonicalSources, targetDependentSources...) {
+			report.ProviderResults = append(report.ProviderResults, agentapi.IPQualityProviderResultPayload{
+				Provider: source.Name(), Status: sourceStatusSkipped, SourceType: sourceTypeDefault,
+				ErrorCode: report.ErrorCode, ErrorSummary: report.ErrorSummary,
+			})
+		}
+		report.ProviderResults = append(report.ProviderResults, optionalProviderDiagnostics()...)
+		for _, service := range normalizedServices(plan.Services) {
+			source, ok := defaultServiceSource(service)
+			if !ok {
+				report.ServiceUnlocks = append(report.ServiceUnlocks, unsupportedServiceOutcome(service).Result)
+				continue
+			}
+			report.ServiceUnlocks = append(report.ServiceUnlocks, agentapi.IPQualityServiceUnlockPayload{
+				Service: service, Source: source, Status: "unknown", ProbeStatus: sourceStatusSkipped,
+				ErrorCode: report.ErrorCode, ErrorSummary: report.ErrorSummary,
+			})
+		}
+		report.Coverage = coverageFromResults(report.ProviderResults, report.ServiceUnlocks)
+		report.DiagnosticsJSON = diagnosticsJSON(startedAt, nil, nil, ipVersion, availability, collectionID, false, report.ProviderResults)
 		return report
 	}
-	timeout := time.Duration(plan.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 15 * time.Second
-	}
-	collectCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	canonicalBudget, dependentBudget, _ := collectionBudgets(timeout)
-	canonicalSources, targetDependentSources := defaultProviderSources()
-
-	canonicalCtx, canonicalCancel := context.WithTimeout(collectCtx, canonicalBudget)
-	canonicalOutcomes := c.collectProviderSources(canonicalCtx, canonicalSources, "", minDuration(canonicalBudget, 5*time.Second))
-	canonicalCancel()
 	providerOutcomes := append([]providerSourceOutcome(nil), canonicalOutcomes...)
 	discoveryCandidates := map[string]string{}
-	targetIP, ipVersion := "", 0
+	targetIP := ""
+	// Registry order breaks ties within this family, never completion order.
 	for _, outcome := range canonicalOutcomes {
 		if outcome.Result.Status == sourceStatusSuccess && validIPAddress(outcome.IPAddress) {
 			discoveryCandidates[outcome.Result.Provider] = outcome.IPAddress
+			if targetIP == "" {
+				targetIP = outcome.IPAddress
+			}
 		}
 	}
-	// Registry order breaks ties within a family, never completion order.
-	for _, family := range []int{4, 6} {
-		for _, outcome := range canonicalOutcomes {
-			address, ok := ipidentity.Parse(outcome.IPAddress)
-			if outcome.Result.Status != sourceStatusSuccess || !ok || address.IsUnspecified() {
-				continue
-			}
-			if address.Is4() == (family == 4) {
-				targetIP, ipVersion = outcome.IPAddress, family
-				break
-			}
-		}
-		if targetIP != "" {
-			break
-		}
+	if targetIP != "" {
+		availability = agentapi.IPQualityFamilyAvailable
 	}
 	egressAmbiguous := discoveryEgressAmbiguous(canonicalOutcomes)
 	var services []serviceProbeOutcome
@@ -259,18 +377,18 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 		phases.Add(2)
 		go func() {
 			defer phases.Done()
-			dependentCtx, dependentCancel := context.WithTimeout(collectCtx, dependentBudget)
+			dependentCtx, dependentCancel := context.WithTimeout(ctx, dependentBudget)
 			defer dependentCancel()
-			dependentOutcomes = c.collectProviderSources(dependentCtx, dependentSources, targetIP, minDuration(dependentBudget, 5*time.Second))
+			dependentOutcomes = c.collectProviderSources(dependentCtx, dependentSources, targetIP, minDuration(dependentBudget, 5*time.Second), providerSlots, 0)
 		}()
 		go func() {
 			defer phases.Done()
 			requestedServices := normalizedServices(plan.Services)
 			if egressAmbiguous {
-				services = ambiguousServiceOutcomes(requestedServices)
+				services = ambiguousServiceOutcomes(requestedServices, ipVersion)
 				return
 			}
-			services = c.collectDefaultServiceUnlocks(collectCtx, requestedServices, ipVersion)
+			services = c.collectDefaultServiceUnlocksWithSemaphore(ctx, requestedServices, ipVersion, serviceSlots)
 		}()
 		phases.Wait()
 		for index, canonicalIndex := range requeryIndices {
@@ -309,7 +427,7 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 	if len(successfulProviders) == 0 {
 		report.ErrorCode = "lookup_failed"
 		report.ErrorSummary = "all default IP quality provider sources failed"
-		report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, egressAmbiguous, report.ProviderResults)
+		report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, availability, collectionID, egressAmbiguous, report.ProviderResults)
 		report.RawJSON = rawEnvelopeV2(providerRaw, nil, report.DiagnosticsJSON)
 		return report
 	}
@@ -324,7 +442,7 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 		serviceRaw[outcome.Result.Service] = sourceRawEnvelopeFromService(outcome)
 	}
 	report.Coverage = coverageFromResults(report.ProviderResults, report.ServiceUnlocks)
-	report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, egressAmbiguous, report.ProviderResults)
+	report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, availability, collectionID, egressAmbiguous, report.ProviderResults)
 	report.RawJSON = rawEnvelopeV2(providerRaw, serviceRaw, report.DiagnosticsJSON)
 	report.Status = agentapi.IPQualityStatusSuccess
 	if hasDefaultSourceFailure(report.ProviderResults) || hasServiceProbeFailure(report.ServiceUnlocks) {
@@ -364,7 +482,7 @@ func minDuration(left, right time.Duration) time.Duration {
 	return right
 }
 
-func (c *HTTPCollector) collectProviderSources(ctx context.Context, sources []providerSource, targetIP string, sourceTimeout time.Duration) []providerSourceOutcome {
+func (c *HTTPCollector) collectProviderSources(ctx context.Context, sources []providerSource, targetIP string, sourceTimeout time.Duration, slots chan struct{}, ipVersion int) []providerSourceOutcome {
 	outcomes := make([]providerSourceOutcome, len(sources))
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(len(sources))
@@ -372,6 +490,13 @@ func (c *HTTPCollector) collectProviderSources(ctx context.Context, sources []pr
 		index, source := index, source
 		go func() {
 			defer waitGroup.Done()
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				outcomes[index] = sourceFailure(source.Name(), sourceTypeDefault, errorCodeForHTTPError(ctx.Err()), "", nil, nil)
+				return
+			}
 			if err := ctx.Err(); err != nil {
 				outcomes[index] = sourceFailure(source.Name(), sourceTypeDefault, errorCodeForHTTPError(err), err.Error(), nil, nil)
 				return
@@ -379,6 +504,13 @@ func (c *HTTPCollector) collectProviderSources(ctx context.Context, sources []pr
 			sourceCtx, cancel := context.WithTimeout(ctx, sourceTimeout)
 			defer cancel()
 			outcomes[index] = source.Collect(sourceCtx, c, targetIP)
+			if ipVersion != 0 && outcomes[index].Result.Status == sourceStatusSuccess {
+				address, ok := ipidentity.Parse(outcomes[index].IPAddress)
+				if !ok || address.IsUnspecified() || address.Is4() != (ipVersion == 4) {
+					outcomes[index] = sourceFailure(source.Name(), sourceTypeDefault, "ip_mismatch", "", outcomes[index].Result.LatencyMS, outcomes[index].Raw)
+					outcomes[index].Result.ErrorSummary = "provider returned a different IP"
+				}
+			}
 		}()
 	}
 	waitGroup.Wait()
@@ -444,17 +576,17 @@ func (c *HTTPCollector) getJSON(ctx context.Context, url string) (map[string]any
 		body = body[:maxRawJSONBytes]
 	}
 	if !looksLikeJSONObject(body) {
-		return nil, nil, fmt.Errorf("non_json_response: http status %d content-type %q", response.StatusCode, response.Header.Get("Content-Type"))
+		return nil, nil, &sourceHTTPError{code: "non_json_response", status: response.StatusCode}
 	}
 	raw := json.RawMessage(append([]byte(nil), body...))
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, raw, fmt.Errorf("http status %d", response.StatusCode)
-	}
 	var payload map[string]any
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := decoder.Decode(&payload); err != nil {
-		return nil, nil, fmt.Errorf("non_json_response: %w", err)
+		return nil, nil, &sourceHTTPError{code: "non_json_response", status: response.StatusCode, cause: err}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, raw, &sourceHTTPError{code: "http_status", status: response.StatusCode}
 	}
 	return payload, raw, nil
 }

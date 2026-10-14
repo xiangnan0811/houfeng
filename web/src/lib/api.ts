@@ -44,6 +44,7 @@ import type {
   UpdateProbeItemInput,
   ExtendVPSValidityInput,
   IPQualityCollectStatus,
+  IPQualityIPVersion,
   MonitoringInstanceInstallCommandIssue,
   MonitoringInstanceLifecycleManagementInput,
   MonitoringInstanceListScope,
@@ -503,8 +504,10 @@ export function getVPSAsset(vpsId: string) {
   return requestJSON<VPSAssetDetail>(`/api/vps/${vpsId}`)
 }
 
-export function getVPSIPQuality(vpsId: string) {
-  return requestJSON<VPSIPQualityReport>(`/api/vps/${vpsId}/ip-quality`)
+// 未显式选择族时不带 query，由服务端默认族算法决定；显式 4/6 只读该族，不回退另一族。
+export function getVPSIPQuality(vpsId: string, ipVersion?: IPQualityIPVersion) {
+  const query = ipVersion === undefined ? '' : `?ip_version=${ipVersion}`
+  return requestJSON<VPSIPQualityReport>(`/api/vps/${encodeURIComponent(vpsId)}/ip-quality${query}`)
 }
 
 export function getVPSIPQualityReport(vpsId: string, reportId: string) {

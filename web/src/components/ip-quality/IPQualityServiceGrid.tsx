@@ -2,6 +2,7 @@ import { Badge } from '../atoms'
 import type { IPQualityServiceUnlock } from '../../lib/types'
 import {
   effectiveUnlockStatus,
+  serviceEvidenceNotes,
   serviceLabel,
   serviceRowUsesAnonymousProbe,
   serviceTileDetail,
@@ -13,13 +14,15 @@ import {
 
 type IPQualityServiceGridProps = {
   unlocks: IPQualityServiceUnlock[]
-  // 所选报告 diagnostics.service_probe_revision === 2：免登录服务探测范围。
+  // 所选报告 diagnostics.service_probe_revision 为 2 或 3：免登录服务探测范围。
   anonymousProbe?: boolean
+  // 所选报告自身的地址族；页面地区证据必须与之匹配。
+  ipVersion: 4 | 6 | null
 }
 
 const TITLE_ID = 'ip-quality-services-title'
 
-export function IPQualityServiceGrid({ unlocks, anonymousProbe = false }: IPQualityServiceGridProps) {
+export function IPQualityServiceGrid({ unlocks, anonymousProbe = false, ipVersion }: IPQualityServiceGridProps) {
   const counts = serviceUnlockCounts(unlocks)
   return (
     <section className="vps-detail-workspace__section ipq-services" aria-labelledby={TITLE_ID}>
@@ -43,6 +46,7 @@ export function IPQualityServiceGrid({ unlocks, anonymousProbe = false }: IPQual
           {unlocks.map((unlock) => {
             const kind = effectiveUnlockStatus(unlock)
             const detail = serviceTileDetail(unlock)
+            const notes = serviceEvidenceNotes(unlock, ipVersion)
             return (
               <li key={`${unlock.service}:${unlock.source ?? ''}`} className={`ipq-service ipq-service--${kind}`}>
                 <div className="ipq-service__head">
@@ -52,6 +56,11 @@ export function IPQualityServiceGrid({ unlocks, anonymousProbe = false }: IPQual
                   </Badge>
                 </div>
                 {detail ? <p className="ipq-service__detail">{detail}</p> : null}
+                {notes.length > 0 ? (
+                  <ul className="ipq-service__notes" aria-label={`${serviceLabel(unlock.service)} 附加证据`}>
+                    {notes.map((note) => <li key={note}>{note}</li>)}
+                  </ul>
+                ) : null}
               </li>
             )
           })}

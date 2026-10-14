@@ -4,18 +4,31 @@ import { ScrollRegion, Timestamp } from '../atoms'
 import { formatLatency, formatOptional } from '../../lib/format'
 import type { IPQualityCoverage, IPQualityProviderResult, IPQualityServiceUnlock, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
 import { IPQualityJSONBlock } from './IPQualityJSONBlock'
-import { serviceLabel } from './ipQualityPresentation'
+import {
+  probeErrorLabel,
+  serviceEndpointDiagnostics,
+  serviceLabel,
+  type ServiceEndpointDiagnostic,
+  type ServiceEndpointOutcome,
+} from './ipQualityPresentation'
 
 type IPQualityDiagnosticsProps = {
   report: VPSIPQualityReport
   summary: IPQualitySummary
 }
 
+// 无 adapter 的可选来源 wire 为 not_configured，页面称“未接入”，不暗示存在配置入口。
 const SOURCE_STATUS_LABELS: Record<string, string> = {
   success: '成功',
   failure: '失败',
   skipped: '跳过',
-  not_configured: '未配置',
+  not_configured: '未接入',
+}
+
+const ENDPOINT_OUTCOME_LABELS: Record<ServiceEndpointOutcome, string> = {
+  available: '可用',
+  restricted: '受限',
+  unknown: '未知',
 }
 
 const REPORT_STATUS_LABELS: Record<string, string> = {
@@ -45,7 +58,7 @@ function errorText(code?: string, summary?: string): string {
   return [code, summary].map((value) => (value ?? '').trim()).filter(Boolean).join(' · ') || '—'
 }
 
-// 来源行按状态分别计数：未配置的可选来源不是失败。
+// 来源行按状态分别计数：未接入的可选来源不是失败。
 function sourceStatusSummary(providers: IPQualityProviderResult[]): string {
   const counts = { failure: 0, skipped: 0, not_configured: 0 }
   for (const row of providers) {
@@ -55,8 +68,20 @@ function sourceStatusSummary(providers: IPQualityProviderResult[]): string {
   return [
     counts.failure > 0 ? ` · 失败 ${counts.failure}` : '',
     counts.skipped > 0 ? ` · 跳过 ${counts.skipped}` : '',
-    counts.not_configured > 0 ? ` · 未配置 ${counts.not_configured}` : '',
+    counts.not_configured > 0 ? ` · 未接入 ${counts.not_configured}` : '',
   ].join('')
+}
+
+// 单个入口的安全诊断：固定标签、整数 HTTP 状态、结果、规则与错误类别。
+function endpointText(endpoint: ServiceEndpointDiagnostic): string {
+  const error = endpoint.errorCode ? (probeErrorLabel(endpoint.errorCode, endpoint.httpStatus) ?? endpoint.errorCode) : null
+  return [
+    endpoint.endpoint,
+    endpoint.httpStatus != null ? `HTTP ${endpoint.httpStatus}` : null,
+    endpoint.outcome ? ENDPOINT_OUTCOME_LABELS[endpoint.outcome] : null,
+    endpoint.matchedRule,
+    error,
+  ].filter(Boolean).join(' · ')
 }
 
 function extraJSONMap<T extends { extra_json?: unknown }>(rows: T[], name: (row: T) => string): Record<string, unknown> | null {
@@ -108,13 +133,13 @@ export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsPr
                 <div className="ipq-facts__wide">
                   <dt>来源覆盖（全部）</dt>
                   <dd className="mono">
-                    {`成功 ${coverage.successful_provider_count}/${coverage.expected_provider_count} · 失败 ${coverage.failed_provider_count} · 跳过 ${coverage.skipped_provider_count} · 未配置 ${coverage.not_configured_provider_count}`}
+                    {`成功 ${coverage.successful_provider_count}/${coverage.expected_provider_count} · 失败 ${coverage.failed_provider_count} · 跳过 ${coverage.skipped_provider_count} · 未接入 ${coverage.not_configured_provider_count}`}
                   </dd>
                 </div>
                 <div className="ipq-facts__wide">
                   <dt>服务覆盖</dt>
                   <dd className="mono">
-                    {`成功 ${coverage.successful_service_count}/${coverage.expected_service_count} · 失败 ${coverage.failed_service_count} · 跳过 ${coverage.skipped_service_count} · 未配置 ${coverage.not_configured_service_count}`}
+                    {`成功 ${coverage.successful_service_count}/${coverage.expected_service_count} · 失败 ${coverage.failed_service_count} · 跳过 ${coverage.skipped_service_count} · 未接入 ${coverage.not_configured_service_count}`}
                   </dd>
                 </div>
               </>
@@ -166,18 +191,28 @@ export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsPr
               >
                 <table className="data-table data-table--compact ipq-diagnostics__table">
                   <thead className="data-table__head">
-                    <tr><th>服务</th><th>探测方式</th><th>状态</th><th>耗时</th><th>错误</th></tr>
+                    <tr><th>服务</th><th>探测方式</th><th>状态</th><th>耗时</th><th>入口证据</th><th>错误</th></tr>
                   </thead>
                   <tbody>
-                    {services.map((row) => (
-                      <tr key={serviceKey(row)} className="data-table__row">
-                        <td className="data-table__cell">{serviceLabel(row.service)}</td>
-                        <td className="data-table__cell mono">{row.source || '—'}</td>
-                        <td className="data-table__cell">{sourceStatusLabel(row.probe_status)}</td>
-                        <td className="data-table__cell mono">{row.latency_ms != null ? formatLatency(row.latency_ms) : '—'}</td>
-                        <td className="data-table__cell ipq-diagnostics__error">{errorText(row.error_code, row.error_summary)}</td>
-                      </tr>
-                    ))}
+                    {services.map((row) => {
+                      const endpoints = serviceEndpointDiagnostics(row)
+                      return (
+                        <tr key={serviceKey(row)} className="data-table__row">
+                          <td className="data-table__cell">{serviceLabel(row.service)}</td>
+                          <td className="data-table__cell mono">{row.source || '—'}</td>
+                          <td className="data-table__cell">{sourceStatusLabel(row.probe_status)}</td>
+                          <td className="data-table__cell mono">{row.latency_ms != null ? formatLatency(row.latency_ms) : '—'}</td>
+                          <td className="data-table__cell ipq-diagnostics__error">
+                            {endpoints.length > 0 ? (
+                              <ul className="ipq-diagnostics__endpoints">
+                                {endpoints.map((endpoint, index) => <li key={`${endpoint.endpoint}:${index}`}>{endpointText(endpoint)}</li>)}
+                              </ul>
+                            ) : '—'}
+                          </td>
+                          <td className="data-table__cell ipq-diagnostics__error">{errorText(row.error_code, row.error_summary)}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </ScrollRegion>

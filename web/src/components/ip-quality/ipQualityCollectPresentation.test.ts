@@ -7,7 +7,12 @@ import {
   collectUnavailableLabel,
   isCollectRequestActive,
   safeCollectErrorSummary,
+  type CollectNoticeView,
 } from './ipQualityCollectPresentation'
+
+function view(patch: Partial<CollectNoticeView> = {}): CollectNoticeView {
+  return { ipVersion: 4, viewingHistory: false, reportCollectionID: null, reportCollectRequestID: null, refreshState: 'idle', ...patch }
+}
 
 const now = new Date('2026-09-30T08:01:15Z')
 
@@ -158,48 +163,87 @@ describe('collectUnavailableAction', () => {
 
 describe('collectNotice', () => {
   it('describes an active request with its stage and elapsed time', () => {
-    expect(collectNotice(status({ status: 'pending' }), null, now)).toEqual({
+    expect(collectNotice(status({ status: 'pending' }), null, now, view())).toEqual({
       tone: 'progress',
       title: '正在采集最新 IP 质量',
       detail: '等待 agent 同步 · 已用 1 分 15 秒',
     })
-    expect(collectNotice(status({ status: 'dispatched' }), null, now)?.detail).toBe('agent 已接收，正在检测 · 已用 1 分 15 秒')
+    expect(collectNotice(status({ status: 'dispatched' }), null, now, view())?.detail).toBe('agent 已接收，正在检测 · 已用 1 分 15 秒')
   })
 
+  const dual = (familyResults: NonNullable<IPQualityCollectRequest['family_results']>, extra: Partial<IPQualityCollectRequest> = {}) => status({
+    status: 'completed',
+    report_status: 'partial',
+    collection_scope: 'dual_stack',
+    collection_id: 'col_new',
+    family_results: familyResults,
+    ...extra,
+  })
+  const ipv4FailedIPv6Ok = dual([
+    { ip_version: 4, availability: 'available', report_status: 'failure', error_code: 'lookup_failed' },
+    { ip_version: 6, availability: 'available', report_status: 'success' },
+  ], { error_summary: 'ipv4 lookup timeout' })
+
   it('reports results only for the request watched in this session', () => {
-    const completed = status({ status: 'completed', report_status: 'success' })
-    expect(collectNotice(completed, null, now)).toBeNull()
-    expect(collectNotice(completed, 'ipqc_001', now)).toEqual({ tone: 'success', title: '采集完成，报告已更新' })
+    expect(collectNotice(ipv4FailedIPv6Ok, null, now, view())).toBeNull()
+    expect(collectNotice(status({ status: 'expired' }), 'ipqc_001', now, view())?.title).toBe('agent 未在 10 分钟内返回结果')
+  })
+
+  it('separates the selected family result from the aggregate round', () => {
+    // IPv4 失败 + IPv6 成功：IPv4 视图说失败并保留上次结果，不宣称已更新。
+    expect(collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, view({ ipVersion: 4, reportCollectionID: 'col_old' }))).toEqual({
+      tone: 'warning',
+      title: '本轮 IPv4 采集失败，仍展示上一份有效结果',
+      detail: 'IPv4 出口探测失败',
+      rawError: 'ipv4 lookup timeout',
+    })
+    // IPv6 视图只有展示报告属于本轮且刷新成功时才是“报告已更新”。
+    expect(collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, view({ ipVersion: 6, reportCollectionID: 'col_new' })))
+      .toEqual({ tone: 'success', title: '采集完成，报告已更新' })
+    expect(collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, view({ ipVersion: 6, reportCollectionID: 'col_old' }))?.title).toBe('本轮采集已结束')
+    expect(collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, view({ ipVersion: 6, reportCollectionID: 'col_new', refreshState: 'refreshing' }))?.tone).toBe('progress')
+    expect(collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, view({ ipVersion: 6, reportCollectionID: 'col_new', refreshState: 'failed' }))?.title).toContain('刷新失败')
+
+    const v6Missing = dual([
+      { ip_version: 4, availability: 'available', report_status: 'success' },
+      { ip_version: 6, availability: 'unavailable', report_status: 'failure', error_code: 'address_family_unavailable' },
+    ], { report_status: 'success' })
+    expect(collectNotice(v6Missing, 'ipqc_001', now, view({ ipVersion: 6 }))?.title).toBe('本轮未检测到 IPv6 可用本地地址')
+    expect(collectNotice(v6Missing, 'ipqc_001', now, view({ ipVersion: 4, reportCollectionID: 'col_new' }))?.title).toBe('采集完成，报告已更新')
+    // partial 的族结果更新了报告，但注明部分来源缺失。
+    expect(collectNotice(dual([{ ip_version: 4, availability: 'available', report_status: 'partial' }]), 'ipqc_001', now, view({ reportCollectionID: 'col_new' })))
+      .toEqual({ tone: 'success', title: '采集完成，报告已更新', detail: 'IPv4 部分来源未返回结果' })
+    // 未回传该族结果时不伪造结论。
+    expect(collectNotice(dual([{ ip_version: 4, availability: 'available', report_status: 'success' }]), 'ipqc_001', now, view({ ipVersion: 6, reportCollectionID: 'col_new' }))?.title).toBe('本轮采集已结束')
+  })
+
+  it('keeps history views on history and never reports them as updated', () => {
+    const notice = collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, view({ ipVersion: 6, viewingHistory: true, reportCollectionID: 'col_new' }))
+    expect(notice?.title).toBe('本轮采集已结束')
+    expect(notice?.detail).toContain('历史')
+  })
+
+  it('labels legacy single-family rounds and matches them by collect request ID', () => {
+    const legacy = status({ status: 'completed', report_status: 'success', collection_scope: 'legacy_single_family' })
+    expect(collectNotice(legacy, 'ipqc_001', now, view({ reportCollectRequestID: 'ipqc_001' })))
+      .toEqual({ tone: 'success', title: '采集完成，报告已更新', detail: '本次仅收到单地址族报告，未验证另一地址族' })
+    expect(collectNotice(legacy, 'ipqc_001', now, view({ reportCollectRequestID: 'ipqc_other' }))?.title).toBe('本轮采集已结束')
 
     // 采集失败：提供安全中文主摘要，原始 error_summary 作为 rawError
-    expect(collectNotice(status({ status: 'completed', report_status: 'failure', error_summary: 'timeout' }), 'ipqc_001', now)).toEqual({
+    expect(collectNotice(status({ status: 'completed', report_status: 'failure', error_summary: 'timeout' }), 'ipqc_001', now, view())).toEqual({
       tone: 'warning',
       title: '本次采集失败，仍展示上一份有效报告',
-      detail: '检测请求超时，未能获取最新数据',
+      detail: '检测请求超时，未能获取最新数据 · 本次仅收到单地址族报告，未验证另一地址族',
       rawError: 'timeout',
     })
-    expect(collectNotice(status({ status: 'completed', report_status: 'failure' }), 'ipqc_001', now)).toEqual({
-      tone: 'warning',
-      title: '本次采集失败，仍展示上一份有效报告',
-      detail: '采集未能完成，请稍后重试',
-      rawError: undefined,
-    })
-    expect(collectNotice(status({ status: 'expired' }), 'ipqc_001', now)?.title).toBe('agent 未在 10 分钟内返回结果')
   })
 
   it('never promotes mixed Chinese/URL error content to primary summary and keeps it folded', () => {
     const raw = 'https://example.com/api/test 发生未授权错误'
-    const notice = collectNotice(
-      status({ status: 'completed', report_status: 'failure', error_summary: raw }),
-      'ipqc_001',
-      now,
-    )
-    expect(notice).toEqual({
-      tone: 'warning',
-      title: '本次采集失败，仍展示上一份有效报告',
-      detail: '采集执行异常，未能获取有效报告',
-      rawError: raw,
-    })
+    const notice = collectNotice(status({ status: 'completed', report_status: 'failure', error_summary: raw }), 'ipqc_001', now, view())
+    expect(notice?.detail).toContain('采集执行异常，未能获取有效报告')
+    expect(notice?.detail).not.toContain('https://')
+    expect(notice?.rawError).toBe(raw)
   })
 
   it('provides a valid link for paused monitoring without VPS context', () => {
@@ -207,23 +251,24 @@ describe('collectNotice', () => {
       status(null, { available: false, unavailable_reason: 'monitoring_paused', monitoring_instance_id: 'mi_001' }),
       null,
       now,
+      view(),
     )
     expect(notice?.action).toEqual({ to: '/monitoring/mi_001', label: '前往监控实例' })
   })
 
   it('explains unavailable collection with actions when appropriate and stays quiet otherwise', () => {
-    expect(collectNotice(status(null, { available: false, unavailable_reason: 'agent_not_bound' }), null, now, 'vps_001')).toEqual({
+    expect(collectNotice(status(null, { available: false, unavailable_reason: 'agent_not_bound' }), null, now, view(), 'vps_001')).toEqual({
       tone: 'muted',
       title: 'agent 尚未完成绑定',
       action: { to: '/vps/vps_001?workbench=monitoring', label: '前往监控工作台' },
     })
-    expect(collectNotice(status(null, { available: false, unavailable_reason: 'disabled' }), null, now)).toEqual({
+    expect(collectNotice(status(null, { available: false, unavailable_reason: 'disabled' }), null, now, view())).toEqual({
       tone: 'muted',
       title: 'IP 质量采集已在设置中关闭',
       action: { to: '/settings?tab=monitoring', label: '前往设置开启' },
     })
-    expect(collectNotice(status(null), null, now)).toBeNull()
-    expect(collectNotice(null, null, now)).toBeNull()
+    expect(collectNotice(status(null), null, now, view())).toBeNull()
+    expect(collectNotice(null, null, now, view())).toBeNull()
   })
 
   it('maps reasons and active states', () => {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/enrollment"
 	"houfeng/internal/center/http/handlers"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
 	"houfeng/internal/contracts/agentapi"
@@ -603,8 +605,8 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 	if report.IPAddress != "203.0.113.10" || report.Status != agentapi.IPQualityStatusSuccess {
 		t.Fatalf("report identity = %#v, want ip/status preserved", report)
 	}
-	if report.CollectRequestID != "ipqc_0123abcd" {
-		t.Fatalf("CollectRequestID = %q, want id read from raw diagnostics", report.CollectRequestID)
+	if report.CollectionMetadata.CollectRequestID != "ipqc_0123abcd" || report.CollectionMetadata.Paired {
+		t.Fatalf("CollectionMetadata = %#v, want legacy id read from raw diagnostics", report.CollectionMetadata)
 	}
 	if len(report.ProviderResults) != 1 || report.ProviderResults[0].Provider != "ipinfo" {
 		t.Fatalf("ProviderResults = %#v, want ipinfo result", report.ProviderResults)
@@ -1152,5 +1154,79 @@ func assertErrorResponse(t *testing.T, recorder *httptest.ResponseRecorder, want
 	}
 	if body.Message != wantMessage {
 		t.Fatalf("Message = %q, want %q", body.Message, wantMessage)
+	}
+}
+
+func TestAgentSyncPairedMetadataSurvivesDiagnosticsTruncation(t *testing.T) {
+	t.Parallel()
+	for _, revision := range []int{4, 5} {
+		t.Run(fmt.Sprintf("revision-%d", revision), func(t *testing.T) {
+			now := time.Now().UTC()
+			registry := ipquality.NewCollectRequests(func() (string, error) { return "ipqc_truncated", nil })
+			if _, err := registry.Request("mi_001", now); err != nil {
+				t.Fatal(err)
+			}
+			svc := &fakeAgentSyncService{}
+			handler := handlers.AgentSync(svc)
+			reports := make([]agentapi.IPQualityReportPayload, 0, 2)
+			for _, family := range []int{4, 6} {
+				// Redaction expands this below-limit input beyond the storage limit.
+				diagnostics := json.RawMessage(fmt.Sprintf(`{"collection_revision":%d,"collection_id":"round","expected_ip_versions":[4,6],"ip_address_family":%d,"family_availability":"available","collect_request_id":"ipqc_truncated","nested":[%s{}]}`,
+					revision, family, strings.Repeat(`{"token":""},`, 8500)))
+				if len(diagnostics) > ipquality.MaxRawJSONBytes {
+					t.Fatalf("fixture exceeds ingest limit: %d", len(diagnostics))
+				}
+				address := "198.51.100.10"
+				if family == 6 {
+					address = "2001:db8::10"
+				}
+				reports = append(reports, agentapi.IPQualityReportPayload{
+					ObservedAt: now, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: "sync_001",
+					IPAddress: address, IPVersion: family, Status: "success", DiagnosticsJSON: diagnostics,
+				})
+			}
+			payload, err := json.Marshal(agentapi.SyncRequest{
+				SessionID: "mas_001", MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001", IPQualityReports: reports,
+				Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
+					ObservedAt: now, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: "sync_001",
+				}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(string(payload)))
+			setSyncAuth(req)
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusOK || len(svc.syncBatch.IPQualityReports) != 2 {
+				t.Fatalf("handler = %d %s, reports=%d", recorder.Code, recorder.Body.String(), len(svc.syncBatch.IPQualityReports))
+			}
+			for _, report := range svc.syncBatch.IPQualityReports {
+				if !report.CollectionMetadata.Paired || report.CollectionMetadata.Valid != (revision == 4) ||
+					report.CollectionMetadata.CollectionID != "round" || report.CollectionMetadata.IPVersion != report.IPVersion ||
+					report.CollectionMetadata.CollectRequestID != "ipqc_truncated" {
+					t.Fatalf("raw metadata lost: %#v", report.CollectionMetadata)
+				}
+				if !strings.Contains(string(report.DiagnosticsJSON), "extra_json_size_limit") ||
+					agentapi.ParseCollectionMetadata(report.DiagnosticsJSON).Paired {
+					t.Fatalf("fixture was not truncated: %s", report.DiagnosticsJSON)
+				}
+			}
+			registry.ObserveReports("mi_001", svc.syncBatch.IPQualityReports[:1], now.Add(time.Second))
+			if current, _ := registry.Latest("mi_001", now.Add(2*time.Second)); !current.Active() {
+				t.Fatalf("one family or malformed metadata completed request: %#v", current)
+			}
+			registry.ObserveReports("mi_001", svc.syncBatch.IPQualityReports[1:], now.Add(3*time.Second))
+			current, _ := registry.Latest("mi_001", now.Add(4*time.Second))
+			if revision == 4 {
+				if current.Status != ipquality.CollectRequestCompleted || current.CollectionScope != ipquality.CollectScopeDualStack ||
+					current.ReportStatus != "success" || len(current.FamilyResults) != 2 {
+					t.Fatalf("valid pair did not complete after sanitization: %#v", current)
+				}
+			} else if !current.Active() || len(current.FamilyResults) != 0 {
+				t.Fatalf("unsupported revision downgraded to legacy: %#v", current)
+			}
+		})
 	}
 }

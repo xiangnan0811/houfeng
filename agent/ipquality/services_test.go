@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -57,6 +60,51 @@ func anonymousServiceFixture(req *http.Request) string {
 		return `<html><shreddit-app country="US"></shreddit-app></html>`
 	default:
 		return ""
+	}
+}
+
+func TestServiceProbeBudgetStartsAfterSharedSlotAcquisition(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		budget  time.Duration
+		success int
+	}{
+		{"queued_probe_gets_own_budget", 30 * time.Second, 2},
+		{"parent_deadline_still_bounds_round", 12 * time.Second, 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
+					select {
+					case <-time.After(9 * time.Second):
+						return serviceTestResponse(req, 200, anonymousServiceFixture(req)), nil
+					case <-req.Context().Done():
+						return nil, req.Context().Err()
+					}
+				})
+				ctx, cancel := context.WithTimeout(context.Background(), test.budget)
+				defer cancel()
+				slots := make(chan struct{}, 1)
+				results := make(chan []serviceProbeOutcome, 2)
+				for _, family := range []int{4, 6} {
+					go func() {
+						results <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx, []string{"youtube-premium"}, family, slots)
+					}()
+				}
+				success := 0
+				for range 2 {
+					result := (<-results)[0].Result
+					if result.Status == "unlocked" && result.Region == "US" {
+						success++
+					} else if result.Status != "unknown" || result.ErrorCode != "timeout" {
+						t.Fatalf("unexpected queued probe result: %+v", result)
+					}
+				}
+				if success != test.success {
+					t.Fatalf("successful family probes = %d, want %d", success, test.success)
+				}
+			})
+		})
 	}
 }
 func restrictedServiceFixture(service string, req *http.Request) string {
@@ -138,7 +186,7 @@ func TestAnonymousServiceProtocolMatrices(t *testing.T) {
 					t.Fatalf("challenge result = %+v", outcome.Result)
 				}
 				var evidence map[string]any
-				if json.Unmarshal(outcome.Raw, &evidence) != nil || evidence["probe_revision"] != float64(2) || evidence["evidence_kind"] != "anonymous_service_probe" {
+				if json.Unmarshal(outcome.Raw, &evidence) != nil || evidence["probe_revision"] != float64(3) || evidence["evidence_kind"] != "anonymous_service_probe" {
 					t.Fatalf("invalid evidence: %s", outcome.Raw)
 				}
 			})
@@ -576,10 +624,14 @@ func TestServiceWorkersShareDeadlineAcrossProtocolSteps(t *testing.T) {
 }
 
 func TestAnonymousProbeEgressAmbiguityHasNoFacts(t *testing.T) {
-	results := ambiguousServiceOutcomes(anonymousTestServices)
+	results := ambiguousServiceOutcomes(anonymousTestServices, 6)
 	for _, outcome := range results {
 		if outcome.Result.ErrorCode != "egress_ambiguous" || outcome.Result.ErrorSummary != "service egress is ambiguous" || outcome.Result.Status != "unknown" || outcome.Result.ProbeStatus != sourceStatusFailure || outcome.Result.Region != "" || outcome.Result.UnlockType != "" {
 			t.Fatalf("result %+v", outcome.Result)
+		}
+		var evidence serviceEvidence
+		if json.Unmarshal(outcome.Raw, &evidence) != nil || evidence.ProbeRevision != 3 || evidence.IPVersion != 6 || evidence.ObservedRegion != "" || len(evidence.Endpoints) != 0 {
+			t.Fatalf("ambiguous egress leaked service evidence: %s", outcome.Raw)
 		}
 	}
 }
@@ -699,6 +751,267 @@ func TestRegexQuoteDoesNotHideLaterServiceJSON(t *testing.T) {
 			result := collector.probeService(context.Background(), test.service, 4)
 			if result.Result.Status != "unlocked" || result.Result.ProbeStatus != sourceStatusSuccess || result.Result.Region != "US" {
 				t.Fatalf("regex quote hid genuine service JSON: %+v", result.Result)
+			}
+		})
+	}
+}
+
+func TestYouTubePageRegionDoesNotEstablishPremiumAvailability(t *testing.T) {
+	tests := []struct {
+		name, body, status, code, region, observed, evidence string
+		httpStatus                                           int
+	}{
+		{"cn_no_offer", `<body>Welcome to YouTube</body><script>var ytInitialData = {"contentRegion":"cn"};</script>`, "unknown", "invalid_response", "", "CN", "youtube_content_region", 200},
+		{"cn_offer", `<body>ad-free</body><script>var ytInitialData = {"contentRegion":"CN"};</script>`, "unlocked", "", "CN", "CN", "youtube_content_region", 200},
+		{"context_no_offer", `<script>ytcfg.set({"INNERTUBE_CONTEXT_GL":"jp"});</script>`, "unknown", "invalid_response", "", "JP", "youtube_context_gl", 200},
+		{"refusal_with_region", `<body>Premium is not available in your country</body><script>var ytInitialData = {"contentRegion":"CN"};</script>`, "blocked", "", "CN", "CN", "youtube_content_region", 200},
+		{"refusal_without_region", `<body>Premium is not available in your country</body><script>var ytInitialData = {};</script>`, "blocked", "", "", "", "", 200},
+		{"403_refusal_without_region", `<body>Premium is not available in your country</body><script>var ytInitialData = {};</script>`, "blocked", "", "", "", "", 403},
+		{"403_refusal_with_untrusted_region", `<body>Premium is not available in your country</body><script>var ytInitialData = {"contentRegion":"CN"};</script>`, "blocked", "", "", "", "", 403},
+		{"conflict_no_fallback", `<body>ad-free</body><script>var ytInitialData = {"contentRegion":"CN"}; ytcfg.set({"contentRegion":"US","INNERTUBE_CONTEXT_GL":"JP"});</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"invalid_primary_no_fallback", `<body>ad-free</body><script>ytcfg.set({"contentRegion":"China","INNERTUBE_CONTEXT_GL":"US"});</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"refusal_survives_conflict", `<body>Premium is not available in your country</body><script>var ytInitialData = {"contentRegion":"CN"}; ytcfg.set({"contentRegion":"US"});</script>`, "blocked", "", "", "", "", 200},
+		{"challenge", `<body>Verify you are human; ad-free</body><script>var ytInitialData = {"contentRegion":"CN"};</script>`, "unknown", "challenge_detected", "", "", "", 200},
+		{"login", `<form action="/login"><input type="password"></form><body>ad-free</body><script>ytcfg.set({"contentRegion":"CN"});</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"malformed_config", `<body>Premium is not available in your country</body><script>var ytInitialData = {"contentRegion":;</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"unrelated_script_region", `<body>ad-free</body><script>ytcfg.set({});</script><script>{"contentRegion":"CN"}</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"same_script_unrelated_region", `<body>ad-free</body><script>ytcfg.set({}); const unrelated = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"same_script_unrelated_does_not_conflict", `<body>ad-free</body><script>ytcfg.set({"contentRegion":"US"}); const unrelated = {"contentRegion":"CN"};</script>`, "unlocked", "", "US", "US", "youtube_content_region", 200},
+		{"comment_marker", `<body>ad-free</body><script>/* ytcfg.set */ const unrelated = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"string_marker", `<body>ad-free</body><script>const marker = "ytInitialData"; const unrelated = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"regex_marker", `<body>ad-free</body><script>const marker = /ytcfg/; const unrelated = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"different_receiver", `<body>ad-free</body><script>unrelated.ytcfg.set({"contentRegion":"CN"});</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"unrelated_property", `<body>ad-free</body><script>unrelated.ytInitialData = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
+		{"comment_between_wrapper_tokens", `<body>ad-free</body><script>ytcfg /* config */ . set ( {"contentRegion":"US"} );</script>`, "unlocked", "", "US", "US", "youtube_content_region", 200},
+		{"window_assignment", `<body>ad-free</body><script>window.ytInitialData = {"contentRegion":"US"};</script>`, "unlocked", "", "US", "US", "youtube_content_region", 200},
+		{"fatal_refusal", `<body>Premium is not available in your country</body><script>ytcfg.set({"contentRegion":"CN"});</script>`, "unknown", "http_status", "", "", "", 503},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
+				return serviceTestResponse(req, test.httpStatus, test.body), nil
+			})
+			outcome := collector.probeService(context.Background(), "youtube-premium", 6)
+			if outcome.Result.Status != test.status || outcome.Result.ErrorCode != test.code || outcome.Result.Region != test.region {
+				t.Fatalf("business conclusion = %+v", outcome.Result)
+			}
+			if test.status == "unknown" && outcome.Result.UnlockType != "" {
+				t.Fatalf("unknown retained normalized scope: %+v", outcome.Result)
+			}
+			var evidence serviceEvidence
+			if err := json.Unmarshal(outcome.Raw, &evidence); err != nil {
+				t.Fatal(err)
+			}
+			if evidence.ProbeRevision != 3 || evidence.IPVersion != 6 || evidence.ObservedRegion != test.observed || evidence.RegionEvidence != test.evidence || evidence.Region != test.region {
+				t.Fatalf("page evidence = %+v", evidence)
+			}
+			if len(evidence.Endpoints) != 1 || evidence.Endpoints[0].HTTPStatus != test.httpStatus {
+				t.Fatalf("endpoint evidence = %+v", evidence.Endpoints)
+			}
+			endpoint := evidence.Endpoints[0]
+			wantOutcome := "unknown"
+			if test.status == "unlocked" {
+				wantOutcome = "available"
+			} else if test.status == "blocked" {
+				wantOutcome = "restricted"
+			}
+			if endpoint.Outcome != wantOutcome || endpoint.ErrorCode != test.code {
+				t.Fatalf("endpoint conclusion = %+v", endpoint)
+			}
+		})
+	}
+}
+
+func TestChatGPTBooleanConsentAndIndependentEndpointFailures(t *testing.T) {
+	for _, consent := range []bool{false, true} {
+		t.Run(fmt.Sprint(consent), func(t *testing.T) {
+			collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
+				if req.URL.Hostname() == "ios.chat.openai.com" {
+					return nil, &net.OpError{Op: "dial", Net: "tcp6", Err: syscall.ENETUNREACH}
+				}
+				return serviceTestResponse(req, 200, fmt.Sprintf(`{"cookie_consent_required":%t,"private":"response-secret"}`, consent)), nil
+			})
+			outcome := collector.probeService(context.Background(), "chatgpt", 6)
+			if outcome.Result.Status != "partial" || outcome.Result.ProbeStatus != sourceStatusSuccess || outcome.Result.UnlockType != "web_verified_app_unknown" || outcome.Result.Region != "" {
+				t.Fatalf("endpoint failure obscured verified Web result: %+v", outcome.Result)
+			}
+			var evidence serviceEvidence
+			if err := json.Unmarshal(outcome.Raw, &evidence); err != nil {
+				t.Fatal(err)
+			}
+			if len(evidence.Endpoints) != 2 {
+				t.Fatalf("endpoints = %+v", evidence.Endpoints)
+			}
+			web, app := evidence.Endpoints[0], evidence.Endpoints[1]
+			if web.Endpoint != "web_cookie_requirements" || web.Outcome != "available" || web.HTTPStatus != 200 || web.ErrorCode != "" || web.MatchedRule == "" {
+				t.Fatalf("Web evidence = %+v", web)
+			}
+			if app.Endpoint != "app_home" || app.Outcome != "unknown" || app.ErrorCode != "network_unreachable" || app.HTTPStatus != 0 || app.MatchedRule != "" {
+				t.Fatalf("App evidence = %+v", app)
+			}
+			if strings.Contains(string(outcome.Raw), "response-secret") || strings.Contains(string(outcome.Raw), "https://") {
+				t.Fatalf("unsafe endpoint evidence: %s", outcome.Raw)
+			}
+		})
+	}
+}
+
+func TestServiceTransportDiagnosticsNeverPersistErrorText(t *testing.T) {
+	tests := []struct {
+		name, code string
+		err        error
+	}{
+		{"dns", "dns_failed", &net.DNSError{Err: "secret-dns-message", Name: "secret.example"}},
+		{"refused", "connection_refused", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}},
+		{"deadline", "timeout", context.DeadlineExceeded},
+		{"unknown", "request_failed", fmt.Errorf("secret-token http status 403 timeout non_json_response")},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
+				return nil, test.err
+			})
+			outcome := collector.probeService(context.Background(), "reddit", 4)
+			if outcome.Result.Status != "unknown" || outcome.Result.ErrorCode != test.code || outcome.Result.Region != "" || outcome.Result.UnlockType != "" {
+				t.Fatalf("transport error established service facts: %+v", outcome.Result)
+			}
+			var evidence serviceEvidence
+			if err := json.Unmarshal(outcome.Raw, &evidence); err != nil {
+				t.Fatal(err)
+			}
+			if len(evidence.Endpoints) != 1 || evidence.Endpoints[0].ErrorCode != test.code || evidence.Endpoints[0].Outcome != "unknown" {
+				t.Fatalf("missing safe transport classification: %+v", evidence)
+			}
+			payload, _ := json.Marshal(outcome)
+			for _, forbidden := range []string{"secret", "https://", "secret.example"} {
+				if strings.Contains(string(payload), forbidden) {
+					t.Fatalf("persisted transport detail: %s", payload)
+				}
+			}
+		})
+	}
+}
+
+func TestServiceSharedSemaphoreHonorsCancellationBeforeTransport(t *testing.T) {
+	slots := make(chan struct{}, 1)
+	slots <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
+		t.Error("request escaped occupied shared service pool")
+		return serviceTestResponse(req, 200, anonymousServiceFixture(req)), nil
+	})
+	done := make(chan []serviceProbeOutcome, 1)
+	go func() {
+		done <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx, []string{"reddit", "youtube-premium"}, 6, slots)
+	}()
+	cancel()
+	select {
+	case outcomes := <-done:
+		for _, outcome := range outcomes {
+			if outcome.Result.Status != "unknown" || outcome.Result.ProbeStatus != sourceStatusFailure {
+				t.Fatalf("canceled waiter produced service facts: %+v", outcome.Result)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled service waiters did not join")
+	}
+	if len(slots) != 1 {
+		t.Fatal("canceled waiter released a slot it did not own")
+	}
+}
+
+func TestServiceSemaphoreIsSharedAcrossFamilyCollectors(t *testing.T) {
+	slots := make(chan struct{}, 1)
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	ctx4, cancel4 := context.WithCancel(context.Background())
+	defer cancel4()
+	collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
+		select {
+		case entered <- struct{}{}:
+		default:
+			t.Error("second family bypassed occupied round-wide service slot")
+		}
+		select {
+		case <-release:
+			return serviceTestResponse(req, 200, anonymousServiceFixture(req)), nil
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		}
+	})
+	done4 := make(chan []serviceProbeOutcome, 1)
+	go func() {
+		done4 <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx4, []string{"reddit"}, 4, slots)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first family did not acquire slot")
+	}
+	ctx6, cancel6 := context.WithCancel(context.Background())
+	defer cancel6()
+	done6 := make(chan []serviceProbeOutcome, 1)
+	go func() {
+		done6 <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx6, []string{"reddit"}, 6, slots)
+	}()
+	select {
+	case <-entered:
+		t.Fatal("second family bypassed occupied round-wide service slot")
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel6()
+	select {
+	case outcomes := <-done6:
+		if len(outcomes) != 1 || outcomes[0].Result.Status != "unknown" || outcomes[0].Result.ProbeStatus != sourceStatusFailure {
+			t.Fatalf("waiting family produced facts: %+v", outcomes)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiting family failed to cancel")
+	}
+	if len(slots) != 1 || len(entered) != 0 {
+		t.Fatal("waiting family disturbed active family slot or started transport")
+	}
+	close(release)
+	select {
+	case outcomes := <-done4:
+		if len(outcomes) != 1 || outcomes[0].Result.Status != "unlocked" || len(slots) != 0 {
+			t.Fatalf("active family did not finish independently: %+v", outcomes)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("active family failed to join")
+	}
+}
+
+func TestYouTubeConsentAndTransportFailuresHaveNoPageRegion(t *testing.T) {
+	for _, failure := range []string{"consent", "transport"} {
+		t.Run(failure, func(t *testing.T) {
+			collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
+				if failure == "transport" {
+					return nil, &net.DNSError{Err: "private-dns-detail", Name: "private.example"}
+				}
+				response := serviceTestResponse(req, 200, `<body>ad-free</body><script>ytcfg.set({"contentRegion":"CN"});</script>`)
+				finalRequest := req.Clone(req.Context())
+				finalRequest.URL, _ = url.Parse("https://consent.youtube.com/?token=private-token")
+				response.Request = finalRequest
+				return response, nil
+			})
+			outcome := collector.probeService(context.Background(), "youtube-premium", 4)
+			wantCode := "invalid_response"
+			if failure == "transport" {
+				wantCode = "dns_failed"
+			}
+			var evidence serviceEvidence
+			if err := json.Unmarshal(outcome.Raw, &evidence); err != nil {
+				t.Fatal(err)
+			}
+			if outcome.Result.Status != "unknown" || outcome.Result.ErrorCode != wantCode || outcome.Result.Region != "" || outcome.Result.UnlockType != "" || evidence.ObservedRegion != "" || evidence.RegionEvidence != "" {
+				t.Fatalf("untrusted response established page geography: %+v evidence %+v", outcome.Result, evidence)
+			}
+			if len(evidence.Endpoints) != 1 || evidence.Endpoints[0].Outcome != "unknown" || evidence.Endpoints[0].ErrorCode != wantCode {
+				t.Fatalf("failure evidence = %+v", evidence.Endpoints)
+			}
+			if strings.Contains(string(outcome.Raw), "private") || strings.Contains(string(outcome.Raw), "consent.youtube.com") {
+				t.Fatalf("persisted unsafe redirect/transport detail: %s", outcome.Raw)
 			}
 		})
 	}

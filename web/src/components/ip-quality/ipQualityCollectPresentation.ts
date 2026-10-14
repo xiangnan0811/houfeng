@@ -1,4 +1,4 @@
-import type { IPQualityCollectRequest, IPQualityCollectStatus } from '../../lib/types'
+import type { IPQualityCollectRequest, IPQualityCollectStatus, IPQualityIPVersion } from '../../lib/types'
 import { validateReturnVPSId, withReturnVPSQuery } from '../../pages/monitoring-detail/monitoringDetailHelpers'
 
 export type CollectNoticeTone = 'progress' | 'success' | 'warning' | 'muted'
@@ -102,11 +102,85 @@ function formatElapsed(seconds: number | null): string {
   return `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
 }
 
+// 当前页面选择：完成提示只对“当前所选族的当前报告”下结论。
+export type CollectNoticeView = {
+  ipVersion: IPQualityIPVersion | null
+  viewingHistory: boolean
+  // 当前展示报告 diagnostics 里的 collection_id / collect_request_id；没有则为 null。
+  reportCollectionID: string | null
+  reportCollectRequestID: string | null
+  // idle：最近一次读取成功；refreshing：采集结束后的刷新进行中；failed：刷新失败，仍展示旧报告。
+  refreshState: 'idle' | 'refreshing' | 'failed'
+}
+
+export const LEGACY_SINGLE_FAMILY_NOTICE = '本次仅收到单地址族报告，未验证另一地址族'
+
+function familyFailureDetail(errorCode: string | undefined, ipVersion: IPQualityIPVersion): string {
+  if ((errorCode ?? '').trim() === 'lookup_failed') return `IPv${ipVersion} 出口探测失败`
+  return `IPv${ipVersion} 未形成有效报告`
+}
+
+// 采集结束 ≠ 当前报告已更新：只有当前族成功、非历史视图、刷新成功且展示报告属于本轮，才说“报告已更新”。
+function completedNotice(request: IPQualityCollectRequest, view: CollectNoticeView): CollectNotice {
+  const rawError = request.error_summary?.trim() || undefined
+  const legacy = request.collection_scope !== 'dual_stack'
+  if (view.viewingHistory) {
+    return {
+      tone: 'muted',
+      title: '本轮采集已结束',
+      detail: legacy ? `仍在查看历史报告 · ${LEGACY_SINGLE_FAMILY_NOTICE}` : '仍在查看历史报告，可切换到最新报告查看本轮结果',
+    }
+  }
+
+  if (legacy) {
+    if (request.report_status === 'failure') {
+      return {
+        tone: 'warning',
+        title: '本次采集失败，仍展示上一份有效报告',
+        detail: `${safeCollectErrorSummary(rawError)} · ${LEGACY_SINGLE_FAMILY_NOTICE}`,
+        ...(rawError ? { rawError } : {}),
+      }
+    }
+    if (view.refreshState === 'refreshing') return { tone: 'progress', title: '本轮采集已结束，正在刷新报告', detail: LEGACY_SINGLE_FAMILY_NOTICE }
+    if (view.refreshState === 'failed') return { tone: 'warning', title: '本轮采集已结束，报告刷新失败', detail: `仍展示刷新前的报告 · ${LEGACY_SINGLE_FAMILY_NOTICE}` }
+    if (view.reportCollectRequestID === request.request_id) {
+      return { tone: 'success', title: '采集完成，报告已更新', detail: LEGACY_SINGLE_FAMILY_NOTICE }
+    }
+    return { tone: 'muted', title: '本轮采集已结束', detail: LEGACY_SINGLE_FAMILY_NOTICE }
+  }
+
+  const family = view.ipVersion
+  const result = family == null ? undefined : request.family_results?.find((item) => item.ip_version === family)
+  if (family == null || !result) {
+    return { tone: 'muted', title: '本轮采集已结束', detail: family == null ? '未确定当前地址族' : `本轮未收到 IPv${family} 结果` }
+  }
+  if (result.availability === 'unavailable') {
+    return { tone: 'muted', title: `本轮未检测到 IPv${family} 可用本地地址`, detail: '已保留该地址族的历史结果' }
+  }
+  if (result.report_status !== 'success' && result.report_status !== 'partial') {
+    return {
+      tone: 'warning',
+      title: `本轮 IPv${family} 采集失败，仍展示上一份有效结果`,
+      detail: familyFailureDetail(result.error_code, family),
+      ...(rawError ? { rawError } : {}),
+    }
+  }
+  if (view.refreshState === 'refreshing') return { tone: 'progress', title: '本轮采集已结束，正在刷新报告' }
+  if (view.refreshState === 'failed') return { tone: 'warning', title: '本轮采集已结束，报告刷新失败', detail: '仍展示刷新前的报告' }
+  if (request.collection_id && view.reportCollectionID === request.collection_id) {
+    return result.report_status === 'partial'
+      ? { tone: 'success', title: '采集完成，报告已更新', detail: `IPv${family} 部分来源未返回结果` }
+      : { tone: 'success', title: '采集完成，报告已更新' }
+  }
+  return { tone: 'muted', title: '本轮采集已结束', detail: '当前展示的报告不是本轮结果' }
+}
+
 // collectNotice 只描述本次页面会话中发起或正在进行的请求；历史上已结束的请求不打扰用户。
 export function collectNotice(
   status: IPQualityCollectStatus | null,
   watchedRequestId: string | null,
   now: Date,
+  view: CollectNoticeView,
   vpsId?: string | null,
 ): CollectNotice | null {
   const request = status?.request ?? null
@@ -129,18 +203,7 @@ export function collectNotice(
     }
   }
   if (request && watchedRequestId === request.request_id) {
-    if (request.status === 'completed') {
-      if (request.report_status === 'failure') {
-        const rawError = request.error_summary?.trim() || undefined
-        return {
-          tone: 'warning',
-          title: '本次采集失败，仍展示上一份有效报告',
-          detail: safeCollectErrorSummary(rawError),
-          ...(rawError ? { rawError } : {}),
-        }
-      }
-      return { tone: 'success', title: '采集完成，报告已更新' }
-    }
+    if (request.status === 'completed') return completedNotice(request, view)
     if (request.status === 'expired') {
       return {
         tone: 'warning',

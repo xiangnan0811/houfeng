@@ -485,7 +485,7 @@ func assertSyncInterleavingConvergedState(t *testing.T, ctx context.Context, fix
 	if err != nil || monitoringSubject.AgentVersion != "agent/live-v2" {
 		t.Fatal("latest heartbeat agent version did not converge to live T2")
 	}
-	report, err := NewPostgresIPQualityRepository(fixture.db).GetVPSIPQuality(ctx, vpsID)
+	report, err := NewPostgresIPQualityRepository(fixture.db).GetVPSIPQuality(ctx, vpsID, 0)
 	if err != nil || report.LatestReport == nil || report.LatestReport.AgentVersion != "agent/live-v2" || report.LatestReport.IsBackfilled {
 		t.Fatal("latest IP quality did not converge to live T2")
 	}
@@ -655,7 +655,7 @@ func assertReplaySafeLatestStoreConsumers(t *testing.T, ctx context.Context, fix
 	if summaries[vpsID].ReportID != wantReportID {
 		t.Fatalf("latest IP summary report = %q, want %q", summaries[vpsID].ReportID, wantReportID)
 	}
-	latest, err := ipRepository.GetVPSIPQuality(ctx, vpsID)
+	latest, err := ipRepository.GetVPSIPQuality(ctx, vpsID, 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality: %v", err)
 	}

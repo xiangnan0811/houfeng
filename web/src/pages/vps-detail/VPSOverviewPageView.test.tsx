@@ -820,6 +820,26 @@ describe('VPSOverviewPageView', () => {
 
   })
 
+  it('labels the IP-quality cell with its default report family and never guesses one', () => {
+    const overview = healthyOverview()
+    overview.summary = { ...overview.summary, ip_quality: { ...overview.summary.ip_quality, ip_version: 6 } }
+    const { unmount } = render(
+      <MemoryRouter>
+        <VPSOverviewPageView overview={overview} management={managementStub()} onRefresh={vi.fn()} retrying={false} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByLabelText('IP 质量')).toHaveTextContent('IPv6 · 默认族报告')
+    expect(screen.getByLabelText('监控关联')).not.toHaveTextContent('默认族报告')
+    unmount()
+
+    render(
+      <MemoryRouter>
+        <VPSOverviewPageView overview={healthyOverview()} management={managementStub()} onRefresh={vi.fn()} retrying={false} />
+      </MemoryRouter>,
+    )
+    expect(screen.getByLabelText('IP 质量')).not.toHaveTextContent(/IPv[46] · 默认族报告/)
+  })
+
   it('keeps monitoring coverage visible with an independent issue detail', () => {
     const overview = healthyOverview()
     overview.summary = {

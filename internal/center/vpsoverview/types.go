@@ -108,9 +108,10 @@ type Summary struct {
 
 // SummaryCell is one tile: a short status plus the section's own freshness.
 type SummaryCell struct {
-	Status  string       `json:"status"`
-	Detail  string       `json:"detail,omitempty"`
-	Section SectionState `json:"section"`
+	Status    string       `json:"status"`
+	Detail    string       `json:"detail,omitempty"`
+	IPVersion int          `json:"ip_version,omitempty"`
+	Section   SectionState `json:"section"`
 }
 
 // ActivitySection is recent activity for this VPS, produced by the same activity

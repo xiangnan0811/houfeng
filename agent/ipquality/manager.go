@@ -101,7 +101,7 @@ func (m *Manager) DrainReports() []agentapi.IPQualityReportPayload {
 }
 
 func (m *Manager) collect(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) {
-	report := m.collector.Collect(ctx, plan, observedAt)
+	reports := m.collector.Collect(ctx, plan, observedAt)
 
 	// 认领请求、保存状态和入队报告在同一临界区内完成，避免与 MaybeStart 的认领竞争。
 	// 被 Stop 取消时报告会被丢弃，也不把请求记为已处理。
@@ -110,16 +110,18 @@ func (m *Manager) collect(ctx context.Context, plan *agentapi.IPQualityPlan, obs
 	if ctx.Err() == nil {
 		state := m.startState
 		state.LastAttemptedAt = observedAt
-		state.LastStatus = report.Status
-		if report.Status == agentapi.IPQualityStatusSuccess {
+		state.LastStatus = aggregateReportStatus(reports)
+		if state.LastStatus == agentapi.IPQualityStatusSuccess {
 			state.LastSucceededAt = observedAt
 		}
 		if m.inFlightRequestID != "" {
-			report.DiagnosticsJSON = withCollectRequestID(report.DiagnosticsJSON, m.inFlightRequestID)
+			for index := range reports {
+				reports[index].DiagnosticsJSON = withCollectRequestID(reports[index].DiagnosticsJSON, m.inFlightRequestID)
+			}
 			m.handledRequestID = m.inFlightRequestID
 		}
 		_ = m.store.Save(ctx, state)
-		m.reports = append(m.reports, report)
+		m.reports = append(m.reports, reports...)
 	}
 	if m.cancel != nil {
 		m.cancel()
@@ -127,6 +129,31 @@ func (m *Manager) collect(ctx context.Context, plan *agentapi.IPQualityPlan, obs
 	}
 	m.inFlight = false
 	m.inFlightRequestID = ""
+}
+
+func aggregateReportStatus(reports []agentapi.IPQualityReportPayload) string {
+	actual, valid, successful := 0, 0, 0
+	for _, report := range reports {
+		metadata := agentapi.ParseCollectionMetadata(report.DiagnosticsJSON)
+		if metadata.Valid && metadata.IPVersion == report.IPVersion && metadata.Availability == agentapi.IPQualityFamilyUnavailable {
+			continue
+		}
+		actual++
+		switch report.Status {
+		case agentapi.IPQualityStatusSuccess:
+			valid++
+			successful++
+		case agentapi.IPQualityStatusPartial:
+			valid++
+		}
+	}
+	if actual > 0 && successful == actual {
+		return agentapi.IPQualityStatusSuccess
+	}
+	if valid > 0 {
+		return agentapi.IPQualityStatusPartial
+	}
+	return agentapi.IPQualityStatusFailure
 }
 
 func clonePlan(plan *agentapi.IPQualityPlan) *agentapi.IPQualityPlan {

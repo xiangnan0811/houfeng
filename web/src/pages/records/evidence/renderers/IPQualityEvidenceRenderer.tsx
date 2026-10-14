@@ -17,7 +17,8 @@ const SOURCE_STATUS_LABELS: Record<string, string> = {
   success: '成功',
   failure: '失败',
   skipped: '已跳过',
-  not_configured: '未配置',
+  // 无 adapter 的可选来源；wire 值不变，页面不暗示存在配置入口。
+  not_configured: '未接入',
 }
 
 const SOURCE_STATUS_TONES: Record<string, BadgeTone> = { failure: 'alert' }

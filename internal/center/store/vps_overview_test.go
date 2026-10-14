@@ -55,7 +55,7 @@ type fakeIPQuality struct {
 	vpsID           string
 }
 
-func (fake *fakeIPQuality) GetVPSIPQuality(_ context.Context, vpsID string) (ipquality.VPSReport, error) {
+func (fake *fakeIPQuality) GetVPSIPQuality(_ context.Context, vpsID string, _ int) (ipquality.VPSReport, error) {
 	fake.calls++
 	fake.fullReportCalls++
 	fake.vpsID = vpsID

@@ -35,6 +35,7 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("p72_upgrade", testPostgresIntegrationAppACLCurrentP72Upgrade)
 	t.Run("p73_upgrade", testPostgresIntegrationAppACLCurrentP73Upgrade)
 	t.Run("p74_upgrade", testPostgresIntegrationAppACLCurrentP74Upgrade)
+	t.Run("p75_upgrade", testPostgresIntegrationAppACLCurrentP75Upgrade)
 	t.Run("registered_settings_presence_matrix", testPostgresIntegrationAppACLCurrentSettingsPresenceMatrix)
 	t.Run("missing_settings_predecessor_suffixes", testPostgresIntegrationAppACLCurrentMissingSettingsPredecessorSuffixes)
 	t.Run("missing_settings_p67_rollback_and_drift", testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift)

@@ -33,6 +33,7 @@ func TestPostgresIntegrationIPQualityAddressIdentity(t *testing.T) {
 	assertIPQualityAddressIdentityAssignments(t, ctx, ipQualityRepository, runtimePool, identityFixture)
 	assertIPQualityAddressIdentityOverviewAfterUnlink(t, ctx, runtimePool, ipQualityRepository, identityFixture)
 	assertIPQualityAddressIdentityVPSPatchHistory(t, ctx, runtimePool, identityFixture.patchVPSID)
+	assertIPQualityFamilyFallbackAndLinkIsolation(t, ctx, fixture, runtimePool)
 
 }
 
@@ -239,7 +240,7 @@ func assertIPQualityAddressIdentityAssignments(
 ) {
 	t.Helper()
 
-	active, err := repository.GetVPSIPQuality(ctx, fixture.activeVPSID)
+	active, err := repository.GetVPSIPQuality(ctx, fixture.activeVPSID, 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality active-link report: %v", err)
 	}
@@ -247,7 +248,7 @@ func assertIPQualityAddressIdentityAssignments(
 		t.Fatalf("active-link assignment = %#v, latest=%#v, want link report %q", active.Summary, active.LatestReport, fixture.activeReportIP)
 	}
 
-	suppressed, err := repository.GetVPSIPQuality(ctx, fixture.suppressedVPSID)
+	suppressed, err := repository.GetVPSIPQuality(ctx, fixture.suppressedVPSID, 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality active-link suppression: %v", err)
 	}
@@ -260,16 +261,21 @@ func assertIPQualityAddressIdentityAssignments(
 		where link_id = $1`, fixture.suppressedLinkID); err != nil {
 		t.Fatalf("unlink suppressed monitoring instance: %v", err)
 	}
-	fallback, err := repository.GetVPSIPQuality(ctx, fixture.suppressedVPSID)
+	fallback, err := repository.GetVPSIPQuality(ctx, fixture.suppressedVPSID, 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality after unlink: %v", err)
 	}
 	if fallback.Summary == nil || fallback.Summary.AssignmentMode != "ip_match" || fallback.Summary.IPAddress != fixture.suppressedFallbackIP || fallback.LatestReport == nil || fallback.LatestReport.IPAddress != fixture.suppressedFallbackIP {
 		t.Fatalf("fallback assignment after unlink = %#v, latest=%#v, want ip_match report %q", fallback.Summary, fallback.LatestReport, fixture.suppressedFallbackIP)
 	}
+	if fallback.DefaultIPVersion != 6 || fallback.SelectedIPVersion != 6 || len(fallback.Families) != 2 ||
+		fallback.Families[0].Availability != "unknown" || fallback.Families[0].LatestAttempt != nil ||
+		fallback.Families[1].LatestAttempt == nil || fallback.Families[1].LatestAttempt.CollectionScope != "legacy_single_family" {
+		t.Fatalf("legacy IPv6 fallback claimed verified single-stack availability: %#v", fallback)
+	}
 
 	for _, vpsID := range []string{fixture.ambiguousVPSAID, fixture.ambiguousVPSBID} {
-		ambiguous, err := repository.GetVPSIPQuality(ctx, vpsID)
+		ambiguous, err := repository.GetVPSIPQuality(ctx, vpsID, 0)
 		if err != nil {
 			t.Fatalf("GetVPSIPQuality ambiguous %q: %v", vpsID, err)
 		}
@@ -278,14 +284,14 @@ func assertIPQualityAddressIdentityAssignments(
 		}
 	}
 
-	familyIPv4, err := repository.GetVPSIPQuality(ctx, fixture.familyIPv4VPSID)
+	familyIPv4, err := repository.GetVPSIPQuality(ctx, fixture.familyIPv4VPSID, 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality IPv4/mapped IPv6 separation: %v", err)
 	}
 	if familyIPv4.Summary != nil || familyIPv4.LatestReport != nil {
 		t.Fatalf("mapped IPv6 report crossed into IPv4 VPS identity: %#v", familyIPv4)
 	}
-	familyMappedIPv6, err := repository.GetVPSIPQuality(ctx, fixture.familyMappedIPv6VPSID)
+	familyMappedIPv6, err := repository.GetVPSIPQuality(ctx, fixture.familyMappedIPv6VPSID, 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality mapped IPv6 identity: %v", err)
 	}
@@ -293,7 +299,7 @@ func assertIPQualityAddressIdentityAssignments(
 		t.Fatalf("mapped IPv6 assignment = %#v, want same-family ip_match report %q", familyMappedIPv6.Summary, fixture.familyMappedReportIP)
 	}
 
-	failure, err := repository.GetVPSIPQuality(ctx, fixture.failureVPSID)
+	failure, err := repository.GetVPSIPQuality(ctx, fixture.failureVPSID, 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality failure placeholder: %v", err)
 	}
@@ -376,8 +382,12 @@ func assertIPQualityAddressIdentityOverviewAfterUnlink(
 			vpsID: fixture.failureVPSID,
 		},
 		{
-			name:  "newest ambiguous shared IPv6 hides older unique IPv4",
-			vpsID: fixture.slotsAmbiguousLatestVPSID,
+			name:         "default IPv4 is not replaced by newer ambiguous IPv6",
+			vpsID:        fixture.slotsAmbiguousLatestVPSID,
+			wantSummary:  true,
+			reportSuffix: "slots-ambiguous-unique-older",
+			wantStatus:   "success",
+			wantRisk:     "low",
 		},
 		{
 			name:         "newest unique IPv4 wins over older ambiguous shared IPv6",

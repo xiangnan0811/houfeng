@@ -76,12 +76,15 @@ func hasServiceProbeFailure(services []agentapi.IPQualityServiceUnlockPayload) b
 	return false
 }
 
-func diagnosticsJSON(startedAt time.Time, discoveryCandidates, ipCandidates map[string]string, ipVersion int, egressAmbiguous bool, providers []agentapi.IPQualityProviderResultPayload) json.RawMessage {
+func diagnosticsJSON(startedAt time.Time, discoveryCandidates, ipCandidates map[string]string, ipVersion int, availability, collectionID string, egressAmbiguous bool, providers []agentapi.IPQualityProviderResultPayload) json.RawMessage {
 	payload := map[string]any{
-		"source_version":         "v2",
-		"collection_revision":    3,
-		"service_probe_revision": 2,
-		"elapsed_ms":             int(time.Since(startedAt).Milliseconds()),
+		"source_version": "v2",
+		agentapi.IPQualityDiagnosticsCollectionRevisionKey: agentapi.IPQualityCollectionRevision,
+		"service_probe_revision":                           3,
+		agentapi.IPQualityDiagnosticsCollectionIDKey:       collectionID,
+		agentapi.IPQualityDiagnosticsExpectedIPVersionsKey: [2]int{4, 6},
+		agentapi.IPQualityDiagnosticsFamilyAvailabilityKey: availability,
+		"elapsed_ms": int(time.Since(startedAt).Milliseconds()),
 	}
 	if ipVersion == 4 || ipVersion == 6 {
 		payload["ip_address_family"] = ipVersion

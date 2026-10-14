@@ -14,6 +14,10 @@
 /* IP 质量报告页：页头与卡片复用 VPS 详情工作区（VPSDetailWorkspace.css）的版式。 */
 .ipq-page{container:ipq / inline-size;width:min(100%, 1600px);margin-inline:auto}
 .ipq-header__history{flex:0 0 auto}
+.ipq-header__family{margin-top:var(--space-2)}
+/* 长 IPv6 在 390px 下断行，不撑开页头。 */
+.ipq-header .vps-overview-identity__copy,.ipq-header .vps-overview-identity__meta,.ipq-header .vps-overview-identity__meta-item{min-width:0;max-width:100%}
+.ipq-header .vps-overview-identity__meta dd{min-width:0;overflow-wrap:anywhere}
 .ipq-muted{color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4}
 .ipq-empty{margin:0;padding:var(--space-3);border-radius:var(--radius-2);background:var(--panel-bg-muted);color:var(--text-muted);line-height:1.45}
 .ipq-page .data-table{border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
@@ -26,6 +30,8 @@
 .ipq-table-hint{margin:0;color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
 
 .ipq-collect-button{display:inline-flex;align-items:center;gap:var(--space-2)}
+.ipq-collect{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px var(--space-2);min-width:0}
+.ipq-collect__hint{color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4}
 .ipq-collect-button .ipq-pulse{background:currentColor}
 .ipq-pulse{flex:0 0 auto;width:8px;height:8px;border-radius:var(--radius-pill);background:var(--accent);animation:ipq-pulse 1.2s var(--ease-calm) infinite}
 @keyframes ipq-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.35;transform:scale(0.75)}}
@@ -52,6 +58,7 @@
 .ipq-verdict__label{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
 .ipq-verdict__value{display:flex;align-items:baseline;gap:4px;margin:0}
 .ipq-verdict__value strong{color:var(--text-primary);font-size:40px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums}
+.ipq-verdict__value--gap strong{font-size:28px}
 .ipq-verdict__value span{color:var(--text-muted);font-size:var(--vps-detail-body-size)}
 .ipq-verdict--normal .ipq-verdict__value strong{color:var(--color-state-normal)}
 .ipq-verdict--notice .ipq-verdict__value strong{color:var(--color-state-notice)}
@@ -76,6 +83,7 @@
 .ipq-service__head .badge{flex:0 0 auto}
 .ipq-service__name{min-width:0;color:var(--text-primary);font-weight:600;overflow-wrap:anywhere}
 .ipq-service__detail{margin:0;color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4;overflow-wrap:anywhere}
+.ipq-service__notes{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none;color:var(--text-secondary);font-size:var(--vps-detail-helper-size);line-height:1.4;overflow-wrap:anywhere}
 .ipq-service--unlocked{box-shadow:inset var(--border-w-strong) 0 0 var(--color-state-normal)}
 .ipq-service--partial{box-shadow:inset var(--border-w-strong) 0 0 var(--color-state-notice)}
 .ipq-service--blocked{border-color:color-mix(in srgb,var(--color-state-alert) 35%,var(--border-muted));background:color-mix(in srgb,var(--color-state-alert) 5%,var(--surface));box-shadow:inset var(--border-w-strong) 0 0 var(--color-state-alert)}
@@ -117,6 +125,7 @@
 .ipq-diagnostics__group h3{margin:0;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong);font-weight:600}
 .ipq-diagnostics__table{min-width:560px}
 .ipq-page .ipq-diagnostics__error{white-space:normal;overflow-wrap:anywhere;color:var(--text-secondary)}
+.ipq-diagnostics__endpoints{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
 .ipq-diagnostics__json{display:flex;flex-direction:column;gap:6px;min-width:0}
 .ipq-facts{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(100%, 16rem), 1fr));gap:6px 20px;margin:0}
 .ipq-facts > div{display:grid;grid-template-columns:5.5rem minmax(0, 1fr);align-items:baseline;gap:8px;min-width:0}

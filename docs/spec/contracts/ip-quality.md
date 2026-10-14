@@ -37,12 +37,15 @@
 - DB read views:
   - `ip_quality_assigned_vps_reports`
   - `ip_quality_latest_vps_summaries`
+  - `ip_quality_vps_family_state`：每个 VPS 固定 IPv4/IPv6 两行，统一默认族与最新尝试选择
 - HTTP API:
-  - `GET /api/vps/{vps_id}/ip-quality`
-  - `GET /api/vps/{vps_id}/ip-quality/reports/{report_id}`
+  - `GET /api/vps/{vps_id}/ip-quality?ip_version=4|6`：可省略参数使用服务端默认族；空值、重复值或非法族返回 400
+  - `GET /api/vps/{vps_id}/ip-quality/reports/{report_id}`：身份由历史 ID 确定，禁止 `ip_version` 参数
   - `GET /api/vps/{vps_id}/ip-quality/collect`：`enabled`、`available`、`unavailable_reason`（`disabled` / `no_monitoring_instance` / `agent_not_bound` / `monitoring_paused`）、`monitoring_instance_id`、`agent_last_sync_at`、最近一次 `request`
   - `POST /api/vps/{vps_id}/ip-quality/collect`：可用时 202 返回同结构并带 `request`；不可用时 409 `{error, reason}`
   - `request`：`request_id`、`monitoring_instance_id`、`status`（`pending` / `dispatched` / `completed` / `expired`）、`requested_at`、`expires_at`、`dispatched_at`、`completed_at`、`report_status`、`error_summary`
+  - 请求结果新增 `collection_scope`（有结果时为 `dual_stack` / `legacy_single_family`）、可选 `collection_id`、`family_results`（每行含 `ip_version`、`availability`、`report_status`、安全 `error_code`）；只投影一个采集组，不把不同组的族拼接
+  - 报告响应新增 `selected_ip_version`、`default_ip_version`、固定 [4,6] 的 `families`；每族含 availability、可空 latest_attempt 与 latest_report_summary。attempt 只公开时间、stale、status、安全 error_code、scope/id，不公开占位出口或原始异常
   - VPS list/detail records may include `ip_quality_summary`.
 - Asset decision evidence kinds:
   - `ip_quality_missing`
@@ -62,18 +65,20 @@
 - 默认 service registry 以 Go 原生固定协议执行七项免登录探测，历史 source 身份连续：`netflix` → `netflix_title_probe`、`chatgpt` → `openai_status_probe`、`youtube-premium` → `youtube_premium_page_probe`、`amazon-prime-video` → `prime_video_page_probe`、`disney-plus` → `disney_default_probe`、`tiktok` → `tiktok_home_probe`、`reddit` → `reddit_home_probe`。检测范围仅为本轮匿名入口/地区可用性，不承诺账号资格、付费播放、原生/DNS 解锁或完整片库。
 - 只有服务专属业务证据可产生 `unlocked|partial|blocked`，三者均为 `probe_status=success`；通用 HTTP 200、空 JSON、无阻断文字不能作为成功。网络错误、挑战、登录页、未知响应为 `unknown/failure`，清空 region/unlock_type。429/5xx 一律未知；普通 401/403 不是地区封锁证据。
 - 服务页脚本仅静态提取可解码的 JSON，不执行 JavaScript；字符串、模板文本、注释和已识别正则字面量中的 JSON 样式文本不构成业务证据。正则识别须覆盖赋值、参数、一元/二元运算及表达式关键字边界，并保留普通除法、属性名及后缀自增/自减之后的真实 JSON。该提取器不是完整 JavaScript 解释器；未形成服务专属事实仍返回未知。
+- YouTube 仅信任直接绑定到 `ytcfg.set({...})` 或 `ytInitialData = {...}`（可带 `window.`）的静态 JSON 对象；同一 script 中的无关对象、其他对象的同名属性，以及注释/字符串/正则中的标记都不能建立页面有效性或地区证据。配置对象缺地区时仍保留独立的有效页面业务拒绝判据。
 - 服务结果按 normalized settings 输入顺序回收；未知服务仍为 `default_probe_registry/unknown/skipped/unsupported_service`，空输入不请求。历史 revision1 的 `unknown/skipped/unsupported_default_probe` 原样保留，不重新探测或回写。
 - 显式 custom JSON service adapter 的字段优先级为 `status` → `unlock_status`，只有状态为空才使用 `unlocked` bool 映射（`true` → `unlocked`、`false` → `blocked`）；`region` / `unlock_type` 及其既有别名保持不变。状态经 trim/lower 后仅允许 `unlocked`、`blocked`、`partial`、`unknown`。
 - 字段选择保留既有 `stringFromMap` 行为：若 `status` 是已存在的空字符串（包括 trim 后为空），不继续读取 `unlock_status`，而是进入 `unlocked` bool 回退；例如 `{"status":"","unlock_status":"partial","unlocked":true}` 的结论是 `unlocked`。没有有效 bool 结论时仍按无结论失败处理。
 - custom JSON 的 `unlocked`、`blocked`、`partial` 均写 `probe_status=success`；保留已有业务错误说明（例如 `blocked` 的业务 `error_code` 不是探测失败）。`unknown`、空对象、缺少结论或非法状态写 `status=unknown`、`probe_status=failure`、`error_code=invalid_response`、固定摘要 `service response did not establish a business conclusion`，并清空 region/unlock_type。HTTP/JSON 读取错误（包括 HTML、空 body、JSON 解析失败和所有非 2xx）写 `probe_status=failure`、`status=unknown`，保留 `probe_failed` 语义和安全 raw。
 - Lookup 成功后任一最终 default provider failure 或 service failure 使报告为 `partial`；skipped/not_configured 是能力诊断，不单独制造 partial。每个来源及服务有独立 timeout，并受总采集 context 约束；慢数据库来源不得吞掉并行服务阶段的预算。
+- 两族服务共享最多7个并发槽；排队只受整轮 context 约束，取得槽位后才开始 `min(父 context 剩余时间, 10秒)` 的服务预算。排队取消不发送 HTTP，也不让已等待的服务提前耗尽自己的探测预算。
 - IP 质量采集默认开启；默认配置为 86400 秒周期、15 秒 timeout 和默认服务集合。没有 settings 行、JSON 缺 `enabled` 字段时（`settings.Default()`、sync plan SQL 兜底、`IPQualityEnabled` 读取）都按开启处理；已保存的显式值（包括关闭）原样保留，不做迁移覆盖。只传零值对象或 `{"enabled":false}` 时视为显式关闭，其余字段补默认值。低频报告与脱敏原始结果长期保留，不再提供 raw/history 按天自动删除配置，见 [数据保留合同](retention.md)。
 - 立即采集：`POST /api/vps/{vps_id}/ip-quality/collect` 只为该 VPS 当前监控实例（未退役、未归档、所属 VPS 未归档）登记请求；采集关闭、无当前实例、agent 未绑定或监控暂停时返回 409 与原因，不登记请求。同一实例已有 `pending` / `dispatched` 请求时返回该请求，不重复触发外部查询。
 - 立即采集请求只保存在 center 进程内存（`ipquality.CollectRequests`），TTL 10 分钟，结束后保留 30 分钟供页面展示；center 重启即丢失，用户重新发起即可。该机制假设单 center 进程；多副本部署前必须改为持久化协调。不新增数据库表，不复用命令白名单/pending action，也不写命令审计。
 - `syncing.Service` 在 `ApplyBatch` 成功后，只在 `Disposition=recorded`（报告确已入库）时用本批报告完成进行中的请求；`suppressed`（暂停/退役等未写入）与 `exact_duplicate` 不改变请求。随后在 plan `enabled=true` 且未 `stop_collection` 时把仍待执行的请求 ID 写入 plan 副本并标记 `dispatched`；不得修改仓库返回的 plan。IP 质量关闭或实例暂停时不下发，请求保持原状直到过期。
-- 请求与报告按 ID 精确关联：agent 把请求 ID 写进报告的 `diagnostics_json.collect_request_id`，center 在脱敏前从原始 diagnostics 读取并按 `[A-Za-z0-9_-]{1,64}` 规整，只有带回同一 ID 的已入库报告才能完成请求。周期报告、离线补传或其他请求的报告不论时间多新都不算。不在报告顶层加字段：旧 center 的 sync 解码拒绝未知字段，回滚期间排队的整批数据会被 agent 丢弃；`diagnostics_json` 是旧 center 已接受的自由 JSON，该键不是敏感字段，会随诊断保存。
+- 请求与报告按 ID 精确关联：agent 把请求 ID 写进 `diagnostics_json.collect_request_id`，center 脱敏前使用共享 `agentapi.ParseCollectionMetadata` 解析；request ID 按原 `[A-Za-z0-9_-]{1,64}` 规整。revision4 必须同实例、同 request ID、同 collection ID、同 observed_at 的 IPv4/IPv6 两个合法终态齐全才完成；允许分批 recorded 回传，重复族保留首次值，不同组不得拼接。一次 ObserveReports 先应用全部行，再选最新 observed_at、同时间 collection_id 字典序最大的完整组并冻结；进行中按同排序投影单组，公开数组在锁内复制。非法或未来配对元数据不能降为 legacy。无配对标记旧报告可单行完成，但 scope 明确为 legacy_single_family，未验证另一族。metadata 族必须与报告一致；占位仅可用于 failure 的缺族/lookup_failed。周期/其他请求、suppressed、exact_duplicate 不推进。新元数据只放已有 JSON，不增加 sync 顶层字段。
 - Agent 收到新的 `collect_request_id` 时不看周期立即采集一次；周期采集进行中收到请求时由这一轮认领并在报告中带回该 ID，不再重复采集。已产出报告的请求 ID 只在 agent 内存中去重（center 收到报告前会继续下发同一 ID）；进程重启或 `Stop` 后清空，此时若 center 仍下发同一 ID 会再采一次——宁可多采一次也不漏采。旧 agent 忽略该 plan 字段，请求到期后显示超时。
-- 过期后到达的报告照常入库，但不再改变请求状态；失败报告使请求 `completed` 且 `report_status=failure`，用户侧报告仍按下述 read view 规则只展示有效事实。
+- 过期后到达的报告照常入库，不改变请求。双族聚合忽略明确 unavailable；其余全 success 为 success，有有效结果且任一 partial/failure 为 partial，全失败或两族 unavailable 为 failure。LastStatus 使用相同规则，LastSucceededAt 仅聚合 success 时更新；失败终态不变成 IP 事实。
 - IP 质量 stale 窗口由 `stale_after_seconds` 控制，默认 604800 秒。该值必须不小于 `frequency_seconds`，避免还没到下一次采集就判过期。API、Settings 页面、Go/TS 类型和迁移默认必须同步该字段。
 - IP 质量采集频率独立于 host sample / probe frequency。Agent 心跳 tick 只 drain 已完成报告，不在同步路径内阻塞外部 HTTP 请求。
 - Agent due 判断必须按 `LastAttemptedAt` 节流；lookup 持续失败时也只能按 `frequency_seconds` 周期重试，不能因为 `LastSucceededAt` 为空而在每个 heartbeat tick 重复采集/上报 failure。
@@ -82,21 +87,23 @@
 - Provider row `status` 只允许 `success`、`failure`、`skipped`、`not_configured`；`source_type` 只允许 `default`、`optional`、`custom`。Service row `probe_status` 只允许 `success`、`failure`、`skipped`、`not_configured`。
 - `coverage` 必须记录 expected/successful/failed/skipped/not_configured provider 与 service 计数；前端完整页优先使用 summary 的 `coverage`，其次使用 selected report 的 `coverage`。两者均缺失时显示“—”，不得从历史行数或默认 success 重建成功率、归一成 100%。
 - Service coverage 只有 `probe_status=success` 且 `status` 为 `unlocked`、`blocked` 或 `partial` 才计 successful；`skipped` 与 `not_configured` 各计原分类，其余组合（包括空 probe_status、`unknown/success`、`unlocked/failure`）计 failed。该谓词只约束新报告计数，历史入库/读取的兼容事实不回写。
-- 默认采集 diagnostics 保留 `"source_version":"v2"`，新增数值 `"collection_revision":3`、`"service_probe_revision":2` 和选定 `"ip_address_family":4|6`；发现及最终候选分别记录为 `discovery_ip_candidates` / `ip_candidates`，最终 mismatch 标记 `ip_conflict`，同族多出口标记 `egress_ambiguous`。显式 custom/legacy 不附加默认标记。所有元数据只放现有 JSON，不新增顶层 DTO/数据库列，不回写历史。
-- selected report 有 service rows 但无 source_version 或任何 service source 时提示来源不可核验。已知默认 revision2 显示免登录探测范围；revision1 保留停用说明，旧/未知 revision 保留不可靠警告；custom-only 不套默认来源提示。历史切换依据选中报告自身 diagnostics，不借用最新报告。
+- 默认每轮固定返回 [IPv4, IPv6]，共享 observed_at 与 crypto/rand.Text collection_id；diagnostics 保留 source_version=v2，collection_revision=4、service_probe_revision=3、expected_ip_versions=[4,6]、ip_address_family、family_availability。共享 parser 只有精确 revision4、合法 1..64 字符 ID、[4,6]、合法族/availability 才 Valid；出现配对键或数值 revision>=4 即 Paired，未知版本不得 legacy 回退。显式 legacy/custom 仍返回单元素 slice，不附默认配对元数据。历史数据不回写。
+- family_availability 仅 available/unavailable/unknown：UP 非 loopback 接口有该族 global-unicast（包括私网/ULA）或强制出口发现成功即 available；成功枚举却没有该族可用地址才 unavailable；枚举失败且发现失败为 unknown，仍尝试发现。忽略 unspecified/loopback/multicast/link-local。unavailable 使用族对应 0.0.0.0/::、failure/address_family_unavailable、安全摘要 no usable local address for this IP family，不发该族外部请求；配置来源/服务计 skipped，可选来源仍 not_configured。available/unknown 发现失败用 lookup_failed，不能冒充缺族。
+- selected report 有 service rows 但无 source_version 或任何 service source 时提示来源不可核验。默认 service revision2/3 均显示免登录能力边界；revision1 保留停用说明，旧/未知 revision 保留不可靠警告；custom-only 不套默认来源提示。历史切换依据所选报告自身 diagnostics。
 - HTTP lookup 返回 HTML、非 JSON、空 body 或 JSON 解析失败时，Agent 必须生成短诊断 failure（如 `non_json_response`），不得把 HTML 原文写入 `error_summary` 或 raw envelope。
 - Center 必须在 sync 事务内保存完整 IP 质量报告、provider/service 扩展元数据、coverage 与 diagnostics，与心跳、样本、观测和 batch receipt 一起提交或回滚；不得另开 SaveReports 事务。先通过 sync token/fingerprint 验证，fingerprint 不匹配的报告不得入库。相同 service 不同 source 是不同事实，相同 `(service, source)` 重复须失败并回滚整批。exact replay 不增事实、不重复完成立即采集请求。
 - 两个写入入口共享完整 writer 与 sanitizer，但保留入口语义：缺 raw 的 sync 写 JSON null，SaveReports 写 SQL NULL；非空非法 raw 经 sanitizer 得到 SQL NULL。显式 received_at 原样保留，零值分别使用批次 received_at 与 SaveReports 的当前 UTC 时间；缺 coverage/diagnostics/extra 保持 SQL NULL。
 - Raw JSON、provider `extra_json`、service `extra_json` 和 report `diagnostics_json` 必须通过 `ipquality.SanitizeRawJSON` / extra JSON sanitizer 兜底处理：递归替换 token/key/authorization/cookie/password 类字段为 `[redacted]`，并限制到对应最大字节数内；超限时存合法 JSON truncation marker，不做字节截断。
 - VPS 归属优先使用 active `vps_monitoring_instance_links`；有 active link 时即使没有有效报告也禁止地址 fallback。没有 active link 时，当前 `ipv4`/`ipv6` 与报告出口 IP 按解析后的 host address 身份比较：IPv6 展开/压缩/大小写等价，IPv4-mapped IPv6 只与同一 mapped 地址等价，不与普通 IPv4 合并。同一报告匹配多个 VPS 时标记 `ambiguous=true`；unlink 后恢复 fallback。SQL view 与 Overview 使用相同规则，不改原始存储文本或历史报告事实。
 - 地址 fallback 的报告身份与无 active link 资产身份分别在已过滤的 MATERIALIZED CTE 中计算；JOIN 只比较已解析值，避免对每个报告/资产组合重复执行 parser。assigned view 与 Overview 同步这一计算边界，不以新增索引或历史回填替代。
-- Overview 的窄 summary 不新增字段：先按原排序选定最新归属报告，再检查 fallback 是否被另一台无 active link 的 VPS 同址命中。选定报告归属歧义时返回无 summary，沿用 `missing` 缺口提示，不把其 risk/partial/stale 归给该 VPS，也不得跳过它改用更旧的唯一归属报告；最新报告唯一归属与 active-link 分支的既有结果保持不变。
+- Overview 窄 summary 使用同一 family-state view 的默认族报告，先选定再检查归属歧义；歧义返回 missing，不偷换更旧报告。SELECT/Scan、IPQualitySource 与 SummaryCell 传递 ip_version；仅 IP-quality cell 有合法族时显示“IPv4/IPv6 · 默认族报告”，不改机器 status/detail。disabled/missing 不伪造族，保持 disabled 不读事实与单查询边界。
 - Go/SQL host identity 解析均 trim Unicode White_Space，拒绝 CIDR、zone、端口、短 IPv4、前导零及越界十进制 octet；合法 unspecified 可解析，既有业务过滤不变。无效文本不参与 fallback，但不妨碍 active-link 归属。Agent 候选只在存在不同有效地址时确认冲突；出口不一致 evidence 需 success、非 ambiguous、有效报告地址和至少一个有效当前地址。
 - VPS PATCH 仅改变地址表示不新增 IP history；真实地址改变仍记史。任一侧不可解析时按 trim 后原文比较，修正/删除非法旧地址也记史。独立创建 IP history 使用同一无变化判定；四个历史地址字段只去掉首尾空白、不做规范化，保留原文（存量非法文本 ` 999.1.1 ` 清空时记为 `999.1.1` → 空）。VPS create/导入拒绝非空的非法地址；PATCH 只在地址按本条无变化判定确有改变时才校验格式，并在版本前提检查之后执行，未改动（含只差首尾空白）的存量非法原文不被拒绝（见 assets 合同）。不放宽 evidence 地址族校验。
-- 用户侧 read model（`ip_quality_assigned_vps_reports` / `ip_quality_latest_vps_summaries`）只能包含真实 IP 事实：`status in ('success','partial')`、`ip_address <> '0.0.0.0'`、`ip_version in (4,6)`。原始 failure 报告继续保存在 `ip_quality_reports` 供诊断，但 VPS API、VPS 列表/详情和资产决策不得展示这些 failure 占位事实。
-- 历史详情 API 必须按 VPS assignment 规则读取 selected report，响应中必须同时返回该 report 的 `summary`、`latest_report`、provider rows、service rows；不能只返回 row 细节而让前端历史视图空态或退回 latest summary。
-- 最新与历史详情各自在单个 `REPEATABLE READ READ ONLY` transaction 中读取归属、摘要、报告及 children（最新入口还包含最多 30 条 history）。最新入口以摘要的 ReportID 固定身份，历史入口以请求 ID 固定身份；并发入库、link 或地址/共享地址变化只影响后续请求，不能拼接两个快照。
-- 无归属报告返回 summary/latest 为 null、provider/service/history 为非 nil 空数组。已选摘要缺 assigned report，或已读 assigned report 缺摘要，必须失败；禁止重新选择 latest 或从 report 合成无歧义摘要。begin/query/commit 任一失败均不返回部分响应；公共 summaries 与 Overview 的单查询边界不扩大。
+- 有效 IP 事实只包含 success/partial、真实非 unspecified IP 与匹配族。failure 及 0.0.0.0/:: 占位不得进入有效 history、矩阵、风险、evidence。最新尝试独立保留，只有当前 active link 可归属无出口失败；无 active link 仅沿用有效报告 host-address fallback，旧实例失败不污染新 link。
+- 默认选择只由 family-state view 决定：排除新鲜 unavailable 后，IPv4 有有效报告/尝试/合法配置则选4，否则 IPv6 有依据选6，皆无依据选4。过期 unavailable 不是当前缺族证明；显式4/6不受自动规则限制。只有旧 IPv6 可默认6，但 IPv4 unknown 不等于单栈。
+- 最新与历史详情在单个 REPEATABLE READ READ ONLY transaction 内读取 family state、所选摘要、报告、children 和每族最多30份有效 history；同时间按 live 优先、received_at、report_id 稳定排序。历史 ID 决定族及事实，families 仅导航。并发 link/地址/报告变化不能拼快照。
+- 历史详情也返回所选报告自身地址族的 history，而不是空列表；更新的同族报告只能在新读快照中出现，不替换历史 ID 对应的摘要或 children。
+- 显式族无报告返回本族空 facts + attempt，不404、不借另一族。可以展示同族上次有效报告，但本轮失败/时间独立标识。缺已选 assigned report 或 summary 必须失败，禁止重新选 latest；begin/query/commit 失败不返回部分结果。默认族只有失败无有效报告时公共 summary 为空，不退另一族。
 - VPS Overview 在 IP 质量关闭时只做 availability 检查，立即返回 `not_configured` + `SectionReady`，不得查询 `GetLatestVPSIPQualitySummary`，也不得发出 `ip_quality_disabled_has_history`。历史注释不是当前健康判断的一部分；历史只在 `GET /api/vps/{vps_id}/ip-quality` 详情页展示。关闭路径上的 summary 超时不得把 Overview 标成 `source.unavailable.v1`。
 - 资产决策只能把 IP 质量作为 evidence / scoring / readback 输入，不自动执行迁移、取消或续费动作。
 - `ip_quality.report/v1`是authoritative evidence source kind；只有生成新的logical evidence snapshot时才按该snapshot的`logical_size_bytes`消耗project evidence capacity。IP质量report/provider/service表大小、raw retention、coverage、风险等级或source availability都不能成为quota counter、capacity fallback或janitor删除依据。
@@ -124,7 +131,7 @@
 | 显式 custom service adapter 返回 429 / 403 / 451 / 404 / 5xx，或 HTML/非 JSON/空 body | 不判定解锁；写 `probe_status=failure`、`status=unknown`，不根据裸 HTTP 状态码形成 blocked |
 | 显式 custom JSON 缺少结论、状态为 unknown 或状态非法 | 写 `probe_status=failure`、`status=unknown`、`error_code=invalid_response`，清空 region/unlock_type；lookup 成功时报告为 partial |
 | 默认服务未形成固定规则的业务证据 | 写 `unknown/failure` 及安全错误；裸 HTTP 状态或页面可达不等于可用/受限 |
-| 默认七项服务集合 | 按输入顺序回收真实探测结果，coverage 分类如实统计，`service_probe_revision=2`；历史 revision1 skipped 原样保留 |
+| 默认七项服务集合 | 按输入顺序回收真实探测结果，coverage 如实分类，service_probe_revision=3；历史不回写 |
 | Lookup 失败 | Agent report `status=failure`，不采 service unlock，error_code/error_summary 必填 |
 | Lookup 返回 HTML / 非 JSON | Agent report `status=failure` + 短 `non_json_response` 诊断，raw_json 为空或合法 JSON，不保存 HTML |
 | Lookup 持续失败 | Agent 更新 `LastAttemptedAt`，在 `frequency_seconds` 内不因 heartbeat 重复采集 |
@@ -173,8 +180,8 @@
 - `internal/contracts/agentapi`: provider/service v2 字段、`coverage`、`diagnostics_json` JSON round-trip，并覆盖旧 payload 兼容。
 - `internal/center/settings`: 默认开启、零值/仅 `enabled=false` 视为显式关闭、低频默认值、`stale_after_seconds` 默认值与校验、service normalization、非法频率/timeout/service；不暴露低频 TTL 配置。
 - `agent/ipquality`: due 判断、state store、HTTP collector 成功/partial/failure、显式 custom JSON service status 映射、raw JSON 脱敏和合法 JSON。
-- `agent/ipquality`: 五个默认 provider、十三个 optional not_configured rows、确定性 IPv4 优先/IPv6 fallback、指定 IP 重查与 mismatch 隔离、地区/网络成组来源、严格 ProxyCheck v3、false/0/缺值、provider/service 预算与取消回收、HTML/非 JSON 清洁 failure、失败 attempt 节流。
-- `agent/ipquality`: 七服务阳性/限制/partial/挑战/通用 HTML/非法 JSON/429/5xx 矩阵、重定向/解压大小限制、固定地址族、Disney token 不外泄和逐步中止；custom 状态兼容、非法组合 coverage，以及 service revision2/collection revision3 round-trip。
+- `agent/ipquality`: 双族不同出口与来源/服务独立、单栈零缺族外部请求、枚举失败 unknown、强制族 mismatch、canonical 全局 barrier、共享预算/并发上限、timeout 双终态与 Stop 整轮丢弃、lookup 失败节流；指定 IP 重查、风险来源组与 typed HTTP 错误回归。
+- `agent/ipquality`: 七服务阳性/限制/partial/挑战/429/5xx、重定向/大小/固定地址族、YouTube 无 offer 地区与无地区拒绝独立、ChatGPT bool 与 endpoint 失败、collection revision4/service revision3 round-trip；旧 JSON shape 兼容。
 - `agent/runtime`: plan 到后台 collector 的启动/drain 行为，disabled plan 不启动采集。
 - `agent/ipquality`: 立即采集绕过周期且只执行一次、ID 写入 diagnostics 且保留原诊断、周期报告不带 ID、周期采集中认领请求、Stop/重启后可重新执行、disabled plan 忽略请求、失败的立即采集保留上次成功时间。
 - `internal/center/ipquality`: 立即采集请求复用、只按回传 ID 完成（排除周期报告与其他 ID）、diagnostics ID 解析与规整、过期与清理。
@@ -229,15 +236,13 @@ if unlocked := boolFromMap(payload, "unlocked"); unlocked != nil && *unlocked {
 
 ### 8. 出口身份、来源事实与调度
 
-默认先并发查询 `ipapi.is` 和 `ipquery.io` self，canonical 预算为总 timeout 的三分之一、单请求上限 5 秒。成功候选先选 IPv4，没有成功 IPv4 才选 IPv6；同族按 ipapi.is → IPQuery 顺序，不以完成时间决定身份。均失败时返回 lookup_failed，dependent 只写 missing_target_ip，不启动服务。
+默认每轮取一次本地接口快照、一个总 context 和 collection ID，IPv4/IPv6 分别使用固定 tcp4/tcp6 client。两族至多四个 canonical self 请求作为一个全局阶段并发完成或到 canonical deadline，任一 dependent 不得抢占尚未完成 canonical 的槽位。canonical 预算为总 timeout 三分之一、单请求最多5秒；响应必须合法、非 unspecified 且与所请求族相同，异族是 ip_mismatch，不借另一族结果。
 
-选定 IP 后，三个 dependent 一律指定该 IP 查询；另一个成功 canonical 若地址不同，仅指定 IP 重查一次并替换最终 outcome，初次失败不重试。最多六次数据库请求。指定查询的成功结果必须经 `ipidentity.Parse` 与 target 精确相等，否则 `failure/ip_mismatch`、摘要固定 `provider returned a different IP`，清空 normalized facts，原响应仅存脱敏 raw。只有同 IP 成功来源进入 summary/fallback/risk。
+每族按 ipapi.is → IPQuery 选择 target；三个 dependent 显式查询该 target，另一成功 canonical 地址不同才重查一次。整轮最多12次数据库请求，不隐式重试。dependent 允许普通直连 tcp，因为目标由参数确定；成功结果仍必须与 target 精确一致，mismatch 清空 normalized facts，安全摘要固定。summary/fallback/risk 全部按族独立。
 
-正常双栈发现不表示 conflict，也不独立制造 partial；最终 mismatch 才设置 ip_conflict。同族两个不同发现地址记 egress_ambiguous，服务全部 unknown/failure/egress_ambiguous，不能把未知服务出口归到选定 IP。只有一个发现来源成功不算已证实歧义。固定族直连不声称识别操作系统不可见的按目的地分流或 NAT。
+跨族不比较出口、不制造冲突；同族多出口 egress_ambiguous 时服务未知，不能猜归属。默认 client Proxy=nil，不继承环境代理；Client4/Client6 显式优先，其次已有显式 Client 测试入口；生产绝不跨族 fallback。
 
-默认 registry 且未注入 client 时，构造器复用三份独立标准 transport/client（数据库 tcp、服务 tcp4/tcp6），Proxy=nil，不继承 HTTP_PROXY/HTTPS_PROXY，也不修改全局 default client。显式 client 原样保留为请求入口；显式 legacy LookupURL 保留默认 client 语义。
-
-target 选定后 dependent 与服务阶段并发，dependent 预算 min(total/3,5s)，最多四个 worker；七个服务各共享 min(parent remaining,10s) 总时限，最多七个 worker。所有请求和 body read 都受父取消/Stop 约束，WaitGroup 回收后才组装返回，返回后不能继续写报告。现行默认 15 秒和已保存 timeout 不变。
+target 选定后 dependent 与服务并发；整轮共享 provider 上限4、service上限7，等槽也受父 context 取消。dependent min(total/3,5s)，服务 min(parent remaining,10s)。总 timeout 不翻倍。所有 goroutine 回收后按[4,6]组装；deadline 给未完成族 failure 终态，主动 Stop 丢弃整轮，不发布半轮。manager 在一个 mutex 临界区给全部行写同一认领 request ID 并原子 append；runtime/queue 保持整批 slice 持久化。
 
 ### 9. 数据库字段与风险边界
 
@@ -263,7 +268,7 @@ HTML 用 tokenizer 提取结构/可见正文（排除 script/style），内嵌 J
 |---|---|
 |Netflix / catalog_sample、sample_titles_unavailable|依次 GET www.netflix.com/title/81280792 和 /70143836。Netflix app meta、对应 title ID Android URL、对应可见 LEGO Ninjago / Breaking Bad h1 才为有效目录；另一页也有效或明确 Netflix Oh no! 不可用页时为可用。两页均明确不可用为 partial，不声称仅自制剧。region 仅取同 JSON object 的两字母 id + countryName，冲突未知。|
 |ChatGPT / web_and_app、web_only、app_only、verified_*_unknown|GET api.openai.com/compliance/cookie_requirements（固定 Origin/Referer，无账号 Authorization）和 ios.chat.openai.com/。Web 2xx JSON cookie_consent_required bool（false 有效）；App 2xx HTML 标识 ChatGPT/OpenAI 且非挑战才阳性。结构化 unsupported_country/unsupported_country_region_territory 或带服务标识的明确 VPN 拒绝完整文案才限制。双阳性 unlocked、一阳性另一受限/未知 partial、双限制 blocked；dc 403 不猜地区/VPN，不请求 favicon/trace 兜底。|
-|YouTube Premium / premium_offer|GET www.youtube.com/premium，有效 ytcfg/ytInitialData 页面、可见 ad-free 和 contentRegion（优先）/INNERTUBE_CONTEXT_GL 两字母区域才可用；同有效页明确 Premium is not available in your country 才受限。consent、营销词或 google.cn 链接不成结论。|
+|YouTube Premium / premium_offer|有效 ytcfg/ytInitialData 页面通过 fatal/challenge/consent 排除后，明确 Premium 拒绝正文独立构成 blocked（包括有效403及无地区200拒绝页）。地区证据另要求2xx：优先 contentRegion，仅缺失时用 INNERTUBE_CONTEXT_GL；冲突/非法不 fallback。只有可信地区而无 offer 是 unknown，CN 本身不等于 blocked。unknown 顶层 Region/UnlockType 清空，安全 observed_region 单独保存页面地区。|
 |Prime Video / territory_offer|GET www.primevideo.com/，title 含 Prime Video、内嵌 JSON currentTerritory 合法且 isServiceRestricted 非 true 才可用；明确 bool true 才受限，false 不受限，字段类型异常未知。|
 |Disney+ / supported_location|disney.api.edge.bamgrid.com 上 devices → token → graph/v1/device/graphql 三步匿名 browser client 交换，共享 deadline，前步失败即停。仅 sdk.session.location.countryCode 合法且 inSupportedLocation bool 才支持/受限；forbidden-location 是明确受限，缺 token、GraphQL errors 或普通 401/403 未知，无 JP 例外。公开 browser 标识不是用户 key，本轮 assertion/refresh token/sessionId 不持久化。|
 |TikTok / web_region|GET www.tiktok.com/，仅可见 Please wait... 时在同 deadline GET /explore 一次；TikTok title 加 script JSON region 才可用，带页面标识的明确 not available in your country/region 正文才受限。|
@@ -271,4 +276,6 @@ HTML 用 tokenizer 提取结构/可见正文（排除 script/style），内嵌 J
 
 允许 host：Netflix netflix.com/www.netflix.com；ChatGPT api.openai.com/ios.chat.openai.com；YouTube www.youtube.com/consent.youtube.com/consent.google.com；Prime www.primevideo.com/primevideo.com；Disney disney.api.edge.bamgrid.com；TikTok www.tiktok.com/tiktok.com；Reddit www.reddit.com/reddit.com。其他跳转 unexpected_redirect。
 
-Raw/Extra 仅保存 `{probe_revision:2,evidence_kind:"anonymous_service_probe",matched_rule,http_status,region,ip_version}` 白名单及 endpoint 安全结果，不存响应 HTML、Authorization、Set-Cookie、assertion/access/refresh token、sessionId 或带 query URL。固定错误摘要：response_too_large=`service response exceeds size limit`、unexpected_redirect=`service redirect is not allowed`、challenge_detected=`service challenge detected`、egress_ambiguous=`service egress is ambiguous`。未知协议不临时放宽判据。
+Raw/Extra 使用 probe_revision=3、evidence_kind=anonymous_service_probe，保留 matched_rule/http_status/region/ip_version 等固定安全证据。可选 observed_region 仅规范国家码、region_evidence 仅 youtube_content_region/youtube_context_gl；端点只存固定标签、HTTP整数状态、安全 error_code 与 outcome=available/restricted/unknown。ChatGPT Web/App 独立诊断，cookie_consent_required true/false 都合法，不从 IP 数据库补地区；Netflix 只检测抽样目录，连接方式未检测。不存 HTML、URL query、Authorization、cookie、token/session 或原始异常。
+
+HTTP 错误通过 sourceHTTPError 与标准库 typed errors 分类，禁止匹配 error.String：dns_failed、connection_refused、network_unreachable、tls_failed、timeout、request_failed；无细分依据保持 request_failed。getJSON 先识别非对象/解码失败 non_json_response，再识别合法 JSON 的非2xx http_status 并保留整数status；不把429/503/HTML折叠成 request_failed。固定安全摘要与既有大小/重定向/挑战边界不变。五个实际 provider 与十三个未接入来源范围不扩大。

@@ -226,13 +226,17 @@ export function VPSOverviewSummaryGrid({
     const allowRetry = retryable && (cell.section.state === 'stale' || knownFailure)
     const unmatchedStatus = overviewUnmatchedStatus(key, cell.status)
     if (unmatchedStatus) diagnostics = [...diagnostics, { label: '原始状态', detail: unmatchedStatus }]
+    // IP 质量摘要只来自默认族报告；后端给出合法族时注明，缺失时不猜。
+    const familyNote = key === 'ip_quality' && !compactEmpty && (cell.ip_version === 4 || cell.ip_version === 6)
+      ? `IPv${cell.ip_version} · 默认族报告`
+      : ''
     return {
       key,
       project: label,
       ariaLabel: label,
       conclusion: statusLabel,
       conclusionTone: statusTone || '',
-      description: hideDetail ? '' : detailText,
+      description: [familyNote, hideDetail ? '' : detailText].filter(Boolean).join(' · '),
       ...(diagnostics.length > 0 ? { diagnostics } : {}),
       ...(compactEmpty ? {} : { section: cell.section }),
       sourceLabel,

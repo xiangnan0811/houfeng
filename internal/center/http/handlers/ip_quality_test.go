@@ -19,12 +19,14 @@ type fakeVPSIPQualityRepository struct {
 	detailResult   ipquality.VPSReport
 	err            error
 	vpsID          string
+	ipVersion      int
 	detailVPSID    string
 	detailReportID string
 }
 
-func (f *fakeVPSIPQualityRepository) GetVPSIPQuality(_ context.Context, vpsID string) (ipquality.VPSReport, error) {
+func (f *fakeVPSIPQualityRepository) GetVPSIPQuality(_ context.Context, vpsID string, ipVersion int) (ipquality.VPSReport, error) {
 	f.vpsID = vpsID
+	f.ipVersion = ipVersion
 	if f.err != nil {
 		return ipquality.VPSReport{}, f.err
 	}
@@ -168,5 +170,52 @@ func TestVPSIPQualityHandlerMapsRepositoryFailure(t *testing.T) {
 
 	if recorder.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestVPSIPQualityHandlerFamilySelectionAndInvalidQueries(t *testing.T) {
+	for _, tc := range []struct {
+		query   string
+		version int
+		status  int
+	}{
+		{"", 0, http.StatusOK},
+		{"?ip_version=4", 4, http.StatusOK},
+		{"?ip_version=6", 6, http.StatusOK},
+		{"?ip%5Fversion=6", 6, http.StatusOK},
+		{"?ip_version=", 0, http.StatusBadRequest},
+		{"?ip_version=5", 0, http.StatusBadRequest},
+		{"?ip_version=04", 0, http.StatusBadRequest},
+		{"?ip_version=4&ip_version=6", 0, http.StatusBadRequest},
+		{"?ip_version=%zz", 0, http.StatusBadRequest},
+		{"?ip_version=4;ip_version=6", 0, http.StatusBadRequest},
+		{"?ip_version=4&ignored=%zz", 0, http.StatusBadRequest},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			repo := &fakeVPSIPQualityRepository{}
+			recorder := httptest.NewRecorder()
+			handlers.VPSIPQuality(repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/ip-quality"+tc.query, nil))
+			if recorder.Code != tc.status {
+				t.Fatalf("status=%d, want %d; %s", recorder.Code, tc.status, recorder.Body.String())
+			}
+			if tc.status == http.StatusOK {
+				if repo.vpsID != "vps_001" || repo.ipVersion != tc.version {
+					t.Fatalf("repository selection=%q/%d, want vps_001/%d", repo.vpsID, repo.ipVersion, tc.version)
+				}
+			} else if repo.vpsID != "" {
+				t.Fatal("invalid query reached repository")
+			}
+		})
+	}
+}
+
+func TestVPSIPQualityHistoricalHandlerRejectsFamilyOverride(t *testing.T) {
+	for _, query := range []string{"?ip_version=4", "?ip_version=", "?ip_version=6&ip_version=4", "?ip_version=%zz", "?ip_version=4;ip_version=6"} {
+		repo := &fakeVPSIPQualityRepository{}
+		recorder := httptest.NewRecorder()
+		handlers.VPSIPQuality(repo).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/vps/vps_001/ip-quality/reports/ipq_001"+query, nil))
+		if recorder.Code != http.StatusBadRequest || repo.detailReportID != "" {
+			t.Fatalf("historical override %q: status=%d repo=%#v", query, recorder.Code, repo)
+		}
 	}
 }
