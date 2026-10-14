@@ -2,11 +2,9 @@ package ipquality
 
 import (
 	"encoding/json"
-	"net/netip"
 	"time"
 
 	"houfeng/internal/contracts/agentapi"
-	"houfeng/internal/ipidentity"
 )
 
 func serviceProbeSucceeded(result agentapi.IPQualityServiceUnlockPayload) bool {
@@ -78,37 +76,30 @@ func hasServiceProbeFailure(services []agentapi.IPQualityServiceUnlockPayload) b
 	return false
 }
 
-func hasIPCandididateConflict(candidates map[string]string) bool {
-	var first netip.Addr
-	haveFirst := false
-	for _, value := range candidates {
-		candidate, ok := ipidentity.Parse(value)
-		if !ok {
-			continue
-		}
-		if !haveFirst {
-			first = candidate
-			haveFirst = true
-			continue
-		}
-		if candidate != first {
-			return true
-		}
-	}
-	return false
-}
-
-func diagnosticsJSON(startedAt time.Time, ipCandidates map[string]string) json.RawMessage {
+func diagnosticsJSON(startedAt time.Time, discoveryCandidates, ipCandidates map[string]string, ipVersion int, egressAmbiguous bool, providers []agentapi.IPQualityProviderResultPayload) json.RawMessage {
 	payload := map[string]any{
 		"source_version":         "v2",
-		"service_probe_revision": 1,
+		"collection_revision":    3,
+		"service_probe_revision": 2,
 		"elapsed_ms":             int(time.Since(startedAt).Milliseconds()),
+	}
+	if ipVersion == 4 || ipVersion == 6 {
+		payload["ip_address_family"] = ipVersion
+	}
+	if len(discoveryCandidates) > 0 {
+		payload["discovery_ip_candidates"] = discoveryCandidates
 	}
 	if len(ipCandidates) > 0 {
 		payload["ip_candidates"] = ipCandidates
 	}
-	if hasIPCandididateConflict(ipCandidates) {
-		payload["ip_conflict"] = true
+	if egressAmbiguous {
+		payload["egress_ambiguous"] = true
+	}
+	for _, provider := range providers {
+		if provider.ErrorCode == "ip_mismatch" {
+			payload["ip_conflict"] = true
+			break
+		}
 	}
 	return extraJSON(payload)
 }

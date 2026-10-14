@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -168,6 +169,10 @@ func TestIPQualityAdapterRejectsMalformedCustomSourceFacts(t *testing.T) {
 			report.Coverage = IPQualityCoverage{ExpectedServiceCount: 1, SuccessfulServiceCount: 1}
 			report.Services = []IPQualityServiceEvidence{{Service: "netflix", Status: "maybe", ProbeStatus: "success"}}
 		}},
+		{name: "non-canonical partial service status", mutate: func(report *IPQualityEvidenceReport) {
+			report.Coverage = IPQualityCoverage{ExpectedServiceCount: 1, SuccessfulServiceCount: 1}
+			report.Services = []IPQualityServiceEvidence{{Service: "chatgpt", Status: " partial ", ProbeStatus: "success"}}
+		}},
 		{name: "non-canonical assignment mode", mutate: func(report *IPQualityEvidenceReport) { report.AssignmentMode = " link " }},
 		{name: "provider coverage does not match rows", mutate: func(report *IPQualityEvidenceReport) {
 			report.Coverage = IPQualityCoverage{ExpectedProviderCount: 1, SuccessfulProviderCount: 1}
@@ -283,6 +288,89 @@ func TestIPQualityCaptureStripsRiskAndUnlockFactsFromFailedRows(t *testing.T) {
 	}
 }
 
+func TestIPQualityCaptureServiceBusinessStatusAndScope(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 2, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		status      string
+		probeStatus string
+		known       bool
+	}{
+		{name: "unlocked success", status: "unlocked", probeStatus: "success", known: true},
+		{name: "partial success", status: "partial", probeStatus: "success", known: true},
+		{name: "blocked success", status: "blocked", probeStatus: "success", known: true},
+		{name: "unknown success", status: "unknown", probeStatus: "success"},
+		{name: "unlocked failure", status: "unlocked", probeStatus: "failure"},
+		{name: "partial failure", status: "partial", probeStatus: "failure"},
+		{name: "blocked failure", status: "blocked", probeStatus: "failure"},
+		{name: "unknown failure", status: "unknown", probeStatus: "failure"},
+		{name: "skipped", status: "partial", probeStatus: "skipped"},
+		{name: "not configured", status: "blocked", probeStatus: "not_configured"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			report := validIPQualityTestReport(now.Add(-time.Hour))
+			report.Services = []IPQualityServiceEvidence{{
+				Service: "chatgpt", Source: "openai_probe", Status: tt.status, ProbeStatus: tt.probeStatus,
+				Region: "JP", UnlockType: "web_verified_app_unknown", LatencyMS: new(25),
+			}}
+			report.Coverage.ExpectedServiceCount = 1
+			switch tt.probeStatus {
+			case "success":
+				report.Coverage.SuccessfulServiceCount = 1
+			case "failure":
+				report.Coverage.FailedServiceCount = 1
+			case "skipped":
+				report.Coverage.SkippedServiceCount = 1
+			case "not_configured":
+				report.Coverage.NotConfiguredServiceCount = 1
+			}
+			adapter, err := NewIPQualityAdapter(
+				staticIPQualitySource{report: report},
+				monitoringTestResolver(t, recordauth.SourceKindVPS, "vps_0123456789abcdef"),
+				AdapterOptions{Clock: func() time.Time { return now }, NewIntentID: func() (string, error) { return "evi_89abcdef0123456701234567", nil }},
+			)
+			if err != nil {
+				t.Fatalf("NewIPQualityAdapter() error = %v", err)
+			}
+			selection := evidence.Selection{
+				Key: evidence.IPQualityReportV1Key(), SourceType: string(recordauth.SourceKindVPS), SourceID: "vps_0123456789abcdef",
+				RequestedWindow:         evidence.TimeWindow{Start: now.Add(-2 * time.Hour), End: now},
+				SensitiveTopologyFields: []string{"services.region"},
+			}
+			preview, err := adapter.PreviewCapture(context.Background(), monitoringTestActor(t), selection)
+			if err != nil {
+				t.Fatalf("PreviewCapture() error = %v", err)
+			}
+			snapshot, err := adapter.Capture(context.Background(), monitoringTestActor(t), evidence.Intent{
+				ID: preview.IntentID, Key: selection.Key, Selection: selection,
+				PreviewDigest: sha256.Sum256([]byte("preview")), ValidUntil: preview.ValidUntil,
+			})
+			if err != nil {
+				t.Fatalf("Capture() error = %v", err)
+			}
+			canonical := snapshot.Bytes()
+			wantStatus, wantRegion, wantType := "unknown", "", ""
+			if tt.known {
+				wantStatus, wantRegion, wantType = tt.status, "JP", "web_verified_app_unknown"
+			}
+			for _, required := range []string{
+				fmt.Sprintf(`"status":%q`, wantStatus), fmt.Sprintf(`"region":%q`, wantRegion),
+				fmt.Sprintf(`"unlock_type":%q`, wantType), fmt.Sprintf(`"probe_status":%q`, tt.probeStatus),
+			} {
+				if !bytes.Contains(canonical, []byte(required)) {
+					t.Fatalf("canonical payload = %s, want %s", canonical, required)
+				}
+			}
+			if !tt.known && (bytes.Contains(canonical, []byte(`"region":"JP"`)) || bytes.Contains(canonical, []byte("web_verified_app_unknown"))) {
+				t.Fatalf("canonical payload retains unknown/failed service facts: %s", canonical)
+			}
+		})
+	}
+}
+
 func TestIPQualityStaleBoundaryAndPartialQuality(t *testing.T) {
 	t.Parallel()
 
@@ -370,6 +458,48 @@ func TestIPQualityCoverageGapForcesPartialAndClearsRiskConclusion(t *testing.T) 
 	}
 	if bytes.Contains(snapshot.Bytes(), []byte(`"risk_level":"high"`)) || !bytes.Contains(snapshot.Bytes(), []byte(`"risk_level":""`)) {
 		t.Fatalf("canonical payload = %s, want incomplete report risk conclusion cleared", snapshot.Bytes())
+	}
+}
+
+func TestIPQualityOptionalProvidersRemainCoverageGaps(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, time.July, 2, 12, 0, 0, 0, time.UTC)
+	report := validIPQualityTestReport(now.Add(-time.Hour))
+	report.Coverage = IPQualityCoverage{
+		ExpectedProviderCount: 18, SuccessfulProviderCount: 5, NotConfiguredProviderCount: 13,
+		ExpectedServiceCount: 1, SuccessfulServiceCount: 1,
+	}
+	for index := range 18 {
+		provider := IPQualityProviderEvidence{Provider: fmt.Sprintf("provider-%02d", index), Status: "not_configured", SourceType: "optional"}
+		if index < 5 {
+			provider.Status, provider.SourceType = "success", "default"
+		}
+		report.Providers = append(report.Providers, provider)
+	}
+	report.Services = []IPQualityServiceEvidence{{Service: "chatgpt", Source: "openai_probe", Status: "partial", ProbeStatus: "success", UnlockType: "web_verified_app_unknown"}}
+	adapter, snapshot := captureIPQualityReadModelFixture(t, now, report)
+	if !ipQualityCoverageIncomplete(report.Coverage) {
+		t.Fatal("18-provider raw coverage is complete despite 13 unconfigured providers")
+	}
+	selection := evidence.Selection{
+		Key: evidence.IPQualityReportV1Key(), SourceType: string(recordauth.SourceKindVPS), SourceID: "vps_0123456789abcdef",
+		RequestedWindow: evidence.TimeWindow{Start: now.Add(-3 * time.Hour), End: now},
+	}
+	preview, err := adapter.PreviewCapture(context.Background(), monitoringTestActor(t), selection)
+	if err != nil {
+		t.Fatalf("PreviewCapture() error = %v", err)
+	}
+	if preview.Quality.Status != evidence.QualityPartial || !preview.Quality.Partial {
+		t.Fatalf("preview quality = %#v, want conservative partial raw coverage", preview.Quality)
+	}
+	for _, required := range []string{
+		`"expected_provider_count":18`, `"successful_provider_count":5`, `"not_configured_provider_count":13`,
+		`"risk_level":""`, `"status":"partial"`, `"unlock_type":"web_verified_app_unknown"`,
+	} {
+		if !bytes.Contains(snapshot.Bytes(), []byte(required)) {
+			t.Fatalf("canonical payload = %s, want %s", snapshot.Bytes(), required)
+		}
 	}
 }
 

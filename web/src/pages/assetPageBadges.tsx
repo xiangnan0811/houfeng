@@ -68,10 +68,17 @@ function lifecycleGlyphState(tone: BadgeTone): HealthState {
 }
 
 function ipQualityLabel(summary: IPQualitySummary): string {
-  if (summary.ambiguous) return 'IP 归属不唯一'
-  if (summary.status !== 'success') return 'IP 未完成'
-  const suffix = summary.use_region_code || summary.use_region_name
-  return `IP ${normalizeRiskLevel(summary.risk_level)}${summary.stale ? ' · 过期' : suffix ? ` · ${suffix}` : ''}`
+  const status = (summary.status ?? '').trim().toLowerCase()
+  let label: string
+  if (summary.ambiguous) label = 'IP 归属不唯一'
+  else if (status === 'partial') label = 'IP 部分采集'
+  else if (status === 'failure') label = 'IP 采集失败'
+  else if (status !== 'success') label = 'IP 状态未知'
+  else {
+    const suffix = summary.stale ? '' : summary.use_region_code || summary.use_region_name
+    label = `IP ${normalizeRiskLevel(summary.risk_level)}${suffix ? ` · ${suffix}` : ''}`
+  }
+  return summary.stale ? `${label} · 过期` : label
 }
 
 function IPQualityText({ tone, label }: { tone: BadgeTone; label: string }) {

@@ -413,7 +413,7 @@ func ipQualityPayload(report IPQualityEvidenceReport, stale bool, selected map[s
 	services := make([]any, 0, len(report.Services))
 	for _, service := range report.Services {
 		status, region, unlockType := "unknown", "", ""
-		if service.ProbeStatus == "success" {
+		if service.ProbeStatus == "success" && service.Status != "unknown" {
 			status, region, unlockType = service.Status, service.Region, service.UnlockType
 		}
 		item := map[string]any{
@@ -512,7 +512,7 @@ func validIPQualitySourceType(value string) bool {
 
 func validIPQualityServiceStatus(value string) bool {
 	switch value {
-	case "unlocked", "blocked", "unknown":
+	case "unlocked", "partial", "blocked", "unknown":
 		return true
 	default:
 		return false

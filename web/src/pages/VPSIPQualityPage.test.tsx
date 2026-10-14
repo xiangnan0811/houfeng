@@ -261,17 +261,49 @@ describe('VPSIPQualityPage', () => {
     expect(within(screen.getByLabelText('采集诊断')).getByText('ipq_000')).toBeInTheDocument()
   })
 
-  it('loads the selected history report after switching from latest', async () => {
+  it('renders the selected history report with its own revision, coverage and risk after switching from latest', async () => {
+    const coverage = {
+      expected_provider_count: 18,
+      successful_provider_count: 5,
+      failed_provider_count: 0,
+      skipped_provider_count: 0,
+      not_configured_provider_count: 13,
+      expected_service_count: 7,
+      successful_service_count: 1,
+      failed_service_count: 0,
+      skipped_service_count: 0,
+      not_configured_service_count: 0,
+    }
+    const latestBody = {
+      ...ipQualityReportBody,
+      summary: { ...ipQualitySummaryBody, coverage },
+      latest_report: { ...ipQualityReportBody.latest_report, coverage, diagnostics_json: { source_version: 'v2', collection_revision: 3, service_probe_revision: 2 } },
+      provider_results: [{ provider: 'proxycheck.io', status: 'success', source_type: 'default', risk_level: 'high', risk_score: '80' }],
+    }
+    const historyCoverage = { ...coverage, successful_provider_count: 4, failed_provider_count: 1, successful_service_count: 0, skipped_service_count: 7 }
+    const historyBody = {
+      ...ipQualityReportBody,
+      summary: { ...ipQualitySummaryBody, report_id: 'ipq_000', risk_level: 'low', coverage: historyCoverage },
+      latest_report: { ...ipQualityReportBody.latest_report, report_id: 'ipq_000', coverage: historyCoverage, diagnostics_json: { source_version: 'v2', service_probe_revision: 1 } },
+      provider_results: [{ provider: 'ipapi.is', status: 'success', source_type: 'default', risk_level: 'medium', is_vpn: true }],
+      service_unlocks: [
+        { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe' },
+      ],
+    }
     const fetchMock = routeFetch([
-      { path: '/api/vps/vps_001/ip-quality', responses: [{ body: ipQualityReportBody }] },
-      { path: '/api/vps/vps_001/ip-quality/reports/ipq_000', responses: [{ body: { ...ipQualityReportBody, summary: { ...ipQualitySummaryBody, report_id: 'ipq_000' } } }] },
+      { path: '/api/vps/vps_001/ip-quality', responses: [{ body: latestBody }] },
+      { path: '/api/vps/vps_001/ip-quality/reports/ipq_000', responses: [{ body: historyBody }] },
       { path: '/api/vps/vps_001/ip-quality/collect', responses: [{ body: availableStatus }] },
     ])
     vi.stubGlobal('fetch', fetchMock)
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '历史报告' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('heading', { name: '服务可用性（免登录探测）' })).toBeInTheDocument())
+    expect(screen.getByLabelText('数据库风险评级').querySelector('.ipq-verdict__value strong')).toHaveTextContent('高风险')
+    expect(screen.getByRole('note', { name: '服务探测可信度' })).toHaveClass('ipq-notice--muted')
+    expect(within(screen.getByLabelText('IP 质量摘要指标')).getByText('已启用来源成功率').nextElementSibling).toHaveTextContent('成功 5/5 · 未配置 13')
+
     const historyLink = screen.getAllByRole('link', { name: /^查看 .* 的报告$/ })
       .find((link) => link.getAttribute('href')?.includes('report_id=ipq_000'))
     expect(historyLink).toBeDefined()
@@ -279,6 +311,11 @@ describe('VPSIPQualityPage', () => {
 
     await waitFor(() => expect(callsTo(fetchMock, '/api/vps/vps_001/ip-quality/reports/ipq_000')).toHaveLength(1))
     await waitFor(() => expect(screen.getByRole('link', { name: '查看最新报告' })).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '服务解锁' })).toBeInTheDocument()
+    expect(screen.getByRole('note', { name: '服务探测可信度' })).toHaveTextContent('已停用')
+    // 历史报告的风险评级来自它自己的成功来源，不沿用最新报告，也不相信 summary low。
+    expect(screen.getByLabelText('数据库风险评级').querySelector('.ipq-verdict__value strong')).toHaveTextContent('中风险')
+    expect(within(screen.getByLabelText('IP 质量摘要指标')).getByText('已启用来源成功率').nextElementSibling).toHaveTextContent('成功 4/5 · 未配置 13')
   })
 
   it('retries a failed report load without leaving the page', async () => {

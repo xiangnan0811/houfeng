@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"houfeng/internal/contracts/agentapi"
+	"houfeng/internal/ipidentity"
 )
 
 const (
@@ -37,23 +38,33 @@ type HTTPCollectorOptions struct {
 }
 
 type HTTPCollector struct {
-	client       *http.Client
-	lookupURL    string
-	serviceURL   string
-	customLookup bool
-	agentVersion string
-	fingerprint  string
-	syncBatchID  string
-	userAgent    string
+	client         *http.Client
+	serviceClient4 *http.Client
+	serviceClient6 *http.Client
+	lookupURL      string
+	serviceURL     string
+	customLookup   bool
+	agentVersion   string
+	fingerprint    string
+	syncBatchID    string
+	userAgent      string
 }
 
 func NewHTTPCollector(opts HTTPCollectorOptions) *HTTPCollector {
 	client := opts.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
 	lookupURL := strings.TrimSpace(opts.LookupURL)
 	customLookup := lookupURL != ""
+	serviceClient4, serviceClient6 := client, client
+	if client == nil {
+		if customLookup {
+			client = http.DefaultClient
+			serviceClient4, serviceClient6 = client, client
+		} else {
+			client = directHTTPClient("tcp")
+			serviceClient4 = directHTTPClient("tcp4")
+			serviceClient6 = directHTTPClient("tcp6")
+		}
+	}
 	if lookupURL == "" {
 		lookupURL = defaultLookupURL
 	}
@@ -63,15 +74,34 @@ func NewHTTPCollector(opts HTTPCollectorOptions) *HTTPCollector {
 		userAgent = defaultUserAgent
 	}
 	return &HTTPCollector{
-		client:       client,
-		lookupURL:    lookupURL,
-		serviceURL:   serviceURL,
-		customLookup: customLookup,
-		agentVersion: opts.AgentVersion,
-		fingerprint:  opts.Fingerprint,
-		syncBatchID:  opts.SyncBatchID,
-		userAgent:    userAgent,
+		client:         client,
+		serviceClient4: serviceClient4,
+		serviceClient6: serviceClient6,
+		lookupURL:      lookupURL,
+		serviceURL:     serviceURL,
+		customLookup:   customLookup,
+		agentVersion:   opts.AgentVersion,
+		fingerprint:    opts.Fingerprint,
+		syncBatchID:    opts.SyncBatchID,
+		userAgent:      userAgent,
 	}
+}
+
+func directHTTPClient(network string) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	transport.DialContext = func(ctx context.Context, _, address string) (net.Conn, error) {
+		return dialer.DialContext(ctx, network, address)
+	}
+	return &http.Client{Transport: transport}
+}
+
+func (c *HTTPCollector) serviceHTTPClient(ipVersion int) *http.Client {
+	if ipVersion == 6 {
+		return c.serviceClient6
+	}
+	return c.serviceClient4
 }
 
 func (c *HTTPCollector) WithMetadata(agentVersion, fingerprint, syncBatchID string) *HTTPCollector {
@@ -188,19 +218,65 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 	canonicalOutcomes := c.collectProviderSources(canonicalCtx, canonicalSources, "", minDuration(canonicalBudget, 5*time.Second))
 	canonicalCancel()
 	providerOutcomes := append([]providerSourceOutcome(nil), canonicalOutcomes...)
-	targetIP := ""
+	discoveryCandidates := map[string]string{}
+	targetIP, ipVersion := "", 0
 	for _, outcome := range canonicalOutcomes {
 		if outcome.Result.Status == sourceStatusSuccess && validIPAddress(outcome.IPAddress) {
-			targetIP = outcome.IPAddress
+			discoveryCandidates[outcome.Result.Provider] = outcome.IPAddress
+		}
+	}
+	// Registry order breaks ties within a family, never completion order.
+	for _, family := range []int{4, 6} {
+		for _, outcome := range canonicalOutcomes {
+			address, ok := ipidentity.Parse(outcome.IPAddress)
+			if outcome.Result.Status != sourceStatusSuccess || !ok || address.IsUnspecified() {
+				continue
+			}
+			if address.Is4() == (family == 4) {
+				targetIP, ipVersion = outcome.IPAddress, family
+				break
+			}
+		}
+		if targetIP != "" {
 			break
 		}
 	}
-
+	egressAmbiguous := discoveryEgressAmbiguous(canonicalOutcomes)
+	var services []serviceProbeOutcome
 	if targetIP != "" {
-		dependentCtx, dependentCancel := context.WithTimeout(collectCtx, dependentBudget)
-		dependentOutcomes := c.collectProviderSources(dependentCtx, targetDependentSources, targetIP, minDuration(dependentBudget, 5*time.Second))
-		dependentCancel()
-		providerOutcomes = append(providerOutcomes, dependentOutcomes...)
+		// Only successful discovery rows for a different IP are queried again.
+		// The three dependent providers plus at most one requery stay bounded.
+		dependentSources := append([]providerSource(nil), targetDependentSources...)
+		var requeryIndices []int
+		for index, outcome := range canonicalOutcomes {
+			if outcome.Result.Status == sourceStatusSuccess && ipidentity.Changed(outcome.IPAddress, targetIP) {
+				dependentSources = append(dependentSources, canonicalSources[index])
+				requeryIndices = append(requeryIndices, index)
+			}
+		}
+		var dependentOutcomes []providerSourceOutcome
+		var phases sync.WaitGroup
+		phases.Add(2)
+		go func() {
+			defer phases.Done()
+			dependentCtx, dependentCancel := context.WithTimeout(collectCtx, dependentBudget)
+			defer dependentCancel()
+			dependentOutcomes = c.collectProviderSources(dependentCtx, dependentSources, targetIP, minDuration(dependentBudget, 5*time.Second))
+		}()
+		go func() {
+			defer phases.Done()
+			requestedServices := normalizedServices(plan.Services)
+			if egressAmbiguous {
+				services = ambiguousServiceOutcomes(requestedServices)
+				return
+			}
+			services = c.collectDefaultServiceUnlocks(collectCtx, requestedServices, ipVersion)
+		}()
+		phases.Wait()
+		for index, canonicalIndex := range requeryIndices {
+			providerOutcomes[canonicalIndex] = dependentOutcomes[len(targetDependentSources)+index]
+		}
+		providerOutcomes = append(providerOutcomes, dependentOutcomes[:len(targetDependentSources)]...)
 	} else {
 		for _, source := range targetDependentSources {
 			providerOutcomes = append(providerOutcomes, sourceFailure(
@@ -233,42 +309,44 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 	if len(successfulProviders) == 0 {
 		report.ErrorCode = "lookup_failed"
 		report.ErrorSummary = "all default IP quality provider sources failed"
-		report.DiagnosticsJSON = diagnosticsJSON(startedAt, ipCandidates)
+		report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, egressAmbiguous, report.ProviderResults)
 		report.RawJSON = rawEnvelopeV2(providerRaw, nil, report.DiagnosticsJSON)
 		return report
 	}
 
-	preferred := preferredProviderOutcome(successfulProviders)
-	collectedProviders := append([]agentapi.IPQualityProviderResultPayload(nil), report.ProviderResults...)
-	applyLookupPayload(&report, preferred.Payload)
-	report.ProviderResults = collectedProviders
-	if validIPAddress(preferred.IPAddress) {
-		report.IPAddress = preferred.IPAddress
-	}
-	if parsedIP := net.ParseIP(report.IPAddress); parsedIP == nil {
-		report.IPAddress = "0.0.0.0"
-		report.IPVersion = 4
-	} else if parsedIP.To4() == nil {
-		report.IPVersion = 6
-	} else {
-		report.IPVersion = 4
-	}
+	report.IPAddress = targetIP
+	report.IPVersion = ipVersion
 	applyReportFallbacksFromProviders(&report, successfulProviders)
 
 	serviceRaw := map[string]sourceRawEnvelope{}
-	services := collectDefaultServiceUnlocks(normalizedServices(plan.Services))
 	for _, outcome := range services {
 		report.ServiceUnlocks = append(report.ServiceUnlocks, outcome.Result)
 		serviceRaw[outcome.Result.Service] = sourceRawEnvelopeFromService(outcome)
 	}
 	report.Coverage = coverageFromResults(report.ProviderResults, report.ServiceUnlocks)
-	report.DiagnosticsJSON = diagnosticsJSON(startedAt, ipCandidates)
+	report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, egressAmbiguous, report.ProviderResults)
 	report.RawJSON = rawEnvelopeV2(providerRaw, serviceRaw, report.DiagnosticsJSON)
 	report.Status = agentapi.IPQualityStatusSuccess
-	if hasDefaultSourceFailure(report.ProviderResults) || hasServiceProbeFailure(report.ServiceUnlocks) || hasIPCandididateConflict(ipCandidates) {
+	if hasDefaultSourceFailure(report.ProviderResults) || hasServiceProbeFailure(report.ServiceUnlocks) {
 		report.Status = agentapi.IPQualityStatusPartial
 	}
 	return report
+}
+
+func discoveryEgressAmbiguous(outcomes []providerSourceOutcome) bool {
+	for index, left := range outcomes {
+		leftIP, leftOK := ipidentity.Parse(left.IPAddress)
+		if left.Result.Status != sourceStatusSuccess || !leftOK {
+			continue
+		}
+		for _, right := range outcomes[index+1:] {
+			rightIP, rightOK := ipidentity.Parse(right.IPAddress)
+			if right.Result.Status == sourceStatusSuccess && rightOK && leftIP.Is4() == rightIP.Is4() && leftIP != rightIP {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func collectionBudgets(total time.Duration) (time.Duration, time.Duration, time.Duration) {

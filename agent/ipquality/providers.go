@@ -2,12 +2,16 @@ package ipquality
 
 import (
 	"context"
-	"fmt"
+	"encoding/json"
+	"math"
 	"net/url"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"houfeng/internal/contracts/agentapi"
+	"houfeng/internal/ipidentity"
 )
 
 type jsonProviderSource struct {
@@ -53,6 +57,18 @@ func (s jsonProviderSource) Collect(ctx context.Context, collector *HTTPCollecto
 	if strings.TrimSpace(outcome.IPAddress) == "" {
 		outcome.IPAddress = stringFromMap(payload, "ip", "ip_address", "query")
 	}
+	address, validAddress := ipidentity.Parse(outcome.IPAddress)
+	if !validAddress || address.IsUnspecified() {
+		return sourceFailure(s.name, s.sourceType, "invalid_response", "invalid provider response", latency, raw)
+	}
+	if targetIP != "" {
+		target, validTarget := ipidentity.Parse(targetIP)
+		if !validTarget || address != target {
+			failure := sourceFailure(s.name, s.sourceType, "ip_mismatch", "", latency, raw)
+			failure.Result.ErrorSummary = "provider returned a different IP"
+			return failure
+		}
+	}
 	return outcome
 }
 
@@ -61,8 +77,13 @@ func defaultProviderSources() (canonical []providerSource, targetDependent []pro
 			jsonProviderSource{
 				name:       "ipapi.is",
 				sourceType: sourceTypeDefault,
-				urlForIP:   func(string) string { return defaultLookupURL },
-				parse:      parseIPAPIISProvider,
+				urlForIP: func(ip string) string {
+					if strings.TrimSpace(ip) == "" {
+						return defaultLookupURL
+					}
+					return defaultLookupURL + "/?q=" + url.QueryEscape(strings.TrimSpace(ip))
+				},
+				parse: parseIPAPIISProvider,
 			},
 			jsonProviderSource{
 				name:       "ipquery.io",
@@ -81,7 +102,7 @@ func defaultProviderSources() (canonical []providerSource, targetDependent []pro
 				sourceType: sourceTypeDefault,
 				needsIP:    true,
 				urlForIP: func(ip string) string {
-					return "https://proxycheck.io/v2/" + url.PathEscape(strings.TrimSpace(ip)) + "?vpn=1&asn=1&risk=1"
+					return "https://proxycheck.io/v3/" + url.PathEscape(strings.TrimSpace(ip)) + "?ver=24-June-2026"
 				},
 				parse: parseProxycheckProvider,
 			},
@@ -149,11 +170,10 @@ func parseIPAPIISProvider(payload map[string]any, _ string) providerSourceOutcom
 		stringFromMap(nestedMap(payload, "company"), "type"),
 		stringFromMap(payload, "company_type"),
 	)
-	result.UsageType = firstNonEmpty(result.UsageType, stringFromNestedMap(payload, "asn", "type"))
-	result.RegionCode = firstNonEmpty(result.RegionCode, facts.regionCode)
-	result.RegionName = firstNonEmpty(result.RegionName, facts.regionName)
-	result.ExtraJSON = extraJSON(ipapiExtraPayload(payload))
-	return providerSourceOutcome{Result: result, IPAddress: facts.ip}
+	result.UsageType = firstNonEmpty(stringFromMap(payload, "usage_type"), stringFromNestedMap(payload, "asn", "type"))
+	result.RegionCode = facts.regionCode
+	result.RegionName = facts.regionName
+	return successfulProviderResult(result, facts.ip, payload, ipapiExtraPayload(payload))
 }
 
 func parseIPQueryProvider(payload map[string]any, _ string) providerSourceOutcome {
@@ -168,10 +188,11 @@ func parseIPQueryProvider(payload map[string]any, _ string) providerSourceOutcom
 	isp := nestedMap(payload, "isp")
 	location := nestedMap(payload, "location")
 	result := agentapi.IPQualityProviderResultPayload{
+		Provider:    "ipquery.io",
 		UsageType:   stringFromNestedMap(payload, "risk", "usage_type"),
 		CompanyType: stringFromNestedMap(payload, "company", "type"),
-		RiskScore:   stringFromMap(risk, "risk_score", "score"),
-		RegionCode:  firstNonEmpty(stringFromMap(location, "country_code"), stringFromMap(payload, "country_code")),
+		RiskScore:   providerScore(risk, "risk_score", "score"),
+		RegionCode:  countryCode(firstNonEmpty(stringFromMap(location, "country_code"), stringFromMap(payload, "country_code"))),
 		RegionName:  firstNonEmpty(stringFromMap(location, "country"), stringFromMap(payload, "country")),
 		IsProxy:     boolFromMap(risk, "is_proxy", "proxy"),
 		IsTor:       boolFromMap(risk, "is_tor", "tor"),
@@ -179,16 +200,11 @@ func parseIPQueryProvider(payload map[string]any, _ string) providerSourceOutcom
 		IsServer:    boolFromMap(risk, "is_datacenter", "datacenter", "is_server"),
 		IsAbuser:    boolFromMap(risk, "is_abuser", "abuser"),
 		IsRobot:     boolFromMap(risk, "is_robot", "is_crawler", "bot"),
-		ExtraJSON: extraJSON(map[string]any{
-			"risk":     risk,
-			"isp":      isp,
-			"location": location,
-		}),
 	}
 	if result.RiskScore != "" {
 		result.RiskLevel = riskLevelFromScore(result.RiskScore)
 	}
-	return providerSourceOutcome{Result: result, IPAddress: ip}
+	return successfulProviderResult(result, ip, payload, map[string]any{"risk": risk, "isp": isp, "location": location})
 }
 
 func parseProxycheckProvider(payload map[string]any, targetIP string) providerSourceOutcome {
@@ -200,33 +216,53 @@ func parseProxycheckProvider(payload map[string]any, targetIP string) providerSo
 	default:
 		return invalidProviderResponse("proxycheck.io", payload)
 	}
-	canonicalIP := strings.TrimSpace(targetIP)
-	if !validIPAddress(canonicalIP) {
+	version, validVersion := payload["version"].(string)
+	if !validVersion || version != "24-June-2026" || !validIPAddress(targetIP) {
 		return invalidProviderResponse("proxycheck.io", payload)
 	}
-	ipPayload := nestedMap(payload, canonicalIP)
-	if len(ipPayload) == 0 {
+	ipPayload, validTarget := payload[targetIP].(map[string]any)
+	network, validNetwork := ipPayload["network"].(map[string]any)
+	location, validLocation := ipPayload["location"].(map[string]any)
+	detections, validDetections := ipPayload["detections"].(map[string]any)
+	if !validTarget || !validNetwork || !validLocation || !validDetections {
 		return invalidProviderResponse("proxycheck.io", payload)
 	}
-	usageType := stringFromMap(ipPayload, "type")
-	proxy := boolFromMap(ipPayload, "proxy")
+	for _, key := range []string{"proxy", "vpn", "tor", "hosting", "scraper", "compromised", "anonymous"} {
+		if value, exists := detections[key]; exists && value != nil {
+			if _, ok := value.(bool); !ok {
+				return invalidProviderResponse("proxycheck.io", payload)
+			}
+		}
+	}
+	score := ""
+	if value := detections["risk"]; value != nil {
+		switch value.(type) {
+		case json.Number, float64:
+			score = providerScore(detections, "risk")
+		default:
+			return invalidProviderResponse("proxycheck.io", payload)
+		}
+		if riskLevelFromScore(score) == "" {
+			return invalidProviderResponse("proxycheck.io", payload)
+		}
+	}
 	result := agentapi.IPQualityProviderResultPayload{
-		UsageType:  usageType,
-		RiskScore:  stringFromMap(ipPayload, "risk"),
-		RegionCode: stringFromMap(ipPayload, "isocode", "country_code"),
-		RegionName: stringFromMap(ipPayload, "country"),
-		IsProxy:    proxy,
-		IsVPN:      firstBool(boolFromMap(ipPayload, "vpn"), boolFromUsageType(usageType, "vpn")),
-		IsTor:      boolFromMap(ipPayload, "tor"),
-		IsServer:   firstBool(boolFromMap(ipPayload, "hosting", "datacenter"), boolFromUsageType(usageType, "hosting", "datacenter", "server")),
-		IsAbuser:   boolFromMap(ipPayload, "abuse"),
-		IsRobot:    boolFromMap(ipPayload, "bot"),
-		ExtraJSON:  extraJSON(ipPayload),
+		Provider:   "proxycheck.io",
+		UsageType:  stringFromMap(network, "type"),
+		RiskScore:  score,
+		RiskLevel:  riskLevelFromScore(score),
+		RegionCode: countryCode(stringFromMap(location, "country_code")),
+		RegionName: stringFromMap(location, "country_name"),
+		IsProxy:    explicitBoolFromMap(detections, "proxy"),
+		IsVPN:      explicitBoolFromMap(detections, "vpn"),
+		IsTor:      explicitBoolFromMap(detections, "tor"),
+		IsServer:   explicitBoolFromMap(detections, "hosting"),
+		IsRobot:    explicitBoolFromMap(detections, "scraper"),
 	}
-	if result.RiskScore != "" {
-		result.RiskLevel = riskLevelFromScore(result.RiskScore)
-	}
-	return providerSourceOutcome{Result: result, IPAddress: canonicalIP}
+	return successfulProviderResult(result, targetIP, payload, map[string]any{
+		"api_version": "24-June-2026", "network": network, "location": location, "detections": detections,
+		"attack_history": ipPayload["attack_history"],
+	})
 }
 
 func parseIP2LocationProvider(payload map[string]any, _ string) providerSourceOutcome {
@@ -237,16 +273,21 @@ func parseIP2LocationProvider(payload map[string]any, _ string) providerSourceOu
 	if !validIPAddress(ip) {
 		return invalidProviderResponse("ip2location.io", payload)
 	}
-	result := providerResultFromMap(payload)
-	result.Provider = "ip2location.io"
-	result.RegionCode = firstNonEmpty(result.RegionCode, stringFromMap(payload, "country_code"))
-	result.RegionName = firstNonEmpty(result.RegionName, stringFromMap(payload, "country_name"))
-	result.IsProxy = firstBool(result.IsProxy, boolFromMap(payload, "is_proxy", "proxy"))
-	result.IsVPN = firstBool(result.IsVPN, boolFromMap(payload, "is_vpn", "vpn"))
-	result.IsTor = firstBool(result.IsTor, boolFromMap(payload, "is_tor", "tor"))
-	result.IsServer = firstBool(result.IsServer, boolFromMap(payload, "is_datacenter", "is_data_center", "hosting"))
-	result.ExtraJSON = extraJSON(payload)
-	return providerSourceOutcome{Result: result, IPAddress: ip}
+	proxy := nestedMap(payload, "proxy")
+	result := agentapi.IPQualityProviderResultPayload{
+		Provider:   "ip2location.io",
+		UsageType:  firstNonEmpty(stringFromMap(payload, "usage_type"), stringFromNestedMap(payload, "as_info", "as_usage_type")),
+		RiskScore:  providerScore(payload, "fraud_score"),
+		RegionCode: countryCode(stringFromMap(payload, "country_code")),
+		RegionName: stringFromMap(payload, "country_name"),
+		IsProxy:    firstBool(explicitBoolFromMap(payload, "is_proxy"), explicitBoolFromMap(proxy, "is_proxy")),
+		IsVPN:      firstBool(explicitBoolFromMap(payload, "is_vpn"), explicitBoolFromMap(proxy, "is_vpn")),
+		IsTor:      firstBool(explicitBoolFromMap(payload, "is_tor"), explicitBoolFromMap(proxy, "is_tor")),
+		IsServer:   firstBool(explicitBoolFromMap(payload, "is_data_center", "is_datacenter"), explicitBoolFromMap(proxy, "is_data_center")),
+		IsRobot:    firstBool(explicitBoolFromMap(payload, "is_web_crawler"), explicitBoolFromMap(proxy, "is_web_crawler")),
+	}
+	result.RiskLevel = riskLevelFromScore(result.RiskScore)
+	return successfulProviderResult(result, ip, payload, payload)
 }
 
 func parseIPWhoIsProvider(payload map[string]any, _ string) providerSourceOutcome {
@@ -261,19 +302,59 @@ func parseIPWhoIsProvider(payload map[string]any, _ string) providerSourceOutcom
 	if !validIPAddress(ip) {
 		return invalidProviderResponse("ipwho.is", payload)
 	}
+	security := nestedMap(payload, "security")
 	result := agentapi.IPQualityProviderResultPayload{
-		RegionCode:  stringFromMap(payload, "country_code"),
-		RegionName:  stringFromMap(payload, "country"),
-		UsageType:   stringFromNestedMap(payload, "connection", "type"),
-		CompanyType: stringFromNestedMap(payload, "connection", "type"),
-		ExtraJSON: extraJSON(map[string]any{
-			"asn":        payload["asn"],
-			"isp":        payload["isp"],
-			"org":        payload["org"],
-			"connection": payload["connection"],
-		}),
+		Provider:   "ipwho.is",
+		RegionCode: countryCode(stringFromMap(payload, "country_code")),
+		RegionName: stringFromMap(payload, "country"),
+		IsProxy:    explicitBoolFromMap(security, "proxy"),
+		IsVPN:      explicitBoolFromMap(security, "vpn"),
+		IsTor:      explicitBoolFromMap(security, "tor"),
+		IsServer:   explicitBoolFromMap(security, "hosting"),
 	}
-	return providerSourceOutcome{Result: result, IPAddress: ip}
+	return successfulProviderResult(result, ip, payload, map[string]any{
+		"connection": payload["connection"], "security": payload["security"],
+	})
+}
+
+func successfulProviderResult(result agentapi.IPQualityProviderResultPayload, ip string, payload, extra map[string]any) providerSourceOutcome {
+	// Copy the evidence map so adding metadata never changes the response.
+	evidence := make(map[string]any, len(extra)+1)
+	for key, value := range extra {
+		evidence[key] = value
+	}
+	capability := "geo_only"
+	if result.IsProxy != nil || result.IsVPN != nil || result.IsTor != nil ||
+		result.IsServer != nil || result.IsAbuser != nil || result.IsRobot != nil || result.RiskScore != "" {
+		capability = "risk"
+	}
+	evidence["capability"] = capability
+	result.Status = sourceStatusSuccess
+	result.ExtraJSON = extraJSON(evidence)
+	return providerSourceOutcome{Result: result, IPAddress: ip, Payload: payload}
+}
+
+func explicitBoolFromMap(payload map[string]any, keys ...string) *bool {
+	for _, key := range keys {
+		if value, ok := payload[key].(bool); ok {
+			return &value
+		}
+	}
+	return nil
+}
+
+func providerScore(payload map[string]any, keys ...string) string {
+	for _, key := range keys {
+		switch value := payload[key].(type) {
+		case json.Number:
+			return value.String()
+		case float64:
+			return strconv.FormatFloat(value, 'f', -1, 64)
+		case string:
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func providerErrorValue(payload map[string]any, key string) bool {
@@ -331,93 +412,101 @@ func successfulProviderOutcomes(outcomes []providerSourceOutcome) []providerSour
 	return out
 }
 
-func preferredProviderOutcome(outcomes []providerSourceOutcome) providerSourceOutcome {
-	order := map[string]int{
-		"ipapi.is":       0,
-		"ipquery.io":     1,
-		"ipwho.is":       2,
-		"proxycheck.io":  3,
-		"ip2location.io": 4,
+func applyReportFallbacksFromProviders(report *agentapi.IPQualityReportPayload, outcomes []providerSourceOutcome) {
+	target, validTarget := ipidentity.Parse(report.IPAddress)
+	if !validTarget || target.IsUnspecified() {
+		return
 	}
-	best := outcomes[0]
-	bestRank := 999
-	for _, outcome := range outcomes {
-		rank, ok := order[outcome.Result.Provider]
-		if !ok {
-			rank = 900
-		}
-		if rank < bestRank {
-			best = outcome
-			bestRank = rank
+	var geography, network, registered bool
+	report.RiskLevel = ""
+	for _, provider := range []string{"ipapi.is", "ipquery.io", "ipwho.is", "proxycheck.io", "ip2location.io"} {
+		for _, outcome := range outcomes {
+			if outcome.Result.Provider != provider || outcome.Result.Status != sourceStatusSuccess {
+				continue
+			}
+			address, validAddress := ipidentity.Parse(outcome.IPAddress)
+			if !validAddress || address != target {
+				continue
+			}
+			facts := reportFactsFromProvider(outcome)
+			if !geography && (facts.regionCode != "" || facts.regionName != "" || facts.latitude != nil || facts.longitude != nil) {
+				report.UseRegionCode, report.UseRegionName = facts.regionCode, facts.regionName
+				report.Latitude, report.Longitude = facts.latitude, facts.longitude
+				geography = true
+			}
+			if !network && (facts.asn != "" || facts.organization != "") {
+				report.ASN, report.Organization = facts.asn, facts.organization
+				network = true
+			}
+			if !registered && (facts.registeredRegionCode != "" || facts.registeredRegionName != "") {
+				report.RegisteredRegionCode, report.RegisteredRegionName = facts.registeredRegionCode, facts.registeredRegionName
+				registered = true
+			}
+			level := strings.ToLower(strings.TrimSpace(outcome.Result.RiskLevel))
+			if riskLevelRank(level) > riskLevelRank(report.RiskLevel) {
+				report.RiskLevel = level
+			}
 		}
 	}
-	return best
 }
 
-func applyReportFallbacksFromProviders(report *agentapi.IPQualityReportPayload, outcomes []providerSourceOutcome) {
-	for _, outcome := range outcomes {
-		if outcome.Result.Status != sourceStatusSuccess {
-			continue
-		}
-		payload := outcome.Payload
-		if outcome.Result.Provider == "ipapi.is" {
-			facts := ipapiISFactsFromPayload(payload)
-			if report.ASN == "" {
-				report.ASN = facts.asn
-			}
-			if report.Organization == "" {
-				report.Organization = facts.organization
-			}
-			if report.UseRegionCode == "" {
-				report.UseRegionCode = facts.regionCode
-			}
-			if report.UseRegionName == "" {
-				report.UseRegionName = facts.regionName
-			}
-			if report.Latitude == nil {
-				report.Latitude = facts.latitude
-			}
-			if report.Longitude == nil {
-				report.Longitude = facts.longitude
-			}
-		}
-		if report.ASN == "" {
-			report.ASN = asnStringFromPayload(payload)
-		}
-		if report.Organization == "" {
-			report.Organization = firstNonEmpty(
-				stringFromMap(payload, "organization", "org", "isp"),
-				stringFromNestedMap(payload, "asn", "org", "organization", "name"),
-				stringFromNestedMap(payload, "isp", "org", "organization", "name"),
-				stringFromNestedMap(payload, "connection", "org"),
-			)
-		}
-		if report.UseRegionCode == "" {
-			report.UseRegionCode = firstNonEmpty(stringFromMap(payload, "country_code"), stringFromNestedMap(payload, "location", "country_code"))
-		}
-		if report.UseRegionName == "" {
-			report.UseRegionName = firstNonEmpty(stringFromMap(payload, "country", "country_name"), stringFromNestedMap(payload, "location", "country"))
-		}
-		if report.Latitude == nil {
-			report.Latitude = firstFloatPtr(floatPtrFromMap(payload, "latitude", "lat"), floatPtrFromNestedMap(payload, "location", "latitude", "lat"))
-		}
-		if report.Longitude == nil {
-			report.Longitude = firstFloatPtr(floatPtrFromMap(payload, "longitude", "lon", "lng"), floatPtrFromNestedMap(payload, "location", "longitude", "lon", "lng"))
-		}
-		if report.RiskLevel == "" {
-			report.RiskLevel = outcome.Result.RiskLevel
-		}
+func reportFactsFromProvider(outcome providerSourceOutcome) ipapiISFacts {
+	payload := outcome.Payload
+	facts := ipapiISFacts{
+		regionCode: outcome.Result.RegionCode, regionName: outcome.Result.RegionName,
+	}
+	var network, location map[string]any
+	switch outcome.Result.Provider {
+	case "ipapi.is":
+		return ipapiISFactsFromPayload(payload)
+	case "ipquery.io":
+		network, location = nestedMap(payload, "isp"), nestedMap(payload, "location")
+		facts.asn, _ = normalizeASN(stringFromMap(network, "asn"))
+		facts.organization = stringFromMap(network, "org")
+	case "ipwho.is":
+		network, location = nestedMap(payload, "connection"), payload
+		facts.asn, _ = normalizeASN(stringFromMap(network, "asn"))
+		facts.organization = firstNonEmpty(stringFromMap(network, "org"), stringFromMap(network, "isp"))
+	case "proxycheck.io":
+		business := nestedMap(payload, outcome.IPAddress)
+		network, location = nestedMap(business, "network"), nestedMap(business, "location")
+		facts.asn, _ = normalizeASN(stringFromMap(network, "asn"))
+		facts.organization = firstNonEmpty(stringFromMap(network, "organisation"), stringFromMap(network, "provider"))
+	case "ip2location.io":
+		location = payload
+		facts.asn, _ = normalizeASN(stringFromMap(payload, "asn"))
+		facts.organization = stringFromMap(payload, "as")
+	}
+	facts.latitude = floatPtrFromMap(location, "latitude", "lat")
+	facts.longitude = floatPtrFromMap(location, "longitude", "lon", "lng")
+	return facts
+}
+
+func riskLevelRank(level string) int {
+	switch level {
+	case "low":
+		return 1
+	case "medium":
+		return 2
+	case "high":
+		return 3
+	case "critical":
+		return 4
+	default:
+		return 0
 	}
 }
 
 type ipapiISFacts struct {
-	ip           string
-	asn          string
-	organization string
-	regionCode   string
-	regionName   string
-	latitude     *float64
-	longitude    *float64
+	ip                   string
+	asn                  string
+	organization         string
+	regionCode           string
+	regionName           string
+	registeredRegionCode string
+	registeredRegionName string
+	latitude             *float64
+	longitude            *float64
 }
 
 func ipapiISFactsFromPayload(payload map[string]any) ipapiISFacts {
@@ -434,16 +523,23 @@ func ipapiISFactsFromPayload(payload map[string]any) ipapiISFacts {
 		ip:           firstNonEmpty(stringFromMap(payload, "ip", "ip_address")),
 		asn:          asn,
 		organization: organization,
-		regionCode: firstNonEmpty(
+		regionCode: countryCode(firstNonEmpty(
 			stringFromMap(payload, "use_region_code", "country_code"),
 			stringFromNestedMap(payload, "location", "country_code"),
-		),
+		)),
 		regionName: firstNonEmpty(
 			stringFromMap(payload, "use_region_name", "country_name", "country", "region", "city"),
 			stringFromNestedMap(payload, "location", "country"),
 		),
-		latitude:  firstFloatPtr(floatPtrFromMap(payload, "latitude", "lat"), floatPtrFromNestedMap(payload, "location", "latitude", "lat")),
-		longitude: firstFloatPtr(floatPtrFromMap(payload, "longitude", "lon", "lng"), floatPtrFromNestedMap(payload, "location", "longitude", "lon", "lng")),
+		registeredRegionCode: countryCode(firstNonEmpty(
+			stringFromMap(payload, "registered_region_code"),
+			stringFromMap(payload, "registered_country_code"),
+			stringFromNestedMap(payload, "asn", "country"),
+			stringFromNestedMap(payload, "asn", "country_code"),
+		)),
+		registeredRegionName: firstNonEmpty(stringFromMap(payload, "registered_region_name"), stringFromMap(payload, "registered_country_name")),
+		latitude:             firstFloatPtr(floatPtrFromMap(payload, "latitude", "lat"), floatPtrFromNestedMap(payload, "location", "latitude", "lat")),
+		longitude:            firstFloatPtr(floatPtrFromMap(payload, "longitude", "lon", "lng"), floatPtrFromNestedMap(payload, "location", "longitude", "lon", "lng")),
 	}
 }
 
@@ -525,20 +621,6 @@ func firstBool(values ...*bool) *bool {
 	return nil
 }
 
-func boolFromUsageType(value string, matches ...string) *bool {
-	normalized := strings.ToLower(strings.TrimSpace(value))
-	if normalized == "" {
-		return nil
-	}
-	for _, match := range matches {
-		if strings.Contains(normalized, strings.ToLower(match)) {
-			v := true
-			return &v
-		}
-	}
-	return nil
-}
-
 func firstFloatPtr(values ...*float64) *float64 {
 	for _, value := range values {
 		if value != nil {
@@ -548,13 +630,16 @@ func firstFloatPtr(values ...*float64) *float64 {
 	return nil
 }
 
+var decimalRiskScore = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
+
+// These bands are Houfeng reference bands, not equivalent vendor ratings.
 func riskLevelFromScore(score string) string {
 	trimmed := strings.TrimSpace(score)
-	if trimmed == "" {
+	if !decimalRiskScore.MatchString(trimmed) {
 		return ""
 	}
-	var n int
-	if _, err := fmt.Sscanf(trimmed, "%d", &n); err != nil {
+	n, err := strconv.ParseFloat(trimmed, 64)
+	if err != nil || math.IsNaN(n) || math.IsInf(n, 0) || n < 0 || n > 100 {
 		return ""
 	}
 	if n >= 80 {
@@ -564,4 +649,17 @@ func riskLevelFromScore(score string) string {
 		return "medium"
 	}
 	return "low"
+}
+
+func countryCode(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) != 2 {
+		return ""
+	}
+	for _, char := range value {
+		if !((char >= 'A' && char <= 'Z') || (char >= 'a' && char <= 'z')) {
+			return ""
+		}
+	}
+	return strings.ToUpper(value)
 }

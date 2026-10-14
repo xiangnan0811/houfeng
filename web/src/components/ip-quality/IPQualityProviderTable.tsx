@@ -1,7 +1,9 @@
 import { Badge, ScrollRegion } from '../atoms'
 import type { IPQualityProviderResult } from '../../lib/types'
 import {
+  providerCapability,
   providerTableRows,
+  riskEvidenceComplete,
   riskFlags,
   riskLevelLabel,
   riskSignalHits,
@@ -59,17 +61,22 @@ function textCell(value?: string): string {
 export function IPQualityProviderTable({ results }: IPQualityProviderTableProps) {
   const { rows, emptyCount, unavailable } = providerTableRows(results)
   const hits = riskSignalHits(results)
+  const negativeHit = hits.some((hit) => hit.negative)
+  const hasRiskScore = rows.some((result) => (result.risk_score ?? '').trim() !== '')
 
   return (
     <section className="vps-detail-workspace__section ipq-providers" aria-labelledby={TITLE_ID}>
       <div className="vps-detail-workspace__section-head">
         <h2 id={TITLE_ID}>IP 数据库判断</h2>
         <div className="ipq-signal-hits" aria-label="风险信号命中">
-          {hits.length > 0 ? hits.map((hit) => (
+          {hits.map((hit) => (
             <Badge key={hit.key} variant="info" tone={hit.negative ? 'alert' : 'neutral'}>
               {hit.key === 'server' ? '机房' : hit.label} {hit.hits}/{hit.total}
             </Badge>
-          )) : <span className="ipq-muted">未发现代理、VPN、Tor、滥用信号</span>}
+          ))}
+          {negativeHit ? null : (
+            <span className="ipq-muted">{riskEvidenceComplete(results) ? '已返回风险字段未命中' : '风险字段不完整'}</span>
+          )}
         </div>
       </div>
       {rows.length > 0 ? (
@@ -94,7 +101,12 @@ export function IPQualityProviderTable({ results }: IPQualityProviderTableProps)
             <tbody>
               {rows.map((result) => (
                 <tr key={`${result.provider}:${result.source_type ?? ''}`} className="data-table__row">
-                  <td className="data-table__cell ipq-provider-table__name">{result.provider}</td>
+                  <td className="data-table__cell ipq-provider-table__name">
+                    {result.provider}
+                    {providerCapability(result) === 'geo_only' ? (
+                      <div className="ipq-muted ipq-provider-table__capability">该来源本次仅返回地理信息</div>
+                    ) : null}
+                  </td>
                   <td className="data-table__cell">{textCell(result.usage_type)}</td>
                   <td className="data-table__cell">{textCell(result.company_type)}</td>
                   <td className="data-table__cell"><RiskCell result={result} /></td>
@@ -110,8 +122,9 @@ export function IPQualityProviderTable({ results }: IPQualityProviderTableProps)
       ) : (
         <p className="ipq-empty">暂无可展示的数据库判断。</p>
       )}
-      {emptyCount > 0 || unavailable.length > 0 ? (
+      {hasRiskScore || emptyCount > 0 || unavailable.length > 0 ? (
         <p className="ipq-providers__footnote">
+          {hasRiskScore ? <span>风险分：数值越高风险越高；不同数据库不可直接比较</span> : null}
           {emptyCount > 0 ? <span>另有 {emptyCount} 个数据库未给出风险判断</span> : null}
           {unavailable.length > 0 ? (
             <span className="ipq-providers__unavailable" aria-label="未返回结果的数据库">
