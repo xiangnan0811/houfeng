@@ -316,14 +316,23 @@ func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
-	// 0075 adds settings deployment ownership, 0074 adds subscription
-	// month-end exchange rates, 0073 adds the monitoring-instance metadata
-	// version and 0072 adds freshness columns, all without APP ACL changes.
+	// 0076 adds the family-state view and SELECT grant, 0075 adds settings
+	// ownership, and 0072 through 0074 add non-policy schema only.
 	// 0071 adds access-management ACL only, while 0070 adds nullable
 	// destination-subject columns and 0069 adds CPU validity schema. These
 	// non-heartbeat migrations must be stripped from the terminal suffix
 	// before policy-shape classification.
 	successorNames := transition.successor.names
+	addressFamiliesMigrationPending := false
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0076_ip_quality_address_families.sql" {
+		addressFamiliesMigrationPending = true
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0076_ip_quality_address_families.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
 	settingsDeploymentOverridesMigrationPending := false
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0075_add_settings_deployment_overrides.sql" {
 		settingsDeploymentOverridesMigrationPending = true
@@ -406,10 +415,10 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 	}
 	switch {
 	case len(successorNames) == 0:
-		// P69 carries 0070 through 0075; P70 carries 0071 through 0075;
-		// P71 carries 0072 through 0075; P72 carries 0073 through 0075;
-		// P73 carries 0074 and 0075, and P74 carries only 0075. The
-		// terminal non-policy suffixes have already been stripped above.
+		// P69 through P75 carry only the stripped non-policy terminal suffix.
+		if transition.profile == appACLCurrentProfileP75 && !addressFamiliesMigrationPending {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
 		if transition.profile == appACLCurrentProfileP74 && !settingsDeploymentOverridesMigrationPending {
 			return false, fmt.Errorf("unsupported registered APP transition")
 		}
@@ -418,7 +427,8 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 			transition.profile == appACLCurrentProfileP71 ||
 			transition.profile == appACLCurrentProfileP72 ||
 			transition.profile == appACLCurrentProfileP73 ||
-			transition.profile == appACLCurrentProfileP74 {
+			transition.profile == appACLCurrentProfileP74 ||
+			transition.profile == appACLCurrentProfileP75 {
 			return false, nil
 		}
 		if !addressIdentityMigrationPending && !cpuRatesMigrationPending {

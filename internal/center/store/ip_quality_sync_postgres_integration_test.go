@@ -79,7 +79,7 @@ func TestPostgresIntegrationIPQualitySyncMetadataRoundTrip(t *testing.T) {
 	}
 
 	readRepository := NewPostgresIPQualityRepository(runtimePool)
-	vpsReport, err := readRepository.GetVPSIPQuality(ctx, "vps_"+prefix)
+	vpsReport, err := readRepository.GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality() after sync: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestPostgresIntegrationIPQualitySyncMetadataRoundTrip(t *testing.T) {
 				result.Plan.IPQualityPlan == nil || result.Plan.IPQualityPlan.CollectRequestID != "" {
 				t.Fatalf("exact request completion = %#v, plan=%#v, want completed partial without redispatch", current, result.Plan.IPQualityPlan)
 			}
-			recovered, err = readRepository.GetVPSIPQuality(ctx, "vps_"+prefix)
+			recovered, err = readRepository.GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 			if err != nil {
 				t.Fatalf("read recovery report: %v", err)
 			}
@@ -226,6 +226,14 @@ func TestPostgresIntegrationIPQualitySyncMetadataRoundTrip(t *testing.T) {
 	if !ok || !saveZero.RawJSONIsNull || saveZero.ReceivedAt.Before(saveBefore) || saveZero.ReceivedAt.After(saveAfter) {
 		t.Fatalf("SaveReports zero row = %#v, want SQL NULL raw and current received_at between %s and %s", saveZero, saveBefore, saveAfter)
 	}
+	t.Run("paired family read model", func(t *testing.T) {
+		assertIPQualityFamilySyncReadModel(t, ctx, fixture, runtimePool)
+		assertIPQualityFamilyStaleAndHistoricalSelection(t, ctx, fixture, runtimePool)
+		assertIPQualityFamilyContradictoryMetadata(t, ctx, fixture, runtimePool)
+	})
+	t.Run("0076 preserves C75 reports and children", func(t *testing.T) {
+		assertIPQualityAddressFamilyMigrationPreservesLegacyRows(t, ctx)
+	})
 }
 
 func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
@@ -249,9 +257,10 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 		service := syncing.NewService(repository).WithIPQualityCollectCoordinator(requests)
 
 		liveBatch, _ := syncInterleavingBatches(prefix)
-		badReport := ipQualitySyncFullReport(prefix, "sync_live_"+prefix, syncInterleavingT2, time.Time{}, requestID)
+		firstReport := pairedIPQualityTestReport(prefix, "sync_live_"+prefix, prefix, requestID, 4, syncInterleavingT2, "available", "success")
+		badReport := pairedIPQualityTestReport(prefix, "sync_live_"+prefix, prefix, requestID, 6, syncInterleavingT2, "available", "partial")
 		badReport.ServiceUnlocks = append(badReport.ServiceUnlocks, badReport.ServiceUnlocks[0])
-		liveBatch.IPQualityReports = []ipquality.ReportWrite{badReport}
+		liveBatch.IPQualityReports = []ipquality.ReportWrite{firstReport, badReport}
 		receivedAt := syncInterleavingT2.Add(2 * time.Minute)
 		repository.now = func() time.Time { return receivedAt }
 		before := readIPQualitySyncFactCounts(t, ctx, fixture, "mi_"+prefix)
@@ -277,7 +286,7 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 		goodBatch := liveBatch
 		goodReport := badReport
 		goodReport.ServiceUnlocks = append([]ipquality.ServiceUnlockWrite(nil), badReport.ServiceUnlocks[:len(badReport.ServiceUnlocks)-1]...)
-		goodBatch.IPQualityReports = []ipquality.ReportWrite{goodReport}
+		goodBatch.IPQualityReports = []ipquality.ReportWrite{firstReport, goodReport}
 		goodResult, err := service.SyncBatch(ctx, goodBatch)
 		if err != nil {
 			t.Fatalf("corrected sync batch: %v", err)
@@ -286,11 +295,11 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 			t.Fatalf("corrected disposition = %q, want recorded", goodResult.Disposition)
 		}
 		completed, ok := requests.Latest("mi_"+prefix, time.Now().UTC())
-		if !ok || completed.Status != ipquality.CollectRequestCompleted || completed.CompletedAt == nil {
+		if !ok || completed.Status != ipquality.CollectRequestCompleted || completed.CompletedAt == nil || completed.CollectionScope != "dual_stack" || completed.CollectionID != prefix || len(completed.FamilyResults) != 2 {
 			t.Fatalf("request after corrected sync = %#v, ok=%t, want completed", completed, ok)
 		}
 		countsAfterRecord := readIPQualitySyncFactCounts(t, ctx, fixture, "mi_"+prefix)
-		if countsAfterRecord.AgentSyncBatches != 1 || countsAfterRecord.Heartbeats != 1 || countsAfterRecord.HostSamples != 1 || countsAfterRecord.ProbeObservations != 3 || countsAfterRecord.Reports != 1 || countsAfterRecord.ProviderResults != 3 || countsAfterRecord.ServiceUnlocks != 2 {
+		if countsAfterRecord.AgentSyncBatches != 1 || countsAfterRecord.Heartbeats != 1 || countsAfterRecord.HostSamples != 1 || countsAfterRecord.ProbeObservations != 3 || countsAfterRecord.Reports != 2 || countsAfterRecord.ProviderResults != 6 || countsAfterRecord.ServiceUnlocks != 4 {
 			t.Fatalf("facts after corrected sync = %#v, want one recorded batch with full IP quality matrix", countsAfterRecord)
 		}
 
@@ -379,6 +388,9 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 	defer cancel()
 
 	fixture := newRecordsPostgresFixture(t, ctx)
+	t.Run("family navigation shares selected facts snapshot", func(t *testing.T) {
+		assertIPQualityFamilySnapshot(t, ctx, fixture)
+	})
 	t.Run("A to B", func(t *testing.T) {
 		const prefix = "ipq_snapshot_ab"
 		seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)
@@ -393,7 +405,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 		}
 		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "ab", "vps_"+prefix,
 			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
-				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 			},
 			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
 				_, err := saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
@@ -404,7 +416,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 			},
 		)
 		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-A", "link", false)
-		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 		if err != nil {
 			t.Fatalf("read snapshot B: %v", err)
 		}
@@ -418,7 +430,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 		writerPool := fixture.openDirectRuntimePool(t, ctx, "ip-quality-snapshot-empty-writer", 1)
 		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "empty", "vps_"+prefix,
 			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
-				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 			},
 			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
 				_, err := saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
@@ -429,7 +441,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 			},
 		)
 		assertIPQualitySnapshotEmpty(t, before)
-		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 		if err != nil {
 			t.Fatalf("read first snapshot B: %v", err)
 		}
@@ -450,7 +462,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 		}
 		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "order", "vps_"+prefix,
 			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
-				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 			},
 			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
 				_, err := saveIPQualitySnapshotReport(t, ctx, pool, ipQualitySnapshotReport(
@@ -461,7 +473,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 			},
 		)
 		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-backfill", "link", false)
-		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 		if err != nil {
 			t.Fatalf("read live snapshot: %v", err)
 		}
@@ -482,7 +494,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 		}
 		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "link", "vps_"+prefix,
 			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
-				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 			},
 			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
 				monitoringRepository := NewPostgresMonitoringInstanceRepository(pool)
@@ -514,7 +526,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 			},
 		)
 		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-link-A", "link", false)
-		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 		if err != nil {
 			t.Fatalf("read replacement link snapshot: %v", err)
 		}
@@ -539,7 +551,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 		}
 		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "address", "vps_"+prefix,
 			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
-				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 			},
 			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
 				if _, err := pool.Exec(ctx, `update public.vps_assets set ipv4 = $1 where vps_id = $2`, newIP, "vps_"+prefix); err != nil {
@@ -553,7 +565,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 			},
 		)
 		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-address-A", "ip_match", false)
-		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 		if err != nil {
 			t.Fatalf("read address snapshot B: %v", err)
 		}
@@ -577,7 +589,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 		}
 		before := runIPQualitySnapshotReadBarrier(t, ctx, fixture, "shared", "vps_"+prefix,
 			func(repo *PostgresIPQualityRepository) (ipquality.VPSReport, error) {
-				return repo.GetVPSIPQuality(ctx, "vps_"+prefix)
+				return repo.GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 			},
 			func(ctx context.Context, repo *PostgresIPQualityRepository, pool *pgxpool.Pool) error {
 				_, err := pool.Exec(ctx, `
@@ -587,7 +599,7 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 			},
 		)
 		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-shared-A", "ip_match", false)
-		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix)
+		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQuality(ctx, "vps_"+prefix, 0)
 		if err != nil {
 			t.Fatalf("read shared ambiguous snapshot: %v", err)
 		}
@@ -619,16 +631,17 @@ func TestPostgresIntegrationIPQualityReadSnapshot(t *testing.T) {
 			},
 		)
 		assertIPQualitySnapshotComplete(t, before, aID, "snapshot-history-A", "link", false)
-		if before.History == nil || len(before.History) != 0 {
-			t.Fatalf("historical detail history = %#v, want non-nil empty slice", before.History)
+		if len(before.History) != 1 || before.History[0].ReportID != aID {
+			t.Fatalf("historical snapshot included a concurrent report or lost A: %#v", before.History)
 		}
 		later, err := NewPostgresIPQualityRepository(writerPool).GetVPSIPQualityReportDetail(ctx, "vps_"+prefix, aID)
 		if err != nil {
 			t.Fatalf("read selected historical A after B: %v", err)
 		}
 		assertIPQualitySnapshotComplete(t, later, aID, "snapshot-history-A", "link", false)
-		if later.History == nil || len(later.History) != 0 {
-			t.Fatalf("historical detail after B history = %#v, want non-nil empty slice", later.History)
+		if len(later.History) != 2 || later.History[1].ReportID != aID || later.History[0].ReportID == aID ||
+			!later.History[0].ObservedAt.Equal(observedAt.Add(time.Minute)) {
+			t.Fatalf("historical detail did not retain A while exposing newer same-family B: %#v", later.History)
 		}
 	})
 }
@@ -1069,7 +1082,7 @@ func ipQualitySyncRecoveryReport(prefix, syncBatchID string, observedAt, receive
 	report.ErrorCode, report.ErrorSummary = "service_partial", "one service did not establish a business conclusion"
 	report.RawJSON = json.RawMessage(`{"source_version":"v2","collection_revision":3}`)
 	report.DiagnosticsJSON = json.RawMessage(fmt.Sprintf(`{"source_version":"v2","service_probe_revision":2,"collection_revision":3,"ip_address_family":4,"collect_request_id":%q}`, requestID))
-	report.CollectRequestID = ipquality.CollectRequestIDFromDiagnostics(report.DiagnosticsJSON)
+	report.CollectionMetadata = agentapi.ParseCollectionMetadata(report.DiagnosticsJSON)
 	report.CoverageJSON = json.RawMessage(`{"expected_provider_count":18,"successful_provider_count":5,"failed_provider_count":0,"skipped_provider_count":0,"not_configured_provider_count":13,"expected_service_count":2,"successful_service_count":1,"failed_service_count":1,"skipped_service_count":0,"not_configured_service_count":0}`)
 	report.ProviderResults = []ipquality.ProviderResultWrite{
 		{Provider: "ipapi.is", Status: "success", SourceType: "default", RegionCode: "US", RegionName: "United States", ExtraJSON: json.RawMessage(`{"capability":"geo_only"}`)},
@@ -1099,6 +1112,7 @@ func ipQualitySyncRecoveryReport(prefix, syncBatchID string, observedAt, receive
 }
 
 func ipQualitySyncFullReport(prefix, syncBatchID string, observedAt, receivedAt time.Time, requestID string) ipquality.ReportWrite {
+	diagnostics := json.RawMessage(fmt.Sprintf(`{"source_version":"v2","service_probe_revision":1,"collect_request_id":"%s","nested":{"password":"secret-password","ordinary":"diagnostic-kept"}}`, requestID))
 	return ipquality.ReportWrite{
 		MonitoringInstanceID: "mi_" + prefix,
 		ObservedAt:           observedAt,
@@ -1122,8 +1136,8 @@ func ipQualitySyncFullReport(prefix, syncBatchID string, observedAt, receivedAt 
 		ErrorSummary:         "one provider failed",
 		RawJSON:              json.RawMessage(`{"nested":{"token":"secret-token","ordinary":"kept"}}`),
 		CoverageJSON:         json.RawMessage(`{"expected_provider_count":3,"successful_provider_count":1,"failed_provider_count":1,"skipped_provider_count":0,"not_configured_provider_count":1,"expected_service_count":2,"successful_service_count":1,"failed_service_count":0,"skipped_service_count":1,"not_configured_service_count":0}`),
-		DiagnosticsJSON:      json.RawMessage(fmt.Sprintf(`{"source_version":"v2","service_probe_revision":1,"collect_request_id":"%s","nested":{"password":"secret-password","ordinary":"diagnostic-kept"}}`, requestID)),
-		CollectRequestID:     requestID,
+		DiagnosticsJSON:      diagnostics,
+		CollectionMetadata:   agentapi.ParseCollectionMetadata(diagnostics),
 		ProviderResults: []ipquality.ProviderResultWrite{
 			{
 				Provider:    "ipapi.is",

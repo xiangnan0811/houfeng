@@ -889,3 +889,56 @@ func syncRequestWithOutput(batchID string, outputBytes int) agentapi.SyncRequest
 	}}
 	return request
 }
+
+func TestFileStorePersistsAndReplaysDualRoundAsOneBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dual-round.json")
+	ctx := context.Background()
+	opts := syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour}
+	store := syncqueue.NewFileStore(path, opts)
+	request := syncRequest("dual-batch", false)
+	request.IPQualityReports = nil
+	for index, family := range []int{4, 6} {
+		ip, status, availability, code := "198.51.100.10", "success", "available", ""
+		if index == 1 {
+			ip, status, availability, code = "::", "failure", "unavailable", "address_family_unavailable"
+		}
+		diagnostics, _ := json.Marshal(map[string]any{"collection_revision": 4, "collection_id": "durable-round", "expected_ip_versions": []int{4, 6}, "ip_address_family": family, "family_availability": availability, "collect_request_id": "durable-request"})
+		request.IPQualityReports = append(request.IPQualityReports, agentapi.IPQualityReportPayload{ObservedAt: time.Now().UTC(), IPVersion: family, IPAddress: ip, Status: status, ErrorCode: code, DiagnosticsJSON: diagnostics})
+	}
+	request.IPQualityReports[1].ObservedAt = request.IPQualityReports[0].ObservedAt
+	id, err := store.Enqueue(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The durable queue owns a snapshot rather than a caller's mutable rows.
+	request.IPQualityReports[0].DiagnosticsJSON[0] = 'x'
+	request.IPQualityReports[1].IPAddress = "2001:db8::bad"
+	reopened := syncqueue.NewFileStore(path, opts)
+	if err := reopened.MarkAttempt(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := syncqueue.NewFileStore(path, opts).List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Attempts != 1 || len(entries[0].Request.IPQualityReports) != 2 {
+		t.Fatalf("queue split or lost round: %#v", entries)
+	}
+	reports := entries[0].Request.IPQualityReports
+	for index, family := range []int{4, 6} {
+		m := agentapi.ParseCollectionMetadata(reports[index].DiagnosticsJSON)
+		if reports[index].IPVersion != family || !m.Valid || m.CollectionID != "durable-round" || m.CollectRequestID != "durable-request" {
+			t.Fatalf("persisted pair lost identity: %#v", reports)
+		}
+	}
+	if reports[1].IPAddress != "::" || reports[1].ErrorCode != "address_family_unavailable" || !reports[0].ObservedAt.Equal(reports[1].ObservedAt) {
+		t.Fatalf("terminal pair changed: %#v", reports)
+	}
+	if err := reopened.Delete(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	entries, err = reopened.List(ctx)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("batch acknowledgement did not remove whole round: entries=%#v err=%v", entries, err)
+	}
+}

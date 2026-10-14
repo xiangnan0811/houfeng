@@ -67,16 +67,18 @@ function lifecycleGlyphState(tone: BadgeTone): HealthState {
   return tone
 }
 
+// 徽标只读默认族 summary；文本带真实地址族，非法/缺失族不猜，仍写 “IP”。
 function ipQualityLabel(summary: IPQualitySummary): string {
+  const family = summary.ip_version === 4 || summary.ip_version === 6 ? `IPv${summary.ip_version}` : 'IP'
   const status = (summary.status ?? '').trim().toLowerCase()
   let label: string
-  if (summary.ambiguous) label = 'IP 归属不唯一'
-  else if (status === 'partial') label = 'IP 部分采集'
-  else if (status === 'failure') label = 'IP 采集失败'
-  else if (status !== 'success') label = 'IP 状态未知'
+  if (summary.ambiguous) label = `${family} 归属不唯一`
+  else if (status === 'partial') label = `${family} 部分采集`
+  else if (status === 'failure') label = `${family} 采集失败`
+  else if (status !== 'success') label = `${family} 状态未知`
   else {
     const suffix = summary.stale ? '' : summary.use_region_code || summary.use_region_name
-    label = `IP ${normalizeRiskLevel(summary.risk_level)}${suffix ? ` · ${suffix}` : ''}`
+    label = `${family} ${normalizeRiskLevel(summary.risk_level)}${suffix ? ` · ${suffix}` : ''}`
   }
   return summary.stale ? `${label} · 过期` : label
 }

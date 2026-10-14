@@ -588,6 +588,12 @@ describe('api helpers', () => {
     } satisfies CreateVPSAssetInput
     const detail = { ...vps, monitoring_instance_links: [] }
     const ipQuality = {
+      selected_ip_version: 4,
+      default_ip_version: 4,
+      families: [
+        { ip_version: 4, availability: 'available', latest_attempt: null, latest_report_summary: null },
+        { ip_version: 6, availability: 'unknown', latest_attempt: null, latest_report_summary: null },
+      ],
       summary: {
         vps_id: 'vps_001',
         observed_at: '2026-06-08T12:00:00Z',
@@ -687,6 +693,24 @@ describe('api helpers', () => {
       credentials: 'include',
       body: JSON.stringify(input),
     })
+  })
+
+  it('adds the IP family query only for an explicit family and never on report detail', async () => {
+    const body = { selected_ip_version: 6, default_ip_version: 4, families: [], summary: null, latest_report: null, provider_results: [], service_unlocks: [], history: [] }
+    const fetchMock = vi.fn().mockImplementation(async () => mockResponse(200, JSON.stringify(body)))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await getVPSIPQuality('vps 001')
+    await getVPSIPQuality('vps 001', 6)
+    await getVPSIPQuality('vps 001', 4)
+    await getVPSIPQualityReport('vps 001', 'ipq_001')
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      '/api/vps/vps%20001/ip-quality',
+      '/api/vps/vps%20001/ip-quality?ip_version=6',
+      '/api/vps/vps%20001/ip-quality?ip_version=4',
+      '/api/vps/vps%20001/ip-quality/reports/ipq_001',
+    ])
   })
 
   it('reads and requests immediate IP quality collection', async () => {

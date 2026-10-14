@@ -525,11 +525,8 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
             from projected_monitoring n where n.lifecycle_status <> '已退役' group by n.vps_id
         ),
 			ip_quality_latest as (
-				select distinct on (assigned.vps_id)
-					assigned.*
-				from ip_quality_assigned_vps_reports assigned
-				join ip_quality_reports r on r.report_id = assigned.report_id
-				order by assigned.vps_id, assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc
+				select assigned.*
+				from ip_quality_latest_vps_summaries assigned
 			),
 			ip_quality_provider_risk_rollup as (
 			select

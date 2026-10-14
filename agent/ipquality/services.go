@@ -17,6 +17,11 @@ import (
 )
 
 func (c *HTTPCollector) collectDefaultServiceUnlocks(ctx context.Context, services []string, ipVersion int) []serviceProbeOutcome {
+	return c.collectDefaultServiceUnlocksWithSemaphore(ctx, services, ipVersion, make(chan struct{}, 7))
+}
+
+// The caller supplies one round-wide pool so both families share the limit.
+func (c *HTTPCollector) collectDefaultServiceUnlocksWithSemaphore(ctx context.Context, services []string, ipVersion int, slots chan struct{}) []serviceProbeOutcome {
 	outcomes := make([]serviceProbeOutcome, len(services))
 	var workers sync.WaitGroup
 	workerCount := min(len(services), 7)
@@ -25,9 +30,16 @@ func (c *HTTPCollector) collectDefaultServiceUnlocks(ctx context.Context, servic
 		go func(worker int) {
 			defer workers.Done()
 			for index := worker; index < len(services); index += workerCount {
-				serviceCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-				outcomes[index] = c.probeService(serviceCtx, services[index], ipVersion)
-				cancel()
+				select {
+				case slots <- struct{}{}:
+					serviceCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+					outcomes[index] = c.probeService(serviceCtx, services[index], ipVersion)
+					cancel()
+					<-slots
+				case <-ctx.Done():
+					// probeService records cancellation without issuing HTTP.
+					outcomes[index] = c.probeService(ctx, services[index], ipVersion)
+				}
 			}
 		}(worker)
 	}
@@ -38,18 +50,22 @@ func (c *HTTPCollector) collectDefaultServiceUnlocks(ctx context.Context, servic
 // Evidence contains only rules, response statuses and normalized countries; never
 // response bodies, URLs, cookies, or anonymous device credentials.
 type serviceEvidence struct {
-	ProbeRevision int                       `json:"probe_revision"`
-	EvidenceKind  string                    `json:"evidence_kind"`
-	MatchedRule   string                    `json:"matched_rule,omitempty"`
-	HTTPStatus    int                       `json:"http_status,omitempty"`
-	Region        string                    `json:"region,omitempty"`
-	IPVersion     int                       `json:"ip_version"`
-	Endpoints     []serviceEndpointEvidence `json:"endpoints,omitempty"`
+	ProbeRevision  int                       `json:"probe_revision"`
+	EvidenceKind   string                    `json:"evidence_kind"`
+	MatchedRule    string                    `json:"matched_rule,omitempty"`
+	HTTPStatus     int                       `json:"http_status,omitempty"`
+	Region         string                    `json:"region,omitempty"`
+	ObservedRegion string                    `json:"observed_region,omitempty"`
+	RegionEvidence string                    `json:"region_evidence,omitempty"`
+	IPVersion      int                       `json:"ip_version"`
+	Endpoints      []serviceEndpointEvidence `json:"endpoints,omitempty"`
 }
 type serviceEndpointEvidence struct {
 	Endpoint    string `json:"endpoint"`
 	HTTPStatus  int    `json:"http_status,omitempty"`
 	MatchedRule string `json:"matched_rule,omitempty"`
+	ErrorCode   string `json:"error_code,omitempty"`
+	Outcome     string `json:"outcome"`
 }
 type serviceDecision struct{ status, region, scope, rule, code string }
 type serviceProbe struct {
@@ -66,7 +82,7 @@ func (c *HTTPCollector) probeService(ctx context.Context, service string, ipVers
 		return unsupportedServiceOutcome(service)
 	}
 	start := time.Now()
-	probe := serviceProbe{collector: c, ctx: ctx, service: service, ipVersion: ipVersion, evidence: serviceEvidence{ProbeRevision: 2, EvidenceKind: "anonymous_service_probe", IPVersion: ipVersion}}
+	probe := serviceProbe{collector: c, ctx: ctx, service: service, ipVersion: ipVersion, evidence: serviceEvidence{ProbeRevision: 3, EvidenceKind: "anonymous_service_probe", IPVersion: ipVersion}}
 	var decision serviceDecision
 	if err := ctx.Err(); err != nil {
 		decision.code = errorCodeForHTTPError(err)
@@ -89,6 +105,9 @@ func (c *HTTPCollector) probeService(ctx context.Context, service string, ipVers
 		}
 	}
 	probe.evidence.MatchedRule = decision.rule
+	if service != "chatgpt" && (service != "netflix" || decision.code != "") {
+		probe.finishEndpoint(decision)
+	}
 	var outcome serviceProbeOutcome
 	if decision.code != "" || decision.status == "" {
 		code := firstNonEmpty(decision.code, "invalid_response")
@@ -116,6 +135,16 @@ func serviceErrorSummary(code string) string {
 		return "invalid service response"
 	case "http_status":
 		return "service returned an unsuccessful HTTP status"
+	case "dns_failed":
+		return "service DNS lookup failed"
+	case "connection_refused":
+		return "service connection was refused"
+	case "network_unreachable":
+		return "service network is unreachable"
+	case "tls_failed":
+		return "service TLS request failed"
+	case "timeout":
+		return "service request timed out"
 	default:
 		return "service request failed"
 	}
@@ -124,17 +153,37 @@ func serviceErrorSummary(code string) string {
 func (p *serviceProbe) request(label, method, endpoint string, headers http.Header, body io.Reader) (serviceHTTPResponse, string) {
 	response, err := p.collector.doServiceRequest(p.ctx, p.ipVersion, p.service, method, endpoint, headers, body)
 	p.evidence.HTTPStatus = response.StatusCode
-	p.evidence.Endpoints = append(p.evidence.Endpoints, serviceEndpointEvidence{Endpoint: label, HTTPStatus: response.StatusCode})
-	if err == nil {
-		return response, ""
+	evidence := serviceEndpointEvidence{Endpoint: label, HTTPStatus: response.StatusCode, Outcome: "unknown"}
+	if err != nil {
+		switch {
+		case errors.Is(err, errServiceBodyLimit):
+			evidence.ErrorCode = "response_too_large"
+		case errors.Is(err, errServiceRedirect):
+			evidence.ErrorCode = "unexpected_redirect"
+		default:
+			evidence.ErrorCode = errorCodeForHTTPError(err)
+		}
 	}
-	if errors.Is(err, errServiceBodyLimit) {
-		return response, "response_too_large"
+	p.evidence.Endpoints = append(p.evidence.Endpoints, evidence)
+	return response, evidence.ErrorCode
+}
+
+func (p *serviceProbe) finishEndpoint(decision serviceDecision) {
+	if len(p.evidence.Endpoints) == 0 {
+		return
 	}
-	if errors.Is(err, errServiceRedirect) {
-		return response, "unexpected_redirect"
+	endpoint := &p.evidence.Endpoints[len(p.evidence.Endpoints)-1]
+	endpoint.ErrorCode = decision.code
+	endpoint.MatchedRule = decision.rule
+	switch decision.status {
+	case "unlocked":
+		endpoint.Outcome = "available"
+	case "blocked", "partial":
+		endpoint.Outcome = "restricted"
+	default:
+		endpoint.Outcome = "unknown"
+		endpoint.ErrorCode = firstNonEmpty(decision.code, "invalid_response")
 	}
-	return response, errorCodeForHTTPError(err)
 }
 func unknownService(code string) serviceDecision { return serviceDecision{code: code} }
 func knownService(status, region, scope, rule string) serviceDecision {
@@ -165,7 +214,7 @@ type servicePage struct {
 	visibleMarkup     bool
 	headings          []string
 	metas             map[string]string
-	scripts           []string
+	youtubeObjects    []any
 	objects           []any
 	challenge         bool
 	login             bool
@@ -266,8 +315,9 @@ func parseServicePage(body []byte) servicePage {
 			}
 			if token.Data == "script" && inScript {
 				value := script.String()
-				page.scripts = append(page.scripts, value)
-				page.objects = append(page.objects, serviceScriptObjects(value)...)
+				objects, youtubeObjects := serviceScriptObjects(value)
+				page.objects = append(page.objects, objects...)
+				page.youtubeObjects = append(page.youtubeObjects, youtubeObjects...)
 				lower := strings.ToLower(value)
 				if strings.Contains(lower, "cf-chl-") || strings.Contains(lower, "challenge-platform") {
 					page.challenge = true
@@ -321,8 +371,11 @@ func voidServiceTag(tag string) bool {
 // Extract balanced JSON objects from script wrappers without executing JavaScript.
 // Decoding the outer object also preserves relationships such as Netflix's
 // country id/name pair; string escapes are handled by encoding/json.
-func serviceScriptObjects(script string) []any {
-	var result []any
+func serviceScriptObjects(script string) (objects, youtubeObjects []any) {
+	// Keep the decoded object's immediate binding, not markers elsewhere in
+	// the script. The same lexer excludes strings, comments and regex literals.
+	youtubeBinding := ""
+	youtubeObject := false
 	start, depth := -1, 0
 	var wrapperQuote byte
 	wrapperEscaped, lineComment, blockComment := false, false, false
@@ -388,6 +441,19 @@ func serviceScriptObjects(script string) []any {
 			for i+1 < len(script) && serviceScriptWordByte(script[i+1]) {
 				i++
 			}
+			if depth == 0 {
+				word := script[wordStart : i+1]
+				switch {
+				case (word == "ytcfg" || word == "ytInitialData") && (!memberName || youtubeBinding == "window."):
+					youtubeBinding = word
+				case word == "window" && !memberName:
+					youtubeBinding = "window"
+				case word == "set" && youtubeBinding == "ytcfg.":
+					youtubeBinding = "ytcfg.set"
+				default:
+					youtubeBinding = ""
+				}
+			}
 			regexOperandStart = false
 			if !memberName {
 				switch script[wordStart : i+1] {
@@ -397,6 +463,21 @@ func serviceScriptObjects(script string) []any {
 			}
 			memberName = false
 			continue
+		}
+		if depth == 0 && !(char == '/' && i+1 < len(script) && (script[i+1] == '/' || script[i+1] == '*')) {
+			switch {
+			case char == '.' && youtubeBinding == "window":
+				youtubeBinding = "window."
+			case char == '.' && youtubeBinding == "ytcfg":
+				youtubeBinding = "ytcfg."
+			case char == '(' && youtubeBinding == "ytcfg.set":
+				youtubeBinding = "ytcfg.set("
+			case char == '=' && youtubeBinding == "ytInitialData":
+				youtubeBinding = "ytInitialData="
+			default:
+				youtubeObject = char == '{' && (youtubeBinding == "ytcfg.set(" || youtubeBinding == "ytInitialData=")
+				youtubeBinding = ""
+			}
 		}
 		switch char {
 		case '\'', '"', '`':
@@ -430,7 +511,10 @@ func serviceScriptObjects(script string) []any {
 				if depth == 0 {
 					var value any
 					if json.Unmarshal([]byte(script[start:i+1]), &value) == nil {
-						result = append(result, value)
+						objects = append(objects, value)
+						if youtubeObject {
+							youtubeObjects = append(youtubeObjects, value)
+						}
 					}
 				}
 			}
@@ -454,7 +538,7 @@ func serviceScriptObjects(script string) []any {
 			memberName = false
 		}
 	}
-	return result
+	return objects, youtubeObjects
 }
 
 func serviceScriptWordByte(char byte) bool {
@@ -551,8 +635,10 @@ func (p *serviceProbe) netflix() serviceDecision {
 		matchesID := err == nil && android != nil && (strings.TrimRight(android.Path, "/") == "/title/"+title.id || (android.Host == "title" && android.Path == "/"+title.id))
 		if successfulHTTP(response) && branded && matchesID && hasHeading {
 			valid++
+			p.finishEndpoint(knownService("unlocked", "", "", "netflix_title_catalog"))
 		} else if branded && !hasHeading && strings.Contains(strings.ToLower(page.text), "oh no!") {
 			unavailable++
+			p.finishEndpoint(knownService("partial", "", "", "netflix_titles_oh_no"))
 		} else {
 			if !successfulHTTP(response) {
 				return unknownService("http_status")
@@ -611,6 +697,14 @@ func (p *serviceProbe) chatGPT() serviceDecision {
 			}
 		}
 	}
+	switch webState {
+	case "positive":
+		p.finishEndpoint(knownService("unlocked", "", "", "openai_cookie_requirements"))
+	case "restricted":
+		p.finishEndpoint(knownService("blocked", "", "", "openai_unsupported_country"))
+	default:
+		p.finishEndpoint(unknownService(webCode))
+	}
 	app, code := p.request("app_home", http.MethodGet, "https://ios.chat.openai.com/", nil, nil)
 	appState, appCode := "unknown", code
 	if code == "" {
@@ -636,6 +730,14 @@ func (p *serviceProbe) chatGPT() serviceDecision {
 				}
 			}
 		}
+	}
+	switch appState {
+	case "positive":
+		p.finishEndpoint(knownService("unlocked", "", "", "openai_app_page"))
+	case "restricted":
+		p.finishEndpoint(knownService("blocked", "", "", "openai_app_vpn_restriction"))
+	default:
+		p.finishEndpoint(unknownService(appCode))
 	}
 	if webState == "positive" && appState == "positive" {
 		return knownService("unlocked", "", "web_and_app", "openai_web_and_app")
@@ -679,29 +781,35 @@ func (p *serviceProbe) youtube() serviceDecision {
 	if response.FinalURL != nil && (response.FinalURL.Hostname() == "consent.youtube.com" || response.FinalURL.Hostname() == "consent.google.com") {
 		return unknownService("invalid_response")
 	}
-	valid := false
-	for _, script := range page.scripts {
-		if strings.Contains(script, "ytcfg") || strings.Contains(script, "ytInitialData") {
-			valid = true
-		}
-	}
-	if !valid {
+	objects := page.youtubeObjects
+	if len(objects) == 0 {
 		return unknownService("invalid_response")
 	}
+	// Page geography is separate from Premium eligibility. Only a successful,
+	// valid page may supply it; an invalid primary value never falls back.
+	region := ""
+	if successfulHTTP(response) {
+		country, valid := serviceRegion(objects, "contentRegion")
+		evidence := "youtube_content_region"
+		if valid && country == "" {
+			country, valid = serviceRegion(objects, "INNERTUBE_CONTEXT_GL")
+			evidence = "youtube_context_gl"
+		}
+		if valid && country != "" {
+			region = country
+			p.evidence.ObservedRegion = country
+			p.evidence.RegionEvidence = evidence
+		}
+	}
+	// Nonfatal business refusals remain authoritative even without geography
+	// (including established valid 403 refusal pages).
 	if strings.Contains(strings.ToLower(page.text), "premium is not available in your country") {
-		return knownService("blocked", "", "premium_offer", "youtube_premium_country_restriction")
+		return knownService("blocked", region, "premium_offer", "youtube_premium_country_restriction")
 	}
 	if !successfulHTTP(response) {
 		return unknownService("http_status")
 	}
-	region, ok := serviceRegion(page.objects, "contentRegion")
-	if !ok {
-		return unknownService("invalid_response")
-	}
-	if region == "" {
-		region, ok = serviceRegion(page.objects, "INNERTUBE_CONTEXT_GL")
-	}
-	if !ok || region == "" || !strings.Contains(strings.ToLower(page.text), "ad-free") {
+	if region == "" || !strings.Contains(strings.ToLower(page.text), "ad-free") {
 		return unknownService("invalid_response")
 	}
 	return knownService("unlocked", region, "premium_offer", "youtube_premium_region_offer")
@@ -769,6 +877,7 @@ func (p *serviceProbe) disney() serviceDecision {
 	if !ok || strings.TrimSpace(assertion) == "" {
 		return unknownService("invalid_response")
 	}
+	p.finishEndpoint(knownService("unlocked", "", "", "disney_device_assertion"))
 	form := url.Values{"grant_type": {"urn:ietf:params:oauth:grant-type:token-exchange"}, "latitude": {"0"}, "longitude": {"0"}, "platform": {"browser"}, "subject_token": {assertion}, "subject_token_type": {"urn:bamtech:params:oauth:token-type:device"}}
 	token, decision := p.disneyJSON("token", "/token", "application/x-www-form-urlencoded", "Bearer "+disneyBrowserClient, strings.NewReader(form.Encode()))
 	if token == nil {
@@ -778,6 +887,7 @@ func (p *serviceProbe) disney() serviceDecision {
 	if !ok || strings.TrimSpace(refresh) == "" {
 		return unknownService("invalid_response")
 	}
+	p.finishEndpoint(knownService("unlocked", "", "", "disney_refresh_token"))
 	body, err := json.Marshal(map[string]any{"query": "mutation refreshToken($input: RefreshTokenInput!) { refreshToken(refreshToken: $input) { activeSession { sessionId } } }", "variables": map[string]any{"input": map[string]any{"refreshToken": refresh}}})
 	if err != nil {
 		return unknownService("invalid_response")
@@ -874,7 +984,7 @@ func (p *serviceProbe) reddit() serviceDecision {
 func unsupportedServiceOutcome(service string) serviceProbeOutcome {
 	return serviceProbeOutcome{Result: agentapi.IPQualityServiceUnlockPayload{Service: service, Source: "default_probe_registry", Status: "unknown", ProbeStatus: sourceStatusSkipped, ErrorCode: "unsupported_service", ErrorSummary: "service is not supported by default IP quality probes"}}
 }
-func ambiguousServiceOutcomes(services []string) []serviceProbeOutcome {
+func ambiguousServiceOutcomes(services []string, ipVersion int) []serviceProbeOutcome {
 	outcomes := make([]serviceProbeOutcome, len(services))
 	for index, service := range services {
 		source, ok := defaultServiceSource(service)
@@ -882,7 +992,9 @@ func ambiguousServiceOutcomes(services []string) []serviceProbeOutcome {
 			outcomes[index] = unsupportedServiceOutcome(service)
 			continue
 		}
-		outcomes[index] = serviceFailure(service, source, "egress_ambiguous", "service egress is ambiguous", nil, nil)
+		raw := extraJSON(serviceEvidence{ProbeRevision: 3, EvidenceKind: "anonymous_service_probe", IPVersion: ipVersion})
+		outcomes[index] = serviceFailure(service, source, "egress_ambiguous", "service egress is ambiguous", nil, raw)
+		outcomes[index].Result.ExtraJSON = raw
 	}
 	return outcomes
 }

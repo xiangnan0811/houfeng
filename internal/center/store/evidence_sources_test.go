@@ -39,7 +39,7 @@ func TestIPQualityEvidenceQueryUsesReplaySafeLatestOrderingWithinWindow(t *testi
 	t.Parallel()
 
 	normalized := strings.ToLower(ipQualityEvidenceReportSQL)
-	if !strings.Contains(normalized, "order by r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc") {
+	if !strings.Contains(normalized, "order by r.ip_version asc, r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc") {
 		t.Fatalf("ipQualityEvidenceReportSQL = %q, want replay-safe latest IP-quality ordering", ipQualityEvidenceReportSQL)
 	}
 }

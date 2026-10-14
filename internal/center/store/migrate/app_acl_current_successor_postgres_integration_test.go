@@ -402,6 +402,15 @@ func readAppACLCurrentTransitionDurableState(
 		t.Fatalf("read transition settings state: %v", err)
 	}
 	state.SettingsRawDigest = sha256.Sum256(settingsExceptTransition)
+	// Preserve the raw digest for rollback, but project the exact published
+	// 0075 addition when comparing a pre-C75 predecessor with current.
+	if !appACLCurrentSettingsJSONHasField(settingsExceptTransition, "incident_sweep_runtime_managed") {
+		normalized, err := appACLCurrentSettingsDeploymentOverrides(settingsExceptTransition)
+		if err != nil {
+			t.Fatalf("normalize expected deployment override settings state: %v", err)
+		}
+		settingsExceptTransition = normalized
+	}
 	normalizedSettings, err := appACLCurrentLifecycleSettings(settingsExceptTransition)
 	if err != nil {
 		t.Fatalf("normalize expected lifecycle settings: %v", err)

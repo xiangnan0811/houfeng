@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +23,14 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 	return f(request)
 }
 
+func ipv4LocalAddresses() ([]netip.Addr, error) {
+	return []netip.Addr{netip.MustParseAddr("192.168.1.2")}, nil
+}
+
+func ipv6LocalAddresses() ([]netip.Addr, error) {
+	return []netip.Addr{netip.MustParseAddr("fd00::2")}, nil
+}
+
 func TestHTTPCollectorCustomLookupKeepsLegacyJSONLookupAndSkipsServiceUnlocksWithoutServiceURL(t *testing.T) {
 	var requests []string
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -33,20 +42,22 @@ func TestHTTPCollectorCustomLookupKeepsLegacyJSONLookupAndSkipsServiceUnlocksWit
 			Request:    request,
 		}, nil
 	})}
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       client,
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client,
 		LookupURL:    "https://api.ipapi.is",
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
-	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+	reports := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
 		Services:         []string{"netflix", "chatgpt"},
 	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	if len(reports) != 1 || agentapi.ParseCollectionMetadata(reports[0].DiagnosticsJSON).Paired {
+		t.Fatalf("legacy adapter must preserve single-family wire semantics: %#v", reports)
+	}
+	report := reports[0]
 
 	if report.Status != agentapi.IPQualityStatusSuccess {
 		t.Fatalf("Status = %q, want success, error=%q", report.Status, report.ErrorSummary)
@@ -112,18 +123,16 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 			Request:    request,
 		}, nil
 	})}
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       client,
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client,
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if report.Status != agentapi.IPQualityStatusPartial {
 		t.Fatalf("Status = %q, want partial because one default provider failed", report.Status)
@@ -157,7 +166,7 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 		t.Fatalf("ipquery extra_json = %s, want provider-specific details", providers["ipquery.io"].ExtraJSON)
 	}
 	if len(report.DiagnosticsJSON) == 0 || !strings.Contains(string(report.DiagnosticsJSON), `"source_version":"v2"`) ||
-		!strings.Contains(string(report.DiagnosticsJSON), `"service_probe_revision":2`) {
+		!strings.Contains(string(report.DiagnosticsJSON), `"service_probe_revision":3`) {
 		t.Fatalf("DiagnosticsJSON = %s, want v2 service-probe revision diagnostics", report.DiagnosticsJSON)
 	}
 	if len(report.RawJSON) == 0 || !strings.Contains(string(report.RawJSON), `"providers"`) {
@@ -226,18 +235,16 @@ func TestHTTPCollectorDefaultSourcesParseProviderFactsForKnownVPSIP(t *testing.T
 			Request:    request,
 		}, nil
 	})}
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       client,
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client,
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
-	}, time.Date(2026, time.June, 10, 5, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 10, 5, 0, 0, 0, time.UTC))[0]
 
 	providers := providerResultsByName(report.ProviderResults)
 	ipapi := providers["ipapi.is"]
@@ -317,13 +324,13 @@ func TestHTTPCollectorDefaultSourcesIsolatesProviderTimeouts(t *testing.T) {
 			return nil, nil
 		}
 	})}
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   1,
 		FrequencySeconds: 86400,
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	providers := providerResultsByName(report.ProviderResults)
 	if providers["ipapi.is"].Status != "failure" || providers["ipapi.is"].ErrorCode != "timeout" {
@@ -373,14 +380,14 @@ func TestHTTPCollectorSameFamilyDiscoveryAmbiguityFailsServicesWithoutProviderCo
 			Request:    request,
 		}, nil
 	})}
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
 		Services:         []string{"netflix", "not-a-service"},
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if report.Status != agentapi.IPQualityStatusPartial {
 		t.Fatalf("Status = %q, want partial for ambiguous service egress", report.Status)
@@ -409,7 +416,7 @@ func TestHTTPCollectorSameFamilyDiscoveryAmbiguityFailsServicesWithoutProviderCo
 	}
 	providersOnly := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled: true, TimeoutSeconds: 5,
-	}, time.Now())
+	}, time.Now())[0]
 	if providersOnly.Status != agentapi.IPQualityStatusSuccess || len(providersOnly.ServiceUnlocks) != 0 {
 		t.Fatalf("providers-only report=%#v, discovery ambiguity alone must not change status", providersOnly)
 	}
@@ -441,13 +448,13 @@ func TestHTTPCollectorEquivalentIPv6CandidatesAreNotAmbiguous(t *testing.T) {
 			Request:    request,
 		}, nil
 	})}
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv6LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[1]
 
 	if report.Status != agentapi.IPQualityStatusSuccess {
 		t.Fatalf("Status = %q, want success for equivalent IPv6 candidates", report.Status)
@@ -482,19 +489,17 @@ func TestHTTPCollectorParsesIPAPIISNestedLookupPayload(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       server.Client(),
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(),
 		LookupURL:    server.URL + "/lookup",
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if report.Status != agentapi.IPQualityStatusSuccess {
 		t.Fatalf("Status = %q, want success, error=%q", report.Status, report.ErrorSummary)
@@ -574,15 +579,13 @@ func TestHTTPCollectorCustomLookupPreservesVersionForFlatAndNestedShapes(t *test
 			}))
 			defer server.Close()
 
-			collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-				Client:    server.Client(),
-				LookupURL: server.URL,
-			})
+			collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(),
+				LookupURL: server.URL, LocalAddresses: ipv4LocalAddresses})
 			report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 				Enabled:          true,
 				TimeoutSeconds:   5,
 				FrequencySeconds: 86400,
-			}, time.Date(2026, time.June, 10, 5, 0, 0, 0, time.UTC))
+			}, time.Date(2026, time.June, 10, 5, 0, 0, 0, time.UTC))[0]
 
 			if report.Status != agentapi.IPQualityStatusSuccess {
 				t.Fatalf("Status = %q, want success, error=%q", report.Status, report.ErrorSummary)
@@ -611,19 +614,17 @@ func TestHTTPCollectorReturnsCleanFailureForHTMLLookupResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       server.Client(),
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(),
 		LookupURL:    server.URL,
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if report.Status != agentapi.IPQualityStatusFailure {
 		t.Fatalf("Status = %q, want failure", report.Status)
@@ -631,8 +632,8 @@ func TestHTTPCollectorReturnsCleanFailureForHTMLLookupResponse(t *testing.T) {
 	if report.ErrorCode != "lookup_failed" {
 		t.Fatalf("ErrorCode = %q, want lookup_failed", report.ErrorCode)
 	}
-	if !strings.Contains(report.ErrorSummary, "non_json_response") {
-		t.Fatalf("ErrorSummary = %q, want non_json_response diagnostic", report.ErrorSummary)
+	if report.ErrorSummary == "" {
+		t.Fatalf("HTML failure lost safe diagnostic: %#v", report)
 	}
 	if strings.Contains(report.ErrorSummary, "<html") || strings.Contains(string(report.RawJSON), "<html") {
 		t.Fatalf("HTML leaked into failure report: summary=%q raw=%s", report.ErrorSummary, report.RawJSON)
@@ -689,14 +690,12 @@ func TestHTTPCollectorCollectsIPMetadataProvidersAndServiceUnlocks(t *testing.T)
 	}))
 	defer server.Close()
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       server.Client(),
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(),
 		LookupURL:    server.URL + "/lookup",
 		ServiceURL:   server.URL + "/unlock/{service}",
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 	observedAt := time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC)
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
@@ -704,7 +703,7 @@ func TestHTTPCollectorCollectsIPMetadataProvidersAndServiceUnlocks(t *testing.T)
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
 		Services:         []string{"netflix", "chatgpt"},
-	}, observedAt)
+	}, observedAt)[0]
 
 	if report.Status != agentapi.IPQualityStatusSuccess {
 		t.Fatalf("Status = %q, want success, error=%q", report.Status, report.ErrorSummary)
@@ -763,21 +762,19 @@ func TestHTTPCollectorSanitizesSensitiveRawJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       server.Client(),
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(),
 		LookupURL:    server.URL + "/lookup",
 		ServiceURL:   server.URL + "/unlock/{service}",
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
 		Services:         []string{"netflix"},
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	raw := string(report.RawJSON)
 	for _, secret := range []string{"lookup-secret", "nested-secret", "lookup-token", "service-secret"} {
@@ -808,21 +805,19 @@ func TestHTTPCollectorMapsBooleanUnlockedServiceStatus(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       server.Client(),
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(),
 		LookupURL:    server.URL + "/lookup",
 		ServiceURL:   server.URL + "/unlock/{service}",
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
 		Services:         []string{"netflix"},
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if len(report.ServiceUnlocks) != 1 {
 		t.Fatalf("len(ServiceUnlocks) = %d, want 1", len(report.ServiceUnlocks))
@@ -847,21 +842,19 @@ func TestHTTPCollectorReturnsPartialWhenServiceProbeFails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       server.Client(),
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(),
 		LookupURL:    server.URL + "/lookup",
 		ServiceURL:   server.URL + "/unlock/{service}",
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
 		Services:         []string{"netflix"},
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if report.Status != agentapi.IPQualityStatusPartial {
 		t.Fatalf("Status = %q, want partial", report.Status)
@@ -880,21 +873,19 @@ func TestHTTPCollectorReturnsFailureWhenLookupFails(t *testing.T) {
 	}))
 	defer server.Close()
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client:       server.Client(),
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(),
 		LookupURL:    server.URL,
 		ServiceURL:   server.URL + "/unlock/{service}",
 		AgentVersion: "test-agent",
 		Fingerprint:  "fp-001",
-		SyncBatchID:  "sync-001",
-	})
+		SyncBatchID:  "sync-001", LocalAddresses: ipv4LocalAddresses})
 
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
 		Services:         []string{"netflix"},
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if report.Status != agentapi.IPQualityStatusFailure {
 		t.Fatalf("Status = %q, want failure", report.Status)
@@ -928,12 +919,12 @@ func TestHTTPCollectorServiceOutcomesKeepNormalizedInputOrder(t *testing.T) {
 		}
 	})}
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses})
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:        true,
 		TimeoutSeconds: 5,
 		Services:       []string{" Netflix ", "", "CHATGPT", "netflix", " reddit ", "chatgpt", "future-service"},
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if len(report.ServiceUnlocks) != 4 {
 		t.Fatalf("ServiceUnlocks = %#v, want normalized outcomes", report.ServiceUnlocks)
@@ -974,12 +965,12 @@ func TestHTTPCollectorSkipsDependentProvidersAndServicesWithoutCanonicalIP(t *te
 		}
 	})}
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses})
 	report := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
 		Enabled:        true,
 		TimeoutSeconds: 5,
 		Services:       []string{"netflix"},
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if report.Status != agentapi.IPQualityStatusFailure {
 		t.Fatalf("Status = %q, want failure when canonical providers fail", report.Status)
@@ -1012,13 +1003,13 @@ func TestHTTPCollectorDefaultSourcesPreCancelledContextDoesNotStartTransport(t *
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses})
 	report := collector.Collect(ctx, &agentapi.IPQualityPlan{
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
 		Services:         []string{"netflix", "chatgpt"},
-	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	requestsMu.Lock()
 	requestCount := len(requests)
@@ -1065,7 +1056,7 @@ func TestHTTPCollectorDefaultSourcesParentCancellationJoinsInFlightRequests(t *t
 		<-request.Context().Done()
 		return nil, request.Context().Err()
 	})}
-	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client})
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan agentapi.IPQualityReportPayload, 1)
@@ -1075,7 +1066,7 @@ func TestHTTPCollectorDefaultSourcesParentCancellationJoinsInFlightRequests(t *t
 			TimeoutSeconds:   5,
 			FrequencySeconds: 86400,
 			Services:         []string{"netflix"},
-		}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
+		}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 	}()
 
 	<-started
@@ -1197,8 +1188,7 @@ func TestHTTPCollectorIPQueryCanonicalFallbackAndFailureMatrix(t *testing.T) {
 					return jsonResponse(request, `{}`)
 				}
 			})}
-			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
-				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 1}, time.Now())
+			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 1}, time.Now())[0]
 			providers := providerResultsByName(report.ProviderResults)
 			if scenario.wantCode == "" {
 				if report.IPAddress != "203.0.113.10" || report.Status != agentapi.IPQualityStatusPartial || providers["ipquery.io"].Status != "success" {
@@ -1273,9 +1263,7 @@ func TestHTTPCollectorCustomServiceBusinessConclusionMatrix(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-				Client: server.Client(), LookupURL: server.URL + "/lookup", ServiceURL: server.URL + "/service/{service}",
-			}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: []string{"good", "subject"}}, time.Now())
+			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: server.Client(), LookupURL: server.URL + "/lookup", ServiceURL: server.URL + "/service/{service}", LocalAddresses: ipv4LocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: []string{"good", "subject"}}, time.Now())[0]
 			if len(report.ServiceUnlocks) != 2 {
 				t.Fatalf("service rows = %#v", report.ServiceUnlocks)
 			}
@@ -1304,7 +1292,7 @@ func TestHTTPCollectorCustomServiceBusinessConclusionMatrix(t *testing.T) {
 	}
 }
 
-func TestHTTPCollectorDualStackPrefersIPv4AndRequeriesOtherCanonical(t *testing.T) {
+func TestHTTPCollectorRejectsCrossFamilyDiscoveryWithoutRequery(t *testing.T) {
 	for _, ipv4Provider := range []string{"api.ipapi.is", "api.ipquery.io"} {
 		t.Run(ipv4Provider, func(t *testing.T) {
 			const targetIP = "203.0.113.10"
@@ -1365,10 +1353,9 @@ func TestHTTPCollectorDualStackPrefersIPv4AndRequeriesOtherCanonical(t *testing.
 					return nil, fmt.Errorf("unexpected request %s", request.URL.String())
 				}
 			})}
-			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
-				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5}, time.Now())
-			if report.IPAddress != targetIP || report.IPVersion != 4 || report.Status != agentapi.IPQualityStatusSuccess {
-				t.Fatalf("report=%#v, want successful selected IPv4 report", report)
+			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5}, time.Now())[0]
+			if report.IPAddress != targetIP || report.IPVersion != 4 || report.Status != agentapi.IPQualityStatusPartial {
+				t.Fatalf("report=%#v, want selected IPv4 and rejected cross-family source", report)
 			}
 			var diagnostics struct {
 				CollectionRevision int               `json:"collection_revision"`
@@ -1381,9 +1368,9 @@ func TestHTTPCollectorDualStackPrefersIPv4AndRequeriesOtherCanonical(t *testing.
 			if err := json.Unmarshal(report.DiagnosticsJSON, &diagnostics); err != nil {
 				t.Fatal(err)
 			}
-			if diagnostics.CollectionRevision != 3 || diagnostics.Family != 4 ||
-				len(diagnostics.Discovery) != 2 || len(diagnostics.Final) != 5 || diagnostics.Conflict || diagnostics.Ambiguous {
-				t.Fatalf("diagnostics=%s, want normal dual-stack discovery without conflict", report.DiagnosticsJSON)
+			if diagnostics.CollectionRevision != 4 || diagnostics.Family != 4 ||
+				len(diagnostics.Discovery) != 1 || len(diagnostics.Final) != 4 || !diagnostics.Conflict || diagnostics.Ambiguous {
+				t.Fatalf("diagnostics=%s, want a rejected mismatching response, not cross-family candidate selection", report.DiagnosticsJSON)
 			}
 			for provider, ip := range diagnostics.Final {
 				if ip != targetIP {
@@ -1396,15 +1383,12 @@ func TestHTTPCollectorDualStackPrefersIPv4AndRequeriesOtherCanonical(t *testing.
 			for host, urls := range requests {
 				requestCount += len(urls)
 				want := 1
-				if (host == "api.ipapi.is" || host == "api.ipquery.io") && host != ipv4Provider {
-					want = 2
-				}
 				if len(urls) != want {
 					t.Fatalf("%s requests=%#v, want %d", host, urls, want)
 				}
 			}
-			if requestCount != 6 {
-				t.Fatalf("requests=%#v, want exactly six database requests", requests)
+			if requestCount != 5 {
+				t.Fatalf("requests=%#v, want no requery for a rejected cross-family response", requests)
 			}
 		})
 	}
@@ -1437,8 +1421,7 @@ func TestHTTPCollectorTargetMismatchCannotPolluteReportFacts(t *testing.T) {
 					return nil, fmt.Errorf("unexpected request %s", request.URL.String())
 				}
 			})}
-			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
-				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5}, time.Now())
+			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5}, time.Now())[0]
 			providerName := map[string]string{"api.ipapi.is": "ipapi.is", "api.ipquery.io": "ipquery.io", "api.ip2location.io": "ip2location.io", "ipwho.is": "ipwho.is"}[mismatchingProvider]
 			result := providerResultsByName(report.ProviderResults)[providerName]
 			if result.Status != "failure" || result.ErrorCode != "ip_mismatch" || result.ErrorSummary != "provider returned a different IP" {
@@ -1509,7 +1492,7 @@ func TestHTTPCollectorCancellationJoinsDependentRequeryAndBodyReaders(t *testing
 			return jsonResponse(request, `{"ip":"203.0.113.10"}`)
 		}
 		if request.URL.Host == "api.ipquery.io" && request.URL.Path == "/" {
-			return jsonResponse(request, `{"ip":"2001:db8::1"}`)
+			return jsonResponse(request, `{"ip":"203.0.113.11"}`)
 		}
 		started <- request.URL.Host
 		return &http.Response{
@@ -1523,8 +1506,7 @@ func TestHTTPCollectorCancellationJoinsDependentRequeryAndBodyReaders(t *testing
 	})}
 	done := make(chan agentapi.IPQualityReportPayload, 1)
 	go func() {
-		done <- agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
-			ctx, &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 15}, time.Now())
+		done <- agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses}).Collect(ctx, &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 15}, time.Now())[0]
 	}()
 	for range 4 {
 		select {
@@ -1588,8 +1570,7 @@ func TestHTTPCollectorProviderGroupsAndRiskDoNotDependOnServiceResults(t *testin
 					return nil, fmt.Errorf("unexpected test endpoint %s", request.URL)
 				}
 			})}
-			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
-				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: services}, time.Now())
+			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client, LocalAddresses: ipv4LocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: services}, time.Now())[0]
 			if report.IPAddress != "203.0.113.10" || report.IPVersion != 4 ||
 				report.UseRegionName != "Singapore" || report.UseRegionCode != "" ||
 				report.RegisteredRegionCode != "SG" || report.RegisteredRegionName != "" ||

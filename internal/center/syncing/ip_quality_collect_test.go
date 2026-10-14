@@ -2,11 +2,13 @@ package syncing
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"houfeng/internal/center/agentplan"
 	"houfeng/internal/center/ipquality"
+	"houfeng/internal/contracts/agentapi"
 )
 
 type fakeCollectCoordinator struct {
@@ -139,7 +141,10 @@ func TestServiceCollectRequestLifecycleWithRegistry(t *testing.T) {
 		t.Fatalf("SyncBatch() = %#v, %v; want request dispatched", got.Plan.IPQualityPlan, err)
 	}
 
-	echoed := Batch{MonitoringInstanceID: "mi_001", IPQualityReports: []ipquality.ReportWrite{{Status: "success", CollectRequestID: "ipqc_001"}}}
+	echoed := Batch{MonitoringInstanceID: "mi_001", IPQualityReports: []ipquality.ReportWrite{{
+		Status: "success", IPVersion: 4,
+		CollectionMetadata: agentapi.ParseCollectionMetadata([]byte(`{"collect_request_id":"ipqc_001"}`)),
+	}}}
 	// 实例在采集期间被暂停：报告随 suppressed 批次到达、未入库，请求保持进行中。
 	repo.result = Result{Disposition: ResultDispositionSuppressed, StopCollection: true}
 	if _, err := service.SyncBatch(context.Background(), echoed); err != nil {
@@ -159,5 +164,73 @@ func TestServiceCollectRequestLifecycleWithRegistry(t *testing.T) {
 	}
 	if got.Plan.IPQualityPlan.CollectRequestID != "" {
 		t.Fatalf("plan = %#v, completed request must not be dispatched again", got.Plan.IPQualityPlan)
+	}
+}
+
+func TestServicePairedRequestRequiresTwoRecordedFamilyTerminals(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	registry := ipquality.NewCollectRequests(func() (string, error) { return "ipqc_paired", nil })
+	if _, err := registry.Request("mi_001", now); err != nil {
+		t.Fatal(err)
+	}
+	repo := &fakeSyncRepository{result: Result{
+		Disposition: ResultDispositionRecorded,
+		Plan:        agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: true}},
+	}}
+	service := NewService(repo).WithIPQualityCollectCoordinator(registry)
+	report := func(family int) ipquality.ReportWrite {
+		raw := []byte(fmt.Sprintf(`{"collection_revision":4,"collection_id":"round","expected_ip_versions":[4,6],"ip_address_family":%d,"family_availability":"available","collect_request_id":"ipqc_paired"}`, family))
+		address, status, code := "198.51.100.10", "success", ""
+		if family == 6 {
+			address, status, code = "::", "failure", "lookup_failed"
+		}
+		return ipquality.ReportWrite{
+			MonitoringInstanceID: "mi_001", ObservedAt: now, IPVersion: family,
+			IPAddress: address, Status: status, ErrorCode: code,
+			DiagnosticsJSON: raw, CollectionMetadata: agentapi.ParseCollectionMetadata(raw),
+		}
+	}
+	four := Batch{MonitoringInstanceID: "mi_001", IPQualityReports: []ipquality.ReportWrite{report(4)}}
+	six := Batch{MonitoringInstanceID: "mi_001", IPQualityReports: []ipquality.ReportWrite{report(6)}}
+	got, err := service.SyncBatch(context.Background(), four)
+	if err != nil || got.Plan.IPQualityPlan.CollectRequestID != "ipqc_paired" {
+		t.Fatalf("first terminal completed request or failed: %#v, %v", got, err)
+	}
+	for _, disposition := range []ResultDisposition{ResultDispositionExactDuplicate, ResultDispositionSuppressed} {
+		repo.result.Disposition = disposition
+		if _, err := service.SyncBatch(context.Background(), six); err != nil {
+			t.Fatal(err)
+		}
+		current, _ := registry.Latest("mi_001", time.Now())
+		if current.Status != ipquality.CollectRequestDispatched || len(current.FamilyResults) != 1 || current.FamilyResults[0].IPVersion != 4 {
+			t.Fatalf("%s advanced paired request: %#v", disposition, current)
+		}
+	}
+	repo.result.Disposition = ResultDispositionRecorded
+	// Another recorded IPv4 does not count as IPv6.
+	if _, err := service.SyncBatch(context.Background(), four); err != nil {
+		t.Fatal(err)
+	}
+	current, _ := registry.Latest("mi_001", time.Now())
+	if !current.Active() || len(current.FamilyResults) != 1 {
+		t.Fatalf("duplicate family advanced request: %#v", current)
+	}
+	got, err = service.SyncBatch(context.Background(), six)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed, _ := registry.Latest("mi_001", time.Now())
+	if completed.Status != ipquality.CollectRequestCompleted || completed.ReportStatus != "partial" ||
+		completed.CollectionID != "round" || len(completed.FamilyResults) != 2 || got.Plan.IPQualityPlan.CollectRequestID != "" {
+		t.Fatalf("paired completion incorrect: %#v, plan=%#v", completed, got.Plan.IPQualityPlan)
+	}
+	repo.result.Disposition = ResultDispositionExactDuplicate
+	if _, err := service.SyncBatch(context.Background(), six); err != nil {
+		t.Fatal(err)
+	}
+	replayed, _ := registry.Latest("mi_001", time.Now())
+	if !replayed.CompletedAt.Equal(*completed.CompletedAt) || replayed.ReportStatus != completed.ReportStatus {
+		t.Fatalf("replay changed completion: %#v", replayed)
 	}
 }

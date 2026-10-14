@@ -194,15 +194,103 @@ export function riskSignalCounts(results: IPQualityProviderResult[]): RiskSignal
   })
 }
 
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null
+}
+
 function reportDiagnostics(report: VPSIPQualityReport): Record<string, unknown> | null {
-  const raw = report.latest_report?.diagnostics_json
-  return typeof raw === 'object' && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+  return objectRecord(report.latest_report?.diagnostics_json)
 }
 
 // 只接受数值 revision；字符串 "2" 等不认作新规则。
 export function serviceProbeRevision(report: VPSIPQualityReport): number | null {
   const revision = reportDiagnostics(report)?.service_probe_revision
   return typeof revision === 'number' && Number.isFinite(revision) ? revision : null
+}
+
+// 免登录服务探测的报告级/行级 revision：数值 2 与 3 均为同一能力边界。
+export function isAnonymousServiceProbeRevision(revision: unknown): boolean {
+  return revision === 2 || revision === 3
+}
+
+function ipFamily(value: unknown): 4 | 6 | null {
+  return value === 4 || value === 6 ? value : null
+}
+
+// 所选报告自身的地址族：selected_ip_version、latest_report 与 summary 描述同一报告，任意两者矛盾时不认任何一族。
+export function selectedReportIPVersion(report: VPSIPQualityReport): 4 | 6 | null {
+  const candidates = [report.selected_ip_version, report.latest_report?.ip_version, report.summary?.ip_version]
+    .filter((value) => value != null)
+  const families = candidates.map(ipFamily)
+  if (families.length === 0 || families.some((value) => value == null)) return null
+  return families.every((value) => value === families[0]) ? families[0]! : null
+}
+
+export type IPVersionParam =
+  | { kind: 'default' }
+  | { kind: 'family', ipVersion: 4 | 6 }
+  | { kind: 'invalid' }
+
+// 页面 URL 的 ip_version：缺省走服务端默认；只接受恰好一个 “4” 或 “6”，空值/重复/其他值都是可恢复的参数错误。
+export function parseIPVersionParam(values: readonly string[]): IPVersionParam {
+  if (values.length === 0) return { kind: 'default' }
+  if (values.length === 1 && (values[0] === '4' || values[0] === '6')) return { kind: 'family', ipVersion: values[0] === '4' ? 4 : 6 }
+  return { kind: 'invalid' }
+}
+
+export type ReportCollectionIdentity = {
+  collectionID: string | null
+  collectRequestID: string | null
+}
+
+function diagnosticsIdentifier(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' && value.length <= 128 ? value : null
+}
+
+// 当前展示报告属于哪一轮：双栈看 collection_id，旧 agent 看 collect_request_id；用于区分“轮次结束”和“报告已更新”。
+export function reportCollectionIdentity(report: VPSIPQualityReport | null): ReportCollectionIdentity {
+  const diagnostics = report ? reportDiagnostics(report) : null
+  return {
+    collectionID: diagnosticsIdentifier(diagnostics?.collection_id),
+    collectRequestID: diagnosticsIdentifier(diagnostics?.collect_request_id),
+  }
+}
+
+export type FamilyStateNotice = {
+  tone: 'warning' | 'muted'
+  title: string
+  detail: string | null
+  // 所选族仍有旧有效报告时，其独立时间；页面写明“上次有效结果”。
+  lastValidAt: string | null
+}
+
+// 所选地址族最新尝试的说明：失败尝试不冒充出口事实，缺族不冒充失败，过期记录不宣称当前缺族。
+export function familyStateNotice(report: VPSIPQualityReport, family: 4 | 6): FamilyStateNotice | null {
+  const status = report.families.find((item) => item.ip_version === family)
+  const attempt = status?.latest_attempt ?? null
+  const summary = report.summary ?? null
+  const label = `IPv${family}`
+  if (!attempt) {
+    return summary ? null : { tone: 'muted', title: `${label} 尚无采集结果`, detail: null, lastValidAt: null }
+  }
+  const unavailable = status?.availability === 'unavailable'
+  const failed = !unavailable && attempt.report_status !== 'success' && attempt.report_status !== 'partial'
+  const lastValidAt = summary ? summary.observed_at : null
+  if (attempt.stale && (unavailable || failed || !summary)) {
+    return {
+      tone: 'muted',
+      title: `${label} 最近一次采集记录已过期`,
+      detail: unavailable ? '当时未发现该地址族的本地地址，不代表当前状态' : failed ? '当时出口探测失败，不代表当前状态' : null,
+      lastValidAt,
+    }
+  }
+  if (unavailable) {
+    return { tone: 'muted', title: `本轮未检测到 ${label} 可用本地地址`, detail: null, lastValidAt }
+  }
+  if (failed) {
+    return { tone: 'warning', title: `${label} 出口探测失败`, detail: null, lastValidAt }
+  }
+  return null
 }
 
 export type RiskAssessmentBlocker = 'missing_report' | 'ambiguous' | 'ip_conflict'
@@ -245,8 +333,10 @@ export function deriveRiskAssessment(report: VPSIPQualityReport): RiskAssessment
 }
 
 export type RiskVerdict = {
-  // 大字：标准等级或 “—”。
+  // 大字：标准等级、“证据不完整”或 “—”。
   value: string
+  // level：已发现等级；gap：低风险但字段不完整；none：无聚合等级。
+  valueKind: 'level' | 'gap' | 'none'
   headline: string
   // 证据范围说明，例如 “风险字段 4/5，结论不完整”。
   scope: string | null
@@ -260,13 +350,13 @@ function incompleteScope(assessment: RiskAssessment): string {
 export function riskVerdict(report: VPSIPQualityReport): RiskVerdict {
   const blocker = riskAssessmentBlocker(report)
   if (blocker === 'missing_report') {
-    return { value: '—', headline: '缺少 IP 质量报告', scope: null, tone: 'neutral' }
+    return { value: '—', valueKind: 'none', headline: '缺少 IP 质量报告', scope: null, tone: 'neutral' }
   }
   if (blocker === 'ambiguous') {
-    return { value: '—', headline: 'IP 归属不唯一，需先复核', scope: '数据库明细仍可在下方查看', tone: 'neutral' }
+    return { value: '—', valueKind: 'none', headline: 'IP 归属不唯一，需先复核', scope: '数据库明细仍可在下方查看', tone: 'neutral' }
   }
   if (blocker === 'ip_conflict') {
-    return { value: '—', headline: '来源返回了不同 IP，需复核来源', scope: '数据库明细仍可在下方查看', tone: 'neutral' }
+    return { value: '—', valueKind: 'none', headline: '来源返回了不同 IP，需复核来源', scope: '数据库明细仍可在下方查看', tone: 'neutral' }
   }
 
   const assessment = deriveRiskAssessment(report)
@@ -274,21 +364,21 @@ export function riskVerdict(report: VPSIPQualityReport): RiskVerdict {
   let verdict: RiskVerdict
   if (assessment.level) {
     const label = riskLevelLabel(assessment.level)
-    verdict = assessment.complete
-      ? { value: label, headline: `风险字段 ${assessment.totalFlags}/${assessment.totalFlags} 已返回`, scope: null, tone: riskTone(assessment.level) }
-      : {
-          value: label,
-          headline: `已返回来源：${label}`,
-          scope: incompleteScope(assessment),
-          // 证据不全时不把低风险画成整体绿色结论。
-          tone: assessment.level === 'low' ? 'neutral' : riskTone(assessment.level),
-        }
+    if (assessment.complete) {
+      verdict = { value: label, valueKind: 'level', headline: `风险字段 ${assessment.totalFlags}/${assessment.totalFlags} 已返回`, scope: null, tone: riskTone(assessment.level) }
+    } else if (assessment.level === 'low') {
+      // 缺字段时“低风险”只是已返回来源的结论，大字改为证据缺口，不着绿。
+      verdict = { value: '证据不完整', valueKind: 'gap', headline: `已返回来源：${label}`, scope: `风险字段 ${assessment.knownFlags}/${assessment.totalFlags}`, tone: 'neutral' }
+    } else {
+      // 中/高/严重是已发现的负面证据，缺口不能遮蔽它。
+      verdict = { value: label, valueKind: 'level', headline: `已返回来源：${label}`, scope: incompleteScope(assessment), tone: riskTone(assessment.level) }
+    }
   } else if (negativeRiskSignals(report.provider_results).length > 0) {
-    verdict = { value: '—', headline: '发现风险信号', scope: assessment.complete ? null : incompleteScope(assessment), tone: 'alert' }
+    verdict = { value: '—', valueKind: 'none', headline: '发现风险信号', scope: assessment.complete ? null : incompleteScope(assessment), tone: 'alert' }
   } else if (assessment.complete) {
-    verdict = { value: '—', headline: '已返回风险字段未命中', scope: null, tone: 'neutral' }
+    verdict = { value: '—', valueKind: 'none', headline: '已返回风险字段未命中', scope: null, tone: 'neutral' }
   } else {
-    verdict = { value: '—', headline: '证据不足', scope: incompleteScope(assessment), tone: 'neutral' }
+    verdict = { value: '—', valueKind: 'none', headline: '证据不足', scope: incompleteScope(assessment), tone: 'neutral' }
   }
   // 过期报告保留事实，但不作为当前评级着色。
   return stale ? { ...verdict, tone: 'neutral' } : verdict
@@ -350,11 +440,9 @@ export function unlockStatusLabel(unlock: IPQualityServiceUnlock, anonymousProbe
   return region ? `${label} · ${region}` : label
 }
 
-// 单行可由安全 extra_json.probe_revision === 2 识别为免登录探测；旧行不套用新范围。
+// 单行可由安全 extra_json.probe_revision 2/3 识别为免登录探测；旧行不套用新范围。
 export function serviceRowUsesAnonymousProbe(unlock: IPQualityServiceUnlock): boolean {
-  const extra = unlock.extra_json
-  if (typeof extra !== 'object' || extra === null || Array.isArray(extra)) return false
-  return (extra as Record<string, unknown>).probe_revision === 2
+  return isAnonymousServiceProbeRevision(objectRecord(unlock.extra_json)?.probe_revision)
 }
 
 export function serviceUnlockCounts(unlocks: IPQualityServiceUnlock[]) {
@@ -413,6 +501,10 @@ function unlockTypeLabel(value?: string): string | null {
 // agent 服务探测的 error_code → 中文短句；原始 error_summary 留在折叠的采集诊断里。
 const PROBE_FAILURE_LABELS: Readonly<Record<string, string>> = {
   timeout: '探测超时',
+  dns_failed: '域名解析失败',
+  connection_refused: '连接被拒绝',
+  network_unreachable: '网络不可达',
+  tls_failed: 'TLS 连接失败',
   non_json_response: '服务响应无法识别',
   request_failed: '探测请求失败',
   read_failed: '读取服务响应失败',
@@ -426,58 +518,125 @@ const PROBE_FAILURE_LABELS: Readonly<Record<string, string>> = {
   challenge_detected: '服务要求人机验证',
   egress_ambiguous: '当前出口不唯一，无法确认探测归属',
   ip_mismatch: '来源返回了不同IP',
+  address_family_unavailable: '本轮未检测到该地址族的可用本地地址',
+  not_configured: '未接入该检测',
 }
 
-// 只认 agent 生成的完整格式，避免把其它说明里顺带提到的状态码当作失败原因。
-const HTTP_STATUS_SUMMARY = /^http status (\d{3})$/i
+// 固定安全错误码的中文短句；未知码返回 null，由调用方决定是否展示原码。
+export function probeErrorLabel(errorCode?: string, httpStatus: number | null = null): string | null {
+  const code = (errorCode ?? '').trim().toLowerCase()
+  if (code === 'http_status') return httpStatusLabel(httpStatus)
+  return Object.hasOwn(PROBE_FAILURE_LABELS, code) ? (PROBE_FAILURE_LABELS[code] ?? null) : null
+}
 
-function httpStatusLabel(status?: string): string {
-  if (!status) return '服务返回异常状态'
-  const code = Number(status)
-  if (code === 401 || code === 403) return `服务拒绝了探测请求（HTTP ${status}）`
-  if (code === 404) return `探测地址不存在（HTTP ${status}）`
-  if (code === 429) return `探测请求被限流（HTTP ${status}）`
-  if (code >= 500) return `服务暂时不可用（HTTP ${status}）`
+function httpStatusLabel(status: number | null): string {
+  if (status == null) return '服务返回异常状态'
+  if (status === 401 || status === 403) return `服务拒绝了探测请求（HTTP ${status}）`
+  if (status === 404) return `探测地址不存在（HTTP ${status}）`
+  if (status === 429) return `探测请求被限流（HTTP ${status}）`
+  if (status >= 500) return `服务暂时不可用（HTTP ${status}）`
   return `服务返回异常状态（HTTP ${status}）`
 }
 
-function probeFailureLabel(errorCode: string, summary: string | null): string | null {
-  const httpStatus = summary?.trim().match(HTTP_STATUS_SUMMARY)?.[1]
-  if (errorCode === 'http_status') return httpStatusLabel(httpStatus)
-  if (Object.hasOwn(PROBE_FAILURE_LABELS, errorCode)) return PROBE_FAILURE_LABELS[errorCode] ?? null
-  // 旧数据可能只有 summary 没有 code。
-  if (!errorCode && httpStatus) return httpStatusLabel(httpStatus)
-  return null
+// agent 只写固定 snake_case 标签/规则/错误码；不符合的值视为不可信，不展示。
+const SAFE_EVIDENCE_TOKEN = /^[a-z0-9_]{1,64}$/
+
+function safeEvidenceToken(value: unknown): string | null {
+  return typeof value === 'string' && SAFE_EVIDENCE_TOKEN.test(value) ? value : null
+}
+
+// 免登录服务探测的安全 extra_json：evidence_kind 与 revision 2/3 都必须匹配。
+function anonymousServiceEvidence(unlock: IPQualityServiceUnlock): Record<string, unknown> | null {
+  const extra = objectRecord(unlock.extra_json)
+  if (!extra || extra.evidence_kind !== 'anonymous_service_probe' || !isAnonymousServiceProbeRevision(extra.probe_revision)) return null
+  return extra
+}
+
+export type ServiceEndpointOutcome = 'available' | 'restricted' | 'unknown'
+
+export type ServiceEndpointDiagnostic = {
+  endpoint: string
+  httpStatus: number | null
+  matchedRule: string | null
+  errorCode: string | null
+  outcome: ServiceEndpointOutcome | null
+}
+
+// 各入口的固定标签、整数 HTTP 状态、规则与错误码；任何非白名单形状的条目整体丢弃。
+export function serviceEndpointDiagnostics(unlock: IPQualityServiceUnlock): ServiceEndpointDiagnostic[] {
+  const endpoints = anonymousServiceEvidence(unlock)?.endpoints
+  if (!Array.isArray(endpoints)) return []
+  return endpoints.flatMap((raw) => {
+    const entry = objectRecord(raw)
+    const endpoint = safeEvidenceToken(entry?.endpoint)
+    if (!entry || !endpoint) return []
+    const outcome = entry.outcome === 'available' || entry.outcome === 'restricted' || entry.outcome === 'unknown' ? entry.outcome : null
+    return [{
+      endpoint,
+      httpStatus: typeof entry.http_status === 'number' && Number.isInteger(entry.http_status) && entry.http_status >= 100 && entry.http_status <= 599 ? entry.http_status : null,
+      matchedRule: safeEvidenceToken(entry.matched_rule),
+      errorCode: safeEvidenceToken(entry.error_code),
+      outcome,
+    }]
+  })
+}
+
+// http_status 失败的整数状态只取 endpoint 安全诊断（最后一个 http_status 入口），不从 error_summary 反解析。
+function serviceFailureHTTPStatus(unlock: IPQualityServiceUnlock): number | null {
+  const failed = serviceEndpointDiagnostics(unlock).filter((endpoint) => endpoint.errorCode === 'http_status' && endpoint.httpStatus != null)
+  return failed.at(-1)?.httpStatus ?? null
 }
 
 function unknownServiceReason(unlock: IPQualityServiceUnlock): string {
-  const safeError = safeDiagnosticText(unlock.error_summary)
   const errorCode = (unlock.error_code ?? '').trim().toLowerCase()
-  const failureLabel = probeFailureLabel(errorCode, safeError)
+  const failureLabel = probeErrorLabel(errorCode, errorCode === 'http_status' ? serviceFailureHTTPStatus(unlock) : null)
   if (failureLabel) return failureLabel
+  const safeError = safeDiagnosticText(unlock.error_summary)
   if (safeError) return safeError
   const probeStatus = (unlock.probe_status ?? '').trim().toLowerCase()
   if (probeStatus === 'skipped') return '默认探测暂不支持该服务'
-  if (probeStatus === 'not_configured' || errorCode === 'not_configured') return '需要可选配置后才能检测'
+  if (probeStatus === 'not_configured') return '未接入该检测'
   if (probeStatus === 'failure') return '探测失败，未形成可靠结论'
   return '本轮未形成可靠结论'
-}
-
-export function serviceCardDescription(unlock: IPQualityServiceUnlock): string {
-  const kind = effectiveUnlockStatus(unlock)
-  if (kind === 'unknown') return unknownServiceReason(unlock)
-  const scope = unlockTypeLabel(unlock.unlock_type)
-  if (scope) return scope
-  const region = (unlock.region ?? '').trim()
-  if (kind === 'unlocked') return region ? `区域 ${region} 可用` : '服务可用'
-  if (kind === 'partial') return region ? `区域 ${region} 部分可用` : '部分内容可用'
-  return region ? `区域 ${region} 受限` : '服务受限'
 }
 
 // 服务卡片的补充说明：状态和区域已在徽标里，已知结果只补检测范围，未知结果补原因。
 export function serviceTileDetail(unlock: IPQualityServiceUnlock): string | null {
   if (effectiveUnlockStatus(unlock) !== 'unknown') return unlockTypeLabel(unlock.unlock_type)
   return unknownServiceReason(unlock)
+}
+
+const COUNTRY_CODE = /^[A-Z]{2}$/
+
+export type ObservedServiceRegion = {
+  region: string
+  evidence: 'youtube_content_region' | 'youtube_context_gl'
+}
+
+// revision3 可信“页面地区”：所选报告族、probe_revision、evidence_kind、证据类型与国家码全部匹配才采用。
+// 它只描述页面展示的地区，不改变 effectiveUnlockStatus、coverage 或风险。
+export function observedServiceRegion(unlock: IPQualityServiceUnlock, selectedIPVersion: 4 | 6 | null): ObservedServiceRegion | null {
+  const extra = objectRecord(unlock.extra_json)
+  if (!extra || selectedIPVersion == null) return null
+  if (extra.probe_revision !== 3 || extra.evidence_kind !== 'anonymous_service_probe' || extra.ip_version !== selectedIPVersion) return null
+  const evidence = extra.region_evidence
+  const region = extra.observed_region
+  if (evidence !== 'youtube_content_region' && evidence !== 'youtube_context_gl') return null
+  if (typeof region !== 'string' || !COUNTRY_CODE.test(region)) return null
+  return { region, evidence }
+}
+
+// 卡片上的附加证据/能力说明；不参与状态、统计或风险。
+export function serviceEvidenceNotes(unlock: IPQualityServiceUnlock, selectedIPVersion: 4 | 6 | null): string[] {
+  const kind = effectiveUnlockStatus(unlock)
+  const service = unlock.service.trim().toLowerCase()
+  const notes: string[] = []
+  const observed = kind === 'unknown' ? observedServiceRegion(unlock, selectedIPVersion) : null
+  if (observed) notes.push(`页面地区：${observed.region}；Premium 可用性未知`)
+  // 匿名 HTTP 探测只覆盖抽样目录，原生/DNS 解锁方式不在能力范围内。
+  if (service === 'netflix') notes.push('连接方式未检测')
+  if ((service === 'chatgpt' || service === 'openai') && kind !== 'unknown' && !(unlock.region ?? '').trim()) notes.push('服务地区未知')
+  return notes
 }
 
 function reportCoverage(report: VPSIPQualityReport): IPQualityCoverage | null {
@@ -501,7 +660,8 @@ export type EnabledProviderCoverage = {
   percent: number
 }
 
-// 已启用来源成功率：分母为 expected - not_configured，只使用 API coverage，不从行数重建。
+// 已启用来源响应成功率：分母为 expected - not_configured，只使用 API coverage，不从行数重建。
+// 响应成功不等于风险字段完整；未接入数量只用于诊断。
 export function enabledProviderCoverage(report: VPSIPQualityReport): EnabledProviderCoverage | null {
   const coverage = reportCoverage(report)
   if (!coverage) return null
@@ -515,10 +675,21 @@ export function enabledProviderCoverage(report: VPSIPQualityReport): EnabledProv
   return { successful, enabled, notConfigured, percent }
 }
 
-export function serviceCoverage(report: VPSIPQualityReport): number | null {
-  const coverage = reportCoverage(report)
-  if (!coverage) return null
-  return coveragePercent(coverage.successful_service_count, coverage.expected_service_count)
+export type ServiceAvailability = Record<UnlockStatusKind, number> & {
+  // 合法 coverage 的完整 expected_service_count；缺失/非法时为 null，不构造比例。
+  expected: number | null
+}
+
+// 服务可用性：分子只计完全 unlocked，partial 不算完全可用，unknown 不算受限。
+export function serviceAvailability(report: VPSIPQualityReport): ServiceAvailability {
+  const counts = serviceUnlockCounts(report.service_unlocks)
+  const observed = counts.unlocked + counts.partial + counts.blocked + counts.unknown
+  const expected = reportCoverage(report)?.expected_service_count
+  if (!validCount(expected) || !Number.isInteger(expected) || expected <= 0 || observed > expected) {
+    return { ...counts, expected: null }
+  }
+  // coverage 声明但未返回行的服务同样是未知，不能让分布少于分母。
+  return { ...counts, unknown: counts.unknown + expected - observed, expected }
 }
 
 export type DatabaseConsistency = {
@@ -588,7 +759,8 @@ export function providerTableRows(results: IPQualityProviderResult[]): ProviderT
     .filter((result) => !providerSucceeded(result))
     .map((result) => {
       const status = sourceStatusKind(result)
-      const label = status === 'failure' ? '失败' : status === 'skipped' ? '未检测' : '未配置'
+      // 无 adapter 的来源 wire 仍为 not_configured，页面称“未接入”，不暗示存在配置入口。
+      const label = status === 'failure' ? '失败' : status === 'skipped' ? '未检测' : '未接入'
       return {
         provider: result.provider,
         label: `${result.provider} · ${label}`,
@@ -600,9 +772,7 @@ export function providerTableRows(results: IPQualityProviderResult[]): ProviderT
 
 // extra_json.capability 只描述该来源本次响应：geo_only 表示本次仅返回地理信息。
 export function providerCapability(result: IPQualityProviderResult): 'risk' | 'geo_only' | null {
-  const extra = result.extra_json
-  if (typeof extra !== 'object' || extra === null || Array.isArray(extra)) return null
-  const capability = (extra as Record<string, unknown>).capability
+  const capability = objectRecord(result.extra_json)?.capability
   return capability === 'risk' || capability === 'geo_only' ? capability : null
 }
 
@@ -638,7 +808,7 @@ export const DEFAULT_SERVICE_PROBE_SOURCES: ReadonlySet<string> = new Set([
 ])
 
 export type ServiceProbeNotice = {
-  // warning：历史停用或不可核验；muted：revision 2 的中性范围说明。
+  // warning：历史停用或不可核验；muted：revision 2/3 的中性范围说明。
   tone: 'warning' | 'muted'
   text: string
 }
@@ -661,7 +831,7 @@ export function defaultServiceProbeNotice(report: VPSIPQualityReport): ServicePr
   const isDefaultReport = isDefaultSourceVersion || hasDefaultSourceRow
   if (isDefaultReport) {
     const revision = serviceProbeRevision(report)
-    if (revision === 2) {
+    if (isAnonymousServiceProbeRevision(revision)) {
       return { tone: 'muted', text: ANONYMOUS_SERVICE_PROBE_NOTICE }
     }
 

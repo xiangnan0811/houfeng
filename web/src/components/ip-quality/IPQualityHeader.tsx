@@ -1,7 +1,8 @@
+import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 import { Badge, Timestamp } from '../atoms'
-import type { IPQualityReport, IPQualitySummary } from '../../lib/types'
+import type { IPQualityIPVersion, IPQualityReport, IPQualitySummary } from '../../lib/types'
 import { IPQualityCollectButton } from './IPQualityCollectControls'
 import type { IPQualityCollectController } from './useIPQualityCollect'
 
@@ -11,6 +12,10 @@ type IPQualityHeaderProps = {
   summary?: IPQualitySummary | null
   latest?: IPQualityReport | null
   viewingHistory?: boolean
+  // 历史视图“查看最新报告”回到该历史报告所属族的最新报告；未知时交给服务端默认。
+  latestIPVersion?: IPQualityIPVersion | null
+  // 地址族选择器，位于身份下方；页头、空态与参数错误态都保留。
+  familyControl?: ReactNode
   // 空态由正文承载主操作，页头不再重复按钮。
   showCollect?: boolean
 }
@@ -39,6 +44,8 @@ export function IPQualityHeader({
   summary = null,
   latest = null,
   viewingHistory = false,
+  latestIPVersion = null,
+  familyControl = null,
   showCollect = true,
 }: IPQualityHeaderProps) {
   const location = useLocation()
@@ -76,11 +83,18 @@ export function IPQualityHeader({
               </div>
             </dl>
           ) : null}
+          {familyControl ? <div className="ipq-header__family">{familyControl}</div> : null}
         </div>
       </div>
       <div className="page__actions">
         {viewingHistory ? (
-          <Link className="btn md secondary" to={location.pathname} state={location.state}>查看最新报告</Link>
+          <Link
+            className="btn md secondary"
+            to={latestIPVersion == null ? location.pathname : `${location.pathname}?ip_version=${latestIPVersion}`}
+            state={location.state}
+          >
+            查看最新报告
+          </Link>
         ) : showCollect ? (
           <IPQualityCollectButton collect={collect} />
         ) : null}

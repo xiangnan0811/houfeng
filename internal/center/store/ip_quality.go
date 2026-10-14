@@ -12,6 +12,7 @@ import (
 
 	"houfeng/internal/center/ids"
 	"houfeng/internal/center/ipquality"
+	"houfeng/internal/contracts/agentapi"
 )
 
 type ipQualityDB interface {
@@ -53,7 +54,9 @@ func (r *PostgresIPQualityRepository) SaveReports(ctx context.Context, reports [
 	if len(reports) == 0 {
 		return nil
 	}
-	for _, report := range reports {
+	for i := range reports {
+		reports[i].CollectionMetadata = agentapi.ParseCollectionMetadata(reports[i].DiagnosticsJSON)
+		report := reports[i]
 		if err := ipquality.ValidateReportWrite(report); err != nil {
 			return err
 		}
@@ -255,104 +258,36 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 
 const overviewLatestIPQualitySummarySQL = `
 		-- vps overview ip quality summary
-		with valid_reports as materialized (
-			select r.report_id, r.observed_at, r.received_at, r.ip_address, r.status, r.risk_level, r.monitoring_instance_id, r.is_backfilled,
-			       public.houfeng_parse_host_address(r.ip_address) as ip_identity
-			from ip_quality_reports r
-			where r.status in ('success', 'partial')
-				and r.ip_address <> '0.0.0.0'
-				and r.ip_version in (4, 6)
-		),
-		ip_quality_stale_settings as (
-			select
-				case
-					when coalesce(ip_quality_settings, '{}'::jsonb) ? 'stale_after_seconds'
-						and coalesce(ip_quality_settings->>'stale_after_seconds', '') ~ '^[0-9]+$'
-					then greatest((ip_quality_settings->>'stale_after_seconds')::integer, 60)
-					else 604800
-				end as stale_after_seconds
-			from center_settings
-			where settings_id = 'center'
-			union all
-			select 604800
-			where not exists (
-				select 1 from center_settings where settings_id = 'center'
-			)
-		),
-		fallback_asset_identities as materialized (
-			select
-				v.vps_id,
+		with selected_report as materialized (
+			select state.vps_id, r.status, r.risk_level, r.observed_at, r.ip_version,
+				public.houfeng_parse_host_address(r.ip_address) as ip_identity
+			from ip_quality_vps_family_state state
+			join ip_quality_reports r on r.report_id = state.latest_report_id
+			where state.vps_id = $1 and state.is_default
+		), fallback_asset_identities as materialized (
+			select v.vps_id,
 				public.houfeng_parse_host_address(nullif(v.ipv4, '')) as ipv4_identity,
 				public.houfeng_parse_host_address(nullif(v.ipv6, '')) as ipv6_identity
 			from vps_assets v
-			where not exists (
-				select 1
-				from vps_monitoring_instance_links l
-				where l.vps_id = v.vps_id
-					and l.unlinked_at is null
-			)
-		),
-		assigned as (
-			select
-				l.vps_id,
-				r.report_id,
-				r.observed_at,
-				r.received_at,
-				r.status,
-				r.risk_level,
-				r.is_backfilled,
-				r.ip_identity,
-				true as is_linked
-			from vps_monitoring_instance_links l
-			join valid_reports r on r.monitoring_instance_id = l.monitoring_instance_id
-			where l.unlinked_at is null
-				and l.vps_id = $1
-			union all
-			select
-				v.vps_id,
-				r.report_id,
-				r.observed_at,
-				r.received_at,
-				r.status,
-				r.risk_level,
-				r.is_backfilled,
-				r.ip_identity,
-				false as is_linked
-			from fallback_asset_identities v
-			join valid_reports r
-			  on r.ip_identity is not null
-			 and (
-			   r.ip_identity = v.ipv4_identity
-			   or r.ip_identity = v.ipv6_identity
-			 )
-			where v.vps_id = $1
-		),
-		latest_assigned as (
-			select *
-			from assigned
-			order by observed_at desc, is_backfilled asc, received_at desc, report_id desc
-			limit 1
+			where not exists (select 1 from vps_monitoring_instance_links l
+				where l.vps_id = v.vps_id and l.unlinked_at is null)
 		)
-		select
-			assigned.vps_id,
-			assigned.status,
-			assigned.risk_level,
-			assigned.observed_at < now() - make_interval(secs => (
-				select stale_after_seconds
-				from ip_quality_stale_settings
-				limit 1
-			)) as stale,
-			assigned.observed_at
-		from latest_assigned assigned
-		where assigned.is_linked or not exists (
-			select 1
-			from fallback_asset_identities other
-			where other.vps_id <> assigned.vps_id
-				and (
-					assigned.ip_identity = other.ipv4_identity
-					or assigned.ip_identity = other.ipv6_identity
-				)
-		)`
+		select selected.vps_id, selected.status, selected.risk_level,
+			selected.observed_at < now() - make_interval(secs => coalesce((
+				select case when coalesce(ip_quality_settings->>'stale_after_seconds', '') ~ '^[0-9]+$'
+					then greatest((ip_quality_settings->>'stale_after_seconds')::integer, 60)
+					else 604800 end
+				from center_settings where settings_id = 'center'
+			), 604800)) as stale,
+			selected.observed_at, selected.ip_version
+		from selected_report selected
+		where exists (select 1 from vps_monitoring_instance_links l
+			where l.vps_id = selected.vps_id and l.unlinked_at is null)
+			or not exists (
+				select 1 from fallback_asset_identities other
+				where other.vps_id <> selected.vps_id
+					and (selected.ip_identity = other.ipv4_identity or selected.ip_identity = other.ipv6_identity)
+			)`
 
 func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.Context, vpsID string) (*ipquality.Summary, error) {
 	rows, err := r.db.Query(ctx, overviewLatestIPQualitySummarySQL, vpsID)
@@ -373,6 +308,7 @@ func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.C
 		&summary.RiskLevel,
 		&summary.Stale,
 		&summary.ObservedAt,
+		&summary.IPVersion,
 	); err != nil {
 		return nil, fmt.Errorf("scan overview ip quality summary: %w", err)
 	}
@@ -380,13 +316,108 @@ func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.C
 }
 func emptyVPSIPQualityReport() ipquality.VPSReport {
 	return ipquality.VPSReport{
+		SelectedIPVersion: 4,
+		DefaultIPVersion:  4,
+		Families: []ipquality.FamilyStatus{
+			{IPVersion: 4, Availability: "unknown"},
+			{IPVersion: 6, Availability: "unknown"},
+		},
 		ProviderResults: []ipquality.ProviderResultRead{},
 		ServiceUnlocks:  []ipquality.ServiceUnlockRead{},
 		History:         []ipquality.Summary{},
 	}
 }
 
-func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID string) (ipquality.VPSReport, error) {
+// Read navigation and facts through the same snapshot. Close rows before issuing
+// summary queries: pgx transactions share one connection.
+func familyStateForVPS(ctx context.Context, db ipQualityDB, vpsID string) (ipquality.VPSReport, error) {
+	result := emptyVPSIPQualityReport()
+	rows, err := db.Query(ctx, `
+		select state.ip_version, state.latest_report_id, state.availability,
+			state.attempt_stale, state.is_default,
+			attempt.observed_at, attempt.status, attempt.error_code, attempt.diagnostics_json
+		from ip_quality_vps_family_state state
+		left join ip_quality_reports attempt on attempt.report_id = state.latest_attempt_id
+		where state.vps_id = $1
+		order by state.ip_version`, vpsID)
+	if err != nil {
+		return ipquality.VPSReport{}, fmt.Errorf("query ip quality family state: %w", err)
+	}
+	var reportIDs [2]string
+	for rows.Next() {
+		var version int
+		var reportID *string
+		var availability string
+		var stale, isDefault bool
+		var observedAt *time.Time
+		var status, errorCode *string
+		var diagnostics []byte
+		if err := rows.Scan(&version, &reportID, &availability, &stale, &isDefault,
+			&observedAt, &status, &errorCode, &diagnostics); err != nil {
+			rows.Close()
+			return ipquality.VPSReport{}, fmt.Errorf("scan ip quality family state: %w", err)
+		}
+		index := 0
+		if version == 6 {
+			index = 1
+		} else if version != 4 {
+			rows.Close()
+			return ipquality.VPSReport{}, fmt.Errorf("invalid ip quality family state")
+		}
+		family := &result.Families[index]
+		family.Availability = availability
+		if isDefault {
+			result.DefaultIPVersion = version
+		}
+		if reportID != nil {
+			reportIDs[index] = *reportID
+		}
+		if observedAt != nil && status != nil {
+			metadata := agentapi.ParseCollectionMetadata(diagnostics)
+			attempt := &ipquality.FamilyAttempt{
+				ObservedAt: *observedAt, Stale: stale, ReportStatus: *status,
+				CollectionScope: "legacy_single_family",
+			}
+			if errorCode != nil {
+				attempt.ErrorCode = ipquality.SafeCollectErrorCode(*errorCode)
+			}
+			// A malformed/unsupported paired marker must never claim legacy
+			// semantics. Only validated metadata can expose a collection ID.
+			if metadata.Paired {
+				attempt.CollectionScope = "dual_stack"
+				if metadata.Valid && metadata.IPVersion == version {
+					attempt.CollectionID = metadata.CollectionID
+				}
+			}
+			family.LatestAttempt = attempt
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return ipquality.VPSReport{}, fmt.Errorf("iterate ip quality family state: %w", err)
+	}
+	for index, reportID := range reportIDs {
+		if reportID == "" {
+			continue
+		}
+		summary, ok, err := summaryForAssignedVPSReport(ctx, db, vpsID, reportID)
+		if err != nil {
+			return ipquality.VPSReport{}, err
+		}
+		if !ok {
+			return ipquality.VPSReport{}, fmt.Errorf("ip quality assigned summary missing from read snapshot")
+		}
+		result.Families[index].LatestReportSummary = &summary
+	}
+	result.SelectedIPVersion = result.DefaultIPVersion
+	return result, nil
+}
+
+func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID string, ipVersion int) (ipquality.VPSReport, error) {
+	if ipVersion != 0 && ipVersion != 4 && ipVersion != 6 {
+		return ipquality.VPSReport{}, ipquality.ErrInvalidIPQualityReport
+	}
 	if r.beginTx == nil {
 		return ipquality.VPSReport{}, fmt.Errorf("ip quality repository cannot read reports without transaction support")
 	}
@@ -399,17 +430,27 @@ func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	summaries, err := listLatestSummariesForVPS(ctx, tx, []string{vpsID})
+	result, err := familyStateForVPS(ctx, tx, vpsID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	summary, ok := summaries[vpsID]
-	if !ok {
+	result.SelectedIPVersion = result.DefaultIPVersion
+	if ipVersion != 0 {
+		result.SelectedIPVersion = ipVersion
+	}
+	var selected *ipquality.Summary
+	for _, family := range result.Families {
+		if family.IPVersion == result.SelectedIPVersion {
+			selected = family.LatestReportSummary
+		}
+	}
+	if selected == nil {
 		if err := tx.Commit(ctx); err != nil {
 			return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
 		}
-		return emptyVPSIPQualityReport(), nil
+		return result, nil
 	}
+	summary := *selected
 
 	report, ok, err := reportForAssignedVPS(ctx, tx, vpsID, summary.ReportID)
 	if err != nil {
@@ -426,20 +467,19 @@ func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	history, err := historyForVPS(ctx, tx, vpsID)
+	history, err := historyForVPS(ctx, tx, vpsID, result.SelectedIPVersion)
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
 	}
-	return ipquality.VPSReport{
-		Summary:         &summary,
-		LatestReport:    &report,
-		ProviderResults: providers,
-		ServiceUnlocks:  unlocks,
-		History:         history,
-	}, nil
+	result.Summary = &summary
+	result.LatestReport = &report
+	result.ProviderResults = providers
+	result.ServiceUnlocks = unlocks
+	result.History = history
+	return result, nil
 }
 
 func (r *PostgresIPQualityRepository) GetVPSIPQualityReportDetail(ctx context.Context, vpsID, reportID string) (ipquality.VPSReport, error) {
@@ -455,6 +495,10 @@ func (r *PostgresIPQualityRepository) GetVPSIPQualityReportDetail(ctx context.Co
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	result, err := familyStateForVPS(ctx, tx, vpsID)
+	if err != nil {
+		return ipquality.VPSReport{}, err
+	}
 	report, ok, err := reportForAssignedVPS(ctx, tx, vpsID, reportID)
 	if err != nil {
 		return ipquality.VPSReport{}, err
@@ -463,7 +507,7 @@ func (r *PostgresIPQualityRepository) GetVPSIPQualityReportDetail(ctx context.Co
 		if err := tx.Commit(ctx); err != nil {
 			return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
 		}
-		return emptyVPSIPQualityReport(), nil
+		return result, nil
 	}
 	summary, ok, err := summaryForAssignedVPSReport(ctx, tx, vpsID, report.ReportID)
 	if err != nil {
@@ -480,16 +524,20 @@ func (r *PostgresIPQualityRepository) GetVPSIPQualityReportDetail(ctx context.Co
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
+	history, err := historyForVPS(ctx, tx, vpsID, report.IPVersion)
+	if err != nil {
+		return ipquality.VPSReport{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
 	}
-	return ipquality.VPSReport{
-		Summary:         &summary,
-		LatestReport:    &report,
-		ProviderResults: providers,
-		ServiceUnlocks:  unlocks,
-		History:         []ipquality.Summary{},
-	}, nil
+	result.SelectedIPVersion = report.IPVersion
+	result.Summary = &summary
+	result.LatestReport = &report
+	result.ProviderResults = providers
+	result.ServiceUnlocks = unlocks
+	result.History = history
+	return result, nil
 }
 
 func (r *PostgresIPQualityRepository) ListLatestSummariesForVPS(ctx context.Context, vpsIDs []string) (map[string]ipquality.Summary, error) {
@@ -502,16 +550,6 @@ func listLatestSummariesForVPS(ctx context.Context, db ipQualityDB, vpsIDs []str
 		return out, nil
 	}
 	rows, err := db.Query(ctx, `
-		with ranked as (
-			select assigned.*,
-				row_number() over (
-					partition by assigned.vps_id
-					order by assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc
-				) as latest_rank
-			from ip_quality_assigned_vps_reports assigned
-			join ip_quality_reports r on r.report_id = assigned.report_id
-			where assigned.vps_id = any($1)
-		)
 		select latest.vps_id,
 			latest.report_id,
 			latest.observed_at,
@@ -531,8 +569,8 @@ func listLatestSummariesForVPS(ctx context.Context, db ipQualityDB, vpsIDs []str
 			latest.provider_count,
 			latest.unlockable_count,
 			latest.coverage_json
-		from ranked latest
-		where latest.latest_rank = 1`, vpsIDs)
+		from ip_quality_latest_vps_summaries latest
+		where latest.vps_id = any($1)`, vpsIDs)
 	if err != nil {
 		return nil, fmt.Errorf("query ip quality latest summaries: %w", err)
 	}
@@ -581,6 +619,8 @@ func reportForAssignedVPS(ctx context.Context, db ipQualityDB, vpsID, reportID s
 		from ip_quality_reports r
 		join ip_quality_assigned_vps_reports assigned on assigned.report_id = r.report_id
 		where assigned.vps_id = $1 and r.report_id = $2
+			and public.houfeng_parse_host_address(r.ip_address) not in ('0.0.0.0'::inet, '::'::inet)
+			and family(public.houfeng_parse_host_address(r.ip_address)) = r.ip_version
 		limit 1`, vpsID, reportID)
 	if err != nil {
 		return ipquality.Report{}, false, fmt.Errorf("query assigned ip quality report %q for vps %q: %w", reportID, vpsID, err)
@@ -622,6 +662,8 @@ func summaryForAssignedVPSReport(ctx context.Context, db ipQualityDB, vpsID, rep
 			assigned.coverage_json
 		from ip_quality_assigned_vps_reports assigned
 		where assigned.vps_id = $1 and assigned.report_id = $2
+			and public.houfeng_parse_host_address(assigned.ip_address) not in ('0.0.0.0'::inet, '::'::inet)
+			and family(public.houfeng_parse_host_address(assigned.ip_address)) = assigned.ip_version
 		limit 1`, vpsID, reportID)
 	if err != nil {
 		return ipquality.Summary{}, false, fmt.Errorf("query assigned ip quality summary %q for vps %q: %w", reportID, vpsID, err)
@@ -754,7 +796,7 @@ func serviceUnlocksForReport(ctx context.Context, db ipQualityDB, reportID strin
 	return results, nil
 }
 
-func historyForVPS(ctx context.Context, db ipQualityDB, vpsID string) ([]ipquality.Summary, error) {
+func historyForVPS(ctx context.Context, db ipQualityDB, vpsID string, ipVersion int) ([]ipquality.Summary, error) {
 	rows, err := db.Query(ctx, `
 		select assigned.vps_id,
 			assigned.report_id,
@@ -777,9 +819,11 @@ func historyForVPS(ctx context.Context, db ipQualityDB, vpsID string) ([]ipquali
 			assigned.coverage_json
 		from ip_quality_assigned_vps_reports assigned
 		join ip_quality_reports r on r.report_id = assigned.report_id
-		where assigned.vps_id = $1
+		where assigned.vps_id = $1 and assigned.ip_version = $2
+			and public.houfeng_parse_host_address(assigned.ip_address) not in ('0.0.0.0'::inet, '::'::inet)
+			and family(public.houfeng_parse_host_address(assigned.ip_address)) = assigned.ip_version
 		order by assigned.observed_at desc, r.is_backfilled asc, r.received_at desc, assigned.report_id desc
-		limit 30`, vpsID)
+		limit 30`, vpsID, ipVersion)
 	if err != nil {
 		return nil, fmt.Errorf("query ip quality history for vps %q: %w", vpsID, err)
 	}

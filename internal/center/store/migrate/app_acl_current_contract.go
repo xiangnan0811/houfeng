@@ -65,6 +65,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	monitoringInstanceMetadataVersionAppACLCurrentMigrationFragment(),
 	subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment(),
 	settingsDeploymentOverridesAppACLCurrentMigrationFragment(),
+	ipQualityAddressFamiliesAppACLCurrentMigrationFragment(),
 }
 
 func subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -81,6 +82,26 @@ func settingsDeploymentOverridesAppACLCurrentMigrationFragment() AppACLCurrentMi
 		Migration: "0075_add_settings_deployment_overrides.sql",
 		Privileges: func(string) []AppACLPrivilege {
 			return nil
+		},
+	}
+}
+
+func ipQualityAddressFamiliesAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0076_ip_quality_address_families.sql",
+		Objects: []AppACLManagedObjectR1{{
+			ObjectClass:    AppACLObjectClassView,
+			SchemaName:     appACLManagedPublicSchemaR1,
+			ObjectIdentity: "ip_quality_vps_family_state",
+		}},
+		Privileges: func(string) []AppACLPrivilege {
+			return []AppACLPrivilege{{
+				Subject:        AppACLSubjectCenterRuntime,
+				ObjectClass:    AppACLObjectClassView,
+				SchemaName:     appACLManagedPublicSchemaR1,
+				ObjectIdentity: "ip_quality_vps_family_state",
+				Privilege:      AppACLPrivilegeSelect,
+			}}
 		},
 	}
 }

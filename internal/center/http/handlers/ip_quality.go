@@ -3,13 +3,14 @@ package handlers
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"houfeng/internal/center/ipquality"
 )
 
 type VPSIPQualityRepository interface {
-	GetVPSIPQuality(context.Context, string) (ipquality.VPSReport, error)
+	GetVPSIPQuality(context.Context, string, int) (ipquality.VPSReport, error)
 	GetVPSIPQualityReportDetail(context.Context, string, string) (ipquality.VPSReport, error)
 }
 
@@ -24,6 +25,23 @@ func VPSIPQuality(repo VPSIPQualityRepository) http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
 		}
+		query, queryErr := url.ParseQuery(r.URL.RawQuery)
+		if queryErr != nil {
+			writeError(w, http.StatusBadRequest, "invalid query")
+			return
+		}
+		ipVersion := 0
+		if values, present := query["ip_version"]; present {
+			if reportID != "" || len(values) != 1 || (values[0] != "4" && values[0] != "6") {
+				writeError(w, http.StatusBadRequest, "invalid IP version")
+				return
+			}
+			if values[0] == "4" {
+				ipVersion = 4
+			} else {
+				ipVersion = 6
+			}
+		}
 		var (
 			report ipquality.VPSReport
 			err    error
@@ -31,7 +49,7 @@ func VPSIPQuality(repo VPSIPQualityRepository) http.Handler {
 		if reportID != "" {
 			report, err = repo.GetVPSIPQualityReportDetail(r.Context(), vpsID, reportID)
 		} else {
-			report, err = repo.GetVPSIPQuality(r.Context(), vpsID)
+			report, err = repo.GetVPSIPQuality(r.Context(), vpsID, ipVersion)
 		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal server error")

@@ -56,14 +56,15 @@ func testPostgresIntegrationAppACLCurrentP73Upgrade(t *testing.T) {
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
 		t.Fatalf("C75 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
-	if len(after.Ledger) != len(before.Ledger)+2 ||
+	if len(after.Ledger) != len(before.Ledger)+3 ||
 		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
-		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP74Migration ||
-		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP75Migration {
-		t.Fatalf("C75 ledger tail = %#v, want predecessor prefix plus 0074 and 0075 rows", after.Ledger)
+		after.Ledger[len(after.Ledger)-3].Name != appACLCurrentP74Migration ||
+		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP75Migration ||
+		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP76Migration {
+		t.Fatalf("C76 ledger tail = %#v, want predecessor prefix plus 0074 through 0076", after.Ledger)
 	}
-	if !reflect.DeepEqual(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges) ||
-		!reflect.DeepEqual(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges) ||
+	if !appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
+		!appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) {
 		t.Fatalf("C73 to C74 migration changed ACL state\nbefore direct/effective/column/default: %#v/%#v/%#v/%#v\nafter: %#v/%#v/%#v/%#v",

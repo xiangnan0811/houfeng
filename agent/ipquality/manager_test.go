@@ -37,20 +37,24 @@ func (s *memoryStateStore) Save(_ context.Context, state agentipquality.State) e
 }
 
 type channelCollector struct {
-	mu     sync.Mutex
-	calls  int
-	report agentapi.IPQualityReportPayload
-	wait   chan struct{}
+	mu      sync.Mutex
+	calls   int
+	report  agentapi.IPQualityReportPayload
+	reports []agentapi.IPQualityReportPayload
+	wait    chan struct{}
 }
 
-func (c *channelCollector) Collect(context.Context, *agentapi.IPQualityPlan, time.Time) agentapi.IPQualityReportPayload {
+func (c *channelCollector) Collect(context.Context, *agentapi.IPQualityPlan, time.Time) []agentapi.IPQualityReportPayload {
 	c.mu.Lock()
 	c.calls++
 	c.mu.Unlock()
 	if c.wait != nil {
 		<-c.wait
 	}
-	return c.report
+	if c.reports != nil {
+		return c.reports
+	}
+	return []agentapi.IPQualityReportPayload{c.report}
 }
 
 func (c *channelCollector) Calls() int {
@@ -358,5 +362,103 @@ func TestManagerRetriesCollectRequestAfterStop(t *testing.T) {
 	}
 	if reports := waitForReports(t, manager); len(reports) != 1 || collector.Calls() != 3 {
 		t.Fatalf("reports = %#v calls = %d, want the request answered again after Stop", reports, collector.Calls())
+	}
+}
+
+func pairedManagerReports(fourStatus, sixStatus, fourAvailability, sixAvailability string) []agentapi.IPQualityReportPayload {
+	reports := make([]agentapi.IPQualityReportPayload, 2)
+	for index, family := range []int{4, 6} {
+		status, availability, ip := fourStatus, fourAvailability, "198.51.100.10"
+		if index == 1 {
+			status, availability, ip = sixStatus, sixAvailability, "2001:db8::10"
+		}
+		fields := map[string]any{"collection_revision": 4, "collection_id": "round-manager", "expected_ip_versions": []int{4, 6}, "ip_address_family": family, "family_availability": availability}
+		raw, _ := json.Marshal(fields)
+		reports[index] = agentapi.IPQualityReportPayload{IPVersion: family, IPAddress: ip, Status: status, DiagnosticsJSON: raw}
+		if availability == "unavailable" {
+			reports[index].ErrorCode = "address_family_unavailable"
+			if family == 4 {
+				reports[index].IPAddress = "0.0.0.0"
+			} else {
+				reports[index].IPAddress = "::"
+			}
+		}
+	}
+	return reports
+}
+
+func TestManagerAtomicallyTagsDualRoundAndAggregatesActualFamilies(t *testing.T) {
+	for _, scenario := range []struct{ name, four, six, fourAvailability, sixAvailability, want string }{
+		{"both_success", "success", "success", "available", "available", "success"},
+		{"ipv4_only", "success", "failure", "available", "unavailable", "success"},
+		{"ipv6_only", "failure", "success", "unavailable", "available", "success"},
+		{"lookup_failure", "failure", "success", "available", "available", "partial"},
+		{"partial", "partial", "success", "available", "available", "partial"},
+		{"both_failed", "failure", "failure", "unknown", "unknown", "failure"},
+		{"both_unavailable", "failure", "failure", "unavailable", "unavailable", "failure"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			store := &memoryStateStore{}
+			collector := &channelCollector{reports: pairedManagerReports(scenario.four, scenario.six, scenario.fourAvailability, scenario.sixAvailability)}
+			manager := agentipquality.NewManager(store, collector)
+			plan := &agentapi.IPQualityPlan{Enabled: true, FrequencySeconds: 86400, CollectRequestID: "request-manager"}
+			if err := manager.MaybeStart(context.Background(), plan, now); err != nil {
+				t.Fatal(err)
+			}
+			reports := waitForReports(t, manager)
+			if len(reports) != 2 {
+				t.Fatalf("half round exposed: %#v", reports)
+			}
+			for _, r := range reports {
+				m := agentapi.ParseCollectionMetadata(r.DiagnosticsJSON)
+				if !m.Valid || m.CollectRequestID != "request-manager" || m.CollectionID != "round-manager" {
+					t.Fatalf("round identity lost: %#v", m)
+				}
+			}
+			if store.state.LastStatus != scenario.want || !store.state.LastAttemptedAt.Equal(now) || (scenario.want == "success") != store.state.LastSucceededAt.Equal(now) {
+				t.Fatalf("state=%#v", store.state)
+			}
+			if err := manager.MaybeStart(context.Background(), plan, now.Add(time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if collector.Calls() != 1 {
+				t.Fatal("heartbeat retried a completed round")
+			}
+		})
+	}
+}
+
+func TestManagerStopDiscardsEntirePairedRoundAndAllowsSameRequestRetry(t *testing.T) {
+	wait := make(chan struct{})
+	collector := &channelCollector{wait: wait, reports: pairedManagerReports("success", "success", "available", "available")}
+	manager := agentipquality.NewManager(&memoryStateStore{}, collector)
+	plan := &agentapi.IPQualityPlan{Enabled: true, FrequencySeconds: 86400, CollectRequestID: "request-stop-pair"}
+	now := time.Now().UTC()
+	if err := manager.MaybeStart(context.Background(), plan, now); err != nil {
+		t.Fatal(err)
+	}
+	manager.Stop()
+	close(wait)
+	deadline := time.After(time.Second)
+	for collector.Calls() < 2 {
+		if err := manager.MaybeStart(context.Background(), plan, now.Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-deadline:
+			t.Fatal("stopped request was not retried")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	reports := waitForReports(t, manager)
+	if len(reports) != 2 {
+		t.Fatalf("retry must publish a complete pair: %#v", reports)
+	}
+	for _, r := range reports {
+		if reportCollectRequestID(t, r) != "request-stop-pair" {
+			t.Fatal("retried pair lost request identity")
+		}
 	}
 }

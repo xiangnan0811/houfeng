@@ -169,6 +169,7 @@ func (repository *VPSOverviewRepository) LoadIPQuality(
 	result.Status = summary.Status
 	result.RiskLevel = summary.RiskLevel
 	result.Stale = summary.Stale
+	result.IPVersion = summary.IPVersion
 	if !summary.ObservedAt.IsZero() {
 		observed := summary.ObservedAt.UTC()
 		result.Section.ObservedAt = &observed

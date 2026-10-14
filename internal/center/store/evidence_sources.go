@@ -233,7 +233,9 @@ const ipQualityEvidenceReportSQL = `
 	where assigned.vps_id = $1
 		and r.observed_at >= $2
 		and r.observed_at < $3
-	order by r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc
+		and public.houfeng_parse_host_address(r.ip_address) not in ('0.0.0.0'::inet, '::'::inet)
+		and family(public.houfeng_parse_host_address(r.ip_address)) = r.ip_version
+	order by r.ip_version asc, r.observed_at desc, r.is_backfilled asc, r.received_at desc, r.report_id desc
 	limit 1`
 
 const ipQualityEvidenceProvidersSQL = `

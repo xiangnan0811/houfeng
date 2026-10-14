@@ -3535,10 +3535,15 @@ func TestRuntimeDrainsCompletedIPQualityReportIntoNextSync(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	ipProvider := &fakeIPQualityProvider{
 		reportsAfterStart: []agentapi.IPQualityReportPayload{{
+			ObservedAt:      time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC),
+			IPAddress:       "203.0.113.10",
+			IPVersion:       4,
+			Status:          agentapi.IPQualityStatusSuccess,
+			DiagnosticsJSON: json.RawMessage(`{"collection_revision":4,"collection_id":"round-runtime","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available"}`),
+		}, {
 			ObservedAt: time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC),
-			IPAddress:  "203.0.113.10",
-			IPVersion:  4,
-			Status:     agentapi.IPQualityStatusSuccess,
+			IPAddress:  "2001:db8::10", IPVersion: 6, Status: agentapi.IPQualityStatusSuccess,
+			DiagnosticsJSON: json.RawMessage(`{"collection_revision":4,"collection_id":"round-runtime","expected_ip_versions":[4,6],"ip_address_family":6,"family_availability":"available"}`),
 		}},
 	}
 	client := &fakeClient{
@@ -3577,8 +3582,8 @@ func TestRuntimeDrainsCompletedIPQualityReportIntoNextSync(t *testing.T) {
 		t.Fatal("second sync included an IP-quality report before collection completed")
 	}
 	thirdSync := client.syncRequests[2]
-	if len(thirdSync.IPQualityReports) != 1 {
-		t.Fatalf("len(thirdSync.IPQualityReports) = %d, want 1", len(thirdSync.IPQualityReports))
+	if len(thirdSync.IPQualityReports) != 2 {
+		t.Fatalf("len(thirdSync.IPQualityReports) = %d, want one complete pair", len(thirdSync.IPQualityReports))
 	}
 	report := thirdSync.IPQualityReports[0]
 	if report.AgentVersion != "dev" || report.Fingerprint != "fp-001" || report.SyncBatchID == "" {
@@ -3586,6 +3591,13 @@ func TestRuntimeDrainsCompletedIPQualityReportIntoNextSync(t *testing.T) {
 	}
 	if report.IPAddress != "203.0.113.10" || report.Status != agentapi.IPQualityStatusSuccess {
 		t.Fatal("completed IP-quality report did not match the provider result")
+	}
+	for index, family := range []int{4, 6} {
+		paired := thirdSync.IPQualityReports[index]
+		metadata := agentapi.ParseCollectionMetadata(paired.DiagnosticsJSON)
+		if paired.IPVersion != family || !metadata.Valid || metadata.CollectionID != "round-runtime" || paired.Fingerprint != report.Fingerprint || paired.SyncBatchID != report.SyncBatchID || paired.AgentVersion != report.AgentVersion {
+			t.Fatalf("dual round lost identity or runtime metadata: %#v", thirdSync.IPQualityReports)
+		}
 	}
 }
 

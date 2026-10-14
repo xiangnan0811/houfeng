@@ -487,3 +487,28 @@ func TestAppACLCurrentTransitionDeploymentOverrideSettingsTransformation(t *test
 		}
 	})
 }
+
+func TestAppACLCurrentTransitionAddressFamiliesSuffixClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		profile   appACLCurrentProfileID
+		names     []string
+		wantError bool
+	}{
+		{name: "P75 exact", profile: appACLCurrentProfileP75, names: []string{"0076_ip_quality_address_families.sql"}},
+		{name: "P74 exact", profile: appACLCurrentProfileP74, names: []string{"0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}},
+		{name: "P75 missing", profile: appACLCurrentProfileP75, wantError: true},
+		{name: "P75 duplicate", profile: appACLCurrentProfileP75, names: []string{"0076_ip_quality_address_families.sql", "0076_ip_quality_address_families.sql"}, wantError: true},
+		{name: "P74 reordered", profile: appACLCurrentProfileP74, names: []string{"0076_ip_quality_address_families.sql", "0075_add_settings_deployment_overrides.sql"}, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
+				profile:   tc.profile,
+				successor: migrationSourceSnapshot{names: tc.names},
+			})
+			if (err != nil) != tc.wantError || got {
+				t.Fatalf("heartbeat policy classification = %t/%v, want false/error=%t", got, err, tc.wantError)
+			}
+		})
+	}
+}

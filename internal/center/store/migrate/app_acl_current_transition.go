@@ -135,6 +135,23 @@ var appACLCurrentC74MigrationGolden = func() []byte {
 
 var appACLCurrentC74PrivilegeGolden = append([]byte(nil), appACLCurrentC73PrivilegeGolden...)
 
+// The C75 predecessor is the frozen C74 literal plus the published 0075
+// checksum record. Its privileges are unchanged and independent of C76.
+var appACLCurrentC75MigrationGolden = func() []byte {
+	body := append([]byte(nil), appACLCurrentC74MigrationGolden...)
+	body = append(body, 0, 0, 0, 42)
+	body = append(body, []byte("0075_add_settings_deployment_overrides.sql")...)
+	body = append(body, []byte{
+		0xa0, 0x0b, 0xd6, 0x6a, 0x36, 0x87, 0xe3, 0x27,
+		0x8c, 0x0e, 0x94, 0x44, 0x53, 0x8e, 0x6b, 0xa5,
+		0x72, 0xf2, 0x45, 0x2f, 0x57, 0x98, 0x2d, 0xd9,
+		0xb0, 0x82, 0xee, 0xcc, 0x1e, 0x90, 0x91, 0x1a,
+	}...)
+	return body
+}()
+
+var appACLCurrentC75PrivilegeGolden = append([]byte(nil), appACLCurrentC74PrivilegeGolden...)
+
 // The C69 predecessor is the preserved terminal from the baseline source
 // tree. Its source golden is the independent C68 golden plus the immutable
 // 0069 checksum record; 0069 adds no APP ACL privileges, so the independent
@@ -184,6 +201,7 @@ const (
 	appACLCurrentProfileP72
 	appACLCurrentProfileP73
 	appACLCurrentProfileP74
+	appACLCurrentProfileP75
 )
 
 type appACLCurrentTransitionDefinition struct {
@@ -221,6 +239,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden:      appACLCurrentV0794MigrationGolden,
 		predecessorPrivilegeGolden:      appACLCurrentV0794PrivilegeGolden,
@@ -241,6 +260,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV0802MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0802PrivilegeGolden,
@@ -261,6 +281,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV0796MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0796PrivilegeGolden,
@@ -278,6 +299,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV0804MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV0804PrivilegeGolden,
@@ -294,6 +316,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV1153MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV1153PrivilegeGolden,
@@ -309,6 +332,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentV1157MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentV1157PrivilegeGolden,
@@ -323,6 +347,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC69MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC69PrivilegeGolden,
@@ -336,6 +361,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC70MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC70PrivilegeGolden,
@@ -348,6 +374,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC71MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC71PrivilegeGolden,
@@ -359,6 +386,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 			"0073_add_monitoring_instance_metadata_version.sql",
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC72MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC72PrivilegeGolden,
@@ -369,6 +397,7 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 		successorMigrations: []string{
 			"0074_add_subscription_exchange_rate_month_end.sql",
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC73MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC73PrivilegeGolden,
@@ -378,9 +407,19 @@ var appACLCurrentTransitionDefinitions = []appACLCurrentTransitionDefinition{
 		predecessorLastMigration: "0074_add_subscription_exchange_rate_month_end.sql",
 		successorMigrations: []string{
 			"0075_add_settings_deployment_overrides.sql",
+			"0076_ip_quality_address_families.sql",
 		},
 		predecessorMigrationGolden: appACLCurrentC74MigrationGolden,
 		predecessorPrivilegeGolden: appACLCurrentC74PrivilegeGolden,
+	},
+	{
+		profile:                  appACLCurrentProfileP75,
+		predecessorLastMigration: "0075_add_settings_deployment_overrides.sql",
+		successorMigrations: []string{
+			"0076_ip_quality_address_families.sql",
+		},
+		predecessorMigrationGolden: appACLCurrentC75MigrationGolden,
+		predecessorPrivilegeGolden: appACLCurrentC75PrivilegeGolden,
 	},
 }
 
@@ -488,7 +527,15 @@ var appACLCurrentAcceptedPredecessorProfileChains = func() [][]appACLCurrentProf
 		withP74 = append(withP74, appACLCurrentProfileP74)
 		c75Chains = append(c75Chains, withP74)
 	}
-	return c75Chains
+	c76Chains := make([][]appACLCurrentProfileID, 0, len(c75Chains)*2+1)
+	c76Chains = append(c76Chains, c75Chains...)
+	c76Chains = append(c76Chains, []appACLCurrentProfileID{appACLCurrentProfileP75})
+	for _, chain := range c75Chains {
+		withP75 := append([]appACLCurrentProfileID(nil), chain...)
+		withP75 = append(withP75, appACLCurrentProfileP75)
+		c76Chains = append(c76Chains, withP75)
+	}
+	return c76Chains
 }()
 
 func cloneAppACLCurrentTransitionDefinitions(source []appACLCurrentTransitionDefinition) []appACLCurrentTransitionDefinition {
@@ -510,8 +557,8 @@ func compileAppACLCurrentTransitions(
 	if len(definitions) == 0 {
 		return nil, fmt.Errorf("current APP ACL transition registry has no definitions")
 	}
-	if len(definitions) != 12 {
-		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64, P63, P66, P67, P68, P69, P70, P71, P72, P73 and P74 profiles")
+	if len(definitions) != 13 {
+		return nil, fmt.Errorf("current APP ACL transition registry must contain exactly the P62, P64, P63, P66, P67, P68, P69, P70, P71, P72, P73, P74 and P75 profiles")
 	}
 	expectedDefinitions := cloneAppACLCurrentTransitionDefinitions(appACLCurrentTransitionDefinitions)
 	compiled := make([]appACLCurrentTransition, 0, len(definitions))
@@ -522,7 +569,8 @@ func compileAppACLCurrentTransitions(
 			definition.profile != appACLCurrentProfileP67 && definition.profile != appACLCurrentProfileP68 &&
 			definition.profile != appACLCurrentProfileP69 && definition.profile != appACLCurrentProfileP70 &&
 			definition.profile != appACLCurrentProfileP71 && definition.profile != appACLCurrentProfileP72 &&
-			definition.profile != appACLCurrentProfileP73 && definition.profile != appACLCurrentProfileP74 {
+			definition.profile != appACLCurrentProfileP73 && definition.profile != appACLCurrentProfileP74 &&
+			definition.profile != appACLCurrentProfileP75 {
 			return nil, fmt.Errorf("current APP ACL transition %d has unknown predecessor profile", index)
 		}
 		if _, duplicate := claimedProfiles[definition.profile]; duplicate {
@@ -610,7 +658,7 @@ func compileAppACLCurrentTransition(
 		return appACLCurrentTransition{}, fmt.Errorf("P62 predecessor manifest digest golden has invalid length")
 	}
 	if definition.profile != appACLCurrentProfileP62 && len(definition.predecessorManifestDigestGolden) != 0 {
-		return appACLCurrentTransition{}, fmt.Errorf("P63/P64/P66/P67/P68/P69/P70/P71/P72/P73/P74 predecessor must support role-bound manifest identities")
+		return appACLCurrentTransition{}, fmt.Errorf("P63/P64/P66/P67/P68/P69/P70/P71/P72/P73/P74/P75 predecessor must support role-bound manifest identities")
 	}
 	manifest, err := NewAppACLManifestPersistedV1(1, appACLCurrentTransitionMigrator, [32]byte{}, predecessor.sources.canonicalSet, predecessorPrivileges)
 	if err != nil {
@@ -680,14 +728,14 @@ func validateAppACLCurrentTransitionPrivilegeDelta(
 				Privilege:      AppACLPrivilegeUpdate,
 			}] = struct{}{}
 		}
-	case appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68, appACLCurrentProfileP69, appACLCurrentProfileP70, appACLCurrentProfileP71, appACLCurrentProfileP72, appACLCurrentProfileP73, appACLCurrentProfileP74:
+	case appACLCurrentProfileP66, appACLCurrentProfileP67, appACLCurrentProfileP68, appACLCurrentProfileP69, appACLCurrentProfileP70, appACLCurrentProfileP71, appACLCurrentProfileP72, appACLCurrentProfileP73, appACLCurrentProfileP74, appACLCurrentProfileP75:
 	default:
 		return fmt.Errorf("registered APP transition has unknown predecessor profile %d", profile)
 	}
 	if profile != appACLCurrentProfileP67 && profile != appACLCurrentProfileP68 &&
 		profile != appACLCurrentProfileP69 && profile != appACLCurrentProfileP70 &&
 		profile != appACLCurrentProfileP71 && profile != appACLCurrentProfileP72 &&
-		profile != appACLCurrentProfileP73 && profile != appACLCurrentProfileP74 {
+		profile != appACLCurrentProfileP73 && profile != appACLCurrentProfileP74 && profile != appACLCurrentProfileP75 {
 		for _, privilege := range vpsMonitoringLifecycleAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
 			expectedAdditions[privilege] = struct{}{}
 		}
@@ -695,17 +743,24 @@ func validateAppACLCurrentTransitionPrivilegeDelta(
 	if profile != appACLCurrentProfileP68 && profile != appACLCurrentProfileP69 &&
 		profile != appACLCurrentProfileP70 && profile != appACLCurrentProfileP71 &&
 		profile != appACLCurrentProfileP72 && profile != appACLCurrentProfileP73 &&
-		profile != appACLCurrentProfileP74 {
+		profile != appACLCurrentProfileP74 && profile != appACLCurrentProfileP75 {
 		for _, privilege := range ipQualityHostAddressIdentityAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
 			expectedAdditions[privilege] = struct{}{}
 		}
 	}
 	if profile != appACLCurrentProfileP71 && profile != appACLCurrentProfileP72 &&
-		profile != appACLCurrentProfileP73 && profile != appACLCurrentProfileP74 {
+		profile != appACLCurrentProfileP73 && profile != appACLCurrentProfileP74 && profile != appACLCurrentProfileP75 {
 		for _, privilege := range accessManagementAppACLCurrentMigrationFragment().Privileges(appACLCurrentTransitionDatabase) {
 			expectedAdditions[privilege] = struct{}{}
 		}
 	}
+	expectedAdditions[AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassView,
+		SchemaName:     appACLManagedPublicSchemaR1,
+		ObjectIdentity: "ip_quality_vps_family_state",
+		Privilege:      AppACLPrivilegeSelect,
+	}] = struct{}{}
 	if len(additions) != len(expectedAdditions) {
 		return fmt.Errorf("registered APP transition privilege delta is not exactly the approved current fragments")
 	}

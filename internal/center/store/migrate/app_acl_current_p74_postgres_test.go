@@ -96,13 +96,14 @@ func testPostgresIntegrationAppACLCurrentP74SettingsState(t *testing.T, state st
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
 		t.Fatalf("C75 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
-	if len(after.Ledger) != len(before.Ledger)+1 ||
+	if len(after.Ledger) != len(before.Ledger)+2 ||
 		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
-		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP75Migration {
-		t.Fatalf("C75 ledger tail = %#v, want predecessor prefix plus 0075 row", after.Ledger)
+		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP75Migration ||
+		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP76Migration {
+		t.Fatalf("C76 ledger tail = %#v, want predecessor prefix plus 0075 and 0076", after.Ledger)
 	}
-	if !reflect.DeepEqual(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges) ||
-		!reflect.DeepEqual(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges) ||
+	if !appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
+		!appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) {
 		t.Fatalf("C74 to C75 migration changed ACL state\nbefore direct/effective/column/default: %#v/%#v/%#v/%#v\nafter: %#v/%#v/%#v/%#v",
@@ -236,13 +237,14 @@ func testPostgresIntegrationAppACLCurrentP74SuccessorChain(t *testing.T) {
 		t.Fatalf("admit P75 runtime after P74 successor chain: %v", err)
 	}
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
-	if len(after.Ledger) != len(before.Ledger)+1 ||
+	if len(after.Ledger) != len(before.Ledger)+2 ||
 		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
-		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP75Migration {
-		t.Fatalf("P74 successor chain ledger tail = %#v, want predecessor prefix plus 0075", after.Ledger)
+		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP75Migration ||
+		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP76Migration {
+		t.Fatalf("P74 successor chain ledger tail = %#v, want predecessor prefix plus 0075 and 0076", after.Ledger)
 	}
-	if !reflect.DeepEqual(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges) ||
-		!reflect.DeepEqual(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges) ||
+	if !appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
+		!appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) {
 		t.Fatalf("P74 successor chain changed ACL state")

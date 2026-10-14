@@ -1,8 +1,8 @@
 package ipquality
 
 import (
-	"encoding/json"
 	"fmt"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -10,8 +10,7 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-// 立即采集请求状态。请求只保存在 center 进程内存中：center 重启后丢失，
-// 用户可重新发起；agent 侧按请求 ID 去重，重复下发不会重复采集。
+// Requests are process-local: center restart loses them, not stored reports.
 const (
 	CollectRequestPending    = "pending"
 	CollectRequestDispatched = "dispatched"
@@ -20,50 +19,76 @@ const (
 )
 
 const (
-	// CollectRequestTTL 覆盖 agent 同步间隔、最长 300 秒的采集超时与上报排队。
-	CollectRequestTTL = 10 * time.Minute
-	// collectRequestRetention 让已完成/过期的请求在页面上保留一段时间后再清理。
-	collectRequestRetention = 30 * time.Minute
-
-	maxCollectRequestIDLength   = 64
-	maxCollectErrorSummaryRunes = 200
+	CollectRequestTTL              = 10 * time.Minute
+	collectRequestRetention        = 30 * time.Minute
+	maxCollectErrorSummaryRunes    = 200
+	CollectScopeDualStack          = "dual_stack"
+	CollectScopeLegacySingleFamily = "legacy_single_family"
 )
 
-type CollectRequest struct {
-	RequestID            string     `json:"request_id"`
-	MonitoringInstanceID string     `json:"monitoring_instance_id"`
-	Status               string     `json:"status"`
-	RequestedAt          time.Time  `json:"requested_at"`
-	ExpiresAt            time.Time  `json:"expires_at"`
-	DispatchedAt         *time.Time `json:"dispatched_at,omitempty"`
-	CompletedAt          *time.Time `json:"completed_at,omitempty"`
-	ReportStatus         string     `json:"report_status,omitempty"`
-	ErrorSummary         string     `json:"error_summary,omitempty"`
+type CollectFamilyResult struct {
+	IPVersion    int    `json:"ip_version"`
+	Availability string `json:"availability"`
+	ReportStatus string `json:"report_status"`
+	ErrorCode    string `json:"error_code,omitempty"`
 }
 
-// Active 表示请求仍在等待 agent 执行或回传。
+type CollectRequest struct {
+	RequestID            string                `json:"request_id"`
+	MonitoringInstanceID string                `json:"monitoring_instance_id"`
+	Status               string                `json:"status"`
+	RequestedAt          time.Time             `json:"requested_at"`
+	ExpiresAt            time.Time             `json:"expires_at"`
+	DispatchedAt         *time.Time            `json:"dispatched_at,omitempty"`
+	CompletedAt          *time.Time            `json:"completed_at,omitempty"`
+	ReportStatus         string                `json:"report_status,omitempty"`
+	ErrorSummary         string                `json:"error_summary,omitempty"`
+	CollectionScope      string                `json:"collection_scope,omitempty"`
+	CollectionID         string                `json:"collection_id,omitempty"`
+	FamilyResults        []CollectFamilyResult `json:"family_results,omitempty"`
+}
+
 func (r CollectRequest) Active() bool {
 	return r.Status == CollectRequestPending || r.Status == CollectRequestDispatched
 }
 
+type collectGroup struct {
+	id         string
+	observedAt time.Time
+	families   [2]*CollectFamilyResult
+}
+
+func (g *collectGroup) complete() bool {
+	return g.families[0] != nil && g.families[1] != nil
+}
+
+func (g *collectGroup) newerThan(other *collectGroup) bool {
+	return other == nil || g.observedAt.After(other.observedAt) ||
+		(g.observedAt.Equal(other.observedAt) && g.id > other.id)
+}
+
+type collectEntry struct {
+	request CollectRequest
+	groups  map[string]*collectGroup
+}
+
 type CollectRequests struct {
 	mu      sync.Mutex
-	entries map[string]CollectRequest
+	entries map[string]*collectEntry
 	newID   func() (string, error)
 }
 
 func NewCollectRequests(newID func() (string, error)) *CollectRequests {
-	return &CollectRequests{entries: make(map[string]CollectRequest), newID: newID}
+	return &CollectRequests{entries: make(map[string]*collectEntry), newID: newID}
 }
 
-// Request 为监控实例登记一次立即采集；已有进行中的请求时直接返回它，避免重复触发外部查询。
+// Request reuses an active request rather than causing another external collection.
 func (c *CollectRequests) Request(monitoringInstanceID string, now time.Time) (CollectRequest, error) {
 	now = now.UTC()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.pruneLocked(now)
-	if current, ok := c.currentLocked(monitoringInstanceID, now); ok && current.Active() {
-		return current, nil
+	if entry, ok := c.currentLocked(monitoringInstanceID, now); ok && entry.request.Active() {
+		return cloneCollectRequest(entry.request), nil
 	}
 	requestID, err := c.newID()
 	if err != nil {
@@ -76,103 +101,229 @@ func (c *CollectRequests) Request(monitoringInstanceID string, now time.Time) (C
 		RequestedAt:          now,
 		ExpiresAt:            now.Add(CollectRequestTTL),
 	}
-	c.entries[monitoringInstanceID] = request
+	c.entries[monitoringInstanceID] = &collectEntry{request: request}
 	return request, nil
 }
 
-// Latest 返回监控实例最近一次请求（含已完成/过期），供页面展示进度。
 func (c *CollectRequests) Latest(monitoringInstanceID string, now time.Time) (CollectRequest, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.currentLocked(monitoringInstanceID, now.UTC())
+	entry, ok := c.currentLocked(monitoringInstanceID, now.UTC())
+	if !ok {
+		return CollectRequest{}, false
+	}
+	return cloneCollectRequest(entry.request), true
 }
 
-// PendingRequestID 返回需要随 sync plan 下发的请求 ID，并把请求标记为已下发。
 func (c *CollectRequests) PendingRequestID(monitoringInstanceID string, now time.Time) string {
 	now = now.UTC()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	current, ok := c.currentLocked(monitoringInstanceID, now)
-	if !ok || !current.Active() {
+	entry, ok := c.currentLocked(monitoringInstanceID, now)
+	if !ok || !entry.request.Active() {
 		return ""
 	}
-	if current.Status == CollectRequestPending {
-		dispatchedAt := now
-		current.Status = CollectRequestDispatched
-		current.DispatchedAt = &dispatchedAt
-		c.entries[monitoringInstanceID] = current
+	if entry.request.Status == CollectRequestPending {
+		entry.request.Status = CollectRequestDispatched
+		entry.request.DispatchedAt = &now
 	}
-	return current.RequestID
+	return entry.request.RequestID
 }
 
-// ObserveReports 用已入库、且在 diagnostics_json 中带回同一请求 ID 的报告完成请求。
+// ObserveReports is called only after a recorded sync transaction. Apply the
+// entire batch before selecting a complete group, so batch order cannot choose
+// an older collection. Partial groups never combine across collection IDs.
 func (c *CollectRequests) ObserveReports(monitoringInstanceID string, reports []ReportWrite, now time.Time) {
 	now = now.UTC()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	current, ok := c.currentLocked(monitoringInstanceID, now)
-	if !ok || !current.Active() {
+	entry, ok := c.currentLocked(monitoringInstanceID, now)
+	if !ok || !entry.request.Active() {
 		return
 	}
-	for _, report := range reports {
-		if report.CollectRequestID == "" || report.CollectRequestID != current.RequestID {
+	var legacy *ReportWrite
+	for i := range reports {
+		report := &reports[i]
+		metadata := report.CollectionMetadata
+		if metadata.CollectRequestID == "" || metadata.CollectRequestID != entry.request.RequestID ||
+			(report.MonitoringInstanceID != "" && report.MonitoringInstanceID != monitoringInstanceID) {
 			continue
 		}
-		completedAt := now
-		current.Status = CollectRequestCompleted
-		current.CompletedAt = &completedAt
-		current.ReportStatus = report.Status
-		current.ErrorSummary = truncateRunes(strings.TrimSpace(report.ErrorSummary), maxCollectErrorSummaryRunes)
-		c.entries[monitoringInstanceID] = current
+		if !metadata.Paired {
+			if terminalReportStatus(report.Status) && (report.IPVersion == 4 || report.IPVersion == 6) &&
+				(legacy == nil || report.ObservedAt.After(legacy.ObservedAt)) {
+				legacy = report
+			}
+			continue
+		}
+		if !validPairedReport(*report) {
+			continue
+		}
+		if entry.groups == nil {
+			entry.groups = make(map[string]*collectGroup)
+		}
+		group := entry.groups[metadata.CollectionID]
+		if group == nil {
+			group = &collectGroup{id: metadata.CollectionID, observedAt: report.ObservedAt}
+			entry.groups[group.id] = group
+		}
+		if !group.observedAt.Equal(report.ObservedAt) {
+			continue
+		}
+		index := (report.IPVersion - 4) / 2
+		if group.families[index] == nil {
+			group.families[index] = &CollectFamilyResult{
+				IPVersion:    report.IPVersion,
+				Availability: metadata.Availability,
+				ReportStatus: report.Status,
+				ErrorCode:    SafeCollectErrorCode(report.ErrorCode),
+			}
+		}
+	}
+	var newest, complete *collectGroup
+	for _, group := range entry.groups {
+		if group.newerThan(newest) {
+			newest = group
+		}
+		if group.complete() && group.newerThan(complete) {
+			complete = group
+		}
+	}
+	if complete != nil {
+		projectCollectGroup(&entry.request, complete)
+		entry.request.ReportStatus = aggregateCollectStatus(complete.families)
+		// Never publish agent-provided error text for a paired request.
+		if entry.request.ReportStatus != "success" {
+			entry.request.ErrorSummary = "one or more IP families did not complete successfully"
+		}
+		completeCollectRequest(entry, now)
 		return
+	}
+	if legacy != nil {
+		entry.request.CollectionScope = CollectScopeLegacySingleFamily
+		entry.request.CollectionID = ""
+		entry.request.FamilyResults = []CollectFamilyResult{{
+			IPVersion: legacy.IPVersion, Availability: agentapi.IPQualityFamilyUnknown,
+			ReportStatus: legacy.Status, ErrorCode: SafeCollectErrorCode(legacy.ErrorCode),
+		}}
+		entry.request.ReportStatus = legacy.Status
+		entry.request.ErrorSummary = truncateRunes(strings.TrimSpace(legacy.ErrorSummary), maxCollectErrorSummaryRunes)
+		completeCollectRequest(entry, now)
+		return
+	}
+	if newest != nil {
+		projectCollectGroup(&entry.request, newest)
 	}
 }
 
-func (c *CollectRequests) currentLocked(monitoringInstanceID string, now time.Time) (CollectRequest, bool) {
-	current, ok := c.entries[monitoringInstanceID]
+func validPairedReport(report ReportWrite) bool {
+	metadata := report.CollectionMetadata
+	if !metadata.Valid || metadata.IPVersion != report.IPVersion || report.ObservedAt.IsZero() || !terminalReportStatus(report.Status) {
+		return false
+	}
+	address, err := netip.ParseAddr(report.IPAddress)
+	if err != nil || address.Zone() != "" || (address.Is4() && report.IPVersion != 4) || (address.Is6() && report.IPVersion != 6) {
+		return false
+	}
+	if metadata.Availability == agentapi.IPQualityFamilyUnavailable {
+		return address.IsUnspecified() && report.Status == "failure" && report.ErrorCode == "address_family_unavailable"
+	}
+	if address.IsUnspecified() {
+		return report.Status == "failure" && report.ErrorCode == "lookup_failed"
+	}
+	if report.Status != "failure" && metadata.Availability != agentapi.IPQualityFamilyAvailable {
+		return false
+	}
+	return report.ErrorCode != "address_family_unavailable" && report.ErrorCode != "lookup_failed" && address.IsGlobalUnicast()
+}
+
+func terminalReportStatus(status string) bool {
+	return status == "success" || status == "partial" || status == "failure"
+}
+
+func aggregateCollectStatus(families [2]*CollectFamilyResult) string {
+	usable, valid, allSuccess := 0, 0, true
+	for _, family := range families {
+		if family.Availability == agentapi.IPQualityFamilyUnavailable {
+			continue
+		}
+		usable++
+		if family.ReportStatus == "success" || family.ReportStatus == "partial" {
+			valid++
+		}
+		allSuccess = allSuccess && family.ReportStatus == "success"
+	}
+	if usable > 0 && allSuccess {
+		return "success"
+	}
+	if valid > 0 {
+		return "partial"
+	}
+	return "failure"
+}
+
+// SafeCollectErrorCode projects only fixed diagnostic codes into public responses.
+// Unknown values are omitted rather than exposing arbitrary agent-provided text.
+func SafeCollectErrorCode(code string) string {
+	switch code {
+	case "address_family_unavailable", "lookup_failed", "disabled", "ip_mismatch", "egress_ambiguous",
+		"provider_partial", "service_partial", "probe_failed", "non_json_response", "http_status",
+		"dns_failed", "connection_refused", "network_unreachable", "tls_failed", "timeout", "request_failed":
+		return code
+	default:
+		return ""
+	}
+}
+
+func projectCollectGroup(request *CollectRequest, group *collectGroup) {
+	request.CollectionScope = CollectScopeDualStack
+	request.CollectionID = group.id
+	request.FamilyResults = make([]CollectFamilyResult, 0, 2)
+	for _, family := range group.families {
+		if family != nil {
+			request.FamilyResults = append(request.FamilyResults, *family)
+		}
+	}
+}
+
+func completeCollectRequest(entry *collectEntry, now time.Time) {
+	entry.request.Status = CollectRequestCompleted
+	entry.request.CompletedAt = &now
+	entry.groups = nil
+}
+
+func cloneCollectRequest(request CollectRequest) CollectRequest {
+	request.FamilyResults = append([]CollectFamilyResult(nil), request.FamilyResults...)
+	if request.DispatchedAt != nil {
+		value := *request.DispatchedAt
+		request.DispatchedAt = &value
+	}
+	if request.CompletedAt != nil {
+		value := *request.CompletedAt
+		request.CompletedAt = &value
+	}
+	return request
+}
+
+func (c *CollectRequests) currentLocked(monitoringInstanceID string, now time.Time) (*collectEntry, bool) {
+	c.pruneLocked(now)
+	entry, ok := c.entries[monitoringInstanceID]
 	if !ok {
-		return CollectRequest{}, false
+		return nil, false
 	}
-	if current.Active() && !now.Before(current.ExpiresAt) {
-		current.Status = CollectRequestExpired
-		c.entries[monitoringInstanceID] = current
+	if entry.request.Active() && !now.Before(entry.request.ExpiresAt) {
+		entry.request.Status = CollectRequestExpired
+		entry.groups = nil
 	}
-	return current, true
+	return entry, true
 }
 
 func (c *CollectRequests) pruneLocked(now time.Time) {
 	for key, entry := range c.entries {
-		// 保留期长于 TTL，超过保留期的请求必然已完成或过期。
-		if now.Sub(entry.RequestedAt) > collectRequestRetention {
+		if now.Sub(entry.request.RequestedAt) > collectRequestRetention {
 			delete(c.entries, key)
 		}
 	}
-}
-
-// CollectRequestIDFromDiagnostics 从 agent 原始 diagnostics_json 读取回传的请求 ID；
-// 非对象、缺失、超长或含非法字符时返回空串。
-func CollectRequestIDFromDiagnostics(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
-		return ""
-	}
-	var value string
-	if err := json.Unmarshal(fields[agentapi.IPQualityDiagnosticsCollectRequestIDKey], &value); err != nil {
-		return ""
-	}
-	value = strings.TrimSpace(value)
-	if value == "" || len(value) > maxCollectRequestIDLength {
-		return ""
-	}
-	for _, r := range value {
-		if !(r == '_' || r == '-' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
-			return ""
-		}
-	}
-	return value
 }
 
 func truncateRunes(value string, limit int) string {

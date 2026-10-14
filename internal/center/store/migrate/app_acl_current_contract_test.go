@@ -77,6 +77,30 @@ func TestSettingsDeploymentOverridesAppACLFragmentIsEmpty(t *testing.T) {
 	}
 }
 
+func TestIPQualityAddressFamiliesAppACLFragment(t *testing.T) {
+	fragment := ipQualityAddressFamiliesAppACLCurrentMigrationFragment()
+	if fragment.Migration != "0076_ip_quality_address_families.sql" {
+		t.Fatalf("fragment migration = %q, want 0076", fragment.Migration)
+	}
+	wantObject := AppACLManagedObjectR1{
+		ObjectClass: AppACLObjectClassView, SchemaName: "public",
+		ObjectIdentity: "ip_quality_vps_family_state",
+	}
+	if !reflect.DeepEqual(fragment.Objects, []AppACLManagedObjectR1{wantObject}) ||
+		len(fragment.Functions) != 0 || len(fragment.AuxiliaryPrivileges) != 0 {
+		t.Fatalf("0076 must manage only the family-state view: %#v", fragment)
+	}
+	want := []AppACLPrivilege{{
+		Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassView,
+		SchemaName: "public", ObjectIdentity: "ip_quality_vps_family_state", Privilege: AppACLPrivilegeSelect,
+	}}
+	for _, database := range []string{"houfeng", "other_database"} {
+		if got := fragment.Privileges(database); !reflect.DeepEqual(got, want) {
+			t.Fatalf("0076 privileges = %#v, want only runtime SELECT", got)
+		}
+	}
+}
+
 func TestCompileAppACLCurrentSourceContractRejectsMissingFutureFragment(t *testing.T) {
 	fsys := appACLCurrentTestMigrationFS(t)
 	fsys["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}
@@ -571,26 +595,26 @@ func appACLCurrentCatalogTestExtension() (
 	AppACLCurrentFunctionContract,
 ) {
 	return AppACLManagedObjectR1{
-			ObjectClass:    AppACLObjectClassTable,
-			SchemaName:     "public",
-			ObjectIdentity: "future_records",
-		}, AppACLManagedObjectR1{
-			ObjectClass:    AppACLObjectClassFunction,
-			SchemaName:     "public",
-			ObjectIdentity: "future_function()",
-		}, AppACLPrivilege{
-			Subject:        AppACLSubjectCenterRuntime,
-			ObjectClass:    AppACLObjectClassTable,
-			SchemaName:     "public",
-			ObjectIdentity: "future_records",
-			Privilege:      AppACLPrivilegeSelect,
-		}, AppACLCurrentFunctionContract{
-			SchemaName:      "public",
-			Identity:        "future_function()",
-			Kind:            "f",
-			SecurityDefiner: true,
-			Config:          []string{"search_path=pg_catalog"},
-		}
+		ObjectClass:    AppACLObjectClassTable,
+		SchemaName:     "public",
+		ObjectIdentity: "future_records",
+	}, AppACLManagedObjectR1{
+		ObjectClass:    AppACLObjectClassFunction,
+		SchemaName:     "public",
+		ObjectIdentity: "future_function()",
+	}, AppACLPrivilege{
+		Subject:        AppACLSubjectCenterRuntime,
+		ObjectClass:    AppACLObjectClassTable,
+		SchemaName:     "public",
+		ObjectIdentity: "future_records",
+		Privilege:      AppACLPrivilegeSelect,
+	}, AppACLCurrentFunctionContract{
+		SchemaName:      "public",
+		Identity:        "future_function()",
+		Kind:            "f",
+		SecurityDefiner: true,
+		Config:          []string{"search_path=pg_catalog"},
+	}
 }
 
 func appACLCurrentTestSourceContract(t *testing.T, fragments []AppACLCurrentMigrationFragment) appACLCurrentSourceContract {

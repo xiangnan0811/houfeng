@@ -38,6 +38,17 @@ const summary: IPQualitySummary = {
 
 function report(overrides: Partial<VPSIPQualityReport> = {}): VPSIPQualityReport {
   return {
+    selected_ip_version: 4,
+    default_ip_version: 4,
+    families: [
+      {
+        ip_version: 4,
+        availability: 'available',
+        latest_attempt: { observed_at: '2026-06-08T12:00:00Z', stale: false, report_status: 'success', collection_scope: 'dual_stack', collection_id: 'col_001' },
+        latest_report_summary: summary,
+      },
+      { ip_version: 6, availability: 'unknown', latest_attempt: null, latest_report_summary: null },
+    ],
     summary,
     latest_report: {
       report_id: 'ipq_001',
@@ -98,14 +109,34 @@ function controller(overrides: Partial<IPQualityCollectController> = {}, status:
 
 function renderDashboard(
   body: VPSIPQualityReport,
-  { collect = controller(), initialEntry = '/vps/vps_001/ip-quality' }: { collect?: IPQualityCollectController, initialEntry?: string } = {},
+  {
+    collect = controller(),
+    initialEntry = '/vps/vps_001/ip-quality',
+    refreshState = 'idle',
+    onSelectFamily = vi.fn(),
+  }: {
+    collect?: IPQualityCollectController
+    initialEntry?: string
+    refreshState?: 'idle' | 'refreshing' | 'failed'
+    onSelectFamily?: (next: 4 | 6) => void
+  } = {},
 ) {
+  const viewingHistory = new URL(initialEntry, 'http://local').searchParams.has('report_id')
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route
           path="/vps/:vpsId/ip-quality"
-          element={<IPQualityDashboard report={body} summary={body.summary!} detailPath="/vps/vps_001" collect={collect} />}
+          element={(
+            <IPQualityDashboard
+              view={{ kind: 'report', report: body, summary: body.summary! }}
+              detailPath="/vps/vps_001"
+              collect={collect}
+              viewingHistory={viewingHistory}
+              refreshState={refreshState}
+              onSelectFamily={onSelectFamily}
+            />
+          )}
         />
       </Routes>
     </MemoryRouter>,
@@ -143,8 +174,10 @@ describe('IPQualityDashboard', () => {
     expect(signals).toHaveTextContent('高风险来源：ipinfo')
     // 失败来源 fraud-check 的 proxy 字段不能进入结论。
     expect(signals).not.toHaveTextContent('Proxy')
-    expect(within(metrics).getByText('服务解锁').nextElementSibling).toHaveTextContent('1/2')
-    expect(within(metrics).getByText('服务解锁').nextElementSibling).toHaveTextContent('1 受阻 · 1 未知')
+    // 分母是 coverage 的完整 4 项服务；未返回行的服务计为未知，不算受阻。
+    const serviceMetric = within(metrics).getByText('服务解锁').nextElementSibling as HTMLElement
+    expect(serviceMetric.querySelector('strong')).toHaveTextContent('1/4 解锁')
+    expect(serviceMetric).toHaveTextContent('1 受阻 · 2 未知')
   })
 
   it('shows services with status and region without internal probe fields', () => {
@@ -222,12 +255,12 @@ describe('IPQualityDashboard', () => {
     fireEvent.click(within(section).getByRole('button', { name: '显示全部 7 份' }))
     const links = within(section).getAllByRole('link', { name: /^查看 .* 的报告$/ })
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
-      '/vps/vps_001/ip-quality?report_id=ipq_000',
-      '/vps/vps_001/ip-quality?report_id=ipq_002',
-      '/vps/vps_001/ip-quality?report_id=ipq_003',
-      '/vps/vps_001/ip-quality?report_id=ipq_004',
-      '/vps/vps_001/ip-quality?report_id=ipq_005',
-      '/vps/vps_001/ip-quality?report_id=ipq_006',
+      '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_000',
+      '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_002',
+      '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_003',
+      '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_004',
+      '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_005',
+      '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_006',
     ])
     expect(within(section).getByRole('button', { name: '收起' })).toHaveAttribute('aria-expanded', 'true')
   })
@@ -421,11 +454,12 @@ describe('IPQualityDashboard', () => {
     renderDashboard(report(), { initialEntry: '/vps/vps_001/ip-quality?report_id=ipq_000' })
 
     expect(screen.getByText('历史报告', { selector: '.badge' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看最新报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality')
+    // 回到该历史报告所属族的最新报告。
+    expect(screen.getByRole('link', { name: '查看最新报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality?ip_version=4')
     expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
   })
 
-  it('reports incomplete risk evidence without a clean or green low verdict', () => {
+  it('reports incomplete low risk evidence as an evidence gap without a clean or green verdict', () => {
     renderDashboard(report({
       summary: { ...summary, risk_level: 'low' },
       provider_results: [{
@@ -442,14 +476,25 @@ describe('IPQualityDashboard', () => {
 
     const verdict = screen.getByLabelText('数据库风险评级')
     expect(verdict).not.toHaveClass('ipq-verdict--normal')
-    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('低风险')
+    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('证据不完整')
     expect(within(verdict).getByText('已返回来源：低风险')).toBeInTheDocument()
-    expect(within(verdict).getByText('风险字段 4/5，结论不完整', { selector: '.ipq-verdict__scope' })).toBeInTheDocument()
+    expect(within(verdict).getByText('风险字段 4/5', { selector: '.ipq-verdict__scope' })).toBeInTheDocument()
     const metrics = screen.getByLabelText('IP 质量摘要指标')
     expect(within(metrics).getByText('风险信号').nextElementSibling?.querySelector('strong')).toHaveTextContent('未知')
     const providers = screen.getByRole('heading', { name: 'IP 数据库判断' }).closest('section') as HTMLElement
     expect(within(providers).getByLabelText('风险信号命中')).toHaveTextContent('风险字段不完整')
     expect(screen.queryByText(/已返回风险字段未命中|未发现代理/)).not.toBeInTheDocument()
+  })
+
+  it('keeps a found medium level visible while flagging missing risk fields', () => {
+    renderDashboard(report({
+      provider_results: [{ provider: 'mid-db', status: 'success', source_type: 'default', risk_level: 'medium', is_vpn: false }],
+    }))
+
+    const verdict = screen.getByLabelText('数据库风险评级')
+    expect(verdict).toHaveClass('ipq-verdict--notice')
+    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('中风险')
+    expect(within(verdict).getByText('风险字段 1/5，结论不完整', { selector: '.ipq-verdict__scope' })).toBeInTheDocument()
   })
 
   it('states that returned risk fields did not hit only when all five are present', () => {
@@ -621,20 +666,24 @@ describe('IPQualityDashboard', () => {
     expect(within(services).queryByText(/catalog_sample|anonymous_web/)).not.toBeInTheDocument()
 
     const metrics = screen.getByLabelText('IP 质量摘要指标')
-    expect(within(metrics).getByText('服务可用性').nextElementSibling).toHaveTextContent('1/3')
-    expect(within(metrics).getByText('服务可用性').nextElementSibling).toHaveTextContent('1 受限 · 1 未知')
-    const providerCoverage = within(metrics).getByText('已启用来源成功率').nextElementSibling as HTMLElement
+    // 2 个分母外的未返回服务也计为未知：1/7 可用，partial 与 unknown 分列。
+    const serviceMetric = within(metrics).getByText('服务可用性').nextElementSibling as HTMLElement
+    expect(serviceMetric.querySelector('strong')).toHaveTextContent('1/7 可用')
+    expect(serviceMetric).toHaveTextContent('1 部分可用 · 1 受限 · 4 未知')
+    const providerCoverage = within(metrics).getByText('已启用来源响应成功率').nextElementSibling as HTMLElement
     expect(providerCoverage.querySelector('strong')).toHaveTextContent('100%')
-    expect(providerCoverage).toHaveTextContent('成功 5/5 · 未配置 13')
-    expect(providerCoverage).toHaveTextContent('服务探测 86%')
+    expect(providerCoverage).toHaveTextContent('响应成功 5/5')
+    // 未接入数量只放诊断，不进入摘要指标。
+    expect(providerCoverage).not.toHaveTextContent('13')
+    expect(within(metrics).getByText('已知字段一致性')).toBeInTheDocument()
 
     const providers = screen.getByRole('heading', { name: 'IP 数据库判断' }).closest('section') as HTMLElement
     expect(within(providers).getByText('ipwho.is').closest('td')).toHaveTextContent('该来源本次仅返回地理信息')
 
     const diagnostics = screen.getByLabelText('采集诊断')
-    expect(within(diagnostics).getByText(/个来源 · 4 项服务探测/)).toHaveTextContent('失败 1 · 未配置 1')
-    expect(within(diagnostics).getByText('来源覆盖（全部）').nextElementSibling).toHaveTextContent('成功 5/18 · 失败 0 · 跳过 0 · 未配置 13')
-    expect(within(diagnostics).getByText('服务覆盖').nextElementSibling).toHaveTextContent('成功 6/7 · 失败 1 · 跳过 0 · 未配置 0')
+    expect(within(diagnostics).getByText(/个来源 · 4 项服务探测/)).toHaveTextContent('失败 1 · 未接入 1')
+    expect(within(diagnostics).getByText('来源覆盖（全部）').nextElementSibling).toHaveTextContent('成功 5/18 · 失败 0 · 跳过 0 · 未接入 13')
+    expect(within(diagnostics).getByText('服务覆盖').nextElementSibling).toHaveTextContent('成功 6/7 · 失败 1 · 跳过 0 · 未接入 0')
   })
 
   it('renders probe credibility notice for legacy default report without revision', () => {
@@ -655,7 +704,7 @@ describe('IPQualityDashboard', () => {
     expect(within(services).getByText('受阻')).toBeInTheDocument()
   })
 
-  it('renders the disabled-probe notice and 0% service coverage for a revision 1 default report with skipped probes', () => {
+  it('renders the disabled-probe notice and a full-denominator service count for a revision 1 default report with skipped probes', () => {
     const skippedReport = report({
       summary: {
         ...summary,
@@ -696,7 +745,9 @@ describe('IPQualityDashboard', () => {
     expect(notice).toHaveTextContent('已停用')
 
     const metrics = screen.getByLabelText('IP 质量摘要指标')
-    expect(within(metrics).getByText('已启用来源成功率').nextElementSibling).toHaveTextContent('服务探测 0%')
+    const serviceMetric = within(metrics).getByText('服务解锁').nextElementSibling as HTMLElement
+    expect(serviceMetric.querySelector('strong')).toHaveTextContent('0/7 解锁')
+    expect(serviceMetric).toHaveTextContent('7 未知')
     expect(screen.getByRole('heading', { name: '服务解锁' })).toBeInTheDocument()
   })
 
@@ -804,7 +855,7 @@ describe('IPQualityDashboard', () => {
     expect(within(services).queryByText('service response did not establish a business conclusion')).not.toBeInTheDocument()
   })
 
-  it('renders em dashes for provider and service coverage when coverage is missing even with multiple rows', () => {
+  it('keeps status counts without a fabricated ratio when coverage is missing even with multiple rows', () => {
     const reportWithoutCoverage = report({
       summary: { ...summary },
       latest_report: { ...report().latest_report! },
@@ -815,10 +866,82 @@ describe('IPQualityDashboard', () => {
     renderDashboard(reportWithoutCoverage)
 
     const metrics = screen.getByLabelText('IP 质量摘要指标')
-    const integrity = within(metrics).getByText('已启用来源成功率').nextElementSibling as HTMLElement
+    const integrity = within(metrics).getByText('已启用来源响应成功率').nextElementSibling as HTMLElement
     expect(integrity.querySelector('strong')).toHaveTextContent('—')
     expect(integrity).toHaveTextContent('暂无有效覆盖数据')
-    expect(integrity).toHaveTextContent('服务探测 —')
+    const serviceMetric = within(metrics).getByText('服务解锁').nextElementSibling as HTMLElement
+    expect(serviceMetric.querySelector('strong')).toHaveTextContent('1 解锁')
+    expect(serviceMetric.querySelector('strong')).not.toHaveTextContent('/')
+    expect(serviceMetric).toHaveTextContent('1 受阻 · 1 未知')
+  })
+
+  it('shows trusted revision 3 page geography and endpoint diagnostics without changing service status', () => {
+    const youtubeExtra = {
+      probe_revision: 3,
+      evidence_kind: 'anonymous_service_probe',
+      ip_version: 6,
+      observed_region: 'CN',
+      region_evidence: 'youtube_content_region',
+      http_status: 200,
+      endpoints: [{ endpoint: 'premium', http_status: 200, error_code: 'invalid_response', outcome: 'unknown' }],
+    }
+    const ipv6Report = (family: 4 | 6) => report({
+      selected_ip_version: family,
+      summary: { ...summary, ip_address: '2001:db8::10', ip_version: family },
+      latest_report: {
+        ...report().latest_report!,
+        ip_address: '2001:db8::10',
+        ip_version: family,
+        diagnostics_json: { source_version: 'v2', service_probe_revision: 3 },
+      },
+      service_unlocks: [
+        { service: 'youtube-premium', source: 'youtube_premium_page_probe', status: 'unknown', probe_status: 'failure', region: 'US', error_code: 'invalid_response', extra_json: youtubeExtra },
+        {
+          service: 'chatgpt', source: 'openai_status_probe', status: 'partial', probe_status: 'success', unlock_type: 'web_verified_app_unknown',
+          extra_json: {
+            probe_revision: 3, evidence_kind: 'anonymous_service_probe', ip_version: 6,
+            endpoints: [
+              { endpoint: 'web_cookie_requirements', http_status: 200, matched_rule: 'openai_cookie_requirements', outcome: 'available' },
+              { endpoint: 'app_home', error_code: 'network_unreachable', outcome: 'unknown' },
+            ],
+          },
+        },
+        { service: 'reddit', source: 'reddit_home_probe', status: 'unknown', probe_status: 'failure', error_code: 'http_status', error_summary: 'service returned an unsuccessful HTTP status', extra_json: { probe_revision: 3, evidence_kind: 'anonymous_service_probe', ip_version: 6, http_status: 403, endpoints: [{ endpoint: 'anonymous_chat', http_status: 403, error_code: 'http_status', outcome: 'unknown' }] } },
+      ],
+    })
+
+    const { unmount } = renderDashboard(ipv6Report(6))
+    expect(screen.getByRole('note', { name: '服务探测可信度' })).toHaveClass('ipq-notice--muted')
+    const services = screen.getByRole('heading', { name: '服务可用性（免登录探测）' }).closest('section') as HTMLElement
+    const youtube = within(services).getByText('YouTube Premium').closest('li') as HTMLElement
+    expect(youtube).toHaveClass('ipq-service--unknown')
+    expect(within(youtube).getByText('未知')).toBeInTheDocument()
+    expect(within(youtube).getByLabelText('YouTube Premium 附加证据')).toHaveTextContent('页面地区：CN；Premium 可用性未知')
+    // 残留 normalized region 不进入卡片。
+    expect(youtube).not.toHaveTextContent('US')
+    expect(within(services).getByLabelText('服务状态统计')).toHaveTextContent('0 可用0 受限1 部分可用2 未知')
+    const reddit = within(services).getByText('Reddit').closest('li') as HTMLElement
+    expect(reddit).toHaveTextContent('服务拒绝了探测请求（HTTP 403）')
+    expect(within(services).getByText('ChatGPT').closest('li')).toHaveTextContent('服务地区未知')
+
+    const diagnostics = screen.getByLabelText('采集诊断')
+    const chatgptRow = within(diagnostics).getByText('openai_status_probe').closest('tr') as HTMLElement
+    expect(chatgptRow).toHaveTextContent('web_cookie_requirements · HTTP 200 · 可用 · openai_cookie_requirements')
+    expect(chatgptRow).toHaveTextContent('app_home · 未知 · 网络不可达')
+    unmount()
+
+    // 证据族与所选报告族不一致时不展示页面地区。
+    renderDashboard(ipv6Report(4))
+    const mismatched = within(screen.getByRole('heading', { name: '服务可用性（免登录探测）' }).closest('section') as HTMLElement)
+      .getByText('YouTube Premium').closest('li') as HTMLElement
+    expect(mismatched).not.toHaveTextContent('页面地区')
+  })
+
+  it('labels the untested Netflix connection method without inventing native or DNS unlock', () => {
+    renderDashboard(report())
+    const netflix = screen.getByText('Netflix', { selector: '.ipq-service__name' }).closest('li') as HTMLElement
+    expect(netflix).toHaveTextContent('连接方式未检测')
+    expect(netflix).not.toHaveTextContent(/原生|DNS/)
   })
 
   it('renders generic notice when report lacks service probe source information', () => {
@@ -850,5 +973,147 @@ describe('IPQualityDashboard', () => {
     }))
 
     expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
+  })
+
+  describe('dual-stack collection completion and family state', () => {
+    type Request = NonNullable<IPQualityCollectStatus['request']>
+    function completedCollect(familyResults: NonNullable<Request['family_results']> | null, extra: Partial<Request> = {}) {
+      const request: Request = {
+        request_id: 'ipqc_dual',
+        monitoring_instance_id: 'mi_001',
+        status: 'completed',
+        requested_at: new Date(Date.now() - 30_000).toISOString(),
+        expires_at: new Date(Date.now() + 500_000).toISOString(),
+        report_status: 'partial',
+        collection_scope: 'dual_stack',
+        collection_id: 'col_new',
+        ...(familyResults ? { family_results: familyResults } : {}),
+        ...extra,
+      }
+      return controller({ watchedRequestId: 'ipqc_dual' }, { enabled: true, available: true, request })
+    }
+    const ipv4FailedIPv6Ok = [
+      { ip_version: 4 as const, availability: 'available', report_status: 'failure', error_code: 'lookup_failed' },
+      { ip_version: 6 as const, availability: 'available', report_status: 'success' },
+    ]
+    const withCollection = (collectionID: string, patch: Partial<VPSIPQualityReport> = {}) => {
+      const base = report(patch)
+      return { ...base, latest_report: { ...base.latest_report!, diagnostics_json: { source_version: 'v2', collection_id: collectionID } } }
+    }
+
+    it('keeps the previous IPv4 result and reports the IPv4 failure instead of an update', () => {
+      renderDashboard(withCollection('col_old', {
+        families: [
+          { ip_version: 4, availability: 'available', latest_attempt: { observed_at: '2026-06-09T12:00:00Z', stale: false, report_status: 'failure', error_code: 'lookup_failed', collection_scope: 'dual_stack', collection_id: 'col_new' }, latest_report_summary: summary },
+          { ip_version: 6, availability: 'available', latest_attempt: null, latest_report_summary: null },
+        ],
+      }), { collect: completedCollect(ipv4FailedIPv6Ok) })
+
+      const status = screen.getByRole('status', { name: 'IP 质量采集状态' })
+      expect(status).toHaveTextContent('本轮 IPv4 采集失败')
+      expect(status).toHaveTextContent('IPv4 出口探测失败')
+      expect(status).not.toHaveTextContent('报告已更新')
+      const family = screen.getByRole('note', { name: '地址族采集状态' })
+      expect(family).toHaveTextContent('IPv4 出口探测失败')
+      expect(family).toHaveTextContent('以下为上次有效结果')
+      // 失败尝试不进入事实：身份仍是上次有效 IPv4 出口。
+      expect(screen.getByLabelText('报告身份')).toHaveTextContent('192.0.2.1 · IPv4')
+    })
+
+    it('announces an update only for the selected family when the shown report belongs to the completed round', () => {
+      const ipv6Summary = { ...summary, report_id: 'ipq_v6', ip_address: '2001:db8::10', ip_version: 6 }
+      const ipv6 = withCollection('col_new', {
+        selected_ip_version: 6,
+        summary: ipv6Summary,
+        history: [ipv6Summary],
+      })
+      ipv6.latest_report = { ...ipv6.latest_report!, report_id: 'ipq_v6', ip_address: '2001:db8::10', ip_version: 6 }
+      const { unmount } = renderDashboard(ipv6, { collect: completedCollect(ipv4FailedIPv6Ok) })
+      expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('采集完成，报告已更新')
+      // IPv6 视图不出现 IPv4 出口。
+      expect(document.querySelector('.ipq-page')).not.toHaveTextContent('192.0.2.1')
+      unmount()
+
+      // 刷新进行中或失败时不能宣称已更新；展示的报告不是本轮结果时也不能。
+      for (const [refreshState, text] of [['refreshing', '正在刷新报告'], ['failed', '刷新失败']] as const) {
+        const rendered = renderDashboard(ipv6, { collect: completedCollect(ipv4FailedIPv6Ok), refreshState })
+        expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent(text)
+        expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).not.toHaveTextContent('报告已更新')
+        rendered.unmount()
+      }
+      renderDashboard({ ...ipv6, latest_report: { ...ipv6.latest_report!, diagnostics_json: { source_version: 'v2', collection_id: 'col_old' } } }, { collect: completedCollect(ipv4FailedIPv6Ok) })
+      expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).not.toHaveTextContent('报告已更新')
+    })
+
+    it('keeps a history view on history when the round completes', () => {
+      renderDashboard(withCollection('col_new'), {
+        collect: completedCollect([{ ip_version: 4, availability: 'available', report_status: 'success' }, { ip_version: 6, availability: 'unavailable', report_status: 'failure', error_code: 'address_family_unavailable' }]),
+        initialEntry: '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_000',
+      })
+      const status = screen.getByRole('status', { name: 'IP 质量采集状态' })
+      expect(status).toHaveTextContent('历史')
+      expect(status).not.toHaveTextContent('报告已更新')
+      expect(screen.queryByRole('note', { name: '地址族采集状态' })).not.toBeInTheDocument()
+    })
+
+    it('explains a missing family and legacy single-family rounds without claiming dual-stack verification', () => {
+      const v6Unavailable = [
+        { ip_version: 4 as const, availability: 'available', report_status: 'success' },
+        { ip_version: 6 as const, availability: 'unavailable', report_status: 'failure', error_code: 'address_family_unavailable' },
+      ]
+      const ipv6Empty = { ...report({ selected_ip_version: 6, summary: null, latest_report: null, provider_results: [], service_unlocks: [], history: [] }) }
+      const { unmount } = render(
+        <MemoryRouter initialEntries={['/vps/vps_001/ip-quality?ip_version=6']}>
+          <Routes>
+            <Route
+              path="/vps/:vpsId/ip-quality"
+              element={<IPQualityDashboard view={{ kind: 'empty', report: { ...ipv6Empty, families: [ipv6Empty.families[0]!, { ip_version: 6, availability: 'unavailable', latest_attempt: { observed_at: '2026-06-09T12:00:00Z', stale: false, report_status: 'failure', error_code: 'address_family_unavailable', collection_scope: 'dual_stack', collection_id: 'col_new' }, latest_report_summary: null }] }, ipVersion: 6 }} detailPath="/vps/vps_001" collect={completedCollect(v6Unavailable)} viewingHistory={false} refreshState="idle" onSelectFamily={vi.fn()} />}
+            />
+          </Routes>
+        </MemoryRouter>,
+      )
+      expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('本轮未检测到 IPv6 可用本地地址')
+      expect(screen.getByRole('note', { name: '地址族采集状态' })).toHaveTextContent('本轮未检测到 IPv6 可用本地地址')
+      expect(screen.queryByLabelText('报告身份')).not.toBeInTheDocument()
+      expect(screen.queryByLabelText('数据库风险评级')).not.toBeInTheDocument()
+      expect(document.querySelector('.ipq-page')).not.toHaveTextContent(/0\.0\.0\.0|192\.0\.2\.1/)
+      // 缺族仍可切换。
+      expect(screen.getByRole('button', { name: 'IPv4' })).toHaveAttribute('aria-pressed', 'false')
+      expect(screen.getByRole('button', { name: 'IPv6' })).toHaveAttribute('aria-pressed', 'true')
+      unmount()
+
+      const legacyCollect = completedCollect(null, { collection_scope: 'legacy_single_family', report_status: 'success' })
+      delete legacyCollect.status!.request!.collection_id
+      renderDashboard(report({
+        latest_report: { ...report().latest_report!, diagnostics_json: { source_version: 'v2', collect_request_id: 'ipqc_dual' } },
+      }), { collect: legacyCollect })
+      const status = screen.getByRole('status', { name: 'IP 质量采集状态' })
+      expect(status).toHaveTextContent('采集完成，报告已更新')
+      expect(status).toHaveTextContent('本次仅收到单地址族报告，未验证另一地址族')
+    })
+
+    it('marks a stale unavailable attempt as expired instead of a current missing family', () => {
+      renderDashboard(report({
+        families: [
+          { ip_version: 4, availability: 'unavailable', latest_attempt: { observed_at: '2026-05-01T12:00:00Z', stale: true, report_status: 'failure', error_code: 'address_family_unavailable', collection_scope: 'dual_stack', collection_id: 'col_old' }, latest_report_summary: summary },
+          { ip_version: 6, availability: 'unknown', latest_attempt: null, latest_report_summary: null },
+        ],
+      }))
+      const family = screen.getByRole('note', { name: '地址族采集状态' })
+      expect(family).toHaveTextContent('已过期')
+      expect(family).not.toHaveTextContent('本轮未检测到')
+    })
+
+    it('switches family through the selector without starting a collection', () => {
+      const onSelectFamily = vi.fn()
+      const collect = controller()
+      renderDashboard(report(), { onSelectFamily, collect })
+      const group = screen.getByRole('group', { name: 'IP 地址族' })
+      expect(within(group).getByRole('button', { name: 'IPv4' })).toHaveAttribute('aria-pressed', 'true')
+      fireEvent.click(within(group).getByRole('button', { name: 'IPv6' }))
+      expect(onSelectFamily).toHaveBeenCalledWith(6)
+      expect(collect.start).not.toHaveBeenCalled()
+      expect(screen.getByText('分别检测 IPv4 / IPv6')).toBeInTheDocument()
+    })
   })
 })

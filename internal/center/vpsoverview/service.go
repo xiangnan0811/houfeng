@@ -53,6 +53,7 @@ type IPQualitySource struct {
 	Status    string
 	RiskLevel string
 	Stale     bool
+	IPVersion int
 }
 
 // RenewalSource is one bounded subscription read. ActiveSubscriptions and its
@@ -462,6 +463,7 @@ func (service *Service) buildOverview(identitySource IdentitySource, collected s
 			IPQuality: SummaryCell{
 				Status: firstNonEmpty(ipQuality.RiskLevel, ipQuality.Status, "unknown"),
 				Detail: ipQuality.Status, Section: ipQuality.Section,
+				IPVersion: ipQuality.IPVersion,
 			},
 			Renewal: SummaryCell{
 				Status:  firstNonEmpty(renewal.Status, identity.RenewalDecision, "unknown"),

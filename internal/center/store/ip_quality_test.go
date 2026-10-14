@@ -78,6 +78,7 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsLatestMatricesAndHisto
 	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
 	db := &fakeIPQualityDB{
 		queryRows: map[string]pgx.Rows{
+			"select state.ip_version, state.latest_report_id, state.availability": fakeIPQualityFamilyRows("ipq_001", nil, nil),
 			"from ip_quality_reports r": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 				scan: scanIPQualityReportRow("ipq_001", "mi_001", now, agentapi.IPQualityStatusSuccess),
 			}}},
@@ -174,7 +175,7 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsLatestMatricesAndHisto
 	}
 	repo := newFakeIPQualityReadRepository(db)
 
-	got, err := repo.GetVPSIPQuality(context.Background(), "vps_001")
+	got, err := repo.GetVPSIPQuality(context.Background(), "vps_001", 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality() error = %v", err)
 	}
@@ -293,7 +294,7 @@ func TestPostgresIPQualityRepositoryHistoryDoesNotReadLatestOnlyView(t *testing.
 		},
 	}
 
-	if _, err := historyForVPS(context.Background(), db, "vps_001"); err != nil {
+	if _, err := historyForVPS(context.Background(), db, "vps_001", 4); err != nil {
 		t.Fatalf("historyForVPS() error = %v", err)
 	}
 	if len(db.queries) != 1 {
@@ -315,7 +316,7 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsEmptyWhenFilteredViews
 	}
 	repo := newFakeIPQualityReadRepository(db)
 
-	got, err := repo.GetVPSIPQuality(context.Background(), "vps_001")
+	got, err := repo.GetVPSIPQuality(context.Background(), "vps_001", 0)
 	if err != nil {
 		t.Fatalf("GetVPSIPQuality() error = %v", err)
 	}
@@ -340,7 +341,7 @@ func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T
 	ctx := context.Background()
 
 	t.Run("missing begin function", func(t *testing.T) {
-		_, err := (&PostgresIPQualityRepository{}).GetVPSIPQuality(ctx, "vps_001")
+		_, err := (&PostgresIPQualityRepository{}).GetVPSIPQuality(ctx, "vps_001", 0)
 		if err == nil || !strings.Contains(err.Error(), "without transaction support") {
 			t.Fatalf("GetVPSIPQuality() error = %v, want transaction support error", err)
 		}
@@ -351,7 +352,7 @@ func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T
 		repo := &PostgresIPQualityRepository{
 			beginTx: func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return nil, want },
 		}
-		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001", 0)
 		if !errors.Is(err, want) {
 			t.Fatalf("GetVPSIPQuality() error = %v, want %v", err, want)
 		}
@@ -361,7 +362,7 @@ func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T
 		repo := &PostgresIPQualityRepository{
 			beginTx: func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return nil, nil },
 		}
-		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001", 0)
 		if err == nil || !strings.Contains(err.Error(), "nil transaction") {
 			t.Fatalf("GetVPSIPQuality() error = %v, want nil transaction error", err)
 		}
@@ -371,7 +372,7 @@ func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T
 		want := errors.New("summary query failed")
 		db := &fakeIPQualityDB{queryErr: want}
 		repo := newFakeIPQualityReadRepository(db)
-		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001", 0)
 		if !errors.Is(err, want) {
 			t.Fatalf("GetVPSIPQuality() error = %v, want %v", err, want)
 		}
@@ -387,7 +388,7 @@ func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T
 		}
 		repo := newFakeIPQualityReadRepository(db)
 		db.readTx.commitErr = want
-		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001", 0)
 		if !errors.Is(err, want) {
 			t.Fatalf("GetVPSIPQuality() error = %v, want %v", err, want)
 		}
@@ -399,6 +400,10 @@ func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T
 	t.Run("latest summary without assigned report", func(t *testing.T) {
 		db := &fakeIPQualityDB{
 			queryRows: map[string]pgx.Rows{
+				"select state.ip_version, state.latest_report_id, state.availability": fakeIPQualityFamilyRows("ipq_missing", nil, nil),
+				"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+					scan: scanIPQualitySummaryRow("vps_001", "ipq_missing", time.Now().UTC(), agentapi.IPQualityStatusSuccess),
+				}}},
 				"select latest.vps_id": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 					scan: scanIPQualitySummaryRow("vps_001", "ipq_missing", time.Now().UTC(), agentapi.IPQualityStatusSuccess),
 				}}},
@@ -406,7 +411,7 @@ func TestPostgresIPQualityRepositoryReadTransactionFailureContracts(t *testing.T
 			},
 		}
 		repo := newFakeIPQualityReadRepository(db)
-		_, err := repo.GetVPSIPQuality(ctx, "vps_001")
+		_, err := repo.GetVPSIPQuality(ctx, "vps_001", 0)
 		if err == nil || !strings.Contains(err.Error(), "assigned report missing from read snapshot") {
 			t.Fatalf("GetVPSIPQuality() error = %v, want missing assigned report", err)
 		}
@@ -465,6 +470,7 @@ func TestPostgresIPQualityRepositoryGetLatestVPSIPQualitySummaryDoesNotLoadDetai
 					*(dest[2].(*string)) = "high"
 					*(dest[3].(*bool)) = true
 					*(dest[4].(*time.Time)) = now
+					*(dest[5].(*int)) = 6
 					return nil
 				},
 			}}},
@@ -494,7 +500,7 @@ func TestPostgresIPQualityRepositoryGetLatestVPSIPQualitySummaryDoesNotLoadDetai
 	if err != nil {
 		t.Fatalf("GetLatestVPSIPQualitySummary() error = %v", err)
 	}
-	if got == nil || got.Status != agentapi.IPQualityStatusSuccess || got.RiskLevel != "high" || !got.Stale {
+	if got == nil || got.IPVersion != 6 || got.Status != agentapi.IPQualityStatusSuccess || got.RiskLevel != "high" || !got.Stale {
 		t.Fatalf("summary = %#v", got)
 	}
 	joined := strings.ToLower(strings.Join(db.queries, "\n"))
@@ -526,6 +532,7 @@ func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredAssignedView
 	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
 	db := &fakeIPQualityDB{
 		queryRows: map[string]pgx.Rows{
+			"select state.ip_version, state.latest_report_id, state.availability": fakeIPQualityFamilyRows("ipq_valid", nil, nil),
 			"from ip_quality_reports r": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
 				scan: scanIPQualityReportRow("ipq_valid", "mi_001", now, agentapi.IPQualityStatusSuccess),
 			}}},
@@ -562,7 +569,7 @@ func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredAssignedView
 	}
 	repo := newFakeIPQualityReadRepository(db)
 
-	if _, err := repo.GetVPSIPQuality(context.Background(), "vps_001"); err != nil {
+	if _, err := repo.GetVPSIPQuality(context.Background(), "vps_001", 0); err != nil {
 		t.Fatalf("GetVPSIPQuality() error = %v", err)
 	}
 
@@ -571,8 +578,8 @@ func TestPostgresIPQualityRepositoryReadsVPSIPQualityThroughFilteredAssignedView
 		strings.Contains(joined, "r.ip_address in (nullif") {
 		t.Fatalf("repository query bypassed filtered IP quality read views: %s", joined)
 	}
-	if strings.Contains(joined, "ip_quality_latest_vps_summaries") {
-		t.Fatalf("repository queries = %s, legacy latest view cannot express replay-safe ordering", joined)
+	if !strings.Contains(joined, "ip_quality_vps_family_state") {
+		t.Fatalf("repository queries = %s, want shared family selection view", joined)
 	}
 	if !strings.Contains(joined, "ip_quality_assigned_vps_reports") {
 		t.Fatalf("repository queries = %s, want filtered assigned reports view", joined)
@@ -630,6 +637,12 @@ type fakeIPQualityDB struct {
 }
 
 func newFakeIPQualityReadRepository(db *fakeIPQualityDB) *PostgresIPQualityRepository {
+	if db.queryRows == nil {
+		db.queryRows = make(map[string]pgx.Rows)
+	}
+	if _, ok := db.queryRows["select state.ip_version, state.latest_report_id, state.availability"]; !ok {
+		db.queryRows["select state.ip_version, state.latest_report_id, state.availability"] = &fakeIPQualityRows{}
+	}
 	db.readTx = &fakeIPQualityTx{querySource: db}
 	return &PostgresIPQualityRepository{
 		db: db,
@@ -763,5 +776,108 @@ func scanIPQualityReportRow(reportID, monitoringInstanceID string, observedAt ti
 		*(dest[24].(*[]byte)) = []byte(`{"source_version":"v2"}`)
 		*(dest[25].(*time.Time)) = observedAt.Add(2 * time.Second)
 		return nil
+	}
+}
+
+func fakeIPQualityFamilyRows(reportID string, observedAt *time.Time, diagnostics []byte) *fakeIPQualityRows {
+	return &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+		scan: func(dest ...any) error {
+			*(dest[0].(*int)) = 4
+			if reportID != "" {
+				*(dest[1].(**string)) = &reportID
+			}
+			*(dest[2].(*string)) = "unknown"
+			*(dest[3].(*bool)) = false
+			*(dest[4].(*bool)) = true
+			*(dest[5].(**time.Time)) = observedAt
+			if observedAt != nil {
+				status := "failure"
+				code := "lookup_failed"
+				*(dest[6].(**string)) = &status
+				*(dest[7].(**string)) = &code
+			}
+			*(dest[8].(*[]byte)) = diagnostics
+			return nil
+		},
+	}}}
+}
+
+func TestIPQualityReadFamilySelectionNeverFallsBackFromEmptyExplicitFamily(t *testing.T) {
+	now := time.Now().UTC()
+	db := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
+		"select state.ip_version, state.latest_report_id, state.availability": fakeIPQualityFamilyRows("ipq_ipv4", &now, []byte(`{"collection_revision":4,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available"}`)),
+		"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{
+			scan: scanIPQualitySummaryRow("vps_001", "ipq_ipv4", now.Add(-time.Hour), "success"),
+		}}},
+	}}
+	result, err := newFakeIPQualityReadRepository(db).GetVPSIPQuality(context.Background(), "vps_001", 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SelectedIPVersion != 6 || result.DefaultIPVersion != 4 || result.Summary != nil || result.LatestReport != nil || len(result.History) != 0 {
+		t.Fatalf("explicit empty IPv6 borrowed IPv4: %#v", result)
+	}
+	if len(result.Families) != 2 || result.Families[0].LatestReportSummary == nil || result.Families[0].LatestAttempt.CollectionID != "paired" || result.Families[1].Availability != "unknown" {
+		t.Fatalf("navigation lost other family evidence: %#v", result.Families)
+	}
+}
+
+func TestIPQualityAttemptsKeepInvalidPairedMetadataDistinctFromLegacy(t *testing.T) {
+	now := time.Now().UTC()
+	for _, tc := range []struct {
+		name        string
+		diagnostics string
+		scope       string
+		id          string
+	}{
+		{"legacy", `{"source_version":"v2"}`, "legacy_single_family", ""},
+		{"valid paired", `{"collection_revision":4,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available"}`, "dual_stack", "paired"},
+		{"unsupported revision", `{"collection_revision":5,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available"}`, "dual_stack", ""},
+		{"invalid family", `{"collection_revision":4,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":6,"family_availability":"available"}`, "dual_stack", ""},
+		{"malformed paired", `{"collection_id":"paired","expected_ip_versions":[6,4]}`, "dual_stack", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
+				"select state.ip_version, state.latest_report_id, state.availability": fakeIPQualityFamilyRows("", &now, []byte(tc.diagnostics)),
+			}}
+			got, err := newFakeIPQualityReadRepository(db).GetVPSIPQuality(context.Background(), "vps_001", 4)
+			if err != nil {
+				t.Fatal(err)
+			}
+			attempt := got.Families[0].LatestAttempt
+			if attempt == nil || attempt.CollectionScope != tc.scope || attempt.CollectionID != tc.id || attempt.ReportStatus != "failure" || attempt.ErrorCode != "lookup_failed" {
+				t.Fatalf("attempt=%#v, want %s/%s failure", attempt, tc.scope, tc.id)
+			}
+			if got.Summary != nil || got.LatestReport != nil || len(got.History) != 0 {
+				t.Fatalf("failure attempt became facts: %#v", got)
+			}
+		})
+	}
+}
+
+func TestIPQualityReadRejectsInvalidFamilyBeforeStartingTransaction(t *testing.T) {
+	for _, version := range []int{-1, 1, 5, 46} {
+		db := &fakeIPQualityDB{}
+		_, err := newFakeIPQualityReadRepository(db).GetVPSIPQuality(context.Background(), "vps_001", version)
+		if !errors.Is(err, ipquality.ErrInvalidIPQualityReport) || len(db.beginOptions) != 0 {
+			t.Fatalf("family %d: err=%v begins=%#v", version, err, db.beginOptions)
+		}
+	}
+}
+
+func TestSaveReportsParsesCollectionMetadataBeforeSanitizingDiagnostics(t *testing.T) {
+	tx := &fakeIPQualityTx{}
+	repo := &PostgresIPQualityRepository{
+		beginTx:     func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return tx, nil },
+		newReportID: func() (string, error) { return "ipq_metadata", nil },
+	}
+	report := ipQualityReportWrite()
+	report.DiagnosticsJSON = json.RawMessage(`{"collection_revision":4,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available","collect_request_id":"ipqc_test"}`)
+	reports := []ipquality.ReportWrite{report}
+	if err := repo.SaveReports(context.Background(), reports); err != nil {
+		t.Fatal(err)
+	}
+	if !reports[0].CollectionMetadata.Valid || reports[0].CollectionMetadata.CollectionID != "paired" || reports[0].CollectionMetadata.CollectRequestID != "ipqc_test" {
+		t.Fatalf("direct construction metadata=%#v", reports[0].CollectionMetadata)
 	}
 }

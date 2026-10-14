@@ -9,12 +9,22 @@ import { riskLevelLabel, riskTone } from './ipQualityPresentation'
 type IPQualityHistoryListProps = {
   history: IPQualitySummary[]
   currentReportId: string
+  // 所选族；历史只属于该族，链接同时携带族与 report_id（detail API 只用 report_id）。
+  ipVersion: 4 | 6 | null
+}
+
+function historyLink(item: IPQualitySummary, fallback: 4 | 6 | null, reportId: string): string {
+  const family = item.ip_version === 4 || item.ip_version === 6 ? item.ip_version : fallback
+  const query = new URLSearchParams()
+  if (family != null) query.set('ip_version', String(family))
+  query.set('report_id', reportId)
+  return `?${query.toString()}`
 }
 
 const TITLE_ID = 'ip-quality-history-title'
 const COLLAPSED_LIMIT = 5
 
-export function IPQualityHistoryList({ history, currentReportId }: IPQualityHistoryListProps) {
+export function IPQualityHistoryList({ history, currentReportId, ipVersion }: IPQualityHistoryListProps) {
   const location = useLocation()
   const [expanded, setExpanded] = useState(false)
   // 当前查看的报告不在前几条时直接展开，避免它被折叠。
@@ -48,7 +58,7 @@ export function IPQualityHistoryList({ history, currentReportId }: IPQualityHist
                   ) : item.report_id ? (
                     <Link
                       className="text-link"
-                      to={`?report_id=${encodeURIComponent(item.report_id)}`}
+                      to={historyLink(item, ipVersion, item.report_id)}
                       state={location.state}
                       aria-label={`查看 ${formatDateTime(item.observed_at)} 的报告`}
                     >

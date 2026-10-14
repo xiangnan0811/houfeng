@@ -666,6 +666,7 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWrite {
 	reports := make([]ipquality.ReportWrite, 0, len(req.IPQualityReports))
 	for _, report := range req.IPQualityReports {
+		metadata := agentapi.ParseCollectionMetadata(report.DiagnosticsJSON)
 		write := ipquality.ReportWrite{
 			MonitoringInstanceID: req.MonitoringInstanceID,
 			ObservedAt:           report.ObservedAt,
@@ -690,7 +691,7 @@ func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWri
 			RawJSON:              ipquality.SanitizeRawJSON(report.RawJSON),
 			CoverageJSON:         coveragePayloadJSON(report.Coverage),
 			DiagnosticsJSON:      ipquality.SanitizeExtraJSON(report.DiagnosticsJSON),
-			CollectRequestID:     ipquality.CollectRequestIDFromDiagnostics(report.DiagnosticsJSON),
+			CollectionMetadata:   metadata,
 			ProviderResults:      make([]ipquality.ProviderResultWrite, 0, len(report.ProviderResults)),
 			ServiceUnlocks:       make([]ipquality.ServiceUnlockWrite, 0, len(report.ServiceUnlocks)),
 		}

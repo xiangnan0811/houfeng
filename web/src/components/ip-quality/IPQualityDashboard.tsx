@@ -1,9 +1,12 @@
-import { useSearchParams } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 
 import { Badge } from '../atoms'
+import { PageState } from '../PageState'
 import { formatPercent } from '../../lib/format'
-import type { IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
-import { IPQualityCollectNotice } from './IPQualityCollectControls'
+import type { IPQualityIPVersion, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
+import { IPQualityCollectButton, IPQualityCollectNotice } from './IPQualityCollectControls'
+import type { CollectNoticeView } from './ipQualityCollectPresentation'
+import { IPQualityFamilySelector, IPQualityFamilyState } from './IPQualityFamily'
 import { IPQualityDiagnostics } from './IPQualityDiagnostics'
 import { IPQualityHeader } from './IPQualityHeader'
 import { IPQualityHistoryList } from './IPQualityHistoryList'
@@ -15,22 +18,58 @@ import {
   deriveRiskAssessment,
   enabledProviderCoverage,
   highRiskProviders,
+  isAnonymousServiceProbeRevision,
   negativeRiskSignals,
   riskAssessmentBlocker,
   riskVerdict,
-  serviceCoverage,
+  selectedReportIPVersion,
+  serviceAvailability,
+  reportCollectionIdentity,
   serviceProbeRevision,
-  serviceUnlockCounts,
+  type ServiceAvailability,
   unlockStatusText,
 } from './ipQualityPresentation'
 import type { IPQualityCollectController } from './useIPQualityCollect'
 
+// 页面主体的几种形态共用同一页头与族选择器：切族加载时选择器不卸载，键盘焦点留在按钮上。
+export type IPQualityDashboardView =
+  | { kind: 'loading', ipVersion: IPQualityIPVersion | null }
+  | { kind: 'invalid_family' }
+  | { kind: 'empty', report: VPSIPQualityReport | null, ipVersion: IPQualityIPVersion | null }
+  | { kind: 'report', report: VPSIPQualityReport, summary: IPQualitySummary }
+
 type IPQualityDashboardProps = {
-  report: VPSIPQualityReport
-  summary: IPQualitySummary
+  view: IPQualityDashboardView
   detailPath: string
   collect: IPQualityCollectController
   vpsId?: string
+  // 历史视图：URL 带 report_id；事实全部来自该历史报告本身。
+  viewingHistory: boolean
+  // 最近一次同族刷新状态：区分“轮次结束”和“当前报告已更新”。
+  refreshState: CollectNoticeView['refreshState']
+  onSelectFamily: (next: IPQualityIPVersion) => void
+}
+
+function emptyDescription(collect: IPQualityCollectController, family: IPQualityIPVersion | null): string {
+  const status = collect.status
+  if (collect.active) return '采集完成后会自动显示报告。'
+  if (status && !status.available) return '满足采集条件后，agent 会自动上报。'
+  const label = family == null ? '该地址族' : `IPv${family}`
+  return `${label} 还没有有效结果，可以立即采集一次（同时检测 IPv4 / IPv6）。`
+}
+
+function noticeView(report: VPSIPQualityReport | null, ipVersion: IPQualityIPVersion | null, viewingHistory: boolean, refreshState: CollectNoticeView['refreshState']): CollectNoticeView {
+  const identity = reportCollectionIdentity(report)
+  return { ipVersion, viewingHistory, reportCollectionID: identity.collectionID, reportCollectRequestID: identity.collectRequestID, refreshState }
+}
+
+// 服务分布：partial 与 unknown 分列，不并入可用或受限。
+function serviceDistribution(services: ServiceAvailability, anonymousProbe: boolean): string {
+  const parts = (['partial', 'blocked', 'unknown'] as const)
+    .filter((kind) => services[kind] > 0)
+    .map((kind) => `${services[kind]} ${unlockStatusText(kind, anonymousProbe)}`)
+  if (parts.length > 0) return parts.join(' · ')
+  return services.unlocked > 0 ? '无部分可用、受限或未知' : '暂无服务结果'
 }
 
 function IPQualityVerdict({ report, summary, anonymousProbe }: { report: VPSIPQualityReport, summary: IPQualitySummary, anonymousProbe: boolean }) {
@@ -39,11 +78,9 @@ function IPQualityVerdict({ report, summary, anonymousProbe }: { report: VPSIPQu
   const blocker = riskAssessmentBlocker(report)
   const signals = negativeRiskSignals(report.provider_results)
   const highRiskSources = highRiskProviders(report.provider_results)
-  const services = serviceUnlockCounts(report.service_unlocks)
-  const determinate = services.unlocked + services.partial + services.blocked
+  const services = serviceAvailability(report)
   const consistency = databaseConsistency(report.provider_results)
   const providerCoverage = enabledProviderCoverage(report)
-  const serviceCoveragePct = serviceCoverage(report)
   const verdictTone = verdict.tone === 'critical' ? 'alert' : verdict.tone
 
   let signalValue = '未知'
@@ -60,7 +97,7 @@ function IPQualityVerdict({ report, summary, anonymousProbe }: { report: VPSIPQu
     <section className={`vps-detail-workspace__section ipq-verdict ipq-verdict--${verdictTone}`} aria-label="数据库风险评级">
       <div className="ipq-verdict__score">
         <span className="ipq-verdict__label">数据库风险评级</span>
-        <p className="ipq-verdict__value">
+        <p className={verdict.valueKind === 'gap' ? 'ipq-verdict__value ipq-verdict__value--gap' : 'ipq-verdict__value'}>
           <strong>{verdict.value}</strong>
         </p>
         <p className="ipq-verdict__text">{verdict.headline}</p>
@@ -85,31 +122,30 @@ function IPQualityVerdict({ report, summary, anonymousProbe }: { report: VPSIPQu
         <div className={services.blocked > 0 ? 'ipq-metric ipq-metric--alert' : 'ipq-metric'}>
           <dt>{anonymousProbe ? '服务可用性' : '服务解锁'}</dt>
           <dd>
-            <strong className="mono">{determinate > 0 ? `${services.unlocked}/${determinate}` : '—'}</strong>
-            <span>
-              {determinate > 0
-                ? `${services.blocked} ${unlockStatusText('blocked', anonymousProbe)} · ${services.unknown} 未知`
-                : '暂无可靠结果'}
-            </span>
+            <strong className="mono">
+              {services.expected == null
+                ? `${services.unlocked} ${unlockStatusText('unlocked', anonymousProbe)}`
+                : `${services.unlocked}/${services.expected} ${unlockStatusText('unlocked', anonymousProbe)}`}
+            </strong>
+            <span>{serviceDistribution(services, anonymousProbe)}</span>
           </dd>
         </div>
         <div className="ipq-metric">
-          <dt>数据库一致性</dt>
+          <dt>已知字段一致性</dt>
           <dd>
             <strong className="mono">{consistency == null ? '—' : `${consistency.percent}%`}</strong>
-            <span>{consistency == null ? '可比较字段不足' : `${consistency.dimensions} 个可比维度`}</span>
+            <span>{consistency == null ? '可比较字段不足' : `${consistency.dimensions} 个可比较维度`}</span>
           </dd>
         </div>
         <div className="ipq-metric">
-          <dt>已启用来源成功率</dt>
+          <dt>已启用来源响应成功率</dt>
           <dd>
             <strong className="mono">{providerCoverage == null ? '—' : formatPercent(providerCoverage.percent, 0)}</strong>
             <span>
               {providerCoverage == null
                 ? '暂无有效覆盖数据'
-                : `成功 ${providerCoverage.successful}/${providerCoverage.enabled} · 未配置 ${providerCoverage.notConfigured}`}
+                : `响应成功 ${providerCoverage.successful}/${providerCoverage.enabled}`}
             </span>
-            <span>服务探测 {serviceCoveragePct == null ? '—' : formatPercent(serviceCoveragePct, 0)}</span>
           </dd>
         </div>
       </dl>
@@ -117,13 +153,18 @@ function IPQualityVerdict({ report, summary, anonymousProbe }: { report: VPSIPQu
   )
 }
 
-export function IPQualityDashboard({ report, summary, detailPath, collect, vpsId }: IPQualityDashboardProps) {
-  const [searchParams] = useSearchParams()
-  const selectedReportId = searchParams.get('report_id')?.trim() || ''
-  const viewingHistory = selectedReportId !== ''
-  const currentReportId = selectedReportId || summary.report_id || report.latest_report?.report_id || ''
-  const probeNotice = defaultServiceProbeNotice(report)
-  const anonymousProbe = serviceProbeRevision(report) === 2
+function viewIPVersion(view: IPQualityDashboardView): IPQualityIPVersion | null {
+  if (view.kind === 'report') return selectedReportIPVersion(view.report)
+  if (view.kind === 'invalid_family') return null
+  return view.ipVersion
+}
+
+export function IPQualityDashboard({ view, detailPath, collect, vpsId, viewingHistory, refreshState, onSelectFamily }: IPQualityDashboardProps) {
+  const location = useLocation()
+  const ipVersion = viewIPVersion(view)
+  const report = view.kind === 'report' ? view.report : null
+  const summary = view.kind === 'report' ? view.summary : null
+  const returnLink = <Link className="btn md secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
 
   return (
     <div className="page vps-detail-workspace ipq-page">
@@ -131,10 +172,71 @@ export function IPQualityDashboard({ report, summary, detailPath, collect, vpsId
         detailPath={detailPath}
         collect={collect}
         summary={summary}
-        latest={report.latest_report ?? null}
-        viewingHistory={viewingHistory}
+        latest={report?.latest_report ?? null}
+        viewingHistory={viewingHistory && view.kind !== 'invalid_family'}
+        latestIPVersion={ipVersion}
+        showCollect={view.kind === 'report'}
+        familyControl={<IPQualityFamilySelector value={ipVersion} onChange={onSelectFamily} />}
       />
-      {viewingHistory ? null : <IPQualityCollectNotice collect={collect} vpsId={vpsId ?? summary.vps_id} />}
+      {view.kind === 'loading' ? (
+        <PageState kind="loading" surface="empty" title={ipVersion == null ? '正在加载 IP 质量报告' : `正在加载 IPv${ipVersion} 报告`} />
+      ) : null}
+      {view.kind === 'invalid_family' ? (
+        <PageState
+          kind="empty"
+          surface="empty"
+          title="地址族参数无效"
+          description="链接中的 ip_version 只能是 4 或 6，且只能出现一次。"
+          action={<Link className="btn sm secondary" to={location.pathname} state={location.state}>查看默认报告</Link>}
+        />
+      ) : null}
+      {view.kind === 'empty' ? (
+        <>
+          <IPQualityCollectNotice collect={collect} vpsId={vpsId} view={noticeView(view.report, ipVersion, viewingHistory, refreshState)} />
+          {view.report && ipVersion != null && !viewingHistory ? <IPQualityFamilyState report={view.report} ipVersion={ipVersion} /> : null}
+          <PageState
+            kind="empty"
+            surface="empty"
+            title={ipVersion == null ? '暂无 IP 质量报告' : `暂无 IPv${ipVersion} 质量报告`}
+            description={emptyDescription(collect, ipVersion)}
+            action={viewingHistory ? returnLink : <IPQualityCollectButton collect={collect} />}
+          />
+        </>
+      ) : null}
+      {view.kind === 'report' ? (
+        <IPQualityReportBody
+          report={view.report}
+          summary={view.summary}
+          ipVersion={ipVersion}
+          collect={collect}
+          vpsId={vpsId ?? view.summary.vps_id}
+          viewingHistory={viewingHistory}
+          refreshState={refreshState}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+type IPQualityReportBodyProps = {
+  report: VPSIPQualityReport
+  summary: IPQualitySummary
+  ipVersion: IPQualityIPVersion | null
+  collect: IPQualityCollectController
+  vpsId: string | undefined
+  viewingHistory: boolean
+  refreshState: CollectNoticeView['refreshState']
+}
+
+// 所有事实只来自所选报告本身，不拼另一族数据。
+function IPQualityReportBody({ report, summary, ipVersion, collect, vpsId, viewingHistory, refreshState }: IPQualityReportBodyProps) {
+  const currentReportId = summary.report_id || report.latest_report?.report_id || ''
+  const probeNotice = defaultServiceProbeNotice(report)
+  const anonymousProbe = isAnonymousServiceProbeRevision(serviceProbeRevision(report))
+  return (
+    <>
+      <IPQualityCollectNotice collect={collect} vpsId={vpsId} view={noticeView(report, ipVersion, viewingHistory, refreshState)} />
+      {!viewingHistory && ipVersion != null ? <IPQualityFamilyState report={report} ipVersion={ipVersion} /> : null}
       {probeNotice ? (
         <aside className={`ipq-notice ipq-notice--${probeNotice.tone}`} role="note" aria-label="服务探测可信度">
           <span className="ipq-notice__dot" aria-hidden="true" />
@@ -143,10 +245,10 @@ export function IPQualityDashboard({ report, summary, detailPath, collect, vpsId
         </aside>
       ) : null}
       <IPQualityVerdict report={report} summary={summary} anonymousProbe={anonymousProbe} />
-      <IPQualityServiceGrid unlocks={report.service_unlocks} anonymousProbe={anonymousProbe} />
+      <IPQualityServiceGrid unlocks={report.service_unlocks} anonymousProbe={anonymousProbe} ipVersion={ipVersion} />
       <IPQualityProviderTable results={report.provider_results} />
-      <IPQualityHistoryList history={report.history} currentReportId={currentReportId} />
+      <IPQualityHistoryList history={report.history} currentReportId={currentReportId} ipVersion={ipVersion} />
       <IPQualityDiagnostics report={report} summary={summary} />
-    </div>
+    </>
   )
 }

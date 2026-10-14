@@ -680,6 +680,8 @@ function decodeOverviewSummaryCell(value: unknown): VPSOverview['summary']['over
     section: decodeOverviewSection(cell.section),
   }
   if (detail !== undefined) decoded.detail = detail
+  // 只接受合法地址族；缺失或非法时不猜。
+  if (cell.ip_version === 4 || cell.ip_version === 6) decoded.ip_version = cell.ip_version
   return decoded
 }
 

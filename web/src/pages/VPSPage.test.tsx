@@ -488,21 +488,27 @@ describe('VPSPage', () => {
     expect(screen.getAllByRole('region', { name: 'VPS 快速查看' })).toHaveLength(1)
   })
 
-  it('labels partial, failed and stale IP quality reports instead of calling them unfinished', async () => {
+  it('labels partial, failed and stale IP quality reports with the default report family instead of calling them unfinished', async () => {
     const ipSummary = vps.ip_quality_summary
     mockInventory([
       { ...vps, ip_quality_summary: { ...ipSummary, status: 'partial' } },
       { ...vps, vps_id: 'vps_partial_stale', display_name: 'Partial Stale', ip_quality_summary: { ...ipSummary, status: 'partial', stale: true } },
       { ...vps, vps_id: 'vps_success_stale', display_name: 'Success Stale', ip_quality_summary: { ...ipSummary, stale: true } },
       { ...vps, vps_id: 'vps_failure', display_name: 'Failure Edge', ip_quality_summary: { ...ipSummary, status: 'failure' } },
+      { ...vps, vps_id: 'vps_v6', display_name: 'IPv6 Only', ip_quality_summary: { ...ipSummary, ip_address: '2001:db8::10', ip_version: 6 } },
+      { ...vps, vps_id: 'vps_bad_family', display_name: 'Bad Family', ip_quality_summary: { ...ipSummary, ip_version: 5 } },
     ], [])
     mount('/vps?workspace=workbench')
 
     const rowFor = async (name: string) => (await screen.findByRole('button', { name: '选择 ' + name })).closest('tr')!
-    expect(await rowFor('Tokyo Edge')).toHaveTextContent('IP 部分采集')
-    expect(await rowFor('Partial Stale')).toHaveTextContent('IP 部分采集 · 过期')
-    expect(await rowFor('Success Stale')).toHaveTextContent('IP 低风险 · 过期')
-    expect(await rowFor('Failure Edge')).toHaveTextContent('IP 采集失败')
+    expect(await rowFor('Tokyo Edge')).toHaveTextContent('IPv4 部分采集')
+    expect(await rowFor('Partial Stale')).toHaveTextContent('IPv4 部分采集 · 过期')
+    expect(await rowFor('Success Stale')).toHaveTextContent('IPv4 低风险 · 过期')
+    expect(await rowFor('Failure Edge')).toHaveTextContent('IPv4 采集失败')
+    expect(await rowFor('IPv6 Only')).toHaveTextContent('IPv6 低风险 · JP')
+    // 非法族不猜成 IPv4/IPv6。
+    expect(await rowFor('Bad Family')).toHaveTextContent('IP 低风险 · JP')
+    expect(await rowFor('Bad Family')).not.toHaveTextContent(/IPv[46] 低风险/)
     expect(screen.queryByText(/IP 未完成/)).not.toBeInTheDocument()
   })
 

@@ -1212,7 +1212,37 @@ export type IPQualityReport = {
   diagnostics_json?: unknown
 }
 
+export type IPQualityIPVersion = 4 | 6
+
+// available：本轮有该族本地地址或强制出口发现成功；unavailable：成功枚举接口但无该族地址；unknown：无法判断或无本轮元数据。
+export type IPQualityFamilyAvailability = 'available' | 'unavailable' | 'unknown'
+
+export type IPQualityCollectionScope = 'dual_stack' | 'legacy_single_family'
+
+// 该族最新一次尝试的终态；不携带占位 IP，也不携带原始错误文本。
+export type IPQualityFamilyAttempt = {
+  observed_at: string
+  stale: boolean
+  report_status: string
+  error_code?: string
+  collection_scope: IPQualityCollectionScope | string
+  collection_id?: string
+}
+
+export type IPQualityFamilyStatus = {
+  ip_version: IPQualityIPVersion
+  availability: IPQualityFamilyAvailability | string
+  latest_attempt: IPQualityFamilyAttempt | null
+  latest_report_summary: IPQualitySummary | null
+}
+
 export type VPSIPQualityReport = {
+  // 所选族；summary/latest_report/provider_results/service_unlocks/history 全部只属于它。
+  selected_ip_version: IPQualityIPVersion
+  // 服务端统一默认族算法给出的默认族。
+  default_ip_version: IPQualityIPVersion
+  // 固定 [IPv4, IPv6] 两项，仅用于族导航与尝试状态。
+  families: IPQualityFamilyStatus[]
   summary?: IPQualitySummary | null
   latest_report?: IPQualityReport | null
   provider_results: IPQualityProviderResult[]
@@ -1228,6 +1258,13 @@ export type IPQualityCollectUnavailableReason =
   | 'agent_not_bound'
   | 'monitoring_paused'
 
+export type IPQualityCollectFamilyResult = {
+  ip_version: IPQualityIPVersion
+  availability: IPQualityFamilyAvailability | string
+  report_status: string
+  error_code?: string
+}
+
 export type IPQualityCollectRequest = {
   request_id: string
   monitoring_instance_id: string
@@ -1238,6 +1275,10 @@ export type IPQualityCollectRequest = {
   completed_at?: string
   report_status?: string
   error_summary?: string
+  // 没有回传结果时省略；legacy_single_family 表示只收到旧 agent 的单族报告。
+  collection_scope?: IPQualityCollectionScope | string
+  collection_id?: string
+  family_results?: IPQualityCollectFamilyResult[]
 }
 
 export type IPQualityCollectStatus = {
@@ -3657,6 +3698,8 @@ export type VPSOverviewSectionState = {
 export type VPSOverviewSummaryCell = {
   status: string
   detail?: string
+  // 仅 IP 质量单元：默认族报告的地址族；缺失时不猜。
+  ip_version?: IPQualityIPVersion
   section: VPSOverviewSectionState
 }
 
