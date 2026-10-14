@@ -1,6 +1,9 @@
 package ipquality
 
 import (
+	"context"
+	"net/http"
+	"strings"
 	"testing"
 
 	"houfeng/internal/contracts/agentapi"
@@ -39,12 +42,77 @@ func TestServiceCoverageRequiresSuccessfulBusinessConclusion(t *testing.T) {
 }
 
 func TestEmptyServiceCollectionHasNoCoverageOrFailure(t *testing.T) {
-	rows := collectDefaultServiceUnlocks(nil)
+	rows := NewHTTPCollector(HTTPCollectorOptions{}).collectDefaultServiceUnlocks(context.Background(), nil, 4)
 	if len(rows) != 0 {
 		t.Fatalf("empty input produced diagnostics: %#v", rows)
 	}
 	coverage := coverageFromResults(nil, nil)
 	if *coverage != (agentapi.IPQualityCoveragePayload{}) || hasServiceProbeFailure(nil) {
 		t.Fatalf("empty coverage=%#v", coverage)
+	}
+}
+
+func TestDefaultHTTPCollectorUsesIndependentDirectFamilyTransports(t *testing.T) {
+	collector := NewHTTPCollector(HTTPCollectorOptions{})
+	clients := []*http.Client{collector.client, collector.serviceHTTPClient(4), collector.serviceHTTPClient(6)}
+	transports := make(map[*http.Transport]bool, len(clients))
+	for _, client := range clients {
+		transport, ok := client.Transport.(*http.Transport)
+		if !ok || transport.Proxy != nil || transport == http.DefaultTransport {
+			t.Fatalf("transport=%#v, want independent direct standard transport", client.Transport)
+		}
+		if transports[transport] {
+			t.Fatal("database and address-family clients must not share transports")
+		}
+		transports[transport] = true
+	}
+	for _, scenario := range []struct {
+		family  int
+		address string
+	}{
+		{family: 4, address: "[::1]:1"},
+		{family: 6, address: "127.0.0.1:1"},
+	} {
+		transport := collector.serviceHTTPClient(scenario.family).Transport.(*http.Transport)
+		connection, err := transport.DialContext(context.Background(), "tcp", scenario.address)
+		if connection != nil {
+			_ = connection.Close()
+			t.Fatalf("family %d dialed the opposite address family", scenario.family)
+		}
+		if err == nil || !strings.Contains(err.Error(), "no suitable address") {
+			t.Fatalf("family %d error=%v, want rejected opposite-family address before connection", scenario.family, err)
+		}
+	}
+}
+
+func TestHTTPCollectorPreservesInjectedAndLegacyClients(t *testing.T) {
+	injected := &http.Client{Timeout: 123}
+	for _, lookupURL := range []string{"", "https://custom.example/lookup"} {
+		collector := NewHTTPCollector(HTTPCollectorOptions{Client: injected, LookupURL: lookupURL})
+		if collector.client != injected || collector.serviceHTTPClient(4) != injected || collector.serviceHTTPClient(6) != injected {
+			t.Fatal("explicit client must remain the request entry point for every address family")
+		}
+		cloned := collector.WithMetadata("version", "fingerprint", "batch")
+		if cloned.client != injected || cloned.serviceHTTPClient(4) != injected || cloned.serviceHTTPClient(6) != injected {
+			t.Fatal("metadata cloning must preserve client instances")
+		}
+	}
+	legacy := NewHTTPCollector(HTTPCollectorOptions{LookupURL: "https://custom.example/lookup"})
+	if legacy.client != http.DefaultClient || legacy.serviceHTTPClient(4) != http.DefaultClient || legacy.serviceHTTPClient(6) != http.DefaultClient {
+		t.Fatal("explicit legacy lookup must preserve the original default-client semantics")
+	}
+}
+
+func TestDefaultServicePreservesUnsupportedAndCancelledOutcomes(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	collector := NewHTTPCollector(HTTPCollectorOptions{})
+	outcomes := collector.collectDefaultServiceUnlocks(ctx, []string{"netflix", "not-a-service"}, 6)
+	if outcomes[0].Result.ProbeStatus != sourceStatusFailure || outcomes[0].Result.Status != "unknown" ||
+		outcomes[0].Result.Region != "" || outcomes[0].Result.UnlockType != "" {
+		t.Fatalf("cancelled service=%#v, want failure without business facts", outcomes[0])
+	}
+	if outcomes[1].Result.ProbeStatus != sourceStatusSkipped || outcomes[1].Result.ErrorCode != "unsupported_service" {
+		t.Fatalf("unsupported service=%#v", outcomes[1])
 	}
 }

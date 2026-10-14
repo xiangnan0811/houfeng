@@ -108,6 +108,96 @@ func TestPostgresIntegrationIPQualitySyncMetadataRoundTrip(t *testing.T) {
 		t.Fatalf("fallback stored report = %#v, want batch received_at and JSON null raw value", fallbackStored)
 	}
 
+	t.Run("anonymous probe metadata preserves old history and exact request completion", func(t *testing.T) {
+		const recoveryRequestID = "ipqc_ipq_sync_recovery"
+		recoveryRequests := ipquality.NewCollectRequests(func() (string, error) { return recoveryRequestID, nil })
+		if _, err := recoveryRequests.Request("mi_"+prefix, time.Now().UTC()); err != nil {
+			t.Fatalf("register recovery request: %v", err)
+		}
+		recoveryService := syncing.NewService(repository).WithIPQualityCollectCoordinator(recoveryRequests)
+		newObservedAt := syncInterleavingT2.Add(5 * time.Minute)
+		var recovered ipquality.VPSReport
+		for index, returnedID := range []string{requestID, recoveryRequestID} {
+			batchID := fmt.Sprintf("sync_recovery_%d_%s", index, prefix)
+			observedAt := newObservedAt.Add(time.Duration(index) * time.Minute)
+			receivedAt := observedAt.Add(30 * time.Second)
+			report := ipQualitySyncRecoveryReport(prefix, batchID, observedAt, receivedAt, returnedID)
+			batch, _ := syncInterleavingBatches(prefix)
+			batch.LiveSignal = nil
+			// Sync receipts are keyed by the heartbeat's batch ID; reports alone
+			// are not an accepted sync envelope. Keep the fixture heartbeat and
+			// give each recovery batch its own receipt identity.
+			batch.Heartbeats[0].ObservedAt = observedAt
+			batch.Heartbeats[0].AgentVersion = report.AgentVersion
+			batch.Heartbeats[0].SyncBatchID = batchID
+			batch.Observations.HostSamples = nil
+			batch.Observations.ProbeObservations = nil
+			batch.IPQualityReports = []ipquality.ReportWrite{report}
+			repository.now = func() time.Time { return receivedAt }
+			result, err := recoveryService.SyncBatch(ctx, batch)
+			if err != nil {
+				t.Fatalf("sync recovery report with request %q: %v", returnedID, err)
+			}
+			if result.Disposition != syncing.ResultDispositionRecorded {
+				t.Fatalf("recovery disposition = %q, want recorded", result.Disposition)
+			}
+			current, ok := recoveryRequests.Latest("mi_"+prefix, time.Now().UTC())
+			if !ok || current.RequestID != recoveryRequestID {
+				t.Fatalf("recovery request = %#v, ok=%t, want exact pending request ID", current, ok)
+			}
+			if index == 0 {
+				if current.Status != ipquality.CollectRequestDispatched || current.CompletedAt != nil ||
+					result.Plan.IPQualityPlan == nil || result.Plan.IPQualityPlan.CollectRequestID != recoveryRequestID {
+					t.Fatalf("old request ID completed new request: request=%#v plan=%#v", current, result.Plan.IPQualityPlan)
+				}
+				continue
+			}
+			if current.Status != ipquality.CollectRequestCompleted || current.CompletedAt == nil ||
+				current.ReportStatus != agentapi.IPQualityStatusPartial ||
+				result.Plan.IPQualityPlan == nil || result.Plan.IPQualityPlan.CollectRequestID != "" {
+				t.Fatalf("exact request completion = %#v, plan=%#v, want completed partial without redispatch", current, result.Plan.IPQualityPlan)
+			}
+			recovered, err = readRepository.GetVPSIPQuality(ctx, "vps_"+prefix)
+			if err != nil {
+				t.Fatalf("read recovery report: %v", err)
+			}
+			assertIPQualityRecoveryRoundTrip(t, recovered, receivedAt, recoveryRequestID)
+		}
+		if len(recovered.History) != len(vpsReport.History)+2 {
+			t.Fatalf("recovered history = %#v, want two new reports and unchanged old entries", recovered.History)
+		}
+		if recovered.LatestReport.ReportID != recovered.History[0].ReportID {
+			t.Fatalf("latest recovery report missing from history: %#v", recovered.History)
+		}
+		for _, oldSummary := range vpsReport.History {
+			found := false
+			for _, summary := range recovered.History {
+				if summary.ReportID == oldSummary.ReportID {
+					found = true
+					if !reflect.DeepEqual(summary, oldSummary) {
+						t.Fatalf("old history entry changed: got %#v, want %#v", summary, oldSummary)
+					}
+				}
+			}
+			if !found {
+				t.Fatalf("old report %q removed from history", oldSummary.ReportID)
+			}
+		}
+		selected, err := readRepository.GetVPSIPQualityReportDetail(ctx, "vps_"+prefix, recovered.LatestReport.ReportID)
+		if err != nil {
+			t.Fatalf("select recovery report from history: %v", err)
+		}
+		assertIPQualityRecoveryRoundTrip(t, selected, recovered.LatestReport.ReceivedAt, recoveryRequestID)
+		old, err := readRepository.GetVPSIPQualityReportDetail(ctx, "vps_"+prefix, fullStored.ReportID)
+		if err != nil {
+			t.Fatalf("select old revision1 report from history: %v", err)
+		}
+		if !reflect.DeepEqual(old.Summary, vpsReport.Summary) || !reflect.DeepEqual(old.LatestReport, vpsReport.LatestReport) ||
+			!reflect.DeepEqual(old.ProviderResults, vpsReport.ProviderResults) || !reflect.DeepEqual(old.ServiceUnlocks, vpsReport.ServiceUnlocks) {
+			t.Fatalf("revision1 report or children changed after recovery: got %#v, want %#v", old, vpsReport)
+		}
+	})
+
 	saveBatchID := "save_reports_" + prefix
 	saveExplicitReceivedAt := syncInterleavingT2.Add(3 * time.Minute)
 	saveZeroObservedAt := syncInterleavingT1.Add(-2 * time.Minute)
@@ -909,6 +999,103 @@ func assertIPQualityJSONFields(t *testing.T, raw json.RawMessage, expected strin
 			t.Errorf("stored JSON field %q = %#v, want %#v", key, got[key], value)
 		}
 	}
+}
+
+func assertIPQualityRecoveryRoundTrip(t *testing.T, report ipquality.VPSReport, receivedAt time.Time, requestID string) {
+	t.Helper()
+	if report.Summary == nil || report.LatestReport == nil {
+		t.Fatalf("recovery report = %#v, want summary and selected report", report)
+	}
+	latest := report.LatestReport
+	if latest.AgentVersion != "agent/ip-quality-recovery" || latest.Status != agentapi.IPQualityStatusPartial ||
+		!latest.ReceivedAt.Equal(receivedAt) || latest.ReportID != report.Summary.ReportID {
+		t.Fatalf("recovery report metadata = %#v, summary=%#v", latest, report.Summary)
+	}
+	assertIPQualityJSONFields(t, latest.DiagnosticsJSON, fmt.Sprintf(`{"source_version":"v2","service_probe_revision":2,"collection_revision":3,"ip_address_family":4,"collect_request_id":%q}`, requestID))
+	wantCoverage := ipquality.Coverage{
+		ExpectedProviderCount: 18, SuccessfulProviderCount: 5, NotConfiguredProviderCount: 13,
+		ExpectedServiceCount: 2, SuccessfulServiceCount: 1, FailedServiceCount: 1,
+	}
+	if latest.Coverage == nil || *latest.Coverage != wantCoverage || report.Summary.Coverage == nil || *report.Summary.Coverage != wantCoverage {
+		t.Fatalf("recovery coverage latest=%#v summary=%#v, want %#v", latest.Coverage, report.Summary.Coverage, wantCoverage)
+	}
+	if len(report.ProviderResults) != 18 || len(report.ServiceUnlocks) != 2 {
+		t.Fatalf("recovery child counts = %d/%d, want 18/2", len(report.ProviderResults), len(report.ServiceUnlocks))
+	}
+	for _, provider := range report.ProviderResults {
+		switch provider.Provider {
+		case "ipquery.io":
+			if provider.Status != "success" || provider.RiskScore != "0" || provider.IsProxy == nil || *provider.IsProxy {
+				t.Fatalf("zero risk/false flag not preserved: %#v", provider)
+			}
+			assertIPQualityJSONFields(t, provider.ExtraJSON, `{"capability":"risk"}`)
+		case "ipwho.is":
+			if provider.Status != "success" || provider.IsProxy != nil {
+				t.Fatalf("geo-only provider acquired risk facts: %#v", provider)
+			}
+			assertIPQualityJSONFields(t, provider.ExtraJSON, `{"capability":"geo_only"}`)
+		}
+	}
+	for _, service := range report.ServiceUnlocks {
+		switch service.Service {
+		case "chatgpt":
+			if service.Status != "partial" || service.ProbeStatus != "success" || service.Region != "US" ||
+				service.UnlockType != "web_verified_app_unknown" || service.LatencyMS == nil || *service.LatencyMS != 211 {
+				t.Fatalf("partial service business scope lost: %#v", service)
+			}
+			assertIPQualityJSONFields(t, service.ExtraJSON, `{"probe_revision":2,"evidence_kind":"anonymous_service_probe","matched_rule":"cookie_consent_required","http_status":200,"region":"US","ip_version":4}`)
+		case "reddit":
+			if service.Status != "unknown" || service.ProbeStatus != "failure" || service.Region != "" || service.UnlockType != "" || service.ErrorCode != "challenge_detected" {
+				t.Fatalf("unknown service gained business facts: %#v", service)
+			}
+		default:
+			t.Fatalf("unexpected recovery service: %#v", service)
+		}
+	}
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatalf("encode recovery readback: %v", err)
+	}
+	for _, forbidden := range []string{"secret-token", "provider-secret", "service-secret", "assertion", "refresh_token", "access_token", "Authorization", "Set-Cookie"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("recovery readback contains %q", forbidden)
+		}
+	}
+}
+
+func ipQualitySyncRecoveryReport(prefix, syncBatchID string, observedAt, receivedAt time.Time, requestID string) ipquality.ReportWrite {
+	report := ipQualitySyncFullReport(prefix, syncBatchID, observedAt, receivedAt, requestID)
+	report.AgentVersion = "agent/ip-quality-recovery"
+	report.ErrorCode, report.ErrorSummary = "service_partial", "one service did not establish a business conclusion"
+	report.RawJSON = json.RawMessage(`{"source_version":"v2","collection_revision":3}`)
+	report.DiagnosticsJSON = json.RawMessage(fmt.Sprintf(`{"source_version":"v2","service_probe_revision":2,"collection_revision":3,"ip_address_family":4,"collect_request_id":%q}`, requestID))
+	report.CollectRequestID = ipquality.CollectRequestIDFromDiagnostics(report.DiagnosticsJSON)
+	report.CoverageJSON = json.RawMessage(`{"expected_provider_count":18,"successful_provider_count":5,"failed_provider_count":0,"skipped_provider_count":0,"not_configured_provider_count":13,"expected_service_count":2,"successful_service_count":1,"failed_service_count":1,"skipped_service_count":0,"not_configured_service_count":0}`)
+	report.ProviderResults = []ipquality.ProviderResultWrite{
+		{Provider: "ipapi.is", Status: "success", SourceType: "default", RegionCode: "US", RegionName: "United States", ExtraJSON: json.RawMessage(`{"capability":"geo_only"}`)},
+		{Provider: "ipquery.io", Status: "success", SourceType: "default", RiskLevel: "low", RiskScore: "0", IsProxy: new(false), IsVPN: new(false), IsTor: new(false), IsServer: new(true), ExtraJSON: json.RawMessage(`{"capability":"risk"}`)},
+		{Provider: "proxycheck.io", Status: "success", SourceType: "default", RiskLevel: "medium", RiskScore: "50", IsVPN: new(true), ExtraJSON: json.RawMessage(`{"capability":"risk","api_version":"24-June-2026"}`)},
+		{Provider: "ip2location.io", Status: "success", SourceType: "default", RegionCode: "US", ExtraJSON: json.RawMessage(`{"capability":"geo_only"}`)},
+		{Provider: "ipwho.is", Status: "success", SourceType: "default", RegionCode: "US", ExtraJSON: json.RawMessage(`{"capability":"geo_only"}`)},
+	}
+	for _, provider := range []string{"maxmind", "ipinfo", "ipregistry", "ipdata", "ipqualityscore", "abuseipdb", "scamalytics", "ipapi.co", "ip-api.com", "db-ip", "ippure", "meowvps", "ip.net.coffee"} {
+		report.ProviderResults = append(report.ProviderResults, ipquality.ProviderResultWrite{
+			Provider: provider, Status: "not_configured", SourceType: "optional", ErrorCode: "not_configured",
+		})
+	}
+	report.ServiceUnlocks = []ipquality.ServiceUnlockWrite{
+		{
+			Service: "chatgpt", Source: "openai_status_probe", Status: "partial", ProbeStatus: "success",
+			Region: "US", UnlockType: "web_verified_app_unknown", LatencyMS: new(211),
+			ExtraJSON: json.RawMessage(`{"probe_revision":2,"evidence_kind":"anonymous_service_probe","matched_rule":"cookie_consent_required","http_status":200,"region":"US","ip_version":4}`),
+		},
+		{
+			Service: "reddit", Source: "reddit_home_probe", Status: "unknown", ProbeStatus: "failure",
+			ErrorCode: "challenge_detected", ErrorSummary: "service challenge detected",
+			ExtraJSON: json.RawMessage(`{"probe_revision":2,"evidence_kind":"anonymous_service_probe","matched_rule":"challenge","http_status":403,"ip_version":4}`),
+		},
+	}
+	return report
 }
 
 func ipQualitySyncFullReport(prefix, syncBatchID string, observedAt, receivedAt time.Time, requestID string) ipquality.ReportWrite {

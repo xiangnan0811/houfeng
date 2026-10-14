@@ -96,14 +96,14 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 				"risk":{"is_vpn":false,"is_tor":false,"is_proxy":false,"is_datacenter":true,"risk_score":22}
 			}`
 		case "proxycheck.io":
-			body = `{"status":"ok","203.0.113.10":{"proxy":"no","type":"business","risk":15,"country":"US","isocode":"US"}}`
+			body = `{"status":"ok","version":"24-June-2026","203.0.113.10":{"network":{"type":"business"},"location":{"country_name":"United States","country_code":"US"},"detections":{"proxy":false,"risk":15}}}`
 		case "api.ip2location.io":
 			status = http.StatusTooManyRequests
 			body = `{"error":{"error_message":"rate limit"}}`
 		case "ipwho.is":
 			body = `{"success":true,"ip":"203.0.113.10","country_code":"US","country":"United States","asn":64500,"isp":"Example Transit"}`
 		default:
-			t.Fatalf("unexpected request to %s; default service probes must not perform I/O", request.URL.String())
+			t.Fatalf("unexpected provider request to %s", request.URL.String())
 		}
 		return &http.Response{
 			StatusCode: status,
@@ -123,7 +123,6 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
-		Services:         []string{"netflix", "chatgpt", "youtube-premium", "amazon-prime-video", "disney-plus", "tiktok", "reddit"},
 	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
 
 	if report.Status != agentapi.IPQualityStatusPartial {
@@ -139,9 +138,8 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 		report.Coverage.FailedProviderCount != 1 || report.Coverage.NotConfiguredProviderCount < 1 {
 		t.Fatalf("provider coverage = %#v, want default + optional source counts", report.Coverage)
 	}
-	if report.Coverage.ExpectedServiceCount != 7 || report.Coverage.SuccessfulServiceCount != 0 ||
-		report.Coverage.FailedServiceCount != 0 || report.Coverage.SkippedServiceCount != 7 {
-		t.Fatalf("service coverage = %#v, want seven skipped diagnostics and no successful probes", report.Coverage)
+	if report.Coverage.ExpectedServiceCount != 0 || len(report.ServiceUnlocks) != 0 {
+		t.Fatalf("service coverage = %#v, want no services for provider-only collection", report.Coverage)
 	}
 	providers := providerResultsByName(report.ProviderResults)
 	for _, provider := range []string{"ipapi.is", "ipquery.io", "proxycheck.io", "ip2location.io", "ipwho.is", "maxmind"} {
@@ -158,41 +156,19 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 	if providers["ipquery.io"].ExtraJSON == nil || !strings.Contains(string(providers["ipquery.io"].ExtraJSON), `"risk_score":22`) {
 		t.Fatalf("ipquery extra_json = %s, want provider-specific details", providers["ipquery.io"].ExtraJSON)
 	}
-	wantSources := map[string]string{
-		"netflix":            "netflix_title_probe",
-		"chatgpt":            "openai_status_probe",
-		"youtube-premium":    "youtube_premium_page_probe",
-		"amazon-prime-video": "prime_video_page_probe",
-		"disney-plus":        "disney_default_probe",
-		"tiktok":             "tiktok_home_probe",
-		"reddit":             "reddit_home_probe",
-	}
-	services := serviceUnlocksByService(report.ServiceUnlocks)
-	for service, source := range wantSources {
-		result, ok := services[service]
-		if !ok {
-			t.Fatalf("ServiceUnlocks missing %s: %#v", service, report.ServiceUnlocks)
-		}
-		if result.Source != source || result.Status != "unknown" || result.ProbeStatus != "skipped" ||
-			result.ErrorCode != "unsupported_default_probe" ||
-			result.ErrorSummary != "safe default probe is not available without verified business evidence" ||
-			result.Region != "" || result.UnlockType != "" || result.LatencyMS != nil || result.ExtraJSON != nil {
-			t.Fatalf("%s row = %#v, want zero-I/O skipped diagnostic", service, result)
-		}
-	}
 	if len(report.DiagnosticsJSON) == 0 || !strings.Contains(string(report.DiagnosticsJSON), `"source_version":"v2"`) ||
-		!strings.Contains(string(report.DiagnosticsJSON), `"service_probe_revision":1`) {
+		!strings.Contains(string(report.DiagnosticsJSON), `"service_probe_revision":2`) {
 		t.Fatalf("DiagnosticsJSON = %s, want v2 service-probe revision diagnostics", report.DiagnosticsJSON)
 	}
-	if len(report.RawJSON) == 0 || !strings.Contains(string(report.RawJSON), `"providers"`) || !strings.Contains(string(report.RawJSON), `"services"`) {
-		t.Fatalf("RawJSON = %s, want provider/service raw envelope", report.RawJSON)
+	if len(report.RawJSON) == 0 || !strings.Contains(string(report.RawJSON), `"providers"`) {
+		t.Fatalf("RawJSON = %s, want provider raw envelope", report.RawJSON)
 	}
 	requestsMu.Lock()
 	defer requestsMu.Unlock()
 	if len(requests["api.ipapi.is"]) != 1 || len(requests["api.ipquery.io"]) != 1 ||
 		len(requests["proxycheck.io"]) != 1 || len(requests["api.ip2location.io"]) != 1 || len(requests["ipwho.is"]) != 1 ||
 		len(requests) != 5 {
-		t.Fatalf("requests = %#v, want only five provider requests and no service I/O", requests)
+		t.Fatalf("requests = %#v, want five provider requests for the empty service set", requests)
 	}
 }
 
@@ -229,23 +205,11 @@ func TestHTTPCollectorDefaultSourcesParseProviderFactsForKnownVPSIP(t *testing.T
 			}`
 		case "proxycheck.io":
 			body = `{
-				"status":"ok",
+				"status":"ok","version":"24-June-2026",
 				"209.33.173.4":{
-					"asn":"AS63150",
-					"range":"209.33.173.0/23",
-					"provider":"BAGE CLOUD LLC",
-					"organisation":"Bage Cloud LLC",
-					"continent":"Asia",
-					"continentcode":"AS",
-					"country":"Japan",
-					"isocode":"JP",
-					"region":"Tokyo",
-					"regioncode":"13",
-					"timezone":"Asia/Tokyo",
-					"city":"Akiruno (Ushinuma)",
-					"risk":66,
-					"proxy":"yes",
-					"type":"VPN"
+					"network":{"asn":"AS63150","provider":"BAGE CLOUD LLC","organisation":"Bage Cloud LLC","type":"VPN"},
+					"location":{"country_name":"Japan","country_code":"JP"},
+					"detections":{"proxy":true,"vpn":true,"tor":false,"hosting":true,"scraper":false,"risk":66}
 				}
 			}`
 		case "api.ip2location.io":
@@ -292,15 +256,15 @@ func TestHTTPCollectorDefaultSourcesParseProviderFactsForKnownVPSIP(t *testing.T
 		t.Fatalf("proxycheck.io row = %#v, want risk 66 VPN proxy in JP", proxycheck)
 	}
 	ip2location := providers["ip2location.io"]
-	if ip2location.RegionCode != "JP" || ip2location.RegionName != "Tokyo" ||
+	if ip2location.RegionCode != "JP" || ip2location.RegionName != "Japan" ||
 		ip2location.IsProxy == nil || *ip2location.IsProxy ||
 		len(ip2location.ExtraJSON) == 0 || !strings.Contains(string(ip2location.ExtraJSON), `"asn":"63150"`) {
 		t.Fatalf("ip2location.io row = %#v extra=%s, want JP proxy=false and ASN extra", ip2location, ip2location.ExtraJSON)
 	}
 	ipwhois := providers["ipwho.is"]
 	if ipwhois.RegionCode != "JP" || ipwhois.RegionName != "Japan" ||
-		ipwhois.CompanyType != "hosting" && !strings.Contains(string(ipwhois.ExtraJSON), "BAGE CLOUD LLC") {
-		t.Fatalf("ipwho.is row = %#v extra=%s, want JP and connection org context", ipwhois, ipwhois.ExtraJSON)
+		ipwhois.CompanyType != "" || ipwhois.UsageType != "" || !strings.Contains(string(ipwhois.ExtraJSON), "BAGE CLOUD LLC") {
+		t.Fatalf("ipwho.is row = %#v extra=%s, want JP and connection context without invented type", ipwhois, ipwhois.ExtraJSON)
 	}
 	ipquery := providers["ipquery.io"]
 	if ipquery.RegionCode != "US" || !strings.Contains(string(ipquery.ExtraJSON), "Windstream Communications LLC") {
@@ -337,7 +301,7 @@ func TestHTTPCollectorDefaultSourcesIsolatesProviderTimeouts(t *testing.T) {
 			if err := request.Context().Err(); err != nil {
 				return nil, err
 			}
-			return jsonResponse(request, `{"status":"ok","203.0.113.10":{"proxy":"no","risk":9,"country":"US","isocode":"US"}}`)
+			return jsonResponse(request, `{"status":"ok","version":"24-June-2026","203.0.113.10":{"network":{},"location":{"country_name":"United States","country_code":"US"},"detections":{"proxy":false,"risk":9}}}`)
 		case "api.ip2location.io":
 			if err := request.Context().Err(); err != nil {
 				return nil, err
@@ -371,12 +335,15 @@ func TestHTTPCollectorDefaultSourcesIsolatesProviderTimeouts(t *testing.T) {
 	if requests["api.ipquery.io"] == 0 || requests["proxycheck.io"] == 0 || requests["ipwho.is"] == 0 {
 		t.Fatalf("requests = %#v, want later provider sources still attempted", requests)
 	}
+	if requests["api.ipapi.is"] != 1 {
+		t.Fatalf("requests=%#v, failed canonical discovery must not be retried", requests)
+	}
 	if report.Status != agentapi.IPQualityStatusPartial {
 		t.Fatalf("Status = %q, want partial from one timed out source", report.Status)
 	}
 }
 
-func TestHTTPCollectorMarksAmbiguousProviderIPCandidates(t *testing.T) {
+func TestHTTPCollectorSameFamilyDiscoveryAmbiguityFailsServicesWithoutProviderConflict(t *testing.T) {
 	t.Parallel()
 
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -385,9 +352,13 @@ func TestHTTPCollectorMarksAmbiguousProviderIPCandidates(t *testing.T) {
 		case "api.ipapi.is":
 			body = `{"ip":"203.0.113.10","version":4}`
 		case "api.ipquery.io":
-			body = `{"ip":"203.0.113.11","risk":{"is_proxy":false}}`
+			if request.URL.Path == "/" {
+				body = `{"ip":"203.0.113.11","risk":{"is_proxy":false}}`
+			} else {
+				body = `{"ip":"203.0.113.10","risk":{"is_proxy":false}}`
+			}
 		case "proxycheck.io":
-			body = `{"status":"ok","203.0.113.10":{"proxy":"no"}}`
+			body = `{"status":"ok","version":"24-June-2026","203.0.113.10":{"network":{},"location":{},"detections":{"proxy":false}}}`
 		case "api.ip2location.io":
 			body = `{"ip":"203.0.113.10","country_code":"US"}`
 		case "ipwho.is":
@@ -408,16 +379,39 @@ func TestHTTPCollectorMarksAmbiguousProviderIPCandidates(t *testing.T) {
 		Enabled:          true,
 		TimeoutSeconds:   5,
 		FrequencySeconds: 86400,
+		Services:         []string{"netflix", "not-a-service"},
 	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))
 
 	if report.Status != agentapi.IPQualityStatusPartial {
-		t.Fatalf("Status = %q, want partial for conflicting provider IP candidates", report.Status)
+		t.Fatalf("Status = %q, want partial for ambiguous service egress", report.Status)
 	}
 	if report.IPAddress != "203.0.113.10" {
 		t.Fatalf("IPAddress = %q, want canonical IP from preferred provider", report.IPAddress)
 	}
 	if len(report.DiagnosticsJSON) == 0 || !strings.Contains(string(report.DiagnosticsJSON), `"ip_candidates"`) {
 		t.Fatalf("DiagnosticsJSON = %s, want ip_candidates diagnostics", report.DiagnosticsJSON)
+	}
+	if strings.Contains(string(report.DiagnosticsJSON), `"ip_conflict":true`) ||
+		!strings.Contains(string(report.DiagnosticsJSON), `"egress_ambiguous":true`) {
+		t.Fatalf("DiagnosticsJSON = %s, want discovery ambiguity without final provider conflict", report.DiagnosticsJSON)
+	}
+	providers := providerResultsByName(report.ProviderResults)
+	if providers["ipquery.io"].Status != "success" || report.Coverage.SuccessfulProviderCount != 5 {
+		t.Fatalf("providers=%#v coverage=%#v, want targeted canonical requery to succeed", providers, report.Coverage)
+	}
+	services := serviceUnlocksByService(report.ServiceUnlocks)
+	if services["netflix"].Status != "unknown" || services["netflix"].ProbeStatus != "failure" ||
+		services["netflix"].ErrorCode != "egress_ambiguous" || services["netflix"].ErrorSummary != "service egress is ambiguous" {
+		t.Fatalf("netflix=%#v, want ambiguous-egress failure without facts", services["netflix"])
+	}
+	if services["not-a-service"].ProbeStatus != "skipped" || services["not-a-service"].ErrorCode != "unsupported_service" {
+		t.Fatalf("unknown service=%#v, want unsupported diagnostic", services["not-a-service"])
+	}
+	providersOnly := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled: true, TimeoutSeconds: 5,
+	}, time.Now())
+	if providersOnly.Status != agentapi.IPQualityStatusSuccess || len(providersOnly.ServiceUnlocks) != 0 {
+		t.Fatalf("providers-only report=%#v, discovery ambiguity alone must not change status", providersOnly)
 	}
 }
 
@@ -432,7 +426,7 @@ func TestHTTPCollectorEquivalentIPv6CandidatesAreNotAmbiguous(t *testing.T) {
 		case "api.ipquery.io":
 			body = `{"ip":"2001:db8::1","risk":{"is_proxy":false}}`
 		case "proxycheck.io":
-			body = `{"status":"ok","2001:0db8:0:0:0:0:0:1":{"proxy":"no"}}`
+			body = `{"status":"ok","version":"24-June-2026","2001:0db8:0:0:0:0:0:1":{"network":{},"location":{},"detections":{"proxy":false}}}`
 		case "api.ip2location.io":
 			body = `{"ip":"2001:db8::1","country_code":"US"}`
 		case "ipwho.is":
@@ -916,7 +910,7 @@ func TestHTTPCollectorReturnsFailureWhenLookupFails(t *testing.T) {
 	}
 }
 
-func TestHTTPCollectorSkippedDiagnosticsKeepNormalizedInputOrder(t *testing.T) {
+func TestHTTPCollectorServiceOutcomesKeepNormalizedInputOrder(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Host {
 		case "api.ipapi.is":
@@ -924,13 +918,12 @@ func TestHTTPCollectorSkippedDiagnosticsKeepNormalizedInputOrder(t *testing.T) {
 		case "api.ipquery.io":
 			return jsonResponse(request, `{"ip":"203.0.113.10"}`)
 		case "proxycheck.io":
-			return jsonResponse(request, `{"status":"ok","203.0.113.10":{"proxy":"no"}}`)
+			return jsonResponse(request, `{"status":"ok","version":"24-June-2026","203.0.113.10":{"network":{},"location":{},"detections":{"proxy":false}}}`)
 		case "api.ip2location.io":
 			return jsonResponse(request, `{"ip":"203.0.113.10"}`)
 		case "ipwho.is":
 			return jsonResponse(request, `{"success":true,"ip":"203.0.113.10"}`)
 		default:
-			t.Errorf("unexpected service request: %s", request.URL)
 			return jsonResponse(request, `{}`)
 		}
 	})}
@@ -947,16 +940,20 @@ func TestHTTPCollectorSkippedDiagnosticsKeepNormalizedInputOrder(t *testing.T) {
 	}
 	for index, want := range []string{"netflix", "chatgpt", "reddit", "future-service"} {
 		row := report.ServiceUnlocks[index]
-		if row.Service != want || row.Status != "unknown" || row.ProbeStatus != "skipped" {
-			t.Fatalf("ServiceUnlocks[%d] = %#v, want skipped service %q", index, row, want)
+		wantProbe := "failure"
+		if want == "future-service" {
+			wantProbe = "skipped"
+		}
+		if row.Service != want || row.Status != "unknown" || row.ProbeStatus != wantProbe {
+			t.Fatalf("ServiceUnlocks[%d] = %#v, want normalized unknown service %q", index, row, want)
 		}
 	}
 	if row := report.ServiceUnlocks[3]; row.Source != "default_probe_registry" || row.ErrorCode != "unsupported_service" {
 		t.Fatalf("unknown service diagnostic = %#v", row)
 	}
-	if report.Status != agentapi.IPQualityStatusSuccess || report.Coverage.ExpectedServiceCount != 4 ||
-		report.Coverage.SkippedServiceCount != 4 || report.Coverage.SuccessfulServiceCount != 0 || report.Coverage.FailedServiceCount != 0 {
-		t.Fatalf("skipped diagnostics must not manufacture partial or successful coverage: status=%s coverage=%#v", report.Status, report.Coverage)
+	if report.Status != agentapi.IPQualityStatusPartial || report.Coverage.ExpectedServiceCount != 4 ||
+		report.Coverage.SkippedServiceCount != 1 || report.Coverage.SuccessfulServiceCount != 0 || report.Coverage.FailedServiceCount != 3 {
+		t.Fatalf("unrecognized service responses must remain failed unknown outcomes: status=%s coverage=%#v", report.Status, report.Coverage)
 	}
 }
 
@@ -1181,10 +1178,10 @@ func TestHTTPCollectorIPQueryCanonicalFallbackAndFailureMatrix(t *testing.T) {
 					}
 					return jsonResponse(request, scenario.body)
 				case "proxycheck.io":
-					if request.URL.Path != "/v2/203.0.113.10" {
+					if request.URL.Path != "/v3/203.0.113.10" || request.URL.Query().Get("ver") != "24-June-2026" {
 						t.Errorf("proxycheck target = %s", request.URL)
 					}
-					return jsonResponse(request, `{"status":"ok","203.0.113.10":{"proxy":"no"}}`)
+					return jsonResponse(request, `{"status":"ok","version":"24-June-2026","203.0.113.10":{"network":{},"location":{},"detections":{"proxy":false}}}`)
 				case "api.ip2location.io":
 					if request.URL.Query().Get("ip") != "203.0.113.10" {
 						t.Errorf("ip2location target = %s", request.URL)
@@ -1201,7 +1198,7 @@ func TestHTTPCollectorIPQueryCanonicalFallbackAndFailureMatrix(t *testing.T) {
 				}
 			})}
 			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
-				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 1, Services: []string{"netflix"}}, time.Now())
+				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 1}, time.Now())
 			providers := providerResultsByName(report.ProviderResults)
 			if scenario.wantCode == "" {
 				if report.IPAddress != "203.0.113.10" || report.Status != agentapi.IPQualityStatusPartial || providers["ipquery.io"].Status != "success" {
@@ -1215,7 +1212,7 @@ func TestHTTPCollectorIPQueryCanonicalFallbackAndFailureMatrix(t *testing.T) {
 				if len(requests) != 5 || requests["api.ipquery.io"] != "https://api.ipquery.io/?format=json" {
 					t.Fatalf("fallback requests = %#v", requests)
 				}
-				if report.Coverage.SuccessfulServiceCount != 0 || report.Coverage.SkippedServiceCount != 1 {
+				if report.Coverage.ExpectedServiceCount != 0 || len(report.ServiceUnlocks) != 0 {
 					t.Fatalf("coverage = %#v", report.Coverage)
 				}
 			} else {
@@ -1302,6 +1299,318 @@ func TestHTTPCollectorCustomServiceBusinessConclusionMatrix(t *testing.T) {
 			}
 			if scenario.name == "blocked business error" && row.ErrorSummary != "business denied" {
 				t.Fatalf("business diagnostic lost: %#v", row)
+			}
+		})
+	}
+}
+
+func TestHTTPCollectorDualStackPrefersIPv4AndRequeriesOtherCanonical(t *testing.T) {
+	for _, ipv4Provider := range []string{"api.ipapi.is", "api.ipquery.io"} {
+		t.Run(ipv4Provider, func(t *testing.T) {
+			const targetIP = "203.0.113.10"
+			const ipv6IP = "2001:db8::1"
+			var mu sync.Mutex
+			requests := map[string][]string{}
+			ipqueryDiscovered := make(chan struct{})
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				mu.Lock()
+				requests[request.URL.Host] = append(requests[request.URL.Host], request.URL.String())
+				mu.Unlock()
+				switch request.URL.Host {
+				case "api.ipapi.is", "api.ipquery.io":
+					discovery := request.URL.Query().Get("q") == "" && request.URL.Path == "/"
+					if request.URL.Host == "api.ipapi.is" && request.URL.Path == "" {
+						discovery = request.URL.Query().Get("q") == ""
+					}
+					ip := targetIP
+					if discovery {
+						if request.URL.Host == "api.ipquery.io" {
+							close(ipqueryDiscovered)
+						} else {
+							// The lower-priority registry entry responds first.
+							select {
+							case <-ipqueryDiscovered:
+							case <-request.Context().Done():
+								return nil, request.Context().Err()
+							}
+						}
+						if request.URL.Host != ipv4Provider {
+							ip = ipv6IP
+						}
+					} else if request.URL.Host == "api.ipapi.is" {
+						if request.URL.Query().Get("q") != targetIP {
+							return nil, fmt.Errorf("unexpected targeted ipapi URL %s", request.URL.String())
+						}
+					} else if request.URL.Path != "/"+targetIP {
+						return nil, fmt.Errorf("unexpected targeted IPQuery URL %s", request.URL.String())
+					}
+					// A provider-supplied family must not override target identity.
+					return jsonResponse(request, fmt.Sprintf(`{"ip":%q,"version":6,"country_code":"US"}`, ip))
+				case "proxycheck.io":
+					if !strings.Contains(request.URL.Path, targetIP) {
+						return nil, fmt.Errorf("unexpected ProxyCheck target %s", request.URL.String())
+					}
+					return jsonResponse(request, `{"status":"ok","version":"24-June-2026","203.0.113.10":{"network":{},"location":{},"detections":{"proxy":false}}}`)
+				case "api.ip2location.io":
+					if request.URL.Query().Get("ip") != targetIP {
+						return nil, fmt.Errorf("unexpected IP2Location target %s", request.URL.String())
+					}
+					return jsonResponse(request, `{"ip":"203.0.113.10","country_code":"US"}`)
+				case "ipwho.is":
+					if request.URL.Path != "/"+targetIP {
+						return nil, fmt.Errorf("unexpected IPWho target %s", request.URL.String())
+					}
+					return jsonResponse(request, `{"success":true,"ip":"203.0.113.10","country_code":"US"}`)
+				default:
+					return nil, fmt.Errorf("unexpected request %s", request.URL.String())
+				}
+			})}
+			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
+				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5}, time.Now())
+			if report.IPAddress != targetIP || report.IPVersion != 4 || report.Status != agentapi.IPQualityStatusSuccess {
+				t.Fatalf("report=%#v, want successful selected IPv4 report", report)
+			}
+			var diagnostics struct {
+				CollectionRevision int               `json:"collection_revision"`
+				Family             int               `json:"ip_address_family"`
+				Discovery          map[string]string `json:"discovery_ip_candidates"`
+				Final              map[string]string `json:"ip_candidates"`
+				Conflict           bool              `json:"ip_conflict"`
+				Ambiguous          bool              `json:"egress_ambiguous"`
+			}
+			if err := json.Unmarshal(report.DiagnosticsJSON, &diagnostics); err != nil {
+				t.Fatal(err)
+			}
+			if diagnostics.CollectionRevision != 3 || diagnostics.Family != 4 ||
+				len(diagnostics.Discovery) != 2 || len(diagnostics.Final) != 5 || diagnostics.Conflict || diagnostics.Ambiguous {
+				t.Fatalf("diagnostics=%s, want normal dual-stack discovery without conflict", report.DiagnosticsJSON)
+			}
+			for provider, ip := range diagnostics.Final {
+				if ip != targetIP {
+					t.Fatalf("%s final IP=%s, want selected target", provider, ip)
+				}
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			requestCount := 0
+			for host, urls := range requests {
+				requestCount += len(urls)
+				want := 1
+				if (host == "api.ipapi.is" || host == "api.ipquery.io") && host != ipv4Provider {
+					want = 2
+				}
+				if len(urls) != want {
+					t.Fatalf("%s requests=%#v, want %d", host, urls, want)
+				}
+			}
+			if requestCount != 6 {
+				t.Fatalf("requests=%#v, want exactly six database requests", requests)
+			}
+		})
+	}
+}
+
+func TestHTTPCollectorTargetMismatchCannotPolluteReportFacts(t *testing.T) {
+	for _, mismatchingProvider := range []string{"api.ipapi.is", "api.ipquery.io", "api.ip2location.io", "ipwho.is"} {
+		t.Run(mismatchingProvider, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Host == mismatchingProvider {
+					// IPv6 discovery loses to IPv4, then the canonical requery
+					// returns a different IPv4 with facts that must be discarded.
+					ip := "203.0.113.11"
+					if mismatchingProvider == "api.ipapi.is" && request.URL.Query().Get("q") == "" {
+						ip = "2001:db8::1"
+					}
+					return jsonResponse(request, fmt.Sprintf(`{"success":true,"ip":%q,"country_code":"XX","country":"Wrong region","organization":"Wrong organization","asn":64599,"latitude":66,"longitude":77,"risk":{"is_vpn":true,"risk_score":99},"is_vpn":true,"risk_level":"high"}`, ip))
+				}
+				if request.URL.Host == "api.ipapi.is" {
+					return jsonResponse(request, `{"ip":"203.0.113.10"}`)
+				}
+				switch request.URL.Host {
+				case "api.ipquery.io", "api.ip2location.io":
+					return jsonResponse(request, `{"ip":"203.0.113.10"}`)
+				case "proxycheck.io":
+					return jsonResponse(request, `{"status":"ok","version":"24-June-2026","203.0.113.10":{"network":{},"location":{},"detections":{"proxy":false}}}`)
+				case "ipwho.is":
+					return jsonResponse(request, `{"success":true,"ip":"203.0.113.10"}`)
+				default:
+					return nil, fmt.Errorf("unexpected request %s", request.URL.String())
+				}
+			})}
+			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
+				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5}, time.Now())
+			providerName := map[string]string{"api.ipapi.is": "ipapi.is", "api.ipquery.io": "ipquery.io", "api.ip2location.io": "ip2location.io", "ipwho.is": "ipwho.is"}[mismatchingProvider]
+			result := providerResultsByName(report.ProviderResults)[providerName]
+			if result.Status != "failure" || result.ErrorCode != "ip_mismatch" || result.ErrorSummary != "provider returned a different IP" {
+				t.Fatalf("result=%#v, want precise mismatch failure", result)
+			}
+			if result.RegionCode != "" || result.RegionName != "" || result.RiskLevel != "" || result.RiskScore != "" ||
+				result.IsVPN != nil || result.IsProxy != nil || result.ExtraJSON != nil {
+				t.Fatalf("mismatch retained normalized facts=%#v", result)
+			}
+			if report.Status != agentapi.IPQualityStatusPartial || report.IPAddress != "203.0.113.10" || report.IPVersion != 4 ||
+				report.UseRegionCode != "" || report.UseRegionName != "" || report.ASN != "" || report.Organization != "" ||
+				report.Latitude != nil || report.Longitude != nil || report.RiskLevel != "" {
+				t.Fatalf("mismatch polluted summary=%#v", report)
+			}
+			var diagnostics struct {
+				Final    map[string]string `json:"ip_candidates"`
+				Conflict bool              `json:"ip_conflict"`
+			}
+			if err := json.Unmarshal(report.DiagnosticsJSON, &diagnostics); err != nil {
+				t.Fatal(err)
+			}
+			if !diagnostics.Conflict || len(diagnostics.Final) != 4 || diagnostics.Final[providerName] != "" {
+				t.Fatalf("diagnostics=%s, want explicit mismatch excluded from final candidates", report.DiagnosticsJSON)
+			}
+			if !strings.Contains(string(report.RawJSON), `"Wrong organization"`) {
+				t.Fatalf("raw=%s, want retained raw mismatch response", report.RawJSON)
+			}
+		})
+	}
+}
+
+type cancellationBarrierBody struct {
+	ctx       context.Context
+	host      string
+	cancelled chan<- string
+	release   <-chan struct{}
+	closed    chan<- string
+}
+
+func (body *cancellationBarrierBody) Read([]byte) (int, error) {
+	<-body.ctx.Done()
+	body.cancelled <- body.host
+	<-body.release
+	return 0, body.ctx.Err()
+}
+
+func (body *cancellationBarrierBody) Close() error {
+	body.closed <- body.host
+	return nil
+}
+
+func TestHTTPCollectorCancellationJoinsDependentRequeryAndBodyReaders(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan string, 4)
+	cancelled := make(chan string, 4)
+	closed := make(chan string, 4)
+	release := make(chan struct{})
+	defer func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	}()
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Host == "api.ipapi.is" {
+			return jsonResponse(request, `{"ip":"203.0.113.10"}`)
+		}
+		if request.URL.Host == "api.ipquery.io" && request.URL.Path == "/" {
+			return jsonResponse(request, `{"ip":"2001:db8::1"}`)
+		}
+		started <- request.URL.Host
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: &cancellationBarrierBody{
+				ctx: request.Context(), host: request.URL.Host, cancelled: cancelled, release: release, closed: closed,
+			},
+			Request: request,
+		}, nil
+	})}
+	done := make(chan agentapi.IPQualityReportPayload, 1)
+	go func() {
+		done <- agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
+			ctx, &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 15}, time.Now())
+	}()
+	for range 4 {
+		select {
+		case <-started:
+		case <-time.After(3 * time.Second):
+			t.Fatal("all dependent and targeted requery workers must start concurrently")
+		}
+	}
+	cancel()
+	for range 4 {
+		select {
+		case <-cancelled:
+		case <-time.After(3 * time.Second):
+			t.Fatal("parent cancellation did not reach all response readers")
+		}
+	}
+	select {
+	case report := <-done:
+		t.Fatalf("Collect returned before response readers exited: %#v", report)
+	default:
+	}
+	close(release)
+	var report agentapi.IPQualityReportPayload
+	select {
+	case report = <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Collect did not join cancelled workers")
+	}
+	if len(closed) != 4 {
+		t.Fatalf("closed response bodies=%d, want all four before return", len(closed))
+	}
+	if report.Status != agentapi.IPQualityStatusPartial || report.Coverage.SuccessfulProviderCount != 1 || report.Coverage.FailedProviderCount != 4 {
+		t.Fatalf("report=%#v, want final joined failure rows with selected canonical retained", report)
+	}
+	for _, result := range report.ProviderResults {
+		if result.SourceType == "default" && result.Provider != "ipapi.is" && result.Status != "failure" {
+			t.Fatalf("worker outcome not finalized before return=%#v", result)
+		}
+	}
+}
+
+func TestHTTPCollectorProviderGroupsAndRiskDoNotDependOnServiceResults(t *testing.T) {
+	for _, services := range [][]string{nil, {"chatgpt"}} {
+		t.Run(fmt.Sprintf("services_%d", len(services)), func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				switch request.URL.Host {
+				case "api.ipapi.is":
+					return jsonResponse(request, `{"ip":"203.0.113.10","version":6,"asn":"AS64500","company":"Example Network","country":"Singapore","registered_country_code":"sg","latitude":1.25,"risk_level":"low"}`)
+				case "api.ipquery.io":
+					return jsonResponse(request, `{"ip":"203.0.113.10","isp":{"asn":"64501","org":"Other Network"},"location":{"country_code":"JP","country":"Japan","longitude":139.5},"risk":{"is_proxy":false,"is_vpn":true,"risk_score":0}}`)
+				case "proxycheck.io":
+					return jsonResponse(request, `{"status":"ok","version":"24-June-2026","203.0.113.10":{"network":{"asn":"64502","organisation":"Third Network"},"location":{"country_code":"US","country_name":"United States"},"detections":{"proxy":false,"risk":90.5}}}`)
+				case "api.ip2location.io":
+					return jsonResponse(request, `{"ip":"203.0.113.10","country_code":"US","country_name":"United States"}`)
+				case "ipwho.is":
+					return jsonResponse(request, `{"success":true,"ip":"203.0.113.10","country_code":"US","country":"United States"}`)
+				case "api.openai.com", "ios.chat.openai.com":
+					// Unrecognized responses cannot become service positives.
+					return jsonResponse(request, `{}`)
+				default:
+					return nil, fmt.Errorf("unexpected test endpoint %s", request.URL)
+				}
+			})}
+			report := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: client}).Collect(
+				context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: services}, time.Now())
+			if report.IPAddress != "203.0.113.10" || report.IPVersion != 4 ||
+				report.UseRegionName != "Singapore" || report.UseRegionCode != "" ||
+				report.RegisteredRegionCode != "SG" || report.RegisteredRegionName != "" ||
+				report.ASN != "AS64500" || report.Organization != "Example Network" ||
+				report.Latitude == nil || *report.Latitude != 1.25 || report.Longitude != nil || report.RiskLevel != "high" {
+				t.Fatalf("default report mixed groups, overrode identity or hid maximum risk: %#v", report)
+			}
+			rows := providerResultsByName(report.ProviderResults)
+			if rows["ipapi.is"].RegionCode != "" || rows["ipapi.is"].CompanyType != "" ||
+				rows["ipquery.io"].RiskScore != "0" || rows["proxycheck.io"].RiskScore != "90.5" {
+				t.Fatalf("provider facts=%#v", rows)
+			}
+			wantStatus := agentapi.IPQualityStatusSuccess
+			if len(services) > 0 {
+				wantStatus = agentapi.IPQualityStatusPartial
+				if len(report.ServiceUnlocks) != 1 || report.ServiceUnlocks[0].Status != "unknown" || report.ServiceUnlocks[0].ProbeStatus != "failure" {
+					t.Fatalf("generic JSON became service facts=%#v", report.ServiceUnlocks)
+				}
+			}
+			if report.Status != wantStatus {
+				t.Fatalf("status=%s want %s without changing risk", report.Status, wantStatus)
 			}
 		})
 	}

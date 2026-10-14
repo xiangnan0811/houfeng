@@ -488,6 +488,24 @@ describe('VPSPage', () => {
     expect(screen.getAllByRole('region', { name: 'VPS 快速查看' })).toHaveLength(1)
   })
 
+  it('labels partial, failed and stale IP quality reports instead of calling them unfinished', async () => {
+    const ipSummary = vps.ip_quality_summary
+    mockInventory([
+      { ...vps, ip_quality_summary: { ...ipSummary, status: 'partial' } },
+      { ...vps, vps_id: 'vps_partial_stale', display_name: 'Partial Stale', ip_quality_summary: { ...ipSummary, status: 'partial', stale: true } },
+      { ...vps, vps_id: 'vps_success_stale', display_name: 'Success Stale', ip_quality_summary: { ...ipSummary, stale: true } },
+      { ...vps, vps_id: 'vps_failure', display_name: 'Failure Edge', ip_quality_summary: { ...ipSummary, status: 'failure' } },
+    ], [])
+    mount('/vps?workspace=workbench')
+
+    const rowFor = async (name: string) => (await screen.findByRole('button', { name: '选择 ' + name })).closest('tr')!
+    expect(await rowFor('Tokyo Edge')).toHaveTextContent('IP 部分采集')
+    expect(await rowFor('Partial Stale')).toHaveTextContent('IP 部分采集 · 过期')
+    expect(await rowFor('Success Stale')).toHaveTextContent('IP 低风险 · 过期')
+    expect(await rowFor('Failure Edge')).toHaveTextContent('IP 采集失败')
+    expect(screen.queryByText(/IP 未完成/)).not.toBeInTheDocument()
+  })
+
   it('does not announce lifecycle or renewal status dots as health states', async () => {
     mockInventory([{ ...vps, renewal_decision: 'cancel' }], [])
     mount('/vps?workspace=workbench&selected=vps_001')

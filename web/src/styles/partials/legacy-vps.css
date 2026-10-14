@@ -87,6 +87,7 @@
 .ipq-provider-table th,.ipq-provider-table td{white-space:nowrap}
 .ipq-page .ipq-provider-table__flag{text-align:center}
 .ipq-provider-table__name{font-weight:600}
+.ipq-provider-table__capability{font-weight:400}
 .ipq-flag{font-size:var(--vps-detail-helper-size)}
 .ipq-flag--no{color:var(--text-secondary)}
 .ipq-flag--unknown{color:var(--text-muted)}

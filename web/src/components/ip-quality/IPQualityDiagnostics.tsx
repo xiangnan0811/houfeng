@@ -2,7 +2,7 @@ import { useId } from 'react'
 
 import { ScrollRegion, Timestamp } from '../atoms'
 import { formatLatency, formatOptional } from '../../lib/format'
-import type { IPQualityProviderResult, IPQualityServiceUnlock, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
+import type { IPQualityCoverage, IPQualityProviderResult, IPQualityServiceUnlock, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
 import { IPQualityJSONBlock } from './IPQualityJSONBlock'
 import { serviceLabel } from './ipQualityPresentation'
 
@@ -45,6 +45,20 @@ function errorText(code?: string, summary?: string): string {
   return [code, summary].map((value) => (value ?? '').trim()).filter(Boolean).join(' · ') || '—'
 }
 
+// 来源行按状态分别计数：未配置的可选来源不是失败。
+function sourceStatusSummary(providers: IPQualityProviderResult[]): string {
+  const counts = { failure: 0, skipped: 0, not_configured: 0 }
+  for (const row of providers) {
+    const status = (row.status ?? 'success').trim().toLowerCase()
+    if (status === 'failure' || status === 'skipped' || status === 'not_configured') counts[status] += 1
+  }
+  return [
+    counts.failure > 0 ? ` · 失败 ${counts.failure}` : '',
+    counts.skipped > 0 ? ` · 跳过 ${counts.skipped}` : '',
+    counts.not_configured > 0 ? ` · 未配置 ${counts.not_configured}` : '',
+  ].join('')
+}
+
 function extraJSONMap<T extends { extra_json?: unknown }>(rows: T[], name: (row: T) => string): Record<string, unknown> | null {
   const entries = rows.filter((row) => row.extra_json != null).map((row) => [name(row), row.extra_json] as const)
   return entries.length > 0 ? Object.fromEntries(entries) : null
@@ -64,7 +78,7 @@ export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsPr
   const latest = report.latest_report ?? null
   const providers = report.provider_results
   const services = report.service_unlocks
-  const failedSources = providers.filter((row) => sourceStatusLabel(row.status) !== '成功').length
+  const coverage: IPQualityCoverage | null = summary.coverage ?? latest?.coverage ?? null
   const coordinates = latest?.latitude != null && latest?.longitude != null ? `${latest.latitude}, ${latest.longitude}` : '—'
   const providerExtra = extraJSONMap(providers, (row) => row.provider)
   const serviceExtra = extraJSONMap(services, (row) => row.service)
@@ -77,7 +91,7 @@ export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsPr
         <summary className="ipq-diagnostics__summary">
           <h2>采集诊断</h2>
           <span className="ipq-diagnostics__hint">
-            {providers.length} 个来源 · {services.length} 项服务探测{failedSources > 0 ? ` · ${failedSources} 个来源未成功` : ''}
+            {providers.length} 个来源 · {services.length} 项服务探测{sourceStatusSummary(providers)}
           </span>
         </summary>
         <div className="ipq-diagnostics__body">
@@ -89,6 +103,22 @@ export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsPr
             <div><dt>接收时间</dt><dd><Timestamp value={latest?.received_at} /></dd></div>
             <div><dt>坐标</dt><dd className="mono">{coordinates}</dd></div>
             <div><dt>数据来源</dt><dd>{latest?.is_backfilled ? '离线补传' : '实时上报'}</dd></div>
+            {coverage ? (
+              <>
+                <div className="ipq-facts__wide">
+                  <dt>来源覆盖（全部）</dt>
+                  <dd className="mono">
+                    {`成功 ${coverage.successful_provider_count}/${coverage.expected_provider_count} · 失败 ${coverage.failed_provider_count} · 跳过 ${coverage.skipped_provider_count} · 未配置 ${coverage.not_configured_provider_count}`}
+                  </dd>
+                </div>
+                <div className="ipq-facts__wide">
+                  <dt>服务覆盖</dt>
+                  <dd className="mono">
+                    {`成功 ${coverage.successful_service_count}/${coverage.expected_service_count} · 失败 ${coverage.failed_service_count} · 跳过 ${coverage.skipped_service_count} · 未配置 ${coverage.not_configured_service_count}`}
+                  </dd>
+                </div>
+              </>
+            ) : null}
             {latest?.error_summary || latest?.error_code ? (
               <div className="ipq-facts__wide"><dt>错误</dt><dd>{errorText(latest.error_code, latest.error_summary)}</dd></div>
             ) : null}

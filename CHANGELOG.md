@@ -18,6 +18,10 @@
 
 ### Bug Fixes
 
+* **ip-quality:** restore seven bounded anonymous service probes with service-specific business evidence, direct address-family clients and safe failure diagnostics; preserve historical probe revisions and custom adapter behavior.
+* **ip-quality:** distinguish JavaScript regex literals from division when extracting service-page JSON, including unary/logical expression boundaries; ignore quoted, commented and regex-contained lookalikes without losing subsequent real service facts.
+* **ip-quality:** bind all database results to one deterministic report IP, restore provider-specific fields and strict ProxyCheck v3 parsing, preserve unknown/false/zero distinctions, and keep database risk independent of service availability without averaging vendor scores.
+* **web:** replace the composite IP quality score with incomplete-evidence-aware database risk assessment; distinguish partial/stale reports, enabled-source success rates, anonymous service scope and historical probe trust.
 * **web:** reset stale inventory scroll on detail entry, close the management menu reliably from its trigger, and preserve the mobile overflow menu's accessible name.
 * **web:** remove unreachable legacy styles, improve inventory and account-label contrast, and move column-width defaults ref updates out of render.
 * **web:** improve shared tab and light-theme secondary-text contrast instead of maintaining VPS-only color overrides.
