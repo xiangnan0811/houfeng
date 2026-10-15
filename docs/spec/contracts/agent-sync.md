@@ -339,13 +339,13 @@ if ok {
 
 1. **Scope / Trigger**
    - 触发：修改 MonitoringInstance onboarding、一键安装命令、center-served installer、`HOUFENG_PUBLIC_BASE_URL`、agent release artifact 命名、或 `/api/agent/install.sh` 路由。
-   - 目标：让每个自部署 center 负责生成自己的安装命令和 enrollment token；GitHub Release 只提供二进制与 signed checksum manifest，不能成为 token/script authority，也不能只靠同源 checksum 提供供应链信任。
+   - 目标：自部署center负责安装命令/token；GitHub Release提供二进制、对应源码与signed checksum manifest，不作token/script authority，不能只靠同源checksum提供信任。
 
 2. **Signatures**
    - Config: `config.CenterConfig.PublicBaseURL` 来自 `HOUFENG_PUBLIC_BASE_URL`，必须是无 query/fragment 的 absolute `http(s)` URL，可为 domain 或 `IP:port`。
    - Public route: `GET agentapi.InstallScriptPath` -> embedded shell script，未登录可读，只允许读取脚本。
    - Installer-pinned checksum public key: `HOUFENG_CHECKSUM_MINISIGN_PUBLIC_KEY` inside `internal/center/installer/houfeng-agent-install.sh`。
-   - Release assets: `houfeng-agent_<version>_linux_amd64`、`houfeng-agent_<version>_linux_arm64`、`sha256sums.txt`、`sha256sums.txt.minisig`。
+   - Release assets: `houfeng-agent_<version>_linux_amd64`、`houfeng-agent_<version>_linux_arm64`、`houfeng-agent_<version>_source.tar.gz`、`houfeng-agent_<version>_licenses.txt`、`sha256sums.txt`、`sha256sums.txt.minisig`。
    - Release workflow secrets: `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` and optional `HOUFENG_RELEASE_MINISIGN_PASSWORD`。
    - Authenticated route: `POST /api/monitoring-instances/{monitoring_instance_id}/install-command` -> `monitoringinstances.InstallCommandIssue`。
    - Response JSON: `{command, issued_at, expires_at, installer_url, public_base_url, agent_version, release_repo}`。
@@ -368,11 +368,14 @@ if ok {
    - Installer server URLs default to HTTPS-only. `http://` is accepted only when the operator passes `--insecure-allow-http`, which the center includes for explicitly configured HTTP `HOUFENG_PUBLIC_BASE_URL` values.
    - Generated commands must not pass the one-time enrollment token as installer argv or as another command's argv. Use a quoted heredoc into installer stdin so token exposure is limited to the copied command text rather than `ps` output for the installer process.
    - Manual installer invocations must provide exactly one enrollment token source; empty token, multiple sources, or unreadable `--enrollment-token-file` values fail before writes.
+   - Detector preflight requires working Bash>=4 and jq in `/usr/bin` or `/bin` before downloads or existing Agent/systemd changes; only shell builtins and the private Agent fetch helper are otherwise needed. Missing/broken tools fail with manual repair instructions, even with `--install-missing-deps`; no detector dependencies are installed. Runtime loss is `detector_dependency_missing` for four script services/keyless geo, not monitoring exit or fallback to replaced algorithms.
    - Generated commands include `--install-missing-deps` so Debian 11 / older Ubuntu style hosts without a packaged `minisign` can recover without separate operator diagnosis. Manual installer invocations may omit the flag for an interactive `/dev/tty` prompt, or pass `--no-install-missing-deps` to fail closed when `minisign` is missing.
    - If `minisign` is missing and dependency recovery is allowed, the installer must download the pinned upstream static minisign tarball, verify its embedded SHA256 before extracting, install only the matching `amd64`/`arm64` verifier to `/usr/local/bin/minisign`, ensure the current script `PATH` can find it, then continue. Do not use apt/yum/dnf/apk or enable distro repositories in the installer path; package availability differs by distribution and version.
    - Any installer prompt must read from `/dev/tty`, never stdin, because generated commands reserve stdin for `--enrollment-token-stdin`.
    - The installer must require a working `minisign` before release verification, download `sha256sums.txt.minisig`, verify `sha256sums.txt` with the pinned public key, then verify the downloaded binary against the signed manifest before replacing `/usr/local/bin/houfeng-agent` or starting systemd. Missing signature, signature failure, missing checksum entry, checksum mismatch, denied dependency recovery, failed minisign bootstrap checksum, or failed bootstrap install must fail closed without checksum-only fallback.
    - Release workflow must sign `dist/sha256sums.txt` before uploading release assets. `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` must match the installer-pinned public key; encrypted keys require `HOUFENG_RELEASE_MINISIGN_PASSWORD`.
+   - Source archive contains complete tracked release HEAD (project AGPL-3.0-only license, third-party notices, detector source/assets/license/upstream original/modifications/SHA256SUMS, Go source/modules and build workflow/Makefile), enters the same signed checksum/upload mechanism and is verified before publication. Clean binary VCS metadata and archive material/hash checks remain required. Dirty local builds do not prove correspondence; Houfeng's original code is explicitly owner-licensed under AGPL-3.0-only, not exempted through subprocess execution. Third-party licenses remain applicable and corresponding source must include the actual distributed modifications.
+   - Before release builds or output creation, reject any tracked/index difference from HEAD and any non-ignored untracked file. Ignored scratch is allowed and untouched. Dirty development candidates use build-agent, never a silently mismatched binary/source release pair.
    - Installed `agent.env` must include durable sync queue bounds: `HOUFENG_AGENT_BUFFER_MAX_ENTRIES`、`HOUFENG_AGENT_BUFFER_MAX_AGE`、`HOUFENG_AGENT_BUFFER_MAX_BYTES`.
    - MVP support is Linux + systemd + `amd64`/`arm64` only. Auto-upgrade, uninstall UX, non-systemd hosts, package repos, Docker/Kubernetes installs, and center-hosted binary mirrors are out of scope.
    - Installer output, center logs, and UI conflict copy must not print the full enrollment token or imply a one-time token remains reusable after a failed/pending fingerprint attempt.
@@ -389,6 +392,7 @@ if ok {
    | Multiple token sources or empty token | installer exits before writing runtime files |
    | Unsupported install method | installer returns non-zero with a short error; no partial service start |
    | Unsupported OS / architecture / no running systemd | installer exits before writing binary/config/token |
+   | Bash missing/older than4 or jq missing/broken | manual repair error before release downloads, stopping service or Agent file changes; --install-missing-deps does not authorize installing these tools |
    | `minisign` missing + generated command `--install-missing-deps` | installer verifies pinned minisign tarball SHA256, installs `/usr/local/bin/minisign`, then verifies release manifest |
    | `minisign` missing + manual interactive run without dependency flag | installer explains the consequence and asks via `/dev/tty`; no answer or `no` exits before release download and local writes |
    | `minisign` missing + `--no-install-missing-deps` or non-interactive run without consent | installer exits before release download, replacing binary, or starting service |
@@ -412,7 +416,7 @@ if ok {
    - Handler tests for install-command success, 404 monitoring instance, 409 missing public URL, 409 dev/missing version, method not allowed, HTTP base URL `--insecure-allow-http`, no argv token exposure, and shell quoting of all command arguments.
    - Router/bootstrap tests proving `/api/agent/install.sh` is public while `/api/monitoring-instances/{id}/install-command` remains session-protected and wired non-nil.
    - Installer tests or embedded-script checks for Linux arch mapping, systemd requirement, missing-`minisign` dependency recovery flags, `/dev/tty` prompt usage, pinned bootstrap SHA256, recovery before release asset download, signed checksum manifest download, signature verification before checksum extraction, exact checksum-manifest matching, HTTPS-by-default behavior, token file/stdin sources, token file permissions, and no full-token logging.
-   - Release target test/sanity that `make build-agent-release VERSION=<tag>` emits both Linux binaries and `sha256sums.txt` with names matching installer expectations; publish workflow review checks signing and upload of `sha256sums.txt.minisig`.
+   - Release target emits both Linux binaries, corresponding-source archive, project/third-party license bundle and sha256sums.txt with matching names; workflow verifies required source/license/build materials and detector hashes, includes all four checksums, then signs and uploads the manifest/signature. Images wait for successful source/license publication. Houfeng-owned code is AGPL-3.0-only by explicit owner choice; third-party notices and actual-version corresponding-source obligations remain applicable.
 
 7. **Wrong vs Correct**
 

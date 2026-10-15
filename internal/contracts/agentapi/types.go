@@ -158,38 +158,40 @@ type ProbeObservationPayload struct {
 }
 
 type IPQualityProviderResultPayload struct {
-	Provider     string          `json:"provider"`
-	Status       string          `json:"status,omitempty"`
-	SourceType   string          `json:"source_type,omitempty"`
-	LatencyMS    *int            `json:"latency_ms,omitempty"`
-	UsageType    string          `json:"usage_type,omitempty"`
-	CompanyType  string          `json:"company_type,omitempty"`
-	RiskLevel    string          `json:"risk_level,omitempty"`
-	RiskScore    string          `json:"risk_score,omitempty"`
-	RegionCode   string          `json:"region_code,omitempty"`
-	RegionName   string          `json:"region_name,omitempty"`
-	IsProxy      *bool           `json:"is_proxy,omitempty"`
-	IsTor        *bool           `json:"is_tor,omitempty"`
-	IsVPN        *bool           `json:"is_vpn,omitempty"`
-	IsServer     *bool           `json:"is_server,omitempty"`
-	IsAbuser     *bool           `json:"is_abuser,omitempty"`
-	IsRobot      *bool           `json:"is_robot,omitempty"`
-	ErrorCode    string          `json:"error_code,omitempty"`
-	ErrorSummary string          `json:"error_summary,omitempty"`
-	ExtraJSON    json.RawMessage `json:"extra_json,omitempty"`
+	Provider     string                    `json:"provider"`
+	Status       string                    `json:"status,omitempty"`
+	SourceType   string                    `json:"source_type,omitempty"`
+	LatencyMS    *int                      `json:"latency_ms,omitempty"`
+	UsageType    string                    `json:"usage_type,omitempty"`
+	CompanyType  string                    `json:"company_type,omitempty"`
+	RiskLevel    string                    `json:"risk_level,omitempty"`
+	RiskScore    string                    `json:"risk_score,omitempty"`
+	RegionCode   string                    `json:"region_code,omitempty"`
+	RegionName   string                    `json:"region_name,omitempty"`
+	IsProxy      *bool                     `json:"is_proxy,omitempty"`
+	IsTor        *bool                     `json:"is_tor,omitempty"`
+	IsVPN        *bool                     `json:"is_vpn,omitempty"`
+	IsServer     *bool                     `json:"is_server,omitempty"`
+	IsAbuser     *bool                     `json:"is_abuser,omitempty"`
+	IsRobot      *bool                     `json:"is_robot,omitempty"`
+	ErrorCode    string                    `json:"error_code,omitempty"`
+	ErrorSummary string                    `json:"error_summary,omitempty"`
+	ExtraJSON    json.RawMessage           `json:"extra_json,omitempty"`
+	Details      *IPQualityProviderDetails `json:"details,omitempty"`
 }
 
 type IPQualityServiceUnlockPayload struct {
-	Service      string          `json:"service"`
-	Source       string          `json:"source,omitempty"`
-	Status       string          `json:"status"`
-	ProbeStatus  string          `json:"probe_status,omitempty"`
-	LatencyMS    *int            `json:"latency_ms,omitempty"`
-	Region       string          `json:"region,omitempty"`
-	UnlockType   string          `json:"unlock_type,omitempty"`
-	ErrorCode    string          `json:"error_code,omitempty"`
-	ErrorSummary string          `json:"error_summary,omitempty"`
-	ExtraJSON    json.RawMessage `json:"extra_json,omitempty"`
+	Service      string                  `json:"service"`
+	Source       string                  `json:"source,omitempty"`
+	Status       string                  `json:"status"`
+	ProbeStatus  string                  `json:"probe_status,omitempty"`
+	LatencyMS    *int                    `json:"latency_ms,omitempty"`
+	Region       string                  `json:"region,omitempty"`
+	UnlockType   string                  `json:"unlock_type,omitempty"`
+	ErrorCode    string                  `json:"error_code,omitempty"`
+	ErrorSummary string                  `json:"error_summary,omitempty"`
+	ExtraJSON    json.RawMessage         `json:"extra_json,omitempty"`
+	Checks       []IPQualityServiceCheck `json:"checks,omitempty"`
 }
 
 type IPQualityCoveragePayload struct {
@@ -230,6 +232,7 @@ type IPQualityReportPayload struct {
 	DiagnosticsJSON      json.RawMessage                  `json:"diagnostics_json,omitempty"`
 	ProviderResults      []IPQualityProviderResultPayload `json:"provider_results,omitempty"`
 	ServiceUnlocks       []IPQualityServiceUnlockPayload  `json:"service_unlocks,omitempty"`
+	Product              *IPQualityAgentProduct           `json:"product,omitempty"`
 }
 
 // SyncRequest keeps heartbeat sync as the canonical carrier; host_samples and
@@ -281,8 +284,12 @@ type IPQualityPlan struct {
 	FrequencySeconds int      `json:"frequency_seconds"`
 	TimeoutSeconds   int      `json:"timeout_seconds"`
 	Services         []string `json:"services,omitempty"`
+	ProductRevision  int      `json:"product_revision,omitempty"`
+	MailEnabled      *bool    `json:"mail_enabled,omitempty"`
 	// CollectRequestID 非空且与 agent 上次处理的请求不同时，agent 立即采集一次，不等待周期。
-	CollectRequestID string `json:"collect_request_id,omitempty"`
+	CollectRequestID   string `json:"collect_request_id,omitempty"`
+	CollectionRevision int    `json:"collection_revision,omitempty"`
+	CollectIPVersions  []int  `json:"collect_ip_versions,omitempty"`
 }
 
 // PendingAction describes a command the center wants the agent to execute.

@@ -66,6 +66,8 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment(),
 	settingsDeploymentOverridesAppACLCurrentMigrationFragment(),
 	ipQualityAddressFamiliesAppACLCurrentMigrationFragment(),
+	ipQualityProductAppACLCurrentMigrationFragment(),
+	ipQualityCollectionScopeAppACLCurrentMigrationFragment(),
 }
 
 func subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -102,6 +104,34 @@ func ipQualityAddressFamiliesAppACLCurrentMigrationFragment() AppACLCurrentMigra
 				ObjectIdentity: "ip_quality_vps_family_state",
 				Privilege:      AppACLPrivilegeSelect,
 			}}
+		},
+	}
+}
+
+func ipQualityProductAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0077_ip_quality_product.sql",
+		Objects: []AppACLManagedObjectR1{
+			{ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "ip_quality_intelligence"},
+			{ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "ip_quality_source_cache"},
+		},
+		Privileges: func(string) []AppACLPrivilege {
+			privileges := make([]AppACLPrivilege, 0, 7)
+			for _, table := range []string{"ip_quality_intelligence", "ip_quality_source_cache"} {
+				for _, kind := range []AppACLPrivilegeKind{AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate} {
+					privileges = append(privileges, AppACLPrivilege{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: table, Privilege: kind})
+				}
+			}
+			return append(privileges, AppACLPrivilege{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "ip_quality_source_cache", Privilege: AppACLPrivilegeDelete})
+		},
+	}
+}
+
+func ipQualityCollectionScopeAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0078_ip_quality_collection_scope.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return nil
 		},
 	}
 }
@@ -1313,16 +1343,20 @@ func compileAppACLCurrentCatalogContract(
 		}
 	}
 
-	canonicalBody, err := CanonicalPrivilegeSetBodyV1(contract.RoleBindings, contract.Privileges)
+	// Normalize the in-memory tuples directly instead of serializing and parsing
+	// them just to recover the same sorted values. The tuple validators enforce
+	// the wire string bounds; retain the parser's privilege-count bound here.
+	if len(contract.Privileges) > 65536 {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonical privilege set has too many privileges")
+	}
+	contract.RoleBindings, err = canonicalRoleBindings(contract.RoleBindings)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL role bindings: %w", err)
+	}
+	contract.Privileges, err = canonicalPrivileges(contract.Privileges)
 	if err != nil {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL privileges: %w", err)
 	}
-	canonicalSet, err := ParseCanonicalPrivilegeSetBodyV1(canonicalBody)
-	if err != nil {
-		return appACLEffectiveCatalogContract{}, fmt.Errorf("parse current APP ACL privileges: %w", err)
-	}
-	contract.RoleBindings = append([]AppACLRoleBinding(nil), canonicalSet.RoleBindings...)
-	contract.Privileges = append([]AppACLPrivilege(nil), canonicalSet.Privileges...)
 	contract.AuxiliaryPrivileges, err = canonicalAppACLCurrentAuxiliaryPrivileges(contract.AuxiliaryPrivileges)
 	if err != nil {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL auxiliary privileges: %w", err)

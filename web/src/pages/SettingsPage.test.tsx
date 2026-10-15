@@ -120,6 +120,12 @@ const settingsResponseBody = {
     stale_after_seconds: 604800,
     timeout_seconds: 15,
     services: ['netflix', 'chatgpt', 'youtube-premium'],
+    mail_enabled: true,
+    sources: {
+      ipapi_is: { configured: true, masked_summary: '****f00d' },
+      abuseipdb: { configured: false, masked_summary: '' },
+      maxmind: { configured: true, masked_summary: '账号 ****21 · Key ****9abc' },
+    },
   },
   incident_sweep: {
     mode: 'inherit',
@@ -136,6 +142,16 @@ const settingsResponseBody = {
     max_reminder_lead_days: 30,
     exchange_rate_stale_after_hours: 36,
   },
+}
+
+// 保存其它设置时 IP 质量块回传的是可编辑字段；凭据未改动则整块 sources 省略。
+const ipQualityUpdatePayload = {
+  enabled: true,
+  frequency_seconds: 86400,
+  stale_after_seconds: 604800,
+  timeout_seconds: 15,
+  services: ['netflix', 'chatgpt', 'youtube-premium'],
+  mail_enabled: true,
 }
 
 describe('SettingsPage', () => {
@@ -428,7 +444,7 @@ describe('SettingsPage', () => {
         raw_layer_days: 45,
         aggregate_layer_days: 365,
       },
-      ip_quality_settings: settingsResponseBody.ip_quality_settings,
+      ip_quality_settings: ipQualityUpdatePayload,
     })
   })
 
@@ -445,6 +461,12 @@ describe('SettingsPage', () => {
             stale_after_seconds: 864000,
             timeout_seconds: 20,
             services: ['netflix', 'chatgpt'],
+            mail_enabled: false,
+            sources: {
+              ipapi_is: { configured: true, masked_summary: '****f00d' },
+              abuseipdb: { configured: true, masked_summary: '****beef' },
+              maxmind: { configured: true, masked_summary: '账号 ****21 · Key ****9abc' },
+            },
           },
         }),
       )
@@ -461,18 +483,104 @@ describe('SettingsPage', () => {
     expect(screen.getByLabelText('IP 质量过期窗口秒数').parentElement).toHaveTextContent('（10 天）')
     fireEvent.change(screen.getByLabelText('IP 质量请求超时秒数'), { target: { value: '20' } })
     fireEvent.change(screen.getByLabelText('IP 质量采集服务集合'), { target: { value: 'netflix, chatgpt' } })
+    fireEvent.click(screen.getByRole('switch', { name: '检测邮局 25 端口连通性' }))
+    fireEvent.change(screen.getByLabelText('AbuseIPDB API Key'), { target: { value: 'abuse-secret-value' } })
     fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
-      ip_quality_settings: {
-        enabled: false,
-        frequency_seconds: 259200,
-        stale_after_seconds: 864000,
-        timeout_seconds: 20,
-        services: ['netflix', 'chatgpt'],
-      },
+    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(body.ip_quality_settings).toEqual({
+      enabled: false,
+      frequency_seconds: 259200,
+      stale_after_seconds: 864000,
+      timeout_seconds: 20,
+      services: ['netflix', 'chatgpt'],
+      mail_enabled: false,
+      // 未改动的 ipapi.is 省略即保留；掩码从不回传。
+      sources: { abuseipdb_key: 'abuse-secret-value' },
     })
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).not.toContain('****f00d')
+    await waitFor(() => expect(screen.getByText('已配置 · ****beef')).toBeInTheDocument())
+    expect(screen.getByLabelText('AbuseIPDB API Key')).toHaveValue('')
+  })
+
+  it('clears an IP quality credential only when explicitly requested and rejects masked keys', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse({
+        ...settingsResponseBody,
+        ip_quality_settings: {
+          ...settingsResponseBody.ip_quality_settings,
+          sources: { ...settingsResponseBody.ip_quality_settings.sources, ipapi_is: { configured: false, masked_summary: '' } },
+        },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+
+    // 掩码不能作为新 Key 提交。
+    fireEvent.change(screen.getByLabelText('ipapi.is API Key'), { target: { value: '****f00d' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.getByText('ipapi.is Key 不能使用掩码。')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: '清除 ipapi.is Key' }))
+    expect(screen.getByLabelText('ipapi.is API Key')).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const body = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(body.ip_quality_settings.sources).toEqual({ ipapi_is_key: '' })
+    await waitFor(() => expect(screen.getByLabelText('ipapi.is API Key').parentElement).toHaveTextContent('未配置'))
+    expect(screen.getByLabelText('ipapi.is API Key')).toBeEnabled()
+  })
+
+  it('writes GeoLite account ID and license key as one pair and clears both together', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse(settingsResponseBody))
+      .mockResolvedValueOnce(mockJSONResponse({
+        ...settingsResponseBody,
+        ip_quality_settings: {
+          ...settingsResponseBody.ip_quality_settings,
+          sources: { ...settingsResponseBody.ip_quality_settings.sources, maxmind: { configured: false, masked_summary: '' } },
+        },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderSettingsPage()
+    await waitFor(() => expect(screen.getByRole('heading', { name: '系统设置' })).toBeInTheDocument())
+    switchTab('监控策略')
+
+    // 已保存的凭据只显示掩码，两个输入框都不预填。
+    expect(screen.getByText('已配置 · 账号 ****21 · Key ****9abc')).toBeInTheDocument()
+    expect(screen.getByLabelText('MaxMind GeoLite 账号 ID')).toHaveValue('')
+    expect(screen.getByLabelText('MaxMind GeoLite License Key')).toHaveValue('')
+
+    // 只填一半不提交。
+    fireEvent.change(screen.getByLabelText('MaxMind GeoLite License Key'), { target: { value: 'new-license' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(screen.getByText('GeoLite 账号 ID 与 License Key 需同时填写。')).toBeInTheDocument())
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    fireEvent.change(screen.getByLabelText('MaxMind GeoLite 账号 ID'), { target: { value: ' 123421 ' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    const replaced = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))
+    expect(replaced.ip_quality_settings.sources).toEqual({ maxmind_account_id: '123421', maxmind_license_key: 'new-license' })
+    expect(String(fetchMock.mock.calls[1]?.[1]?.body)).not.toContain('****')
+
+    fireEvent.click(screen.getByRole('button', { name: '清除 MaxMind GeoLite 账号 ID 与 License Key' }))
+    expect(screen.getByLabelText('MaxMind GeoLite 账号 ID')).toBeDisabled()
+    expect(screen.getByLabelText('MaxMind GeoLite License Key')).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: '保存设置' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    const cleared = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))
+    expect(cleared.ip_quality_settings.sources).toEqual({ maxmind_account_id: '', maxmind_license_key: '' })
+    await waitFor(() => expect(screen.getByText('未配置 · 不配置也有默认检测')).toBeInTheDocument())
   })
 
   it('opens subscription settings from query tab and manages subscription-specific APIs', async () => {
@@ -930,7 +1038,7 @@ describe('SettingsPage', () => {
       },
       override_rules: settingsResponseBody.override_rules,
       retention_policy: settingsResponseBody.retention_policy,
-      ip_quality_settings: settingsResponseBody.ip_quality_settings,
+      ip_quality_settings: ipQualityUpdatePayload,
     })
   })
 

@@ -396,7 +396,7 @@ func assertIPQualityFamilyFallbackAndLinkIsolation(t *testing.T, ctx context.Con
 	}
 	malformed := pairedIPQualityTestReport(prefix, "identity_malformed", "malformed", "", 4, observedAt.Add(2*time.Minute), "unavailable", "failure")
 	malformed.MonitoringInstanceID = "mi_family_replacement"
-	malformed.DiagnosticsJSON = json.RawMessage(`{"collection_revision":5,"collection_id":"unsupported","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"unavailable"}`)
+	malformed.DiagnosticsJSON = json.RawMessage(`{"collection_revision":6,"collection_id":"unsupported","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"unavailable"}`)
 	if err := repo.SaveReports(ctx, []ipquality.ReportWrite{malformed}); err != nil {
 		t.Fatal(err)
 	}
@@ -531,20 +531,17 @@ func assertIPQualityAddressFamilyMigrationPreservesLegacyRows(t *testing.T, ctx 
 	failure.ErrorCode = "lookup_failed"
 	failure.ProviderResults = nil
 	failure.ServiceUnlocks = nil
-	repository := NewPostgresIPQualityRepository(db)
-	if err := repository.SaveReports(ctx, []ipquality.ReportWrite{report4, report6, failure}); err != nil {
-		t.Fatalf("seed pre-0076 report and child rows: %v", err)
-	}
-	// Compare complete stored rows, including IDs, timestamps, diagnostics,
-	// coverage, raw/extra JSON and every provider/service column.
+	seedIPQualityC75Reports(t, ctx, db, prefix, []ipquality.ReportWrite{report4, report6, failure})
+	// Compare every C75 column, including IDs, timestamps, diagnostics,
+	// coverage and raw/extra JSON. C77's additive columns are checked separately.
 	snapshot := func() []byte {
 		t.Helper()
 		var raw []byte
 		if err := db.QueryRow(ctx, `
 			select jsonb_build_object(
-				'reports', (select coalesce(jsonb_agg(to_jsonb(r) order by r.report_id), '[]'::jsonb) from ip_quality_reports r),
-				'providers', (select coalesce(jsonb_agg(to_jsonb(p) order by p.result_id), '[]'::jsonb) from ip_quality_provider_results p),
-				'services', (select coalesce(jsonb_agg(to_jsonb(s) order by s.unlock_id), '[]'::jsonb) from ip_quality_service_unlocks s)
+				'reports', (select coalesce(jsonb_agg(to_jsonb(r) - 'product_json' - 'product_summary_json' order by r.report_id), '[]'::jsonb) from ip_quality_reports r),
+				'providers', (select coalesce(jsonb_agg(to_jsonb(p) - 'details_json' order by p.result_id), '[]'::jsonb) from ip_quality_provider_results p),
+				'services', (select coalesce(jsonb_agg(to_jsonb(s) - 'checks_json' order by s.unlock_id), '[]'::jsonb) from ip_quality_service_unlocks s)
 			)`).Scan(&raw); err != nil {
 			t.Fatal(err)
 		}
@@ -561,12 +558,31 @@ func assertIPQualityAddressFamilyMigrationPreservesLegacyRows(t *testing.T, ctx 
 	if reportCount != 3 || providerCount != 6 || serviceCount != 4 {
 		t.Fatalf("predecessor facts missing: reports=%d providers=%d services=%d", reportCount, providerCount, serviceCount)
 	}
-	if err := storemigrate.Apply(ctx, db); err != nil {
-		t.Fatalf("apply 0076 after legacy IP quality rows: %v", err)
+	if err := applyIPQualityMigrationsThrough(t, ctx, db, "0076_ip_quality_address_families.sql"); err != nil {
+		t.Fatalf("apply only 0076 after legacy IP quality rows: %v", err)
 	}
 	if !bytes.Equal(before, snapshot()) {
 		t.Fatal("0076 changed legacy report/provider/service rows")
 	}
+	// Prove the C75→C76 transition before installing C77 for today's reader.
+	// The current repository deliberately has no historical-schema write shim.
+	if err := storemigrate.Apply(ctx, db); err != nil {
+		t.Fatalf("upgrade preserved C76 facts to current schema: %v", err)
+	}
+	if !bytes.Equal(before, snapshot()) {
+		t.Fatal("current migration changed legacy report/provider/service facts")
+	}
+	var legacyProductFieldsUnchanged bool
+	if err := db.QueryRow(ctx, `
+		select not exists (select 1 from ip_quality_reports where product_json is not null or product_summary_json is not null)
+			and not exists (select 1 from ip_quality_provider_results where details_json is not null)
+			and not exists (select 1 from ip_quality_service_unlocks where checks_json is not null)
+			and not exists (select 1 from ip_quality_intelligence)
+			and not exists (select 1 from ip_quality_source_cache)
+	`).Scan(&legacyProductFieldsUnchanged); err != nil || !legacyProductFieldsUnchanged {
+		t.Fatalf("current migration fabricated product facts/jobs/cache for C75 history: %t/%v", legacyProductFieldsUnchanged, err)
+	}
+	repository := NewPostgresIPQualityRepository(db)
 	for _, version := range []int{0, 4, 6} {
 		got, err := repository.GetVPSIPQuality(ctx, "vps_"+prefix, version)
 		if err != nil {
@@ -616,6 +632,20 @@ func applyIPQualityMigrationsThrough(t *testing.T, ctx context.Context, db *pgxp
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 		digest := sha256.Sum256(payload)
+		var appliedChecksum string
+		err = db.QueryRow(ctx, `select checksum from schema_migrations where name = $1`, name).Scan(&appliedChecksum)
+		if err == nil {
+			if appliedChecksum != hex.EncodeToString(digest[:]) {
+				return fmt.Errorf("historical migration %s checksum mismatch", name)
+			}
+			if name == through {
+				return nil
+			}
+			continue
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read historical migration %s: %w", name, err)
+		}
 		tx, err := db.BeginTx(ctx, pgx.TxOptions{})
 		if err != nil {
 			return err
@@ -636,4 +666,66 @@ func applyIPQualityMigrationsThrough(t *testing.T, ctx context.Context, db *pgxp
 		}
 	}
 	return fmt.Errorf("migration %q not found", through)
+}
+
+// Seed the frozen C75 SQL shape directly. Using SaveReports here would make
+// historical migration evidence depend on columns introduced after C75.
+func seedIPQualityC75Reports(t *testing.T, ctx context.Context, db *pgxpool.Pool, prefix string, reports []ipquality.ReportWrite) {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	for index, report := range reports {
+		reportID := fmt.Sprintf("ipq_%s_%d", prefix, index)
+		if _, err := tx.Exec(ctx, `
+			insert into ip_quality_reports (
+				report_id, monitoring_instance_id, observed_at, received_at, agent_version, fingerprint,
+				sync_batch_id, ip_address, ip_version, status, asn, organization, latitude, longitude,
+				use_region_code, use_region_name, registered_region_code, registered_region_name,
+				risk_level, error_code, error_summary, is_backfilled, raw_json, coverage_json, diagnostics_json
+			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,$24::jsonb,$25::jsonb)`,
+			reportID, report.MonitoringInstanceID, report.ObservedAt, report.ReceivedAt, report.AgentVersion, report.Fingerprint,
+			report.SyncBatchID, report.IPAddress, report.IPVersion, report.Status, report.ASN, report.Organization,
+			report.Latitude, report.Longitude, report.UseRegionCode, report.UseRegionName, report.RegisteredRegionCode,
+			report.RegisteredRegionName, report.RiskLevel, report.ErrorCode, report.ErrorSummary, report.IsBackfilled,
+			ipquality.SanitizeRawJSON(report.RawJSON), ipquality.SanitizeExtraJSON(report.CoverageJSON),
+			ipquality.SanitizeExtraJSON(report.DiagnosticsJSON),
+		); err != nil {
+			t.Fatalf("seed C75 report %d with historical columns: %v", index, err)
+		}
+		for providerIndex, provider := range report.ProviderResults {
+			if _, err := tx.Exec(ctx, `
+				insert into ip_quality_provider_results (
+					result_id, report_id, provider, status, source_type, latency_ms, usage_type, company_type,
+					risk_level, risk_score, region_code, region_name, is_proxy, is_tor, is_vpn, is_server,
+					is_abuser, is_robot, error_code, error_summary, extra_json
+				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb)`,
+				fmt.Sprintf("%s_provider_%d", reportID, providerIndex), reportID, provider.Provider,
+				provider.Status, provider.SourceType, provider.LatencyMS, provider.UsageType, provider.CompanyType,
+				provider.RiskLevel, provider.RiskScore, provider.RegionCode, provider.RegionName,
+				provider.IsProxy, provider.IsTor, provider.IsVPN, provider.IsServer, provider.IsAbuser, provider.IsRobot,
+				provider.ErrorCode, provider.ErrorSummary, ipquality.SanitizeExtraJSON(provider.ExtraJSON),
+			); err != nil {
+				t.Fatalf("seed C75 provider %d/%d with historical columns: %v", index, providerIndex, err)
+			}
+		}
+		for serviceIndex, service := range report.ServiceUnlocks {
+			if _, err := tx.Exec(ctx, `
+				insert into ip_quality_service_unlocks (
+					unlock_id, report_id, service, source, status, probe_status, latency_ms, region,
+					unlock_type, error_code, error_summary, extra_json
+				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
+				fmt.Sprintf("%s_service_%d", reportID, serviceIndex), reportID, service.Service, service.Source,
+				service.Status, service.ProbeStatus, service.LatencyMS, service.Region, service.UnlockType,
+				service.ErrorCode, service.ErrorSummary, ipquality.SanitizeExtraJSON(service.ExtraJSON),
+			); err != nil {
+				t.Fatalf("seed C75 service %d/%d with historical columns: %v", index, serviceIndex, err)
+			}
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit C75 report fixture: %v", err)
+	}
 }

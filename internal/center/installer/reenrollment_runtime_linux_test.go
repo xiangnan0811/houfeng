@@ -29,6 +29,7 @@ func TestInstallerReenrollmentExplicitlyReplacesExistingSession(t *testing.T) {
 				t.Fatal(err)
 			}
 			script := strings.NewReplacer("/etc/houfeng-agent", filepath.Join(root, "etc/houfeng-agent"), "/etc/systemd/system", filepath.Join(root, "etc/systemd/system"), "/var/lib/houfeng-agent", filepath.Join(root, "var/lib/houfeng-agent"), "/run/systemd/system", filepath.Join(root, "run/systemd/system"), "/usr/local/bin/houfeng-agent", filepath.Join(root, "houfeng-agent")).Replace(Script)
+			script = strings.ReplaceAll(script, "for detector_dir in /usr/bin /bin;", "for detector_dir in "+env.binDir+";")
 			mustWriteExecutable(t, env.script, script)
 			env.writeCommand(t, "minisign", "#!/bin/sh\nexit 0\n")
 			env.writeCommand(t, "systemctl", `#!/bin/sh

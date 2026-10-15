@@ -11,7 +11,7 @@ import {
 } from './ipQualityCollectPresentation'
 
 function view(patch: Partial<CollectNoticeView> = {}): CollectNoticeView {
-  return { ipVersion: 4, viewingHistory: false, reportCollectionID: null, reportCollectRequestID: null, refreshState: 'idle', ...patch }
+  return { ipVersion: 4, viewingHistory: false, reportCollectionID: null, reportCollectRequestID: null, refreshState: 'idle', hasReport: true, ...patch }
 }
 
 const now = new Date('2026-09-30T08:01:15Z')
@@ -162,13 +162,52 @@ describe('collectUnavailableAction', () => {
 })
 
 describe('collectNotice', () => {
-  it('describes an active request with its stage and elapsed time', () => {
-    expect(collectNotice(status({ status: 'pending' }), null, now, view())).toEqual({
+  it('describes an active request with its real family scope, stage and elapsed time', () => {
+    expect(collectNotice(status({ status: 'pending', requested_ip_versions: [4, 6] }), null, now, view())).toEqual({
       tone: 'progress',
-      title: '正在采集最新 IP 质量',
+      title: '正在采集 IPv4 / IPv6',
       detail: '等待 agent 同步 · 已用 1 分 15 秒',
     })
-    expect(collectNotice(status({ status: 'dispatched' }), null, now, view())?.detail).toBe('agent 已接收，正在检测 · 已用 1 分 15 秒')
+    expect(collectNotice(status({ status: 'dispatched', requested_ip_versions: [6] }), null, now, view())).toMatchObject({
+      title: '正在采集 IPv6',
+      detail: 'agent 已接收，正在检测 · 已用 1 分 15 秒',
+    })
+    // 旧 Center 不返回族集合：按双栈描述，不猜测单族。
+    expect(collectNotice(status({ status: 'pending' }), null, now, view())?.title).toBe('正在采集 IPv4 / IPv6')
+  })
+
+  it('reports a single-family round without claiming the other family report was updated', () => {
+    const v6Only = (result: NonNullable<IPQualityCollectRequest['family_results']>[number]) => status({
+      status: 'completed',
+      report_status: result.report_status,
+      requested_ip_versions: [6],
+      collection_scope: 'single_family',
+      collection_id: 'col_v6',
+      family_results: [result],
+    })
+    const ok = v6Only({ ip_version: 6, availability: 'available', report_status: 'success' })
+    // 查看 IPv4 时只采了 IPv6：短状态，不说当前报告已更新、不刷新为“本轮结果”。
+    expect(collectNotice(ok, 'ipqc_001', now, view({ ipVersion: 4, reportCollectionID: 'col_old' }))).toEqual({ tone: 'success', title: 'IPv6 采集完成' })
+    expect(collectNotice(ok, 'ipqc_001', now, view({ ipVersion: 4, viewingHistory: true }))?.title).toBe('IPv6 采集完成')
+    expect(collectNotice(v6Only({ ip_version: 6, availability: 'unavailable', report_status: 'failure', error_code: 'address_family_unavailable' }), 'ipqc_001', now, view({ ipVersion: 4 }))?.title)
+      .toBe('本轮未检测到 IPv6 可用本地地址')
+    expect(collectNotice(v6Only({ ip_version: 6, availability: 'available', report_status: 'failure', error_code: 'lookup_failed' }), 'ipqc_001', now, view({ ipVersion: 4 })))
+      .toEqual({ tone: 'warning', title: 'IPv6 采集失败', detail: 'IPv6 出口探测失败' })
+    // 查看 IPv6 时：只有展示报告属于本轮且刷新成功才是“报告已更新”。
+    expect(collectNotice(ok, 'ipqc_001', now, view({ ipVersion: 6, reportCollectionID: 'col_v6' }))?.title).toBe('采集完成，报告已更新')
+    expect(collectNotice(ok, 'ipqc_001', now, view({ ipVersion: 6, reportCollectionID: 'col_old' }))?.title).toBe('本轮采集已结束')
+  })
+
+  it('stops on failed requests with an actionable short error for agents without single-family support', () => {
+    expect(collectNotice(status({ status: 'failed', requested_ip_versions: [4], error_code: 'unsupported_agent' }), 'ipqc_001', now, view())).toEqual({
+      tone: 'warning',
+      title: 'agent 版本不支持单独采集 IPv4',
+      detail: '升级 agent，或改为采集 IPv4 / IPv6',
+    })
+    expect(collectNotice(status({ status: 'failed', requested_ip_versions: [6], error_code: 'future_code' }), 'ipqc_001', now, view())?.title).toBe('采集请求失败')
+    // 失败请求不是进行中，也不在其他会话里打扰。
+    expect(isCollectRequestActive(status({ status: 'failed' }).request)).toBe(false)
+    expect(collectNotice(status({ status: 'failed', error_code: 'unsupported_agent' }), null, now, view())).toBeNull()
   })
 
   const dual = (familyResults: NonNullable<IPQualityCollectRequest['family_results']>, extra: Partial<IPQualityCollectRequest> = {}) => status({
@@ -221,6 +260,25 @@ describe('collectNotice', () => {
     const notice = collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, view({ ipVersion: 6, viewingHistory: true, reportCollectionID: 'col_new' }))
     expect(notice?.title).toBe('本轮采集已结束')
     expect(notice?.detail).toContain('历史')
+  })
+
+  it('claims preserved results only when the selected family actually shows an older report', () => {
+    const v6Missing = dual([
+      { ip_version: 4, availability: 'available', report_status: 'success' },
+      { ip_version: 6, availability: 'unavailable', report_status: 'failure', error_code: 'address_family_unavailable' },
+    ], { report_status: 'success' })
+    // 有旧报告：可以说保留了历史结果。
+    expect(collectNotice(v6Missing, 'ipqc_001', now, view({ ipVersion: 6 }))?.detail).toBeDefined()
+    // 该族从未有过报告：只说本轮结果，不宣称保留/仍展示上一份结果。
+    const noReport = (patch: Partial<CollectNoticeView> = {}) => view({ hasReport: false, ...patch })
+    expect(collectNotice(v6Missing, 'ipqc_001', now, noReport({ ipVersion: 6 }))).toEqual({ tone: 'muted', title: '本轮未检测到 IPv6 可用本地地址' })
+    const failed = collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, noReport({ ipVersion: 4 }))
+    expect(failed?.tone).toBe('warning')
+    expect(failed?.title).not.toMatch(/上一份|保留|仍展示/)
+    expect(collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, noReport({ ipVersion: 6, refreshState: 'failed' }))?.detail).toBeUndefined()
+    const legacyFailed = collectNotice(status({ status: 'completed', report_status: 'failure', error_summary: 'timeout' }), 'ipqc_001', now, noReport())
+    expect(legacyFailed?.tone).toBe('warning')
+    expect(legacyFailed?.title).not.toMatch(/上一份|保留|仍展示/)
   })
 
   it('labels legacy single-family rounds and matches them by collect request ID', () => {

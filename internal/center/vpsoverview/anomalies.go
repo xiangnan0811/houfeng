@@ -5,6 +5,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"houfeng/internal/center/ipquality"
+	"houfeng/internal/contracts/agentapi"
 )
 
 // Rule IDs are stable contracts for the web. Renaming one is a breaking change.
@@ -42,11 +45,13 @@ type Snapshot struct {
 	ActiveIncidents      int
 	MonitoringObserved   *time.Time
 
-	IPAvailable  bool
-	IPStatus     string
-	IPRiskLevel  string
-	IPStale      bool
-	IPObservedAt *time.Time
+	IPAvailable       bool
+	IPStatus          string
+	IPRiskLevel       string
+	IPStale           bool
+	IPObservedAt      *time.Time
+	IPProductRevision int
+	IPProductSummary  *agentapi.IPQualityProductSummary
 
 	SubscriptionAvailable bool
 	ActiveSubscriptions   int
@@ -146,12 +151,21 @@ func EvaluateAnomalies(snapshot Snapshot) []Anomaly {
 					},
 				})
 			}
-			if elevatedIPRisk(snapshot.IPRiskLevel) {
+			risky := elevatedIPRisk(snapshot.IPRiskLevel)
+			riskDetail := snapshot.IPRiskLevel
+			if snapshot.IPProductRevision == 1 {
+				risky = ipquality.ProductHasRisk(snapshot.IPProductSummary) && (status == "success" || status == "partial")
+				riskDetail = ""
+				if snapshot.IPProductSummary != nil {
+					riskDetail = strings.Join(snapshot.IPProductSummary.RiskFlags, ", ")
+				}
+			}
+			if risky {
 				anomalies = append(anomalies, Anomaly{
 					RuleID:   RuleIPQualityRiskElevated,
 					Severity: SeverityWarning,
 					Title:    "IP 风险偏高",
-					Detail:   snapshot.IPRiskLevel,
+					Detail:   riskDetail,
 					Source:   "ip_quality",
 					EventAt:  snapshot.IPObservedAt,
 					Primary: &AnomalyAction{

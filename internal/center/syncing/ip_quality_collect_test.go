@@ -24,10 +24,10 @@ func (f *fakeCollectCoordinator) ObserveReports(monitoringInstanceID string, rep
 	f.observed = append(f.observed, reports...)
 }
 
-func (f *fakeCollectCoordinator) PendingRequestID(monitoringInstanceID string, _ time.Time) string {
+func (f *fakeCollectCoordinator) PendingRequest(monitoringInstanceID string, _ time.Time, _ *int) ipquality.CollectRequest {
 	f.pendingCalls++
 	f.pendingInstance = monitoringInstanceID
-	return f.requestID
+	return ipquality.CollectRequest{RequestID: f.requestID, RequestedIPVersions: []int{4, 6}}
 }
 
 func TestServiceAttachesPendingCollectRequestToPlanCopy(t *testing.T) {

@@ -4,6 +4,11 @@
 
 ### Features
 
+* **license:** adopt AGPL-3.0-only for Houfeng-owned code; retain third-party notices, expose source/license links, and publish signed corresponding-source and license assets before images.
+
+* **ip-quality:** add revisioned, immutable report products with independent provider locations and scoped raw scores, ASN/RDAP intelligence, fixed DNSBL/DROP checks, bounded SMTP greeting probes, Center-only optional credentials, and a compact seven-module report with historical identity and visible-only enrichment refresh. Preserve legacy queue compatibility, runtime ACLs and known risk facts during partial collection.
+* **ip-quality:** integrate a pinned, embedded IPQuality fork for four anonymous regional-access probes and keyless geography, preserving the other three service probes and provider provenance. Add immutable IP-type comparison evidence and optional paired GeoLite credentials without rewriting historical results.
+* **ip-quality:** support negotiated IPv4, IPv6 and dual-stack manual collection with scope-conflict handling and recorded-only completion; compact the six default identity facts, service conclusions and semantically colored per-source risk displays.
 * **web:** bring the accepted compact VPS dialog design into the real frontend: common facts plus one optional section, searchable grouped country input, retained hidden IPv6/SSH values, native usage-state/importance controls, and read-only service/domain dossiers with full URL copy/open actions. Preserve real facts saving, conflicts and existing create flows; service/domain editing APIs remain deferred.
 * **web:** isolate facts and dossier styles under the VPS owner. Rebase measured source/built-CSS ceilings for the two local surfaces and entry-JS gzip from 110738 to 111670 bytes (+932); retain existing color, duplicate-selector, importance, font and async-JS ceilings.
 
@@ -18,6 +23,11 @@
 
 ### Bug Fixes
 
+* **migrate:** avoid redundant privilege serialization/parsing and tuple comparison copies during ACL contract compilation, retaining canonical validation and exhaustive predecessor-chain coverage.
+* **ip-quality:** show IP types as short labels without conceptual explanations, and shorten service-evidence copy while preserving diagnostic details.
+* **ip-quality:** remove unimplemented provider placeholders and invented score bands; preserve country provenance, IPv4/IPv6 isolation and unknown results rather than inferring clean risk or service availability.
+* **agent:** preflight Bash >=4 and jq before installation or upgrade changes, fail detector modules safely when dependencies disappear, and include corresponding detector source, assets, license and build materials in the existing signed-checksum release assets.
+* **ip-quality:** retain Spamhaus DROP entries with unknown RIR metadata and compare explicit country codes rather than mixing codes with display names, preventing valid datasets from being rejected and false location disagreements.
 * **ip-quality:** restore seven bounded anonymous service probes with service-specific business evidence, direct address-family clients and safe failure diagnostics; preserve historical probe revisions and custom adapter behavior.
 * **ip-quality:** distinguish JavaScript regex literals from division when extracting service-page JSON, including unary/logical expression boundaries; ignore quoted, commented and regex-contained lookalikes without losing subsequent real service facts.
 * **ip-quality:** bind all database results to one deterministic report IP, restore provider-specific fields and strict ProxyCheck v3 parsing, preserve unknown/false/zero distinctions, and keep database risk independent of service availability without averaging vendor scores.

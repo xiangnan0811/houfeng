@@ -4,6 +4,16 @@ Houfeng is an early-stage, self-hosted fleet control plane for a single operator
 
 The repository contains the Go center, Go agent, PostgreSQL schema, React/Vite web UI, a published-image production Docker Compose stack, local/systemd deployment notes, and validation workflows. There are no package-manager repositories, Kubernetes deployment manifests, automatic upgrade service, or completed real-inventory validation claims in this repo.
 
+## License and corresponding source
+
+Houfeng's original code is licensed under the [GNU Affero General Public License, version 3 only (AGPL-3.0-only)](LICENSE), without warranty. Third-party code and assets retain their own licenses and notices.
+
+The Agent includes a modified [IPQuality](https://github.com/xykt/IPQuality) detector under AGPL-3.0; its [provenance and modifications](agent/ipquality/detector_assets/MODIFICATIONS.md) and upstream license are retained. This project-level license is an explicit owner decision, not an exemption based on subprocess execution.
+
+Each [release](https://github.com/xiangnan0811/houfeng/releases) includes `houfeng-agent_<version>_source.tar.gz`, containing the complete tracked Houfeng source and build materials at that release, alongside signed checksums. Operators of modified network-facing versions must also offer their users the corresponding source of the version actually running, as required by AGPL section 13; a link to an unmodified upstream release does not substitute for local modifications.
+
+The login and sidebar footers link to source and [project/third-party license notices](web/public/licenses.txt). Official images pin the source link to their build revision. For modified deployments, set Docker `SOURCE_URL` (or `VITE_SOURCE_URL` when building the SPA directly) to your own corresponding source. Regenerate the tracked notice bundle after dependency changes with `node scripts/collect-licenses.mjs`; see [distribution details](docs/deploy/local-and-systemd.md#build-artifacts).
+
 ## Current shape
 
 The supported deployment topology is small and explicit:
@@ -171,7 +181,7 @@ make build-center VERSION=v1.2.3
 make build-agent-release VERSION=v1.2.3
 ```
 
-Upload `dist/houfeng-agent_v1.2.3_linux_amd64`, `dist/houfeng-agent_v1.2.3_linux_arm64`, `dist/sha256sums.txt`, and `dist/sha256sums.txt.minisig` to the matching GitHub Release. The installer script itself is served by the deployed center at `/api/agent/install.sh`; GitHub Release hosts only the binary and signed checksum assets.
+Upload all six assets to the matching GitHub Release: `dist/houfeng-agent_v1.2.3_linux_amd64`, `dist/houfeng-agent_v1.2.3_linux_arm64`, `dist/houfeng-agent_v1.2.3_source.tar.gz`, `dist/houfeng-agent_v1.2.3_licenses.txt`, `dist/sha256sums.txt`, and `dist/sha256sums.txt.minisig`. The source archive and license bundle are covered by the same signed checksum manifest as the binaries. The installer script itself is served by the deployed center at `/api/agent/install.sh`; GitHub Release supplies the binaries, corresponding source, license notices and signed checksums, not enrollment-token authority.
 
 ## API compatibility
 

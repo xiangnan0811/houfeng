@@ -12,6 +12,8 @@ import { DeploymentSettingsSection } from './settings/DeploymentSettingsSection'
 import type {
   FeishuSettingsInput,
   IncidentDefaults,
+  IPQualitySettingsUpdateInput,
+  IPQualitySourceCredential,
   SettingsRecord,
   SettingsTelegramInput,
   SettingsUpdateInput,
@@ -32,7 +34,7 @@ import {
   comparableSettingsForm,
   compileOverrideRules,
 } from './settings/overrideRulesModel'
-import type { SettingsFormState } from './settings/types'
+import type { SettingsFormState, SettingsIPQualityForm } from './settings/types'
 
 const SETTINGS_TABS = [
   { value: 'appearance', label: '外观' },
@@ -123,6 +125,14 @@ function buildFormState(settings: SettingsRecord): SettingsFormState {
       staleAfterSeconds: String(settings.ip_quality_settings.stale_after_seconds),
       timeoutSeconds: String(settings.ip_quality_settings.timeout_seconds),
       servicesText: settings.ip_quality_settings.services.join(', '),
+      mailEnabled: settings.ip_quality_settings.mail_enabled,
+      ipapiKey: '',
+      ipapiClear: false,
+      abuseipdbKey: '',
+      abuseipdbClear: false,
+      maxmindAccountId: '',
+      maxmindLicenseKey: '',
+      maxmindClear: false,
     },
   }
 }
@@ -249,7 +259,32 @@ function readGlobalIncident(form: SettingsFormState, inheritedSweepSeconds: numb
   }
 }
 
-function buildIPQualitySettings(f: SettingsFormState) {
+// 凭据：空草稿=省略（保留）；清除=空字符串；新值=替换。掩码永远不作为 Key 回传。
+function credentialUpdate(draft: string, clear: boolean, current: IPQualitySourceCredential, label: string): string | undefined {
+  const key = draft.trim()
+  if (key !== '') {
+    if (key.includes('*') || (current.masked_summary !== '' && key === current.masked_summary)) throw new Error(`${label} Key 不能使用掩码。`)
+    return key
+  }
+  return clear && current.configured ? '' : undefined
+}
+
+// GeoLite 账号 ID 与 License Key 成对写入：任一填写则两者都必须填写并一起替换；清除时两者同时为空字符串；
+// 都留空即保留。掩码永远不作为凭据回传。
+function maxmindUpdate(f: SettingsIPQualityForm, current: IPQualitySourceCredential): { maxmind_account_id: string, maxmind_license_key: string } | undefined {
+  const accountId = f.maxmindAccountId.trim()
+  const licenseKey = f.maxmindLicenseKey.trim()
+  if (accountId === '' && licenseKey === '') {
+    return f.maxmindClear && current.configured ? { maxmind_account_id: '', maxmind_license_key: '' } : undefined
+  }
+  if (accountId === '' || licenseKey === '') throw new Error('GeoLite 账号 ID 与 License Key 需同时填写。')
+  for (const value of [accountId, licenseKey]) {
+    if (value.includes('*') || (current.masked_summary !== '' && value === current.masked_summary)) throw new Error('GeoLite 凭据不能使用掩码。')
+  }
+  return { maxmind_account_id: accountId, maxmind_license_key: licenseKey }
+}
+
+function buildIPQualitySettings(f: SettingsFormState, cur: SettingsRecord): IPQualitySettingsUpdateInput {
   const frequencySeconds = parsePositiveInteger(f.ipQuality.frequencySeconds, 'IP 质量采集周期')
   if (frequencySeconds < 60) throw new Error('IP 质量采集周期必须至少为 60 秒。')
   const staleAfterSeconds = parsePositiveInteger(f.ipQuality.staleAfterSeconds, 'IP 质量过期窗口')
@@ -257,13 +292,26 @@ function buildIPQualitySettings(f: SettingsFormState) {
   const timeoutSeconds = parsePositiveInteger(f.ipQuality.timeoutSeconds, 'IP 质量请求超时')
   if (timeoutSeconds > 300) throw new Error('IP 质量请求超时必须不超过 300 秒。')
 
-  return {
+  const update: IPQualitySettingsUpdateInput = {
     enabled: f.ipQuality.enabled,
     frequency_seconds: frequencySeconds,
     stale_after_seconds: staleAfterSeconds,
     timeout_seconds: timeoutSeconds,
     services: parseCommaList(f.ipQuality.servicesText, 'IP 质量采集服务集合'),
+    mail_enabled: f.ipQuality.mailEnabled,
   }
+  const sources = cur.ip_quality_settings.sources
+  const ipapiKey = credentialUpdate(f.ipQuality.ipapiKey, f.ipQuality.ipapiClear, sources.ipapi_is, 'ipapi.is')
+  const abuseipdbKey = credentialUpdate(f.ipQuality.abuseipdbKey, f.ipQuality.abuseipdbClear, sources.abuseipdb, 'AbuseIPDB')
+  const maxmind = maxmindUpdate(f.ipQuality, sources.maxmind)
+  if (ipapiKey !== undefined || abuseipdbKey !== undefined || maxmind !== undefined) {
+    update.sources = {
+      ...(ipapiKey !== undefined ? { ipapi_is_key: ipapiKey } : {}),
+      ...(abuseipdbKey !== undefined ? { abuseipdb_key: abuseipdbKey } : {}),
+      ...(maxmind ?? {}),
+    }
+  }
+  return update
 }
 
 function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): SettingsUpdateInput {
@@ -294,7 +342,7 @@ function buildUpdateInput(form: SettingsFormState, cur: SettingsRecord): Setting
       raw_layer_days: parseRawRetentionDays(form.retentionPolicy.rawLayerDays),
       aggregate_layer_days: parsePositiveInteger(form.retentionPolicy.aggregateLayerDays, '聚合层天数'),
     },
-    ip_quality_settings: buildIPQualitySettings(form),
+    ip_quality_settings: buildIPQualitySettings(form, cur),
   }
   if (telegram) update.telegram = telegram
   if (sweepModeChanged(form, cur)) update.incident_sweep_mode = form.incidentSweepMode
@@ -649,6 +697,7 @@ export function SettingsPage() {
               <div className="settings-section">
                 <IPQualitySettingsSection
                   value={systemForm.ipQuality}
+                  sources={systemSettings.ip_quality_settings.sources}
                   onChange={(patch) => patchForm((f) => ({ ...f, ipQuality: { ...f.ipQuality, ...patch } }))}
                 />
               </div>

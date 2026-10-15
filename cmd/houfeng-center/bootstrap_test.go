@@ -22,6 +22,7 @@ import (
 	centerhttp "houfeng/internal/center/http"
 	"houfeng/internal/center/http/sessionctx"
 	incidentservice "houfeng/internal/center/incidents"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/recordauth"
 	"houfeng/internal/center/recordsearch"
 	centersettings "houfeng/internal/center/settings"
@@ -258,15 +259,19 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	if activityGenerationCalls != 1 {
 		t.Fatalf("ensureActivityGeneration calls = %d, want 1", activityGenerationCalls)
 	}
-	if len(gotWorkers) != 8 {
-		t.Fatalf("runtime workers = %d, want search rebuild + activity projection with evidence maintenance still disabled", len(gotWorkers))
+	if len(gotWorkers) != 9 {
+		t.Fatalf("runtime workers = %d, want intelligence + search rebuild + activity projection with evidence maintenance still disabled", len(gotWorkers))
 	}
 	// The projector only indexes commits, so records written before the index
 	// existed stay invisible until a rebuild backfills them. That backfill has to
 	// be a running worker, not a manual step.
 	var rebuilder *recordsearch.RebuildWorker
 	var activityWorker centerapp.Worker
+	var intelligenceWorker *ipquality.IntelligenceWorker
 	for _, worker := range gotWorkers {
+		if candidate, ok := worker.(*ipquality.IntelligenceWorker); ok {
+			intelligenceWorker = candidate
+		}
 		if candidate, ok := worker.(*recordsearch.RebuildWorker); ok {
 			rebuilder = candidate
 		}
@@ -279,6 +284,9 @@ func TestBootstrapCenterUsesRuntimeAdmissionWhenRecordPlatformEnabled(t *testing
 	}
 	if activityWorker == nil {
 		t.Fatalf("runtime workers = %#v, want an activity projection worker", gotWorkers)
+	}
+	if intelligenceWorker == nil {
+		t.Fatal("missing IP quality intelligence lifecycle worker")
 	}
 	if gotRouterOptions.ComparisonEnabled {
 		t.Fatal("runtime ComparisonEnabled = true, want default off")
@@ -474,10 +482,14 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 		newApp: func(addr string, handler http.Handler, workers ...centerapp.Worker) appRunner {
 			gotAddr = addr
 			gotHandler = handler
-			if len(workers) != 6 {
-				t.Fatalf("len(workers) = %d, want 5", len(workers))
+			if len(workers) != 7 {
+				t.Fatalf("len(workers) = %d, want 7", len(workers))
 			}
+			intelligenceCount := 0
 			for i, worker := range workers {
+				if _, ok := worker.(*ipquality.IntelligenceWorker); ok {
+					intelligenceCount++
+				}
 				if worker == nil {
 					t.Fatalf("workers[%d] = nil, want non-nil", i)
 				}
@@ -489,6 +501,9 @@ func TestBootstrapCenterBuildsAppOnSuccess(t *testing.T) {
 				if _, ok := worker.(*activity.Worker); ok {
 					t.Fatalf("workers[%d] is an activity projection worker, want none while records are disabled", i)
 				}
+			}
+			if intelligenceCount != 1 {
+				t.Fatalf("intelligence workers = %d, want 1 even with Records disabled", intelligenceCount)
 			}
 			return app
 		},

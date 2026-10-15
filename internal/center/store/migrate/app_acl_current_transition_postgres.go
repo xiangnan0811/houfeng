@@ -316,13 +316,38 @@ func appACLCurrentTransitionContainsMigration(transition appACLCurrentTransition
 }
 
 func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCurrentTransition) (bool, error) {
-	// 0076 adds the family-state view and SELECT grant, 0075 adds settings
-	// ownership, and 0072 through 0074 add non-policy schema only.
+	// 0078 replaces only the family-state view definition. 0077 adds product
+	// snapshot/cache tables and their runtime grants; 0076 adds the view and
+	// SELECT grant, 0075 adds settings ownership, and 0072–0074 add schema only.
 	// 0071 adds access-management ACL only, while 0070 adds nullable
 	// destination-subject columns and 0069 adds CPU validity schema. These
 	// non-heartbeat migrations must be stripped from the terminal suffix
 	// before policy-shape classification.
 	successorNames := transition.successor.names
+	if transition.profile == appACLCurrentProfileP77 &&
+		!equalAppACLCurrentMigrationNames(successorNames, []string{"0078_ip_quality_collection_scope.sql"}) {
+		return false, fmt.Errorf("unsupported registered APP transition")
+	}
+	collectionScopeMigrationPending := false
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0078_ip_quality_collection_scope.sql" {
+		collectionScopeMigrationPending = true
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0078_ip_quality_collection_scope.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
+	productMigrationPending := false
+	if n := len(successorNames); n > 0 && successorNames[n-1] == "0077_ip_quality_product.sql" {
+		productMigrationPending = true
+		successorNames = successorNames[:n-1]
+	}
+	for _, name := range successorNames {
+		if name == "0077_ip_quality_product.sql" {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+	}
 	addressFamiliesMigrationPending := false
 	if n := len(successorNames); n > 0 && successorNames[n-1] == "0076_ip_quality_address_families.sql" {
 		addressFamiliesMigrationPending = true
@@ -415,7 +440,13 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 	}
 	switch {
 	case len(successorNames) == 0:
-		// P69 through P75 carry only the stripped non-policy terminal suffix.
+		// P69 through P77 carry only the stripped non-policy terminal suffix.
+		if transition.profile == appACLCurrentProfileP77 && !collectionScopeMigrationPending {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
+		if transition.profile == appACLCurrentProfileP76 && !productMigrationPending {
+			return false, fmt.Errorf("unsupported registered APP transition")
+		}
 		if transition.profile == appACLCurrentProfileP75 && !addressFamiliesMigrationPending {
 			return false, fmt.Errorf("unsupported registered APP transition")
 		}
@@ -428,7 +459,9 @@ func appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition appACLCur
 			transition.profile == appACLCurrentProfileP72 ||
 			transition.profile == appACLCurrentProfileP73 ||
 			transition.profile == appACLCurrentProfileP74 ||
-			transition.profile == appACLCurrentProfileP75 {
+			transition.profile == appACLCurrentProfileP75 ||
+			transition.profile == appACLCurrentProfileP76 ||
+			transition.profile == appACLCurrentProfileP77 {
 			return false, nil
 		}
 		if !addressIdentityMigrationPending && !cpuRatesMigrationPending {

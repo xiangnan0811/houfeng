@@ -11,37 +11,48 @@
 
 .vps-detail-modal .asset-operation-form{padding:0;border:0;background:transparent}
 
-/* IP 质量报告页：页头与卡片复用 VPS 详情工作区（VPSDetailWorkspace.css）的版式。 */
+/* IP 质量报告页：页头与卡片复用 VPS 详情工作区（VPSDetailWorkspace.css）的版式与字号。 */
 .ipq-page{container:ipq / inline-size;width:min(100%, 1600px);margin-inline:auto}
 .ipq-header__history{flex:0 0 auto}
 .ipq-header__family{margin-top:var(--space-2)}
 /* 长 IPv6 在 390px 下断行，不撑开页头。 */
 .ipq-header .vps-overview-identity__copy,.ipq-header .vps-overview-identity__meta,.ipq-header .vps-overview-identity__meta-item{min-width:0;max-width:100%}
 .ipq-header .vps-overview-identity__meta dd{min-width:0;overflow-wrap:anywhere}
+.ipq-header__ip dd{display:flex;flex-wrap:wrap;align-items:center;gap:2px var(--space-2)}
+.ipq-header__address{min-width:0;color:var(--text-primary);font-size:var(--vps-detail-body-size);font-weight:600;overflow-wrap:anywhere}
+.ipq-header__marks{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:var(--space-2)}
+.ipq-header__enrichment{display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong)}
 .ipq-muted{color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4}
+.ipq-gap{color:var(--text-muted)}
+.ipq-wrap{min-width:0;overflow-wrap:anywhere}
 .ipq-empty{margin:0;padding:var(--space-3);border-radius:var(--radius-2);background:var(--panel-bg-muted);color:var(--text-muted);line-height:1.45}
 .ipq-page .data-table{border:0;border-radius:0;background:transparent;box-shadow:none;overflow:visible}
 .ipq-page .data-table__head th{position:static;background:transparent;color:var(--text-muted);font-size:var(--vps-detail-helper-size);font-weight:400;letter-spacing:0;text-transform:none;border-bottom:var(--border-w) solid var(--border-muted)}
-.ipq-page .data-table--compact .data-table__cell{height:auto;padding:8px 12px}
+.ipq-page .data-table--compact .data-table__cell{height:auto;padding:var(--space-2) var(--space-3)}
 .ipq-page .data-table__head th:first-child,.ipq-page .data-table__cell:first-child{padding-left:0}
 .ipq-page .data-table__row + .data-table__row td{border-top:var(--border-w) solid var(--border-muted)}
-.ipq-table-scroll{max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-gutter:stable}
+.ipq-table-scroll{position:relative;max-width:100%;min-width:0;overflow-x:auto;overflow-y:hidden;scrollbar-gutter:stable}
 .ipq-table-scroll:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:var(--space-1)}
 .ipq-table-hint{margin:0;color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
 
 .ipq-collect-button{display:inline-flex;align-items:center;gap:var(--space-2)}
-.ipq-collect{display:inline-flex;flex-wrap:wrap;align-items:center;gap:4px var(--space-2);min-width:0}
-.ipq-collect__hint{color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4}
+.ipq-collect{position:relative;display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);min-width:0}
+.ipq-collect__caret{font-size:var(--vps-detail-helper-size);line-height:1}
+/* 三个采集动作在按钮正下方展开，左对齐按钮，不撑开页头。 */
+.ipq-collect__menu{position:absolute;z-index:200;top:calc(100% + var(--space-1));left:0;display:flex;min-width:max(100%, 11rem);flex-direction:column;gap:2px;padding:var(--space-1);border:var(--border-w) solid var(--border);border-radius:var(--radius-3);box-shadow:var(--shadow-overlay);background:var(--surface-elevated)}
+.ipq-collect__item{width:100%;min-height:var(--control-min-height);padding:var(--space-2) var(--space-3);border:0;border-radius:var(--radius-2);background:transparent;color:var(--text-secondary);font:inherit;font-size:var(--type-small-size);text-align:left;white-space:nowrap;cursor:pointer}
+.ipq-collect__item:hover,.ipq-collect__item:focus-visible{background:var(--item-bg);color:var(--text-primary)}
+.ipq-collect__item:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:-2px}
 .ipq-collect-button .ipq-pulse{background:currentColor}
-.ipq-pulse{flex:0 0 auto;width:8px;height:8px;border-radius:var(--radius-pill);background:var(--accent);animation:ipq-pulse 1.2s var(--ease-calm) infinite}
+.ipq-pulse{flex:0 0 auto;width:var(--space-2);height:var(--space-2);border-radius:var(--radius-pill);background:var(--accent);animation:ipq-pulse 1.2s var(--ease-calm) infinite}
 @keyframes ipq-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.35;transform:scale(0.75)}}
 .ipq-notice-slot:empty{display:none}
 .ipq-notice{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;min-width:0;padding:10px 14px;border:var(--border-w) solid var(--border-muted);border-radius:var(--vps-detail-radius);background:var(--surface);font-size:var(--vps-detail-helper-size-strong);line-height:1.45}
-.ipq-notice__dot{flex:0 0 auto;width:8px;height:8px;border-radius:var(--radius-pill);background:var(--text-muted)}
+.ipq-notice__dot{flex:0 0 auto;width:var(--space-2);height:var(--space-2);border-radius:var(--radius-pill);background:var(--text-muted)}
 .ipq-notice__title{color:var(--text-primary);font-weight:600}
 .ipq-notice__detail{min-width:0;color:var(--text-secondary);overflow-wrap:anywhere}
 .ipq-notice__action{margin-left:auto}
-.ipq-notice__raw-details{width:100%;margin-top:4px}
+.ipq-notice__raw-details{width:100%;margin-top:var(--space-1)}
 .ipq-notice__raw-summary{cursor:pointer;color:var(--text-secondary);font-size:var(--type-small-size,12px)}
 .ipq-notice__raw-text{margin:6px 0 0;padding:6px 8px;background:var(--panel-bg-muted);border-radius:var(--radius-1,4px);font-size:var(--type-small-size,12px);white-space:pre-wrap;word-break:break-all}
 .ipq-notice--progress{border-color:color-mix(in srgb,var(--accent) 40%,var(--border-muted));background:color-mix(in srgb,var(--accent) 6%,var(--surface))}
@@ -52,68 +63,125 @@
 .ipq-notice--muted{background:var(--panel-bg-muted)}
 .ipq-notice--muted .ipq-notice__title{color:var(--text-secondary);font-weight:500}
 
-/* 需压过懒加载的 .vps-detail-workspace__section{display:flex}。 */
-.ipq-page .ipq-verdict{display:grid;grid-template-columns:minmax(11rem, 15rem) minmax(0, 1fr);align-items:center;gap:var(--vps-detail-gap) var(--space-6)}
-.ipq-verdict__score{display:flex;flex-direction:column;gap:4px;min-width:0;padding-right:var(--space-6);border-right:var(--border-w) solid var(--border-muted)}
-.ipq-verdict__label{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
-.ipq-verdict__value{display:flex;align-items:baseline;gap:4px;margin:0}
-.ipq-verdict__value strong{color:var(--text-primary);font-size:40px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums}
-.ipq-verdict__value--gap strong{font-size:28px}
-.ipq-verdict__value span{color:var(--text-muted);font-size:var(--vps-detail-body-size)}
-.ipq-verdict--normal .ipq-verdict__value strong{color:var(--color-state-normal)}
-.ipq-verdict--notice .ipq-verdict__value strong{color:var(--color-state-notice)}
-.ipq-verdict--alert .ipq-verdict__value strong{color:var(--color-state-alert)}
-.ipq-verdict__text{margin:0;color:var(--text-primary);font-weight:500;line-height:1.4}
-.ipq-verdict__badges{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
-.ipq-verdict__metrics{display:grid;grid-template-columns:repeat(4, minmax(0, 1fr));gap:var(--space-3);margin:0}
-.ipq-metric{display:flex;flex-direction:column;gap:4px;min-width:0;padding:10px 12px;border-radius:var(--radius-2);background:var(--panel-bg-muted)}
-.ipq-metric dt{color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4}
-.ipq-metric dd{display:flex;flex-direction:column;gap:2px;min-width:0;margin:0}
-.ipq-metric strong{color:var(--text-primary);font-size:var(--vps-detail-amount-size);font-weight:600;line-height:1.2;font-variant-numeric:tabular-nums}
-.ipq-metric span{color:var(--text-secondary);font-size:var(--vps-detail-helper-size);line-height:1.4;overflow-wrap:anywhere}
-.ipq-metric--alert strong{color:var(--color-state-alert)}
+/* 基础信息：默认六项，桌面三列两行，中等宽度两列，手机一列；其余在“更多信息”。
+   需压过懒加载的 .vps-detail-workspace__section{display:flex}。 */
+.ipq-page .ipq-identity{display:flex;flex-direction:column;gap:var(--space-3)}
+.ipq-identity__primary{display:grid;grid-template-columns:repeat(3, minmax(0, 1fr));gap:var(--space-3) var(--space-6);margin:0}
+.ipq-identity__primary > div{display:flex;flex-direction:column;gap:2px;min-width:0}
+.ipq-identity__primary dt{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
+.ipq-identity__primary dd{min-width:0;margin:0;color:var(--text-primary);font-weight:600;overflow-wrap:anywhere}
+.ipq-identity__more{min-width:0;padding-top:var(--space-2);border-top:var(--border-w) solid var(--border-muted)}
+.ipq-identity__more > summary{width:max-content;cursor:pointer;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong)}
+.ipq-identity__more > summary:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px;border-radius:var(--radius-1)}
+.ipq-identity__more > .ipq-facts{margin-top:var(--space-2)}
+.ipq-chip-link{display:inline-flex;align-items:center;padding:0 var(--space-2);border:var(--border-w) dashed var(--border-strong);border-radius:var(--radius-pill);color:var(--text-secondary);font-size:var(--vps-detail-helper-size);text-decoration:none}
+.ipq-chip-link:hover{color:var(--text-primary);border-color:var(--accent-border)}
+.ipq-chip-link:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
+.ipq-facts{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(100%, 15rem), 1fr));gap:6px 20px;margin:0}
+.ipq-facts > div{display:grid;grid-template-columns:5.5rem minmax(0, 1fr);align-items:baseline;gap:var(--space-2);min-width:0}
+.ipq-facts dt{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
+.ipq-facts dd{min-width:0;margin:0;color:var(--text-primary);overflow-wrap:anywhere}
+.ipq-facts__wide{grid-column:1 / -1}
 
-.ipq-services__stats{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin:0;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong)}
+.ipq-services__stats{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) 12px;margin:0;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong)}
 .ipq-services__stat--unlocked{color:var(--color-state-normal)}
 .ipq-services__stat--blocked{color:var(--color-state-alert)}
 .ipq-services__stat--partial{color:var(--color-state-notice)}
-.ipq-services__grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(100%, 13rem), 1fr));gap:10px;margin:0;padding:0;list-style:none}
-.ipq-service{display:flex;flex-direction:column;gap:4px;min-width:0;padding:10px 12px;border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-2);background:var(--surface)}
+.ipq-services__grid{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(100%, 12rem), 1fr));gap:var(--space-2);margin:0;padding:0;list-style:none}
+.ipq-service{display:flex;flex-direction:column;gap:var(--space-1);min-width:0;padding:var(--space-2) 10px;border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-2);background:var(--surface)}
 .ipq-service__head{display:flex;align-items:center;justify-content:space-between;gap:var(--space-2);min-width:0}
 .ipq-service__head .badge{flex:0 0 auto}
 .ipq-service__name{min-width:0;color:var(--text-primary);font-weight:600;overflow-wrap:anywhere}
 .ipq-service__detail{margin:0;color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4;overflow-wrap:anywhere}
-.ipq-service__notes{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none;color:var(--text-secondary);font-size:var(--vps-detail-helper-size);line-height:1.4;overflow-wrap:anywhere}
+.ipq-service__more > summary{width:max-content;cursor:pointer;color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
+.ipq-service__more > summary:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px;border-radius:var(--radius-1)}
+.ipq-service__lines{display:flex;flex-direction:column;gap:2px;margin:var(--space-1) 0 0;padding:0;list-style:none;color:var(--text-secondary);font-size:var(--vps-detail-helper-size);line-height:1.4;overflow-wrap:anywhere}
 .ipq-service--unlocked{box-shadow:inset var(--border-w-strong) 0 0 var(--color-state-normal)}
 .ipq-service--partial{box-shadow:inset var(--border-w-strong) 0 0 var(--color-state-notice)}
 .ipq-service--blocked{border-color:color-mix(in srgb,var(--color-state-alert) 35%,var(--border-muted));background:color-mix(in srgb,var(--color-state-alert) 5%,var(--surface));box-shadow:inset var(--border-w-strong) 0 0 var(--color-state-alert)}
 .ipq-service--unknown{background:var(--panel-bg-muted)}
 .ipq-service--unknown .ipq-service__name{color:var(--text-secondary)}
 
+/* 风险因子矩阵：每个供应商一行，各状态单元格有独立字形与外观；窄屏只在区域内横向滚动。 */
 .ipq-signal-hits{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-.ipq-provider-table{min-width:760px}
-.ipq-provider-table th,.ipq-provider-table td{white-space:nowrap}
+.ipq-provider-table{min-width:720px}
+.ipq-provider-table th,.ipq-provider-table td{white-space:nowrap;vertical-align:top}
 .ipq-page .ipq-provider-table__flag{text-align:center}
 .ipq-provider-table__name{font-weight:600}
-.ipq-provider-table__capability{font-weight:400}
-.ipq-flag{font-size:var(--vps-detail-helper-size)}
-.ipq-flag--no{color:var(--text-secondary)}
-.ipq-flag--unknown{color:var(--text-muted)}
-.ipq-risk-cell{display:inline-flex;align-items:center;gap:6px}
-.ipq-risk-cell__label,.ipq-risk-cell__score{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
-.ipq-providers__footnote{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;margin:0;color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
-.ipq-providers__unavailable{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px}
+.ipq-page .ipq-provider-table__failure{white-space:normal}
+.ipq-provider-table__failure .ipq-muted{margin-left:var(--space-2)}
+.ipq-provider-table__toggle{margin-top:2px}
+.ipq-provider-table__sample td{background:var(--panel-bg-muted)}
+.ipq-source{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:2px var(--space-2);min-width:0}
+.ipq-source__name{color:var(--text-primary);font-weight:600}
+.ipq-source__method{color:var(--text-muted);font-size:var(--vps-detail-helper-size);font-weight:400}
+.ipq-source--sample{padding-left:var(--space-3)}
+.ipq-type{display:inline-flex;flex-direction:column;gap:0}
+.ipq-source__failure{display:block;color:var(--color-state-notice);font-size:var(--vps-detail-helper-size);font-weight:400}
+.ipq-type__raw{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
+.ipq-cell{display:inline-flex;align-items:center;justify-content:center;min-width:1.75rem;height:1.25rem;padding:0 var(--space-1);border:var(--border-w) solid transparent;border-radius:var(--radius-1);font-size:var(--vps-detail-helper-size);line-height:1}
+/* 是/否为实心：负面因子“是”告警、“否”正常；机房是/否中性。 */
+.ipq-cell--yes,.ipq-cell--no{font-weight:600}
+.ipq-cell--alert{border-color:var(--color-state-alert);background:color-mix(in srgb,var(--color-state-alert) 18%,var(--surface));color:color-mix(in srgb,var(--color-state-alert) 80%,var(--text-primary))}
+.ipq-cell--normal{border-color:color-mix(in srgb,var(--color-state-normal) 55%,var(--border-muted));background:color-mix(in srgb,var(--color-state-normal) 14%,var(--surface));color:color-mix(in srgb,var(--color-state-normal) 80%,var(--text-primary))}
+.ipq-cell--neutral{border-color:var(--border-strong);background:var(--surface-pressed);color:var(--text-primary)}
+/* 非已知状态：不支持“—”、未知“?”、错误“!”，各自有字形与边框，不靠颜色区分。 */
+.ipq-cell--unsupported{border-color:var(--border-muted);color:var(--text-muted)}
+.ipq-cell--unknown{border-style:dashed;border-color:var(--border-strong);color:var(--text-secondary)}
+.ipq-cell--error{border-color:var(--color-state-notice);color:var(--color-state-notice);font-weight:700}
+.ipq-provider-table__failure .ipq-cell{margin-right:var(--space-2)}
+.ipq-provider-table__failure-text{color:var(--text-secondary)}
+
+/* 风险评分与因子：评分逐源逐项一行，因子矩阵紧随其后。 */
+.ipq-risk{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.ipq-risk__block{display:flex;flex-direction:column;gap:var(--space-2);min-width:0}
+.ipq-risk__title{margin:0;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong);font-weight:600}
+.ipq-score-rows{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
+.ipq-score-row{display:grid;grid-template-columns:minmax(8rem, 11rem) minmax(8rem, 1fr) minmax(4.5rem, auto) minmax(5rem, 8rem) minmax(6rem, 12rem);grid-template-areas:'source metric value level bar';align-items:center;gap:var(--space-1) var(--space-3);min-width:0;padding:6px 0;font-size:var(--vps-detail-helper-size-strong)}
+.ipq-score-row--first:not(:first-child){border-top:var(--border-w) solid var(--border-muted)}
+.ipq-score-row__source{grid-area:source;min-width:0}
+.ipq-score-row__metric{grid-area:metric;display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1);min-width:0;color:var(--text-secondary)}
+.ipq-score-row__value{grid-area:value;color:var(--text-primary);font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.ipq-score-row__level{grid-area:level;display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--space-1);min-width:0}
+.ipq-score-row__raw{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
+.ipq-score-row__bar{grid-area:bar;min-width:0}
+.ipq-score__scope{padding:0 var(--space-1);border-radius:var(--radius-1);background:var(--panel-bg-muted);color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
+.ipq-score__bar{display:block;width:100%;height:6px;border-radius:var(--radius-pill);overflow:hidden}
+.ipq-score__track{fill:var(--border-muted)}
+.ipq-score__fill--neutral{fill:var(--text-muted)}
+.ipq-score__fill--normal{fill:var(--color-state-normal)}
+.ipq-score__fill--notice{fill:var(--color-state-notice)}
+.ipq-score__fill--alert{fill:var(--color-state-alert)}
+.ipq-score__fill--critical{fill:var(--color-state-critical)}
+
+.ipq-location-table{min-width:640px}
+.ipq-location-table td,.ipq-location-table th{white-space:nowrap}
+
+/* 邮件与黑名单双栏，窄屏叠放。 */
+.ipq-pair{display:grid;grid-template-columns:repeat(2, minmax(0, 1fr));gap:var(--vps-detail-gap);min-width:0}
+.ipq-mail-table,.ipq-blacklist-table{width:100%}
+.ipq-mail-table td,.ipq-mail-table th,.ipq-blacklist-table td,.ipq-blacklist-table th{white-space:nowrap}
+.ipq-page .ipq-mail-table__toggle{text-align:right}
+.ipq-row-detail td{background:var(--panel-bg-muted)}
+.ipq-page .ipq-row-detail .data-table__cell:first-child{padding-left:var(--space-3)}
+.ipq-inline-facts{display:flex;flex-wrap:wrap;gap:var(--space-1) var(--space-4);margin:0;font-size:var(--vps-detail-helper-size)}
+.ipq-inline-facts > div{display:inline-flex;gap:6px;min-width:0}
+.ipq-inline-facts dt{color:var(--text-muted)}
+.ipq-inline-facts dd{margin:0;color:var(--text-primary);white-space:normal;overflow-wrap:anywhere}
+.ipq-count{color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong);font-variant-numeric:tabular-nums}
+.ipq-count--alert{color:var(--color-state-alert);font-weight:600}
 
 .ipq-history__list{display:flex;flex-direction:column;margin:0;padding:0;list-style:none}
-.ipq-history__item{display:grid;grid-template-columns:minmax(10rem, 13rem) auto minmax(0, 1fr) auto;align-items:center;gap:6px 14px;min-width:0;padding:8px 10px;border-bottom:var(--border-w) solid var(--border-muted);font-size:var(--vps-detail-helper-size-strong)}
+.ipq-history__item{display:grid;grid-template-columns:minmax(9rem, 12rem) minmax(0, 16rem) minmax(0, 1fr) auto;align-items:center;gap:6px 14px;min-width:0;padding:var(--space-2) 10px;border-bottom:var(--border-w) solid var(--border-muted);font-size:var(--vps-detail-helper-size-strong)}
 .ipq-history__item:last-child{border-bottom:0}
 .ipq-history__item--current{box-shadow:inset var(--border-w-strong) 0 0 var(--accent)}
 .ipq-history__ip{min-width:0;color:var(--text-secondary);overflow-wrap:anywhere}
+.ipq-history__facts{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) var(--space-2);min-width:0}
 .ipq-history__action{justify-self:end}
 .ipq-history__more{display:flex}
 
 .ipq-diagnostics__fold{display:flex;flex-direction:column;min-width:0}
-.ipq-diagnostics__summary,.ipq-json__summary{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px;cursor:pointer;list-style:none}
+.ipq-diagnostics__summary,.ipq-json__summary{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-1) 12px;cursor:pointer;list-style:none}
 .ipq-diagnostics__summary::-webkit-details-marker,.ipq-json__summary::-webkit-details-marker{display:none}
 .ipq-diagnostics__summary::before,.ipq-json__summary::before{content:'';flex:0 0 auto;width:0;height:0;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid var(--text-muted);transition:transform var(--dur-micro) var(--ease-calm)}
 .ipq-diagnostics__fold[open] > .ipq-diagnostics__summary::before,.ipq-json[open] > .ipq-json__summary::before{transform:rotate(90deg)}
@@ -127,13 +195,8 @@
 .ipq-page .ipq-diagnostics__error{white-space:normal;overflow-wrap:anywhere;color:var(--text-secondary)}
 .ipq-diagnostics__endpoints{display:flex;flex-direction:column;gap:2px;margin:0;padding:0;list-style:none}
 .ipq-diagnostics__json{display:flex;flex-direction:column;gap:6px;min-width:0}
-.ipq-facts{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(100%, 16rem), 1fr));gap:6px 20px;margin:0}
-.ipq-facts > div{display:grid;grid-template-columns:5.5rem minmax(0, 1fr);align-items:baseline;gap:8px;min-width:0}
-.ipq-facts dt{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}
-.ipq-facts dd{min-width:0;margin:0;color:var(--text-primary);overflow-wrap:anywhere}
-.ipq-facts__wide{grid-column:1 / -1}
 .ipq-json{min-width:0;border:var(--border-w) solid var(--border-muted);border-radius:var(--radius-2);background:var(--surface)}
-.ipq-json__summary{justify-content:flex-start;padding:8px 12px;font-size:var(--vps-detail-helper-size-strong)}
+.ipq-json__summary{justify-content:flex-start;padding:var(--space-2) 12px;font-size:var(--vps-detail-helper-size-strong)}
 .ipq-json__title{flex:1 1 auto;min-width:0;color:var(--text-primary)}
 .ipq-json__size{color:var(--text-muted);font-family:var(--font-mono);font-size:var(--vps-detail-helper-size)}
 .ipq-json__body{display:flex;flex-direction:column;gap:6px;min-width:0;padding:0 12px 10px}
@@ -142,14 +205,17 @@
 .ipq-json__actions{display:flex;justify-content:flex-end}
 
 @container ipq (max-width: 60rem){
-.ipq-page .ipq-verdict{grid-template-columns:minmax(0, 1fr)}
-.ipq-verdict__score{padding:0 0 var(--space-3);border-right:0;border-bottom:var(--border-w) solid var(--border-muted)}
-.ipq-verdict__metrics{grid-template-columns:repeat(2, minmax(0, 1fr))}
+.ipq-identity__primary{grid-template-columns:repeat(2, minmax(0, 1fr))}
+.ipq-score-row{grid-template-columns:minmax(0, 1fr) auto auto;grid-template-areas:'source source source' 'metric value level' 'bar bar bar'}
+.ipq-pair{grid-template-columns:minmax(0, 1fr)}
 }
 @container ipq (max-width: 32rem){
-.ipq-history__item{grid-template-columns:auto minmax(0, 1fr) auto}
-.ipq-history__time{grid-column:1 / -1}
+.ipq-history__item{grid-template-columns:minmax(0, 1fr) auto}
+.ipq-history__ip,.ipq-history__facts{grid-column:1 / -1}
+.ipq-history__action{grid-column:2;grid-row:1}
 .ipq-notice__action{margin-left:0}
+.ipq-facts > div{grid-template-columns:5rem minmax(0, 1fr)}
+.ipq-identity__primary{grid-template-columns:minmax(0, 1fr)}
 }
 /* partial: legacy-3.css (extracted from index.css; do not hand-edit large rules here) */
 

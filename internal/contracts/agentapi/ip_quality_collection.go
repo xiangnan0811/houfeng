@@ -12,6 +12,8 @@ const (
 	IPQualityDiagnosticsIPFamilyKey           = "ip_address_family"
 	IPQualityDiagnosticsFamilyAvailabilityKey = "family_availability"
 	IPQualityCollectionRevision               = 4
+	IPQualitySelectiveCollectionRevision      = 5
+	IPQualityCollectionRevisionHeader         = "X-Houfeng-IPQuality-Collection-Revision"
 	IPQualityFamilyAvailable                  = "available"
 	IPQualityFamilyUnavailable                = "unavailable"
 	IPQualityFamilyUnknown                    = "unknown"
@@ -25,7 +27,7 @@ type CollectionMetadata struct {
 	Valid              bool
 	Revision           int
 	CollectionID       string
-	ExpectedIPVersions [2]int
+	ExpectedIPVersions []int
 	IPVersion          int
 	Availability       string
 	CollectRequestID   string
@@ -58,13 +60,17 @@ func ParseCollectionMetadata(raw json.RawMessage) CollectionMetadata {
 	expectedErr := json.Unmarshal(fields[IPQualityDiagnosticsExpectedIPVersionsKey], &expected)
 	familyErr := json.Unmarshal(fields[IPQualityDiagnosticsIPFamilyKey], &result.IPVersion)
 	availabilityErr := json.Unmarshal(fields[IPQualityDiagnosticsFamilyAvailabilityKey], &result.Availability)
-	if len(expected) == 2 {
-		copy(result.ExpectedIPVersions[:], expected)
+	result.ExpectedIPVersions = expected
+	validRevision := result.Revision == IPQualitySelectiveCollectionRevision ||
+		(result.Revision == IPQualityCollectionRevision && len(expected) == 2)
+	includesFamily := false
+	for _, family := range expected {
+		includesFamily = includesFamily || family == result.IPVersion
 	}
-	result.Valid = revisionErr == nil && result.Revision == IPQualityCollectionRevision &&
+	result.Valid = revisionErr == nil && validRevision &&
 		idErr == nil && validCollectionID(result.CollectionID) &&
-		expectedErr == nil && len(expected) == 2 && expected[0] == 4 && expected[1] == 6 &&
-		familyErr == nil && (result.IPVersion == 4 || result.IPVersion == 6) &&
+		expectedErr == nil && ValidIPQualityVersions(expected) &&
+		familyErr == nil && includesFamily &&
 		availabilityErr == nil && (result.Availability == IPQualityFamilyAvailable || result.Availability == IPQualityFamilyUnavailable || result.Availability == IPQualityFamilyUnknown)
 	return result
 }
@@ -79,4 +85,20 @@ func validCollectionID(value string) bool {
 		}
 	}
 	return true
+}
+
+// ValidIPQualityVersions accepts only canonical nonempty family selections.
+func ValidIPQualityVersions(versions []int) bool {
+	return len(versions) == 1 && (versions[0] == 4 || versions[0] == 6) ||
+		len(versions) == 2 && versions[0] == 4 && versions[1] == 6
+}
+
+// CollectionIPVersions returns an owned selection. Periodic and legacy plans
+// always remain dual-stack, even when a stale selector is present.
+func CollectionIPVersions(plan *IPQualityPlan) []int {
+	if plan != nil && plan.CollectionRevision == IPQualitySelectiveCollectionRevision &&
+		strings.TrimSpace(plan.CollectRequestID) != "" && ValidIPQualityVersions(plan.CollectIPVersions) {
+		return append([]int(nil), plan.CollectIPVersions...)
+	}
+	return []int{4, 6}
 }

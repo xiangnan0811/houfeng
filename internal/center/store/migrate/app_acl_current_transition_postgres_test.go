@@ -512,3 +512,66 @@ func TestAppACLCurrentTransitionAddressFamiliesSuffixClassification(t *testing.T
 		})
 	}
 }
+
+func TestAppACLCurrentTransitionProductSuffixClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		profile   appACLCurrentProfileID
+		names     []string
+		wantError bool
+	}{
+		{name: "P76 exact", profile: appACLCurrentProfileP76, names: []string{"0077_ip_quality_product.sql"}},
+		{name: "P75 exact", profile: appACLCurrentProfileP75, names: []string{"0076_ip_quality_address_families.sql", "0077_ip_quality_product.sql"}},
+		{name: "P76 missing", profile: appACLCurrentProfileP76, wantError: true},
+		{name: "P76 duplicate", profile: appACLCurrentProfileP76, names: []string{"0077_ip_quality_product.sql", "0077_ip_quality_product.sql"}, wantError: true},
+		{name: "P75 reordered", profile: appACLCurrentProfileP75, names: []string{"0077_ip_quality_product.sql", "0076_ip_quality_address_families.sql"}, wantError: true},
+		{name: "P75 missing family state", profile: appACLCurrentProfileP75, names: []string{"0077_ip_quality_product.sql"}, wantError: true},
+		{name: "P76 unknown tail", profile: appACLCurrentProfileP76, names: []string{"0077_ip_quality_product.sql", "0078_future.sql"}, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
+				profile: tc.profile, successor: migrationSourceSnapshot{names: tc.names},
+			})
+			if (err != nil) != tc.wantError || got {
+				t.Fatalf("heartbeat policy classification = %t/%v, want false/error=%t", got, err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestAppACLCurrentTransitionCollectionScopeSuffixClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		names     []string
+		wantError bool
+	}{
+		{name: "exact", names: []string{"0078_ip_quality_collection_scope.sql"}},
+		{name: "missing", wantError: true},
+		{name: "duplicate", names: []string{"0078_ip_quality_collection_scope.sql", "0078_ip_quality_collection_scope.sql"}, wantError: true},
+		{name: "nonterminal", names: []string{"0078_ip_quality_collection_scope.sql", "0079_future.sql"}, wantError: true},
+		{name: "unknown", names: []string{"0079_future.sql"}, wantError: true},
+		{name: "already applied product", names: []string{"0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql"}, wantError: true},
+		{name: "already applied family view", names: []string{"0076_ip_quality_address_families.sql", "0078_ip_quality_collection_scope.sql"}, wantError: true},
+		{name: "reordered", names: []string{"0078_ip_quality_collection_scope.sql", "0077_ip_quality_product.sql"}, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
+				profile: appACLCurrentProfileP77, successor: migrationSourceSnapshot{names: tc.names},
+			})
+			if got || (err != nil) != tc.wantError {
+				t.Fatalf("collection scope heartbeat classification = %t/%v, want false/error=%t", got, err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestAppACLCurrentRegisteredSuffixesPreservePolicyClassification(t *testing.T) {
+	for _, definition := range appACLCurrentTransitionDefinitions {
+		got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
+			profile: definition.profile, successor: migrationSourceSnapshot{names: definition.successorMigrations},
+		})
+		if err != nil || got != (definition.profile == appACLCurrentProfileP62) {
+			t.Fatalf("registered profile %d heartbeat classification = %t/%v", definition.profile, got, err)
+		}
+	}
+}

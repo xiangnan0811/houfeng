@@ -10,6 +10,7 @@ import {
   overviewUnmatchedStatus,
   type OverviewObservationTone,
 } from '../../lib/vpsOverviewPresentation'
+import { productRiskFacts } from '../../components/ip-quality/ipQualityProductPresentation'
 import { VPSObservationRows, type VPSObservationRowModel } from './VPSObservationRows'
 import { overviewSourceHasRetainedEvidence, overviewSourceIsKnownReadFailure, overviewSourceReadKind } from './vpsOverviewFreshness'
 
@@ -86,7 +87,7 @@ function observationTone(key: SummaryKey, status: string): OverviewObservationTo
   }
 
   if (key === 'ip_quality') {
-    if (normalized === 'high' || normalized === 'critical' || normalized === '高风险' || normalized === '严重风险') {
+    if (normalized === 'risk' || normalized === '发现风险' || normalized === 'high' || normalized === 'critical' || normalized === '高风险' || normalized === '严重风险') {
       return 'alert'
     }
     if (
@@ -149,6 +150,11 @@ export function VPSOverviewSummaryGrid({
     let statusTone = presented.tone
     let detailText = presented.explanation || mappedDetail
     let diagnostics = key === 'monitoring' ? [] : detailPresentation.diagnostics
+    // revision1 风险命中：说明来自服务端事实摘要（命中标记/黑名单），不由页面推断等级。
+    if (key === 'ip_quality' && cell.status === 'risk' && cell.product_revision === 1 && cell.product_summary) {
+      const facts = productRiskFacts(cell.product_summary)
+      if (facts.length > 0) detailText = [...facts, cell.detail === 'partial' ? mappedDetail : ''].filter(Boolean).join(' · ')
+    }
     const sourceLabel = label === '监控关联' ? '监控' : label
     let hideDetail = !presented.explanation
       && (

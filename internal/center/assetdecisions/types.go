@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/subscriptions"
 	"houfeng/internal/center/vpsassets"
 	"houfeng/internal/ipidentity"
@@ -1272,7 +1273,7 @@ func appendIPQualityEvidence(chips *[]EvidenceChip, fact Fact) {
 		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPQualityMissing, Label: "IP 归属不唯一", Tone: "notice", Details: "同一出口 IP 匹配多个 VPS，暂不参与评分"})
 		return
 	}
-	if !ipQualitySummarySucceeded(summary.Status) {
+	if !ipQualitySummaryUsable(summary) {
 		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPQualityMissing, Label: "IP 质量未完成", Tone: "notice", Details: ipQualityCollectionDetails(summary.Status, summary.ErrorSummary)})
 		return
 	}
@@ -1285,13 +1286,21 @@ func appendIPQualityEvidence(chips *[]EvidenceChip, fact Fact) {
 	if ipQualityEgressMismatch(fact) {
 		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceIPEgressMismatch, Label: "出口不一致", Tone: "alert", Details: "采集出口 IP 与 VPS 当前 IPv4/IPv6 不一致"})
 	}
-	if len(fact.IPQualityBlockedServices) > 0 {
-		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceMediaUnlockBlocked, Label: "解锁受阻", Tone: "alert", Details: strings.Join(fact.IPQualityBlockedServices, ", ")})
+	blockedServices := fact.IPQualityBlockedServices
+	if summary.ProductRevision == 1 && summary.ProductSummary != nil {
+		blockedServices = summary.ProductSummary.RestrictedServices
+	}
+	if len(blockedServices) > 0 {
+		appendUniqueChip(chips, EvidenceChip{Kind: EvidenceMediaUnlockBlocked, Label: "解锁受阻", Tone: "alert", Details: strings.Join(blockedServices, ", ")})
 	}
 }
 
-func ipQualitySummarySucceeded(status string) bool {
-	return strings.EqualFold(strings.TrimSpace(status), "success")
+func ipQualitySummaryUsable(summary *ipquality.Summary) bool {
+	if summary == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(summary.Status), "success") ||
+		(summary.ProductRevision == 1 && strings.EqualFold(strings.TrimSpace(summary.Status), "partial"))
 }
 
 func ipQualityCollectionDetails(status, summary string) string {
@@ -1308,8 +1317,11 @@ func ipQualityCollectionDetails(status, summary string) string {
 
 func ipQualityRiskSignal(fact Fact) bool {
 	summary := fact.VPS.IPQualitySummary
-	if summary == nil || summary.Ambiguous || !ipQualitySummarySucceeded(summary.Status) {
+	if summary == nil || summary.Ambiguous || !ipQualitySummaryUsable(summary) {
 		return false
+	}
+	if summary.ProductRevision == 1 {
+		return ipquality.ProductHasRisk(summary.ProductSummary)
 	}
 	return ipQualityRiskLevelRisky(summary.RiskLevel) || fact.IPQualityProviderRiskSignalCount > 0
 }
@@ -1324,6 +1336,18 @@ func ipQualityRiskLevelRisky(level string) bool {
 }
 
 func ipQualityRiskDetails(fact Fact) string {
+	if summary := fact.VPS.IPQualitySummary; summary != nil && summary.ProductRevision == 1 {
+		if summary.ProductSummary == nil {
+			return ""
+		}
+		product := summary.ProductSummary
+		parts := append([]string(nil), product.RiskFlags...)
+		parts = append(parts, product.HighRiskSources...)
+		if product.BlacklistListedCount > 0 {
+			parts = append(parts, fmt.Sprintf("%d 个黑名单命中", product.BlacklistListedCount))
+		}
+		return strings.Join(parts, "；")
+	}
 	parts := []string{}
 	if summary := fact.VPS.IPQualitySummary; summary != nil && strings.TrimSpace(summary.RiskLevel) != "" {
 		parts = append(parts, "risk="+strings.TrimSpace(summary.RiskLevel))
@@ -1338,7 +1362,7 @@ func ipQualityRiskDetails(fact Fact) string {
 
 func ipQualityEgressMismatch(fact Fact) bool {
 	summary := fact.VPS.IPQualitySummary
-	if summary == nil || summary.Ambiguous || !ipQualitySummarySucceeded(summary.Status) {
+	if summary == nil || summary.Ambiguous || !ipQualitySummaryUsable(summary) {
 		return false
 	}
 	reportIP, reportOK := ipidentity.Parse(summary.IPAddress)

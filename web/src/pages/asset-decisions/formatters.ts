@@ -34,6 +34,7 @@ import {
   renewalLabel,
   usageLabel,
 } from '../assetPageUtils'
+import { productRiskFacts, productSummaryHasRisk } from '../../components/ip-quality/ipQualityProductPresentation'
 import { parseComparisonInsight } from './utils'
 
 // 常量映射表
@@ -379,13 +380,29 @@ export function currentFactsStateLabel(facts?: AssetDecisionExecutionCurrentFact
   ].filter(Boolean).join(' · ') || '基础状态正常'
 }
 
+// revision1 只读服务端事实摘要：success/partial 的明确风险命中直接说明，不回退旧版评级；revision0 才显示旧评级。
 export function currentFactsIPQualityLabel(facts: AssetDecisionExecutionCurrentFacts): string {
   const summary = facts.ip_quality_summary
   if (!summary) return ''
   const parts = [`IP ${summary.ip_address}`]
+  const region = summary.use_region_code || summary.use_region_name
+  if (summary.product_revision === 1) {
+    const product = summary.product_summary
+    const settled = summary.status === 'success' || summary.status === 'partial'
+    if (settled && product && productSummaryHasRisk(product)) {
+      parts.push(`风险命中 ${productRiskFacts(product).join('、')}`)
+    } else if (summary.status === 'success') {
+      parts.push('采集成功')
+      if (region) parts.push(region)
+    } else if (summary.status === 'partial') {
+      parts.push('部分采集')
+    } else {
+      parts.push('采集未完成')
+    }
+    return parts.filter(Boolean).join(' ')
+  }
   if (summary.status === 'success') {
     parts.push(ipQualityRiskLabel(summary.risk_level))
-    const region = summary.use_region_code || summary.use_region_name
     if (region) parts.push(region)
   } else {
     parts.push('采集未完成')

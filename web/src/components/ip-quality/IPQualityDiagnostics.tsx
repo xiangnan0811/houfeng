@@ -2,7 +2,7 @@ import { useId } from 'react'
 
 import { ScrollRegion, Timestamp } from '../atoms'
 import { formatLatency, formatOptional } from '../../lib/format'
-import type { IPQualityCoverage, IPQualityProviderResult, IPQualityServiceUnlock, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
+import type { IPQualityCoverage, IPQualityProductView, IPQualityProviderResult, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
 import { IPQualityJSONBlock } from './IPQualityJSONBlock'
 import {
   probeErrorLabel,
@@ -11,10 +11,12 @@ import {
   type ServiceEndpointDiagnostic,
   type ServiceEndpointOutcome,
 } from './ipQualityPresentation'
+import { productStateLabel, providerMethodLabel } from './ipQualityProductPresentation'
 
 type IPQualityDiagnosticsProps = {
   report: VPSIPQualityReport
   summary: IPQualitySummary
+  product: IPQualityProductView | null
 }
 
 // 无 adapter 的可选来源 wire 为 not_configured，页面称“未接入”，不暗示存在配置入口。
@@ -89,23 +91,16 @@ function extraJSONMap<T extends { extra_json?: unknown }>(rows: T[], name: (row:
   return entries.length > 0 ? Object.fromEntries(entries) : null
 }
 
-function providerKey(result: IPQualityProviderResult): string {
-  return `${result.provider}:${result.source_type ?? ''}:${result.status ?? ''}`
-}
-
-function serviceKey(unlock: IPQualityServiceUnlock): string {
-  return `${unlock.service}:${unlock.source ?? ''}`
-}
-
 // 采集诊断默认折叠：只服务排障，不参与上方结论。
-export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsProps) {
+export function IPQualityDiagnostics({ report, summary, product }: IPQualityDiagnosticsProps) {
   const idPrefix = useId()
   const latest = report.latest_report ?? null
-  const providers = report.provider_results
+  // product 含 Agent 与 Center 认证的全部原始样本；旧报告只有 Agent 行（含历史占位）。
+  const providers = product ? product.providers : report.provider_results
   const services = report.service_unlocks
   const coverage: IPQualityCoverage | null = summary.coverage ?? latest?.coverage ?? null
   const coordinates = latest?.latitude != null && latest?.longitude != null ? `${latest.latitude}, ${latest.longitude}` : '—'
-  const providerExtra = extraJSONMap(providers, (row) => row.provider)
+  const providerExtra = extraJSONMap(providers, (row) => (row.details?.method === 'center_api' ? `${row.provider} (center_api)` : row.provider))
   const serviceExtra = extraJSONMap(services, (row) => row.service)
   const providerTitleId = `${idPrefix}-providers`
   const serviceTitleId = `${idPrefix}-services`
@@ -128,6 +123,15 @@ export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsPr
             <div><dt>接收时间</dt><dd><Timestamp value={latest?.received_at} /></dd></div>
             <div><dt>坐标</dt><dd className="mono">{coordinates}</dd></div>
             <div><dt>数据来源</dt><dd>{latest?.is_backfilled ? '离线补传' : '实时上报'}</dd></div>
+            {product ? (
+              <div>
+                <dt>补充资料</dt>
+                <dd>
+                  {productStateLabel(product.state)}
+                  {product.completed_at ? <> · <Timestamp value={product.completed_at} /></> : null}
+                </dd>
+              </div>
+            ) : null}
             {coverage ? (
               <>
                 <div className="ipq-facts__wide">
@@ -161,13 +165,14 @@ export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsPr
               >
                 <table className="data-table data-table--compact ipq-diagnostics__table">
                   <thead className="data-table__head">
-                    <tr><th>来源</th><th>类型</th><th>状态</th><th>耗时</th><th>错误</th></tr>
+                    <tr><th>来源</th><th>类型</th><th>方式</th><th>状态</th><th>耗时</th><th>错误</th></tr>
                   </thead>
                   <tbody>
-                    {providers.map((row) => (
-                      <tr key={providerKey(row)} className="data-table__row">
+                    {providers.map((row, index) => (
+                      <tr key={`${row.provider}:${row.details?.method ?? row.source_type ?? ''}:${index}`} className="data-table__row">
                         <td className="data-table__cell">{row.provider}</td>
                         <td className="data-table__cell mono">{row.source_type || 'default'}</td>
+                        <td className="data-table__cell">{providerMethodLabel(row) ?? '—'}</td>
                         <td className="data-table__cell">{sourceStatusLabel(row.status)}</td>
                         <td className="data-table__cell mono">{row.latency_ms != null ? formatLatency(row.latency_ms) : '—'}</td>
                         <td className="data-table__cell ipq-diagnostics__error">{errorText(row.error_code, row.error_summary)}</td>
@@ -197,7 +202,7 @@ export function IPQualityDiagnostics({ report, summary }: IPQualityDiagnosticsPr
                     {services.map((row) => {
                       const endpoints = serviceEndpointDiagnostics(row)
                       return (
-                        <tr key={serviceKey(row)} className="data-table__row">
+                        <tr key={`${row.service}:${row.source ?? ''}`} className="data-table__row">
                           <td className="data-table__cell">{serviceLabel(row.service)}</td>
                           <td className="data-table__cell mono">{row.source || '—'}</td>
                           <td className="data-table__cell">{sourceStatusLabel(row.probe_status)}</td>

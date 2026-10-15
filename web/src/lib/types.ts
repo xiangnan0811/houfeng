@@ -898,12 +898,41 @@ export type SettingsRecord = {
   settings_source: 'default' | 'database'
 }
 
+export type IPQualitySourceCredential = {
+  configured: boolean
+  masked_summary: string
+}
+
 export type IPQualitySettings = {
   enabled: boolean
   frequency_seconds: number
   stale_after_seconds: number
   timeout_seconds: number
   services: string[]
+  mail_enabled: boolean
+  sources: {
+    ipapi_is: IPQualitySourceCredential
+    abuseipdb: IPQualitySourceCredential
+    // GeoLite 官方查询：账号 ID 与 License Key 成对配置，只返回配置状态与掩码。
+    maxmind: IPQualitySourceCredential
+  }
+}
+
+// 凭据字段：省略=保留；空字符串=清除；非空=替换。不发送 null，也从不回传掩码。
+// GeoLite 账号 ID 与 License Key 成对：首次配置两者齐全；清除时两者同时为空字符串。
+export type IPQualitySettingsUpdateInput = {
+  enabled: boolean
+  frequency_seconds: number
+  stale_after_seconds: number
+  timeout_seconds: number
+  services: string[]
+  mail_enabled: boolean
+  sources?: {
+    ipapi_is_key?: string
+    abuseipdb_key?: string
+    maxmind_account_id?: string
+    maxmind_license_key?: string
+  }
 }
 
 export type MonitoringInstanceSparklinesResponse = {
@@ -1113,6 +1142,167 @@ export type VPSAssetRecord = {
   archived_state_snapshot?: ArchivedStateSnapshot | null
 }
 
+export type IPQualityScore = {
+  id: string
+  label: string
+  raw_value: string
+  unit: string
+  scope: 'ip' | 'company_network' | 'asn'
+  direction: 'higher_risk' | 'higher_trust' | 'unspecified'
+  source_label: string
+  value: number | null
+  min: number | null
+  max: number | null
+}
+
+export type IPQualityProviderDetails = {
+  queried_ip: string
+  observed_at: string
+  method: 'agent_public' | 'center_api'
+  api_tier: 'anonymous' | 'authenticated'
+  country_code: string
+  region: string
+  city: string
+  postal_code: string
+  timezone: string
+  latitude: number | null
+  longitude: number | null
+  registered_country_code: string
+  asn: string
+  as_name: string
+  as_domain: string
+  as_country_code: string
+  route: string
+  company_name: string
+  company_domain: string
+  is_mobile: boolean | null
+  is_anycast: boolean | null
+  is_bogon: boolean | null
+  scores: IPQualityScore[]
+  field_states: Record<string, 'known' | 'unsupported' | 'unknown' | 'error'>
+}
+
+export type IPQualityServiceCheck = {
+  id: string
+  label: string
+  status: 'available' | 'restricted' | 'unknown'
+  region: string
+  error_code: string
+  rule: string
+  http_status: number | null
+}
+
+export type IPQualityMailResult = {
+  provider: string
+  domain: string
+  status: 'reachable' | 'refused' | 'timeout' | 'no_mx' | 'no_address' | 'unknown' | 'skipped'
+  mx_host: string
+  target_ip: string
+  error_code: string
+  mx_preference: number | null
+  greeting_code: number | null
+  latency_ms: number | null
+  observed_at: string
+}
+
+export type IPQualityBlacklistResult = {
+  source: string
+  category: 'spam' | 'abuse' | 'network'
+  status: 'listed' | 'not_listed' | 'unknown' | 'unsupported'
+  query_method: 'dnsbl' | 'dataset'
+  error_code: string
+  reference_url: string
+  matched_range: string
+  codes: string[]
+  observed_at: string
+  dataset_at: string | null
+}
+
+export type IPQualityRegistration = {
+  status: string
+  rir: string
+  network_handle: string
+  start_address: string
+  end_address: string
+  network_name: string
+  network_country_code: string
+  registrant_country_code: string
+  registrant_name: string
+  source_url: string
+  registered_at: string | null
+  updated_at: string | null
+}
+
+export type IPQualityASN = {
+  status: string
+  number: string
+  name: string
+  domain: string
+  type: string
+  country_code: string
+  rir: string
+  source_url: string
+  route: string
+  registered_at: string | null
+  updated_at: string | null
+  observed_at: string | null
+  ipv4_prefixes: string | null
+  ipv4_addresses: string | null
+  ipv6_prefixes: string | null
+  ipv6_48s: string | null
+  origins: string[]
+}
+
+export type IPQualityIPTypeStatus = 'native' | 'broadcast' | 'unknown' | 'conflict'
+
+// 原生/广播：IPQuality 地理比较口径（注册国 vs 使用国），不是物理 anycast、住宅/机房或风险判定。
+// basis=abuse_contact_country 表示 IPinfo 滥用联系国家后备，不是官方注册国。
+export type IPQualityIPType = {
+  status: IPQualityIPTypeStatus | string
+  basis?: 'registered_country' | 'abuse_contact_country' | string
+  provider?: string
+  method?: string
+  country_code?: string
+  comparison_country_code?: string
+  upstream_commit?: string
+  fork_revision?: number
+}
+
+export type IPQualityProductSummary = {
+  risk_flags: string[]
+  high_risk_sources: string[]
+  restricted_services: string[]
+  blacklist_listed_count: number
+  blacklist_checked_count: number
+  service_available_count: number
+  service_partial_count: number
+  service_restricted_count: number
+  service_unknown_count: number
+  // 旧地理一致性证据：只用于历史报告，不再充当 IP 类型。
+  geo_status: 'consistent' | 'discrepant' | 'unknown' | 'conflict'
+  // 新报告的 IP 类型；旧报告缺失时不重分类。
+  ip_type?: IPQualityIPType | null
+}
+
+export type IPQualityProductState = 'pending' | 'running' | 'complete' | 'partial' | 'failed' | 'skipped'
+
+export type IPQualityProductView = {
+  revision: number
+  report_id: string
+  ip_address: string
+  ip_version: number
+  state: IPQualityProductState
+  agent_observed_at: string
+  completed_at: string | null
+  ptr_names: string[]
+  providers: IPQualityProviderResult[]
+  mail: IPQualityMailResult[]
+  blacklists: IPQualityBlacklistResult[]
+  registration: IPQualityRegistration
+  asn: IPQualityASN
+  summary: IPQualityProductSummary
+}
+
 export type IPQualityProviderResult = {
   provider: string
   status?: string
@@ -1133,6 +1323,7 @@ export type IPQualityProviderResult = {
   error_code?: string
   error_summary?: string
   extra_json?: unknown
+  details?: IPQualityProviderDetails | null
 }
 
 export type IPQualityServiceUnlock = {
@@ -1146,6 +1337,7 @@ export type IPQualityServiceUnlock = {
   error_code?: string
   error_summary?: string
   extra_json?: unknown
+  checks?: IPQualityServiceCheck[]
 }
 
 export type IPQualityCoverage = {
@@ -1181,6 +1373,9 @@ export type IPQualitySummary = {
   provider_count: number
   unlockable_count: number
   coverage?: IPQualityCoverage | null
+  product_revision?: number
+  intelligence_state?: IPQualityProductState
+  product_summary?: IPQualityProductSummary | null
 }
 
 export type IPQualityReport = {
@@ -1217,7 +1412,8 @@ export type IPQualityIPVersion = 4 | 6
 // available：本轮有该族本地地址或强制出口发现成功；unavailable：成功枚举接口但无该族地址；unknown：无法判断或无本轮元数据。
 export type IPQualityFamilyAvailability = 'available' | 'unavailable' | 'unknown'
 
-export type IPQualityCollectionScope = 'dual_stack' | 'legacy_single_family'
+// single_family：revision5 只采所选单族；dual_stack：一轮 IPv4 + IPv6；legacy_single_family：旧 agent 单族报告。
+export type IPQualityCollectionScope = 'single_family' | 'dual_stack' | 'legacy_single_family'
 
 // 该族最新一次尝试的终态；不携带占位 IP，也不携带原始错误文本。
 export type IPQualityFamilyAttempt = {
@@ -1248,9 +1444,13 @@ export type VPSIPQualityReport = {
   provider_results: IPQualityProviderResult[]
   service_unlocks: IPQualityServiceUnlock[]
   history: IPQualitySummary[]
+  product?: IPQualityProductView | null
 }
 
-export type IPQualityCollectRequestStatus = 'pending' | 'dispatched' | 'completed' | 'expired'
+export type IPQualityCollectRequestStatus = 'pending' | 'dispatched' | 'completed' | 'expired' | 'failed'
+
+// 立即采集的族集合：只允许 [4]、[6]、[4,6]。
+export type IPQualityCollectIPVersions = readonly [4] | readonly [6] | readonly [4, 6]
 
 export type IPQualityCollectUnavailableReason =
   | 'disabled'
@@ -1269,12 +1469,16 @@ export type IPQualityCollectRequest = {
   request_id: string
   monitoring_instance_id: string
   status: IPQualityCollectRequestStatus
+  // 本请求的族集合（[4]/[6]/[4,6]）；旧 Center 省略时视为双栈。
+  requested_ip_versions?: number[]
   requested_at: string
   expires_at: string
   dispatched_at?: string
   completed_at?: string
   report_status?: string
   error_summary?: string
+  // failed 的安全原因码，例如 unsupported_agent。
+  error_code?: string
   // 没有回传结果时省略；legacy_single_family 表示只收到旧 agent 的单族报告。
   collection_scope?: IPQualityCollectionScope | string
   collection_id?: string
@@ -2793,7 +2997,7 @@ export type SettingsUpdateInput = {
   incident_sweep_mode?: IncidentSweepMode
   override_rules: OverrideRules
   retention_policy: RetentionPolicy
-  ip_quality_settings: IPQualitySettings
+  ip_quality_settings: IPQualitySettingsUpdateInput
   subscription_cost_settings?: SubscriptionCostSettingsUpdateInput
 }
 
@@ -3700,6 +3904,9 @@ export type VPSOverviewSummaryCell = {
   detail?: string
   // 仅 IP 质量单元：默认族报告的地址族；缺失时不猜。
   ip_version?: IPQualityIPVersion
+  // 仅 IP 质量单元：revision1 报告的服务端事实摘要；status 为 risk 时由它说明命中项。
+  product_revision?: number
+  product_summary?: IPQualityProductSummary
   section: VPSOverviewSectionState
 }
 

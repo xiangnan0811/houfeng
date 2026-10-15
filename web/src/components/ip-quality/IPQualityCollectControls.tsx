@@ -1,9 +1,10 @@
-import { useId } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 import { Button } from '../atoms'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
-import { collectNotice, collectUnavailableLabel, type CollectNoticeView } from './ipQualityCollectPresentation'
+import type { IPQualityCollectIPVersions } from '../../lib/types'
+import { COLLECT_SCOPE_OPTIONS, collectNotice, collectUnavailableLabel, type CollectNoticeView } from './ipQualityCollectPresentation'
 import type { IPQualityCollectController } from './useIPQualityCollect'
 
 type CollectButtonProps = {
@@ -11,30 +12,141 @@ type CollectButtonProps = {
   variant?: 'primary' | 'secondary'
 }
 
-// 立即采集始终是一整轮 IPv4 + IPv6，与当前查看的地址族无关。
+const OPTION_COUNT = COLLECT_SCOPE_OPTIONS.length
+
+// 立即采集：点击后在按钮正下方展开 IPv4 / IPv6 / 双栈三个动作，与当前查看的地址族无关。
 export function IPQualityCollectButton({ collect, variant = 'primary' }: CollectButtonProps) {
-  const hintId = useId()
-  // 只读预览不提供写操作入口。
-  if (READ_ONLY_PREVIEW) return null
+  const baseId = useId()
+  const menuId = `${baseId}-menu`
+  const triggerId = `${baseId}-trigger`
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLSpanElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([])
+  const pendingFocusIndex = useRef(0)
   const unavailable = collect.status != null && !collect.status.available
   const busy = collect.submitting || collect.active
+  const disabled = busy || unavailable
+  // 进行中或不可用时菜单关闭且不再自动重现，避免重复提交（渲染期重置，不在 effect 里同步 setState）。
+  if (open && disabled) setOpen(false)
+  const menuOpen = open && !disabled && !READ_ONLY_PREVIEW
+
+  useEffect(() => {
+    if (!menuOpen) return
+    itemRefs.current[pendingFocusIndex.current]?.focus()
+  }, [menuOpen])
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = (event: MouseEvent) => {
+      if (!(event.target instanceof Node) || !containerRef.current?.contains(event.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [menuOpen])
+
+  // 只读预览不提供写操作入口。
+  if (READ_ONLY_PREVIEW) return null
+
+  function openMenu(index: number) {
+    pendingFocusIndex.current = index
+    setOpen(true)
+  }
+
+  function closeAndRestoreFocus() {
+    setOpen(false)
+    triggerRef.current?.focus()
+  }
+
+  function handleTriggerKeyDown(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === 'Escape' && menuOpen) {
+      event.preventDefault()
+      setOpen(false)
+      return
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+    event.preventDefault()
+    openMenu(event.key === 'ArrowDown' ? 0 : OPTION_COUNT - 1)
+  }
+
+  function handleItemKeyDown(event: KeyboardEvent<HTMLButtonElement>, index: number) {
+    let nextIndex: number
+    switch (event.key) {
+      case 'ArrowDown':
+        nextIndex = (index + 1) % OPTION_COUNT
+        break
+      case 'ArrowUp':
+        nextIndex = (index - 1 + OPTION_COUNT) % OPTION_COUNT
+        break
+      case 'Home':
+        nextIndex = 0
+        break
+      case 'End':
+        nextIndex = OPTION_COUNT - 1
+        break
+      case 'Escape':
+        event.preventDefault()
+        closeAndRestoreFocus()
+        return
+      case 'Tab':
+        setOpen(false)
+        return
+      default:
+        return
+    }
+    event.preventDefault()
+    itemRefs.current[nextIndex]?.focus()
+  }
+
+  function choose(ipVersions: IPQualityCollectIPVersions) {
+    closeAndRestoreFocus()
+    collect.start(ipVersions)
+  }
+
   const label = collect.submitting ? '正在发起…' : collect.active ? '采集中…' : '立即采集'
   return (
-    <span className="ipq-collect">
+    <span className="ipq-collect" ref={containerRef}>
       <Button
+        ref={triggerRef}
+        id={triggerId}
         size="md"
         variant={variant}
         className={busy ? 'ipq-collect-button ipq-collect-button--busy' : 'ipq-collect-button'}
-        onClick={collect.start}
-        disabled={busy || unavailable}
+        onClick={() => {
+          if (menuOpen) setOpen(false)
+          else openMenu(0)
+        }}
+        onKeyDown={handleTriggerKeyDown}
+        disabled={disabled}
         aria-busy={busy || undefined}
-        aria-describedby={hintId}
+        aria-haspopup="menu"
+        aria-controls={menuOpen ? menuId : undefined}
+        aria-expanded={menuOpen}
         title={unavailable ? collectUnavailableLabel(collect.status?.unavailable_reason) : undefined}
       >
         {busy ? <span className="ipq-pulse" aria-hidden="true" /> : null}
         {label}
+        {busy ? null : <span className="ipq-collect__caret" aria-hidden="true">{menuOpen ? '▴' : '▾'}</span>}
       </Button>
-      <span id={hintId} className="ipq-collect__hint">分别检测 IPv4 / IPv6</span>
+      {menuOpen ? (
+        <span id={menuId} className="ipq-collect__menu" role="menu" aria-labelledby={triggerId} aria-orientation="vertical">
+          {COLLECT_SCOPE_OPTIONS.map((option, index) => (
+            <button
+              key={option.label}
+              ref={(node) => {
+                itemRefs.current[index] = node
+              }}
+              type="button"
+              role="menuitem"
+              className="ipq-collect__item"
+              onClick={() => choose(option.ipVersions)}
+              onKeyDown={(event) => handleItemKeyDown(event, index)}
+            >
+              {option.label}
+            </button>
+          ))}
+        </span>
+      ) : null}
     </span>
   )
 }

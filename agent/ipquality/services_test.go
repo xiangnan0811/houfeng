@@ -42,7 +42,7 @@ func anonymousServiceFixture(req *http.Request) string {
 	case "ios.chat.openai.com":
 		return `<html><title>ChatGPT</title><body>OpenAI</body></html>`
 	case "www.youtube.com":
-		return `<html><body>Enjoy ad-free videos</body><script>var ytInitialData = {"contentRegion":"US"};</script></html>`
+		return `<html><title>YouTube Premium</title><body>Enjoy ad-free videos</body><script>var ytInitialData = {"contentRegion":"US"};</script></html>`
 	case "www.primevideo.com":
 		return `<html><title>Prime Video</title><script>{"currentTerritory":"US","isServiceRestricted":false}</script></html>`
 	case "disney.api.edge.bamgrid.com":
@@ -88,7 +88,7 @@ func TestServiceProbeBudgetStartsAfterSharedSlotAcquisition(t *testing.T) {
 				results := make(chan []serviceProbeOutcome, 2)
 				for _, family := range []int{4, 6} {
 					go func() {
-						results <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx, []string{"youtube-premium"}, family, slots)
+						results <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx, []string{"reddit"}, family, slots, "")
 					}()
 				}
 				success := 0
@@ -109,17 +109,6 @@ func TestServiceProbeBudgetStartsAfterSharedSlotAcquisition(t *testing.T) {
 }
 func restrictedServiceFixture(service string, req *http.Request) string {
 	switch service {
-	case "netflix":
-		return `<html><meta property="al:android:app_name" content="Netflix"><body>Oh no!</body></html>`
-	case "chatgpt":
-		if req.URL.Hostname() == "api.openai.com" {
-			return `{"error":{"code":"unsupported_country_region_territory"}}`
-		}
-		return `<html><title>ChatGPT</title><body>Please disable your VPN</body></html>`
-	case "youtube-premium":
-		return `<html><body>Premium is not available in your country</body><script>var ytInitialData = {};</script></html>`
-	case "amazon-prime-video":
-		return `<html><title>Prime Video</title><script>{"isServiceRestricted":true}</script></html>`
 	case "disney-plus":
 		return `{"error_description":"forbidden-location"}`
 	case "tiktok":
@@ -131,7 +120,7 @@ func restrictedServiceFixture(service string, req *http.Request) string {
 	}
 }
 
-var anonymousTestServices = []string{"netflix", "chatgpt", "youtube-premium", "amazon-prime-video", "disney-plus", "tiktok", "reddit"}
+var anonymousTestServices = []string{"disney-plus", "tiktok", "reddit"}
 
 func TestAnonymousServiceProtocolMatrices(t *testing.T) {
 	cases := []struct {
@@ -166,9 +155,6 @@ func TestAnonymousServiceProtocolMatrices(t *testing.T) {
 				})
 				outcome := collector.probeService(context.Background(), service, 4)
 				expected := test.expected
-				if service == "netflix" && test.name == "restricted" {
-					expected = "partial"
-				}
 				if outcome.Result.Status != expected {
 					t.Fatalf("result = %+v, want %s", outcome.Result, expected)
 				}
@@ -186,7 +172,7 @@ func TestAnonymousServiceProtocolMatrices(t *testing.T) {
 					t.Fatalf("challenge result = %+v", outcome.Result)
 				}
 				var evidence map[string]any
-				if json.Unmarshal(outcome.Raw, &evidence) != nil || evidence["probe_revision"] != float64(3) || evidence["evidence_kind"] != "anonymous_service_probe" {
+				if json.Unmarshal(outcome.Raw, &evidence) != nil || evidence["probe_revision"] != float64(4) || evidence["evidence_kind"] != "anonymous_service_probe" {
 					t.Fatalf("invalid evidence: %s", outcome.Raw)
 				}
 			})
@@ -199,80 +185,6 @@ func TestAnonymousServiceSpecificBoundaries(t *testing.T) {
 		name, service, wantStatus, wantScope string
 		handler                              serviceTestTransport
 	}{
-		{"netflix_one_unavailable", "netflix", "unlocked", "catalog_sample", func(r *http.Request) (*http.Response, error) {
-			body := anonymousServiceFixture(r)
-			if strings.HasSuffix(r.URL.Path, "70143836") {
-				body = restrictedServiceFixture("netflix", r)
-			}
-			return serviceTestResponse(r, 200, body), nil
-		}},
-		{"netflix_missing_title_meta", "netflix", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, `<meta property="al:android:app_name" content="Netflix"><h1>Breaking Bad</h1>`), nil
-		}},
-		{"netflix_wrong_title_id", "netflix", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, strings.ReplaceAll(anonymousServiceFixture(r), "/title/81280792", "/title/000")), nil
-		}},
-		{"netflix_region_conflict", "netflix", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			body := anonymousServiceFixture(r)
-			if strings.HasSuffix(r.URL.Path, "70143836") {
-				body = strings.ReplaceAll(body, `"US"`, `"JP"`)
-			}
-			return serviceTestResponse(r, 200, body), nil
-		}},
-		{"netflix_hidden_h1", "netflix", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, strings.ReplaceAll(anonymousServiceFixture(r), "<h1>", "<h1 hidden>")), nil
-		}},
-		{"chatgpt_web_positive_dc_unknown", "chatgpt", "partial", "web_verified_app_unknown", func(r *http.Request) (*http.Response, error) {
-			if r.URL.Hostname() == "ios.chat.openai.com" {
-				return serviceTestResponse(r, 403, `{"cf_details":"Request is not allowed. Please try again later.","type":"dc"}`), nil
-			}
-			return serviceTestResponse(r, 200, anonymousServiceFixture(r)), nil
-		}},
-		{"chatgpt_dc_without_positive", "chatgpt", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 403, `{"cf_details":"Request is not allowed. Please try again later.","type":"dc"}`), nil
-		}},
-		{"chatgpt_web_only", "chatgpt", "partial", "web_only", func(r *http.Request) (*http.Response, error) {
-			if r.URL.Hostname() == "api.openai.com" {
-				return serviceTestResponse(r, 200, anonymousServiceFixture(r)), nil
-			}
-			return serviceTestResponse(r, 403, restrictedServiceFixture("chatgpt", r)), nil
-		}},
-		{"chatgpt_app_only", "chatgpt", "partial", "app_only", func(r *http.Request) (*http.Response, error) {
-			if r.URL.Hostname() == "ios.chat.openai.com" {
-				return serviceTestResponse(r, 200, anonymousServiceFixture(r)), nil
-			}
-			return serviceTestResponse(r, 403, restrictedServiceFixture("chatgpt", r)), nil
-		}},
-		{"chatgpt_app_web_unknown", "chatgpt", "partial", "app_verified_web_unknown", func(r *http.Request) (*http.Response, error) {
-			if r.URL.Hostname() == "ios.chat.openai.com" {
-				return serviceTestResponse(r, 200, anonymousServiceFixture(r)), nil
-			}
-			return serviceTestResponse(r, 200, `{}`), nil
-		}},
-		{"chatgpt_vpn_word_not_restriction", "chatgpt", "partial", "app_verified_web_unknown", func(r *http.Request) (*http.Response, error) {
-			if r.URL.Hostname() == "ios.chat.openai.com" {
-				return serviceTestResponse(r, 200, `<html><title>ChatGPT</title><body>Information about VPN</body></html>`), nil
-			}
-			return serviceTestResponse(r, 200, `{}`), nil
-		}},
-		{"youtube_missing_region", "youtube-premium", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, `<html><body>ad-free</body><script>var ytInitialData = {};</script></html>`), nil
-		}},
-		{"youtube_context_region", "youtube-premium", "unlocked", "premium_offer", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, `<html><body>ad-free</body><script>ytcfg.set({"INNERTUBE_CONTEXT_GL":"jp"});</script></html>`), nil
-		}},
-		{"youtube_marketing_only", "youtube-premium", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, `<html><body>ad-free</body><script>{"contentRegion":"US"}</script></html>`), nil
-		}},
-		{"prime_false", "amazon-prime-video", "unlocked", "territory_offer", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, anonymousServiceFixture(r)), nil
-		}},
-		{"prime_string_false", "amazon-prime-video", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, `<title>Prime Video</title><script>{"currentTerritory":"US","isServiceRestricted":"false"}</script>`), nil
-		}},
-		{"prime_wrong_brand", "amazon-prime-video", "unknown", "", func(r *http.Request) (*http.Response, error) {
-			return serviceTestResponse(r, 200, `<title>Other</title><script>{"currentTerritory":"US"}</script>`), nil
-		}},
 		{"tiktok_no_brand", "tiktok", "unknown", "", func(r *http.Request) (*http.Response, error) {
 			return serviceTestResponse(r, 200, `<script>{"region":"US"}</script>`), nil
 		}},
@@ -454,7 +366,7 @@ func TestServiceWorkersJoinCanceledBodyReads(t *testing.T) {
 	})
 	done := make(chan []serviceProbeOutcome, 1)
 	go func() { done <- collector.collectDefaultServiceUnlocks(ctx, anonymousTestServices, 6) }()
-	for range 7 {
+	for range len(anonymousTestServices) {
 		select {
 		case <-entered:
 		case <-time.After(5 * time.Second):
@@ -468,7 +380,7 @@ func TestServiceWorkersJoinCanceledBodyReads(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("workers did not join")
 	}
-	if len(closed) != 7 {
+	if len(closed) != len(anonymousTestServices) {
 		t.Fatalf("returned before closing all bodies: %d", len(closed))
 	}
 	for _, outcome := range outcomes {
@@ -477,7 +389,7 @@ func TestServiceWorkersJoinCanceledBodyReads(t *testing.T) {
 		}
 	}
 	before, _ := json.Marshal(outcomes)
-	for range 7 {
+	for range len(anonymousTestServices) {
 		<-closed
 	}
 	after, _ := json.Marshal(outcomes)
@@ -502,7 +414,7 @@ func TestServiceWorkersDoNotSerializeIndependentRequests(t *testing.T) {
 	})
 	done := make(chan []serviceProbeOutcome, 1)
 	go func() { done <- collector.collectDefaultServiceUnlocks(ctx, anonymousTestServices, 4) }()
-	for range 7 {
+	for range len(anonymousTestServices) {
 		select {
 		case <-entered:
 		case <-time.After(5 * time.Second):
@@ -588,7 +500,7 @@ func TestCountryOnlyAndChallengeOverridesAreUnknown(t *testing.T) {
 }
 
 func TestServiceWorkersShareDeadlineAcrossProtocolSteps(t *testing.T) {
-	for _, service := range []string{"netflix", "chatgpt", "disney-plus", "tiktok"} {
+	for _, service := range []string{"disney-plus", "tiktok"} {
 		t.Run(service, func(t *testing.T) {
 			var deadline time.Time
 			calls := 0
@@ -630,7 +542,7 @@ func TestAnonymousProbeEgressAmbiguityHasNoFacts(t *testing.T) {
 			t.Fatalf("result %+v", outcome.Result)
 		}
 		var evidence serviceEvidence
-		if json.Unmarshal(outcome.Raw, &evidence) != nil || evidence.ProbeRevision != 3 || evidence.IPVersion != 6 || evidence.ObservedRegion != "" || len(evidence.Endpoints) != 0 {
+		if json.Unmarshal(outcome.Raw, &evidence) != nil || evidence.ProbeRevision != 4 || evidence.IPVersion != 6 || evidence.ObservedRegion != "" || len(evidence.Endpoints) != 0 {
 			t.Fatalf("ambiguous egress leaked service evidence: %s", outcome.Raw)
 		}
 	}
@@ -652,11 +564,8 @@ func TestServiceScriptQuotedAndCommentedLookalikesAreUnknown(t *testing.T) {
 		{"regex_after_unary", func(payload string) string { return "const value = !/" + payload + "/.test('x');" }},
 		{"regex_after_logical", func(payload string) string { return "const value = enabled && /" + payload + "/;" }},
 	}
-	for _, service := range []string{"amazon-prime-video", "tiktok"} {
-		title, payload := "Prime Video", `{"isServiceRestricted":true}`
-		if service == "tiktok" {
-			title, payload = "TikTok", `{"region":"US"}`
-		}
+	for _, service := range []string{"tiktok"} {
+		title, payload := "TikTok", `{"region":"US"}`
 		for _, wrapper := range wrappers {
 			t.Run(service+"/"+wrapper.name, func(t *testing.T) {
 				collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
@@ -673,11 +582,8 @@ func TestServiceScriptQuotedAndCommentedLookalikesAreUnknown(t *testing.T) {
 
 func TestServiceScriptActualJSONSurvivesWrapperLexing(t *testing.T) {
 	cases := []struct{ service, title, script, status, region string }{
-		{"amazon-prime-video", "Prime Video", `{"isServiceRestricted":true}`, "blocked", ""},
-		{"amazon-prime-video", "Prime Video", `window.state = {"currentTerritory":"US","isServiceRestricted":false};`, "unlocked", "US"},
 		{"tiktok", "TikTok", `{"region":"u\u0073","note":"escaped \" brace { and slash /"}`, "unlocked", "US"},
 		{"tiktok", "TikTok", `window.state = {"region":"US"};`, "unlocked", "US"},
-		{"youtube-premium", "YouTube", `ytcfg.set({"INNERTUBE_CONTEXT_GL":"US"});`, "unlocked", "US"},
 	}
 	prefixes := []string{
 		"",
@@ -741,7 +647,6 @@ func TestServiceScriptActualJSONSurvivesWrapperLexing(t *testing.T) {
 func TestRegexQuoteDoesNotHideLaterServiceJSON(t *testing.T) {
 	cases := []struct{ service, body string }{
 		{"tiktok", `<title>TikTok</title><script>const quote = /"/; window.state = {"region":"US"};</script>`},
-		{"amazon-prime-video", `<title>Prime Video</title><script>const quote = /"/; window.state = {"currentTerritory":"US","isServiceRestricted":false};</script>`},
 	}
 	for _, test := range cases {
 		t.Run(test.service, func(t *testing.T) {
@@ -751,106 +656,6 @@ func TestRegexQuoteDoesNotHideLaterServiceJSON(t *testing.T) {
 			result := collector.probeService(context.Background(), test.service, 4)
 			if result.Result.Status != "unlocked" || result.Result.ProbeStatus != sourceStatusSuccess || result.Result.Region != "US" {
 				t.Fatalf("regex quote hid genuine service JSON: %+v", result.Result)
-			}
-		})
-	}
-}
-
-func TestYouTubePageRegionDoesNotEstablishPremiumAvailability(t *testing.T) {
-	tests := []struct {
-		name, body, status, code, region, observed, evidence string
-		httpStatus                                           int
-	}{
-		{"cn_no_offer", `<body>Welcome to YouTube</body><script>var ytInitialData = {"contentRegion":"cn"};</script>`, "unknown", "invalid_response", "", "CN", "youtube_content_region", 200},
-		{"cn_offer", `<body>ad-free</body><script>var ytInitialData = {"contentRegion":"CN"};</script>`, "unlocked", "", "CN", "CN", "youtube_content_region", 200},
-		{"context_no_offer", `<script>ytcfg.set({"INNERTUBE_CONTEXT_GL":"jp"});</script>`, "unknown", "invalid_response", "", "JP", "youtube_context_gl", 200},
-		{"refusal_with_region", `<body>Premium is not available in your country</body><script>var ytInitialData = {"contentRegion":"CN"};</script>`, "blocked", "", "CN", "CN", "youtube_content_region", 200},
-		{"refusal_without_region", `<body>Premium is not available in your country</body><script>var ytInitialData = {};</script>`, "blocked", "", "", "", "", 200},
-		{"403_refusal_without_region", `<body>Premium is not available in your country</body><script>var ytInitialData = {};</script>`, "blocked", "", "", "", "", 403},
-		{"403_refusal_with_untrusted_region", `<body>Premium is not available in your country</body><script>var ytInitialData = {"contentRegion":"CN"};</script>`, "blocked", "", "", "", "", 403},
-		{"conflict_no_fallback", `<body>ad-free</body><script>var ytInitialData = {"contentRegion":"CN"}; ytcfg.set({"contentRegion":"US","INNERTUBE_CONTEXT_GL":"JP"});</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"invalid_primary_no_fallback", `<body>ad-free</body><script>ytcfg.set({"contentRegion":"China","INNERTUBE_CONTEXT_GL":"US"});</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"refusal_survives_conflict", `<body>Premium is not available in your country</body><script>var ytInitialData = {"contentRegion":"CN"}; ytcfg.set({"contentRegion":"US"});</script>`, "blocked", "", "", "", "", 200},
-		{"challenge", `<body>Verify you are human; ad-free</body><script>var ytInitialData = {"contentRegion":"CN"};</script>`, "unknown", "challenge_detected", "", "", "", 200},
-		{"login", `<form action="/login"><input type="password"></form><body>ad-free</body><script>ytcfg.set({"contentRegion":"CN"});</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"malformed_config", `<body>Premium is not available in your country</body><script>var ytInitialData = {"contentRegion":;</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"unrelated_script_region", `<body>ad-free</body><script>ytcfg.set({});</script><script>{"contentRegion":"CN"}</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"same_script_unrelated_region", `<body>ad-free</body><script>ytcfg.set({}); const unrelated = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"same_script_unrelated_does_not_conflict", `<body>ad-free</body><script>ytcfg.set({"contentRegion":"US"}); const unrelated = {"contentRegion":"CN"};</script>`, "unlocked", "", "US", "US", "youtube_content_region", 200},
-		{"comment_marker", `<body>ad-free</body><script>/* ytcfg.set */ const unrelated = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"string_marker", `<body>ad-free</body><script>const marker = "ytInitialData"; const unrelated = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"regex_marker", `<body>ad-free</body><script>const marker = /ytcfg/; const unrelated = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"different_receiver", `<body>ad-free</body><script>unrelated.ytcfg.set({"contentRegion":"CN"});</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"unrelated_property", `<body>ad-free</body><script>unrelated.ytInitialData = {"contentRegion":"CN"};</script>`, "unknown", "invalid_response", "", "", "", 200},
-		{"comment_between_wrapper_tokens", `<body>ad-free</body><script>ytcfg /* config */ . set ( {"contentRegion":"US"} );</script>`, "unlocked", "", "US", "US", "youtube_content_region", 200},
-		{"window_assignment", `<body>ad-free</body><script>window.ytInitialData = {"contentRegion":"US"};</script>`, "unlocked", "", "US", "US", "youtube_content_region", 200},
-		{"fatal_refusal", `<body>Premium is not available in your country</body><script>ytcfg.set({"contentRegion":"CN"});</script>`, "unknown", "http_status", "", "", "", 503},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
-				return serviceTestResponse(req, test.httpStatus, test.body), nil
-			})
-			outcome := collector.probeService(context.Background(), "youtube-premium", 6)
-			if outcome.Result.Status != test.status || outcome.Result.ErrorCode != test.code || outcome.Result.Region != test.region {
-				t.Fatalf("business conclusion = %+v", outcome.Result)
-			}
-			if test.status == "unknown" && outcome.Result.UnlockType != "" {
-				t.Fatalf("unknown retained normalized scope: %+v", outcome.Result)
-			}
-			var evidence serviceEvidence
-			if err := json.Unmarshal(outcome.Raw, &evidence); err != nil {
-				t.Fatal(err)
-			}
-			if evidence.ProbeRevision != 3 || evidence.IPVersion != 6 || evidence.ObservedRegion != test.observed || evidence.RegionEvidence != test.evidence || evidence.Region != test.region {
-				t.Fatalf("page evidence = %+v", evidence)
-			}
-			if len(evidence.Endpoints) != 1 || evidence.Endpoints[0].HTTPStatus != test.httpStatus {
-				t.Fatalf("endpoint evidence = %+v", evidence.Endpoints)
-			}
-			endpoint := evidence.Endpoints[0]
-			wantOutcome := "unknown"
-			if test.status == "unlocked" {
-				wantOutcome = "available"
-			} else if test.status == "blocked" {
-				wantOutcome = "restricted"
-			}
-			if endpoint.Outcome != wantOutcome || endpoint.ErrorCode != test.code {
-				t.Fatalf("endpoint conclusion = %+v", endpoint)
-			}
-		})
-	}
-}
-
-func TestChatGPTBooleanConsentAndIndependentEndpointFailures(t *testing.T) {
-	for _, consent := range []bool{false, true} {
-		t.Run(fmt.Sprint(consent), func(t *testing.T) {
-			collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
-				if req.URL.Hostname() == "ios.chat.openai.com" {
-					return nil, &net.OpError{Op: "dial", Net: "tcp6", Err: syscall.ENETUNREACH}
-				}
-				return serviceTestResponse(req, 200, fmt.Sprintf(`{"cookie_consent_required":%t,"private":"response-secret"}`, consent)), nil
-			})
-			outcome := collector.probeService(context.Background(), "chatgpt", 6)
-			if outcome.Result.Status != "partial" || outcome.Result.ProbeStatus != sourceStatusSuccess || outcome.Result.UnlockType != "web_verified_app_unknown" || outcome.Result.Region != "" {
-				t.Fatalf("endpoint failure obscured verified Web result: %+v", outcome.Result)
-			}
-			var evidence serviceEvidence
-			if err := json.Unmarshal(outcome.Raw, &evidence); err != nil {
-				t.Fatal(err)
-			}
-			if len(evidence.Endpoints) != 2 {
-				t.Fatalf("endpoints = %+v", evidence.Endpoints)
-			}
-			web, app := evidence.Endpoints[0], evidence.Endpoints[1]
-			if web.Endpoint != "web_cookie_requirements" || web.Outcome != "available" || web.HTTPStatus != 200 || web.ErrorCode != "" || web.MatchedRule == "" {
-				t.Fatalf("Web evidence = %+v", web)
-			}
-			if app.Endpoint != "app_home" || app.Outcome != "unknown" || app.ErrorCode != "network_unreachable" || app.HTTPStatus != 0 || app.MatchedRule != "" {
-				t.Fatalf("App evidence = %+v", app)
-			}
-			if strings.Contains(string(outcome.Raw), "response-secret") || strings.Contains(string(outcome.Raw), "https://") {
-				t.Fatalf("unsafe endpoint evidence: %s", outcome.Raw)
 			}
 		})
 	}
@@ -902,7 +707,7 @@ func TestServiceSharedSemaphoreHonorsCancellationBeforeTransport(t *testing.T) {
 	})
 	done := make(chan []serviceProbeOutcome, 1)
 	go func() {
-		done <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx, []string{"reddit", "youtube-premium"}, 6, slots)
+		done <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx, []string{"reddit", "youtube-premium"}, 6, slots, "")
 	}()
 	cancel()
 	select {
@@ -941,7 +746,7 @@ func TestServiceSemaphoreIsSharedAcrossFamilyCollectors(t *testing.T) {
 	})
 	done4 := make(chan []serviceProbeOutcome, 1)
 	go func() {
-		done4 <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx4, []string{"reddit"}, 4, slots)
+		done4 <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx4, []string{"reddit"}, 4, slots, "")
 	}()
 	select {
 	case <-entered:
@@ -952,7 +757,7 @@ func TestServiceSemaphoreIsSharedAcrossFamilyCollectors(t *testing.T) {
 	defer cancel6()
 	done6 := make(chan []serviceProbeOutcome, 1)
 	go func() {
-		done6 <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx6, []string{"reddit"}, 6, slots)
+		done6 <- collector.collectDefaultServiceUnlocksWithSemaphore(ctx6, []string{"reddit"}, 6, slots, "")
 	}()
 	select {
 	case <-entered:
@@ -982,37 +787,23 @@ func TestServiceSemaphoreIsSharedAcrossFamilyCollectors(t *testing.T) {
 	}
 }
 
-func TestYouTubeConsentAndTransportFailuresHaveNoPageRegion(t *testing.T) {
-	for _, failure := range []string{"consent", "transport"} {
-		t.Run(failure, func(t *testing.T) {
-			collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
-				if failure == "transport" {
-					return nil, &net.DNSError{Err: "private-dns-detail", Name: "private.example"}
-				}
-				response := serviceTestResponse(req, 200, `<body>ad-free</body><script>ytcfg.set({"contentRegion":"CN"});</script>`)
-				finalRequest := req.Clone(req.Context())
-				finalRequest.URL, _ = url.Parse("https://consent.youtube.com/?token=private-token")
-				response.Request = finalRequest
-				return response, nil
-			})
-			outcome := collector.probeService(context.Background(), "youtube-premium", 4)
-			wantCode := "invalid_response"
-			if failure == "transport" {
-				wantCode = "dns_failed"
-			}
-			var evidence serviceEvidence
-			if err := json.Unmarshal(outcome.Raw, &evidence); err != nil {
-				t.Fatal(err)
-			}
-			if outcome.Result.Status != "unknown" || outcome.Result.ErrorCode != wantCode || outcome.Result.Region != "" || outcome.Result.UnlockType != "" || evidence.ObservedRegion != "" || evidence.RegionEvidence != "" {
-				t.Fatalf("untrusted response established page geography: %+v evidence %+v", outcome.Result, evidence)
-			}
-			if len(evidence.Endpoints) != 1 || evidence.Endpoints[0].Outcome != "unknown" || evidence.Endpoints[0].ErrorCode != wantCode {
-				t.Fatalf("failure evidence = %+v", evidence.Endpoints)
-			}
-			if strings.Contains(string(outcome.Raw), "private") || strings.Contains(string(outcome.Raw), "consent.youtube.com") {
-				t.Fatalf("persisted unsafe redirect/transport detail: %s", outcome.Raw)
-			}
+func TestRegistryBusinessChecksDoNotCountProtocolExchanges(t *testing.T) {
+	expected := map[string][]string{
+		"disney-plus": {"region"}, "tiktok": {"web_region"}, "reddit": {"web"},
+	}
+	for service, ids := range expected {
+		collector := serviceTestCollector(func(req *http.Request) (*http.Response, error) {
+			return serviceTestResponse(req, 200, anonymousServiceFixture(req)), nil
 		})
+		result := collector.probeService(context.Background(), service, 4).Result
+		if len(result.Checks) != len(ids) {
+			t.Fatalf("%s protocol count leaked: %+v", service, result.Checks)
+		}
+		for i, id := range ids {
+			check := result.Checks[i]
+			if check.ID != id || check.Status != "available" || check.Rule == "" || check.HTTPStatus == nil || *check.HTTPStatus != 200 || check.ErrorCode != "" {
+				t.Fatalf("%s business evidence: %+v", service, check)
+			}
+		}
 	}
 }

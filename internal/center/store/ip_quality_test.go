@@ -211,6 +211,9 @@ func TestPostgresIPQualityRepositoryGetVPSIPQualityReturnsLatestMatricesAndHisto
 		got.History[0].Coverage.ExpectedProviderCount != 2 {
 		t.Fatalf("History[0] = %#v, want report_id and coverage", got.History[0])
 	}
+	if got.Product != nil || got.Summary.ProductRevision != 0 || got.Summary.ProductSummary != nil || got.Summary.IntelligenceState != "" || got.LatestReport.Product != nil || got.History[0].ProductRevision != 0 {
+		t.Fatalf("legacy report invented product fields: summary=%#v product=%#v", got.Summary, got.Product)
+	}
 	if len(db.beginOptions) != 1 ||
 		db.beginOptions[0].IsoLevel != pgx.RepeatableRead ||
 		db.beginOptions[0].AccessMode != pgx.ReadOnly {
@@ -666,12 +669,16 @@ func (f *fakeIPQualityDB) Query(_ context.Context, sql string, _ ...any) (pgx.Ro
 			return rows, nil
 		}
 	}
+	if strings.Contains(sql, ipQualityProductBatchMarker) || strings.Contains(sql, ipQualityProductProviderMarker) {
+		return &fakeIPQualityRows{}, nil
+	}
 	return nil, errors.New("unexpected query")
 }
 
 type fakeIPQualityTx struct {
 	querySource   *fakeIPQualityDB
 	execSQL       []string
+	execArgs      [][]any
 	commitCalls   int
 	commitErr     error
 	rollbackCalls int
@@ -684,8 +691,9 @@ func (f *fakeIPQualityTx) Query(ctx context.Context, sql string, args ...any) (p
 	return f.querySource.Query(ctx, sql, args...)
 }
 
-func (f *fakeIPQualityTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
+func (f *fakeIPQualityTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
 	f.execSQL = append(f.execSQL, sql)
+	f.execArgs = append(f.execArgs, append([]any(nil), args...))
 	return pgconn.CommandTag{}, nil
 }
 
@@ -832,7 +840,8 @@ func TestIPQualityAttemptsKeepInvalidPairedMetadataDistinctFromLegacy(t *testing
 	}{
 		{"legacy", `{"source_version":"v2"}`, "legacy_single_family", ""},
 		{"valid paired", `{"collection_revision":4,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available"}`, "dual_stack", "paired"},
-		{"unsupported revision", `{"collection_revision":5,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available"}`, "dual_stack", ""},
+		{"unsupported revision", `{"collection_revision":6,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available"}`, "dual_stack", ""},
+		{"selected family", `{"collection_revision":5,"collection_id":"single","expected_ip_versions":[4],"ip_address_family":4,"family_availability":"available"}`, "single_family", "single"},
 		{"invalid family", `{"collection_revision":4,"collection_id":"paired","expected_ip_versions":[4,6],"ip_address_family":6,"family_availability":"available"}`, "dual_stack", ""},
 		{"malformed paired", `{"collection_id":"paired","expected_ip_versions":[6,4]}`, "dual_stack", ""},
 	} {
@@ -880,4 +889,266 @@ func TestSaveReportsParsesCollectionMetadataBeforeSanitizingDiagnostics(t *testi
 	if !reports[0].CollectionMetadata.Valid || reports[0].CollectionMetadata.CollectionID != "paired" || reports[0].CollectionMetadata.CollectRequestID != "ipqc_test" {
 		t.Fatalf("direct construction metadata=%#v", reports[0].CollectionMetadata)
 	}
+}
+
+func TestSaveReportsStoresRevision1SummaryWithoutRewritingLegacyJSON(t *testing.T) {
+	tx := &fakeIPQualityTx{}
+	repo := &PostgresIPQualityRepository{
+		beginTx:     func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return tx, nil },
+		newReportID: func() (string, error) { return "ipq_product", nil },
+	}
+	report := ipQualityRevision1ReportWrite()
+	if err := repo.SaveReports(context.Background(), []ipquality.ReportWrite{report}); err != nil {
+		t.Fatal(err)
+	}
+	if tx.commitCalls != 1 {
+		t.Fatalf("commitCalls = %d, want 1", tx.commitCalls)
+	}
+	reportSQL, reportArgs := ipQualityExec(t, tx, "insert into ip_quality_reports")
+	if !strings.Contains(reportSQL, "product_json") || !strings.Contains(reportSQL, "product_summary_json") {
+		t.Fatalf("report SQL = %s, want typed product columns", reportSQL)
+	}
+	raw, _ := reportArgs[22].([]byte)
+	if strings.Contains(string(raw), "ptr.example.net") || strings.Contains(string(raw), "gmail.com") || strings.Contains(string(raw), `"revision"`) {
+		t.Fatalf("raw JSON = %s, want legacy payload without product fields", raw)
+	}
+	product, _ := reportArgs[25].([]byte)
+	summary, _ := reportArgs[26].([]byte)
+	if !strings.Contains(string(product), `"ptr.example.net"`) || !strings.Contains(string(summary), `"vpn"`) {
+		t.Fatalf("product/summary = %s / %s, want stored PTR and agent risk flag", product, summary)
+	}
+	_, enqueueArgs := ipQualityExec(t, tx, "insert into ip_quality_intelligence")
+	if enqueueArgs[0] != "ipq_product" || !enqueueArgs[1].(time.Time).Equal(report.ReceivedAt.Add(10*time.Minute)) {
+		t.Fatalf("enqueue args = %#v, want pending deadline", enqueueArgs)
+	}
+	if _, providerArgs := ipQualityExec(t, tx, "details_json"); !strings.Contains(string(providerArgs[len(providerArgs)-1].([]byte)), `"agent_public"`) {
+		t.Fatalf("provider args = %#v, want anonymous details", providerArgs)
+	}
+	if _, serviceArgs := ipQualityExec(t, tx, "checks_json"); !strings.Contains(string(serviceArgs[len(serviceArgs)-1].([]byte)), `"title_81280792"`) {
+		t.Fatalf("service args = %#v, want typed check", serviceArgs)
+	}
+}
+
+func TestSaveReportsSkipsIntelligenceForBackfillAndPlaceholder(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*ipquality.ReportWrite)
+	}{
+		{name: "backfilled", mutate: func(report *ipquality.ReportWrite) { report.IsBackfilled = true }},
+		{name: "placeholder", mutate: func(report *ipquality.ReportWrite) {
+			report.IPAddress = "0.0.0.0"
+			report.ProviderResults[0].Details.QueriedIP = "0.0.0.0"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := &fakeIPQualityTx{}
+			repo := &PostgresIPQualityRepository{
+				beginTx:     func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return tx, nil },
+				newReportID: func() (string, error) { return "ipq_" + tc.name, nil },
+			}
+			report := ipQualityRevision1ReportWrite()
+			tc.mutate(&report)
+			if err := repo.SaveReports(context.Background(), []ipquality.ReportWrite{report}); err != nil {
+				t.Fatal(err)
+			}
+			if containsSQL(tx.execSQL, "insert into ip_quality_intelligence") {
+				t.Fatalf("execSQL = %#v, want summary without a job", tx.execSQL)
+			}
+			_, args := ipQualityExec(t, tx, "insert into ip_quality_reports")
+			if args[25] == nil || args[26] == nil {
+				t.Fatalf("product columns = %#v/%#v, want agent summary", args[25], args[26])
+			}
+		})
+	}
+}
+
+func TestSaveReportsRejectsDetailsWithoutProductRevision(t *testing.T) {
+	tx := &fakeIPQualityTx{}
+	repo := &PostgresIPQualityRepository{
+		beginTx: func(context.Context, pgx.TxOptions) (ipQualityTx, error) { return tx, nil },
+	}
+	report := ipQualityReportWrite()
+	report.ProviderResults[0].Details = &agentapi.IPQualityProviderDetails{QueriedIP: report.IPAddress, Method: "agent_public", APITier: "anonymous", ObservedAt: report.ObservedAt}
+	err := repo.SaveReports(context.Background(), []ipquality.ReportWrite{report})
+	if !errors.Is(err, ipquality.ErrInvalidIPQualityReport) || tx.commitCalls != 0 || len(tx.execSQL) != 0 {
+		t.Fatalf("SaveReports() = %v commit=%d exec=%#v, want rejection before write", err, tx.commitCalls, tx.execSQL)
+	}
+}
+
+func TestIPQualityReadUsesStoredSummaryAndDoesNotRecomputeTerminalFacts(t *testing.T) {
+	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
+	agentSummary := []byte(`{"risk_flags":["vpn"],"high_risk_sources":[],"restricted_services":[],"blacklist_listed_count":0,"blacklist_checked_count":0,"service_available_count":1,"service_partial_count":0,"service_restricted_count":0,"service_unknown_count":0,"geo_status":"unknown"}`)
+	terminalSummary := []byte(`{"risk_flags":["abuse"],"high_risk_sources":["abuseipdb"],"restricted_services":["netflix"],"blacklist_listed_count":1,"blacklist_checked_count":1,"service_available_count":0,"service_partial_count":0,"service_restricted_count":1,"service_unknown_count":0,"geo_status":"consistent"}`)
+	product := []byte(`{"revision":1,"ptr_names":["historical.example.net"],"mail":[]}`)
+	completed := now.Add(time.Minute)
+	state := "complete"
+	db := &fakeIPQualityDB{queryRows: map[string]pgx.Rows{
+		"select state.ip_version, state.latest_report_id, state.availability": fakeIPQualityFamilyRows("ipq_product", nil, nil),
+		"from ip_quality_reports r":            &fakeIPQualityRows{rows: []fakeIPQualityScan{{scan: scanIPQualityReportRow("ipq_product", "mi_001", now, agentapi.IPQualityStatusSuccess)}}},
+		"from ip_quality_provider_results":     &fakeIPQualityRows{},
+		"from ip_quality_service_unlocks":      &fakeIPQualityRows{},
+		"from ip_quality_assigned_vps_reports": &fakeIPQualityRows{rows: []fakeIPQualityScan{{scan: scanIPQualitySummaryRow("vps_001", "ipq_product", now, agentapi.IPQualityStatusSuccess)}}},
+		ipQualityProductBatchMarker: &fakeIPQualityRows{rows: []fakeIPQualityScan{{scan: func(dest ...any) error {
+			*(dest[0].(*string)) = "ipq_product"
+			*(dest[1].(*string)) = "203.0.113.10"
+			*(dest[2].(*int)) = 4
+			*(dest[3].(*time.Time)) = now
+			*(dest[4].(*[]byte)) = product
+			*(dest[5].(*[]byte)) = agentSummary
+			*(dest[6].(**string)) = &state
+			*(dest[7].(**time.Time)) = &completed
+			*(dest[8].(*[]byte)) = []byte(`{"providers":[{"provider":"abuseipdb","status":"success","details":{"method":"center_api","api_tier":"authenticated","queried_ip":"203.0.113.10","scores":[],"field_states":{}}}],"blacklists":[{"source":"spamcop","status":"listed","codes":["127.0.0.2"]}],"registration":{"status":"success","network_country_code":"US"},"asn":{"status":"success","origins":["AS64500"]},"source_outcomes":[{"source_id":"ripe","status":"success"}]}`)
+			*(dest[9].(*[]byte)) = terminalSummary
+			return nil
+		}}}},
+	}}
+	got, err := newFakeIPQualityReadRepository(db).GetVPSIPQuality(context.Background(), "vps_001", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Product == nil || got.Product.ReportID != "ipq_product" || got.Product.State != "complete" || got.Product.CompletedAt == nil || !got.Product.CompletedAt.Equal(completed) {
+		t.Fatalf("product = %#v, want completed stored view", got.Product)
+	}
+	if len(got.Product.PTRNames) != 1 || got.Product.PTRNames[0] != "historical.example.net" {
+		t.Fatalf("PTR = %#v, want historical stored name", got.Product.PTRNames)
+	}
+	if got.Summary.ProductRevision != 1 || got.Summary.IntelligenceState != "complete" || got.Summary.ProductSummary == nil || got.Summary.ProductSummary.BlacklistListedCount != 1 || got.Summary.ProductSummary.GeoStatus != "consistent" || len(got.Summary.ProductSummary.RiskFlags) != 1 || got.Summary.ProductSummary.RiskFlags[0] != "abuse" {
+		t.Fatalf("summary = %#v, want stored terminal summary rather than recomputed agent summary", got.Summary)
+	}
+	if got.Summary.RiskLevel != "low" {
+		t.Fatalf("old risk level = %q, want preserved historical field", got.Summary.RiskLevel)
+	}
+	if len(got.Product.Blacklists) != 1 || got.Product.Blacklists[0].Status != "listed" || len(got.Product.Providers) != 1 || got.Product.Providers[0].Provider != "abuseipdb" {
+		t.Fatalf("view facts = %#v, want snapshot samples", got.Product)
+	}
+	if got.History[0].ProductRevision != 1 || got.Families[0].LatestReportSummary.IntelligenceState != "complete" {
+		t.Fatalf("history/family did not share the batch summary: %#v %#v", got.History, got.Families)
+	}
+}
+
+func TestFailedSnapshotDiagnosticsKeepAgentSummary(t *testing.T) {
+	now := time.Date(2026, time.June, 1, 10, 0, 0, 0, time.UTC)
+	completed := now.Add(time.Minute)
+	product := []byte(`{"revision":1,"ptr_names":["historical.example.net"],"mail":[]}`)
+	agentSummary := []byte(`{"risk_flags":["vpn"],"high_risk_sources":[],"restricted_services":[],"blacklist_listed_count":0,"blacklist_checked_count":0,"service_available_count":1,"service_partial_count":0,"service_restricted_count":0,"service_unknown_count":0,"geo_status":"unknown"}`)
+	intelligenceSummary := []byte(`{"risk_flags":["abuse"],"high_risk_sources":["abuseipdb"],"restricted_services":["netflix"],"blacklist_listed_count":1,"blacklist_checked_count":1,"service_available_count":0,"service_partial_count":0,"service_restricted_count":1,"service_unknown_count":0,"geo_status":"consistent"}`)
+	snapshot, err := json.Marshal(ipquality.IntelligenceSnapshot{
+		Providers: []ipquality.ProviderResultRead{{
+			Provider: "abuseipdb", Status: "failure", SourceType: "default", ErrorCode: "http_failed",
+			Details: &agentapi.IPQualityProviderDetails{
+				QueriedIP: "203.0.113.10", ObservedAt: now, Method: "center_api", APITier: "authenticated",
+				Scores: []agentapi.IPQualityScore{}, FieldStates: map[string]string{},
+			},
+		}},
+		Blacklists: []agentapi.IPQualityBlacklistResult{{
+			Source: "spamcop", Category: "spam", Status: "unknown", QueryMethod: "dnsbl",
+			ErrorCode: "dns_failed", Codes: []string{}, ObservedAt: now,
+		}},
+		Registration:   agentapi.IPQualityRegistration{Status: "unknown"},
+		ASN:            agentapi.IPQualityASN{Status: "unknown", Origins: []string{}},
+		SourceOutcomes: []ipquality.SourceOutcome{{SourceID: "abuseipdb", Status: "failure", ErrorCode: "http_failed", ObservedAt: now}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vpn := true
+	providers := []ipquality.ProviderResultWrite{{Provider: "ipapi.is", Status: "success", IsVPN: &vpn}}
+	failed := "failed"
+	view, ok, err := buildStoredIPQualityProduct(ipQualityStoredProductRow{
+		reportID: "ipq_failed", ipAddress: "203.0.113.10", ipVersion: 4, observedAt: now,
+		productJSON: product, agentSummaryJSON: agentSummary, intelligenceState: &failed, completedAt: &completed,
+		snapshotJSON: snapshot, intelligenceSummaryJSON: intelligenceSummary,
+	}, providers)
+	if err != nil || !ok || view.State != "failed" || view.Summary.BlacklistListedCount != 0 || len(view.Summary.RiskFlags) != 1 || view.Summary.RiskFlags[0] != "vpn" {
+		t.Fatalf("failed view = %#v ok=%t err=%v, want agent VPN summary", view.Summary, ok, err)
+	}
+	foundFailure, foundVPN, foundUnknown := false, false, false
+	for _, row := range view.Providers {
+		if row.Provider == "abuseipdb" && row.Status == "failure" && row.ErrorCode == "http_failed" && row.IsVPN == nil && row.Details != nil && row.Details.Method == "center_api" && row.Details.City == "" {
+			foundFailure = true
+		}
+		if row.Provider == "ipapi.is" && row.IsVPN != nil && *row.IsVPN {
+			foundVPN = true
+		}
+	}
+	for _, row := range view.Blacklists {
+		if row.Source == "spamcop" && row.Status == "unknown" && row.ErrorCode == "dns_failed" {
+			foundUnknown = true
+		}
+	}
+	if !foundFailure || !foundVPN || !foundUnknown {
+		t.Fatalf("diagnostics = providers:%#v blacklists:%#v", view.Providers, view.Blacklists)
+	}
+	facts, err := interpretStoredIPQualityProduct(product, agentSummary, &failed, &completed, nil, intelligenceSummary, true)
+	if err != nil || facts.snapshot != nil || facts.summary == nil || len(facts.summary.RiskFlags) != 1 || facts.summary.RiskFlags[0] != "vpn" {
+		t.Fatalf("overview failed facts = %#v err=%v, want agent summary and no invented snapshot", facts, err)
+	}
+	if _, err := interpretStoredIPQualityProduct(product, agentSummary, &failed, &completed, []byte(`{`), intelligenceSummary, true); err == nil {
+		t.Fatal("corrupt failed snapshot was ignored")
+	}
+	swept, ok, err := buildStoredIPQualityProduct(ipQualityStoredProductRow{
+		reportID: "ipq_swept", ipAddress: "203.0.113.10", ipVersion: 4, observedAt: now,
+		productJSON: product, agentSummaryJSON: agentSummary, intelligenceState: &failed, completedAt: &completed,
+		intelligenceSummaryJSON: intelligenceSummary,
+	}, providers)
+	if err != nil || !ok || swept.State != "failed" || len(swept.Blacklists) != 0 || len(swept.Providers) != 1 || swept.Providers[0].Provider != "ipapi.is" || swept.Summary.RiskFlags[0] != "vpn" {
+		t.Fatalf("swept view = %#v err=%v, want empty center diagnostics", swept, err)
+	}
+	skipped := "skipped"
+	cleared, err := json.Marshal(ipquality.IntelligenceSnapshot{
+		Blacklists: []agentapi.IPQualityBlacklistResult{{Source: "spamcop", Status: "listed", Codes: []string{"127.0.0.2"}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	empty, ok, err := buildStoredIPQualityProduct(ipQualityStoredProductRow{
+		reportID: "ipq_skipped", ipAddress: "203.0.113.10", ipVersion: 4, observedAt: now,
+		productJSON: product, agentSummaryJSON: agentSummary, intelligenceState: &skipped, completedAt: &completed,
+		snapshotJSON: cleared, intelligenceSummaryJSON: intelligenceSummary,
+	}, providers)
+	if err != nil || !ok || empty.State != "skipped" || len(empty.Blacklists) != 0 || len(empty.Providers) != 1 || empty.Summary.RiskFlags[0] != "vpn" || empty.Summary.BlacklistListedCount != 0 {
+		t.Fatalf("skipped view = %#v err=%v, want cleared snapshot to stay empty", empty, err)
+	}
+}
+
+func ipQualityRevision1ReportWrite() ipquality.ReportWrite {
+	report := ipQualityReportWrite()
+	report.ReceivedAt = report.ObservedAt.Add(time.Second)
+	report.RiskLevel = "low"
+	report.IPAddress = "203.0.113.10"
+	report.Product = &agentapi.IPQualityAgentProduct{
+		Revision: agentapi.IPQualityProductRevision,
+		PTRNames: []string{"ptr.example.net"},
+		Mail: []agentapi.IPQualityMailResult{{
+			Provider: "gmail", Domain: "gmail.com", Status: "reachable",
+			MXHost: "gmail-smtp-in.l.google.com", TargetIP: "1.1.1.1",
+			ObservedAt: report.ObservedAt, GreetingCode: new(220), LatencyMS: new(40),
+		}},
+	}
+	report.ProviderResults[0].Provider = "ipapi.is"
+	report.ProviderResults[0].IsVPN = new(true)
+	report.ProviderResults[0].Details = &agentapi.IPQualityProviderDetails{
+		QueriedIP: report.IPAddress, ObservedAt: report.ObservedAt,
+		Method: "agent_public", APITier: "anonymous", CountryCode: "US",
+		Scores: []agentapi.IPQualityScore{{
+			ID: "risk", Scope: "ip", Direction: "higher_risk", SourceLabel: "high",
+			Value: new(90.0), Min: new(0.0), Max: new(100.0),
+		}},
+		FieldStates: map[string]string{"is_vpn": "known"},
+	}
+	report.ServiceUnlocks[0].Checks = []agentapi.IPQualityServiceCheck{{
+		ID: "title_81280792", Status: "available", Region: "US", HTTPStatus: new(200),
+	}}
+	return report
+}
+
+func ipQualityExec(t *testing.T, tx *fakeIPQualityTx, fragment string) (string, []any) {
+	t.Helper()
+	for i, sql := range tx.execSQL {
+		if strings.Contains(sql, fragment) {
+			return sql, tx.execArgs[i]
+		}
+	}
+	t.Fatalf("exec SQL missing %q: %#v", fragment, tx.execSQL)
+	return "", nil
 }

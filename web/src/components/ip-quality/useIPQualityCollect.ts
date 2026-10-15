@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, getVPSIPQualityCollectStatus, requestVPSIPQualityCollect } from '../../lib/api'
-import type { IPQualityCollectRequest, IPQualityCollectStatus } from '../../lib/types'
+import type { IPQualityCollectIPVersions, IPQualityCollectRequest, IPQualityCollectStatus } from '../../lib/types'
 import { isCollectRequestActive } from './ipQualityCollectPresentation'
 
 export const COLLECT_POLL_INTERVAL_MS = 3000
@@ -13,7 +13,8 @@ export type IPQualityCollectController = {
   submitting: boolean
   error: string | null
   active: boolean
-  start: () => void
+  // 发起所选族集合的一次立即采集；进行中/提交中不重复提交。
+  start: (ipVersions: IPQualityCollectIPVersions) => void
 }
 
 type State = {
@@ -30,7 +31,7 @@ function initialState(vpsId: string | null): State {
   return { vpsId, status: null, watchedRequestId: null, submitting: false, error: null, pollAttempt: 0 }
 }
 
-// 409 的具体原因由随后读取的状态给出，这里只处理其他失败。
+// 409 的具体原因（不可用或另一范围的请求在途）由随后读取的状态给出，这里只处理其他失败。
 function describeCollectError(error: unknown): string | null {
   if (error instanceof ApiError && error.status === 409) return null
   return '发起采集失败，请稍后重试'
@@ -52,7 +53,8 @@ function justCompleted(prev: IPQualityCollectRequest | null, next: IPQualityColl
 }
 
 // enabled 为 false 时（报告尚未加载成功）不读取采集状态，避免错误页发出无用请求。
-export function useIPQualityCollect(vpsId: string | undefined, onCompleted: () => void, enabled = true): IPQualityCollectController {
+// onCompleted 收到刚完成的请求本身，由页面按其族集合决定是否刷新当前族。
+export function useIPQualityCollect(vpsId: string | undefined, onCompleted: (request: IPQualityCollectRequest) => void, enabled = true): IPQualityCollectController {
   const key = vpsId ?? null
   const [state, setState] = useState<State>(() => initialState(key))
   const onCompletedRef = useRef(onCompleted)
@@ -155,16 +157,16 @@ export function useIPQualityCollect(vpsId: string | undefined, onCompleted: () =
     const previous = lastRequestRef.current
     lastRequestRef.current = request
     if (request && current.watchedRequestId === request.request_id && justCompleted(previous, request)) {
-      onCompletedRef.current()
+      onCompletedRef.current(request)
     }
   }, [request, current.watchedRequestId])
 
   const busy = current.submitting || active
-  const start = useCallback(() => {
+  const start = useCallback((ipVersions: IPQualityCollectIPVersions) => {
     if (!key || busy) return
     setState((prev) => ({ ...prev, submitting: true, error: null }))
     const ticket = issueTicket()
-    requestVPSIPQualityCollect(key)
+    requestVPSIPQualityCollect(key, ipVersions)
       .then((next) => {
         if (!isCurrentTicket(sessionRef.current, ticket)) return
         // POST 结果即使被更新的 GET 取代，也要结束提交中状态。

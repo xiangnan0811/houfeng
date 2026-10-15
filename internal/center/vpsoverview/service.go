@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"houfeng/internal/center/activity"
+	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/recordauth"
+	"houfeng/internal/contracts/agentapi"
 )
 
 var (
@@ -49,11 +51,13 @@ type MonitoringSource struct {
 
 // IPQualitySource is one bounded IP-quality read.
 type IPQualitySource struct {
-	Section   SectionState
-	Status    string
-	RiskLevel string
-	Stale     bool
-	IPVersion int
+	Section         SectionState
+	Status          string
+	RiskLevel       string
+	Stale           bool
+	IPVersion       int
+	ProductRevision int
+	ProductSummary  *agentapi.IPQualityProductSummary
 }
 
 // RenewalSource is one bounded subscription read. ActiveSubscriptions and its
@@ -461,9 +465,11 @@ func (service *Service) buildOverview(identitySource IdentitySource, collected s
 				Detail: monitoring.Detail, Section: monitoring.Section,
 			},
 			IPQuality: SummaryCell{
-				Status: firstNonEmpty(ipQuality.RiskLevel, ipQuality.Status, "unknown"),
+				Status: ipQualitySummaryStatus(ipQuality),
 				Detail: ipQuality.Status, Section: ipQuality.Section,
-				IPVersion: ipQuality.IPVersion,
+				IPVersion:       ipQuality.IPVersion,
+				ProductRevision: ipQuality.ProductRevision,
+				ProductSummary:  ipQuality.ProductSummary,
 			},
 			Renewal: SummaryCell{
 				Status:  firstNonEmpty(renewal.Status, identity.RenewalDecision, "unknown"),
@@ -644,6 +650,8 @@ func snapshotFromSources(
 		MonitoringObserved:   monitoring.Section.ObservedAt,
 		IPStatus:             ipQuality.Status,
 		IPRiskLevel:          ipQuality.RiskLevel,
+		IPProductRevision:    ipQuality.ProductRevision,
+		IPProductSummary:     ipQuality.ProductSummary,
 		IPStale:              ipQuality.Stale,
 		IPObservedAt:         ipQuality.Section.ObservedAt,
 		ActiveSubscriptions:  renewal.ActiveSubscriptions,
@@ -711,4 +719,14 @@ func nilOverviewDependency(value any) bool {
 	default:
 		return false
 	}
+}
+
+func ipQualitySummaryStatus(source IPQualitySource) string {
+	if source.ProductRevision == 1 {
+		if ipquality.ProductHasRisk(source.ProductSummary) {
+			return "risk"
+		}
+		return firstNonEmpty(source.Status, "unknown")
+	}
+	return firstNonEmpty(source.RiskLevel, source.Status, "unknown")
 }

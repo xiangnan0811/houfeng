@@ -76,13 +76,29 @@ func hasServiceProbeFailure(services []agentapi.IPQualityServiceUnlockPayload) b
 	return false
 }
 
-func diagnosticsJSON(startedAt time.Time, discoveryCandidates, ipCandidates map[string]string, ipVersion int, availability, collectionID string, egressAmbiguous bool, providers []agentapi.IPQualityProviderResultPayload) json.RawMessage {
+func hasMailProbeFailure(product *agentapi.IPQualityAgentProduct) bool {
+	if product == nil {
+		return false
+	}
+	for _, result := range product.Mail {
+		if result.Status == "timeout" || result.Status == "unknown" {
+			return true
+		}
+	}
+	return false
+}
+
+func diagnosticsJSON(startedAt time.Time, discoveryCandidates, ipCandidates map[string]string, ipVersion int, availability, collectionID string, egressAmbiguous bool, providers []agentapi.IPQualityProviderResultPayload, plan *agentapi.IPQualityPlan) json.RawMessage {
+	revision := agentapi.IPQualityCollectionRevision
+	if plan != nil && plan.CollectionRevision == agentapi.IPQualitySelectiveCollectionRevision {
+		revision = agentapi.IPQualitySelectiveCollectionRevision
+	}
 	payload := map[string]any{
 		"source_version": "v2",
-		agentapi.IPQualityDiagnosticsCollectionRevisionKey: agentapi.IPQualityCollectionRevision,
-		"service_probe_revision":                           3,
+		agentapi.IPQualityDiagnosticsCollectionRevisionKey: revision,
+		"service_probe_revision":                           5,
 		agentapi.IPQualityDiagnosticsCollectionIDKey:       collectionID,
-		agentapi.IPQualityDiagnosticsExpectedIPVersionsKey: [2]int{4, 6},
+		agentapi.IPQualityDiagnosticsExpectedIPVersionsKey: agentapi.CollectionIPVersions(plan),
 		agentapi.IPQualityDiagnosticsFamilyAvailabilityKey: availability,
 		"elapsed_ms": int(time.Since(startedAt).Milliseconds()),
 	}

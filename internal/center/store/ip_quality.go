@@ -32,13 +32,15 @@ type ipQualityTx interface {
 
 type PostgresIPQualityRepository struct {
 	db          ipQualityDB
+	pool        *pgxpool.Pool
 	beginTx     func(context.Context, pgx.TxOptions) (ipQualityTx, error)
 	newReportID func() (string, error)
 }
 
 func NewPostgresIPQualityRepository(db *pgxpool.Pool) *PostgresIPQualityRepository {
 	return &PostgresIPQualityRepository{
-		db: db,
+		db:   db,
+		pool: db,
 		beginTx: func(ctx context.Context, opts pgx.TxOptions) (ipQualityTx, error) {
 			return db.BeginTx(ctx, opts)
 		},
@@ -104,7 +106,11 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 	}
 	diagnosticsJSON := []byte(nil)
 	if len(report.DiagnosticsJSON) > 0 {
-		diagnosticsJSON = ipquality.SanitizeExtraJSON(report.DiagnosticsJSON)
+		diagnosticsJSON = ipquality.SanitizeCollectionDiagnostics(report.DiagnosticsJSON)
+	}
+	productWrite, err := prepareIPQualityProductWrite(report)
+	if err != nil {
+		return err
 	}
 	receivedAt := report.ReceivedAt
 	if _, err := tx.Exec(ctx, `
@@ -133,8 +139,10 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 				is_backfilled,
 				raw_json,
 				coverage_json,
-				diagnostics_json
-			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,$24::jsonb,$25::jsonb)`,
+				diagnostics_json,
+				product_json,
+				product_summary_json
+			) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,$24::jsonb,$25::jsonb,$26::jsonb,$27::jsonb)`,
 		reportID,
 		report.MonitoringInstanceID,
 		report.ObservedAt,
@@ -160,10 +168,12 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 		rawJSON,
 		coverageJSON,
 		diagnosticsJSON,
+		productWrite.productJSON,
+		productWrite.summaryJSON,
 	); err != nil {
 		return fmt.Errorf("insert ip quality report for monitoring instance %q: %w", report.MonitoringInstanceID, err)
 	}
-	for _, provider := range report.ProviderResults {
+	for i, provider := range report.ProviderResults {
 		resultID, err := ids.New("ipqp")
 		if err != nil {
 			return fmt.Errorf("generate ip quality provider result id: %w", err)
@@ -190,8 +200,9 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 					is_robot,
 					error_code,
 					error_summary,
-					extra_json
-				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb)`,
+					extra_json,
+					details_json
+				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21::jsonb,$22::jsonb)`,
 			resultID,
 			reportID,
 			provider.Provider,
@@ -213,11 +224,12 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 			provider.ErrorCode,
 			provider.ErrorSummary,
 			ipquality.SanitizeExtraJSON(provider.ExtraJSON),
+			ipQualityColumn(productWrite.details, i),
 		); err != nil {
 			return fmt.Errorf("insert ip quality provider result for report %q: %w", reportID, err)
 		}
 	}
-	for _, unlock := range report.ServiceUnlocks {
+	for i, unlock := range report.ServiceUnlocks {
 		unlockID, err := ids.New("ipqu")
 		if err != nil {
 			return fmt.Errorf("generate ip quality service unlock id: %w", err)
@@ -235,8 +247,9 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 					unlock_type,
 					error_code,
 					error_summary,
-					extra_json
-				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)`,
+					extra_json,
+					checks_json
+				) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb,$13::jsonb)`,
 			unlockID,
 			reportID,
 			unlock.Service,
@@ -249,8 +262,14 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 			unlock.ErrorCode,
 			unlock.ErrorSummary,
 			ipquality.SanitizeExtraJSON(unlock.ExtraJSON),
+			ipQualityColumn(productWrite.checks, i),
 		); err != nil {
 			return fmt.Errorf("insert ip quality service unlock for report %q: %w", reportID, err)
+		}
+	}
+	if productWrite.enqueue {
+		if err := enqueueIPQualityIntelligence(ctx, tx, reportID, receivedAt); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -259,7 +278,8 @@ func writeIPQualityReport(ctx context.Context, tx ipQualityExecutor, reportID st
 const overviewLatestIPQualitySummarySQL = `
 		-- vps overview ip quality summary
 		with selected_report as materialized (
-			select state.vps_id, r.status, r.risk_level, r.observed_at, r.ip_version,
+			select state.vps_id, r.report_id, r.status, r.risk_level, r.observed_at, r.ip_version,
+				r.product_json, r.product_summary_json,
 				public.houfeng_parse_host_address(r.ip_address) as ip_identity
 			from ip_quality_vps_family_state state
 			join ip_quality_reports r on r.report_id = state.latest_report_id
@@ -279,8 +299,15 @@ const overviewLatestIPQualitySummarySQL = `
 					else 604800 end
 				from center_settings where settings_id = 'center'
 			), 604800)) as stale,
-			selected.observed_at, selected.ip_version
+			selected.observed_at, selected.ip_version,
+			selected.product_json,
+			selected.product_summary_json,
+			intelligence.state,
+			(intelligence.data_json is not null and jsonb_typeof(intelligence.data_json) = 'object') as has_snapshot,
+			intelligence.summary_json
 		from selected_report selected
+		left join public.ip_quality_intelligence as intelligence
+			on intelligence.report_id = selected.report_id
 		where exists (select 1 from vps_monitoring_instance_links l
 			where l.vps_id = selected.vps_id and l.unlinked_at is null)
 			or not exists (
@@ -302,6 +329,9 @@ func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.C
 		return nil, nil
 	}
 	var summary ipquality.Summary
+	var productJSON, agentSummaryJSON, intelligenceSummaryJSON []byte
+	var intelligenceState *string
+	var hasSnapshot bool
 	if err := rows.Scan(
 		&summary.VPSID,
 		&summary.Status,
@@ -309,9 +339,21 @@ func (r *PostgresIPQualityRepository) GetLatestVPSIPQualitySummary(ctx context.C
 		&summary.Stale,
 		&summary.ObservedAt,
 		&summary.IPVersion,
+		&productJSON,
+		&agentSummaryJSON,
+		&intelligenceState,
+		&hasSnapshot,
+		&intelligenceSummaryJSON,
 	); err != nil {
 		return nil, fmt.Errorf("scan overview ip quality summary: %w", err)
 	}
+	facts, err := interpretStoredIPQualityProduct(productJSON, agentSummaryJSON, intelligenceState, nil, nil, intelligenceSummaryJSON, hasSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	summary.ProductRevision = facts.revision
+	summary.IntelligenceState = facts.state
+	summary.ProductSummary = facts.summary
 	return &summary, nil
 }
 func emptyVPSIPQualityReport() ipquality.VPSReport {
@@ -386,6 +428,9 @@ func familyStateForVPS(ctx context.Context, db ipQualityDB, vpsID string) (ipqua
 			if metadata.Paired {
 				attempt.CollectionScope = "dual_stack"
 				if metadata.Valid && metadata.IPVersion == version {
+					if len(metadata.ExpectedIPVersions) == 1 {
+						attempt.CollectionScope = "single_family"
+					}
 					attempt.CollectionID = metadata.CollectionID
 				}
 			}
@@ -445,6 +490,9 @@ func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID
 		}
 	}
 	if selected == nil {
+		if err := attachIPQualityProducts(ctx, tx, &result); err != nil {
+			return ipquality.VPSReport{}, err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
 		}
@@ -471,14 +519,17 @@ func (r *PostgresIPQualityRepository) GetVPSIPQuality(ctx context.Context, vpsID
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
-	}
 	result.Summary = &summary
 	result.LatestReport = &report
 	result.ProviderResults = providers
 	result.ServiceUnlocks = unlocks
 	result.History = history
+	if err := attachIPQualityProducts(ctx, tx, &result); err != nil {
+		return ipquality.VPSReport{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
+	}
 	return result, nil
 }
 
@@ -504,6 +555,9 @@ func (r *PostgresIPQualityRepository) GetVPSIPQualityReportDetail(ctx context.Co
 		return ipquality.VPSReport{}, err
 	}
 	if !ok {
+		if err := attachIPQualityProducts(ctx, tx, &result); err != nil {
+			return ipquality.VPSReport{}, err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
 		}
@@ -528,15 +582,18 @@ func (r *PostgresIPQualityRepository) GetVPSIPQualityReportDetail(ctx context.Co
 	if err != nil {
 		return ipquality.VPSReport{}, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
-	}
 	result.SelectedIPVersion = report.IPVersion
 	result.Summary = &summary
 	result.LatestReport = &report
 	result.ProviderResults = providers
 	result.ServiceUnlocks = unlocks
 	result.History = history
+	if err := attachIPQualityProducts(ctx, tx, &result); err != nil {
+		return ipquality.VPSReport{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return ipquality.VPSReport{}, fmt.Errorf("commit ip quality read transaction: %w", err)
+	}
 	return result, nil
 }
 
@@ -585,6 +642,10 @@ func listLatestSummariesForVPS(ctx context.Context, db ipQualityDB, vpsIDs []str
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate ip quality latest summaries: %w", err)
 	}
+	rows.Close()
+	if err := applyIPQualityProductSummaries(ctx, db, out); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
@@ -615,7 +676,8 @@ func reportForAssignedVPS(ctx context.Context, db ipQualityDB, vpsID, reportID s
 			r.raw_json,
 			r.coverage_json,
 			r.diagnostics_json,
-			r.created_at
+			r.created_at,
+			r.product_json
 		from ip_quality_reports r
 		join ip_quality_assigned_vps_reports assigned on assigned.report_id = r.report_id
 		where assigned.vps_id = $1 and r.report_id = $2
@@ -702,7 +764,8 @@ func providerResultsForReport(ctx context.Context, db ipQualityDB, reportID stri
 			is_robot,
 			error_code,
 			error_summary,
-			extra_json
+			extra_json,
+			details_json
 		from ip_quality_provider_results
 		where report_id = $1
 		order by provider`, reportID)
@@ -713,7 +776,7 @@ func providerResultsForReport(ctx context.Context, db ipQualityDB, reportID stri
 	results := []ipquality.ProviderResultRead{}
 	for rows.Next() {
 		var result ipquality.ProviderResultRead
-		var rawExtra []byte
+		var rawExtra, rawDetails []byte
 		if err := rows.Scan(
 			&result.Provider,
 			&result.Status,
@@ -734,12 +797,18 @@ func providerResultsForReport(ctx context.Context, db ipQualityDB, reportID stri
 			&result.ErrorCode,
 			&result.ErrorSummary,
 			&rawExtra,
+			&rawDetails,
 		); err != nil {
 			return nil, err
 		}
 		if len(rawExtra) > 0 {
 			result.ExtraJSON = json.RawMessage(append([]byte(nil), rawExtra...))
 		}
+		details, err := decodeIPQualityProviderDetails(rawDetails)
+		if err != nil {
+			return nil, err
+		}
+		result.Details = details
 		results = append(results, result)
 	}
 	if err := rows.Err(); err != nil {
@@ -759,7 +828,8 @@ func serviceUnlocksForReport(ctx context.Context, db ipQualityDB, reportID strin
 			unlock_type,
 			error_code,
 			error_summary,
-			extra_json
+			extra_json,
+			checks_json
 		from ip_quality_service_unlocks
 		where report_id = $1
 		order by service`, reportID)
@@ -770,7 +840,7 @@ func serviceUnlocksForReport(ctx context.Context, db ipQualityDB, reportID strin
 	results := []ipquality.ServiceUnlockRead{}
 	for rows.Next() {
 		var result ipquality.ServiceUnlockRead
-		var rawExtra []byte
+		var rawExtra, rawChecks []byte
 		if err := rows.Scan(
 			&result.Service,
 			&result.Source,
@@ -782,12 +852,18 @@ func serviceUnlocksForReport(ctx context.Context, db ipQualityDB, reportID strin
 			&result.ErrorCode,
 			&result.ErrorSummary,
 			&rawExtra,
+			&rawChecks,
 		); err != nil {
 			return nil, err
 		}
 		if len(rawExtra) > 0 {
 			result.ExtraJSON = json.RawMessage(append([]byte(nil), rawExtra...))
 		}
+		checks, err := decodeIPQualityServiceChecks(rawChecks)
+		if err != nil {
+			return nil, err
+		}
+		result.Checks = checks
 		results = append(results, result)
 	}
 	if err := rows.Err(); err != nil {
@@ -851,6 +927,7 @@ func scanIPQualityReport(row ipQualityScanner) (ipquality.Report, error) {
 	var rawJSON []byte
 	var coverageJSON []byte
 	var diagnosticsJSON []byte
+	var productJSON []byte
 	if err := row.Scan(
 		&report.ReportID,
 		&report.MonitoringInstanceID,
@@ -878,6 +955,7 @@ func scanIPQualityReport(row ipQualityScanner) (ipquality.Report, error) {
 		&coverageJSON,
 		&diagnosticsJSON,
 		&report.CreatedAt,
+		&productJSON,
 	); err != nil {
 		return ipquality.Report{}, err
 	}
@@ -888,6 +966,11 @@ func scanIPQualityReport(row ipQualityScanner) (ipquality.Report, error) {
 	if len(diagnosticsJSON) > 0 {
 		report.DiagnosticsJSON = json.RawMessage(append([]byte(nil), diagnosticsJSON...))
 	}
+	product, err := decodeIPQualityAgentProduct(productJSON)
+	if err != nil {
+		return ipquality.Report{}, err
+	}
+	report.Product = product
 	return report, nil
 }
 

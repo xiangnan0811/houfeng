@@ -2,6 +2,7 @@ package agentapi
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,7 @@ func TestParseCollectionMetadata(t *testing.T) {
 		{"id only", `{"collection_id":"one","collect_request_id":"request"}`, true, false, "request"},
 		{"expected only", `{"expected_ip_versions":null}`, true, false, ""},
 		{"revision only", `{"collection_revision":4}`, true, false, ""},
-		{"future revision", `{"collection_revision":5}`, true, false, ""},
+		{"future revision", `{"collection_revision":6}`, true, false, ""},
 		{"fractional future revision", `{"collection_revision":4.5}`, true, false, ""},
 		{"valid", `{"collection_revision":4,"collection_id":"round-1","expected_ip_versions":[4,6],"ip_address_family":4,"family_availability":"available","collect_request_id":"request"}`, true, true, "request"},
 		{"unknown", `{"collection_revision":4,"collection_id":"round-1","expected_ip_versions":[4,6],"ip_address_family":6,"family_availability":"unknown"}`, true, true, ""},
@@ -37,7 +38,7 @@ func TestParseCollectionMetadata(t *testing.T) {
 			if got.Paired != tc.paired || got.Valid != tc.valid || got.CollectRequestID != tc.request {
 				t.Fatalf("metadata = %+v", got)
 			}
-			if got.Valid && (got.ExpectedIPVersions != [2]int{4, 6} || got.CollectionID != "round-1") {
+			if got.Valid && (!slices.Equal(got.ExpectedIPVersions, []int{4, 6}) || got.CollectionID != "round-1") {
 				t.Fatalf("paired identity = %+v", got)
 			}
 		})

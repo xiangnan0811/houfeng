@@ -294,7 +294,12 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			return
 		}
 
-		result, err := svc.SyncBatch(r.Context(), syncBatchFromRequest(req))
+		batch := syncBatchFromRequest(req)
+		values := r.Header.Values(agentapi.IPQualityCollectionRevisionHeader)
+		if req.LiveSignal != nil && len(values) == 1 && values[0] == "5" {
+			batch.IPQualityCollectionRevision = agentapi.IPQualitySelectiveCollectionRevision
+		}
+		result, err := svc.SyncBatch(r.Context(), batch)
 		if err != nil {
 			switch {
 			case errors.Is(err, syncing.ErrInvalidSyncToken):
@@ -470,6 +475,9 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 			if unlock.ProbeStatus != "" && !isValidIPQualitySourceStatus(unlock.ProbeStatus) {
 				return false
 			}
+		}
+		if err := agentapi.ValidateIPQualityProduct(report); err != nil {
+			return false
 		}
 	}
 	for _, result := range req.CommandResults {
@@ -690,10 +698,11 @@ func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWri
 			IsBackfilled:         report.IsBackfilled,
 			RawJSON:              ipquality.SanitizeRawJSON(report.RawJSON),
 			CoverageJSON:         coveragePayloadJSON(report.Coverage),
-			DiagnosticsJSON:      ipquality.SanitizeExtraJSON(report.DiagnosticsJSON),
+			DiagnosticsJSON:      ipquality.SanitizeCollectionDiagnostics(report.DiagnosticsJSON),
 			CollectionMetadata:   metadata,
 			ProviderResults:      make([]ipquality.ProviderResultWrite, 0, len(report.ProviderResults)),
 			ServiceUnlocks:       make([]ipquality.ServiceUnlockWrite, 0, len(report.ServiceUnlocks)),
+			Product:              cloneIPQualityProduct(report.Product),
 		}
 		for _, provider := range report.ProviderResults {
 			write.ProviderResults = append(write.ProviderResults, ipquality.ProviderResultWrite{
@@ -716,6 +725,7 @@ func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWri
 				ErrorCode:    provider.ErrorCode,
 				ErrorSummary: provider.ErrorSummary,
 				ExtraJSON:    ipquality.SanitizeExtraJSON(provider.ExtraJSON),
+				Details:      cloneIPQualityProviderDetails(provider.Details),
 			})
 		}
 		for _, unlock := range report.ServiceUnlocks {
@@ -730,6 +740,7 @@ func ipQualityReportsFromRequest(req agentapi.SyncRequest) []ipquality.ReportWri
 				ErrorCode:    unlock.ErrorCode,
 				ErrorSummary: unlock.ErrorSummary,
 				ExtraJSON:    ipquality.SanitizeExtraJSON(unlock.ExtraJSON),
+				Checks:       cloneIPQualityServiceChecks(unlock.Checks),
 			})
 		}
 		reports = append(reports, write)
@@ -777,14 +788,124 @@ func syncPlanToAPI(plan agentplan.SyncPlan) *agentapi.SyncPlan {
 		}
 	}
 	if plan.IPQualityPlan != nil {
-		apiPlan.IPQualityPlan = &agentapi.IPQualityPlan{
-			Enabled:          plan.IPQualityPlan.Enabled,
-			FrequencySeconds: plan.IPQualityPlan.FrequencySeconds,
-			TimeoutSeconds:   plan.IPQualityPlan.TimeoutSeconds,
-			Services:         append([]string(nil), plan.IPQualityPlan.Services...),
-			CollectRequestID: plan.IPQualityPlan.CollectRequestID,
-		}
+		apiPlan.IPQualityPlan = ipQualityPlanToAPI(plan.IPQualityPlan)
 	}
 
 	return apiPlan
+}
+
+func ipQualityPlanToAPI(plan *agentplan.IPQualityPlan) *agentapi.IPQualityPlan {
+	revision := plan.ProductRevision
+	if revision == 0 {
+		revision = agentapi.IPQualityProductRevision
+	}
+	var mailEnabled *bool
+	if plan.MailEnabled != nil {
+		value := *plan.MailEnabled
+		mailEnabled = &value
+	}
+	return &agentapi.IPQualityPlan{
+		Enabled:            plan.Enabled,
+		FrequencySeconds:   plan.FrequencySeconds,
+		TimeoutSeconds:     plan.TimeoutSeconds,
+		Services:           append([]string(nil), plan.Services...),
+		ProductRevision:    revision,
+		MailEnabled:        mailEnabled,
+		CollectRequestID:   plan.CollectRequestID,
+		CollectionRevision: plan.CollectionRevision,
+		CollectIPVersions:  append([]int(nil), plan.CollectIPVersions...),
+	}
+}
+
+func cloneIPQualityProduct(product *agentapi.IPQualityAgentProduct) *agentapi.IPQualityAgentProduct {
+	if product == nil {
+		return nil
+	}
+	cloned := *product
+	if product.PTRNames != nil {
+		cloned.PTRNames = make([]string, len(product.PTRNames))
+		copy(cloned.PTRNames, product.PTRNames)
+	}
+	if product.Mail != nil {
+		cloned.Mail = make([]agentapi.IPQualityMailResult, len(product.Mail))
+		for i, row := range product.Mail {
+			cloned.Mail[i] = row
+			cloned.Mail[i].MXPreference = cloneOptionalUint16(row.MXPreference)
+			cloned.Mail[i].GreetingCode = cloneOptionalInt(row.GreetingCode)
+			cloned.Mail[i].LatencyMS = cloneOptionalInt(row.LatencyMS)
+		}
+	}
+	return &cloned
+}
+
+func cloneIPQualityProviderDetails(details *agentapi.IPQualityProviderDetails) *agentapi.IPQualityProviderDetails {
+	if details == nil {
+		return nil
+	}
+	cloned := *details
+	cloned.Latitude = cloneOptionalFloat(details.Latitude)
+	cloned.Longitude = cloneOptionalFloat(details.Longitude)
+	cloned.IsMobile = cloneOptionalBool(details.IsMobile)
+	cloned.IsAnycast = cloneOptionalBool(details.IsAnycast)
+	cloned.IsBogon = cloneOptionalBool(details.IsBogon)
+	if details.Scores != nil {
+		cloned.Scores = make([]agentapi.IPQualityScore, len(details.Scores))
+		for i, score := range details.Scores {
+			cloned.Scores[i] = score
+			cloned.Scores[i].Value = cloneOptionalFloat(score.Value)
+			cloned.Scores[i].Min = cloneOptionalFloat(score.Min)
+			cloned.Scores[i].Max = cloneOptionalFloat(score.Max)
+		}
+	}
+	if details.FieldStates != nil {
+		cloned.FieldStates = make(map[string]string, len(details.FieldStates))
+		for key, value := range details.FieldStates {
+			cloned.FieldStates[key] = value
+		}
+	}
+	return &cloned
+}
+
+func cloneIPQualityServiceChecks(checks []agentapi.IPQualityServiceCheck) []agentapi.IPQualityServiceCheck {
+	if checks == nil {
+		return nil
+	}
+	cloned := make([]agentapi.IPQualityServiceCheck, len(checks))
+	for i, check := range checks {
+		cloned[i] = check
+		cloned[i].HTTPStatus = cloneOptionalInt(check.HTTPStatus)
+	}
+	return cloned
+}
+
+func cloneOptionalInt(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneOptionalUint16(value *uint16) *uint16 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneOptionalFloat(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneOptionalBool(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }

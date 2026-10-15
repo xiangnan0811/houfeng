@@ -1,8 +1,10 @@
 package ipquality
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,7 @@ const (
 	CollectRequestDispatched = "dispatched"
 	CollectRequestCompleted  = "completed"
 	CollectRequestExpired    = "expired"
+	CollectRequestFailed     = "failed"
 )
 
 const (
@@ -23,8 +26,12 @@ const (
 	collectRequestRetention        = 30 * time.Minute
 	maxCollectErrorSummaryRunes    = 200
 	CollectScopeDualStack          = "dual_stack"
+	CollectScopeSingleFamily       = "single_family"
 	CollectScopeLegacySingleFamily = "legacy_single_family"
 )
+
+var ErrCollectionScopeConflict = errors.New("collection_scope_conflict")
+var ErrInvalidCollectionScope = errors.New("invalid collection scope")
 
 type CollectFamilyResult struct {
 	IPVersion    int    `json:"ip_version"`
@@ -37,6 +44,8 @@ type CollectRequest struct {
 	RequestID            string                `json:"request_id"`
 	MonitoringInstanceID string                `json:"monitoring_instance_id"`
 	Status               string                `json:"status"`
+	RequestedIPVersions  []int                 `json:"requested_ip_versions"`
+	ErrorCode            string                `json:"error_code,omitempty"`
 	RequestedAt          time.Time             `json:"requested_at"`
 	ExpiresAt            time.Time             `json:"expires_at"`
 	DispatchedAt         *time.Time            `json:"dispatched_at,omitempty"`
@@ -55,11 +64,18 @@ func (r CollectRequest) Active() bool {
 type collectGroup struct {
 	id         string
 	observedAt time.Time
+	revision   int
+	expected   []int
 	families   [2]*CollectFamilyResult
 }
 
 func (g *collectGroup) complete() bool {
-	return g.families[0] != nil && g.families[1] != nil
+	for _, family := range g.expected {
+		if g.families[(family-4)/2] == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (g *collectGroup) newerThan(other *collectGroup) bool {
@@ -83,11 +99,24 @@ func NewCollectRequests(newID func() (string, error)) *CollectRequests {
 }
 
 // Request reuses an active request rather than causing another external collection.
-func (c *CollectRequests) Request(monitoringInstanceID string, now time.Time) (CollectRequest, error) {
+func (c *CollectRequests) Request(monitoringInstanceID string, now time.Time, selections ...[]int) (CollectRequest, error) {
+	versions := []int{4, 6}
+	if len(selections) > 1 {
+		return CollectRequest{}, ErrInvalidCollectionScope
+	}
+	if len(selections) == 1 {
+		versions = selections[0]
+	}
+	if !agentapi.ValidIPQualityVersions(versions) {
+		return CollectRequest{}, ErrInvalidCollectionScope
+	}
 	now = now.UTC()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if entry, ok := c.currentLocked(monitoringInstanceID, now); ok && entry.request.Active() {
+		if !slices.Equal(entry.request.RequestedIPVersions, versions) {
+			return cloneCollectRequest(entry.request), ErrCollectionScopeConflict
+		}
 		return cloneCollectRequest(entry.request), nil
 	}
 	requestID, err := c.newID()
@@ -97,12 +126,13 @@ func (c *CollectRequests) Request(monitoringInstanceID string, now time.Time) (C
 	request := CollectRequest{
 		RequestID:            requestID,
 		MonitoringInstanceID: monitoringInstanceID,
+		RequestedIPVersions:  append([]int(nil), versions...),
 		Status:               CollectRequestPending,
 		RequestedAt:          now,
 		ExpiresAt:            now.Add(CollectRequestTTL),
 	}
 	c.entries[monitoringInstanceID] = &collectEntry{request: request}
-	return request, nil
+	return cloneCollectRequest(request), nil
 }
 
 func (c *CollectRequests) Latest(monitoringInstanceID string, now time.Time) (CollectRequest, bool) {
@@ -115,19 +145,34 @@ func (c *CollectRequests) Latest(monitoringInstanceID string, now time.Time) (Co
 	return cloneCollectRequest(entry.request), true
 }
 
-func (c *CollectRequests) PendingRequestID(monitoringInstanceID string, now time.Time) string {
+// PendingRequest atomically snapshots ID and scope and decides dispatch. A nil
+// revision means no accepted writable live evidence; zero means an incapable
+// live agent. Neither capability nor this snapshot is persisted.
+func (c *CollectRequests) PendingRequest(monitoringInstanceID string, now time.Time, liveRevision *int) CollectRequest {
 	now = now.UTC()
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	entry, ok := c.currentLocked(monitoringInstanceID, now)
 	if !ok || !entry.request.Active() {
-		return ""
+		return CollectRequest{}
+	}
+	if len(entry.request.RequestedIPVersions) == 1 {
+		if liveRevision == nil {
+			return CollectRequest{}
+		}
+		if *liveRevision != agentapi.IPQualitySelectiveCollectionRevision {
+			entry.request.Status = CollectRequestFailed
+			entry.request.ErrorCode = "unsupported_agent"
+			entry.request.CompletedAt = &now
+			entry.groups = nil
+			return CollectRequest{}
+		}
 	}
 	if entry.request.Status == CollectRequestPending {
 		entry.request.Status = CollectRequestDispatched
 		entry.request.DispatchedAt = &now
 	}
-	return entry.request.RequestID
+	return cloneCollectRequest(entry.request)
 }
 
 // ObserveReports is called only after a recorded sync transaction. Apply the
@@ -150,13 +195,13 @@ func (c *CollectRequests) ObserveReports(monitoringInstanceID string, reports []
 			continue
 		}
 		if !metadata.Paired {
-			if terminalReportStatus(report.Status) && (report.IPVersion == 4 || report.IPVersion == 6) &&
+			if len(entry.request.RequestedIPVersions) == 2 && terminalReportStatus(report.Status) && (report.IPVersion == 4 || report.IPVersion == 6) &&
 				(legacy == nil || report.ObservedAt.After(legacy.ObservedAt)) {
 				legacy = report
 			}
 			continue
 		}
-		if !validPairedReport(*report) {
+		if !validPairedReport(*report) || !slices.Equal(metadata.ExpectedIPVersions, entry.request.RequestedIPVersions) {
 			continue
 		}
 		if entry.groups == nil {
@@ -164,10 +209,12 @@ func (c *CollectRequests) ObserveReports(monitoringInstanceID string, reports []
 		}
 		group := entry.groups[metadata.CollectionID]
 		if group == nil {
-			group = &collectGroup{id: metadata.CollectionID, observedAt: report.ObservedAt}
+			group = &collectGroup{id: metadata.CollectionID, observedAt: report.ObservedAt,
+				revision: metadata.Revision, expected: append([]int(nil), metadata.ExpectedIPVersions...)}
 			entry.groups[group.id] = group
 		}
-		if !group.observedAt.Equal(report.ObservedAt) {
+		if !group.observedAt.Equal(report.ObservedAt) || group.revision != metadata.Revision ||
+			!slices.Equal(group.expected, metadata.ExpectedIPVersions) {
 			continue
 		}
 		index := (report.IPVersion - 4) / 2
@@ -222,7 +269,7 @@ func validPairedReport(report ReportWrite) bool {
 		return false
 	}
 	address, err := netip.ParseAddr(report.IPAddress)
-	if err != nil || address.Zone() != "" || (address.Is4() && report.IPVersion != 4) || (address.Is6() && report.IPVersion != 6) {
+	if err != nil || address.Zone() != "" || address.Is4In6() || (address.Is4() && report.IPVersion != 4) || (address.Is6() && report.IPVersion != 6) {
 		return false
 	}
 	if metadata.Availability == agentapi.IPQualityFamilyUnavailable {
@@ -244,6 +291,9 @@ func terminalReportStatus(status string) bool {
 func aggregateCollectStatus(families [2]*CollectFamilyResult) string {
 	usable, valid, allSuccess := 0, 0, true
 	for _, family := range families {
+		if family == nil {
+			continue
+		}
 		if family.Availability == agentapi.IPQualityFamilyUnavailable {
 			continue
 		}
@@ -277,6 +327,9 @@ func SafeCollectErrorCode(code string) string {
 
 func projectCollectGroup(request *CollectRequest, group *collectGroup) {
 	request.CollectionScope = CollectScopeDualStack
+	if len(group.expected) == 1 {
+		request.CollectionScope = CollectScopeSingleFamily
+	}
 	request.CollectionID = group.id
 	request.FamilyResults = make([]CollectFamilyResult, 0, 2)
 	for _, family := range group.families {
@@ -293,6 +346,7 @@ func completeCollectRequest(entry *collectEntry, now time.Time) {
 }
 
 func cloneCollectRequest(request CollectRequest) CollectRequest {
+	request.RequestedIPVersions = append([]int(nil), request.RequestedIPVersions...)
 	request.FamilyResults = append([]CollectFamilyResult(nil), request.FamilyResults...)
 	if request.DispatchedAt != nil {
 		value := *request.DispatchedAt

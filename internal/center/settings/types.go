@@ -215,11 +215,22 @@ type SubscriptionCostSettings struct {
 }
 
 type IPQualitySettings struct {
-	Enabled           bool     `json:"enabled"`
-	FrequencySeconds  int      `json:"frequency_seconds"`
-	StaleAfterSeconds int      `json:"stale_after_seconds"`
-	TimeoutSeconds    int      `json:"timeout_seconds"`
-	Services          []string `json:"services"`
+	Enabled           bool             `json:"enabled"`
+	FrequencySeconds  int              `json:"frequency_seconds"`
+	StaleAfterSeconds int              `json:"stale_after_seconds"`
+	TimeoutSeconds    int              `json:"timeout_seconds"`
+	Services          []string         `json:"services"`
+	MailEnabled       bool             `json:"mail_enabled"`
+	Sources           IPQualitySources `json:"sources"`
+}
+
+// IPQualitySources contains Center-only credentials. Public settings and Agent
+// plans must use their own whitelisted DTOs, never serialize this type.
+type IPQualitySources struct {
+	IPAPIISKey        string `json:"ipapi_is_key"`
+	AbuseIPDBKey      string `json:"abuseipdb_key"`
+	MaxMindAccountID  string `json:"maxmind_account_id"`
+	MaxMindLicenseKey string `json:"maxmind_license_key"`
 }
 
 var defaultIPQualityServices = []string{
@@ -285,8 +296,9 @@ func Default() CenterSettings {
 			Enabled:           true,
 			FrequencySeconds:  24 * 60 * 60,
 			StaleAfterSeconds: 7 * 24 * 60 * 60,
-			TimeoutSeconds:    15,
+			TimeoutSeconds:    60,
 			Services:          append([]string(nil), defaultIPQualityServices...),
+			MailEnabled:       true,
 		},
 	}
 }
@@ -882,6 +894,16 @@ func validateSubscriptionCostSettings(input SubscriptionCostSettings) (Subscript
 
 func validateIPQualitySettings(input IPQualitySettings) (IPQualitySettings, error) {
 	defaults := Default().IPQuality
+	if len(input.Sources.IPAPIISKey) > 256 || len(input.Sources.AbuseIPDBKey) > 256 {
+		return IPQualitySettings{}, invalidSettings("ip quality source key must not exceed 256 bytes")
+	}
+	input.Sources.IPAPIISKey = strings.TrimSpace(input.Sources.IPAPIISKey)
+	input.Sources.AbuseIPDBKey = strings.TrimSpace(input.Sources.AbuseIPDBKey)
+	input.Sources.MaxMindAccountID = strings.TrimSpace(input.Sources.MaxMindAccountID)
+	input.Sources.MaxMindLicenseKey = strings.TrimSpace(input.Sources.MaxMindLicenseKey)
+	if err := validateMaxMindCredentials(input.Sources); err != nil {
+		return IPQualitySettings{}, err
+	}
 	if isZeroIPQualitySettings(input) {
 		// 零值对象与只传 {"enabled":false} 无法区分；按显式关闭处理，其余字段补默认值。
 		defaults.Enabled = false
@@ -919,7 +941,9 @@ func isZeroIPQualitySettings(input IPQualitySettings) bool {
 		input.FrequencySeconds == 0 &&
 		input.StaleAfterSeconds == 0 &&
 		input.TimeoutSeconds == 0 &&
-		len(input.Services) == 0
+		len(input.Services) == 0 &&
+		!input.MailEnabled &&
+		input.Sources == (IPQualitySources{})
 }
 
 func normalizeIPQualityServices(values []string) ([]string, error) {

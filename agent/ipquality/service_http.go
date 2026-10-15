@@ -13,6 +13,10 @@ import (
 const serviceBodyLimit = 2 * 1024 * 1024
 const serviceUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 
+func serviceDocumentHeaders() http.Header {
+	return http.Header{"Accept": {"text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"}}
+}
+
 var (
 	errServiceBodyLimit = errors.New("service response exceeds size limit")
 	errServiceRedirect  = errors.New("service redirect is not allowed")

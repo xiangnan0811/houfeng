@@ -43,6 +43,7 @@ import type {
   LifecycleActionResult,
   UpdateProbeItemInput,
   ExtendVPSValidityInput,
+  IPQualityCollectIPVersions,
   IPQualityCollectStatus,
   IPQualityIPVersion,
   MonitoringInstanceInstallCommandIssue,
@@ -520,8 +521,11 @@ export function getVPSIPQualityCollectStatus(vpsId: string) {
   return requestJSON<IPQualityCollectStatus>(`/api/vps/${encodeURIComponent(vpsId)}/ip-quality/collect`)
 }
 
-export function requestVPSIPQualityCollect(vpsId: string) {
-  return postJSON<IPQualityCollectStatus>(`/api/vps/${encodeURIComponent(vpsId)}/ip-quality/collect`)
+// 立即采集只发送用户明确选择的族集合；不同范围的在途请求由服务端 409 拒绝，页面随后读取真实在途范围。
+export function requestVPSIPQualityCollect(vpsId: string, ipVersions: IPQualityCollectIPVersions) {
+  return postJSONBody<IPQualityCollectStatus>(`/api/vps/${encodeURIComponent(vpsId)}/ip-quality/collect`, {
+    ip_versions: [...ipVersions],
+  })
 }
 
 export function updateVPSAsset(

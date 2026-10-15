@@ -5,6 +5,8 @@ ARG GO_VERSION=1.26.2
 
 FROM node:${NODE_VERSION}-bookworm-slim AS web-build
 WORKDIR /src/web
+ARG SOURCE_URL=https://github.com/xiangnan0811/houfeng
+ENV VITE_SOURCE_URL=${SOURCE_URL}
 
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -41,6 +43,7 @@ RUN set -eux; \
 	install -d -o houfeng -g houfeng -m 0700 /var/lib/houfeng/attachments /var/lib/houfeng/processor-workspace
 
 WORKDIR /app
+LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
 
 ENV HOUFENG_HTTP_ADDR=:16001
 ENV HOUFENG_WEB_DIST_DIR=/app/web/dist
@@ -51,6 +54,8 @@ COPY --from=go-build --chown=houfeng:houfeng /out/houfeng-content-processor /usr
 COPY --from=go-build --chown=houfeng:houfeng /out/houfeng-record-platform-admin /usr/local/bin/houfeng-record-platform-admin
 COPY --from=web-build --chown=houfeng:houfeng /src/web/dist/ /app/web/dist/
 COPY scripts/docker-entrypoint.sh /usr/local/bin/houfeng-docker-entrypoint
+COPY LICENSE /usr/share/licenses/houfeng/LICENSE
+COPY web/public/licenses.txt /usr/share/licenses/houfeng/licenses.txt
 RUN chmod 0755 /usr/local/bin/houfeng-docker-entrypoint
 
 EXPOSE 16001

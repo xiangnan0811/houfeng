@@ -43,6 +43,16 @@ export type SettingsIPQualityForm = {
   staleAfterSeconds: string
   timeoutSeconds: string
   servicesText: string
+  mailEnabled: boolean
+  // 凭据草稿：空字符串=不修改；clear=true 表示保存时清除。从不预填掩码。
+  ipapiKey: string
+  ipapiClear: boolean
+  abuseipdbKey: string
+  abuseipdbClear: boolean
+  // GeoLite 账号 ID 与 License Key 成对：两个草稿都从不预填；清除时一并清除。
+  maxmindAccountId: string
+  maxmindLicenseKey: string
+  maxmindClear: boolean
 }
 
 export type OverrideScope = 'monitoring_instance_labels' | 'target_types' | 'target_labels'

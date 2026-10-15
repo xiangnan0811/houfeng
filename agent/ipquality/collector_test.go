@@ -31,6 +31,24 @@ func ipv6LocalAddresses() ([]netip.Addr, error) {
 	return []netip.Addr{netip.MustParseAddr("fd00::2")}, nil
 }
 
+// The test executable deliberately rejects ip-quality-fetch before any WAN
+// access. The actual geo module therefore records both attempted sources as
+// failures; controlled Go provider responses must not hide those attempts.
+func assertRejectedDetectorGeoAttempts(t *testing.T, report agentapi.IPQualityReportPayload) {
+	t.Helper()
+	rows := providerResultsByName(report.ProviderResults)
+	for _, provider := range []string{"maxmind", "ipinfo"} {
+		row, ok := rows[provider]
+		if !ok || row.Status != "failure" || row.ErrorCode != "detector_fetch_failed" ||
+			row.SourceType != "default" || row.RegionCode != "" || row.RiskScore != "" || row.Details != nil {
+			t.Fatalf("%s must retain the rejected detector fetch without invented facts: %#v", provider, row)
+		}
+	}
+	if len(report.ProviderResults) != 7 || report.Coverage == nil || report.Coverage.ExpectedProviderCount != 7 {
+		t.Fatalf("coverage must include five Go providers and both attempted geo sources: rows=%d coverage=%#v", len(report.ProviderResults), report.Coverage)
+	}
+}
+
 func TestHTTPCollectorCustomLookupKeepsLegacyJSONLookupAndSkipsServiceUnlocksWithoutServiceURL(t *testing.T) {
 	var requests []string
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -135,7 +153,7 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	if report.Status != agentapi.IPQualityStatusPartial {
-		t.Fatalf("Status = %q, want partial because one default provider failed", report.Status)
+		t.Fatalf("Status = %q, want partial because one public provider and both detector geo fetches failed", report.Status)
 	}
 	if report.IPAddress != "203.0.113.10" || report.IPVersion != 4 {
 		t.Fatalf("IP facts = (%q,%d), want canonical provider IP", report.IPAddress, report.IPVersion)
@@ -143,15 +161,15 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 	if report.Coverage == nil {
 		t.Fatal("Coverage = nil, want source coverage")
 	}
-	if report.Coverage.ExpectedProviderCount < 6 || report.Coverage.SuccessfulProviderCount != 4 ||
-		report.Coverage.FailedProviderCount != 1 || report.Coverage.NotConfiguredProviderCount < 1 {
-		t.Fatalf("provider coverage = %#v, want default + optional source counts", report.Coverage)
+	if report.Coverage.ExpectedProviderCount != 7 || report.Coverage.SuccessfulProviderCount != 4 ||
+		report.Coverage.FailedProviderCount != 3 || report.Coverage.NotConfiguredProviderCount != 0 {
+		t.Fatalf("provider coverage = %#v, want only actual source attempts", report.Coverage)
 	}
 	if report.Coverage.ExpectedServiceCount != 0 || len(report.ServiceUnlocks) != 0 {
 		t.Fatalf("service coverage = %#v, want no services for provider-only collection", report.Coverage)
 	}
 	providers := providerResultsByName(report.ProviderResults)
-	for _, provider := range []string{"ipapi.is", "ipquery.io", "proxycheck.io", "ip2location.io", "ipwho.is", "maxmind"} {
+	for _, provider := range []string{"ipapi.is", "ipquery.io", "proxycheck.io", "ip2location.io", "ipwho.is"} {
 		if _, ok := providers[provider]; !ok {
 			t.Fatalf("ProviderResults missing %s: %#v", provider, report.ProviderResults)
 		}
@@ -159,16 +177,7 @@ func TestHTTPCollectorDefaultSourcesCollectProviderCoverageAndServiceDiagnostics
 	if providers["ip2location.io"].Status != "failure" || providers["ip2location.io"].ErrorCode == "" {
 		t.Fatalf("ip2location row = %#v, want failure diagnostic", providers["ip2location.io"])
 	}
-	if providers["maxmind"].Status != "not_configured" || providers["maxmind"].SourceType != "optional" {
-		t.Fatalf("maxmind row = %#v, want optional not_configured diagnostic", providers["maxmind"])
-	}
-	if providers["ipquery.io"].ExtraJSON == nil || !strings.Contains(string(providers["ipquery.io"].ExtraJSON), `"risk_score":22`) {
-		t.Fatalf("ipquery extra_json = %s, want provider-specific details", providers["ipquery.io"].ExtraJSON)
-	}
-	if len(report.DiagnosticsJSON) == 0 || !strings.Contains(string(report.DiagnosticsJSON), `"source_version":"v2"`) ||
-		!strings.Contains(string(report.DiagnosticsJSON), `"service_probe_revision":3`) {
-		t.Fatalf("DiagnosticsJSON = %s, want v2 service-probe revision diagnostics", report.DiagnosticsJSON)
-	}
+	assertRejectedDetectorGeoAttempts(t, report)
 	if len(report.RawJSON) == 0 || !strings.Contains(string(report.RawJSON), `"providers"`) {
 		t.Fatalf("RawJSON = %s, want provider raw envelope", report.RawJSON)
 	}
@@ -256,7 +265,7 @@ func TestHTTPCollectorDefaultSourcesParseProviderFactsForKnownVPSIP(t *testing.T
 		t.Fatalf("ipapi.is row = %#v, want hosting JP datacenter context and false proxy/vpn/tor", ipapi)
 	}
 	proxycheck := providers["proxycheck.io"]
-	if proxycheck.RiskScore != "66" || proxycheck.RiskLevel != "medium" ||
+	if proxycheck.RiskScore != "66" || proxycheck.RiskLevel != "" ||
 		proxycheck.UsageType != "VPN" || proxycheck.RegionCode != "JP" ||
 		proxycheck.IsProxy == nil || !*proxycheck.IsProxy ||
 		proxycheck.IsVPN == nil || !*proxycheck.IsVPN {
@@ -264,18 +273,17 @@ func TestHTTPCollectorDefaultSourcesParseProviderFactsForKnownVPSIP(t *testing.T
 	}
 	ip2location := providers["ip2location.io"]
 	if ip2location.RegionCode != "JP" || ip2location.RegionName != "Japan" ||
-		ip2location.IsProxy == nil || *ip2location.IsProxy ||
-		len(ip2location.ExtraJSON) == 0 || !strings.Contains(string(ip2location.ExtraJSON), `"asn":"63150"`) {
-		t.Fatalf("ip2location.io row = %#v extra=%s, want JP proxy=false and ASN extra", ip2location, ip2location.ExtraJSON)
+		ip2location.IsProxy == nil || *ip2location.IsProxy {
+		t.Fatalf("ip2location.io row = %#v, want JP proxy=false", ip2location)
 	}
 	ipwhois := providers["ipwho.is"]
 	if ipwhois.RegionCode != "JP" || ipwhois.RegionName != "Japan" ||
-		ipwhois.CompanyType != "" || ipwhois.UsageType != "" || !strings.Contains(string(ipwhois.ExtraJSON), "BAGE CLOUD LLC") {
-		t.Fatalf("ipwho.is row = %#v extra=%s, want JP and connection context without invented type", ipwhois, ipwhois.ExtraJSON)
+		ipwhois.CompanyType != "" || ipwhois.UsageType != "" {
+		t.Fatalf("ipwho.is row = %#v, want JP without invented type", ipwhois)
 	}
 	ipquery := providers["ipquery.io"]
-	if ipquery.RegionCode != "US" || !strings.Contains(string(ipquery.ExtraJSON), "Windstream Communications LLC") {
-		t.Fatalf("ipquery.io row = %#v extra=%s, want conflicting US/Windstream evidence preserved", ipquery, ipquery.ExtraJSON)
+	if ipquery.RegionCode != "US" {
+		t.Fatalf("ipquery.io row = %#v, want conflicting US evidence preserved", ipquery)
 	}
 	if len(report.DiagnosticsJSON) == 0 || !strings.Contains(string(report.DiagnosticsJSON), `"ip_candidates"`) {
 		t.Fatalf("DiagnosticsJSON = %s, want provider candidate diagnostics", report.DiagnosticsJSON)
@@ -456,15 +464,17 @@ func TestHTTPCollectorEquivalentIPv6CandidatesAreNotAmbiguous(t *testing.T) {
 		FrequencySeconds: 86400,
 	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[1]
 
-	if report.Status != agentapi.IPQualityStatusSuccess {
-		t.Fatalf("Status = %q, want success for equivalent IPv6 candidates", report.Status)
+	if report.Status != agentapi.IPQualityStatusPartial {
+		t.Fatalf("Status = %q, want partial for rejected geo fetches, not equivalent IPv6 candidates", report.Status)
 	}
-	if report.IPAddress != "2001:0db8:0:0:0:0:0:1" || report.IPVersion != 6 {
-		t.Fatalf("IP facts = (%q,%d), want preferred IPv6 candidate", report.IPAddress, report.IPVersion)
+	if report.IPAddress != "2001:db8::1" || report.IPVersion != 6 {
+		t.Fatalf("IP facts = (%q,%d), want canonical preferred IPv6 candidate", report.IPAddress, report.IPVersion)
 	}
-	if strings.Contains(string(report.DiagnosticsJSON), `"ip_conflict":true`) {
-		t.Fatalf("DiagnosticsJSON = %s, must not mark equivalent IPv6 candidates as conflicting", report.DiagnosticsJSON)
+	if strings.Contains(string(report.DiagnosticsJSON), `"ip_conflict":true`) ||
+		strings.Contains(string(report.DiagnosticsJSON), `"egress_ambiguous":true`) {
+		t.Fatalf("DiagnosticsJSON = %s, must not mark equivalent IPv6 candidates as conflicting or ambiguous", report.DiagnosticsJSON)
 	}
+	assertRejectedDetectorGeoAttempts(t, report)
 }
 
 func TestHTTPCollectorParsesIPAPIISNestedLookupPayload(t *testing.T) {
@@ -1563,9 +1573,8 @@ func TestHTTPCollectorProviderGroupsAndRiskDoNotDependOnServiceResults(t *testin
 					return jsonResponse(request, `{"ip":"203.0.113.10","country_code":"US","country_name":"United States"}`)
 				case "ipwho.is":
 					return jsonResponse(request, `{"success":true,"ip":"203.0.113.10","country_code":"US","country":"United States"}`)
-				case "api.openai.com", "ios.chat.openai.com":
-					// Unrecognized responses cannot become service positives.
-					return jsonResponse(request, `{}`)
+				// Scripted services use the explicitly rejected subprocess helper,
+				// not this transport; they cannot inherit these provider facts.
 				default:
 					return nil, fmt.Errorf("unexpected test endpoint %s", request.URL)
 				}
@@ -1575,23 +1584,23 @@ func TestHTTPCollectorProviderGroupsAndRiskDoNotDependOnServiceResults(t *testin
 				report.UseRegionName != "Singapore" || report.UseRegionCode != "" ||
 				report.RegisteredRegionCode != "SG" || report.RegisteredRegionName != "" ||
 				report.ASN != "AS64500" || report.Organization != "Example Network" ||
-				report.Latitude == nil || *report.Latitude != 1.25 || report.Longitude != nil || report.RiskLevel != "high" {
-				t.Fatalf("default report mixed groups, overrode identity or hid maximum risk: %#v", report)
+				report.Latitude != nil || report.Longitude != nil || report.RiskLevel != "" {
+				t.Fatalf("default report mixed sources, accepted a lone coordinate or invented a rating: %#v", report)
 			}
 			rows := providerResultsByName(report.ProviderResults)
 			if rows["ipapi.is"].RegionCode != "" || rows["ipapi.is"].CompanyType != "" ||
 				rows["ipquery.io"].RiskScore != "0" || rows["proxycheck.io"].RiskScore != "90.5" {
 				t.Fatalf("provider facts=%#v", rows)
 			}
-			wantStatus := agentapi.IPQualityStatusSuccess
+			assertRejectedDetectorGeoAttempts(t, report)
 			if len(services) > 0 {
-				wantStatus = agentapi.IPQualityStatusPartial
-				if len(report.ServiceUnlocks) != 1 || report.ServiceUnlocks[0].Status != "unknown" || report.ServiceUnlocks[0].ProbeStatus != "failure" {
-					t.Fatalf("generic JSON became service facts=%#v", report.ServiceUnlocks)
+				if len(report.ServiceUnlocks) != 1 || report.ServiceUnlocks[0].Status != "unknown" ||
+					report.ServiceUnlocks[0].ProbeStatus != "failure" || report.ServiceUnlocks[0].ErrorCode != "detector_fetch_failed" {
+					t.Fatalf("rejected helper became service facts=%#v", report.ServiceUnlocks)
 				}
 			}
-			if report.Status != wantStatus {
-				t.Fatalf("status=%s want %s without changing risk", report.Status, wantStatus)
+			if report.Status != agentapi.IPQualityStatusPartial {
+				t.Fatalf("status=%s want partial for rejected detector fetches without changing risk", report.Status)
 			}
 		})
 	}

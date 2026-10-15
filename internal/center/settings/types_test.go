@@ -471,11 +471,14 @@ func TestSettingsDefaultProvidesDeterministicSingletonShape(t *testing.T) {
 	if got.IPQuality.FrequencySeconds != 86400 {
 		t.Fatalf("IPQuality.FrequencySeconds = %d, want 86400", got.IPQuality.FrequencySeconds)
 	}
-	if got.IPQuality.TimeoutSeconds != 15 {
-		t.Fatalf("IPQuality.TimeoutSeconds = %d, want 15", got.IPQuality.TimeoutSeconds)
+	if got.IPQuality.TimeoutSeconds != 60 {
+		t.Fatalf("IPQuality.TimeoutSeconds = %d, want 60", got.IPQuality.TimeoutSeconds)
 	}
 	if got.IPQuality.StaleAfterSeconds != 7*24*60*60 {
 		t.Fatalf("IPQuality.StaleAfterSeconds = %d, want 604800", got.IPQuality.StaleAfterSeconds)
+	}
+	if !got.IPQuality.MailEnabled {
+		t.Fatal("IPQuality.MailEnabled = false, want true by default")
 	}
 	if len(got.IPQuality.Services) == 0 {
 		t.Fatal("IPQuality.Services = empty, want default service set")
@@ -809,10 +812,47 @@ func TestSettingsValidateTreatsZeroIPQualityAsExplicitDisable(t *testing.T) {
 	if got.IPQuality.Enabled {
 		t.Fatal("IPQuality.Enabled = true, want an explicit {enabled:false} payload to stay disabled")
 	}
-	if got.IPQuality.FrequencySeconds != 86400 || got.IPQuality.TimeoutSeconds != 15 || len(got.IPQuality.Services) == 0 {
+	if got.IPQuality.FrequencySeconds != 86400 || got.IPQuality.TimeoutSeconds != 60 || !got.IPQuality.MailEnabled || len(got.IPQuality.Services) == 0 {
 		t.Fatalf("IPQuality = %#v, want remaining defaults filled in", got.IPQuality)
 	}
 }
+
+func TestSettingsValidateIPQualityCredentialsAndExplicitDefaults(t *testing.T) {
+	t.Parallel()
+
+	for name, length := range map[string]int{"empty": 0, "short": 1, "maximum": 256, "overlong": 257} {
+		for _, source := range []string{"ipapi_is", "abuseipdb"} {
+			t.Run(source+"/"+name, func(t *testing.T) {
+				input := Default()
+				input.IPQuality.MailEnabled = false
+				input.IPQuality.TimeoutSeconds = 15
+				key := strings.Repeat("x", length)
+				if source == "ipapi_is" {
+					input.IPQuality.Sources.IPAPIISKey = key
+				} else {
+					input.IPQuality.Sources.AbuseIPDBKey = key
+				}
+				got, err := Validate(input)
+				if length > 256 {
+					if !errors.Is(err, ErrInvalidSettings) {
+						t.Fatalf("Validate() error = %v, want invalid key length", err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("Validate() error = %v", err)
+				}
+				if got.IPQuality.Sources != input.IPQuality.Sources {
+					t.Fatal("valid credentials were changed or truncated")
+				}
+				if got.IPQuality.MailEnabled || got.IPQuality.TimeoutSeconds != 15 {
+					t.Fatal("explicit disabled mail or legacy timeout was overwritten")
+				}
+			})
+		}
+	}
+}
+
 func TestFreshInstallDefaultsIncludesLegacyCoreOverride(t *testing.T) {
 	t.Parallel()
 

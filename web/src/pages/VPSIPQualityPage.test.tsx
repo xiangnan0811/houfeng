@@ -3,6 +3,7 @@ import { Link, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import { COLLECT_POLL_INTERVAL_MS } from '../components/ip-quality/useIPQualityCollect'
+import { ENRICHMENT_POLL_INTERVAL_MS } from '../components/ip-quality/useIPQualityEnrichment'
 import { VPSIPQualityPage } from './VPSIPQualityPage'
 
 type FetchMock = Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>
@@ -94,6 +95,41 @@ function reportBody({ family = 4, defaultFamily = 4, empty = false, collectionId
 }
 
 const availableStatus = { enabled: true, available: true, monitoring_instance_id: 'mi_001' }
+
+function productSummary(riskFlags: string[] = []) {
+  return {
+    risk_flags: riskFlags, high_risk_sources: [], restricted_services: [],
+    blacklist_listed_count: 0, blacklist_checked_count: 0,
+    service_available_count: 1, service_partial_count: 0, service_restricted_count: 0, service_unknown_count: 0,
+    geo_status: 'unknown',
+  }
+}
+
+function productBody(reportId: string, state: 'running' | 'complete') {
+  const done = state === 'complete'
+  return {
+    revision: 1, report_id: reportId, ip_address: IPV4, ip_version: 4, state,
+    agent_observed_at: '2026-06-08T12:00:00Z', completed_at: done ? '2026-06-08T12:01:00Z' : null,
+    ptr_names: [],
+    providers: [{ provider: 'ipinfo', status: 'success', source_type: 'default', is_vpn: true, is_proxy: false }],
+    mail: [{ provider: 'gmail', domain: 'gmail.com', status: 'reachable', mx_host: 'mx.example', target_ip: '192.0.2.25', error_code: '', mx_preference: 5, greeting_code: 220, latency_ms: 80, observed_at: '2026-06-08T12:00:00Z' }],
+    blacklists: done
+      ? [{ source: 'spamcop', category: 'spam', status: 'not_listed', query_method: 'dnsbl', error_code: '', reference_url: '', matched_range: '', codes: [], observed_at: '2026-06-08T12:01:00Z', dataset_at: null }]
+      : [],
+    registration: { status: 'unknown', rir: '', network_handle: '', start_address: '', end_address: '', network_name: '', network_country_code: '', registrant_country_code: '', registrant_name: '', source_url: '', registered_at: null, updated_at: null },
+    asn: { status: 'unknown', number: '', name: '', domain: '', type: '', country_code: '', rir: '', source_url: '', route: '', registered_at: null, updated_at: null, observed_at: null, ipv4_prefixes: null, ipv4_addresses: null, ipv6_prefixes: null, ipv6_48s: null, origins: [] },
+    summary: { ...productSummary(['vpn']), blacklist_checked_count: done ? 1 : 0 },
+  }
+}
+
+function productReportBody(state: 'running' | 'complete') {
+  const base = reportBody({ diagnostics: { source_version: 'v2', collection_revision: 4, service_probe_revision: 4 } })
+  return {
+    ...base,
+    summary: { ...base.summary, risk_level: '', product_revision: 1, intelligence_state: state, product_summary: productSummary(['vpn']) },
+    product: productBody('ipq_001', state),
+  }
+}
 
 function collectRequest(status: string, extra: Record<string, unknown> = {}) {
   return {
@@ -206,8 +242,12 @@ describe('VPSIPQualityPage', () => {
     await waitFor(() => expect(callsTo(fetchMock, COLLECT)).toHaveLength(1))
     expect(reportCalls(fetchMock)).toHaveLength(1)
     expect(within(familyGroup()).getByRole('button', { name: 'IPv4' })).toHaveAttribute('aria-pressed', 'true')
-    expect(screen.getByRole('button', { name: '立即采集' })).toBeEnabled()
-    expect(screen.getByText('分别检测 IPv4 / IPv6')).toBeInTheDocument()
+    const trigger = screen.getByRole('button', { name: '立即采集' })
+    expect(trigger).toBeEnabled()
+    // 采集范围在点击后的菜单里选择，按钮旁不再常驻解释文字。
+    expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    expect(trigger).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByText('分别检测 IPv4 / IPv6')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '返回 VPS 详情' })).toHaveAttribute('href', '/vps/vps_001')
     expect(screen.getByRole('heading', { name: '采集诊断' }).closest('details')).not.toHaveAttribute('open')
     expect(screen.queryByRole('button', { name: /保存|编辑|删除/ })).not.toBeInTheDocument()
@@ -355,7 +395,7 @@ describe('VPSIPQualityPage', () => {
     expect(reportCalls(fetchMock)).toHaveLength(1)
   })
 
-  it('collects both families from the empty state and announces an update only when the shown report is from the round', async () => {
+  it('collects the chosen dual-stack scope from the empty state and announces an update only when the shown report is from the round', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     const fetchMock = routeFetch([
       { path: BASE, responses: [{ body: reportBody({ empty: true }) }] },
@@ -379,9 +419,12 @@ describe('VPSIPQualityPage', () => {
     expect(screen.getAllByRole('button', { name: '立即采集' })).toHaveLength(1)
     await waitFor(() => expect(screen.getByRole('button', { name: '立即采集' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '立即采集' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '采集 IPv4 / IPv6' }))
 
     await waitFor(() => expect(screen.getByRole('button', { name: /采集中/ })).toBeDisabled())
     expect(callsTo(fetchMock, COLLECT, 'POST')).toHaveLength(1)
+    expect(JSON.parse(String(callsTo(fetchMock, COLLECT, 'POST')[0]?.[1]?.body))).toEqual({ ip_versions: [4, 6] })
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('等待 agent 同步')
 
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
@@ -434,7 +477,7 @@ describe('VPSIPQualityPage', () => {
     expect(server.reads).toBe(1)
     expect(callsTo(fetchMock, COLLECT, 'POST')).toHaveLength(0)
     expect(screen.getByRole('button', { name: /采集中/ })).toBeDisabled()
-    expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集最新 IP 质量')
+    expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集 IPv4 / IPv6')
 
     // 轮询仍在进行：本轮完成后刷新当前所选 IPv6，并只在该报告属于本轮时说已更新。
     server.completed = true
@@ -464,7 +507,7 @@ describe('VPSIPQualityPage', () => {
     fireEvent.click(screen.getAllByRole('link', { name: /^查看 .* 的报告$/ })[0]!)
     await waitFor(() => expect(screen.getByRole('link', { name: '查看最新报告' })).toBeInTheDocument())
     expect(server.reads).toBe(1)
-    expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集最新 IP 质量')
+    expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集 IPv4 / IPv6')
 
     server.completed = true
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
@@ -474,6 +517,76 @@ describe('VPSIPQualityPage', () => {
     // 历史视图不刷新最新报告。
     expect(callsTo(fetchMock, `${BASE}?ip_version=4`)).toHaveLength(1)
     expect(callsTo(fetchMock, COLLECT, 'POST')).toHaveLength(0)
+  })
+
+  it('collects only IPv6 while viewing IPv4 without refreshing, switching family or claiming the IPv4 report was updated', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const v6Request = (status: string, extra: Record<string, unknown> = {}) => collectRequest(status, { requested_ip_versions: [6], ...extra })
+    const fetchMock = routeFetch([
+      { path: `${BASE}?ip_version=4`, responses: [{ body: reportBody() }] },
+      {
+        path: COLLECT,
+        responses: [
+          { body: availableStatus },
+          { body: { ...availableStatus, request: v6Request('completed', { report_status: 'success', collection_scope: 'single_family', collection_id: 'col_v6', family_results: [{ ip_version: 6, availability: 'available', report_status: 'success' }] }) } },
+        ],
+      },
+      { method: 'POST', path: COLLECT, responses: [{ body: { ...availableStatus, request: v6Request('pending') }, status: 202 }] },
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage('/vps/vps_001/ip-quality?ip_version=4')
+    await waitFor(() => expect(screen.getByRole('button', { name: '立即采集' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '立即采集' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '采集 IPv6' }))
+
+    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集 IPv6'))
+    expect(JSON.parse(String(callsTo(fetchMock, COLLECT, 'POST')[0]?.[1]?.body))).toEqual({ ip_versions: [6] })
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
+    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('IPv6 采集完成'))
+    expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).not.toHaveTextContent('报告已更新')
+    expect(currentLocation()).toBe('/vps/vps_001/ip-quality?ip_version=4')
+    expect(screen.getByLabelText('报告身份')).toHaveTextContent(IPV4)
+    // 当前 IPv4 报告不刷新，也不读取 IPv6。
+    expect(callsTo(fetchMock, `${BASE}?ip_version=4`)).toHaveLength(1)
+    expect(callsTo(fetchMock, `${BASE}?ip_version=6`)).toHaveLength(0)
+  })
+
+  it('shows an actionable error and stops when the agent cannot collect a single family', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const fetchMock = routeFetch([
+      { path: `${BASE}?ip_version=4`, responses: [{ body: reportBody() }] },
+      {
+        path: COLLECT,
+        responses: [
+          { body: availableStatus },
+          { body: { ...availableStatus, request: collectRequest('failed', { requested_ip_versions: [4], error_code: 'unsupported_agent' }) } },
+        ],
+      },
+      { method: 'POST', path: COLLECT, responses: [{ body: { ...availableStatus, request: collectRequest('pending', { requested_ip_versions: [4] }) }, status: 202 }] },
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage('/vps/vps_001/ip-quality?ip_version=4')
+    await waitFor(() => expect(screen.getByRole('button', { name: '立即采集' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: '立即采集' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '采集 IPv4' }))
+
+    const status = () => screen.getByRole('status', { name: 'IP 质量采集状态' })
+    // 先等 POST 落地、页面进入进行中，轮询计时器才被设置；之后再推进时钟。
+    await waitFor(() => expect(status()).toHaveTextContent('正在采集 IPv4'))
+    expect(JSON.parse(String(callsTo(fetchMock, COLLECT, 'POST')[0]?.[1]?.body))).toEqual({ ip_versions: [4] })
+    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
+
+    // failed 终态：显示不支持单族的可操作错误（精确文案由展示层单测覆盖），停止进行中并可重新选择。
+    await waitFor(() => expect(status()).toHaveTextContent('agent 版本不支持单独采集 IPv4'))
+    expect(status()).not.toHaveTextContent('正在采集')
+    expect(screen.getByRole('button', { name: '立即采集' })).toBeEnabled()
+    const polls = callsTo(fetchMock, COLLECT).length
+    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS * 2) })
+    expect(callsTo(fetchMock, COLLECT)).toHaveLength(polls)
+    expect(callsTo(fetchMock, `${BASE}?ip_version=4`)).toHaveLength(1)
   })
 
   it('reports the selected family failure and keeps the previous IPv4 result after an IPv6-only success', async () => {
@@ -498,7 +611,7 @@ describe('VPSIPQualityPage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     renderPage('/vps/vps_001/ip-quality?ip_version=4')
-    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集最新 IP 质量'))
+    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集 IPv4 / IPv6'))
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
     await waitFor(() => expect(screen.getByRole('note', { name: '地址族采集状态' })).toHaveTextContent('IPv4 出口探测失败'))
     const status = screen.getByRole('status', { name: 'IP 质量采集状态' })
@@ -527,7 +640,7 @@ describe('VPSIPQualityPage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     renderPage('/vps/vps_001/ip-quality?ip_version=4')
-    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集最新 IP 质量'))
+    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集 IPv4 / IPv6'))
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
     await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('刷新失败'))
     expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).not.toHaveTextContent('报告已更新')
@@ -550,7 +663,7 @@ describe('VPSIPQualityPage', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     renderPage('/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_000')
-    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集最新 IP 质量'))
+    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集 IPv4 / IPv6'))
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
     await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('历史'))
     expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).not.toHaveTextContent('报告已更新')
@@ -575,7 +688,7 @@ describe('VPSIPQualityPage', () => {
     renderPage('/vps/vps_001/ip-quality?ip_version=4')
 
     // 页面打开时已有进行中的请求：直接接手并展示进度。
-    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集最新 IP 质量'))
+    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集 IPv4 / IPv6'))
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
     const status = () => screen.getByRole('status', { name: 'IP 质量采集状态' })
     await waitFor(() => expect(status()).toHaveTextContent('本次采集失败，仍展示上一份有效报告'))
@@ -622,6 +735,7 @@ describe('VPSIPQualityPage', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: '立即采集' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: '立即采集' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '采集 IPv4 / IPv6' }))
     const status = () => screen.getByRole('status', { name: 'IP 质量采集状态' })
     await waitFor(() => expect(status()).toHaveTextContent('监控已暂停'))
     expect(within(status()).getByRole('link', { name: '前往监控实例' })).toHaveAttribute('href', '/monitoring/mi_001?return_vps=vps_001')
@@ -629,32 +743,17 @@ describe('VPSIPQualityPage', () => {
     expect(screen.queryByRole('button', { name: /恢复/ })).not.toBeInTheDocument()
   })
 
-  it('renders the selected history report with its own revision, coverage and risk after switching from latest', async () => {
-    const coverage = {
-      expected_provider_count: 18,
-      successful_provider_count: 5,
-      failed_provider_count: 0,
-      skipped_provider_count: 0,
-      not_configured_provider_count: 13,
-      expected_service_count: 7,
-      successful_service_count: 1,
-      failed_service_count: 0,
-      skipped_service_count: 0,
-      not_configured_service_count: 0,
-    }
-    const latest = reportBody({ diagnostics: { source_version: 'v2', collection_revision: 4, service_probe_revision: 2 } })
+  it('renders the selected history report with its own facts after switching from a product report', async () => {
+    const latest = reportBody({ diagnostics: { source_version: 'v2', collection_revision: 4, service_probe_revision: 4 } })
     const latestBody = {
       ...latest,
-      summary: { ...latest.summary, coverage },
-      latest_report: { ...latest.latest_report, coverage },
-      provider_results: [{ provider: 'proxycheck.io', status: 'success', source_type: 'default', risk_level: 'high', risk_score: '80' }],
+      summary: { ...latest.summary, risk_level: '', product_revision: 1, intelligence_state: 'complete', product_summary: productSummary(['vpn']) },
+      product: productBody('ipq_001', 'complete'),
     }
-    const historyCoverage = { ...coverage, successful_provider_count: 4, failed_provider_count: 1, successful_service_count: 0, skipped_service_count: 7 }
     const history = reportBody({ reportId: 'ipq_000', diagnostics: { source_version: 'v2', service_probe_revision: 1 } })
     const historyBody = {
       ...history,
-      summary: { ...history.summary, risk_level: 'low', coverage: historyCoverage },
-      latest_report: { ...history.latest_report, coverage: historyCoverage },
+      summary: { ...history.summary, risk_level: 'medium' },
       provider_results: [{ provider: 'ipapi.is', status: 'success', source_type: 'default', risk_level: 'medium', is_vpn: true }],
       service_unlocks: [
         { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe' },
@@ -669,10 +768,9 @@ describe('VPSIPQualityPage', () => {
 
     renderPage()
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: '服务可用性（免登录探测）' })).toBeInTheDocument())
-    expect(screen.getByLabelText('数据库风险评级').querySelector('.ipq-verdict__value strong')).toHaveTextContent('高风险')
-    expect(screen.getByRole('note', { name: '服务探测可信度' })).toHaveClass('ipq-notice--muted')
-    expect(within(screen.getByLabelText('IP 质量摘要指标')).getByText('已启用来源响应成功率').nextElementSibling).toHaveTextContent('响应成功 5/5')
+    await waitFor(() => expect(screen.getByRole('heading', { name: '邮件连通性' })).toBeInTheDocument())
+    expect(screen.queryByText('旧版报告')).not.toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '邮件连通性' }).closest('section')).toHaveTextContent('可连接 1/1')
 
     const historyLink = screen.getAllByRole('link', { name: /^查看 .* 的报告$/ })
       .find((link) => link.getAttribute('href')?.includes('report_id=ipq_000'))
@@ -681,11 +779,61 @@ describe('VPSIPQualityPage', () => {
 
     await waitFor(() => expect(callsTo(fetchMock, `${BASE}/reports/ipq_000`)).toHaveLength(1))
     await waitFor(() => expect(screen.getByRole('link', { name: '查看最新报告' })).toBeInTheDocument())
-    expect(screen.getByRole('heading', { name: '服务解锁' })).toBeInTheDocument()
-    expect(screen.getByRole('note', { name: '服务探测可信度' })).toHaveTextContent('已停用')
-    // 历史报告的风险评级来自它自己的成功来源，不沿用最新报告，也不相信 summary low。
-    expect(screen.getByLabelText('数据库风险评级').querySelector('.ipq-verdict__value strong')).toHaveTextContent('中风险')
-    expect(within(screen.getByLabelText('IP 质量摘要指标')).getByText('已启用来源响应成功率').nextElementSibling).toHaveTextContent('响应成功 4/5')
+    // 历史报告用它自己的事实：没有 product 就是旧版报告，不借最新报告的邮件或摘要。
+    expect(screen.getByText('旧版报告')).toBeInTheDocument()
+    expect(screen.getByText('探测已停用')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: '邮件连通性' }).closest('section')).toHaveTextContent('旧版报告无此项')
+    expect(screen.getByRole('group', { name: '风险命中' })).toHaveTextContent('旧版评级 · 中风险')
+  })
+
+  it('polls the same selected report while Center enrichment runs and stops at a terminal state', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const running = productReportBody('running')
+    const complete = productReportBody('complete')
+    const fetchMock = routeFetch([
+      { path: `${BASE}?ip_version=4`, responses: [{ body: running }] },
+      { path: `${BASE}/reports/ipq_001`, responses: [{ body: running }, { body: complete }] },
+      { path: COLLECT, responses: [{ body: availableStatus }] },
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage('/vps/vps_001/ip-quality?ip_version=4')
+    await waitFor(() => expect(screen.getByRole('status', { name: '补充资料状态' })).toHaveTextContent('查询中'))
+    expect(screen.getByRole('heading', { name: '黑名单' }).closest('section')).toHaveTextContent('查询中')
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(ENRICHMENT_POLL_INTERVAL_MS) })
+    await waitFor(() => expect(callsTo(fetchMock, `${BASE}/reports/ipq_001`)).toHaveLength(1))
+    await act(async () => { await vi.advanceTimersByTimeAsync(ENRICHMENT_POLL_INTERVAL_MS) })
+    await waitFor(() => expect(screen.queryByRole('status', { name: '补充资料状态' })).not.toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: '黑名单' }).closest('section')).toHaveTextContent('命中 0 / 已查 1')
+    // URL 与所选族不变；终态后不再轮询。
+    expect(currentLocation()).toBe('/vps/vps_001/ip-quality?ip_version=4')
+    await act(async () => { await vi.advanceTimersByTimeAsync(ENRICHMENT_POLL_INTERVAL_MS * 3) })
+    expect(callsTo(fetchMock, `${BASE}/reports/ipq_001`)).toHaveLength(2)
+  })
+
+  it('stops polling after a failed enrichment read and resumes only on retry', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const running = productReportBody('running')
+    const fetchMock = routeFetch([
+      { path: `${BASE}?ip_version=4`, responses: [{ body: running }] },
+      { path: `${BASE}/reports/ipq_001`, responses: [{ body: { error: 'temporary' }, status: 500 }, { body: productReportBody('complete') }] },
+      { path: COLLECT, responses: [{ body: availableStatus }] },
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage('/vps/vps_001/ip-quality?ip_version=4')
+    await waitFor(() => expect(screen.getByRole('status', { name: '补充资料状态' })).toHaveTextContent('查询中'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(ENRICHMENT_POLL_INTERVAL_MS) })
+    await waitFor(() => expect(screen.getByRole('status', { name: '补充资料状态' })).toHaveTextContent('资料刷新失败'))
+    await act(async () => { await vi.advanceTimersByTimeAsync(ENRICHMENT_POLL_INTERVAL_MS * 3) })
+    expect(callsTo(fetchMock, `${BASE}/reports/ipq_001`)).toHaveLength(1)
+    // 已显示的 Agent 事实保留。
+    expect(screen.getByLabelText('报告身份')).toHaveTextContent(IPV4)
+
+    fireEvent.click(within(screen.getByRole('status', { name: '补充资料状态' })).getByRole('button', { name: '重试' }))
+    await waitFor(() => expect(callsTo(fetchMock, `${BASE}/reports/ipq_001`)).toHaveLength(2))
+    await waitFor(() => expect(screen.queryByRole('status', { name: '补充资料状态' })).not.toBeInTheDocument())
   })
 
   it('retries a failed report load without leaving the page', async () => {

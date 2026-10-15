@@ -32,11 +32,15 @@ type SyncPlan struct {
 }
 
 type IPQualityPlan struct {
-	Enabled          bool
-	FrequencySeconds int
-	TimeoutSeconds   int
-	Services         []string
-	CollectRequestID string
+	Enabled            bool
+	FrequencySeconds   int
+	TimeoutSeconds     int
+	Services           []string
+	ProductRevision    int
+	MailEnabled        *bool
+	CollectRequestID   string
+	CollectionRevision int
+	CollectIPVersions  []int
 }
 
 type Repository interface {

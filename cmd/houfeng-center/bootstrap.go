@@ -200,6 +200,11 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 	settingsRepo := store.NewPostgresSettingsRepository(db.Pool(), deploymentDefaults)
 	retentionRepo := store.NewPostgresRetentionRepository(db.Pool())
 	retentionWorker := retention.NewWorker(retentionRepo, settingsRepo, slog.Default(), retention.DefaultWorkerInterval)
+	intelligenceWorker, err := ipquality.NewIntelligenceWorker(ipQualityRepo, settingsRepo, slog.Default())
+	if err != nil {
+		db.Close()
+		return nil, nil, fmt.Errorf("initialize IP quality intelligence worker: %w", err)
+	}
 	receiverHealthObserver, err := deps.newReceiverHealthObserver(ctx, db.Pool())
 	if err != nil {
 		db.Close()
@@ -483,6 +488,7 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		sessionCleanup,
 		exchangeRateWorker,
 		subscriptionReminderWorker,
+		intelligenceWorker,
 	}
 	if recordsEnabled {
 		if collaborationRuntime.projectionWorker != nil {

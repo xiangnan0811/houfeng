@@ -284,6 +284,7 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 					TimeoutSeconds:   15,
 					Services:         []string{"netflix", "chatgpt"},
 					CollectRequestID: "ipqc_001",
+					MailEnabled:      new(bool),
 				},
 				ProbeAssignments: []agentplan.ProbeAssignment{{
 					TargetID:           "tg_001",
@@ -336,6 +337,15 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 	if body.Plan.IPQualityPlan.CollectRequestID != "ipqc_001" {
 		t.Fatalf("IPQualityPlan.CollectRequestID = %q, want ipqc_001", body.Plan.IPQualityPlan.CollectRequestID)
+	}
+	if body.Plan.IPQualityPlan.ProductRevision != agentapi.IPQualityProductRevision {
+		t.Fatalf("ProductRevision = %d, want %d", body.Plan.IPQualityPlan.ProductRevision, agentapi.IPQualityProductRevision)
+	}
+	if body.Plan.IPQualityPlan.MailEnabled == nil || *body.Plan.IPQualityPlan.MailEnabled {
+		t.Fatalf("MailEnabled = %v, want explicit false", body.Plan.IPQualityPlan.MailEnabled)
+	}
+	if !strings.Contains(recorder.Body.String(), `"product_revision":1`) || !strings.Contains(recorder.Body.String(), `"mail_enabled":false`) {
+		t.Fatalf("plan wire = %s, want negotiated revision and explicit mail false", recorder.Body.String())
 	}
 	if !body.Plan.HostSampleMaintenanceContext {
 		t.Fatal("HostSampleMaintenanceContext = false, want true")
@@ -730,6 +740,79 @@ func TestAgentSyncHandlerRejectsInvalidIPQualityReportEnums(t *testing.T) {
 			}
 			assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
 		})
+	}
+}
+
+func TestAgentSyncHandlerRejectsIPQualityDetailsWithoutProduct(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentSyncService{}
+	handler := handlers.AgentSync(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+		"session_id":"mas_001","monitoring_instance_id":"mi_001",
+		"sync_token":"sync-token-001",
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"ip_quality_reports":[{
+			"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001",
+			"ip_address":"203.0.113.10","ip_version":4,"status":"success",
+			"provider_results":[{"provider":"ipapi.is","status":"success","source_type":"default","details":{"queried_ip":"203.0.113.10","observed_at":"2026-04-23T09:00:01Z","method":"agent_public","api_tier":"anonymous"}}]
+		}]
+	}`))
+	setSyncAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusBadRequest)
+	}
+	if svc.syncBatch.MonitoringInstanceID != "" {
+		t.Fatal("invalid typed details reached sync")
+	}
+	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "invalid request")
+}
+
+func TestAgentSyncHandlerAttachesIPQualityProductFields(t *testing.T) {
+	t.Parallel()
+
+	svc := &fakeAgentSyncService{}
+	handler := handlers.AgentSync(svc)
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+		"session_id":"mas_001","monitoring_instance_id":"mi_001",
+		"sync_token":"sync-token-001",
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"ip_quality_reports":[{
+			"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001",
+			"ip_address":"203.0.113.10","ip_version":4,"status":"success",
+			"product":{"revision":1,"ptr_names":["mail.example.net"],"mail":[{"provider":"gmail","domain":"gmail.com","status":"reachable","mx_host":"gmail-smtp-in.l.google.com","target_ip":"1.1.1.1","greeting_code":220,"latency_ms":40,"observed_at":"2026-04-23T09:00:01Z"}]},
+			"provider_results":[{"provider":"ipapi.is","status":"success","source_type":"default","details":{"queried_ip":"203.0.113.10","observed_at":"2026-04-23T09:00:01Z","method":"agent_public","api_tier":"anonymous","country_code":"US","latitude":0,"longitude":0,"scores":[{"id":"abuser_score","label":"Abuser","raw_value":"0.0183 (Elevated)","unit":"ratio","scope":"company_network","direction":"higher_risk","source_label":"Elevated","value":0.0183}],"field_states":{"is_proxy":"unsupported"}}}],
+			"service_unlocks":[{"service":"chatgpt","status":"partial","probe_status":"success","checks":[{"id":"web","label":"Web","status":"available","region":"US","rule":"openai_cookie_requirements","http_status":200},{"id":"app","label":"App","status":"unknown","error_code":"invalid_response","rule":"openai_app_page"}]}]
+		}]
+	}`))
+	setSyncAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+	if len(svc.syncBatch.IPQualityReports) != 1 {
+		t.Fatalf("reports = %d, want 1", len(svc.syncBatch.IPQualityReports))
+	}
+	report := svc.syncBatch.IPQualityReports[0]
+	if report.Product == nil || report.Product.Revision != 1 || len(report.Product.PTRNames) != 1 || report.Product.PTRNames[0] != "mail.example.net" ||
+		len(report.Product.Mail) != 1 || report.Product.Mail[0].Provider != "gmail" || report.Product.Mail[0].Status != "reachable" || report.Product.Mail[0].TargetIP != "1.1.1.1" {
+		t.Fatalf("product = %#v, want attached mail and ptr", report.Product)
+	}
+	if len(report.ProviderResults) != 1 || report.ProviderResults[0].Details == nil || report.ProviderResults[0].Details.QueriedIP != "203.0.113.10" ||
+		report.ProviderResults[0].Details.Latitude == nil || *report.ProviderResults[0].Details.Latitude != 0 ||
+		report.ProviderResults[0].Details.Longitude == nil || *report.ProviderResults[0].Details.Longitude != 0 ||
+		len(report.ProviderResults[0].Details.Scores) != 1 || report.ProviderResults[0].Details.Scores[0].Scope != "company_network" ||
+		report.ProviderResults[0].Details.FieldStates["is_proxy"] != "unsupported" {
+		t.Fatalf("details = %#v, want attached typed details", report.ProviderResults[0].Details)
+	}
+	if len(report.ServiceUnlocks) != 1 || len(report.ServiceUnlocks[0].Checks) != 2 ||
+		report.ServiceUnlocks[0].Checks[0].Status != "available" || report.ServiceUnlocks[0].Checks[1].Status != "unknown" {
+		t.Fatalf("checks = %#v, want web available and app unknown", report.ServiceUnlocks)
 	}
 }
 
@@ -1159,7 +1242,7 @@ func assertErrorResponse(t *testing.T, recorder *httptest.ResponseRecorder, want
 
 func TestAgentSyncPairedMetadataSurvivesDiagnosticsTruncation(t *testing.T) {
 	t.Parallel()
-	for _, revision := range []int{4, 5} {
+	for _, revision := range []int{4, 5, 6} {
 		t.Run(fmt.Sprintf("revision-%d", revision), func(t *testing.T) {
 			now := time.Now().UTC()
 			registry := ipquality.NewCollectRequests(func() (string, error) { return "ipqc_truncated", nil })
@@ -1203,14 +1286,14 @@ func TestAgentSyncPairedMetadataSurvivesDiagnosticsTruncation(t *testing.T) {
 				t.Fatalf("handler = %d %s, reports=%d", recorder.Code, recorder.Body.String(), len(svc.syncBatch.IPQualityReports))
 			}
 			for _, report := range svc.syncBatch.IPQualityReports {
-				if !report.CollectionMetadata.Paired || report.CollectionMetadata.Valid != (revision == 4) ||
+				if !report.CollectionMetadata.Paired || report.CollectionMetadata.Valid != (revision == 4 || revision == 5) ||
 					report.CollectionMetadata.CollectionID != "round" || report.CollectionMetadata.IPVersion != report.IPVersion ||
 					report.CollectionMetadata.CollectRequestID != "ipqc_truncated" {
 					t.Fatalf("raw metadata lost: %#v", report.CollectionMetadata)
 				}
-				if !strings.Contains(string(report.DiagnosticsJSON), "extra_json_size_limit") ||
-					agentapi.ParseCollectionMetadata(report.DiagnosticsJSON).Paired {
-					t.Fatalf("fixture was not truncated: %s", report.DiagnosticsJSON)
+				persisted := agentapi.ParseCollectionMetadata(report.DiagnosticsJSON)
+				if !persisted.Paired || persisted.Valid {
+					t.Fatalf("truncated diagnostics lost the invalid paired boundary: %s", report.DiagnosticsJSON)
 				}
 			}
 			registry.ObserveReports("mi_001", svc.syncBatch.IPQualityReports[:1], now.Add(time.Second))
@@ -1219,7 +1302,7 @@ func TestAgentSyncPairedMetadataSurvivesDiagnosticsTruncation(t *testing.T) {
 			}
 			registry.ObserveReports("mi_001", svc.syncBatch.IPQualityReports[1:], now.Add(3*time.Second))
 			current, _ := registry.Latest("mi_001", now.Add(4*time.Second))
-			if revision == 4 {
+			if revision == 4 || revision == 5 {
 				if current.Status != ipquality.CollectRequestCompleted || current.CollectionScope != ipquality.CollectScopeDualStack ||
 					current.ReportStatus != "success" || len(current.FamilyResults) != 2 {
 					t.Fatalf("valid pair did not complete after sanitization: %#v", current)

@@ -1,27 +1,39 @@
 import { describe, expect, it } from 'vitest'
 
-import type { IPQualityCoverage, IPQualityProviderResult, IPQualityServiceUnlock, VPSIPQualityReport } from '../../lib/types'
+import type {
+  IPQualityProductView,
+  IPQualityProviderDetails,
+  IPQualityProviderResult,
+  IPQualityScore,
+  IPQualityServiceUnlock,
+  VPSIPQualityReport,
+} from '../../lib/types'
 import {
-  databaseConsistency,
-  defaultServiceProbeNotice,
-  deriveRiskAssessment,
   effectiveUnlockStatus,
-  enabledProviderCoverage,
-  negativeRiskSignals,
   observedServiceRegion,
-  riskEvidenceComplete,
-  riskVerdict,
   familyStateNotice,
   parseIPVersionParam,
   reportCollectionIdentity,
   selectedReportIPVersion,
-  serviceAvailability,
   serviceEndpointDiagnostics,
-  serviceEvidenceNotes,
+  serviceRuleMark,
   serviceTileDetail,
   serviceUnlockCounts,
   unlockStatusLabel,
 } from './ipQualityPresentation'
+import {
+  agreedCountry,
+  agreedValue,
+  fieldCellState,
+  flagCellState,
+  FLAG_COLUMNS,
+  groupDigits,
+  locationRows,
+  scoreDisplay,
+  selectedProduct,
+  usageTypeLabel,
+  vendorGroups,
+} from './ipQualityProductPresentation'
 
 function unlock(patch: Partial<IPQualityServiceUnlock>): IPQualityServiceUnlock {
   return { service: 'reddit', status: 'unknown', probe_status: 'failure', ...patch } as IPQualityServiceUnlock
@@ -98,10 +110,23 @@ describe('serviceEndpointDiagnostics', () => {
       { endpoint: 'app_home', httpStatus: null, matchedRule: null, errorCode: 'network_unreachable', outcome: 'unknown' },
       { endpoint: 'home', httpStatus: null, matchedRule: null, errorCode: null, outcome: null },
     ])
-    // revision 2 证据同样可追溯；未知 revision 或缺 evidence_kind 不读取。
+    // revision 2/3/4 证据同样可追溯；未知 revision 或缺 evidence_kind 不读取。
     expect(serviceEndpointDiagnostics(unlock({ extra_json: revision3Extra({ probe_revision: 2, endpoints: [{ endpoint: 'home', outcome: 'unknown' }] }) }))).toHaveLength(1)
-    expect(serviceEndpointDiagnostics(unlock({ extra_json: revision3Extra({ probe_revision: 4, endpoints: [{ endpoint: 'home' }] }) }))).toEqual([])
+    expect(serviceEndpointDiagnostics(unlock({ extra_json: revision3Extra({ probe_revision: 4, endpoints: [{ endpoint: 'home', outcome: 'unknown' }] }) }))).toHaveLength(1)
+    expect(serviceEndpointDiagnostics(unlock({ extra_json: revision3Extra({ probe_revision: 5, endpoints: [{ endpoint: 'home' }] }) }))).toEqual([])
     expect(serviceEndpointDiagnostics(unlock({ extra_json: { probe_revision: 3, endpoints: [{ endpoint: 'home' }] } }))).toEqual([])
+    // 固定脚本 revision5：读 diagnostics，positive 统一为可用；连字符端点 ID 合法，非白名单形状整体丢弃。
+    const script = (patch: Record<string, unknown>) => unlock({ extra_json: { evidence_kind: 'ipquality_script', probe_revision: 5, ip_version: 4, rule: 'netflix_originals_only', ...patch } })
+    expect(serviceEndpointDiagnostics(script({ diagnostics: [
+      { endpoint: 'netflix-80057281', http_status: 200, outcome: 'positive' },
+      { endpoint: 'openai-ios', http_status: 403, outcome: 'unknown', error_code: 'client_access_denied' },
+      { endpoint: 'Bad Endpoint', outcome: 'positive' },
+    ] }))).toEqual([
+      { endpoint: 'netflix-80057281', httpStatus: 200, matchedRule: null, errorCode: null, outcome: 'available' },
+      { endpoint: 'openai-ios', httpStatus: 403, matchedRule: null, errorCode: 'client_access_denied', outcome: 'unknown' },
+    ])
+    // 脚本证据必须是 revision5；evidence_kind 与 revision 不配对时不读取。
+    expect(serviceEndpointDiagnostics(script({ probe_revision: 4, diagnostics: [{ endpoint: 'netflix-80057281', outcome: 'positive' }] }))).toEqual([])
   })
 })
 
@@ -120,7 +145,7 @@ describe('observedServiceRegion', () => {
     const row = youtube({})
     expect(observedServiceRegion(row, 4)).toEqual({ region: 'CN', evidence: 'youtube_content_region' })
     expect(observedServiceRegion(youtube({ region_evidence: 'youtube_context_gl', observed_region: 'US' }), 4)).toEqual({ region: 'US', evidence: 'youtube_context_gl' })
-    expect(serviceEvidenceNotes(row, 4)).toEqual(['页面地区：CN；Premium 可用性未知'])
+    expect(observedServiceRegion(youtube({ probe_revision: 4 }), 4)).toEqual({ region: 'CN', evidence: 'youtube_content_region' })
     // 页面地区不改变状态、统计或徽标区域。
     expect(effectiveUnlockStatus(row)).toBe('unknown')
     expect(unlockStatusLabel(row, true)).toBe('未知')
@@ -140,21 +165,12 @@ describe('observedServiceRegion', () => {
     // 残留 normalized region 不是页面地区证据。
     const residual = youtube({ observed_region: undefined, region_evidence: undefined }, { region: 'CN' })
     expect(observedServiceRegion(residual, 4)).toBeNull()
-    expect(serviceEvidenceNotes(residual, 4)).toEqual([])
+    expect(observedServiceRegion(youtube({}, { status: 'blocked', probe_status: 'success' }), 6)).toBeNull()
   })
 
-  it('does not add the unknown-availability note once business evidence decided the status', () => {
+  it('keeps a business-decided status label independent of page geography', () => {
     const blocked = youtube({}, { status: 'blocked', probe_status: 'success', region: 'CN', unlock_type: 'premium_offer' })
-    expect(serviceEvidenceNotes(blocked, 4)).toEqual([])
     expect(unlockStatusLabel(blocked, true)).toBe('受限 · CN')
-  })
-})
-
-describe('serviceEvidenceNotes capability boundaries', () => {
-  it('states untested Netflix connection method and unknown ChatGPT region without inventing facts', () => {
-    expect(serviceEvidenceNotes(unlock({ service: 'netflix', status: 'unlocked', probe_status: 'success', region: 'US' }), 4)).toEqual(['连接方式未检测'])
-    expect(serviceEvidenceNotes(unlock({ service: 'chatgpt', status: 'partial', probe_status: 'success', unlock_type: 'web_verified_app_unknown' }), 4)).toEqual(['服务地区未知'])
-    expect(serviceEvidenceNotes(unlock({ service: 'reddit', status: 'blocked', probe_status: 'success' }), 4)).toEqual([])
   })
 })
 
@@ -258,29 +274,19 @@ describe('effectiveUnlockStatus', () => {
     const netflix = unlock({ service: 'netflix', status: 'partial', probe_status: 'success', region: 'DE', unlock_type: 'sample_titles_unavailable' })
     expect(unlockStatusLabel(netflix, true)).toBe('部分可用 · DE')
     expect(unlockStatusLabel(netflix, false)).toBe('部分 · DE')
-    expect(serviceTileDetail(netflix)).toBe('抽样片目不可用，未验证完整片库')
+    expect(serviceTileDetail(netflix)).toBe('样片均不可用')
     const chatgpt = unlock({ service: 'chatgpt', status: 'partial', probe_status: 'success', unlock_type: 'web_verified_app_unknown' })
-    expect(serviceTileDetail(chatgpt)).toBe('Web 已验证，App 入口未知')
+    expect(serviceTileDetail(chatgpt)).toBe('Web 可用，App 未知')
     expect(unlockStatusLabel(unlock({ status: 'blocked', probe_status: 'success' }), true)).toBe('受限')
     expect(unlockStatusLabel(unlock({ status: 'blocked', probe_status: 'success' }), false)).toBe('受阻')
+    // Netflix 仅自制剧：短标签替代笼统“部分可用”，范围在详情里。
+    const originals = unlock({ service: 'netflix', status: 'partial', probe_status: 'success', region: 'US', unlock_type: 'originals_only' })
+    expect(unlockStatusLabel(originals, true)).toBe('仅自制剧 · US')
+    expect(serviceTileDetail(originals)).toBe('仅自制剧可访问')
+    // 失败行残留的 originals_only 不生效。
+    expect(unlockStatusLabel(unlock({ ...originals, probe_status: 'failure' }), true)).toBe('未知')
   })
 })
-
-function coverage(patch: Partial<IPQualityCoverage> = {}): IPQualityCoverage {
-  return {
-    expected_provider_count: 18,
-    successful_provider_count: 5,
-    failed_provider_count: 0,
-    skipped_provider_count: 0,
-    not_configured_provider_count: 13,
-    expected_service_count: 7,
-    successful_service_count: 6,
-    failed_service_count: 1,
-    skipped_service_count: 0,
-    not_configured_service_count: 0,
-    ...patch,
-  }
-}
 
 function report(
   provider_results: IPQualityProviderResult[],
@@ -322,155 +328,134 @@ function latestReport(patch: Partial<NonNullable<VPSIPQualityReport['latest_repo
   }
 }
 
-const cleanFlags = { is_proxy: false, is_tor: false, is_vpn: false, is_abuser: false, is_robot: false }
 
-describe('deriveRiskAssessment', () => {
-  it('is independent of service probe results', () => {
-    const providers: IPQualityProviderResult[] = [
-      { provider: 'ipapi.is', status: 'success', ...cleanFlags, is_vpn: true },
-      { provider: 'proxycheck.io', status: 'success', risk_level: 'medium', is_vpn: true },
-    ]
-    const unknownServices = report(providers, {
-      service_unlocks: [{ service: 'netflix', status: 'unknown', probe_status: 'failure', error_code: 'timeout' }],
-    })
-    const knownServices = report(providers, {
-      service_unlocks: [
-        { service: 'netflix', status: 'blocked', probe_status: 'success' },
-        { service: 'reddit', status: 'unlocked', probe_status: 'success' },
-      ],
-    })
-    expect(deriveRiskAssessment(unknownServices)).toEqual(deriveRiskAssessment(knownServices))
-    expect(riskVerdict(unknownServices)).toEqual(riskVerdict(knownServices))
-    expect(deriveRiskAssessment(knownServices)).toEqual({ level: 'medium', complete: true, knownFlags: 5, totalFlags: 5 })
-  })
-
-  it('takes the highest successful provider level and ignores summary low and failed residue', () => {
-    const assessed = report([
-      { provider: 'ipapi.is', status: 'success', risk_level: 'low', ...cleanFlags },
-      { provider: 'proxycheck.io', status: 'success', risk_level: 'high' },
-      { provider: 'ip2location.io', status: 'failure', risk_level: 'critical', is_tor: true },
-    ], {}, { risk_level: 'low' })
-    expect(deriveRiskAssessment(assessed).level).toBe('high')
-    expect(riskVerdict(assessed)).toMatchObject({ value: '高风险', tone: 'alert' })
-    expect(negativeRiskSignals(assessed.provider_results)).toEqual([])
-  })
-
-  it('shows an evidence gap instead of a low verdict when flags are missing, but keeps found medium/high levels', () => {
-    const partial = report([
-      { provider: 'ipapi.is', status: 'success', risk_level: 'low', is_proxy: false, is_vpn: false, is_tor: false, is_server: true },
-      { provider: 'ipquery.io', status: 'success', risk_score: '0', is_proxy: false },
-    ])
-    expect(deriveRiskAssessment(partial)).toEqual({ level: 'low', complete: false, knownFlags: 3, totalFlags: 5 })
-    expect(riskVerdict(partial)).toEqual({ value: '证据不完整', valueKind: 'gap', headline: '已返回来源：低风险', scope: '风险字段 3/5', tone: 'neutral' })
-
-    // 负面等级即使字段不全也必须作为已发现等级显示，同时保留缺口说明。
-    for (const [level, label, tone] of [['medium', '中风险', 'notice'], ['high', '高风险', 'alert'], ['critical', '严重风险', 'critical']] as const) {
-      expect(riskVerdict(report([{ provider: 'db', status: 'success', risk_level: level, is_vpn: false }]))).toEqual({
-        value: label, valueKind: 'level', headline: `已返回来源：${label}`, scope: '风险字段 1/5，结论不完整', tone,
-      })
-    }
-    expect(riskVerdict(report([{ provider: 'flags', status: 'success', risk_level: 'low', ...cleanFlags }]))).toMatchObject({ value: '低风险', valueKind: 'level', tone: 'normal' })
-
-    expect(riskVerdict(report([{ provider: 'geo', status: 'success', region_code: 'DE' }]))).toEqual({
-      value: '—',
-      valueKind: 'none',
-      headline: '证据不足',
-      scope: '风险字段 0/5，结论不完整',
-      tone: 'neutral',
-    })
-    expect(riskVerdict(report([{ provider: 'vpn-db', status: 'success', is_vpn: true }]))).toMatchObject({ value: '—', headline: '发现风险信号', tone: 'alert' })
-    expect(riskVerdict(report([{ provider: 'flags', status: 'success', ...cleanFlags }]))).toMatchObject({ value: '—', headline: '已返回风险字段未命中' })
-    expect(riskEvidenceComplete([{ provider: 'flags', status: 'success', ...cleanFlags, is_robot: null }])).toBe(false)
-  })
-
-  it('withholds aggregation for ambiguous attribution or source IP conflict, and neutralises stale reports', () => {
-    const providers: IPQualityProviderResult[] = [{ provider: 'ipapi.is', status: 'success', risk_level: 'high', ...cleanFlags }]
-    expect(deriveRiskAssessment(report(providers, {}, { ambiguous: true }))).toMatchObject({ level: null, complete: false })
-    expect(riskVerdict(report(providers, {}, { ambiguous: true })).headline).toBe('IP 归属不唯一，需先复核')
-
-    const conflict = report(providers, {
-      latest_report: latestReport({ status: 'partial', diagnostics_json: { source_version: 'v2', ip_conflict: true } }),
-    })
-    expect(deriveRiskAssessment(conflict).level).toBeNull()
-    expect(riskVerdict(conflict)).toMatchObject({ value: '—', headline: '来源返回了不同 IP，需复核来源' })
-
-    expect(riskVerdict(report(providers, {}, { stale: true }))).toMatchObject({ value: '高风险', tone: 'neutral' })
-    expect(deriveRiskAssessment({ ...report(providers), summary: null })).toMatchObject({ level: null, complete: false })
-  })
-})
-
-describe('enabledProviderCoverage', () => {
-  it('divides by enabled sources only and refuses to clamp abnormal counts', () => {
-    expect(enabledProviderCoverage(report([], { latest_report: null }, { coverage: coverage() }))).toEqual({ successful: 5, enabled: 5, notConfigured: 13, percent: 100 })
-    expect(enabledProviderCoverage(report([], {}, { coverage: coverage({ successful_provider_count: 4, failed_provider_count: 1 }) }))?.percent).toBe(80)
-    expect(enabledProviderCoverage(report([], {}, { coverage: coverage({ successful_provider_count: 6 }) }))).toBeNull()
-    expect(enabledProviderCoverage(report([], {}, { coverage: coverage({ not_configured_provider_count: 18 }) }))).toBeNull()
-    expect(enabledProviderCoverage(report([], {}, { coverage: coverage({ successful_provider_count: -1 }) }))).toBeNull()
-    expect(enabledProviderCoverage(report([], {}, { coverage: null }))).toBeNull()
-  })
-})
-
-describe('serviceAvailability', () => {
-  const services = (statuses: string[]): IPQualityServiceUnlock[] => statuses.map((status, index) => ({
-    service: `svc${index}`,
-    status,
-    probe_status: status === 'unknown' ? 'failure' : 'success',
-  }))
-
-  it('uses the full expected service count as denominator and only counts fully unlocked as available', () => {
-    const rows = services(['unlocked', 'unlocked', 'partial', 'unknown', 'unknown', 'unknown', 'unknown'])
-    expect(serviceAvailability(report([], { service_unlocks: rows }, { coverage: coverage() }))).toEqual({
-      unlocked: 2, partial: 1, blocked: 0, unknown: 4, expected: 7,
-    })
-    // 覆盖声明但没有返回行的服务计为未知，而不是缩小分母。
-    expect(serviceAvailability(report([], { service_unlocks: rows.slice(0, 3) }, { coverage: coverage() }))).toEqual({
-      unlocked: 2, partial: 1, blocked: 0, unknown: 4, expected: 7,
-    })
-  })
-
-  it('keeps status counts without fabricating a ratio when coverage is absent or invalid', () => {
-    const rows = services(['unlocked', 'blocked', 'unknown'])
-    for (const invalid of [null, coverage({ expected_service_count: 0 }), coverage({ expected_service_count: 2 }), coverage({ expected_service_count: -1 }), coverage({ expected_service_count: 2.5 })]) {
-      expect(serviceAvailability(report([], { service_unlocks: rows, latest_report: null }, { coverage: invalid }))).toEqual({
-        unlocked: 1, partial: 0, blocked: 1, unknown: 1, expected: null,
-      })
-    }
-  })
-})
-
-describe('databaseConsistency', () => {
-  it('compares only dimensions with at least two known values and never mixes region names with codes', () => {
-    expect(databaseConsistency([
-      { provider: 'ipapi.is', status: 'success', region_name: 'Singapore', is_vpn: false, is_proxy: null },
-      { provider: 'ipquery.io', status: 'success', region_code: 'JP', is_vpn: false },
-    ])).toEqual({ percent: 100, dimensions: 1 })
-    expect(databaseConsistency([
-      { provider: 'a', status: 'success', region_code: 'SG', is_vpn: true },
-      { provider: 'b', status: 'success', region_code: 'JP', is_vpn: true },
-      { provider: 'c', status: 'failure', region_code: 'US', is_vpn: false },
-    ])).toEqual({ percent: 50, dimensions: 2 })
-    expect(databaseConsistency([
-      { provider: 'a', status: 'success', region_code: 'SG' },
-      { provider: 'b', status: 'success', usage_type: 'hosting' },
-    ])).toBeNull()
-  })
-})
-
-describe('defaultServiceProbeNotice', () => {
+describe('serviceRuleMark', () => {
   const rows: IPQualityServiceUnlock[] = [{ service: 'netflix', source: 'netflix_title_probe', status: 'unlocked', probe_status: 'success' }]
-  function withDiagnostics(diagnostics_json: unknown, service_unlocks = rows): VPSIPQualityReport {
-    return report([], { service_unlocks, latest_report: latestReport({ report_id: 'ipq', diagnostics_json }) })
-  }
+  const withDiagnostics = (diagnostics_json: unknown, service_unlocks = rows) => report([], { service_unlocks, latest_report: latestReport({ diagnostics_json }) })
 
-  it('uses the same neutral capability notice for revisions 2 and 3 and keeps warnings for others', () => {
-    const revision2 = defaultServiceProbeNotice(withDiagnostics({ source_version: 'v2', service_probe_revision: 2 }))
-    expect(revision2?.tone).toBe('muted')
-    expect(defaultServiceProbeNotice(withDiagnostics({ source_version: 'v2', service_probe_revision: 3 }))).toEqual(revision2)
-    for (const service_probe_revision of ['2', '3', 4, null]) {
-      expect(defaultServiceProbeNotice(withDiagnostics({ source_version: 'v2', service_probe_revision }))?.tone).toBe('warning')
+  it('adds no mark for current anonymous revisions and short marks for old or unverifiable rules', () => {
+    for (const service_probe_revision of [2, 3, 4]) {
+      expect(serviceRuleMark(withDiagnostics({ source_version: 'v2', service_probe_revision }))).toBeNull()
     }
-    expect(defaultServiceProbeNotice(withDiagnostics({ source_version: 'v2', service_probe_revision: 1 }, [
+    for (const service_probe_revision of ['2', '4', 0, null]) {
+      expect(serviceRuleMark(withDiagnostics({ source_version: 'v2', service_probe_revision }))?.label).toBe('旧版规则')
+    }
+    expect(serviceRuleMark(withDiagnostics({ source_version: 'v2', service_probe_revision: 1 }, [
       { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe' },
-    ]))).toMatchObject({ tone: 'warning', text: expect.stringContaining('已停用') })
+    ]))?.label).toBe('探测已停用')
+    expect(serviceRuleMark(withDiagnostics({ source_version: 'v2', service_probe_revision: 1 }))).toBeNull()
+    expect(serviceRuleMark(withDiagnostics({}, [{ service: 'custom', status: 'unlocked' }]))?.label).toBe('来源未知')
+    expect(serviceRuleMark(withDiagnostics({}, []))).toBeNull()
+  })
+})
+
+function score(patch: Partial<IPQualityScore>): IPQualityScore {
+  return { id: 's', label: 's', raw_value: '', unit: 'score', scope: 'ip', direction: 'higher_risk', source_label: '', value: null, min: null, max: null, ...patch }
+}
+
+describe('product presentation', () => {
+  it('shows ratio scores as percentages and only draws bars with explicit bounds', () => {
+    expect(scoreDisplay(score({ unit: 'ratio', value: 0.0183, min: 0, max: 1, scope: 'company_network' }))).toEqual({ text: '1.83%', fraction: 0.0183 })
+    expect(scoreDisplay(score({ value: 20, min: 0, max: 100 }))).toEqual({ text: '20', fraction: 0.2 })
+    expect(scoreDisplay(score({ value: 0, min: 0, max: 100 }))).toEqual({ text: '0', fraction: 0 })
+    // 未得到明确数字就不画进度，也不构造 0。
+    expect(scoreDisplay(score({ raw_value: 'n/a' }))).toEqual({ text: 'n/a', fraction: null })
+    expect(scoreDisplay(score({ value: 33 }))).toEqual({ text: '33', fraction: null })
+  })
+
+  it('selects one sample per vendor without merging fields across vendors', () => {
+    const agent: IPQualityProviderResult = { provider: 'ipapi.is', status: 'success', details: { method: 'agent_public' } as IPQualityProviderDetails }
+    const center: IPQualityProviderResult = { provider: 'ipapi.is', status: 'success', details: { method: 'center_api' } as IPQualityProviderDetails }
+    const failedCenter: IPQualityProviderResult = { provider: 'abuseipdb', status: 'failure' }
+    expect(vendorGroups([agent, center, failedCenter]).map((group) => [group.provider, group.primary, group.others])).toEqual([
+      ['ipapi.is', center, [agent]],
+      ['abuseipdb', failedCenter, []],
+    ])
+    // 认证失败时保留匿名成功样本为主行，并标注增强查询失败；仅有失败认证行的供应商照实显示失败。
+    const failedEnhancement: IPQualityProviderResult = { provider: 'ipapi.is', status: 'failure', error_code: 'rate_limited', details: { method: 'center_api' } as IPQualityProviderDetails }
+    const [withFailure] = vendorGroups([agent, failedEnhancement])
+    expect(withFailure?.primary).toBe(agent)
+    expect(withFailure?.enhancementFailed).toBe(true)
+    expect(vendorGroups([agent, center])[0]?.enhancementFailed).toBe(false)
+    const [failureOnly] = vendorGroups([{ ...failedEnhancement, provider: 'abuseipdb' }])
+    expect(failureOnly?.primary.status).toBe('failure')
+    expect(failureOnly?.enhancementFailed).toBe(false)
+    // 历史可选占位不进入主表。
+    expect(vendorGroups([{ provider: 'maxmind', status: 'not_configured', source_type: 'optional' }])).toEqual([])
+  })
+
+  it('separates known negatives from unsupported, error and unknown cells', () => {
+    const vpn = FLAG_COLUMNS.find((column) => column.key === 'is_vpn')!
+    const row = (patch: Partial<IPQualityProviderResult>, states: Record<string, 'known' | 'unsupported' | 'unknown' | 'error'> = {}): IPQualityProviderResult => ({
+      provider: 'p', status: 'success', ...patch, details: { field_states: states } as IPQualityProviderDetails,
+    })
+    expect(flagCellState(row({ is_vpn: true }), vpn)).toBe('yes')
+    expect(flagCellState(row({ is_vpn: false }), vpn)).toBe('no')
+    expect(flagCellState(row({}, { is_vpn: 'unsupported' }), vpn)).toBe('unsupported')
+    expect(flagCellState(row({}, { is_vpn: 'error' }), vpn)).toBe('error')
+    expect(flagCellState(row({}), vpn)).toBe('unknown')
+    expect(flagCellState({ provider: 'legacy', status: 'success' }, vpn)).toBe('unknown')
+  })
+
+  it('keeps zero coordinates and per-source locations, and only agrees on identical values', () => {
+    const rows = locationRows([
+      { provider: 'a', status: 'success', details: { method: 'agent_public', country_code: 'US', region: '', city: 'LA', latitude: 0, longitude: 0, observed_at: 't' } as IPQualityProviderDetails },
+      { provider: 'b', status: 'success', details: { method: 'agent_public', country_code: 'US', region: '', city: 'SJ', latitude: null, longitude: null, observed_at: 't' } as IPQualityProviderDetails },
+      { provider: 'c', status: 'failure', region_code: 'JP' },
+    ])
+    expect(rows.map((row) => [row.provider, row.city, row.coordinates])).toEqual([['a', 'LA', '0, 0'], ['b', 'SJ', null]])
+    expect(agreedValue(rows.map((row) => row.country))).toEqual({ value: 'US', discrepant: false })
+    expect(agreedValue(rows.map((row) => row.city))).toEqual({ value: null, discrepant: true })
+  })
+
+  it('compares countries by typed code only, keeping name-only sources visible and unfilled', () => {
+    const typed = (provider: string, code: string, regionName = ''): IPQualityProviderResult => ({
+      provider, status: 'success', region_name: regionName,
+      details: { method: 'agent_public', country_code: code, region: 'Wyoming', city: 'Buffalo', latitude: null, longitude: null, observed_at: 't' } as IPQualityProviderDetails,
+    })
+    const rows = locationRows([typed('a', 'US'), typed('b', '', 'United States'), typed('c', 'us')])
+    expect(rows.map((row) => [row.country, row.countryCode])).toEqual([['US', 'US'], ['United States', ''], ['us', 'US']])
+    expect(agreedCountry(rows)).toEqual({ value: 'US', discrepant: false })
+    expect(agreedCountry(locationRows([typed('a', 'US'), typed('b', 'JP')]))).toEqual({ value: null, discrepant: true })
+    // 全部只有名称时不据名称宣称分歧。
+    expect(agreedCountry(locationRows([typed('a', '', 'United States'), typed('b', '', 'United States of America')]))).toEqual({ value: null, discrepant: false })
+  })
+
+  it('keeps per-source field states for type and location cells instead of one missing dash', () => {
+    const row: IPQualityProviderResult = {
+      provider: 'ipapi.is', status: 'success', usage_type: 'hosting',
+      details: {
+        method: 'agent_public', country_code: 'US', region: '', city: '', latitude: null, longitude: null, observed_at: 't',
+        field_states: { usage_type: 'known', company_type: 'unsupported', region: 'error', latitude: 'unsupported', longitude: 'unsupported' },
+      } as unknown as IPQualityProviderDetails,
+    }
+    expect(fieldCellState(row, 'usage_type', row.usage_type)).toBe('known')
+    expect(fieldCellState(row, 'company_type', row.company_type)).toBe('unsupported')
+    expect(fieldCellState({ provider: 'legacy', status: 'success' }, 'company_type', '')).toBe('unknown')
+    const [location] = locationRows([row])
+    expect(location?.states).toEqual({ country: 'known', region: 'error', city: 'unknown', coordinates: 'unsupported' })
+    // revision1 来源即使没有任何定位值也保留一行以显示其字段状态；无 details 的旧行不占行。
+    const empty = { ...row, details: { ...row.details!, country_code: '', field_states: { country_code: 'unsupported' } } } as IPQualityProviderResult
+    expect(locationRows([empty])[0]?.states.country).toBe('unsupported')
+    expect(locationRows([{ provider: 'legacy', status: 'success' }])).toEqual([])
+    const badCoordinates = { ...row, details: { ...row.details!, field_states: { latitude: 'error', longitude: 'unknown' } } } as IPQualityProviderResult
+    expect(locationRows([badCoordinates])[0]?.states.coordinates).toBe('error')
+  })
+
+  it('labels residential only when a source says so and groups large decimal strings', () => {
+    expect(usageTypeLabel('hosting')).toBe('机房')
+    expect(usageTypeLabel('Residential')).toBe('家宽')
+    expect(usageTypeLabel('isp')).toBe('ISP')
+    expect(usageTypeLabel('MOB')).toBe('MOB')
+    expect(usageTypeLabel('')).toBeNull()
+    expect(groupDigits('79228162514264337593543950336')).toBe('79,228,162,514,264,337,593,543,950,336')
+    expect(groupDigits(null)).toBeNull()
+  })
+
+  it('uses only a revision1 product that belongs to the selected report', () => {
+    const product = { revision: 1, report_id: 'ipq_evidence' } as IPQualityProductView
+    expect(selectedProduct(report([], { product }))).toBe(product)
+    expect(selectedProduct(report([], { product: { ...product, report_id: 'other' } }))).toBeNull()
+    expect(selectedProduct(report([], { product: { ...product, revision: 2 } }))).toBeNull()
   })
 })

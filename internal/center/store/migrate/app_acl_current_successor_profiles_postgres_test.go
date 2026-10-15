@@ -427,6 +427,8 @@ func appendAppACLCurrentReleasedSuccessor(
 	isP66 := profileLastMigration == appACLCurrentP66LastMigration
 	isP67 := profileLastMigration == "0067_refactor_vps_monitoring_lifecycle.sql"
 	isP68 := profileLastMigration == "0068_normalize_ip_quality_host_address_identity.sql"
+	isP76 := profileLastMigration == appACLCurrentP76Migration
+	isP77 := profileLastMigration == appACLCurrentP77Migration
 	tx, err := migratorDB.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("begin released APP profile fixture transaction: %w", err)
@@ -503,6 +505,42 @@ func appendAppACLCurrentReleasedSuccessor(
 		dependencies := defaultAppACLCurrentConvergenceDependencies()
 		if err := dependencies.applyDCL(ctx, tx, contract); err != nil {
 			return AppACLManifestPersistedV1{}, fmt.Errorf("apply released P68 catalog DCL: %w", err)
+		}
+	} else if isP76 {
+		previousSet, err := ParseCanonicalPrivilegeSetBodyV1(previous.CanonicalPrivilegeSet)
+		if err != nil {
+			return AppACLManifestPersistedV1{}, err
+		}
+		expected, err := CanonicalPrivilegeSetBodyV1(previousSet.RoleBindings, append(previousSet.Privileges, AppACLPrivilege{
+			Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassView, SchemaName: "public",
+			ObjectIdentity: "ip_quality_vps_family_state", Privilege: AppACLPrivilegeSelect,
+		}))
+		if err != nil || !bytes.Equal(expected, privileges) {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("released C76 delta is not exactly family-state SELECT")
+		}
+		if _, err := tx.Exec(ctx, "grant select on public.ip_quality_vps_family_state to "+pgx.Identifier{fixture.runtimeRole}.Sanitize()); err != nil {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("grant released C76 family-state SELECT: %w", err)
+		}
+	} else if isP77 {
+		if err := validateAppACLCurrentReleasedP68PreviousContract(t, fixture, previous); err != nil {
+			return AppACLManifestPersistedV1{}, err
+		}
+		previousSet, err := ParseCanonicalPrivilegeSetBodyV1(previous.CanonicalPrivilegeSet)
+		if err != nil {
+			return AppACLManifestPersistedV1{}, err
+		}
+		expected, err := CanonicalPrivilegeSetBodyV1(previousSet.RoleBindings,
+			append(previousSet.Privileges, appACLCurrentProductExpectedPrivileges()...))
+		if err != nil || !bytes.Equal(expected, privileges) {
+			return AppACLManifestPersistedV1{}, fmt.Errorf("released C77 delta is not exactly seven runtime product grants")
+		}
+		for _, privilege := range appACLCurrentProductExpectedPrivileges() {
+			statement := "grant " + strings.ToLower(string(privilege.Privilege)) + " on table " +
+				pgx.Identifier{privilege.SchemaName, privilege.ObjectIdentity}.Sanitize() +
+				" to " + pgx.Identifier{fixture.runtimeRole}.Sanitize()
+			if _, err := tx.Exec(ctx, statement); err != nil {
+				return AppACLManifestPersistedV1{}, fmt.Errorf("grant released C77 product privilege: %w", err)
+			}
 		}
 	} else if !bytes.Equal(previous.CanonicalPrivilegeSet, privileges) {
 		return AppACLManifestPersistedV1{}, fmt.Errorf("released profile privilege body changes the exact predecessor grants")

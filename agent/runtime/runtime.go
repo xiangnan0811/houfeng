@@ -1021,12 +1021,21 @@ func cloneSyncPlan(plan *agentapi.SyncPlan) *agentapi.SyncPlan {
 		}
 	}
 	if plan.IPQualityPlan != nil {
+		var mailEnabled *bool
+		if plan.IPQualityPlan.MailEnabled != nil {
+			value := *plan.IPQualityPlan.MailEnabled
+			mailEnabled = &value
+		}
 		cloned.IPQualityPlan = &agentapi.IPQualityPlan{
-			Enabled:          plan.IPQualityPlan.Enabled,
-			FrequencySeconds: plan.IPQualityPlan.FrequencySeconds,
-			TimeoutSeconds:   plan.IPQualityPlan.TimeoutSeconds,
-			Services:         append([]string(nil), plan.IPQualityPlan.Services...),
-			CollectRequestID: plan.IPQualityPlan.CollectRequestID,
+			Enabled:            plan.IPQualityPlan.Enabled,
+			FrequencySeconds:   plan.IPQualityPlan.FrequencySeconds,
+			TimeoutSeconds:     plan.IPQualityPlan.TimeoutSeconds,
+			Services:           append([]string(nil), plan.IPQualityPlan.Services...),
+			CollectRequestID:   plan.IPQualityPlan.CollectRequestID,
+			CollectionRevision: plan.IPQualityPlan.CollectionRevision,
+			CollectIPVersions:  append([]int(nil), plan.IPQualityPlan.CollectIPVersions...),
+			ProductRevision:    plan.IPQualityPlan.ProductRevision,
+			MailEnabled:        mailEnabled,
 		}
 	}
 	for _, assignment := range plan.ProbeAssignments {

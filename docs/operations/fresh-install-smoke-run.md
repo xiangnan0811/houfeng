@@ -83,11 +83,15 @@ Local build outputs expected under `dist/`:
 
 - `houfeng-agent_v1.2.3_linux_amd64`
 - `houfeng-agent_v1.2.3_linux_arm64`
+- `houfeng-agent_v1.2.3_source.tar.gz`
+- `houfeng-agent_v1.2.3_licenses.txt`
 - `sha256sums.txt`
 
 The release workflow additionally signs the checksum manifest as `sha256sums.txt.minisig`; the local build target does not generate this signature.
 
-Published releases should already contain those files because `.github/workflows/publish-images.yml` uploads them on `release.published`. Use `make build-agent-release VERSION=<tag>` locally as a sanity check or emergency backfill source if a historical release is missing assets, but remember that installable releases also need the signed manifest produced by the release workflow. GitHub Release hosts only the binary and signed-checksum assets; the installer script is served by the running center at `/api/agent/install.sh`.
+The release target first rejects tracked/index changes and non-ignored untracked files before building or creating outputs; ignored scratch remains allowed and unchanged. For a dirty local candidate, use the manual `make build-agent` path rather than producing a release with mismatched corresponding source.
+
+The release workflow uploads both binaries, the complete tracked release-HEAD source archive, the project/third-party license bundle and signed checksums on `release.published`. The archive includes embedded detector source/assets, license, original upstream source, modification notes/hash manifest and Go/build materials; archive and license-bundle hashes are covered by the same signed manifest. Use a clean checkout to verify source correspondence; dirty local builds are not release evidence. Houfeng-owned code is explicitly licensed under AGPL-3.0-only; third-party licenses and actual-version corresponding-source obligations remain applicable, with no subprocess exemption. All publication jobs use one resolved source commit. The installer itself remains served by Center at `/api/agent/install.sh`.
 
 For API-only local smoke on the same machine, `make build-agent` plus the manual fallback appendix can still verify enroll/sync behavior, but it does not verify the release-asset installer path.
 
@@ -285,6 +289,7 @@ Run the exact generated command once on a Linux systemd `amd64` or `arm64` host 
 Expected installer behavior:
 
 - detects Linux/systemd and supported architecture before writing runtime files;
+- preflights working Bash >=4 and jq in `/usr/bin` or `/bin` before release downloads, service changes or Agent file writes; missing tools stop safely even with `--install-missing-deps`, with manual repair instructions and no package-manager/dependency install (the existing minisign policy below is separate);
 - if `minisign` is missing, the generated command's `--install-missing-deps` flag allows the installer to download upstream `minisign` 0.12, verify the pinned tarball SHA256, and install `/usr/local/bin/minisign`;
 - downloads `houfeng-agent_<version>_linux_<amd64|arm64>`, `sha256sums.txt`, and `sha256sums.txt.minisig` from the configured GitHub Release;
 - verifies the checksum manifest signature with the installer-pinned public key, then verifies the exact checksum entry before replacing `/usr/local/bin/houfeng-agent` or starting the service;
@@ -295,6 +300,7 @@ Expected runtime behavior:
 
 - agent enrolls through `/api/agent/enroll`;
 - subsequent syncs call `/api/agent/sync`;
+- the embedded detector uses only Bash/jq plus shell builtins and the private Agent fetch helper, not curl/dig/bc. If dependencies later disappear, four script-backed service results and keyless geography become `detector_dependency_missing`, while monitoring and independent probes continue; no old-algorithm fallback is permitted;
 - enrollment returns session-scoped credentials; identity confirmation and the first accepted real-time signal change the lifecycle from `待接入` to `已接入`, even before performance samples arrive.
 
 Check from the center machine:

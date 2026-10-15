@@ -103,7 +103,7 @@ func TestVPSIPQualityCollectQueuesAndReportsProgress(t *testing.T) {
 		t.Fatalf("repeat POST = %d %#v, want the active request reused", code, repeated)
 	}
 
-	registry.PendingRequestID("mi_001", time.Now())
+	registry.PendingRequest("mi_001", time.Now(), nil)
 	code, progress := serveIPQualityCollect(t, handler, http.MethodGet, "/api/vps/vps_001/ip-quality/collect")
 	if code != http.StatusOK || progress.Request == nil || progress.Request.Status != ipquality.CollectRequestDispatched {
 		t.Fatalf("GET after dispatch = %d %#v, want dispatched request", code, progress)

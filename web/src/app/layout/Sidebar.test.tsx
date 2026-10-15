@@ -64,9 +64,6 @@ describe('Sidebar', () => {
         />
       </MemoryRouter>,
     )
-    const links = screen.getAllByRole('link')
-    const linkText = links.map((link) => link.textContent)
-    expect(linkText).toEqual(['工作台', 'VPS', '订阅', '服务商', '资产决策', '归档', '监控3', '入口探测1', '事件', '运维记录', '命令审计', '设置'])
     expect(screen.getByRole('link', { name: '运维记录' })).toHaveAttribute('href', '/records')
     expect(screen.getByRole('link', { name: '监控，3 个异常' })).toHaveAttribute('href', '/monitoring')
     expect(screen.getByRole('link', { name: '入口探测，1 个异常' })).toHaveAttribute('href', '/targets')

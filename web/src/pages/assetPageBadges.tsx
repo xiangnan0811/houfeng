@@ -12,6 +12,10 @@ import {
   subscriptionStatusLabel,
   usageLabel,
 } from './assetPageUtils'
+import {
+  productRiskFacts as productRiskFactLabels,
+  productSummaryHasRisk,
+} from '../components/ip-quality/ipQualityProductPresentation'
 
 function badgeToneForLabel(label: string): BadgeTone {
   if (['管理中', '在用', '承载业务', '保留', '生效中', '正常'].includes(label)) return 'normal'
@@ -53,8 +57,18 @@ function normalizeRiskLevel(value?: string): string {
   return risk || '未评级'
 }
 
+// revision1：只读服务端事实摘要；有明确风险命中即告警（partial 同样适用），否则沿用采集状态，不合成“低风险”。
+function productRiskFacts(summary: IPQualitySummary): string[] | null {
+  if (summary.product_revision !== 1 || !summary.product_summary) return null
+  return productSummaryHasRisk(summary.product_summary) ? productRiskFactLabels(summary.product_summary) : []
+}
+
 function ipQualityTone(summary?: IPQualitySummary | null): BadgeTone {
-  if (!summary || summary.ambiguous || summary.stale || summary.status !== 'success') return 'notice'
+  if (!summary || summary.ambiguous) return 'notice'
+  const facts = productRiskFacts(summary)
+  if (facts && facts.length > 0) return summary.stale ? 'notice' : 'alert'
+  if (summary.stale || summary.status !== 'success') return 'notice'
+  if (facts) return 'normal'
   const risk = (summary.risk_level ?? '').trim().toLowerCase()
   if (risk === 'high') return 'alert'
   if (risk === 'critical') return 'critical'
@@ -71,12 +85,17 @@ function lifecycleGlyphState(tone: BadgeTone): HealthState {
 function ipQualityLabel(summary: IPQualitySummary): string {
   const family = summary.ip_version === 4 || summary.ip_version === 6 ? `IPv${summary.ip_version}` : 'IP'
   const status = (summary.status ?? '').trim().toLowerCase()
+  const facts = productRiskFacts(summary)
   let label: string
   if (summary.ambiguous) label = `${family} 归属不唯一`
+  else if (facts && facts.length > 0) label = `${family} 风险命中 · ${facts.join(' · ')}`
   else if (status === 'partial') label = `${family} 部分采集`
   else if (status === 'failure') label = `${family} 采集失败`
   else if (status !== 'success') label = `${family} 状态未知`
-  else {
+  else if (facts) {
+    const suffix = summary.stale ? '' : summary.use_region_code || summary.use_region_name
+    label = `${family} 采集成功${suffix ? ` · ${suffix}` : ''}`
+  } else {
     const suffix = summary.stale ? '' : summary.use_region_code || summary.use_region_name
     label = `${family} ${normalizeRiskLevel(summary.risk_level)}${suffix ? ` · ${suffix}` : ''}`
   }
