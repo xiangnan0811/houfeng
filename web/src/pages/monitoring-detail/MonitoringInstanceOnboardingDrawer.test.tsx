@@ -155,9 +155,10 @@ describe('MonitoringInstanceOnboardingDrawer issue lifecycle', () => {
     let phases: unknown[] = [racing]
     let phaseReads = 0
     let releaseSlowRead: (() => void) | null = null
+    const issued = deferred<Response>()
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
-      if ((init?.method ?? 'GET') === 'POST' && path === '/api/monitoring-instances/mi_001/install-command') return mockJSONResponse(installIssue())
+      if ((init?.method ?? 'GET') === 'POST' && path === '/api/monitoring-instances/mi_001/install-command') return issued.promise
       if (path === '/api/monitoring-instances/mi_001/phases') {
         phaseReads += 1
         // 第三次读取故意卡住：其间不应发起新的轮询。
@@ -171,12 +172,13 @@ describe('MonitoringInstanceOnboardingDrawer issue lifecycle', () => {
       render(<DrawerHarness monitoringInstance={instance()} open onClose={vi.fn()} />)
       const drawer = screen.getByRole('dialog', { name: '监控实例接入抽屉' })
       fireEvent.click(within(drawer).getByRole('button', { name: '生成一键安装命令' }))
-      const complete = await within(drawer).findByRole('button', { name: '完成并查看监控实例' })
+      expect(phaseReads).toBe(0)
+      await act(async () => { issued.resolve(mockJSONResponse(installIssue())) })
+      const complete = within(drawer).getByRole('button', { name: '完成并查看监控实例' })
       expect(complete).toHaveClass('primary')
       expect(within(drawer).getByRole('button', { name: '重新生成安装命令' })).toHaveClass('secondary')
-      expect(within(drawer).getByText('执行命令后，本窗口会自动检测首次心跳。')).toBeInTheDocument()
       // 签发后立即读取一次作为基线。
-      await waitFor(() => expect(phaseReads).toBe(1))
+      expect(phaseReads).toBe(1)
 
       // 基线里的会话、签发前开始的完整会话与降级的旧会话都不算本次接入。
       phases = [
@@ -192,10 +194,11 @@ describe('MonitoringInstanceOnboardingDrawer issue lifecycle', () => {
       expect(phaseReads).toBe(3)
       await act(async () => { vi.advanceTimersByTime(15_000) })
       expect(phaseReads).toBe(3)
+      expect(within(drawer).queryByText(/接入完成/)).not.toBeInTheDocument()
 
       phases = [...phases, { session_id: 's_new', capability: 'full', fingerprint_hash: 'c', started_at: '2026-04-24T09:02:00Z', last_trusted_online_at: '2026-04-24T09:03:00Z', ever_connected: true }]
       await act(async () => { releaseSlowRead?.() })
-      expect(await within(drawer).findByText(/接入完成/)).toBeInTheDocument()
+      expect(within(drawer).getByText(/接入完成/)).toBeInTheDocument()
       expect(within(drawer).queryByRole('button', { name: /重新生成/ })).not.toBeInTheDocument()
       expect(drawer.querySelector('[aria-label="一键安装命令"]')).toBeNull()
       expect(within(drawer).getByRole('button', { name: '完成并查看监控实例' })).toHaveClass('primary')
