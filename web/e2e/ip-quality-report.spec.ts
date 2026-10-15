@@ -532,7 +532,9 @@ test('a late IPv6 response cannot overwrite IPv4 after back navigation, and forw
 // 而不是 POST 之前的空闲状态（真实 center 不会在请求进行中返回空闲）。
 async function startCollect(page: Page, api: { useProfile: (profile: ApiFixtureProfile) => void }, scenario: IPQualityScenario, outcome: CollectOutcome) {
   await page.getByRole('button', { name: '立即采集' }).click()
+  const collectRequestSent = page.waitForRequest((request) => request.method() === 'POST' && new URL(request.url()).pathname === IPQ_COLLECT_PATH)
   await page.getByRole('menuitem', { name: UI.collectDual }).click()
+  expect((await collectRequestSent).postDataJSON()).toEqual({ ip_versions: [4, 6] })
   await expect(collectStatus(page)).toContainText('正在采集 IPv4 / IPv6')
   api.useProfile(ipQualityScenarioProfile(scenario, { collect: { ...COLLECT_AVAILABLE, request: collectRequest('dispatched', outcome) } }))
   await expect(page.getByRole('button', { name: /采集中/ })).toBeDisabled()

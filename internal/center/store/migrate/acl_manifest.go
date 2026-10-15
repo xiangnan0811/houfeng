@@ -478,20 +478,23 @@ func oneOfPrivilege(got AppACLPrivilegeKind, allowed ...AppACLPrivilegeKind) boo
 }
 
 func compareAppACLPrivilege(left, right AppACLPrivilege) int {
-	for _, pair := range [][2]string{
-		{string(left.Subject), string(right.Subject)},
-		{string(left.ObjectClass), string(right.ObjectClass)},
-		{left.SchemaName, right.SchemaName},
-		{left.ObjectIdentity, right.ObjectIdentity},
-		{left.ColumnName, right.ColumnName},
-		{string(left.Privilege), string(right.Privilege)},
-	} {
-		if pair[0] < pair[1] {
-			return -1
-		}
-		if pair[0] > pair[1] {
-			return 1
-		}
+	if order := strings.Compare(string(left.Subject), string(right.Subject)); order != 0 {
+		return order
+	}
+	if order := strings.Compare(string(left.ObjectClass), string(right.ObjectClass)); order != 0 {
+		return order
+	}
+	if order := strings.Compare(left.SchemaName, right.SchemaName); order != 0 {
+		return order
+	}
+	if order := strings.Compare(left.ObjectIdentity, right.ObjectIdentity); order != 0 {
+		return order
+	}
+	if order := strings.Compare(left.ColumnName, right.ColumnName); order != 0 {
+		return order
+	}
+	if order := strings.Compare(string(left.Privilege), string(right.Privilege)); order != 0 {
+		return order
 	}
 	if left.GrantOption == right.GrantOption {
 		return 0

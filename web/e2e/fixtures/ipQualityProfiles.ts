@@ -962,6 +962,6 @@ export function ipQualityScenarioProfile(
 
 export function collectPostRoute(outcome: CollectOutcome = 'both_success'): ApiFixtureProfile {
   return {
-    [apiRouteKey('POST', IPQ_COLLECT_PATH)]: { status: 202, body: { ...COLLECT_AVAILABLE, request: collectRequest('pending', outcome) }, expectNoBody: true as const },
+    [apiRouteKey('POST', IPQ_COLLECT_PATH)]: { status: 202, body: { ...COLLECT_AVAILABLE, request: collectRequest('pending', outcome) }, expectedBodyKeys: ['ip_versions'] },
   }
 }

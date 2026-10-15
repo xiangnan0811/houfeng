@@ -1343,16 +1343,20 @@ func compileAppACLCurrentCatalogContract(
 		}
 	}
 
-	canonicalBody, err := CanonicalPrivilegeSetBodyV1(contract.RoleBindings, contract.Privileges)
+	// Normalize the in-memory tuples directly instead of serializing and parsing
+	// them just to recover the same sorted values. The tuple validators enforce
+	// the wire string bounds; retain the parser's privilege-count bound here.
+	if len(contract.Privileges) > 65536 {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonical privilege set has too many privileges")
+	}
+	contract.RoleBindings, err = canonicalRoleBindings(contract.RoleBindings)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL role bindings: %w", err)
+	}
+	contract.Privileges, err = canonicalPrivileges(contract.Privileges)
 	if err != nil {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL privileges: %w", err)
 	}
-	canonicalSet, err := ParseCanonicalPrivilegeSetBodyV1(canonicalBody)
-	if err != nil {
-		return appACLEffectiveCatalogContract{}, fmt.Errorf("parse current APP ACL privileges: %w", err)
-	}
-	contract.RoleBindings = append([]AppACLRoleBinding(nil), canonicalSet.RoleBindings...)
-	contract.Privileges = append([]AppACLPrivilege(nil), canonicalSet.Privileges...)
 	contract.AuxiliaryPrivileges, err = canonicalAppACLCurrentAuxiliaryPrivileges(contract.AuxiliaryPrivileges)
 	if err != nil {
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("canonicalize current APP ACL auxiliary privileges: %w", err)
