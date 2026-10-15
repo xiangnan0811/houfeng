@@ -58,6 +58,8 @@ import type {
   SubjectActivitySourceStatus,
   RecordSubjectKind,
   VPSOverview,
+  IPQualityIPType,
+  IPQualityProductSummary,
 } from './types'
 
 function encoded(value: string): string {
@@ -615,6 +617,49 @@ function overviewStringArray(value: unknown): string[] {
   return overviewArray(value).map(overviewString)
 }
 
+function overviewCount(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) invalidVPSOverview()
+  return value
+}
+
+const OVERVIEW_GEO_STATUSES = ['consistent', 'discrepant', 'unknown', 'conflict'] as const
+const OVERVIEW_IP_TYPE_STATUSES = ['native', 'broadcast', 'unknown', 'conflict'] as const
+const OVERVIEW_IP_TYPE_BASES = ['registered_country', 'abuse_contact_country'] as const
+
+// ip_type 只存在于新报告；旧报告缺失或为 null 时保持缺失，不补默认分类。
+function decodeOverviewIPType(value: unknown): IPQualityIPType | null {
+  if (value == null) return null
+  const object = overviewObject(value)
+  const ipType: IPQualityIPType = { status: overviewEnum(object.status, OVERVIEW_IP_TYPE_STATUSES) }
+  if (object.basis != null && object.basis !== '') ipType.basis = overviewEnum(object.basis, OVERVIEW_IP_TYPE_BASES)
+  for (const key of ['provider', 'method', 'country_code', 'comparison_country_code', 'upstream_commit'] as const) {
+    const text = optionalOverviewString(object, key)
+    if (text !== undefined) ipType[key] = text
+  }
+  if (object.fork_revision != null) ipType.fork_revision = overviewCount(object.fork_revision)
+  return ipType
+}
+
+// IP 质量 revision1 的服务端事实摘要：形状不合法即整份 overview 无效，不在前端补默认值。
+function decodeOverviewProductSummary(value: unknown): IPQualityProductSummary {
+  const summary = overviewObject(value)
+  const decoded: IPQualityProductSummary = {
+    risk_flags: overviewStringArray(summary.risk_flags),
+    high_risk_sources: overviewStringArray(summary.high_risk_sources),
+    restricted_services: overviewStringArray(summary.restricted_services),
+    blacklist_listed_count: overviewCount(summary.blacklist_listed_count),
+    blacklist_checked_count: overviewCount(summary.blacklist_checked_count),
+    service_available_count: overviewCount(summary.service_available_count),
+    service_partial_count: overviewCount(summary.service_partial_count),
+    service_restricted_count: overviewCount(summary.service_restricted_count),
+    service_unknown_count: overviewCount(summary.service_unknown_count),
+    geo_status: overviewEnum(summary.geo_status, OVERVIEW_GEO_STATUSES),
+  }
+  const ipType = decodeOverviewIPType(summary.ip_type)
+  if (ipType) decoded.ip_type = ipType
+  return decoded
+}
+
 function isLeapYear(year: number): boolean {
   return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
 }
@@ -682,6 +727,8 @@ function decodeOverviewSummaryCell(value: unknown): VPSOverview['summary']['over
   if (detail !== undefined) decoded.detail = detail
   // 只接受合法地址族；缺失或非法时不猜。
   if (cell.ip_version === 4 || cell.ip_version === 6) decoded.ip_version = cell.ip_version
+  if (cell.product_revision !== undefined) decoded.product_revision = overviewCount(cell.product_revision)
+  if (cell.product_summary != null) decoded.product_summary = decodeOverviewProductSummary(cell.product_summary)
   return decoded
 }
 

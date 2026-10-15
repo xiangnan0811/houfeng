@@ -49,8 +49,8 @@ func testPostgresIntegrationAppACLCurrentP75Fresh(t *testing.T) {
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
-	if len(before.Ledger) != 77 || before.Ledger[len(before.Ledger)-1].Name != appACLCurrentP76Migration {
-		t.Fatalf("fresh C76 ledger = %#v, want 77 sources ending in 0076", before.Ledger)
+	if len(before.Ledger) != 79 || before.Ledger[len(before.Ledger)-1].Name != appACLCurrentP78Migration {
+		t.Fatalf("fresh C78 ledger = %#v, want 79 sources ending in 0078", before.Ledger)
 	}
 	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
 	if err != nil {
@@ -89,14 +89,13 @@ func testPostgresIntegrationAppACLCurrentP75SettingsState(t *testing.T, state st
 	assertAppACLCurrentP75FamilyStateRead(t, ctx, runtimeDB)
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
 	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
-	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 ||
-		len(after.Ledger) != len(before.Ledger)+1 ||
-		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
-		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP76Migration {
-		t.Fatalf("C76 did not append exactly one manifest and 0076 ledger row: %#v", after)
+	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
+		t.Fatalf("current successor must append exactly one manifest: %#v", after.Manifest)
 	}
-	if !appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
-		!appACLCurrentPrivilegesWithFamilyStateSelect(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
+	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
+		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration)
+	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
+		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) ||
 		!reflect.DeepEqual(after.Catalog.Functions, before.Catalog.Functions) {
@@ -109,14 +108,15 @@ func testPostgresIntegrationAppACLCurrentP75SettingsState(t *testing.T, state st
 	var retainedOwners []AppACLEffectiveCatalogObjectOwnerR1
 	newOwners := 0
 	for _, owner := range after.Catalog.Owners {
-		if owner == wantOwner {
+		if owner == wantOwner || owner == (AppACLEffectiveCatalogObjectOwnerR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "ip_quality_intelligence", OwnerRole: fixture.migratorRole}) ||
+			owner == (AppACLEffectiveCatalogObjectOwnerR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "ip_quality_source_cache", OwnerRole: fixture.migratorRole}) {
 			newOwners++
 		} else {
 			retainedOwners = append(retainedOwners, owner)
 		}
 	}
-	if newOwners != 1 || !reflect.DeepEqual(retainedOwners, before.Catalog.Owners) {
-		t.Fatalf("C76 object inventory changed beyond one migrator-owned family-state view")
+	if newOwners != 3 || !reflect.DeepEqual(retainedOwners, before.Catalog.Owners) {
+		t.Fatalf("C77 object inventory changed beyond the family-state view and product tables")
 	}
 	assertAppACLCurrentSettingsPresenceSnapshotEqual(t, beforeSettings, readAppACLCurrentSettingsPresenceSnapshot(t, ctx, migratorDB))
 	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
@@ -189,10 +189,10 @@ func appACLCurrentFamilyStateSelectObservation(runtimeRole string) AppACLEffecti
 	}
 }
 
-// Compare the entire predecessor inventory plus one independently stated tuple;
-// removal, duplicates, grant options and other new privileges remain failures.
-func appACLCurrentPrivilegesWithFamilyStateSelect(after, before []AppACLEffectiveCatalogPrivilegeObservationR1, runtimeRole string) bool {
-	if len(after) != len(before)+1 {
+// Compare the entire predecessor inventory plus the family-state SELECT and
+// product table grants required by the current target. No other delta is allowed.
+func appACLCurrentPrivilegesWithFamilyStateAndProductTables(after, before []AppACLEffectiveCatalogPrivilegeObservationR1, runtimeRole string) bool {
+	if len(after) != len(before)+8 {
 		return false
 	}
 	want := make(map[AppACLEffectiveCatalogPrivilegeObservationR1]struct{}, len(after))
@@ -200,6 +200,9 @@ func appACLCurrentPrivilegesWithFamilyStateSelect(after, before []AppACLEffectiv
 		want[privilege] = struct{}{}
 	}
 	want[appACLCurrentFamilyStateSelectObservation(runtimeRole)] = struct{}{}
+	for _, privilege := range appACLCurrentProductExpectedObservations(runtimeRole) {
+		want[privilege] = struct{}{}
+	}
 	if len(want) != len(after) {
 		return false
 	}

@@ -23,6 +23,8 @@ const MONITORING_STATUS_LABELS: Record<string, string> = {
 }
 
 const IP_STATUS_LABELS: Record<string, string> = {
+  // revision1：服务端按明确风险命中给出 risk；否则沿用采集状态，不合成低风险。
+  risk: '发现风险',
   low: '低风险',
   medium: '中风险',
   moderate: '中风险',

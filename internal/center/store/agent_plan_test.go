@@ -91,6 +91,12 @@ func TestBuildSyncPlanUsesPersistedSettings(t *testing.T) {
 	if plan.IPQualityPlan.FrequencySeconds != centersettings.Default().IPQuality.FrequencySeconds {
 		t.Fatalf("IPQualityPlan.FrequencySeconds = %d, want %d", plan.IPQualityPlan.FrequencySeconds, centersettings.Default().IPQuality.FrequencySeconds)
 	}
+	if plan.IPQualityPlan.ProductRevision != agentapi.IPQualityProductRevision {
+		t.Fatalf("ProductRevision = %d, want %d", plan.IPQualityPlan.ProductRevision, agentapi.IPQualityProductRevision)
+	}
+	if plan.IPQualityPlan.MailEnabled == nil || !*plan.IPQualityPlan.MailEnabled {
+		t.Fatalf("MailEnabled = %v, want true when persisted JSON omits mail_enabled", plan.IPQualityPlan.MailEnabled)
+	}
 	if len(plan.ProbeAssignments) != 2 {
 		t.Fatalf("len(ProbeAssignments) = %d, want 2", len(plan.ProbeAssignments))
 	}
@@ -164,6 +170,52 @@ func TestBuildSyncPlanIncludesIPQualityPlanFromSettings(t *testing.T) {
 	}
 	if len(plan.IPQualityPlan.Services) != 2 || plan.IPQualityPlan.Services[1] != "chatgpt" {
 		t.Fatalf("IPQualityPlan.Services = %#v, want netflix/chatgpt", plan.IPQualityPlan.Services)
+	}
+	if plan.IPQualityPlan.ProductRevision != agentapi.IPQualityProductRevision {
+		t.Fatalf("ProductRevision = %d, want %d", plan.IPQualityPlan.ProductRevision, agentapi.IPQualityProductRevision)
+	}
+	if plan.IPQualityPlan.MailEnabled == nil || *plan.IPQualityPlan.MailEnabled {
+		t.Fatalf("MailEnabled = %v, want false from explicit settings", plan.IPQualityPlan.MailEnabled)
+	}
+}
+
+func TestBuildSyncPlanNegotiatesIPQualityProduct(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "omitted mail stays enabled", raw: `{"enabled":true,"frequency_seconds":86400,"timeout_seconds":15,"services":["netflix"]}`, want: true},
+		{name: "explicit mail false", raw: `{"enabled":true,"frequency_seconds":86400,"timeout_seconds":15,"services":["netflix"],"mail_enabled":false}`, want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := &PostgresAgentPlanRepository{db: fakeAgentPlanQueryer{
+				queryRow: func(_ context.Context, sql string, args ...any) pgx.Row {
+					if sql != selectAgentPlanMonitoringInstanceLabelsSQL || args[0] != "mi_001" {
+						return fakeAgentPlanRow{scan: func(dest ...any) error { return errors.New("unexpected QueryRow") }}
+					}
+					return fakeAgentPlanRow{scan: func(dest ...any) error {
+						*(dest[0].(*[]string)) = []string{"edge"}
+						*(dest[5].(*bool)) = true
+						*(dest[7].(*[]byte)) = []byte(tc.raw)
+						return nil
+					}}
+				},
+			}}
+			plan, err := repo.BuildSyncPlan(context.Background(), "mi_001")
+			if err != nil {
+				t.Fatalf("BuildSyncPlan() error = %v", err)
+			}
+			if plan.IPQualityPlan == nil || plan.IPQualityPlan.ProductRevision != agentapi.IPQualityProductRevision {
+				t.Fatalf("plan = %#v, want product revision 1", plan.IPQualityPlan)
+			}
+			if plan.IPQualityPlan.MailEnabled == nil || *plan.IPQualityPlan.MailEnabled != tc.want {
+				t.Fatalf("MailEnabled = %v, want %v", plan.IPQualityPlan.MailEnabled, tc.want)
+			}
+		})
 	}
 }
 

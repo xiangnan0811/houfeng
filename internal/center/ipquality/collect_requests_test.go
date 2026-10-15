@@ -51,18 +51,18 @@ func TestCollectRequestsDispatchAndCompleteFromEchoedReport(t *testing.T) {
 	requests := newTestCollectRequests()
 	request, _ := requests.Request("mi_001", now)
 
-	if got := requests.PendingRequestID("mi_unknown", now); got != "" {
-		t.Fatalf("PendingRequestID(unknown) = %q, want empty", got)
+	if got := requests.PendingRequest("mi_unknown", now, nil); got.RequestID != "" {
+		t.Fatalf("PendingRequest(unknown) = %#v, want empty", got)
 	}
-	if got := requests.PendingRequestID("mi_001", now.Add(5*time.Second)); got != request.RequestID {
-		t.Fatalf("PendingRequestID() = %q, want %q", got, request.RequestID)
+	if got := requests.PendingRequest("mi_001", now.Add(5*time.Second), nil); got.RequestID != request.RequestID {
+		t.Fatalf("PendingRequest() = %#v, want %q", got, request.RequestID)
 	}
 	dispatched, _ := requests.Latest("mi_001", now.Add(6*time.Second))
 	if dispatched.Status != CollectRequestDispatched || dispatched.DispatchedAt == nil {
 		t.Fatalf("latest = %#v, want dispatched", dispatched)
 	}
 	// 再次下发保持首次下发时间。
-	requests.PendingRequestID("mi_001", now.Add(10*time.Second))
+	requests.PendingRequest("mi_001", now.Add(10*time.Second), nil)
 	again, _ := requests.Latest("mi_001", now.Add(11*time.Second))
 	if !again.DispatchedAt.Equal(now.Add(5 * time.Second)) {
 		t.Fatalf("DispatchedAt = %s, want first dispatch time", again.DispatchedAt)
@@ -97,8 +97,8 @@ func TestCollectRequestsDispatchAndCompleteFromEchoedReport(t *testing.T) {
 	if len([]rune(completed.ErrorSummary)) != maxCollectErrorSummaryRunes+1 {
 		t.Fatalf("ErrorSummary runes = %d, want truncated to %d plus ellipsis", len([]rune(completed.ErrorSummary)), maxCollectErrorSummaryRunes)
 	}
-	if got := requests.PendingRequestID("mi_001", now.Add(32*time.Second)); got != "" {
-		t.Fatalf("PendingRequestID(after completion) = %q, want empty", got)
+	if got := requests.PendingRequest("mi_001", now.Add(32*time.Second), nil); got.RequestID != "" {
+		t.Fatalf("PendingRequest(after completion) = %#v, want empty", got)
 	}
 
 	next, _ := requests.Request("mi_001", now.Add(40*time.Second))
@@ -112,11 +112,11 @@ func TestCollectRequestsExpireAndPrune(t *testing.T) {
 	now := time.Date(2026, time.September, 30, 8, 0, 0, 0, time.UTC)
 	requests := newTestCollectRequests()
 	request, _ := requests.Request("mi_001", now)
-	requests.PendingRequestID("mi_001", now)
+	requests.PendingRequest("mi_001", now, nil)
 
 	expiredAt := now.Add(CollectRequestTTL)
-	if got := requests.PendingRequestID("mi_001", expiredAt); got != "" {
-		t.Fatalf("PendingRequestID(expired) = %q, want empty", got)
+	if got := requests.PendingRequest("mi_001", expiredAt, nil); got.RequestID != "" {
+		t.Fatalf("PendingRequest(expired) = %#v, want empty", got)
 	}
 	expired, ok := requests.Latest("mi_001", expiredAt)
 	if !ok || expired.Status != CollectRequestExpired {
@@ -190,7 +190,7 @@ func TestCollectRequestsPairedGroupsNeverMixOrOverwriteFamily(t *testing.T) {
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	registry := newTestCollectRequests()
 	request, _ := registry.Request("mi_001", now)
-	registry.PendingRequestID("mi_001", now)
+	registry.PendingRequest("mi_001", now, nil)
 	a4 := pairedCollectReport(request.RequestID, "A", 4, "available", "success", now)
 	b6 := pairedCollectReport(request.RequestID, "B", 6, "available", "success", now.Add(time.Second))
 	registry.ObserveReports("mi_001", []ReportWrite{a4, b6}, now.Add(2*time.Second))
@@ -256,7 +256,7 @@ func TestCollectRequestsRejectMalformedPairedTerminals(t *testing.T) {
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	for name, mutate := range map[string]func(*ReportWrite){
 		"future revision": func(r *ReportWrite) {
-			r.DiagnosticsJSON = []byte(strings.Replace(string(r.DiagnosticsJSON), `"collection_revision":4`, `"collection_revision":5`, 1))
+			r.DiagnosticsJSON = []byte(strings.Replace(string(r.DiagnosticsJSON), `"collection_revision":4`, `"collection_revision":6`, 1))
 			r.CollectionMetadata = agentapi.ParseCollectionMetadata(r.DiagnosticsJSON)
 		},
 		"missing collection ID": func(r *ReportWrite) {
@@ -344,7 +344,7 @@ func TestCollectRequestsDoNotExposeMutableOrUnsafeResults(t *testing.T) {
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	registry := newTestCollectRequests()
 	request, _ := registry.Request("mi_001", now)
-	registry.PendingRequestID("mi_001", now)
+	registry.PendingRequest("mi_001", now, nil)
 	a := pairedCollectReport(request.RequestID, "round", 4, "available", "partial", now)
 	a.ErrorCode, a.ErrorSummary = "https://secret.example/?token=password", "private token password"
 	registry.ObserveReports("mi_001", []ReportWrite{a}, now.Add(time.Second))

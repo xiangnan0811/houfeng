@@ -598,6 +598,9 @@ func cloneIPQualityReports(reports []agentapi.IPQualityReportPayload) []agentapi
 		cloned[i].RawJSON = append([]byte(nil), report.RawJSON...)
 		cloned[i].ProviderResults = append([]agentapi.IPQualityProviderResultPayload(nil), report.ProviderResults...)
 		cloned[i].ServiceUnlocks = append([]agentapi.IPQualityServiceUnlockPayload(nil), report.ServiceUnlocks...)
+		cloned[i].DiagnosticsJSON = append([]byte(nil), report.DiagnosticsJSON...)
+		cloned[i].Coverage = clonePointer(report.Coverage)
+		cloneIPQualityProductFields(&cloned[i])
 	}
 	return cloned
 }

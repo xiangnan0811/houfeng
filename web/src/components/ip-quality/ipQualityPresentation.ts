@@ -1,55 +1,12 @@
 import type { BadgeTone } from '../atoms'
 import type {
-  IPQualityCoverage,
   IPQualityProviderResult,
+  IPQualityServiceCheck,
   IPQualityServiceUnlock,
   VPSIPQualityReport,
 } from '../../lib/types'
 
-export type RiskFlagKey = 'proxy' | 'tor' | 'vpn' | 'server' | 'abuse' | 'robot'
-
-export type RiskFlag = {
-  key: RiskFlagKey
-  label: string
-  active: boolean | null
-  negative: boolean
-}
-
-export type RiskSignalCount = {
-  key: RiskFlagKey
-  label: string
-  yes: number
-  no: number
-  unknown: number
-  negative: boolean
-}
-
 export type UnlockStatusKind = 'unlocked' | 'partial' | 'blocked' | 'unknown'
-
-export type ProviderSourceGap = {
-  provider: string
-  label: string
-  tone: BadgeTone
-}
-
-const RISK_FLAG_DEFINITIONS: Array<{
-  key: RiskFlagKey
-  label: string
-  negative: boolean
-  read: (result: IPQualityProviderResult) => boolean | null | undefined
-}> = [
-  { key: 'proxy', label: 'Proxy', negative: true, read: (result) => result.is_proxy },
-  { key: 'tor', label: 'Tor', negative: true, read: (result) => result.is_tor },
-  { key: 'vpn', label: 'VPN', negative: true, read: (result) => result.is_vpn },
-  { key: 'server', label: 'Server', negative: false, read: (result) => result.is_server },
-  { key: 'abuse', label: 'Abuse', negative: true, read: (result) => result.is_abuser },
-  { key: 'robot', label: 'Robot', negative: true, read: (result) => result.is_robot },
-]
-
-const NEGATIVE_RISK_FLAG_DEFINITIONS = RISK_FLAG_DEFINITIONS.filter((definition) => definition.negative)
-
-// 五类负面风险字段（proxy、tor、vpn、abuse、robot）；机房不是负面风险。
-export const TOTAL_NEGATIVE_RISK_FLAGS = NEGATIVE_RISK_FLAG_DEFINITIONS.length
 
 export function serviceLabel(value: string): string {
   const normalized = value.toLowerCase()
@@ -63,6 +20,7 @@ export function serviceLabel(value: string): string {
   return value
 }
 
+// 旧版报告（无 product）的服务端/来源评级，只作为“旧版评级”标注展示。
 export function riskLevelLabel(value?: string): string {
   const risk = (value ?? '').trim().toLowerCase()
   if (risk === 'low' || risk === 'clean' || risk === 'safe') return '低风险'
@@ -77,42 +35,14 @@ export function riskTone(value?: string): BadgeTone {
   if (risk === 'critical') return 'critical'
   if (risk === 'high') return 'alert'
   if (risk === 'medium' || risk === 'moderate') return 'notice'
-  if (risk === 'low' || risk === 'clean' || risk === 'safe') return 'normal'
   return 'neutral'
-}
-
-// 只认可比较的标准等级；其它供应商自定义文本不参与聚合。
-const STANDARD_RISK_LEVEL_RANK: Readonly<Record<string, number>> = {
-  low: 1,
-  medium: 2,
-  high: 3,
-  critical: 4,
-}
-
-function standardRiskLevel(value?: string): string | null {
-  const risk = (value ?? '').trim().toLowerCase()
-  if (risk === 'clean' || risk === 'safe') return 'low'
-  if (risk === 'moderate') return 'medium'
-  return Object.hasOwn(STANDARD_RISK_LEVEL_RANK, risk) ? risk : null
-}
-
-export function riskFlags(result: IPQualityProviderResult): RiskFlag[] {
-  return RISK_FLAG_DEFINITIONS.map((definition) => {
-    const raw = definition.read(result)
-    return {
-      key: definition.key,
-      label: definition.label,
-      active: typeof raw === 'boolean' ? raw : null,
-      negative: definition.negative,
-    }
-  })
 }
 
 export function providerSucceeded(result: IPQualityProviderResult): boolean {
   return sourceStatusKind(result) === 'success'
 }
 
-function sourceStatusKind(result: IPQualityProviderResult): string {
+export function sourceStatusKind(result: IPQualityProviderResult): string {
   return result.status == null ? 'success' : result.status.trim().toLowerCase()
 }
 
@@ -120,77 +50,11 @@ function sourceTypeKind(result: IPQualityProviderResult): string {
   return result.source_type == null ? 'default' : result.source_type.trim().toLowerCase()
 }
 
-function knownNegativeFlagCount(results: IPQualityProviderResult[]): number {
-  const successful = results.filter(providerSucceeded)
-  return NEGATIVE_RISK_FLAG_DEFINITIONS.filter((definition) => successful.some((result) => {
-    const value = definition.read(result)
-    return value === true || value === false
-  })).length
-}
-
-export function riskEvidenceComplete(results: IPQualityProviderResult[]): boolean {
-  return knownNegativeFlagCount(results) === TOTAL_NEGATIVE_RISK_FLAGS
-}
-
+// 历史报告里无 adapter 的可选来源占位（not_configured/skipped）只在诊断出现。
 export function visibleProviderResults(results: IPQualityProviderResult[]): IPQualityProviderResult[] {
   return results.filter((result) => {
     const status = sourceStatusKind(result)
-    const sourceType = sourceTypeKind(result)
-    if (sourceType === 'optional' && (status === 'not_configured' || status === 'skipped')) {
-      return false
-    }
-    return true
-  })
-}
-
-function activeRiskFlags(result: IPQualityProviderResult): RiskFlag[] {
-  return riskFlags(result).filter((flag) => flag.active === true)
-}
-
-// 成功来源命中的负面信号，按信号类去重：多个数据库同时判 VPN 只算一项。
-export function negativeRiskSignals(results: IPQualityProviderResult[]): RiskFlag[] {
-  const hits = new Set<RiskFlagKey>()
-  for (const result of results.filter(providerSucceeded)) {
-    for (const flag of activeRiskFlags(result)) {
-      if (flag.negative) hits.add(flag.key)
-    }
-  }
-  return RISK_FLAG_DEFINITIONS
-    .filter((definition) => hits.has(definition.key))
-    .map((definition) => ({ key: definition.key, label: definition.label, active: true, negative: true }))
-}
-
-// 成功来源中标准等级为高/严重的数据库，单独列出来源，不折算为信号项数。
-export function highRiskProviders(results: IPQualityProviderResult[]): string[] {
-  return results
-    .filter(providerSucceeded)
-    .filter((result) => {
-      const level = standardRiskLevel(result.risk_level)
-      return level === 'high' || level === 'critical'
-    })
-    .map((result) => result.provider)
-}
-
-export function riskSignalCounts(results: IPQualityProviderResult[]): RiskSignalCount[] {
-  const successfulResults = results.filter(providerSucceeded)
-  return RISK_FLAG_DEFINITIONS.map((definition) => {
-    let yes = 0
-    let no = 0
-    let unknown = 0
-    for (const result of successfulResults) {
-      const value = definition.read(result)
-      if (value === true) yes += 1
-      else if (value === false) no += 1
-      else unknown += 1
-    }
-    return {
-      key: definition.key,
-      label: definition.label,
-      yes,
-      no,
-      unknown,
-      negative: definition.negative,
-    }
+    return !(sourceTypeKind(result) === 'optional' && (status === 'not_configured' || status === 'skipped'))
   })
 }
 
@@ -208,9 +72,10 @@ export function serviceProbeRevision(report: VPSIPQualityReport): number | null 
   return typeof revision === 'number' && Number.isFinite(revision) ? revision : null
 }
 
-// 免登录服务探测的报告级/行级 revision：数值 2 与 3 均为同一能力边界。
+// 免登录服务探测的报告级/行级 revision：2、3、4 同属业务证据探测；5 为固定 IPQuality 脚本与其余免登录探测的混合实现。
+// 行级优先读各自 extra_json.probe_revision：新报告里 TikTok/Disney+/Reddit 仍为 4，四项脚本服务为 5。
 export function isAnonymousServiceProbeRevision(revision: unknown): boolean {
-  return revision === 2 || revision === 3
+  return revision === 2 || revision === 3 || revision === 4 || revision === 5
 }
 
 function ipFamily(value: unknown): 4 | 6 | null {
@@ -293,95 +158,13 @@ export function familyStateNotice(report: VPSIPQualityReport, family: 4 | 6): Fa
   return null
 }
 
-export type RiskAssessmentBlocker = 'missing_report' | 'ambiguous' | 'ip_conflict'
+export type ReportAttributionBlocker = 'ambiguous' | 'ip_conflict'
 
-// 归属不唯一或来源返回不同 IP 时，数据库事实不能聚合成本 VPS 的评级。
-export function riskAssessmentBlocker(report: VPSIPQualityReport): RiskAssessmentBlocker | null {
-  if (!report.summary) return 'missing_report'
-  if (report.summary.ambiguous) return 'ambiguous'
+// 归属不唯一或来源返回不同 IP：事实仍展示，但页头给出复核标记。
+export function reportAttributionBlocker(report: VPSIPQualityReport): ReportAttributionBlocker | null {
+  if (report.summary?.ambiguous) return 'ambiguous'
   if (reportDiagnostics(report)?.ip_conflict === true) return 'ip_conflict'
   return null
-}
-
-export type RiskAssessment = {
-  level: string | null
-  complete: boolean
-  knownFlags: number
-  totalFlags: number
-}
-
-// 数据库风险评级：只读成功来源的标准 risk_level 取最高；服务探测结果不参与。
-export function deriveRiskAssessment(report: VPSIPQualityReport): RiskAssessment {
-  const successful = report.provider_results.filter(providerSucceeded)
-  const knownFlags = knownNegativeFlagCount(successful)
-  if (riskAssessmentBlocker(report)) {
-    return { level: null, complete: false, knownFlags, totalFlags: TOTAL_NEGATIVE_RISK_FLAGS }
-  }
-  let level: string | null = null
-  for (const result of successful) {
-    const candidate = standardRiskLevel(result.risk_level)
-    if (candidate && (level == null || STANDARD_RISK_LEVEL_RANK[candidate]! > STANDARD_RISK_LEVEL_RANK[level]!)) {
-      level = candidate
-    }
-  }
-  return {
-    level,
-    complete: knownFlags === TOTAL_NEGATIVE_RISK_FLAGS,
-    knownFlags,
-    totalFlags: TOTAL_NEGATIVE_RISK_FLAGS,
-  }
-}
-
-export type RiskVerdict = {
-  // 大字：标准等级、“证据不完整”或 “—”。
-  value: string
-  // level：已发现等级；gap：低风险但字段不完整；none：无聚合等级。
-  valueKind: 'level' | 'gap' | 'none'
-  headline: string
-  // 证据范围说明，例如 “风险字段 4/5，结论不完整”。
-  scope: string | null
-  tone: BadgeTone
-}
-
-function incompleteScope(assessment: RiskAssessment): string {
-  return `风险字段 ${assessment.knownFlags}/${assessment.totalFlags}，结论不完整`
-}
-
-export function riskVerdict(report: VPSIPQualityReport): RiskVerdict {
-  const blocker = riskAssessmentBlocker(report)
-  if (blocker === 'missing_report') {
-    return { value: '—', valueKind: 'none', headline: '缺少 IP 质量报告', scope: null, tone: 'neutral' }
-  }
-  if (blocker === 'ambiguous') {
-    return { value: '—', valueKind: 'none', headline: 'IP 归属不唯一，需先复核', scope: '数据库明细仍可在下方查看', tone: 'neutral' }
-  }
-  if (blocker === 'ip_conflict') {
-    return { value: '—', valueKind: 'none', headline: '来源返回了不同 IP，需复核来源', scope: '数据库明细仍可在下方查看', tone: 'neutral' }
-  }
-
-  const assessment = deriveRiskAssessment(report)
-  const stale = report.summary?.stale === true
-  let verdict: RiskVerdict
-  if (assessment.level) {
-    const label = riskLevelLabel(assessment.level)
-    if (assessment.complete) {
-      verdict = { value: label, valueKind: 'level', headline: `风险字段 ${assessment.totalFlags}/${assessment.totalFlags} 已返回`, scope: null, tone: riskTone(assessment.level) }
-    } else if (assessment.level === 'low') {
-      // 缺字段时“低风险”只是已返回来源的结论，大字改为证据缺口，不着绿。
-      verdict = { value: '证据不完整', valueKind: 'gap', headline: `已返回来源：${label}`, scope: `风险字段 ${assessment.knownFlags}/${assessment.totalFlags}`, tone: 'neutral' }
-    } else {
-      // 中/高/严重是已发现的负面证据，缺口不能遮蔽它。
-      verdict = { value: label, valueKind: 'level', headline: `已返回来源：${label}`, scope: incompleteScope(assessment), tone: riskTone(assessment.level) }
-    }
-  } else if (negativeRiskSignals(report.provider_results).length > 0) {
-    verdict = { value: '—', valueKind: 'none', headline: '发现风险信号', scope: assessment.complete ? null : incompleteScope(assessment), tone: 'alert' }
-  } else if (assessment.complete) {
-    verdict = { value: '—', valueKind: 'none', headline: '已返回风险字段未命中', scope: null, tone: 'neutral' }
-  } else {
-    verdict = { value: '—', valueKind: 'none', headline: '证据不足', scope: incompleteScope(assessment), tone: 'neutral' }
-  }
-  // 过期报告保留事实，但不作为当前评级着色。
-  return stale ? { ...verdict, tone: 'neutral' } : verdict
 }
 
 function unlockStatusKind(status?: string): UnlockStatusKind {
@@ -435,12 +218,15 @@ export function unlockStatusText(kind: UnlockStatusKind, anonymousProbe: boolean
 
 export function unlockStatusLabel(unlock: IPQualityServiceUnlock, anonymousProbe: boolean): string {
   const kind = effectiveUnlockStatus(unlock)
-  const label = unlockStatusText(kind, anonymousProbe)
+  // Netflix 仅自制剧可访问是独立的部分结论，用短标签而不是笼统的“部分可用”。
+  const label = kind === 'partial' && (unlock.unlock_type ?? '').trim().toLowerCase() === 'originals_only'
+    ? '仅自制剧'
+    : unlockStatusText(kind, anonymousProbe)
   const region = kind === 'unknown' ? '' : (unlock.region ?? '').trim()
   return region ? `${label} · ${region}` : label
 }
 
-// 单行可由安全 extra_json.probe_revision 2/3 识别为免登录探测；旧行不套用新范围。
+// 单行可由安全 extra_json.probe_revision 识别为免登录探测；旧行不套用新范围。
 export function serviceRowUsesAnonymousProbe(unlock: IPQualityServiceUnlock): boolean {
   return isAnonymousServiceProbeRevision(objectRecord(unlock.extra_json)?.probe_revision)
 }
@@ -475,13 +261,14 @@ function safeDiagnosticText(value?: string): string | null {
 
 // agent 的 UnlockType 只描述检测范围，页面显示中文范围，不显示内部枚举。
 const UNLOCK_TYPE_LABELS: Readonly<Record<string, string>> = {
-  catalog_sample: '抽样目录可访问',
-  sample_titles_unavailable: '抽样片目不可用，未验证完整片库',
-  web_and_app: 'Web 与 App 入口',
-  web_only: '仅 Web 入口可用',
-  app_only: '仅 App 入口可用',
-  web_verified_app_unknown: 'Web 已验证，App 入口未知',
-  app_verified_web_unknown: 'App 已验证，Web 入口未知',
+  catalog_sample: '样片可访问',
+  sample_titles_unavailable: '样片均不可用',
+  originals_only: '仅自制剧可访问',
+  web_and_app: 'Web 与 App',
+  web_only: '仅 Web',
+  app_only: '仅 App',
+  web_verified_app_unknown: 'Web 可用，App 未知',
+  app_verified_web_unknown: 'App 可用，Web 未知',
   premium_offer: 'Premium 地区展示',
   territory_offer: 'Prime 地区展示',
   supported_location: '地区支持检测',
@@ -520,6 +307,14 @@ const PROBE_FAILURE_LABELS: Readonly<Record<string, string>> = {
   ip_mismatch: '来源返回了不同IP',
   address_family_unavailable: '本轮未检测到该地址族的可用本地地址',
   not_configured: '未接入该检测',
+  unauthorized: '凭据被拒绝',
+  settings_changed: '凭据已变更，本次结果作废',
+  detector_dependency_missing: '检测组件缺少运行依赖',
+  detector_fetch_failed: '检测请求失败',
+  detector_invalid_output: '检测结果无法识别',
+  detector_output_limit: '检测输出超出上限',
+  missing_target_ip: '缺少已确认的出口 IP',
+  client_access_denied: '入口拒绝客户端访问',
 }
 
 // 固定安全错误码的中文短句；未知码返回 null，由调用方决定是否展示原码。
@@ -540,16 +335,23 @@ function httpStatusLabel(status: number | null): string {
 
 // agent 只写固定 snake_case 标签/规则/错误码；不符合的值视为不可信，不展示。
 const SAFE_EVIDENCE_TOKEN = /^[a-z0-9_]{1,64}$/
+// 脚本端点 ID 是固定的连字符标识（netflix-81280792、openai-ios 等）。
+const SAFE_ENDPOINT_TOKEN = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
 function safeEvidenceToken(value: unknown): string | null {
   return typeof value === 'string' && SAFE_EVIDENCE_TOKEN.test(value) ? value : null
 }
 
-// 免登录服务探测的安全 extra_json：evidence_kind 与 revision 2/3 都必须匹配。
-function anonymousServiceEvidence(unlock: IPQualityServiceUnlock): Record<string, unknown> | null {
+export type ServiceEvidenceKind = 'anonymous_service_probe' | 'ipquality_script'
+
+// 服务行自身的证据类型：evidence_kind 与 probe_revision 必须配对（免登录探测 2–4，固定脚本 5）。
+export function serviceEvidenceKind(unlock: IPQualityServiceUnlock): ServiceEvidenceKind | null {
   const extra = objectRecord(unlock.extra_json)
-  if (!extra || extra.evidence_kind !== 'anonymous_service_probe' || !isAnonymousServiceProbeRevision(extra.probe_revision)) return null
-  return extra
+  if (!extra) return null
+  const revision = extra.probe_revision
+  if (extra.evidence_kind === 'anonymous_service_probe' && (revision === 2 || revision === 3 || revision === 4)) return 'anonymous_service_probe'
+  if (extra.evidence_kind === 'ipquality_script' && revision === 5) return 'ipquality_script'
+  return null
 }
 
 export type ServiceEndpointOutcome = 'available' | 'restricted' | 'unknown'
@@ -562,23 +364,37 @@ export type ServiceEndpointDiagnostic = {
   outcome: ServiceEndpointOutcome | null
 }
 
+function validHTTPStatus(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 100 && value <= 599 ? value : null
+}
+
 // 各入口的固定标签、整数 HTTP 状态、规则与错误码；任何非白名单形状的条目整体丢弃。
+// 免登录探测读 endpoints（outcome=available），固定脚本读 diagnostics（outcome=positive），两者统一成同一结构。
 export function serviceEndpointDiagnostics(unlock: IPQualityServiceUnlock): ServiceEndpointDiagnostic[] {
-  const endpoints = anonymousServiceEvidence(unlock)?.endpoints
-  if (!Array.isArray(endpoints)) return []
-  return endpoints.flatMap((raw) => {
+  const kind = serviceEvidenceKind(unlock)
+  if (!kind) return []
+  const extra = objectRecord(unlock.extra_json)
+  const entries = kind === 'ipquality_script' ? extra?.diagnostics : extra?.endpoints
+  if (!Array.isArray(entries)) return []
+  const positive = kind === 'ipquality_script' ? 'positive' : 'available'
+  return entries.flatMap((raw) => {
     const entry = objectRecord(raw)
-    const endpoint = safeEvidenceToken(entry?.endpoint)
+    const endpoint = typeof entry?.endpoint === 'string' && SAFE_ENDPOINT_TOKEN.test(entry.endpoint) ? entry.endpoint : null
     if (!entry || !endpoint) return []
-    const outcome = entry.outcome === 'available' || entry.outcome === 'restricted' || entry.outcome === 'unknown' ? entry.outcome : null
+    const outcome = entry.outcome === positive ? 'available' : entry.outcome === 'restricted' || entry.outcome === 'unknown' ? entry.outcome : null
     return [{
       endpoint,
-      httpStatus: typeof entry.http_status === 'number' && Number.isInteger(entry.http_status) && entry.http_status >= 100 && entry.http_status <= 599 ? entry.http_status : null,
+      httpStatus: validHTTPStatus(entry.http_status),
       matchedRule: safeEvidenceToken(entry.matched_rule),
       errorCode: safeEvidenceToken(entry.error_code),
       outcome,
     }]
   })
+}
+
+// 固定脚本行的判定规则（安全 snake_case）；其余证据类型没有行级规则。
+export function serviceScriptRule(unlock: IPQualityServiceUnlock): string | null {
+  return serviceEvidenceKind(unlock) === 'ipquality_script' ? safeEvidenceToken(objectRecord(unlock.extra_json)?.rule) : null
 }
 
 // http_status 失败的整数状态只取 endpoint 安全诊断（最后一个 http_status 入口），不从 error_summary 反解析。
@@ -600,7 +416,7 @@ function unknownServiceReason(unlock: IPQualityServiceUnlock): string {
   return '本轮未形成可靠结论'
 }
 
-// 服务卡片的补充说明：状态和区域已在徽标里，已知结果只补检测范围，未知结果补原因。
+// 服务卡片的一行补充：已知结果只补检测范围，未知结果补原因。
 export function serviceTileDetail(unlock: IPQualityServiceUnlock): string | null {
   if (effectiveUnlockStatus(unlock) !== 'unknown') return unlockTypeLabel(unlock.unlock_type)
   return unknownServiceReason(unlock)
@@ -613,12 +429,12 @@ export type ObservedServiceRegion = {
   evidence: 'youtube_content_region' | 'youtube_context_gl'
 }
 
-// revision3 可信“页面地区”：所选报告族、probe_revision、evidence_kind、证据类型与国家码全部匹配才采用。
-// 它只描述页面展示的地区，不改变 effectiveUnlockStatus、coverage 或风险。
+// 可信“页面地区”：所选报告族、probe_revision、evidence_kind、证据类型与国家码全部匹配才采用。
+// 它只描述页面展示的地区，不改变 effectiveUnlockStatus 或计数。
 export function observedServiceRegion(unlock: IPQualityServiceUnlock, selectedIPVersion: 4 | 6 | null): ObservedServiceRegion | null {
   const extra = objectRecord(unlock.extra_json)
   if (!extra || selectedIPVersion == null) return null
-  if (extra.probe_revision !== 3 || extra.evidence_kind !== 'anonymous_service_probe' || extra.ip_version !== selectedIPVersion) return null
+  if ((extra.probe_revision !== 3 && extra.probe_revision !== 4) || extra.evidence_kind !== 'anonymous_service_probe' || extra.ip_version !== selectedIPVersion) return null
   const evidence = extra.region_evidence
   const region = extra.observed_region
   if (evidence !== 'youtube_content_region' && evidence !== 'youtube_context_gl') return null
@@ -626,236 +442,66 @@ export function observedServiceRegion(unlock: IPQualityServiceUnlock, selectedIP
   return { region, evidence }
 }
 
-// 卡片上的附加证据/能力说明；不参与状态、统计或风险。
-export function serviceEvidenceNotes(unlock: IPQualityServiceUnlock, selectedIPVersion: 4 | 6 | null): string[] {
-  const kind = effectiveUnlockStatus(unlock)
-  const service = unlock.service.trim().toLowerCase()
-  const notes: string[] = []
-  const observed = kind === 'unknown' ? observedServiceRegion(unlock, selectedIPVersion) : null
-  if (observed) notes.push(`页面地区：${observed.region}；Premium 可用性未知`)
-  // 匿名 HTTP 探测只覆盖抽样目录，原生/DNS 解锁方式不在能力范围内。
-  if (service === 'netflix') notes.push('连接方式未检测')
-  if ((service === 'chatgpt' || service === 'openai') && kind !== 'unknown' && !(unlock.region ?? '').trim()) notes.push('服务地区未知')
-  return notes
+export type ServiceCheckStatus = IPQualityServiceCheck['status']
+
+// typed checks 只接受固定枚举与安全 ID；未知形状整条忽略，不被当作结论。
+export function serviceChecks(unlock: IPQualityServiceUnlock): IPQualityServiceCheck[] {
+  if (!Array.isArray(unlock.checks)) return []
+  return unlock.checks.filter((check) => (
+    check != null
+    && safeEvidenceToken(check.id) != null
+    && (check.status === 'available' || check.status === 'restricted' || check.status === 'unknown')
+  ))
 }
 
-function reportCoverage(report: VPSIPQualityReport): IPQualityCoverage | null {
-  return report.summary?.coverage ?? report.latest_report?.coverage ?? null
+export function serviceCheckStatusText(status: ServiceCheckStatus): string {
+  if (status === 'available') return '可用'
+  if (status === 'restricted') return '受限'
+  return '未知'
 }
 
-function validCount(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+const DEFAULT_SERVICE_PROBE_SOURCES: Readonly<Record<string, true>> = {
+  netflix_title_probe: true,
+  openai_status_probe: true,
+  youtube_premium_page_probe: true,
+  prime_video_page_probe: true,
+  disney_default_probe: true,
+  tiktok_home_probe: true,
+  reddit_home_probe: true,
 }
 
-// 异常计数（负数、分子大于分母、分母为 0）返回 null，不夹到 100%。
-export function coveragePercent(observed: number, expected: number): number | null {
-  if (!validCount(observed) || !validCount(expected) || expected <= 0 || observed > expected) return null
-  return (observed / expected) * 100
-}
-
-export type EnabledProviderCoverage = {
-  successful: number
-  enabled: number
-  notConfigured: number
-  percent: number
-}
-
-// 已启用来源响应成功率：分母为 expected - not_configured，只使用 API coverage，不从行数重建。
-// 响应成功不等于风险字段完整；未接入数量只用于诊断。
-export function enabledProviderCoverage(report: VPSIPQualityReport): EnabledProviderCoverage | null {
-  const coverage = reportCoverage(report)
-  if (!coverage) return null
-  const expected = coverage.expected_provider_count
-  const successful = coverage.successful_provider_count
-  const notConfigured = coverage.not_configured_provider_count
-  if (!validCount(expected) || !validCount(successful) || !validCount(notConfigured)) return null
-  const enabled = expected - notConfigured
-  const percent = coveragePercent(successful, enabled)
-  if (percent == null) return null
-  return { successful, enabled, notConfigured, percent }
-}
-
-export type ServiceAvailability = Record<UnlockStatusKind, number> & {
-  // 合法 coverage 的完整 expected_service_count；缺失/非法时为 null，不构造比例。
-  expected: number | null
-}
-
-// 服务可用性：分子只计完全 unlocked，partial 不算完全可用，unknown 不算受限。
-export function serviceAvailability(report: VPSIPQualityReport): ServiceAvailability {
-  const counts = serviceUnlockCounts(report.service_unlocks)
-  const observed = counts.unlocked + counts.partial + counts.blocked + counts.unknown
-  const expected = reportCoverage(report)?.expected_service_count
-  if (!validCount(expected) || !Number.isInteger(expected) || expected <= 0 || observed > expected) {
-    return { ...counts, expected: null }
-  }
-  // coverage 声明但未返回行的服务同样是未知，不能让分布少于分母。
-  return { ...counts, unknown: counts.unknown + expected - observed, expected }
-}
-
-export type DatabaseConsistency = {
-  percent: number
-  dimensions: number
-}
-
-function knownText(results: IPQualityProviderResult[], read: (result: IPQualityProviderResult) => string | undefined): string[] {
-  return results.map((result) => normalizeComparable(read(result))).filter(Boolean)
-}
-
-// 只比较至少有两个已知值的维度；未知 bool、空字符串不参与，区域不混用代码与全名。
-export function databaseConsistency(results: IPQualityProviderResult[]): DatabaseConsistency | null {
-  const successful = results.filter(providerSucceeded)
-  const regionCodes = knownText(successful, (result) => result.region_code)
-  const dimensions: string[][] = [
-    knownText(successful, (result) => result.usage_type),
-    knownText(successful, (result) => result.company_type),
-    knownText(successful, (result) => result.risk_level),
-    regionCodes.length >= 2 ? regionCodes : knownText(successful, (result) => result.region_name),
-    ...RISK_FLAG_DEFINITIONS.map((definition) => successful
-      .map(definition.read)
-      .filter((value): value is boolean => typeof value === 'boolean')
-      .map(String)),
-  ]
-  const comparable = dimensions.filter((values) => values.length >= 2)
-  if (comparable.length === 0) return null
-  const consistent = comparable.filter((values) => new Set(values).size === 1).length
-  return { percent: Math.round((consistent / comparable.length) * 100), dimensions: comparable.length }
-}
-
-function normalizeComparable(value?: string): string {
-  return (value ?? '').trim().toLowerCase()
-}
-
-export type ProviderTableRows = {
-  // 成功且至少给出一个判断字段的数据库，按风险相关度排序。
-  rows: IPQualityProviderResult[]
-  // 成功但没有任何可展示判断字段的数据库数量。
-  emptyCount: number
-  // 本轮未返回结果的默认/自定义来源（失败或跳过）；可选来源的未配置行只在诊断中展示。
-  unavailable: ProviderSourceGap[]
-}
-
-function providerHasFacts(result: IPQualityProviderResult): boolean {
-  const text = [result.usage_type, result.company_type, result.risk_level, result.risk_score, result.region_code, result.region_name]
-  if (text.some((value) => (value ?? '').trim() !== '')) return true
-  return riskFlags(result).some((flag) => flag.active != null)
-}
-
-function providerRelevance(result: IPQualityProviderResult): number {
-  const negativeHits = activeRiskFlags(result).filter((flag) => flag.negative).length
-  const level = standardRiskLevel(result.risk_level)
-  const riskWeight = level ? STANDARD_RISK_LEVEL_RANK[level]! - 1 : 0
-  const known = riskFlags(result).filter((flag) => flag.active != null).length
-  return negativeHits * 100 + riskWeight * 10 + known
-}
-
-export function providerTableRows(results: IPQualityProviderResult[]): ProviderTableRows {
-  const successful = results.filter(providerSucceeded)
-  const withFacts = successful.filter(providerHasFacts)
-  const rows = withFacts
-    .map((result, index) => ({ result, index, relevance: providerRelevance(result) }))
-    .sort((a, b) => b.relevance - a.relevance || a.index - b.index)
-    .map((item) => item.result)
-  const unavailable = visibleProviderResults(results)
-    .filter((result) => !providerSucceeded(result))
-    .map((result) => {
-      const status = sourceStatusKind(result)
-      // 无 adapter 的来源 wire 仍为 not_configured，页面称“未接入”，不暗示存在配置入口。
-      const label = status === 'failure' ? '失败' : status === 'skipped' ? '未检测' : '未接入'
-      return {
-        provider: result.provider,
-        label: `${result.provider} · ${label}`,
-        tone: status === 'failure' ? 'alert' : 'neutral',
-      } satisfies ProviderSourceGap
-    })
-  return { rows, emptyCount: successful.length - withFacts.length, unavailable }
-}
-
-// extra_json.capability 只描述该来源本次响应：geo_only 表示本次仅返回地理信息。
-export function providerCapability(result: IPQualityProviderResult): 'risk' | 'geo_only' | null {
-  const capability = objectRecord(result.extra_json)?.capability
-  return capability === 'risk' || capability === 'geo_only' ? capability : null
-}
-
-export type RiskSignalHit = {
-  key: RiskFlagKey
+export type ServiceRuleMark = {
   label: string
-  hits: number
-  total: number
-  negative: boolean
+  // 鼠标/读屏可读的单句说明，不作为常驻段落。
+  title: string
 }
 
-// 只返回至少一个数据库命中的信号，total 为给出该信号判断的数据库数。
-export function riskSignalHits(results: IPQualityProviderResult[]): RiskSignalHit[] {
-  return riskSignalCounts(results)
-    .filter((signal) => signal.yes > 0)
-    .map((signal) => ({
-      key: signal.key,
-      label: signal.label,
-      hits: signal.yes,
-      total: signal.yes + signal.no,
-      negative: signal.negative,
-    }))
-}
-
-export const DEFAULT_SERVICE_PROBE_SOURCES: ReadonlySet<string> = new Set([
-  'netflix_title_probe',
-  'openai_status_probe',
-  'youtube_premium_page_probe',
-  'prime_video_page_probe',
-  'disney_default_probe',
-  'tiktok_home_probe',
-  'reddit_home_probe',
-])
-
-export type ServiceProbeNotice = {
-  // warning：历史停用或不可核验；muted：revision 2/3 的中性范围说明。
-  tone: 'warning' | 'muted'
-  text: string
-}
-
-export const ANONYMOUS_SERVICE_PROBE_NOTICE = '免登录服务探测，仅反映当前入口和地区可用性，不代表账号或付费内容权限。'
-
-export function defaultServiceProbeNotice(report: VPSIPQualityReport): ServiceProbeNotice | null {
+// 所选报告服务探测规则的短标记：当前免登录规则不加标记；旧规则、停用规则与来源缺失各给一个短标记。
+export function serviceRuleMark(report: VPSIPQualityReport): ServiceRuleMark | null {
   const serviceRows = report.service_unlocks
-  if (!serviceRows || serviceRows.length === 0) {
-    return null
-  }
+  if (!serviceRows || serviceRows.length === 0) return null
 
   const diagnostics = reportDiagnostics(report)
   const isDefaultSourceVersion = typeof diagnostics?.source_version === 'string' && diagnostics.source_version.trim() === 'v2'
-  const hasDefaultSourceRow = serviceRows.some((row) => {
-    const source = (row.source ?? '').trim()
-    return DEFAULT_SERVICE_PROBE_SOURCES.has(source)
-  })
+  const hasDefaultSourceRow = serviceRows.some((row) => Object.hasOwn(DEFAULT_SERVICE_PROBE_SOURCES, (row.source ?? '').trim()))
 
-  const isDefaultReport = isDefaultSourceVersion || hasDefaultSourceRow
-  if (isDefaultReport) {
+  if (isDefaultSourceVersion || hasDefaultSourceRow) {
     const revision = serviceProbeRevision(report)
-    if (isAnonymousServiceProbeRevision(revision)) {
-      return { tone: 'muted', text: ANONYMOUS_SERVICE_PROBE_NOTICE }
-    }
-
+    if (isAnonymousServiceProbeRevision(revision)) return null
     if (revision === 1) {
-      const hasSkippedRow = serviceRows.some((row) => {
-        const probeStatus = (row.probe_status ?? '').trim().toLowerCase()
-        const errorCode = (row.error_code ?? '').trim().toLowerCase()
-        return probeStatus === 'skipped' && errorCode === 'unsupported_default_probe'
-      })
-      if (hasSkippedRow) {
-        return { tone: 'warning', text: '默认服务解锁探测已停用：缺少可靠业务证据。未知不表示服务受阻，服务覆盖可能不足。' }
-      }
-      return null
+      const hasSkippedRow = serviceRows.some((row) => (
+        (row.probe_status ?? '').trim().toLowerCase() === 'skipped'
+        && (row.error_code ?? '').trim().toLowerCase() === 'unsupported_default_probe'
+      ))
+      return hasSkippedRow ? { label: '探测已停用', title: '该报告的默认服务探测缺少可靠业务证据，已停用；未知不表示受阻。' } : null
     }
-
-    return { tone: 'warning', text: '此报告使用旧版或未识别的服务探测规则，解锁结果可能不可靠；历史原始结果予以保留。' }
+    return { label: '旧版规则', title: '该报告使用旧版或未识别的服务探测规则，结果仅作历史参考。' }
   }
 
   const hasSourceVersion = typeof diagnostics?.source_version === 'string' && diagnostics.source_version.trim() !== ''
   const allSourcesMissing = serviceRows.every((row) => (row.source ?? '').trim() === '')
-
   if (!hasSourceVersion && allSourcesMissing) {
-    return { tone: 'warning', text: '此报告缺少服务探测来源信息，无法核验解锁结果；历史原始结果予以保留。' }
+    return { label: '来源未知', title: '该报告缺少服务探测来源信息，无法核验结果。' }
   }
-
   return null
 }

@@ -77,8 +77,15 @@ func TestHTTPCollectorDualRoundUsesRealIPv4AndIPv6Sockets(t *testing.T) {
 		return client4.Transport.RoundTrip(r)
 	})}
 	reports := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: dependent, Client4: client4, Client6: client6, LocalAddresses: dualLocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: []string{"reddit"}}, time.Now())
-	if len(reports) != 2 || reports[0].Status != "success" || reports[1].Status != "success" || reports[0].IPAddress != "198.51.100.10" || reports[1].IPAddress != "2001:db8::10" {
+	if len(reports) != 2 || reports[0].Status != "partial" || reports[1].Status != "partial" || reports[0].IPAddress != "198.51.100.10" || reports[1].IPAddress != "2001:db8::10" {
 		t.Fatalf("real socket reports=%#v", reports)
+	}
+	for index, report := range reports {
+		if report.IPVersion != []int{4, 6}[index] || agentapi.ParseCollectionMetadata(report.DiagnosticsJSON).Availability != "available" ||
+			len(report.ServiceUnlocks) != 1 || report.ServiceUnlocks[0].Status != "unlocked" {
+			t.Fatalf("real socket family terminal=%#v", report)
+		}
+		assertRejectedDetectorGeoAttempts(t, report)
 	}
 	mu.Lock()
 	defer mu.Unlock()

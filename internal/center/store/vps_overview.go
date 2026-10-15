@@ -168,6 +168,8 @@ func (repository *VPSOverviewRepository) LoadIPQuality(
 	}
 	result.Status = summary.Status
 	result.RiskLevel = summary.RiskLevel
+	result.ProductRevision = summary.ProductRevision
+	result.ProductSummary = summary.ProductSummary
 	result.Stale = summary.Stale
 	result.IPVersion = summary.IPVersion
 	if !summary.ObservedAt.IsZero() {

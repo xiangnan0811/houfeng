@@ -11,7 +11,7 @@
 核心约定一句话总结：
 - **driver**：`github.com/jackc/pgx/v5` 与 `github.com/jackc/pgx/v5/pgxpool`，连接池在 `cmd/houfeng-center/bootstrap.go` 内构造（参见 `bootstrap.go:60-69`，调用 `store.OpenPostgres`）。
 - **仓库**：`internal/center/store/` 下一文件一 aggregate（`monitoring_instances.go`、`targets.go`、`incidents.go`、`sync_batches.go` 等）。
-- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current root 已扩展到 `0075_add_settings_deployment_overrides.sql`，共 76 个 source（R1 的 52 个 source 加 post-R1 的 24 个 exact fragments）。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛 current exact set 或一个明确注册、完整 golden 匹配的 predecessor，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。0067 不转换旧业务数据；存在 VPS、监控实例、服务、域名、Target 或订阅时明确拒绝，必须另行授权环境重建。0072 仅增加目标/探测项新鲜度投影列；0073 仅增加监控实例资料版本列 `metadata_updated_at`（回填既有行）；0074 仅为汇率缓存增加月末汇率标记列 `month_end_for` 并把唯一键拆为实时/月末两个部分唯一索引；0075 仅为 `center_settings` 增加 `incident_sweep_runtime_managed` 列（显式 empty fragment，不新增 APP ACL）；C73 经 P73 升级到 C74（历史基线），C74 经 P74 升级到当前 C75，不扩大运行角色权限。
+- **schema 演进**：冻结 R1 source prefix 仍为 `0001_*.sql` … `0051_create_record_platform_foundation.sql`（含两个按文件名字典序排列的 `0004_*`，共 52 个 SQL 文件）；current root 已扩展到 `0077_ip_quality_product.sql`，共 78 个 source（R1 的 52 个 source 加 post-R1 的 26 个 exact fragments）。`db/migrations/embed.go` 用 `embed.FS` 嵌入，状态记在 `schema_migrations` 表。两个 record flag 都关闭时，旧 center/importer 启动路径仍由 `internal/center/store/migrate/migrate.go` 的 `Apply` 顺序应用；`records-on/delete-off` 必须先由显式 scoped migrator 收敛 current exact set 或一个明确注册、完整 golden 匹配的 predecessor，center/importer 只做 current runtime admission，绝不在启动时调用 `Apply`。0067 不转换旧业务数据；存在 VPS、监控实例、服务、域名、Target 或订阅时明确拒绝，必须另行授权环境重建。0072 仅增加目标/探测项新鲜度投影列；0073 仅增加监控实例资料版本列 `metadata_updated_at`（回填既有行）；0074 仅为汇率缓存增加月末汇率标记列 `month_end_for` 并把唯一键拆为实时/月末两个部分唯一索引；0075 仅为 `center_settings` 增加 `incident_sweep_runtime_managed` 列（显式 empty fragment，不新增 APP ACL）；历史 C75→C76 仅增加 family-state view 与 runtime SELECT；C76 经 P76 升级到当前 C77，仅增加 product 两表及七个精确 runtime grant，不扩张 Records/PUBLIC/admin 权限。
 - **事务边界**：写多张表时使用 `pgx.Tx`，参考 `store/sync_batches.go:40-91` 的 `ApplyBatch`（一次同步批次串起 4-5 张表的写入与一次 plan 计算）。
 - **不变量**：领域规则（MonitoringInstance/Target/Probe 语义、健康状态派生、回填观测不告警）必须落到 SQL + 仓库 + 服务层共同遵守，详见后文。
 
@@ -68,22 +68,26 @@
   1. `EnsureLedger` —— 建 `schema_migrations(name primary key, applied_at)` 表
   2. 按文件名排序遍历，逐条 `HasMigration` 检查，未应用则 `ExecMigration` + `RecordMigration`
 - `records-on/delete-off` 不复用这个逐迁移提交的 API：`houfeng-record-platform-admin migrate --scope app` 先编译 exact embedded set 与 post-`0051` fragment registry，再在一个 scoped `SERIALIZABLE` 事务内处理 migration、ACL 和 manifest；center/importer 的启动路径只能执行 current read-only admission。
+- 当前 C77 registry 为 14 个固定 profile（P62/P64/P63/P66/P67/P68/P69/P70/P71/P72/P73/P74/P75/P76）、12287 条明确注册的 predecessor chain；既有 ID、冻结 R1/R2 与历史 C76 6143-chain/C75 3071-chain goldens 不变。所有旧 successor suffix 末尾追加 0077，P76 仅执行 0077；不能靠任意 prefix 或从 current compiler 动态截取的 oracle 接受旧库。详细 source、suffix、manifest/catalog 与事务顺序见 [APP 当前迁移合同](../contracts/platform/app-acl-current.md)。
+- `ipQualityProductAppACLCurrentMigrationFragment()` 只注册 `ip_quality_intelligence` 与 `ip_quality_source_cache`；center_runtime 对前者仅 SELECT/INSERT/UPDATE，对后者仅 SELECT/INSERT/UPDATE/DELETE。0077 SQL 不包含角色名或 GRANT；scoped convergence 在同事务内应用 exact DCL、验证完整 catalog 并发布 successor。旧报告/来源/服务的新增 JSONB 列保持 NULL，不回填 product、不生成历史 job/cache，原表 ACL 不变。
 - **每个迁移必须幂等**：`create table if not exists`、`create index if not exists`、`alter table ... add column if not exists` 是基线写法（见 `0001_initial_schema.sql`、`0009_add_observability_filter_indexes.sql`）。
 - **视图列结构变化必须先 drop 再 recreate**：PostgreSQL 的 `CREATE OR REPLACE VIEW` 不能删除列、重排列或在中间插入列；否则会出现类似 `cannot change name of view column "evidence_snapshot" to "followup_todo_count"` 的启动失败。迁移需要使用 `drop view if exists <view_name>;` 后再 `create or replace view ...`，并保证依赖对象可随迁移重建。
 
 ### 流程
 
 1. 想清楚改动是否需要持久化（业务模型变化、查询需要新索引、retention 行为变化等）。
-2. 在 `db/migrations/` 新建下一个未占用序号的文件。冻结 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，current root 已到 `0075_add_settings_deployment_overrides.sql`，因此若没有并发新增文件，下一个候选是 `0076_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须在同一 PR 注册 exact current fragment，不能由 records-on 启动路径补跑。
+2. 在 `db/migrations/` 新建下一个未占用序号的文件。冻结 r1 固定清单末尾是 `0051_create_record_platform_foundation.sql`，current root 已到 `0077_ip_quality_product.sql`，因此若没有并发新增文件，下一个候选是 `0078_<verb>_<scope>.sql`；任何 r1 之后的 APP migration 还必须在同一 PR 注册 exact current fragment、更新全部 exact successor suffix，并以独立冻结的 predecessor golden 明确支持升级，不能由 records-on 启动路径补跑。
 3. 文件内只允许 `create / alter / drop / insert` 等 DDL/DML 语句，不要在里面写 Go。
 4. 同时更新对应 `internal/center/store/<aggregate>.go` 的 `select` 列、`insert` / `update` 语句、读写函数签名。
 5. 跑 `make verify-go`（含 `migrate` 包的单测，见 `migrate_test.go`）；接着按 `docs/operations/fresh-install-smoke-run.md` 在真 Postgres 上做 fresh-install smoke。
+   C77 还须经 strict PostgreSQL wrapper 运行 `./internal/center/store/migrate` 的 `TestPostgresIntegrationIPQualityProductMigration`：覆盖真实 C75→C76→C77 链、C76 三种 settings 状态、旧行/ACL/history 保持、runtime 实际表操作、事务回滚、额外 runtime/admin/PUBLIC/Records grant 拒绝与 repeat。业务包的 `TestPostgresIntegrationIPQualitySyncMetadataRoundTrip/0076_preserves_C75_reports_and_children` 独立保留 C75→C76 证据，并检查升级到当前 schema 后的新字段仍为 NULL；skip 不算通过。
 
 ### 历史 / 审计字段同步
 
 - 如果业务主表新增用户可见合同字段，且该字段会被历史、审计或决策表记录（如订阅价格历史、生命周期动作），同一个迁移必须同步补齐历史表列、backfill、约束与仓库 scan/insert 逻辑。不要只改源表导致后续审计丢失新字段。
 - 兼容旧字段时，迁移需要给出可重复的推导规则和约束收口：例如订阅以 `billing_period_unit` + `billing_period_length` + `renewal_mode` 为新合同，同时从 `billing_months`、`billing_cycle`、`auto_renew`、`auto_renew_cancelled` 回填，并短期保留旧字段供下游兼容。
 - 会同时更新业务事实和审计记录的动作必须在一个事务内完成。VPS 有效期更新应锁定目标 VPS，写生命周期 action / step，并更新 VPS 自身 `validity_mode/expires_at`；不要求存在订阅，不自动覆盖 subscription `renew_at`。账单续费和资源有效期分别显式确认。
+- 历史迁移 fixture 必须在实际 predecessor schema 上用该版本的固定 SQL 列清单写入，不能调用已增加后续列的当前生产 writer，也不能为测试加入生产 backward shim。先独立执行被验证的迁移并逐列比较历史事实，再安装 current schema 验证现行 reader；新增列的 NULL/回填合同单独断言，不把合法 additive schema 差异当成旧事实变化。
 
 ### 不要做
 
@@ -92,7 +96,7 @@
 - ❌ 用任何运维脚本 / SQL 客户端直接改线上 schema，必须走迁移文件。
 - ❌ 把测试数据 / seed 数据写进迁移文件——种子用户由 `internal/center/auth/seed.go` 在 bootstrap 阶段执行（`bootstrap.go:104-107`）。
 
-> ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义。legacy `migrate.Apply` 按文件名字典序排序，scoped r1 migrator 也把它们作为固定 52-source 清单中的两个独立 checksum source；二者顺序均由后缀决定，并不冲突。序号撞车仍违反“序号唯一”的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（current root 已到 `0075_add_settings_deployment_overrides.sql`，若没有并发新增文件，下一个候选为 `0076_*`）。
+> ⚠️ **已知 gap**：当前 `db/migrations/` 里存在两个 `0004_*` 文件 (`0004_add_node_onboarding_binding_state.sql`、`0004_add_observation_provenance.sql`)。前者是历史 Node 命名迁移，当前 schema 由 `0029_rename_nodes_to_monitoring_instances.sql` 迁到 MonitoringInstance 语义。legacy `migrate.Apply` 按文件名字典序排序，scoped r1 migrator 也把它们作为固定 52-source 清单中的两个独立 checksum source；二者顺序均由后缀决定，并不冲突。序号撞车仍违反“序号唯一”的隐含约定，新增迁移时**必须先查看 `db/migrations/`，再使用当前最大编号之后的下一个未占用序号**（current root 已到 `0077_ip_quality_product.sql`，若没有并发新增文件，下一个候选为 `0078_*`）。
 
 ## Naming Conventions
 

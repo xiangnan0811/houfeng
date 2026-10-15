@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +12,7 @@ import (
 	"houfeng/internal/center/assetlinks"
 	"houfeng/internal/center/ipquality"
 	"houfeng/internal/center/monitoringinstances"
+	"houfeng/internal/contracts/agentapi"
 )
 
 // 立即采集不可用的原因，前端据此给出对应引导。
@@ -28,7 +32,7 @@ type ipQualityCollectSettingsRepository interface {
 }
 
 type IPQualityCollectRequests interface {
-	Request(monitoringInstanceID string, now time.Time) (ipquality.CollectRequest, error)
+	Request(monitoringInstanceID string, now time.Time, selections ...[]int) (ipquality.CollectRequest, error)
 	Latest(monitoringInstanceID string, now time.Time) (ipquality.CollectRequest, bool)
 }
 
@@ -39,6 +43,8 @@ type ipQualityCollectStatus struct {
 	MonitoringInstanceID string                    `json:"monitoring_instance_id,omitempty"`
 	AgentLastSyncAt      *time.Time                `json:"agent_last_sync_at,omitempty"`
 	Request              *ipquality.CollectRequest `json:"request,omitempty"`
+	Error                string                    `json:"error,omitempty"`
+	Reason               string                    `json:"reason,omitempty"`
 }
 
 // VPSIPQualityCollect handles GET/POST /api/vps/{vps_id}/ip-quality/collect.
@@ -54,6 +60,15 @@ func VPSIPQualityCollect(links ipQualityCollectLinkRepository, settings ipQualit
 		if r.Method != http.MethodGet && r.Method != http.MethodPost {
 			writeError(w, http.StatusMethodNotAllowed, "method not allowed")
 			return
+		}
+		var versions []int
+		if r.Method == http.MethodPost {
+			var err error
+			versions, err = decodeIPQualityCollectVersions(w, r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid collection scope")
+				return
+			}
 		}
 		now := time.Now().UTC()
 		status, err := resolveIPQualityCollectStatus(r.Context(), links, settings, vpsID)
@@ -77,14 +92,51 @@ func VPSIPQualityCollect(links ipQualityCollectLinkRepository, settings ipQualit
 			})
 			return
 		}
-		request, err := requests.Request(status.MonitoringInstanceID, now)
+		request, err := requests.Request(status.MonitoringInstanceID, now, versions)
 		if err != nil {
+			if errors.Is(err, ipquality.ErrCollectionScopeConflict) {
+				status.Request = &request
+				status.Error = "an IP quality collection with a different scope is already active"
+				status.Reason = "collection_scope_conflict"
+				writeJSON(w, http.StatusConflict, status)
+				return
+			}
 			writeError(w, http.StatusInternalServerError, "internal server error")
 			return
 		}
 		status.Request = &request
 		writeJSON(w, http.StatusAccepted, status)
 	})
+}
+
+func decodeIPQualityCollectVersions(w http.ResponseWriter, r *http.Request) ([]int, error) {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+	token, err := decoder.Token()
+	if errors.Is(err, io.EOF) {
+		return []int{4, 6}, nil
+	}
+	if err != nil || token != json.Delim('{') {
+		return nil, ipquality.ErrInvalidCollectionScope
+	}
+	versions := []int{4, 6}
+	seen := false
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil || key != "ip_versions" || seen {
+			return nil, ipquality.ErrInvalidCollectionScope
+		}
+		seen = true
+		if err := decoder.Decode(&versions); err != nil || !agentapi.ValidIPQualityVersions(versions) {
+			return nil, ipquality.ErrInvalidCollectionScope
+		}
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim('}') {
+		return nil, ipquality.ErrInvalidCollectionScope
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return nil, ipquality.ErrInvalidCollectionScope
+	}
+	return versions, nil
 }
 
 func resolveIPQualityCollectStatus(ctx context.Context, links ipQualityCollectLinkRepository, settings ipQualityCollectSettingsRepository, vpsID string) (ipQualityCollectStatus, error) {

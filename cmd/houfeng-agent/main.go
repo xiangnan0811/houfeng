@@ -9,11 +9,15 @@ import (
 
 	agentconfig "houfeng/agent/config"
 	"houfeng/agent/fingerprint"
+	"houfeng/agent/ipquality"
 	agentruntime "houfeng/agent/runtime"
 	"houfeng/agent/token"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "ip-quality-fetch" {
+		os.Exit(ipquality.RunIPQualityFetch(os.Args[2:]))
+	}
 	cfg, err := agentconfig.LoadAgentConfig()
 	if err != nil {
 		slog.Error("load agent config", "error", err)

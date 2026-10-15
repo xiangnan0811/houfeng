@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -16,9 +17,10 @@ type Manager struct {
 	collector Collector
 	mu        sync.Mutex
 	inFlight  bool
-	// inFlightRequestID 是本轮采集要回传的立即采集请求；周期采集中途收到请求时直接认领，
-	// 采集完成后不再重复执行。
-	inFlightRequestID string
+	// A manual request can claim an active round only when its exact family
+	// selection matches; mismatched requests wait for the next round.
+	inFlightRequestID  string
+	inFlightIPVersions []int
 	// handledRequestID 是已产出报告的立即采集请求，只保存在内存：center 收到报告前会继续
 	// 下发同一 ID，据此去重；进程重启或 Stop 后清空，最多多采一次，不会漏采。
 	handledRequestID string
@@ -38,34 +40,39 @@ func (m *Manager) MaybeStart(ctx context.Context, plan *agentapi.IPQualityPlan, 
 	}
 	requestID := strings.TrimSpace(plan.CollectRequestID)
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	manual := requestID != "" && requestID != m.handledRequestID
+	effective := *plan
+	if !manual {
+		effective.CollectRequestID = ""
+		effective.CollectIPVersions = nil
+	}
 	if m.inFlight {
-		if requestID != "" && m.inFlightRequestID == "" && requestID != m.handledRequestID {
+		versions := []int{4, 6}
+		if manual && effective.CollectionRevision == agentapi.IPQualitySelectiveCollectionRevision &&
+			agentapi.ValidIPQualityVersions(effective.CollectIPVersions) {
+			versions = effective.CollectIPVersions
+		}
+		if manual && m.inFlightRequestID == "" && slices.Equal(versions, m.inFlightIPVersions) &&
+			m.cancel != nil {
 			m.inFlightRequestID = requestID
 		}
-		m.mu.Unlock()
 		return nil
 	}
-	manual := requestID != "" && requestID != m.handledRequestID
-	m.mu.Unlock()
-
 	state, err := m.store.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("load ip quality state: %w", err)
 	}
-	if !manual && !Due(plan, state, observedAt) {
+	if !manual && !Due(&effective, state, observedAt) {
 		return nil
 	}
 	state.LastAttemptedAt = observedAt.UTC()
 	if err := m.store.Save(ctx, state); err != nil {
 		return fmt.Errorf("save ip quality attempt state: %w", err)
 	}
-
-	m.mu.Lock()
-	if m.inFlight {
-		m.mu.Unlock()
-		return nil
-	}
+	planCopy := clonePlan(&effective)
 	m.inFlight = true
+	m.inFlightIPVersions = agentapi.CollectionIPVersions(planCopy)
 	m.inFlightRequestID = ""
 	if manual {
 		m.inFlightRequestID = requestID
@@ -73,9 +80,6 @@ func (m *Manager) MaybeStart(ctx context.Context, plan *agentapi.IPQualityPlan, 
 	m.startState = state
 	collectCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	m.cancel = cancel
-	m.mu.Unlock()
-
-	planCopy := clonePlan(plan)
 	go m.collect(collectCtx, planCopy, observedAt.UTC())
 	return nil
 }
@@ -87,6 +91,7 @@ func (m *Manager) Stop() {
 	defer m.mu.Unlock()
 	if m.cancel != nil {
 		m.cancel()
+		m.cancel = nil
 	}
 	m.reports = nil
 	m.handledRequestID = ""
@@ -129,6 +134,7 @@ func (m *Manager) collect(ctx context.Context, plan *agentapi.IPQualityPlan, obs
 	}
 	m.inFlight = false
 	m.inFlightRequestID = ""
+	m.inFlightIPVersions = nil
 }
 
 func aggregateReportStatus(reports []agentapi.IPQualityReportPayload) string {
@@ -160,12 +166,21 @@ func clonePlan(plan *agentapi.IPQualityPlan) *agentapi.IPQualityPlan {
 	if plan == nil {
 		return nil
 	}
+	var mailEnabled *bool
+	if plan.MailEnabled != nil {
+		value := *plan.MailEnabled
+		mailEnabled = &value
+	}
 	return &agentapi.IPQualityPlan{
-		Enabled:          plan.Enabled,
-		FrequencySeconds: plan.FrequencySeconds,
-		TimeoutSeconds:   plan.TimeoutSeconds,
-		Services:         append([]string(nil), plan.Services...),
-		CollectRequestID: plan.CollectRequestID,
+		Enabled:            plan.Enabled,
+		FrequencySeconds:   plan.FrequencySeconds,
+		TimeoutSeconds:     plan.TimeoutSeconds,
+		Services:           append([]string(nil), plan.Services...),
+		CollectRequestID:   plan.CollectRequestID,
+		CollectionRevision: plan.CollectionRevision,
+		CollectIPVersions:  append([]int(nil), plan.CollectIPVersions...),
+		ProductRevision:    plan.ProductRevision,
+		MailEnabled:        mailEnabled,
 	}
 }
 

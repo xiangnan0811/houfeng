@@ -130,10 +130,26 @@ func (c *HTTPCollector) WithMetadata(agentVersion, fingerprint, syncBatchID stri
 }
 
 func (c *HTTPCollector) Collect(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) []agentapi.IPQualityReportPayload {
+	var reports []agentapi.IPQualityReportPayload
 	if !c.customLookup {
-		return c.collectDefault(ctx, plan, observedAt)
+		reports = c.collectDefault(ctx, plan, observedAt)
+	} else {
+		reports = []agentapi.IPQualityReportPayload{c.collectLegacy(ctx, plan, observedAt)}
 	}
-	return []agentapi.IPQualityReportPayload{c.collectLegacy(ctx, plan, observedAt)}
+	// An old Center strictly rejects unknown wire fields. Negotiate the entire
+	// product, not just SMTP, before the result can reach the durable queue.
+	if plan == nil || plan.ProductRevision != agentapi.IPQualityProductRevision || c.customLookup {
+		for i := range reports {
+			reports[i].Product = nil
+			for j := range reports[i].ProviderResults {
+				reports[i].ProviderResults[j].Details = nil
+			}
+			for j := range reports[i].ServiceUnlocks {
+				reports[i].ServiceUnlocks[j].Checks = nil
+			}
+		}
+	}
+	return reports
 }
 
 func (c *HTTPCollector) collectLegacy(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) agentapi.IPQualityReportPayload {
@@ -242,20 +258,21 @@ func familyPlaceholder(ipVersion int) string {
 func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time) []agentapi.IPQualityReportPayload {
 	startedAt := time.Now()
 	collectionID := rand.Text()
-	timeout := 15 * time.Second
+	timeout := 60 * time.Second
 	if plan != nil && plan.TimeoutSeconds > 0 {
 		timeout = time.Duration(plan.TimeoutSeconds) * time.Second
 	}
 	collectCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	reports := make([]agentapi.IPQualityReportPayload, 2)
+	families := agentapi.CollectionIPVersions(plan)
+	reports := make([]agentapi.IPQualityReportPayload, len(families))
 	if plan == nil || !plan.Enabled {
-		for index, family := range [2]int{4, 6} {
+		for index, family := range families {
 			reports[index] = agentapi.IPQualityReportPayload{
 				ObservedAt: observedAt.UTC(), IPAddress: familyPlaceholder(family), IPVersion: family,
 				AgentVersion: c.agentVersion, Fingerprint: c.fingerprint, SyncBatchID: c.syncBatchID,
 				Status: agentapi.IPQualityStatusFailure, ErrorCode: "disabled", ErrorSummary: "ip quality collection disabled",
-				DiagnosticsJSON: diagnosticsJSON(startedAt, nil, nil, family, agentapi.IPQualityFamilyUnknown, collectionID, false, nil),
+				DiagnosticsJSON: diagnosticsJSON(startedAt, nil, nil, family, agentapi.IPQualityFamilyUnknown, collectionID, false, nil, plan),
 			}
 		}
 		return reports
@@ -278,37 +295,38 @@ func (c *HTTPCollector) collectDefault(ctx context.Context, plan *agentapi.IPQua
 	}
 	canonicalBudget, dependentBudget, _ := collectionBudgets(timeout)
 	providerSlots, serviceSlots := make(chan struct{}, 4), make(chan struct{}, 7)
+	mailSlots := make(chan struct{}, 6)
 	canonicalSources, _ := defaultProviderSources()
 	canonicalCtx, canonicalCancel := context.WithTimeout(collectCtx, canonicalBudget)
 	var canonical [2][]providerSourceOutcome
 	var workers sync.WaitGroup
-	for index, family := range [2]int{4, 6} {
+	for _, family := range families {
+		index := (family - 4) / 2
 		if availability[index] == agentapi.IPQualityFamilyUnavailable {
 			continue
 		}
 		workers.Add(1)
 		go func(index, family int) {
 			defer workers.Done()
-			familyCollector := *c
-			familyCollector.client = c.serviceHTTPClient(family)
-			canonical[index] = familyCollector.collectProviderSources(canonicalCtx, canonicalSources, "", minDuration(canonicalBudget, 5*time.Second), providerSlots, family)
+			canonical[index] = c.collectProviderSources(canonicalCtx, canonicalSources, "", minDuration(canonicalBudget, 5*time.Second), providerSlots, family)
 		}(index, family)
 	}
 	// A global barrier prevents dependent work from taking discovery slots.
 	workers.Wait()
 	canonicalCancel()
-	for index, family := range [2]int{4, 6} {
+	for index, family := range families {
 		workers.Add(1)
 		go func(index, family int) {
 			defer workers.Done()
-			reports[index] = c.collectDefaultFamily(collectCtx, plan, observedAt, startedAt, collectionID, family, availability[index], canonical[index], dependentBudget, providerSlots, serviceSlots)
+			familyIndex := (family - 4) / 2
+			reports[index] = c.collectDefaultFamily(collectCtx, plan, observedAt, startedAt, collectionID, family, availability[familyIndex], canonical[familyIndex], dependentBudget, providerSlots, serviceSlots, mailSlots)
 		}(index, family)
 	}
 	workers.Wait()
 	return reports
 }
 
-func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time, startedAt time.Time, collectionID string, ipVersion int, availability string, canonicalOutcomes []providerSourceOutcome, dependentBudget time.Duration, providerSlots, serviceSlots chan struct{}) agentapi.IPQualityReportPayload {
+func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi.IPQualityPlan, observedAt time.Time, startedAt time.Time, collectionID string, ipVersion int, availability string, canonicalOutcomes []providerSourceOutcome, dependentBudget time.Duration, providerSlots, serviceSlots, mailSlots chan struct{}) agentapi.IPQualityReportPayload {
 	report := agentapi.IPQualityReportPayload{
 		ObservedAt:   observedAt.UTC(),
 		AgentVersion: c.agentVersion,
@@ -317,6 +335,11 @@ func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi
 		IPAddress:    familyPlaceholder(ipVersion),
 		IPVersion:    ipVersion,
 		Status:       agentapi.IPQualityStatusFailure,
+	}
+	productEnabled := plan.ProductRevision == agentapi.IPQualityProductRevision
+	mailEnabled := productEnabled && plan.MailEnabled != nil && *plan.MailEnabled
+	if productEnabled {
+		report.Product = &agentapi.IPQualityAgentProduct{Revision: 1, PTRNames: []string{}, Mail: []agentapi.IPQualityMailResult{}}
 	}
 	canonicalSources, targetDependentSources := defaultProviderSources()
 	if availability == agentapi.IPQualityFamilyUnavailable {
@@ -328,7 +351,9 @@ func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi
 				ErrorCode: report.ErrorCode, ErrorSummary: report.ErrorSummary,
 			})
 		}
-		report.ProviderResults = append(report.ProviderResults, optionalProviderDiagnostics()...)
+		if mailEnabled {
+			report.Product.Mail = skippedMailResults(observedAt, report.ErrorCode)
+		}
 		for _, service := range normalizedServices(plan.Services) {
 			source, ok := defaultServiceSource(service)
 			if !ok {
@@ -341,7 +366,7 @@ func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi
 			})
 		}
 		report.Coverage = coverageFromResults(report.ProviderResults, report.ServiceUnlocks)
-		report.DiagnosticsJSON = diagnosticsJSON(startedAt, nil, nil, ipVersion, availability, collectionID, false, report.ProviderResults)
+		report.DiagnosticsJSON = diagnosticsJSON(startedAt, nil, nil, ipVersion, availability, collectionID, false, report.ProviderResults, plan)
 		return report
 	}
 	providerOutcomes := append([]providerSourceOutcome(nil), canonicalOutcomes...)
@@ -349,10 +374,11 @@ func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi
 	targetIP := ""
 	// Registry order breaks ties within this family, never completion order.
 	for _, outcome := range canonicalOutcomes {
-		if outcome.Result.Status == sourceStatusSuccess && validIPAddress(outcome.IPAddress) {
+		address, valid := ipidentity.Parse(outcome.IPAddress)
+		if outcome.Result.Status == sourceStatusSuccess && valid && !address.IsUnspecified() {
 			discoveryCandidates[outcome.Result.Provider] = outcome.IPAddress
 			if targetIP == "" {
-				targetIP = outcome.IPAddress
+				targetIP = address.String()
 			}
 		}
 	}
@@ -373,13 +399,14 @@ func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi
 			}
 		}
 		var dependentOutcomes []providerSourceOutcome
+		var geoOutcomes []providerSourceOutcome
 		var phases sync.WaitGroup
 		phases.Add(2)
 		go func() {
 			defer phases.Done()
 			dependentCtx, dependentCancel := context.WithTimeout(ctx, dependentBudget)
 			defer dependentCancel()
-			dependentOutcomes = c.collectProviderSources(dependentCtx, dependentSources, targetIP, minDuration(dependentBudget, 5*time.Second), providerSlots, 0)
+			dependentOutcomes = c.collectProviderSources(dependentCtx, dependentSources, targetIP, minDuration(dependentBudget, 5*time.Second), providerSlots, ipVersion)
 		}()
 		go func() {
 			defer phases.Done()
@@ -388,14 +415,43 @@ func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi
 				services = ambiguousServiceOutcomes(requestedServices, ipVersion)
 				return
 			}
-			services = c.collectDefaultServiceUnlocksWithSemaphore(ctx, requestedServices, ipVersion, serviceSlots)
+			services = c.collectDefaultServiceUnlocksWithSemaphore(ctx, requestedServices, ipVersion, serviceSlots, targetIP)
 		}()
+		if !egressAmbiguous {
+			phases.Add(1)
+			go func() {
+				defer phases.Done()
+				geoOutcomes = collectScriptGeo(ctx, targetIP, ipVersion, observedAt, providerSlots)
+			}()
+		}
+		if productEnabled {
+			phases.Add(1)
+			go func() {
+				defer phases.Done()
+				report.Product.PTRNames = collectPTR(ctx, targetIP)
+			}()
+		}
+		if mailEnabled {
+			phases.Add(1)
+			go func() {
+				defer phases.Done()
+				if egressAmbiguous {
+					report.Product.Mail = skippedMailResults(observedAt, "egress_ambiguous")
+					return
+				}
+				report.Product.Mail = collectMail(ctx, targetIP, ipVersion, observedAt, mailSlots)
+			}()
+		}
 		phases.Wait()
 		for index, canonicalIndex := range requeryIndices {
 			providerOutcomes[canonicalIndex] = dependentOutcomes[len(targetDependentSources)+index]
 		}
 		providerOutcomes = append(providerOutcomes, dependentOutcomes[:len(targetDependentSources)]...)
+		providerOutcomes = append(providerOutcomes, geoOutcomes...)
 	} else {
+		if mailEnabled {
+			report.Product.Mail = skippedMailResults(observedAt, "missing_target_ip")
+		}
 		for _, source := range targetDependentSources {
 			providerOutcomes = append(providerOutcomes, sourceFailure(
 				source.Name(),
@@ -417,17 +473,13 @@ func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi
 			ipCandidates[outcome.Result.Provider] = outcome.IPAddress
 		}
 	}
-	for _, result := range optionalProviderDiagnostics() {
-		report.ProviderResults = append(report.ProviderResults, result)
-		providerRaw[result.Provider] = sourceRawEnvelope{Status: result.Status, ErrorCode: result.ErrorCode, ErrorSummary: result.ErrorSummary}
-	}
 
 	successfulProviders := successfulProviderOutcomes(providerOutcomes)
 	report.Coverage = coverageFromResults(report.ProviderResults, nil)
 	if len(successfulProviders) == 0 {
 		report.ErrorCode = "lookup_failed"
 		report.ErrorSummary = "all default IP quality provider sources failed"
-		report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, availability, collectionID, egressAmbiguous, report.ProviderResults)
+		report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, availability, collectionID, egressAmbiguous, report.ProviderResults, plan)
 		report.RawJSON = rawEnvelopeV2(providerRaw, nil, report.DiagnosticsJSON)
 		return report
 	}
@@ -442,10 +494,10 @@ func (c *HTTPCollector) collectDefaultFamily(ctx context.Context, plan *agentapi
 		serviceRaw[outcome.Result.Service] = sourceRawEnvelopeFromService(outcome)
 	}
 	report.Coverage = coverageFromResults(report.ProviderResults, report.ServiceUnlocks)
-	report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, availability, collectionID, egressAmbiguous, report.ProviderResults)
+	report.DiagnosticsJSON = diagnosticsJSON(startedAt, discoveryCandidates, ipCandidates, ipVersion, availability, collectionID, egressAmbiguous, report.ProviderResults, plan)
 	report.RawJSON = rawEnvelopeV2(providerRaw, serviceRaw, report.DiagnosticsJSON)
 	report.Status = agentapi.IPQualityStatusSuccess
-	if hasDefaultSourceFailure(report.ProviderResults) || hasServiceProbeFailure(report.ServiceUnlocks) {
+	if hasDefaultSourceFailure(report.ProviderResults) || hasServiceProbeFailure(report.ServiceUnlocks) || hasMailProbeFailure(report.Product) {
 		report.Status = agentapi.IPQualityStatusPartial
 	}
 	return report
@@ -483,6 +535,10 @@ func minDuration(left, right time.Duration) time.Duration {
 }
 
 func (c *HTTPCollector) collectProviderSources(ctx context.Context, sources []providerSource, targetIP string, sourceTimeout time.Duration, slots chan struct{}, ipVersion int) []providerSourceOutcome {
+	// Discovery, target-dependent lookups and canonical requeries must all
+	// use the selected family's transport, not the generic legacy client.
+	familyCollector := *c
+	familyCollector.client = c.serviceHTTPClient(ipVersion)
 	outcomes := make([]providerSourceOutcome, len(sources))
 	var waitGroup sync.WaitGroup
 	waitGroup.Add(len(sources))
@@ -503,7 +559,7 @@ func (c *HTTPCollector) collectProviderSources(ctx context.Context, sources []pr
 			}
 			sourceCtx, cancel := context.WithTimeout(ctx, sourceTimeout)
 			defer cancel()
-			outcomes[index] = source.Collect(sourceCtx, c, targetIP)
+			outcomes[index] = source.Collect(sourceCtx, &familyCollector, targetIP)
 			if ipVersion != 0 && outcomes[index].Result.Status == sourceStatusSuccess {
 				address, ok := ipidentity.Parse(outcomes[index].IPAddress)
 				if !ok || address.IsUnspecified() || address.Is4() != (ipVersion == 4) {
@@ -609,10 +665,7 @@ func applyLookupPayload(report *agentapi.IPQualityReportPayload, payload map[str
 		report.Longitude = facts.longitude
 		report.UseRegionCode = facts.regionCode
 		report.UseRegionName = facts.regionName
-		report.RegisteredRegionCode = firstNonEmpty(
-			stringFromMap(payload, "registered_region_code", "registered_country_code"),
-			stringFromNestedMap(payload, "asn", "country", "country_code"),
-		)
+		report.RegisteredRegionCode = stringFromMap(payload, "registered_region_code", "registered_country_code")
 		report.RegisteredRegionName = firstNonEmpty(
 			stringFromMap(payload, "registered_region_name", "registered_country_name"),
 		)
@@ -644,10 +697,7 @@ func applyLookupPayload(report *agentapi.IPQualityReportPayload, payload map[str
 		stringFromMap(payload, "use_region_name", "country_name"),
 		stringFromNestedMap(payload, "location", "country"),
 	)
-	report.RegisteredRegionCode = firstNonEmpty(
-		stringFromMap(payload, "registered_region_code", "registered_country_code"),
-		stringFromNestedMap(payload, "asn", "country", "country_code"),
-	)
+	report.RegisteredRegionCode = stringFromMap(payload, "registered_region_code", "registered_country_code")
 	report.RegisteredRegionName = stringFromMap(payload, "registered_region_name", "registered_country_name")
 	report.RiskLevel = stringFromMap(payload, "risk_level", "risk")
 	report.ProviderResults = providerResultsFromLookup(payload)

@@ -208,6 +208,12 @@ const SETTINGS = {
     stale_after_seconds: 604_800,
     timeout_seconds: 15,
     services: ['netflix', 'chatgpt'],
+    mail_enabled: true,
+    sources: {
+      ipapi_is: { configured: false, masked_summary: '' },
+      abuseipdb: { configured: false, masked_summary: '' },
+      maxmind: { configured: false, masked_summary: '' },
+    },
   },
   subscription_cost_settings: {
     base_currency: 'CNY',

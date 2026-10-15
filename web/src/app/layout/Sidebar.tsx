@@ -1,6 +1,7 @@
 import { Link, matchPath, NavLink, useLocation, type Location } from 'react-router-dom'
 import type { User } from '../../lib/auth-client'
 import { UserChip } from './UserChip'
+import { SourceLinks } from '../../components/SourceLinks'
 
 export interface SidebarProps {
   user: User
@@ -76,6 +77,7 @@ export function Sidebar({
       </nav>
       <div className="sidebar-footer">
         <UserChip user={user} onLogout={onLogout} onChangePassword={onChangePassword} />
+        <SourceLinks />
       </div>
     </aside>
   )

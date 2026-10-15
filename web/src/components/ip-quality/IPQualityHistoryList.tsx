@@ -4,7 +4,9 @@ import { Link, useLocation } from 'react-router-dom'
 import { Badge, Button, Timestamp } from '../atoms'
 import { formatDateTime } from '../../lib/format'
 import type { IPQualitySummary } from '../../lib/types'
+import { IP_QUALITY_HISTORY_ANCHOR } from './IPQualityHeader'
 import { riskLevelLabel, riskTone } from './ipQualityPresentation'
+import { productRiskFacts } from './ipQualityProductPresentation'
 
 type IPQualityHistoryListProps = {
   history: IPQualitySummary[]
@@ -21,8 +23,24 @@ function historyLink(item: IPQualitySummary, fallback: 4 | 6 | null, reportId: s
   return `?${query.toString()}`
 }
 
-const TITLE_ID = 'ip-quality-history-title'
 const COLLAPSED_LIMIT = 5
+
+// 每条历史的事实摘要：revision1 用服务端事实（风险命中、服务可用数）；旧报告只显示标注的旧版评级。
+function HistoryFacts({ item }: { item: IPQualitySummary }) {
+  const product = item.product_revision === 1 ? item.product_summary : null
+  if (!product) {
+    return <Badge variant="info" tone={riskTone(item.risk_level)}>旧版评级 · {riskLevelLabel(item.risk_level)}</Badge>
+  }
+  const facts = productRiskFacts(product)
+  return (
+    <span className="ipq-history__facts">
+      {facts.length > 0
+        ? facts.map((fact) => <Badge key={fact} variant="info" tone="alert">{fact}</Badge>)
+        : <span className="ipq-muted">未见风险命中</span>}
+      <span className="ipq-muted">服务 {product.service_available_count} 可用</span>
+    </span>
+  )
+}
 
 export function IPQualityHistoryList({ history, currentReportId, ipVersion }: IPQualityHistoryListProps) {
   const location = useLocation()
@@ -34,9 +52,9 @@ export function IPQualityHistoryList({ history, currentReportId, ipVersion }: IP
   const hiddenCount = history.length - visible.length
 
   return (
-    <section className="vps-detail-workspace__section ipq-history" aria-labelledby={TITLE_ID}>
+    <section className="vps-detail-workspace__section ipq-history" aria-labelledby={IP_QUALITY_HISTORY_ANCHOR}>
       <div className="vps-detail-workspace__section-head">
-        <h2 id={TITLE_ID}>历史报告</h2>
+        <h2 id={IP_QUALITY_HISTORY_ANCHOR}>历史报告</h2>
         {history.length > 0 ? <span className="ipq-muted">共 {history.length} 份</span> : null}
       </div>
       {history.length > 0 ? (
@@ -50,8 +68,8 @@ export function IPQualityHistoryList({ history, currentReportId, ipVersion }: IP
                 aria-current={isCurrent ? 'page' : undefined}
               >
                 <Timestamp value={item.observed_at} className="ipq-history__time" />
-                <Badge variant="info" tone={riskTone(item.risk_level)}>{riskLevelLabel(item.risk_level)}</Badge>
                 <span className="ipq-history__ip mono">{item.ip_address}</span>
+                <HistoryFacts item={item} />
                 <span className="ipq-history__action">
                   {isCurrent ? (
                     <span className="ipq-muted">当前查看</span>

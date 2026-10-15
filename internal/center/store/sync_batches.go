@@ -123,7 +123,8 @@ func (r *PostgresSyncRepository) applyBatch(ctx context.Context, batch syncing.B
 		if err := tx.Commit(ctx); err != nil {
 			return syncing.Result{}, err
 		}
-		return syncing.Result{Disposition: syncing.ResultDispositionSuppressed, AcceptedAt: receivedAt, Plan: plan}, nil
+		return syncing.Result{Disposition: syncing.ResultDispositionSuppressed, AcceptedAt: receivedAt, Plan: plan,
+			LiveCollectionAllowed: batch.LiveSignal != nil && syncState.Capability == "full"}, nil
 	}
 
 	observationBatch := batchWithReceivedAt(batch.Observations, receivedAt)
@@ -183,9 +184,10 @@ func (r *PostgresSyncRepository) applyBatch(ctx context.Context, batch syncing.B
 	}
 
 	return syncing.Result{
-		Disposition: syncing.ResultDispositionRecorded,
-		AcceptedAt:  receivedAt,
-		Plan:        plan,
+		Disposition:           syncing.ResultDispositionRecorded,
+		AcceptedAt:            receivedAt,
+		LiveCollectionAllowed: batch.LiveSignal != nil && syncState.Capability == "full",
+		Plan:                  plan,
 	}, nil
 }
 

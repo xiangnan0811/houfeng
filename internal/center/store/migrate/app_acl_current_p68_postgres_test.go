@@ -176,35 +176,10 @@ func runAppACLCurrentP68OnlyUpgrade(t *testing.T, profile appACLCurrentReleasedP
 
 func assertAppACLCurrentP68LedgerAppend(t *testing.T, before, after []appACLCurrentPostgresLedgerRow) {
 	t.Helper()
-	if len(after) != len(before)+8 || !reflect.DeepEqual(after[:len(before)], before) {
-		t.Fatalf("C76 ledger did not preserve its predecessor prefix\nbefore: %#v\nafter:  %#v", before, after)
-	}
-	cpuCount, destinationCount, accessManagementCount, freshnessCount, metadataVersionCount, monthEndRateCount, settingsDeploymentOverridesCount, familyStateCount := 0, 0, 0, 0, 0, 0, 0, 0
-	for _, row := range after {
-		switch row.Name {
-		case appACLCurrentP69Migration:
-			cpuCount++
-		case appACLCurrentP70Migration:
-			destinationCount++
-		case appACLCurrentP71Migration:
-			accessManagementCount++
-		case appACLCurrentP72Migration:
-			freshnessCount++
-		case appACLCurrentP73Migration:
-			metadataVersionCount++
-		case appACLCurrentP74Migration:
-			monthEndRateCount++
-		case appACLCurrentP75Migration:
-			settingsDeploymentOverridesCount++
-		case appACLCurrentP76Migration:
-			familyStateCount++
-		}
-	}
-	if cpuCount != 1 || destinationCount != 1 || accessManagementCount != 1 || freshnessCount != 1 || metadataVersionCount != 1 ||
-		monthEndRateCount != 1 || settingsDeploymentOverridesCount != 1 || familyStateCount != 1 || after[len(after)-1].Name != appACLCurrentP76Migration {
-		t.Fatalf("C76 ledger tail/count = %q/%d/%d/%d/%d/%d/%d/%d/%d, want one each 0069 through 0076 row",
-			after[len(after)-1].Name, cpuCount, destinationCount, accessManagementCount, freshnessCount, metadataVersionCount, monthEndRateCount, settingsDeploymentOverridesCount, familyStateCount)
-	}
+	assertAppACLCurrentLedgerSuffix(t, before, after,
+		appACLCurrentP69Migration, appACLCurrentP70Migration, appACLCurrentP71Migration,
+		appACLCurrentP72Migration, appACLCurrentP73Migration, appACLCurrentP74Migration,
+		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration)
 }
 
 func assertAppACLCurrentP70CatalogDelta(
@@ -236,6 +211,9 @@ func assertAppACLCurrentP70CatalogDelta(
 		}] = struct{}{}
 	}
 	want[appACLCurrentFamilyStateSelectObservation(runtimeRole)] = struct{}{}
+	for _, privilege := range appACLCurrentProductExpectedObservations(runtimeRole) {
+		want[privilege] = struct{}{}
+	}
 	if !reflect.DeepEqual(additions, want) {
 		t.Fatalf("current direct ACL additions = %#v, want access-management and family-state SELECT delta %#v", additions, want)
 	}
@@ -317,16 +295,10 @@ func testPostgresIntegrationAppACLCurrentP70Upgrade(t *testing.T) {
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
 		t.Fatalf("C70 to C74 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
-	if len(after.Ledger) != len(before.Ledger)+6 ||
-		!reflect.DeepEqual(after.Ledger[:len(before.Ledger)], before.Ledger) ||
-		after.Ledger[len(after.Ledger)-6].Name != appACLCurrentP71Migration ||
-		after.Ledger[len(after.Ledger)-5].Name != appACLCurrentP72Migration ||
-		after.Ledger[len(after.Ledger)-4].Name != appACLCurrentP73Migration ||
-		after.Ledger[len(after.Ledger)-3].Name != appACLCurrentP74Migration ||
-		after.Ledger[len(after.Ledger)-2].Name != appACLCurrentP75Migration ||
-		after.Ledger[len(after.Ledger)-1].Name != appACLCurrentP76Migration {
-		t.Fatalf("C76 ledger tail = %#v, want predecessor prefix plus 0071 through 0076", after.Ledger)
-	}
+	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
+		appACLCurrentP71Migration, appACLCurrentP72Migration, appACLCurrentP73Migration,
+		appACLCurrentP74Migration, appACLCurrentP75Migration, appACLCurrentP76Migration,
+		appACLCurrentP77Migration, appACLCurrentP78Migration)
 	assertAppACLCurrentP70CatalogDelta(t, before.Catalog, after.Catalog, fixture.runtimeRole)
 
 	beforeRepeat := after

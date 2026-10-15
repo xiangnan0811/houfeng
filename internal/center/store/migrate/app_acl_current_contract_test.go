@@ -101,6 +101,28 @@ func TestIPQualityAddressFamiliesAppACLFragment(t *testing.T) {
 	}
 }
 
+func TestIPQualityProductAppACLFragment(t *testing.T) {
+	fragment := ipQualityProductAppACLCurrentMigrationFragment()
+	wantObjects := []AppACLManagedObjectR1{
+		{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "ip_quality_intelligence"},
+		{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "ip_quality_source_cache"},
+	}
+	if fragment.Migration != "0077_ip_quality_product.sql" ||
+		!reflect.DeepEqual(fragment.Objects, wantObjects) ||
+		len(fragment.Functions) != 0 || len(fragment.AuxiliaryPrivileges) != 0 {
+		t.Fatalf("0077 must manage only the product tables: %#v", fragment)
+	}
+	for _, database := range []string{"houfeng", "other_database"} {
+		got, err := canonicalPrivileges(fragment.Privileges(database))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, appACLCurrentProductExpectedPrivileges()) {
+			t.Fatalf("0077 privileges = %#v, want only seven runtime table grants", got)
+		}
+	}
+}
+
 func TestCompileAppACLCurrentSourceContractRejectsMissingFutureFragment(t *testing.T) {
 	fsys := appACLCurrentTestMigrationFS(t)
 	fsys["0052_future.sql"] = &fstest.MapFile{Data: []byte("select 'future';")}

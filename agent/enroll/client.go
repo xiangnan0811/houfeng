@@ -58,6 +58,9 @@ func (c *Client) Sync(ctx context.Context, request agentapi.SyncRequest) (*agent
 	if strings.TrimSpace(request.SyncToken) != "" {
 		headers["Authorization"] = "Bearer " + strings.TrimSpace(request.SyncToken)
 	}
+	if request.LiveSignal != nil {
+		headers[agentapi.IPQualityCollectionRevisionHeader] = "5"
+	}
 	if err := c.postJSON(ctx, agentapi.SyncPath, syncRequestPayloadFrom(request), response, headers); err != nil {
 		return nil, err
 	}

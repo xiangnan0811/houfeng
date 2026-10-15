@@ -1,16 +1,26 @@
 import type { ReactNode } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
-import { Badge, Timestamp } from '../atoms'
-import type { IPQualityIPVersion, IPQualityReport, IPQualitySummary } from '../../lib/types'
+import { Badge, Button, Timestamp } from '../atoms'
+import { VPSCopyValueButton } from '../../pages/vps-detail/VPSCopyValueButton'
+import type { IPQualityIPVersion, IPQualitySummary } from '../../lib/types'
 import { IPQualityCollectButton } from './IPQualityCollectControls'
 import type { IPQualityCollectController } from './useIPQualityCollect'
+
+export type IPQualityEnrichmentView = {
+  // pending/running：Center 资料仍在补充；只显示单一短状态。
+  active: boolean
+  // 页面可见轮询失败：保留已显示事实，给一次重试入口。
+  failed: boolean
+  retry: () => void
+}
+
+export type IPQualityHeaderMark = { label: string, tone: 'notice' | 'neutral', title?: string }
 
 type IPQualityHeaderProps = {
   detailPath: string
   collect: IPQualityCollectController
   summary?: IPQualitySummary | null
-  latest?: IPQualityReport | null
   viewingHistory?: boolean
   // 历史视图“查看最新报告”回到该历史报告所属族的最新报告；未知时交给服务端默认。
   latestIPVersion?: IPQualityIPVersion | null
@@ -18,6 +28,9 @@ type IPQualityHeaderProps = {
   familyControl?: ReactNode
   // 空态由正文承载主操作，页头不再重复按钮。
   showCollect?: boolean
+  // 过期、旧版、归属复核等短标记；不写解释段落。
+  marks?: IPQualityHeaderMark[]
+  enrichment?: IPQualityEnrichmentView | null
 }
 
 function IPQualityMark() {
@@ -31,27 +44,20 @@ function IPQualityMark() {
   )
 }
 
-function regionText(code?: string, name?: string): string {
-  const normalizedCode = (code ?? '').trim()
-  const normalizedName = (name ?? '').trim()
-  if (normalizedName && normalizedCode && normalizedName !== normalizedCode) return `${normalizedName} (${normalizedCode})`
-  return normalizedName || normalizedCode
-}
+export const IP_QUALITY_HISTORY_ANCHOR = 'ip-quality-history-title'
 
 export function IPQualityHeader({
   detailPath,
   collect,
   summary = null,
-  latest = null,
   viewingHistory = false,
   latestIPVersion = null,
   familyControl = null,
   showCollect = true,
+  marks = [],
+  enrichment = null,
 }: IPQualityHeaderProps) {
   const location = useLocation()
-  const useRegion = summary ? regionText(summary.use_region_code, summary.use_region_name) : ''
-  const registeredRegion = regionText(latest?.registered_region_code, latest?.registered_region_name)
-  const network = [summary?.asn, summary?.organization].map((value) => (value ?? '').trim()).filter(Boolean).join(' ')
 
   return (
     <header className="page__head vps-overview-identity ipq-header">
@@ -63,25 +69,43 @@ export function IPQualityHeader({
             {viewingHistory ? <Badge variant="info" className="ipq-header__history">历史报告</Badge> : null}
           </div>
           {summary ? (
-            <dl className="vps-overview-identity__meta" aria-label="报告身份">
-              <div className="vps-overview-identity__meta-item">
+            <dl className="vps-overview-identity__meta ipq-header__meta" aria-label="报告身份">
+              <div className="vps-overview-identity__meta-item ipq-header__ip">
                 <dt>出口 IP</dt>
-                <dd className="mono">{summary.ip_address} · IPv{summary.ip_version}</dd>
+                <dd>
+                  <span className="mono ipq-header__address">{summary.ip_address}</span>
+                  <VPSCopyValueButton value={summary.ip_address} label="出口 IP" />
+                </dd>
               </div>
-              {network ? (
-                <div className="vps-overview-identity__meta-item"><dt>网络</dt><dd>{network}</dd></div>
-              ) : null}
-              {useRegion ? (
-                <div className="vps-overview-identity__meta-item"><dt>使用地</dt><dd>{useRegion}</dd></div>
-              ) : null}
-              {registeredRegion && registeredRegion !== useRegion ? (
-                <div className="vps-overview-identity__meta-item"><dt>注册地</dt><dd>{registeredRegion}</dd></div>
-              ) : null}
               <div className="vps-overview-identity__meta-item">
-                <dt>报告时间</dt>
+                <dt>地址族</dt>
+                <dd className="mono">IPv{summary.ip_version}</dd>
+              </div>
+              <div className="vps-overview-identity__meta-item">
+                <dt>采集时间</dt>
                 <dd><Timestamp value={summary.observed_at} mode="both" /></dd>
               </div>
             </dl>
+          ) : null}
+          {marks.length > 0 || enrichment?.active || enrichment?.failed ? (
+            <div className="ipq-header__marks">
+              {marks.map((mark) => (
+                <Badge key={mark.label} variant="info" tone={mark.tone}>
+                  <span title={mark.title}>{mark.label}</span>
+                </Badge>
+              ))}
+              {enrichment?.failed ? (
+                <span className="ipq-header__enrichment" role="status" aria-label="补充资料状态">
+                  <span>资料刷新失败</span>
+                  <Button size="sm" variant="ghost" onClick={enrichment.retry}>重试</Button>
+                </span>
+              ) : enrichment?.active ? (
+                <span className="ipq-header__enrichment" role="status" aria-label="补充资料状态">
+                  <span className="ipq-pulse" aria-hidden="true" />
+                  查询中
+                </span>
+              ) : null}
+            </div>
           ) : null}
           {familyControl ? <div className="ipq-header__family">{familyControl}</div> : null}
         </div>
@@ -98,6 +122,7 @@ export function IPQualityHeader({
         ) : showCollect ? (
           <IPQualityCollectButton collect={collect} />
         ) : null}
+        {summary ? <a className="btn md ghost" href={`#${IP_QUALITY_HISTORY_ANCHOR}`}>历史</a> : null}
         <Link className="btn md secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
       </div>
     </header>

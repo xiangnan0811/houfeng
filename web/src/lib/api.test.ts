@@ -229,6 +229,12 @@ const settingsResponseBody = {
     stale_after_seconds: 604800,
     timeout_seconds: 15,
     services: ['netflix', 'chatgpt'],
+    mail_enabled: true,
+    sources: {
+      ipapi_is: { configured: false, masked_summary: '' },
+      abuseipdb: { configured: false, masked_summary: '' },
+      maxmind: { configured: false, masked_summary: '' },
+    },
   },
   subscription_cost_settings: {
     base_currency: 'CNY',
@@ -323,6 +329,7 @@ const settingsUpdateBody = {
     stale_after_seconds: 604800,
     timeout_seconds: 15,
     services: ['netflix', 'chatgpt'],
+    mail_enabled: true,
   },
 } satisfies SettingsUpdateInput
 
@@ -722,7 +729,7 @@ describe('api helpers', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await expect(getVPSIPQualityCollectStatus('vps 001')).resolves.toEqual(status)
-    await expect(requestVPSIPQualityCollect('vps 001')).resolves.toEqual(queued)
+    await expect(requestVPSIPQualityCollect('vps 001', [6])).resolves.toEqual(queued)
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/vps/vps%20001/ip-quality/collect', {
       headers: { Accept: 'application/json' },
@@ -731,9 +738,10 @@ describe('api helpers', () => {
     })
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/vps/vps%20001/ip-quality/collect', {
       method: 'POST',
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
       cache: 'no-store',
       credentials: 'include',
+      body: JSON.stringify({ ip_versions: [6] }),
     })
   })
 

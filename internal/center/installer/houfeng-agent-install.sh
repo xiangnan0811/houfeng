@@ -148,6 +148,27 @@ case "$ARCH" in
   *) fail "unsupported architecture: $ARCH (linux/amd64 or linux/arm64 required)" ;;
 esac
 
+# Match the detector's fixed dependency lookup, not an inherited custom PATH.
+# Missing detector tools must never stop or replace an existing Agent.
+DETECTOR_BASH=""
+DETECTOR_JQ=""
+for detector_dir in /usr/bin /bin; do
+  if [ -z "$DETECTOR_BASH" ] && [ -f "$detector_dir/bash" ] && [ -x "$detector_dir/bash" ]; then
+    DETECTOR_BASH="$detector_dir/bash"
+  fi
+  if [ -z "$DETECTOR_JQ" ] && [ -f "$detector_dir/jq" ] && [ -x "$detector_dir/jq" ]; then
+    DETECTOR_JQ="$detector_dir/jq"
+  fi
+done
+[ -n "$DETECTOR_BASH" ] || fail "IP quality detector requires Bash >=4 in /usr/bin or /bin; install it manually and rerun (existing Agent unchanged)"
+[ -n "$DETECTOR_JQ" ] || fail "IP quality detector requires jq in /usr/bin or /bin; install it manually and rerun (existing Agent unchanged)"
+if ! (unset BASH_ENV ENV; "$DETECTOR_BASH" --noprofile --norc -c '[ "${BASH_VERSINFO[0]}" -ge 4 ]'); then
+  fail "IP quality detector requires Bash >=4; install it manually and rerun (existing Agent unchanged)"
+fi
+if ! "$DETECTOR_JQ" --version >/dev/null 2>&1; then
+  fail "IP quality detector requires working jq; repair it manually and rerun (existing Agent unchanged)"
+fi
+
 command -v systemctl >/dev/null 2>&1 || fail "systemctl not found; systemd is required"
 [ -d /run/systemd/system ] || fail "systemd does not appear to be running on this host"
 for required_cmd in awk grep getent groupadd useradd install chown chmod mktemp mv; do

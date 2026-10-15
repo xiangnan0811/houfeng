@@ -1,139 +1,274 @@
-import { Badge, ScrollRegion } from '../atoms'
-import type { IPQualityProviderResult } from '../../lib/types'
+import { Fragment, useState, type ReactNode } from 'react'
+
+import { Badge, Button, ScrollRegion } from '../atoms'
+import type { IPQualityProductSummary, IPQualityProviderResult, IPQualityScore } from '../../lib/types'
 import {
-  providerCapability,
-  providerTableRows,
-  riskEvidenceComplete,
-  riskFlags,
-  riskLevelLabel,
-  riskSignalHits,
-  riskTone,
-  type RiskFlag,
-} from './ipQualityPresentation'
+  FLAG_COLUMNS,
+  fieldCellState,
+  flagCellState,
+  providerFailureText,
+  providerMethodLabel,
+  riskFlagLabel,
+  scoreDisplay,
+  scoreLevel,
+  scoreScopeLabel,
+  usageTypeLabel,
+  vendorGroups,
+  type FieldCellState,
+  type FlagCellState,
+  type FlagColumn,
+} from './ipQualityProductPresentation'
+import { probeErrorLabel, providerSucceeded, riskLevelLabel, riskTone } from './ipQualityPresentation'
 
 type IPQualityProviderTableProps = {
   results: IPQualityProviderResult[]
+  // revision1：服务端事实摘要；缺失时为旧版报告，只显示旧版评级标记。
+  productSummary: IPQualityProductSummary | null
+  legacyRiskLevel?: string
 }
 
 const TITLE_ID = 'ip-quality-provider-table-title'
+const SCORES_TITLE_ID = 'ip-quality-scores-title'
+const FACTORS_TITLE_ID = 'ip-quality-factors-title'
+const COLUMN_COUNT = 3 + FLAG_COLUMNS.length
 
-// 表头顺序：先负面信号，机房属性放最后，它本身不是负面风险。
-const FLAG_ORDER: RiskFlag['key'][] = ['proxy', 'vpn', 'tor', 'abuse', 'robot', 'server']
-const FLAG_HEADERS: Record<RiskFlag['key'], string> = {
-  proxy: 'Proxy',
-  vpn: 'VPN',
-  tor: 'Tor',
-  abuse: 'Abuse',
-  robot: 'Robot',
-  server: '机房',
+// 每种状态同时有字形与文字名称；颜色只是附加信号。
+const CELL_TEXT: Record<FlagCellState, { glyph: string, label: string }> = {
+  yes: { glyph: '是', label: '是' },
+  no: { glyph: '否', label: '否' },
+  unsupported: { glyph: '—', label: '来源不支持' },
+  unknown: { glyph: '?', label: '未知' },
+  error: { glyph: '!', label: '来源错误' },
 }
 
-function orderedFlags(result: IPQualityProviderResult): RiskFlag[] {
-  const flags = riskFlags(result)
-  return FLAG_ORDER.map((key) => flags.find((flag) => flag.key === key) as RiskFlag)
-}
-
-function FlagCell({ flag }: { flag: RiskFlag }) {
-  if (flag.active === true) {
-    return <Badge variant="info" tone={flag.negative ? 'alert' : 'neutral'}>是</Badge>
-  }
-  if (flag.active === false) return <span className="ipq-flag ipq-flag--no">否</span>
-  return <span className="ipq-flag ipq-flag--unknown" aria-label="未知">—</span>
-}
-
-function RiskCell({ result }: { result: IPQualityProviderResult }) {
-  const level = (result.risk_level ?? '').trim()
-  const score = (result.risk_score ?? '').trim()
-  if (!level && !score) return <span className="ipq-flag ipq-flag--unknown" aria-label="未评级">—</span>
+// 负面因子：是=告警实心，否=正常实心；机房不是负面风险，是/否都用中性实心。
+function FlagCell({ row, column }: { row: IPQualityProviderResult, column: FlagColumn }) {
+  const state = flagCellState(row, column)
+  const text = CELL_TEXT[state]
+  const tone = state === 'yes' || state === 'no' ? (column.negative ? (state === 'yes' ? 'alert' : 'normal') : 'neutral') : null
   return (
-    <span className="ipq-risk-cell">
-      {level ? <Badge variant="info" tone={riskTone(level)}>{riskLevelLabel(level)}</Badge> : <span className="ipq-risk-cell__label">风险分</span>}
-      {score ? <span className="ipq-risk-cell__score mono">{score}</span> : null}
+    <span className={`ipq-cell ipq-cell--${state}${tone ? ` ipq-cell--${tone}` : ''}`} title={text.label}>
+      <span aria-hidden="true">{text.glyph}</span>
+      <span className="visually-hidden">{column.label} {text.label}</span>
     </span>
   )
 }
 
-function textCell(value?: string): string {
-  const normalized = (value ?? '').trim()
-  return normalized || '—'
+// 非已知字段的紧凑标记（不支持—、未知?、错误!），定位表复用同一视觉词汇。
+export function FieldStateMark({ state, label }: { state: Exclude<FieldCellState, 'known'>, label: string }) {
+  const text = CELL_TEXT[state]
+  return (
+    <span className={`ipq-cell ipq-cell--${state}`} title={text.label}>
+      <span aria-hidden="true">{text.glyph}</span>
+      <span className="visually-hidden">{label} {text.label}</span>
+    </span>
+  )
 }
 
-export function IPQualityProviderTable({ results }: IPQualityProviderTableProps) {
-  const { rows, emptyCount, unavailable } = providerTableRows(results)
-  const hits = riskSignalHits(results)
-  const negativeHit = hits.some((hit) => hit.negative)
-  const hasRiskScore = rows.some((result) => (result.risk_score ?? '').trim() !== '')
+function TypeCell({ row, field, label }: { row: IPQualityProviderResult, field: 'usage_type' | 'company_type', label: string }) {
+  const raw = (row[field] ?? '').trim()
+  const state = fieldCellState(row, field, raw)
+  if (state !== 'known') return <FieldStateMark state={state} label={label} />
+  const display = usageTypeLabel(raw) ?? raw
+  return (
+    <span className="ipq-type">
+      {display}
+      {display !== raw ? <span className="ipq-type__raw mono">{raw}</span> : null}
+    </span>
+  )
+}
+
+// 条形只表示该来源自身量程上的位置：0 就是空条，不设最小宽度；颜色只随来源等级，无等级时中性。
+function ScoreBar({ fraction, tone }: { fraction: number, tone: string }) {
+  return (
+    <svg className="ipq-score__bar" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <rect className="ipq-score__track" x="0" y="0" width="100" height="4" />
+      {fraction > 0 ? <rect className={`ipq-score__fill ipq-score__fill--${tone}`} x="0" y="0" width={fraction * 100} height="4" /> : null}
+    </svg>
+  )
+}
+
+function SourceName({ row, sample }: { row: IPQualityProviderResult, sample?: boolean }) {
+  const method = providerMethodLabel(row)
+  return (
+    <span className={sample ? 'ipq-source ipq-source--sample' : 'ipq-source'}>
+      <span className="ipq-source__name">{row.provider}</span>
+      {method ? <span className="ipq-source__method">{method}</span> : null}
+    </span>
+  )
+}
+
+function ScoreRow({ row, score, first }: { row: IPQualityProviderResult, score: IPQualityScore, first: boolean }) {
+  const display = scoreDisplay(score)
+  const level = scoreLevel(score.source_label)
+  const tone = level?.tone ?? 'neutral'
+  const raw = score.raw_value.trim()
+  return (
+    <li className={first ? 'ipq-score-row ipq-score-row--first' : 'ipq-score-row'}>
+      <span className="ipq-score-row__source">{first ? <SourceName row={row} /> : <span className="visually-hidden">{row.provider}</span>}</span>
+      <span className="ipq-score-row__metric">
+        <span className="ipq-score-row__label">{score.label || score.id}</span>
+        <span className="ipq-score__scope">{scoreScopeLabel(score.scope)}</span>
+      </span>
+      <span className="ipq-score-row__value mono" title={raw && raw !== display.text ? `原始值 ${raw}` : undefined}>
+        {display.text}
+      </span>
+      <span className="ipq-score-row__level">
+        {level ? <Badge variant="info" tone={level.tone}>{level.label}</Badge> : null}
+        {level && level.raw !== level.label ? <span className="ipq-score-row__raw">{level.raw}</span> : null}
+      </span>
+      <span className="ipq-score-row__bar">
+        {display.fraction != null ? <ScoreBar fraction={display.fraction} tone={tone} /> : null}
+      </span>
+    </li>
+  )
+}
+
+// 旧行没有 typed scores：只有真实原始分时才占一行，旧版评级随之作历史标注；只有评级没有分数不造评分行。
+function LegacyScoreRow({ row, score }: { row: IPQualityProviderResult, score: string }) {
+  const legacyLevel = (row.risk_level ?? '').trim()
+  return (
+    <li className="ipq-score-row ipq-score-row--first">
+      <span className="ipq-score-row__source"><SourceName row={row} /></span>
+      <span className="ipq-score-row__metric"><span className="ipq-score-row__label">旧版评分</span></span>
+      <span className="ipq-score-row__value mono">{score}</span>
+      <span className="ipq-score-row__level">
+        {legacyLevel ? <Badge variant="info" tone={riskTone(legacyLevel)}>旧版评级 · {riskLevelLabel(legacyLevel)}</Badge> : null}
+      </span>
+      <span className="ipq-score-row__bar" />
+    </li>
+  )
+}
+
+// 逐源逐项列出来源给出的分数；没有分数的来源不占行，不合成总分、不跨源平均。
+function ScoreRows({ rows }: { rows: IPQualityProviderResult[] }) {
+  const items = rows.flatMap((row): ReactNode[] => {
+    const scores = row.details?.scores ?? []
+    if (scores.length > 0) {
+      return scores.map((score, index) => <ScoreRow key={`${row.provider}:${score.id}:${score.scope}`} row={row} score={score} first={index === 0} />)
+    }
+    const legacyScore = (row.risk_score ?? '').trim()
+    if (!row.details && legacyScore) {
+      return [<LegacyScoreRow key={`${row.provider}:legacy`} row={row} score={legacyScore} />]
+    }
+    return []
+  })
+  if (items.length === 0) return <p className="ipq-empty">来源未返回风险评分。</p>
+  return <ul className="ipq-score-rows" aria-labelledby={SCORES_TITLE_ID}>{items}</ul>
+}
+
+function ProviderRow({ row, sample = false, toggle, enhancementFailed = false }: { row: IPQualityProviderResult, sample?: boolean, toggle?: ReactNode, enhancementFailed?: boolean }) {
+  const succeeded = providerSucceeded(row)
+  return (
+    <tr className={sample ? 'data-table__row ipq-provider-table__sample' : 'data-table__row'}>
+      <td className="data-table__cell ipq-provider-table__name">
+        <SourceName row={row} sample={sample} />
+        {enhancementFailed ? <span className="ipq-source__failure">增强查询失败</span> : null}
+        {toggle}
+      </td>
+      {succeeded ? (
+        <>
+          <td className="data-table__cell"><TypeCell row={row} field="usage_type" label="使用类型" /></td>
+          <td className="data-table__cell"><TypeCell row={row} field="company_type" label="公司类型" /></td>
+          {FLAG_COLUMNS.map((column) => (
+            <td key={column.key} className="data-table__cell ipq-provider-table__flag"><FlagCell row={row} column={column} /></td>
+          ))}
+        </>
+      ) : (
+        <td className="data-table__cell ipq-provider-table__failure" colSpan={COLUMN_COUNT - 1}>
+          <span className="ipq-cell ipq-cell--error" aria-hidden="true">!</span>
+          <span className="ipq-provider-table__failure-text">{providerFailureText(row)}</span>
+          {row.error_code ? <span className="ipq-muted">{probeErrorLabel(row.error_code) ?? row.error_code}</span> : null}
+        </td>
+      )}
+    </tr>
+  )
+}
+
+function RiskHeadline({ productSummary, legacyRiskLevel }: { productSummary: IPQualityProductSummary | null, legacyRiskLevel: string | undefined }) {
+  if (!productSummary) {
+    const level = (legacyRiskLevel ?? '').trim()
+    return level ? <Badge variant="info" tone={riskTone(level)}>旧版评级 · {riskLevelLabel(level)}</Badge> : null
+  }
+  if (productSummary.risk_flags.length === 0 && productSummary.high_risk_sources.length === 0) {
+    return <span className="ipq-muted">未见风险命中</span>
+  }
+  return (
+    <>
+      {productSummary.risk_flags.map((flag) => <Badge key={flag} variant="info" tone="alert">{riskFlagLabel(flag)}</Badge>)}
+      {productSummary.high_risk_sources.length > 0 ? (
+        <Badge variant="info" tone="alert">高风险来源 · {productSummary.high_risk_sources.join('、')}</Badge>
+      ) : null}
+    </>
+  )
+}
+
+export function IPQualityProviderTable({ results, productSummary, legacyRiskLevel }: IPQualityProviderTableProps) {
+  const groups = vendorGroups(results)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
+  const scoredRows = groups.map((group) => group.primary).filter(providerSucceeded)
 
   return (
     <section className="vps-detail-workspace__section ipq-providers" aria-labelledby={TITLE_ID}>
       <div className="vps-detail-workspace__section-head">
-        <h2 id={TITLE_ID}>IP 数据库判断</h2>
-        <div className="ipq-signal-hits" aria-label="风险信号命中">
-          {hits.map((hit) => (
-            <Badge key={hit.key} variant="info" tone={hit.negative ? 'alert' : 'neutral'}>
-              {hit.key === 'server' ? '机房' : hit.label} {hit.hits}/{hit.total}
-            </Badge>
-          ))}
-          {negativeHit ? null : (
-            <span className="ipq-muted">{riskEvidenceComplete(results) ? '已返回风险字段未命中' : '风险字段不完整'}</span>
-          )}
+        <h2 id={TITLE_ID}>风险评分与因子</h2>
+        <div className="ipq-signal-hits" role="group" aria-label="风险命中">
+          <RiskHeadline productSummary={productSummary} legacyRiskLevel={legacyRiskLevel} />
         </div>
       </div>
-      {rows.length > 0 ? (
-        <ScrollRegion
-          className="ipq-table-scroll"
-          labelledBy={TITLE_ID}
-          hintId="ip-quality-provider-table-hint"
-          hintClassName="ipq-table-hint"
-          hint="横向滚动查看完整列"
-        >
-          <table className="data-table data-table--compact ipq-provider-table">
-            <thead className="data-table__head">
-              <tr>
-                <th>数据库</th>
-                <th>使用类型</th>
-                <th>公司类型</th>
-                <th>风险</th>
-                <th>地区</th>
-                {FLAG_ORDER.map((key) => <th key={key} className="ipq-provider-table__flag">{FLAG_HEADERS[key]}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((result) => (
-                <tr key={`${result.provider}:${result.source_type ?? ''}`} className="data-table__row">
-                  <td className="data-table__cell ipq-provider-table__name">
-                    {result.provider}
-                    {providerCapability(result) === 'geo_only' ? (
-                      <div className="ipq-muted ipq-provider-table__capability">该来源本次仅返回地理信息</div>
-                    ) : null}
-                  </td>
-                  <td className="data-table__cell">{textCell(result.usage_type)}</td>
-                  <td className="data-table__cell">{textCell(result.company_type)}</td>
-                  <td className="data-table__cell"><RiskCell result={result} /></td>
-                  <td className="data-table__cell">{textCell(result.region_code || result.region_name)}</td>
-                  {orderedFlags(result).map((flag) => (
-                    <td key={flag.key} className="data-table__cell ipq-provider-table__flag"><FlagCell flag={flag} /></td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </ScrollRegion>
+      {groups.length > 0 ? (
+        <div className="ipq-risk">
+          <div className="ipq-risk__block">
+            <h3 id={SCORES_TITLE_ID} className="ipq-risk__title">风险评分</h3>
+            <ScoreRows rows={scoredRows} />
+          </div>
+          <div className="ipq-risk__block">
+            <h3 id={FACTORS_TITLE_ID} className="ipq-risk__title">风险因子</h3>
+            <ScrollRegion
+              className="ipq-table-scroll"
+              labelledBy={FACTORS_TITLE_ID}
+              hintId="ip-quality-factors-hint"
+              hintClassName="ipq-table-hint"
+              hint="横向滚动查看完整列"
+            >
+              <table className="data-table data-table--compact ipq-provider-table">
+                <thead className="data-table__head">
+                  <tr>
+                    <th scope="col">来源</th>
+                    <th scope="col">使用类型</th>
+                    <th scope="col">公司类型</th>
+                    {FLAG_COLUMNS.map((column) => <th key={column.key} scope="col" className="ipq-provider-table__flag">{column.label}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.map((group) => {
+                    const open = expanded[group.provider] === true
+                    const toggle = group.others.length > 0 ? (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="ipq-provider-table__toggle"
+                        aria-expanded={open}
+                        onClick={() => setExpanded((current) => ({ ...current, [group.provider]: !open }))}
+                      >
+                        {open ? '收起样本' : `另 ${group.others.length} 个样本`}
+                      </Button>
+                    ) : null
+                    return (
+                      <Fragment key={group.provider}>
+                        <ProviderRow row={group.primary} toggle={toggle} enhancementFailed={group.enhancementFailed} />
+                        {open ? group.others.map((row, index) => <ProviderRow key={`${group.provider}:sample:${index}`} row={row} sample />) : null}
+                      </Fragment>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </ScrollRegion>
+          </div>
+        </div>
       ) : (
-        <p className="ipq-empty">暂无可展示的数据库判断。</p>
+        <p className="ipq-empty">暂无来源结果。</p>
       )}
-      {hasRiskScore || emptyCount > 0 || unavailable.length > 0 ? (
-        <p className="ipq-providers__footnote">
-          {hasRiskScore ? <span>风险分：数值越高风险越高；不同数据库不可直接比较</span> : null}
-          {emptyCount > 0 ? <span>另有 {emptyCount} 个数据库未给出风险判断</span> : null}
-          {unavailable.length > 0 ? (
-            <span className="ipq-providers__unavailable" aria-label="未返回结果的数据库">
-              未返回结果：
-              {unavailable.map((gap) => <Badge key={gap.provider} variant="info" tone={gap.tone}>{gap.label}</Badge>)}
-            </span>
-          ) : null}
-        </p>
-      ) : null}
     </section>
   )
 }

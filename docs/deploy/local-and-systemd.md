@@ -23,6 +23,28 @@ This repository does not currently document package-manager repositories, Kubern
 
 Deploy a matching Center, SPA and Agent candidate together. The new Agent session credentials and unbuffered online signals are required; mixed old/new Agent operation is unsupported. A Center restart resets the continuous receiver-health observation window. Archive eligibility therefore requires another uninterrupted 180-minute observation after restart for previously enrolled assets.
 
+### IP quality product protocol upgrade and rollback
+
+For the product revision 1 report upgrade, deploy the compatible **Center first,
+then Agents**. The Center advertises `product_revision=1`; new Agents talking to
+an older or unsupported plan omit all product/details/checks fields and do not
+probe mail. Old Agent reports and queued 18-provider carriers remain accepted by
+the new Center. C77 is additive; no historical report is re-collected or backfilled.
+
+Once any Agent has persisted revision 1 reports in its sync queue, rolling the
+Center back to a version that does not recognize that protocol is unsupported.
+Before such a rollback, stop new IP-quality collection and verify those queues
+have drained into a compatible Center. If a queue still contains revision 1
+reports, restore a compatible Center instead. **Never delete or rewrite the queue
+to downgrade it**, and never weaken strict request decoding or the Agent's
+HTTP-400 discard policy to conceal incompatibility.
+
+Source credentials are optional, self-owned keys stored only by Center settings.
+They are not sent to Agents. Clearing a key prevents new use/cache reuse and fences
+in-flight authenticated results at finalization; previously completed historical
+business facts remain immutable. Changing a key or refreshing the page does not
+reopen old enrichment snapshots: request a new report for new data.
+
 ## Build artifacts
 
 From the repository root:
@@ -41,7 +63,7 @@ Expected local outputs:
 - `bin/houfeng-agent`
 - `web/dist/`
 
-For one-command agent installation, each published GitHub Release must contain Linux agent artifacts, the checksum manifest, and a detached minisign signature for that manifest. The release workflow builds, signs, and uploads them automatically on `release.published`; keep the local target for sanity checks and emergency backfills:
+For one-command agent installation, a published GitHub Release contains the Linux agent binaries, corresponding-source archive, checksum manifest and detached minisign manifest signature. The release workflow builds, signs and uploads these assets on `release.published`; local build/signing capability alone is not public-distribution authorization:
 
 ```bash
 make build-agent-release VERSION=v1.2.3
@@ -51,11 +73,21 @@ Local `make build-agent-release` outputs under `dist/`:
 
 - `houfeng-agent_v1.2.3_linux_amd64`
 - `houfeng-agent_v1.2.3_linux_arm64`
+- `houfeng-agent_v1.2.3_source.tar.gz`
+- `houfeng-agent_v1.2.3_licenses.txt`
 - `sha256sums.txt`
 
-The local target does not sign the manifest. The release workflow additionally creates `sha256sums.txt.minisig`; all four assets must exist before testing the installer.
+`build-agent-release` fails before building or creating release outputs if the tracked working tree or index differs from `HEAD`, or if any non-ignored untracked file exists. Ignored scratch is permitted and untouched. This prevents current-tree binaries from being paired silently with a different HEAD source archive; use `make build-agent` for a dirty development candidate instead.
 
-`build-agent-release` stamps the agent heartbeat version with the same `VERSION` value used in the artifact names. The center-served installer script is fetched from the deployed center; GitHub Release is only used for these binary and signed-checksum assets. Maintainers must configure `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` in GitHub Secrets with the secret key matching the installer-pinned public key before publishing installable agent assets. If the key is encrypted, also set `HOUFENG_RELEASE_MINISIGN_PASSWORD`. Target hosts need `minisign` to verify the signed checksum manifest. The generated command includes `--install-missing-deps`, so if `minisign` is absent the installer downloads the pinned upstream static verifier, checks its SHA256, installs it to `/usr/local/bin/minisign`, and only then verifies Houfeng release assets.
+The local target does not sign the manifest. The release workflow additionally creates `sha256sums.txt.minisig`; all six assets must exist before testing the complete distribution. The source archive is the complete tracked release `HEAD`, including project and third-party licenses, detector source/assets, upstream original, modification notes, SHA256SUMS, Go module files, Makefile and workflow. Binary, archive and license-bundle hashes share the signed manifest. Use a clean release checkout for corresponding-source evidence; a dirty local build is not such evidence.
+
+`build-agent-release` stamps the heartbeat version with the `VERSION` used in artifact names. Center serves the installer; GitHub Release supplies binaries, corresponding source and signed checksums, not token authority. Configure `HOUFENG_RELEASE_MINISIGN_PRIVATE_KEY` to match the installer-pinned public key, and `HOUFENG_RELEASE_MINISIGN_PASSWORD` if encrypted. The target host needs minisign: `--install-missing-deps` retains the existing pinned static-verifier download/SHA256/install flow before release verification.
+
+IP quality detector runtime dependencies are **Bash >=4 and jq**, installed in `/usr/bin` or `/bin`; it uses shell builtins and the Agent's private fetch helper, not curl/dig/bc. The installer preflights these before downloads, stopping the service or changing existing Agent files; missing/broken dependencies require manual operator repair, even with `--install-missing-deps`. No apt/yum/dnf/apk or new detector dependency installation is performed. The existing separately consented, checksum-pinned minisign bootstrap remains unchanged. If dependencies disappear after installation, the four script-backed service probes and keyless geo fallback report `detector_dependency_missing`; monitoring, five public risk sources, the retained three probes and PTR/mail do not exit or silently use old algorithms.
+
+Houfeng's original code is licensed under [AGPL-3.0-only](../../LICENSE) by explicit owner choice. The embedded IPQuality fork retains its upstream license/source/provenance; other third-party components retain their own licenses and notices. Subprocess execution is not an AGPL exemption. Distributors must retain corresponding source and build materials; operators of modified network-facing versions must offer users the corresponding source of their actual version under AGPL section 13, including local changes rather than only linking upstream. See the [project license and source policy](../../README.md#license-and-corresponding-source) and [IP quality contract](../spec/contracts/ip-quality.md). Local verification alone does not authorize publication or production deployment.
+
+The login and sidebar footers offer source and license links. Official image builds set Docker `SOURCE_URL` to the exact checked-out GitHub revision; custom builds must set it to their own published corresponding source (`VITE_SOURCE_URL` for a direct web build). `/licenses.txt` contains the project license and complete third-party notice wording, with line endings and trailing whitespace normalized; the image also retains them under `/usr/share/licenses/houfeng/` and keeps OS-package notices under `/usr/share/doc`. After dependency or toolchain updates, regenerate the tracked bundle with `node scripts/collect-licenses.mjs` (installed npm dependencies and the go.mod toolchain required), then check it with `node scripts/collect-licenses.mjs --check`. Image publication waits for the signed source/license assets to upload successfully.
 
 The monitoring list’s upload/download rates use `network_rates_valid`. A missing valid sample shows an em dash rather than a guessed zero. The first Agent sample establishes a counter baseline; rates become available after a subsequent valid sample. System uptime remains sampled host uptime, not Agent process age.
 
@@ -679,8 +711,8 @@ Important behavior:
 - Explicit reenrollment is distinct from a binary upgrade: when token issuance observes a pending instance with prior sessions, the generated command includes `--reenroll`. This path replaces old session credentials with the new bootstrap token after stopping the service; an ordinary installer rerun retains its existing session credentials. Old sessions can still report minimal online evidence and never regain collection or command permissions.
 - If the center was built with the placeholder `dev` version or without `HOUFENG_PUBLIC_BASE_URL`, command generation returns a configuration error instead of guessing.
 - `/api/agent/install.sh` is a public, read-only script route served by the deployed center. It contains no deployment-specific token until the generated command feeds a token through `--enrollment-token-stdin` at execution time.
-- GitHub Release hosts only `houfeng-agent_<version>_linux_amd64`, `houfeng-agent_<version>_linux_arm64`, `sha256sums.txt`, and `sha256sums.txt.minisig`; the install script is not taken from GitHub raw/release assets.
-- The generated command grants explicit consent for missing dependency recovery with `--install-missing-deps`. Manual installer runs can omit that flag to get an interactive prompt, or pass `--no-install-missing-deps` to fail if `minisign` is missing.
+- GitHub Release also hosts `houfeng-agent_<version>_source.tar.gz` and `houfeng-agent_<version>_licenses.txt` alongside the two Linux binaries, `sha256sums.txt` and `sha256sums.txt.minisig`; the install script is served by Center, not GitHub raw/release assets. The installer downloads only the selected binary and signed checksums; source and license assets remain independently verifiable in that manifest. The workflow resolves its source ref to one commit before either asset or image builds, including manual dispatches.
+- `--install-missing-deps` grants consent only for the existing minisign recovery. Manual runs can omit it for a minisign prompt or pass `--no-install-missing-deps`; it never installs Bash, jq or other detector dependencies.
 - Treat the generated command as a secret: do not paste it into tickets, chat, screenshots, process logs, or shell transcripts you plan to share.
 
 The installer supports Linux systemd hosts on `amd64` and `arm64`. It fails before writing runtime files when the OS, architecture, service manager, downloader, or checksum tools are unsupported. If `minisign` is missing, the generated command allows downloading upstream `minisign` 0.12, verifies its pinned tarball SHA256 and installs the matching static binary to `/usr/local/bin/minisign`; declining dependency recovery stops before agent changes. The installer downloads the selected release asset and signed checksums, verifies the manifest signature and exact checksum entry, then replaces the agent binary and changes systemd state. It writes `agent.env`, creates the state directory, installs the unit, reloads systemd, enables and starts or restarts the service. Token files use mode `0600`: ordinary binary upgrades preserve existing session credentials; an explicit `--reenroll` command first stops the service and atomically replaces them with the new bootstrap token. Neither path requires a separate manual restart.

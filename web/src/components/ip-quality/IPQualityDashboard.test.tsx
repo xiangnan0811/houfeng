@@ -2,7 +2,15 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { IPQualityCollectStatus, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
+import type {
+  IPQualityCollectStatus,
+  IPQualityProductSummary,
+  IPQualityProductView,
+  IPQualityProviderDetails,
+  IPQualityProviderResult,
+  IPQualitySummary,
+  VPSIPQualityReport,
+} from '../../lib/types'
 import { IPQualityDashboard } from './IPQualityDashboard'
 import type { IPQualityCollectController } from './useIPQualityCollect'
 
@@ -95,6 +103,116 @@ function report(overrides: Partial<VPSIPQualityReport> = {}): VPSIPQualityReport
   }
 }
 
+const OBSERVED = '2026-06-08T12:00:00Z'
+
+function productSummary(): IPQualityProductSummary {
+  return {
+    risk_flags: ['vpn'],
+    high_risk_sources: [],
+    restricted_services: [],
+    blacklist_listed_count: 1,
+    blacklist_checked_count: 2,
+    service_available_count: 5,
+    service_partial_count: 1,
+    service_restricted_count: 0,
+    service_unknown_count: 1,
+    geo_status: 'consistent',
+  }
+}
+
+function details(patch: Partial<IPQualityProviderDetails>): IPQualityProviderDetails {
+  return {
+    queried_ip: '192.0.2.1', observed_at: OBSERVED, method: 'agent_public', api_tier: 'anonymous',
+    country_code: 'US', region: 'California', city: '', postal_code: '', timezone: '',
+    latitude: null, longitude: null, registered_country_code: '', asn: 'AS64500', as_name: '', as_domain: '',
+    as_country_code: '', route: '', company_name: 'Example Transit', company_domain: '',
+    is_mobile: null, is_anycast: null, is_bogon: null, scores: [], field_states: {},
+    ...patch,
+  }
+}
+
+function productView(): IPQualityProductView {
+  return {
+    revision: 1,
+    report_id: 'ipq_001',
+    ip_address: '192.0.2.1',
+    ip_version: 4,
+    state: 'complete',
+    agent_observed_at: OBSERVED,
+    completed_at: '2026-06-08T12:01:00Z',
+    ptr_names: ['host.example.net'],
+    providers: [
+      {
+        provider: 'ipapi.is', status: 'success', source_type: 'default', usage_type: 'hosting', company_type: 'hosting',
+        details: details({ city: 'Los Angeles', field_states: { is_proxy: 'unsupported', is_vpn: 'unsupported' } }),
+      },
+      {
+        provider: 'ipquery.io', status: 'success', source_type: 'default', usage_type: 'hosting', is_proxy: false, is_vpn: true,
+        details: details({
+          city: 'San Jose',
+          field_states: { is_abuser: 'unknown', is_robot: 'error' },
+          scores: [{ id: 'risk_score', label: '风险分', raw_value: '20', unit: 'score', scope: 'ip', direction: 'higher_risk', source_label: '', value: 20, min: 0, max: 100 }],
+        }),
+      },
+      {
+        provider: 'ipapi.is', status: 'success', source_type: 'default', usage_type: 'hosting', company_type: 'hosting',
+        is_proxy: false, is_vpn: false, is_tor: false, is_abuser: false, is_server: true,
+        details: details({
+          method: 'center_api', api_tier: 'authenticated', city: 'Los Angeles', latitude: 0, longitude: 0,
+          scores: [{ id: 'company_abuser_score', label: '公司滥用', raw_value: '0.0183 (Elevated)', unit: 'ratio', scope: 'company_network', direction: 'higher_risk', source_label: 'Elevated', value: 0.0183, min: 0, max: 1 }],
+        }),
+      },
+      { provider: 'proxycheck.io', status: 'failure', source_type: 'default', error_code: 'timeout', is_proxy: true },
+    ],
+    mail: [
+      { provider: 'gmail', domain: 'gmail.com', status: 'reachable', mx_host: 'gmail-smtp-in.l.google.com', target_ip: '192.0.2.25', error_code: '', mx_preference: 5, greeting_code: 220, latency_ms: 120, observed_at: OBSERVED },
+      { provider: 'qq', domain: 'qq.com', status: 'timeout', mx_host: 'mx1.qq.com', target_ip: '192.0.2.26', error_code: 'timeout', mx_preference: 10, greeting_code: null, latency_ms: null, observed_at: OBSERVED },
+    ],
+    blacklists: [
+      { source: 'spamcop', category: 'spam', status: 'not_listed', query_method: 'dnsbl', error_code: '', reference_url: 'https://www.spamcop.net/bl.shtml', matched_range: '', codes: [], observed_at: OBSERVED, dataset_at: null },
+      { source: 'dronebl', category: 'abuse', status: 'listed', query_method: 'dnsbl', error_code: '', reference_url: 'https://dronebl.org/', matched_range: '', codes: ['8'], observed_at: OBSERVED, dataset_at: null },
+      { source: 'spamhaus-drop', category: 'network', status: 'unknown', query_method: 'dataset', error_code: 'dataset_incomplete', reference_url: '', matched_range: '', codes: [], observed_at: OBSERVED, dataset_at: null },
+    ],
+    registration: {
+      status: 'success', rir: 'arin', network_handle: 'NET-192-0-2-0-1', start_address: '192.0.2.0', end_address: '192.0.2.255',
+      network_name: 'EXAMPLE-NET', network_country_code: 'US', registrant_country_code: 'US', registrant_name: 'Example', source_url: '',
+      registered_at: null, updated_at: null,
+    },
+    asn: {
+      status: 'success', number: 'AS64500', name: 'EXAMPLE-TRANSIT', domain: 'example.net', type: 'hosting', country_code: 'US', rir: 'arin',
+      source_url: '', route: '192.0.2.0/24', registered_at: null, updated_at: null, observed_at: OBSERVED,
+      ipv4_prefixes: '123', ipv4_addresses: '4096', ipv6_prefixes: null, ipv6_48s: null, origins: ['AS64500'],
+    },
+    summary: productSummary(),
+  }
+}
+
+function productReport(overrides: Partial<IPQualityProductView> = {}): VPSIPQualityReport {
+  const productSummaryValue = { ...summary, risk_level: '', product_revision: 1, intelligence_state: overrides.state ?? 'complete', product_summary: productSummary() }
+  return report({
+    summary: productSummaryValue,
+    latest_report: { ...report().latest_report!, diagnostics_json: { source_version: 'v2', service_probe_revision: 4 } },
+    service_unlocks: [
+      {
+        service: 'chatgpt', source: 'openai_status_probe', status: 'partial', probe_status: 'success',
+        checks: [
+          { id: 'web', label: 'Web', status: 'available', region: '', error_code: '', rule: 'openai_cookie_requirements', http_status: 200 },
+          { id: 'app', label: 'App', status: 'unknown', region: '', error_code: 'timeout', rule: '', http_status: null },
+        ],
+      },
+      {
+        service: 'netflix', source: 'netflix_title_probe', status: 'unlocked', probe_status: 'success', region: 'US', unlock_type: 'catalog_sample',
+        checks: [
+          { id: 'title_81280792', label: '样片 81280792', status: 'available', region: 'US', error_code: '', rule: 'netflix_title_meta', http_status: 200 },
+          { id: 'title_70143836', label: '样片 70143836', status: 'restricted', region: '', error_code: '', rule: 'netflix_title_missing', http_status: 404 },
+        ],
+      },
+    ],
+    history: [productSummaryValue],
+    product: { ...productView(), ...overrides },
+  })
+}
+
 function controller(overrides: Partial<IPQualityCollectController> = {}, status: IPQualityCollectStatus | null = { enabled: true, available: true }): IPQualityCollectController {
   return {
     status,
@@ -114,11 +232,13 @@ function renderDashboard(
     initialEntry = '/vps/vps_001/ip-quality',
     refreshState = 'idle',
     onSelectFamily = vi.fn(),
+    enrichment = null,
   }: {
     collect?: IPQualityCollectController
     initialEntry?: string
     refreshState?: 'idle' | 'refreshing' | 'failed'
     onSelectFamily?: (next: 4 | 6) => void
+    enrichment?: { active: boolean, failed: boolean, retry: () => void } | null
   } = {},
 ) {
   const viewingHistory = new URL(initialEntry, 'http://local').searchParams.has('report_id')
@@ -135,6 +255,7 @@ function renderDashboard(
               viewingHistory={viewingHistory}
               refreshState={refreshState}
               onSelectFamily={onSelectFamily}
+              enrichment={enrichment}
             />
           )}
         />
@@ -144,51 +265,75 @@ function renderDashboard(
 }
 
 describe('IPQualityDashboard', () => {
-  it('summarises identity in the header instead of a separate field grid', () => {
+  it('keeps the identity strip to IP, family and time with a copy action', () => {
     renderDashboard(report())
 
     expect(screen.getByRole('heading', { level: 1, name: 'IP 质量报告' })).toBeInTheDocument()
     const identity = screen.getByLabelText('报告身份')
     expect(identity.tagName).toBe('DL')
-    expect(identity).toHaveTextContent('192.0.2.1 · IPv4')
-    expect(identity).toHaveTextContent('AS64500 Example Transit')
-    expect(identity).toHaveTextContent('注册地US')
-    expect(within(identity).queryByText('link')).not.toBeInTheDocument()
-    expect(within(identity).queryByText('v1.1.0')).not.toBeInTheDocument()
-    expect(within(identity).queryByText('ipq_001')).not.toBeInTheDocument()
-    expect(screen.queryByText(/本身不构成负面风险/)).not.toBeInTheDocument()
-    expect(screen.queryByText(/仅用于排障/)).not.toBeInTheDocument()
+    expect(identity).toHaveTextContent('192.0.2.1')
+    expect(identity).toHaveTextContent('IPv4')
+    expect(within(identity).getByRole('button', { name: '复制出口 IP' })).toBeInTheDocument()
+    expect(within(identity).queryByText(/link|v1\.1\.0|ipq_001|AS64500/)).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '历史' })).toHaveAttribute('href', '#ip-quality-history-title')
+    // 旧报告没有 product：只给短标记，不铺解释段落。
+    expect(screen.getByText('旧版报告')).toBeInTheDocument()
+    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
   })
 
-  it('rates database risk from successful providers and dedupes risk signals by flag class', () => {
+  it('labels a legacy rating as legacy and keeps product-only modules truthful', () => {
     renderDashboard(report())
 
-    const verdict = screen.getByLabelText('数据库风险评级')
-    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('高风险')
-    expect(within(verdict).getByText('风险字段 5/5 已返回')).toBeInTheDocument()
-    expect(within(verdict).queryByText(/质量分|主力节点/)).not.toBeInTheDocument()
-    const metrics = screen.getByLabelText('IP 质量摘要指标')
-    const signals = within(metrics).getByText('风险信号').nextElementSibling as HTMLElement
-    expect(signals.querySelector('strong')).toHaveTextContent('1 项')
-    expect(signals).toHaveTextContent('VPN')
-    expect(signals).toHaveTextContent('高风险来源：ipinfo')
-    // 失败来源 fraud-check 的 proxy 字段不能进入结论。
-    expect(signals).not.toHaveTextContent('Proxy')
-    // 分母是 coverage 的完整 4 项服务；未返回行的服务计为未知，不算受阻。
-    const serviceMetric = within(metrics).getByText('服务解锁').nextElementSibling as HTMLElement
-    expect(serviceMetric.querySelector('strong')).toHaveTextContent('1/4 解锁')
-    expect(serviceMetric).toHaveTextContent('1 受阻 · 2 未知')
+    const providers = screen.getByRole('heading', { name: '风险评分与因子' }).closest('section') as HTMLElement
+    expect(within(providers).getByRole('group', { name: '风险命中' })).toHaveTextContent('旧版评级 · 高风险')
+    // 旧行只有评级、没有真实原始分：不造评分行，旧版评级只留在头部标记。
+    expect(within(providers).queryByRole('list', { name: '风险评分' })).not.toBeInTheDocument()
+    const region = within(providers).getByRole('region', { name: '风险因子' })
+    expect(region).toHaveAttribute('tabindex', '0')
+    const rows = within(region).getAllByRole('row').slice(1)
+    // 每个供应商一行；历史可选占位（maxmind）只在诊断出现。
+    expect(rows.map((row) => (row as HTMLTableRowElement).cells[0]?.textContent)).toEqual(['clean-db', 'ipinfo', 'geo-only', 'fraud-check'])
+    expect(rows[3]).toHaveTextContent('查询失败')
+    // 失败来源残留的 proxy 不作为命中单元格展示。
+    expect(within(rows[3] as HTMLElement).queryByText('Proxy 是')).not.toBeInTheDocument()
+    expect(within(rows[1] as HTMLElement).getByText('VPN 是')).toBeInTheDocument()
+    expect(within(rows[0] as HTMLElement).getByText('VPN 否')).toBeInTheDocument()
+    expect(within(providers).queryByText(/maxmind|http status 429|73 ms/)).not.toBeInTheDocument()
+    expect(within(providers).queryByRole('list', { name: '图例' })).not.toBeInTheDocument()
+    expect(screen.queryByText(/证据不完整|响应成功率|一致性|N\/5/)).not.toBeInTheDocument()
+
+    const mail = screen.getByRole('heading', { name: '邮件连通性' }).closest('section') as HTMLElement
+    expect(mail).toHaveTextContent('旧版报告无此项')
+    const blacklist = screen.getByRole('heading', { name: '黑名单' }).closest('section') as HTMLElement
+    expect(blacklist).toHaveTextContent('旧版报告无此项')
+    expect(screen.getByRole('region', { name: '基础信息' })).toHaveTextContent('AS64500')
+  })
+
+  it('keeps one legacy score row only when the source gave an actual score', () => {
+    const base = report()
+    renderDashboard(report({
+      provider_results: base.provider_results.map((row) => (row.provider === 'ipinfo' ? { ...row, risk_score: '82' } : row)),
+    }))
+    const providers = screen.getByRole('heading', { name: '风险评分与因子' }).closest('section') as HTMLElement
+    const items = within(within(providers).getByRole('list', { name: '风险评分' })).getAllByRole('listitem')
+    expect(items).toHaveLength(1)
+    expect(items[0]).toHaveTextContent('ipinfo')
+    expect(items[0]).toHaveTextContent('82')
+    expect(items[0]).toHaveTextContent('旧版评级')
   })
 
   it('shows services with status and region without internal probe fields', () => {
     renderDashboard(report())
 
     const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
-    expect(within(services).getByLabelText('服务状态统计')).toHaveTextContent('1 解锁1 受阻1 未知')
+    expect(within(services).getByLabelText('服务状态统计')).toHaveTextContent('1 可用1 受限1 未知')
     expect(within(services).getByText('解锁 · JP')).toBeInTheDocument()
     expect(within(services).getByText('受阻')).toBeInTheDocument()
-    expect(within(services).getByText('默认探测暂不支持该服务')).toBeInTheDocument()
-    expect(within(services).queryByText(/openai_status_probe|211|skipped/)).not.toBeInTheDocument()
+    // 未知原因只在折叠详情里，主卡片只有短状态。
+    const disney = within(services).getByText('Disney+').closest('li') as HTMLElement
+    expect(within(disney).getByText('未知')).toBeInTheDocument()
+    expect(within(disney).getByText('原因：默认探测暂不支持该服务').closest('details')).not.toHaveAttribute('open')
+    expect(within(services).queryByText(/openai_status_probe|211|skipped|连接方式未检测|服务地区未知/)).not.toBeInTheDocument()
   })
 
   it('keeps duplicate service rows distinct by service and source', () => {
@@ -215,43 +360,37 @@ describe('IPQualityDashboard', () => {
     }))
 
     const stats = screen.getByLabelText('服务状态统计')
-    expect(stats).toHaveTextContent('0 受阻')
+    expect(stats).toHaveTextContent('0 受限')
     expect(stats).toHaveTextContent('2 未知')
     expect(screen.getByText('部分采集')).toBeInTheDocument()
   })
 
-  it('lists databases with facts first and folds empty or failed sources into a footnote', () => {
-    renderDashboard(report())
-
-    const heading = screen.getByRole('heading', { name: 'IP 数据库判断' })
-    const section = heading.closest('section') as HTMLElement
-    const region = within(section).getByRole('region', { name: 'IP 数据库判断' })
-    expect(region).toHaveAttribute('tabindex', '0')
-    expect(region).toHaveAttribute('aria-labelledby', heading.id)
-    expect(region).not.toHaveAttribute('aria-describedby')
-
-    const rows = within(region).getAllByRole('row').slice(1)
-    expect(rows.map((row) => (row as HTMLTableRowElement).cells[0]?.textContent)).toEqual(['ipinfo', 'clean-db'])
-    expect(within(section).getByLabelText('风险信号命中')).toHaveTextContent('VPN 1/2')
-    expect(within(section).getByLabelText('风险信号命中')).toHaveTextContent('机房 1/1')
-    expect(within(section).getByText('另有 1 个数据库未给出风险判断')).toBeInTheDocument()
-    expect(within(section).getByLabelText('未返回结果的数据库')).toHaveTextContent('fraud-check · 失败')
-    expect(within(section).queryByText(/maxmind|http status 429|73 ms/)).not.toBeInTheDocument()
-  })
-
-  it('collapses long history but keeps every report reachable', () => {
-    const history = Array.from({ length: 7 }, (_, index) => ({
+  it('collapses long history but keeps every report reachable with factual summaries', () => {
+    const history: IPQualitySummary[] = Array.from({ length: 7 }, (_, index) => ({
       ...summary,
       report_id: `ipq_00${index}`,
       observed_at: `2026-06-${String(8 - index).padStart(2, '0')}T12:00:00Z`,
       risk_level: index === 0 ? 'high' : 'medium',
     }))
+    history[0] = {
+      ...history[0]!,
+      risk_level: '',
+      product_revision: 1,
+      product_summary: { ...productSummary(), risk_flags: ['vpn'], blacklist_listed_count: 1 },
+    }
 
     renderDashboard(report({ history }))
 
     const section = screen.getByRole('heading', { name: '历史报告' }).closest('section') as HTMLElement
-    expect(within(section).getAllByRole('listitem')).toHaveLength(5)
+    const items = within(section).getAllByRole('listitem')
+    expect(items).toHaveLength(5)
     expect(within(section).getByText('当前查看').closest('li')).toHaveAttribute('aria-current', 'page')
+    // revision1 历史用服务端事实，不再出现 unknown/低风险冲突；旧报告明确标为旧版评级。
+    expect(items[0]).toHaveTextContent('VPN')
+    expect(items[0]).toHaveTextContent('黑名单 1')
+    expect(items[0]).toHaveTextContent('服务 5 可用')
+    expect(items[0]).not.toHaveTextContent('评级')
+    expect(items[1]).toHaveTextContent('旧版评级 · 中风险')
     fireEvent.click(within(section).getByRole('button', { name: '显示全部 7 份' }))
     const links = within(section).getAllByRole('link', { name: /^查看 .* 的报告$/ })
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
@@ -263,6 +402,371 @@ describe('IPQualityDashboard', () => {
       '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_006',
     ])
     expect(within(section).getByRole('button', { name: '收起' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  describe('revision1 product report', () => {
+    it('selects the authenticated sample per vendor, keeps scoped scores and four distinct cell states', () => {
+      renderDashboard(productReport())
+
+      expect(screen.queryByText('旧版报告')).not.toBeInTheDocument()
+      const providers = screen.getByRole('heading', { name: '风险评分与因子' }).closest('section') as HTMLElement
+      expect(within(providers).getByRole('group', { name: '风险命中' })).toHaveTextContent('VPN')
+
+      // 评分逐源逐项一行，紧邻因子矩阵；只有带分数的来源占行。
+      const scores = within(providers).getByRole('list', { name: '风险评分' })
+      const scoreRows = within(scores).getAllByRole('listitem')
+      expect(scoreRows).toHaveLength(2)
+      // 0.0183 (Elevated) 是公司网段比例：显示 1.83%，中文等级“偏高”并保留来源原文与范围。
+      expect(scoreRows[0]).toHaveTextContent('ipapi.is')
+      expect(scoreRows[0]).toHaveTextContent('1.83%')
+      expect(scoreRows[0]).toHaveTextContent('公司网段')
+      expect(within(scoreRows[0]!).getByText('偏高')).toBeInTheDocument()
+      expect(scoreRows[0]).toHaveTextContent('Elevated')
+      expect(scoreRows[0]!.querySelector('.ipq-score__fill--notice')).not.toBeNull()
+      // 只有数值没有等级：中性原尺度条，不捏造阈值等级。
+      expect(scoreRows[1]).toHaveTextContent('ipquery.io')
+      expect(scoreRows[1]).toHaveTextContent('20')
+      expect(scoreRows[1]!.querySelector('.ipq-score__fill--neutral')).not.toBeNull()
+      expect(scoreRows[1]!.querySelector('.badge')).toBeNull()
+
+      const region = within(providers).getByRole('region', { name: '风险因子' })
+      const rows = () => within(region).getAllByRole('row').slice(1) as HTMLTableRowElement[]
+      expect(rows().map((row) => row.cells[0]?.textContent)).toEqual(['ipapi.is认证另 1 个样本', 'ipquery.io匿名', 'proxycheck.io'])
+
+      const ipapi = rows()[0]!
+      expect(within(ipapi).getByText('VPN 否')).toBeInTheDocument()
+      expect(ipapi.querySelector('.ipq-score__bar')).toBeNull()
+
+      const ipquery = rows()[1]!
+      expect(within(ipquery).getByText('VPN 是')).toBeInTheDocument()
+      expect(within(ipquery).getByText('Abuse 未知')).toBeInTheDocument()
+      expect(within(ipquery).getByText('Robot 来源错误')).toBeInTheDocument()
+      expect(rows()[2]).toHaveTextContent('查询失败')
+
+      fireEvent.click(within(ipapi).getByRole('button', { name: '另 1 个样本' }))
+      const sample = rows()[1]!
+      expect(sample).toHaveClass('ipq-provider-table__sample')
+      expect(sample).toHaveTextContent('匿名')
+      // 匿名层不提供的风险字段是“不支持”，不是“否”。
+      expect(within(sample).getByText('Proxy 来源不支持')).toBeInTheDocument()
+      expect(screen.queryByText(/证据不完整|综合|纯净度/)).not.toBeInTheDocument()
+    })
+
+    it('renders type and location cells from each source field state, not one missing dash', () => {
+      renderDashboard(productReport({
+        providers: [{
+          provider: 'ipwho.is', status: 'success', source_type: 'default', usage_type: '',
+          details: details({
+            region: '', city: '',
+            field_states: { usage_type: 'error', company_type: 'unsupported', region: 'unsupported', city: 'unknown', latitude: 'error', longitude: 'error' },
+          }),
+        }],
+      }))
+
+      const providers = screen.getByRole('heading', { name: '风险评分与因子' }).closest('section') as HTMLElement
+      const row = within(within(providers).getByRole('region', { name: '风险因子' })).getAllByRole('row')[1] as HTMLElement
+      expect(within(row).getByText('使用类型 来源错误')).toBeInTheDocument()
+      expect(within(row).getByText('公司类型 来源不支持')).toBeInTheDocument()
+      // 没有分数的来源不造空评分行。
+      expect(within(providers).queryByRole('list', { name: '风险评分' })).not.toBeInTheDocument()
+      expect(providers).toHaveTextContent('来源未返回风险评分。')
+
+      const location = screen.getByRole('heading', { name: '多源定位' }).closest('section') as HTMLElement
+      const locationRow = within(location).getAllByRole('row')[1] as HTMLElement
+      expect(locationRow).toHaveTextContent('US')
+      expect(within(locationRow).getByText('省 / 州 来源不支持')).toBeInTheDocument()
+      expect(within(locationRow).getByText('城市 未知')).toBeInTheDocument()
+      expect(within(locationRow).getByText('经纬度 来源错误')).toBeInTheDocument()
+      // 三种缺失状态各有字形，不画成同一个占位。
+      expect(locationRow.querySelector('.ipq-cell--unsupported')).toHaveTextContent('—')
+      expect(locationRow.querySelector('.ipq-cell--unknown')).toHaveTextContent('?')
+      expect(locationRow.querySelector('.ipq-cell--error')).toHaveTextContent('!')
+    })
+
+    it('renders basic, ASN, location, mail and blacklist facts from the product view', () => {
+      renderDashboard(productReport())
+
+      const identity = screen.getByRole('region', { name: '基础信息' })
+      // 默认只有六项，按固定顺序；ASN 与组织来自同一份 ASN 资料。
+      const primary = identity.querySelector('.ipq-identity__primary') as HTMLElement
+      expect(Array.from(primary.querySelectorAll('dt')).map((dt) => dt.textContent)).toEqual(['自治系统号', '组织', '城市', '注册地', '使用地', 'IP 类型'])
+      expect(primary).toHaveTextContent('AS64500')
+      expect(primary).toHaveTextContent('EXAMPLE-TRANSIT')
+      expect(primary).not.toHaveTextContent('Example Transit')
+      expect(primary).toHaveTextContent('US')
+      // 两个来源城市不同：不挑选其一，只给逐源对照入口。
+      expect(within(primary).getByRole('link', { name: '来源有分歧' })).toHaveAttribute('href', '#ip-quality-location-title')
+      // 来源没有真实注册国家，不拿 RDAP/ASN 国家冒充注册地；旧报告无 ip_type 时 IP 类型是“未知”，不按 geo_status 重分类。
+      expect(within(primary).getByText('注册地').nextElementSibling).toHaveTextContent('未知')
+      expect(within(primary).getByText('IP 类型').nextElementSibling).toHaveTextContent('未知')
+      expect(primary).not.toHaveTextContent(/原生|广播/)
+      // 其余事实在默认关闭的“更多信息”里，且不重复六项。
+      const more = within(identity).getByText('更多信息').closest('details') as HTMLElement
+      expect(more).not.toHaveAttribute('open')
+      expect(more).toHaveTextContent('host.example.net')
+      expect(more).toHaveTextContent('123 前缀 · 4,096 地址')
+      expect(more).toHaveTextContent('机房')
+      expect(more).toHaveTextContent('注册与使用地一致')
+      expect(Array.from(more.querySelectorAll('dt')).map((dt) => dt.textContent)).not.toContain('自治系统号')
+
+      const location = screen.getByRole('heading', { name: '多源定位' }).closest('section') as HTMLElement
+      // 0 是合法坐标。
+      expect(location).toHaveTextContent('0, 0')
+      expect(location).toHaveTextContent('San Jose')
+
+      const mail = screen.getByRole('heading', { name: '邮件连通性' }).closest('section') as HTMLElement
+      expect(mail).toHaveTextContent('可连接 1/2')
+      expect(within(mail).getByText('可连接')).toBeInTheDocument()
+      expect(within(mail).getByText('超时')).toBeInTheDocument()
+      expect(within(mail).queryByText(/gmail-smtp-in\.l\.google\.com/)).not.toBeInTheDocument()
+      fireEvent.click(within(mail).getByRole('button', { name: 'Gmail MX 详情' }))
+      expect(within(mail).getByText(/gmail-smtp-in\.l\.google\.com/)).toBeInTheDocument()
+
+      const blacklist = screen.getByRole('heading', { name: '黑名单' }).closest('section') as HTMLElement
+      expect(blacklist).toHaveTextContent('命中 1 / 已查 2')
+      const drone = within(blacklist).getByText('DroneBL').closest('tr') as HTMLElement
+      expect(drone).toHaveTextContent('已列入')
+      const drop = within(blacklist).getByText('Spamhaus DROP').closest('tr') as HTMLElement
+      expect(drop).toHaveTextContent('未知')
+      expect(drop).not.toHaveTextContent('未列入')
+
+      const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
+      expect(within(services).getByLabelText('服务状态统计')).toHaveTextContent('5 可用1 部分0 受限1 未知')
+      // 卡片默认只给短结论与地区；Web/App、样片明细都在折叠详情里。
+      const chatgpt = within(services).getByText('ChatGPT').closest('li') as HTMLElement
+      expect(within(chatgpt).getByText('部分可用')).toBeInTheDocument()
+      const chatgptDetails = within(chatgpt).getByText('详情').closest('details') as HTMLElement
+      expect(chatgptDetails).not.toHaveAttribute('open')
+      expect(chatgptDetails).toHaveTextContent('Web · 可用')
+      expect(chatgptDetails).toHaveTextContent('App · 未知')
+      const netflix = within(services).getByText('Netflix').closest('li') as HTMLElement
+      expect(within(netflix).getByText('可用 · US')).toBeInTheDocument()
+      expect(within(netflix).getByText('详情').closest('details')).toHaveTextContent('样片 70143836 · 受限')
+    })
+
+    it('compares typed country codes, not a source-local country name, in identity and location', () => {
+      // 复现实网 Hostcram IPv4 报告形态：四个来源 typed country_code=US，ipapi.is 只给名称 United States。
+      const located = (provider: string): IPQualityProviderResult => ({
+        provider, status: 'success', source_type: 'default', region_code: 'US', region_name: 'United States',
+        details: details({ region: 'Wyoming', city: 'Buffalo' }),
+      })
+      renderDashboard(productReport({
+        providers: [
+          located('ip2location.io'),
+          // 真实报告中该行没有 region_code，只有 typed 空代码（状态 unknown）与名称。
+          {
+            provider: 'ipapi.is', status: 'success', source_type: 'default', region_name: 'United States',
+            details: details({ region: 'Wyoming', city: 'Buffalo', country_code: '', field_states: { country_code: 'unknown' } }),
+          },
+          located('ipquery.io'),
+          located('ipwho.is'),
+          located('proxycheck.io'),
+        ],
+        summary: { ...productSummary(), geo_status: 'unknown' },
+      }))
+
+      const identity = screen.getByRole('region', { name: '基础信息' })
+      expect(within(identity).queryByRole('link', { name: '来源有分歧' })).not.toBeInTheDocument()
+      expect(identity).toHaveTextContent('US')
+      expect(identity).toHaveTextContent('Wyoming')
+      expect(identity).toHaveTextContent('Buffalo')
+      // 服务端 geo_status 仍为 unknown：不因来源一致而贴原生/广播标签。
+      expect(identity).not.toHaveTextContent(/原生|广播|地区分歧/)
+
+      const location = screen.getByRole('heading', { name: '多源定位' }).closest('section') as HTMLElement
+      expect(location).not.toHaveTextContent('来源有分歧')
+      const ipapi = within(location).getByText('ipapi.is').closest('tr') as HTMLTableRowElement
+      // 名称原样显示，不被换成其他来源的代码，也不查表补成 US。
+      expect(ipapi.cells[1]?.textContent).toBe('United States')
+    })
+
+    it('still shows a genuine typed country disagreement in identity and location', () => {
+      renderDashboard(productReport({
+        providers: [
+          { provider: 'ipwho.is', status: 'success', source_type: 'default', details: details({ country_code: 'US', city: 'Buffalo' }) },
+          { provider: 'ipquery.io', status: 'success', source_type: 'default', details: details({ country_code: 'JP', city: 'Buffalo' }) },
+        ],
+      }))
+
+      const identity = screen.getByRole('region', { name: '基础信息' })
+      expect(within(identity).getByRole('link', { name: '来源有分歧' })).toBeInTheDocument()
+      const location = screen.getByRole('heading', { name: '多源定位' }).closest('section') as HTMLElement
+      expect(location).toHaveTextContent('来源有分歧')
+    })
+
+    it('keeps Agent facts visible while Center enrichment is still running', () => {
+      const running = productReport({
+        state: 'running',
+        completed_at: null,
+        blacklists: [],
+        registration: { ...productView().registration, status: 'unknown' },
+        asn: { ...productView().asn, status: 'unknown' },
+      })
+      renderDashboard(running, { enrichment: { active: true, failed: false, retry: vi.fn() } })
+
+      expect(screen.getByRole('status', { name: '补充资料状态' })).toHaveTextContent('查询中')
+      const identity = screen.getByRole('region', { name: '基础信息' })
+      // Agent 已知 ASN 仍展示；Center 资料未到只写短状态。
+      expect(identity).toHaveTextContent('AS64500')
+      expect(within(identity).getAllByText('查询中').length).toBeGreaterThan(0)
+      expect(screen.getByRole('heading', { name: '黑名单' }).closest('section')).toHaveTextContent('查询中')
+      expect(screen.getByRole('heading', { name: '邮件连通性' }).closest('section')).toHaveTextContent('可连接 1/2')
+    })
+
+    it('offers one retry when the enrichment refresh fails', () => {
+      const retry = vi.fn()
+      renderDashboard(productReport({ state: 'running', completed_at: null }), { enrichment: { active: true, failed: true, retry } })
+      const status = screen.getByRole('status', { name: '补充资料状态' })
+      expect(status).toHaveTextContent('资料刷新失败')
+      fireEvent.click(within(status).getByRole('button', { name: '重试' }))
+      expect(retry).toHaveBeenCalledTimes(1)
+    })
+
+    it('keeps the anonymous sample primary and marks a failed Center enhancement; failure-only vendors stay visible', () => {
+      const failedCenter = (provider: string) => ({
+        provider, status: 'failure', source_type: 'default', error_code: 'rate_limited',
+        details: details({ method: 'center_api', api_tier: 'authenticated', country_code: '', region: '', asn: '', company_name: '' }),
+      })
+      const view = productView()
+      renderDashboard(productReport({
+        providers: [view.providers[0]!, view.providers[1]!, failedCenter('ipapi.is'), failedCenter('abuseipdb')],
+      }))
+      // 外层 section 与内部滚动区同名；与其它来源表用例一致，先限定到 section 再取滚动区。
+      const providers = screen.getByRole('heading', { name: '风险评分与因子' }).closest('section') as HTMLElement
+      const region = within(providers).getByRole('region', { name: '风险因子' })
+      const rows = within(region).getAllByRole('row').slice(1) as HTMLTableRowElement[]
+      expect(rows.map((row) => row.cells[0]?.textContent)).toEqual([
+        'ipapi.is匿名增强查询失败另 1 个样本',
+        'ipquery.io匿名',
+        'abuseipdb认证',
+      ])
+      // 失败的认证样本不带事实，只显示短失败态。
+      expect(rows[2]).toHaveTextContent('查询失败')
+      expect(within(rows[1]!).queryByText('增强查询失败')).not.toBeInTheDocument()
+    })
+
+    it('treats a product belonging to another report as legacy', () => {
+      renderDashboard(productReport({ report_id: 'ipq_other' }))
+      expect(screen.getByText('旧版报告')).toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: '邮件连通性' }).closest('section')).toHaveTextContent('旧版报告无此项')
+    })
+
+    it('shows the server IP type and never turns an abuse contact country into the registered country', () => {
+      const withIPType = (ipType: NonNullable<IPQualityProductSummary['ip_type']>) => productReport({ summary: { ...productSummary(), ip_type: ipType } })
+      const typeFact = () => within(screen.getByRole('region', { name: '基础信息' })).getByText('IP 类型').nextElementSibling as HTMLElement
+      const registeredFact = () => within(screen.getByRole('region', { name: '基础信息' })).getByText('注册地').nextElementSibling as HTMLElement
+
+      // 服务端生产方向：country_code 是使用国，comparison_country_code 是注册国或滥用联系国家。
+      // Hostcram 形态：MaxMind 失败，IPinfo 滥用联系国家 US 与使用国 US 一致 → 原生 IP。
+      const first = renderDashboard(withIPType({
+        status: 'native', basis: 'abuse_contact_country', provider: 'ipinfo', method: 'agent_public',
+        country_code: 'US', comparison_country_code: 'US', upstream_commit: '2384a67c756eb35231f5982b34731e522be3653e', fork_revision: 1,
+      }))
+      // 滥用联系国家不进入“注册地”。
+      expect(registeredFact()).toHaveTextContent('未知')
+      first.unmount()
+
+      // 不等国家、abuse 后备：注册地仍未知，不冒充联系国家 DE 或使用国 US。
+      const abuse = renderDashboard(withIPType({ status: 'broadcast', basis: 'abuse_contact_country', provider: 'ipinfo', method: 'agent_public', country_code: 'US', comparison_country_code: 'DE' }))
+      expect(typeFact()).toHaveTextContent('广播 IP')
+      expect(registeredFact()).toHaveTextContent('未知')
+      expect(registeredFact()).not.toHaveTextContent(/DE|US/)
+      abuse.unmount()
+
+      // 不等国家、真实注册国：注册地显示 comparison_country_code（JP），不是使用国 country_code（US）。
+      const registered = renderDashboard(withIPType({ status: 'broadcast', basis: 'registered_country', provider: 'maxmind', method: 'center_api', country_code: 'US', comparison_country_code: 'JP' }))
+      expect(typeFact()).toHaveTextContent('广播 IP')
+      expect(registeredFact()).toHaveTextContent('JP')
+      expect(registeredFact()).not.toHaveTextContent('US')
+      registered.unmount()
+
+      renderDashboard(withIPType({ status: 'conflict', basis: 'registered_country' }))
+      expect(typeFact()).toHaveTextContent('来源冲突')
+      expect(typeFact()).not.toHaveTextContent(/原生|广播/)
+    })
+
+    it('keeps scores on each source scale: zero is an empty bar and labels map to explicit semantic tones', () => {
+      const score = (id: string, label: string, value: number) => ({ id, label: id, raw_value: String(value), unit: 'score', scope: 'ip' as const, direction: 'higher_risk' as const, source_label: label, value, min: 0, max: 100 })
+      renderDashboard(productReport({
+        providers: [{
+          provider: 'scamalytics', status: 'success', source_type: 'default',
+          details: details({ scores: [score('zero', 'Low', 0), score('high', 'High', 60), score('very', 'very high', 80), score('crit', 'CRITICAL', 95), score('odd', 'Suspicious', 50)] }),
+        }],
+      }))
+      const rows = within(screen.getByRole('list', { name: '风险评分' })).getAllByRole('listitem')
+      expect(rows).toHaveLength(5)
+      // 0 分：保留轨道，不画最小宽度的填充。
+      expect(rows[0]!.querySelector('.ipq-score__track')).not.toBeNull()
+      expect(rows[0]!.querySelector('.ipq-score__fill')).toBeNull()
+      expect(within(rows[0]!).getByText('低')).toBeInTheDocument()
+      expect(within(rows[1]!).getByText('高')).toBeInTheDocument()
+      expect(rows[1]!.querySelector('.ipq-score__fill--alert')).not.toBeNull()
+      expect(within(rows[2]!).getByText('很高')).toBeInTheDocument()
+      expect(within(rows[3]!).getByText('严重')).toBeInTheDocument()
+      expect(rows[3]!.querySelector('.ipq-score__fill--critical')).not.toBeNull()
+      // 未识别的来源等级保留原文、中性色，不猜高低。
+      expect(within(rows[4]!).getByText('Suspicious')).toBeInTheDocument()
+      expect(rows[4]!.querySelector('.ipq-score__fill--neutral')).not.toBeNull()
+      // 不合成总分。
+      expect(screen.queryByText(/综合|总分|平均/)).not.toBeInTheDocument()
+    })
+
+    it('shows fixed-detector service rows as short verdicts and keeps the other probe revisions intact', () => {
+      const script = (service: string, rule: string, diagnostics: Array<Record<string, unknown>>) => ({
+        evidence_kind: 'ipquality_script', probe_revision: 5, ip_version: 4, upstream_commit: '2384a67c756eb35231f5982b34731e522be3653e', fork_revision: 1, schema_revision: 1, rule, diagnostics,
+        service,
+      })
+      const anonymous = { evidence_kind: 'anonymous_service_probe', probe_revision: 4, ip_version: 4, endpoints: [] }
+      const body = productReport()
+      body.latest_report = { ...body.latest_report!, diagnostics_json: { source_version: 'v2', service_probe_revision: 5 } }
+      body.service_unlocks = [
+        { service: 'youtube-premium', source: 'ipquality_script', status: 'unlocked', probe_status: 'success', region: 'US', unlock_type: 'premium_offer', extra_json: script('youtube-premium', 'youtube_premium_offer', [{ endpoint: 'youtube-premium', http_status: 200, outcome: 'positive' }]) },
+        { service: 'amazon-prime-video', source: 'ipquality_script', status: 'unlocked', probe_status: 'success', region: 'US', unlock_type: 'territory_offer', extra_json: script('amazon-prime-video', 'prime_current_territory', [{ endpoint: 'amazon-prime-video', http_status: 200, outcome: 'positive' }]) },
+        {
+          service: 'netflix', source: 'ipquality_script', status: 'partial', probe_status: 'success', region: 'US', unlock_type: 'originals_only',
+          extra_json: script('netflix', 'netflix_originals_only', [
+            { endpoint: 'netflix-81280792', http_status: 200, outcome: 'restricted' },
+            { endpoint: 'netflix-70143836', http_status: 200, outcome: 'restricted' },
+            { endpoint: 'netflix-80057281', http_status: 200, outcome: 'positive' },
+          ]),
+        },
+        {
+          service: 'chatgpt', source: 'ipquality_script', status: 'unlocked', probe_status: 'success', region: 'US',
+          extra_json: script('chatgpt', 'openai_cookie_region', [
+            { endpoint: 'openai-cookie', http_status: 200, outcome: 'positive' },
+            { endpoint: 'openai-ios', http_status: 403, outcome: 'unknown', error_code: 'client_access_denied' },
+          ]),
+        },
+        { service: 'tiktok', source: 'tiktok_home_probe', status: 'unlocked', probe_status: 'success', region: 'US', extra_json: anonymous },
+        { service: 'disney-plus', source: 'disney_default_probe', status: 'blocked', probe_status: 'success', extra_json: anonymous },
+        { service: 'reddit', source: 'reddit_home_probe', status: 'blocked', probe_status: 'success', extra_json: anonymous },
+      ]
+      renderDashboard(body)
+
+      const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
+      const tile = (name: string) => within(services).getByText(name).closest('li') as HTMLElement
+      expect(within(tile('YouTube Premium')).getByText('可用 · US')).toBeInTheDocument()
+      expect(within(tile('Amazon Prime Video')).getByText('可用 · US')).toBeInTheDocument()
+      expect(within(tile('Netflix')).getByText('仅自制剧 · US')).toBeInTheDocument()
+      expect(within(tile('ChatGPT')).getByText('可用 · US')).toBeInTheDocument()
+      expect(within(tile('TikTok')).getByText('可用 · US')).toBeInTheDocument()
+      expect(within(tile('Disney+')).getByText('受限')).toBeInTheDocument()
+      expect(within(tile('Reddit')).getByText('受限')).toBeInTheDocument()
+      // 新规则不贴“旧版规则”等标记。
+      expect(within(services).getByLabelText('服务状态统计')).not.toHaveTextContent(/旧版规则|探测已停用|来源未知/)
+
+      // 默认卡片不展示规则、入口或“未知”长句；iOS 入口风控在详情里如实保留，不宣称 App 实测。
+      const chatgpt = tile('ChatGPT')
+      const chatgptDetails = within(chatgpt).getByText('详情').closest('details') as HTMLElement
+      expect(chatgptDetails).not.toHaveAttribute('open')
+      expect(chatgptDetails).toHaveTextContent('规则：openai_cookie_region')
+      expect(chatgptDetails).toHaveTextContent('openai-ios · HTTP 403 · 未知 · 入口拒绝客户端访问')
+      expect(chatgpt).not.toHaveTextContent(/仅 Web|App 未知|未形成可靠业务结论/)
+      const netflixDetails = within(tile('Netflix')).getByText('详情').closest('details') as HTMLElement
+      expect(netflixDetails).toHaveTextContent('范围：仅自制剧可访问')
+      expect(netflixDetails).toHaveTextContent('netflix-80057281 · HTTP 200 · 可用')
+      expect(netflixDetails).toHaveTextContent('netflix-81280792 · HTTP 200 · 受限')
+    })
   })
 
   it('keeps diagnostics and raw JSON folded until requested', () => {
@@ -290,13 +794,13 @@ describe('IPQualityDashboard', () => {
     expect(within(diagnostics).getByText('来源附加数据')).toBeInTheDocument()
   })
 
-  it('offers immediate collection from the header', () => {
+  it('offers immediate collection from the header through the scope menu', () => {
     const collect = controller()
     renderDashboard(report(), { collect })
 
-    const button = screen.getByRole('button', { name: '立即采集' })
-    fireEvent.click(button)
-    expect(collect.start).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: '立即采集' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '采集 IPv4 / IPv6' }))
+    expect(collect.start).toHaveBeenCalledWith([4, 6])
     expect(screen.getByRole('link', { name: '返回 VPS 详情' })).toHaveAttribute('href', '/vps/vps_001')
   })
 
@@ -311,7 +815,7 @@ describe('IPQualityDashboard', () => {
     })
 
     expect(screen.getByRole('button', { name: /采集中/ })).toBeDisabled()
-    expect(screen.getByRole('status')).toHaveTextContent('正在采集最新 IP 质量')
+    expect(screen.getByRole('status')).toHaveTextContent('正在采集 IPv4 / IPv6')
     expect(screen.getByRole('status')).toHaveTextContent(/agent 已接收，正在检测 · 已用 1\d 秒/)
   })
 
@@ -459,388 +963,60 @@ describe('IPQualityDashboard', () => {
     expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
   })
 
-  it('reports incomplete low risk evidence as an evidence gap without a clean or green verdict', () => {
-    renderDashboard(report({
-      summary: { ...summary, risk_level: 'low' },
-      provider_results: [{
-        provider: 'clean-db',
-        status: 'success',
-        source_type: 'default',
-        risk_level: 'low',
-        is_proxy: false,
-        is_vpn: false,
-        is_abuser: false,
-        is_robot: false,
-      }],
-    }))
-
-    const verdict = screen.getByLabelText('数据库风险评级')
-    expect(verdict).not.toHaveClass('ipq-verdict--normal')
-    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('证据不完整')
-    expect(within(verdict).getByText('已返回来源：低风险')).toBeInTheDocument()
-    expect(within(verdict).getByText('风险字段 4/5', { selector: '.ipq-verdict__scope' })).toBeInTheDocument()
-    const metrics = screen.getByLabelText('IP 质量摘要指标')
-    expect(within(metrics).getByText('风险信号').nextElementSibling?.querySelector('strong')).toHaveTextContent('未知')
-    const providers = screen.getByRole('heading', { name: 'IP 数据库判断' }).closest('section') as HTMLElement
-    expect(within(providers).getByLabelText('风险信号命中')).toHaveTextContent('风险字段不完整')
-    expect(screen.queryByText(/已返回风险字段未命中|未发现代理/)).not.toBeInTheDocument()
+  it.each([
+    ['ambiguous', '归属需复核'],
+    ['ip_conflict', '来源 IP 冲突'],
+  ] as const)('marks %s attribution with a short header mark and keeps the source rows', (blocker, mark) => {
+    renderDashboard(report(blocker === 'ambiguous'
+      ? { summary: { ...summary, ambiguous: true } }
+      : { latest_report: { ...report().latest_report!, diagnostics_json: { source_version: 'v2', ip_conflict: true } } }))
+    expect(screen.getByText(mark)).toBeInTheDocument()
+    const providers = screen.getByRole('heading', { name: '风险评分与因子' }).closest('section') as HTMLElement
+    expect(within(within(providers).getByRole('region', { name: '风险因子' })).getByText('ipinfo')).toBeInTheDocument()
   })
 
-  it('keeps a found medium level visible while flagging missing risk fields', () => {
-    renderDashboard(report({
-      provider_results: [{ provider: 'mid-db', status: 'success', source_type: 'default', risk_level: 'medium', is_vpn: false }],
-    }))
-
-    const verdict = screen.getByLabelText('数据库风险评级')
-    expect(verdict).toHaveClass('ipq-verdict--notice')
-    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('中风险')
-    expect(within(verdict).getByText('风险字段 1/5，结论不完整', { selector: '.ipq-verdict__scope' })).toBeInTheDocument()
-  })
-
-  it('states that returned risk fields did not hit only when all five are present', () => {
-    renderDashboard(report({
-      summary: { ...summary, risk_level: 'low' },
-      provider_results: [{
-        provider: 'clean-db',
-        status: 'success',
-        source_type: 'default',
-        is_proxy: false,
-        is_tor: false,
-        is_vpn: false,
-        is_abuser: false,
-        is_robot: false,
-      }],
-    }))
-
-    const verdict = screen.getByLabelText('数据库风险评级')
-    // 没有任何来源给出等级时，不把 summary low 当作评级。
-    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('—')
-    const metrics = screen.getByLabelText('IP 质量摘要指标')
-    expect(within(metrics).getByText('风险信号').nextElementSibling?.querySelector('strong')).toHaveTextContent('未命中')
-    expect(within(metrics).getByText('已返回风险字段未命中')).toBeInTheDocument()
-    const providers = screen.getByRole('heading', { name: 'IP 数据库判断' }).closest('section') as HTMLElement
-    expect(within(providers).getByLabelText('风险信号命中')).toHaveTextContent('已返回风险字段未命中')
-  })
-
-  it('lets a successful high-risk provider override a contradictory summary low', () => {
-    renderDashboard(report({
-      summary: { ...summary, risk_level: 'low' },
-      provider_results: [
-        { provider: 'clean-db', status: 'success', risk_level: 'low', is_proxy: false, is_tor: false, is_vpn: false, is_abuser: false, is_robot: false },
-        { provider: 'proxycheck.io', status: 'success', risk_level: 'high', risk_score: '0' },
-      ],
-    }))
-
-    const verdict = screen.getByLabelText('数据库风险评级')
-    expect(verdict).toHaveClass('ipq-verdict--alert')
-    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('高风险')
-    expect(within(verdict).queryByText('低风险')).not.toBeInTheDocument()
-    // 原始供应商零分保留在来源行，不被当作缺失。
-    const providers = screen.getByRole('heading', { name: 'IP 数据库判断' }).closest('section') as HTMLElement
-    expect(providers.querySelector('.ipq-risk-cell__score')).toHaveTextContent('0')
-    expect(within(providers).getByText('风险分：数值越高风险越高；不同数据库不可直接比较')).toBeInTheDocument()
-  })
-
-  it('keeps the same risk assessment whether services are unknown or known', () => {
-    const unknownServices = renderDashboard(report({
-      service_unlocks: [{ service: 'netflix', source: 'netflix_title_probe', status: 'unknown', probe_status: 'failure', error_code: 'timeout' }],
-    }))
-    const unknownVerdict = screen.getByLabelText('数据库风险评级')
-    const unknownText = unknownVerdict.querySelector('.ipq-verdict__score')?.textContent
-    const unknownSignals = within(screen.getByLabelText('IP 质量摘要指标')).getByText('风险信号').nextElementSibling?.textContent
-    const unknownClass = unknownVerdict.className
-    unknownServices.unmount()
-
-    renderDashboard(report({
-      service_unlocks: [
-        { service: 'netflix', source: 'netflix_title_probe', status: 'blocked', probe_status: 'success' },
-        { service: 'reddit', source: 'reddit_home_probe', status: 'unlocked', probe_status: 'success' },
-      ],
-    }))
-    const knownVerdict = screen.getByLabelText('数据库风险评级')
-    expect(knownVerdict.querySelector('.ipq-verdict__score')?.textContent).toBe(unknownText)
-    expect(within(screen.getByLabelText('IP 质量摘要指标')).getByText('风险信号').nextElementSibling?.textContent).toBe(unknownSignals)
-    expect(knownVerdict.className).toBe(unknownClass)
-  })
-
-  it('withholds the aggregate rating for a source IP conflict but keeps provider rows', () => {
-    renderDashboard(report({
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: { source_version: 'v2', collection_revision: 3, ip_conflict: true },
-      },
-    }))
-
-    const verdict = screen.getByLabelText('数据库风险评级')
-    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('—')
-    expect(within(verdict).getByText('来源返回了不同 IP，需复核来源')).toBeInTheDocument()
-    expect(within(verdict).getByText('来源 IP 冲突')).toBeInTheDocument()
-    expect(within(verdict).queryByText('高风险')).not.toBeInTheDocument()
-    const region = screen.getByRole('heading', { name: 'IP 数据库判断' }).closest('section') as HTMLElement
-    expect(within(region).getByText('ipinfo')).toBeInTheDocument()
-  })
-
-  it.each(['ambiguous', 'ip_conflict'] as const)('withholds the clean signal claim when %s prevents attribution', (blocker) => {
-    renderDashboard(report({
-      summary: { ...summary, ambiguous: blocker === 'ambiguous' },
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: { ip_conflict: blocker === 'ip_conflict' },
-      },
-      provider_results: [{
-        provider: 'all-false-db', status: 'success',
-        is_proxy: false, is_vpn: false, is_tor: false, is_abuser: false, is_robot: false,
-      }],
-    }))
-
-    const metrics = screen.getByLabelText('IP 质量摘要指标')
-    const signals = within(metrics).getByText('风险信号').nextElementSibling as HTMLElement
-    expect(signals.querySelector('strong')).toHaveTextContent('未知')
-    expect(signals).not.toHaveTextContent('未命中')
-    expect(signals).toHaveTextContent('复核')
-    const providers = screen.getByRole('heading', { name: 'IP 数据库判断' }).closest('section') as HTMLElement
-    expect(within(providers).getByText('all-false-db')).toBeInTheDocument()
-  })
-
-  it('marks stale partial reports as historical risk information', () => {
-    renderDashboard(report({ summary: { ...summary, status: 'partial', stale: true } }))
-
-    const verdict = screen.getByLabelText('数据库风险评级')
-    expect(verdict).not.toHaveClass('ipq-verdict--alert')
-    expect(verdict.querySelector('.ipq-verdict__value strong')).toHaveTextContent('高风险')
-    expect(within(verdict).getByText('报告已过期，仅作历史风险信息')).toBeInTheDocument()
-    expect(within(verdict).getByText('报告过期')).toBeInTheDocument()
-    expect(within(verdict).getByText('部分采集')).toBeInTheDocument()
-  })
-
-  it('presents revision 2 anonymous probes with neutral scope, enabled-source coverage and gated service cards', () => {
-    const coverage = {
-      expected_provider_count: 18,
-      successful_provider_count: 5,
-      failed_provider_count: 0,
-      skipped_provider_count: 0,
-      not_configured_provider_count: 13,
-      expected_service_count: 7,
-      successful_service_count: 6,
-      failed_service_count: 1,
-      skipped_service_count: 0,
-      not_configured_service_count: 0,
-    }
-    renderDashboard(report({
-      summary: { ...summary, coverage },
-      latest_report: {
-        ...report().latest_report!,
-        coverage,
-        diagnostics_json: { source_version: 'v2', collection_revision: 3, service_probe_revision: 2 },
-      },
-      provider_results: [
-        ...report().provider_results,
-        { provider: 'ipwho.is', status: 'success', source_type: 'default', region_code: 'DE', extra_json: { capability: 'geo_only' } },
-      ],
-      service_unlocks: [
-        { service: 'netflix', source: 'netflix_title_probe', status: 'unlocked', probe_status: 'success', region: 'DE', unlock_type: 'catalog_sample', extra_json: { probe_revision: 2 } },
-        { service: 'chatgpt', source: 'openai_status_probe', status: 'partial', probe_status: 'success', unlock_type: 'web_verified_app_unknown' },
-        { service: 'reddit', source: 'reddit_home_probe', status: 'blocked', probe_status: 'success', unlock_type: 'anonymous_web' },
-        { service: 'tiktok', source: 'tiktok_home_probe', status: 'blocked', probe_status: 'failure', region: 'US', unlock_type: 'web_region', error_code: 'challenge_detected', error_summary: 'service challenge detected' },
-      ],
-    }))
-
-    const notice = screen.getByRole('note', { name: '服务探测可信度' })
-    expect(notice).toHaveClass('ipq-notice--muted')
-    expect(notice).not.toHaveClass('ipq-notice--warning')
-    expect(notice).toHaveTextContent('免登录服务探测，仅反映当前入口和地区可用性，不代表账号或付费内容权限。')
-
-    const services = screen.getByRole('heading', { name: '服务可用性（免登录探测）' }).closest('section') as HTMLElement
-    expect(within(services).getByLabelText('服务状态统计')).toHaveTextContent('1 可用1 受限1 部分可用1 未知')
-    expect(within(services).getByText('可用 · DE')).toBeInTheDocument()
-    expect(within(services).getByText('抽样目录可访问')).toBeInTheDocument()
-    expect(within(services).getByText('部分可用')).toBeInTheDocument()
-    expect(within(services).getByText('Web 已验证，App 入口未知')).toBeInTheDocument()
-    expect(within(services).getByText('受限')).toBeInTheDocument()
-    const tiktok = within(services).getByText('TikTok').closest('li') as HTMLElement
-    expect(tiktok).toHaveClass('ipq-service--unknown')
-    expect(within(tiktok).getByText('未知')).toBeInTheDocument()
-    expect(within(tiktok).getByText('服务要求人机验证')).toBeInTheDocument()
-    // 失败探测残留的区域与范围不能进入卡片。
-    expect(tiktok).not.toHaveTextContent(/US|网页地区检测|web_region/)
-    expect(within(services).queryByText(/catalog_sample|anonymous_web/)).not.toBeInTheDocument()
-
-    const metrics = screen.getByLabelText('IP 质量摘要指标')
-    // 2 个分母外的未返回服务也计为未知：1/7 可用，partial 与 unknown 分列。
-    const serviceMetric = within(metrics).getByText('服务可用性').nextElementSibling as HTMLElement
-    expect(serviceMetric.querySelector('strong')).toHaveTextContent('1/7 可用')
-    expect(serviceMetric).toHaveTextContent('1 部分可用 · 1 受限 · 4 未知')
-    const providerCoverage = within(metrics).getByText('已启用来源响应成功率').nextElementSibling as HTMLElement
-    expect(providerCoverage.querySelector('strong')).toHaveTextContent('100%')
-    expect(providerCoverage).toHaveTextContent('响应成功 5/5')
-    // 未接入数量只放诊断，不进入摘要指标。
-    expect(providerCoverage).not.toHaveTextContent('13')
-    expect(within(metrics).getByText('已知字段一致性')).toBeInTheDocument()
-
-    const providers = screen.getByRole('heading', { name: 'IP 数据库判断' }).closest('section') as HTMLElement
-    expect(within(providers).getByText('ipwho.is').closest('td')).toHaveTextContent('该来源本次仅返回地理信息')
-
-    const diagnostics = screen.getByLabelText('采集诊断')
-    expect(within(diagnostics).getByText(/个来源 · 4 项服务探测/)).toHaveTextContent('失败 1 · 未接入 1')
-    expect(within(diagnostics).getByText('来源覆盖（全部）').nextElementSibling).toHaveTextContent('成功 5/18 · 失败 0 · 跳过 0 · 未接入 13')
-    expect(within(diagnostics).getByText('服务覆盖').nextElementSibling).toHaveTextContent('成功 6/7 · 失败 1 · 跳过 0 · 未接入 0')
-  })
-
-  it('renders probe credibility notice for legacy default report without revision', () => {
-    renderDashboard(report({
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: { source_version: 'v2' },
-      },
-    }))
-
-    const notice = screen.getByRole('note', { name: '服务探测可信度' })
-    expect(notice).toHaveClass('ipq-notice', 'ipq-notice--warning')
-    expect(within(notice).getByText('服务探测可信度')).toBeInTheDocument()
-    expect(notice).toHaveTextContent('旧版或未识别')
-    // 保留原服务行，旧版报告继续使用“服务解锁”措辞。
-    const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
-    expect(within(services).getByText('解锁 · JP')).toBeInTheDocument()
-    expect(within(services).getByText('受阻')).toBeInTheDocument()
-  })
-
-  it('renders the disabled-probe notice and a full-denominator service count for a revision 1 default report with skipped probes', () => {
-    const skippedReport = report({
-      summary: {
-        ...summary,
-        coverage: {
-          ...summary.coverage!,
-          expected_service_count: 7,
-          successful_service_count: 0,
-          skipped_service_count: 7,
-          failed_service_count: 0,
-        },
-      },
-      latest_report: {
-        ...report().latest_report!,
-        coverage: {
-          ...summary.coverage!,
-          expected_service_count: 7,
-          successful_service_count: 0,
-          skipped_service_count: 7,
-          failed_service_count: 0,
-        },
-        diagnostics_json: { source_version: 'v2', service_probe_revision: 1 },
-      },
-      service_unlocks: [
-        { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
-        { service: 'chatgpt', source: 'openai_status_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
-        { service: 'youtube-premium', source: 'youtube_premium_page_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
-        { service: 'amazon-prime-video', source: 'prime_video_page_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
-        { service: 'disney-plus', source: 'disney_default_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
-        { service: 'tiktok', source: 'tiktok_home_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
-        { service: 'reddit', source: 'reddit_home_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe', error_summary: 'safe default probe is not available without verified business evidence' },
-      ],
-    })
-
-    renderDashboard(skippedReport)
-
-    const notice = screen.getByRole('note', { name: '服务探测可信度' })
-    expect(notice).toHaveClass('ipq-notice', 'ipq-notice--warning')
-    expect(notice).toHaveTextContent('已停用')
-
-    const metrics = screen.getByLabelText('IP 质量摘要指标')
-    const serviceMetric = within(metrics).getByText('服务解锁').nextElementSibling as HTMLElement
-    expect(serviceMetric.querySelector('strong')).toHaveTextContent('0/7 解锁')
-    expect(serviceMetric).toHaveTextContent('7 未知')
-    expect(screen.getByRole('heading', { name: '服务解锁' })).toBeInTheDocument()
+  it('marks stale reports with a short expired mark', () => {
+    renderDashboard(report({ summary: { ...summary, stale: true, status: 'partial' } }))
+    expect(screen.getByText('已过期')).toBeInTheDocument()
+    expect(screen.getByText('部分采集')).toBeInTheDocument()
   })
 
   it.each([
-    '1',
-    '2',
-    -1,
-    0,
-    null,
-  ])('renders legacy notice when service_probe_revision is %s', (invalidRevision) => {
+    ['missing revision on a default report', { source_version: 'v2' }, false, '旧版规则'],
+    ['revision 1 with skipped default probes', { source_version: 'v2', service_probe_revision: 1 }, true, '探测已停用'],
+    ['revision 3 anonymous probes', { source_version: 'v2', service_probe_revision: 3 }, false, null],
+    ['revision 4 anonymous probes', { source_version: 'v2', service_probe_revision: 4 }, false, null],
+  ] as const)('marks service rules for %s without a credibility paragraph', (_label, diagnostics, skipped, mark) => {
     renderDashboard(report({
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: { source_version: 'v2', service_probe_revision: invalidRevision },
-      },
-    }))
-
-    const notice = screen.getByRole('note', { name: '服务探测可信度' })
-    expect(notice).toHaveTextContent('旧版或未识别')
-  })
-
-  it('does not render probe notice when report has no service rows', () => {
-    renderDashboard(report({
-      service_unlocks: [],
-    }))
-
-    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
-  })
-
-  it('does not render probe notice for custom source report', () => {
-    renderDashboard(report({
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: { source_version: 'custom_v1' },
-      },
+      latest_report: { ...report().latest_report!, diagnostics_json: diagnostics },
       service_unlocks: [
-        { service: 'internal-api', source: 'internal_custom_probe', status: 'unlocked', probe_status: 'success' },
+        skipped
+          ? { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', probe_status: 'skipped', error_code: 'unsupported_default_probe' }
+          : { service: 'netflix', source: 'netflix_title_probe', status: 'unlocked', probe_status: 'success' },
       ],
     }))
-
+    const stats = screen.getByLabelText('服务状态统计')
+    if (mark) expect(stats).toHaveTextContent(mark)
+    else expect(stats).not.toHaveTextContent(/旧版规则|探测已停用|来源未知/)
     expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
   })
 
-  it('does not render probe notice for revision 1 report without skipped default rows', () => {
-    renderDashboard(report({
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: { source_version: 'v2', service_probe_revision: 1 },
-      },
+  it('marks custom rows without any source as unverifiable but leaves named custom sources alone', () => {
+    const { unmount } = renderDashboard(report({
+      latest_report: { ...report().latest_report!, diagnostics_json: {} },
       service_unlocks: [
-        { service: 'chatgpt', source: 'openai_status_probe', status: 'unlocked', probe_status: 'success', region: 'JP' },
-        { service: 'netflix', source: 'netflix_title_probe', status: 'blocked', probe_status: 'success' },
+        { service: 'custom-one', source: '', status: 'unlocked', probe_status: 'success' },
+        { service: 'custom-two', status: 'blocked', probe_status: 'success' },
       ],
     }))
+    expect(screen.getByLabelText('服务状态统计')).toHaveTextContent('来源未知')
+    unmount()
 
-    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
-  })
-
-  it.each([
-    { probe_status: 'skipped', error_code: 'unsupported_service' },
-    { probe_status: 'failure', error_code: 'unsupported_default_probe' },
-  ])('does not infer a disabled default probe from mismatched diagnostic %j', (diagnostic) => {
     renderDashboard(report({
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: { source_version: 'v2', service_probe_revision: 1 },
-      },
-      service_unlocks: [
-        { service: 'netflix', source: 'netflix_title_probe', status: 'unknown', ...diagnostic },
-      ],
+      latest_report: { ...report().latest_report!, diagnostics_json: {} },
+      service_unlocks: [{ service: 'internal-api', source: 'internal_custom_probe', status: 'unlocked', probe_status: 'success' }],
     }))
-    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
-  })
-
-  it('uses selected report diagnostics when viewing historical report and retains actions boundary', () => {
-    const historyReport = report({
-      latest_report: {
-        ...report().latest_report!,
-        report_id: 'ipq_000',
-        diagnostics_json: { source_version: 'v2' },
-      },
-    })
-
-    renderDashboard(historyReport, { initialEntry: '/vps/vps_001/ip-quality?report_id=ipq_000' })
-
-    expect(screen.getByText('历史报告', { selector: '.badge' })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
-    const notice = screen.getByRole('note', { name: '服务探测可信度' })
-    expect(notice).toHaveTextContent('旧版或未识别')
-    expect(notice).toHaveClass('ipq-notice--warning')
-    // 所选历史报告没有 revision 2，不套用免登录探测措辞。
-    expect(screen.getByRole('heading', { name: '服务解锁' })).toBeInTheDocument()
-    expect(screen.queryByText(/免登录/)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('服务状态统计')).not.toHaveTextContent('来源未知')
   })
 
   it('translates invalid_response error code into Chinese in service card', () => {
@@ -851,31 +1027,11 @@ describe('IPQualityDashboard', () => {
     }))
 
     const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
-    expect(within(services).getByText('响应未形成可靠业务结论')).toBeInTheDocument()
+    expect(services).toHaveTextContent('原因：响应未形成可靠业务结论')
     expect(within(services).queryByText('service response did not establish a business conclusion')).not.toBeInTheDocument()
   })
 
-  it('keeps status counts without a fabricated ratio when coverage is missing even with multiple rows', () => {
-    const reportWithoutCoverage = report({
-      summary: { ...summary },
-      latest_report: { ...report().latest_report! },
-    })
-    delete reportWithoutCoverage.summary!.coverage
-    delete reportWithoutCoverage.latest_report!.coverage
-
-    renderDashboard(reportWithoutCoverage)
-
-    const metrics = screen.getByLabelText('IP 质量摘要指标')
-    const integrity = within(metrics).getByText('已启用来源响应成功率').nextElementSibling as HTMLElement
-    expect(integrity.querySelector('strong')).toHaveTextContent('—')
-    expect(integrity).toHaveTextContent('暂无有效覆盖数据')
-    const serviceMetric = within(metrics).getByText('服务解锁').nextElementSibling as HTMLElement
-    expect(serviceMetric.querySelector('strong')).toHaveTextContent('1 解锁')
-    expect(serviceMetric.querySelector('strong')).not.toHaveTextContent('/')
-    expect(serviceMetric).toHaveTextContent('1 受阻 · 1 未知')
-  })
-
-  it('shows trusted revision 3 page geography and endpoint diagnostics without changing service status', () => {
+  it('shows trusted page geography and endpoint diagnostics without changing service status', () => {
     const youtubeExtra = {
       probe_revision: 3,
       evidence_kind: 'anonymous_service_probe',
@@ -911,68 +1067,32 @@ describe('IPQualityDashboard', () => {
     })
 
     const { unmount } = renderDashboard(ipv6Report(6))
-    expect(screen.getByRole('note', { name: '服务探测可信度' })).toHaveClass('ipq-notice--muted')
-    const services = screen.getByRole('heading', { name: '服务可用性（免登录探测）' }).closest('section') as HTMLElement
+    const services = screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement
     const youtube = within(services).getByText('YouTube Premium').closest('li') as HTMLElement
     expect(youtube).toHaveClass('ipq-service--unknown')
     expect(within(youtube).getByText('未知')).toBeInTheDocument()
-    expect(within(youtube).getByLabelText('YouTube Premium 附加证据')).toHaveTextContent('页面地区：CN；Premium 可用性未知')
+    expect(youtube).toHaveTextContent('页面地区 CN')
     // 残留 normalized region 不进入卡片。
     expect(youtube).not.toHaveTextContent('US')
-    expect(within(services).getByLabelText('服务状态统计')).toHaveTextContent('0 可用0 受限1 部分可用2 未知')
+    expect(within(services).getByLabelText('服务状态统计')).toHaveTextContent('0 可用1 部分0 受限2 未知')
     const reddit = within(services).getByText('Reddit').closest('li') as HTMLElement
     expect(reddit).toHaveTextContent('服务拒绝了探测请求（HTTP 403）')
-    expect(within(services).getByText('ChatGPT').closest('li')).toHaveTextContent('服务地区未知')
+    // 入口证据在卡片详情里按需展开。
+    const chatgpt = within(services).getByText('ChatGPT').closest('li') as HTMLElement
+    expect(within(chatgpt).getByText('详情').closest('details')).not.toHaveAttribute('open')
+    expect(chatgpt).toHaveTextContent('web_cookie_requirements · HTTP 200 · 可用 · openai_cookie_requirements')
+    expect(chatgpt).not.toHaveTextContent('服务地区未知')
 
     const diagnostics = screen.getByLabelText('采集诊断')
     const chatgptRow = within(diagnostics).getByText('openai_status_probe').closest('tr') as HTMLElement
-    expect(chatgptRow).toHaveTextContent('web_cookie_requirements · HTTP 200 · 可用 · openai_cookie_requirements')
     expect(chatgptRow).toHaveTextContent('app_home · 未知 · 网络不可达')
     unmount()
 
     // 证据族与所选报告族不一致时不展示页面地区。
     renderDashboard(ipv6Report(4))
-    const mismatched = within(screen.getByRole('heading', { name: '服务可用性（免登录探测）' }).closest('section') as HTMLElement)
+    const mismatched = within(screen.getByRole('heading', { name: '服务解锁' }).closest('section') as HTMLElement)
       .getByText('YouTube Premium').closest('li') as HTMLElement
     expect(mismatched).not.toHaveTextContent('页面地区')
-  })
-
-  it('labels the untested Netflix connection method without inventing native or DNS unlock', () => {
-    renderDashboard(report())
-    const netflix = screen.getByText('Netflix', { selector: '.ipq-service__name' }).closest('li') as HTMLElement
-    expect(netflix).toHaveTextContent('连接方式未检测')
-    expect(netflix).not.toHaveTextContent(/原生|DNS/)
-  })
-
-  it('renders generic notice when report lacks service probe source information', () => {
-    renderDashboard(report({
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: {},
-      },
-      service_unlocks: [
-        { service: 'custom-one', source: '', status: 'unlocked', probe_status: 'success' },
-        { service: 'custom-two', status: 'blocked', probe_status: 'success' },
-      ],
-    }))
-
-    const notice = screen.getByRole('note', { name: '服务探测可信度' })
-    expect(notice).toHaveClass('ipq-notice', 'ipq-notice--warning')
-    expect(notice).toHaveTextContent('此报告缺少服务探测来源信息，无法核验解锁结果；历史原始结果予以保留。')
-  })
-
-  it('does not render probe notice for custom sources with unversioned diagnostics', () => {
-    renderDashboard(report({
-      latest_report: {
-        ...report().latest_report!,
-        diagnostics_json: {},
-      },
-      service_unlocks: [
-        { service: 'internal-api', source: 'internal_custom_probe', status: 'unlocked', probe_status: 'success' },
-      ],
-    }))
-
-    expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
   })
 
   describe('dual-stack collection completion and family state', () => {
@@ -1017,7 +1137,7 @@ describe('IPQualityDashboard', () => {
       expect(family).toHaveTextContent('IPv4 出口探测失败')
       expect(family).toHaveTextContent('以下为上次有效结果')
       // 失败尝试不进入事实：身份仍是上次有效 IPv4 出口。
-      expect(screen.getByLabelText('报告身份')).toHaveTextContent('192.0.2.1 · IPv4')
+      expect(screen.getByLabelText('报告身份')).toHaveTextContent('192.0.2.1')
     })
 
     it('announces an update only for the selected family when the shown report belongs to the completed round', () => {
@@ -1073,9 +1193,11 @@ describe('IPQualityDashboard', () => {
         </MemoryRouter>,
       )
       expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('本轮未检测到 IPv6 可用本地地址')
+      // 该族从未有过报告：不宣称保留了历史结果。
+      expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).not.toHaveTextContent(/保留|上一份|仍展示/)
       expect(screen.getByRole('note', { name: '地址族采集状态' })).toHaveTextContent('本轮未检测到 IPv6 可用本地地址')
       expect(screen.queryByLabelText('报告身份')).not.toBeInTheDocument()
-      expect(screen.queryByLabelText('数据库风险评级')).not.toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: '风险评分与因子' })).not.toBeInTheDocument()
       expect(document.querySelector('.ipq-page')).not.toHaveTextContent(/0\.0\.0\.0|192\.0\.2\.1/)
       // 缺族仍可切换。
       expect(screen.getByRole('button', { name: 'IPv4' })).toHaveAttribute('aria-pressed', 'false')
@@ -1113,7 +1235,7 @@ describe('IPQualityDashboard', () => {
       fireEvent.click(within(group).getByRole('button', { name: 'IPv6' }))
       expect(onSelectFamily).toHaveBeenCalledWith(6)
       expect(collect.start).not.toHaveBeenCalled()
-      expect(screen.getByText('分别检测 IPv4 / IPv6')).toBeInTheDocument()
+      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     })
   })
 })

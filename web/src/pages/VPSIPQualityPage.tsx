@@ -2,13 +2,15 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
 import { Button } from '../components/atoms'
-import type { CollectNoticeView } from '../components/ip-quality/ipQualityCollectPresentation'
+import { collectRequestCoversFamily, type CollectNoticeView } from '../components/ip-quality/ipQualityCollectPresentation'
 import { IPQualityDashboard, type IPQualityDashboardView } from '../components/ip-quality/IPQualityDashboard'
 import { parseIPVersionParam, selectedReportIPVersion } from '../components/ip-quality/ipQualityPresentation'
+import { productEnriching, selectedProduct } from '../components/ip-quality/ipQualityProductPresentation'
 import { useIPQualityCollect } from '../components/ip-quality/useIPQualityCollect'
+import { useIPQualityEnrichment } from '../components/ip-quality/useIPQualityEnrichment'
 import { PageState } from '../components/PageState'
 import { ApiError, getVPSIPQuality, getVPSIPQualityReport } from '../lib/api'
-import type { IPQualityIPVersion, VPSIPQualityReport } from '../lib/types'
+import type { IPQualityCollectRequest, IPQualityIPVersion, VPSIPQualityReport } from '../lib/types'
 import './vps-detail/VPSDetailWorkspace.css'
 
 type PageLoadState = {
@@ -60,11 +62,12 @@ export function VPSIPQualityPage() {
   // 默认请求的响应被迁移到规范化后的族 requestKey；URL 补正后对应 effect 不再重复请求。
   const adoptedKeyRef = useRef<string | null>(null)
   // 采集完成回调与异步补正读取的“当前选择”，避免闭包里的旧路由。
-  const currentRef = useRef({ viewingHistory, search: location.search, routeState: location.state as unknown })
+  const currentFamily = state.report && state.requestKey === requestKey ? selectedReportIPVersion(state.report) : explicitFamily
+  const currentRef = useRef({ viewingHistory, family: currentFamily, search: location.search, routeState: location.state as unknown })
 
   useEffect(() => {
-    currentRef.current = { viewingHistory, search: location.search, routeState: location.state as unknown }
-  }, [viewingHistory, location.search, location.state])
+    currentRef.current = { viewingHistory, family: currentFamily, search: location.search, routeState: location.state as unknown }
+  }, [viewingHistory, currentFamily, location.search, location.state])
 
   useEffect(() => {
     if (!vpsId || !requestKey) return
@@ -113,9 +116,10 @@ export function VPSIPQualityPage() {
     return () => { cancelled = true }
   }, [vpsId, reportId, requestFamily, requestKey, reloadKey, navigate])
 
-  // 立即采集完成后在原地刷新当前所选族；历史视图保持历史，不跳回最新。
-  const refreshLatest = useCallback(() => {
-    if (currentRef.current.viewingHistory) return
+  // 立即采集完成后在原地刷新当前所选族；历史视图保持历史，不跳回最新；只采了另一族时不刷新、不切族。
+  const refreshLatest = useCallback((request: IPQualityCollectRequest) => {
+    const { viewingHistory: inHistory, family } = currentRef.current
+    if (inHistory || !collectRequestCoversFamily(request, family)) return
     setState((prev) => (prev.report ? { ...prev, refreshState: 'refreshing' } : prev))
     setReloadKey((key) => key + 1)
   }, [])
@@ -133,6 +137,20 @@ export function VPSIPQualityPage() {
     navigate({ search: familySearch(next) }, { state: location.state })
   }, [viewingHistory, explicitFamily, navigate, location.state])
 
+  // Center 补充资料：同一所选报告在 pending/running 时可见轮询；写回前核对请求身份与报告 ID，迟到结果不覆盖新选择。
+  const loadedProduct = state.report && state.requestKey === requestKey && !state.error ? selectedProduct(state.report) : null
+  const pollReportId = loadedProduct && productEnriching(loadedProduct) ? loadedProduct.report_id : null
+  const adoptEnrichment = useCallback((key: string, next: VPSIPQualityReport) => {
+    setState((prev) => {
+      if (prev.requestKey !== key || !prev.report) return prev
+      const current = selectedProduct(prev.report)
+      const updated = selectedProduct(next)
+      if (!current || !updated || updated.report_id !== current.report_id) return prev
+      return { ...prev, report: next }
+    })
+  }, [])
+  const enrichment = useIPQualityEnrichment({ vpsId, reportId: pollReportId, requestKey, onReport: adoptEnrichment })
+
   const detailPath = vpsId ? `/vps/${encodeURIComponent(vpsId)}` : '/vps'
   const returnLink = <Link className="btn md secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
   const shell = (view: IPQualityDashboardView) => (
@@ -144,6 +162,7 @@ export function VPSIPQualityPage() {
       viewingHistory={viewingHistory}
       refreshState={state.refreshState}
       onSelectFamily={selectFamily}
+      enrichment={loadedProduct && (productEnriching(loadedProduct) || enrichment.failed) ? { active: productEnriching(loadedProduct), failed: enrichment.failed, retry: enrichment.retry } : null}
     />
   )
 

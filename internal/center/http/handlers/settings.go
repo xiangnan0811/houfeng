@@ -26,7 +26,7 @@ type settingsResponse struct {
 	OverrideRules            centersettings.OverrideRules          `json:"override_rules"`
 	RetentionPolicy          centersettings.RetentionPolicy        `json:"retention_policy"`
 	SubscriptionCostSettings subscriptionCostSettingsResponse      `json:"subscription_cost_settings"`
-	IPQualitySettings        centersettings.IPQualitySettings      `json:"ip_quality_settings"`
+	IPQualitySettings        ipQualitySettingsResponse             `json:"ip_quality_settings"`
 	SettingsSource           centersettings.ConfigSource           `json:"settings_source"`
 }
 
@@ -69,13 +69,12 @@ type settingsUpdateRequest struct {
 	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
 	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
 	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
-	IPQualitySettings        *centersettings.IPQualitySettings      `json:"ip_quality_settings,omitempty"`
+	IPQualitySettings        *ipQualitySettingsUpdateRequest        `json:"ip_quality_settings,omitempty"`
 }
 
-// Only the newly optional Telegram block and sweep mode use raw messages here:
-// their omission must remain distinct from explicit null. The existing core
-// settings remain full-form value fields for compatibility with the settings
-// page contract.
+// Optional blocks use raw messages when omission must remain distinct from
+// explicit null. The existing core settings remain full-form value fields for
+// compatibility with the settings page contract.
 type settingsUpdateRequestWire struct {
 	Telegram                 json.RawMessage                        `json:"telegram"`
 	Feishu                   feishuSettingsUpdateRequest            `json:"feishu"`
@@ -86,7 +85,7 @@ type settingsUpdateRequestWire struct {
 	OverrideRules            centersettings.OverrideRules           `json:"override_rules"`
 	RetentionPolicy          centersettings.RetentionPolicy         `json:"retention_policy"`
 	SubscriptionCostSettings *subscriptionCostSettingsUpdateRequest `json:"subscription_cost_settings,omitempty"`
-	IPQualitySettings        *centersettings.IPQualitySettings      `json:"ip_quality_settings,omitempty"`
+	IPQualitySettings        json.RawMessage                        `json:"ip_quality_settings"`
 }
 
 func (request *settingsUpdateRequest) UnmarshalJSON(data []byte) error {
@@ -106,7 +105,6 @@ func (request *settingsUpdateRequest) UnmarshalJSON(data []byte) error {
 		OverrideRules:            wire.OverrideRules,
 		RetentionPolicy:          wire.RetentionPolicy,
 		SubscriptionCostSettings: wire.SubscriptionCostSettings,
-		IPQualitySettings:        wire.IPQualitySettings,
 	}
 	if wire.Telegram != nil {
 		var telegram telegramSettingsUpdateRequest
@@ -121,6 +119,13 @@ func (request *settingsUpdateRequest) UnmarshalJSON(data []byte) error {
 			return err
 		}
 		decoded.IncidentSweepMode = &mode
+	}
+	if wire.IPQualitySettings != nil {
+		var ipQuality ipQualitySettingsUpdateRequest
+		if err := decodeOptionalSettingsJSON(wire.IPQualitySettings, &ipQuality); err != nil {
+			return err
+		}
+		decoded.IPQualitySettings = &ipQuality
 	}
 
 	*request = decoded
@@ -314,7 +319,7 @@ func mergeSettingsUpdate(current centersettings.CenterSettings, input settingsUp
 		merged.SubscriptionCost = mergeSubscriptionCostSettingsUpdate(current.SubscriptionCost, *input.SubscriptionCostSettings)
 	}
 	if input.IPQualitySettings != nil {
-		merged.IPQuality = *input.IPQualitySettings
+		merged.IPQuality = mergeIPQualitySettingsUpdate(current.IPQuality, *input.IPQualitySettings)
 	}
 
 	incidentDefaults := input.IncidentDefaults
@@ -404,7 +409,7 @@ func newSettingsResponse(record centersettings.CenterSettings, deployment center
 		OverrideRules:            effective.OverrideRules,
 		RetentionPolicy:          effective.RetentionPolicy,
 		SubscriptionCostSettings: newSubscriptionCostSettingsResponse(effective.SubscriptionCost),
-		IPQualitySettings:        effective.IPQuality,
+		IPQualitySettings:        newIPQualitySettingsResponse(effective.IPQuality),
 		SettingsSource:           settingsSource(effective),
 	}
 }

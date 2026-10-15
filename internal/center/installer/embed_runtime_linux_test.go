@@ -63,6 +63,38 @@ func TestScriptMissingMinisignRuntimeBehavior(t *testing.T) {
 	}
 }
 
+func TestInstallerDetectorDependenciesFailBeforeAgentChanges(t *testing.T) {
+	for _, dependency := range []string{"bash", "jq", "old-bash", "broken-jq"} {
+		t.Run(dependency, func(t *testing.T) {
+			env := newInstallerRuntimeTestEnv(t)
+			switch dependency {
+			case "bash", "jq":
+				if err := os.Remove(filepath.Join(env.binDir, dependency)); err != nil {
+					t.Fatal(err)
+				}
+			case "old-bash":
+				if err := os.Remove(filepath.Join(env.binDir, "bash")); err != nil {
+					t.Fatal(err)
+				}
+				env.writeCommand(t, "bash", "#!/bin/sh\nexit 1\n")
+			case "broken-jq":
+				env.writeCommand(t, "jq", "#!/bin/sh\nexit 1\n")
+			}
+			env.writeCommand(t, "systemctl", "#!/bin/sh\ntouch \"$FAKE_INSTALLER_MARKERS/systemctl-called\"\n")
+			env.writeCommand(t, "install", "#!/bin/sh\ntouch \"$FAKE_INSTALLER_MARKERS/install-called\"\n")
+			output, err := env.run(t, "--install-missing-deps", "--reenroll")
+			if err == nil || !strings.Contains(output, "existing Agent unchanged") {
+				t.Fatalf("missing dependency must stop safely: %v\n%s", err, output)
+			}
+			for _, marker := range []string{"systemctl-called", "install-called", "minisign-bootstrap-downloaded", "release-attempted"} {
+				if env.exists(marker) {
+					t.Fatalf("dependency preflight allowed %s", marker)
+				}
+			}
+		})
+	}
+}
+
 type installerRuntimeTestEnv struct {
 	dir     string
 	binDir  string
@@ -82,7 +114,7 @@ func newInstallerRuntimeTestEnv(t *testing.T) installerRuntimeTestEnv {
 	}
 	mustMkdir(t, env.binDir)
 	mustMkdir(t, env.markers)
-	mustWriteExecutable(t, env.script, Script)
+	mustWriteExecutable(t, env.script, strings.ReplaceAll(Script, "for detector_dir in /usr/bin /bin;", "for detector_dir in "+env.binDir+";"))
 
 	env.writeCommand(t, "id", `#!/bin/sh
 if [ "$1" = "-u" ]; then
@@ -103,6 +135,8 @@ esac
 	env.writeCommand(t, "groupadd", "#!/bin/sh\nexit 0\n")
 	env.writeCommand(t, "useradd", "#!/bin/sh\nexit 0\n")
 	env.writeCommand(t, "chown", "#!/bin/sh\nexit 0\n")
+	env.symlinkHostCommand(t, "bash")
+	env.writeCommand(t, "jq", "#!/bin/sh\nexit 0\n")
 	env.writeFakeInstall(t)
 	env.writeFakeCurl(t)
 	env.writeFakeSHA256Sum(t)

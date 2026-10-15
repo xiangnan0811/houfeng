@@ -7,6 +7,10 @@ import type {
   IPQualityFamilyAvailability,
   IPQualityFamilyStatus,
   IPQualityIPVersion,
+  IPQualityProductState,
+  IPQualityProductSummary,
+  IPQualityProductView,
+  IPQualityProviderDetails,
   IPQualityProviderResult,
   IPQualityReport,
   IPQualityServiceUnlock,
@@ -513,7 +517,6 @@ function ipv4Providers(): IPQualityProviderResult[] {
       region_code: 'US', region_name: 'United States', is_proxy: false,
       extra_json: { capability: 'geo_only' },
     },
-    ...NOT_CONFIGURED_PROVIDERS,
   ]
 }
 
@@ -560,7 +563,6 @@ function ipv6Providers(): IPQualityProviderResult[] {
       provider: 'ip2location.io', status: 'failure', source_type: 'default', latency_ms: 5000,
       error_code: 'timeout', error_summary: 'request timed out',
     },
-    ...NOT_CONFIGURED_PROVIDERS,
   ]
 }
 
@@ -582,6 +584,77 @@ type FamilyFacts = {
   latest: IPQualityReport
   providers: IPQualityProviderResult[]
   services: IPQualityServiceUnlock[]
+  product: IPQualityProductView | null
+}
+
+// revision1 product：五个真实默认来源（无 18 来源占位分母）、12 邮局、三个黑名单来源与 RDAP/RIS 资料。
+const MAIL_DOMAINS: ReadonlyArray<readonly [string, string]> = [
+  ['gmail', 'gmail.com'], ['outlook', 'outlook.com'], ['yahoo', 'yahoo.com'], ['apple', 'me.com'], ['mailru', 'mail.ru'], ['aol', 'aol.com'],
+  ['gmx', 'gmx.com'], ['mailcom', 'mail.com'], ['163', '163.com'], ['sohu', 'sohu.com'], ['sina', 'sina.com'], ['qq', 'qq.com'],
+]
+
+function providerDetails(row: IPQualityProviderResult, ipAddress: string, observedAt: string, city: string): IPQualityProviderResult {
+  if (row.status !== 'success') return row
+  const details: IPQualityProviderDetails = {
+    queried_ip: ipAddress, observed_at: observedAt, method: 'agent_public', api_tier: 'anonymous',
+    country_code: row.region_code ?? '', region: '', city, postal_code: '', timezone: '',
+    latitude: null, longitude: null, registered_country_code: '', asn: '', as_name: '', as_domain: '', as_country_code: '', route: '',
+    company_name: '', company_domain: '', is_mobile: null, is_anycast: null, is_bogon: null,
+    scores: row.risk_score ? [{ id: 'risk_score', label: '风险分', raw_value: row.risk_score, unit: 'score', scope: 'ip', direction: 'higher_risk', source_label: '', value: Number(row.risk_score), min: 0, max: 100 }] : [],
+    field_states: {},
+  }
+  // 新报告不再携带旧综合评级；来源原始分数在 typed scores 中。
+  const rest: IPQualityProviderResult = { ...row }
+  delete rest.risk_level
+  return { ...rest, details }
+}
+
+function productFor(ipVersion: IPQualityIPVersion, reportId: string, identity: SummaryIdentity, observedAt: string, providers: IPQualityProviderResult[], state: IPQualityProductState = 'complete'): IPQualityProductView {
+  const summary: IPQualityProductSummary = ipVersion === 4
+    ? {
+        risk_flags: [], high_risk_sources: [], restricted_services: ['tiktok'], blacklist_listed_count: 0, blacklist_checked_count: 3, service_available_count: 6, service_partial_count: 0, service_restricted_count: 1, service_unknown_count: 0, geo_status: 'consistent',
+        // 无 Key 默认路径：IPinfo 滥用联系国家与使用国比较（不是官方注册国）。
+        ip_type: { status: 'native', basis: 'abuse_contact_country', provider: 'ipinfo', method: 'agent_public', country_code: 'US', comparison_country_code: 'US', upstream_commit: '2384a67c756eb35231f5982b34731e522be3653e', fork_revision: 1 },
+      }
+    : { risk_flags: [], high_risk_sources: [], restricted_services: [], blacklist_listed_count: 0, blacklist_checked_count: 1, service_available_count: 2, service_partial_count: 1, service_restricted_count: 0, service_unknown_count: 4, geo_status: 'consistent' }
+  const completedAt = new Date(Date.parse(observedAt) + 30_000).toISOString().replace('.000Z', 'Z')
+  const dnsbl = (source: string, category: 'spam' | 'abuse') => ({
+    source, category, status: ipVersion === 4 ? 'not_listed' as const : 'unsupported' as const, query_method: 'dnsbl' as const,
+    error_code: '', reference_url: '', matched_range: '', codes: [], observed_at: completedAt, dataset_at: null,
+  })
+  return {
+    revision: 1,
+    report_id: reportId,
+    ip_address: identity.ipAddress,
+    ip_version: ipVersion,
+    state,
+    agent_observed_at: observedAt,
+    completed_at: state === 'complete' ? completedAt : null,
+    ptr_names: [ipVersion === 4 ? 'edge-10.fixture.example' : 'edge-v6.fixture.example'],
+    providers,
+    mail: MAIL_DOMAINS.map(([provider, domain], index) => ({
+      provider, domain,
+      status: ipVersion === 4 ? (index === 11 ? 'timeout' as const : 'reachable' as const) : (index < 3 ? 'reachable' as const : 'no_address' as const),
+      mx_host: `mx.${domain}`, target_ip: ipVersion === 4 ? `192.0.2.${index + 1}` : `2001:db8::${index + 1}`,
+      error_code: '', mx_preference: 10, greeting_code: index === 11 && ipVersion === 4 ? null : 220, latency_ms: 40 + index, observed_at: observedAt,
+    })),
+    blacklists: [
+      dnsbl('spamcop', 'spam'),
+      dnsbl('dronebl', 'abuse'),
+      { source: 'spamhaus-drop', category: 'network', status: 'not_listed', query_method: 'dataset', error_code: '', reference_url: 'https://www.spamhaus.org/drop/', matched_range: '', codes: [], observed_at: completedAt, dataset_at: completedAt },
+    ],
+    registration: {
+      status: 'success', rir: 'arin', network_handle: `NET-FIXTURE-${ipVersion}`, start_address: '', end_address: '', network_name: `FIXTURE-NET-${ipVersion}`,
+      network_country_code: identity.regionCode, registrant_country_code: identity.regionCode, registrant_name: identity.organization, source_url: '',
+      registered_at: '2020-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+    },
+    asn: {
+      status: 'success', number: identity.asn, name: identity.organization, domain: 'fixture.example', type: 'isp', country_code: identity.regionCode, rir: 'arin',
+      source_url: '', route: '', registered_at: '2020-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z', observed_at: completedAt,
+      ipv4_prefixes: '12', ipv4_addresses: '3072', ipv6_prefixes: '2', ipv6_48s: '131072', origins: [identity.asn],
+    },
+    summary,
+  }
 }
 
 function familyFacts(
@@ -592,21 +665,46 @@ function familyFacts(
   identity: SummaryIdentity,
   options: { collectRequestId?: string, stale?: boolean } = {},
 ): FamilyFacts {
-  const providers = ipVersion === 4 ? ipv4Providers() : ipv6Providers()
+  const city = ipVersion === 4 ? 'Los Angeles' : 'Tokyo'
+  const providers = (ipVersion === 4 ? ipv4Providers() : ipv6Providers()).map((row) => providerDetails(row, identity.ipAddress, observedAt, city))
   const services = ipVersion === 4 ? ipv4Services() : ipv6Services()
+  const coverageBase = { expected_provider_count: 5, skipped_provider_count: 0, not_configured_provider_count: 0, expected_service_count: 7, not_configured_service_count: 0 }
   const coverage: IPQualityCoverage = ipVersion === 4
-    ? { ...RAW_COVERAGE_BASE, successful_provider_count: 5, failed_provider_count: 0, successful_service_count: 7, failed_service_count: 0, skipped_service_count: 0 }
-    : { ...RAW_COVERAGE_BASE, successful_provider_count: 4, failed_provider_count: 1, successful_service_count: 3, failed_service_count: 4, skipped_service_count: 0 }
+    ? { ...coverageBase, successful_provider_count: 5, failed_provider_count: 0, successful_service_count: 7, failed_service_count: 0, skipped_service_count: 0 }
+    : { ...coverageBase, successful_provider_count: 4, failed_provider_count: 1, successful_service_count: 3, failed_service_count: 4, skipped_service_count: 0 }
   const status = ipVersion === 4 ? 'success' : 'partial'
-  const risk = ipVersion === 4 ? 'low' : 'medium'
-  const summary = summaryFor(reportId, observedAt, status, risk, coverage, 18, identity, options.stale ?? false)
-  const diagnostics = revision4Diagnostics(ipVersion, collectionId, 'available', options.collectRequestId)
+  const product = productFor(ipVersion, reportId, identity, observedAt, providers)
+  const summary: IPQualitySummary = {
+    ...summaryFor(reportId, observedAt, status, '', coverage, 5, identity, options.stale ?? false),
+    product_revision: 1,
+    intelligence_state: product.state,
+    product_summary: product.summary,
+  }
+  const diagnostics = { ...revision4Diagnostics(ipVersion, collectionId, 'available', options.collectRequestId), service_probe_revision: 4 }
   const receivedAt = new Date(Date.parse(observedAt) + 5_000).toISOString().replace('.000Z', 'Z')
   return {
     summary,
     latest: latestFor(summary, receivedAt, diagnostics, rawEnvelope(identity.ipAddress, providers, services, diagnostics), 'fixture-agent-rev4'),
     providers,
     services,
+    product,
+  }
+}
+
+/** 同一报告的 Center 补充资料仍在进行：Agent 事实齐全，ASN/注册/黑名单尚未到达。 */
+export function enrichingView(view: VPSIPQualityReport): VPSIPQualityReport {
+  const product = view.product!
+  return {
+    ...view,
+    product: {
+      ...product,
+      state: 'running',
+      completed_at: null,
+      blacklists: [],
+      registration: { ...product.registration, status: 'unknown' },
+      asn: { ...product.asn, status: 'unknown' },
+      summary: { ...product.summary, blacklist_checked_count: 0 },
+    },
   }
 }
 
@@ -620,6 +718,7 @@ function viewOf(facts: FamilyFacts, defaultIPVersion: IPQualityIPVersion, famili
     provider_results: facts.providers,
     service_unlocks: facts.services,
     history,
+    product: facts.product,
   }
 }
 
@@ -808,9 +907,12 @@ export function scenarioAfterCollect(outcome: CollectOutcome): IPQualityScenario
       ], { 4: { current: v4New, history: [v4New, v4Old, v4Previous()] }, 6: { current: v6Old, history: [v6Old, v6Previous()] } })
     case 'legacy_single_family': {
       // 旧 agent：单份 IPv4 报告只带 collect_request_id，没有 collection_id/族元数据。
-      const summary = { ...v4New.summary, report_id: 'ipq_v4_legacy_r2' }
+      const summary: IPQualitySummary = { ...v4New.summary, report_id: 'ipq_v4_legacy_r2', risk_level: 'low' }
+      delete summary.product_revision
+      delete summary.intelligence_state
+      delete summary.product_summary
       const diagnostics = { source_version: 'v2', collection_revision: 3, service_probe_revision: 3, ip_address_family: 4, collect_request_id: IPQ_COLLECT_REQUEST_ID }
-      const legacy: FamilyFacts = { ...v4New, summary, latest: { ...v4New.latest, report_id: summary.report_id!, diagnostics_json: diagnostics, raw_json: rawEnvelope(summary.ip_address, v4New.providers, v4New.services, diagnostics) } }
+      const legacy: FamilyFacts = { ...v4New, summary, product: null, latest: { ...v4New.latest, report_id: summary.report_id!, diagnostics_json: diagnostics, raw_json: rawEnvelope(summary.ip_address, v4New.providers, v4New.services, diagnostics) } }
       return buildScenario(4, [
         family(4, 'unknown', attempt(ROUND2.observedAt, 'success', { scope: 'legacy_single_family' }), summary),
         family(6, 'available', attempt(ROUND1.observedAt, 'partial', { collectionId: ROUND1.collectionId }), v6Old.summary),

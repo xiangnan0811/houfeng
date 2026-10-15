@@ -216,6 +216,59 @@ func TestCenterSettingsRepositoryGetSettingsReadsIPQualityEnabledLikeSyncPlan(t 
 		})
 	}
 }
+
+func TestCenterSettingsRepositoryIPQualityDefaultsPreservePersistedValues(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		raw         string
+		wantTimeout int
+		wantMail    bool
+		wantEnabled bool
+		wantSources centersettings.IPQualitySources
+	}{
+		"missing block": {wantTimeout: 60, wantMail: true, wantEnabled: true},
+		"legacy explicit timeout": {
+			raw:         `{"enabled":true,"frequency_seconds":86400,"timeout_seconds":15,"stale_after_seconds":604800,"services":["netflix"]}`,
+			wantTimeout: 15, wantMail: true, wantEnabled: true,
+		},
+		"legacy explicitly disabled": {
+			raw:         `{"enabled":false,"timeout_seconds":20}`,
+			wantTimeout: 20, wantMail: true,
+		},
+		"mail explicitly disabled": {
+			raw:         `{"mail_enabled":false,"timeout_seconds":25}`,
+			wantTimeout: 25, wantEnabled: true,
+		},
+		"credentials persisted": {
+			raw:         `{"mail_enabled":true,"sources":{"ipapi_is_key":"private-ipapi","abuseipdb_key":"private-abuse"}}`,
+			wantTimeout: 60, wantMail: true, wantEnabled: true,
+			wantSources: centersettings.IPQualitySources{IPAPIISKey: "private-ipapi", AbuseIPDBKey: "private-abuse"},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &PostgresSettingsRepository{db: fakeSettingsQueryer{
+				queryRow: func(context.Context, string, ...any) pgx.Row {
+					return fakeSettingsRow{scan: func(dest ...any) error {
+						scanCenterSettingsRow(dest, centersettings.Default())
+						*(dest[13].(*[]byte)) = []byte(test.raw)
+						return nil
+					}}
+				},
+			}}
+			got, err := repo.GetSettings(context.Background())
+			if err != nil {
+				t.Fatalf("GetSettings() error = %v", err)
+			}
+			if got.IPQuality.TimeoutSeconds != test.wantTimeout || got.IPQuality.MailEnabled != test.wantMail || got.IPQuality.Enabled != test.wantEnabled {
+				t.Fatalf("timeout/mail/enabled = %d/%v/%v, want %d/%v/%v", got.IPQuality.TimeoutSeconds, got.IPQuality.MailEnabled, got.IPQuality.Enabled, test.wantTimeout, test.wantMail, test.wantEnabled)
+			}
+			if got.IPQuality.Sources != test.wantSources {
+				t.Fatal("persisted credentials were lost or changed")
+			}
+		})
+	}
+}
 func TestCenterSettingsRepositoryGetSettingsPreservesExplicitFalseOverride(t *testing.T) {
 	t.Parallel()
 

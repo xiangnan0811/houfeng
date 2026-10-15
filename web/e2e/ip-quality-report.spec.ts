@@ -19,6 +19,7 @@ import {
   ipQualityScenario,
   ipQualityScenarioProfile,
   legacyAgentProfile,
+  enrichingView,
   scenarioAfterCollect,
   type CollectOutcome,
   type IPQualityScenario,
@@ -30,7 +31,7 @@ import { expectNoDocumentOverflow } from './support/geometry'
 // 页面可见合同（docs/spec/contracts/ip-quality-web.md）集中在此，文案调整只改一处。
 const UI = {
   familyGroup: 'IP 地址族',
-  collectHint: '分别检测 IPv4 / IPv6',
+  collectDual: '采集 IPv4 / IPv6',
   updated: '报告已更新',
   invalidFamily: '地址族参数无效',
   showDefault: '查看默认报告',
@@ -64,7 +65,8 @@ const THEMES = [
   { preset: 'observatory', mode: 'dark' },
 ] as const
 
-const ANONYMOUS_PROBE_NOTICE = '免登录服务探测，仅反映当前入口和地区可用性，不代表账号或付费内容权限。'
+const basicInfo = (page: Page) => page.getByRole('region', { name: '基础信息' })
+const sectionByHeading = (page: Page, name: string) => page.locator('section').filter({ has: page.getByRole('heading', { level: 2, name, exact: true }) })
 
 function familyButton(page: Page, ipVersion: IPQualityIPVersion): Locator {
   return page.getByRole('group', { name: UI.familyGroup }).getByRole('button', { name: `IPv${ipVersion}`, exact: true })
@@ -126,8 +128,11 @@ for (const viewport of VIEWPORTS) {
     await expectSelection(page, 4)
     expect(api.requestCount('GET', ipqReportPath())).toBe(1)
     expect(api.requestCount('GET', ipqReportPath(4))).toBe(0)
-    await expect(page.getByRole('button', { name: '立即采集' })).toBeEnabled()
-    await expect(page.getByText(UI.collectHint)).toBeVisible()
+    const trigger = page.getByRole('button', { name: '立即采集' })
+    await expect(trigger).toBeEnabled()
+    // 采集范围点击后才展开；按钮旁不常驻解释文字。
+    await expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+    await expect(page.getByText('分别检测 IPv4 / IPv6')).toHaveCount(0)
     // 旧 agent 没有 IPv6 记录：切到 IPv6 只能说尚无结果，不能说缺族，也不借 IPv4 事实。
     await familyButton(page, 6).click()
     await expectSelection(page, 6)
@@ -138,42 +143,23 @@ for (const viewport of VIEWPORTS) {
     await expectSelection(page, 4)
     await expect(page.getByLabel('报告身份')).toContainText('95.169.166.229')
 
-    const notice = page.getByRole('note', { name: '服务探测可信度' })
-    await expect(notice).toContainText(ANONYMOUS_PROBE_NOTICE)
-    await expect(notice).not.toContainText('已停用')
-    await expect(notice).not.toContainText('旧版或未识别')
-
-    // abuse 缺失时大字是证据缺口，低风险只作为已返回来源的副文；失败来源残留的高风险不进入结论。
-    const verdict = page.getByRole('region', { name: '数据库风险评级' })
-    await expect(verdict.locator('.ipq-verdict__value strong')).toHaveText('证据不完整')
-    await expect(verdict).toContainText('已返回来源：低风险')
-    await expect(verdict.locator('.ipq-verdict__scope')).toHaveText('风险字段 4/5')
-    await expect(verdict).not.toContainText('质量分')
-    await expect(verdict).not.toContainText('高风险')
-
-    const metrics = page.getByLabel('IP 质量摘要指标')
-    const riskSignals = metrics.locator('.ipq-metric').filter({ hasText: '风险信号' })
-    await expect(riskSignals.locator('strong')).toHaveText('未知')
-    // 成功 4 / (18 - 13)：十三个未接入不是失败，也不进入摘要。
-    const enabledRate = metrics.locator('.ipq-metric').filter({ hasText: '已启用来源响应成功率' })
-    await expect(enabledRate.locator('strong')).toHaveText('80%')
-    await expect(enabledRate).toContainText('响应成功 4/5')
-    await expect(enabledRate).not.toContainText('13')
-    // 服务分母是完整 7 项：ChatGPT 部分可用不进分子，Disney+ 未知不算受限。
-    const serviceRate = metrics.locator('.ipq-metric').filter({ hasText: '服务可用性' })
-    await expect(serviceRate.locator('strong')).toHaveText('5/7 可用')
-    await expect(serviceRate).toContainText('1 部分可用 · 1 未知')
+    // 旧报告：只有短标记与旧版评级标注，没有可信度段落、完整性口号或百分比指标。
+    await expect(page.locator('.badge').filter({ hasText: '旧版报告' })).toBeVisible()
+    await expect(page.getByRole('note', { name: '服务探测可信度' })).toHaveCount(0)
+    await expect(page.locator('.ipq-page')).not.toContainText('证据不完整')
+    await expect(page.locator('.ipq-page')).not.toContainText('响应成功率')
+    const riskHits = page.getByRole('group', { name: '风险命中' })
+    await expect(riskHits).toContainText('旧版评级 · 低风险')
 
     await expectNoDocumentOverflow(page)
     await page.screenshot({ path: testInfo.outputPath('legacy-report-top.png'), fullPage: true })
 
     // 失败行残留的 blocked/US/范围一律不展示。
     const servicesSection = page.locator('section.ipq-services')
-    await expect(servicesSection.getByRole('heading', { level: 2, name: '服务可用性（免登录探测）' })).toBeVisible()
+    await expect(servicesSection.getByRole('heading', { level: 2, name: '服务解锁' })).toBeVisible()
     await expect(servicesSection.getByLabel('服务状态统计')).toContainText('5 可用')
     const netflix = servicesSection.locator('.ipq-service').filter({ hasText: 'Netflix' })
     await expect(netflix).toContainText('可用 · DE')
-    await expect(netflix).toContainText('抽样目录可访问')
     await expect(servicesSection.locator('.ipq-service').filter({ hasText: 'ChatGPT' })).toContainText('部分可用')
     const disney = servicesSection.locator('.ipq-service').filter({ hasText: 'Disney+' })
     await expect(disney).toHaveClass(/ipq-service--unknown/)
@@ -181,19 +167,18 @@ for (const viewport of VIEWPORTS) {
     await expect(disney).toContainText('服务要求人机验证')
     await expect(disney).not.toContainText('US')
     await expect(disney).not.toContainText('受限')
-    await expect(disney).not.toContainText('地区支持检测')
     await expect(servicesSection).not.toContainText('catalog_sample')
+    await expect(servicesSection).not.toContainText('连接方式未检测')
 
-    // 数据库明细：四个成功来源，未接入来源只在诊断里；零分保留，仅地理来源有说明。
-    const providerSection = page.locator('section').filter({ has: page.getByRole('heading', { name: 'IP 数据库判断' }) })
-    await expect(providerSection.getByRole('row')).toHaveCount(5)
-    await expect(providerSection.getByRole('row').filter({ hasText: 'ipquery.io' }).locator('.ipq-risk-cell__score')).toHaveText('0')
-    await expect(providerSection.getByRole('row').filter({ hasText: 'ipwho.is' })).toContainText('该来源本次仅返回地理信息')
-    await expect(providerSection.getByLabel('风险信号命中')).not.toContainText('VPN')
-    await expect(providerSection.getByLabel('未返回结果的数据库')).toContainText('ip2location.io · 失败')
+    // 来源表：每个默认来源一行，失败来源只显示短失败态；未接入占位只在诊断里。
+    const providerSection = sectionByHeading(page, '风险评分与因子')
+    await expect(providerSection.getByRole('row')).toHaveCount(6)
+    await expect(providerSection.getByRole('row').filter({ hasText: 'ip2location.io' })).toContainText('查询失败')
+    await expect(riskHits).not.toContainText('VPN')
     await expect(providerSection).not.toContainText('91')
     await expect(providerSection).not.toContainText('maxmind')
-    await expect(providerSection).not.toContainText('已返回风险字段未命中')
+    await expect(sectionByHeading(page, '邮件连通性')).toContainText('旧版报告无此项')
+    await expect(sectionByHeading(page, '黑名单')).toContainText('旧版报告无此项')
 
     // 诊断：失败/未接入分开计数，原始 18 来源覆盖可见；raw JSON 限高可滚动且无 HTML。
     const diagnostics = page.getByLabel('采集诊断')
@@ -223,36 +208,33 @@ for (const viewport of VIEWPORTS) {
     expect(api.requestCount('GET', ipqDetailPath('ipq_hist_rev1'))).toBe(1)
     await expect(page.locator('.badge').filter({ hasText: '历史报告' })).toBeVisible()
     await expect(page.getByRole('button', { name: '立即采集' })).toHaveCount(0)
-    await expect(notice).toContainText('已停用')
-    await expect(servicesSection.getByRole('heading', { level: 2, name: '服务解锁' })).toBeVisible()
-    await expect(verdict.locator('.ipq-verdict__value strong')).toHaveText('高风险')
-    await expect(verdict).toContainText('风险字段 5/5 已返回')
-    await expect(riskSignals.locator('strong')).toHaveText('2 项')
-    await expect(riskSignals).toContainText('高风险来源：proxycheck.io')
-    await expect(enabledRate).toContainText('响应成功 5/5')
+    await expect(servicesSection.getByLabel('服务状态统计')).toContainText('探测已停用')
+    // revision1 历史保留自己的来源事实：proxycheck 的 VPN 命中可见，摘要只作旧版评级标注。
+    await expect(providerSection.getByRole('row').filter({ hasText: 'proxycheck.io' })).toContainText('VPN 是')
+    await expect(riskHits).toContainText('旧版评级 · 低风险')
     await expectNoDocumentOverflow(page)
 
     // 查看最新报告回到显式 IPv4 latest。
     await page.getByRole('link', { name: '查看最新报告' }).click()
     await expectSelection(page, 4)
-    await expect(notice).toContainText(ANONYMOUS_PROBE_NOTICE)
+    await expect(servicesSection.getByLabel('服务状态统计')).not.toContainText('探测已停用')
 
     // 来源不明修订：保留旧规则警示；旧行没有 endpoint 诊断，不从 error_summary 反解析状态码。
     await historySection.scrollIntoViewIfNeeded()
     await historySection.locator('a[href*="report_id=ipq_hist_legacy"]').click()
     await expectSelection(page, 4, 'ipq_hist_legacy')
-    await expect(notice).toContainText('旧版或未识别')
+    await expect(servicesSection.getByLabel('服务状态统计')).toContainText('旧版规则')
     await expect(servicesSection).toContainText('服务返回异常状态')
     await expect(servicesSection).not.toContainText('HTTP 403')
     await expect(servicesSection).not.toContainText('http status 403')
-    await expect(enabledRate).toContainText('响应成功 15/16')
+    await expect(providerSection.getByRole('row').filter({ hasText: 'scamalytics' })).toContainText('查询失败')
     await expectNoDocumentOverflow(page)
 
     await page.getByRole('link', { name: '查看最新报告' }).click()
     await expectSelection(page, 4)
     await expect(page.getByRole('button', { name: '立即采集' })).toBeEnabled()
-    await expect(servicesSection.getByRole('heading', { level: 2, name: '服务可用性（免登录探测）' })).toBeVisible()
-    await expect(enabledRate.locator('strong')).toHaveText('80%')
+    await expect(servicesSection.getByRole('heading', { level: 2, name: '服务解锁' })).toBeVisible()
+    await expect(riskHits).toContainText('旧版评级 · 低风险')
   })
 }
 
@@ -268,8 +250,6 @@ for (const viewport of VIEWPORTS) {
 
     const pageRoot = page.locator('.ipq-page')
     const identity = page.getByLabel('报告身份')
-    const verdict = page.getByRole('region', { name: '数据库风险评级' })
-    const serviceRate = page.getByLabel('IP 质量摘要指标').locator('.ipq-metric').filter({ hasText: '服务可用性' })
     const servicesSection = page.locator('section.ipq-services')
     const historySection = page.locator('section.ipq-history')
 
@@ -277,11 +257,19 @@ for (const viewport of VIEWPORTS) {
     await expectSelection(page, 4)
     expect(api.requestCount('GET', ipqReportPath())).toBe(1)
     expect(api.requestCount('GET', ipqReportPath(4))).toBe(0)
-    await expect(identity).toContainText(IPV4_IDENTITY.asn)
+    await expect(basicInfo(page)).toContainText(IPV4_IDENTITY.asn)
     await expect(identity).toContainText(ROUND1_TIME)
-    await expect(verdict.locator('.ipq-verdict__value strong')).toHaveText('低风险')
-    await expect(verdict).toContainText('风险字段 5/5 已返回')
-    await expect(serviceRate.locator('strong')).toHaveText('6/7 可用')
+    // 结果优先：没有综合评级或证据完整性口号；风险只看服务端事实。
+    await expect(page.getByRole('group', { name: '风险命中' })).toContainText('未见风险命中')
+    await expect(pageRoot).not.toContainText('证据不完整')
+    await expect(servicesSection.getByLabel('服务状态统计')).toContainText('6 可用')
+    await expect(servicesSection.getByLabel('服务状态统计')).toContainText('1 受限')
+    await expect(sectionByHeading(page, '邮件连通性')).toContainText('可连接 11/12')
+    await expect(sectionByHeading(page, '黑名单')).toContainText('命中 0 / 已查 3')
+    await expect(basicInfo(page)).toContainText('原生 IP')
+    await expect(basicInfo(page).getByText('更多信息')).toBeVisible()
+    await expect(basicInfo(page).locator('details.ipq-identity__more')).not.toHaveAttribute('open')
+    await expect(sectionByHeading(page, '多源定位')).toContainText('Los Angeles')
     await expect(historySection).toContainText('共 2 份')
     await expect(pageRoot).not.toContainText(IPV6_IDENTITY.ipAddress)
     await expect(pageRoot).not.toContainText(IPV6_PREVIOUS_TIME)
@@ -292,25 +280,28 @@ for (const viewport of VIEWPORTS) {
     await expectSelection(page, 6)
     expect(api.requestCount('GET', ipqReportPath(6))).toBe(1)
     await expect(identity).toContainText(IPV6_IDENTITY.ipAddress)
-    await expect(identity).toContainText(IPV6_IDENTITY.asn)
+    await expect(basicInfo(page)).toContainText(IPV6_IDENTITY.asn)
     await expect(pageRoot).not.toContainText(IPV4_IDENTITY.ipAddress)
     await expect(pageRoot).not.toContainText(IPV4_IDENTITY.asn)
-    // IPv6 自己的风险：medium 已发现但 abuse 缺失，仍展示等级并标不完整。
-    await expect(verdict.locator('.ipq-verdict__value strong')).toHaveText('中风险')
-    await expect(verdict).toContainText('4/5')
-    await expect(serviceRate.locator('strong')).toHaveText('2/7 可用')
-    await expect(serviceRate).toContainText('1 部分可用 · 4 未知')
+    // IPv6 自己的服务端计数与模块：DNSBL 只在支持的地址族查询。
+    await expect(servicesSection.getByLabel('服务状态统计')).toContainText('2 可用')
+    await expect(servicesSection.getByLabel('服务状态统计')).toContainText('1 部分')
+    await expect(servicesSection.getByLabel('服务状态统计')).toContainText('4 未知')
+    await expect(sectionByHeading(page, '黑名单')).toContainText('命中 0 / 已查 1')
+    await expect(sectionByHeading(page, '黑名单').getByRole('row').filter({ hasText: 'SpamCop' })).toContainText('不支持')
+    await expect(sectionByHeading(page, '多源定位')).toContainText('Tokyo')
+    await expect(sectionByHeading(page, '多源定位')).not.toContainText('Los Angeles')
     // YouTube 只有可信页面地区 CN：未知 + 页面地区，残留 US 与 CN 都不能推出受限。
     const youtube = servicesSection.locator('.ipq-service').filter({ hasText: 'YouTube Premium' })
     await expect(youtube).toContainText('未知')
-    await expect(youtube).toContainText('页面地区：CN；Premium 可用性未知')
+    await expect(youtube).toContainText('页面地区 CN')
     await expect(youtube).not.toContainText('US')
     await expect(youtube).not.toContainText('受限')
     // 普通 403 不是业务拒绝。
     for (const name of ['Prime Video', 'Reddit']) {
       await expect(servicesSection.locator('.ipq-service').filter({ hasText: name })).not.toContainText('受限')
     }
-    await expect(servicesSection.locator('.ipq-service').filter({ hasText: 'Netflix' })).toContainText('连接方式未检测')
+    await expect(servicesSection.locator('.ipq-service').filter({ hasText: 'Netflix' })).not.toContainText('连接方式未检测')
     await expect(historySection).toContainText('共 2 份')
     await expect(historySection).toContainText(IPV6_PREVIOUS_TIME)
     await expectIdentityFits(page)
@@ -387,7 +378,7 @@ test('IPv4-only server keeps IPv4 default and explains the missing IPv6 family w
   await page.goto(IPQ_PAGE_PATH)
   await expectSelection(page, 4)
   await expect(page.getByLabel('报告身份')).toContainText(IPV4_IDENTITY.ipAddress)
-  await expect(page.getByRole('region', { name: '数据库风险评级' }).locator('.ipq-verdict__value strong')).toHaveText('低风险')
+  await expect(page.getByRole('group', { name: '风险命中' })).toContainText('未见风险命中')
 
   await familyButton(page, 6).click()
   await expectSelection(page, 6)
@@ -396,7 +387,7 @@ test('IPv4-only server keeps IPv4 default and explains the missing IPv6 family w
   await expect(page.getByRole('heading', { level: 1, name: 'IP 质量报告' })).toBeVisible()
   // 失败占位不是出口、不是风险、不借 IPv4 事实。
   await expect(page.getByLabel('报告身份')).toHaveCount(0)
-  await expect(page.getByRole('region', { name: '数据库风险评级' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '风险评分与因子' })).toHaveCount(0)
   await expect(pageRoot).not.toContainText('0.0.0.0')
   await expect(pageRoot).not.toContainText(IPV4_IDENTITY.ipAddress)
   await expect(pageRoot).not.toContainText(UI.lookupFailed(6))
@@ -540,11 +531,45 @@ test('a late IPv6 response cannot overwrite IPv4 after back navigation, and forw
 // POST 之后 center 的 GET /collect 会返回这条进行中请求；页面在切族/进入历史后重新读取状态时必须看到它，
 // 而不是 POST 之前的空闲状态（真实 center 不会在请求进行中返回空闲）。
 async function startCollect(page: Page, api: { useProfile: (profile: ApiFixtureProfile) => void }, scenario: IPQualityScenario, outcome: CollectOutcome) {
-  await expect(page.getByText(UI.collectHint)).toBeVisible()
   await page.getByRole('button', { name: '立即采集' }).click()
-  await expect(collectStatus(page)).toContainText('正在采集最新 IP 质量')
+  await page.getByRole('menuitem', { name: UI.collectDual }).click()
+  await expect(collectStatus(page)).toContainText('正在采集 IPv4 / IPv6')
   api.useProfile(ipQualityScenarioProfile(scenario, { collect: { ...COLLECT_AVAILABLE, request: collectRequest('dispatched', outcome) } }))
   await expect(page.getByRole('button', { name: /采集中/ })).toBeDisabled()
+}
+
+for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 900 }] as const) {
+  test(`collect scope menu opens below the trigger, is keyboard operable and fits at ${viewport.width}px`, async ({ api, page }, testInfo) => {
+    api.useProfile(ipQualityScenarioProfile('dual_stack', { extra: collectPostRoute('both_success') }))
+    await page.setViewportSize(viewport)
+    await page.goto(IPQ_PAGE_PATH)
+    await expectSelection(page, 4)
+
+    const trigger = page.getByRole('button', { name: '立即采集' })
+    await trigger.focus()
+    await page.keyboard.press('ArrowDown')
+    const menu = page.getByRole('menu', { name: '立即采集' })
+    await expect(menu).toBeVisible()
+    const items = menu.getByRole('menuitem')
+    await expect(items).toHaveText(['采集 IPv4', '采集 IPv6', UI.collectDual])
+    await expect(items.first()).toBeFocused()
+    // 菜单紧贴按钮下方，且不撑出视口。
+    const [triggerBox, menuBox] = await Promise.all([trigger.boundingBox(), menu.boundingBox()])
+    expect(menuBox!.y).toBeGreaterThanOrEqual(triggerBox!.y + triggerBox!.height - 1)
+    expect(menuBox!.y - (triggerBox!.y + triggerBox!.height)).toBeLessThanOrEqual(12)
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport.width + 1)
+    await expectNoDocumentOverflow(page)
+    await page.screenshot({ path: testInfo.outputPath(`collect-menu-${viewport.width}.png`) })
+
+    await page.keyboard.press('End')
+    await expect(items.last()).toBeFocused()
+    await page.keyboard.press('ArrowDown')
+    await expect(items.first()).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await expect(trigger).toBeFocused()
+    expect(api.requestCount('POST', IPQ_COLLECT_PATH)).toBe(0)
+  })
 }
 
 function completedProfile(outcome: CollectOutcome) {
@@ -675,4 +700,33 @@ test('immediate collection from the empty state refreshes into the new dual-stac
   await expect(collectStatus(page)).toContainText(UI.updated)
   await expect(page.getByRole('button', { name: '立即采集' })).toBeEnabled()
   expect(api.requestCount('POST', IPQ_COLLECT_PATH)).toBe(1)
+})
+
+// ---------------------------------------------------------------------------
+// Center 补充资料：同一所选报告可见轮询，终态停止
+// ---------------------------------------------------------------------------
+
+test('running enrichment shows a single short status and fills the same report without navigation', async ({ api, page }) => {
+  const scenario = ipQualityScenario('dual_stack')
+  const running = enrichingView(scenario.views[4])
+  api.useProfile(ipQualityScenarioProfile(scenario, { overrides: { default: { status: 200, body: running }, 4: { status: 200, body: running } } }))
+  await page.goto(IPQ_PAGE_PATH)
+  await expectSelection(page, 4)
+
+  const enrichment = page.getByRole('status', { name: '补充资料状态' })
+  await expect(enrichment).toContainText('查询中')
+  // Agent 事实已可见；Center 资料未到只写短状态，不清空页面。
+  await expect(sectionByHeading(page, '邮件连通性')).toContainText('可连接 11/12')
+  await expect(sectionByHeading(page, '黑名单')).toContainText('查询中')
+
+  // detail 路由返回同一报告的终态快照。
+  await expect(sectionByHeading(page, '黑名单')).toContainText('命中 0 / 已查 3', { timeout: 10_000 })
+  await expect(enrichment).toHaveCount(0)
+  await expect(basicInfo(page)).toContainText('原生 IP')
+  await expectSelection(page, 4)
+  const polled = api.requestCount('GET', ipqDetailPath('ipq_v4_r1'))
+  expect(polled).toBeGreaterThanOrEqual(1)
+  await page.waitForTimeout(4_000)
+  expect(api.requestCount('GET', ipqDetailPath('ipq_v4_r1'))).toBe(polled)
+  await expectNoDocumentOverflow(page)
 })

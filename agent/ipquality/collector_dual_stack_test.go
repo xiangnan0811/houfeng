@@ -64,14 +64,12 @@ func TestHTTPCollectorDualStackKeepsIndependentFactsAndTransports(t *testing.T) 
 			return dualFixtureResponse(r, ip, region, asn)
 		})}
 	}
-	dependent := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if strings.Contains(r.URL.String(), "2001:db8") || strings.Contains(r.URL.Query().Get("ip"), "2001:db8") {
-			return dualFixtureResponse(r, "2001:db8::10", "JP", "AS64501")
-		}
-		return dualFixtureResponse(r, "198.51.100.10", "US", "AS64500")
+	generic := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("family collection used generic transport for %s", r.URL)
+		return nil, errors.New("generic transport must not be used")
 	})}
 	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
-		Client: dependent, Client4: familyClient(0, "198.51.100.10", "US", "AS64500"), Client6: familyClient(1, "2001:db8::10", "JP", "AS64501"), LocalAddresses: dualLocalAddresses,
+		Client: generic, Client4: familyClient(0, "198.51.100.10", "US", "AS64500"), Client6: familyClient(1, "2001:db8::10", "JP", "AS64501"), LocalAddresses: dualLocalAddresses,
 	})
 	now := time.Now().UTC()
 	reports := collector.Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: []string{"reddit"}}, now)
@@ -84,12 +82,13 @@ func TestHTTPCollectorDualStackKeepsIndependentFactsAndTransports(t *testing.T) 
 	}{{"198.51.100.10", "US", "AS64500", 4}, {"2001:db8::10", "JP", "AS64501", 6}} {
 		r := reports[index]
 		m := agentapi.ParseCollectionMetadata(r.DiagnosticsJSON)
-		if r.Status != "success" || r.IPAddress != expected.ip || r.IPVersion != expected.family || r.ASN != expected.asn || r.UseRegionCode != expected.region || !r.ObservedAt.Equal(now) || !m.Valid || m.Availability != "available" {
+		if r.Status != "partial" || r.IPAddress != expected.ip || r.IPVersion != expected.family || r.ASN != expected.asn || r.UseRegionCode != expected.region || !r.ObservedAt.Equal(now) || !m.Valid || m.Availability != "available" {
 			t.Fatalf("family report=%#v metadata=%#v", r, m)
 		}
 		if len(r.ServiceUnlocks) != 1 || r.ServiceUnlocks[0].Status != "unlocked" || r.ServiceUnlocks[0].Region != expected.region {
 			t.Fatalf("family services=%#v", r.ServiceUnlocks)
 		}
+		assertRejectedDetectorGeoAttempts(t, r)
 	}
 	if agentapi.ParseCollectionMetadata(reports[0].DiagnosticsJSON).CollectionID != agentapi.ParseCollectionMetadata(reports[1].DiagnosticsJSON).CollectionID {
 		t.Fatal("families do not share round identity")
@@ -124,7 +123,7 @@ func TestHTTPCollectorUnavailableFamilyMakesNoExternalRequests(t *testing.T) {
 			if missing.Status != "failure" || missing.ErrorCode != "address_family_unavailable" || agentapi.ParseCollectionMetadata(missing.DiagnosticsJSON).Availability != "unavailable" {
 				t.Fatalf("missing=%#v", missing)
 			}
-			if missing.Coverage.FailedProviderCount != 0 || missing.Coverage.SkippedProviderCount != 5 || missing.Coverage.NotConfiguredProviderCount != 13 || missing.Coverage.SkippedServiceCount != 1 || missing.Coverage.FailedServiceCount != 0 {
+			if missing.Coverage.FailedProviderCount != 0 || missing.Coverage.SkippedProviderCount != 5 || missing.Coverage.NotConfiguredProviderCount != 0 || missing.Coverage.SkippedServiceCount != 1 || missing.Coverage.FailedServiceCount != 0 {
 				t.Fatalf("coverage=%#v", missing.Coverage)
 			}
 		})
@@ -158,12 +157,27 @@ func TestHTTPCollectorCanonicalBarrierAcrossFamilies(t *testing.T) {
 	dependentStarted := make(chan struct{}, 8)
 	var mu sync.Mutex
 	canonicalDone, earlyDependent := false, false
+	dependent := func(r *http.Request, ip, region string) (*http.Response, error) {
+		mu.Lock()
+		if !canonicalDone {
+			earlyDependent = true
+		}
+		mu.Unlock()
+		dependentStarted <- struct{}{}
+		return dualFixtureResponse(r, ip, region, "AS64500")
+	}
 	four := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.ipapi.is" && r.URL.Host != "api.ipquery.io" {
+			return dependent(r, "198.51.100.10", "US")
+		}
 		response, err := dualFixtureResponse(r, "198.51.100.10", "US", "AS64500")
 		fourDone <- struct{}{}
 		return response, err
 	})}
 	six := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host != "api.ipapi.is" && r.URL.Host != "api.ipquery.io" {
+			return dependent(r, "2001:db8::10", "JP")
+		}
 		started <- struct{}{}
 		select {
 		case <-release:
@@ -172,22 +186,13 @@ func TestHTTPCollectorCanonicalBarrierAcrossFamilies(t *testing.T) {
 		}
 		return dualFixtureResponse(r, "2001:db8::10", "JP", "AS64501")
 	})}
-	dependent := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		mu.Lock()
-		if !canonicalDone {
-			earlyDependent = true
-		}
-		mu.Unlock()
-		dependentStarted <- struct{}{}
-		ip, region := "198.51.100.10", "US"
-		if strings.Contains(r.URL.String(), "2001:db8") || strings.Contains(r.URL.Query().Get("ip"), "2001:db8") {
-			ip, region = "2001:db8::10", "JP"
-		}
-		return dualFixtureResponse(r, ip, region, "AS64500")
+	generic := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("family collection used generic transport for %s", r.URL)
+		return nil, errors.New("generic transport must not be used")
 	})}
 	done := make(chan []agentapi.IPQualityReportPayload, 1)
 	go func() {
-		done <- agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: dependent, Client4: four, Client6: six, LocalAddresses: dualLocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5}, time.Now())
+		done <- agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: generic, Client4: four, Client6: six, LocalAddresses: dualLocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5}, time.Now())
 	}()
 	for range 2 {
 		select {
@@ -216,8 +221,11 @@ func TestHTTPCollectorCanonicalBarrierAcrossFamilies(t *testing.T) {
 	close(release)
 	select {
 	case reports := <-done:
-		if reports[0].Status != "success" || reports[1].Status != "success" {
+		if len(reports) != 2 || reports[0].Status != "partial" || reports[1].Status != "partial" {
 			t.Fatalf("reports=%#v", reports)
+		}
+		for _, report := range reports {
+			assertRejectedDetectorGeoAttempts(t, report)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("round did not finish")
@@ -237,8 +245,13 @@ func TestHTTPCollectorSharedDeadlinePreservesFastFamilyTerminal(t *testing.T) {
 	if time.Since(started) > 1500*time.Millisecond {
 		t.Fatal("per-family timeouts multiplied total budget")
 	}
-	if len(reports) != 2 || reports[0].Status != "success" || reports[1].Status != "failure" || reports[1].IPAddress != "::" || reports[1].ErrorCode != "lookup_failed" || agentapi.ParseCollectionMetadata(reports[1].DiagnosticsJSON).Availability != "available" {
+	if len(reports) != 2 || reports[0].Status != "partial" || reports[1].Status != "failure" || reports[1].IPAddress != "::" || reports[1].ErrorCode != "lookup_failed" || agentapi.ParseCollectionMetadata(reports[1].DiagnosticsJSON).Availability != "available" {
 		t.Fatalf("reports=%#v", reports)
+	}
+	if reports[0].IPAddress != "198.51.100.10" || reports[0].IPVersion != 4 || reports[1].IPVersion != 6 ||
+		!reports[0].ObservedAt.Equal(started.UTC()) || !reports[1].ObservedAt.Equal(started.UTC()) ||
+		agentapi.ParseCollectionMetadata(reports[0].DiagnosticsJSON).CollectionID != agentapi.ParseCollectionMetadata(reports[1].DiagnosticsJSON).CollectionID {
+		t.Fatalf("deadline lost independent family terminals or round identity: %#v", reports)
 	}
 }
 
@@ -247,6 +260,7 @@ func TestHTTPCollectorSharesProviderAndServiceConcurrencyLimits(t *testing.T) {
 	providerActive, providerMax, serviceActive, serviceMax := 0, 0, 0, 0
 	serviceStarted := make(chan struct{}, 32)
 	releaseServices := make(chan struct{})
+	retainedServices := []string{"disney-plus", "tiktok", "reddit"}
 	enter := func(provider bool) func() {
 		mu.Lock()
 		if provider {
@@ -269,7 +283,8 @@ func TestHTTPCollectorSharesProviderAndServiceConcurrencyLimits(t *testing.T) {
 	}
 	familyClient := func(ip string) *http.Client {
 		return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-			provider := r.URL.Host == "api.ipapi.is" || r.URL.Host == "api.ipquery.io"
+			provider := r.URL.Host == "api.ipapi.is" || r.URL.Host == "api.ipquery.io" ||
+				r.URL.Host == "proxycheck.io" || r.URL.Host == "api.ip2location.io" || r.URL.Host == "ipwho.is"
 			leave := enter(provider)
 			defer leave()
 			if provider {
@@ -289,39 +304,33 @@ func TestHTTPCollectorSharesProviderAndServiceConcurrencyLimits(t *testing.T) {
 			return nil, errors.New("controlled service transport failure")
 		})}
 	}
-	dependent := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		leave := enter(true)
-		defer leave()
-		select {
-		case <-time.After(20 * time.Millisecond):
-		case <-r.Context().Done():
-			return nil, r.Context().Err()
-		}
-		ip := "198.51.100.10"
-		if strings.Contains(r.URL.String(), "2001:db8") || strings.Contains(r.URL.Query().Get("ip"), "2001:db8") {
-			ip = "2001:db8::10"
-		}
-		return dualFixtureResponse(r, ip, "US", "AS64500")
+	generic := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("family collection used generic transport for %s", r.URL)
+		return nil, errors.New("generic transport must not be used")
 	})}
 	done := make(chan []agentapi.IPQualityReportPayload, 1)
 	go func() {
-		done <- agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: dependent, Client4: familyClient("198.51.100.10"), Client6: familyClient("2001:db8::10"), LocalAddresses: dualLocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: []string{"netflix", "chatgpt", "youtube-premium", "amazon-prime-video", "disney-plus", "tiktok", "reddit"}}, time.Now())
+		done <- agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: generic, Client4: familyClient("198.51.100.10"), Client6: familyClient("2001:db8::10"), LocalAddresses: dualLocalAddresses}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 5, Services: []string{"netflix", "chatgpt", "youtube-premium", "amazon-prime-video", "disney-plus", "tiktok", "reddit"}}, time.Now())
 	}()
-	for range 7 {
+	// Only retained Go services use these transports. The four actual Bash
+	// modules fail at the explicitly rejected fetch helper instead of using WAN.
+	// The seven-slot invariant is exercised with eight real HTTP jobs by
+	// TestServiceSemaphoreSharesSevenSlotsAcrossFamilies.
+	for range len(retainedServices) * 2 {
 		select {
 		case <-serviceStarted:
 		case <-time.After(time.Second):
 			close(releaseServices)
 			<-done
-			t.Fatal("shared service pool did not fill")
+			t.Fatal("retained service transports did not all start")
 		}
 	}
-	// Holding seven first endpoints must prevent an eighth family probe.
+	// Every retained service has a blocked first endpoint in both families.
 	select {
 	case <-serviceStarted:
 		close(releaseServices)
 		<-done
-		t.Fatal("more than seven services ran concurrently")
+		t.Fatal("a blocked retained service issued an unexpected extra endpoint")
 	case <-time.After(50 * time.Millisecond):
 	}
 	close(releaseServices)
@@ -329,6 +338,15 @@ func TestHTTPCollectorSharesProviderAndServiceConcurrencyLimits(t *testing.T) {
 	case reports := <-done:
 		if len(reports) != 2 || reports[0].Status != "partial" || reports[1].Status != "partial" {
 			t.Fatalf("reports=%#v", reports)
+		}
+		for _, report := range reports {
+			assertRejectedDetectorGeoAttempts(t, report)
+			rows := serviceUnlocksByService(report.ServiceUnlocks)
+			for _, service := range []string{"netflix", "chatgpt", "youtube-premium", "amazon-prime-video"} {
+				if rows[service].Status != "unknown" || rows[service].ProbeStatus != "failure" || rows[service].ErrorCode != "detector_fetch_failed" {
+					t.Fatalf("scripted service must retain the rejected helper failure: %#v", rows[service])
+				}
+			}
 		}
 	case <-time.After(time.Second):
 		t.Fatal("workers were not joined")
@@ -384,9 +402,10 @@ func TestHTTPCollectorForcedDiscoveryResolvesUnknownAvailability(t *testing.T) {
 	})}
 	reports := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{Client: dependent, Client4: four, Client6: six, LocalAddresses: func() ([]netip.Addr, error) { return nil, errors.New("local addresses unavailable") }}).Collect(context.Background(), &agentapi.IPQualityPlan{Enabled: true, TimeoutSeconds: 1}, time.Now())
 	for _, report := range reports {
-		if report.Status != "success" || agentapi.ParseCollectionMetadata(report.DiagnosticsJSON).Availability != "available" {
+		if report.Status != "partial" || agentapi.ParseCollectionMetadata(report.DiagnosticsJSON).Availability != "available" {
 			t.Fatalf("successful forced discovery did not establish family availability: %#v", report)
 		}
+		assertRejectedDetectorGeoAttempts(t, report)
 	}
 }
 
@@ -404,6 +423,140 @@ func TestHTTPCollectorIgnoresNonUsableLocalAddresses(t *testing.T) {
 	for _, report := range reports {
 		if report.Status != "failure" || report.ErrorCode != "address_family_unavailable" || agentapi.ParseCollectionMetadata(report.DiagnosticsJSON).Availability != "unavailable" {
 			t.Fatalf("non-usable address incorrectly admitted: %#v", report)
+		}
+	}
+}
+
+func TestHTTPCollectorSelectiveScopeNeverDiscoversUnselectedFamily(t *testing.T) {
+	for _, selected := range []int{4, 6} {
+		t.Run(fmt.Sprint(selected), func(t *testing.T) {
+			var mu sync.Mutex
+			calls := [2]int{}
+			client := func(family int) *http.Client {
+				return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					mu.Lock()
+					calls[(family-4)/2]++
+					mu.Unlock()
+					return nil, errors.New("controlled discovery failure")
+				})}
+			}
+			collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
+				Client4: client(4), Client6: client(6), LocalAddresses: dualLocalAddresses,
+			})
+			reports := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+				Enabled: true, TimeoutSeconds: 1, CollectionRevision: 5,
+				CollectRequestID: "selected-family", CollectIPVersions: []int{selected},
+			}, time.Now())
+			if len(reports) != 1 || reports[0].IPVersion != selected || reports[0].ErrorCode != "lookup_failed" {
+				t.Fatalf("scope produced unselected or misleading terminal: %#v", reports)
+			}
+			meta := agentapi.ParseCollectionMetadata(reports[0].DiagnosticsJSON)
+			if !meta.Valid || meta.Revision != 5 || len(meta.ExpectedIPVersions) != 1 || meta.ExpectedIPVersions[0] != selected {
+				t.Fatalf("scope metadata=%#v", meta)
+			}
+			if calls[(selected-4)/2] != 2 || calls[(6-selected)/2] != 0 {
+				t.Fatalf("selected IPv%d discovery calls=%v", selected, calls)
+			}
+		})
+	}
+}
+
+func TestHTTPCollectorSelectiveAbsentFamilyDoesNotTouchAvailableFamily(t *testing.T) {
+	never := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("unselected or absent family made request to %s", r.URL.Host)
+		return nil, errors.New("unexpected external request")
+	})}
+	collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
+		Client: never, Client4: never, Client6: never, LocalAddresses: ipv4LocalAddresses,
+	})
+	reports := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+		Enabled: true, TimeoutSeconds: 1, CollectionRevision: 5,
+		CollectRequestID: "absent-six", CollectIPVersions: []int{6}, Services: []string{"reddit"},
+	}, time.Now())
+	if len(reports) != 1 || reports[0].IPVersion != 6 || reports[0].ErrorCode != "address_family_unavailable" ||
+		agentapi.ParseCollectionMetadata(reports[0].DiagnosticsJSON).Availability != "unavailable" {
+		t.Fatalf("absent-only result=%#v", reports)
+	}
+}
+
+func TestHTTPCollectorSelectedFamilyOwnsDependentQueriesAndCanonicalRequery(t *testing.T) {
+	for _, selected := range []int{4, 6} {
+		for _, wrongResponse := range []string{"", "api.ipquery.io", "proxycheck.io", "api.ip2location.io", "ipwho.is"} {
+			t.Run(fmt.Sprintf("IPv%d/wrong=%s", selected, wrongResponse), func(t *testing.T) {
+				target, alternate, opposite := "198.51.100.10", "198.51.100.11", "2001:db8::10"
+				if selected == 6 {
+					target, alternate, opposite = "2001:db8::10", "2001:db8::11", "198.51.100.10"
+				}
+				var mu sync.Mutex
+				calls := map[string]int{}
+				selectedClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					mu.Lock()
+					calls[r.URL.Host]++
+					mu.Unlock()
+					ip := target
+					if r.URL.Host == "api.ipquery.io" && r.URL.Path == "/" {
+						// Disagree within the selected family to require a
+						// canonical-target requery, not a cross-family retry.
+						ip = alternate
+					} else if r.URL.Host == wrongResponse {
+						ip = opposite
+					}
+					if r.URL.Host == "proxycheck.io" {
+						if r.URL.Path != "/v3/"+target {
+							return nil, errors.New("dependent request lost canonical target")
+						}
+						return jsonResponse(r, fmt.Sprintf(`{"status":"ok","version":"24-June-2026",%q:{"network":{},"location":{},"detections":{"proxy":false}}}`, ip))
+					}
+					if r.URL.Host == "api.ip2location.io" && r.URL.Query().Get("ip") != target {
+						return nil, errors.New("dependent request lost canonical target")
+					}
+					if r.URL.Host == "ipwho.is" && r.URL.Path != "/"+target {
+						return nil, errors.New("dependent request lost canonical target")
+					}
+					if r.URL.Host == "api.ipquery.io" && r.URL.Path != "/" && r.URL.Path != "/"+target {
+						return nil, errors.New("canonical requery lost target")
+					}
+					if r.URL.Host == "ipwho.is" {
+						return jsonResponse(r, fmt.Sprintf(`{"success":true,"ip":%q,"country_code":"US"}`, ip))
+					}
+					return jsonResponse(r, fmt.Sprintf(`{"ip":%q,"country_code":"US"}`, ip))
+				})}
+				never := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+					t.Errorf("selected IPv%d used generic/opposite transport for %s", selected, r.URL)
+					return nil, errors.New("unselected transport must not be used")
+				})}
+				four, six := selectedClient, never
+				if selected == 6 {
+					four, six = never, selectedClient
+				}
+				collector := agentipquality.NewHTTPCollector(agentipquality.HTTPCollectorOptions{
+					Client: never, Client4: four, Client6: six, LocalAddresses: dualLocalAddresses,
+				})
+				reports := collector.Collect(context.Background(), &agentapi.IPQualityPlan{
+					Enabled: true, TimeoutSeconds: 5, CollectionRevision: 5,
+					CollectRequestID: "selected-requery", CollectIPVersions: []int{selected},
+				}, time.Now())
+				if len(reports) != 1 || reports[0].IPAddress != target || reports[0].IPVersion != selected {
+					t.Fatalf("canonical family identity changed: %#v", reports)
+				}
+				for _, row := range reports[0].ProviderResults {
+					wantFailure := (wrongResponse == "api.ipquery.io" && row.Provider == "ipquery.io") ||
+						(wrongResponse == "proxycheck.io" && row.Provider == wrongResponse) ||
+						(wrongResponse == "api.ip2location.io" && row.Provider == "ip2location.io") ||
+						(wrongResponse == "ipwho.is" && row.Provider == wrongResponse)
+					if wantFailure {
+						if row.Status != "failure" || row.Details != nil || row.IsProxy != nil {
+							t.Fatalf("opposite-family facts survived: %#v", row)
+						}
+					} else if row.Status != "success" {
+						t.Fatalf("selected-family provider failed: %#v", row)
+					}
+				}
+				if len(reports[0].ProviderResults) != 5 || len(calls) != 5 || calls["api.ipquery.io"] != 2 ||
+					calls["api.ipapi.is"] != 1 || calls["proxycheck.io"] != 1 || calls["api.ip2location.io"] != 1 || calls["ipwho.is"] != 1 {
+					t.Fatalf("dependent/requery coverage changed: calls=%v report=%#v", calls, reports[0])
+				}
+			})
 		}
 	}
 }

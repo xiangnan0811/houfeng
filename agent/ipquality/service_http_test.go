@@ -314,3 +314,26 @@ func TestJSONTextIsNotAnHTMLRestrictionPage(t *testing.T) {
 		}
 	}
 }
+
+func TestPrimeAndChatGPTAppUseAnonymousDocumentRequest(t *testing.T) {
+	calls := 0
+	client := &http.Client{Transport: serviceTestTransport(func(req *http.Request) (*http.Response, error) {
+		calls++
+		if req.URL.Hostname() != "www.primevideo.com" && req.URL.Hostname() != "ios.chat.openai.com" {
+			t.Fatalf("unexpected document endpoint: %s", req.URL.Hostname())
+		}
+		if req.Method != http.MethodGet || !strings.Contains(req.Header.Get("Accept"), "text/html") || req.Header.Get("Cookie") != "" || req.Header.Get("Authorization") != "" {
+			t.Fatalf("document request policy: %v", req.Header)
+		}
+		return serviceTestResponse(req, 200, anonymousServiceFixture(req)), nil
+	})}
+	for _, endpoint := range []string{"amazon-prime-video", "openai-ios"} {
+		facts, err := fetchDetectorEndpoint(context.Background(), client, endpoint, "23.160.160.61", 4, t.TempDir())
+		if err != nil || facts.ErrorCode != "" || facts.HTTPStatus != 200 || facts.Title == "" {
+			t.Fatalf("endpoint %s: facts=%+v error=%v", endpoint, facts, err)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("document requests = %d, want 2", calls)
+	}
+}

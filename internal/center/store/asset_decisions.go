@@ -552,6 +552,7 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 				), '') as risk_summary
 			from ip_quality_provider_results
 			where coalesce(status, 'success') = 'success'
+				and report_id in (select report_id from ip_quality_reports where product_json is null)
 			group by report_id
 		),
 		ip_quality_unlock_rollup as (
@@ -565,6 +566,7 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 				), '{}'::text[]) as blocked_services
 			from ip_quality_service_unlocks
 			where coalesce(probe_status, 'success') = 'success'
+				and report_id in (select report_id from ip_quality_reports where product_json is null)
 			group by report_id
 		)
 		select
@@ -660,7 +662,8 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 			coalesce(ipq.unlockable_count, 0),
 			coalesce(ipqr.risk_signal_count, 0),
 			coalesce(ipqr.risk_summary, ''),
-			coalesce(ipqu.blocked_services, '{}'::text[])
+			coalesce(ipqu.blocked_services, '{}'::text[]),
+			coalesce(ipq.report_id, '')
 		from vps_assets v
 		left join providers p on p.provider_id = v.provider_id
 		left join subscription_rollup sr on sr.vps_id = v.vps_id
@@ -688,6 +691,29 @@ func (r *PostgresAssetDecisionRepository) loadFacts(ctx context.Context) ([]asse
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate asset decision facts: %w", err)
+	}
+	rows.Close()
+	summaries := make(map[string]ipquality.Summary, len(facts))
+	for _, fact := range facts {
+		if fact.VPS.IPQualitySummary != nil {
+			summaries[fact.VPS.VPSID] = *fact.VPS.IPQualitySummary
+		}
+	}
+	if err := applyIPQualityProductSummaries(ctx, r.db, summaries); err != nil {
+		return nil, fmt.Errorf("load asset decision product summaries: %w", err)
+	}
+	for i := range facts {
+		summary, ok := summaries[facts[i].VPS.VPSID]
+		if !ok {
+			continue
+		}
+		facts[i].VPS.IPQualitySummary = &summary
+		if summary.ProductRevision == 1 && summary.ProductSummary != nil {
+			product := summary.ProductSummary
+			facts[i].IPQualityProviderRiskSignalCount = len(product.RiskFlags) + len(product.HighRiskSources) + product.BlacklistListedCount
+			facts[i].IPQualityProviderRiskSummary = strings.Join(product.RiskFlags, ", ")
+			facts[i].IPQualityBlockedServices = product.RestrictedServices
+		}
 	}
 	return facts, nil
 }
@@ -893,6 +919,7 @@ func scanAssetDecisionFact(row assetDecisionFactScanner) (assetdecisions.Fact, e
 		&fact.IPQualityProviderRiskSignalCount,
 		&fact.IPQualityProviderRiskSummary,
 		&fact.IPQualityBlockedServices,
+		&ipQualitySummary.ReportID,
 	); err != nil {
 		return assetdecisions.Fact{}, err
 	}

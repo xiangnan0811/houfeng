@@ -2,6 +2,7 @@ import { useRef, useState, type FormEvent } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ApiError } from '../lib/api'
 import { useAuth } from '../lib/auth-context'
+import { SourceLinks } from '../components/SourceLinks'
 import './LoginPage.css'
 
 export function LoginPage() {
@@ -73,7 +74,7 @@ export function LoginPage() {
           {submitting ? '登录中…' : '登录'}
         </button>
       </form>
-      <div className="login-page__footer">仅授权人员</div>
+      <div className="login-page__footer">仅授权人员 · <SourceLinks /></div>
     </div>
   )
 }

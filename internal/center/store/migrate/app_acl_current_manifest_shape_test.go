@@ -285,6 +285,51 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 	if len(allTestChains) != 6143 {
 		t.Fatalf("independent C76 predecessor chain cases = %d, want 6143", len(allTestChains))
 	}
+	c77Chains := append([]struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}(nil), allTestChains...)
+	allTestChains = append(allTestChains, struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{
+		name:     "P76",
+		profiles: []appACLCurrentProfileID{appACLCurrentProfileP76},
+	})
+	for _, tc := range c77Chains {
+		allTestChains = append(allTestChains, struct {
+			name     string
+			profiles []appACLCurrentProfileID
+		}{
+			name:     "C76-" + tc.name,
+			profiles: append(append([]appACLCurrentProfileID(nil), tc.profiles...), appACLCurrentProfileP76),
+		})
+	}
+	if len(allTestChains) != 12287 {
+		t.Fatalf("independent C77 predecessor chain cases = %d, want 12287", len(allTestChains))
+	}
+	c78Chains := append([]struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}(nil), allTestChains...)
+	allTestChains = append(allTestChains, struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{
+		name: "P77", profiles: []appACLCurrentProfileID{appACLCurrentProfileP77},
+	})
+	for _, tc := range c78Chains {
+		allTestChains = append(allTestChains, struct {
+			name     string
+			profiles []appACLCurrentProfileID
+		}{
+			name:     "C77-" + tc.name,
+			profiles: append(append([]appACLCurrentProfileID(nil), tc.profiles...), appACLCurrentProfileP77),
+		})
+	}
+	if len(allTestChains) != 24575 {
+		t.Fatalf("independent C78 predecessor chain cases = %d, want 24575", len(allTestChains))
+	}
 	if len(allTestChains) != len(appACLCurrentAcceptedPredecessorProfileChains) {
 		t.Fatalf("test chain cases = %d, production accepted chains = %d", len(allTestChains), len(appACLCurrentAcceptedPredecessorProfileChains))
 	}

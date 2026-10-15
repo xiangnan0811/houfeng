@@ -37,14 +37,16 @@ type CommandResult struct {
 }
 
 type Batch struct {
-	SessionID            string
-	LiveSignal           *agentapi.LiveSignal
-	MonitoringInstanceID string
-	SyncToken            string
-	Heartbeats           []HeartbeatPayload
-	Observations         observations.BatchWrite
-	IPQualityReports     []ipquality.ReportWrite
-	CommandResults       []CommandResult
+	SessionID  string
+	LiveSignal *agentapi.LiveSignal
+	// Transient HTTP capability; never stored in heartbeat or queue JSON.
+	IPQualityCollectionRevision int
+	MonitoringInstanceID        string
+	SyncToken                   string
+	Heartbeats                  []HeartbeatPayload
+	Observations                observations.BatchWrite
+	IPQualityReports            []ipquality.ReportWrite
+	CommandResults              []CommandResult
 }
 
 type ResultDisposition string
@@ -58,8 +60,11 @@ const (
 type Result struct {
 	StopCollection bool
 	Disposition    ResultDisposition
-	AcceptedAt     time.Time
-	Plan           agentplan.SyncPlan
+	// Set only after a committed live sync authenticated with writable full
+	// permission. Suppression/replay alone does not imply collection permission.
+	LiveCollectionAllowed bool
+	AcceptedAt            time.Time
+	Plan                  agentplan.SyncPlan
 }
 
 type PostSyncProcessor interface {
@@ -96,7 +101,7 @@ type Repository interface {
 // IPQualityCollectCoordinator 在 sync 边界上把立即采集请求下发给 agent，并用回传报告完成请求。
 type IPQualityCollectCoordinator interface {
 	ObserveReports(monitoringInstanceID string, reports []ipquality.ReportWrite, now time.Time)
-	PendingRequestID(monitoringInstanceID string, now time.Time) string
+	PendingRequest(monitoringInstanceID string, now time.Time, liveRevision *int) ipquality.CollectRequest
 }
 
 type Service struct {
@@ -148,13 +153,24 @@ func (s *Service) coordinateIPQualityCollect(batch Batch, result Result) Result 
 	if result.StopCollection || plan == nil || !plan.Enabled {
 		return result
 	}
-	requestID := s.collect.PendingRequestID(batch.MonitoringInstanceID, now)
-	if requestID == "" {
+	var liveRevision *int
+	if batch.LiveSignal != nil && result.LiveCollectionAllowed {
+		revision := batch.IPQualityCollectionRevision
+		liveRevision = &revision
+	}
+	request := s.collect.PendingRequest(batch.MonitoringInstanceID, now, liveRevision)
+	if request.RequestID == "" {
 		return result
 	}
 	nextPlan := *plan
 	nextPlan.Services = append([]string(nil), plan.Services...)
-	nextPlan.CollectRequestID = requestID
+	nextPlan.CollectRequestID = request.RequestID
+	nextPlan.CollectionRevision = 0
+	nextPlan.CollectIPVersions = nil
+	if liveRevision != nil && *liveRevision == agentapi.IPQualitySelectiveCollectionRevision {
+		nextPlan.CollectionRevision = agentapi.IPQualitySelectiveCollectionRevision
+		nextPlan.CollectIPVersions = append([]int(nil), request.RequestedIPVersions...)
+	}
 	result.Plan.IPQualityPlan = &nextPlan
 	return result
 }

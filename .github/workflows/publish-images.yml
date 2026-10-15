@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      source_ref: ${{ steps.version.outputs.source_ref }}
+      source_ref: ${{ steps.source.outputs.sha }}
       update_latest: ${{ steps.version.outputs.update_latest }}
     steps:
       - id: version
@@ -73,6 +73,15 @@ jobs:
             printf 'update_latest=%s\n' "$update_latest"
           } >> "$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.version.outputs.source_ref }}
+
+      - name: Pin source revision for every publication job
+        id: source
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
   agent-assets:
     needs: resolve
     runs-on: ubuntu-latest
@@ -105,17 +114,33 @@ jobs:
         run: |
           amd64="dist/houfeng-agent_${VERSION}_linux_amd64"
           arm64="dist/houfeng-agent_${VERSION}_linux_arm64"
+          source="dist/houfeng-agent_${VERSION}_source.tar.gz"
           manifest="dist/sha256sums.txt"
+          licenses="dist/houfeng-agent_${VERSION}_licenses.txt"
 
           test -s "$amd64"
           test -s "$arm64"
           test -s "$manifest"
+          test -s "$source"
+          test -s "$licenses"
+          cmp web/public/licenses.txt "$licenses"
+          source_prefix="houfeng-agent_${VERSION}_source"
+          for material in LICENSE README.md web/public/licenses.txt scripts/collect-licenses.mjs go.mod go.sum Makefile .github/workflows/publish-images.yml agent/ipquality/detector.go agent/ipquality/detector_fetch.go agent/ipquality/detector_assets/detector.sh agent/ipquality/detector_assets/iso3166.json agent/ipquality/detector_assets/LICENSE agent/ipquality/detector_assets/upstream-ip.sh.txt agent/ipquality/detector_assets/MODIFICATIONS.md agent/ipquality/detector_assets/SHA256SUMS; do
+            tar -tzf "$source" "${source_prefix}/${material}" >/dev/null
+          done
+          source_dir="$(mktemp -d)"
+          tar -xzf "$source" -C "$source_dir"
+          (
+            cd "$source_dir/$source_prefix/agent/ipquality/detector_assets"
+            sha256sum -c SHA256SUMS
+          )
+          rm -rf "$source_dir"
 
           expected_manifest="$(mktemp)"
           trap 'rm -f "$expected_manifest"' EXIT
           (
             cd dist
-            sha256sum "houfeng-agent_${VERSION}_linux_amd64" "houfeng-agent_${VERSION}_linux_arm64"
+            sha256sum "houfeng-agent_${VERSION}_linux_amd64" "houfeng-agent_${VERSION}_linux_arm64" "houfeng-agent_${VERSION}_source.tar.gz" "houfeng-agent_${VERSION}_licenses.txt"
           ) > "$expected_manifest"
           diff -u "$expected_manifest" "$manifest"
 
@@ -171,6 +196,8 @@ jobs:
           gh release upload "$VERSION" \
             "dist/houfeng-agent_${VERSION}_linux_amd64" \
             "dist/houfeng-agent_${VERSION}_linux_arm64" \
+            "dist/houfeng-agent_${VERSION}_source.tar.gz" \
+            "dist/houfeng-agent_${VERSION}_licenses.txt" \
             "dist/sha256sums.txt" \
             "dist/sha256sums.txt.minisig" \
             --clobber
@@ -190,6 +217,8 @@ jobs:
             echo "### Assets"
             echo "- \`houfeng-agent_${VERSION}_linux_amd64\`"
             echo "- \`houfeng-agent_${VERSION}_linux_arm64\`"
+            echo "- \`houfeng-agent_${VERSION}_source.tar.gz\` (corresponding source, detector provenance and build materials)"
+            echo "- \`houfeng-agent_${VERSION}_licenses.txt\` (project and third-party notices)"
             echo "- \`sha256sums.txt\`"
             echo "- \`sha256sums.txt.minisig\`"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -213,6 +242,7 @@ jobs:
     needs:
       - resolve
       - credentials
+      - agent-assets
     strategy:
       fail-fast: false
       matrix:
@@ -252,10 +282,12 @@ jobs:
           platforms: ${{ matrix.platform }}
           build-args: |
             VERSION=v${{ needs.resolve.outputs.version }}
+            SOURCE_URL=${{ github.server_url }}/${{ github.repository }}/tree/${{ steps.source.outputs.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.source.outputs.sha }}
             org.opencontainers.image.version=v${{ needs.resolve.outputs.version }}
+            org.opencontainers.image.licenses=AGPL-3.0-only
           outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=gha
           cache-to: type=gha,mode=max,ignore-error=true

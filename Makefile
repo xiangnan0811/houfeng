@@ -9,6 +9,8 @@ VERSION ?= dev
 AGENT_RELEASE_DIR ?= ./dist
 AGENT_RELEASE_AMD64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_amd64
 AGENT_RELEASE_ARM64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_arm64
+AGENT_RELEASE_SOURCE := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_source.tar.gz
+AGENT_RELEASE_LICENSES := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_licenses.txt
 
 .PHONY: fmt-go test-go vet-go build-center build-agent build-agent-release verify-go test-web-toolchain verify-web verify-docs verify
 
@@ -69,7 +71,13 @@ build-agent-release:
 		echo 'VERSION must be set to a release tag, for example: make build-agent-release VERSION=v1.2.3' >&2; \
 		exit 1; \
 	fi
-	@if ! find cmd/houfeng-agent -maxdepth 1 -type f -name '*.go' | grep -q .; then \
+	@set -euo pipefail; \
+	untracked="$$(git ls-files --others --exclude-standard)"; \
+	if ! git diff --quiet -- || ! git diff --cached --quiet HEAD -- || [ -n "$$untracked" ]; then \
+		echo 'agent release requires a clean tracked tree/index and no untracked non-ignored files; binary and corresponding source must match HEAD' >&2; \
+		exit 1; \
+	fi; \
+	if ! find cmd/houfeng-agent -maxdepth 1 -type f -name '*.go' | grep -q .; then \
 		echo 'houfeng-agent not implemented yet'; \
 	else \
 		mkdir -p $(AGENT_RELEASE_DIR); \
@@ -77,13 +85,16 @@ build-agent-release:
 		trap 'rm -rf "$$build_dir"' EXIT; \
 		CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "-s -w -X houfeng/agent/runtime.agentVersion=$(VERSION)" -o "$$build_dir/houfeng-agent_$(VERSION)_linux_amd64" ./cmd/houfeng-agent; \
 		CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "-s -w -X houfeng/agent/runtime.agentVersion=$(VERSION)" -o "$$build_dir/houfeng-agent_$(VERSION)_linux_arm64" ./cmd/houfeng-agent; \
+		git archive --format=tar --prefix=houfeng-agent_$(VERSION)_source/ HEAD | gzip -n > "$$build_dir/houfeng-agent_$(VERSION)_source.tar.gz"; \
 		cp "$$build_dir/houfeng-agent_$(VERSION)_linux_amd64" $(AGENT_RELEASE_AMD64); \
 		cp "$$build_dir/houfeng-agent_$(VERSION)_linux_arm64" $(AGENT_RELEASE_ARM64); \
+		cp "$$build_dir/houfeng-agent_$(VERSION)_source.tar.gz" $(AGENT_RELEASE_SOURCE); \
+		cp web/public/licenses.txt $(AGENT_RELEASE_LICENSES); \
 		cd $(AGENT_RELEASE_DIR) && \
 			if command -v sha256sum >/dev/null 2>&1; then \
-				sha256sum houfeng-agent_$(VERSION)_linux_amd64 houfeng-agent_$(VERSION)_linux_arm64 > sha256sums.txt; \
+				sha256sum houfeng-agent_$(VERSION)_linux_amd64 houfeng-agent_$(VERSION)_linux_arm64 houfeng-agent_$(VERSION)_source.tar.gz houfeng-agent_$(VERSION)_licenses.txt > sha256sums.txt; \
 			else \
-				shasum -a 256 houfeng-agent_$(VERSION)_linux_amd64 houfeng-agent_$(VERSION)_linux_arm64 > sha256sums.txt; \
+				shasum -a 256 houfeng-agent_$(VERSION)_linux_amd64 houfeng-agent_$(VERSION)_linux_arm64 houfeng-agent_$(VERSION)_source.tar.gz houfeng-agent_$(VERSION)_licenses.txt > sha256sums.txt; \
 			fi; \
 	fi
 

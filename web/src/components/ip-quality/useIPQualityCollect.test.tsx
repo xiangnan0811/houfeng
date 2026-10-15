@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '../../lib/api'
 import type { IPQualityCollectStatus } from '../../lib/types'
 
 const api = vi.hoisted(() => ({
@@ -23,7 +24,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function status(requestStatus?: 'pending' | 'dispatched' | 'completed' | 'expired', extra: Partial<IPQualityCollectStatus> = {}): IPQualityCollectStatus {
+function status(requestStatus?: 'pending' | 'dispatched' | 'completed' | 'expired' | 'failed', extra: Partial<IPQualityCollectStatus> = {}): IPQualityCollectStatus {
   return {
     enabled: true,
     available: true,
@@ -58,7 +59,7 @@ describe('useIPQualityCollect', () => {
     api.requestVPSIPQualityCollect.mockResolvedValue(status('pending'))
     const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
 
-    act(() => result.current.start())
+    act(() => result.current.start([4, 6]))
     await waitFor(() => expect(result.current.active).toBe(true))
     await act(async () => { initial.resolve(status()) })
 
@@ -78,6 +79,8 @@ describe('useIPQualityCollect', () => {
     await waitFor(() => expect(result.current.active).toBe(true))
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
     await waitFor(() => expect(onCompleted).toHaveBeenCalledTimes(1))
+    // 完成回调拿到请求本身，页面据其族集合决定是否刷新当前族。
+    expect(onCompleted).toHaveBeenCalledWith(expect.objectContaining({ request_id: 'ipqc_001', status: 'completed' }))
 
     const calls = api.getVPSIPQualityCollectStatus.mock.calls.length
     await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS * 3) })
@@ -125,8 +128,8 @@ describe('useIPQualityCollect', () => {
 
     rerender({ enabled: true })
     await waitFor(() => expect(result.current.status?.available).toBe(true))
-    act(() => result.current.start())
-    act(() => result.current.start())
+    act(() => result.current.start([4]))
+    act(() => result.current.start([6]))
     expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(1)
   })
 
@@ -137,10 +140,10 @@ describe('useIPQualityCollect', () => {
     api.requestVPSIPQualityCollect.mockReturnValue(post.promise)
     const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
 
-    act(() => result.current.start())
+    act(() => result.current.start([4, 6]))
     await act(async () => { initial.resolve(status()) })
     expect(result.current.submitting).toBe(true)
-    act(() => result.current.start())
+    act(() => result.current.start([4, 6]))
     expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(1)
 
     await act(async () => { post.resolve(status('pending')) })
@@ -155,7 +158,7 @@ describe('useIPQualityCollect', () => {
     const { result, unmount } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
     await waitFor(() => expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(1))
 
-    act(() => result.current.start())
+    act(() => result.current.start([4, 6]))
     unmount()
     await act(async () => {
       rejectPost(new Error('network down'))
@@ -171,7 +174,7 @@ describe('useIPQualityCollect', () => {
     api.requestVPSIPQualityCollect.mockResolvedValue(status('pending'))
     const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()), { wrapper: StrictMode })
     await waitFor(() => expect(result.current.status).toEqual(status()))
-    act(() => result.current.start())
+    act(() => result.current.start([4, 6]))
     await waitFor(() => expect(result.current.status?.request?.status).toBe('pending'))
     expect(result.current.submitting).toBe(false)
     expect(result.current.watchedRequestId).toBe('ipqc_001')
@@ -189,7 +192,7 @@ describe('useIPQualityCollect', () => {
       initialProps: { vpsId: 'vps_001' },
     })
     await waitFor(() => expect(result.current.status?.available).toBe(true))
-    act(() => result.current.start())
+    act(() => result.current.start([4, 6]))
 
     rerender({ vpsId: 'vps_002' })
     const callsAfterSwitch = api.getVPSIPQualityCollectStatus.mock.calls.length
@@ -212,13 +215,13 @@ describe('useIPQualityCollect', () => {
       initialProps: { vpsId: 'vps_001' },
     })
     await waitFor(() => expect(result.current.status?.available).toBe(true))
-    act(() => result.current.start())
+    act(() => result.current.start([4, 6]))
 
     rerender({ vpsId: 'vps_002' })
     await waitFor(() => expect(result.current.status?.available).toBe(true))
     rerender({ vpsId: 'vps_001' })
     await waitFor(() => expect(result.current.status?.available).toBe(true))
-    act(() => result.current.start())
+    act(() => result.current.start([4, 6]))
     expect(result.current.submitting).toBe(true)
 
     // 第一次访问的 POST 迟到：不能结束本次提交，也不能写入状态。
@@ -229,6 +232,42 @@ describe('useIPQualityCollect', () => {
     await act(async () => { secondPost.resolve(status('pending')) })
     expect(result.current.submitting).toBe(false)
     expect(result.current.status?.request?.status).toBe('pending')
+  })
+
+  it('posts the chosen family set and stops polling on a failed request without refreshing', async () => {
+    const onCompleted = vi.fn()
+    api.getVPSIPQualityCollectStatus
+      .mockResolvedValueOnce(status())
+      .mockResolvedValue(status('failed', {}))
+    api.requestVPSIPQualityCollect.mockResolvedValue(status('pending'))
+    const { result } = renderHook(() => useIPQualityCollect('vps_001', onCompleted))
+    await waitFor(() => expect(result.current.status?.available).toBe(true))
+
+    act(() => result.current.start([6]))
+    expect(api.requestVPSIPQualityCollect).toHaveBeenCalledWith('vps_001', [6])
+    await waitFor(() => expect(result.current.active).toBe(true))
+    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
+    await waitFor(() => expect(result.current.status?.request?.status).toBe('failed'))
+    expect(result.current.active).toBe(false)
+    const calls = api.getVPSIPQualityCollectStatus.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS * 3) })
+    expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(calls)
+    expect(onCompleted).not.toHaveBeenCalled()
+  })
+
+  it('adopts the in-flight request of another scope after a 409 instead of showing a generic error', async () => {
+    const inFlight = status('dispatched')
+    inFlight.request!.requested_ip_versions = [4, 6]
+    api.getVPSIPQualityCollectStatus.mockResolvedValueOnce(status()).mockResolvedValue(inFlight)
+    api.requestVPSIPQualityCollect.mockRejectedValue(new ApiError(409, 'collection_scope_conflict'))
+    const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+    await waitFor(() => expect(result.current.status?.available).toBe(true))
+
+    act(() => result.current.start([4]))
+    await waitFor(() => expect(result.current.status?.request?.requested_ip_versions).toEqual([4, 6]))
+    expect(result.current.error).toBeNull()
+    expect(result.current.active).toBe(true)
+    expect(result.current.watchedRequestId).toBe('ipqc_001')
   })
 })
 

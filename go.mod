@@ -7,12 +7,13 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/klauspost/compress v1.18.6
 	github.com/microcosm-cc/bluemonday v1.0.27
+	github.com/miekg/dns v1.1.73
 	github.com/minio/minio-go/v7 v7.2.1
 	github.com/pdfcpu/pdfcpu v0.14.0
 	github.com/yuin/goldmark v1.8.4
 	golang.org/x/crypto v0.54.0
 	golang.org/x/image v0.44.0
-	golang.org/x/net v0.56.0
+	golang.org/x/net v0.57.0
 	golang.org/x/sys v0.47.0
 	golang.org/x/text v0.40.0
 )

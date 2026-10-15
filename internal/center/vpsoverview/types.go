@@ -6,6 +6,7 @@ import (
 
 	"houfeng/internal/center/activity"
 	"houfeng/internal/center/records"
+	"houfeng/internal/contracts/agentapi"
 )
 
 type AnomalySeverity string
@@ -108,10 +109,12 @@ type Summary struct {
 
 // SummaryCell is one tile: a short status plus the section's own freshness.
 type SummaryCell struct {
-	Status    string       `json:"status"`
-	Detail    string       `json:"detail,omitempty"`
-	IPVersion int          `json:"ip_version,omitempty"`
-	Section   SectionState `json:"section"`
+	Status          string                            `json:"status"`
+	Detail          string                            `json:"detail,omitempty"`
+	IPVersion       int                               `json:"ip_version,omitempty"`
+	Section         SectionState                      `json:"section"`
+	ProductRevision int                               `json:"product_revision,omitempty"`
+	ProductSummary  *agentapi.IPQualityProductSummary `json:"product_summary,omitempty"`
 }
 
 // ActivitySection is recent activity for this VPS, produced by the same activity

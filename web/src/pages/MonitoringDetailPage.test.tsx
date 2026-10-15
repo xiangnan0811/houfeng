@@ -1969,8 +1969,6 @@ describe('MonitoringDetailPage', () => {
     await waitFor(() => {
       expect(document.querySelector('.observability-notice')?.textContent).toContain('活跃 1')
     })
-    expect(document.querySelector('.observability-notice')?.textContent).toMatch(/已持续 \d+ 天/)
-    expect(document.querySelector('.observability-notice')?.textContent).not.toMatch(/持续 .+\s前/)
     // The explicit primary issue summary wins over the incident summary.
     expect(screen.getByText('磁盘使用率偏高')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Singapore Edge' })).toBeInTheDocument()

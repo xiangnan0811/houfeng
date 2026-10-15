@@ -66,6 +66,8 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment(),
 	settingsDeploymentOverridesAppACLCurrentMigrationFragment(),
 	ipQualityAddressFamiliesAppACLCurrentMigrationFragment(),
+	ipQualityProductAppACLCurrentMigrationFragment(),
+	ipQualityCollectionScopeAppACLCurrentMigrationFragment(),
 }
 
 func subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -102,6 +104,34 @@ func ipQualityAddressFamiliesAppACLCurrentMigrationFragment() AppACLCurrentMigra
 				ObjectIdentity: "ip_quality_vps_family_state",
 				Privilege:      AppACLPrivilegeSelect,
 			}}
+		},
+	}
+}
+
+func ipQualityProductAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0077_ip_quality_product.sql",
+		Objects: []AppACLManagedObjectR1{
+			{ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "ip_quality_intelligence"},
+			{ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "ip_quality_source_cache"},
+		},
+		Privileges: func(string) []AppACLPrivilege {
+			privileges := make([]AppACLPrivilege, 0, 7)
+			for _, table := range []string{"ip_quality_intelligence", "ip_quality_source_cache"} {
+				for _, kind := range []AppACLPrivilegeKind{AppACLPrivilegeSelect, AppACLPrivilegeInsert, AppACLPrivilegeUpdate} {
+					privileges = append(privileges, AppACLPrivilege{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: table, Privilege: kind})
+				}
+			}
+			return append(privileges, AppACLPrivilege{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassTable, SchemaName: appACLManagedPublicSchemaR1, ObjectIdentity: "ip_quality_source_cache", Privilege: AppACLPrivilegeDelete})
+		},
+	}
+}
+
+func ipQualityCollectionScopeAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0078_ip_quality_collection_scope.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return nil
 		},
 	}
 }

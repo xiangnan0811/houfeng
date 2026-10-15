@@ -263,11 +263,14 @@ func resolveAgentPlanSettings(
 }
 
 func ipQualityPlanFromSettings(settings centersettings.IPQualitySettings) *agentplan.IPQualityPlan {
+	mailEnabled := settings.MailEnabled
 	return &agentplan.IPQualityPlan{
 		Enabled:          settings.Enabled,
 		FrequencySeconds: settings.FrequencySeconds,
 		TimeoutSeconds:   settings.TimeoutSeconds,
 		Services:         append([]string(nil), settings.Services...),
+		ProductRevision:  agentapi.IPQualityProductRevision,
+		MailEnabled:      &mailEnabled,
 	}
 }
 

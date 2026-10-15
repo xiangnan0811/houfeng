@@ -35,6 +35,10 @@ func (f *fakeSettingsRepository) MutateSettings(_ context.Context, mutate center
 	if err != nil {
 		return centersettings.CenterSettings{}, err
 	}
+	next, err = centersettings.Validate(next)
+	if err != nil {
+		return centersettings.CenterSettings{}, err
+	}
 	f.mutateInput = next
 	if f.mutateSettingsErr != nil {
 		return centersettings.CenterSettings{}, f.mutateSettingsErr
@@ -391,5 +395,186 @@ func TestSettingsHandlerRejectsRemovedRetentionControlsAndMethods(t *testing.T) 
 	handler.ServeHTTP(methodRecorder, httptest.NewRequest(http.MethodPost, "/api/settings", nil))
 	if methodRecorder.Code != http.StatusMethodNotAllowed || methodRecorder.Header().Get("Cache-Control") != "private, no-store" {
 		t.Fatalf("POST status/cache = %d/%q", methodRecorder.Code, methodRecorder.Header().Get("Cache-Control"))
+	}
+}
+
+func TestSettingsHandlerIPQualityResponsesNeverExposeCredentials(t *testing.T) {
+	current := centersettings.FreshInstallDefaults()
+	current.IPQuality.Sources = centersettings.IPQualitySources{
+		IPAPIISKey:   "ipapi-private-value-1234",
+		AbuseIPDBKey: "abuse-private-value-5678",
+	}
+	repo := &fakeSettingsRepository{getSettingsResult: current}
+	handler := handlers.Settings(repo, nil, centersettings.DeploymentDefaults{})
+
+	get := httptest.NewRecorder()
+	handler.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/api/settings", nil))
+	put := serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"ip_quality_settings": map[string]any{
+			"sources": map[string]any{"ipapi_is_key": "replacement-private-value-9012"},
+		},
+	}))
+	for name, recorder := range map[string]*httptest.ResponseRecorder{"get": get, "put": put} {
+		t.Run(name, func(t *testing.T) {
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", recorder.Code)
+			}
+			body := recorder.Body.String()
+			for _, forbidden := range []string{
+				`"ipapi_is_key"`, `"abuseipdb_key"`,
+				current.IPQuality.Sources.IPAPIISKey, current.IPQuality.Sources.AbuseIPDBKey,
+				"replacement-private-value-9012",
+			} {
+				if strings.Contains(body, forbidden) {
+					t.Fatal("settings response exposed a credential or internal credential field")
+				}
+			}
+			var response struct {
+				IPQuality struct {
+					MailEnabled bool `json:"mail_enabled"`
+					Sources     map[string]struct {
+						Configured    bool   `json:"configured"`
+						MaskedSummary string `json:"masked_summary"`
+					} `json:"sources"`
+				} `json:"ip_quality_settings"`
+			}
+			if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			for _, source := range []string{"ipapi_is", "abuseipdb"} {
+				summary := response.IPQuality.Sources[source]
+				if !summary.Configured || !strings.Contains(summary.MaskedSummary, "*") {
+					t.Fatalf("%s must be configured with a masked summary", source)
+				}
+			}
+		})
+	}
+}
+
+func TestSettingsHandlerIPQualityUpdatesMergeLatestRawSettings(t *testing.T) {
+	for name, update := range map[string]map[string]any{
+		"block omitted": nil,
+		"old client collection block": {
+			"enabled": false, "frequency_seconds": 3600, "stale_after_seconds": 7200,
+			"timeout_seconds": 15, "services": []string{"chatgpt"},
+		},
+		"empty sources": {"sources": map[string]any{}},
+		"mail disabled": {"mail_enabled": false},
+		"key replaced":  {"sources": map[string]any{"ipapi_is_key": "new-private-key"}},
+		"key cleared":   {"sources": map[string]any{"abuseipdb_key": ""}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			current := centersettings.FreshInstallDefaults()
+			current.IPQuality.TimeoutSeconds = 15
+			current.IPQuality.Sources = centersettings.IPQualitySources{
+				IPAPIISKey: "latest-ipapi-secret", AbuseIPDBKey: "latest-abuse-secret",
+			}
+			repo := &fakeSettingsRepository{
+				getSettingsResult: current,
+				getSettingsErr:    errors.New("updates must use lock-held raw settings, not a separate read"),
+			}
+			handler := handlers.Settings(repo, nil, centersettings.DeploymentDefaults{})
+			extras := map[string]any{}
+			if update != nil {
+				extras["ip_quality_settings"] = update
+			}
+			recorder := serveSettingsPut(handler, fullSettingsBody(t, extras))
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200", recorder.Code)
+			}
+			got := repo.getSettingsResult.IPQuality
+			wantIPAPI, wantAbuse := "latest-ipapi-secret", "latest-abuse-secret"
+			if name == "key replaced" {
+				wantIPAPI = "new-private-key"
+			}
+			if name == "key cleared" {
+				wantAbuse = ""
+			}
+			if got.Sources.IPAPIISKey != wantIPAPI || got.Sources.AbuseIPDBKey != wantAbuse {
+				t.Fatal("update lost or overwrote an omitted credential")
+			}
+			if got.MailEnabled != (name != "mail disabled") || got.TimeoutSeconds != 15 {
+				t.Fatal("update lost mail state or changed an explicit persisted timeout")
+			}
+			if name == "old client collection block" && (got.Enabled || got.FrequencySeconds != 3600 || len(got.Services) != 1 || got.Services[0] != "chatgpt") {
+				t.Fatal("old client's collection changes were not applied")
+			}
+			if name == "key cleared" {
+				var response map[string]json.RawMessage
+				if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+					t.Fatal(err)
+				}
+				var ipQuality struct {
+					Sources map[string]struct {
+						Configured    bool   `json:"configured"`
+						MaskedSummary string `json:"masked_summary"`
+					} `json:"sources"`
+				}
+				if err := json.Unmarshal(response["ip_quality_settings"], &ipQuality); err != nil {
+					t.Fatal(err)
+				}
+				if ipQuality.Sources["abuseipdb"].Configured || ipQuality.Sources["abuseipdb"].MaskedSummary != "" {
+					t.Fatal("cleared credential must have an unconfigured public response")
+				}
+			}
+		})
+	}
+}
+
+func TestSettingsHandlerRejectsInvalidIPQualityUpdatesAtomically(t *testing.T) {
+	for name, raw := range map[string]string{
+		"null block":      `null`,
+		"null sources":    `{"sources":null}`,
+		"null ipapi key":  `{"sources":{"ipapi_is_key":null}}`,
+		"null abuse key":  `{"sources":{"abuseipdb_key":null}}`,
+		"nonstring key":   `{"sources":{"ipapi_is_key":123}}`,
+		"null mail":       `{"mail_enabled":null}`,
+		"unknown source":  `{"sources":{"other_key":"secret"}}`,
+		"response echoed": `{"sources":{"ipapi_is":{"configured":true,"masked_summary":"****"}}}`,
+		"overlong ipapi":  `{"sources":{"ipapi_is_key":"` + strings.Repeat("x", 257) + `"}}`,
+		"overlong abuse":  `{"sources":{"abuseipdb_key":"` + strings.Repeat("x", 257) + `"}}`,
+		"empty services":  `{"services":[]}`,
+		"invalid timeout": `{"timeout_seconds":0}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			current := centersettings.FreshInstallDefaults()
+			current.IPQuality.Sources.IPAPIISKey = "keep-private-secret"
+			repo := &fakeSettingsRepository{getSettingsResult: current}
+			refresh := &refreshRecorder{}
+			handler := handlers.Settings(repo, refresh, centersettings.DeploymentDefaults{})
+			recorder := serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+				"ip_quality_settings": json.RawMessage(raw),
+			}))
+			if recorder.Code != http.StatusBadRequest || refresh.calls != 0 {
+				t.Fatalf("status/refresh = %d/%d, want 400/0", recorder.Code, refresh.calls)
+			}
+			if repo.getSettingsResult.IPQuality.Sources.IPAPIISKey != "keep-private-secret" {
+				t.Fatal("rejected update changed persisted credentials")
+			}
+			if strings.Contains(recorder.Body.String(), "keep-private-secret") || strings.Contains(recorder.Body.String(), strings.Repeat("x", 257)) {
+				t.Fatal("error response exposed a credential")
+			}
+		})
+	}
+}
+
+func TestSettingsHandlerIPQualityShortCredentialsRemainFullyMasked(t *testing.T) {
+	current := centersettings.FreshInstallDefaults()
+	current.IPQuality.MailEnabled = false
+	repo := &fakeSettingsRepository{getSettingsResult: current}
+	handler := handlers.Settings(repo, nil, centersettings.DeploymentDefaults{})
+	recorder := serveSettingsPut(handler, fullSettingsBody(t, map[string]any{
+		"ip_quality_settings": map[string]any{
+			"sources": map[string]any{"ipapi_is_key": "abc", "abuseipdb_key": strings.Repeat("z", 256)},
+		},
+	}))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	if strings.Contains(recorder.Body.String(), `"abc"`) || strings.Contains(recorder.Body.String(), strings.Repeat("z", 256)) {
+		t.Fatal("response exposed short or maximum-length credentials")
+	}
+	if repo.getSettingsResult.IPQuality.Sources.IPAPIISKey != "abc" || len(repo.getSettingsResult.IPQuality.Sources.AbuseIPDBKey) != 256 || repo.getSettingsResult.IPQuality.MailEnabled {
+		t.Fatal("credential update changed omitted disabled mail or truncated a valid key")
 	}
 }
