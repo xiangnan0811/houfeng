@@ -217,9 +217,13 @@ func TestParseCanonicalPrivilegeSetBodyV1RejectsTruncatedAndTrailingBytes(t *tes
 		t.Fatalf("CanonicalPrivilegeSetBodyV1() error = %v", err)
 	}
 
+	for cut := range len(body) {
+		if _, err := ParseCanonicalPrivilegeSetBodyV1(body[:cut]); err == nil {
+			t.Fatalf("accepted canonical privilege body truncated at byte %d", cut)
+		}
+	}
 	for _, malformed := range [][]byte{
 		[]byte("wrong magic"),
-		body[:len(body)-1],
 		append(append([]byte(nil), body...), 0),
 	} {
 		if _, err := ParseCanonicalPrivilegeSetBodyV1(malformed); err == nil {
@@ -252,6 +256,25 @@ func TestParseCanonicalPrivilegeSetBodyV1RejectsNonCanonicalTupleOrderAndDuplica
 	} {
 		if _, err := ParseCanonicalPrivilegeSetBodyV1(rawCanonicalPrivilegeSetBody(bindings, privileges)); err == nil {
 			t.Fatal("ParseCanonicalPrivilegeSetBodyV1() error = nil, want non-canonical tuple rejection")
+		}
+	}
+}
+
+func TestParseCanonicalPrivilegeSetBodyV1ValidatesEveryTuple(t *testing.T) {
+	bindings := []AppACLRoleBinding{
+		{Subject: AppACLSubjectCenterRuntime, CatalogRole: "houfeng_center_runtime"},
+		{Subject: AppACLSubjectPlatformAdmin, CatalogRole: "houfeng_platform_admin"},
+	}
+	for invalidIndex := range 3 {
+		privileges := []AppACLPrivilege{
+			{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassDatabase, ObjectIdentity: "a", Privilege: AppACLPrivilegeConnect},
+			{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassDatabase, ObjectIdentity: "b", Privilege: AppACLPrivilegeConnect},
+			{Subject: AppACLSubjectCenterRuntime, ObjectClass: AppACLObjectClassDatabase, ObjectIdentity: "c", Privilege: AppACLPrivilegeConnect},
+		}
+		// The tuple order remains canonical, but SELECT is not a database grant.
+		privileges[invalidIndex].Privilege = AppACLPrivilegeSelect
+		if _, err := ParseCanonicalPrivilegeSetBodyV1(rawCanonicalPrivilegeSetBody(bindings, privileges)); err == nil {
+			t.Fatalf("accepted invalid database privilege at tuple %d", invalidIndex)
 		}
 	}
 }

@@ -327,15 +327,19 @@ func ParseCanonicalPrivilegeSetBodyV1(body []byte) (AppACLPrivilegeSet, error) {
 	if offset != len(body) {
 		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege set has trailing bytes")
 	}
-	canonical, err := canonicalPrivileges(privileges)
-	if err != nil {
-		return AppACLPrivilegeSet{}, err
-	}
-	if len(canonical) != len(privileges) {
-		return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege set privilege count changed")
-	}
-	for index := range privileges {
-		if compareAppACLPrivilege(privileges[index], canonical[index]) != 0 {
+	// Parsed tuples must already be canonical. Validate their strict order in
+	// place instead of allocating and sorting a second copy for comparison.
+	for index, privilege := range privileges {
+		if err := validateAppACLPrivilege(privilege); err != nil {
+			return AppACLPrivilegeSet{}, err
+		}
+		if index == 0 {
+			continue
+		}
+		switch compareAppACLPrivilege(privileges[index-1], privilege) {
+		case 0:
+			return AppACLPrivilegeSet{}, fmt.Errorf("duplicate canonical privilege tuple")
+		case 1:
 			return AppACLPrivilegeSet{}, fmt.Errorf("canonical privilege tuples are not sorted")
 		}
 	}
@@ -526,10 +530,13 @@ func readCanonicalUint32(body []byte, offset *int, field string) (uint32, error)
 }
 
 func readCanonicalString(body []byte, offset *int, maximumLength int, field string) (string, error) {
-	length, err := readCanonicalUint32(body, offset, field+" length")
-	if err != nil {
-		return "", err
+	// Keep diagnostic formatting on the error path: this decoder runs once
+	// for every string in every manifest tuple.
+	if len(body)-*offset < 4 {
+		return "", fmt.Errorf("truncated %s length", field)
 	}
+	length := binary.BigEndian.Uint32(body[*offset : *offset+4])
+	*offset += 4
 	if length > uint32(maximumLength) || len(body)-*offset < int(length) {
 		return "", fmt.Errorf("invalid %s length", field)
 	}
