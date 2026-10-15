@@ -23,7 +23,7 @@
 
 ### Bug Fixes
 
-* **migrate:** avoid redundant privilege serialization/parsing and tuple comparison copies during ACL contract compilation, retaining canonical validation and exhaustive predecessor-chain coverage.
+* **migrate:** avoid redundant privilege serialization/parsing and tuple comparison copies during ACL contract compilation; validate parsed tuple order in one pass and format decoder diagnostics only on failure, retaining canonical validation and exhaustive predecessor-chain coverage.
 * **ip-quality:** show IP types as short labels without conceptual explanations, and shorten service-evidence copy while preserving diagnostic details.
 * **ip-quality:** remove unimplemented provider placeholders and invented score bands; preserve country provenance, IPv4/IPv6 isolation and unknown results rather than inferring clean risk or service availability.
 * **agent:** preflight Bash >=4 and jq before installation or upgrade changes, fail detector modules safely when dependencies disappear, and include corresponding detector source, assets, license and build materials in the existing signed-checksum release assets.
