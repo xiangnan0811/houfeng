@@ -42,10 +42,19 @@ function describeCollectError(error: unknown): string | null {
   return '发起采集失败，请稍后重试'
 }
 
+// POST 409 后补读状态也失败：没有任何状态能解释冲突原因，只给安全的恢复提示。
+const CONFLICT_STATUS_READ_FAILED = '本次采集未能发起，当前状态读取失败，请稍后重试'
+
 type Ticket = { generation: number, sequence: number }
 
 function isCurrentTicket(session: { generation: number }, ticket: Ticket | null): ticket is Ticket {
   return ticket != null && ticket.generation === session.generation
+}
+
+// 仅供 POST 失败后的补读链使用：除同一会话外，还必须是最后发出的请求。新 POST 一发出就取代它，
+// 即使新 POST 尚未完成、applied 还没前移，旧补读的成功或失败都不能覆盖新操作。
+function isLatestTicket(session: { generation: number, issued: number }, ticket: Ticket | null): ticket is Ticket {
+  return isCurrentTicket(session, ticket) && ticket.sequence === session.issued
 }
 
 function justCompleted(prev: IPQualityCollectRequest | null, next: IPQualityCollectRequest | null): boolean {
@@ -186,10 +195,21 @@ export function useIPQualityCollect(vpsId: string | undefined, onCompleted: (req
       .catch((error: unknown) => {
         if (!isCurrentTicket(sessionRef.current, ticket)) return
         setState((prev) => (prev.vpsId === key ? { ...prev, submitting: false, error: describeCollectError(error) } : prev))
+        const conflict = error instanceof ApiError && error.status === 409
         const refreshTicket = issueTicket()
         getVPSIPQualityCollectStatus(key)
-          .then((next) => applyStatus(next, false, refreshTicket))
-          .catch(() => undefined)
+          .then((next) => {
+            if (isLatestTicket(sessionRef.current, refreshTicket)) applyStatus(next, false, refreshTicket)
+          })
+          .catch(() => {
+            // 非 409 已有通用 POST 错误；409 的原因本应由这次补读给出，读取失败时补上安全提示。
+            if (!conflict || !isLatestTicket(sessionRef.current, refreshTicket)) return
+            setState((prev) => (
+              prev.vpsId === key && isLatestTicket(sessionRef.current, refreshTicket)
+                ? { ...prev, error: CONFLICT_STATUS_READ_FAILED }
+                : prev
+            ))
+          })
       })
   }, [key, busy, checking, applyStatus, issueTicket])
 

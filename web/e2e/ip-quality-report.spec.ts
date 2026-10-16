@@ -3,7 +3,7 @@ import type { Locator, Page } from '@playwright/test'
 
 import type { IPQualityIPVersion } from '../src/lib/types'
 import { expect, test } from './fixtures'
-import type { ApiFixtureProfile } from './fixtures/contracts'
+import { apiRouteKey, type ApiFixtureProfile, type ApiFixtureResponse } from './fixtures/contracts'
 import {
   collectPostRoute,
   collectRequest,
@@ -406,11 +406,29 @@ for (const viewport of [VIEWPORTS[0], VIEWPORTS[2]]) {
     }
     await page.screenshot({ path: testInfo.outputPath('stale-history-scrolled.png') })
 
-    // 页头“历史”锚点：目标标题落在上下文下方，不被吸顶区遮挡。
+    // 页头“历史”锚点：键盘激活后标题真实获得焦点、落在上下文下方不被遮挡，下一次 Tab 进入历史操作。
     await page.evaluate(() => document.querySelector('.main')?.scrollTo(0, 0))
-    await page.getByRole('link', { name: '历史', exact: true }).click()
-    await expectContextVisibleAbove(page, page.getByRole('heading', { level: 2, name: '历史报告', exact: true }))
+    const historyAnchor = page.getByRole('link', { name: '历史', exact: true })
+    const historyHeading = page.getByRole('heading', { level: 2, name: '历史报告', exact: true })
+    await historyAnchor.focus()
+    await page.keyboard.press('Enter')
+    await expect(historyHeading).toBeFocused()
+    await expect(page).toHaveURL(/#ip-quality-history-title$/)
+    await expectContextVisibleAbove(page, historyHeading)
+    await page.keyboard.press('Tab')
+    expect(await page.evaluate(() => Boolean(document.activeElement?.closest('section.ipq-history')) && document.activeElement?.tagName !== 'H2')).toBe(true)
     await expectNoDocumentOverflow(page)
+
+    // 修饰键点击属于新窗口/标签语义：不把焦点劫持到标题。文档级监听在页面处理之后才取消默认动作，只为不真的打开标签页。
+    await page.evaluate(() => {
+      document.querySelector('.main')?.scrollTo(0, 0)
+      document.addEventListener('click', (event) => { if (event.ctrlKey || event.metaKey) event.preventDefault() })
+    })
+    await historyAnchor.focus()
+    for (const modifier of ['ctrlKey', 'metaKey'] as const) {
+      await historyAnchor.dispatchEvent('click', { button: 0, [modifier]: true })
+      await expect(historyAnchor).toBeFocused()
+    }
   })
 }
 
@@ -654,6 +672,185 @@ for (const [label, search] of [
   })
 }
 
+test('a delayed history report with a conflicting family stays family-neutral until it resolves', async ({ api, page }) => {
+  const release = deferred()
+  const scenario = ipQualityScenario('dual_stack')
+  api.useProfile(ipQualityScenarioProfile(scenario, {
+    extra: { [apiRouteKey('GET', ipqDetailPath('ipq_v6_prev'))]: { status: 200, body: scenario.details.ipq_v6_prev, waitFor: release.promise } },
+  }))
+  const detailRequest = page.waitForRequest((request) => new URL(request.url()).pathname === ipqDetailPath('ipq_v6_prev'))
+  await page.goto(ipqPageURL({ ipVersion: 4, reportId: 'ipq_v6_prev' }))
+  await detailRequest
+
+  // 解析前：query 的 IPv4 不冒充历史真实族；选择器、加载标题与身份都“待确定”，“查看最新报告”是非交互占位。
+  const context = reportContext(page)
+  await expect(familyButton(page, 4)).toHaveAttribute('aria-pressed', 'false')
+  await expect(familyButton(page, 6)).toHaveAttribute('aria-pressed', 'false')
+  await expect(context.getByLabel('报告身份')).toContainText('待确定')
+  await expect(context.getByLabel('报告身份')).not.toContainText(/IPv[46]/)
+  await expect(page.getByText('正在加载 IP 质量报告', { exact: true })).toBeVisible()
+  await expect(page.getByText(/正在加载 IPv[46] 报告/)).toHaveCount(0)
+  await expect(context.getByRole('link', { name: '查看最新报告' })).toHaveCount(0)
+  await expect(context.getByText('查看最新报告', { exact: true })).toHaveAttribute('aria-disabled', 'true')
+
+  release.resolve()
+  await expectSelection(page, 6, 'ipq_v6_prev')
+  await expect(context.getByLabel('报告身份')).toContainText(IPV6_IDENTITY.ipAddress)
+  await expect(context.getByRole('link', { name: '查看最新报告' })).toHaveAttribute('href', `${IPQ_PAGE_PATH}?ip_version=6`)
+  // detail API 只带 ID、只请求一次，不发族查询。
+  expect(api.requestCount('GET', ipqDetailPath('ipq_v6_prev'))).toBe(1)
+  expect(reportGETCount(api)).toBe(0)
+})
+
+test('history rows state each report’s own collection facts without a negative risk verdict', async ({ api, page }) => {
+  // ipq_v4_prev 改为部分采集且名单一个都未查成；同一报告 ID 的 summary、latest 与 product 一起改，保持事实一致。
+  const scenario = ipQualityScenario('dual_stack')
+  const previous = scenario.details.ipq_v4_prev!
+  previous.summary!.status = 'partial'
+  previous.latest_report!.status = 'partial'
+  previous.product!.blacklists = previous.product!.blacklists.map((row) => ({ ...row, status: 'unknown' as const, error_code: 'timeout' }))
+  previous.product!.summary.blacklist_checked_count = 0
+  expect(previous.summary!.product_summary).toBe(previous.product!.summary)
+  api.useProfile(ipQualityScenarioProfile(scenario))
+  await page.goto(ipqPageURL({ ipVersion: 4 }))
+  await expectSelection(page, 4)
+
+  const historySection = page.locator('section.ipq-history')
+  const row = (reportId: string) => historySection.locator('li').filter({ has: page.locator(`a[href*="report_id=${reportId}"]`) })
+  const currentRow = historySection.locator('li[aria-current="page"]')
+  await historySection.scrollIntoViewIfNeeded()
+  await expect(historySection).not.toContainText('未见风险命中')
+  // 当前报告采集成功、无已知阳性：只陈述“采集成功”，服务数独立呈现。
+  await expect(currentRow).toContainText('采集成功')
+  await expect(currentRow).toContainText('服务 6 可用')
+  await expect(row('ipq_v4_prev')).toContainText('部分采集')
+  await expect(row('ipq_v4_prev')).toContainText('服务 6 可用')
+  await expect(row('ipq_v4_prev')).not.toContainText('采集成功')
+
+  // IPv6 本身是部分采集：同样只写过程事实。
+  await familyButton(page, 6).click()
+  await expectSelection(page, 6)
+  await expect(historySection).not.toContainText('未见风险命中')
+  await expect(currentRow).toContainText('部分采集')
+  await expect(currentRow).toContainText('服务 2 可用')
+
+  // 打开改过的旧报告：页头与历史行给出同一份事实，链接绑定原报告。
+  await familyButton(page, 4).click()
+  await expectSelection(page, 4)
+  await row('ipq_v4_prev').getByRole('link').click()
+  await expectSelection(page, 4, 'ipq_v4_prev')
+  await expect(page.locator('.ipq-header__marks')).toContainText('部分采集')
+  await expect(currentRow).toContainText('部分采集')
+  expect(api.requestCount('GET', ipqDetailPath('ipq_v4_prev'))).toBe(1)
+  await expectNoDocumentOverflow(page)
+})
+
+// ---------------------------------------------------------------------------
+// POST 409 后补读状态失败：安全恢复提示；过时补读不能污染新一次操作
+// ---------------------------------------------------------------------------
+
+const CONFLICT_READ_FAILED = '本次采集未能发起，当前状态读取失败，请稍后重试'
+const collectConflict = (): ApiFixtureResponse => ({ status: 409, body: { error: 'collect request conflict', code: 'collect_conflict' }, expectedBodyKeys: ['ip_versions'] })
+const isCollectStatusRead = (request: { method: () => string, url: () => string }) => request.method() === 'GET' && new URL(request.url()).pathname === IPQ_COLLECT_PATH
+const collectButton = (page: Page) => page.getByRole('button', { name: /^(立即采集|正在发起…|采集中…)$/ })
+
+test('a 409 whose follow-up status read fails explains it safely and recovers on a manual retry', async ({ api, page }) => {
+  api.useProfile(ipQualityScenarioProfile('dual_stack'))
+  await page.goto(IPQ_PAGE_PATH)
+  await expectSelection(page, 4)
+  await expect(collectButton(page)).toBeEnabled()
+
+  api.useProfile(ipQualityScenarioProfile('dual_stack', {
+    extra: {
+      [apiRouteKey('POST', IPQ_COLLECT_PATH)]: collectConflict(),
+      [apiRouteKey('GET', IPQ_COLLECT_PATH)]: { status: 503, body: { error: 'collect status unavailable', code: 'service_unavailable' } },
+    },
+  }))
+  const followUp = page.waitForResponse((response) => isCollectStatusRead(response.request()))
+  await collectButton(page).click()
+  await page.getByRole('menuitem', { name: UI.collectDual }).click()
+  expect((await followUp).status()).toBe(503)
+  await expect(collectStatus(page)).toContainText(CONFLICT_READ_FAILED)
+  await expect(collectStatus(page)).not.toContainText('发起采集失败')
+  await expect(collectButton(page)).toHaveAccessibleName('立即采集')
+  await expect(collectButton(page)).toBeEnabled()
+  // 原报告保留，不自动重发 POST。
+  await expect(page.getByLabel('报告身份')).toContainText(IPV4_IDENTITY.ipAddress)
+  await page.waitForTimeout(3_500)
+  expect(api.requestCount('POST', IPQ_COLLECT_PATH)).toBe(1)
+
+  api.useProfile(ipQualityScenarioProfile('dual_stack', { collect: { ...COLLECT_AVAILABLE, request: collectRequest('dispatched') }, extra: collectPostRoute('both_success') }))
+  await collectButton(page).click()
+  await page.getByRole('menuitem', { name: UI.collectDual }).click()
+  await expect(collectStatus(page)).toContainText('正在采集 IPv4 / IPv6')
+  await expect(page.getByText(CONFLICT_READ_FAILED)).toHaveCount(0)
+  expect(api.requestCount('POST', IPQ_COLLECT_PATH)).toBe(2)
+  await expectNoDocumentOverflow(page)
+})
+
+for (const [phase, staleRead] of [['pending', '503'], ['completed', 'old idle status']] as const) {
+  test(`a stale 409 follow-up read (${staleRead}) cannot overwrite a newer collection whose POST is ${phase}`, async ({ api, page }) => {
+    const releaseA = deferred()
+    const releaseB = deferred()
+    api.useProfile(ipQualityScenarioProfile('dual_stack'))
+    await page.goto(IPQ_PAGE_PATH)
+    await expectSelection(page, 4)
+    await expect(collectButton(page)).toBeEnabled()
+
+    // A：POST 409，随后的补读挂起。
+    api.useProfile(ipQualityScenarioProfile('dual_stack', {
+      extra: {
+        [apiRouteKey('POST', IPQ_COLLECT_PATH)]: collectConflict(),
+        [apiRouteKey('GET', IPQ_COLLECT_PATH)]: phase === 'pending'
+          ? { status: 503, body: { error: 'collect status unavailable', code: 'service_unavailable' }, waitFor: releaseA.promise }
+          : { status: 200, body: COLLECT_AVAILABLE, waitFor: releaseA.promise },
+      },
+    }))
+    const followUpA = page.waitForRequest(isCollectStatusRead)
+    await collectButton(page).click()
+    await page.getByRole('menuitem', { name: UI.collectDual }).click()
+    const requestA = await followUpA
+    await expect(collectButton(page)).toHaveAccessibleName('立即采集')
+
+    // B：同一会话内的新 POST，服务端返回不同的请求 ID。
+    const requestB = { ...collectRequest('pending'), request_id: 'ipqc_e2e_b' }
+    api.useProfile(ipQualityScenarioProfile('dual_stack', {
+      collect: { ...COLLECT_AVAILABLE, request: { ...collectRequest('dispatched'), request_id: 'ipqc_e2e_b' } },
+      extra: {
+        [apiRouteKey('POST', IPQ_COLLECT_PATH)]: {
+          status: 202,
+          body: { ...COLLECT_AVAILABLE, request: requestB },
+          expectedBodyKeys: ['ip_versions'],
+          ...(phase === 'pending' ? { waitFor: releaseB.promise } : {}),
+        },
+      },
+    }))
+    const postB = page.waitForRequest((request) => request.method() === 'POST' && new URL(request.url()).pathname === IPQ_COLLECT_PATH)
+    await collectButton(page).click()
+    await page.getByRole('menuitem', { name: UI.collectDual }).click()
+    await postB
+    if (phase === 'pending') await expect(collectButton(page)).toHaveAccessibleName('正在发起…')
+    else await expect(collectStatus(page)).toContainText('正在采集 IPv4 / IPv6')
+
+    // 释放 A 的旧补读：既不给 B 套上冲突错误，也不用旧状态覆盖 B 的提交或进度。
+    const responseA = page.waitForResponse((response) => response.request() === requestA)
+    releaseA.resolve()
+    await responseA
+    await expect(page.getByText(CONFLICT_READ_FAILED)).toHaveCount(0)
+    if (phase === 'pending') {
+      await expect(collectButton(page)).toHaveAccessibleName('正在发起…')
+      await expect(collectButton(page)).toBeDisabled()
+      releaseB.resolve()
+    }
+    await expect(collectStatus(page)).toContainText('正在采集 IPv4 / IPv6')
+    await expect(collectButton(page)).toHaveAccessibleName('采集中…')
+    await expect(collectButton(page)).toBeDisabled()
+    await expect(page.getByText(CONFLICT_READ_FAILED)).toHaveCount(0)
+    expect(api.requestCount('POST', IPQ_COLLECT_PATH)).toBe(2)
+    releaseB.resolve()
+  })
+}
+
 // ---------------------------------------------------------------------------
 // 来源分歧：每个字段可核对来源与值，入口定位与焦点正确，样本按钮读出供应商
 // ---------------------------------------------------------------------------
@@ -684,20 +881,45 @@ test('every disagreeing identity field leads to its own source evidence with foc
     await expect(identity.getByRole('link', { name: `${field}来源有分歧，查看${section}` })).toHaveAttribute('href', `#${anchor}`)
   }
 
-  // 注册地与公司名称：就近披露，列出主样本的供应商、方式与原值。
+  // 注册地与公司名称：就近披露，列出主样本的供应商、方式与原值；方向标记关闭指右、打开指下，名称不含字形。
+  const caretTransform = (details: Locator) => details.locator('summary .ipq-disagreement__caret').evaluate((element) => getComputedStyle(element).transform)
   const registration = identity.locator('details.ipq-disagreement').filter({ has: page.locator('summary[aria-label="查看注册地来源分歧"]') })
+  const registrationSummary = registration.locator('summary')
   await expect(registration).not.toHaveAttribute('open')
-  await registration.locator('summary').press('Enter')
+  await expect(registrationSummary).toHaveAccessibleName('查看注册地来源分歧')
+  await expect(registration.locator('.ipq-disagreement__caret')).toBeVisible()
+  expect(await caretTransform(registration)).toBe('none')
+  await registrationSummary.press('Enter')
   await expect(registration).toHaveAttribute('open')
+  expect(await caretTransform(registration)).not.toBe('none')
+  await expect(registrationSummary).toHaveCSS('border-top-style', 'solid')
   await expect(registration).toContainText(`${first.provider} · 认证US`)
   await expect(registration).toContainText(`${second.provider}`)
   await expect(registration).toContainText('DE')
   await expect(registration).not.toContainText('FR')
+  await registrationSummary.press('Enter')
+  await expect(registration).not.toHaveAttribute('open')
+  expect(await caretTransform(registration)).toBe('none')
+  await expect(registrationSummary).toHaveCSS('border-top-style', 'dashed')
+  // 跳转链接保持原文字链接，不带展开标记。
+  await expect(identity.locator('a .ipq-disagreement__caret')).toHaveCount(0)
   const company = identity.locator('details.ipq-disagreement').filter({ has: page.locator('summary[aria-label="查看公司名称来源分歧"]') })
-  await company.locator('summary').click()
+  const companySummary = company.locator('summary')
+  await expect(companySummary).toHaveAccessibleName('查看公司名称来源分歧')
+  expect(await caretTransform(company)).toBe('none')
+  await companySummary.focus()
+  await page.keyboard.press('Space')
+  await expect(company).toHaveAttribute('open')
+  expect(await caretTransform(company)).not.toBe('none')
   await expect(company).toContainText('Alpha Hosting')
   await expect(company).toContainText('Beta Net')
   await expect(company).not.toContainText('Anon Co')
+  await companySummary.click()
+  await expect(company).not.toHaveAttribute('open')
+  expect(await caretTransform(company)).toBe('none')
+  await companySummary.click()
+  await expect(company).toHaveAttribute('open')
+  await expectNoDocumentOverflow(page)
 
   // 键盘激活：焦点移到目标标题，且标题不被吸顶上下文遮挡。
   await identity.getByRole('link', { name: '城市来源有分歧，查看多源定位' }).press('Enter')

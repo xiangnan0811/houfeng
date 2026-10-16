@@ -166,7 +166,19 @@ export function IPQualityHeader({
           ) : (
             <>
               {showCollect ? <IPQualityCollectButton collect={collect} /> : null}
-              {summary ? <a className="btn md ghost" href={`#${IP_QUALITY_HISTORY_ANCHOR}`}>历史</a> : null}
+              {summary ? (
+                // 真实锚点：普通激活同时把焦点移到历史标题（滚动仍由原生锚点完成）；修饰键/新窗口不劫持。
+                <a
+                  className="btn md ghost"
+                  href={`#${IP_QUALITY_HISTORY_ANCHOR}`}
+                  onClick={(event) => {
+                    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                    document.getElementById(IP_QUALITY_HISTORY_ANCHOR)?.focus({ preventScroll: true })
+                  }}
+                >
+                  历史
+                </a>
+              ) : null}
             </>
           )}
           <Link className="btn md secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>

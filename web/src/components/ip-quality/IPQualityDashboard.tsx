@@ -130,8 +130,10 @@ function identityState(view: IPQualityDashboardView): IPQualityIdentityState {
 
 export function IPQualityDashboard({ view, detailPath, collect, vpsId, viewingHistory, refreshState, onSelectFamily, enrichment = null }: IPQualityDashboardProps) {
   const location = useLocation()
-  const ipVersion = viewIPVersion(view)
   const history = viewingHistory && view.kind !== 'invalid_family'
+  // 历史视图只信所选报告自身的族：未展示报告（加载/失败/空）时选择器、标题与身份一律“待确定”，
+  // 不用 query 或响应选择族冒充。
+  const ipVersion = history && view.kind !== 'report' ? null : viewIPVersion(view)
   // 本次响应：只有 report/empty 才有；loading/error/invalid 不派生完成通知或族状态。
   const response = view.kind === 'report' || view.kind === 'empty' ? view.report : null
   const summary = view.kind === 'report' ? view.summary : null
@@ -150,8 +152,6 @@ export function IPQualityDashboard({ view, detailPath, collect, vpsId, viewingHi
   const reportContext: CollectReportContext | undefined = notice
     ? notice.reportContext
     : hasReport && !history && refreshState === 'failed' ? 'before_refresh' : undefined
-  // 历史视图只信所选报告自身的族：未展示报告（加载/失败/空）时一律“待确定”，不用 query 或响应选择族冒充。
-  const targetIPVersion = history ? null : ipVersion
   const returnLink = <Link className="btn md secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
 
   return (
@@ -161,7 +161,7 @@ export function IPQualityDashboard({ view, detailPath, collect, vpsId, viewingHi
         collect={collect}
         identityState={identityState(view)}
         summary={summary}
-        targetIPVersion={targetIPVersion}
+        targetIPVersion={ipVersion}
         viewingHistory={history}
         showCollect={view.kind === 'report'}
         familyControl={<IPQualityFamilySelector value={ipVersion} onChange={onSelectFamily} />}

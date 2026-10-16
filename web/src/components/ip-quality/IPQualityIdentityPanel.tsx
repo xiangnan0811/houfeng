@@ -70,7 +70,10 @@ type FieldEvidence = { provider: string, method: string | null, value: string }
 function DisagreementDetails({ label, entries }: { label: string, entries: FieldEvidence[] }) {
   return (
     <details className="ipq-disagreement">
-      <summary className="ipq-chip-link" aria-label={`查看${label}来源分歧`}>来源有分歧</summary>
+      <summary className="ipq-chip-link" aria-label={`查看${label}来源分歧`}>
+        <span className="ipq-disagreement__caret" aria-hidden="true">▸</span>
+        来源有分歧
+      </summary>
       <dl className="ipq-disagreement__list">
         {entries.map((entry) => (
           <div key={entry.provider}>

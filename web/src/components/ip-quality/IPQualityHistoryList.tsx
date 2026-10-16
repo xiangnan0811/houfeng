@@ -25,18 +25,25 @@ function historyLink(item: IPQualitySummary, fallback: 4 | 6 | null, reportId: s
 
 const COLLAPSED_LIMIT = 5
 
-// 每条历史的事实摘要：revision1 用服务端事实（风险命中、服务可用数）；旧报告只显示标注的旧版评级。
+// 无已知阳性时只陈述采集过程，不给风险阴性总评：采集成功也不代表各风险维度都已知。
+function collectionFact(status: IPQualitySummary['status']): string | null {
+  if (status === 'partial') return '部分采集'
+  if (status === 'success') return '采集成功'
+  return null
+}
+
+// 每条历史的事实摘要：revision1 用服务端事实（已知风险阳性、服务可用数）；旧报告只显示标注的旧版评级。
 function HistoryFacts({ item }: { item: IPQualitySummary }) {
   const product = item.product_revision === 1 ? item.product_summary : null
   if (!product) {
     return <Badge variant="info" tone={riskTone(item.risk_level)}>旧版评级 · {riskLevelLabel(item.risk_level)}</Badge>
   }
   const facts = productRiskFacts(product)
+  const process = facts.length > 0 ? null : collectionFact(item.status)
   return (
     <span className="ipq-history__facts">
-      {facts.length > 0
-        ? facts.map((fact) => <Badge key={fact} variant="info" tone="alert">{fact}</Badge>)
-        : <span className="ipq-muted">未见风险命中</span>}
+      {facts.map((fact) => <Badge key={fact} variant="info" tone="alert">{fact}</Badge>)}
+      {process ? <span className="ipq-muted">{process}</span> : null}
       <span className="ipq-muted">服务 {product.service_available_count} 可用</span>
     </span>
   )
@@ -54,7 +61,7 @@ export function IPQualityHistoryList({ history, currentReportId, ipVersion }: IP
   return (
     <section className="vps-detail-workspace__section ipq-history" aria-labelledby={IP_QUALITY_HISTORY_ANCHOR}>
       <div className="vps-detail-workspace__section-head">
-        <h2 id={IP_QUALITY_HISTORY_ANCHOR}>历史报告</h2>
+        <h2 id={IP_QUALITY_HISTORY_ANCHOR} tabIndex={-1}>历史报告</h2>
         {history.length > 0 ? <span className="ipq-muted">共 {history.length} 份</span> : null}
       </div>
       {history.length > 0 ? (
