@@ -2,6 +2,7 @@ package ipquality
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -119,17 +120,21 @@ func TestCollectRequestsExpireAndPrune(t *testing.T) {
 		t.Fatalf("PendingRequest(expired) = %#v, want empty", got)
 	}
 	expired, ok := requests.Latest("mi_001", expiredAt)
-	if !ok || expired.Status != CollectRequestExpired {
-		t.Fatalf("latest = %#v, want expired", expired)
+	if !ok || expired.Status != CollectRequestExpired || expired.CompletedAt != nil {
+		t.Fatalf("latest = %#v, want expired without a fabricated completion time", expired)
 	}
 	requests.ObserveReports("mi_001", []ReportWrite{legacyCollectReport(request.RequestID, "success", now)}, expiredAt.Add(time.Second))
 	if late, _ := requests.Latest("mi_001", expiredAt.Add(2*time.Second)); late.Status != CollectRequestExpired {
 		t.Fatalf("late report must not revive an expired request: %#v", late)
 	}
 
+	pruneAt := expiredAt.Add(collectRequestRetention)
 	requests.Request("mi_002", now.Add(collectRequestRetention+time.Second))
-	if _, ok := requests.Latest("mi_001", now.Add(collectRequestRetention+time.Second)); ok {
-		t.Fatal("request older than retention must be pruned")
+	if retained, ok := requests.Latest("mi_001", pruneAt.Add(-time.Nanosecond)); !ok || !reflect.DeepEqual(retained, expired) {
+		t.Fatalf("expired request must remain readable throughout retention: %#v, ok=%t", retained, ok)
+	}
+	if _, ok := requests.Latest("mi_001", pruneAt); ok {
+		t.Fatal("expired request must be pruned exactly at its terminal retention cutoff")
 	}
 }
 
@@ -392,7 +397,229 @@ func TestCollectRequestsExpirePartialGroupsAndReplaceRequest(t *testing.T) {
 	if current.RequestID != next.RequestID || !current.Active() || len(current.FamilyResults) != 0 || current.CollectionScope != "" {
 		t.Fatalf("old request reports polluted replacement: %#v", current)
 	}
-	if _, ok := registry.Latest("mi_001", now.Add(collectRequestRetention+CollectRequestTTL+2*time.Second)); ok {
+	pruneAt := next.ExpiresAt.Add(collectRequestRetention)
+	if retained, ok := registry.Latest("mi_001", pruneAt.Add(-time.Nanosecond)); !ok || retained.Status != CollectRequestExpired || retained.CompletedAt != nil {
+		t.Fatalf("replacement request must retain its own expired result: %#v, ok=%t", retained, ok)
+	}
+	if _, ok := registry.Latest("mi_001", pruneAt); ok {
 		t.Fatal("retention must prune without requiring another Request call")
+	}
+}
+
+func TestCollectRequestsRetainCompletedFromTerminalTime(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, status := range []string{"success", "partial", "failure"} {
+		t.Run(status, func(t *testing.T) {
+			registry := newTestCollectRequests()
+			request, _ := registry.Request("mi_001", now)
+			registry.PendingRequest("mi_001", now.Add(time.Second), nil)
+			four := pairedCollectReport(request.RequestID, "round", 4, "available", status, now)
+			six := pairedCollectReport(request.RequestID, "round", 6, "available", status, now)
+			registry.ObserveReports("mi_001", []ReportWrite{four}, now.Add(time.Minute))
+			completedAt := now.Add(9 * time.Minute)
+			registry.ObserveReports("mi_001", []ReportWrite{six}, completedAt)
+			completed, ok := registry.Latest("mi_001", completedAt)
+			if !ok || completed.Status != CollectRequestCompleted || completed.ReportStatus != status ||
+				completed.CompletedAt == nil || !completed.CompletedAt.Equal(completedAt) ||
+				len(completed.FamilyResults) != 2 || registry.entries["mi_001"].groups != nil {
+				t.Fatalf("paired completion = %#v, ok=%t, want retained terminal metadata without groups", completed, ok)
+			}
+			if retained, ok := registry.Latest("mi_001", now.Add(31*time.Minute)); !ok || !reflect.DeepEqual(retained, completed) {
+				t.Fatalf("request completed at t9 must still be readable at t31: %#v, ok=%t", retained, ok)
+			}
+			registry.ObserveReports("mi_001", []ReportWrite{four, six}, now.Add(32*time.Minute))
+			cutoff := completedAt.Add(collectRequestRetention)
+			if retained, ok := registry.Latest("mi_001", cutoff.Add(-time.Nanosecond)); !ok || !reflect.DeepEqual(retained, completed) {
+				t.Fatalf("late reports must not change or extend completed retention: %#v, ok=%t", retained, ok)
+			}
+			for _, at := range []time.Time{cutoff, cutoff.Add(time.Nanosecond)} {
+				if _, ok := registry.Latest("mi_001", at); ok {
+					t.Fatalf("completed request retained at or after t39 cutoff: %s", at)
+				}
+			}
+		})
+	}
+}
+
+func TestCollectRequestsRetainUnsupportedFailureFromTerminalTime(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	registry := newTestCollectRequests()
+	request, _ := registry.Request("mi_001", now, []int{4})
+	failedAt := now.Add(9 * time.Minute)
+	incapable := 0
+	if got := registry.PendingRequest("mi_001", failedAt, &incapable); got.RequestID != "" {
+		t.Fatalf("unsupported agent dispatched request: %#v", got)
+	}
+	failed, ok := registry.Latest("mi_001", now.Add(31*time.Minute))
+	if !ok || failed.Status != CollectRequestFailed || failed.ErrorCode != "unsupported_agent" ||
+		failed.CompletedAt == nil || !failed.CompletedAt.Equal(failedAt) || failed.DispatchedAt != nil ||
+		registry.entries["mi_001"].groups != nil {
+		t.Fatalf("unsupported failure must remain readable from t9 to t39: %#v, ok=%t", failed, ok)
+	}
+	registry.ObserveReports("mi_001", []ReportWrite{legacyCollectReport(request.RequestID, "success", now)}, now.Add(32*time.Minute))
+	cutoff := failedAt.Add(collectRequestRetention)
+	if retained, ok := registry.Latest("mi_001", cutoff.Add(-time.Nanosecond)); !ok || !reflect.DeepEqual(retained, failed) {
+		t.Fatalf("late report revived or modified failed request: %#v, ok=%t", retained, ok)
+	}
+	if _, ok := registry.Latest("mi_001", cutoff); ok {
+		t.Fatal("unsupported failure must be pruned at t39 cutoff")
+	}
+}
+
+func TestCollectRequestsUnvisitedExpiryRetainedUntilLogicalCutoff(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, dispatched := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dispatched=%t", dispatched), func(t *testing.T) {
+			registry := newTestCollectRequests()
+			request, _ := registry.Request("mi_001", now)
+			if dispatched {
+				registry.PendingRequest("mi_001", now, nil)
+			}
+			four := pairedCollectReport(request.RequestID, "round", 4, "available", "success", now)
+			registry.ObserveReports("mi_001", []ReportWrite{four}, now.Add(time.Second))
+			expired, ok := registry.Latest("mi_001", now.Add(35*time.Minute))
+			if !ok || expired.Status != CollectRequestExpired || expired.CompletedAt != nil ||
+				!expired.ExpiresAt.Equal(now.Add(CollectRequestTTL)) || len(expired.FamilyResults) != 1 ||
+				registry.entries["mi_001"].groups != nil {
+				t.Fatalf("first read at t35 must return logical t10 expiry and release groups: %#v, ok=%t", expired, ok)
+			}
+			six := pairedCollectReport(request.RequestID, "round", 6, "available", "success", now)
+			registry.ObserveReports("mi_001", []ReportWrite{six}, now.Add(36*time.Minute))
+			cutoff := request.ExpiresAt.Add(collectRequestRetention)
+			if retained, ok := registry.Latest("mi_001", cutoff.Add(-time.Nanosecond)); !ok || !reflect.DeepEqual(retained, expired) {
+				t.Fatalf("late paired report changed expired result or retention: %#v, ok=%t", retained, ok)
+			}
+			if _, ok := registry.Latest("mi_001", cutoff); ok {
+				t.Fatal("unvisited request must be pruned at t40, not t65")
+			}
+		})
+	}
+}
+
+func TestCollectRequestsExpiryBoundaries(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, status := range []string{CollectRequestPending, CollectRequestDispatched} {
+		for _, delta := range []time.Duration{-time.Nanosecond, 0, time.Nanosecond} {
+			t.Run(fmt.Sprintf("%s/%s", status, delta), func(t *testing.T) {
+				registry := newTestCollectRequests()
+				request, _ := registry.Request("mi_001", now)
+				if status == CollectRequestDispatched {
+					registry.PendingRequest("mi_001", now, nil)
+				}
+				four := pairedCollectReport(request.RequestID, "round", 4, "available", "success", now)
+				registry.ObserveReports("mi_001", []ReportWrite{four}, now.Add(time.Second))
+				at := request.ExpiresAt.Add(delta)
+				current, ok := registry.Latest("mi_001", at)
+				wantStatus := status
+				if delta >= 0 {
+					wantStatus = CollectRequestExpired
+				}
+				if !ok || current.Status != wantStatus || current.CompletedAt != nil {
+					t.Fatalf("TTL boundary at %s = %#v, ok=%t, want %s", delta, current, ok, wantStatus)
+				}
+				if hasGroups := registry.entries["mi_001"].groups != nil; hasGroups != (delta < 0) {
+					t.Fatalf("TTL boundary at %s retained groups=%t", delta, hasGroups)
+				}
+			})
+		}
+	}
+}
+
+func TestCollectRequestsPruneExpiresAllInstancesAndReleasesGroups(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	registry := newTestCollectRequests()
+	for index, offset := range []time.Duration{0, 5 * time.Minute, 9 * time.Minute} {
+		instanceID := fmt.Sprintf("mi_%03d", index+1)
+		requestAt := now.Add(offset)
+		request, _ := registry.Request(instanceID, requestAt)
+		report := pairedCollectReport(request.RequestID, "round", 4, "available", "success", requestAt)
+		report.MonitoringInstanceID = instanceID
+		registry.ObserveReports(instanceID, []ReportWrite{report}, requestAt.Add(time.Second))
+	}
+	if _, ok := registry.Latest("mi_unknown", now.Add(CollectRequestTTL)); ok {
+		t.Fatal("unknown instance unexpectedly has a request")
+	}
+	first := registry.entries["mi_001"]
+	if first.request.Status != CollectRequestExpired || first.groups != nil || first.request.CompletedAt != nil {
+		t.Fatalf("accessing unknown instance failed to expire the oldest request: %#v", first)
+	}
+	for _, instanceID := range []string{"mi_002", "mi_003"} {
+		entry := registry.entries[instanceID]
+		if !entry.request.Active() || entry.groups == nil {
+			t.Fatalf("unexpired instance %s lost its active request or groups: %#v", instanceID, entry)
+		}
+	}
+	dispatched := registry.PendingRequest("mi_003", now.Add(15*time.Minute), nil)
+	second := registry.entries["mi_002"]
+	if dispatched.Status != CollectRequestDispatched || registry.entries["mi_003"].groups == nil ||
+		second.request.Status != CollectRequestExpired || second.groups != nil || second.request.CompletedAt != nil {
+		t.Fatalf("interleaved access failed to expire only elapsed requests: dispatched=%#v second=%#v", dispatched, second)
+	}
+	registry.Latest("mi_unknown", now.Add(40*time.Minute))
+	if _, ok := registry.entries["mi_001"]; ok {
+		t.Fatal("oldest instance must be pruned at its t40 cutoff")
+	}
+	if len(registry.entries) != 2 || registry.entries["mi_002"].request.Status != CollectRequestExpired ||
+		registry.entries["mi_003"].request.Status != CollectRequestExpired || registry.entries["mi_003"].groups != nil {
+		t.Fatal("global cleanup must retain later terminal requests and release every expired group")
+	}
+	registry.Latest("mi_unknown", now.Add(45*time.Minute))
+	if _, ok := registry.entries["mi_002"]; ok {
+		t.Fatal("second instance must be pruned at its t45 cutoff")
+	}
+	if _, ok := registry.Latest("mi_003", now.Add(49*time.Minute-time.Nanosecond)); !ok {
+		t.Fatal("third instance must remain until its own t49 cutoff")
+	}
+	registry.Latest("mi_unknown", now.Add(49*time.Minute))
+	if len(registry.entries) != 0 {
+		t.Fatalf("elapsed terminal requests remain: %#v", registry.entries)
+	}
+}
+
+func TestCollectRequestsMissingCompletionUsesExpiryFallback(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, status := range []string{CollectRequestCompleted, CollectRequestFailed} {
+		t.Run(status, func(t *testing.T) {
+			registry := newTestCollectRequests()
+			request, _ := registry.Request("mi_001", now)
+			registry.entries["mi_001"].request.Status = status
+			cutoff := request.ExpiresAt.Add(collectRequestRetention)
+			if current, ok := registry.Latest("mi_001", now.Add(31*time.Minute)); !ok || current.Status != status || current.CompletedAt != nil {
+				t.Fatalf("missing completion fell back to requested_at or fabricated a completion: %#v, ok=%t", current, ok)
+			}
+			if _, ok := registry.Latest("mi_001", cutoff.Add(-time.Nanosecond)); !ok {
+				t.Fatal("missing completion must retain until expiry plus retention")
+			}
+			if _, ok := registry.Latest("mi_001", cutoff); ok {
+				t.Fatal("missing completion must prune at expiry plus retention")
+			}
+		})
+	}
+}
+
+func TestCollectRequestsNeverPruneActiveBeforeExpiry(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	for _, status := range []string{CollectRequestPending, CollectRequestDispatched} {
+		t.Run(status, func(t *testing.T) {
+			registry := newTestCollectRequests()
+			request, _ := registry.Request("mi_001", now)
+			entry := registry.entries["mi_001"]
+			entry.request.Status = status
+			// A future expiry must govern active entries even if their age
+			// already exceeds terminal retention.
+			entry.request.ExpiresAt = now.Add(time.Hour)
+			at := now.Add(collectRequestRetention + time.Minute)
+			current, ok := registry.Latest("mi_001", at)
+			if !ok || current.RequestID != request.RequestID || current.Status != status || current.CompletedAt != nil {
+				t.Fatalf("active request was removed based on requested_at: %#v, ok=%t", current, ok)
+			}
+		})
 	}
 }

@@ -97,7 +97,7 @@ func testPostgresIntegrationAppACLCurrentP74SettingsState(t *testing.T, state st
 		t.Fatalf("C75 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration)
+		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
 	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
 		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
@@ -234,7 +234,7 @@ func testPostgresIntegrationAppACLCurrentP74SuccessorChain(t *testing.T) {
 	}
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration)
+		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
 	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
 		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||

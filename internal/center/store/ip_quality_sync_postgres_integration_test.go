@@ -947,6 +947,8 @@ func assertIPQualitySyncRoundTrip(t *testing.T, report ipquality.VPSReport, want
 	}
 	assertIPQualityJSONFields(t, latest.RawJSON, `{"nested":{"token":"[redacted]","ordinary":"kept"}}`)
 	assertIPQualityJSONFields(t, latest.DiagnosticsJSON, fmt.Sprintf(`{"source_version":"v2","service_probe_revision":1,"collect_request_id":"%s","nested":{"password":"[redacted]","ordinary":"diagnostic-kept"}}`, requestID))
+	assertIPQualitySyncSecretSuffixes(t, latest.RawJSON)
+	assertIPQualitySyncSecretSuffixes(t, latest.DiagnosticsJSON)
 	wantCoverage := &ipquality.Coverage{
 		ExpectedProviderCount: 3, SuccessfulProviderCount: 1, FailedProviderCount: 1, NotConfiguredProviderCount: 1,
 		ExpectedServiceCount: 2, SuccessfulServiceCount: 1, FailedServiceCount: 0, SkippedServiceCount: 1,
@@ -970,6 +972,7 @@ func assertIPQualitySyncRoundTrip(t *testing.T, report ipquality.VPSReport, want
 		t.Fatalf("success provider = %#v, want all provider metadata", success)
 	}
 	assertIPQualityJSONFields(t, success.ExtraJSON, `{"nested":{"api_key":"[redacted]","ordinary":"kept"}}`)
+	assertIPQualitySyncSecretSuffixes(t, success.ExtraJSON)
 	failure, ok := providers["ip2location.io"]
 	if !ok || failure.Status != "failure" || failure.SourceType != "default" || failure.LatencyMS == nil || *failure.LatencyMS != 420 || failure.ErrorCode != "rate_limit" || failure.ErrorSummary != "provider rate limited" {
 		t.Fatalf("failure provider = %#v, want failure metadata", failure)
@@ -991,11 +994,30 @@ func assertIPQualitySyncRoundTrip(t *testing.T, report ipquality.VPSReport, want
 		t.Fatalf("unlocked service = %#v, want success metadata", unlocked)
 	}
 	assertIPQualityJSONFields(t, unlocked.ExtraJSON, `{"nested":{"cookie":"[redacted]","ordinary":"kept"}}`)
+	assertIPQualitySyncSecretSuffixes(t, unlocked.ExtraJSON)
 	skipped, ok := services["netflix|legacy_probe"]
 	if !ok || skipped.Status != "unknown" || skipped.ProbeStatus != "skipped" || skipped.ErrorCode != "unsupported_probe" || skipped.ErrorSummary != "probe skipped" {
 		t.Fatalf("skipped service = %#v, want unknown/skipped metadata", skipped)
 	}
 	assertIPQualityJSONFields(t, skipped.ExtraJSON, `{"truncated":true,"reason":"extra_json_size_limit"}`)
+}
+
+func assertIPQualitySyncSecretSuffixes(t *testing.T, raw json.RawMessage) {
+	t.Helper()
+	if len(raw) > ipquality.MaxRawJSONBytes {
+		t.Fatalf("stored JSON exceeds size limit: %d", len(raw))
+	}
+	assertIPQualityJSONFields(t, raw, `{
+		"client_secret":"[redacted]",
+		"credentials":{" APP_SECRET ":"[redacted]"},
+		"items":[{"Signing-Secret":"[redacted]","PRIVATE_SECRET":"[redacted]"}],
+		"ordinary":"kept","secretary":"retained","secret_count":2
+	}`)
+	for _, secret := range []string{"synthetic-root", "synthetic-nested", "synthetic-array", "synthetic-uppercase"} {
+		if strings.Contains(string(raw), secret) {
+			t.Errorf("stored JSON leaked %q: %s", secret, raw)
+		}
+	}
 }
 
 func assertIPQualityJSONFields(t *testing.T, raw json.RawMessage, expected string) {
@@ -1112,7 +1134,8 @@ func ipQualitySyncRecoveryReport(prefix, syncBatchID string, observedAt, receive
 }
 
 func ipQualitySyncFullReport(prefix, syncBatchID string, observedAt, receivedAt time.Time, requestID string) ipquality.ReportWrite {
-	diagnostics := json.RawMessage(fmt.Sprintf(`{"source_version":"v2","service_probe_revision":1,"collect_request_id":"%s","nested":{"password":"secret-password","ordinary":"diagnostic-kept"}}`, requestID))
+	const suffixFields = `"client_secret":"synthetic-root","credentials":{" APP_SECRET ":"synthetic-nested"},"items":[{"Signing-Secret":"synthetic-array","PRIVATE_SECRET":"synthetic-uppercase"}],"ordinary":"kept","secretary":"retained","secret_count":2`
+	diagnostics := json.RawMessage(fmt.Sprintf(`{"source_version":"v2","service_probe_revision":1,"collect_request_id":"%s","nested":{"password":"secret-password","ordinary":"diagnostic-kept"},%s}`, requestID, suffixFields))
 	return ipquality.ReportWrite{
 		MonitoringInstanceID: "mi_" + prefix,
 		ObservedAt:           observedAt,
@@ -1134,7 +1157,7 @@ func ipQualitySyncFullReport(prefix, syncBatchID string, observedAt, receivedAt 
 		RiskLevel:            "medium",
 		ErrorCode:            "provider_partial",
 		ErrorSummary:         "one provider failed",
-		RawJSON:              json.RawMessage(`{"nested":{"token":"secret-token","ordinary":"kept"}}`),
+		RawJSON:              json.RawMessage(fmt.Sprintf(`{"nested":{"token":"secret-token","ordinary":"kept"},%s}`, suffixFields)),
 		CoverageJSON:         json.RawMessage(`{"expected_provider_count":3,"successful_provider_count":1,"failed_provider_count":1,"skipped_provider_count":0,"not_configured_provider_count":1,"expected_service_count":2,"successful_service_count":1,"failed_service_count":0,"skipped_service_count":1,"not_configured_service_count":0}`),
 		DiagnosticsJSON:      diagnostics,
 		CollectionMetadata:   agentapi.ParseCollectionMetadata(diagnostics),
@@ -1156,7 +1179,7 @@ func ipQualitySyncFullReport(prefix, syncBatchID string, observedAt, receivedAt 
 				IsServer:    new(true),
 				IsAbuser:    new(false),
 				IsRobot:     new(false),
-				ExtraJSON:   json.RawMessage(`{"nested":{"api_key":"provider-secret","ordinary":"kept"}}`),
+				ExtraJSON:   json.RawMessage(fmt.Sprintf(`{"nested":{"api_key":"provider-secret","ordinary":"kept"},%s}`, suffixFields)),
 			},
 			{
 				Provider:     "ip2location.io",
@@ -1183,7 +1206,7 @@ func ipQualitySyncFullReport(prefix, syncBatchID string, observedAt, receivedAt 
 				LatencyMS:   new(211),
 				Region:      "US",
 				UnlockType:  "full",
-				ExtraJSON:   json.RawMessage(`{"nested":{"cookie":"service-secret","ordinary":"kept"}}`),
+				ExtraJSON:   json.RawMessage(fmt.Sprintf(`{"nested":{"cookie":"service-secret","ordinary":"kept"},%s}`, suffixFields)),
 			},
 			{
 				Service:      "netflix",

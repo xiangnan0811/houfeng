@@ -5,7 +5,7 @@ import { formatLatency, formatOptional } from '../../lib/format'
 import type { IPQualityCoverage, IPQualityProductView, IPQualityProviderResult, IPQualitySummary, VPSIPQualityReport } from '../../lib/types'
 import { IPQualityJSONBlock } from './IPQualityJSONBlock'
 import {
-  probeErrorLabel,
+  probeDiagnosticText,
   serviceEndpointDiagnostics,
   serviceLabel,
   type ServiceEndpointDiagnostic,
@@ -74,15 +74,13 @@ function sourceStatusSummary(providers: IPQualityProviderResult[]): string {
   ].join('')
 }
 
-// 单个入口的安全诊断：固定标签、整数 HTTP 状态、结果、规则与错误类别。
+// 单个入口的安全诊断：固定标签、HTTP 状态与原因（合成一段，HTTP N 只出现一次）、结果与规则。
 function endpointText(endpoint: ServiceEndpointDiagnostic): string {
-  const error = endpoint.errorCode ? (probeErrorLabel(endpoint.errorCode, endpoint.httpStatus) ?? endpoint.errorCode) : null
   return [
     endpoint.endpoint,
-    endpoint.httpStatus != null ? `HTTP ${endpoint.httpStatus}` : null,
+    probeDiagnosticText(endpoint.errorCode ?? undefined, endpoint.httpStatus),
     endpoint.outcome ? ENDPOINT_OUTCOME_LABELS[endpoint.outcome] : null,
     endpoint.matchedRule,
-    error,
   ].filter(Boolean).join(' · ')
 }
 
@@ -165,7 +163,7 @@ export function IPQualityDiagnostics({ report, summary, product }: IPQualityDiag
               >
                 <table className="data-table data-table--compact ipq-diagnostics__table">
                   <thead className="data-table__head">
-                    <tr><th>来源</th><th>类型</th><th>方式</th><th>状态</th><th>耗时</th><th>错误</th></tr>
+                    <tr><th scope="col">来源</th><th scope="col">类型</th><th scope="col">方式</th><th scope="col">状态</th><th scope="col">耗时</th><th scope="col">错误</th></tr>
                   </thead>
                   <tbody>
                     {providers.map((row, index) => (
@@ -196,7 +194,7 @@ export function IPQualityDiagnostics({ report, summary, product }: IPQualityDiag
               >
                 <table className="data-table data-table--compact ipq-diagnostics__table">
                   <thead className="data-table__head">
-                    <tr><th>服务</th><th>探测方式</th><th>状态</th><th>耗时</th><th>入口证据</th><th>错误</th></tr>
+                    <tr><th scope="col">服务</th><th scope="col">探测方式</th><th scope="col">状态</th><th scope="col">耗时</th><th scope="col">入口证据</th><th scope="col">错误</th></tr>
                   </thead>
                   <tbody>
                     {services.map((row) => {

@@ -59,7 +59,7 @@ func testPostgresIntegrationAppACLCurrentP72Upgrade(t *testing.T) {
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
 		appACLCurrentP73Migration, appACLCurrentP74Migration, appACLCurrentP75Migration,
-		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration)
+		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
 	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
 		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||

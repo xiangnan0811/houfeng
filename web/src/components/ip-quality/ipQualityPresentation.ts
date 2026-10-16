@@ -121,12 +121,18 @@ export function reportCollectionIdentity(report: VPSIPQualityReport | null): Rep
   }
 }
 
+export type FamilyStateKind = 'never' | 'unavailable' | 'failed' | 'stale_unavailable' | 'stale_failed' | 'stale_attempt'
+
 export type FamilyStateNotice = {
+  // 页头上下文与空态正文共用的唯一口径：不解析中文标题判断状态。
+  kind: FamilyStateKind
   tone: 'warning' | 'muted'
   title: string
   detail: string | null
   // 所选族仍有旧有效报告时，其独立时间；页面写明“上次有效结果”。
   lastValidAt: string | null
+  // 最近一次尝试的观察时间；与报告采集时间分开标注。
+  attemptedAt: string | null
 }
 
 // 所选地址族最新尝试的说明：失败尝试不冒充出口事实，缺族不冒充失败，过期记录不宣称当前缺族。
@@ -136,24 +142,27 @@ export function familyStateNotice(report: VPSIPQualityReport, family: 4 | 6): Fa
   const summary = report.summary ?? null
   const label = `IPv${family}`
   if (!attempt) {
-    return summary ? null : { tone: 'muted', title: `${label} 尚无采集结果`, detail: null, lastValidAt: null }
+    return summary ? null : { kind: 'never', tone: 'muted', title: `${label} 尚无采集结果`, detail: null, lastValidAt: null, attemptedAt: null }
   }
   const unavailable = status?.availability === 'unavailable'
   const failed = !unavailable && attempt.report_status !== 'success' && attempt.report_status !== 'partial'
   const lastValidAt = summary ? summary.observed_at : null
+  const attemptedAt = attempt.observed_at || null
   if (attempt.stale && (unavailable || failed || !summary)) {
     return {
+      kind: unavailable ? 'stale_unavailable' : failed ? 'stale_failed' : 'stale_attempt',
       tone: 'muted',
       title: `${label} 最近一次采集记录已过期`,
       detail: unavailable ? '当时未发现该地址族的本地地址，不代表当前状态' : failed ? '当时出口探测失败，不代表当前状态' : null,
       lastValidAt,
+      attemptedAt,
     }
   }
   if (unavailable) {
-    return { tone: 'muted', title: `本轮未检测到 ${label} 可用本地地址`, detail: null, lastValidAt }
+    return { kind: 'unavailable', tone: 'muted', title: `本轮未检测到 ${label} 可用本地地址`, detail: null, lastValidAt, attemptedAt }
   }
   if (failed) {
-    return { tone: 'warning', title: `${label} 出口探测失败`, detail: null, lastValidAt }
+    return { kind: 'failed', tone: 'warning', title: `${label} 出口探测失败`, detail: null, lastValidAt, attemptedAt }
   }
   return null
 }
@@ -331,6 +340,16 @@ function httpStatusLabel(status: number | null): string {
   if (status === 429) return `探测请求被限流（HTTP ${status}）`
   if (status >= 500) return `服务暂时不可用（HTTP ${status}）`
   return `服务返回异常状态（HTTP ${status}）`
+}
+
+// 一条诊断里的“HTTP 状态 + 安全原因”只出现一次：http_status 的中文短句已含状态码，直接用；
+// 其他错误码在合法状态码之后接中文短句（未知但已通过白名单的码原样显示）。不从 error_summary 反解析数字。
+export function probeDiagnosticText(errorCode?: string, httpStatus: number | null = null): string | null {
+  const status = validHTTPStatus(httpStatus)
+  const code = (errorCode ?? '').trim()
+  if (code.toLowerCase() === 'http_status') return probeErrorLabel(code, status)
+  const reason = code ? (probeErrorLabel(code, status) ?? code) : null
+  return [status != null ? `HTTP ${status}` : null, reason].filter(Boolean).join(' · ') || null
 }
 
 // agent 只写固定 snake_case 标签/规则/错误码；不符合的值视为不可信，不展示。

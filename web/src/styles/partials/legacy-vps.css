@@ -13,13 +13,35 @@
 
 /* IP 质量报告页：页头与卡片复用 VPS 详情工作区（VPSDetailWorkspace.css）的版式与字号。 */
 .ipq-page{container:ipq / inline-size;width:min(100%, 1600px);margin-inline:auto}
-.ipq-header__history{flex:0 0 auto}
-.ipq-header__family{margin-top:var(--space-2)}
-/* 长 IPv6 在 390px 下断行，不撑开页头。 */
-.ipq-header .vps-overview-identity__copy,.ipq-header .vps-overview-identity__meta,.ipq-header .vps-overview-identity__meta-item{min-width:0;max-width:100%}
-.ipq-header .vps-overview-identity__meta dd{min-width:0;overflow-wrap:anywhere}
-.ipq-header__ip dd{display:flex;flex-wrap:wrap;align-items:center;gap:2px var(--space-2)}
-.ipq-header__address{min-width:0;color:var(--text-primary);font-size:var(--vps-detail-body-size);font-weight:600;overflow-wrap:anywhere}
+/* 报告上下文：直接位于 .ipq-page 下吸顶。.main 是滚动容器（TopBar 在其外），sticky 以其内容区为界，
+   因此用负的 .main 内边距把它贴到滚动视口顶边：正文不会在上方内边距带里透出，scroll-margin 也与视口顶边同一基准。 */
+.ipq-page > .ipq-report-context{position:sticky;top:calc(-1 * var(--shell-main-inline-padding));z-index:6;display:flex;flex-direction:column;gap:var(--space-2);min-width:0;padding:var(--space-2) var(--space-3);border:var(--border-w) solid var(--border-muted);border-radius:var(--vps-detail-radius);background:var(--surface)}
+@media (max-width:760px){.ipq-page > .ipq-report-context{top:calc(-1 * var(--space-4))}}
+/* 首行只放选择器与“查看最新报告”，高度不随身份数据变化。 */
+.ipq-page .ipq-report-context__bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--space-2) var(--space-3);min-width:0}
+.ipq-page .ipq-report-context__family{flex:0 0 auto}
+.ipq-page .ipq-report-context__facts{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1) var(--space-4);min-width:0}
+.ipq-page .ipq-report-context__identity{display:flex;flex:1 1 20rem;flex-wrap:wrap;align-items:baseline;gap:2px var(--space-4);min-width:0;margin:0;color:var(--text-secondary);font-size:var(--vps-detail-helper-size);line-height:1.4}
+.ipq-page .ipq-report-context__item{display:inline-flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1);min-width:0;max-width:100%}
+.ipq-page .ipq-report-context__item dt{color:var(--text-muted);font-weight:400}
+.ipq-page .ipq-report-context__item dd{min-width:0;margin:0;color:var(--text-primary);overflow-wrap:anywhere}
+.ipq-page .ipq-report-context__ip dd{display:flex;flex-wrap:wrap;align-items:center;gap:2px var(--space-2)}
+.ipq-page .ipq-report-context__address{min-width:0;font-size:var(--vps-detail-body-size);font-weight:600;overflow-wrap:anywhere}
+.ipq-page .ipq-report-context__state{color:var(--text-secondary);font-size:var(--vps-detail-body-size)}
+.ipq-page .ipq-report-context__marks{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.ipq-page .ipq-report-context__latest{flex:0 0 auto}
+.ipq-page .ipq-report-context__latest[aria-disabled='true']{opacity:0.55;pointer-events:none}
+.ipq-page .ipq-report-context__attempt{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px var(--space-3);min-width:0;margin:0;padding-top:var(--space-2);border-top:var(--border-w) solid var(--border-muted);color:var(--text-secondary);font-size:var(--vps-detail-helper-size);line-height:1.4}
+.ipq-page .ipq-report-context__attempt-title{color:var(--text-primary);font-weight:600}
+.ipq-page .ipq-report-context__attempt--warning .ipq-report-context__attempt-title{color:var(--color-state-notice)}
+.ipq-page .ipq-report-context__attempt-detail{min-width:0;overflow-wrap:anywhere}
+.ipq-page .ipq-skeleton{display:inline-block;width:8em;height:0.9em;border-radius:var(--radius-1);background:var(--panel-bg-muted);vertical-align:middle}
+.ipq-page .ipq-skeleton--address{width:12em}
+/* 加载占位与真实动作同尺寸但不可见、不可交互。 */
+.ipq-page .ipq-header__action-placeholder{display:inline-flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);visibility:hidden;pointer-events:none}
+.ipq-page .ipq-header__marks-placeholder{display:inline-flex;visibility:hidden}
+/* 正文标题与可聚焦元素滚入时避开吸顶上下文（高度由页头组件实测写入）。 */
+.ipq-page > :not(.ipq-report-context, .ipq-header) :is(h2, h3, [id], a, button, summary, [tabindex]){scroll-margin-top:calc(var(--ipq-context-height, 0px) + var(--space-3))}
 .ipq-header__marks{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:var(--space-2)}
 .ipq-header__enrichment{display:inline-flex;align-items:center;gap:6px;color:var(--text-secondary);font-size:var(--vps-detail-helper-size-strong)}
 .ipq-muted{color:var(--text-muted);font-size:var(--vps-detail-helper-size);line-height:1.4}
@@ -77,6 +99,16 @@
 .ipq-chip-link{display:inline-flex;align-items:center;padding:0 var(--space-2);border:var(--border-w) dashed var(--border-strong);border-radius:var(--radius-pill);color:var(--text-secondary);font-size:var(--vps-detail-helper-size);text-decoration:none}
 .ipq-chip-link:hover{color:var(--text-primary);border-color:var(--accent-border)}
 .ipq-chip-link:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
+/* 字段就近的来源分歧披露：默认关闭，展开后紧凑列出供应商、方式与原值。 */
+.ipq-page .ipq-disagreement{min-width:0}
+.ipq-page .ipq-disagreement > summary{cursor:pointer;list-style:none}
+.ipq-page .ipq-disagreement > summary::-webkit-details-marker{display:none}
+.ipq-page .ipq-disagreement__list{display:grid;gap:2px;margin:var(--space-1) 0 0;padding:var(--space-1) var(--space-2);border-left:var(--border-w) solid var(--border-muted)}
+.ipq-page .ipq-disagreement__list > div{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1) var(--space-2);min-width:0}
+.ipq-page .ipq-disagreement__list dt{color:var(--text-secondary);font-size:var(--vps-detail-helper-size)}
+.ipq-page .ipq-disagreement__list dd{min-width:0;margin:0;color:var(--text-primary);overflow-wrap:anywhere}
+.ipq-page :is(.ipq-location, .ipq-risk__block) :is(h2, h3)[tabindex='-1']:focus{outline:none}
+.ipq-page :is(.ipq-location, .ipq-risk__block) :is(h2, h3)[tabindex='-1']:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px;border-radius:var(--radius-1)}
 .ipq-facts{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(100%, 15rem), 1fr));gap:6px 20px;margin:0}
 .ipq-facts > div{display:grid;grid-template-columns:5.5rem minmax(0, 1fr);align-items:baseline;gap:var(--space-2);min-width:0}
 .ipq-facts dt{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}

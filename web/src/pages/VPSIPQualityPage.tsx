@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 
-import { Button } from '../components/atoms'
 import { collectRequestCoversFamily, type CollectNoticeView } from '../components/ip-quality/ipQualityCollectPresentation'
 import { IPQualityDashboard, type IPQualityDashboardView } from '../components/ip-quality/IPQualityDashboard'
 import { parseIPVersionParam, selectedReportIPVersion } from '../components/ip-quality/ipQualityPresentation'
@@ -152,7 +151,6 @@ export function VPSIPQualityPage() {
   const enrichment = useIPQualityEnrichment({ vpsId, reportId: pollReportId, requestKey, onReport: adoptEnrichment })
 
   const detailPath = vpsId ? `/vps/${encodeURIComponent(vpsId)}` : '/vps'
-  const returnLink = <Link className="btn md secondary" to={detailPath} state={location.state}>返回 VPS 详情</Link>
   const shell = (view: IPQualityDashboardView) => (
     <IPQualityDashboard
       view={view}
@@ -184,23 +182,16 @@ export function VPSIPQualityPage() {
   if (state.requestKey !== requestKey) return shell({ kind: 'loading', ipVersion: explicitFamily })
 
   if (state.error) {
-    return (
-      <PageState
-        kind="error"
-        eyebrow="IP 质量"
-        title="IP 质量报告加载失败"
-        technicalSummary={state.error}
-        action={(
-          <>
-            <Button size="sm" onClick={() => {
-              setState(INITIAL_STATE)
-              setReloadKey((key) => key + 1)
-            }}>重试</Button>
-            {returnLink}
-          </>
-        )}
-      />
-    )
+    // 首次/换选择读取失败：保留页头、上下文与族选择器，正文给出原错误、重试与返回。
+    return shell({
+      kind: 'error',
+      ipVersion: explicitFamily,
+      error: state.error,
+      onRetry: () => {
+        setState(INITIAL_STATE)
+        setReloadKey((key) => key + 1)
+      },
+    })
   }
 
   const report = state.report

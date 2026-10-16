@@ -57,16 +57,21 @@ func TestAppACLCurrentC77IndependentGoldensPreserveC76(t *testing.T) {
 }
 
 func TestAppACLCurrentP77RequiresExactlyPreservedPrivileges(t *testing.T) {
+	testAppACLCurrentPreservedPrivileges(t, appACLCurrentProfileP77, appACLCurrentC77PrivilegeGolden)
+}
+
+func testAppACLCurrentPreservedPrivileges(t *testing.T, profile appACLCurrentProfileID, golden []byte) {
+	t.Helper()
 	current, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
 	if err != nil {
 		t.Fatal(err)
 	}
 	body, err := appACLCurrentTransitionPrivilegeBody(current)
-	if err != nil || !bytes.Equal(body, appACLCurrentC77PrivilegeGolden) {
-		t.Fatalf("C78 must preserve the independently frozen C77 authorization body exactly: %v", err)
+	if err != nil || !bytes.Equal(body, golden) {
+		t.Fatalf("current must preserve the independently frozen predecessor authorization body exactly: %v", err)
 	}
-	if err := validateAppACLCurrentTransitionPrivilegeDelta(appACLCurrentC77PrivilegeGolden, current, appACLCurrentProfileP77); err != nil {
-		t.Fatalf("unchanged C77 authorization was rejected: %v", err)
+	if err := validateAppACLCurrentTransitionPrivilegeDelta(golden, current, profile); err != nil {
+		t.Fatalf("unchanged predecessor authorization was rejected: %v", err)
 	}
 	for _, change := range []string{"add_runtime", "add_admin", "remove", "grant_option", "role_binding"} {
 		t.Run(change, func(t *testing.T) {
@@ -85,7 +90,7 @@ func TestAppACLCurrentP77RequiresExactlyPreservedPrivileges(t *testing.T) {
 			if index < 0 {
 				t.Fatal("missing product fragment in current source")
 			}
-			predecessorBody := appACLCurrentC77PrivilegeGolden
+			predecessorBody := golden
 			switch change {
 			case "add_runtime", "add_admin":
 				subject := AppACLSubjectCenterRuntime
@@ -111,8 +116,8 @@ func TestAppACLCurrentP77RequiresExactlyPreservedPrivileges(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := validateAppACLCurrentTransitionPrivilegeDelta(predecessorBody, modified, appACLCurrentProfileP77); err == nil {
-				t.Fatalf("P77 accepted %s authorization drift", change)
+			if err := validateAppACLCurrentTransitionPrivilegeDelta(predecessorBody, modified, profile); err == nil {
+				t.Fatalf("profile %d accepted %s authorization drift", profile, change)
 			}
 		})
 	}

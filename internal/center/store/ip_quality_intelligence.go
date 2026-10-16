@@ -101,7 +101,9 @@ func (r *PostgresIPQualityRepository) ClaimIPQualityIntelligence(ctx context.Con
 	if _, err = lockIPQualityIntelligenceSettings(ctx, tx); err != nil {
 		return nil, err
 	}
-	if _, err = tx.Exec(ctx, `delete from ip_quality_source_cache where expires_at < clock_timestamp()-interval '24 hours' and (blocked_until is null or blocked_until <= clock_timestamp())`); err != nil {
+	if _, err = tx.Exec(ctx, `delete from ip_quality_source_cache
+ where expires_at < statement_timestamp() - interval '24 hours'
+   and (blocked_until is null or blocked_until <= statement_timestamp())`); err != nil {
 		return nil, err
 	}
 	if err = tx.Commit(ctx); err != nil {

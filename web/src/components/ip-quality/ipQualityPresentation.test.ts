@@ -11,6 +11,7 @@ import type {
 import {
   effectiveUnlockStatus,
   observedServiceRegion,
+  probeDiagnosticText,
   familyStateNotice,
   parseIPVersionParam,
   reportCollectionIdentity,
@@ -222,15 +223,18 @@ describe('familyStateNotice', () => {
 
   it('separates lookup failure, fresh missing family, stale attempts and never-collected families', () => {
     expect(familyStateNotice(withFamily(4, 'available', attempt({ error_code: 'lookup_failed' }), true), 4)).toEqual({
-      tone: 'warning', title: 'IPv4 出口探测失败', detail: null, lastValidAt: '2026-06-08T12:00:00Z',
+      kind: 'failed', tone: 'warning', title: 'IPv4 出口探测失败', detail: null, lastValidAt: '2026-06-08T12:00:00Z', attemptedAt: '2026-06-09T12:00:00Z',
     })
     expect(familyStateNotice(withFamily(6, 'unavailable', attempt({ error_code: 'address_family_unavailable' }), false), 6)).toMatchObject({
-      title: '本轮未检测到 IPv6 可用本地地址', lastValidAt: null,
+      kind: 'unavailable', title: '本轮未检测到 IPv6 可用本地地址', lastValidAt: null, attemptedAt: '2026-06-09T12:00:00Z',
     })
     const stale = familyStateNotice(withFamily(6, 'unavailable', attempt({ stale: true, error_code: 'address_family_unavailable' }), true), 6)
+    expect(stale?.kind).toBe('stale_unavailable')
     expect(stale?.title).toContain('已过期')
     expect(`${stale?.title}${stale?.detail}`).not.toContain('本轮未检测到')
-    expect(familyStateNotice(withFamily(6, 'unknown', null, false), 6)?.title).toBe('IPv6 尚无采集结果')
+    expect(familyStateNotice(withFamily(4, 'available', attempt({ stale: true }), false), 4)?.kind).toBe('stale_failed')
+    expect(familyStateNotice(withFamily(4, 'available', attempt({ stale: true, report_status: 'success' }), false), 4)?.kind).toBe('stale_attempt')
+    expect(familyStateNotice(withFamily(6, 'unknown', null, false), 6)).toMatchObject({ kind: 'never', title: 'IPv6 尚无采集结果', attemptedAt: null })
     // 成功的本轮或旧 agent 只有有效报告时不额外提示，也不推断缺族。
     expect(familyStateNotice(withFamily(4, 'available', attempt({ report_status: 'success' }), true), 4)).toBeNull()
     expect(familyStateNotice(withFamily(4, 'unknown', null, true), 4)).toBeNull()
@@ -242,6 +246,24 @@ describe('familyStateNotice', () => {
     expect(notice?.lastValidAt).toBe('2026-06-08T12:00:00Z')
     expect(`${notice?.title} ${notice?.detail}`).not.toMatch(/未检测到|未发现.*本地地址/)
     expect(notice?.tone).toBe(stale ? 'muted' : 'warning')
+  })
+})
+
+describe('probeDiagnosticText', () => {
+  it('states the HTTP status and safe reason once per diagnostic', () => {
+    // http_status 的短句已含状态码，不再前置独立的 HTTP N；401/403/429/5xx 语义不变，403 不变成地区封锁。
+    expect(probeDiagnosticText('http_status', 403)).toBe('服务拒绝了探测请求（HTTP 403）')
+    expect(probeDiagnosticText('HTTP_STATUS', 429)).toBe('探测请求被限流（HTTP 429）')
+    expect(probeDiagnosticText('http_status', 503)).toBe('服务暂时不可用（HTTP 503）')
+    expect(probeDiagnosticText('http_status', null)).toBe('服务返回异常状态')
+    // 其他码：合法状态在前、中文原因在后；未知但已过白名单的码原样显示。
+    expect(probeDiagnosticText('client_access_denied', 403)).toBe('HTTP 403 · 入口拒绝客户端访问')
+    expect(probeDiagnosticText('future_code', 418)).toBe('HTTP 418 · future_code')
+    // 可用：只有 HTTP；越界/非整数状态视为缺失；两者都无时为 null。
+    expect(probeDiagnosticText(undefined, 200)).toBe('HTTP 200')
+    expect(probeDiagnosticText('client_access_denied', 99)).toBe('入口拒绝客户端访问')
+    expect(probeDiagnosticText('http_status', 200.5)).toBe('服务返回异常状态')
+    expect(probeDiagnosticText(' ', null)).toBeNull()
   })
 })
 

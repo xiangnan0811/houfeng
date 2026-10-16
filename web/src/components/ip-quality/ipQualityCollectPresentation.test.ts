@@ -235,6 +235,7 @@ describe('collectNotice', () => {
       title: '本轮 IPv4 采集失败，仍展示上一份有效结果',
       detail: 'IPv4 出口探测失败',
       rawError: 'ipv4 lookup timeout',
+      reportContext: 'previous_valid',
     })
     // IPv6 视图只有展示报告属于本轮且刷新成功时才是“报告已更新”。
     expect(collectNotice(ipv4FailedIPv6Ok, 'ipqc_001', now, view({ ipVersion: 6, reportCollectionID: 'col_new' })))
@@ -293,7 +294,29 @@ describe('collectNotice', () => {
       title: '本次采集失败，仍展示上一份有效报告',
       detail: '检测请求超时，未能获取最新数据 · 本次仅收到单地址族报告，未验证另一地址族',
       rawError: 'timeout',
+      reportContext: 'previous_valid',
     })
+  })
+
+  it('tags how the shown report relates to the round only when a report is shown in the latest view', () => {
+    const v6Missing = dual([
+      { ip_version: 4, availability: 'available', report_status: 'success' },
+      { ip_version: 6, availability: 'unavailable', report_status: 'failure', error_code: 'address_family_unavailable' },
+    ], { report_status: 'success' })
+    const context = (request: IPQualityCollectStatus, patch: Partial<CollectNoticeView>) => collectNotice(request, 'ipqc_001', now, view(patch))?.reportContext
+    expect(context(ipv4FailedIPv6Ok, { ipVersion: 4 })).toBe('previous_valid')
+    expect(context(v6Missing, { ipVersion: 6 })).toBe('previous_valid')
+    expect(context(status({ status: 'completed', report_status: 'failure', error_summary: 'timeout' }), {})).toBe('previous_valid')
+    expect(context(ipv4FailedIPv6Ok, { ipVersion: 6, reportCollectionID: 'col_new', refreshState: 'refreshing' })).toBe('before_refresh')
+    expect(context(ipv4FailedIPv6Ok, { ipVersion: 6, reportCollectionID: 'col_new', refreshState: 'failed' })).toBe('before_refresh')
+    expect(context(ipv4FailedIPv6Ok, { ipVersion: 6, reportCollectionID: 'col_old' })).toBe('not_current_collection')
+    expect(context(status({ status: 'completed', report_status: 'success', collection_scope: 'legacy_single_family' }), { reportCollectRequestID: 'ipqc_other' })).toBe('not_current_collection')
+    // 已更新、历史视图、另一族与无报告时不加标记。
+    expect(context(ipv4FailedIPv6Ok, { ipVersion: 6, reportCollectionID: 'col_new' })).toBeUndefined()
+    expect(context(ipv4FailedIPv6Ok, { ipVersion: 4, viewingHistory: true })).toBeUndefined()
+    expect(context(dual([{ ip_version: 6, availability: 'available', report_status: 'failure' }], { requested_ip_versions: [6], collection_scope: 'single_family' }), { ipVersion: 4 })).toBeUndefined()
+    expect(context(ipv4FailedIPv6Ok, { ipVersion: 4, hasReport: false })).toBeUndefined()
+    expect(context(ipv4FailedIPv6Ok, { ipVersion: 6, refreshState: 'failed', hasReport: false })).toBeUndefined()
   })
 
   it('never promotes mixed Chinese/URL error content to primary summary and keeps it folded', () => {

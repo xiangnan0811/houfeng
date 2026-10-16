@@ -75,7 +75,7 @@
 - 两族服务共享最多7个并发槽；排队只受整轮 context 约束，取得槽位后才开始 `min(父 context 剩余时间, 10秒)` 的服务预算。排队取消不发送 HTTP，也不让已等待的服务提前耗尽自己的探测预算。
 - IP 质量采集默认开启；新安装默认 86400 秒周期、60 秒 timeout、邮件启用和默认服务集合。已有显式 timeout/启停值原样保留。没有 settings 行或 JSON 缺 enabled 时按开启；省略 mail/sources 的旧客户端更新保留当前值。低频报告与脱敏原始结果长期保留，见 [数据保留合同](retention.md)。
 - 立即采集仅为当前合格监控实例登记；关闭、无当前实例、未绑定或暂停返回409与原因。同实例同范围 pending/dispatched 复用，不同范围409 `collection_scope_conflict`，绝不静默升级双栈。
-- 立即采集请求只保存在 center 进程内存（`ipquality.CollectRequests`），TTL 10 分钟，结束后保留 30 分钟供页面展示；center 重启即丢失，用户重新发起即可。该机制假设单 center 进程；多副本部署前必须改为持久化协调。不新增数据库表，不复用命令白名单/pending action，也不写命令审计。
+- 立即采集请求只保存在 center 进程内存（`ipquality.CollectRequests`），TTL 10 分钟，结束后保留 30 分钟供页面展示：completed/failed 从 `CompletedAt` 起算，expired 从逻辑到期的 `ExpiresAt` 起算，等于保留截止即清理。每次清理先把所有已到 TTL 的 active 请求转为 expired 并释放配对组；无人访问的请求也不会按 RequestedAt 提前删除，未到 TTL 的 active 不清理。防御性遇到 completed/failed 缺 CompletedAt 时使用 ExpiresAt，不伪造完成时间。center 重启即丢失，用户重新发起即可；新请求仍可替换最近一次终态请求。该机制假设单 center 进程；多副本部署前必须改为持久化协调。不新增数据库表，不复用命令白名单/pending action，也不写命令审计。
 - `syncing.Service` 仅在 `ApplyBatch` 成功且 `Disposition=recorded` 时观察报告；suppressed/exact_duplicate 不推进。下发必须本次 accepted live batch、full 可写、enabled 且非 stop；修改 plan 副本，不改仓库 plan。缺 live 时 pending 至TTL。
 - 新 Agent 只在实际发送含 live signal 的 sync HTTP 附单值 `X-Houfeng-IPQuality-Collection-Revision: 5`，不写 heartbeat/queue JSON。Center 只放本次内部 Batch，不长期缓存；缺失、重复、非法值视为不支持，不拒收无关数据。旧 Agent live 确认不支持时，单族请求 failed/unsupported_agent，不下发ID；双栈仍沿用旧兼容路径，旧 plan 不加新字段。旧 Center 忽略 header，queue 重放不冒充 live 能力。
 - `PendingRequest` 在一次锁内取得不可变ID和族集合，所有 slice 锁内复制。完成必须同实例、request ID、collection ID、observed_at、revision、expected集合一致，已选族合法终态齐全；revision4只允许[4,6]，revision5允许[4]、[6]、[4,6]。允许分批 recorded，重复族首值保留；先应用全部行再按 observed_at/collection_id 稳定顺序选完整组冻结，禁止跨组拼接。配对识别阈值始终>=4，非法/未来配对不能降级legacy；无配对旧行可单行完成且标legacy_single_family。族必须与报告相符，占位仅failure缺族/lookup_failed。
@@ -96,7 +96,7 @@
 - HTTP lookup 返回 HTML、非 JSON、空 body 或 JSON 解析失败时，Agent 必须生成短诊断 failure（如 `non_json_response`），不得把 HTML 原文写入 `error_summary` 或 raw envelope。
 - Center 必须在 sync 事务内保存完整 IP 质量报告、provider/service 扩展元数据、coverage 与 diagnostics，与心跳、样本、观测和 batch receipt 一起提交或回滚；不得另开 SaveReports 事务。先通过 sync token/fingerprint 验证，fingerprint 不匹配的报告不得入库。相同 service 不同 source 是不同事实，相同 `(service, source)` 重复须失败并回滚整批。exact replay 不增事实、不重复完成立即采集请求。
 - 两个写入入口共享完整 writer 与 sanitizer，但保留入口语义：缺 raw 的 sync 写 JSON null，SaveReports 写 SQL NULL；非空非法 raw 经 sanitizer 得到 SQL NULL。显式 received_at 原样保留，零值分别使用批次 received_at 与 SaveReports 的当前 UTC 时间；缺 coverage/diagnostics/extra 保持 SQL NULL。
-- Raw JSON、provider `extra_json`、service `extra_json` 和 report `diagnostics_json` 必须通过 `ipquality.SanitizeRawJSON` / extra JSON sanitizer 兜底处理：递归替换 token/key/authorization/cookie/password 类字段为 `[redacted]`，并限制到对应最大字节数内；超限时存合法 JSON truncation marker，不做字节截断。
+- Raw JSON、provider `extra_json`、service `extra_json` 和 report `diagnostics_json` 必须通过 `ipquality.SanitizeRawJSON` / extra JSON sanitizer 兜底处理：递归替换 token/key/authorization/cookie/password/secret 类字段为 `[redacted]`。Agent 与 Center 各自按既有 trim、大小写和连字符归一化规则识别 `_secret` 后缀（如 client_secret、api_secret、app_secret、shared_secret），不误删 ordinary、secretary、secret_count 等普通字段。保留对应最大字节数及两端既有 truncation 语义；超限时存合法 JSON truncation marker，不做字节截断。此规则只约束新输入，不自动扫描、回写旧报告或宣称覆盖任意格式凭据。
 - VPS 归属优先使用 active `vps_monitoring_instance_links`；有 active link 时即使没有有效报告也禁止地址 fallback。没有 active link 时，当前 `ipv4`/`ipv6` 与报告出口 IP 按解析后的 host address 身份比较：IPv6 展开/压缩/大小写等价，IPv4-mapped IPv6 只与同一 mapped 地址等价，不与普通 IPv4 合并。同一报告匹配多个 VPS 时标记 `ambiguous=true`；unlink 后恢复 fallback。SQL view 与 Overview 使用相同规则，不改原始存储文本或历史报告事实。
 - 地址 fallback 的报告身份与无 active link 资产身份分别在已过滤的 MATERIALIZED CTE 中计算；JOIN 只比较已解析值，避免对每个报告/资产组合重复执行 parser。assigned view 与 Overview 同步这一计算边界，不以新增索引或历史回填替代。
 - Overview 窄 summary 使用同一 family-state view 的默认族报告，先选定再检查归属歧义；歧义返回 missing，不偷换更旧报告。SELECT/Scan、IPQualitySource 与 SummaryCell 传递 ip_version 和 product_revision/product_summary；revision1 正向风险在 partial 时仍保留，详情与 Overview 一致。仅 IP-quality cell 有合法族时显示“IPv4/IPv6 · 默认族报告”；disabled/missing 不伪造族，保持 disabled 不读事实与单查询边界。
@@ -187,7 +187,7 @@
 - `agent/ipquality`: 实际嵌入Bash模块与受控HTTP边界回归，四项新真值、保留三服务、Prime完整8MiB限额、固定family/redirect、依赖缺失、取消/后代回收、stdout/stderr限额及恶意jq字符串；collection4/5与混合service5/4、旧plan/queue兼容、SMTP双族边界。
 - `agent/runtime`: plan 到后台 collector 的启动/drain 行为，disabled plan 不启动采集。
 - `agent/ipquality`: 立即采集绕过周期且只执行一次、ID 写入 diagnostics 且保留原诊断、周期报告不带 ID、周期采集中认领请求、Stop/重启后可重新执行、disabled plan 忽略请求、失败的立即采集保留上次成功时间。
-- `internal/center/ipquality`: 立即采集请求复用、只按回传 ID 完成（排除周期报告与其他 ID）、diagnostics ID 解析与规整、过期与清理。
+- `internal/center/ipquality`: 立即采集请求复用、只按回传 ID 完成（排除周期报告与其他 ID）、diagnostics ID 解析与规整、过期与清理；覆盖 t9 完成后 t31 仍可读/t39 删除、无人访问请求 t35 首读 expired/t40 删除、失败与交错实例、TTL/终态保留截止前/等于/后，迟到报告不复活终态。
 - `internal/center/syncing`: 待执行请求写入 plan 副本、关闭/停止采集时不下发、只有 recorded 批次完成请求，并用真实注册表覆盖“下发—suppressed 不完成—recorded 完成”。
 - `internal/center/store`: 完整 settings 读取与 sync plan 对缺少 `enabled` 的已存 JSON 结论一致。
 - `internal/center/http/handlers`: 立即采集 GET/POST 可用性原因、409、请求复用；agent sync 透传 plan 的 `collect_request_id`，并从原始 diagnostics 读出回传 ID。
@@ -198,6 +198,7 @@
 - `TestPostgresIntegrationIPQualityReadSnapshot` 同为强制业务 PG anchor：使用真实连接和首个 SELECT barrier 覆盖 A→B、空→首次报告、同时间戳 live/backfill、link 增删、地址与共享地址歧义、历史选择；旧请求返回完整旧快照，新请求返回完整新快照，不用 sleep 猜测提交交错。
 - `internal/center/store/migrate`: IP 质量 read view 重建迁移必须过滤 failure、`0.0.0.0` 和非法 IP version，并保留 partial 真实 IP 报告。
 - `internal/center/store/migrate`：0078/C78同列形更新family-state，独立C77 source/privilege前驱、P77及合法pending链，无新grant、不改0076/0077、不回填；真实PostgreSQL覆盖fresh/upgrade/repeat/rollback/runtime-role和Go/SQL revision4/5选集一致。
+- `internal/center/store/migrate`：0079/C79 仅新增 `idx_ip_quality_source_cache_expires_at` 普通 B-tree，fragment 无新增权限；独立 C78 前驱、P78 及所有既有 suffix 追加 0079。真实 PostgreSQL 必须覆盖 fresh、独立 C78 genesis/历史链升级、exact repeat、DDL 后与 manifest 写后回滚、runtime reject-before/admit-after、ACL drift，证明索引定义及业务/settings/cache/历史 manifest 字节保持；不改旧迁移或扩大运行权限。
 - `internal/center/assetdecisions`: IP 质量缺失/过期/失败/partial/ambiguous/风险/解锁阻断 evidence 与 readback 语义，确认只统计 successful provider/probe rows。
 - `web`: API client、Settings、VPS list badge、VPS detail section、完整 IP 质量页、历史详情、Asset Decisions evidence/current facts 展示。
 - `internal/center/evidence` / `internal/center/store`: `ip_quality.report/v1`只通过logical snapshot统一计费；capacity tests不得查询IP质量或attachment source tables。
@@ -374,6 +375,7 @@ PTR仅系统LookupAddr，最多4名/1KiB；失败不改变风险。业务拒绝�
 - cache 以 source/resource/credential fingerprint 隔离，仅缓存验证后的成功事实；
   bootstrap/RDAP 24小时、RIS 8小时、DROP 1小时、认证 IP/ASN 1小时。过期不能当本轮结果，
   Key 变化立即换 namespace，清除后不读取旧认证 cache。quota 是独立限流标记，不当成功数据。
+- `ClaimIPQualityIntelligence` 在原事务和 settings 锁内清理缓存：以同一语句的 `statement_timestamp()` 为基准，仅删除 `expires_at < T - interval '24 hours'` 且 `blocked_until is null or blocked_until <= T` 的行。过期不足或等于 24 小时宽限仍保留，活跃 quota 不提前解除；普通缓存与各凭据 scope 的 quota 使用同一保护条件。0079 为 expires_at 增加普通 B-tree 索引，不用 current-time 部分索引，不增加 janitor、批处理机制或改变 worker 调度、TTL/upsert/load 路径。
 
 `ip_quality_intelligence` 仅为合法真实出口、non-backfilled revision1 报告同事务入队；
 deadline=received_at+10分钟。状态为 pending/running/complete/partial/failed/skipped；

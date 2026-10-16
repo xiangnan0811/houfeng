@@ -330,6 +330,28 @@ func TestClassifyAppACLCurrentManifestShapeRegisteredChains(t *testing.T) {
 	if len(allTestChains) != 24575 {
 		t.Fatalf("independent C78 predecessor chain cases = %d, want 24575", len(allTestChains))
 	}
+	c79Chains := append([]struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}(nil), allTestChains...)
+	allTestChains = append(allTestChains, struct {
+		name     string
+		profiles []appACLCurrentProfileID
+	}{
+		name: "P78", profiles: []appACLCurrentProfileID{appACLCurrentProfileP78},
+	})
+	for _, tc := range c79Chains {
+		allTestChains = append(allTestChains, struct {
+			name     string
+			profiles []appACLCurrentProfileID
+		}{
+			name:     "C78-" + tc.name,
+			profiles: append(append([]appACLCurrentProfileID(nil), tc.profiles...), appACLCurrentProfileP78),
+		})
+	}
+	if len(allTestChains) != 49151 {
+		t.Fatalf("independent C79 predecessor chain cases = %d, want 49151", len(allTestChains))
+	}
 	if len(allTestChains) != len(appACLCurrentAcceptedPredecessorProfileChains) {
 		t.Fatalf("test chain cases = %d, production accepted chains = %d", len(allTestChains), len(appACLCurrentAcceptedPredecessorProfileChains))
 	}

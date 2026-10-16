@@ -452,6 +452,52 @@ func TestPostgresIntegrationIPQualityIntelligenceOwnership(t *testing.T) {
 			t.Fatalf("cache cleanup=%d/%d %v", successes, quotas, err)
 		}
 	})
+	t.Run("claim cleanup preserves grace and credential-scoped quotas", func(t *testing.T) {
+		now := time.Now().UTC()
+		past, future := now.Add(-time.Hour), now.Add(time.Hour)
+		cases := []struct {
+			source, resource, scope string
+			expires                 time.Time
+			blocked                 *time.Time
+			stored, loadable        bool
+		}{
+			{"rdap-ip", "cleanup-fresh", "", future, nil, true, true},
+			{"rdap-ip", "cleanup-grace", "", now.Add(-23 * time.Hour), nil, true, false},
+			{"rdap-ip", "cleanup-just-outside-grace", "", now.Add(-24*time.Hour - 5*time.Minute), nil, false, false},
+			{"rdap-ip", "cleanup-old-past-block", "", now.Add(-25 * time.Hour), &past, false, false},
+			{"rdap-ip", "cleanup-old-active-block", "", now.Add(-25 * time.Hour), &future, true, false},
+			{"rdap-ip", "@quota", "", now.Add(-25 * time.Hour), &future, true, true},
+			{"rdap-asn", "@quota", "", now.Add(-25 * time.Hour), &past, false, false},
+			{"abuseipdb", "@quota", "cleanup-active-scope", now.Add(-25 * time.Hour), &future, true, false},
+			{"abuseipdb", "@quota", "cleanup-expired-scope", now.Add(-25 * time.Hour), &past, false, false},
+			{"abuseipdb", "@quota", "cleanup-grace-scope", now.Add(-23 * time.Hour), nil, true, false},
+		}
+		for _, tc := range cases {
+			exec(`insert into ip_quality_source_cache
+				(source_id,resource,credential_fingerprint,fetched_at,expires_at,blocked_until,payload_json)
+				values($1,$2,$3,$4,$5,$6,'{"ordinary":"cleanup-boundary"}')`,
+				tc.source, tc.resource, tc.scope, now.Add(-48*time.Hour), tc.expires, tc.blocked)
+		}
+		if _, err := repo.ClaimIPQualityIntelligence(ctx, "grace-and-quota-cleanup"); err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range cases {
+			var stored bool
+			if err := pool.QueryRow(ctx, `select exists(select 1 from ip_quality_source_cache
+				where source_id=$1 and resource=$2 and credential_fingerprint=$3)`,
+				tc.source, tc.resource, tc.scope).Scan(&stored); err != nil || stored != tc.stored {
+				t.Fatalf("cleanup %s/%s/%s stored=%t want %t: %v", tc.source, tc.resource, tc.scope, stored, tc.stored, err)
+			}
+			// Authenticated scopes remain subject to the existing settings check;
+			// their independent retention is verified through runtime SQL above.
+			if tc.scope == "" {
+				entry, err := repo.LoadIPQualitySourceCache(ctx, tc.source, tc.resource, "")
+				if err != nil || (entry != nil) != tc.loadable {
+					t.Fatalf("cleanup %s/%s loadable=%t want %t: %v", tc.source, tc.resource, entry != nil, tc.loadable, err)
+				}
+			}
+		}
+	})
 	t.Run("bounded discovery cleans expired backlog across passes", func(t *testing.T) {
 		const prefix = "ipqi_backlog"
 		seedSyncInterleavingFixture(t, ctx, fixture, prefix, monitoringinstances.LifecycleInUse)

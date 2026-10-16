@@ -29,7 +29,8 @@ type IPQualityProviderTableProps = {
 
 const TITLE_ID = 'ip-quality-provider-table-title'
 const SCORES_TITLE_ID = 'ip-quality-scores-title'
-const FACTORS_TITLE_ID = 'ip-quality-factors-title'
+// 风险因子表标题：基础信息中使用/公司类型的分歧入口指向这里。
+export const IP_QUALITY_FACTORS_ANCHOR = 'ip-quality-factors-title'
 const COLUMN_COUNT = 3 + FLAG_COLUMNS.length
 
 // 每种状态同时有字形与文字名称；颜色只是附加信号。
@@ -190,9 +191,8 @@ function RiskHeadline({ productSummary, legacyRiskLevel }: { productSummary: IPQ
     const level = (legacyRiskLevel ?? '').trim()
     return level ? <Badge variant="info" tone={riskTone(level)}>旧版评级 · {riskLevelLabel(level)}</Badge> : null
   }
-  if (productSummary.risk_flags.length === 0 && productSummary.high_risk_sources.length === 0) {
-    return <span className="ipq-muted">未见风险命中</span>
-  }
+  // 局部只报已有阳性：没有命中时不出现泛化的安全/阴性结论。
+  if (productSummary.risk_flags.length === 0 && productSummary.high_risk_sources.length === 0) return null
   return (
     <>
       {productSummary.risk_flags.map((flag) => <Badge key={flag} variant="info" tone="alert">{riskFlagLabel(flag)}</Badge>)}
@@ -223,10 +223,10 @@ export function IPQualityProviderTable({ results, productSummary, legacyRiskLeve
             <ScoreRows rows={scoredRows} />
           </div>
           <div className="ipq-risk__block">
-            <h3 id={FACTORS_TITLE_ID} className="ipq-risk__title">风险因子</h3>
+            <h3 id={IP_QUALITY_FACTORS_ANCHOR} className="ipq-risk__title" tabIndex={-1}>风险因子</h3>
             <ScrollRegion
               className="ipq-table-scroll"
-              labelledBy={FACTORS_TITLE_ID}
+              labelledBy={IP_QUALITY_FACTORS_ANCHOR}
               hintId="ip-quality-factors-hint"
               hintClassName="ipq-table-hint"
               hint="横向滚动查看完整列"
@@ -249,6 +249,7 @@ export function IPQualityProviderTable({ results, productSummary, legacyRiskLeve
                         variant="ghost"
                         className="ipq-provider-table__toggle"
                         aria-expanded={open}
+                        aria-label={open ? `收起 ${group.provider} 的样本` : `展开 ${group.provider} 的另外 ${group.others.length} 个样本`}
                         onClick={() => setExpanded((current) => ({ ...current, [group.provider]: !open }))}
                       >
                         {open ? '收起样本' : `另 ${group.others.length} 个样本`}

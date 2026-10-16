@@ -8,18 +8,23 @@ export const COLLECT_POLL_INTERVAL_MS = 3000
 
 export type IPQualityCollectController = {
   status: IPQualityCollectStatus | null
+  // 首次采集状态读取进行中：采集条件未知，入口禁用、不发起 POST。读取失败后为 false（status 仍为 null），
+  // 此时按钮恢复可用，点击由 POST 给出明确结果。
+  checking: boolean
   // 本次页面会话发起或接手的请求；只有它结束时才提示结果并刷新报告。
   watchedRequestId: string | null
   submitting: boolean
   error: string | null
   active: boolean
-  // 发起所选族集合的一次立即采集；进行中/提交中不重复提交。
+  // 发起所选族集合的一次立即采集；检查中/进行中/提交中不重复提交。
   start: (ipVersions: IPQualityCollectIPVersions) => void
 }
 
 type State = {
   vpsId: string | null
   status: IPQualityCollectStatus | null
+  // 本 VPS 会话的首次状态读取已失败（尚无任何状态）；切换 VPS 时随 initialState 重置。
+  readFailed: boolean
   watchedRequestId: string | null
   submitting: boolean
   error: string | null
@@ -28,7 +33,7 @@ type State = {
 }
 
 function initialState(vpsId: string | null): State {
-  return { vpsId, status: null, watchedRequestId: null, submitting: false, error: null, pollAttempt: 0 }
+  return { vpsId, status: null, readFailed: false, watchedRequestId: null, submitting: false, error: null, pollAttempt: 0 }
 }
 
 // 409 的具体原因（不可用或另一范围的请求在途）由随后读取的状态给出，这里只处理其他失败。
@@ -122,7 +127,10 @@ export function useIPQualityCollect(vpsId: string | undefined, onCompleted: (req
         if (!cancelled) applyStatus(next, false, ticket)
       })
       .catch(() => {
-        // 状态读取失败不影响报告展示；按钮保持可用，点击时由 POST 给出明确错误。
+        // 状态读取失败不影响报告展示；结束“检查中”，按钮恢复可用，点击时由 POST 给出明确错误。
+        // 只作用于本会话：已切到其他 VPS 或已被更新读取取代时不改变状态。
+        if (cancelled || !isCurrentTicket(sessionRef.current, ticket)) return
+        setState((prev) => (prev.vpsId === key && prev.status == null ? { ...prev, readFailed: true } : prev))
       })
     return () => { cancelled = true }
   }, [key, enabled, applyStatus, issueTicket])
@@ -161,9 +169,11 @@ export function useIPQualityCollect(vpsId: string | undefined, onCompleted: (req
     }
   }, [request, current.watchedRequestId])
 
+  // 报告就绪后、首次状态读取完成前：采集条件未知，不可提交。
+  const checking = key != null && current.status == null && !current.readFailed
   const busy = current.submitting || active
   const start = useCallback((ipVersions: IPQualityCollectIPVersions) => {
-    if (!key || busy) return
+    if (!key || busy || checking) return
     setState((prev) => ({ ...prev, submitting: true, error: null }))
     const ticket = issueTicket()
     requestVPSIPQualityCollect(key, ipVersions)
@@ -181,10 +191,11 @@ export function useIPQualityCollect(vpsId: string | undefined, onCompleted: (req
           .then((next) => applyStatus(next, false, refreshTicket))
           .catch(() => undefined)
       })
-  }, [key, busy, applyStatus, issueTicket])
+  }, [key, busy, checking, applyStatus, issueTicket])
 
   return {
     status: current.status,
+    checking,
     watchedRequestId: current.watchedRequestId,
     submitting: current.submitting,
     error: current.error,
