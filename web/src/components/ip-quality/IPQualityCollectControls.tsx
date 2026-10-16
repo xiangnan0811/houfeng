@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { Button } from '../atoms'
 import { READ_ONLY_PREVIEW } from '../../lib/readOnlyPreview'
 import type { IPQualityCollectIPVersions } from '../../lib/types'
-import { COLLECT_SCOPE_OPTIONS, collectNotice, collectUnavailableLabel, type CollectNoticeView } from './ipQualityCollectPresentation'
+import { COLLECT_SCOPE_OPTIONS, collectUnavailableLabel, type CollectNotice } from './ipQualityCollectPresentation'
 import type { IPQualityCollectController } from './useIPQualityCollect'
 
 type CollectButtonProps = {
@@ -26,7 +26,8 @@ export function IPQualityCollectButton({ collect, variant = 'primary' }: Collect
   const pendingFocusIndex = useRef(0)
   const unavailable = collect.status != null && !collect.status.available
   const busy = collect.submitting || collect.active
-  const disabled = busy || unavailable
+  // 首次状态读取中采集条件未知：禁用且不展开菜单，避免在不可用/已在途时提交。
+  const disabled = busy || unavailable || collect.checking
   // 进行中或不可用时菜单关闭且不再自动重现，避免重复提交（渲染期重置，不在 effect 里同步 setState）。
   if (open && disabled) setOpen(false)
   const menuOpen = open && !disabled && !READ_ONLY_PREVIEW
@@ -151,18 +152,8 @@ export function IPQualityCollectButton({ collect, variant = 'primary' }: Collect
   )
 }
 
-type CollectNoticeProps = {
-  collect: IPQualityCollectController
-  view: CollectNoticeView
-  now?: Date
-  vpsId?: string | undefined
-}
-
-// 采集进度与结果条：只在有事可说时出现，不常驻解释文字。
-export function IPQualityCollectNotice({ collect, view, now = new Date(), vpsId }: CollectNoticeProps) {
-  const notice = collect.error
-    ? { tone: 'warning' as const, title: collect.error }
-    : collectNotice(collect.status, collect.watchedRequestId, now, view, vpsId)
+// 采集进度与结果条：只在有事可说时出现，不常驻解释文字；通知由页面外壳一次派生。
+export function IPQualityCollectNotice({ notice }: { notice: CollectNotice | null }) {
   if (!notice) return <div className="ipq-notice-slot" role="status" aria-live="polite" aria-label="IP 质量采集状态" />
 
   return (

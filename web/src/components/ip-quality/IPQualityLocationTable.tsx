@@ -26,7 +26,7 @@ export function IPQualityLocationTable({ results }: IPQualityLocationTableProps)
   return (
     <section className="vps-detail-workspace__section ipq-location" aria-labelledby={IP_QUALITY_LOCATION_ANCHOR}>
       <div className="vps-detail-workspace__section-head">
-        <h2 id={IP_QUALITY_LOCATION_ANCHOR}>多源定位</h2>
+        <h2 id={IP_QUALITY_LOCATION_ANCHOR} tabIndex={-1}>多源定位</h2>
         {discrepant ? <span className="ipq-muted">来源有分歧</span> : null}
       </div>
       {rows.length > 0 ? (
@@ -39,7 +39,7 @@ export function IPQualityLocationTable({ results }: IPQualityLocationTableProps)
         >
           <table className="data-table data-table--compact ipq-location-table">
             <thead className="data-table__head">
-              <tr><th>来源</th><th>国家</th><th>省 / 州</th><th>城市</th><th>经纬度</th><th>采集时间</th></tr>
+              <tr><th scope="col">来源</th><th scope="col">国家</th><th scope="col">省 / 州</th><th scope="col">城市</th><th scope="col">经纬度</th><th scope="col">采集时间</th></tr>
             </thead>
             <tbody>
               {rows.map((row) => (

@@ -115,7 +115,7 @@ func testPostgresIntegrationAppACLCurrentP77Upgrade(t *testing.T, chained bool) 
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
 		t.Fatalf("C78 changed the historical manifest inventory: %#v", after.Manifest)
 	}
-	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP78Migration)
+	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP78Migration, appACLCurrentP79Migration)
 	if !reflect.DeepEqual(after.Catalog, before.Catalog) {
 		t.Fatal("C78 must preserve all owners, direct/effective privileges, column/default ACLs and functions without new grants")
 	}

@@ -25,41 +25,41 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 	if err != nil {
 		t.Fatalf("compileAppACLCurrentTransitions() error = %v", err)
 	}
-	if len(transitions) != 15 {
-		t.Fatalf("compiled transition count = %d, want fifteen registered profiles through P77", len(transitions))
+	if len(transitions) != 16 {
+		t.Fatalf("compiled transition count = %d, want sixteen registered profiles through P78", len(transitions))
 	}
 	p63 := transitions[2]
 	if p63.profile != appACLCurrentProfileP63 || len(p63.predecessor.sources.names) != 64 ||
 		!bytes.Equal(p63.predecessor.sources.canonicalSet, appACLCurrentV0796MigrationGolden) ||
 		!bytes.Equal(p63.predecessorPrivilegeBody, appACLCurrentV0796PrivilegeGolden) ||
-		!equalStringSlices(p63.successor.names, append([]string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql", "0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p63.successor.names, append([]string{"0064_add_network_rates_valid.sql", "0065_extend_vps_lifecycle_audit_and_snapshot.sql", "0066_constrain_monitoring_and_target_state_values.sql", "0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P63 profile differs from independent v0.79.6 release goldens or expected suffix")
 	}
 	p66 := transitions[3]
 	if p66.profile != appACLCurrentProfileP66 || len(p66.predecessor.sources.names) != 67 ||
 		!bytes.Equal(p66.predecessor.sources.canonicalSet, appACLCurrentV0804MigrationGolden) ||
 		!bytes.Equal(p66.predecessorPrivilegeBody, appACLCurrentV0804PrivilegeGolden) ||
-		!equalStringSlices(p66.successor.names, append([]string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p66.successor.names, append([]string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P66 profile differs from independent v0.80.4 release goldens or expected suffix")
 	}
 	p67 := transitions[4]
 	if p67.profile != appACLCurrentProfileP67 || len(p67.predecessor.sources.names) != 68 ||
 		!bytes.Equal(p67.predecessor.sources.canonicalSet, appACLCurrentV1153MigrationGolden) ||
 		!bytes.Equal(p67.predecessorPrivilegeBody, appACLCurrentV1153PrivilegeGolden) ||
-		!equalStringSlices(p67.successor.names, append([]string{"0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p67.successor.names, append([]string{"0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P67 profile differs from independent v1.15.3 release goldens or expected suffix")
 	}
 	p68 := transitions[5]
 	if p68.profile != appACLCurrentProfileP68 || len(p68.predecessor.sources.names) != 69 ||
 		!bytes.Equal(p68.predecessor.sources.canonicalSet, appACLCurrentV1157MigrationGolden) ||
 		!bytes.Equal(p68.predecessorPrivilegeBody, appACLCurrentV1157PrivilegeGolden) ||
-		!equalStringSlices(p68.successor.names, append([]string{"0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p68.successor.names, append([]string{"0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P68 profile differs from the independent v1.15.7 C68 goldens or expected suffix")
 	}
 	p69 := transitions[6]
 	if p69.profile != appACLCurrentProfileP69 || len(p69.predecessor.sources.names) != 70 ||
 		p69.predecessor.sources.names[69] != "0069_add_cpu_rates_valid.sql" ||
-		!equalStringSlices(p69.successor.names, append([]string{"0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p69.successor.names, append([]string{"0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P69 profile does not represent the C69 predecessor and 0070→0071→0072→0073→0074 successor")
 	}
 	if !bytes.Equal(p69.predecessorPrivilegeBody, p68.predecessorPrivilegeBody) {
@@ -73,7 +73,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		p70.predecessor.sources.names[70] != "0070_add_record_import_destination_subject.sql" ||
 		!bytes.Equal(p70.predecessor.sources.canonicalSet, appACLCurrentC70MigrationGolden) ||
 		!bytes.Equal(p70.predecessorPrivilegeBody, appACLCurrentC70PrivilegeGolden) ||
-		!equalStringSlices(p70.successor.names, append([]string{"0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p70.successor.names, append([]string{"0071_add_access_management.sql", "0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P70 profile does not represent the independently frozen C70 predecessor and 0071→0072→0073→0074 successor")
 	}
 	if got := len(appACLCurrentTransitionDefinitions[7].predecessorManifestDigestGolden); got != 0 {
@@ -84,7 +84,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		p71.predecessor.sources.names[71] != "0071_add_access_management.sql" ||
 		!bytes.Equal(p71.predecessor.sources.canonicalSet, appACLCurrentC71MigrationGolden) ||
 		!bytes.Equal(p71.predecessorPrivilegeBody, appACLCurrentC71PrivilegeGolden) ||
-		!equalStringSlices(p71.successor.names, append([]string{"0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p71.successor.names, append([]string{"0072_add_target_observation_freshness.sql", "0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P71 profile does not represent the independently captured C71 predecessor and 0072→0073→0074 successor")
 	}
 	if got := len(appACLCurrentTransitionDefinitions[8].predecessorManifestDigestGolden); got != 0 {
@@ -95,7 +95,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		p72.predecessor.sources.names[72] != "0072_add_target_observation_freshness.sql" ||
 		!bytes.Equal(p72.predecessor.sources.canonicalSet, appACLCurrentC72MigrationGolden) ||
 		!bytes.Equal(p72.predecessorPrivilegeBody, appACLCurrentC72PrivilegeGolden) ||
-		!equalStringSlices(p72.successor.names, append([]string{"0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p72.successor.names, append([]string{"0073_add_monitoring_instance_metadata_version.sql", "0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P72 profile does not represent the C71 golden plus fixed 0072 predecessor and 0073→0074 successor")
 	}
 	if !bytes.Equal(appACLCurrentC72PrivilegeGolden, appACLCurrentC71PrivilegeGolden) {
@@ -109,7 +109,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		p73.predecessor.sources.names[73] != "0073_add_monitoring_instance_metadata_version.sql" ||
 		!bytes.Equal(p73.predecessor.sources.canonicalSet, appACLCurrentC73MigrationGolden) ||
 		!bytes.Equal(p73.predecessorPrivilegeBody, appACLCurrentC73PrivilegeGolden) ||
-		!equalStringSlices(p73.successor.names, append([]string{"0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p73.successor.names, append([]string{"0074_add_subscription_exchange_rate_month_end.sql", "0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P73 profile does not represent the C72 golden plus fixed 0073 predecessor and 0074 successor")
 	}
 	if !bytes.Equal(appACLCurrentC73PrivilegeGolden, appACLCurrentC72PrivilegeGolden) {
@@ -123,7 +123,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		p74.predecessor.sources.names[74] != "0074_add_subscription_exchange_rate_month_end.sql" ||
 		!bytes.Equal(p74.predecessor.sources.canonicalSet, appACLCurrentC74MigrationGolden) ||
 		!bytes.Equal(p74.predecessorPrivilegeBody, appACLCurrentC74PrivilegeGolden) ||
-		!equalStringSlices(p74.successor.names, append([]string{"0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!equalStringSlices(p74.successor.names, append([]string{"0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P74 profile does not represent the frozen C74 predecessor and 0075 successor")
 	}
 	if !bytes.Equal(appACLCurrentC74PrivilegeGolden, appACLCurrentC73PrivilegeGolden) {
@@ -137,7 +137,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		p75.predecessor.sources.names[75] != "0075_add_settings_deployment_overrides.sql" ||
 		!bytes.Equal(p75.predecessor.sources.canonicalSet, appACLCurrentC75MigrationGolden) ||
 		!bytes.Equal(p75.predecessorPrivilegeBody, appACLCurrentC75PrivilegeGolden) ||
-		!reflect.DeepEqual(p75.successor.names, append([]string{"0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) {
+		!reflect.DeepEqual(p75.successor.names, append([]string{"0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) {
 		t.Fatal("compiled P75 differs from frozen C75 predecessor or exact 0076/0077 successor")
 	}
 	if !bytes.Equal(appACLCurrentC75PrivilegeGolden, appACLCurrentC74PrivilegeGolden) ||
@@ -149,7 +149,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		p76.predecessor.sources.names[76] != "0076_ip_quality_address_families.sql" ||
 		!bytes.Equal(p76.predecessor.sources.canonicalSet, appACLCurrentC76MigrationGolden) ||
 		!bytes.Equal(p76.predecessorPrivilegeBody, appACLCurrentC76PrivilegeGolden) ||
-		!reflect.DeepEqual(p76.successor.names, append([]string{}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql")) ||
+		!reflect.DeepEqual(p76.successor.names, append([]string{}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql")) ||
 		len(appACLCurrentTransitionDefinitions[13].predecessorManifestDigestGolden) != 0 {
 		t.Fatal("compiled P76 differs from frozen C76 predecessor or exact 0077 successor")
 	}
@@ -157,11 +157,18 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 	if p77.profile != appACLCurrentProfileP77 ||
 		!bytes.Equal(p77.predecessor.sources.canonicalSet, appACLCurrentC77MigrationGolden) ||
 		!bytes.Equal(p77.predecessorPrivilegeBody, appACLCurrentC77PrivilegeGolden) ||
-		!reflect.DeepEqual(p77.successor.names, []string{"0078_ip_quality_collection_scope.sql"}) {
-		t.Fatal("compiled P77 differs from independent C77 or exact scope-only successor")
+		!reflect.DeepEqual(p77.successor.names, []string{"0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql"}) {
+		t.Fatal("compiled P77 differs from independent C77 or exact scope/index successor")
 	}
-	if len(current.sources.names) != 79 || len(current.fragments) != 27 {
-		t.Fatalf("current source/fragment count = %d/%d, want 79/27", len(current.sources.names), len(current.fragments))
+	p78 := transitions[15]
+	if p78.profile != appACLCurrentProfileP78 ||
+		!bytes.Equal(p78.predecessor.sources.canonicalSet, appACLCurrentC78MigrationGolden) ||
+		!bytes.Equal(p78.predecessorPrivilegeBody, appACLCurrentC78PrivilegeGolden) ||
+		!reflect.DeepEqual(p78.successor.names, []string{"0079_ip_quality_cache_expiry.sql"}) {
+		t.Fatal("compiled P78 differs from independent C78 or exact index-only successor")
+	}
+	if len(current.sources.names) != 80 || len(current.fragments) != 28 {
+		t.Fatalf("current source/fragment count = %d/%d, want 80/28", len(current.sources.names), len(current.fragments))
 	}
 
 	p62, p64 := transitions[0], transitions[1]
@@ -187,7 +194,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		"0073_add_monitoring_instance_metadata_version.sql",
 		"0074_add_subscription_exchange_rate_month_end.sql",
 		"0075_add_settings_deployment_overrides.sql",
-		"0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql"); !equalStringSlices(got, want) {
+		"0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql"); !equalStringSlices(got, want) {
 		t.Fatalf("P62 successor migrations = %#v, want %#v", got, want)
 	}
 	if got, want := len(p64.predecessor.sources.names), 65; got != want {
@@ -207,7 +214,7 @@ func TestAppACLCurrentTransitionCompilerAcceptsExactReleasedProfiles(t *testing.
 		"0073_add_monitoring_instance_metadata_version.sql",
 		"0074_add_subscription_exchange_rate_month_end.sql",
 		"0075_add_settings_deployment_overrides.sql",
-		"0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql"); !equalStringSlices(got, want) {
+		"0076_ip_quality_address_families.sql"}, "0077_ip_quality_product.sql", "0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql"); !equalStringSlices(got, want) {
 		t.Fatalf("P64 successor migrations = %#v, want %#v", got, want)
 	}
 	if !bytes.Equal(p62.predecessor.sources.canonicalSet, appACLCurrentV0794MigrationGolden) ||

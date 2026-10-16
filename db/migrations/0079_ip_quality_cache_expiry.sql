@@ -1,0 +1,1 @@
+create index idx_ip_quality_source_cache_expires_at on ip_quality_source_cache(expires_at);

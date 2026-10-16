@@ -1,6 +1,5 @@
-import { SegmentedControl, Timestamp } from '../atoms'
-import type { IPQualityIPVersion, VPSIPQualityReport } from '../../lib/types'
-import { familyStateNotice } from './ipQualityPresentation'
+import { SegmentedControl } from '../atoms'
+import type { IPQualityIPVersion } from '../../lib/types'
 
 const FAMILY_ITEMS = [
   { value: '4', label: 'IPv4' },
@@ -26,28 +25,5 @@ export function IPQualityFamilySelector({ value, onChange }: IPQualityFamilySele
         if (next === '4' || next === '6') onChange(next === '4' ? 4 : 6)
       }}
     />
-  )
-}
-
-type IPQualityFamilyStateProps = {
-  report: VPSIPQualityReport
-  ipVersion: IPQualityIPVersion
-}
-
-// 所选族最新尝试状态：失败/缺族/过期与“上次有效结果”分开说明，不借另一族事实。
-export function IPQualityFamilyState({ report, ipVersion }: IPQualityFamilyStateProps) {
-  const notice = familyStateNotice(report, ipVersion)
-  if (!notice) return null
-  return (
-    <aside className={`ipq-notice ipq-notice--${notice.tone}`} role="note" aria-label="地址族采集状态">
-      <span className="ipq-notice__dot" aria-hidden="true" />
-      <span className="ipq-notice__title">{notice.title}</span>
-      {notice.detail ? <span className="ipq-notice__detail">{notice.detail}</span> : null}
-      {notice.lastValidAt ? (
-        <span className="ipq-notice__detail">
-          以下为上次有效结果（<Timestamp value={notice.lastValidAt} mode="both" />）
-        </span>
-      ) : null}
-    </aside>
   )
 }

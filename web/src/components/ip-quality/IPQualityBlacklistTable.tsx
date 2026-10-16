@@ -56,7 +56,7 @@ export function IPQualityBlacklistTable({ product }: IPQualityBlacklistTableProp
         >
           <table className="data-table data-table--compact ipq-blacklist-table">
             <thead className="data-table__head">
-              <tr><th>来源</th><th>类别</th><th>结果</th><th>匹配范围</th><th><span className="visually-hidden">详情</span></th></tr>
+              <tr><th scope="col">来源</th><th scope="col">类别</th><th scope="col">结果</th><th scope="col">匹配范围</th><th scope="col"><span className="visually-hidden">详情</span></th></tr>
             </thead>
             <tbody>
               {rows.map((row) => {

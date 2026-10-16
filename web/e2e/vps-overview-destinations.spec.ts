@@ -858,7 +858,8 @@ for (const workspace of ['workbench', 'ledger'] as const) {
       await reportEntry.click()
       await expect(page).toHaveURL(url => url.pathname === `/vps/${selected.vps_id}/ip-quality`)
       await expect(returnLink).toHaveAttribute('href', inventoryHref!)
-      await page.getByRole('link', { name: '返回 VPS 详情', exact: true }).click()
+      // 错误正文也提供返回动作；此处验证加载与错误状态都常驻的页头导航。
+      await page.locator('.ipq-header').getByRole('link', { name: '返回 VPS 详情', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname === `/vps/${selected.vps_id}`)
       await expect(returnLink).toHaveAttribute('href', inventoryHref!)
     }

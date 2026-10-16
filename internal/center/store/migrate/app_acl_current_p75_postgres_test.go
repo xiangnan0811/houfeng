@@ -49,8 +49,8 @@ func testPostgresIntegrationAppACLCurrentP75Fresh(t *testing.T) {
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
-	if len(before.Ledger) != 79 || before.Ledger[len(before.Ledger)-1].Name != appACLCurrentP78Migration {
-		t.Fatalf("fresh C78 ledger = %#v, want 79 sources ending in 0078", before.Ledger)
+	if len(before.Ledger) != 80 || before.Ledger[len(before.Ledger)-1].Name != appACLCurrentP79Migration {
+		t.Fatalf("fresh current ledger = %#v, want 80 sources ending in 0079", before.Ledger)
 	}
 	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
 	if err != nil {
@@ -93,7 +93,7 @@ func testPostgresIntegrationAppACLCurrentP75SettingsState(t *testing.T, state st
 		t.Fatalf("current successor must append exactly one manifest: %#v", after.Manifest)
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration)
+		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
 	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
 		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||

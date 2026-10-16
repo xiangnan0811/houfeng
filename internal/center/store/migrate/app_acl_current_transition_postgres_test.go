@@ -545,8 +545,9 @@ func TestAppACLCurrentTransitionCollectionScopeSuffixClassification(t *testing.T
 		names     []string
 		wantError bool
 	}{
-		{name: "exact", names: []string{"0078_ip_quality_collection_scope.sql"}},
+		{name: "exact", names: []string{"0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql"}},
 		{name: "missing", wantError: true},
+		{name: "missing index", names: []string{"0078_ip_quality_collection_scope.sql"}, wantError: true},
 		{name: "duplicate", names: []string{"0078_ip_quality_collection_scope.sql", "0078_ip_quality_collection_scope.sql"}, wantError: true},
 		{name: "nonterminal", names: []string{"0078_ip_quality_collection_scope.sql", "0079_future.sql"}, wantError: true},
 		{name: "unknown", names: []string{"0079_future.sql"}, wantError: true},
@@ -560,6 +561,31 @@ func TestAppACLCurrentTransitionCollectionScopeSuffixClassification(t *testing.T
 			})
 			if got || (err != nil) != tc.wantError {
 				t.Fatalf("collection scope heartbeat classification = %t/%v, want false/error=%t", got, err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestAppACLCurrentTransitionCacheExpirySuffixClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		names     []string
+		wantError bool
+	}{
+		{name: "exact", names: []string{"0079_ip_quality_cache_expiry.sql"}},
+		{name: "missing", wantError: true},
+		{name: "duplicate", names: []string{"0079_ip_quality_cache_expiry.sql", "0079_ip_quality_cache_expiry.sql"}, wantError: true},
+		{name: "nonterminal", names: []string{"0079_ip_quality_cache_expiry.sql", "0080_future.sql"}, wantError: true},
+		{name: "unknown", names: []string{"0080_future.sql"}, wantError: true},
+		{name: "already applied scope", names: []string{"0078_ip_quality_collection_scope.sql", "0079_ip_quality_cache_expiry.sql"}, wantError: true},
+		{name: "reordered", names: []string{"0079_ip_quality_cache_expiry.sql", "0078_ip_quality_collection_scope.sql"}, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
+				profile: appACLCurrentProfileP78, successor: migrationSourceSnapshot{names: tc.names},
+			})
+			if got || (err != nil) != tc.wantError {
+				t.Fatalf("cache expiry heartbeat classification = %t/%v, want false/error=%t", got, err, tc.wantError)
 			}
 		})
 	}

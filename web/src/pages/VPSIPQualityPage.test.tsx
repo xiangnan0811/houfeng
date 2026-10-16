@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi, type Mock } from 'vitest'
 
 import { COLLECT_POLL_INTERVAL_MS } from '../components/ip-quality/useIPQualityCollect'
 import { ENRICHMENT_POLL_INTERVAL_MS } from '../components/ip-quality/useIPQualityEnrichment'
+import { formatDateTime } from '../lib/format'
 import { VPSIPQualityPage } from './VPSIPQualityPage'
 
 type FetchMock = Mock<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>
@@ -48,19 +49,36 @@ type BodyOptions = {
   empty?: boolean
   collectionId?: string
   reportId?: string
+  // 比基线更新、已入库的报告 ID（按新→旧）；选中与否都留在同一历史集合里。
+  newerReportIds?: string[]
   diagnostics?: Record<string, unknown>
   familyStatus?: Array<Record<string, unknown>>
   extra?: Record<string, unknown>
 }
 
-function reportBody({ family = 4, defaultFamily = 4, empty = false, collectionId = 'col_old', reportId, diagnostics, familyStatus, extra = {} }: BodyOptions = {}) {
+// 每族固定的报告集合：同一 report_id 无论是否被选中，观察时间、IP、族与风险都不变。
+function familyReports(family: 4 | 6, newerReportIds: string[]) {
+  const latest = summaryBody(family)
+  const newer = newerReportIds.map((id, index) => summaryBody(family, { report_id: id, observed_at: `2026-06-${String(9 + newerReportIds.length - 1 - index).padStart(2, '0')}T12:00:00Z` }))
+  return [
+    ...newer,
+    latest,
+    { ...latest, report_id: family === 4 ? 'ipq_000' : 'ipq_600', observed_at: '2026-06-07T12:00:00Z', risk_level: 'medium' },
+  ]
+}
+
+function reportBody({ family = 4, defaultFamily = 4, empty = false, collectionId = 'col_old', reportId, newerReportIds = [], diagnostics, familyStatus, extra = {} }: BodyOptions = {}) {
   const base = {
     selected_ip_version: family,
     default_ip_version: defaultFamily,
     families: familyStatus ?? families(),
   }
   if (empty) return { ...base, summary: null, latest_report: null, provider_results: [], service_unlocks: [], history: [], ...extra }
-  const summary = summaryBody(family, reportId ? { report_id: reportId } : {})
+  const known = familyReports(family, newerReportIds)
+  const existing = reportId ? known.find((item) => item.report_id === reportId) : known[0]
+  // 未登记的自定义 ID 视为更新的一份报告，只在历史开头插入一次。
+  const summary = existing ?? summaryBody(family, { report_id: reportId, observed_at: `2026-06-${String(9 + newerReportIds.length).padStart(2, '0')}T12:00:00Z` })
+  const history = existing ? known : [summary, ...known]
   return {
     ...base,
     summary,
@@ -75,7 +93,7 @@ function reportBody({ family = 4, defaultFamily = 4, empty = false, collectionId
       ip_address: summary.ip_address,
       ip_version: family,
       status: 'success',
-      risk_level: 'high',
+      risk_level: summary.risk_level,
       is_backfilled: false,
       created_at: '2026-06-08T12:00:06Z',
       diagnostics_json: diagnostics ?? { source_version: 'v2', collection_id: collectionId },
@@ -86,10 +104,7 @@ function reportBody({ family = 4, defaultFamily = 4, empty = false, collectionId
     service_unlocks: [
       { service: 'chatgpt', source: 'openai_status_probe', status: 'unlocked', probe_status: 'success', region: 'JP' },
     ],
-    history: [
-      summary,
-      { ...summary, report_id: family === 4 ? 'ipq_000' : 'ipq_600', observed_at: '2026-06-07T12:00:00Z', risk_level: 'medium' },
-    ],
+    history,
     ...extra,
   }
 }
@@ -276,9 +291,15 @@ describe('VPSIPQualityPage', () => {
     expect(page).not.toHaveTextContent('0.0.0.0')
 
     fireEvent.click(within(familyGroup()).getByRole('button', { name: 'IPv4' }))
-    await waitFor(() => expect(screen.getByRole('note', { name: '地址族采集状态' })).toHaveTextContent('本轮未检测到 IPv4 可用本地地址'))
+    await waitFor(() => expect(screen.getByRole('heading', { name: '暂无 IPv4 质量报告' })).toBeInTheDocument())
+    // 新鲜缺族：说明原因并给出“检查网络配置后重新检查”，不承诺自动显示报告。
+    expect(document.querySelector('.ipq-page')).toHaveTextContent('最近一次采集未检测到 IPv4 可用本地地址')
+    expect(document.querySelector('.ipq-page')).toHaveTextContent('检查网络配置后可以重新检查')
+    expect(document.querySelector('.ipq-page')).not.toHaveTextContent('自动显示')
     expect(currentLocation()).toBe('/vps/vps_001/ip-quality?ip_version=4')
-    expect(screen.queryByLabelText('报告身份')).not.toBeInTheDocument()
+    // 身份结构保留但只写“暂无报告”与目标族，绝不借 IPv6 事实。
+    expect(screen.getByLabelText('报告身份')).toHaveTextContent('暂无报告')
+    expect(screen.getByLabelText('报告身份')).toHaveTextContent('IPv4')
     expect(document.querySelector('.ipq-page')).not.toHaveTextContent(/0\.0\.0\.0|2001:db8::10/)
   })
 
@@ -321,6 +342,13 @@ describe('VPSIPQualityPage', () => {
     await waitFor(() => expect(screen.getByLabelText('报告身份')).toHaveTextContent(IPV4))
     fireEvent.click(within(familyGroup()).getByRole('button', { name: 'IPv6' }))
     await waitFor(() => expect(callsTo(fetchMock, `${BASE}?ip_version=6`)).toHaveLength(1))
+    // 加载中：身份结构保留为骨架，只写目标族，不残留 IPv4 的 IP、时间或风险；采集入口是非交互占位。
+    const loadingIdentity = screen.getByLabelText('报告身份')
+    expect(loadingIdentity).toHaveAttribute('aria-busy', 'true')
+    expect(loadingIdentity).toHaveTextContent('IPv6')
+    expect(document.querySelector('.ipq-page')).not.toHaveTextContent(IPV4)
+    expect(screen.queryByRole('group', { name: '风险命中' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
     fireEvent.click(within(familyGroup()).getByRole('button', { name: 'IPv4' }))
     await waitFor(() => expect(screen.getByLabelText('报告身份')).toHaveTextContent(IPV4))
 
@@ -390,9 +418,75 @@ describe('VPSIPQualityPage', () => {
 
     await waitFor(() => expect(currentLocation()).toBe('/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_000'))
     expect(screen.getByRole('link', { name: '查看最新报告' })).toHaveAttribute('href', '/vps/vps_001/ip-quality?ip_version=4')
-    expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '立即采集' })).toBeInTheDocument()
     expect(within(screen.getByLabelText('采集诊断')).getByText('ipq_000')).toBeInTheDocument()
     expect(reportCalls(fetchMock)).toHaveLength(1)
+  })
+
+  // 历史行的可见事实（不含“查看/当前查看”动作列）与身份。
+  function historyRows() {
+    const section = screen.getByRole('heading', { name: '历史报告' }).closest('section') as HTMLElement
+    return within(section).getAllByRole('listitem').map((row) => ({
+      linkedId: row.querySelector('a')?.getAttribute('href')?.match(/report_id=([^&]+)/)?.[1] ?? null,
+      current: row.getAttribute('aria-current') === 'page',
+      facts: Array.from(row.children)
+        .filter((cell) => !cell.classList.contains('ipq-history__action'))
+        .map((cell) => cell.textContent)
+        .join('|'),
+    }))
+  }
+
+  it.each([
+    [4, 'ipq_000', 'ipq_001'],
+    [6, 'ipq_600', 'ipq_601'],
+  ] as const)('opens IPv%s history %s directly with each report listed once', async (family, reportId, latestId) => {
+    const fetchMock = routeFetch([
+      { path: `${BASE}/reports/${reportId}`, responses: [{ body: reportBody({ family, reportId }) }] },
+      { path: COLLECT, responses: [{ body: availableStatus }] },
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage(`/vps/vps_001/ip-quality?ip_version=${family}&report_id=${reportId}`)
+
+    await waitFor(() => expect(screen.getByRole('link', { name: '查看最新报告' })).toBeInTheDocument())
+    const rows = historyRows()
+    expect(rows).toHaveLength(2)
+    expect(rows.filter((row) => row.current)).toHaveLength(1)
+    expect(rows.map((row) => row.linkedId)).toEqual([latestId, null])
+    // 被选中的旧报告保持自己的观察时间和风险，不与最新报告混同。
+    expect(rows[1]!.facts).not.toBe(rows[0]!.facts)
+    expect(screen.getByRole('link', { name: `查看 ${formatDateTime('2026-06-08T12:00:00Z')} 的报告` })).toBeInTheDocument()
+  })
+
+  it('keeps history identities unique and stable after a newer report is prepended and an older one is opened', async () => {
+    const fetchMock = routeFetch([
+      { path: `${BASE}?ip_version=4`, responses: [{ body: reportBody({ newerReportIds: ['ipq_002'] }) }] },
+      { path: `${BASE}/reports/ipq_000`, responses: [{ body: reportBody({ newerReportIds: ['ipq_002'], reportId: 'ipq_000' }) }] },
+      { path: COLLECT, responses: [{ body: availableStatus }] },
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage('/vps/vps_001/ip-quality?ip_version=4')
+
+    await waitFor(() => expect(historyRows()).toHaveLength(3))
+    const latestRows = historyRows()
+    expect(latestRows.map((row) => row.linkedId)).toEqual([null, 'ipq_001', 'ipq_000'])
+    expect(latestRows.filter((row) => row.current)).toHaveLength(1)
+    expect(new Set(latestRows.map((row) => row.facts)).size).toBe(3)
+    const olderFacts = latestRows[2]!.facts
+    const newestFacts = latestRows[0]!.facts
+
+    fireEvent.click(screen.getByRole('link', { name: `查看 ${formatDateTime('2026-06-07T12:00:00Z')} 的报告` }))
+
+    await waitFor(() => expect(currentLocation()).toBe('/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_000'))
+    await waitFor(() => expect(historyRows()[2]!.current).toBe(true))
+    const historyViewRows = historyRows()
+    expect(historyViewRows.map((row) => row.linkedId)).toEqual(['ipq_002', 'ipq_001', null])
+    expect(historyViewRows.filter((row) => row.current)).toHaveLength(1)
+    // 同一 report_id 在两个视图中的观察时间、IP 与风险完全一致。
+    expect(historyViewRows[2]!.facts).toBe(olderFacts)
+    expect(historyViewRows[0]!.facts).toBe(newestFacts)
+    expect(callsTo(fetchMock, `${BASE}/reports/ipq_000`)).toHaveLength(1)
   })
 
   it('collects the chosen dual-stack scope from the empty state and announces an update only when the shown report is from the round', async () => {
@@ -617,7 +711,9 @@ describe('VPSIPQualityPage', () => {
     const status = screen.getByRole('status', { name: 'IP 质量采集状态' })
     expect(status).toHaveTextContent('本轮 IPv4 采集失败')
     expect(status).not.toHaveTextContent('报告已更新')
-    expect(screen.getByRole('note', { name: '地址族采集状态' })).toHaveTextContent('上次有效结果')
+    // 上下文里标出“上次有效结果”，最近尝试有独立时间，不混作报告观察时间。
+    expect(screen.getByRole('group', { name: '报告状态' })).toHaveTextContent('上次有效结果')
+    expect(screen.getByRole('note', { name: '地址族采集状态' })).toHaveTextContent('最近尝试')
     expect(screen.getByLabelText('报告身份')).toHaveTextContent(IPV4)
     expect(currentLocation()).toBe('/vps/vps_001/ip-quality?ip_version=4')
   })
@@ -669,6 +765,64 @@ describe('VPSIPQualityPage', () => {
     expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).not.toHaveTextContent('报告已更新')
     expect(currentLocation()).toBe('/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_000')
     expect(reportCalls(fetchMock)).toHaveLength(1)
+  })
+
+  it('keeps collection disabled until the initial collect status read resolves', async () => {
+    const statusRead = deferred()
+    const fetchMock = routeFetch([
+      { path: `${BASE}?ip_version=4`, responses: [{ body: reportBody() }] },
+      { path: COLLECT, responses: [{ body: { ...availableStatus, request: collectRequest('dispatched') }, wait: statusRead.promise }] },
+      { method: 'POST', path: COLLECT, responses: [{ body: { ...availableStatus, request: collectRequest('pending') }, status: 202 }] },
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage('/vps/vps_001/ip-quality?ip_version=4')
+    await waitFor(() => expect(screen.getByLabelText('报告身份')).toHaveTextContent(IPV4))
+    await waitFor(() => expect(callsTo(fetchMock, COLLECT)).toHaveLength(1))
+    // 报告已就绪但采集条件未知：按钮禁用、菜单不展开、不发 POST。
+    const trigger = screen.getByRole('button', { name: '立即采集' })
+    expect(trigger).toBeDisabled()
+    fireEvent.click(trigger)
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(callsTo(fetchMock, COLLECT, 'POST')).toHaveLength(0)
+
+    // 读取结果是已在途的请求：直接接手进度，仍不提交。
+    await act(async () => { statusRead.resolve() })
+    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('正在采集'))
+    expect(screen.getByRole('button', { name: /采集中/ })).toBeDisabled()
+    expect(callsTo(fetchMock, COLLECT, 'POST')).toHaveLength(0)
+  })
+
+  it('starts a new collection from a history report and keeps that history report afterwards', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const fetchMock = routeFetch([
+      { path: `${BASE}/reports/ipq_000`, responses: [{ body: reportBody({ reportId: 'ipq_000' }) }] },
+      {
+        path: COLLECT,
+        responses: [
+          { body: availableStatus },
+          { body: { ...availableStatus, request: dualCompleted([{ ip_version: 4, availability: 'available', report_status: 'success' }]) } },
+        ],
+      },
+      { method: 'POST', path: COLLECT, responses: [{ body: { ...availableStatus, request: collectRequest('pending') }, status: 202 }] },
+    ])
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage('/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_000')
+    await waitFor(() => expect(screen.getByRole('button', { name: '立即采集' })).toBeEnabled())
+    const observed = screen.getByLabelText('报告身份').textContent
+    fireEvent.click(screen.getByRole('button', { name: '立即采集' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: '采集 IPv4 / IPv6' }))
+    await waitFor(() => expect(callsTo(fetchMock, COLLECT, 'POST')).toHaveLength(1))
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
+    await waitFor(() => expect(screen.getByRole('status', { name: 'IP 质量采集状态' })).toHaveTextContent('仍在查看历史报告'))
+    // 本轮结束不跳回最新、不重读报告；历史身份与观察时间原样保留。
+    expect(currentLocation()).toBe('/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_000')
+    expect(screen.getByLabelText('报告身份').textContent).toBe(observed)
+    expect(screen.getByRole('group', { name: '报告状态' })).toHaveTextContent('历史报告')
+    expect(reportCalls(fetchMock)).toHaveLength(1)
+    expect(callsTo(fetchMock, COLLECT, 'POST')).toHaveLength(1)
   })
 
   it('keeps the previous report and says so when a legacy single-family collection fails', async () => {
@@ -847,6 +1001,11 @@ describe('VPSIPQualityPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'IP 质量报告加载失败' })).toBeInTheDocument())
     expect(screen.getByText('temporary failure')).toBeInTheDocument()
+    // 失败不冒充无报告：上下文与族选择器保留，身份写明状态未知，不出现采集入口。
+    expect(screen.getByLabelText('报告身份')).toHaveTextContent('加载失败，报告状态未知')
+    expect(screen.getByLabelText('报告身份')).not.toHaveTextContent('暂无报告')
+    expect(familyGroup()).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
     // 错误页不启动采集状态查询。
     expect(callsTo(fetchMock, COLLECT)).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: '重试' }))

@@ -573,7 +573,8 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 	svc := &fakeAgentSyncService{}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+	const suffixFields = `"client_secret":"synthetic-root","credentials":{" APP_SECRET ":"synthetic-nested"},"items":[{"Signing-Secret":"synthetic-array","PRIVATE_SECRET":"synthetic-uppercase"}],"ordinary":"kept","secretary":"retained","secret_count":2`
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(fmt.Sprintf(`{
 		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
 		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
@@ -589,13 +590,13 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 			"organization":"Example Network",
 			"use_region_code":"US",
 			"risk_level":"low",
-			"raw_json":{"Info":{"ASN":"AS64500"},"token":"secret-token"},
+			"raw_json":{"Info":{"ASN":"AS64500"},"token":"secret-token",%s},
 			"coverage":{"expected_provider_count":2,"successful_provider_count":1,"failed_provider_count":1,"expected_service_count":1,"successful_service_count":1},
-			"diagnostics_json":{"source_version":"v2","secret":"diagnostic-secret","collect_request_id":"ipqc_0123abcd"},
-			"provider_results":[{"provider":"ipinfo","status":"success","source_type":"default","latency_ms":73,"usage_type":"hosting","company_type":"hosting","risk_level":"low","is_server":true,"is_vpn":false,"extra_json":{"risk":{"score":12},"api_key":"provider-secret"}}],
-			"service_unlocks":[{"service":"netflix","source":"netflix_title_probe","status":"unlocked","probe_status":"success","latency_ms":211,"region":"US","unlock_type":"full","extra_json":{"title_probe":"full_catalog","token":"service-secret"}}]
+			"diagnostics_json":{"source_version":"v2","secret":"diagnostic-secret","collect_request_id":"ipqc_0123abcd",%s},
+			"provider_results":[{"provider":"ipinfo","status":"success","source_type":"default","latency_ms":73,"usage_type":"hosting","company_type":"hosting","risk_level":"low","is_server":true,"is_vpn":false,"extra_json":{"risk":{"score":12},"api_key":"provider-secret",%s}}],
+			"service_unlocks":[{"service":"netflix","source":"netflix_title_probe","status":"unlocked","probe_status":"success","latency_ms":211,"region":"US","unlock_type":"full","extra_json":{"title_probe":"full_catalog","token":"service-secret",%s}}]
 		}]
-	}`))
+	}`, suffixFields, suffixFields, suffixFields, suffixFields)))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -655,6 +656,30 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 	}
 	if !strings.Contains(rawJSON, `"token":"[redacted]"`) || !strings.Contains(rawJSON, `"Info":{"ASN":"AS64500"}`) {
 		t.Fatalf("RawJSON = %s, want sanitized raw JSON preserved for store layer", report.RawJSON)
+	}
+	for name, payload := range map[string]json.RawMessage{
+		"raw":         report.RawJSON,
+		"diagnostics": report.DiagnosticsJSON,
+		"provider":    report.ProviderResults[0].ExtraJSON,
+		"service":     report.ServiceUnlocks[0].ExtraJSON,
+	} {
+		if !json.Valid(payload) || len(payload) > ipquality.MaxRawJSONBytes {
+			t.Fatalf("%s JSON is invalid or oversized: %s", name, payload)
+		}
+		for _, secret := range []string{"synthetic-root", "synthetic-nested", "synthetic-array", "synthetic-uppercase"} {
+			if strings.Contains(string(payload), secret) {
+				t.Errorf("%s leaked %q: %s", name, secret, payload)
+			}
+		}
+		for _, field := range []string{
+			`"client_secret":"[redacted]"`, `"credentials":{" APP_SECRET ":"[redacted]"}`,
+			`"items":[{"PRIVATE_SECRET":"[redacted]","Signing-Secret":"[redacted]"}]`,
+			`"ordinary":"kept"`, `"secretary":"retained"`, `"secret_count":2`,
+		} {
+			if !strings.Contains(string(payload), field) {
+				t.Errorf("%s JSON = %s, want field %s", name, payload, field)
+			}
+		}
 	}
 }
 

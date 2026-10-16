@@ -53,20 +53,56 @@ describe('useIPQualityCollect', () => {
     vi.useRealTimers()
   })
 
-  it('ignores an initial status response that arrives after the POST result', async () => {
+  it('blocks submission while the initial status read is pending and then applies its result', async () => {
     const initial = deferred<IPQualityCollectStatus>()
     api.getVPSIPQualityCollectStatus.mockReturnValueOnce(initial.promise).mockResolvedValue(status('dispatched'))
     api.requestVPSIPQualityCollect.mockResolvedValue(status('pending'))
     const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
 
+    // 采集条件未知：检查中，start 不发 POST。
+    expect(result.current.checking).toBe(true)
     act(() => result.current.start([4, 6]))
-    await waitFor(() => expect(result.current.active).toBe(true))
-    await act(async () => { initial.resolve(status()) })
+    expect(api.requestVPSIPQualityCollect).not.toHaveBeenCalled()
+    expect(result.current.submitting).toBe(false)
 
+    // 首次读取返回进行中的请求：直接接手，不再需要也不允许重复提交。
+    await act(async () => { initial.resolve(status('dispatched')) })
+    expect(result.current.checking).toBe(false)
     expect(result.current.active).toBe(true)
     expect(result.current.watchedRequestId).toBe('ipqc_001')
-    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
-    expect(result.current.status?.request?.status).toBe('dispatched')
+    act(() => result.current.start([4, 6]))
+    expect(api.requestVPSIPQualityCollect).not.toHaveBeenCalled()
+  })
+
+  it('stops checking after a failed initial read and lets the POST give a definite result', async () => {
+    api.getVPSIPQualityCollectStatus.mockRejectedValueOnce(new Error('network')).mockResolvedValue(status('pending'))
+    api.requestVPSIPQualityCollect.mockRejectedValue(new ApiError(409, 'monitoring instance monitoring is paused'))
+    const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+
+    await waitFor(() => expect(result.current.checking).toBe(false))
+    // 读取失败：没有状态，也不再声称检查中；入口恢复可用。
+    expect(result.current.status).toBeNull()
+    act(() => result.current.start([4, 6]))
+    expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(result.current.status?.request?.status).toBe('pending'))
+  })
+
+  it('does not let a failed read from the previous VPS end checking for the next VPS', async () => {
+    let rejectFirst!: (error: unknown) => void
+    const firstRead = new Promise<IPQualityCollectStatus>((_, reject) => { rejectFirst = reject })
+    const second = deferred<IPQualityCollectStatus>()
+    api.getVPSIPQualityCollectStatus.mockReturnValueOnce(firstRead).mockReturnValueOnce(second.promise)
+    const { result, rerender } = renderHook(({ vpsId }) => useIPQualityCollect(vpsId, vi.fn()), { initialProps: { vpsId: 'vps_001' } })
+
+    rerender({ vpsId: 'vps_002' })
+    expect(result.current.checking).toBe(true)
+    await act(async () => { rejectFirst(new Error('network')) })
+    // 旧会话的失败不能解锁另一台 VPS 的入口。
+    expect(result.current.checking).toBe(true)
+    act(() => result.current.start([4, 6]))
+    expect(api.requestVPSIPQualityCollect).not.toHaveBeenCalled()
+    await act(async () => { second.resolve(status()) })
+    expect(result.current.checking).toBe(false)
   })
 
   it('refreshes once when the watched request completes and then stops polling', async () => {
@@ -133,15 +169,14 @@ describe('useIPQualityCollect', () => {
     expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the button busy when an older GET returns while the POST is still pending', async () => {
-    const initial = deferred<IPQualityCollectStatus>()
+  it('keeps the button busy while the POST is pending and ignores a repeated start', async () => {
     const post = deferred<IPQualityCollectStatus>()
-    api.getVPSIPQualityCollectStatus.mockReturnValueOnce(initial.promise).mockResolvedValue(status('pending'))
+    api.getVPSIPQualityCollectStatus.mockResolvedValueOnce(status()).mockResolvedValue(status('pending'))
     api.requestVPSIPQualityCollect.mockReturnValue(post.promise)
     const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+    await waitFor(() => expect(result.current.checking).toBe(false))
 
     act(() => result.current.start([4, 6]))
-    await act(async () => { initial.resolve(status()) })
     expect(result.current.submitting).toBe(true)
     act(() => result.current.start([4, 6]))
     expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(1)

@@ -3,7 +3,7 @@ import type { IPQualityProductSummary, IPQualityServiceCheck, IPQualityServiceUn
 import {
   effectiveUnlockStatus,
   observedServiceRegion,
-  probeErrorLabel,
+  probeDiagnosticText,
   serviceCheckStatusText,
   serviceChecks,
   serviceEndpointDiagnostics,
@@ -31,15 +31,14 @@ type IPQualityServiceGridProps = {
 
 const TITLE_ID = 'ip-quality-services-title'
 
+// 每条检查：HTTP 状态与原因合成一段（可用时只留 HTTP），不重复 HTTP N。
 function checkLine(check: IPQualityServiceCheck): string {
-  const error = check.error_code ? (probeErrorLabel(check.error_code, check.http_status) ?? check.error_code) : null
   return [
     check.label || check.id,
     serviceCheckStatusText(check.status),
     check.region || null,
-    check.http_status != null ? `HTTP ${check.http_status}` : null,
+    probeDiagnosticText(check.status === 'available' ? undefined : check.error_code, check.http_status),
     check.rule || null,
-    check.status === 'available' ? null : error,
   ].filter(Boolean).join(' · ')
 }
 
@@ -66,10 +65,9 @@ function ServiceDetails({ unlock, checks }: { unlock: IPQualityServiceUnlock, ch
           <li key={`${endpoint.endpoint}:${index}`}>
             {[
               endpoint.endpoint,
-              endpoint.httpStatus != null ? `HTTP ${endpoint.httpStatus}` : null,
+              probeDiagnosticText(endpoint.errorCode ?? undefined, endpoint.httpStatus),
               endpoint.outcome ? serviceCheckStatusText(endpoint.outcome) : null,
               endpoint.matchedRule,
-              endpoint.errorCode ? (probeErrorLabel(endpoint.errorCode, endpoint.httpStatus) ?? endpoint.errorCode) : null,
             ].filter(Boolean).join(' · ')}
           </li>
         ))}

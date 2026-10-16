@@ -362,19 +362,29 @@ func cloneCollectRequest(request CollectRequest) CollectRequest {
 func (c *CollectRequests) currentLocked(monitoringInstanceID string, now time.Time) (*collectEntry, bool) {
 	c.pruneLocked(now)
 	entry, ok := c.entries[monitoringInstanceID]
-	if !ok {
-		return nil, false
-	}
-	if entry.request.Active() && !now.Before(entry.request.ExpiresAt) {
-		entry.request.Status = CollectRequestExpired
-		entry.groups = nil
-	}
-	return entry, true
+	return entry, ok
 }
 
 func (c *CollectRequests) pruneLocked(now time.Time) {
 	for key, entry := range c.entries {
-		if now.Sub(entry.request.RequestedAt) > collectRequestRetention {
+		if entry.request.Active() {
+			if now.Before(entry.request.ExpiresAt) {
+				continue
+			}
+			entry.request.Status = CollectRequestExpired
+			entry.groups = nil
+		}
+		terminalAt := entry.request.ExpiresAt
+		switch entry.request.Status {
+		case CollectRequestCompleted, CollectRequestFailed:
+			if entry.request.CompletedAt != nil {
+				terminalAt = *entry.request.CompletedAt
+			}
+		case CollectRequestExpired:
+		default:
+			continue
+		}
+		if !now.Before(terminalAt.Add(collectRequestRetention)) {
 			delete(c.entries, key)
 		}
 	}

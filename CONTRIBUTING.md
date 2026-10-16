@@ -10,7 +10,7 @@
 `make -C "$(git rev-parse --show-toplevel)" <target>`，不要假设存在 `backend/`。
 
 - Go 版本以 `go.mod` 为准，Node 以 `.node-version` 为准；Web 依赖使用 `web/package-lock.json`。
-- `make verify-go`：format、vet、Go tests；format 可能改文件，运行后复查候选。
+- `make verify-go`：format、vet、Go tests；完整迁移链验证使用每包 30 分钟超时，保留全部链路断言。format 可能改文件，运行后复查候选。
 - `make test-web-toolchain`：工具链与 Web 质量门禁脚本回归。
 - `make verify-docs`：文档链接、锚点、导航、平台导入和旧路径检查，含检查器回归。
 - `make verify-web`：独立于调用者 NODE_ENV 安装依赖，lint、覆盖率测试、build、bundle 和 CSS 检查。

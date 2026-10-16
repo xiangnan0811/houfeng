@@ -7,6 +7,7 @@ import type { IPQualityCollectController } from './useIPQualityCollect'
 function controller(patch: Partial<IPQualityCollectController> = {}): IPQualityCollectController {
   return {
     status: { enabled: true, available: true, monitoring_instance_id: 'mi_001' },
+    checking: false,
     watchedRequestId: null,
     submitting: false,
     error: null,

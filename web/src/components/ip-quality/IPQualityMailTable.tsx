@@ -11,17 +11,19 @@ type IPQualityMailTableProps = {
 const TITLE_ID = 'ip-quality-mail-title'
 
 function MailDetail({ row }: { row: IPQualityMailResult }) {
-  const error = mailErrorLabel(row.error_code)
+  const code = row.error_code.trim()
+  const reason = mailErrorLabel(row.error_code)
+  // 技术值（MX、目标地址、响应码、未知安全码）用等宽；已知原因是中文正文短句，不用等宽。
   const facts = [
-    row.mx_host ? { label: 'MX', value: row.mx_preference != null ? `${row.mx_host}（优先级 ${row.mx_preference}）` : row.mx_host } : null,
-    row.target_ip ? { label: '目标地址', value: row.target_ip } : null,
-    row.greeting_code != null ? { label: '响应码', value: String(row.greeting_code) } : null,
-    error ? { label: '原因', value: error } : null,
-  ].filter((fact): fact is { label: string, value: string } => fact != null)
+    row.mx_host ? { label: 'MX', value: row.mx_preference != null ? `${row.mx_host}（优先级 ${row.mx_preference}）` : row.mx_host, mono: true } : null,
+    row.target_ip ? { label: '目标地址', value: row.target_ip, mono: true } : null,
+    row.greeting_code != null ? { label: '响应码', value: String(row.greeting_code), mono: true } : null,
+    reason ? { label: '原因', value: reason, mono: reason === code } : null,
+  ].filter((fact): fact is { label: string, value: string, mono: boolean } => fact != null)
   return (
     <dl className="ipq-inline-facts">
       {facts.length > 0
-        ? facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd className="mono">{fact.value}</dd></div>)
+        ? facts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd className={fact.mono ? 'mono' : undefined}>{fact.value}</dd></div>)
         : <div><dt>MX</dt><dd>—</dd></div>}
     </dl>
   )
@@ -49,7 +51,7 @@ export function IPQualityMailTable({ product }: IPQualityMailTableProps) {
         >
           <table className="data-table data-table--compact ipq-mail-table">
             <thead className="data-table__head">
-              <tr><th>邮局</th><th>端口</th><th>结果</th><th>延迟</th><th><span className="visually-hidden">详情</span></th></tr>
+              <tr><th scope="col">邮局</th><th scope="col">端口</th><th scope="col">结果</th><th scope="col">延迟</th><th scope="col"><span className="visually-hidden">详情</span></th></tr>
             </thead>
             <tbody>
               {rows.map((row) => {

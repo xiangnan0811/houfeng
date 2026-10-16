@@ -39,7 +39,8 @@ const UI = {
   stale: '已过期',
   legacyRound: '本次仅收到单地址族报告，未验证另一地址族',
   refreshFailed: '刷新失败',
-  unavailable: (ipVersion: IPQualityIPVersion) => `本轮未检测到 IPv${ipVersion} 可用本地地址`,
+  // 报告页上下文（本轮未检测到…）与空态正文（最近一次采集未检测到…）共用同一事实短语。
+  unavailable: (ipVersion: IPQualityIPVersion) => `未检测到 IPv${ipVersion} 可用本地地址`,
   lookupFailed: (ipVersion: IPQualityIPVersion) => `IPv${ipVersion} 出口探测失败`,
   noResult: (ipVersion: IPQualityIPVersion) => `IPv${ipVersion} 尚无采集结果`,
 } as const
@@ -138,7 +139,8 @@ for (const viewport of VIEWPORTS) {
     await expectSelection(page, 6)
     await expect(page.locator('.ipq-page')).toContainText(UI.noResult(6))
     await expect(page.locator('.ipq-page')).not.toContainText(UI.unavailable(6))
-    await expect(page.getByLabel('报告身份')).toHaveCount(0)
+    await expect(page.getByLabel('报告身份')).toContainText('暂无报告')
+    await expect(page.getByLabel('报告身份')).not.toContainText('95.169.166.229')
     await familyButton(page, 4).click()
     await expectSelection(page, 4)
     await expect(page.getByLabel('报告身份')).toContainText('95.169.166.229')
@@ -207,7 +209,8 @@ for (const viewport of VIEWPORTS) {
     await expectSelection(page, 4, 'ipq_hist_rev1')
     expect(api.requestCount('GET', ipqDetailPath('ipq_hist_rev1'))).toBe(1)
     await expect(page.locator('.badge').filter({ hasText: '历史报告' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '立即采集' })).toHaveCount(0)
+    // 历史报告也可发起新采集；采集后仍停留在该历史 ID（见历史采集场景）。
+    await expect(page.getByRole('button', { name: '立即采集' })).toHaveCount(1)
     await expect(servicesSection.getByLabel('服务状态统计')).toContainText('探测已停用')
     // revision1 历史保留自己的来源事实：proxycheck 的 VPN 命中可见，摘要只作旧版评级标注。
     await expect(providerSection.getByRole('row').filter({ hasText: 'proxycheck.io' })).toContainText('VPN 是')
@@ -260,7 +263,8 @@ for (const viewport of VIEWPORTS) {
     await expect(basicInfo(page)).toContainText(IPV4_IDENTITY.asn)
     await expect(identity).toContainText(ROUND1_TIME)
     // 结果优先：没有综合评级或证据完整性口号；风险只看服务端事实。
-    await expect(page.getByRole('group', { name: '风险命中' })).toContainText('未见风险命中')
+    // 无阳性时风险区不给泛化的安全/阴性结论。
+    await expect(page.getByRole('group', { name: '风险命中' })).toHaveText('')
     await expect(pageRoot).not.toContainText('证据不完整')
     await expect(servicesSection.getByLabel('服务状态统计')).toContainText('6 可用')
     await expect(servicesSection.getByLabel('服务状态统计')).toContainText('1 受限')
@@ -346,6 +350,167 @@ test('family selector is keyboard operable and keeps focus across a switch', asy
   await expect(page.getByLabel('报告身份')).toContainText(IPV4_IDENTITY.ipAddress)
 })
 
+// ---------------------------------------------------------------------------
+// 吸顶报告上下文：滚动深处仍可辨识 IP/族/观察时间与历史/过期/上次有效状态
+// ---------------------------------------------------------------------------
+
+const reportContext = (page: Page) => page.getByRole('region', { name: '报告上下文' })
+
+async function boxOf(locator: Locator) {
+  const box = await locator.boundingBox()
+  expect(box).not.toBeNull()
+  return box!
+}
+
+/** 吸顶后的上下文贴住滚动视口顶边（其上没有正文透出），完整位于视口内，且目标元素顶部不被它遮挡。 */
+async function expectContextVisibleAbove(page: Page, target: Locator) {
+  const viewport = page.viewportSize()!
+  const scrollportTop = await page.locator('.main').evaluate((element) => element.getBoundingClientRect().top)
+  const header = await boxOf(page.locator('.ipq-header'))
+  const context = await boxOf(reportContext(page))
+  // 页头已滚出视口时上下文必须吸顶并贴住视口顶边，不能留出正文透出的内边距带。
+  if (header.y + header.height <= scrollportTop) expect(Math.abs(context.y - scrollportTop)).toBeLessThanOrEqual(1)
+  expect(context.y + context.height).toBeLessThanOrEqual(viewport.height)
+  const targetBox = await boxOf(target)
+  expect(targetBox.y).toBeGreaterThanOrEqual(context.y + context.height - 1)
+}
+
+for (const viewport of [VIEWPORTS[0], VIEWPORTS[2]]) {
+  test(`stale history context stays readable after scrolling every module at ${viewport.width}px`, async ({ api, page }, testInfo) => {
+    const scenario = ipQualityScenario('dual_stack')
+    const previous = scenario.details.ipq_v6_prev!
+    scenario.details.ipq_v6_prev = { ...previous, summary: { ...previous.summary!, stale: true } }
+    api.useProfile(ipQualityScenarioProfile(scenario))
+    await page.setViewportSize(viewport)
+    await page.goto(ipqPageURL({ ipVersion: 6, reportId: 'ipq_v6_prev' }))
+    await expectSelection(page, 6, 'ipq_v6_prev')
+
+    const context = reportContext(page)
+    const marks = context.getByRole('group', { name: '报告状态' })
+    // 历史与过期是两个独立标记；历史视图不展示当前族的最近尝试。
+    await expect(marks).toContainText('历史报告')
+    await expect(marks).toContainText(UI.stale)
+    await expect(context.getByRole('note', { name: '地址族采集状态' })).toHaveCount(0)
+    await expect(context.getByRole('link', { name: '查看最新报告' })).toHaveAttribute('href', `${IPQ_PAGE_PATH}?ip_version=6`)
+
+    for (const heading of ['服务解锁', '风险评分与因子', '多源定位', '邮件连通性', '黑名单', '历史报告']) {
+      const target = page.getByRole('heading', { level: 2, name: heading, exact: true })
+      await target.scrollIntoViewIfNeeded()
+      await expect(context.getByLabel('报告身份')).toContainText(IPV6_IDENTITY.ipAddress)
+      await expect(context.getByLabel('报告身份')).toContainText(IPV6_PREVIOUS_TIME)
+      await expect(context.getByLabel('报告身份')).toContainText('IPv6')
+      const viewportBox = page.viewportSize()!
+      const contextBox = await boxOf(context)
+      expect(contextBox.y).toBeGreaterThanOrEqual(-1)
+      expect(contextBox.y + contextBox.height).toBeLessThanOrEqual(viewportBox.height)
+    }
+    await page.screenshot({ path: testInfo.outputPath('stale-history-scrolled.png') })
+
+    // 页头“历史”锚点：目标标题落在上下文下方，不被吸顶区遮挡。
+    await page.evaluate(() => document.querySelector('.main')?.scrollTo(0, 0))
+    await page.getByRole('link', { name: '历史', exact: true }).click()
+    await expectContextVisibleAbove(page, page.getByRole('heading', { level: 2, name: '历史报告', exact: true }))
+    await expectNoDocumentOverflow(page)
+  })
+}
+
+test('latest report after a failed attempt marks the last valid result and the separate attempt time while scrolled', async ({ api, page }) => {
+  api.useProfile(ipQualityScenarioProfile('ipv4_lookup_failure'))
+  await page.goto(IPQ_PAGE_PATH)
+  await expectSelection(page, 4)
+  const context = reportContext(page)
+  await page.getByRole('heading', { level: 2, name: '历史报告', exact: true }).scrollIntoViewIfNeeded()
+  await expect(context.getByRole('group', { name: '报告状态' })).toContainText(UI.lastValid)
+  const attempt = context.getByRole('note', { name: '地址族采集状态' })
+  await expect(attempt).toContainText(UI.lookupFailed(4))
+  await expect(attempt).toContainText('最近尝试')
+  await expect(attempt).toContainText(ROUND2_TIME)
+  // 报告观察时间仍是上次有效报告自己的时间，不被最近尝试替换。
+  await expect(context.getByLabel('报告身份')).toContainText(ROUND1_TIME)
+  await expect(context.getByLabel('报告身份')).not.toContainText(ROUND2_TIME)
+  await expectContextVisibleAbove(page, page.getByRole('heading', { level: 2, name: '历史报告', exact: true }))
+})
+
+test('a slow family switch keeps the selector in place and shows only the target family while loading', async ({ api, page }, testInfo) => {
+  const release = deferred()
+  const scenario = ipQualityScenario('dual_stack')
+  api.useProfile(ipQualityScenarioProfile(scenario, {
+    overrides: { 6: { status: 200, body: scenario.views[6], waitFor: release.promise } },
+  }))
+  await page.goto(IPQ_PAGE_PATH)
+  await expectSelection(page, 4)
+  const selectorBefore = await boxOf(page.getByRole('group', { name: UI.familyGroup }))
+
+  await familyButton(page, 6).focus()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => api.requestCount('GET', ipqReportPath(6))).toBe(1)
+  const identity = page.getByLabel('报告身份')
+  await expect(identity).toHaveAttribute('aria-busy', 'true')
+  await expect(identity).toContainText('IPv6')
+  await expect(page.locator('.ipq-page')).not.toContainText(IPV4_IDENTITY.ipAddress)
+  await expect(page.locator('.ipq-page')).not.toContainText(ROUND1_TIME)
+  await expect(page.getByRole('group', { name: '风险命中' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '立即采集' })).toHaveCount(0)
+  await expect(familyButton(page, 6)).toBeFocused()
+  const selectorLoading = await boxOf(page.getByRole('group', { name: UI.familyGroup }))
+
+  release.resolve()
+  await expect(identity).toContainText(IPV6_IDENTITY.ipAddress)
+  await expect(familyButton(page, 6)).toBeFocused()
+  const selectorAfter = await boxOf(page.getByRole('group', { name: UI.familyGroup }))
+  // 记录实测几何而非预设跳动量；选择器位于上下文首行，数据高度变化不推动它。
+  testInfo.annotations.push({ type: 'selector-boxes', description: JSON.stringify({ selectorBefore, selectorLoading, selectorAfter }) })
+  expect(Math.abs(selectorLoading.y - selectorBefore.y)).toBeLessThanOrEqual(1)
+  expect(Math.abs(selectorAfter.y - selectorBefore.y)).toBeLessThanOrEqual(1)
+  expect(api.requestCount('POST', IPQ_COLLECT_PATH)).toBe(0)
+})
+
+test('a failed family load keeps the context, says the state is unknown and retries without collecting', async ({ api, page }) => {
+  const scenario = ipQualityScenario('dual_stack')
+  api.useProfile(ipQualityScenarioProfile(scenario, { overrides: { 6: { status: 500, body: { error: 'temporary failure' } } } }))
+  await page.goto(IPQ_PAGE_PATH)
+  await expectSelection(page, 4)
+
+  await familyButton(page, 6).click()
+  await expect(page.getByRole('heading', { name: 'IP 质量报告加载失败' })).toBeVisible()
+  await expectSelection(page, 6)
+  const identity = page.getByLabel('报告身份')
+  await expect(identity).toContainText('加载失败，报告状态未知')
+  await expect(identity).not.toContainText('暂无报告')
+  await expect(page.locator('.ipq-page')).not.toContainText(IPV4_IDENTITY.ipAddress)
+  await expect(page.getByRole('button', { name: '立即采集' })).toHaveCount(0)
+
+  api.useProfile(ipQualityScenarioProfile(scenario))
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(identity).toContainText(IPV6_IDENTITY.ipAddress)
+  await expectSelection(page, 6)
+  expect(api.requestCount('POST', IPQ_COLLECT_PATH)).toBe(0)
+})
+
+test('an empty family explains why and keeps a single recovery path; unavailable collection defers to its status action', async ({ api, page }) => {
+  api.useProfile(ipQualityScenarioProfile('ipv4_only'))
+  await page.goto(ipqPageURL({ ipVersion: 6 }))
+  await expectSelection(page, 6)
+  const empty = page.locator('.page-state')
+  await expect(empty).toContainText(UI.unavailable(6))
+  await expect(empty).toContainText('检查网络配置后可以重新检查')
+  await expect(empty).toContainText('最近尝试')
+  await expect(empty).not.toContainText('自动')
+  await expect(page.getByRole('button', { name: '立即采集' })).toHaveCount(1)
+  await expect(page.getByRole('button', { name: '立即采集' })).toBeEnabled()
+
+  api.useProfile(ipQualityScenarioProfile('ipv4_only', { collect: { enabled: false, available: false, unavailable_reason: 'disabled' } }))
+  await page.reload()
+  await expect(empty).toContainText(UI.unavailable(6))
+  await expect(empty).toContainText('当前无法发起采集')
+  await expect(empty).not.toContainText('重新检查')
+  await expect(page.getByRole('button', { name: '立即采集' })).toBeDisabled()
+  // 恢复入口是可聚焦的真实链接，不依赖 hover/title。
+  const action = collectStatus(page).getByRole('link', { name: '前往设置开启' })
+  await action.focus()
+  await expect(action).toBeFocused()
+})
+
 for (const theme of THEMES) {
   test(`dual-stack IPv6 report and missing-family state have no serious axe violations in ${theme.preset}-${theme.mode}`, async ({ api, page }) => {
     api.useProfile(ipQualityScenarioProfile('dual_stack'))
@@ -378,7 +543,7 @@ test('IPv4-only server keeps IPv4 default and explains the missing IPv6 family w
   await page.goto(IPQ_PAGE_PATH)
   await expectSelection(page, 4)
   await expect(page.getByLabel('报告身份')).toContainText(IPV4_IDENTITY.ipAddress)
-  await expect(page.getByRole('group', { name: '风险命中' })).toContainText('未见风险命中')
+  await expect(page.getByRole('group', { name: '风险命中' })).toHaveText('')
 
   await familyButton(page, 6).click()
   await expectSelection(page, 6)
@@ -386,7 +551,7 @@ test('IPv4-only server keeps IPv4 default and explains the missing IPv6 family w
   await expect(pageRoot).toContainText(UI.unavailable(6))
   await expect(page.getByRole('heading', { level: 1, name: 'IP 质量报告' })).toBeVisible()
   // 失败占位不是出口、不是风险、不借 IPv4 事实。
-  await expect(page.getByLabel('报告身份')).toHaveCount(0)
+  await expect(page.getByLabel('报告身份')).toContainText('暂无报告')
   await expect(page.getByRole('heading', { name: '风险评分与因子' })).toHaveCount(0)
   await expect(pageRoot).not.toContainText('0.0.0.0')
   await expect(pageRoot).not.toContainText(IPV4_IDENTITY.ipAddress)
@@ -488,6 +653,71 @@ for (const [label, search] of [
     expect(reportGETCount(api)).toBe(0)
   })
 }
+
+// ---------------------------------------------------------------------------
+// 来源分歧：每个字段可核对来源与值，入口定位与焦点正确，样本按钮读出供应商
+// ---------------------------------------------------------------------------
+
+test('every disagreeing identity field leads to its own source evidence with focus and vendor-named samples', async ({ api, page }) => {
+  const scenario = ipQualityScenario('dual_stack')
+  const product = scenario.views[4].product!
+  const [first, second] = product.providers.filter((row) => row.status === 'success' && row.details)
+  if (!first?.details || !second?.details) throw new Error('fixture needs two successful providers')
+  // 同一供应商：匿名样本（FR/Anon Co）与认证主样本；只有认证主样本参与比较与展开。
+  const anonymous = { ...first, usage_type: 'isp', company_type: 'isp', details: { ...first.details, registered_country_code: 'fr', company_name: 'Anon Co' } }
+  const authenticated = { ...first, usage_type: 'hosting', company_type: 'hosting', details: { ...first.details, method: 'center_api' as const, api_tier: 'authenticated' as const, country_code: 'US', region: 'Oregon', city: 'Portland', registered_country_code: 'us', company_name: 'Alpha Hosting' } }
+  const other = { ...second, usage_type: 'isp', company_type: 'isp', details: { ...second.details, country_code: 'DE', region: 'Hesse', city: 'Frankfurt', registered_country_code: 'DE', company_name: 'Beta Net' } }
+  product.providers = product.providers.flatMap((row) => (row === first ? [anonymous, authenticated] : row === second ? [other] : [row]))
+  api.useProfile(ipQualityScenarioProfile(scenario))
+  await page.goto(ipqPageURL({ ipVersion: 4 }))
+  await expectSelection(page, 4)
+
+  const identity = basicInfo(page)
+  await identity.getByText('更多信息').click()
+  for (const [field, section, anchor] of [
+    ['城市', '多源定位', 'ip-quality-location-title'],
+    ['使用地', '多源定位', 'ip-quality-location-title'],
+    ['省 / 州', '多源定位', 'ip-quality-location-title'],
+    ['使用类型', '风险因子', 'ip-quality-factors-title'],
+    ['公司类型', '风险因子', 'ip-quality-factors-title'],
+  ] as const) {
+    await expect(identity.getByRole('link', { name: `${field}来源有分歧，查看${section}` })).toHaveAttribute('href', `#${anchor}`)
+  }
+
+  // 注册地与公司名称：就近披露，列出主样本的供应商、方式与原值。
+  const registration = identity.locator('details.ipq-disagreement').filter({ has: page.locator('summary[aria-label="查看注册地来源分歧"]') })
+  await expect(registration).not.toHaveAttribute('open')
+  await registration.locator('summary').press('Enter')
+  await expect(registration).toHaveAttribute('open')
+  await expect(registration).toContainText(`${first.provider} · 认证US`)
+  await expect(registration).toContainText(`${second.provider}`)
+  await expect(registration).toContainText('DE')
+  await expect(registration).not.toContainText('FR')
+  const company = identity.locator('details.ipq-disagreement').filter({ has: page.locator('summary[aria-label="查看公司名称来源分歧"]') })
+  await company.locator('summary').click()
+  await expect(company).toContainText('Alpha Hosting')
+  await expect(company).toContainText('Beta Net')
+  await expect(company).not.toContainText('Anon Co')
+
+  // 键盘激活：焦点移到目标标题，且标题不被吸顶上下文遮挡。
+  await identity.getByRole('link', { name: '城市来源有分歧，查看多源定位' }).press('Enter')
+  const locationHeading = page.getByRole('heading', { level: 2, name: '多源定位', exact: true })
+  await expect(locationHeading).toBeFocused()
+  await expectContextVisibleAbove(page, locationHeading)
+  await identity.getByRole('link', { name: '使用类型来源有分歧，查看风险因子' }).click()
+  const factorsHeading = page.getByRole('heading', { level: 3, name: '风险因子', exact: true })
+  await expect(factorsHeading).toBeFocused()
+  await expectContextVisibleAbove(page, factorsHeading)
+
+  // 样本按钮：读出供应商与动作，同一按钮切换且焦点不丢。
+  const toggle = page.getByRole('button', { name: `展开 ${first.provider} 的另外 1 个样本` })
+  await toggle.focus()
+  await page.keyboard.press('Enter')
+  const collapse = page.getByRole('button', { name: `收起 ${first.provider} 的样本` })
+  await expect(collapse).toBeFocused()
+  await expect(collapse).toHaveAttribute('aria-expanded', 'true')
+  await expectNoDocumentOverflow(page)
+})
 
 // ---------------------------------------------------------------------------
 // 迟到响应与浏览器前进后退

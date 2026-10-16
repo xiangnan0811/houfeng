@@ -179,7 +179,7 @@ func assertAppACLCurrentP68LedgerAppend(t *testing.T, before, after []appACLCurr
 	assertAppACLCurrentLedgerSuffix(t, before, after,
 		appACLCurrentP69Migration, appACLCurrentP70Migration, appACLCurrentP71Migration,
 		appACLCurrentP72Migration, appACLCurrentP73Migration, appACLCurrentP74Migration,
-		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration)
+		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
 }
 
 func assertAppACLCurrentP70CatalogDelta(
@@ -298,7 +298,7 @@ func testPostgresIntegrationAppACLCurrentP70Upgrade(t *testing.T) {
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
 		appACLCurrentP71Migration, appACLCurrentP72Migration, appACLCurrentP73Migration,
 		appACLCurrentP74Migration, appACLCurrentP75Migration, appACLCurrentP76Migration,
-		appACLCurrentP77Migration, appACLCurrentP78Migration)
+		appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
 	assertAppACLCurrentP70CatalogDelta(t, before.Catalog, after.Catalog, fixture.runtimeRole)
 
 	beforeRepeat := after

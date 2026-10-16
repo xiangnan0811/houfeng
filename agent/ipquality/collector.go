@@ -896,6 +896,7 @@ func isSensitiveRawJSONKey(key string) bool {
 		normalized == "api_key" ||
 		normalized == "apikey" ||
 		normalized == "secret" ||
+		strings.HasSuffix(normalized, "_secret") ||
 		strings.HasSuffix(normalized, "_token") ||
 		strings.HasSuffix(normalized, "_key") ||
 		strings.Contains(normalized, "password")

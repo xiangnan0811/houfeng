@@ -68,6 +68,16 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	ipQualityAddressFamiliesAppACLCurrentMigrationFragment(),
 	ipQualityProductAppACLCurrentMigrationFragment(),
 	ipQualityCollectionScopeAppACLCurrentMigrationFragment(),
+	ipQualityCacheExpiryAppACLCurrentMigrationFragment(),
+}
+
+func ipQualityCacheExpiryAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
+	return AppACLCurrentMigrationFragment{
+		Migration: "0079_ip_quality_cache_expiry.sql",
+		Privileges: func(string) []AppACLPrivilege {
+			return nil
+		},
+	}
 }
 
 func subscriptionExchangeRateMonthEndAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {

@@ -762,10 +762,13 @@ func TestHTTPCollectorSanitizesSensitiveRawJSON(t *testing.T) {
 				"ip":"203.0.113.10",
 				"version":4,
 				"token":"lookup-secret",
-				"nested":{"api_key":"nested-secret","Authorization":"Bearer lookup-token"}
+				"client_secret":"synthetic-root",
+				"nested":{"api_key":"nested-secret","Authorization":"Bearer lookup-token"," APP_SECRET ":"synthetic-nested"},
+				"items":[{"Signing-Secret":"synthetic-array","PRIVATE_SECRET":"synthetic-uppercase"}],
+				"ordinary":"kept","secretary":"retained","secret_count":2
 			}`))
 		case "/unlock/netflix":
-			_, _ = w.Write([]byte(`{"status":"unlocked","region":"US","access_token":"service-secret"}`))
+			_, _ = w.Write([]byte(`{"status":"unlocked","region":"US","access_token":"service-secret","client_secret":"synthetic-service-root","nested":{" APP_SECRET ":"synthetic-service-nested"},"items":[{"Signing-Secret":"synthetic-service-array","PRIVATE_SECRET":"synthetic-service-uppercase"}],"ordinary":"kept","secretary":"retained","secret_count":2}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -787,7 +790,7 @@ func TestHTTPCollectorSanitizesSensitiveRawJSON(t *testing.T) {
 	}, time.Date(2026, time.June, 8, 12, 0, 0, 0, time.UTC))[0]
 
 	raw := string(report.RawJSON)
-	for _, secret := range []string{"lookup-secret", "nested-secret", "lookup-token", "service-secret"} {
+	for _, secret := range []string{"lookup-secret", "nested-secret", "lookup-token", "service-secret", "synthetic-root", "synthetic-nested", "synthetic-array", "synthetic-uppercase", "synthetic-service-root", "synthetic-service-nested", "synthetic-service-array", "synthetic-service-uppercase"} {
 		if strings.Contains(raw, secret) {
 			t.Fatalf("RawJSON leaked secret %q: %s", secret, raw)
 		}
@@ -798,6 +801,20 @@ func TestHTTPCollectorSanitizesSensitiveRawJSON(t *testing.T) {
 	var decoded map[string]any
 	if err := json.Unmarshal(report.RawJSON, &decoded); err != nil {
 		t.Fatalf("RawJSON is not valid JSON: %v; payload=%s", err, raw)
+	}
+	for _, section := range []string{"lookup", "services"} {
+		payload, err := json.Marshal(decoded[section])
+		if err != nil || decoded[section] == nil {
+			t.Fatalf("missing or invalid %s payload: %v; raw=%s", section, err, raw)
+		}
+		for _, field := range []string{
+			`"client_secret":"[redacted]"`, `" APP_SECRET ":"[redacted]"`, `"Signing-Secret":"[redacted]"`, `"PRIVATE_SECRET":"[redacted]"`,
+			`"ordinary":"kept"`, `"secretary":"retained"`, `"secret_count":2`,
+		} {
+			if !strings.Contains(string(payload), field) {
+				t.Errorf("%s payload = %s, want field %s", section, payload, field)
+			}
+		}
 	}
 }
 

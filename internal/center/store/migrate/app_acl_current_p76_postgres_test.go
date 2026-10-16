@@ -65,7 +65,7 @@ func testPostgresIntegrationAppACLCurrentP76Upgrade(t *testing.T, state string) 
 		t.Fatalf("current successor must append exactly one manifest: %#v", after.Manifest)
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP77Migration, appACLCurrentP78Migration)
+		appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
 	for _, pair := range [][2][]AppACLEffectiveCatalogPrivilegeObservationR1{
 		{before.Catalog.DirectPrivileges, after.Catalog.DirectPrivileges},
 		{before.Catalog.EffectivePrivileges, after.Catalog.EffectivePrivileges},

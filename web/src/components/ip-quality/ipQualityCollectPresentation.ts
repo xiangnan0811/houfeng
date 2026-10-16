@@ -8,12 +8,16 @@ export type CollectNoticeAction = {
   label: string
 }
 
+// 当前展示报告与本轮请求的关系：页头上下文据此标记，不解析中文文案。
+export type CollectReportContext = 'previous_valid' | 'before_refresh' | 'not_current_collection'
+
 export type CollectNotice = {
   tone: CollectNoticeTone
   title: string
   detail?: string
   action?: CollectNoticeAction
   rawError?: string
+  reportContext?: CollectReportContext
 }
 
 const UNAVAILABLE_LABELS: Record<string, string> = {
@@ -195,26 +199,29 @@ function completedNotice(request: IPQualityCollectRequest, view: CollectNoticeVi
         title: view.hasReport ? '本次采集失败，仍展示上一份有效报告' : '本次采集失败',
         detail: `${safeCollectErrorSummary(rawError)} · ${LEGACY_SINGLE_FAMILY_NOTICE}`,
         ...(rawError ? { rawError } : {}),
+        ...(view.hasReport ? { reportContext: 'previous_valid' as const } : {}),
       }
     }
-    if (view.refreshState === 'refreshing') return { tone: 'progress', title: '本轮采集已结束，正在刷新报告', detail: LEGACY_SINGLE_FAMILY_NOTICE }
+    if (view.refreshState === 'refreshing') {
+      return { tone: 'progress', title: '本轮采集已结束，正在刷新报告', detail: LEGACY_SINGLE_FAMILY_NOTICE, ...beforeRefresh(view) }
+    }
     if (view.refreshState === 'failed') {
-      return { tone: 'warning', title: '本轮采集已结束，报告刷新失败', detail: view.hasReport ? `仍展示刷新前的报告 · ${LEGACY_SINGLE_FAMILY_NOTICE}` : LEGACY_SINGLE_FAMILY_NOTICE }
+      return { tone: 'warning', title: '本轮采集已结束，报告刷新失败', detail: view.hasReport ? `仍展示刷新前的报告 · ${LEGACY_SINGLE_FAMILY_NOTICE}` : LEGACY_SINGLE_FAMILY_NOTICE, ...beforeRefresh(view) }
     }
     if (view.reportCollectRequestID === request.request_id) {
       return { tone: 'success', title: '采集完成，报告已更新', detail: LEGACY_SINGLE_FAMILY_NOTICE }
     }
-    return { tone: 'muted', title: '本轮采集已结束', detail: LEGACY_SINGLE_FAMILY_NOTICE }
+    return { tone: 'muted', title: '本轮采集已结束', detail: LEGACY_SINGLE_FAMILY_NOTICE, ...notCurrent(view) }
   }
 
   const family = view.ipVersion
   const result = family == null ? undefined : request.family_results?.find((item) => item.ip_version === family)
   if (family == null || !result) {
-    return { tone: 'muted', title: '本轮采集已结束', detail: family == null ? '未确定当前地址族' : `本轮未收到 IPv${family} 结果` }
+    return { tone: 'muted', title: '本轮采集已结束', detail: family == null ? '未确定当前地址族' : `本轮未收到 IPv${family} 结果`, ...notCurrent(view) }
   }
   if (result.availability === 'unavailable') {
     const title = `本轮未检测到 IPv${family} 可用本地地址`
-    return view.hasReport ? { tone: 'muted', title, detail: '已保留该地址族的历史结果' } : { tone: 'muted', title }
+    return view.hasReport ? { tone: 'muted', title, detail: '已保留该地址族的历史结果', reportContext: 'previous_valid' } : { tone: 'muted', title }
   }
   if (result.report_status !== 'success' && result.report_status !== 'partial') {
     return {
@@ -222,12 +229,13 @@ function completedNotice(request: IPQualityCollectRequest, view: CollectNoticeVi
       title: view.hasReport ? `本轮 IPv${family} 采集失败，仍展示上一份有效结果` : `本轮 IPv${family} 采集失败`,
       detail: familyFailureDetail(result.error_code, family),
       ...(rawError ? { rawError } : {}),
+      ...(view.hasReport ? { reportContext: 'previous_valid' as const } : {}),
     }
   }
-  if (view.refreshState === 'refreshing') return { tone: 'progress', title: '本轮采集已结束，正在刷新报告' }
+  if (view.refreshState === 'refreshing') return { tone: 'progress', title: '本轮采集已结束，正在刷新报告', ...beforeRefresh(view) }
   if (view.refreshState === 'failed') {
     return view.hasReport
-      ? { tone: 'warning', title: '本轮采集已结束，报告刷新失败', detail: '仍展示刷新前的报告' }
+      ? { tone: 'warning', title: '本轮采集已结束，报告刷新失败', detail: '仍展示刷新前的报告', reportContext: 'before_refresh' }
       : { tone: 'warning', title: '本轮采集已结束，报告刷新失败' }
   }
   if (request.collection_id && view.reportCollectionID === request.collection_id) {
@@ -235,7 +243,15 @@ function completedNotice(request: IPQualityCollectRequest, view: CollectNoticeVi
       ? { tone: 'success', title: '采集完成，报告已更新', detail: `IPv${family} 部分来源未返回结果` }
       : { tone: 'success', title: '采集完成，报告已更新' }
   }
-  return { tone: 'muted', title: '本轮采集已结束', detail: '当前展示的报告不是本轮结果' }
+  return { tone: 'muted', title: '本轮采集已结束', detail: '当前展示的报告不是本轮结果', ...notCurrent(view) }
+}
+
+function beforeRefresh(view: CollectNoticeView): Pick<CollectNotice, 'reportContext'> {
+  return view.hasReport ? { reportContext: 'before_refresh' } : {}
+}
+
+function notCurrent(view: CollectNoticeView): Pick<CollectNotice, 'reportContext'> {
+  return view.hasReport ? { reportContext: 'not_current_collection' } : {}
 }
 
 // collectNotice 只描述本次页面会话中发起或正在进行的请求；历史上已结束的请求不打扰用户。
