@@ -266,25 +266,52 @@ func TestEventMarshalsEmptyCollectionsAsArrays(t *testing.T) {
 // they reach a response body, one authorization scope learns that activity it
 // cannot see is advancing.
 func TestEventJSONNeverCarriesGlobalProjectionState(t *testing.T) {
+	// A public timestamp may legitimately contain digits from the internal sequence.
+	at := time.Date(2026, time.October, 16, 10, 28, 3, 294211047, time.UTC)
 	payload, err := json.Marshal(Event{
 		ActivityID:     "act_2z4a",
 		EventKind:      EventKindRecordRevised,
-		EventAt:        time.Now().UTC(),
-		RecordedAt:     time.Now().UTC(),
+		EventAt:        at,
+		RecordedAt:     at,
 		IngestSequence: 4211,
 	})
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}
-	for _, forbidden := range []string{
-		"ingest_sequence",
-		"projection_generation",
-		"as_of",
-		"checkpoint",
-		"4211",
-	} {
-		if strings.Contains(string(payload), forbidden) {
-			t.Fatalf("event JSON leaks %q: %s", forbidden, payload)
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode event: %v", err)
+	}
+	for _, field := range []string{"event_at", "recorded_at"} {
+		if fields[field] != at.Format(time.RFC3339Nano) {
+			t.Fatalf("%s does not preserve the public timestamp: %s", field, payload)
 		}
 	}
+	var checkValue func(any)
+	checkValue = func(value any) {
+		t.Helper()
+		switch value := value.(type) {
+		case map[string]any:
+			for key, child := range value {
+				switch key {
+				case "ingest_sequence", "projection_generation", "as_of", "checkpoint":
+					t.Fatalf("event JSON exposes internal field %q: %s", key, payload)
+				}
+				checkValue(child)
+			}
+		case []any:
+			for _, child := range value {
+				checkValue(child)
+			}
+		case float64:
+			if value == 4211 {
+				t.Fatalf("event JSON exposes internal sequence: %s", payload)
+			}
+		case string:
+			if value == "4211" {
+				t.Fatalf("event JSON exposes internal sequence: %s", payload)
+			}
+		}
+	}
+	checkValue(fields)
 }
