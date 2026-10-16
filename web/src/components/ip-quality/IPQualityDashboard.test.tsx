@@ -277,7 +277,17 @@ describe('IPQualityDashboard', () => {
     expect(identity).toHaveTextContent('IPv4')
     expect(within(identity).getByRole('button', { name: '复制出口 IP' })).toBeInTheDocument()
     expect(within(identity).queryByText(/link|v1\.1\.0|ipq_001|AS64500/)).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '历史' })).toHaveAttribute('href', '#ip-quality-history-title')
+    const historyAnchor = screen.getByRole('link', { name: '历史' })
+    expect(historyAnchor).toHaveAttribute('href', '#ip-quality-history-title')
+    // 普通激活把焦点移到历史标题；修饰键点击（新窗口/标签）不劫持焦点。
+    const historyHeading = screen.getByRole('heading', { level: 2, name: '历史报告' })
+    historyAnchor.focus()
+    fireEvent.click(historyAnchor, { button: 0, metaKey: true })
+    expect(document.activeElement).toBe(historyAnchor)
+    fireEvent.click(historyAnchor, { button: 0, ctrlKey: true })
+    expect(document.activeElement).toBe(historyAnchor)
+    fireEvent.click(historyAnchor, { button: 0 })
+    expect(document.activeElement).toBe(historyHeading)
     // 旧报告没有 product：只给短标记，不铺解释段落。
     expect(screen.getByText('旧版报告')).toBeInTheDocument()
     expect(screen.queryByRole('note', { name: '服务探测可信度' })).not.toBeInTheDocument()
@@ -404,6 +414,50 @@ describe('IPQualityDashboard', () => {
       '/vps/vps_001/ip-quality?ip_version=4&report_id=ipq_006',
     ])
     expect(within(section).getByRole('button', { name: '收起' })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('states collection facts per history report without a negative risk verdict', () => {
+    const noHits = { ...productSummary(), risk_flags: [], high_risk_sources: [], blacklist_listed_count: 0 }
+    const entry = (id: string, day: string, patch: Partial<IPQualitySummary>): IPQualitySummary => ({
+      ...summary, report_id: id, observed_at: `2026-06-${day}T12:00:00Z`, risk_level: '', product_revision: 1, ...patch,
+    })
+    const history: IPQualitySummary[] = [
+      // 部分采集、名单一个都没查成：只陈述采集过程。
+      entry('ipq_010', '07', { status: 'partial', product_summary: { ...noHits, blacklist_checked_count: 0, service_available_count: 2 } }),
+      // 采集成功但 Center 资料仍 pending / 已 failed：成功不是风险阴性，也不借别的报告的 product。
+      entry('ipq_011', '06', { status: 'success', intelligence_state: 'pending', product_summary: { ...noHits, blacklist_checked_count: 0, service_available_count: 3 } }),
+      entry('ipq_012', '05', { status: 'success', intelligence_state: 'failed', product_summary: { ...noHits, service_available_count: 4 } }),
+      // 部分采集但已有阳性：阳性优先保留。
+      entry('ipq_013', '04', { status: 'partial', product_summary: { ...noHits, high_risk_sources: ['ipapi.is'], blacklist_listed_count: 2, service_available_count: 1 } }),
+      // 旧报告仍明确是旧版评级。
+      { ...summary, report_id: 'ipq_014', observed_at: '2026-06-03T12:00:00Z', risk_level: 'medium' },
+    ]
+
+    renderDashboard(report({ history }))
+
+    const section = screen.getByRole('heading', { name: '历史报告' }).closest('section') as HTMLElement
+    const items = within(section).getAllByRole('listitem')
+    expect(items).toHaveLength(5)
+    for (const item of items) expect(item).not.toHaveTextContent(/未见|无风险|低风险|安全|正常/)
+    expect(items[0]).toHaveTextContent('部分采集')
+    expect(items[0]).toHaveTextContent('服务 2 可用')
+    expect(items[0]).not.toHaveTextContent('采集成功')
+    expect(items[1]).toHaveTextContent('采集成功')
+    expect(items[1]).toHaveTextContent('服务 3 可用')
+    expect(items[2]).toHaveTextContent('采集成功')
+    expect(items[2]).toHaveTextContent('服务 4 可用')
+    expect(items[3]).toHaveTextContent('高风险：ipapi.is')
+    expect(items[3]).toHaveTextContent('黑名单 2')
+    expect(items[3]).toHaveTextContent('服务 1 可用')
+    // 有阳性时不再附加过程文字，避免“部分采集”被读成对阳性的削弱或总评。
+    expect(items[3]).not.toHaveTextContent('部分采集')
+    expect(items[4]).toHaveTextContent('旧版评级 · 中风险')
+    expect(items[4]).not.toHaveTextContent(/采集成功|部分采集/)
+    for (const item of items.slice(0, 4)) expect(item).not.toHaveTextContent('评级')
+    const links = within(section).getAllByRole('link', { name: /^查看 .* 的报告$/ })
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(
+      ['ipq_010', 'ipq_011', 'ipq_012', 'ipq_013', 'ipq_014'].map((id) => `/vps/vps_001/ip-quality?ip_version=4&report_id=${id}`),
+    )
   })
 
   describe('revision1 product report', () => {
@@ -653,6 +707,12 @@ describe('IPQualityDashboard', () => {
       const regRows = Array.from(registration.querySelectorAll('dl > div')).map((row) => row.textContent)
       expect(regRows).toEqual(['ipapi.is · 认证US', 'ipquery.io · 匿名DE'])
       expect(registration).not.toHaveTextContent(/FR|CN/)
+      // 就近展开有装饰性方向标记（对辅助技术隐藏，名称不含字形）；跳转链接不带该标记。
+      const regSummary = registration.querySelector('summary') as HTMLElement
+      expect(regSummary).toHaveAccessibleName('查看注册地来源分歧')
+      expect(regSummary.querySelector('.ipq-disagreement__caret')).toHaveAttribute('aria-hidden', 'true')
+      expect(regSummary).toHaveTextContent('来源有分歧')
+      expect(identity.querySelectorAll('a .ipq-disagreement__caret')).toHaveLength(0)
 
       fireEvent.click(within(identity).getByText('更多信息'))
       const company = identity.querySelector('summary[aria-label="查看公司名称来源分歧"]')?.closest('details') as HTMLElement
@@ -1344,14 +1404,14 @@ describe('IPQualityDashboard', () => {
   })
 
   describe('report context and empty-state recovery', () => {
-    function renderView(view: IPQualityDashboardView, { collect = controller(), initialEntry = '/vps/vps_001/ip-quality?ip_version=4' }: { collect?: IPQualityCollectController, initialEntry?: string } = {}) {
+    function renderView(view: IPQualityDashboardView, { collect = controller(), initialEntry = '/vps/vps_001/ip-quality?ip_version=4', onSelectFamily = vi.fn() }: { collect?: IPQualityCollectController, initialEntry?: string, onSelectFamily?: (next: 4 | 6) => void } = {}) {
       const viewingHistory = new URL(initialEntry, 'http://local').searchParams.has('report_id')
       return render(
         <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route
               path="/vps/:vpsId/ip-quality"
-              element={<IPQualityDashboard view={view} detailPath="/vps/vps_001" collect={collect} viewingHistory={viewingHistory} refreshState="idle" onSelectFamily={vi.fn()} />}
+              element={<IPQualityDashboard view={view} detailPath="/vps/vps_001" collect={collect} viewingHistory={viewingHistory} refreshState="idle" onSelectFamily={onSelectFamily} />}
             />
           </Routes>
         </MemoryRouter>,
@@ -1378,6 +1438,9 @@ describe('IPQualityDashboard', () => {
       expect(context.firstElementChild).toContainElement(screen.getByRole('group', { name: 'IP 地址族' }))
       expect(screen.getByLabelText('报告身份')).toHaveAttribute('aria-busy', 'true')
       expect(screen.getByLabelText('报告身份')).toHaveTextContent('IPv6')
+      // 普通（非历史）加载仍高亮目标族，标题跟随目标族。
+      expect(within(screen.getByRole('group', { name: 'IP 地址族' })).getByRole('button', { name: 'IPv6' })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByText('正在加载 IPv6 报告')).toBeInTheDocument()
       // 加载时采集入口只是非交互占位。
       expect(screen.queryByRole('button', { name: '立即采集' })).not.toBeInTheDocument()
       expect(screen.queryByRole('status', { name: 'IP 质量采集状态' })).not.toBeInTheDocument()
@@ -1391,11 +1454,31 @@ describe('IPQualityDashboard', () => {
       expect(retry).toHaveBeenCalledTimes(1)
       errored.unmount()
 
-      // 历史报告未解析时不猜族，也不给猜出来的“查看最新报告”链接。
-      const history = renderView({ kind: 'loading', ipVersion: 6 }, { initialEntry: '/vps/vps_001/ip-quality?ip_version=6&report_id=ipq_000' })
-      expect(screen.getByLabelText('报告身份')).toHaveTextContent('待确定')
-      expect(screen.queryByRole('link', { name: '查看最新报告' })).not.toBeInTheDocument()
-      history.unmount()
+      // 历史报告未解析时（加载/失败/空）选择器、标题与身份都不猜族，也不给猜出来的“查看最新报告”链接；
+      // 族按钮仍可点，进入所点族的 latest。
+      const historyEntry = '/vps/vps_001/ip-quality?ip_version=6&report_id=ipq_000'
+      const unresolved: Array<{ view: IPQualityDashboardView, title: string }> = [
+        { view: { kind: 'loading', ipVersion: 6 }, title: '正在加载 IP 质量报告' },
+        { view: { kind: 'error', ipVersion: 6, error: 'temporary failure', onRetry: vi.fn() }, title: 'IP 质量报告加载失败' },
+        { view: { kind: 'empty', report: emptyReport('available', null), ipVersion: 6 }, title: '暂无 IP 质量报告' },
+      ]
+      for (const { view, title } of unresolved) {
+        const onSelectFamily = vi.fn()
+        const history = renderView(view, { initialEntry: historyEntry, onSelectFamily })
+        const family = screen.getByRole('group', { name: 'IP 地址族' })
+        expect(within(family).getByRole('button', { name: 'IPv4' })).toHaveAttribute('aria-pressed', 'false')
+        expect(within(family).getByRole('button', { name: 'IPv6' })).toHaveAttribute('aria-pressed', 'false')
+        const identity = screen.getByLabelText('报告身份')
+        expect(identity).toHaveTextContent('待确定')
+        expect(identity).not.toHaveTextContent(/IPv[46]/)
+        expect(screen.getByText(title)).toBeInTheDocument()
+        expect(screen.queryByText(/正在加载 IPv[46] 报告|暂无 IPv[46] 质量报告/)).not.toBeInTheDocument()
+        expect(screen.queryByRole('link', { name: '查看最新报告' })).not.toBeInTheDocument()
+        expect(screen.getByText('查看最新报告')).toHaveAttribute('aria-disabled', 'true')
+        fireEvent.click(within(family).getByRole('button', { name: 'IPv4' }))
+        expect(onSelectFamily).toHaveBeenCalledWith(4)
+        history.unmount()
+      }
 
       renderView({ kind: 'invalid_family' })
       expect(screen.getByLabelText('报告身份')).toHaveTextContent('地址族参数无效')

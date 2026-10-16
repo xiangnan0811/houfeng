@@ -101,14 +101,18 @@
 .ipq-chip-link:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px}
 /* 字段就近的来源分歧披露：默认关闭，展开后紧凑列出供应商、方式与原值。 */
 .ipq-page .ipq-disagreement{min-width:0}
-.ipq-page .ipq-disagreement > summary{cursor:pointer;list-style:none}
+.ipq-page .ipq-disagreement > summary{gap:var(--space-1);cursor:pointer;list-style:none}
 .ipq-page .ipq-disagreement > summary::-webkit-details-marker{display:none}
+/* 方向标记区分“就近展开”与跳转链接：关闭指右、打开指下；打开态只用强调边框表达交互激活，不用风险色。 */
+.ipq-page .ipq-disagreement__caret{display:inline-block;flex:0 0 auto;color:currentColor}
+.ipq-page .ipq-disagreement[open] > summary .ipq-disagreement__caret{transform:rotate(90deg)}
+.ipq-page .ipq-disagreement[open] > summary{border-style:solid;border-color:var(--accent-border);color:var(--text-primary);background:var(--panel-bg-muted)}
 .ipq-page .ipq-disagreement__list{display:grid;gap:2px;margin:var(--space-1) 0 0;padding:var(--space-1) var(--space-2);border-left:var(--border-w) solid var(--border-muted)}
 .ipq-page .ipq-disagreement__list > div{display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--space-1) var(--space-2);min-width:0}
 .ipq-page .ipq-disagreement__list dt{color:var(--text-secondary);font-size:var(--vps-detail-helper-size)}
 .ipq-page .ipq-disagreement__list dd{min-width:0;margin:0;color:var(--text-primary);overflow-wrap:anywhere}
-.ipq-page :is(.ipq-location, .ipq-risk__block) :is(h2, h3)[tabindex='-1']:focus{outline:none}
-.ipq-page :is(.ipq-location, .ipq-risk__block) :is(h2, h3)[tabindex='-1']:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px;border-radius:var(--radius-1)}
+.ipq-page :is(.ipq-location, .ipq-risk__block, .ipq-history) :is(h2, h3)[tabindex='-1']:focus{outline:none}
+.ipq-page :is(.ipq-location, .ipq-risk__block, .ipq-history) :is(h2, h3)[tabindex='-1']:focus-visible{outline:var(--border-w-strong) solid var(--accent);outline-offset:2px;border-radius:var(--radius-1)}
 .ipq-facts{display:grid;grid-template-columns:repeat(auto-fill, minmax(min(100%, 15rem), 1fr));gap:6px 20px;margin:0}
 .ipq-facts > div{display:grid;grid-template-columns:5.5rem minmax(0, 1fr);align-items:baseline;gap:var(--space-2);min-width:0}
 .ipq-facts dt{color:var(--text-muted);font-size:var(--vps-detail-helper-size)}

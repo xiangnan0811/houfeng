@@ -20,8 +20,9 @@ import { COLLECT_POLL_INTERVAL_MS, useIPQualityCollect } from './useIPQualityCol
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((done) => { resolve = done })
-  return { promise, resolve }
+  let reject!: (error: unknown) => void
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+  return { promise, resolve, reject }
 }
 
 function status(requestStatus?: 'pending' | 'dispatched' | 'completed' | 'expired' | 'failed', extra: Partial<IPQualityCollectStatus> = {}): IPQualityCollectStatus {
@@ -303,6 +304,160 @@ describe('useIPQualityCollect', () => {
     expect(result.current.error).toBeNull()
     expect(result.current.active).toBe(true)
     expect(result.current.watchedRequestId).toBe('ipqc_001')
+    // 接手服务端真实范围后继续轮询，不额外 POST。
+    const reads = api.getVPSIPQualityCollectStatus.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS) })
+    expect(api.getVPSIPQualityCollectStatus.mock.calls.length).toBeGreaterThan(reads)
+    expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats an idle follow-up read after a 409 as a normal state without extra notices', async () => {
+    api.getVPSIPQualityCollectStatus.mockResolvedValue(status())
+    api.requestVPSIPQualityCollect.mockRejectedValue(new ApiError(409, 'collect_unavailable'))
+    const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+    await waitFor(() => expect(result.current.status?.available).toBe(true))
+
+    act(() => result.current.start([4, 6]))
+    await waitFor(() => expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(2))
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.submitting).toBe(false)
+    expect(result.current.error).toBeNull()
+    expect(result.current.active).toBe(false)
+  })
+
+  describe('POST 409 follow-up status read', () => {
+    const CONFLICT_READ_FAILED = '本次采集未能发起，当前状态读取失败，请稍后重试'
+    const conflict = () => new ApiError(409, 'collection_scope_conflict')
+    function requestStatus(requestId: string, requestStatus: 'pending' | 'dispatched' | 'failed'): IPQualityCollectStatus {
+      const next = status(requestStatus)
+      next.request = { ...next.request!, request_id: requestId }
+      return next
+    }
+
+    it.each([
+      ['an idle status', 'idle', new Error('network')],
+      ['an idle status', 'idle', new ApiError(503, 'service unavailable')],
+      ['a failed initial read', 'null', new Error('network')],
+      ['a failed initial read', 'null', new ApiError(503, 'service unavailable')],
+    ] as const)('gives a safe recovery hint when the latest follow-up read fails after %s (%s)', async (_label, initial, readError) => {
+      if (initial === 'idle') api.getVPSIPQualityCollectStatus.mockResolvedValueOnce(status())
+      else api.getVPSIPQualityCollectStatus.mockRejectedValueOnce(new Error('network'))
+      api.getVPSIPQualityCollectStatus.mockRejectedValueOnce(readError).mockResolvedValue(requestStatus('ipqc_retry', 'pending'))
+      api.requestVPSIPQualityCollect.mockRejectedValueOnce(conflict()).mockResolvedValue(requestStatus('ipqc_retry', 'pending'))
+      const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+      await waitFor(() => expect(result.current.checking).toBe(false))
+      expect(result.current.status === null).toBe(initial === 'null')
+
+      act(() => result.current.start([4]))
+      await waitFor(() => expect(result.current.error).toBe(CONFLICT_READ_FAILED))
+      expect(result.current.submitting).toBe(false)
+      expect(result.current.checking).toBe(false)
+      expect(result.current.active).toBe(false)
+      // 不自动重试 POST；用户可手动再试，并接手新请求的进度。
+      await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS * 2) })
+      expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(1)
+      act(() => result.current.start([4]))
+      expect(result.current.error).toBeNull()
+      await waitFor(() => expect(result.current.active).toBe(true))
+      expect(result.current.watchedRequestId).toBe('ipqc_retry')
+      expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(2)
+    })
+
+    it.each([
+      ['pending', 'success'],
+      ['pending', 'failure'],
+      ['completed', 'success'],
+      ['completed', 'failure'],
+    ] as const)('never lets an older follow-up read overwrite a newer POST that is %s (old read %s)', async (phase, outcome) => {
+      const followUpA = deferred<IPQualityCollectStatus>()
+      const postB = deferred<IPQualityCollectStatus>()
+      const statusB = requestStatus('ipqc_b', 'pending')
+      api.getVPSIPQualityCollectStatus.mockResolvedValueOnce(status()).mockReturnValueOnce(followUpA.promise).mockResolvedValue(statusB)
+      api.requestVPSIPQualityCollect.mockRejectedValueOnce(conflict()).mockReturnValueOnce(postB.promise)
+      const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+      await waitFor(() => expect(result.current.status?.available).toBe(true))
+
+      act(() => result.current.start([4]))
+      await waitFor(() => expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(2))
+      expect(result.current.submitting).toBe(false)
+      act(() => result.current.start([6]))
+      expect(result.current.submitting).toBe(true)
+      if (phase === 'completed') {
+        await act(async () => { postB.resolve(statusB) })
+        expect(result.current.watchedRequestId).toBe('ipqc_b')
+      }
+
+      await act(async () => {
+        if (outcome === 'success') followUpA.resolve(requestStatus('ipqc_a', 'failed'))
+        else followUpA.reject(new ApiError(503, 'service unavailable'))
+      })
+      expect(result.current.error).toBeNull()
+      if (phase === 'pending') {
+        // B 仍在提交中，旧补读既不结束提交也不写入状态。
+        expect(result.current.submitting).toBe(true)
+        expect(result.current.status?.request).toBeUndefined()
+        await act(async () => { postB.resolve(statusB) })
+      }
+      expect(result.current.submitting).toBe(false)
+      expect(result.current.error).toBeNull()
+      expect(result.current.status?.request?.request_id).toBe('ipqc_b')
+      expect(result.current.watchedRequestId).toBe('ipqc_b')
+      expect(result.current.active).toBe(true)
+    })
+
+    it.each(['switching to another VPS', 'returning to the same VPS'] as const)('keeps the current session untouched when the follow-up read fails after %s', async (move) => {
+      const followUp = deferred<IPQualityCollectStatus>()
+      api.getVPSIPQualityCollectStatus.mockResolvedValueOnce(status()).mockReturnValueOnce(followUp.promise).mockResolvedValue(status())
+      api.requestVPSIPQualityCollect.mockRejectedValueOnce(conflict())
+      const { result, rerender } = renderHook(({ vpsId }) => useIPQualityCollect(vpsId, vi.fn()), { initialProps: { vpsId: 'vps_001' } })
+      await waitFor(() => expect(result.current.status?.available).toBe(true))
+      act(() => result.current.start([4]))
+      await waitFor(() => expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(2))
+
+      rerender({ vpsId: 'vps_002' })
+      await waitFor(() => expect(result.current.status?.available).toBe(true))
+      if (move === 'returning to the same VPS') {
+        rerender({ vpsId: 'vps_001' })
+        await waitFor(() => expect(result.current.status?.available).toBe(true))
+      }
+      await act(async () => { followUp.reject(new Error('network')) })
+      expect(result.current.error).toBeNull()
+      expect(result.current.checking).toBe(false)
+      expect(result.current.submitting).toBe(false)
+    })
+
+    it('does not issue further requests when the follow-up read fails after unmount', async () => {
+      const followUp = deferred<IPQualityCollectStatus>()
+      api.getVPSIPQualityCollectStatus.mockResolvedValueOnce(status()).mockReturnValueOnce(followUp.promise)
+      api.requestVPSIPQualityCollect.mockRejectedValueOnce(conflict())
+      const { result, unmount } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+      await waitFor(() => expect(result.current.status?.available).toBe(true))
+      act(() => result.current.start([4]))
+      await waitFor(() => expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(2))
+
+      unmount()
+      await act(async () => { followUp.reject(new Error('network')) })
+      await act(async () => { await vi.advanceTimersByTimeAsync(COLLECT_POLL_INTERVAL_MS * 2) })
+      expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(2)
+      expect(api.requestVPSIPQualityCollect).toHaveBeenCalledTimes(1)
+    })
+
+    it.each([
+      ['succeeds', () => Promise.resolve(status())],
+      ['fails', () => Promise.reject(new Error('network'))],
+      ['itself returns 409', () => Promise.reject(new ApiError(409, 'conflict'))],
+    ] as const)('keeps the generic POST error after a non-409 failure when the follow-up read %s', async (_label, followUp) => {
+      api.getVPSIPQualityCollectStatus.mockResolvedValueOnce(status()).mockImplementationOnce(followUp).mockResolvedValue(status())
+      api.requestVPSIPQualityCollect.mockRejectedValueOnce(new ApiError(500, 'internal'))
+      const { result } = renderHook(() => useIPQualityCollect('vps_001', vi.fn()))
+      await waitFor(() => expect(result.current.status?.available).toBe(true))
+
+      act(() => result.current.start([4, 6]))
+      await waitFor(() => expect(api.getVPSIPQualityCollectStatus).toHaveBeenCalledTimes(2))
+      await act(async () => { await Promise.resolve() })
+      expect(result.current.error).toBe('发起采集失败，请稍后重试')
+      expect(result.current.submitting).toBe(false)
+    })
   })
 })
 
