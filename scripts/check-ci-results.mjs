@@ -30,7 +30,9 @@ export function assertGoResult({ changesResult, goSelected, postgresSelected, go
   assertSelection('goSelected', goSelected);
   assertSelection('postgresSelected', postgresSelected);
   assertLaneResult('go-check', goSelected, goResult);
-  assertLaneResult('record-platform-pg16-catalog', postgresSelected, catalogResult);
+  if (catalogResult !== 'success') {
+    throw new Error('record-platform-pg16-catalog must be success');
+  }
   assertLaneResult('business-postgres', postgresSelected, businessResult);
 }
 

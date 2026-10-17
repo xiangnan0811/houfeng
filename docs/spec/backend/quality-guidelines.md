@@ -55,7 +55,7 @@
 当前 workflow job 合约：
 
 - `changes` 执行 CI-tool 行为测试并分类实际 tree：PR event base → checkout merge candidate，main push before → checkout SHA；无可靠 baseline 时选择全部。
-- `go-check`、三个 `record-platform-pg16-catalog` 版本及 `business-postgres` 按分类运行共享 runner；required `go` 聚合四类结果，数据库失败同样阻断它。
+- `go-check` 与 `business-postgres` 按分类运行共享 runner；三个 `record-platform-pg16-catalog` 实例始终展开并验证分类，按选择运行原有 strict runner 或明确报告不适用。required `go` 聚合这些结果，数据库失败同样阻断它。
 - `web` 始终验证分类输出，运行 docs lane（工具测试、docs、严格 manifest 校验），再按选择运行 Web lane。
 - `web-browser-shard` 为两个独立构建、互不等待 Web coverage 的 shard；required `web-browser` 只聚合选择与矩阵结果。
 - `docker-image` 验证分类，再按选择使用 Buildx/build-push-action 构建 root Dockerfile，`VERSION=dev`、`push: false`；发布仍由 `publish-images.yml` 单独负责。
@@ -70,7 +70,8 @@
 - 四个 host-network PostgreSQL fixture 仅监听 `127.0.0.1`，逐个启动并通过 TCP readiness 后才启动下一个，避免无必要的通配地址绑定冲突。端口检查不是预留；真正的 loopback 冲突仍失败并清理，不重试、不回退 IPv6/Unix socket，四个 system identifier 必须两两不同。
 - `web/package.json` 缺失必须失败。本地适用数据库/image lane 需要真实 Docker daemon，image 还需要 buildx；缺依赖或 build 失败明确阻止 commit/push，不能留给 CI 或发布 workflow 兜底。image lane 只构建，不登录/push/签名。
 - runner 子进程清除 database/PG、`HOUFENG_*`、Vite、Node/Go/Make 选择与 Git-local/config overrides，固定 `GOTOOLCHAIN=local`、`GOWORK=off`、`GOENV=off`；普通 Go 不 opt-in 数据库。strict runner 自建隔离 URL，保留 PATH/HOME/缓存/必要代理，不能宣称恶意代码沙箱。不改调用者环境/index，不读取凭据。未跟踪（含 ignored）的私有 Web dotenv 文件只报路径并阻止 Web/browser。
-- required `go` / `web-browser` 聚合只接受 `changes=success` 和严格字符串 `true|false` 选择；选中子项必须 success，未选中必须 skipped。missing/failure/cancelled 或不合选择的 skipped 一律失败。`web` / `docker-image` 也必须验证全部五个分类输出。
+- required `go` / `web-browser` 聚合只接受 `changes=success` 和严格字符串 `true|false` 选择。catalog 在 postgres 两种选择模式下都必须 success；Go check、业务 PostgreSQL、browser shards 各按对应选择，选中必须 success，未选中必须 skipped。missing/failure/cancelled、catalog skipped 或其他不合选择的结果一律失败。`web` / `docker-image` 也必须验证全部五个分类输出。
+- catalog job 使用 `if: always()` 保持三个精确 required contexts；每个实例在 checkout/setup/数据库操作前要求 `changes=success` 和严格字符串 `postgres=true|false`，无效或缺失值失败。true 保持原有 checkout、Go/Node setup 与 strict PostgreSQL 命令；false 仅输出“不适用”并成功，不 checkout、不安装工具链、不启动数据库，不能记为真实 PostgreSQL 验收。不修改 required 保护或 bypass 来解决 context 缺失。
 - job-level 条件只用 Actions 支持的上下文/status 函数；`hashFiles` 仅用于支持它的 step/cache 位置。过期 PR run 可以取消，main run 不因此取消；不改变发布/部署顺序或授权。
 
 ### 4. Validation & Error Matrix
@@ -79,14 +80,15 @@
 |------|------|----------|
 | `jobs.<job_id>.if` 使用 unsupported function，例如 `hashFiles(...)` | 禁止 | GitHub Actions run 直接 `failure`，`jobs=[]`，`log not found`，check suite `latest_check_runs_count=0` |
 | `.github/workflows/ci.yml` 包含 `hashFiles` | 只有在 step-level 支持位置才允许 | job 创建前失败或表达式校验失败 |
-| 任一选中的 Go/catalog/business/browser 子项失败、取消或缺失 | required 聚合失败 | 不能因其他子项绿而放行 |
-| 未选中子项不是 skipped；分类失败或选择无效 | required 聚合失败 | 不能把未知当“不适用” |
+| 任一选中的 Go/business/browser 子项失败、取消或缺失 | required 聚合失败 | 不能因其他子项绿而放行 |
+| 任一 catalog 在 postgres=true 或 false 时失败、取消、skipped 或缺失 | required `go` 失败 | false 也须有三个明确成功的“不适用” contexts |
+| 未选中的 Go/business/browser 子项不是 skipped；分类失败或选择无效 | required 聚合失败 | 不能把未知当“不适用” |
 | `web/package.json` 缺失 | Web lane 失败 | 不输出占位成功 |
 | 适用 image/数据库 lane 缺 Docker daemon/buildx/工具 | 本地阻塞 | 修复环境后执行，不跳过 |
 
 ### 5. Good/Base/Bad Cases
 
-- Good：metadata-only/普通 docs 候选只跑轻量门禁，required checks 校验合法选择与 expected skipped 结果后通过。
+- Good：metadata-only/普通 docs 候选只跑轻量门禁；三个 catalog 实例验证合法分类并明确“不适用”成功，其余未选中子项为 expected skipped，required 聚合据此通过，不宣称数据库验收。
 - Base：后端变更选全部；Go 使用精确工具链与非修改式格式检查，三个 catalog 和业务数据库结果进入 required `go`。
 - Good：本地真实 image build 与 PR `docker-image` 都成功；仍不等同于发布、真实安装或生产验收。
 - Bad：job-level 使用 `hashFiles`，或简单让 required job 随条件消失。
@@ -94,10 +96,10 @@
 
 ### 6. Tests Required
 
-- `make test-ci-tools` 覆盖分类例外、删除/重命名/特殊路径、manifest 正反例、真实 Git 候选与聚合真值表；不要用 Make/YAML 字符串断言重新钉死 DAG。
+- `make test-ci-tools` 覆盖分类例外、删除/重命名/特殊路径、manifest 正反例、真实 Git 候选与聚合真值表，包括 postgres 两种模式下 catalog failure/cancelled/skipped/missing 的拒绝，以及 false 时业务 PostgreSQL 必须 skipped；不要用 Make/YAML 字符串断言重新钉死 DAG。
 - workflow 修改使用 actionlint 校验表达式/矩阵上下文；语法检查不替代实际 Actions。
 - `make verify-ci` 执行所有真实 lanes；额外 focused acceptance 按包合同运行。小 Go fixture 应证明未格式化时失败且字节不变、显式 fmt 后通过。
-- PR 观察全部适用实例，不仅 required 摘要：Go check、三个 PG16 catalog、业务 PostgreSQL、两个 browser shards、Web 和 image。轻量分类不等于每次都执行重门禁。
+- PR 观察全部适用实例，不仅 required 摘要：Go check、三个 PG16 catalog、业务 PostgreSQL、两个 browser shards、Web 和 image。metadata-only/普通 docs 也必须观察三个精确 catalog contexts 的明确“不适用”成功；轻量分类不等于执行真实数据库重门禁。
 - image build 只证明可构建；发布仅在另有授权时观察 `publish-images` 的 build/publish/inspect，不以本地/PR 构建宣称发布或生产成功。
 
 ### 7. Wrong vs Correct

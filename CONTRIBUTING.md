@@ -66,9 +66,16 @@ protected main/master 更新、删除、force 均拒绝，非保护 ref 纯删�
 不复用 commit 成功结果、不绕过 hooks；清晰的小改动无强制任务文档、规划审批或日志。
 
 PR 后持续监控实际 CI；required 名称保留 `go`、`web`、`web-browser`、`docker-image`，
-分支保护实际 required 集合须现场核对。重门禁按分类执行，`go` 聚合 Go check、三个 PG16 catalog
-版本及业务 PostgreSQL，`web-browser` 聚合两个独立构建的 browser shards；适用数据库/任一 shard
-失败或取消不能得到绿色聚合。metadata/普通 docs 仅跑轻量检查也必须验证合法选择与预期 skipped 结果。
+以及三个精确 `record-platform-pg16-catalog (postgres:16.0)`、
+`record-platform-pg16-catalog (postgres:16.6)`、`record-platform-pg16-catalog (postgres:16.12)`；
+分支保护实际 required 集合须现场核对，不修改保护或 bypass 来绕过缺失 context。
+catalog matrix 始终展开；每个实例先要求 `changes=success` 与严格字符串 `postgres=true|false`。
+选中时执行原有 checkout、Go/Node setup 和 strict PostgreSQL runner；未选中时仅报告不适用并成功，
+不 checkout、不安装工具链、不启动数据库，也不构成真实 PostgreSQL 验收证据。
+`go` 聚合要求 catalog 在两种模式下都 success；Go check 按自身选择、业务 PostgreSQL 按 postgres 选择，
+选中必须 success、未选中必须 skipped。`web-browser` 聚合两个独立构建的 browser shards，
+选中必须全部 success、未选中必须 skipped。分类失败、无效选择、任何 catalog 的失败/取消/skipped/缺失，
+或其他不符合选择的结果，都不能得到绿色聚合；metadata/普通 docs 同样遵守此合同。
 CI 比较实际 PR merge candidate 与 event base，main push 比较 before 与 checkout SHA；
 不可靠 event baseline 跑全套。旧 PR run 可取消，main run 不因此中断。
 本地聚焦测试不能代替 CI；数据库 skip 不能写成真实 PostgreSQL 验收通过。

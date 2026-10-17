@@ -62,9 +62,9 @@ test('Go truth table independently enforces Go, catalog and business results', (
         for (const catalogResult of results) {
           for (const businessResult of results) {
             const expectedGo = goSelected === 'true' ? 'success' : 'skipped';
-            const expectedPostgres = postgresSelected === 'true' ? 'success' : 'skipped';
+            const expectedBusiness = postgresSelected === 'true' ? 'success' : 'skipped';
             assertOutcome(() => assertGoResult({ ...go, goSelected, postgresSelected, goResult, catalogResult, businessResult }),
-              goResult === expectedGo && catalogResult === expectedPostgres && businessResult === expectedPostgres);
+              goResult === expectedGo && catalogResult === 'success' && businessResult === expectedBusiness);
           }
         }
       }
@@ -76,11 +76,24 @@ test('each Go lane rejects invalid or non-string results for both selection valu
   for (const selected of ['true', 'false']) {
     const expected = selected === 'true' ? 'success' : 'skipped';
     const valid = { ...go, goSelected: selected, postgresSelected: selected,
-      goResult: expected, catalogResult: expected, businessResult: expected };
+      goResult: expected, catalogResult: 'success', businessResult: expected };
     for (const field of ['goResult', 'catalogResult', 'businessResult']) {
       for (const result of invalidResults) {
         assert.throws(() => assertGoResult({ ...valid, [field]: result }), Error);
       }
+    }
+  }
+});
+
+test('catalog must succeed in both PostgreSQL selection modes, never fail, cancel, skip or disappear', () => {
+  for (const postgresSelected of ['true', 'false']) {
+    const valid = { ...go, postgresSelected,
+      businessResult: postgresSelected === 'true' ? 'success' : 'skipped' };
+    assert.equal(assertGoResult(valid), undefined);
+    for (const catalogResult of ['failure', 'cancelled', 'skipped', undefined]) {
+      assert.throws(() => assertGoResult({ ...valid, catalogResult }), {
+        message: 'record-platform-pg16-catalog must be success',
+      });
     }
   }
 });
@@ -92,7 +105,7 @@ test('changes must be exactly success even when no heavy lanes are selected', ()
       assertOutcome(() => assertBrowserResult({ changesResult, browserSelected: selected, shardsResult: expected }),
         changesResult === 'success');
       assertOutcome(() => assertGoResult({ changesResult, goSelected: selected, postgresSelected: selected,
-        goResult: expected, catalogResult: expected, businessResult: expected }), changesResult === 'success');
+        goResult: expected, catalogResult: 'success', businessResult: expected }), changesResult === 'success');
     }
   }
 });
@@ -123,9 +136,11 @@ test('errors name the failing lane and required result without echoing supplied 
       message: `web-browser-shard must be ${suffix}`,
     });
     const valid = { ...go, goSelected: selected, postgresSelected: selected,
-      goResult: expected, catalogResult: expected, businessResult: expected };
-    for (const [field, name] of [['goResult', 'go-check'], ['catalogResult', 'record-platform-pg16-catalog'],
-      ['businessResult', 'business-postgres']]) {
+      goResult: expected, catalogResult: 'success', businessResult: expected };
+    assert.throws(() => assertGoResult({ ...valid, catalogResult: 'private-value' }), {
+      message: 'record-platform-pg16-catalog must be success',
+    });
+    for (const [field, name] of [['goResult', 'go-check'], ['businessResult', 'business-postgres']]) {
       assert.throws(() => assertGoResult({ ...valid, [field]: 'private-value' }), {
         message: `${name} must be ${suffix}`,
       });
@@ -147,21 +162,29 @@ test('browser CLI reads fixed environment keys and permits only its selected res
     'changes must succeed');
 });
 
-test('Go CLI reads all fixed environment keys and requires both selected PostgreSQL lanes', () => {
+test('Go CLI requires catalog success in both modes and business success or skipped according to selection', () => {
   for (const GO_SELECTED of ['true', 'false']) {
     for (const POSTGRES_SELECTED of ['true', 'false']) {
-      assertCliSuccess(cli(['go'], {
+      const env = {
         CHANGES_RESULT: 'success', GO_SELECTED, POSTGRES_SELECTED,
         GO_RESULT: GO_SELECTED === 'true' ? 'success' : 'skipped',
-        CATALOG_RESULT: POSTGRES_SELECTED === 'true' ? 'success' : 'skipped',
+        CATALOG_RESULT: 'success',
         BUSINESS_RESULT: POSTGRES_SELECTED === 'true' ? 'success' : 'skipped',
-      }));
+      };
+      assertCliSuccess(cli(['go'], env));
+      for (const CATALOG_RESULT of ['failure', 'cancelled', 'skipped', undefined]) {
+        assertCliFailure(cli(['go'], { ...env, CATALOG_RESULT }),
+          'record-platform-pg16-catalog must be success');
+      }
+      for (const BUSINESS_RESULT of results.filter(result => result !== env.BUSINESS_RESULT)) {
+        assertCliFailure(cli(['go'], { ...env, BUSINESS_RESULT }),
+          `business-postgres must be ${POSTGRES_SELECTED === 'true' ? 'success when selected' : 'skipped when not selected'}`);
+      }
     }
   }
   const env = { CHANGES_RESULT: 'success', GO_SELECTED: 'true', POSTGRES_SELECTED: 'true',
     GO_RESULT: 'success', CATALOG_RESULT: 'success', BUSINESS_RESULT: 'success' };
-  for (const [key, name] of [['GO_RESULT', 'go-check'], ['CATALOG_RESULT', 'record-platform-pg16-catalog'],
-    ['BUSINESS_RESULT', 'business-postgres']]) {
+  for (const [key, name] of [['GO_RESULT', 'go-check'], ['BUSINESS_RESULT', 'business-postgres']]) {
     for (const result of ['failure', undefined]) {
       assertCliFailure(cli(['go'], { ...env, [key]: result }), `${name} must be success when selected`);
     }
