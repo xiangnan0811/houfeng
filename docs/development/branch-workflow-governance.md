@@ -21,10 +21,9 @@
 
 The repository ships versioned hooks in `.githooks/`:
 
-- `.githooks/pre-commit` rejects commits while the current branch is `main` or `master`.
-- `.githooks/pre-merge-commit` rejects direct merge commits while the current branch is `main` or `master`.
-- `.githooks/pre-rebase` rejects rebasing local `main` or `master`.
-- `.githooks/pre-push` rejects any push whose remote ref is `refs/heads/main` or `refs/heads/master`, including delete and force-push attempts.
+- `.githooks/pre-commit` and `.githooks/pre-merge-commit` reject local `main` / `master`, then invoke the root's `scripts/verify-candidate.mjs --staged` with Node while preserving the original cwd/index context.
+- `.githooks/pre-rebase` rejects rebasing local `main` / `master`; the resulting candidate is revalidated on push.
+- `.githooks/pre-push` passes its complete stdin to `node scripts/verify-candidate.mjs --push`. Every protected remote `refs/heads/main` / `refs/heads/master` update, deletion or force push is rejected before any lane starts, including direct runner invocation.
 
 Enable them once per clone:
 
@@ -37,6 +36,22 @@ The setup script configures:
 ```bash
 git config core.hooksPath .githooks
 ```
+
+Candidate validation is part of these hooks, not an optional developer-selected subset:
+
+- Commit/merge validates the complete effective index. Unstaged tracked changes and nonignored untracked files block before lanes start; there is no partial-staging snapshot and no automatic stage, stash, cleanup or rollback. Ignored caches/scratch are not candidates.
+- Resolve the root, effective index (including relative `GIT_INDEX_FILE`), HEAD OID and symbolic branch from the original invocation context. Detached HEAD, conflicts, sparse checkout, skip-worktree/assume-unchanged entries, gitlinks and unsupported tracked modes are rejected; restore a normal complete checkout rather than hiding files.
+- Record the raw NUL-delimited `git ls-files --stage` digest, HEAD and branch. Before/after every lane and at completion, recheck identity and clean-state conditions. Candidate/HEAD/branch changes invalidate checks. Unexpected tracked build/format changes remain available for inspection; hooks never undo or stage them.
+- Classification covers the entire candidate from the unique merge-base of `refs/remotes/origin/main` and HEAD, not just this commit's additions. No fetch is performed. Missing baseline, shallow history, no common ancestor or multiple merge-bases selects every lane; Git query errors fail.
+- Push parses every `local_ref local_oid remote_ref remote_oid` line before gates. Nondeleted OIDs must peel to the current HEAD commit; old/other commits and tree/blob tags are rejected. Switch to the target branch and push separately; the hook never switches checkout. Index and working tree must match HEAD. Multiple refs to that HEAD are checked once; nonprotected ref deletions need no gates.
+- Git may describe a push source as a full object ID or revision expression such as `HEAD~0`; those descriptions are accepted when the supplied OID satisfies the same HEAD boundary. Only destination refs require ref-name syntax.
+- Push classifies the actual stdin OID, not a mutable ref name, and reruns applicable gates without persisting/reusing commit success. Native Go/npm/BuildKit caches remain usable.
+
+`scripts/ci-scope.mjs` selects complete applicable lanes; see the [classification table](../../CONTRIBUTING.md#影响范围与轻量门禁). Docs/tool tests and strict release-manifest validation always run, including metadata-only candidates. PostgreSQL selection runs both the three-version catalog matrix and business tests. Unknown paths or undecodable filenames select all heavy lanes. There is no hook environment variable for skipping gates.
+
+Missing Node or any selected lane's prerequisites blocks commit/push. This includes unavailable Docker daemon/buildx, database tools/images or Chromium/system libraries; CI is an independent safeguard, not a fallback for bypassing local validation. `make verify-ci` explicitly runs every lane; `make verify` retains docs/Go/Web only.
+
+Gate subprocesses clear target-changing ambient overrides (`HOUFENG_*`, database/PG, Vite, Node/Go/Make selectors) and Git-local variables/config injection, while candidate Git queries retain the effective index. Go uses `GOTOOLCHAIN=local`, `GOWORK=off`, `GOENV=off`; strict runners create isolated database URLs. PATH, HOME, normal caches and necessary proxy/network settings remain available: this is verification hygiene, **not a malicious-code sandbox**. The caller's environment/index is not rewritten. Untracked `web/.env`, `.env.local`, `.env.test*` or `.env.production*` files, including ignored ones, block Web/browser lanes with path-only diagnostics; their contents are not read or deleted.
 
 Hooks are local guardrails, not a replacement for remote branch protection. Git does not expose a reliable hook for every destructive local operation, so do not use commands such as direct resets on local `main` / `master` even though the hook set focuses on commit, merge, rebase, and push paths. Do not bypass hooks with `--no-verify` to land ordinary work.
 

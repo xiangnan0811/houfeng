@@ -221,6 +221,7 @@ func assertAppACLCurrentP70CatalogDelta(
 
 func appACLCurrentC70PostgresProfile(t *testing.T) appACLCurrentReleasedPostgresProfileData {
 	t.Helper()
+	requireAppACLCurrentPostgres(t)
 	profileFS := appACLCurrentTransitionTestFS(t)
 	for name := range profileFS {
 		if name > appACLCurrentP70Migration {

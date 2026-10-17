@@ -413,25 +413,6 @@ func TestAppACLR2PreR1ProvisioningRevokesPGControlSystemFromPublic(t *testing.T)
 	}
 }
 
-func TestCIDockerImageJobBuildsImageInGitHubActions(t *testing.T) {
-	root := repoRoot(t)
-	workflow := readText(t, filepath.Join(root, ".github", "workflows", "ci.yml"))
-
-	for _, required := range []string{
-		"\n  docker-image:\n",
-		"docker/setup-buildx-action@v4",
-		"docker/build-push-action@v7",
-		"context: .",
-		"file: Dockerfile",
-		"push: false",
-		"VERSION=dev",
-	} {
-		if !strings.Contains(workflow, required) {
-			t.Fatalf("ci docker-image job must contain %q", required)
-		}
-	}
-}
-
 func TestPublishImagesWorkflowBuildsAndInspectsDockerImage(t *testing.T) {
 	root := repoRoot(t)
 	workflow := readText(t, filepath.Join(root, ".github", "workflows", "publish-images.yml"))

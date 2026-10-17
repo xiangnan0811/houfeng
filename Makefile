@@ -3,7 +3,6 @@ GO ?= go
 NPM ?= npm
 CENTER_BIN := ./bin/houfeng-center
 AGENT_BIN := ./bin/houfeng-agent
-GO_PACKAGES := $(shell $(GO) list ./... 2>/dev/null)
 GO_VERIFY_PATTERNS := ./agent/... ./cmd/... ./db/... ./internal/...
 VERSION ?= dev
 AGENT_RELEASE_DIR ?= ./dist
@@ -12,7 +11,7 @@ AGENT_RELEASE_ARM64 := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_linux_arm64
 AGENT_RELEASE_SOURCE := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_source.tar.gz
 AGENT_RELEASE_LICENSES := $(AGENT_RELEASE_DIR)/houfeng-agent_$(VERSION)_licenses.txt
 
-.PHONY: fmt-go test-go vet-go build-center build-agent build-agent-release verify-go test-web-toolchain verify-web verify-docs verify
+.PHONY: fmt-go check-fmt-go test-go vet-go build-center build-agent build-agent-release verify-go test-web-toolchain test-ci-tools verify-web verify-docs verify verify-ci
 
 fmt-go:
 	@if ! command -v $(GO) >/dev/null 2>&1; then \
@@ -24,6 +23,31 @@ fmt-go:
 		echo 'no Go packages yet'; \
 	else \
 		$(GO) fmt $$packages; \
+	fi
+
+check-fmt-go:
+	@set -euo pipefail; \
+	if ! command -v $(GO) >/dev/null 2>&1; then \
+		echo '$(GO) not found' >&2; \
+		exit 1; \
+	fi; \
+	if ! command -v gofmt >/dev/null 2>&1; then \
+		echo 'gofmt not found' >&2; \
+		exit 1; \
+	fi; \
+	inputs="$$($(GO) list -f '{{range .GoFiles}}{{printf "%s/%s\n" $$.Dir .}}{{end}}{{range .CgoFiles}}{{printf "%s/%s\n" $$.Dir .}}{{end}}{{range .TestGoFiles}}{{printf "%s/%s\n" $$.Dir .}}{{end}}{{range .XTestGoFiles}}{{printf "%s/%s\n" $$.Dir .}}{{end}}' $(GO_VERIFY_PATTERNS))"; \
+	if [ -z "$$inputs" ]; then \
+		echo 'no Go packages yet'; \
+		exit 0; \
+	fi; \
+	files=(); \
+	while IFS= read -r file; do \
+		if [ -n "$$file" ]; then files+=("$$file"); fi; \
+	done <<< "$$inputs"; \
+	unformatted="$$(gofmt -l "$${files[@]}")"; \
+	if [ -n "$$unformatted" ]; then \
+		printf 'Go files need formatting; run make fmt-go:\n%s\n' "$$unformatted" >&2; \
+		exit 1; \
 	fi
 
 test-go:
@@ -98,7 +122,7 @@ build-agent-release:
 			fi; \
 	fi
 
-verify-go: fmt-go vet-go test-go
+verify-go: check-fmt-go vet-go test-go
 
 test-web-toolchain:
 	@scripts/check-web-toolchain.test.sh
@@ -114,7 +138,8 @@ verify-web: test-web-toolchain
 		$(NPM) --prefix web run bundle:check && \
 		$(NPM) --prefix web run css:analyze; \
 	else \
-		echo 'web workspace not initialized yet'; \
+		echo 'web/package.json is required for verify-web' >&2; \
+		exit 1; \
 	fi
 
 verify-docs:
@@ -123,3 +148,9 @@ verify-docs:
 
 verify:
 	./scripts/verify.sh
+
+test-ci-tools:
+	node --test scripts/ci-scope.test.mjs scripts/verify-ci.test.mjs scripts/verify-candidate.test.mjs scripts/check-ci-results.test.mjs
+
+verify-ci:
+	node scripts/verify-ci.mjs

@@ -24,14 +24,14 @@ Use the lowest level that honestly proves the change.
 | Level | Required when | Evidence |
 | --- | --- | --- |
 | Preview URL | Any user-visible UI change | Running dev server URL and route list in the final report / PR body |
-| Repository Chromium gate | Every PR/main CI; especially core page UX, state, keyboard, CSP or responsive changes | `npm run test:e2e`: fail-closed fixture routes, 30 route/viewport matrix, state/a11y/security/geometry contracts |
+| Repository Chromium gate | Impact-selected PR/main candidates, especially core page UX, state, keyboard, CSP or responsive changes; metadata/ordinary docs can skip execution | Complete local primary suite or both CI shards: fail-closed fixtures, 30 route/viewport matrix, state/a11y/security/geometry contracts; required `web-browser` validates the aggregate |
 | Local helper / center sample | Incremental detail route or real local data investigation | `visual_evidence.py`/CDP notes with explicit data source and local-only limitation |
 | Authenticated staging real lane | Release/Gate C | health version, UI login, ten real-data routes, command-audit metadata-only presence, cancel-only nested confirmation, reversible Settings save/restore, theme reload, sanitized artifact |
 | Staging injection lane | Release/Gate C frontend resilience | Deployed assets/origin/auth with explicitly intercepted five-state/503/slow/long-list responses; never described as backend or production-data proof |
 | Local screenshot for review | First-viewport structure, page hierarchy, theme, or cross-page UX materially changes and a reviewer asks for visual context | Local, untracked screenshots or external attachments; do not commit bulk screenshots or manifests by default |
 | Manual review | Visual quality, taste, density, copy, or product judgment cannot be automated | Explicit reviewer notes; do not present automated tests as visual acceptance |
 
-Vitest, coverage, lint, build, static analysis and Chromium remain required checks, but they still do not prove visual taste or real inventory truth.
+Vitest, coverage, lint, build, static analysis and Chromium remain mandatory when selected by the [shared classifier](../../CONTRIBUTING.md#影响范围与轻量门禁); they do not prove visual taste or real inventory truth. `web/**` selects Go/Web/browser/image (not PostgreSQL), Web specs and this document select Web/browser, and deployment docs/special Compose contracts/README select all lanes. Ordinary docs and exact root changelog/release manifest paths retain lightweight tool/docs/strict-manifest checks; unknown paths or unreliable baselines select all. No extension-wide Markdown exemption exists.
 
 预算策略、coverage/Chromium/staging 的强制门禁与例外统一见 [Web 质量规范](../spec/web/quality-guidelines.md#scenario-coveragechromium-与-staging-审计门)。本页仅说明如何运行和记录浏览器验证。
 
@@ -83,14 +83,26 @@ Before restarting a dev server, confirm the process and port belong to the previ
 
 ## Repository Chromium gate
 
-From `web/`, run:
+The complete shared entrypoint from the checkout root is:
+
+```bash
+node scripts/verify-ci.mjs --gates browser
+```
+
+It installs lockfile dependencies when needed and compatible Chromium (five-minute installation timeout), then runs the **whole primary suite locally**, one worker, zero retries, within a 20-minute lane limit. Only a successful Web lane earlier in the same runner process supplies a reusable build; otherwise `npm run test:e2e` invokes `pretest:e2e` for a fresh production build. Old `dist` timestamps and success from another process are not reusable evidence. `make verify-ci` includes this full lane and all other lanes; `make verify` remains docs/Go/Web only.
+Every automatic browser invocation rejects `test.only` / `test.describe.only` via `--forbid-only`, independently of the local/CI worker setting. Focused development commands are not a substitute for this full-suite gate.
+
+For standalone iteration from `web/`:
 
 ```bash
 env -u NODE_ENV npm ci --include=dev
+npm exec playwright install -- chromium
 npm run test:e2e
 ```
 
-`pretest:e2e` creates a fresh production build. `playwright.config.ts` then starts Vite preview at `127.0.0.1:4175` with `strictPort`; do not reuse or terminate an unrelated process on another port. The lockfile owns `@playwright/test`, `@axe-core/playwright` and the compatible Chromium revision.
+`playwright.config.ts` excludes staging/component/local-live suites and starts Vite preview at `127.0.0.1:4175` with `strictPort`; do not reuse or terminate an unrelated process. The lockfile owns `@playwright/test`, `@axe-core/playwright` and the Chromium revision. Missing Chromium/system libraries blocks the applicable lane. Only GitHub Actions performs bounded best-effort `install-deps` preparation; local gates do not automatically use sudo, and an actual browser failure is never ignored.
+
+The shared runner clears target-changing ambient overrides and rejects untracked private Web dotenv inputs (including ignored files), reporting paths without reading/deleting them. PATH/HOME/caches/necessary proxies remain available; this is not a malicious-code sandbox. Candidate identity and mixed-state restrictions apply to hooks, not these standalone iteration commands; see [Local Hook Contract](branch-workflow-governance.md#local-hook-contract).
 
 The fixture router is fail closed: method + canonical path/query must match, mutation fixtures declare exact body keys, and unknown API calls fail teardown. Every test shares collection for console/page/request/HTTP/CSP/unhandled-rejection diagnostics. The main document CSP must equal `internal/center/http/csp-policy.txt`; no spec keeps a second policy literal.
 
@@ -102,7 +114,9 @@ Current suites:
 - `security.spec.ts` / `fixture-router.spec.ts`: collector self-tests, CSP, unknown API, canonical query and mutation-body fail-closed behavior;
 - `visual-contracts.spec.ts`: 390px critical commands and named keyboard-scroll table region.
 
-CI runs these in the independent `web-browser` job. CI screenshots/traces are failure-only, short-retention diagnostics; they are not tracked golden images.
+CI executes two independent `web-browser-shard` instances using the same primary config and `--shard 1/2` / `--shard 2/2`, each with a fresh build, two workers, zero retries and a 20-minute job limit. They do not wait for Web coverage or share its process/build. The retained required `web-browser` check aggregates them: classification must succeed with a strict `true|false` browser selection; selected means both shards succeed, unselected means the matrix is skipped. Failure, cancellation, missing results or invalid/unexpected skipped selection fails the aggregate.
+
+For shard changes, compare full-suite and both shard `--list --reporter=json` identities (project/file/title/repeat): no overlap and union equals the whole suite. Run local shards sequentially on fixed port 4175, not concurrently. Observe both actual CI instances, not only the aggregate. CI screenshots/traces are failure-only, shard-named, short-retention diagnostics, not tracked golden images. This fixture evidence does not replace authenticated staging, release or production acceptance.
 
 ## Repo-local browser sanity helper
 

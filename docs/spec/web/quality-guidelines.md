@@ -6,9 +6,9 @@
 
 ## Overview
 
-候风前端的质量门是一条根目录命令：`make verify-web`。**CI 与本地跑同一套 Makefile target**，`.github/workflows/ci.yml` 的 Web job 运行 `NODE_ENV=production make verify-web`，验证该 target 自行隔离调用者环境；包含工具链检查、安装依赖、lint、coverage、production build、bundle 与 CSS 检查。
+前端 source 质量门为根目录 `make verify-web`：工具链检查、安装依赖、lint、coverage、production build、bundle 与 CSS 检查。CI 与本地通过共享 runner 的 Web lane 调用 `NODE_ENV=production make verify-web`，由 target 自行隔离调用者 NODE_ENV。
 
-跨前后端改动（同时动了 `internal/` / `agent/` 与 `web/`）使用 `./scripts/verify.sh` 一把跑完，等价于 `make verify-docs && make verify-go && make verify-web`（参考 `docs/spec/backend/quality-guidelines.md` 的"命令门户"段）。
+`make verify` / `./scripts/verify.sh` 保留 docs → Go → Web，不含数据库、浏览器或镜像；完整入口是 `make verify-ci`。hooks 按 [统一分类](../../../CONTRIBUTING.md#影响范围与轻量门禁) 执行完整适用集合：`web/**` / `.node-version` 选 Go/Web/browser/image、不选 PG；Web 合同文档选 Web/browser。普通 docs/metadata 可只跑轻量，但部署 docs/特殊 Compose 合同/README 及未知输入不能豁免。
 
 不存在以下东西，**不要新增**（除非通过设计基线评审）：
 
@@ -33,37 +33,18 @@
 | `npm run bundle:check` | 测量入口 JS/CSS gzip、最大 async JS gzip 与全部 WOFF2 raw；首版试用用 advisory，数值超限 warning/exit 0，输入/入口资源错误仍 exit 1 | production build 后运行；只读 `bundle-budget.json`，不重设历史参考线 |
 | `npm run lint` | `eslint .` —— 跑 `web/eslint.config.js` 的 flat config | 提交前必跑 |
 | `npm run test` | `vitest` —— 默认进入 watch；本地单次运行可用 `npm run test -- --run` | 本地迭代入口；CI 与 `make verify-web` 使用 `NODE_ENV=test npm --prefix web run test:coverage`，单次普通测试不能替代 coverage 门禁 |
-| `npm run test:e2e` | 先 production build，再用固定 Chromium 跑 fail-closed fixture browser gate | 本地完整浏览器验证与独立 `web-browser` CI job |
+| `npm run test:e2e` | 先 production build，再用固定 Chromium 跑 fail-closed fixture browser gate | 本地完整浏览器验证；CI 由共享 runner 分为两个 `web-browser-shard` 实例 |
 | `npm run test:e2e:staging` | 使用 `playwright.staging.config.ts` 对已部署 staging 做真实认证审计 | 只由受保护的 manual staging workflow 调用 |
 | `npm run preview` | `vite preview` —— 看本地 build 产物效果 | 偶尔做产物 sanity check |
 
 首版受控试用的 13 项 CSS/bundle 数值预算均为历史参考线；advisory 超限仍输出 actual/limit 与 `fail` 测量状态，JSON 用独立 `budgetPolicy` 标明退出策略。`make verify-web` / CI 使用上述 npm 入口。严格审计从仓库根直接运行 `node scripts/analyze-web-css.mjs --budget-policy enforce --format text` 与 `node scripts/check-web-bundle-budget.mjs --budget-policy enforce`（直接 CLI 省略 policy 也默认 enforce）。不重设预算、不使用 `|| true` 或 continue-on-error；coverage、安全、行为与 Chromium 检查不降级。
 
-**Makefile 端**（`test-web-toolchain` 和 `verify-web` targets）：
-
-```make
-test-web-toolchain:
-	@scripts/check-web-toolchain.test.sh
-	@scripts/check-web-quality-gates.test.sh
-
-verify-web: test-web-toolchain
-	@scripts/check-web-toolchain.sh
-	@if [ -f web/package.json ]; then \
-		env -u NODE_ENV $(NPM) --prefix web ci --include=dev && \
-		NODE_ENV=test $(NPM) --prefix web run lint && \
-		NODE_ENV=test $(NPM) --prefix web run test:coverage && \
-		NODE_ENV=production $(NPM) --prefix web run build && \
-		$(NPM) --prefix web run bundle:check && \
-		$(NPM) --prefix web run css:analyze; \
-	else \
-		echo 'web workspace not initialized yet'; \
-	fi
-```
+**根目录入口**：`make test-web-toolchain` 执行 Node-major checker 行为测试及保留的 Web/staging 静态合同检查。`make verify-web` 随后检查工具链，按锁文件安装 devDependencies，固定 test 环境 lint/coverage、production build，再运行 bundle/CSS 分析；缺 `web/package.json` 明确失败。静态合同检查不等于真实 staging 行为证据。
 
 注意：
 
-- **`make verify-web` 会跑 source/toolchain contract、lint、coverage、strict TS+Vite build、bundle/font 与 CSS AST budget**。正式 Chromium gate 作为独立 `web-browser` job 运行，避免浏览器下载与普通 source gate 混在一份日志里。
-- `npm ci` 每次清空 `node_modules` 重装，本地反复跑会比较慢；本地速度优先时直接 `cd web && npm run test -- --run` / `npm run build` 即可，CI 仍走完整 `verify-web`。
+- `make verify-web` 不执行 Chromium；CI 的两个 `web-browser-shard` 独立构建/测试，`web-browser` 是保留名称的 required 聚合。选中时两 shard 都必须 success，未选中只接受 skipped；分类失败、缺失/非法选择或失败/取消均不能放行。
+- `npm ci` 每次清空 `node_modules` 重装；focused Vitest/build 可用于迭代，但不能替代 commit/merge/push hooks 的完整适用门禁。未暂存 tracked 或 nonignored untracked 文件会阻止候选验证，push 不复用 commit 成功结果，见 [Local Hook Contract](../../development/branch-workflow-governance.md#local-hook-contract)。
 - `.node-version` 是本地与 CI 的唯一精确 runtime pin；`actions/setup-node@v6` 必须通过 `node-version-file: .node-version` 读取它。`web/package.json` 的 `engines.node = "22.x"` 只声明兼容范围。
 
 ## Scenario: 可重复前端质量门
@@ -74,8 +55,8 @@ verify-web: test-web-toolchain
 
 ### 2. Signatures
 
-- `make test-web-toolchain`：验证 runtime pin、CI 引用、tsconfig strict、Node types、quality gate wiring 与 preflight 行为。
-- `make verify-web`：source Web gate；先执行 toolchain/source contract，再 install、lint、coverage、build、bundle/font 和 CSS AST budget。
+- `make test-web-toolchain`：真实调用 checker 验证 Node-major 接受/拒绝；另保留 package scripts、staging 隐私/恢复/权限、CSP 和 docs 的静态检查，不再断言 Make/主 CI 源码 wiring 或依赖/tsconfig 字面一致性。
+- `make verify-web`：先执行上述检查，再 install、lint、coverage、build、bundle/font 和 CSS AST budget。
 - `scripts/check-web-toolchain.sh`：无参数；Node major 非 22 时返回 1。
 
 ### 3. Contracts
@@ -83,8 +64,10 @@ verify-web: test-web-toolchain
 - `.node-version` 固定当前批准的 Node 22 LTS patch；CI 不再另外写一份 Node 版本。
 - install 必须清除调用者 `NODE_ENV` 并显式包含 devDependencies。
 - lint/test 固定 `NODE_ENV=test`，build 固定 `NODE_ENV=production`。
+- 共享 runner 的 Web lane 固定 `CI=true`，使 Vitest 拒绝遗留 `.only`；browser lane 显式 `--forbid-only`，本地仍一 worker、GitHub 两 workers。自动门禁不能因 focused 标记只跑子集后放行。
 - `tsconfig.app.json` 同时启用 `strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`；`tsconfig.node.json` 也显式 `strict: true`，`@types/node` 保持 `^22`。
 - Bash 脚本从 Make 直接执行以遵守 shebang；不要用 `sh script` 覆盖 Bash interpreter。
+- 自动门禁清除目标选择相关 Node/Vite/数据库/Go/Git-local ambient overrides，保留 PATH/HOME/缓存/必要代理；这是验证输入隔离，不是恶意代码沙箱。不改变调用者环境/index。Web/browser 前发现未跟踪的 `web/.env`、`.env.local`、`.env.test*`、`.env.production*`（含 ignored）只报路径并失败，不读取或删除。
 
 ### 4. Validation & Error Matrix
 
@@ -92,7 +75,7 @@ verify-web: test-web-toolchain
 |------|------|
 | Node major 不是 22 | install 前失败，输出 `web requires Node 22.x; found vX.Y.Z` |
 | 调用者设置 `NODE_ENV=production` | 仍安装 devDependencies，并完成 lint/test/production build |
-| `.node-version`、CI、tsconfig 或 Node types 漂移 | `test-web-toolchain` 在 npm install 前失败 |
+| `web/package.json` 缺失或存在未跟踪私有 Web dotenv | Web/browser 在采用不完整/私有输入前失败 |
 | lint、coverage、build 或预算分析的结构/输入错误 | `verify-web` 原样返回非零，不掩盖失败；仅 CSS/bundle 数值超限在 advisory 下输出 warning 并退出 0 |
 
 ### 5. Good / Base / Bad Cases
@@ -103,9 +86,9 @@ verify-web: test-web-toolchain
 
 ### 6. Tests Required
 
-- fake Node 22 通过、fake/real Node 24 被拒绝，并断言完整错误文本。
-- 断言 `.node-version`、setup-node `node-version-file`、两个 strict 配置和 `@types/node` 一致。
-- CI 以 `NODE_ENV=production make verify-web` 执行：coverage、production build 与静态结构/输入检查仍必须通过；CSS/bundle 数值超限保留 warning，不阻断。`scripts/check-web-quality-gates.test.sh` 还必须证明独立 browser job 的 Node pin/install/test 位于同一 job block。
+- Node 22 通过、Node 24 被拒绝，并断言完整错误文本；这是 checker 的行为测试，不是依赖/tsconfig/YAML 字面检查。
+- `make test-ci-tools` 覆盖分类、完整候选限制和 required 聚合真值表；真实 Web/browser/image lane 与 PR checks 提供执行证据，不重新钉死 Make/主 CI DAG 源码。
+- 共享 Web lane 以 `NODE_ENV=production make verify-web` 执行，coverage、production build 与静态结构/输入检查仍必须通过；CSS/bundle 数值超限保留现行 advisory warning。
 
 ### 7. Wrong vs Correct
 
@@ -130,6 +113,7 @@ verify-web: test-web-toolchain
 
 - `npm --prefix web run test:coverage`：V8 provider；production include 固定为 `src/**/*.{ts,tsx}`，阈值来自 `web/coverage-budget.json`。
 - `npm --prefix web run test:e2e`：`web/playwright.config.ts`；Chromium、production preview `127.0.0.1:4175`、十 route × 三 viewport。
+- `node scripts/verify-ci.mjs --gates browser`：本地完整 primary suite；CI 使用 `--shard 1/2` 和 `--shard 2/2`，只在单独 browser lane 允许 shard 参数。
 - `npm --prefix web run test:e2e:staging`：`web/playwright.staging.config.ts`；不启动本地 server，只访问 `HOUFENG_STAGING_BASE_URL`。
 - `.github/workflows/frontend-staging-smoke.yml`：仅 `workflow_dispatch(expected_version)`，`environment: staging`。
 - staging env：variable `HOUFENG_STAGING_BASE_URL`；secrets `HOUFENG_STAGING_USERNAME`、`HOUFENG_STAGING_PASSWORD`；input 映射为 `HOUFENG_EXPECTED_VERSION`。
@@ -138,6 +122,7 @@ verify-web: test-web-toolchain
 #### 3. Contracts
 
 - coverage 全局下限是 statements `79.14`、branches `70.27`、functions `78.88`、lines `82.95`；`modalStack`、`useModalFocus`、`Modal`、Dashboard RemoteState/model、`apiRequest`、auth client/context 与七个 Asset controller 的 branch threshold 均不低于 90%，路径不存在也必须失败。
+- 仓库 Chromium 本地完整 suite、一 worker；CI 两 shard 各两 workers，零 retries，20 分钟 lane 上限，不运行 staging/component/local-live suites。共享进程成功执行 Web 后可复用该次构建，否则 browser 安装依赖并 fresh build；不按时间戳或跨进程旧 dist 推定可复用。
 - fixture router 以 method + canonical path/query 精确匹配；未知 API 返回 501 并在 teardown 失败，mutation fixture 必须声明 body key 集合。loading 使用受控 Promise，不用固定 sleep。
 - broad browser matrix 固定 `/`、`/vps`、`/asset-decisions`、`/monitoring`、`/targets`、`/events`、`/command-audit`、`/providers`、`/subscriptions`、`/settings` × `1440x1000`、`1024x768`、`390x900`。每项断言 main/workflow、document overflow、关键命令裁切与统一 diagnostics。
 - `/command-audit` fixture 只声明 exact default `/api/command-audits`，并故意附加 hostile stdout/stderr/details 字段；浏览器必须证明这些字段不进入 DOM，undeclared cursor query 仍返回 501。390px 合同还要证明 named focusable table wrapper 独占横向滚动、event expand 可用、advanced Modal Tab/Escape/focus restore 正常。
@@ -164,13 +149,13 @@ verify-web: test-web-toolchain
 
 #### 5. Good / Base / Bad Cases
 
-- Good：PR 的 source gate 与 30-case core route matrix/相关 Chromium contracts 都绿；release 后由 main ref dispatch staging，每次 route transition 前后都 settle tracked requests/fonts，成功截图不保留 PageState loading surface，artifact 明确区分 real-data 与 injection。
-- Base：普通纯逻辑改动跑 focused Vitest + `make verify-web`；未触及 UI 时无需凭空新增 browser case，但现有 browser job仍必须绿。
+- Good：适用 PR 的 source gate、两个 Chromium shards（含完整 route/state/a11y/security 合同）与其他适用门禁都绿；另有授权的 staging 由 main ref dispatch，artifact 明确区分 real-data 与 injection，不因仓库 gate 绿而宣称真实环境通过。
+- Base：普通 `web/**` 纯逻辑修改仍选 Go/Web/browser/image；无需凭空新增 browser case，但必须通过现有 suite。metadata/普通 docs 可不执行重门禁，required 聚合仍校验选择与预期 skipped 结果。
 - Bad：把失败 API兜底为 `[]`、允许所有 4xx/5xx、增加 retry 掩盖 flake、抬预算让 CI 变绿，或用 mock/injection 声称真实 staging 通过。
 
 #### 6. Tests Required
 
-- `scripts/check-web-quality-gates.test.sh`：package scripts、Make 调用链、browser job 作用域、staging dispatch/ref/environment/concurrency/permissions/artifact 合同。
+- `scripts/check-web-quality-gates.test.sh`：保留 package scripts、CSP、docs 以及 staging dispatch/ref/environment/concurrency/permissions/artifact/恢复隐私静态合同；这些不是实际 staging 验收。不再断言本次受影响的 Make/主 CI wiring；DAG 由分类/候选/聚合行为测试及真实 lane 证据覆盖。
 - `web/src/security/stagingAuditContract.test.ts`：用 fake timers 证明 request idle window 会被级联请求重置且 timeout 失败；用 TypeScript AST 断言 `gotoAuditedRoute` 在首个 `page.goto` 前后都等待 tracked requests，并保持旧文档 font wait 位于 navigation 前；同时覆盖 locationless expected HTTP console correlation 的正反例。
 - `web/e2e/{auth-router,core-routes,page-states,fixture-router,security,accessibility,visual-contracts}.spec.ts`：认证、30 route matrix、五态/四态、fail-closed、diagnostics、axe/键盘、390px/局部滚动。
 - 修改 audit/staging harness 后至少运行 `tsc -b`、ESLint 与 source contract；真实 lane 只能在配置完成的 GitHub staging environment 验收。
@@ -465,7 +450,7 @@ export default defineConfig([
 - ❌ **`git commit --no-verify`**：仓库 `.githooks/` 已保护本地/远端 main/master；先运行 `scripts/setup-git-hooks.sh`，不得绕过。
 - ❌ **`any` / 不带类型的 `useState()`**：`useState<T>(initial)` 必须给出 T 或让 initial 推导出 T；类型断言用 `unknown` + 收口判别替代 `any`。
 - ❌ **把 `exhaustive-deps` warning 当噪音**：要么补依赖，要么用 `useCallback` / `useRef` 重组结构；不要 `// eslint-disable`。
-- ❌ **CI 红了 force-push 改一行试**：在根目录用 `NODE_ENV=production make verify-web` 复现 Web job；Chromium 等其他 job 按各自实际命令复现。找到根因并通过受影响门禁后再提交。
+- ❌ **CI 红了 force-push 改一行试**：根目录用 `node scripts/verify-ci.mjs --gates web` 复现 Web lane；Chromium 使用 browser lane（可按实际 CI shard），其他门禁按失败入口复现。找到根因并通过适用门禁后再提交。
 - ❌ **PR 内只改后端 contract、不改前端类型**：会让 page 在运行期 `unknown` 解析报错（参考 `lib/api.ts` 的错处理）。同 PR 内必须前后端一起改完。
 - ❌ **测试用 `setTimeout(..., 1000)` 等异步**：用 `await waitFor(() => expect(...).toBeInTheDocument())` 让 RTL 自己轮询。
 - ❌ **直接 `screen.debug()` 留在测试里**：debug 完删掉。

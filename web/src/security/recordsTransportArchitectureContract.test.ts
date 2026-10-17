@@ -199,21 +199,32 @@ function eagerImportViolations(sources: SourceMap): string[] {
     .map(([path, source]) => [posix.normalize(path), source]))
   const sourceIndex = new Map<string, string>()
   for (const path of normalized.keys()) sourceIndex.set(stripSourceExtension(path), path)
-  const graph = new Map<string, string[]>()
-  const directEdges = new Map<string, ModuleEdge[]>()
+  const edgeCache = new Map<string, readonly ModuleEdge[]>()
+  const runtimeTargetCache = new Map<string, readonly string[]>()
 
-  for (const [path, source] of normalized) {
-    const edges = moduleEdges(path, source)
-    directEdges.set(path, edges)
-    graph.set(path, edges
+  function edgesOf(path: string): readonly ModuleEdge[] {
+    const cached = edgeCache.get(path)
+    if (cached) return cached
+    const source = normalized.get(path)
+    const edges = source === undefined ? [] : moduleEdges(path, source)
+    edgeCache.set(path, edges)
+    return edges
+  }
+
+  function runtimeTargetsOf(path: string): readonly string[] {
+    const cached = runtimeTargetCache.get(path)
+    if (cached) return cached
+    const targets = edgesOf(path)
       .filter((edge) => edge.runtime)
       .map((edge) => resolveSourceModule(path, edge.specifier, sourceIndex))
-      .filter((target): target is string => target !== null))
+      .filter((target): target is string => target !== null)
+    runtimeTargetCache.set(path, targets)
+    return targets
   }
 
   const violations: string[] = []
   for (const root of EAGER_ROOTS) {
-    const rootEdges = directEdges.get(root) ?? []
+    const rootEdges = edgesOf(root)
     for (const edge of rootEdges) {
       if (resolveSourceModule(root, edge.specifier, sourceIndex) === RECORDS_API_PATH) {
         violations.push(`${root}:${edge.line} direct recordsApi import forbidden`)
@@ -226,7 +237,7 @@ function eagerImportViolations(sources: SourceMap): string[] {
       const current = pending.shift()
       if (!current || visited.has(current.path)) continue
       visited.add(current.path)
-      for (const target of graph.get(current.path) ?? []) {
+      for (const target of runtimeTargetsOf(current.path)) {
         const chain = [...current.chain, target]
         if (stripSourceExtension(target) === RECORDS_API_MODULE) {
           violations.push(`${root}:1 eager chain=${chain.join(' -> ')}`)
@@ -265,6 +276,26 @@ describe('Records transport architecture contract', () => {
       'src/lib/api.ts:1 direct recordsApi import forbidden',
       'src/lib/api.ts:1 eager chain=src/lib/api.ts -> src/lib/recordsApi.ts',
       'src/main.tsx:1 eager chain=src/main.tsx -> src/app/eager.ts -> src/lib/recordsApi.ts',
+    ])
+  })
+
+  it('ignores unreachable and type-only paths while tolerating cycles and external imports', () => {
+    const sources = {
+      'src/main.tsx': "import React from 'react'\nimport './app/cycleA'\n",
+      'src/app/cycleA.ts': "import './cycleB'\nimport type { Shape } from './typed'\n",
+      'src/app/cycleB.ts': "import './cycleA'\nexport type { Shape } from './typed'\n",
+      'src/app/typed.ts': "import '../lib/recordsApi'\nexport type Shape = object\n",
+      'src/app/orphan.ts': "import '../lib/recordsApi'\n",
+      'src/app/router.tsx': "import type { listRecords } from '../lib/recordsApi'\n",
+      'src/app/layout/AppShell.tsx': 'export function AppShell() { return null }\n',
+      'src/app/layout/TopBar.tsx': 'export function TopBar() { return null }\n',
+      'src/app/layout/Sidebar.tsx': 'export function Sidebar() { return null }\n',
+      'src/lib/api.ts': "import './missing'\n",
+      [RECORDS_API_PATH]: 'export function listRecords() { return null }\n',
+    }
+
+    expect(eagerImportViolations(sources)).toEqual([
+      'src/app/router.tsx:1 direct recordsApi import forbidden',
     ])
   })
 

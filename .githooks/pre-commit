@@ -17,4 +17,11 @@ EOF
     ;;
 esac
 
-exit 0
+if ! command -v node >/dev/null 2>&1; then
+  echo "Commit blocked: Node.js is required for candidate verification." >&2
+  exit 1
+fi
+
+root=$(git rev-parse --show-toplevel)
+# Keep the original cwd so relative GIT_INDEX_FILE retains its Git meaning.
+exec node "$root/scripts/verify-candidate.mjs" --staged
