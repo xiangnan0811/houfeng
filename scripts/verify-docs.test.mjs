@@ -3,11 +3,17 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { anchors, auditRepository, links } from './verify-docs.mjs';
 
 function fixture(t, files = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'houfeng-docs-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  // Checkout-local scratch must not inherit the enclosing repository's ignored
+  // tmp/ directory when the auditor enumerates fixture files through Git.
+  execFileSync('git', ['init', '--quiet', root], {
+    env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))),
+  });
   for (const [name, text] of Object.entries({ 'docs/README.md': '# 文档\n[指南](guide.md)\n', 'docs/guide.md': '# 指南\n', ...files })) {
     const target = path.join(root, name);
     fs.mkdirSync(path.dirname(target), { recursive: true });

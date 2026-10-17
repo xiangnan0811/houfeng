@@ -97,7 +97,7 @@ start_postgres() {
     --tmpfs /var/lib/postgresql/data:rw,noexec,nosuid,size=4g \
     -e POSTGRES_PASSWORD="$password" \
     "$postgres_image" \
-    -c port="$port" >/dev/null
+    -c port="$port" -c listen_addresses=127.0.0.1 >/dev/null
 }
 
 wait_for_postgres() {
@@ -105,7 +105,7 @@ wait_for_postgres() {
   port=$2
   for attempt in $(seq 1 30)
   do
-    if docker exec "$name" pg_isready -U postgres -d postgres -p "$port" >/dev/null 2>&1
+    if docker exec "$name" pg_isready -h 127.0.0.1 -U postgres -d postgres -p "$port" >/dev/null 2>&1
     then
       return 0
     fi
@@ -133,13 +133,12 @@ witness_password=$(random_password)
 recovery_password=$(random_password)
 
 start_postgres "$app_name" "$app_port" "$app_password"
-start_postgres "$ledger_name" "$ledger_port" "$ledger_password"
-start_postgres "$witness_name" "$witness_port" "$witness_password"
-start_postgres "$recovery_name" "$recovery_port" "$recovery_password"
-
 wait_for_postgres "$app_name" "$app_port"
+start_postgres "$ledger_name" "$ledger_port" "$ledger_password"
 wait_for_postgres "$ledger_name" "$ledger_port"
+start_postgres "$witness_name" "$witness_port" "$witness_password"
 wait_for_postgres "$witness_name" "$witness_port"
+start_postgres "$recovery_name" "$recovery_port" "$recovery_password"
 wait_for_postgres "$recovery_name" "$recovery_port"
 
 system_identifiers=$(for pair in \

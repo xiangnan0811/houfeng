@@ -256,6 +256,7 @@ func appACLCurrentP64PostgresProfile(t *testing.T) appACLCurrentReleasedPostgres
 
 func appACLCurrentReleasedPostgresProfile(t *testing.T, lastMigration string) appACLCurrentReleasedPostgresProfileData {
 	t.Helper()
+	requireAppACLCurrentPostgres(t)
 	current, err := compileAppACLCurrentSourceContract(migrations.FS, appACLCurrentMigrationFragments)
 	if err != nil {
 		t.Fatalf("compile current APP ACL source for P64 profile fixture: %v", err)

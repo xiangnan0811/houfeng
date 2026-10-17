@@ -48,18 +48,6 @@ const directYamlKeys = (source, indent) => source
   .split(/\r?\n/)
   .filter((line) => leadingSpaces(line) === indent && /^[^#\s][^:]*:/.test(line.trim()))
   .map((line) => line.trim().match(/^([^:]+):/)?.[1] ?? '')
-const makeTarget = (source, target) => {
-  const lines = source.split(/\r?\n/)
-  const heading = lines.findIndex((line) => line.startsWith(`${target}:`))
-  if (heading < 0) return ''
-  const block = []
-  for (let index = heading + 1; index < lines.length; index += 1) {
-    const line = lines[index]
-    if (line && !/^\s/.test(line) && /^[^#][^:]*:/.test(line)) break
-    block.push(line)
-  }
-  return block.join('\n')
-}
 
 const packageJSON = readJSON('web/package.json')
 if (packageJSON) {
@@ -88,22 +76,6 @@ for (const relativePath of [
 ]) {
   read(relativePath)
 }
-
-const makefile = read('Makefile')
-const toolchainTarget = makeTarget(makefile, 'test-web-toolchain')
-const verifyWebTarget = makeTarget(makefile, 'verify-web')
-requireMatch(toolchainTarget, /scripts\/check-web-quality-gates\.test\.sh/, 'Make must invoke the web quality source contract')
-requireMatch(verifyWebTarget, /run test:coverage\b/, 'make verify-web must run test:coverage')
-requireMatch(verifyWebTarget, /run bundle:check\b/, 'make verify-web must run bundle:check')
-requireMatch(verifyWebTarget, /run css:analyze\b/, 'make verify-web must run the Task 9 CSS analyzer')
-
-const ci = read('.github/workflows/ci.yml')
-const browserJob = yamlBlock(ci, 'web-browser')
-if (!browserJob) failures.push('CI must define an independent web-browser job')
-requireMatch(browserJob, /node-version-file:\s*\.node-version/, 'the browser job must read .node-version')
-requireMatch(browserJob, /env -u NODE_ENV npm --prefix web ci --include=dev/, 'the browser job must install dev dependencies reproducibly')
-requireMatch(browserJob, /run:\s*npm --prefix web run test:e2e/, 'the browser job must run test:e2e')
-requireMatch(browserJob, /playwright install[^\n]*chromium/, 'the browser job must install lockfile-compatible Chromium')
 
 const diagnostics = read('web/e2e/support/diagnostics.ts')
 requireMatch(

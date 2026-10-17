@@ -6,14 +6,14 @@
 
 ## Overview
 
-候风后端的质量门是一条命令：`make verify-go`（=`fmt-go` + `vet-go` + `test-go`）。**CI 与本地跑同一套 Makefile target**，`.github/workflows/ci.yml` 第 17 行直接 `run: make verify-go`，没有任何 CI-only lint 偏方。
+后端 source 质量门为 `make verify-go`（=`check-fmt-go` + `vet-go` + `test-go`），不修改源码；格式修复使用显式 `make fmt-go`。CI 与本地共享 `scripts/verify-ci.mjs`，其 Go lane 调用同一 Make target。
 
-跨前端改动（同时动了 `web/`）使用 `make verify` 或 `./scripts/verify.sh`，依次执行 `make verify-docs && make verify-go && make verify-web`。
+`make verify` / `./scripts/verify.sh` 保留 docs → Go → Web；完整 CI 对齐入口为 `make verify-ci`，另含真实 PostgreSQL catalog/业务、Chromium 和 Docker image build。hooks 按统一分类执行全部适用门禁，不由手工挑选替代。
 
 不存在以下东西，**不要新增**（除非通过设计基线评审）：
 
 - ❌ `golangci-lint`（仓库根 `find . -name '.golangci*' -maxdepth 3` 为空）
-- ❌ 另行引入 pre-commit framework / husky / lefthook。仓库已有 `.githooks/` 分支保护 hooks；通过 `sh scripts/setup-git-hooks.sh` 启用，必须保留其本地 main/master 保护及远程直接推送保护，它们不替代质量验证。
+- ❌ 另行引入 pre-commit framework / husky / lefthook。已有 `.githooks/` 通过 `sh scripts/setup-git-hooks.sh` 启用，同时执行 main/master 保护与完整适用候选门禁，见 [Local Hook Contract](../../development/branch-workflow-governance.md#local-hook-contract)。
 - ❌ goimports 单独配置（`go fmt` 已经统一格式）
 - ❌ 任何 ORM、SQL 生成器（参见 `docs/spec/backend/database-guidelines.md`）
 
@@ -24,14 +24,17 @@
 | 命令 | 实际行为 | 来源 |
 |------|----------|------|
 | `make fmt-go` | `go fmt $(go list ./agent/... ./cmd/... ./db/... ./internal/...)` | `Makefile` 的 `fmt-go` |
+| `make check-fmt-go` | 枚举同范围实际 Go/Cgo/Test/XTest 文件，`gofmt -l` 报路径并失败，不写文件 | `Makefile` 的 `check-fmt-go` |
 | `make vet-go` | 同范围 `go vet` | `Makefile` 的 `vet-go` |
 | `make test-go` | 同范围 `go test` | `Makefile` 的 `test-go` |
-| `make verify-go` | `fmt-go + vet-go + test-go` | `Makefile` 的 `verify-go` |
+| `make verify-go` | `check-fmt-go + vet-go + test-go` | `Makefile` 的 `verify-go` |
 | `make build-center` | 构建 `./cmd/houfeng-center` 到 `./bin/houfeng-center`，注入 `main.version` | `Makefile` 的 `build-center` |
 | `make build-agent` | 构建 `./cmd/houfeng-agent` 到 `./bin/houfeng-agent` | `Makefile` 的 `build-agent` |
 | `make verify-web` | 根目录执行工具链回归及检查；`env -u NODE_ENV npm --prefix web ci --include=dev`，test 环境 lint/coverage、production build、bundle:check、css:analyze | `Makefile` 的 `verify-web` |
 | `make verify-docs` | Node 标准库检查本地链接、图片、标题锚点、目录索引/可达性、旧路径残留与平台导入，并运行检查器正反例 | `Makefile` 的 `verify-docs` |
 | `make verify` | `./scripts/verify.sh` 串起 `verify-docs + verify-go + verify-web` | `Makefile` 的 `verify`、`scripts/verify.sh` |
+| `make test-ci-tools` | Node 标准库分类/manifest/候选/聚合行为测试，不启动重门禁 | `Makefile`、`scripts/*.test.mjs` |
+| `make verify-ci` | docs、Go、三个 PG16 catalog、business PostgreSQL、Web、完整 Chromium、image 顺序执行 | `scripts/verify-ci.mjs` |
 
 **注意**：
 
@@ -45,25 +48,30 @@
 
 ### 1. Scope / Trigger
 
-触发条件：改 `.github/workflows/ci.yml`、`Makefile` 的 verify target、或调整 CI job 条件时，必须保持 GitHub Actions 能先创建实际 job，再由 Makefile 执行质量门。
+触发条件：修改 workflow、共享 runner、分类器、hooks 或 Make verify targets 时，必须保持本地与 CI 的完整适用门禁一致，且保留远端 required 名称；不以源码中出现命令视为真实执行证据。
 
 ### 2. Signatures
 
 当前 workflow job 合约：
 
-- `jobs.go.steps[*].run`: `make verify-go`
-- `jobs.web.steps[*].run`: `make verify-web`
-- `jobs.web` 保留独立 `make verify-docs` 步骤；不为文档门禁新增 required job 名称。
-- Go 版本：`actions/setup-go@v6` + `go-version-file: go.mod`
-- Node 版本：`actions/setup-node@v6` + `node-version: 22`
-- npm cache dependency path：`web/package-lock.json`
+- `changes` 执行 CI-tool 行为测试并分类实际 tree：PR event base → checkout merge candidate，main push before → checkout SHA；无可靠 baseline 时选择全部。
+- `go-check`、三个 `record-platform-pg16-catalog` 版本及 `business-postgres` 按分类运行共享 runner；required `go` 聚合四类结果，数据库失败同样阻断它。
+- `web` 始终验证分类输出，运行 docs lane（工具测试、docs、严格 manifest 校验），再按选择运行 Web lane。
+- `web-browser-shard` 为两个独立构建、互不等待 Web coverage 的 shard；required `web-browser` 只聚合选择与矩阵结果。
+- `docker-image` 验证分类，再按选择使用 Buildx/build-push-action 构建 root Dockerfile，`VERSION=dev`、`push: false`；发布仍由 `publish-images.yml` 单独负责。
+- Go 使用 `actions/setup-go@v6` / `go-version-file: go.mod`，Node 使用 `actions/setup-node@v6` / `node-version-file: .node-version`，npm cache 使用 `web/package-lock.json`。
 
 ### 3. Contracts
 
-- CI 与本地共用 Makefile target；不要把 lint/test/build 细节复制进 YAML。
-- `web` workspace 是否存在由 `make verify-web` 的 shell 判断负责；workflow 不需要再用 `hashFiles('web/package.json')` 判断。
-- 如果未来确实需要条件跳过 job，`jobs.<job_id>.if` 只能使用 GitHub Actions 在 job-level 支持的上下文和 status 函数；不要把 step-level/file-hash 表达式搬到 job-level。
-- Docker image build verification belongs to GitHub Actions: `ci.yml` keeps a `docker-image` job using `docker/setup-buildx-action@v4` + `docker/build-push-action@v7` with `push: false`, while `publish-images.yml` builds and pushes release images. A local environment without `/var/run/docker.sock` is not evidence that image verification is missing if these workflow jobs remain present.
+- 统一分类见 [参与开发](../../../CONTRIBUTING.md#影响范围与轻量门禁)：metadata/普通 docs 仅轻量；Web 合同文档选 Web/browser；部署 docs、README、特殊 Compose 合同选全套；`web/**` / `.node-version` 选 Go/Web/browser/image，不选 PG；后端/自动化及未知输入选全套。新增跨层消费者须同步分类和行为测试。
+- 本地按 `origin/main` 与 HEAD 的唯一 merge-base 比较整个 staged/HEAD 候选，覆盖累计分支改动；无可靠历史跑全套，Git 错误失败。混合候选、index/HEAD/branch 稳定性和实际 push OID 限制以 [Local Hook Contract](../../development/branch-workflow-governance.md#local-hook-contract) 为准。
+- runner 固定 docs → go → postgres → business-postgres → web → browser → image，首个失败停止，不保存成功凭证。单 lane 调试可用 `node scripts/verify-ci.mjs --gates <lane>`；hooks 不接受环境变量跳过适用门禁。
+- postgres lane 顺序执行 `postgres:16.0`、`postgres:16.6`、`postgres:16.12`，strict catalog 要求 `TestPostgresIntegrationAppACLR2`、`TestPostgresIntegrationAppACLCurrent` 及包实际 RUN/PASS；业务 runner 同样要求既有 anchors。skip/fail、遗漏或无效 JSON 都失败，不以普通 Go 测试的缺环境 skip 充数。
+- 四个 host-network PostgreSQL fixture 仅监听 `127.0.0.1`，逐个启动并通过 TCP readiness 后才启动下一个，避免无必要的通配地址绑定冲突。端口检查不是预留；真正的 loopback 冲突仍失败并清理，不重试、不回退 IPv6/Unix socket，四个 system identifier 必须两两不同。
+- `web/package.json` 缺失必须失败。本地适用数据库/image lane 需要真实 Docker daemon，image 还需要 buildx；缺依赖或 build 失败明确阻止 commit/push，不能留给 CI 或发布 workflow 兜底。image lane 只构建，不登录/push/签名。
+- runner 子进程清除 database/PG、`HOUFENG_*`、Vite、Node/Go/Make 选择与 Git-local/config overrides，固定 `GOTOOLCHAIN=local`、`GOWORK=off`、`GOENV=off`；普通 Go 不 opt-in 数据库。strict runner 自建隔离 URL，保留 PATH/HOME/缓存/必要代理，不能宣称恶意代码沙箱。不改调用者环境/index，不读取凭据。未跟踪（含 ignored）的私有 Web dotenv 文件只报路径并阻止 Web/browser。
+- required `go` / `web-browser` 聚合只接受 `changes=success` 和严格字符串 `true|false` 选择；选中子项必须 success，未选中必须 skipped。missing/failure/cancelled 或不合选择的 skipped 一律失败。`web` / `docker-image` 也必须验证全部五个分类输出。
+- job-level 条件只用 Actions 支持的上下文/status 函数；`hashFiles` 仅用于支持它的 step/cache 位置。过期 PR run 可以取消，main run 不因此取消；不改变发布/部署顺序或授权。
 
 ### 4. Validation & Error Matrix
 
@@ -71,25 +79,26 @@
 |------|------|----------|
 | `jobs.<job_id>.if` 使用 unsupported function，例如 `hashFiles(...)` | 禁止 | GitHub Actions run 直接 `failure`，`jobs=[]`，`log not found`，check suite `latest_check_runs_count=0` |
 | `.github/workflows/ci.yml` 包含 `hashFiles` | 只有在 step-level 支持位置才允许 | job 创建前失败或表达式校验失败 |
-| `make verify-go` / `make verify-web` 失败 | workflow job 应创建并输出日志 | 正常红 job，有可读失败日志 |
-| `docker-image` job missing from CI | 禁止 | PR 不再验证 Dockerfile can build |
-| local Docker daemon unavailable | 不作为本地阻塞项 | 依赖 GitHub Actions `docker-image` / `publish-images` jobs 验证 |
+| 任一选中的 Go/catalog/business/browser 子项失败、取消或缺失 | required 聚合失败 | 不能因其他子项绿而放行 |
+| 未选中子项不是 skipped；分类失败或选择无效 | required 聚合失败 | 不能把未知当“不适用” |
+| `web/package.json` 缺失 | Web lane 失败 | 不输出占位成功 |
+| 适用 image/数据库 lane 缺 Docker daemon/buildx/工具 | 本地阻塞 | 修复环境后执行，不跳过 |
 
 ### 5. Good/Base/Bad Cases
 
-- Good：`web` job 总是创建，`run: make verify-web`；不存在 `web/package.json` 时由 Makefile 输出 `web workspace not initialized yet`。
-- Base：`go` job 总是创建，`run: make verify-go`；Go 工具链版本来自 `go.mod`。
-- Good：`docker-image` job 总是创建，`docker/build-push-action@v7` 对 root `Dockerfile` 执行 `push: false` 构建。
-- Bad：`web` job 写 `if: ${{ hashFiles('web/package.json') != '' }}`，push 后 run 在 job 创建前失败。
-- Bad：因为本地机器没有 Docker daemon 就把 Docker image build 从上线门禁里删除；正确做法是保留 GitHub Actions Buildx job。
+- Good：metadata-only/普通 docs 候选只跑轻量门禁，required checks 校验合法选择与 expected skipped 结果后通过。
+- Base：后端变更选全部；Go 使用精确工具链与非修改式格式检查，三个 catalog 和业务数据库结果进入 required `go`。
+- Good：本地真实 image build 与 PR `docker-image` 都成功；仍不等同于发布、真实安装或生产验收。
+- Bad：job-level 使用 `hashFiles`，或简单让 required job 随条件消失。
+- Bad：本地缺 Docker 就告警放行，或数据库/任一 browser shard 红灯而聚合绿灯。
 
 ### 6. Tests Required
 
-- 改 workflow 后跑 `git diff --check`。
-- 用 `rg -n "hashFiles" .github/workflows/ci.yml` 确认没有 job-level `hashFiles`。
-- 本地跑改动范围内的门禁：文档/路径/索引或文档检查器运行 `make verify-docs`；Go 质量门变更运行 `make verify-go`；workflow 或 Makefile touch 到 Web 质量门时运行 `make verify-web`。工具链脚本回归另运行 `make test-web-toolchain`，不以静态文档检查替代行为测试。
-- 修复必须推送后观察一次 GitHub Actions run，确认 check suite 创建了实际 `go` / `web` jobs。
-- 改 Dockerfile / entrypoint / Compose / image workflow 时，确认 CI `docker-image` job 仍存在，并在 PR 上观察该 job 成功；发布前再观察 `publish-images` 的 build/publish/inspect steps。
+- `make test-ci-tools` 覆盖分类例外、删除/重命名/特殊路径、manifest 正反例、真实 Git 候选与聚合真值表；不要用 Make/YAML 字符串断言重新钉死 DAG。
+- workflow 修改使用 actionlint 校验表达式/矩阵上下文；语法检查不替代实际 Actions。
+- `make verify-ci` 执行所有真实 lanes；额外 focused acceptance 按包合同运行。小 Go fixture 应证明未格式化时失败且字节不变、显式 fmt 后通过。
+- PR 观察全部适用实例，不仅 required 摘要：Go check、三个 PG16 catalog、业务 PostgreSQL、两个 browser shards、Web 和 image。轻量分类不等于每次都执行重门禁。
+- image build 只证明可构建；发布仅在另有授权时观察 `publish-images` 的 build/publish/inspect，不以本地/PR 构建宣称发布或生产成功。
 
 ### 7. Wrong vs Correct
 
@@ -103,11 +112,11 @@ web:
 
 #### Correct
 
-```yaml
-web:
-  runs-on: ubuntu-latest
-  steps:
-    - run: make verify-web
+```bash
+# 使用共享入口；完整调用不省略 PostgreSQL、browser 或 image。
+make verify-ci
+# 单项调试入口；提交/推送仍由 hooks 选择完整适用集合。
+node scripts/verify-ci.mjs --gates go
 ```
 
 ---
@@ -213,7 +222,7 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 
 ### `go fmt`
 
-- 强制：`make fmt-go` 是 verify 链路第一步，未格式化代码 CI 直接挂。
+- 强制：`make check-fmt-go` 是 verify-go 第一项，未格式化代码返回非零且不改文件；`make fmt-go` 是开发者显式修复入口。
 - 不引入 `goimports` 单独 hook：`go fmt` 已经够用，import 顺序按 stdlib → 三方 → houfeng 内部三段，靠手动维持（参考 `cmd/houfeng-center/bootstrap.go:1-30` 的 import 块写法）。
 
 ### `go vet`
@@ -228,13 +237,14 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 
 ### Go 版本
 
-`actions/setup-go@v6` 通过 `go-version-file: go.mod`（`.github/workflows/ci.yml:16`）锁定精确工具链。本地完成/发布门禁也必须使用 `go.mod` 声明的精确版本；仅仅“更高版本”不能替代该证据，因为标准库编码器等实现细节可能让 byte-level golden 在未来工具链上产生不同输出。
+`actions/setup-go@v6` 通过 `go-version-file: go.mod` 锁定精确工具链。本地完成/发布门禁也必须使用 `go.mod` 声明的精确版本；仅仅“更高版本”不能替代该证据，因为标准库编码器等实现细节可能让 byte-level golden 在未来工具链上产生不同输出。
+共享 CI runner 在首个 Go/catalog/business-PostgreSQL lane 执行前核对实际 Go 版本，必须与 `go.mod` 精确一致；不匹配时失败并提示调整 PATH，不自动下载或接受更新版本。轻量 docs/Web-only 门禁不因此依赖 Go。
 
 当前仓库门禁示例为 `make verify-go`。如果默认 `go version` 不同，使用精确工具链完成验收；不得因为未来/实验性工具链的不同摘要直接更新 golden 或修改生产代码。
 
 图片预览的合同是可解码、尺寸与像素正确、去元数据、资源限制有效，不是标准库 PNG 编码字节跨工具链恒定。此类测试应比较解码后的输出与实际输入图像（JPEG 须与 JPEG 解码结果比较），不能重钉压缩字节哈希。内容寻址存储仍必须对实际输出字节计算摘要；该身份合同与预览编码的偶然字节表示不可混淆。
 
-本地 tmpfs 用户配额不足时，可把编译临时目录 `GOTMPDIR` 放到有余量的文件系统；Go 1.26 的 `testing.T.TempDir` 也读取它。长目录可能超过 Unix socket 路径限制，不能通过跳过 socket 测试解决。必要时使用 `go test -exec 'env -u GOTMPDIR TMPDIR=/tmp' ...` 分离编译与测试进程的临时目录，保持测试运行环境及清理边界。浏览器只需为该次命令设置 home 分区的私有 `TMPDIR`；不要清理其他任务的临时文件。
+手工 focused Go 测试可将 `GOTMPDIR` 放到有余量的文件系统，但长目录可能超过 Unix socket 限制，不能通过跳过测试解决。共享 runner 不采用 ambient tmp/Go 选择，而在 checkout `tmp/agent/` 创建唯一自有 scratch，统一临时目录并清理自有资源；不要清理其他任务或读取私有凭据文件。
 
 ---
 
@@ -242,9 +252,9 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 
 下面这条清单是 happy-path，按顺序勾：
 
-1. [ ] **用 `go.mod` 的精确工具链运行 `make verify-go`** —— 永远必须通过。当前命令是 `make verify-go`；fmt 修了直接重跑。
-2. [ ] **改了 `web/` 里任何文件 → 从仓库根执行 `make verify-web`**；适用的浏览器与生产验收范围见 `docs/spec/web/quality-guidelines.md`。
-3. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完。
+1. [ ] **确认实际完整候选与统一分类**；hooks 执行适用门禁，未知/缺 baseline 走全套，不按“只是文档”自行跳过。
+2. [ ] **Go 选中时用 `go.mod` 精确工具链通过非修改式 `verify-go`**；需修复格式时先显式 `make fmt-go`，再重新验证。
+3. [ ] **区分 `make verify` 与 `make verify-ci`**：前者仅 docs/Go/Web，后者包括真实 PG、完整浏览器和 image；相关 UI/生产验收仍按各自合同。
 4. [ ] **改了迁移 / 表结构** → 跑一次 `docs/operations/fresh-install-smoke-run.md` 的 fresh-install；若发现可复用的 gap 或规则，补到 `docs/spec/` 或当前 active docs。
 5. [ ] **改了 user-visible 的 UI** → 对照 `docs/design/{interface-language.md,component-patterns.md}`，并按 `docs/development/ui-preview-and-browser-sanity.md` 给出 preview URL、已检查 routes / viewports、browser sanity、local screenshot notes（如有，默认不提交）。如果任务改变了可复用 UI 方向，同步更新 `docs/design/` 或相关 `docs/spec/`；历史内容通过 Git 追溯，不恢复占位或已完成提案。
 6. [ ] 如果 worker / 调度类改动，本地用注入的小间隔跑 `go test -count=10` 看下抖动。
@@ -272,9 +282,9 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 
 ## 反模式 / Common Mistakes
 
-- ❌ **跳过 verify 提交**：哪怕"只是改了一行注释"也跑 `make verify-go`，3 秒的事。
-- ❌ **`git commit --no-verify`**：仓库 `.githooks/` 已有本地/远端 main/master 保护；先运行 `sh scripts/setup-git-hooks.sh`，普通提交不得绕过 hooks。分支保护不代替 `make verify-go` 或 `make verify-web`。
-- ❌ **CI 红了直接 force-push 改一行**：先在本地复现 `make verify-go`，找到根因再提 commit。
+- ❌ **手选更小检查代替适用门禁**：以统一分类及累计候选为准；普通 docs 可轻量，后端即使只改注释也选择全部。
+- ❌ **`git commit --no-verify`**：先启用 `.githooks/`，保留本地/远端 main/master 保护与候选检查；不绕过混合候选拒绝或因缺 Docker 放行。
+- ❌ **CI 红了直接 force-push 改一行**：根据实际失败 lane 找根因，通过受影响本地门禁后再提交。
 - ❌ **TODO 不带 issue 链接**：`grep -rn "TODO\|FIXME" internal/ agent/ cmd/` 当前为空，保持纪录干净。如果必须 TODO，写完整理由 + 跟踪 issue 编号。
 - ❌ **新增 handler 但不更新 `bootstrap_test.go` 的 nil 断言**：会让"装配缺失"绕过 verify。
 - ❌ **测试用 `time.Sleep(N seconds)` 等 worker tick**：用注入小间隔 + ctx cancel 的 deterministic 模式（参考 `retention/worker_test.go:92`）。
@@ -289,5 +299,5 @@ worker（retention、auth/cleanup、incidents、agent runtime）测试通过：
 ## 已知 gap
 
 - 仓库**没有** `golangci-lint`、没有 race-by-default、没有 coverage 阈值。如果未来引入，应同步更新 `.github/workflows/ci.yml`、`Makefile`、本文件，并在当前 active docs 或 `docs/spec/` 记录变更。
-- `make verify-web` 按锁文件重新安装依赖；本地迭代可在 `web/` 下运行 `npx vitest run <test-path>` 或 `npm run lint` 做聚焦反馈，但不能代替适用的完整门禁。CI 的 Web job 在根目录运行 `NODE_ENV=production make verify-web`。
+- `make verify-web` 按锁文件重新安装依赖；本地 focused 测试不代替完整适用门禁。CI Web lane 通过 `node scripts/verify-ci.mjs --gates web` 调用 `NODE_ENV=production make verify-web`。
 - center / agent 的 slog handler 仍是 stdlib text 输出，未配置最小 level、source 行号或 trace id。center 支持 `HOUFENG_LOG_FILE` tee 到文件，但不做内建轮转；见 `logging-guidelines.md`。

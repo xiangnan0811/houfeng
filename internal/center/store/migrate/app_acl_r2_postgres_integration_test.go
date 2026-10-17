@@ -2349,6 +2349,55 @@ func assertAppACLR2StrictRunnerBehavior(t *testing.T) {
 			assertAppACLR2FakeRunnerLifecycle(t, fake, image)
 		})
 	}
+	t.Run("rejects duplicate system identifiers and cleans every fixture before starting the child", func(t *testing.T) {
+		fake := newAppACLR2FakeRunnerToolchain(t)
+		fake.duplicateSystemIDs = true
+		image := "postgres:16.12"
+		code, output := runAppACLR2StrictRunner(t, runner, fake, &image, []string{
+			"/bin/sh", "-c", "printf 'unexpected fixture child started\\n'",
+		})
+		if code != 1 || !strings.Contains(string(output), "fixture PostgreSQL system identifiers are not pairwise distinct") {
+			t.Fatalf("duplicate system identifier exit code = %d, output %q, want 1 and uniqueness rejection", code, output)
+		}
+		if strings.Contains(string(output), "unexpected fixture child started") {
+			t.Fatalf("duplicate system identifiers allowed the child to start: %q", output)
+		}
+		assertAppACLR2FakeRunnerLifecycle(t, fake, image)
+	})
+	for _, fixture := range []struct {
+		name        string
+		wantStarted int
+		wantReady   int
+	}{
+		{name: "app", wantStarted: 1, wantReady: 0},
+		{name: "witness", wantStarted: 3, wantReady: 2},
+	} {
+		t.Run("readiness failure for "+fixture.name+" prevents the child and cleans started fixtures", func(t *testing.T) {
+			fake := newAppACLR2FakeRunnerToolchain(t)
+			fake.failReadinessPrefix = "houfeng-rp-" + fixture.name + "-"
+			image := "postgres:16.12"
+			code, output := runAppACLR2StrictRunner(t, runner, fake, &image, []string{
+				"/bin/sh", "-c", "printf 'unexpected fixture child started\\n'",
+			})
+			if code != 1 || !strings.Contains(string(output), "fake PostgreSQL never became ready") {
+				t.Fatalf("readiness failure exit code = %d, output %q, want 1 and unready fixture logs", code, output)
+			}
+			if strings.Contains(string(output), "unexpected fixture child started") {
+				t.Fatalf("readiness failure allowed the child to start: %q", output)
+			}
+			assertAppACLR2FakeRunnerLifecycleCounts(t, fake, image, fixture.wantStarted, fixture.wantReady)
+			log, err := os.ReadFile(fake.dockerLog)
+			if err != nil {
+				t.Fatalf("read readiness failure Docker log: %v", err)
+			}
+			if got, want := strings.Count(string(log), "\tpg_isready\n"), 30+2*fixture.wantReady; got != want {
+				t.Fatalf("readiness attempts = %d, want %d including 30 bounded failures", got, want)
+			}
+			if strings.Contains(string(log), "\tpsql\n") {
+				t.Fatalf("readiness failure reached system identifier queries: %q", log)
+			}
+		})
+	}
 	t.Run("turns a child skip into failure and still cleans up", func(t *testing.T) {
 		fake := newAppACLR2FakeRunnerToolchain(t)
 		delayAppACLR2FakeRunnerTee(t, fake)
@@ -2440,20 +2489,24 @@ func appACLR2StrictRunnerPath(t *testing.T) string {
 }
 
 type appACLR2FakeRunnerToolchain struct {
-	bin           string
-	tmpParent     string
-	dockerLog     string
-	sideEffectLog string
+	bin                 string
+	tmpParent           string
+	dockerLog           string
+	sideEffectLog       string
+	stateDirectory      string
+	duplicateSystemIDs  bool
+	failReadinessPrefix string
 }
 
 func newAppACLR2FakeRunnerToolchain(t *testing.T) *appACLR2FakeRunnerToolchain {
 	t.Helper()
 	root := t.TempDir()
 	toolchain := &appACLR2FakeRunnerToolchain{
-		bin:           filepath.Join(root, "bin"),
-		tmpParent:     filepath.Join(root, "tmp"),
-		dockerLog:     filepath.Join(root, "docker.log"),
-		sideEffectLog: filepath.Join(root, "side-effects.log"),
+		bin:            filepath.Join(root, "bin"),
+		tmpParent:      filepath.Join(root, "tmp"),
+		dockerLog:      filepath.Join(root, "docker.log"),
+		sideEffectLog:  filepath.Join(root, "side-effects.log"),
+		stateDirectory: filepath.Join(root, "state"),
 	}
 	if err := os.MkdirAll(toolchain.bin, 0o755); err != nil {
 		t.Fatalf("create fake runner bin: %v", err)
@@ -2461,7 +2514,10 @@ func newAppACLR2FakeRunnerToolchain(t *testing.T) *appACLR2FakeRunnerToolchain {
 	if err := os.MkdirAll(toolchain.tmpParent, 0o755); err != nil {
 		t.Fatalf("create fake runner TMPDIR: %v", err)
 	}
-	for _, command := range []string{"awk", "env", "od", "seq", "grep", "setsid", "sort", "wc", "tr", "tee", "rm", "sleep"} {
+	if err := os.MkdirAll(toolchain.stateDirectory, 0o755); err != nil {
+		t.Fatalf("create fake runner lifecycle state: %v", err)
+	}
+	for _, command := range []string{"awk", "env", "od", "seq", "grep", "setsid", "sort", "wc", "tr", "tee", "rm"} {
 		target, err := exec.LookPath(command)
 		if err != nil {
 			t.Fatalf("locate host command %q for fake runner: %v", command, err)
@@ -2481,9 +2537,11 @@ printf 'mktemp\n' >> "${HOUFENG_APP_ACLR2_FAKE_SIDE_EFFECT_LOG:?}"
 exec /usr/bin/mktemp "$@"
 `)
 	writeExecutable("ss", "#!/usr/bin/bash\nexit 1\n")
+	writeExecutable("sleep", "#!/usr/bin/bash\nif [ \"$1\" = 1 ]; then exit 0; fi\nexec /usr/bin/sleep \"$@\"\n")
 	writeExecutable("docker", `#!/usr/bin/bash
 set -euo pipefail
 log=${HOUFENG_APP_ACLR2_FAKE_DOCKER_LOG:?}
+state=${HOUFENG_APP_ACLR2_FAKE_STATE_DIRECTORY:?}
 label_value() {
   local labels=$1
   local key=$2
@@ -2507,6 +2565,11 @@ command=$1
 shift
 case "$command" in
   run)
+    if [ -f "$state/pending" ]
+    then
+      printf 'cannot start another fixture before the prior fixture is ready\n' >&2
+      exit 45
+    fi
     name=
     image=
     labels=
@@ -2539,6 +2602,7 @@ case "$command" in
       esac
     done
     printf 'run\t%s\t%s\t%s\n' "$name" "$image" "$labels" >> "$log"
+    printf '%s\n' "$name" > "$state/pending"
     printf 'fake-id-%s\n' "$name"
     ;;
   container)
@@ -2565,19 +2629,61 @@ case "$command" in
   exec)
     container=$1
     shift
+    printf 'exec\t%s\t%s\n' "$container" "${1-}" >> "$log"
     case "${1-}" in
       pg_isready)
+        shift
+        host=
+        while (($#)); do
+          case "$1" in
+            -h)
+              host=$2
+              shift 2
+              ;;
+            *)
+              shift
+              ;;
+          esac
+        done
+        if [ "$host" != 127.0.0.1 ]
+        then
+          printf 'readiness must probe the final TCP server\n' >&2
+          exit 46
+        fi
+        if [ ! -f "$state/$container-attempted" ]
+        then
+          printf 'initializing\n' > "$state/$container-attempted"
+          exit 1
+        fi
+        if [ -n "${HOUFENG_APP_ACLR2_FAKE_FAIL_READINESS_PREFIX-}" ] && \
+          [[ "$container" == "$HOUFENG_APP_ACLR2_FAKE_FAIL_READINESS_PREFIX"* ]]
+        then
+          exit 1
+        fi
+        printf 'ready\n' > "$state/$container-ready"
+        rm -f "$state/pending"
+        printf 'ready\t%s\n' "$container" >> "$log"
         ;;
       psql)
-        printf '%s\n' "${container}-system-identifier"
+        if [ ! -f "$state/$container-ready" ]
+        then
+          printf 'cannot query an unready fixture\n' >&2
+          exit 47
+        fi
+        if [ "${HOUFENG_APP_ACLR2_FAKE_DUPLICATE_SYSTEM_IDS-}" = 1 ]
+        then
+          printf 'duplicate-system-identifier\n'
+        else
+          printf '%s\n' "${container}-system-identifier"
+        fi
         ;;
     esac
-    printf 'exec\t%s\t%s\n' "$container" "${1-}" >> "$log"
     ;;
   rm)
     printf 'rm\t%s\n' "${2-}" >> "$log"
     ;;
   logs)
+    printf 'fake PostgreSQL never became ready\n' >&2
     ;;
   *)
     ;;
@@ -2642,13 +2748,16 @@ func runAppACLR2StrictRunnerStreams(
 
 func appACLR2StrictRunnerEnvironment(fake *appACLR2FakeRunnerToolchain, image *string) []string {
 	blocked := map[string]struct{}{
-		"HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE": {},
-		"HOUFENG_APP_ACLR2_FAKE_DOCKER_LOG":      {},
-		"HOUFENG_APP_ACLR2_FAKE_SIDE_EFFECT_LOG": {},
-		"PATH":                                   {},
-		"TMPDIR":                                 {},
+		"HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE":       {},
+		"HOUFENG_APP_ACLR2_FAKE_DOCKER_LOG":            {},
+		"HOUFENG_APP_ACLR2_FAKE_SIDE_EFFECT_LOG":       {},
+		"HOUFENG_APP_ACLR2_FAKE_STATE_DIRECTORY":       {},
+		"HOUFENG_APP_ACLR2_FAKE_DUPLICATE_SYSTEM_IDS":  {},
+		"HOUFENG_APP_ACLR2_FAKE_FAIL_READINESS_PREFIX": {},
+		"PATH":   {},
+		"TMPDIR": {},
 	}
-	environment := make([]string, 0, len(os.Environ())+4)
+	environment := make([]string, 0, len(os.Environ())+8)
 	for _, entry := range os.Environ() {
 		key, _, _ := strings.Cut(entry, "=")
 		if _, skip := blocked[key]; !skip {
@@ -2660,7 +2769,12 @@ func appACLR2StrictRunnerEnvironment(fake *appACLR2FakeRunnerToolchain, image *s
 		"TMPDIR="+fake.tmpParent,
 		"HOUFENG_APP_ACLR2_FAKE_DOCKER_LOG="+fake.dockerLog,
 		"HOUFENG_APP_ACLR2_FAKE_SIDE_EFFECT_LOG="+fake.sideEffectLog,
+		"HOUFENG_APP_ACLR2_FAKE_STATE_DIRECTORY="+fake.stateDirectory,
+		"HOUFENG_APP_ACLR2_FAKE_FAIL_READINESS_PREFIX="+fake.failReadinessPrefix,
 	)
+	if fake.duplicateSystemIDs {
+		environment = append(environment, "HOUFENG_APP_ACLR2_FAKE_DUPLICATE_SYSTEM_IDS=1")
+	}
 	if image != nil {
 		environment = append(environment, "HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE="+*image)
 	}
@@ -2686,11 +2800,23 @@ func assertAppACLR2FakeRunnerNoSideEffects(t *testing.T, fake *appACLR2FakeRunne
 
 func assertAppACLR2FakeRunnerLifecycle(t *testing.T, fake *appACLR2FakeRunnerToolchain, wantImage string) {
 	t.Helper()
+	assertAppACLR2FakeRunnerLifecycleCounts(t, fake, wantImage, 4, 4)
+}
+
+func assertAppACLR2FakeRunnerLifecycleCounts(t *testing.T, fake *appACLR2FakeRunnerToolchain, wantImage string, wantStarted, wantReady int) {
+	t.Helper()
 	contents, err := os.ReadFile(fake.dockerLog)
 	if err != nil {
 		t.Fatalf("read fake strict runner Docker log: %v", err)
 	}
 	var runNames, removeNames []string
+	readyNames := make(map[string]bool, wantReady)
+	prefixes := []string{
+		"houfeng-rp-app-",
+		"houfeng-rp-ledger-",
+		"houfeng-rp-witness-",
+		"houfeng-rp-recovery-",
+	}
 	seenPrefixes := make(map[string]bool, 4)
 	for _, line := range strings.Split(strings.TrimSpace(string(contents)), "\n") {
 		if line == "" {
@@ -2699,6 +2825,9 @@ func assertAppACLR2FakeRunnerLifecycle(t *testing.T, fake *appACLR2FakeRunnerToo
 		fields := strings.Split(line, "\t")
 		switch fields[0] {
 		case "run":
+			if len(runNames) > 0 && !readyNames[runNames[len(runNames)-1]] {
+				t.Fatalf("fake strict runner started a fixture before the preceding fixture became ready: %q", contents)
+			}
 			if len(fields) != 4 || fields[2] != wantImage {
 				t.Fatalf("fake strict runner run record = %#v, want image %q", fields, wantImage)
 			}
@@ -2712,12 +2841,7 @@ func assertAppACLR2FakeRunnerLifecycle(t *testing.T, fake *appACLR2FakeRunnerToo
 				}
 			}
 			runNames = append(runNames, fields[1])
-			for _, prefix := range []string{
-				"houfeng-rp-app-",
-				"houfeng-rp-ledger-",
-				"houfeng-rp-witness-",
-				"houfeng-rp-recovery-",
-			} {
+			for _, prefix := range prefixes {
 				if strings.HasPrefix(fields[1], prefix) {
 					if seenPrefixes[prefix] {
 						t.Fatalf("fake strict runner repeated fixture prefix %q", prefix)
@@ -2725,6 +2849,11 @@ func assertAppACLR2FakeRunnerLifecycle(t *testing.T, fake *appACLR2FakeRunnerToo
 					seenPrefixes[prefix] = true
 				}
 			}
+		case "ready":
+			if len(fields) != 2 || len(runNames) == 0 || fields[1] != runNames[len(runNames)-1] || readyNames[fields[1]] {
+				t.Fatalf("fake strict runner ready record = %#v, runs %v, ready %v", fields, runNames, readyNames)
+			}
+			readyNames[fields[1]] = true
 		case "rm":
 			if len(fields) != 2 {
 				t.Fatalf("fake strict runner rm record = %#v", fields)
@@ -2732,10 +2861,13 @@ func assertAppACLR2FakeRunnerLifecycle(t *testing.T, fake *appACLR2FakeRunnerToo
 			removeNames = append(removeNames, fields[1])
 		}
 	}
-	if len(runNames) != 4 || len(removeNames) != 4 || len(seenPrefixes) != 4 {
-		t.Fatalf("fake strict runner lifecycle = runs:%v removes:%v prefixes:%v, want four/four/all", runNames, removeNames, seenPrefixes)
+	if len(runNames) != wantStarted || len(removeNames) != wantStarted || len(seenPrefixes) != wantStarted || len(readyNames) != wantReady {
+		t.Fatalf("fake strict runner lifecycle = runs:%v removes:%v prefixes:%v ready:%v, want %d started/cleaned and %d ready", runNames, removeNames, seenPrefixes, readyNames, wantStarted, wantReady)
 	}
-	for _, name := range runNames {
+	for i, name := range runNames {
+		if !strings.HasPrefix(name, prefixes[i]) {
+			t.Fatalf("fake strict runner fixture %d = %q, want prefix %q", i, name, prefixes[i])
+		}
 		found := false
 		for _, removed := range removeNames {
 			if removed == "fake-id-"+name {

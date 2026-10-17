@@ -599,7 +599,7 @@ func newExactAppACLCurrentSuccessorPostgresFixture(t *testing.T, ctx context.Con
 	)
 }
 
-func newExactAppACLCurrentSuccessorPostgresFixtureWithNames(t *testing.T, ctx context.Context, databaseName, runtimeRole, adminRole, migratorRole string) exactAppACLCurrentSuccessorPostgresFixture {
+func requireAppACLCurrentPostgres(t *testing.T) string {
 	t.Helper()
 	if os.Getenv(postgresIntegrationFlag) != "1" {
 		t.Skipf("%s=1 is required for postgres integration tests", postgresIntegrationFlag)
@@ -608,6 +608,12 @@ func newExactAppACLCurrentSuccessorPostgresFixtureWithNames(t *testing.T, ctx co
 	if databaseURL == "" {
 		t.Skip("HOUFENG_DATABASE_URL is required for postgres integration tests")
 	}
+	return databaseURL
+}
+
+func newExactAppACLCurrentSuccessorPostgresFixtureWithNames(t *testing.T, ctx context.Context, databaseName, runtimeRole, adminRole, migratorRole string) exactAppACLCurrentSuccessorPostgresFixture {
+	t.Helper()
+	databaseURL := requireAppACLCurrentPostgres(t)
 	adminConfig, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		t.Fatalf("parse PostgreSQL integration URL: %v", err)

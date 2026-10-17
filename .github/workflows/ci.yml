@@ -6,18 +6,71 @@ on:
       - main
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  go:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.scope.outputs.go }}
+      postgres: ${{ steps.scope.outputs.postgres }}
+      web: ${{ steps.scope.outputs.web }}
+      browser: ${{ steps.scope.outputs.browser }}
+      image: ${{ steps.scope.outputs.image }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Test CI gate tools
+        run: make test-ci-tools
+      - name: Classify actual candidate changes
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          head_oid=$(git rev-parse --verify 'HEAD^{commit}')
+          shallow=$(git rev-parse --is-shallow-repository)
+          case "$EVENT_NAME" in
+            pull_request) base_oid="$PR_BASE_SHA" ;;
+            push) base_oid="$PUSH_BEFORE_SHA" ;;
+            *) base_oid='' ;;
+          esac
+          if [[ "$shallow" == false && "$base_oid" =~ ^([0-9a-fA-F]{40}|[0-9a-fA-F]{64})$ && ! "$base_oid" =~ ^0+$ ]] &&
+            git cat-file -e "${base_oid}^{commit}" 2>/dev/null; then
+            node scripts/ci-scope.mjs --base "$base_oid" --head "$head_oid" --github-output "$GITHUB_OUTPUT"
+          else
+            echo 'No reliable event baseline; selecting every gate.'
+            node scripts/ci-scope.mjs --all --github-output "$GITHUB_OUTPUT"
+          fi
+
+  go-check:
+    needs: changes
+    if: needs.changes.result == 'success' && needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - run: make verify-go
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Verify Go
+        run: node scripts/verify-ci.mjs --gates go
 
   record-platform-pg16-catalog:
     name: record-platform-pg16-catalog (${{ matrix.postgres_image }})
+    needs: changes
+    if: needs.changes.result == 'success' && needs.changes.outputs.postgres == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -27,63 +80,105 @@ jobs:
           - "postgres:16.6"
           - "postgres:16.12"
     env:
-      HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE: ${{ matrix.postgres_image }}
+      POSTGRES_IMAGE: ${{ matrix.postgres_image }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
       - name: Run strict PG16 catalog evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          events=$(mktemp)
-          trap 'rm -f "$events"' EXIT
-          scripts/test-record-platform-integration.sh pg16-catalog -- \
-            go test -json ./internal/center/store/migrate \
-            -run '^(TestPostgresIntegrationAppACLR2|TestPostgresIntegrationAppACLCurrent)$' -count=1 | tee "$events"
-          jq -se '
-            def package_event:
-              .Package == "houfeng/internal/center/store/migrate";
-            [.[] | select(package_event)] as $package_events
-            | ["TestPostgresIntegrationAppACLR2", "TestPostgresIntegrationAppACLCurrent"] as $anchors
-            | (all($anchors[];
-                . as $anchor
-                | [$package_events[] | select(((.Test // "") | test("^" + $anchor + "($|/)")))] as $anchor_events
-                | (($anchor_events | map(select(.Action == "run")) | length) > 0)
-                  and (($anchor_events | map(select(.Action == "pass")) | length) > 0)
-              ))
-              and (($package_events | map(select(.Action == "skip")) | length) == 0)
-              and (($package_events | map(select(.Action == "fail")) | length) == 0)
-          ' "$events" >/dev/null
+        run: node scripts/verify-ci.mjs --gates postgres --postgres-image "$POSTGRES_IMAGE"
 
   business-postgres:
+    needs: changes
+    if: needs.changes.result == 'success' && needs.changes.outputs.postgres == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
       - name: Run strict business PostgreSQL evidence
-        run: bash scripts/test-business-postgres.sh
+        run: node scripts/verify-ci.mjs --gates business-postgres
 
-  web:
+  go:
+    needs: [changes, go-check, record-platform-pg16-catalog, business-postgres]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version-file: .node-version
+      - name: Require every selected Go and PostgreSQL check
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          GO_SELECTED: ${{ needs.changes.outputs.go }}
+          POSTGRES_SELECTED: ${{ needs.changes.outputs.postgres }}
+          GO_RESULT: ${{ needs.go-check.result }}
+          CATALOG_RESULT: ${{ needs.record-platform-pg16-catalog.result }}
+          BUSINESS_RESULT: ${{ needs.business-postgres.result }}
+        run: node scripts/check-ci-results.mjs go
+
+  web:
+    needs: changes
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      GO_SELECTED: ${{ needs.changes.outputs.go }}
+      POSTGRES_SELECTED: ${{ needs.changes.outputs.postgres }}
+      WEB_SELECTED: ${{ needs.changes.outputs.web }}
+      BROWSER_SELECTED: ${{ needs.changes.outputs.browser }}
+      IMAGE_SELECTED: ${{ needs.changes.outputs.image }}
+    steps:
+      - name: Validate complete gate selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CHANGES_RESULT" != success ]]; then
+            echo 'Change classification did not succeed.' >&2
+            exit 1
+          fi
+          for key in GO_SELECTED POSTGRES_SELECTED WEB_SELECTED BROWSER_SELECTED IMAGE_SELECTED; do
+            case "${!key}" in
+              true|false) ;;
+              *) echo "Missing or invalid gate selection: $key" >&2; exit 1 ;;
+            esac
+          done
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Verify documentation links and indexes
-        run: make verify-docs
-      - name: Verify web recipe isolates caller environment
-        run: NODE_ENV=production make verify-web
+      - name: Verify documentation and gate tools
+        run: node scripts/verify-ci.mjs --gates docs
+      - name: Verify Web
+        if: env.WEB_SELECTED == 'true'
+        run: node scripts/verify-ci.mjs --gates web
+      - name: Report unselected Web lane
+        if: env.WEB_SELECTED == 'false'
+        run: echo 'Web lane is not applicable to this candidate.'
 
-  web-browser:
+  web-browser-shard:
+    needs: changes
+    if: needs.changes.result == 'success' && needs.changes.outputs.browser == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    env:
+      CI: 'true'
+      SHARD: ${{ matrix.shard }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -96,43 +191,75 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}
-      - name: Install web dependencies
-        run: env -u NODE_ENV npm --prefix web ci --include=dev
-      # Reconciling apt state is best-effort on purpose. The hosted image already
-      # carries the Chromium libraries, so a broken Ubuntu mirror here used to
-      # hang until the job timeout and report nothing. Bound it instead and let
-      # the contract gate below fail loudly if a library is genuinely missing.
-      - name: Reconcile Chromium system dependencies
-        continue-on-error: true
-        timeout-minutes: 5
-        run: timeout 240s npm --prefix web exec playwright install-deps -- chromium
-      - name: Install lockfile-compatible Chromium
-        timeout-minutes: 5
-        run: npm --prefix web exec playwright install -- chromium
-      - name: Run Chromium contract gate
-        run: npm --prefix web run test:e2e
+      - name: Build candidate and run Chromium shard
+        run: node scripts/verify-ci.mjs --gates browser --shard "${SHARD}/2"
       - name: Upload browser failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-failure-${{ github.run_id }}
+          name: playwright-failure-${{ github.run_id }}-shard-${{ matrix.shard }}
           path: |
             web/playwright-report
             web/test-results/playwright
           if-no-files-found: warn
           retention-days: 7
 
-  docker-image:
+  web-browser:
+    needs: [changes, web-browser-shard]
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+      - name: Require every selected browser shard
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BROWSER_SELECTED: ${{ needs.changes.outputs.browser }}
+          SHARDS_RESULT: ${{ needs.web-browser-shard.result }}
+        run: node scripts/check-ci-results.mjs browser
+
+  docker-image:
+    needs: changes
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      GO_SELECTED: ${{ needs.changes.outputs.go }}
+      POSTGRES_SELECTED: ${{ needs.changes.outputs.postgres }}
+      WEB_SELECTED: ${{ needs.changes.outputs.web }}
+      BROWSER_SELECTED: ${{ needs.changes.outputs.browser }}
+      IMAGE_SELECTED: ${{ needs.changes.outputs.image }}
+    steps:
+      - name: Validate complete gate selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CHANGES_RESULT" != success ]]; then
+            echo 'Change classification did not succeed.' >&2
+            exit 1
+          fi
+          for key in GO_SELECTED POSTGRES_SELECTED WEB_SELECTED BROWSER_SELECTED IMAGE_SELECTED; do
+            case "${!key}" in
+              true|false) ;;
+              *) echo "Missing or invalid gate selection: $key" >&2; exit 1 ;;
+            esac
+          done
+      - uses: actions/checkout@v6
       - uses: docker/setup-buildx-action@v4
-      - uses: docker/build-push-action@v7
+        if: env.IMAGE_SELECTED == 'true'
+      - name: Build candidate image without publishing
+        if: env.IMAGE_SELECTED == 'true'
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
           push: false
           build-args: |
             VERSION=dev
-          cache-from: type=gha
-          cache-to: type=gha,mode=max,ignore-error=true
+          cache-from: type=gha,scope=ci-image
+          cache-to: type=gha,scope=ci-image,mode=max,ignore-error=true
+      - name: Report unselected image lane
+        if: env.IMAGE_SELECTED == 'false'
+        run: echo 'Image lane is not applicable to this candidate.'
