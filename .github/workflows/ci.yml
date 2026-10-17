@@ -70,7 +70,7 @@ jobs:
   record-platform-pg16-catalog:
     name: record-platform-pg16-catalog (${{ matrix.postgres_image }})
     needs: changes
-    if: needs.changes.result == 'success' && needs.changes.outputs.postgres == 'true'
+    if: always()
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -80,17 +80,38 @@ jobs:
           - "postgres:16.6"
           - "postgres:16.12"
     env:
+      CHANGES_RESULT: ${{ needs.changes.result }}
+      POSTGRES_SELECTED: ${{ needs.changes.outputs.postgres }}
       POSTGRES_IMAGE: ${{ matrix.postgres_image }}
     steps:
+      - name: Validate PostgreSQL gate selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CHANGES_RESULT" != success ]]; then
+            echo 'Change classification did not succeed.' >&2
+            exit 1
+          fi
+          case "$POSTGRES_SELECTED" in
+            true|false) ;;
+            *) echo 'Missing or invalid gate selection: POSTGRES_SELECTED' >&2; exit 1 ;;
+          esac
       - uses: actions/checkout@v6
+        if: env.POSTGRES_SELECTED == 'true'
       - uses: actions/setup-go@v6
+        if: env.POSTGRES_SELECTED == 'true'
         with:
           go-version-file: go.mod
       - uses: actions/setup-node@v6
+        if: env.POSTGRES_SELECTED == 'true'
         with:
           node-version-file: .node-version
       - name: Run strict PG16 catalog evidence
+        if: env.POSTGRES_SELECTED == 'true'
         run: node scripts/verify-ci.mjs --gates postgres --postgres-image "$POSTGRES_IMAGE"
+      - name: Report unselected PostgreSQL catalog lane
+        if: env.POSTGRES_SELECTED == 'false'
+        run: echo 'PostgreSQL catalog lane is not applicable to this candidate; no database evidence was run.'
 
   business-postgres:
     needs: changes

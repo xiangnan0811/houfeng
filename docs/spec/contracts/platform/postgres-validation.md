@@ -37,9 +37,13 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   `record-platform-pg16-catalog (postgres:16.0)`,
   `record-platform-pg16-catalog (postgres:16.6)`，和
   `record-platform-pg16-catalog (postgres:16.12)`.
-- job 的 fresh-runner signature 是 `runs-on: ubuntu-latest`、
+- catalog job 使用 `if: always()`，始终展开三个精确 contexts。每个实例先验证
+  `changes=success` 和严格字符串 `postgres=true|false`；分类失败或值缺失/非法必须失败。
+- postgres=true 时，job 的 fresh-runner signature 是 `runs-on: ubuntu-latest`、
   `actions/checkout@v6`、`actions/setup-go@v6` + `go-version-file: go.mod`，
-  随后每一个 matrix lane 执行同一个 strict command：
+  以及 `actions/setup-node@v6` + `node-version-file: .node-version`；
+  每个 matrix lane 执行 `node scripts/verify-ci.mjs --gates postgres --postgres-image "$POSTGRES_IMAGE"`，
+  通过既有共享 runner 执行 strict catalog command：
 
   ```bash
   scripts/test-record-platform-integration.sh pg16-catalog -- \
@@ -90,10 +94,15 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   必须使用 `t.Fatal`/error 而非 skip。其他 database/package spec 指定的
   real-PostgreSQL acceptance test 也必须遵守相同的 strict RUN/PASS 合同。
 - workflow matrix 只能包含三个 quoted literal，不得有 `include`、default
-  expression 或不同 entry point；每个 lane 运行同一 `pg16-catalog` command。
-  job 必须先 checkout 和按仓库既有 `setup-go@v6`/`go.mod` 模式安装 Go；显式
-  job name 是三个 check contexts 的 evidence contract；workflow 文件本身不能
+  expression 或不同 entry point；每个选中的 lane 运行同一 `pg16-catalog` command。
+  选中时 job 必须先 checkout 和按仓库既有 `setup-go@v6`/`go.mod` 模式安装 Go；
+  显式 job name 是三个 check contexts 的 evidence contract；workflow 文件本身不能
   把 context 设为 required。
+- postgres=false 时，每个 catalog 实例仅明确报告不适用并成功，不 checkout、不安装
+  Go/Node、不运行 strict command 或启动数据库；该 context 成功不等于真实 PG16 验收。
+  required `go` 在两种模式下都只接受 catalog success，failure/cancelled/skipped/missing
+  均失败；业务 PostgreSQL 仍是 true 必须 success、false 必须 skipped。
+  不得修改现有 required 保护或使用 bypass 来弥补缺失 contexts。
 - strict child 只运行 migrate package 的 anchored JSON selector。它必须将
   stdout 保存为 JSONL，并以 `jq -se` 分别证明匹配
   `^TestPostgresIntegrationAppACLR2($|/)` 与
@@ -117,10 +126,13 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
 | 调用 `postgres` | 保持通用 mode contract；不能仅因为 strict image variable 缺少或不同而拒绝。 |
 | strict child 输出 `--- SKIP:` | cleanup 后 runner nonzero exit；该 lane 不是 evidence。 |
 | strict child 在 stderr 输出 module/tool diagnostics，同时在 stdout 输出 canonical Go JSON events | diagnostics 保持在 stderr 且 event JSONL 可完整解析；任一 stream 的 `--- SKIP:` 仍使 runner nonzero exit。 |
-| fresh job 缺少 `runs-on`、checkout 或按 `go.mod` 的 setup-go，或 lane 运行不同 child command | workflow review 拒绝；不能声称 fresh Actions runner 可执行。 |
+| postgres=true 时 fresh job 缺少 `runs-on`、checkout 或按 `go.mod` 的 setup-go，或 lane 运行不同 child command | workflow review 拒绝；不能声称 fresh Actions runner 可执行。 |
 | matrix 添加 `include`、第四个值、shell/default fallback 或不同 entry point | workflow/runner contract review 必须拒绝；CI matrix 不再 deterministic。 |
 | anchored JSON stream 没有 matching `run`/`pass`，或 package 有 `skip`/`fail` event | lane nonzero exit；zero-test、skip 或 fail 不是 PG16 evidence。 |
 | strict PG16 command 包含 `platformmigrate` 或 admin CLI | review 拒绝；该 result 会混入非 严格 catalog file ownership 的 package gate。 |
+| metadata-only/普通 docs，`changes=success` 且 `postgres=false` | 三个 catalog contexts 都明确“不适用”成功，不 checkout/setup/启动数据库；不是 PG16 evidence。 |
+| 分类失败，或 postgres 不是严格字符串 true/false | 每个 catalog 实例在工具和数据库操作前失败，required `go` 也失败。 |
+| postgres 任一模式下 catalog failure/cancelled/skipped/missing | required `go` 失败；不能用业务 PostgreSQL 成功或 skipped 代替 catalog success。 |
 
 ### 5. Good / Base / Bad Cases
 
@@ -142,6 +154,10 @@ HOUFENG_RECORD_PLATFORM_POSTGRES_IMAGE=<exact-image> \
   stdout/stderr 中的 skip marker 都 fail closed。两个文件必须分别声明
   `TestPostgresIntegrationAppACLR2` 与 `TestPostgresIntegrationAppACLCurrent`
   top-level anchor；CI/local selector 必须同时锚定这两个名字。
+- 聚合行为测试覆盖 postgres=true/false 下 catalog 必须 success，并分别拒绝
+  failure/cancelled/skipped/missing；postgres=false 时业务 PostgreSQL 必须 skipped。
+  真实 Actions 须观察三个精确 contexts：选中时提供 strict evidence，未选中时明确
+  不适用且无数据库执行；源码/接线断言不能代替这些证据。
 - 三个 image 都必须在本地运行同一 command；可用 Docker Server 是 local
   evidence，不是把 lane 推给 CI 的理由。随后每个 CI matrix lane 也运行完全相同的
   strict entry point。每次运行把 `go test -json` output 保存为 JSONL，并执行：

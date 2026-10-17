@@ -236,5 +236,10 @@ The repository host must protect `main` and `master` when either branch exists:
 - reject force pushes;
 - require changes to come from pull requests;
 - include maintainers/admins in the restriction when the host supports that setting.
+- retain required `go`, `web`, `web-browser`, `docker-image` and the exact catalog contexts `record-platform-pg16-catalog (postgres:16.0)`, `record-platform-pg16-catalog (postgres:16.6)`, `record-platform-pg16-catalog (postgres:16.12)`; verify the live required set rather than inferring it from workflow YAML.
+
+The catalog matrix must expand on every candidate, including metadata-only release PRs. Each instance first requires successful classification and an exact string `postgres=true|false`. A selected instance retains checkout, Go/Node setup and the strict PostgreSQL runner. An unselected instance explicitly succeeds as not applicable without checkout, toolchain setup or database execution; that is not PostgreSQL acceptance evidence. Required `go` demands catalog success in both modes, while business PostgreSQL must succeed when selected and be skipped when unselected (Go check follows its own selection). Catalog failure, cancellation, skipped or missing results must never produce a green aggregate.
+
+Missing required contexts must be repaired in workflow execution, not by weakening protection, renaming required contexts or using a bypass.
 
 Configuring remote branch protection is an owner or main-session operation. Implementation agents must document the requirement but must not silently change remote repository policy.
