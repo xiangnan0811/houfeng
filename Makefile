@@ -59,7 +59,7 @@ test-go:
 	if [ -z "$$packages" ]; then \
 		echo 'no Go packages yet'; \
 	else \
-		$(GO) test -timeout=30m $$packages; \
+		$(GO) test -timeout=60m $$packages; \
 	fi
 
 vet-go:

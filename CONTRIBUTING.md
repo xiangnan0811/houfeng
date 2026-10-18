@@ -10,7 +10,7 @@
 `make -C "$(git rev-parse --show-toplevel)" <target>`，不要假设存在 `backend/`。
 
 - Go 版本以 `go.mod` 为准，Node 以 `.node-version` 为准；Web 依赖使用 `web/package-lock.json`。
-- `make verify-go`：非修改式 `check-fmt-go`、vet、Go tests；完整迁移链验证使用每包 30 分钟超时，保留全部链路断言。`make check-fmt-go` 只报告未格式化文件并失败；修复请显式运行 `make fmt-go`。
+- `make verify-go`：非修改式 `check-fmt-go`、vet、Go tests；完整迁移链验证使用每包 60 分钟超时，为 C80 的 98,303 条支持链在 CI runner 上保留执行余量，不裁剪链路或断言。`make check-fmt-go` 只报告未格式化文件并失败；修复请显式运行 `make fmt-go`。
 - `make test-web-toolchain`：Node-major checker 行为与保留的 Web/staging 静态合同检查；不是实际 staging 验收。
 - `make verify-docs`：文档链接、锚点、导航、平台导入和旧路径检查，含检查器回归。
 - `make verify-web`：独立于调用者 NODE_ENV 安装依赖，lint、覆盖率测试、build、bundle 和 CSS 检查。
