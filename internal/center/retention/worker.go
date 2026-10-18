@@ -78,12 +78,16 @@ func (w *Worker) runOnce(ctx context.Context) {
 		return
 	}
 
-	result, err := w.repo.ApplyRetention(ctx, policy, w.now().UTC())
+	now := w.now().UTC()
+	result, err := w.repo.ApplyRetention(ctx, policy, now)
 	if err != nil {
 		if isContextDone(err) {
 			return
 		}
 		w.logger.Error("apply retention failed", "error", err)
+		return
+	}
+	if result.Skipped {
 		return
 	}
 
@@ -96,8 +100,15 @@ func (w *Worker) runOnce(ctx context.Context) {
 		"deleted_probe_observations", result.DeletedProbeObservations,
 		"deleted_monitoring_instance_aggregates", result.DeletedMonitoringInstanceAggregates,
 		"deleted_target_aggregates", result.DeletedTargetAggregates,
-		"cleared_command_action_outputs", result.ClearedCommandActionOutputs,
 	)
+	cleared, err := w.repo.ClearExpiredCommandOutputs(ctx, now)
+	if err != nil {
+		if !isContextDone(err) {
+			w.logger.Error("clear expired command outputs failed", "error", err)
+		}
+		return
+	}
+	w.logger.Info("command output cleanup completed", "cleared_command_action_outputs", cleared)
 }
 
 func isContextDone(err error) bool {

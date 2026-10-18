@@ -26,8 +26,13 @@ func (errReader) Read([]byte) (int, error) {
 	return 0, errors.New("body should not be read")
 }
 
+const testSyncProducerID = "c393d63b-3128-489f-89ca-109be0de137d"
+const testSyncBatchID = testSyncProducerID + ":1"
+const testSyncBatchFields = `"protocol_revision":2,"producer_id":"c393d63b-3128-489f-89ca-109be0de137d","batch_sequence":1,"allocated_through":1,"retired_through":0,`
+
 func setSyncAuth(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer sync-token-001")
+	req.Header.Set(agentapi.SyncProtocolHeader, "2")
 }
 
 type fakeAgentEnrollmentService struct {
@@ -301,7 +306,7 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","is_backfilled":true}],"command_results":[{"action_id":"act_001","command_id":"uptime","stdout":"up 1 day","stderr":"","exit_code":0}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1","is_backfilled":true}],"command_results":[{"action_id":"act_001","command_id":"uptime","stdout":"up 1 day","stderr":"","exit_code":0}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -375,8 +380,8 @@ func TestAgentSyncHandlerReturnsAcceptedAt(t *testing.T) {
 	if svc.syncBatch.Heartbeats[0].Fingerprint != "fp-001" {
 		t.Fatalf("Fingerprint = %q, want %q", svc.syncBatch.Heartbeats[0].Fingerprint, "fp-001")
 	}
-	if svc.syncBatch.Heartbeats[0].SyncBatchID != "sync_001" {
-		t.Fatalf("SyncBatchID = %q, want %q", svc.syncBatch.Heartbeats[0].SyncBatchID, "sync_001")
+	if svc.syncBatch.Heartbeats[0].SyncBatchID != testSyncBatchID {
+		t.Fatalf("SyncBatchID = %q, want %q", svc.syncBatch.Heartbeats[0].SyncBatchID, testSyncBatchID)
 	}
 	if !svc.syncBatch.Heartbeats[0].IsBackfilled {
 		t.Fatal("SyncBatch Heartbeats[0].IsBackfilled = false, want true")
@@ -397,8 +402,8 @@ func TestAgentSyncHandlerAcceptsHeaderTokenWithoutJSONSyncToken(t *testing.T) {
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
-	req.Header.Set("Authorization", "Bearer sync-token-001")
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
+	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -439,7 +444,7 @@ func TestAgentSyncHandlerRejectsJSONOnlySyncToken(t *testing.T) {
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -461,12 +466,12 @@ func TestAgentSyncHandlerWritesObservationBatch(t *testing.T) {
 	svc := &fakeAgentSyncService{}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`
 		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
-		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
-		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","cpu_usage_pct":12.5,"load_1":0.2,"load_5":0.3,"load_15":0.4,"mem_used_pct":55.5,"mem_available_bytes":1024,"mem_total_bytes":2048,"swap_used_pct":1.5,"disk_used_pct":45.5,"disk_total_bytes":4096,"inode_used_pct":5.5,"net_in_bytes_per_sec":120,"net_out_bytes_per_sec":220,"network_rates_valid":true,"cpu_iowait_pct":0.5,"cpu_steal_pct":0.1,"disk_read_bytes_per_sec":320,"disk_write_bytes_per_sec":420,"disk_busy_pct":3.5,"uptime_seconds":3600}],
-		"probe_observations":[{"target_id":"tg_001","probe_item_id":"pb_001","probe_kind":"http","observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","result_kind":"success","latency_ms":83,"http_status":200}]
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}],
+		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1","cpu_usage_pct":12.5,"load_1":0.2,"load_5":0.3,"load_15":0.4,"mem_used_pct":55.5,"mem_available_bytes":1024,"mem_total_bytes":2048,"swap_used_pct":1.5,"disk_used_pct":45.5,"disk_total_bytes":4096,"inode_used_pct":5.5,"net_in_bytes_per_sec":120,"net_out_bytes_per_sec":220,"network_rates_valid":true,"cpu_iowait_pct":0.5,"cpu_steal_pct":0.1,"disk_read_bytes_per_sec":320,"disk_write_bytes_per_sec":420,"disk_busy_pct":3.5,"uptime_seconds":3600}],
+		"probe_observations":[{"target_id":"tg_001","probe_item_id":"pb_001","probe_kind":"http","observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1","result_kind":"success","latency_ms":83,"http_status":200}]
 	}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -541,10 +546,10 @@ func TestAgentSyncHandlerNormalizesInvalidCPURatesMarkerWithoutRejectingBatch(t 
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`
 		"session_id":"mas_001","monitoring_instance_id":"mi_001",
-		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
-		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","cpu_usage_pct":101,"cpu_rates_valid":true,"cpu_iowait_pct":2,"cpu_steal_pct":3}]
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}],
+		"host_samples":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1","cpu_usage_pct":101,"cpu_rates_valid":true,"cpu_iowait_pct":2,"cpu_steal_pct":3}]
 	}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -574,15 +579,15 @@ func TestAgentSyncHandlerWritesIPQualityReports(t *testing.T) {
 
 	handler := handlers.AgentSync(svc)
 	const suffixFields = `"client_secret":"synthetic-root","credentials":{" APP_SECRET ":"synthetic-nested"},"items":[{"Signing-Secret":"synthetic-array","PRIVATE_SECRET":"synthetic-uppercase"}],"ordinary":"kept","secretary":"retained","secret_count":2`
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(fmt.Sprintf(`{
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(fmt.Sprintf(`{`+testSyncBatchFields+`
 		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
-		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}],
 		"ip_quality_reports":[{
 			"observed_at":"2026-04-23T09:00:01Z",
 			"agent_version":"dev",
 			"fingerprint":"fp-001",
-			"sync_batch_id":"sync_001",
+			"sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1",
 			"ip_address":"203.0.113.10",
 			"ip_version":4,
 			"status":"success",
@@ -687,11 +692,11 @@ func TestAgentSyncHandlerRejectsInvalidIPQualityReport(t *testing.T) {
 	t.Parallel()
 
 	handler := handlers.AgentSync(&fakeAgentSyncService{})
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`
 		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
-		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
-		"ip_quality_reports":[{"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","ip_address":"","ip_version":4,"status":"success"}]
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}],
+		"ip_quality_reports":[{"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1","ip_address":"","ip_version":4,"status":"success"}]
 	}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -739,15 +744,15 @@ func TestAgentSyncHandlerRejectsInvalidIPQualityReportEnums(t *testing.T) {
 			t.Parallel()
 
 			handler := handlers.AgentSync(&fakeAgentSyncService{})
-			body := `{
+			body := `{` + testSyncBatchFields + `
 				"session_id":"mas_001","monitoring_instance_id":"mi_001",
 				"sync_token":"sync-token-001",
-				"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+				"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}],
 				"ip_quality_reports":[{
 					"observed_at":"2026-04-23T09:00:01Z",
 					"agent_version":"dev",
 					"fingerprint":"fp-001",
-					"sync_batch_id":"sync_001",
+					"sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1",
 					"ip_address":"203.0.113.10",
 					"ip_version":4,
 					` + tc.report + `
@@ -773,12 +778,12 @@ func TestAgentSyncHandlerRejectsIPQualityDetailsWithoutProduct(t *testing.T) {
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`
 		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
-		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}],
 		"ip_quality_reports":[{
-			"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001",
+			"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1",
 			"ip_address":"203.0.113.10","ip_version":4,"status":"success",
 			"provider_results":[{"provider":"ipapi.is","status":"success","source_type":"default","details":{"queried_ip":"203.0.113.10","observed_at":"2026-04-23T09:00:01Z","method":"agent_public","api_tier":"anonymous"}}]
 		}]
@@ -801,12 +806,12 @@ func TestAgentSyncHandlerAttachesIPQualityProductFields(t *testing.T) {
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`
 		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
-		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}],
 		"ip_quality_reports":[{
-			"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001",
+			"observed_at":"2026-04-23T09:00:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1",
 			"ip_address":"203.0.113.10","ip_version":4,"status":"success",
 			"product":{"revision":1,"ptr_names":["mail.example.net"],"mail":[{"provider":"gmail","domain":"gmail.com","status":"reachable","mx_host":"gmail-smtp-in.l.google.com","target_ip":"1.1.1.1","greeting_code":220,"latency_ms":40,"observed_at":"2026-04-23T09:00:01Z"}]},
 			"provider_results":[{"provider":"ipapi.is","status":"success","source_type":"default","details":{"queried_ip":"203.0.113.10","observed_at":"2026-04-23T09:00:01Z","method":"agent_public","api_tier":"anonymous","country_code":"US","latitude":0,"longitude":0,"scores":[{"id":"abuser_score","label":"Abuser","raw_value":"0.0183 (Elevated)","unit":"ratio","scope":"company_network","direction":"higher_risk","source_label":"Elevated","value":0.0183}],"field_states":{"is_proxy":"unsupported"}}}],
@@ -847,11 +852,11 @@ func TestAgentSyncHandlerDoesNotReturn200WhenObservationIngestFails(t *testing.T
 	svc := &fakeAgentSyncService{syncErr: observations.ErrInvalidProbeObservation}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`
 		"session_id":"mas_001","monitoring_instance_id":"mi_001",
 		"sync_token":"sync-token-001",
-		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}],
-		"probe_observations":[{"target_id":"tg_bad","probe_item_id":"pb_001","probe_kind":"http","observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001","result_kind":"success","latency_ms":83,"http_status":200}]
+		"heartbeats":[{"observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}],
+		"probe_observations":[{"target_id":"tg_bad","probe_item_id":"pb_001","probe_kind":"http","observed_at":"2026-04-23T09:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1","result_kind":"success","latency_ms":83,"http_status":200}]
 	}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -872,8 +877,9 @@ func TestAgentSyncHandlerReturnsInvalidSyncTokenError(t *testing.T) {
 	svc := &fakeAgentSyncService{syncErr: syncing.ErrInvalidSyncToken}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"bad-token","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"bad-token","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	req.Header.Set("Authorization", "Bearer bad-token")
+	req.Header.Set(agentapi.SyncProtocolHeader, "2")
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 
@@ -892,7 +898,7 @@ func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 	svc := &fakeAgentSyncService{syncErr: syncing.ErrBindingNotAccepted}
 
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -909,10 +915,10 @@ func TestAgentSyncHandlerReturnsBindingNotAcceptedError(t *testing.T) {
 func TestAgentSyncHandlerReturnsStableInternalErrorWithoutStoreDetails(t *testing.T) {
 	t.Parallel()
 
-	const privateStoreDetail = "permission denied for table agent_sync_batches; sync-token-fixture; raw-fingerprint-fixture"
+	const privateStoreDetail = "permission denied for table agent_batch_receipts; sync-token-fixture; raw-fingerprint-fixture"
 	svc := &fakeAgentSyncService{syncErr: errors.New(privateStoreDetail)}
 	handler := handlers.AgentSync(svc)
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -936,7 +942,7 @@ func TestAgentSyncHandlerReturnsStableInternalErrorWithoutStoreDetails(t *testin
 	}
 	for _, privateFragment := range []string{
 		privateStoreDetail,
-		"permission denied for table agent_sync_batches",
+		"permission denied for table agent_batch_receipts",
 		"sync-token-fixture",
 		"raw-fingerprint-fixture",
 		"sync-token-001",
@@ -952,7 +958,7 @@ func TestAgentSyncHandlerRejectsEmptyMonitoringInstanceID(t *testing.T) {
 	t.Parallel()
 
 	handler := handlers.AgentSync(&fakeAgentSyncService{})
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"monitoring_instance_id":"","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -971,7 +977,7 @@ func TestAgentSyncHandlerRejectsOversizedBodyBeforeService(t *testing.T) {
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	body := `{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"` + strings.Repeat("x", handlers.AgentSyncBodyLimit) + `","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`
+	body := `{` + testSyncBatchFields + `"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"` + strings.Repeat("x", handlers.AgentSyncBodyLimit) + `","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -1001,7 +1007,7 @@ func TestAgentSyncHandlerRateLimitsByClientIP(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	req.RemoteAddr = "198.51.100.20:12345"
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -1011,7 +1017,7 @@ func TestAgentSyncHandlerRateLimitsByClientIP(t *testing.T) {
 		t.Fatalf("first attempt status = %d, want %d", recorder.Code, http.StatusOK)
 	}
 
-	req = httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:31:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_002"}]}`))
+	req = httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:31:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	req.RemoteAddr = "198.51.100.20:12345"
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -1019,6 +1025,9 @@ func TestAgentSyncHandlerRateLimitsByClientIP(t *testing.T) {
 	handler.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusTooManyRequests {
 		t.Fatalf("second attempt status = %d, want %d", recorder.Code, http.StatusTooManyRequests)
+	}
+	if got := recorder.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("rate limit Retry-After = %q, want 5", got)
 	}
 	assertErrorResponse(t, recorder, agentapi.ErrorCodeInvalidRequest, "too many requests")
 	if len(receptionFailures) != 1 || receptionFailures[0] != "sync_rate_limited" {
@@ -1076,7 +1085,7 @@ func TestAgentSyncHandlerLimitsInflightRequestsBeforeBodyRead(t *testing.T) {
 			Window:            time.Minute,
 		},
 	})
-	firstReq := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	firstReq := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	setSyncAuth(firstReq)
 	firstReq.Header.Set("Content-Type", "application/json")
 	firstRecorder := httptest.NewRecorder()
@@ -1099,6 +1108,9 @@ func TestAgentSyncHandlerLimitsInflightRequestsBeforeBodyRead(t *testing.T) {
 	if secondRecorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", secondRecorder.Code, http.StatusServiceUnavailable)
 	}
+	if got := secondRecorder.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("capacity Retry-After = %q, want 5", got)
+	}
 	assertErrorResponse(t, secondRecorder, agentapi.ErrorCodeInvalidRequest, "service unavailable")
 	if len(receptionFailures) != 1 || receptionFailures[0] != "sync_capacity_exhausted" {
 		t.Fatalf("capacity rejection did not invalidate safety observation: %v", receptionFailures)
@@ -1112,9 +1124,9 @@ func TestAgentSyncHandlerRejectsTooManyHeartbeatsBeforeService(t *testing.T) {
 	handler := handlers.AgentSync(svc)
 	heartbeats := make([]string, 0, 257)
 	for i := 0; i < 257; i++ {
-		heartbeats = append(heartbeats, `{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}`)
+		heartbeats = append(heartbeats, `{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}`)
 	}
-	body := `{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[` + strings.Join(heartbeats, ",") + `]}`
+	body := `{` + testSyncBatchFields + `"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[` + strings.Join(heartbeats, ",") + `]}`
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -1136,7 +1148,7 @@ func TestAgentSyncHandlerRejectsMixedHeartbeatSyncBatchIDsBeforeService(t *testi
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	body := `{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"},{"observed_at":"2026-04-23T08:30:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_002"}]}`
+	body := `{` + testSyncBatchFields + `"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"},{"observed_at":"2026-04-23T08:30:01Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:2"}]}`
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -1158,7 +1170,7 @@ func TestAgentSyncHandlerRejectsOverlongIdentityStringBeforeService(t *testing.T
 
 	svc := &fakeAgentSyncService{}
 	handler := handlers.AgentSync(svc)
-	body := `{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"` + strings.Repeat("x", 257) + `","sync_batch_id":"sync_001"}]}`
+	body := `{` + testSyncBatchFields + `"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"` + strings.Repeat("x", 257) + `","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`
 	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
@@ -1197,7 +1209,7 @@ func TestAgentSyncHandlerRejectsHeartbeatMissingSyncBatchID(t *testing.T) {
 	t.Parallel()
 
 	handler := handlers.AgentSync(&fakeAgentSyncService{})
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":""}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"2026-04-23T08:30:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":""}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -1215,7 +1227,7 @@ func TestAgentSyncHandlerRejectsHeartbeatWithZeroObservedAt(t *testing.T) {
 	t.Parallel()
 
 	handler := handlers.AgentSync(&fakeAgentSyncService{})
-	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"0001-01-01T00:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"sync_001"}]}`))
+	req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(`{`+testSyncBatchFields+`"session_id":"mas_001","monitoring_instance_id":"mi_001","sync_token":"sync-token-001","heartbeats":[{"observed_at":"0001-01-01T00:00:00Z","agent_version":"dev","fingerprint":"fp-001","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]}`))
 	setSyncAuth(req)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
@@ -1289,14 +1301,15 @@ func TestAgentSyncPairedMetadataSurvivesDiagnosticsTruncation(t *testing.T) {
 					address = "2001:db8::10"
 				}
 				reports = append(reports, agentapi.IPQualityReportPayload{
-					ObservedAt: now, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: "sync_001",
+					ObservedAt: now, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: testSyncBatchID,
 					IPAddress: address, IPVersion: family, Status: "success", DiagnosticsJSON: diagnostics,
 				})
 			}
 			payload, err := json.Marshal(agentapi.SyncRequest{
+				ProtocolRevision: agentapi.SyncProtocolRevision, ProducerID: testSyncProducerID, BatchSequence: 1, AllocatedThrough: 1,
 				SessionID: "mas_001", MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001", IPQualityReports: reports,
 				Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
-					ObservedAt: now, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: "sync_001",
+					ObservedAt: now, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: testSyncBatchID,
 				}},
 			})
 			if err != nil {

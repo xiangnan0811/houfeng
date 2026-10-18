@@ -37,12 +37,13 @@ func TestSyncCollectionCapabilityRequiresCommittedWritableLivePermission(t *test
 			batch.SessionID = "mas_1"
 			batch.IPQualityCollectionRevision = 5
 			if tc.live {
-				batch.LiveSignal = &agentapi.LiveSignal{ID: "live", Fingerprint: "fp-001"}
+				batch.LiveSignal = &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp-001"}
 			}
 			if !tc.heartbeat {
 				batch.Heartbeats = nil
 			}
-			result, err := repo.ApplyBatch(context.Background(), batch)
+			tx.receiptDigest = prepareSyncFixture(batch).PayloadDigest
+			result, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch))
 			if (err != nil) != tc.fail {
 				t.Fatalf("result=%#v err=%v", result, err)
 			}

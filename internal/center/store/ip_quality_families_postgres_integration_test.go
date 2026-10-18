@@ -109,7 +109,7 @@ func assertIPQualityFamilySyncReadModel(t *testing.T, ctx context.Context, fixtu
 				pairedIPQualityTestReport(prefix, "sync_live_"+prefix, prefix, requestID, 6, observedAt, tc.availability6, tc.status6),
 			}
 			repository.now = func() time.Time { return observedAt.Add(time.Second) }
-			result, err := service.SyncBatch(ctx, batch)
+			result, err := service.SyncBatch(ctx, prepareSyncFixture(batch))
 			if err != nil || result.Disposition != syncing.ResultDispositionRecorded {
 				t.Fatalf("sync=%#v err=%v", result, err)
 			}

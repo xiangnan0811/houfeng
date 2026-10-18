@@ -97,9 +97,9 @@ func testPostgresIntegrationAppACLCurrentP74SettingsState(t *testing.T, state st
 		t.Fatalf("C75 manifest history length = %d, want %d", len(after.Manifest.Manifests), len(before.Manifest.Manifests)+1)
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
-	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
-		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
+		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
+		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) {
 		t.Fatalf("C74 to C75 migration changed ACL state\nbefore direct/effective/column/default: %#v/%#v/%#v/%#v\nafter: %#v/%#v/%#v/%#v",
@@ -234,9 +234,9 @@ func testPostgresIntegrationAppACLCurrentP74SuccessorChain(t *testing.T) {
 	}
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, currentInput)
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
-	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
-		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
+		appACLCurrentP75Migration, appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
+		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) {
 		t.Fatalf("P74 successor chain changed ACL state")

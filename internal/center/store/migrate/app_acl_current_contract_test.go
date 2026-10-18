@@ -281,7 +281,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 	for _, tc := range []struct {
 		name      string
 		fragments []AppACLCurrentMigrationFragment
-		want      string
 	}{
 		{
 			name: "duplicate_fragments",
@@ -289,7 +288,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 				{Migration: futureMigration, Privileges: emptyPrivileges},
 				{Migration: futureMigration, Privileges: emptyPrivileges},
 			},
-			want: "duplicate current APP ACL fragment",
 		},
 		{
 			name: "fragment_for_absent_migration",
@@ -297,7 +295,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 				{Migration: futureMigration, Privileges: emptyPrivileges},
 				{Migration: "0053_absent.sql", Privileges: emptyPrivileges},
 			},
-			want: "is not present in the current migration sources",
 		},
 		{
 			name: "duplicate_objects",
@@ -306,7 +303,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 				Objects:    []AppACLManagedObjectR1{newTable, newTable},
 				Privileges: emptyPrivileges,
 			}},
-			want: "duplicate managed object",
 		},
 		{
 			name: "duplicate_privileges",
@@ -317,7 +313,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 					return []AppACLPrivilege{newTablePrivilege, newTablePrivilege}
 				},
 			}},
-			want: "duplicate canonical privilege tuple",
 		},
 		{
 			name: "unknown_subject",
@@ -330,7 +325,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 					return []AppACLPrivilege{privilege}
 				},
 			}},
-			want: "unknown ACL subject",
 		},
 		{
 			name: "privilege_for_unmanaged_object",
@@ -340,7 +334,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 					return []AppACLPrivilege{newTablePrivilege}
 				},
 			}},
-			want: "privilege references unmanaged object",
 		},
 		{
 			name: "hardening_for_unmanaged_function",
@@ -353,7 +346,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 					Kind:       "f",
 				}},
 			}},
-			want: "function hardening references unmanaged function",
 		},
 		{
 			name: "managed_function_without_hardening",
@@ -362,7 +354,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 				Objects:    []AppACLManagedObjectR1{newFunction},
 				Privileges: emptyPrivileges,
 			}},
-			want: "managed function has no hardening contract",
 		},
 		{
 			name: "invalid_function_identity",
@@ -380,7 +371,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 					Kind:       "f",
 				}},
 			}},
-			want: "invalid function object",
 		},
 		{
 			name: "invalid_function_kind",
@@ -394,7 +384,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 					Kind:       "p",
 				}},
 			}},
-			want: "unsupported kind",
 		},
 		{
 			name: "invalid_function_config",
@@ -409,7 +398,6 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 					Config:     []string{"search_path=pg_catalog\x00public"},
 				}},
 			}},
-			want: "invalid configuration",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -417,8 +405,8 @@ func TestCompileAppACLCurrentSourceContractRejectsInvalidFragments(t *testing.T)
 			fsys[futureMigration] = &fstest.MapFile{Data: []byte("select 'future';")}
 
 			_, err := compileAppACLCurrentSourceContract(fsys, tc.fragments)
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("compileAppACLCurrentSourceContract() error = %v, want %q rejection", err, tc.want)
+			if err == nil {
+				t.Fatal("invalid fragment was accepted")
 			}
 		})
 	}

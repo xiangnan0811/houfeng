@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +43,7 @@ import (
 )
 
 const (
+	cpuSamplingProducerID  = "33333333-3333-4333-8333-333333333333"
 	cpuSamplingTargetID    = "tgt_cpu_sampling_validity"
 	cpuSamplingProbeID     = "prb_cpu_sampling_validity"
 	cpuSamplingSyncToken   = "cpu-sampling-validity-secret"
@@ -100,7 +102,7 @@ func TestPostgresIntegrationCPUSamplingValidity(t *testing.T) {
 		}
 		sample.AgentVersion = cpuSamplingAgent
 		sample.Fingerprint = runtimeStreamAuthFingerprint
-		sample.SyncBatchID = fmt.Sprintf("cpu-provider-%d", index)
+		sample.SyncBatchID = cpuSamplingProducerID + ":" + strconv.Itoa(index+1)
 		collected = append(collected, sample)
 		t.Logf("production Collect %s: cpu=(usage=%v iowait=%v steal=%v valid=%v) memory=%v load1=%v network=(in=%d out=%d valid=%v)", sample.SyncBatchID, sample.CPUUsagePct, sample.CPUIOWaitPct, sample.CPUStealPct, boolPointerString(sample.CPURatesValid), sample.MemUsedPct, sample.Load1, sample.NetInBytesPerSec, sample.NetOutBytesPerSec, boolPointerString(sample.NetworkRatesValid))
 	}
@@ -148,7 +150,7 @@ func TestPostgresIntegrationCPUSamplingValidity(t *testing.T) {
 
 	zeroSample := collected[3]
 	zeroSample.ObservedAt = observedAt[3].Add(10 * time.Second)
-	zeroSample.SyncBatchID = "cpu-provider-valid-zero"
+	zeroSample.SyncBatchID = cpuSamplingProducerID + ":5"
 	zeroSample.CPUUsagePct = 0
 	zeroSample.CPUIOWaitPct = 0
 	zeroSample.CPUStealPct = 0
@@ -396,10 +398,16 @@ func newCPUSamplingProvider(t *testing.T) (*hostsample.Provider, []time.Time) {
 
 func cpuSamplingSyncRequest(sample agentapi.HostSamplePayload, includeProbe, backfilled bool) agentapi.SyncRequest {
 	sample.IsBackfilled = backfilled
+	sequence, err := strconv.ParseInt(strings.TrimPrefix(sample.SyncBatchID, cpuSamplingProducerID+":"), 10, 64)
+	if err != nil {
+		panic(err)
+	}
 	heartbeat := agentapi.MonitoringInstanceHeartbeat{
 		ObservedAt: sample.ObservedAt, AgentVersion: sample.AgentVersion, Fingerprint: sample.Fingerprint, SyncBatchID: sample.SyncBatchID, IsBackfilled: backfilled,
 	}
 	request := agentapi.SyncRequest{
+		ProtocolRevision: agentapi.SyncProtocolRevision, ProducerID: cpuSamplingProducerID,
+		BatchSequence: sequence, AllocatedThrough: sequence,
 		SessionID:            "mas_cpu_sampling_validity",
 		MonitoringInstanceID: runtimeStreamAuthMonitoringID,
 		Heartbeats:           []agentapi.MonitoringInstanceHeartbeat{heartbeat},
@@ -428,6 +436,7 @@ func postCPUSamplingSync(t *testing.T, client *http.Client, serverURL string, re
 	}
 	httpRequest.Header.Set("Authorization", "Bearer "+syncToken)
 	httpRequest.Header.Set("Content-Type", "application/json")
+	httpRequest.Header.Set(agentapi.SyncProtocolHeader, "2")
 	response, err := client.Do(httpRequest)
 	if err != nil {
 		t.Fatalf("POST production sync %q: %v", request.HostSamples[0].SyncBatchID, err)

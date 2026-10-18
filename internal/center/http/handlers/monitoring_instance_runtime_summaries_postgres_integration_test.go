@@ -50,18 +50,23 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeSummariesUseCurrentBindingA
 	// deterministic tie-breaker is exercised through the HTTP ingest path.
 	networkRatesValid := false
 	ingestPayload, err := json.Marshal(agentapi.SyncRequest{
+		ProtocolRevision:     agentapi.SyncProtocolRevision,
+		ProducerID:           "c393d63b-3128-489f-89ca-109be0de137d",
+		SessionID:            "mas_runtime_summary",
+		BatchSequence:        1,
+		AllocatedThrough:     1,
 		MonitoringInstanceID: "mi_runtime_live",
 		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
 			ObservedAt:   observedAt,
 			AgentVersion: "test-agent",
 			Fingerprint:  "fp-current",
-			SyncBatchID:  "http-ingest",
+			SyncBatchID:  "c393d63b-3128-489f-89ca-109be0de137d:1",
 		}},
 		HostSamples: []agentapi.HostSamplePayload{{
 			ObservedAt:        observedAt,
 			AgentVersion:      "test-agent",
 			Fingerprint:       "fp-current",
-			SyncBatchID:       "http-ingest",
+			SyncBatchID:       "c393d63b-3128-489f-89ca-109be0de137d:1",
 			UptimeSeconds:     404,
 			NetInBytesPerSec:  4,
 			NetOutBytesPerSec: 4,
@@ -82,6 +87,7 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeSummariesUseCurrentBindingA
 		strings.NewReader(string(ingestPayload)),
 	)
 	ingestRequest.Header.Set("Authorization", "Bearer runtime-summary-sync-token")
+	ingestRequest.Header.Set(agentapi.SyncProtocolHeader, "2")
 	ingestRequest.Header.Set("Content-Type", "application/json")
 	ingestRecorder := httptest.NewRecorder()
 	ingestHandler.ServeHTTP(ingestRecorder, ingestRequest)
@@ -102,7 +108,7 @@ func TestPostgresIntegrationMonitoringInstanceRuntimeSummariesUseCurrentBindingA
 		where monitoring_instance_id = $1 and sync_batch_id = $2
 		order by id desc
 		limit 1
-	`, "mi_runtime_live", "http-ingest").Scan(&persistedNetworkRatesValid); err != nil {
+	`, "mi_runtime_live", "c393d63b-3128-489f-89ca-109be0de137d:1").Scan(&persistedNetworkRatesValid); err != nil {
 		t.Fatalf("read persisted network_rates_valid: %v", err)
 	}
 	if persistedNetworkRatesValid {

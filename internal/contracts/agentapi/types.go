@@ -240,6 +240,11 @@ type IPQualityReportPayload struct {
 // CommandResults carries back outputs from pending actions that were executed
 // since the last sync.
 type SyncRequest struct {
+	ProtocolRevision     int                           `json:"protocol_revision"`
+	ProducerID           string                        `json:"producer_id"`
+	BatchSequence        int64                         `json:"batch_sequence"`
+	AllocatedThrough     int64                         `json:"allocated_through"`
+	RetiredThrough       int64                         `json:"retired_through"`
 	SessionID            string                        `json:"session_id"`
 	LiveSignal           *LiveSignal                   `json:"live_signal,omitempty"`
 	MonitoringInstanceID string                        `json:"monitoring_instance_id"`
@@ -254,7 +259,7 @@ type SyncRequest struct {
 // LiveSignal is generated immediately before transmission. It is never queued,
 // replayed, or interpreted using an agent supplied timestamp.
 type LiveSignal struct {
-	ID          string `json:"id"`
+	Sequence    int64  `json:"sequence"`
 	Fingerprint string `json:"fingerprint"`
 }
 
@@ -311,6 +316,12 @@ type CommandResult struct {
 }
 
 type SyncResponse struct {
+	SessionID      string    `json:"session_id"`
+	ProducerID     string    `json:"producer_id"`
+	BatchSequence  int64     `json:"batch_sequence"`
+	BatchDigest    string    `json:"batch_digest"`
+	Disposition    string    `json:"disposition"`
+	RetiredThrough int64     `json:"retired_through"`
 	StopCollection bool      `json:"stop_collection"`
 	AcceptedAt     time.Time `json:"accepted_at"`
 	Status         string    `json:"status"`

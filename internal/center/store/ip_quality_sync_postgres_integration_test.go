@@ -44,7 +44,7 @@ func TestPostgresIntegrationIPQualitySyncMetadataRoundTrip(t *testing.T) {
 	backfillBatch.IPQualityReports = nil
 	dispatchAt := syncInterleavingT2.Add(-time.Minute)
 	repository.now = func() time.Time { return dispatchAt }
-	dispatchResult, err := service.SyncBatch(ctx, backfillBatch)
+	dispatchResult, err := service.SyncBatch(ctx, prepareSyncFixture(backfillBatch))
 	if err != nil {
 		t.Fatalf("dispatch sync batch: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestPostgresIntegrationIPQualitySyncMetadataRoundTrip(t *testing.T) {
 	fallbackReport := ipQualitySyncFallbackReport(prefix, "sync_live_"+prefix, syncInterleavingT1)
 	liveBatch.IPQualityReports = []ipquality.ReportWrite{fullReport, fallbackReport}
 	repository.now = func() time.Time { return fallbackReceivedAt }
-	liveResult, err := service.SyncBatch(ctx, liveBatch)
+	liveResult, err := service.SyncBatch(ctx, prepareSyncFixture(liveBatch))
 	if err != nil {
 		t.Fatalf("metadata sync batch: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestPostgresIntegrationIPQualitySyncMetadataRoundTrip(t *testing.T) {
 			batch.Observations.ProbeObservations = nil
 			batch.IPQualityReports = []ipquality.ReportWrite{report}
 			repository.now = func() time.Time { return receivedAt }
-			result, err := recoveryService.SyncBatch(ctx, batch)
+			result, err := recoveryService.SyncBatch(ctx, prepareSyncFixture(batch))
 			if err != nil {
 				t.Fatalf("sync recovery report with request %q: %v", returnedID, err)
 			}
@@ -210,7 +210,7 @@ func TestPostgresIntegrationIPQualitySyncMetadataRoundTrip(t *testing.T) {
 		t.Fatalf("SaveReports() metadata/null comparison rows: %v", err)
 	}
 	saveAfter := time.Now().UTC()
-	storedSaveReports := readIPQualitySyncStoredReports(t, ctx, fixture, "mi_"+prefix, saveBatchID)
+	storedSaveReports := readIPQualityStoredReportsByBatchID(t, ctx, fixture, "mi_"+prefix, saveBatchID)
 	if len(storedSaveReports) != 2 {
 		t.Fatalf("stored SaveReports rows = %#v, want two rows", storedSaveReports)
 	}
@@ -267,7 +267,7 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 		if before != (ipQualitySyncFactCounts{}) {
 			t.Fatalf("initial rollback fixture facts = %#v, want empty", before)
 		}
-		if _, err := service.SyncBatch(ctx, liveBatch); err == nil {
+		if _, err := service.SyncBatch(ctx, prepareSyncFixture(liveBatch)); err == nil {
 			t.Fatal("duplicate service source ApplyBatch error = nil, want unique-key failure")
 		} else {
 			var pgErr *pgconn.PgError
@@ -287,7 +287,7 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 		goodReport := badReport
 		goodReport.ServiceUnlocks = append([]ipquality.ServiceUnlockWrite(nil), badReport.ServiceUnlocks[:len(badReport.ServiceUnlocks)-1]...)
 		goodBatch.IPQualityReports = []ipquality.ReportWrite{firstReport, goodReport}
-		goodResult, err := service.SyncBatch(ctx, goodBatch)
+		goodResult, err := service.SyncBatch(ctx, prepareSyncFixture(goodBatch))
 		if err != nil {
 			t.Fatalf("corrected sync batch: %v", err)
 		}
@@ -305,7 +305,7 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 
 		replayAt := receivedAt.Add(time.Minute)
 		repository.now = func() time.Time { return replayAt }
-		replayResult, err := service.SyncBatch(ctx, goodBatch)
+		replayResult, err := service.SyncBatch(ctx, prepareSyncFixture(goodBatch))
 		if err != nil {
 			t.Fatalf("exact replay: %v", err)
 		}
@@ -328,11 +328,11 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 		liveBatch, _ := syncInterleavingBatches(prefix)
 		liveBatch.IPQualityReports = nil
 		repository.now = func() time.Time { return syncInterleavingT2.Add(4 * time.Minute) }
-		if _, err := repository.ApplyBatch(ctx, func() syncing.Batch {
+		if _, err := repository.ApplyBatch(ctx, prepareSyncFixture(func() syncing.Batch {
 			batch := liveBatch
 			batch.SyncToken = "wrong-token"
 			return batch
-		}()); !errors.Is(err, syncing.ErrInvalidSyncToken) {
+		}())); !errors.Is(err, syncing.ErrInvalidSyncToken) {
 			t.Fatalf("invalid token error = %v, want ErrInvalidSyncToken", err)
 		}
 		if counts := readIPQualitySyncFactCounts(t, ctx, fixture, "mi_"+prefix); counts != (ipQualitySyncFactCounts{}) {
@@ -344,7 +344,7 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 		fingerprintReport := ipQualitySyncFullReport(prefix, "sync_live_"+prefix, syncInterleavingT2, time.Time{}, "")
 		fingerprintReport.Fingerprint = "wrong-fingerprint"
 		fingerprintBatch.IPQualityReports = []ipquality.ReportWrite{fingerprintReport}
-		if _, err := repository.ApplyBatch(ctx, fingerprintBatch); !errors.Is(err, syncing.ErrBindingNotAccepted) {
+		if _, err := repository.ApplyBatch(ctx, prepareSyncFixture(fingerprintBatch)); !errors.Is(err, syncing.ErrBindingNotAccepted) {
 			t.Fatalf("invalid fingerprint error = %v, want ErrBindingNotAccepted", err)
 		}
 		if counts := readIPQualitySyncFactCounts(t, ctx, fixture, "mi_"+prefix); counts != (ipQualitySyncFactCounts{}) {
@@ -368,7 +368,7 @@ func TestPostgresIntegrationIPQualitySyncRollbackAndReplay(t *testing.T) {
 		batch, _ := syncInterleavingBatches(prefix)
 		batch.IPQualityReports = []ipquality.ReportWrite{ipQualitySyncFullReport(prefix, "sync_live_"+prefix, syncInterleavingT2, time.Time{}, requestID)}
 		repository.now = func() time.Time { return syncInterleavingT2 }
-		result, err := service.SyncBatch(ctx, batch)
+		result, err := service.SyncBatch(ctx, prepareSyncFixture(batch))
 		if err != nil {
 			t.Fatalf("paused sync batch: %v", err)
 		}
@@ -867,6 +867,13 @@ type ipQualitySyncStoredReport struct {
 
 func readIPQualitySyncStoredReports(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, monitoringInstanceID, syncBatchID string) []ipQualitySyncStoredReport {
 	t.Helper()
+	return readIPQualityStoredReportsByBatchID(t, ctx, fixture, monitoringInstanceID, fixtureCanonicalBatchID(monitoringInstanceID, syncBatchID))
+}
+
+// Standalone SaveReports preserves its caller's association identity; only sync
+// admission canonicalizes legacy fixtures into producer/sequence identities.
+func readIPQualityStoredReportsByBatchID(t *testing.T, ctx context.Context, fixture recordPlatformPostgresFixture, monitoringInstanceID, syncBatchID string) []ipQualitySyncStoredReport {
+	t.Helper()
 	rows, err := fixture.db.Query(ctx, `
 		select report_id, agent_version, received_at,
 			raw_json is null,
@@ -907,7 +914,7 @@ func readIPQualitySyncFactCounts(t *testing.T, ctx context.Context, fixture reco
 	var counts ipQualitySyncFactCounts
 	if err := fixture.db.QueryRow(ctx, `
 		select
-			(select count(*)::int from public.agent_sync_batches where monitoring_instance_id = $1),
+			(select count(*)::int from public.agent_batch_receipts where session_id in (select session_id from monitoring_agent_sessions where monitoring_instance_id = $1)),
 			(select count(*)::int from public.monitoring_instance_heartbeats where monitoring_instance_id = $1),
 			(select count(*)::int from public.host_samples where monitoring_instance_id = $1),
 			(select count(*)::int from public.probe_observations where monitoring_instance_id = $1),

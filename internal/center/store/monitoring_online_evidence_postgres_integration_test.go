@@ -44,12 +44,13 @@ func TestPostgresIntegrationMonitoringOnlineEvidenceProjection(t *testing.T) {
 	syncRepo.now = func() time.Time { return base.Add(-4 * 24 * time.Hour) }
 	batch := syncing.Batch{
 		SessionID: "mas_online", MonitoringInstanceID: id, SyncToken: token,
-		LiveSignal: &agentapi.LiveSignal{ID: "trusted-one", Fingerprint: "fp-current"},
+		LiveSignal: &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp-current"},
+		Heartbeats: []syncing.HeartbeatPayload{{ObservedAt: base, Fingerprint: "fp-current", SyncBatchID: "forbidden-evidence-only-sample"}},
 		Observations: observations.BatchWrite{HostSamples: []observations.HostSampleWrite{{
 			MonitoringInstanceID: id, ObservedAt: base, Fingerprint: "fp-current", SyncBatchID: "forbidden-evidence-only-sample",
 		}}},
 	}
-	result, err := syncRepo.ApplyBatch(ctx, batch)
+	result, err := syncRepo.ApplyBatch(ctx, prepareSyncFixture(batch))
 	if err != nil || !result.StopCollection {
 		t.Fatalf("evidence-only sync result=%#v err=%v, want collection denied", result, err)
 	}
@@ -72,7 +73,7 @@ func TestPostgresIntegrationMonitoringOnlineEvidenceProjection(t *testing.T) {
 	if samples != 1 || capability != "evidence_only" {
 		t.Fatalf("samples=%d capability=%s, evidence read or sync restored collection authority", samples, capability)
 	}
-	if _, err := syncRepo.ApplyBatch(ctx, batch); err != nil {
+	if _, err := syncRepo.ApplyBatch(ctx, prepareSyncFixture(batch)); err != nil {
 		t.Fatal(err)
 	}
 	duplicate, err := repo.GetMonitoringInstanceOnlineEvidence(ctx, id)

@@ -8,35 +8,17 @@ import (
 
 func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 	p62Transition := appACLCurrentTransition{
-		successor: migrationSourceSnapshot{names: []string{
-			"0063_tune_heartbeat_incident_policy.sql",
-			"0064_add_network_rates_valid.sql",
-			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
-			"0066_constrain_monitoring_and_target_state_values.sql",
-			"0067_refactor_vps_monitoring_lifecycle.sql",
-			"0068_normalize_ip_quality_host_address_identity.sql",
-			"0069_add_cpu_rates_valid.sql",
-			"0070_add_record_import_destination_subject.sql",
-			"0071_add_access_management.sql",
-			"0072_add_target_observation_freshness.sql",
-		}},
+		profile:   appACLCurrentProfileP62,
+		successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0063_tune_heartbeat_incident_policy.sql")},
 	}
 	p64Transition := appACLCurrentTransition{
-		successor: migrationSourceSnapshot{names: []string{
-			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
-			"0066_constrain_monitoring_and_target_state_values.sql",
-			"0067_refactor_vps_monitoring_lifecycle.sql",
-			"0068_normalize_ip_quality_host_address_identity.sql",
-			"0069_add_cpu_rates_valid.sql",
-			"0070_add_record_import_destination_subject.sql",
-			"0071_add_access_management.sql",
-			"0072_add_target_observation_freshness.sql",
-		}},
+		profile:   appACLCurrentProfileP64,
+		successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0065_extend_vps_lifecycle_audit_and_snapshot.sql")},
 	}
 
 	p69Transition := appACLCurrentTransition{
 		profile:   appACLCurrentProfileP69,
-		successor: migrationSourceSnapshot{names: []string{"0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}},
+		successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0070_add_record_import_destination_subject.sql")},
 	}
 
 	for _, tc := range []struct {
@@ -48,25 +30,29 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 		{name: "P62 suffix includes heartbeat policy migration", transition: p62Transition, want: true},
 		{name: "P64 suffix starts after heartbeat policy migration", transition: p64Transition, want: false},
 		{name: "P63 suffix preserves heartbeat policy", transition: appACLCurrentTransition{
+			profile:   appACLCurrentProfileP63,
 			successor: migrationSourceSnapshot{names: p62Transition.successor.names[1:]},
 		}, want: false},
 		{name: "P66 lifecycle-only suffix preserves heartbeat policy", transition: appACLCurrentTransition{
-			successor: migrationSourceSnapshot{names: []string{"0067_refactor_vps_monitoring_lifecycle.sql", "0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}},
+			profile:   appACLCurrentProfileP66,
+			successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0067_refactor_vps_monitoring_lifecycle.sql")},
 		}, want: false},
 		{name: "P67 identity-only suffix preserves heartbeat and lifecycle policy", transition: appACLCurrentTransition{
-			successor: migrationSourceSnapshot{names: []string{"0068_normalize_ip_quality_host_address_identity.sql", "0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}},
+			profile:   appACLCurrentProfileP67,
+			successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0068_normalize_ip_quality_host_address_identity.sql")},
 		}, want: false},
 		{name: "P68 CPU-validity-only suffix preserves settings", transition: appACLCurrentTransition{
-			successor: migrationSourceSnapshot{names: []string{"0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}},
+			profile:   appACLCurrentProfileP68,
+			successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0069_add_cpu_rates_valid.sql")},
 		}, want: false},
 		{name: "P69 destination-subject and access-management suffix preserves settings", transition: p69Transition, want: false},
 		{name: "P70 access-management-only suffix preserves settings", transition: appACLCurrentTransition{
 			profile:   appACLCurrentProfileP70,
-			successor: migrationSourceSnapshot{names: []string{"0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}},
+			successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0071_add_access_management.sql")},
 		}, want: false},
 		{name: "P71 freshness-only suffix preserves settings", transition: appACLCurrentTransition{
 			profile:   appACLCurrentProfileP71,
-			successor: migrationSourceSnapshot{names: []string{"0072_add_target_observation_freshness.sql"}},
+			successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0072_add_target_observation_freshness.sql")},
 		}, want: false},
 		{
 			name: "incomplete successor suffix is rejected",
@@ -137,6 +123,9 @@ func TestAppACLCurrentTransitionHeartbeatPreflightPendingSuffix(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantError {
+				tc.transition.successor.names = append(append([]string(nil), tc.transition.successor.names...), appACLCurrentP80Migration)
+			}
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(tc.transition)
 			if tc.wantError {
 				if err == nil {
@@ -197,79 +186,27 @@ func TestAppACLCurrentTransitionWithoutHeartbeatMigrationRequiresExactSettingsSn
 
 func TestAppACLCurrentTransitionSettingsRowPresenceAcrossRegisteredSuffixes(t *testing.T) {
 	suffixes := []struct {
-		name       string
-		transition appACLCurrentTransition
+		name           string
+		profile        appACLCurrentProfileID
+		firstMigration string
 	}{
-		{name: "P62", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
-			"0063_tune_heartbeat_incident_policy.sql",
-			"0064_add_network_rates_valid.sql",
-			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
-			"0066_constrain_monitoring_and_target_state_values.sql",
-			"0067_refactor_vps_monitoring_lifecycle.sql",
-			"0068_normalize_ip_quality_host_address_identity.sql",
-			"0069_add_cpu_rates_valid.sql",
-			"0070_add_record_import_destination_subject.sql",
-			"0071_add_access_management.sql",
-			"0072_add_target_observation_freshness.sql",
-		}}}},
-		{name: "P63", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
-			"0064_add_network_rates_valid.sql",
-			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
-			"0066_constrain_monitoring_and_target_state_values.sql",
-			"0067_refactor_vps_monitoring_lifecycle.sql",
-			"0068_normalize_ip_quality_host_address_identity.sql",
-			"0069_add_cpu_rates_valid.sql",
-			"0070_add_record_import_destination_subject.sql",
-			"0071_add_access_management.sql",
-			"0072_add_target_observation_freshness.sql",
-		}}}},
-		{name: "P64", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
-			"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
-			"0066_constrain_monitoring_and_target_state_values.sql",
-			"0067_refactor_vps_monitoring_lifecycle.sql",
-			"0068_normalize_ip_quality_host_address_identity.sql",
-			"0069_add_cpu_rates_valid.sql",
-			"0070_add_record_import_destination_subject.sql",
-			"0071_add_access_management.sql",
-			"0072_add_target_observation_freshness.sql",
-		}}}},
-		{name: "P66", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
-			"0067_refactor_vps_monitoring_lifecycle.sql",
-			"0068_normalize_ip_quality_host_address_identity.sql",
-			"0069_add_cpu_rates_valid.sql",
-			"0070_add_record_import_destination_subject.sql",
-			"0071_add_access_management.sql",
-			"0072_add_target_observation_freshness.sql",
-		}}}},
-		{name: "P67", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
-			"0068_normalize_ip_quality_host_address_identity.sql",
-			"0069_add_cpu_rates_valid.sql",
-			"0070_add_record_import_destination_subject.sql",
-			"0071_add_access_management.sql",
-			"0072_add_target_observation_freshness.sql",
-		}}}},
-		{name: "P68", transition: appACLCurrentTransition{successor: migrationSourceSnapshot{names: []string{
-			"0069_add_cpu_rates_valid.sql",
-			"0070_add_record_import_destination_subject.sql",
-			"0071_add_access_management.sql",
-			"0072_add_target_observation_freshness.sql",
-		}}}},
-		{name: "P69", transition: appACLCurrentTransition{
-			profile:   appACLCurrentProfileP69,
-			successor: migrationSourceSnapshot{names: []string{"0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}},
-		}},
-		{name: "P70", transition: appACLCurrentTransition{
-			profile:   appACLCurrentProfileP70,
-			successor: migrationSourceSnapshot{names: []string{"0071_add_access_management.sql", "0072_add_target_observation_freshness.sql"}},
-		}},
-		{name: "P71", transition: appACLCurrentTransition{
-			profile:   appACLCurrentProfileP71,
-			successor: migrationSourceSnapshot{names: []string{"0072_add_target_observation_freshness.sql"}},
-		}},
+		{name: "P62", profile: appACLCurrentProfileP62, firstMigration: "0063_tune_heartbeat_incident_policy.sql"},
+		{name: "P63", profile: appACLCurrentProfileP63, firstMigration: "0064_add_network_rates_valid.sql"},
+		{name: "P64", profile: appACLCurrentProfileP64, firstMigration: "0065_extend_vps_lifecycle_audit_and_snapshot.sql"},
+		{name: "P66", profile: appACLCurrentProfileP66, firstMigration: "0067_refactor_vps_monitoring_lifecycle.sql"},
+		{name: "P67", profile: appACLCurrentProfileP67, firstMigration: "0068_normalize_ip_quality_host_address_identity.sql"},
+		{name: "P68", profile: appACLCurrentProfileP68, firstMigration: "0069_add_cpu_rates_valid.sql"},
+		{name: "P69", profile: appACLCurrentProfileP69, firstMigration: "0070_add_record_import_destination_subject.sql"},
+		{name: "P70", profile: appACLCurrentProfileP70, firstMigration: "0071_add_access_management.sql"},
+		{name: "P71", profile: appACLCurrentProfileP71, firstMigration: "0072_add_target_observation_freshness.sql"},
 	}
 	for _, suffix := range suffixes {
 		t.Run(suffix.name, func(t *testing.T) {
-			if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(suffix.transition); err != nil {
+			transition := appACLCurrentTransition{
+				profile:   suffix.profile,
+				successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, suffix.firstMigration)},
+			}
+			if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err != nil {
 				t.Fatalf("registered %s suffix rejected: %v", suffix.name, err)
 			}
 			absent := appACLCurrentTransitionPreflight{
@@ -293,7 +230,8 @@ func TestAppACLCurrentTransitionSettingsRowPresenceAcrossRegisteredSuffixes(t *t
 }
 func TestAppACLCurrentTransitionP68PreservesSettings(t *testing.T) {
 	transition := appACLCurrentTransition{
-		successor: migrationSourceSnapshot{names: []string{"0069_add_cpu_rates_valid.sql", "0070_add_record_import_destination_subject.sql", "0071_add_access_management.sql"}},
+		profile:   appACLCurrentProfileP68,
+		successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0069_add_cpu_rates_valid.sql")},
 	}
 	if got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err != nil || got {
 		t.Fatalf("P68 heartbeat classification = %t, error = %v, want false/nil", got, err)
@@ -356,10 +294,8 @@ func TestAppACLCurrentTransitionHeartbeatSettingsTransformations(t *testing.T) {
 func TestAppACLCurrentTransitionDeploymentOverrideSuffixClassification(t *testing.T) {
 	t.Run("P74 suffix", func(t *testing.T) {
 		transition := appACLCurrentTransition{
-			profile: appACLCurrentProfileP74,
-			successor: migrationSourceSnapshot{names: []string{
-				"0075_add_settings_deployment_overrides.sql",
-			}},
+			profile:   appACLCurrentProfileP74,
+			successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0075_add_settings_deployment_overrides.sql")},
 		}
 		if got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err != nil || got {
 			t.Fatalf("P74 heartbeat classification = %t, error = %v, want false/nil", got, err)
@@ -367,19 +303,20 @@ func TestAppACLCurrentTransitionDeploymentOverrideSuffixClassification(t *testin
 	})
 	t.Run("P74 suffix is required", func(t *testing.T) {
 		transition := appACLCurrentTransition{
-			profile: appACLCurrentProfileP74,
+			profile:   appACLCurrentProfileP74,
+			successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0076_ip_quality_address_families.sql")},
 		}
 		if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err == nil {
-			t.Fatal("classifier accepted P74 without terminal 0075 successor")
+			t.Fatal("classifier accepted P74 without its pending 0075 successor")
 		}
 	})
 	t.Run("duplicate terminal 0075 suffix is rejected", func(t *testing.T) {
 		transition := appACLCurrentTransition{
 			profile: appACLCurrentProfileP74,
-			successor: migrationSourceSnapshot{names: []string{
+			successor: migrationSourceSnapshot{names: append([]string{
 				"0075_add_settings_deployment_overrides.sql",
 				"0075_add_settings_deployment_overrides.sql",
-			}},
+			}, appACLCurrentTransitionTestSuffix(t, "0076_ip_quality_address_families.sql")...)},
 		}
 		if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err == nil {
 			t.Fatal("classifier accepted duplicate terminal 0075 successor")
@@ -387,11 +324,8 @@ func TestAppACLCurrentTransitionDeploymentOverrideSuffixClassification(t *testin
 	})
 	t.Run("P73 suffix strips terminal 0075", func(t *testing.T) {
 		transition := appACLCurrentTransition{
-			profile: appACLCurrentProfileP73,
-			successor: migrationSourceSnapshot{names: []string{
-				"0074_add_subscription_exchange_rate_month_end.sql",
-				"0075_add_settings_deployment_overrides.sql",
-			}},
+			profile:   appACLCurrentProfileP73,
+			successor: migrationSourceSnapshot{names: appACLCurrentTransitionTestSuffix(t, "0074_add_subscription_exchange_rate_month_end.sql")},
 		}
 		if got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err != nil || got {
 			t.Fatalf("P73 heartbeat classification = %t, error = %v, want false/nil", got, err)
@@ -403,6 +337,7 @@ func TestAppACLCurrentTransitionDeploymentOverrideSuffixClassification(t *testin
 			successor: migrationSourceSnapshot{names: []string{
 				"0075_add_settings_deployment_overrides.sql",
 				"0076_future.sql",
+				appACLCurrentP80Migration,
 			}},
 		}
 		if _, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(transition); err == nil {
@@ -495,13 +430,16 @@ func TestAppACLCurrentTransitionAddressFamiliesSuffixClassification(t *testing.T
 		names     []string
 		wantError bool
 	}{
-		{name: "P75 exact", profile: appACLCurrentProfileP75, names: []string{"0076_ip_quality_address_families.sql"}},
-		{name: "P74 exact", profile: appACLCurrentProfileP74, names: []string{"0075_add_settings_deployment_overrides.sql", "0076_ip_quality_address_families.sql"}},
+		{name: "P75 exact", profile: appACLCurrentProfileP75, names: appACLCurrentTransitionTestSuffix(t, "0076_ip_quality_address_families.sql")},
+		{name: "P74 exact", profile: appACLCurrentProfileP74, names: appACLCurrentTransitionTestSuffix(t, "0075_add_settings_deployment_overrides.sql")},
 		{name: "P75 missing", profile: appACLCurrentProfileP75, wantError: true},
 		{name: "P75 duplicate", profile: appACLCurrentProfileP75, names: []string{"0076_ip_quality_address_families.sql", "0076_ip_quality_address_families.sql"}, wantError: true},
 		{name: "P74 reordered", profile: appACLCurrentProfileP74, names: []string{"0076_ip_quality_address_families.sql", "0075_add_settings_deployment_overrides.sql"}, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantError {
+				tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration)
+			}
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
 				profile:   tc.profile,
 				successor: migrationSourceSnapshot{names: tc.names},
@@ -520,8 +458,8 @@ func TestAppACLCurrentTransitionProductSuffixClassification(t *testing.T) {
 		names     []string
 		wantError bool
 	}{
-		{name: "P76 exact", profile: appACLCurrentProfileP76, names: []string{"0077_ip_quality_product.sql"}},
-		{name: "P75 exact", profile: appACLCurrentProfileP75, names: []string{"0076_ip_quality_address_families.sql", "0077_ip_quality_product.sql"}},
+		{name: "P76 exact", profile: appACLCurrentProfileP76, names: appACLCurrentTransitionTestSuffix(t, "0077_ip_quality_product.sql")},
+		{name: "P75 exact", profile: appACLCurrentProfileP75, names: appACLCurrentTransitionTestSuffix(t, "0076_ip_quality_address_families.sql")},
 		{name: "P76 missing", profile: appACLCurrentProfileP76, wantError: true},
 		{name: "P76 duplicate", profile: appACLCurrentProfileP76, names: []string{"0077_ip_quality_product.sql", "0077_ip_quality_product.sql"}, wantError: true},
 		{name: "P75 reordered", profile: appACLCurrentProfileP75, names: []string{"0077_ip_quality_product.sql", "0076_ip_quality_address_families.sql"}, wantError: true},
@@ -529,6 +467,9 @@ func TestAppACLCurrentTransitionProductSuffixClassification(t *testing.T) {
 		{name: "P76 unknown tail", profile: appACLCurrentProfileP76, names: []string{"0077_ip_quality_product.sql", "0078_future.sql"}, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantError {
+				tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration)
+			}
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
 				profile: tc.profile, successor: migrationSourceSnapshot{names: tc.names},
 			})
@@ -556,6 +497,7 @@ func TestAppACLCurrentTransitionCollectionScopeSuffixClassification(t *testing.T
 		{name: "reordered", names: []string{"0078_ip_quality_collection_scope.sql", "0077_ip_quality_product.sql"}, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration)
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
 				profile: appACLCurrentProfileP77, successor: migrationSourceSnapshot{names: tc.names},
 			})
@@ -581,6 +523,7 @@ func TestAppACLCurrentTransitionCacheExpirySuffixClassification(t *testing.T) {
 		{name: "reordered", names: []string{"0079_ip_quality_cache_expiry.sql", "0078_ip_quality_collection_scope.sql"}, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			tc.names = append(append([]string(nil), tc.names...), appACLCurrentP80Migration)
 			got, err := appACLCurrentTransitionAppliesHeartbeatPolicyMigration(appACLCurrentTransition{
 				profile: appACLCurrentProfileP78, successor: migrationSourceSnapshot{names: tc.names},
 			})
@@ -600,4 +543,37 @@ func TestAppACLCurrentRegisteredSuffixesPreservePolicyClassification(t *testing.
 			t.Fatalf("registered profile %d heartbeat classification = %t/%v", definition.profile, got, err)
 		}
 	}
+}
+
+// Keep handcrafted current-suffix consumers independent of the production
+// registry while including every migration through the current C80 target.
+func appACLCurrentTransitionTestSuffix(t *testing.T, firstMigration string) []string {
+	t.Helper()
+	names := []string{
+		"0063_tune_heartbeat_incident_policy.sql",
+		"0064_add_network_rates_valid.sql",
+		"0065_extend_vps_lifecycle_audit_and_snapshot.sql",
+		"0066_constrain_monitoring_and_target_state_values.sql",
+		"0067_refactor_vps_monitoring_lifecycle.sql",
+		"0068_normalize_ip_quality_host_address_identity.sql",
+		"0069_add_cpu_rates_valid.sql",
+		"0070_add_record_import_destination_subject.sql",
+		"0071_add_access_management.sql",
+		"0072_add_target_observation_freshness.sql",
+		"0073_add_monitoring_instance_metadata_version.sql",
+		"0074_add_subscription_exchange_rate_month_end.sql",
+		"0075_add_settings_deployment_overrides.sql",
+		"0076_ip_quality_address_families.sql",
+		"0077_ip_quality_product.sql",
+		"0078_ip_quality_collection_scope.sql",
+		"0079_ip_quality_cache_expiry.sql",
+		"0080_bound_agent_sync_replay.sql",
+	}
+	for i, name := range names {
+		if name == firstMigration {
+			return names[i:]
+		}
+	}
+	t.Fatalf("unknown first migration in current suffix fixture: %q", firstMigration)
+	return nil
 }

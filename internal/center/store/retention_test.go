@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -13,135 +12,149 @@ import (
 	"houfeng/internal/center/retention"
 )
 
-func TestPostgresRetentionRepositoryAppliesAggregatesAndCleanupInTransaction(t *testing.T) {
-	t.Parallel()
-	tx := &fakeRetentionTx{}
-	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
-	now := time.Date(2026, time.April, 28, 12, 30, 0, 0, time.UTC)
-
-	result, err := repo.ApplyRetention(context.Background(), retention.Policy{
-		RawLayerDays:       30,
-		AggregateLayerDays: 365,
-	}, now)
-	if err != nil {
-		t.Fatalf("ApplyRetention() error = %v", err)
+// Transaction orchestration is tested here; SQL results and time boundaries
+// are exercised against PostgreSQL in the retention integration tests.
+func TestRetentionRetriesOnlyWholeRetryableTransactions(t *testing.T) {
+	for _, code := range []string{"40001", "40P01", "23514"} {
+		t.Run(code, func(t *testing.T) {
+			var txs []*fakeRetentionTx
+			repo := &PostgresRetentionRepository{beginTx: func(_ context.Context, opts pgx.TxOptions) (retentionTx, error) {
+				if opts.IsoLevel != pgx.RepeatableRead {
+					t.Fatalf("isolation = %s", opts.IsoLevel)
+				}
+				if len(txs) > 0 && txs[len(txs)-1].rollbacks == 0 {
+					t.Fatal("retry started before rollback")
+				}
+				tx := &fakeRetentionTx{locked: true, failAt: 4, err: &pgconn.PgError{Code: code}}
+				txs = append(txs, tx)
+				return tx, nil
+			}}
+			result, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, time.Now())
+			want := 3
+			if code == "23514" {
+				want = 1
+			}
+			if err == nil || len(txs) != want || result != (retention.Result{}) {
+				t.Fatalf("attempts=%d result=%+v err=%v", len(txs), result, err)
+			}
+			for _, tx := range txs {
+				if tx.commits != 0 || tx.rollbacks != 1 {
+					t.Fatalf("transaction = %+v", tx)
+				}
+			}
+		})
 	}
-	for _, want := range []string{
-		"insert into monitoring_instance_host_sample_daily_aggregates",
-		"insert into target_probe_daily_aggregates",
-		"delete from monitoring_instance_heartbeats",
-		"delete from host_samples",
-		"delete from probe_observations",
-		"delete from monitoring_instance_host_sample_daily_aggregates",
-		"delete from target_probe_daily_aggregates",
-		"update monitoring_instances",
-		"output_expired",
-	} {
-		if !containsSQL(tx.execSQL, want) {
-			t.Fatalf("execSQL = %#v, want %q", tx.execSQL, want)
+}
+
+func TestRetentionSuccessfulRetryReportsOnlyCommittedCounts(t *testing.T) {
+	var txs []*fakeRetentionTx
+	now := time.Date(2026, 10, 1, 0, 30, 0, 0, time.FixedZone("west", -7*3600))
+	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) {
+		tx := &fakeRetentionTx{locked: true}
+		if len(txs) == 0 {
+			tx.failAt = 4
+			tx.err = &pgconn.PgError{Code: "40001"}
+		}
+		txs = append(txs, tx)
+		return tx, nil
+	}}
+	result, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, now)
+	if err != nil || len(txs) != 2 || txs[1].commits != 1 {
+		t.Fatalf("result=%+v attempts=%d err=%v", result, len(txs), err)
+	}
+	// Each committed counter is a single command tag (1), never a sum across
+	// the failed first attempt.
+	if result.MonitoringInstanceAggregateRows != 1 || result.DeletedHostSamples != 1 || result.DeletedTargetAggregates != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	for _, tx := range txs {
+		if got := tx.args[0][0].(time.Time); !got.Equal(startOfUTCDay(now)) {
+			t.Fatalf("stable cutoff = %v", got)
+		}
+		if got := tx.args[0][1].(time.Time); !got.Equal(now.UTC().AddDate(0, 0, -30)) {
+			t.Fatalf("raw cutoff = %v", got)
 		}
 	}
-	for _, forbidden := range []string{"delete from active_incidents", "state_change_events", "notification_records", "ip_quality_reports", "agent_live_signals", "agent_sessions"} {
-		if containsSQL(tx.execSQL, forbidden) {
-			t.Fatalf("execSQL = %#v, must retain %s", tx.execSQL, forbidden)
+}
+
+func TestRetentionCancellationAfterRollbackStopsRetryWait(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tx := &fakeRetentionTx{locked: true, failAt: 1, err: &pgconn.PgError{Code: "40001"}, afterRollback: cancel}
+	calls := 0
+	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) {
+		calls++
+		return tx, nil
+	}}
+	result, err := repo.ApplyRetention(ctx, retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, time.Now())
+	if !errors.Is(err, context.Canceled) || calls != 1 || tx.rollbacks != 1 || result != (retention.Result{}) {
+		t.Fatalf("calls=%d result=%+v err=%v", calls, result, err)
+	}
+}
+
+func TestRetentionOverlapSkipsWithoutWritesOrCommit(t *testing.T) {
+	tx := &fakeRetentionTx{}
+	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
+	result, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, time.Now())
+	if err != nil || !result.Skipped || tx.execs != 0 || tx.commits != 0 || tx.rollbacks != 1 {
+		t.Fatalf("result=%+v tx=%+v err=%v", result, tx, err)
+	}
+}
+
+func TestCommandOutputCleanupUsesIndependentReadCommittedCommit(t *testing.T) {
+	tx := &fakeRetentionTx{}
+	repo := &PostgresRetentionRepository{beginTx: func(_ context.Context, opts pgx.TxOptions) (retentionTx, error) {
+		if opts.IsoLevel != pgx.ReadCommitted {
+			t.Fatalf("isolation = %s", opts.IsoLevel)
 		}
-	}
-	if tx.commitCalls != 1 || tx.rollbackCalls == 0 {
-		t.Fatalf("commitCalls=%d rollbackCalls=%d, want commit and deferred rollback", tx.commitCalls, tx.rollbackCalls)
-	}
-	if result.MonitoringInstanceAggregateRows != 1 ||
-		result.TargetAggregateRows != 1 ||
-		result.DeletedHeartbeats != 1 ||
-		result.ClearedCommandActionOutputs != 1 {
-		t.Fatalf("result = %#v, want command-tag counts", result)
-	}
-}
-
-func TestPostgresRetentionRepositoryUsesRepeatableReadTransaction(t *testing.T) {
-	t.Parallel()
-	tx := &fakeRetentionTx{}
-	var options pgx.TxOptions
-	repo := &PostgresRetentionRepository{
-		beginTx: func(_ context.Context, opts pgx.TxOptions) (retentionTx, error) {
-			options = opts
-			return tx, nil
-		},
-	}
-
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
-	if err != nil {
-		t.Fatalf("ApplyRetention() error = %v", err)
-	}
-
-	if options.IsoLevel != pgx.RepeatableRead {
-		t.Fatalf("transaction isolation = %q, want %q", options.IsoLevel, pgx.RepeatableRead)
-	}
-}
-
-func TestPostgresRetentionRepositoryUsesExpectedCutoffs(t *testing.T) {
-	t.Parallel()
-	tx := &fakeRetentionTx{}
-	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
-	now := time.Date(2026, time.April, 28, 12, 30, 0, 0, time.UTC)
-
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, now)
-	if err != nil {
-		t.Fatalf("ApplyRetention() error = %v", err)
-	}
-	if got := tx.argsForSQL("insert into monitoring_instance_host_sample_daily_aggregates")[0].(time.Time); !got.Equal(time.Date(2026, time.April, 28, 0, 0, 0, 0, time.UTC)) {
-		t.Fatalf("aggregate stable cutoff = %s, want start of current UTC day", got)
-	}
-	if got := tx.argsForSQL("delete from monitoring_instance_heartbeats")[0].(time.Time); !got.Equal(now.AddDate(0, 0, -30)) {
-		t.Fatalf("raw cutoff = %s, want %s", got, now.AddDate(0, 0, -30))
-	}
-	if got := tx.argsForSQL("insert into monitoring_instance_host_sample_daily_aggregates")[1].(time.Time); !got.Equal(now.AddDate(0, 0, -30)) {
-		t.Fatalf("aggregate finalization cutoff = %s, want raw cutoff", got)
-	}
-	if got := tx.argsForSQL("update monitoring_instances")[0].(time.Time); !got.Equal(now) {
-		t.Fatalf("command output expiry cutoff = %s, want %s", got, now)
-	}
-}
-
-func TestPostgresRetentionRepositoryRollsBackOnFailure(t *testing.T) {
-	t.Parallel()
-	tx := &fakeRetentionTx{execErrForSQLSubstring: "delete from host_samples", execErr: errors.New("delete boom")}
-	repo := &PostgresRetentionRepository{beginTx: func(context.Context, pgx.TxOptions) (retentionTx, error) { return tx, nil }}
-
-	_, err := repo.ApplyRetention(context.Background(), retention.Policy{RawLayerDays: 30, AggregateLayerDays: 365}, time.Date(2026, time.April, 28, 12, 0, 0, 0, time.UTC))
-	if err == nil || !strings.Contains(err.Error(), "delete expired host samples") {
-		t.Fatalf("ApplyRetention() error = %v, want host sample context", err)
-	}
-	if tx.commitCalls != 0 || tx.rollbackCalls == 0 {
-		t.Fatalf("commitCalls=%d rollbackCalls=%d, want rollback without commit", tx.commitCalls, tx.rollbackCalls)
+		return tx, nil
+	}}
+	count, err := repo.ClearExpiredCommandOutputs(context.Background(), time.Now())
+	if err != nil || count != 1 || tx.commits != 1 || tx.execs != 1 {
+		t.Fatalf("count=%d tx=%+v err=%v", count, tx, err)
 	}
 }
 
 type fakeRetentionTx struct {
-	execSQL                []string
-	execArgs               [][]any
-	execErrForSQLSubstring string
-	execErr                error
-	commitCalls            int
-	rollbackCalls          int
+	locked        bool
+	failAt        int
+	err           error
+	execs         int
+	commits       int
+	rollbacks     int
+	args          [][]any
+	afterRollback func()
 }
 
-func (f *fakeRetentionTx) Exec(_ context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	f.execSQL = append(f.execSQL, sql)
-	f.execArgs = append(f.execArgs, append([]any(nil), args...))
-	if f.execErr != nil && strings.Contains(sql, f.execErrForSQLSubstring) {
-		return pgconn.CommandTag{}, f.execErr
+func (f *fakeRetentionTx) Exec(_ context.Context, _ string, args ...any) (pgconn.CommandTag, error) {
+	f.execs++
+	f.args = append(f.args, args)
+	if f.execs == f.failAt {
+		return pgconn.CommandTag{}, f.err
 	}
-	return pgconn.NewCommandTag("DELETE 1"), nil
+	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
-func (f *fakeRetentionTx) Commit(context.Context) error   { f.commitCalls++; return nil }
-func (f *fakeRetentionTx) Rollback(context.Context) error { f.rollbackCalls++; return nil }
+func (f *fakeRetentionTx) QueryRow(context.Context, string, ...any) pgx.Row {
+	return retentionBoolRow(f.locked)
+}
 
-func (f *fakeRetentionTx) argsForSQL(substring string) []any {
-	for i, sql := range f.execSQL {
-		if strings.Contains(sql, substring) {
-			return f.execArgs[i]
-		}
+func (f *fakeRetentionTx) Commit(context.Context) error {
+	f.commits++
+	return nil
+}
+
+func (f *fakeRetentionTx) Rollback(context.Context) error {
+	f.rollbacks++
+	if f.afterRollback != nil {
+		f.afterRollback()
 	}
+	return nil
+}
+
+type retentionBoolRow bool
+
+func (r retentionBoolRow) Scan(dest ...any) error {
+	*dest[0].(*bool) = bool(r)
 	return nil
 }

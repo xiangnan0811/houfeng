@@ -32,11 +32,12 @@ func TestSelectiveCollectionDispatchRequiresAcceptedWritableLiveCapability(t *te
 			registry := ipquality.NewCollectRequests(func() (string, error) { return "scope", nil })
 			_, _ = registry.Request("mi", now, []int{6})
 			plan := &agentplan.IPQualityPlan{Enabled: tc.enabled, Services: []string{"reddit"}}
-			repo := &fakeSyncRepository{result: Result{StopCollection: tc.stop, LiveCollectionAllowed: tc.allowed, Plan: agentplan.SyncPlan{IPQualityPlan: plan}}}
+			repo := &fakeSyncRepository{result: Result{Disposition: ResultDispositionRecorded, StopCollection: tc.stop, LiveCollectionAllowed: tc.allowed, Plan: agentplan.SyncPlan{IPQualityPlan: plan}}}
 			service := NewService(repo).WithIPQualityCollectCoordinator(registry)
-			batch := Batch{MonitoringInstanceID: "mi", IPQualityCollectionRevision: tc.revision}
+			batch := validSyncBatch("mi")
+			batch.IPQualityCollectionRevision = tc.revision
 			if tc.live {
-				batch.LiveSignal = &agentapi.LiveSignal{ID: "live", Fingerprint: "fp"}
+				batch.LiveSignal = &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp"}
 			}
 			result, err := service.SyncBatch(context.Background(), batch)
 			if err != nil {
@@ -70,16 +71,21 @@ func TestSelectiveCollectionDispatchRequiresAcceptedWritableLiveCapability(t *te
 func TestDualCollectionNegotiationIsPerLiveRequestAndLegacyCompatible(t *testing.T) {
 	registry := ipquality.NewCollectRequests(func() (string, error) { return "dual", nil })
 	_, _ = registry.Request("mi", time.Now())
-	repo := &fakeSyncRepository{result: Result{LiveCollectionAllowed: true, Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: true}}}}
+	repo := &fakeSyncRepository{result: Result{Disposition: ResultDispositionRecorded, LiveCollectionAllowed: true, Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: true}}}}
 	service := NewService(repo).WithIPQualityCollectCoordinator(registry)
-	capable, err := service.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi", LiveSignal: &agentapi.LiveSignal{ID: "live"}, IPQualityCollectionRevision: 5})
+	capableBatch := validSyncBatch("mi")
+	capableBatch.LiveSignal = &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp"}
+	capableBatch.IPQualityCollectionRevision = 5
+	capable, err := service.SyncBatch(context.Background(), capableBatch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if capable.Plan.IPQualityPlan.CollectionRevision != 5 || !slices.Equal(capable.Plan.IPQualityPlan.CollectIPVersions, []int{4, 6}) {
 		t.Fatalf("capable plan=%#v", capable.Plan.IPQualityPlan)
 	}
-	for _, batch := range []Batch{{MonitoringInstanceID: "mi"}, {MonitoringInstanceID: "mi", LiveSignal: &agentapi.LiveSignal{ID: "old"}}} {
+	legacyLiveBatch := validSyncBatch("mi")
+	legacyLiveBatch.LiveSignal = &agentapi.LiveSignal{Sequence: 2, Fingerprint: "fp"}
+	for _, batch := range []Batch{validSyncBatch("mi"), legacyLiveBatch} {
 		legacy, err := service.SyncBatch(context.Background(), batch)
 		if err != nil {
 			t.Fatal(err)
@@ -97,13 +103,16 @@ func TestSelectiveRequestCompletesOnlyRecordedMatchingTerminal(t *testing.T) {
 	_, _ = registry.Request("mi", now, []int{4})
 	repo := &fakeSyncRepository{result: Result{LiveCollectionAllowed: true, Disposition: ResultDispositionRecorded, Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: true}}}}
 	service := NewService(repo).WithIPQualityCollectCoordinator(registry)
-	_, err := service.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi", LiveSignal: &agentapi.LiveSignal{ID: "live"}, IPQualityCollectionRevision: 5})
+	liveBatch := validSyncBatch("mi")
+	liveBatch.LiveSignal = &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp"}
+	liveBatch.IPQualityCollectionRevision = 5
+	_, err := service.SyncBatch(context.Background(), liveBatch)
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw := []byte(`{"collection_revision":5,"collection_id":"round","expected_ip_versions":[4],"ip_address_family":4,"family_availability":"available","collect_request_id":"single"}`)
-	batch := Batch{MonitoringInstanceID: "mi", IPQualityReports: []ipquality.ReportWrite{{MonitoringInstanceID: "mi", IPVersion: 4, IPAddress: "198.51.100.10", Status: "success", ObservedAt: now, CollectionMetadata: agentapi.ParseCollectionMetadata(raw)}}}
-	for _, disposition := range []ResultDisposition{ResultDispositionSuppressed, ResultDispositionExactDuplicate} {
+	batch := validSyncBatch("mi", ipquality.ReportWrite{MonitoringInstanceID: "mi", IPVersion: 4, IPAddress: "198.51.100.10", Status: "success", ObservedAt: now, CollectionMetadata: agentapi.ParseCollectionMetadata(raw)})
+	for _, disposition := range []ResultDisposition{ResultDispositionSuppressed, ResultDispositionExactDuplicate, ResultDispositionDeferred} {
 		repo.result.Disposition = disposition
 		if _, err := service.SyncBatch(context.Background(), batch); err != nil {
 			t.Fatal(err)

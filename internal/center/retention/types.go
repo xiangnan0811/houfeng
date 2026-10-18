@@ -22,11 +22,12 @@ type Result struct {
 	DeletedProbeObservations            int64
 	DeletedMonitoringInstanceAggregates int64
 	DeletedTargetAggregates             int64
-	ClearedCommandActionOutputs         int64
+	Skipped                             bool
 }
 
 type Repository interface {
 	ApplyRetention(context.Context, Policy, time.Time) (Result, error)
+	ClearExpiredCommandOutputs(context.Context, time.Time) (int64, error)
 }
 
 type SettingsRepository interface {

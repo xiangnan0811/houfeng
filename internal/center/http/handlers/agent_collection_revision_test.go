@@ -28,9 +28,9 @@ func TestAgentSyncCollectionRevisionHeaderIsTransientStrictAndLiveOnly(t *testin
 		{"backfill", []string{"5"}, false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			body := `{"monitoring_instance_id":"mi_1","session_id":"mas_1","heartbeats":[{"observed_at":"2026-10-01T00:00:00Z","agent_version":"test","fingerprint":"fp_1","sync_batch_id":"batch"}]`
+			body := `{` + testSyncBatchFields + `"monitoring_instance_id":"mi_1","session_id":"mas_1","heartbeats":[{"observed_at":"2026-10-01T00:00:00Z","agent_version":"test","fingerprint":"fp_1","sync_batch_id":"c393d63b-3128-489f-89ca-109be0de137d:1"}]`
 			if tc.live {
-				body += `,"live_signal":{"id":"live","fingerprint":"fp_1"}`
+				body += `,"live_signal":{"sequence":1,"fingerprint":"fp_1"}`
 			}
 			body += `}`
 			req := httptest.NewRequest(http.MethodPost, agentapi.SyncPath, strings.NewReader(body))

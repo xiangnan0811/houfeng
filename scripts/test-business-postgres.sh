@@ -39,6 +39,9 @@ anchors=(
   TestCreateSubscriptionIdempotentReplayAfterLostResponseKeepsOneRow
   TestCreateSubscriptionIdempotentDisplayNameIsPartOfTheRequest
   TestPostgresIntegrationMonitoringMetadataVersionIgnoresSyncAdvances
+  TestPostgresIntegrationAgentReplayWindow
+  TestPostgresIntegrationRetentionConcurrentSync
+  TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets
 )
 selector="^($(IFS='|'; printf '%s' "${anchors[*]}"))$"
 anchors_json=$(printf '%s\n' "${anchors[@]}" | jq -R . | jq -s .)

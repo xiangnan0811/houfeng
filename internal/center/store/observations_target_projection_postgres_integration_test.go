@@ -180,7 +180,7 @@ func TestPostgresIntegrationObservationBatchConcurrentTargetProjectionOrder(t *t
 	results := make(chan error, len(batches))
 	apply := func(repository *PostgresSyncRepository, batch syncing.Batch) {
 		go func() {
-			_, applyErr := repository.ApplyBatch(ctx, batch)
+			_, applyErr := repository.ApplyBatch(ctx, prepareSyncFixture(batch))
 			results <- applyErr
 		}()
 	}
@@ -342,7 +342,7 @@ func observationProjectionConcurrentBatch(
 	}
 	return syncing.Batch{
 		SessionID:            sessionID,
-		LiveSignal:           &agentapi.LiveSignal{ID: "live_" + syncBatchID, Fingerprint: fingerprint},
+		LiveSignal:           &agentapi.LiveSignal{Sequence: 1, Fingerprint: fingerprint},
 		MonitoringInstanceID: monitoringInstanceID,
 		SyncToken:            syncToken,
 		Heartbeats: []syncing.HeartbeatPayload{{

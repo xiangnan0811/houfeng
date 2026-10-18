@@ -19,17 +19,17 @@ func TestTrustedLiveSignalsRemainAvailableWhenCollectionStopped(t *testing.T) {
 			tx.receiverClock = now
 			repo := &PostgresSyncRepository{beginTx: func(context.Context, pgx.TxOptions) (syncBatchTx, error) { return tx, nil }, now: func() time.Time { return now }}
 			batch := testSyncBatch()
-			batch.LiveSignal = &agentapi.LiveSignal{ID: "signal-1", Fingerprint: "fp-001"}
+			batch.LiveSignal = &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp-001"}
 			batch.SessionID = "mas_1"
-			result, err := repo.ApplyBatch(context.Background(), batch)
+			result, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if !result.StopCollection {
 				t.Fatal("must explicitly stop collection")
 			}
-			args := tx.argsForSQL("insert into agent_live_signals")
-			if len(args) != 3 || args[2] != now {
+			args := tx.argsForSQL("update monitoring_agent_sessions set last_trusted_online_at")
+			if len(args) != 2 || args[1] != now {
 				t.Fatalf("signal must use receiver time: %#v", args)
 			}
 			if !containsSQL(tx.execSQL, "update monitoring_agent_sessions set last_trusted_online_at") {
@@ -48,9 +48,9 @@ func TestDuplicateLiveSignalAndBackfillNeverRefreshDurableOnlineTime(t *testing.
 			tx := &fakeSyncBatchTx{duplicateLiveSignal: duplicate}
 			batch := syncing.Batch{MonitoringInstanceID: "mi_1", SessionID: "mas_1"}
 			if duplicate {
-				batch.LiveSignal = &agentapi.LiveSignal{ID: "old-signal", Fingerprint: "fp"}
+				batch.LiveSignal = &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp"}
 			}
-			if err := recordTrustedLiveSignal(context.Background(), tx, batch, acceptedSyncBatchState{}, time.Now()); err != nil {
+			if _, err := recordTrustedLiveSignal(context.Background(), tx, batch, acceptedSyncBatchState{}, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 			if containsSQL(tx.execSQL, "update monitoring_agent_sessions") || containsSQL(tx.execSQL, "update monitoring_instances") {

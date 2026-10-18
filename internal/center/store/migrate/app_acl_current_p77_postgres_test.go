@@ -28,7 +28,7 @@ func assertAppACLCurrentLedgerSuffix(t *testing.T, before, after []appACLCurrent
 }
 
 func TestPostgresIntegrationIPQualityCollectionScopeMigration(t *testing.T) {
-	t.Run("fresh_c78", testPostgresIntegrationAppACLCurrentP75Fresh)
+	t.Run("fresh_c80", testPostgresIntegrationAppACLCurrentP75Fresh)
 	for _, chained := range []bool{false, true} {
 		name := "exact_c77_genesis"
 		if chained {
@@ -115,9 +115,9 @@ func testPostgresIntegrationAppACLCurrentP77Upgrade(t *testing.T, chained bool) 
 	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 {
 		t.Fatalf("C78 changed the historical manifest inventory: %#v", after.Manifest)
 	}
-	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP78Migration, appACLCurrentP79Migration)
-	if !reflect.DeepEqual(after.Catalog, before.Catalog) {
-		t.Fatal("C78 must preserve all owners, direct/effective privileges, column/default ACLs and functions without new grants")
+	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+	if !reflect.DeepEqual(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog), before.Catalog) {
+		t.Fatal("current changed catalog beyond the exact C80 replay delta")
 	}
 	if readAppACLCurrentP77Rows(t, ctx, db) != beforeRows {
 		t.Fatal("C78 rewrote historical reports, provider/service facts, product state or source cache")

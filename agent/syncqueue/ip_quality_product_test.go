@@ -12,7 +12,7 @@ import (
 func TestFileStoreProductSnapshotCannotBeMutatedByCaller(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "queue.json")
-	store := syncqueue.NewFileStore(path, syncqueue.Options{})
+	store := openStore(t, path, syncqueue.Options{})
 	value := 0.0183
 	request := syncRequest("product-snapshot", false)
 	report := &request.IPQualityReports[0]
@@ -36,7 +36,10 @@ func TestFileStoreProductSnapshotCannotBeMutatedByCaller(t *testing.T) {
 		t.Fatalf("caller mutated queued snapshot: %+v", got)
 	}
 	got.Product.PTRNames[0] = "list-mutated.example"
-	reopened, err := syncqueue.NewFileStore(path, syncqueue.Options{}).List(ctx)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := openStore(t, path, syncqueue.Options{}).List(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

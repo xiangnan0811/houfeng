@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -77,19 +78,37 @@ func defaultAgentRateLimitOptions() AgentRateLimitOptions {
 	}
 }
 
+func defaultAgentSyncRateLimitOptions() AgentRateLimitOptions {
+	defaults := defaultAgentRateLimitOptions()
+	defaults.MaxRequestsByIP = 2400
+	defaults.MaxRequestsGlobal = 2400
+	return defaults
+}
+
+func normalizeAgentRateLimitOptions(opts, defaults AgentRateLimitOptions) AgentRateLimitOptions {
+	if opts.MaxRequestsByIP <= 0 {
+		opts.MaxRequestsByIP = defaults.MaxRequestsByIP
+	}
+	if opts.MaxRequestsGlobal <= 0 {
+		opts.MaxRequestsGlobal = defaults.MaxRequestsGlobal
+	}
+	if opts.MaxTrackedKeys <= 0 {
+		opts.MaxTrackedKeys = defaults.MaxTrackedKeys
+	}
+	if opts.Window <= 0 {
+		opts.Window = defaults.Window
+	}
+	if opts.SweepInterval <= 0 {
+		opts.SweepInterval = defaults.SweepInterval
+	}
+	if opts.MaxSyncInflight <= 0 {
+		opts.MaxSyncInflight = defaults.MaxSyncInflight
+	}
+	return opts
+}
+
 func newAgentRequestLimiter(opts AgentEndpointOptions) *agentRequestLimiter {
-	if opts.RateLimit == (AgentRateLimitOptions{}) {
-		opts.RateLimit = defaultAgentRateLimitOptions()
-	}
-	if opts.RateLimit.Window <= 0 {
-		opts.RateLimit.Window = time.Minute
-	}
-	if opts.RateLimit.MaxTrackedKeys <= 0 {
-		opts.RateLimit.MaxTrackedKeys = 10000
-	}
-	if opts.RateLimit.SweepInterval <= 0 {
-		opts.RateLimit.SweepInterval = opts.RateLimit.Window
-	}
+	opts.RateLimit = normalizeAgentRateLimitOptions(opts.RateLimit, defaultAgentRateLimitOptions())
 	now := opts.Now
 	if now == nil {
 		now = time.Now
@@ -168,6 +187,7 @@ func (l *agentRequestLimiter) sweepExpiredLocked(now, cutoff time.Time) {
 }
 
 func rejectAgentRateLimited(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "5")
 	writeAgentAPIError(w, http.StatusTooManyRequests, agentapi.ErrorCodeInvalidRequest, "too many requests")
 }
 
@@ -254,6 +274,7 @@ func AgentSync(svc AgentSyncService) http.Handler {
 }
 
 func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.Handler {
+	opts.RateLimit = normalizeAgentRateLimitOptions(opts.RateLimit, defaultAgentSyncRateLimitOptions())
 	limiter := newAgentRequestLimiter(opts)
 	inflight := newAgentSyncInflightGate(opts.RateLimit.MaxSyncInflight)
 	receptionFailure := func(ctx context.Context, reason string) {
@@ -282,6 +303,11 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			return
 		}
 		defer inflight.release()
+		protocolHeaders := r.Header.Values(agentapi.SyncProtocolHeader)
+		if len(protocolHeaders) != 1 || protocolHeaders[0] != strconv.Itoa(agentapi.SyncProtocolRevision) {
+			writeAgentAPIError(w, http.StatusUpgradeRequired, agentapi.ErrorCodeSyncProtocolRequired, "sync protocol required")
+			return
+		}
 
 		var req agentapi.SyncRequest
 		if err := decodeJSONLimited(w, r, &req, AgentSyncBodyLimit); err != nil {
@@ -289,19 +315,43 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			return
 		}
 		req.SyncToken = syncToken
+		if req.ProtocolRevision != agentapi.SyncProtocolRevision {
+			writeAgentAPIError(w, http.StatusUpgradeRequired, agentapi.ErrorCodeSyncProtocolRequired, "sync protocol required")
+			return
+		}
 		if !isValidSyncRequest(req) {
 			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
 			return
 		}
 
+		digest, err := agentapi.CanonicalSyncBatchDigest(req)
+		if err != nil {
+			writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
+			return
+		}
 		batch := syncBatchFromRequest(req)
+		batch.PayloadDigest = digest
 		values := r.Header.Values(agentapi.IPQualityCollectionRevisionHeader)
 		if req.LiveSignal != nil && len(values) == 1 && values[0] == "5" {
 			batch.IPQualityCollectionRevision = agentapi.IPQualitySelectiveCollectionRevision
 		}
-		result, err := svc.SyncBatch(r.Context(), batch)
+		var result syncing.Result
+		err = syncing.ValidateBatchProtocol(batch)
+		if err == nil {
+			result, err = svc.SyncBatch(r.Context(), batch)
+		}
 		if err != nil {
 			switch {
+			case errors.Is(err, syncing.ErrSyncProtocolRequired):
+				writeAgentAPIError(w, http.StatusUpgradeRequired, agentapi.ErrorCodeSyncProtocolRequired, "sync protocol required")
+			case errors.Is(err, syncing.ErrSyncProducerMismatch):
+				writeAgentAPIError(w, http.StatusConflict, agentapi.ErrorCodeSyncProducerMismatch, "sync producer mismatch")
+			case errors.Is(err, syncing.ErrSyncBatchRetired):
+				writeAgentAPIError(w, http.StatusConflict, agentapi.ErrorCodeSyncBatchRetired, "sync batch retired")
+			case errors.Is(err, syncing.ErrSyncBatchIdentityConflict):
+				writeAgentAPIError(w, http.StatusConflict, agentapi.ErrorCodeSyncBatchIdentityConflict, "sync batch identity conflict")
+			case errors.Is(err, syncing.ErrInvalidReplayState), errors.Is(err, syncing.ErrHeartbeatRequired):
+				writeAgentAPIError(w, http.StatusBadRequest, agentapi.ErrorCodeInvalidRequest, "invalid request")
 			case errors.Is(err, syncing.ErrInvalidSyncToken):
 				writeAgentAPIError(w, http.StatusUnauthorized, agentapi.ErrorCodeInvalidSyncToken, "invalid sync token")
 			case errors.Is(err, syncing.ErrBindingNotAccepted):
@@ -317,11 +367,21 @@ func AgentSyncWithOptions(svc AgentSyncService, opts AgentEndpointOptions) http.
 			return
 		}
 
+		var plan *agentapi.SyncPlan
+		if result.Disposition != syncing.ResultDispositionDeferred {
+			plan = syncPlanToAPI(result.Plan)
+		}
 		writeJSON(w, http.StatusOK, agentapi.SyncResponse{
+			SessionID:      result.SessionID,
+			ProducerID:     result.ProducerID,
+			BatchSequence:  result.BatchSequence,
+			BatchDigest:    result.BatchDigest,
+			Disposition:    string(result.Disposition),
+			RetiredThrough: result.RetiredThrough,
 			StopCollection: result.StopCollection,
 			AcceptedAt:     result.AcceptedAt,
 			Status:         "accepted",
-			Plan:           syncPlanToAPI(result.Plan),
+			Plan:           plan,
 		})
 	})
 }
@@ -357,25 +417,35 @@ func isValidEnrollmentRequest(req agentapi.EnrollmentRequest) bool {
 }
 
 func isValidSyncRequest(req agentapi.SyncRequest) bool {
+	if req.ProtocolRevision != agentapi.SyncProtocolRevision ||
+		!agentapi.ValidSyncProducerID(req.ProducerID) ||
+		req.AllocatedThrough < 0 || req.RetiredThrough < 0 ||
+		req.RetiredThrough > req.AllocatedThrough || req.BatchSequence < 0 {
+		return false
+	}
+	hasFacts := len(req.Heartbeats)+len(req.HostSamples)+len(req.ProbeObservations)+len(req.IPQualityReports)+len(req.CommandResults) > 0
+	if hasFacts {
+		if req.BatchSequence == 0 || req.BatchSequence > req.AllocatedThrough {
+			return false
+		}
+	} else if req.BatchSequence != 0 {
+		return false
+	}
 	if !requiredMax(req.SessionID, agentIdentityMaxBytes) {
 		return false
 	}
-	if req.LiveSignal != nil && (!requiredMax(req.LiveSignal.ID, agentIdentityMaxBytes) || !requiredMax(req.LiveSignal.Fingerprint, agentIdentityMaxBytes)) {
+	if req.LiveSignal != nil && (req.LiveSignal.Sequence <= 0 || !requiredMax(req.LiveSignal.Fingerprint, agentIdentityMaxBytes)) {
 		return false
 	}
 	if !requiredMax(req.MonitoringInstanceID, agentIdentityMaxBytes) ||
-		!requiredMax(req.SyncToken, agentSecretMaxBytes) ||
-		(len(req.Heartbeats) == 0 && req.LiveSignal == nil) {
+		!requiredMax(req.SyncToken, agentSecretMaxBytes) {
 		return false
 	}
 	if exceedsAgentBatchLimit(len(req.Heartbeats), len(req.HostSamples), len(req.ProbeObservations), len(req.IPQualityReports), len(req.CommandResults)) {
 		return false
 	}
 
-	heartbeatSyncBatchID := ""
-	if len(req.Heartbeats) > 0 {
-		heartbeatSyncBatchID = req.Heartbeats[0].SyncBatchID
-	}
+	heartbeatSyncBatchID := req.ProducerID + ":" + strconv.FormatInt(req.BatchSequence, 10)
 	if len(req.Heartbeats) == 0 && (len(req.HostSamples)+len(req.ProbeObservations)+len(req.IPQualityReports)+len(req.CommandResults) > 0) {
 		return false
 	}
@@ -387,7 +457,8 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 	}
 
 	for _, sample := range req.HostSamples {
-		if !isValidAgentCarrier(sample.ObservedAt, sample.AgentVersion, sample.Fingerprint, sample.SyncBatchID) ||
+		if sample.SyncBatchID != heartbeatSyncBatchID ||
+			!isValidAgentCarrier(sample.ObservedAt, sample.AgentVersion, sample.Fingerprint, sample.SyncBatchID) ||
 			len(sample.Containers) > syncing.MaxBatchItems {
 			return false
 		}
@@ -402,7 +473,8 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 	}
 
 	for _, observation := range req.ProbeObservations {
-		if !requiredMax(observation.TargetID, agentIdentityMaxBytes) ||
+		if observation.SyncBatchID != heartbeatSyncBatchID ||
+			!requiredMax(observation.TargetID, agentIdentityMaxBytes) ||
 			!requiredMax(observation.ProbeItemID, agentIdentityMaxBytes) ||
 			!requiredMax(observation.ProbeKind, agentIdentityMaxBytes) ||
 			!isValidAgentCarrier(observation.ObservedAt, observation.AgentVersion, observation.Fingerprint, observation.SyncBatchID) ||
@@ -413,7 +485,8 @@ func isValidSyncRequest(req agentapi.SyncRequest) bool {
 		}
 	}
 	for _, report := range req.IPQualityReports {
-		if !isValidAgentCarrier(report.ObservedAt, report.AgentVersion, report.Fingerprint, report.SyncBatchID) ||
+		if report.SyncBatchID != heartbeatSyncBatchID ||
+			!isValidAgentCarrier(report.ObservedAt, report.AgentVersion, report.Fingerprint, report.SyncBatchID) ||
 			!requiredMax(report.IPAddress, agentIdentityMaxBytes) ||
 			report.IPVersion == 0 ||
 			!requiredMax(report.Status, agentIdentityMaxBytes) ||
@@ -641,6 +714,11 @@ func syncBatchFromRequest(req agentapi.SyncRequest) syncing.Batch {
 	}
 
 	batch := syncing.Batch{
+		ProtocolRevision:     req.ProtocolRevision,
+		ProducerID:           req.ProducerID,
+		BatchSequence:        req.BatchSequence,
+		AllocatedThrough:     req.AllocatedThrough,
+		RetiredThrough:       req.RetiredThrough,
 		SessionID:            req.SessionID,
 		LiveSignal:           req.LiveSignal,
 		MonitoringInstanceID: req.MonitoringInstanceID,

@@ -41,6 +41,7 @@ func TestPostgresIntegrationAppACLCurrent(t *testing.T) {
 	t.Run("missing_settings_p67_rollback_and_drift", testPostgresIntegrationAppACLCurrentMissingSettingsP67RollbackAndDrift)
 	t.Run("missing_settings_concurrent_initialization", testPostgresIntegrationAppACLCurrentMissingSettingsConcurrentInitialization)
 	t.Run("missing_settings_snapshot_fence", testPostgresIntegrationAppACLCurrentMissingSettingsSnapshotFence)
+	t.Run("agent_replay_migration", TestPostgresIntegrationAgentReplayMigration)
 }
 
 func testPostgresIntegrationAppACLCurrentP67Upgrade(t *testing.T) {

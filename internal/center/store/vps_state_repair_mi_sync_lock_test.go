@@ -46,7 +46,7 @@ func TestVPSStateRepairMISyncWaitsForRetirementGraphAndSuppressesWrites(t *testi
 		err    error
 	}, 1)
 	go func() {
-		result, syncErr := syncRepo.ApplyBatch(ctx, vpsStateRepairSyncBatch(record.MonitoringInstanceID, token, "fingerprint-race", "sync_after_retirement"))
+		result, syncErr := syncRepo.ApplyBatch(ctx, prepareSyncFixture(vpsStateRepairSyncBatch(record.MonitoringInstanceID, token, "fingerprint-race", "sync_after_retirement")))
 		resultCh <- struct {
 			result syncing.Result
 			err    error
@@ -84,7 +84,7 @@ func TestVPSStateRepairMISyncWaitsForRetirementGraphAndSuppressesWrites(t *testi
 		t.Fatalf("sync disposition after retirement = %q, want suppressed", result.result.Disposition)
 	}
 	assertVPSStateRepairMIIntValue(t, ctx, pool, `select count(*)::int from monitoring_instance_heartbeats where monitoring_instance_id = $1`, record.MonitoringInstanceID, 0)
-	assertVPSStateRepairMIIntValue(t, ctx, pool, `select count(*)::int from agent_sync_batches where monitoring_instance_id = $1`, record.MonitoringInstanceID, 0)
+	assertVPSStateRepairMIIntValue(t, ctx, pool, `select count(*)::int from agent_batch_receipts where session_id in (select session_id from monitoring_agent_sessions where monitoring_instance_id = $1)`, record.MonitoringInstanceID, 0)
 	assertVPSStateRepairMIIntValue(t, ctx, pool, `select count(*)::int from monitoring_agent_sessions where monitoring_instance_id=$1 and ever_connected and last_trusted_online_at is not null`, record.MonitoringInstanceID, 1)
 }
 
@@ -131,7 +131,7 @@ func TestVPSStateRepairMIIndependentSyncBatchesShareGraphLock(t *testing.T) {
 	for _, item := range instances {
 		item := item
 		go func() {
-			result, syncErr := syncRepo.ApplyBatch(ctx, vpsStateRepairSyncBatch(item.id, item.token, item.fingerprint, item.batchID))
+			result, syncErr := syncRepo.ApplyBatch(ctx, prepareSyncFixture(vpsStateRepairSyncBatch(item.id, item.token, item.fingerprint, item.batchID)))
 			if syncErr != nil {
 				results <- syncErr
 				return
@@ -170,7 +170,7 @@ func vpsStateRepairSyncBatch(monitoringInstanceID, token, fingerprint, batchID s
 	session, _, _ := strings.Cut(token, ".")
 	return syncing.Batch{
 		SessionID:            session,
-		LiveSignal:           &agentapi.LiveSignal{ID: "live-" + batchID, Fingerprint: fingerprint},
+		LiveSignal:           &agentapi.LiveSignal{Sequence: 1, Fingerprint: fingerprint},
 		MonitoringInstanceID: monitoringInstanceID,
 		SyncToken:            token,
 		Heartbeats: []syncing.HeartbeatPayload{{

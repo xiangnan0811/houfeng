@@ -460,12 +460,8 @@ func bootstrapCenter(ctx context.Context, cfg config.CenterConfig, version strin
 		AgentEnrollHandler:                            handlers.AgentEnrollWithOptions(enrollmentSvc, handlers.AgentEndpointOptions{TrustedProxies: cfg.TrustedProxies}),
 		AgentSyncHandler: handlers.AgentSyncWithOptions(syncSvc, handlers.AgentEndpointOptions{
 			TrustedProxies: cfg.TrustedProxies,
-			ReceptionFailure: func(ctx context.Context, reason string) {
-				faultCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 4*time.Second)
-				defer cancel()
-				if err := store.MarkReceiverHealthFault(faultCtx, db.Pool(), reason); err != nil {
-					slog.Error("persist receiver admission failure", "reason", reason, "error", err)
-				}
+			ReceptionFailure: func(_ context.Context, reason string) {
+				store.NoteReceiverHealthFault(reason)
 			},
 		}),
 		InstallerScriptHandler: handlers.InstallerScript(installer.Script),

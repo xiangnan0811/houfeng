@@ -122,6 +122,9 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 		if got := r.Header.Get("Authorization"); got != "Bearer sync-token-001" {
 			t.Fatalf("Authorization = %q, want bearer sync token", got)
 		}
+		if r.Header.Get(agentapi.SyncProtocolHeader) != "2" {
+			t.Error("missing v2 sync protocol header")
+		}
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatalf("read request body: %v", err)
@@ -136,8 +139,19 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 		if _, ok := payload["sync_token"]; ok {
 			t.Fatalf("request unexpectedly included sync_token: %s", body)
 		}
+		for key, want := range map[string]any{
+			"protocol_revision": float64(2), "producer_id": "c393d63b-3128-489f-89ca-109be0de137d",
+			"session_id": "mas_1", "batch_sequence": float64(0),
+			"allocated_through": float64(7), "retired_through": float64(7),
+		} {
+			if payload[key] != want {
+				t.Errorf("%s = %v, want %v", key, payload[key], want)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(agentapi.SyncResponse{
+			SessionID: "mas_1", ProducerID: "c393d63b-3128-489f-89ca-109be0de137d",
+			BatchSequence: 0, BatchDigest: "", Disposition: agentapi.SyncDispositionSuppressed, RetiredThrough: 7,
 			AcceptedAt: acceptedAt,
 			Status:     "ok",
 			Plan: &agentapi.SyncPlan{
@@ -157,7 +171,7 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 	defer ts.Close()
 
 	client := enroll.NewClient(ts.URL)
-	response, err := client.Sync(context.Background(), agentapi.SyncRequest{MonitoringInstanceID: "nd-local-01", SyncToken: "sync-token-001"})
+	response, err := client.Sync(context.Background(), agentapi.SyncRequest{ProtocolRevision: agentapi.SyncProtocolRevision, ProducerID: "c393d63b-3128-489f-89ca-109be0de137d", SessionID: "mas_1", MonitoringInstanceID: "nd-local-01", SyncToken: "sync-token-001", AllocatedThrough: 7, RetiredThrough: 7})
 	if err != nil {
 		t.Fatalf("Sync() error = %v", err)
 	}
@@ -166,6 +180,10 @@ func TestClientSyncReturnsDecodedPointer(t *testing.T) {
 	}
 	if response.Status != "ok" {
 		t.Fatalf("Status = %q, want %q", response.Status, "ok")
+	}
+	if response.SessionID != "mas_1" || response.ProducerID != "c393d63b-3128-489f-89ca-109be0de137d" ||
+		response.BatchSequence != 0 || response.BatchDigest != "" || response.Disposition != agentapi.SyncDispositionSuppressed || response.RetiredThrough != 7 {
+		t.Fatalf("lost replay acknowledgement: %#v", response)
 	}
 	if response.Plan == nil {
 		t.Fatal("Plan = nil, want non-nil")

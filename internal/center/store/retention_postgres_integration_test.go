@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -59,7 +60,7 @@ func TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets(t *test
 	if err != nil {
 		t.Fatalf("ApplyRetention(runtime) = %v", err)
 	}
-	if result.DeletedHostSamples != 3 || result.DeletedHeartbeats != 3 || result.DeletedProbeObservations != 3 || result.DeletedMonitoringInstanceAggregates != 1 || result.DeletedTargetAggregates != 1 || result.ClearedCommandActionOutputs != 1 {
+	if result.DeletedHostSamples != 3 || result.DeletedHeartbeats != 3 || result.DeletedProbeObservations != 3 || result.DeletedMonitoringInstanceAggregates != 1 || result.DeletedTargetAggregates != 1 {
 		t.Fatalf("retention boundary counts = %+v", result)
 	}
 	assertCount := func(sql string, want int) {
@@ -75,6 +76,10 @@ func TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets(t *test
 	assertCount(`select count(*) from state_change_events`, 1)
 	assertCount(`select count(*) from notification_records`, 1)
 	assertCount(`select count(*) from ip_quality_reports where raw_json is not null`, 1)
+	assertCount(`select count(*) from monitoring_instances where last_action ? 'stdout'`, 1)
+	if cleared, err := repo.ClearExpiredCommandOutputs(ctx, now); err != nil || cleared != 1 {
+		t.Fatalf("ClearExpiredCommandOutputs = %d, %v", cleared, err)
+	}
 	assertCount(`select count(*) from monitoring_instances where last_action ? 'stdout' or last_action ? 'stderr'`, 0)
 
 	// Partial survivors and a late arrival in the already pruned day must not
@@ -111,4 +116,90 @@ func TestPostgresIntegrationRetentionPreservesHistoryAndFinalizedBuckets(t *test
 	assertCount(`select count(*) from host_samples`, 2)
 	assertCount(`select count(*) from monitoring_instance_heartbeats`, 2)
 	assertCount(`select count(*) from monitoring_instance_host_sample_daily_aggregates`, 2)
+	exec(`drop trigger retention_test_reject_delete on host_samples`)
+	exec(`drop function retention_test_reject_delete()`)
+
+	t.Run("complete_unfinalized_buckets_shorter_policy_and_midnight", func(t *testing.T) {
+		midnight := startOfUTCDay(now.AddDate(0, 0, 5))
+		day10 := midnight.AddDate(0, 0, -10)
+		day45 := midnight.AddDate(0, 0, -45)
+		insertRaw(day10.Add(time.Hour), 10)
+		insertRaw(day10.Add(2*time.Hour), 30)
+		insertRaw(day45.Add(time.Hour), 80)
+		insertRaw(day45.Add(2*time.Hour), 100)
+		apply := func(rawDays int, at time.Time) {
+			t.Helper()
+			if result, err := repo.ApplyRetention(ctx, retention.Policy{RawLayerDays: rawDays, AggregateLayerDays: 365}, at); err != nil || result.Skipped {
+				t.Fatalf("ApplyRetention(%d,%s)=%+v, %v", rawDays, at, result, err)
+			}
+		}
+		assertBucket := func(day time.Time, wantCount, wantValid int, wantAvg, wantP95 float64, wantFinalized bool) {
+			t.Helper()
+			var samples, valid, observations int
+			var cpu, latency, p95 float64
+			var hostFinalized, probeFinalized bool
+			if err := fixture.db.QueryRow(ctx, `select sample_count,cpu_valid_sample_count,avg_cpu_usage_pct,finalized from monitoring_instance_host_sample_daily_aggregates where monitoring_instance_id='mi_retention' and bucket_date=$1::date`, day).Scan(&samples, &valid, &cpu, &hostFinalized); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.db.QueryRow(ctx, `select observation_count,avg_latency_ms,p95_latency_ms,finalized from target_probe_daily_aggregates where target_id='tgt_retention' and probe_item_id='prb_retention' and bucket_date=$1::date`, day).Scan(&observations, &latency, &p95, &probeFinalized); err != nil {
+				t.Fatal(err)
+			}
+			if samples != wantCount || valid != wantValid || observations != wantCount || math.Abs(cpu-wantAvg) > 1e-9 || math.Abs(p95-wantP95) > 1e-9 || hostFinalized != wantFinalized || probeFinalized != wantFinalized {
+				t.Fatalf("day %s: samples=%d valid=%d cpu=%v observations=%d latency=%v p95=%v finalized=%t/%t", day, samples, valid, cpu, observations, latency, p95, hostFinalized, probeFinalized)
+			}
+		}
+		apply(60, midnight)
+		assertBucket(day10, 2, 2, 20, 29, false)
+		assertBucket(day45, 2, 2, 90, 99, false)
+		insertRaw(midnight, 60)
+		apply(60, midnight)
+		var currentDayBuckets int
+		if err := fixture.db.QueryRow(ctx, `select count(*) from monitoring_instance_host_sample_daily_aggregates where bucket_date=$1::date`, midnight).Scan(&currentDayBuckets); err != nil || currentDayBuckets != 0 {
+			t.Fatalf("current UTC day buckets=%d, %v", currentDayBuckets, err)
+		}
+		insertRaw(day10.Add(3*time.Hour), 50)
+		insertRaw(day10.Add(4*time.Hour), 90)
+		exec(`update host_samples set cpu_rates_valid=false where monitoring_instance_id='mi_retention' and observed_at=$1`, day10.Add(4*time.Hour))
+		apply(60, midnight)
+		// Complete raw recomputation, never addition of a previous aggregate:
+		// CPU mean uses only 10/30/50; p95 still includes all four probes.
+		assertBucket(day10, 4, 3, 30, 84, false)
+		// A finalized subject/day must not filter out another subject or
+		// another probe of the same target on that same UTC day.
+		exec(`update monitoring_instance_host_sample_daily_aggregates set finalized=true where monitoring_instance_id='mi_retention' and bucket_date=$1::date`, day10)
+		exec(`update target_probe_daily_aggregates set finalized=true where probe_item_id='prb_retention' and bucket_date=$1::date`, day10)
+		exec(`insert into vps_assets(vps_id,display_name,lifecycle_status) values('vps_retention_other','Other','active')`)
+		exec(`insert into monitoring_instances(monitoring_instance_id,vps_id,display_name,region,city,provider,lifecycle_status,monitoring_status,binding_status) values('mi_retention_other','vps_retention_other','Other','','','','已退役','暂停','已绑定')`)
+		exec(retentionTestInsertHostSQL, "mi_retention_other", day10.Add(time.Hour), 70.0)
+		exec(`insert into probe_items(probe_item_id,target_id,probe_kind,frequency_tier,timeout_seconds) values('prb_retention_other','tgt_retention','http','1m',5)`)
+		exec(`insert into probe_observations(monitoring_instance_id,target_id,probe_item_id,observed_at,received_at,result_kind,latency_ms,sync_batch_id) values('mi_retention_other','tgt_retention','prb_retention_other',$1,$1,'success',77,'other')`, day10.Add(time.Hour))
+		apply(60, midnight)
+		assertCount(`select count(*) from monitoring_instance_host_sample_daily_aggregates where monitoring_instance_id='mi_retention_other' and sample_count=1 and avg_cpu_usage_pct=70`, 1)
+		assertCount(`select count(*) from target_probe_daily_aggregates where probe_item_id='prb_retention_other' and observation_count=1 and p95_latency_ms=77`, 1)
+		assertBucket(day10, 4, 3, 30, 84, true)
+
+		// Missing old buckets are discovered even when shortening the policy.
+		missing := midnight.AddDate(0, 0, -50)
+		insertRaw(missing.Add(time.Hour), 20)
+		cutoff := midnight.AddDate(0, 0, -30)
+		insertRaw(cutoff.Add(-time.Microsecond), 40)
+		insertRaw(cutoff, 60)
+		apply(30, midnight)
+		assertBucket(day45, 2, 2, 90, 99, true)
+		assertBucket(missing, 1, 1, 20, 20, true)
+		assertBucket(cutoff, 1, 1, 60, 60, false)
+		var atCutoff int
+		if err := fixture.db.QueryRow(ctx, `select count(*) from host_samples where monitoring_instance_id='mi_retention' and observed_at=$1`, cutoff).Scan(&atCutoff); err != nil || atCutoff != 1 {
+			t.Fatalf("raw at midnight cutoff=%d, %v", atCutoff, err)
+		}
+		insertRaw(day45.Add(3*time.Hour), 1)
+		apply(30, midnight.Add(time.Microsecond))
+		assertBucket(day45, 2, 2, 90, 99, true)
+		assertBucket(cutoff, 1, 1, 60, 60, true)
+		// Permanent records remain byte-bearing after shortened policy and
+		// repeated passes, including archived ownership.
+		assertCount(`select count(*) from state_change_events where event_id='evt_retention' and summary='permanent'`, 1)
+		assertCount(`select count(*) from notification_records where notification_id='ntf_retention' and summary='permanent'`, 1)
+		assertCount(`select count(*) from ip_quality_reports where report_id='ipq_retention' and raw_json='{"safe":true}'::jsonb`, 1)
+	})
 }

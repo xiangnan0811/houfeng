@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -109,7 +108,11 @@ type syncQueueOperationError struct {
 }
 
 func (e *syncQueueOperationError) Error() string {
-	return fmt.Sprintf("sync queue operation failed operation=%s", e.operation)
+	message := fmt.Sprintf("sync queue operation failed operation=%s", e.operation)
+	if errors.Is(e.cause, syncqueue.ErrLegacyQueueNotDrained) {
+		return message + ": restore previous agent and drain before upgrading"
+	}
+	return message
 }
 
 func (e *syncQueueOperationError) Unwrap() error {
@@ -166,6 +169,7 @@ func (e *EnrollmentNotBoundError) Error() string {
 
 type Client interface {
 	Enroll(context.Context, agentapi.EnrollmentRequest) (*agentapi.EnrollmentResponse, error)
+	CheckSyncProtocol(context.Context) error
 	Sync(context.Context, agentapi.SyncRequest) (*agentapi.SyncResponse, error)
 }
 
@@ -196,6 +200,10 @@ type IPQualityProvider interface {
 }
 
 type SyncQueue interface {
+	OpenSession(context.Context, string) error
+	Close() error
+	ReplayState(context.Context) (syncqueue.ReplayState, error)
+	ReserveLiveSequences(context.Context, int64) (int64, int64, error)
 	Enqueue(context.Context, agentapi.SyncRequest) (string, error)
 	List(context.Context) ([]syncqueue.Entry, error)
 	Delete(context.Context, string) error
@@ -205,25 +213,29 @@ type SyncQueue interface {
 }
 
 type Runtime struct {
-	cfg                  agentconfig.AgentConfig
-	client               Client
-	logger               *slog.Logger
-	tokenSource          TokenSource
-	syncCredentialStore  SyncCredentialStore
-	fingerprintSource    FingerprintSource
-	hostSampleProvider   HostSampleProvider
-	probeProvider        ProbeProvider
-	ipQualityProvider    IPQualityProvider
-	interval             time.Duration
-	syncQueue            SyncQueue
-	currentPlan          *agentapi.SyncPlan
-	collectionStopped    bool
-	lastHostSampleAt     time.Time
-	pendingResults       []agentexec.Result
-	pendingIPReports     []agentapi.IPQualityReportPayload
-	now                  func() time.Time
-	replayActive         bool
-	lastReplayProgressAt time.Time
+	cfg                   agentconfig.AgentConfig
+	client                Client
+	logger                *slog.Logger
+	tokenSource           TokenSource
+	syncCredentialStore   SyncCredentialStore
+	fingerprintSource     FingerprintSource
+	hostSampleProvider    HostSampleProvider
+	probeProvider         ProbeProvider
+	ipQualityProvider     IPQualityProvider
+	interval              time.Duration
+	syncQueue             SyncQueue
+	currentPlan           *agentapi.SyncPlan
+	collectionStopped     bool
+	lastHostSampleAt      time.Time
+	pendingResults        []agentexec.Result
+	pendingIPReports      []agentapi.IPQualityReportPayload
+	now                   func() time.Time
+	replayActive          bool
+	lastReplayProgressAt  time.Time
+	backlogRetryNotBefore time.Time
+	nextLiveSequence      int64
+	lastLiveSequence      int64
+	fatalDurabilityErr    error
 }
 
 func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSource, fingerprintSource FingerprintSource) *Runtime {
@@ -239,7 +251,12 @@ func New(cfg agentconfig.AgentConfig, logger *slog.Logger, tokenSource TokenSour
 }
 
 func NewWithDeps(cfg agentconfig.AgentConfig, logger *slog.Logger, client Client, tokenSource TokenSource, fingerprintSource FingerprintSource, interval time.Duration) *Runtime {
-	return NewWithRuntimeDeps(cfg, logger, client, tokenSource, fingerprintSource, hostsample.New(), probe.New(), interval)
+	queue := syncqueue.NewFileStore(cfg.BufferFile, syncqueue.Options{
+		MaxEntries: cfg.BufferMaxEntries,
+		MaxAge:     cfg.BufferMaxAge,
+		MaxBytes:   cfg.BufferMaxBytes,
+	})
+	return NewWithRuntimeDeps(cfg, logger, client, tokenSource, fingerprintSource, hostsample.New(), probe.New(), interval, queue)
 }
 
 func NewWithRuntimeDeps(
@@ -299,7 +316,15 @@ func NewWithRuntimeDeps(
 	}
 }
 
-func (r *Runtime) Run(ctx context.Context) error {
+func (r *Runtime) Run(ctx context.Context) (runErr error) {
+	if r.fatalDurabilityErr != nil {
+		return r.fatalDurabilityErr
+	}
+	defer func() {
+		if errors.Is(runErr, syncqueue.ErrAmbiguousDurability) {
+			r.fatalDurabilityErr = runErr
+		}
+	}()
 	if r.client == nil {
 		return fmt.Errorf("runtime client is nil")
 	}
@@ -308,6 +333,15 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 	if r.fingerprintSource == nil {
 		return fmt.Errorf("runtime fingerprint source is nil")
+	}
+	if r.syncQueue == nil {
+		return errors.New("runtime sync queue is nil")
+	}
+	if err := r.client.CheckSyncProtocol(ctx); err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return &runtimeOperationError{operation: "check_sync_protocol", cause: err}
 	}
 
 	serverURL := serverURLForLog(r.cfg.ServerURL)
@@ -345,6 +379,20 @@ func (r *Runtime) Run(ctx context.Context) error {
 		syncToken:            syncToken,
 		fingerprint:          fingerprint,
 	}
+	if err := r.syncQueue.OpenSession(ctx, strings.SplitN(syncToken, ".", 2)[0]); err != nil {
+		if ctx.Err() != nil && !errors.Is(err, syncqueue.ErrAmbiguousDurability) {
+			return nil
+		}
+		return &syncQueueOperationError{operation: "open_session", cause: err}
+	}
+	defer func() {
+		if err := r.syncQueue.Close(); err != nil {
+			runErr = errors.Join(runErr, &syncQueueOperationError{operation: "close", cause: err})
+		}
+	}()
+	// Every Run starts beyond the last durable reservation, even when the
+	// previous process exited without consuming its entire block.
+	r.nextLiveSequence, r.lastLiveSequence = 0, 0
 
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -355,27 +403,32 @@ func (r *Runtime) Run(ctx context.Context) error {
 			return nil
 		case tick := <-ticker.C:
 			observedAt := tick.UTC()
-			syncBatchID := observedAt.Format(time.RFC3339Nano)
-			request := r.buildSyncRequest(ctx, monitoringInstanceID, syncToken, observedAt, fingerprint, syncBatchID)
+			// The queue binds every fact to its durably allocated producer/sequence.
+			request := r.buildSyncRequest(ctx, monitoringInstanceID, syncToken, observedAt, fingerprint, "")
 
-			if r.syncQueue == nil {
-				if err := attachLiveSignal(&request); err != nil {
-					return err
-				}
-				response, err := r.client.Sync(ctx, request)
-				if err != nil {
+			if r.collectionStopped {
+				if err := r.sendControl(ctx, request, fingerprint); err != nil {
+					if errors.Is(err, syncqueue.ErrAmbiguousDurability) {
+						return err
+					}
 					if ctx.Err() != nil {
 						return nil
 					}
-					return fmt.Errorf("sync heartbeat: %w", classifySyncFailure(err))
+					var policyErr *syncPolicyError
+					if errors.As(err, &policyErr) && policyErr.action == syncQueueActionRetry {
+						r.logSyncQueueReplayRetry(syncRoundResult{}, policyErr)
+						continue
+					}
+					return err
 				}
-				r.acknowledgePendingPayloads(len(request.CommandResults), len(request.IPQualityReports))
-				r.applySyncPlan(ctx, response)
 				continue
 			}
 
 			round, err := r.enqueueAndFlush(ctx, request, authority)
 			if err != nil {
+				if errors.Is(err, syncqueue.ErrAmbiguousDurability) {
+					return err
+				}
 				if ctx.Err() != nil {
 					return nil
 				}
@@ -451,6 +504,7 @@ func (r *Runtime) buildSyncRequest(ctx context.Context, monitoringInstanceID, sy
 		}},
 	}
 	if r.collectionStopped {
+		request.Heartbeats = nil
 		return request
 	}
 
@@ -540,6 +594,12 @@ func (r *Runtime) flushSyncQueue(ctx context.Context, currentEntryID string, aut
 
 	var backlogRetryErr error
 	for i := 0; i < len(backlog) && i < maxBacklogSyncAttemptsPerRound; i++ {
+		if !r.backlogRetryNotBefore.IsZero() {
+			if r.now().Before(r.backlogRetryNotBefore) {
+				break
+			}
+			r.backlogRetryNotBefore = time.Time{}
+		}
 		disposition, err := r.flushSyncQueueEntry(ctx, backlog[i], false)
 		if err != nil {
 			var policyErr *syncPolicyError
@@ -571,6 +631,12 @@ func (r *Runtime) flushSyncQueue(ctx context.Context, currentEntryID string, aut
 func (r *Runtime) flushSyncQueueEntry(ctx context.Context, entry syncqueue.Entry, current bool) (syncQueueEntryDisposition, error) {
 	response, err := r.syncRequest(ctx, entry, current)
 	if err != nil {
+		// Local durability/read/reservation errors are never network retries and
+		// must not trigger a second mutation after an ambiguous commit.
+		var remotePolicy *syncPolicyError
+		if !errors.As(err, &remotePolicy) {
+			return "", err
+		}
 		if markErr := r.syncQueue.MarkAttempt(ctx, entry.ID); markErr != nil {
 			return "", &syncQueueOperationError{operation: "mark_attempt", cause: markErr}
 		}
@@ -590,6 +656,9 @@ func (r *Runtime) flushSyncQueueEntry(ctx context.Context, entry syncqueue.Entry
 		default:
 			return "", err
 		}
+	}
+	if response.Disposition == agentapi.SyncDispositionDeferred {
+		return "", &syncPolicyError{kind: syncFailureKindRemote, action: syncQueueActionRetry, cause: errSyncQueueReplayRetry}
 	}
 	if err := r.syncQueue.Delete(ctx, entry.ID); err != nil {
 		return "", &syncQueueOperationError{operation: "delete_acknowledged", cause: err}
@@ -661,12 +730,34 @@ func (r *Runtime) syncRequest(ctx context.Context, entry syncqueue.Entry, curren
 	request := entry.Request
 	if !current {
 		request = syncqueue.WithBackfilledFacts(entry.Request, true)
-	} else if err := attachLiveSignal(&request); err != nil {
+	} else if err := r.attachLiveSignal(ctx, &request, request.Heartbeats[0].Fingerprint); err != nil {
+		return nil, err
+	}
+	return r.transmitSyncRequest(ctx, request)
+}
+
+func (r *Runtime) transmitSyncRequest(ctx context.Context, request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+	if err := r.refreshReplayState(ctx, &request); err != nil {
 		return nil, err
 	}
 	response, err := r.client.Sync(ctx, request)
 	if err != nil {
+		var remoteErr *enroll.RemoteError
+		if errors.As(err, &remoteErr) && remoteErr != nil &&
+			(remoteErr.StatusCode == http.StatusTooManyRequests || remoteErr.StatusCode == http.StatusServiceUnavailable) {
+			wait := remoteErr.RetryAfter
+			if wait < time.Second || wait > time.Minute {
+				wait = 5 * time.Second
+			}
+			notBefore := r.now().Add(wait)
+			if notBefore.After(r.backlogRetryNotBefore) {
+				r.backlogRetryNotBefore = notBefore
+			}
+		}
 		return nil, classifySyncFailure(err)
+	}
+	if err := validateSyncAcknowledgement(request, response); err != nil {
+		return nil, &syncPolicyError{kind: syncFailureKindRemote, action: syncQueueActionTerminal, cause: err}
 	}
 	return response, nil
 }
@@ -807,7 +898,11 @@ func allowlistedAgentErrorCode(code string) string {
 		agentapi.ErrorCodeBindingNotAccepted,
 		agentapi.ErrorCodeMethodNotAllowed,
 		agentapi.ErrorCodeMonitoringInstanceNotFound,
-		agentapi.ErrorCodeInternalError:
+		agentapi.ErrorCodeInternalError,
+		agentapi.ErrorCodeSyncProtocolRequired,
+		agentapi.ErrorCodeSyncProducerMismatch,
+		agentapi.ErrorCodeSyncBatchRetired,
+		agentapi.ErrorCodeSyncBatchIdentityConflict:
 		return code
 	default:
 		return ""
@@ -887,15 +982,74 @@ func (r *Runtime) applySyncPlan(ctx context.Context, response *agentapi.SyncResp
 	}
 }
 
-func attachLiveSignal(request *agentapi.SyncRequest) error {
-	if len(request.Heartbeats) == 0 {
+func (r *Runtime) attachLiveSignal(ctx context.Context, request *agentapi.SyncRequest, fingerprint string) error {
+	if fingerprint == "" {
 		return errors.New("live signal requires local identity")
 	}
-	var nonce [24]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return fmt.Errorf("create live signal: %w", err)
+	if r.nextLiveSequence == 0 {
+		first, last, err := r.syncQueue.ReserveLiveSequences(ctx, agentapi.LiveSequenceReservation)
+		if err != nil {
+			return &syncQueueOperationError{operation: "reserve_live_sequences", cause: err}
+		}
+		r.nextLiveSequence, r.lastLiveSequence = first, last
 	}
-	request.LiveSignal = &agentapi.LiveSignal{ID: hex.EncodeToString(nonce[:]), Fingerprint: request.Heartbeats[0].Fingerprint}
+	sequence := r.nextLiveSequence
+	if sequence == r.lastLiveSequence {
+		r.nextLiveSequence = 0
+	} else {
+		r.nextLiveSequence++
+	}
+	request.LiveSignal = &agentapi.LiveSignal{Sequence: sequence, Fingerprint: fingerprint}
+	return nil
+}
+
+func (r *Runtime) refreshReplayState(ctx context.Context, request *agentapi.SyncRequest) error {
+	state, err := r.syncQueue.ReplayState(ctx)
+	if err != nil {
+		return &syncQueueOperationError{operation: "replay_state", cause: err}
+	}
+	if request.SessionID != state.SessionID || (request.BatchSequence > 0 && request.ProducerID != state.ProducerID) {
+		return errors.New("sync request does not match durable replay authority")
+	}
+	request.ProtocolRevision = agentapi.SyncProtocolRevision
+	request.ProducerID = state.ProducerID
+	request.AllocatedThrough = state.AllocatedThrough
+	request.RetiredThrough = state.RetiredThrough
+	return nil
+}
+
+func validateSyncAcknowledgement(request agentapi.SyncRequest, response *agentapi.SyncResponse) error {
+	if response == nil || response.SessionID != request.SessionID || response.ProducerID != request.ProducerID ||
+		response.BatchSequence != request.BatchSequence {
+		return errors.New("sync acknowledgement authority or sequence mismatch")
+	}
+	digest, err := agentapi.CanonicalSyncBatchDigest(request)
+	if err != nil {
+		return err
+	}
+	if response.BatchDigest != hex.EncodeToString(digest[:]) {
+		return errors.New("sync acknowledgement digest mismatch")
+	}
+	switch response.Disposition {
+	case agentapi.SyncDispositionRecorded, agentapi.SyncDispositionExactDuplicate, agentapi.SyncDispositionSuppressed, agentapi.SyncDispositionDeferred:
+		return nil
+	default:
+		return errors.New("sync acknowledgement disposition invalid")
+	}
+}
+
+func (r *Runtime) sendControl(ctx context.Context, request agentapi.SyncRequest, fingerprint string) error {
+	if err := r.attachLiveSignal(ctx, &request, fingerprint); err != nil {
+		return err
+	}
+	response, err := r.transmitSyncRequest(ctx, request)
+	if err != nil {
+		return err
+	}
+	if response.Disposition != agentapi.SyncDispositionSuppressed {
+		return errors.New("minimal sync control was not suppressed")
+	}
+	r.applySyncPlan(ctx, response)
 	return nil
 }
 

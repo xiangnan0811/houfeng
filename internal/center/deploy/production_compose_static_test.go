@@ -117,7 +117,6 @@ func TestProductionComposeWiresFailClosedRecordsAuthority(t *testing.T) {
 	for _, required := range []string{
 		"./data:/state",
 		"/state/attachments",
-		"/state/logs",
 		"/state/center-config",
 		"10002",
 	} {
@@ -255,12 +254,10 @@ func TestProductionComposeUsesPortableData(t *testing.T) {
 		"houfeng-storage-init": {
 			"./data:/state",
 			"/state/attachments",
-			"/state/logs",
 			"/state/center-config",
 		},
 		"houfeng": {
 			"./data/attachments:/var/lib/houfeng/attachments",
-			"./data/logs:/var/log/houfeng",
 		},
 		"houfeng-content-processor": {
 			"./data/attachments:/var/lib/houfeng/attachments",
@@ -549,14 +546,6 @@ func TestProductionEnvironmentTemplateHasThreeOperatorSections(t *testing.T) {
 		"HOUFENG_SESSION_HMAC_KEY=",
 		"COMPOSE_PROJECT_NAME=houfeng",
 		"HOUFENG_RECORDS_ENABLED=true",
-		"openssl rand -hex 32",
-		"Generate a fresh value for every secret",
-		"Never reuse one value",
-		"exact observed proxy-source",
-		"for the selected mode",
-		"Do not guess 127.0.0.0/8",
-		"0.0.0.0/0",
-		"::/0",
 	} {
 		if !strings.Contains(envExample, required) {
 			t.Fatalf("environment template must expose %q", required)

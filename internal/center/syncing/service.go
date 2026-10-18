@@ -20,9 +20,14 @@ import (
 const MaxBatchItems = 256
 
 var (
-	ErrBindingNotAccepted = enrollment.ErrBindingNotAccepted
-	ErrInvalidSyncToken   = enrollment.ErrInvalidSyncToken
-	ErrHeartbeatRequired  = errors.New("heartbeat carrier required for sync batch")
+	ErrBindingNotAccepted        = enrollment.ErrBindingNotAccepted
+	ErrInvalidSyncToken          = enrollment.ErrInvalidSyncToken
+	ErrHeartbeatRequired         = errors.New("heartbeat carrier required for sync batch")
+	ErrSyncProtocolRequired      = errors.New("sync protocol revision required")
+	ErrSyncProducerMismatch      = errors.New("sync producer mismatch")
+	ErrSyncBatchRetired          = errors.New("sync batch retired")
+	ErrSyncBatchIdentityConflict = errors.New("sync batch identity conflict")
+	ErrInvalidReplayState        = errors.New("invalid sync replay state")
 )
 
 type HeartbeatPayload = enrollment.HeartbeatPayload
@@ -37,8 +42,14 @@ type CommandResult struct {
 }
 
 type Batch struct {
-	SessionID  string
-	LiveSignal *agentapi.LiveSignal
+	ProtocolRevision int
+	ProducerID       string
+	BatchSequence    int64
+	AllocatedThrough int64
+	RetiredThrough   int64
+	PayloadDigest    [32]byte
+	SessionID        string
+	LiveSignal       *agentapi.LiveSignal
 	// Transient HTTP capability; never stored in heartbeat or queue JSON.
 	IPQualityCollectionRevision int
 	MonitoringInstanceID        string
@@ -55,9 +66,15 @@ const (
 	ResultDispositionRecorded       ResultDisposition = "recorded"
 	ResultDispositionExactDuplicate ResultDisposition = "exact_duplicate"
 	ResultDispositionSuppressed     ResultDisposition = "suppressed"
+	ResultDispositionDeferred       ResultDisposition = "deferred"
 )
 
 type Result struct {
+	SessionID      string
+	ProducerID     string
+	BatchSequence  int64
+	BatchDigest    string
+	RetiredThrough int64
 	StopCollection bool
 	Disposition    ResultDisposition
 	// Set only after a committed live sync authenticated with writable full
@@ -126,9 +143,17 @@ func (s *Service) WithIPQualityCollectCoordinator(collect IPQualityCollectCoordi
 }
 
 func (s *Service) SyncBatch(ctx context.Context, batch Batch) (Result, error) {
+	if err := ValidateBatchProtocol(batch); err != nil {
+		return Result{}, err
+	}
 	result, err := s.repo.ApplyBatch(ctx, batch)
 	if err != nil {
 		return Result{}, err
+	}
+	if result.Disposition == ResultDispositionDeferred {
+		result.Plan = agentplan.SyncPlan{}
+		result.LiveCollectionAllowed = false
+		return result, nil
 	}
 	result = s.coordinateIPQualityCollect(batch, result)
 	if s.postSync != nil && result.Disposition == ResultDispositionRecorded {

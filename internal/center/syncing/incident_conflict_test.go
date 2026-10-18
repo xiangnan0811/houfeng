@@ -13,6 +13,7 @@ import (
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/runtimefacts"
 	"houfeng/internal/center/syncing"
+	"houfeng/internal/contracts/agentapi"
 )
 
 func TestServiceCommittedSyncProjectionConflictsPreserveResponse(t *testing.T) {
@@ -47,7 +48,19 @@ func TestServiceCommittedSyncProjectionConflictsPreserveResponse(t *testing.T) {
 	)
 	service := syncing.NewService(fixedSyncRepository{result: want}, incidentProcessor)
 
-	got, err := service.SyncBatch(context.Background(), syncing.Batch{MonitoringInstanceID: "mi_committed"})
+	got, err := service.SyncBatch(context.Background(), syncing.Batch{
+		ProtocolRevision:     agentapi.SyncProtocolRevision,
+		SessionID:            "session_committed",
+		ProducerID:           "b88d099e-39d1-4d01-8cec-034698e108e7",
+		BatchSequence:        1,
+		AllocatedThrough:     1,
+		MonitoringInstanceID: "mi_committed",
+		Heartbeats: []syncing.HeartbeatPayload{{
+			ObservedAt:  acceptedAt,
+			Fingerprint: "fp_committed",
+			SyncBatchID: "b88d099e-39d1-4d01-8cec-034698e108e7:1",
+		}},
+	})
 	if err != nil {
 		t.Fatalf("SyncBatch() error = %v", err)
 	}

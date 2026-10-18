@@ -38,10 +38,7 @@ func TestServiceAttachesPendingCollectRequestToPlanCopy(t *testing.T) {
 	coordinator := &fakeCollectCoordinator{requestID: "ipqc_001"}
 	service := NewService(repo).WithIPQualityCollectCoordinator(coordinator)
 
-	batch := Batch{
-		MonitoringInstanceID: "mi_001",
-		IPQualityReports:     []ipquality.ReportWrite{{Status: "success"}},
-	}
+	batch := validSyncBatch("mi_001", ipquality.ReportWrite{Status: "success"})
 	got, err := service.SyncBatch(context.Background(), batch)
 	if err != nil {
 		t.Fatalf("SyncBatch() error = %v", err)
@@ -64,16 +61,16 @@ func TestServiceDoesNotDispatchCollectRequestWhenCollectionOff(t *testing.T) {
 	t.Parallel()
 
 	for name, result := range map[string]Result{
-		"stop collection": {StopCollection: true, Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: true}}},
-		"disabled plan":   {Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: false}}},
-		"no plan":         {},
+		"stop collection": {Disposition: ResultDispositionSuppressed, StopCollection: true, Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: true}}},
+		"disabled plan":   {Disposition: ResultDispositionRecorded, Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: false}}},
+		"no plan":         {Disposition: ResultDispositionRecorded},
 	} {
 		result := result
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			coordinator := &fakeCollectCoordinator{requestID: "ipqc_001"}
 			service := NewService(&fakeSyncRepository{result: result}).WithIPQualityCollectCoordinator(coordinator)
-			got, err := service.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi_001"})
+			got, err := service.SyncBatch(context.Background(), validSyncBatch("mi_001"))
 			if err != nil {
 				t.Fatalf("SyncBatch() error = %v", err)
 			}
@@ -90,11 +87,11 @@ func TestServiceDoesNotDispatchCollectRequestWhenCollectionOff(t *testing.T) {
 func TestWithIPQualityCollectCoordinatorKeepsOriginalService(t *testing.T) {
 	t.Parallel()
 
-	repo := &fakeSyncRepository{result: Result{Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: true}}}}
+	repo := &fakeSyncRepository{result: Result{Disposition: ResultDispositionRecorded, Plan: agentplan.SyncPlan{IPQualityPlan: &agentplan.IPQualityPlan{Enabled: true}}}}
 	original := NewService(repo)
 	_ = original.WithIPQualityCollectCoordinator(&fakeCollectCoordinator{requestID: "ipqc_001"})
 
-	got, err := original.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi_001"})
+	got, err := original.SyncBatch(context.Background(), validSyncBatch("mi_001"))
 	if err != nil {
 		t.Fatalf("SyncBatch() error = %v", err)
 	}
@@ -106,13 +103,13 @@ func TestWithIPQualityCollectCoordinatorKeepsOriginalService(t *testing.T) {
 func TestServiceCompletesCollectRequestsOnlyFromRecordedReports(t *testing.T) {
 	t.Parallel()
 
-	for _, disposition := range []ResultDisposition{ResultDispositionSuppressed, ResultDispositionExactDuplicate, ResultDisposition("")} {
+	for _, disposition := range []ResultDisposition{ResultDispositionSuppressed, ResultDispositionExactDuplicate, ResultDispositionDeferred} {
 		disposition := disposition
 		t.Run(string(disposition), func(t *testing.T) {
 			t.Parallel()
 			coordinator := &fakeCollectCoordinator{}
 			service := NewService(&fakeSyncRepository{result: Result{Disposition: disposition}}).WithIPQualityCollectCoordinator(coordinator)
-			batch := Batch{MonitoringInstanceID: "mi_001", IPQualityReports: []ipquality.ReportWrite{{Status: "success"}}}
+			batch := validSyncBatch("mi_001", ipquality.ReportWrite{Status: "success"})
 			if _, err := service.SyncBatch(context.Background(), batch); err != nil {
 				t.Fatalf("SyncBatch() error = %v", err)
 			}
@@ -136,15 +133,15 @@ func TestServiceCollectRequestLifecycleWithRegistry(t *testing.T) {
 		t.Fatalf("Request() error = %v", err)
 	}
 
-	got, err := service.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi_001"})
+	got, err := service.SyncBatch(context.Background(), validSyncBatch("mi_001"))
 	if err != nil || got.Plan.IPQualityPlan.CollectRequestID != "ipqc_001" {
 		t.Fatalf("SyncBatch() = %#v, %v; want request dispatched", got.Plan.IPQualityPlan, err)
 	}
 
-	echoed := Batch{MonitoringInstanceID: "mi_001", IPQualityReports: []ipquality.ReportWrite{{
+	echoed := validSyncBatch("mi_001", ipquality.ReportWrite{
 		Status: "success", IPVersion: 4,
 		CollectionMetadata: agentapi.ParseCollectionMetadata([]byte(`{"collect_request_id":"ipqc_001"}`)),
-	}}}
+	})
 	// 实例在采集期间被暂停：报告随 suppressed 批次到达、未入库，请求保持进行中。
 	repo.result = Result{Disposition: ResultDispositionSuppressed, StopCollection: true}
 	if _, err := service.SyncBatch(context.Background(), echoed); err != nil {
@@ -191,13 +188,13 @@ func TestServicePairedRequestRequiresTwoRecordedFamilyTerminals(t *testing.T) {
 			DiagnosticsJSON: raw, CollectionMetadata: agentapi.ParseCollectionMetadata(raw),
 		}
 	}
-	four := Batch{MonitoringInstanceID: "mi_001", IPQualityReports: []ipquality.ReportWrite{report(4)}}
-	six := Batch{MonitoringInstanceID: "mi_001", IPQualityReports: []ipquality.ReportWrite{report(6)}}
+	four := validSyncBatch("mi_001", report(4))
+	six := validSyncBatch("mi_001", report(6))
 	got, err := service.SyncBatch(context.Background(), four)
 	if err != nil || got.Plan.IPQualityPlan.CollectRequestID != "ipqc_paired" {
 		t.Fatalf("first terminal completed request or failed: %#v, %v", got, err)
 	}
-	for _, disposition := range []ResultDisposition{ResultDispositionExactDuplicate, ResultDispositionSuppressed} {
+	for _, disposition := range []ResultDisposition{ResultDispositionExactDuplicate, ResultDispositionSuppressed, ResultDispositionDeferred} {
 		repo.result.Disposition = disposition
 		if _, err := service.SyncBatch(context.Background(), six); err != nil {
 			t.Fatal(err)

@@ -35,7 +35,7 @@ func TestPostgresSyncRepositoryRollsBackHeartbeatWhenObservationWriteFails(t *te
 		},
 	}
 
-	_, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	_, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch()))
 	if err == nil {
 		t.Fatal("ApplyBatch() error = nil, want non-nil")
 	}
@@ -71,7 +71,7 @@ func TestPostgresSyncRepositoryRejectsProbeMetadataMismatchBeforeWritingBatch(t 
 		},
 	}
 
-	_, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	_, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch()))
 	if !errors.Is(err, observations.ErrInvalidProbeObservation) {
 		t.Fatalf("ApplyBatch() error = %v, want ErrInvalidProbeObservation", err)
 	}
@@ -104,7 +104,7 @@ func TestPostgresSyncRepositoryRejectsInvalidProbeObservationSemanticsBeforeWrit
 	batch := testSyncBatch()
 	batch.Observations.ProbeObservations[0].ResultKind = "maybe"
 
-	_, err := repo.ApplyBatch(context.Background(), batch)
+	_, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch))
 	if !errors.Is(err, observations.ErrInvalidProbeObservation) {
 		t.Fatalf("ApplyBatch() error = %v, want ErrInvalidProbeObservation", err)
 	}
@@ -132,9 +132,9 @@ func TestPostgresSyncRepositoryRejectsObservationBatchWithoutHeartbeatCarrier(t 
 	batch := testSyncBatch()
 	batch.Heartbeats = nil
 
-	_, err := repo.ApplyBatch(context.Background(), batch)
-	if !errors.Is(err, syncing.ErrHeartbeatRequired) {
-		t.Fatalf("ApplyBatch() error = %v, want ErrHeartbeatRequired", err)
+	_, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch))
+	if !errors.Is(err, syncing.ErrInvalidReplayState) {
+		t.Fatalf("ApplyBatch() error = %v, want ErrInvalidReplayState", err)
 	}
 	if tx.commitCalls != 0 {
 		t.Fatalf("commitCalls = %d, want 0", tx.commitCalls)
@@ -179,7 +179,7 @@ func TestPostgresSyncRepositoryRejectsLegacySessionTokenHash(t *testing.T) {
 		},
 	}
 
-	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); !errors.Is(err, syncing.ErrInvalidSyncToken) {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch())); !errors.Is(err, syncing.ErrInvalidSyncToken) {
 		t.Fatalf("legacy hash error = %v", err)
 	}
 }
@@ -199,11 +199,11 @@ func TestPostgresSyncRepositoryRecordsBatchIDBeforeWritingFacts(t *testing.T) {
 		},
 	}
 
-	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch())); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
-	recordIndex := sqlIndex(tx.execSQL, "insert into agent_sync_batches")
+	recordIndex := sqlIndex(tx.execSQL, "insert into agent_batch_receipts")
 	heartbeatIndex := sqlIndex(tx.execSQL, "insert into monitoring_instance_heartbeats")
 	if recordIndex == -1 {
 		t.Fatalf("agent sync batch id was not recorded; execSQL=%#v", tx.execSQL)
@@ -214,16 +214,10 @@ func TestPostgresSyncRepositoryRecordsBatchIDBeforeWritingFacts(t *testing.T) {
 	if recordIndex > heartbeatIndex {
 		t.Fatalf("agent sync batch id insert index %d should run before heartbeat insert index %d", recordIndex, heartbeatIndex)
 	}
-	args := tx.argsForSQL("insert into agent_sync_batches")
-	if len(args) != 2 || args[0] != "mi_001" || args[1] != "sync_001" {
-		t.Fatalf("agent sync batch insert args = %#v, want monitoring instance id and sync batch id", args)
-	}
-	batchSQL := strings.ToLower(tx.execSQL[recordIndex])
-	if !strings.Contains(batchSQL, "on conflict do nothing") {
-		t.Fatal("agent sync batch SQL must use targetless ON CONFLICT DO NOTHING")
-	}
-	if strings.Contains(batchSQL, "on conflict (") {
-		t.Fatal("agent sync batch SQL must not name conflict columns under INSERT-only ACL")
+	args := tx.argsForSQL("insert into agent_batch_receipts")
+	expected := prepareSyncFixture(testSyncBatch())
+	if len(args) != 3 || args[0] != expected.SessionID || args[1] != expected.BatchSequence || !equalSyncDigest(args[2].([]byte), expected.PayloadDigest) {
+		t.Fatalf("receipt args = %#v, want session/sequence/canonical digest", args)
 	}
 }
 
@@ -236,7 +230,7 @@ func TestPostgresSyncRepositoryPreservesAgentSyncBatchPostgresCause(t *testing.T
 		monitoringInstanceFingerprint:   "fp-001",
 		monitoringInstanceSyncTokenHash: hashSyncToken("sync-token-001"),
 		probeMetadataByItemID:           map[string]observations.ProbeMetadata{"pb_001": {TargetID: "tg_001", ProbeKind: agentapi.ProbeKindHTTP}},
-		execErrForSQLSubstring:          "insert into agent_sync_batches",
+		execErrForSQLSubstring:          "insert into agent_batch_receipts",
 		execErr:                         wantPostgresError,
 	}
 	repo := &PostgresSyncRepository{
@@ -245,7 +239,7 @@ func TestPostgresSyncRepositoryPreservesAgentSyncBatchPostgresCause(t *testing.T
 		},
 	}
 
-	_, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	_, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch()))
 	var gotPostgresError *pgconn.PgError
 	if !errors.As(err, &gotPostgresError) || gotPostgresError != wantPostgresError {
 		t.Fatal("ApplyBatch() did not preserve the agent sync batch PostgreSQL typed cause")
@@ -274,7 +268,7 @@ func TestPostgresSyncRepositoryDuplicateBatchCommitsWithoutRewritingFacts(t *tes
 		},
 	}
 
-	result, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	result, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch()))
 	if err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
@@ -321,8 +315,8 @@ func TestSyncBatchPromotesPendingEnrollmentLifecycleAfterLiveSignal(t *testing.T
 	}
 
 	batch := testSyncBatch()
-	batch.LiveSignal = &agentapi.LiveSignal{ID: "live-1", Fingerprint: "fp-001"}
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	batch.LiveSignal = &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp-001"}
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -351,7 +345,7 @@ func TestSyncBatchKeepsPendingEnrollmentLifecycleWithoutHostSample(t *testing.T)
 		},
 	}
 
-	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch())); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -384,7 +378,7 @@ func TestSyncBatchRecordsIPQualityReportsInSameTransaction(t *testing.T) {
 	batch := testSyncBatch()
 	batch.IPQualityReports = []ipquality.ReportWrite{ipQualityReportWrite()}
 
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 	if tx.commitCalls != 1 {
@@ -419,7 +413,7 @@ func TestSyncBatchDoesNotOverrideNonPendingLifecycleAfterHostSample(t *testing.T
 				},
 			}
 
-			if _, err := repo.ApplyBatch(context.Background(), testSyncBatchWithHostSample()); err != nil {
+			if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatchWithHostSample())); err != nil {
 				t.Fatalf("ApplyBatch() error = %v", err)
 			}
 
@@ -490,7 +484,7 @@ func TestSyncBatchShortCircuitsSuppressedMonitoringInstanceWithoutWrites(t *test
 			batch.IPQualityReports = []ipquality.ReportWrite{ipQualityReportWrite()}
 			batch.CommandResults = []syncing.CommandResult{{ActionID: "act_001", CommandID: "uptime", Stdout: "up", ExitCode: 0}}
 
-			result, err := repo.ApplyBatch(context.Background(), batch)
+			result, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch))
 			if err != nil {
 				t.Fatalf("ApplyBatch() error = %v", err)
 			}
@@ -586,6 +580,8 @@ type fakeSyncBatchTx struct {
 	pendingCommandID                string
 	pendingLastActionRaw            []byte
 	duplicateSyncBatch              bool
+	replayProducer                  string
+	receiptDigest                   [32]byte
 
 	probeMetadataByItemID map[string]observations.ProbeMetadata
 	probeMetadataErr      map[string]error
@@ -607,17 +603,8 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 		return pgconn.CommandTag{}, f.execErr
 	}
 	lowerSQL := strings.ToLower(sql)
-	if strings.Contains(lowerSQL, "insert into agent_live_signals") {
-		if f.duplicateLiveSignal {
-			return pgconn.NewCommandTag("INSERT 0 0"), nil
-		}
-		return pgconn.NewCommandTag("INSERT 0 1"), nil
-	}
-	if strings.Contains(lowerSQL, "insert into agent_sync_batches") {
-		if f.duplicateSyncBatch {
-			return pgconn.NewCommandTag("INSERT 0 0"), nil
-		}
-		return pgconn.NewCommandTag("INSERT 0 1"), nil
+	if strings.Contains(lowerSQL, "insert into agent_replay_states") {
+		f.replayProducer, _ = args[1].(string)
 	}
 	if strings.Contains(lowerSQL, "insert into monitoring_instance_command_action_audit") {
 		return pgconn.NewCommandTag("INSERT 0 1"), nil
@@ -636,8 +623,30 @@ func (f *fakeSyncBatchTx) Exec(_ context.Context, sql string, args ...any) (pgco
 
 func (f *fakeSyncBatchTx) QueryRow(_ context.Context, sql string, args ...any) pgx.Row {
 	switch {
-	case strings.Contains(sql, "select clock_timestamp()"):
+	case strings.Contains(sql, "select producer_id::text"):
 		return fakeRow{scan: func(dest ...any) error {
+			*(dest[0].(*string)) = f.replayProducer
+			*(dest[1].(*int64)) = 0
+			*(dest[2].(*int64)) = 0
+			return nil
+		}}
+	case strings.Contains(sql, "select payload_digest"):
+		return fakeRow{scan: func(dest ...any) error {
+			if !f.duplicateSyncBatch {
+				return pgx.ErrNoRows
+			}
+			digest := prepareSyncFixture(testSyncBatch()).PayloadDigest
+			if f.receiptDigest != ([32]byte{}) {
+				digest = f.receiptDigest
+			}
+			*(dest[0].(*[]byte)) = append([]byte(nil), digest[:]...)
+			return nil
+		}}
+	case strings.Contains(sql, "update agent_replay_states set live_sequence_high"):
+		return fakeRow{scan: func(dest ...any) error {
+			if f.duplicateLiveSignal {
+				return pgx.ErrNoRows
+			}
 			now := f.receiverClock
 			if now.IsZero() {
 				now = time.Now().UTC()
@@ -766,7 +775,7 @@ func TestPostgresSyncRepositoryPersistsBackfilledHeartbeatFlag(t *testing.T) {
 	batch := testSyncBatch()
 	batch.Heartbeats[0].IsBackfilled = true
 
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -809,7 +818,7 @@ func TestSyncBatchPlanReturnsAcceptedAtAndDerivedPlan(t *testing.T) {
 		},
 	}
 
-	result, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	result, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch()))
 	if err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
@@ -857,7 +866,7 @@ func TestSyncBatchDispatchesPendingActionAsDurableLastAction(t *testing.T) {
 		},
 	}
 
-	result, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	result, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch()))
 	if err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
@@ -909,7 +918,7 @@ func TestSyncBatchDispatchPreservesQueuedPendingActionMetadata(t *testing.T) {
 		},
 	}
 
-	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch())); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -956,7 +965,7 @@ func TestSyncBatchDispatchesPendingActionWritesAudit(t *testing.T) {
 		},
 	}
 
-	if _, err := repo.ApplyBatch(context.Background(), testSyncBatch()); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch())); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -1005,7 +1014,7 @@ func TestSyncBatchRollsBackDispatchWhenAuditFails(t *testing.T) {
 		},
 	}
 
-	_, err := repo.ApplyBatch(context.Background(), testSyncBatch())
+	_, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(testSyncBatch()))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("ApplyBatch() error = %v, want wrapped dispatch audit error", err)
 	}
@@ -1046,7 +1055,7 @@ func TestSyncBatchStoresMatchingCommandResultWithCommandID(t *testing.T) {
 		ExitCode:  0,
 	}}
 
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -1096,7 +1105,7 @@ func TestSyncBatchStoresCommandResultOutputTTLMetadata(t *testing.T) {
 		ExitCode:  0,
 	}}
 
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -1145,7 +1154,7 @@ func TestSyncBatchStoresMatchingCommandResultWritesMetadataOnlyCompletionAudit(t
 		ExitCode:  0,
 	}}
 
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 
@@ -1200,7 +1209,7 @@ func TestSyncBatchRollsBackCompletionWhenAuditFails(t *testing.T) {
 		ExitCode:  0,
 	}}
 
-	_, err := repo.ApplyBatch(context.Background(), batch)
+	_, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch))
 	if !errors.Is(err, wantErr) {
 		t.Fatalf("ApplyBatch() error = %v, want wrapped completion audit error", err)
 	}
@@ -1241,7 +1250,7 @@ func TestSyncBatchRedactsCommandResultsBeforePersisting(t *testing.T) {
 		ExitCode:  0,
 	}}
 
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 	args := tx.argsForSQL("last_action->>'status'")
@@ -1286,7 +1295,7 @@ func TestSyncBatchIgnoresMismatchedCommandResultRows(t *testing.T) {
 		ExitCode:  0,
 	}}
 
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v, want mismatch to be ignored", err)
 	}
 	if tx.commitCalls != 1 {
@@ -1321,7 +1330,7 @@ func TestSyncBatchStoresCommandResultBeforeDispatchingQueuedAction(t *testing.T)
 		ExitCode:  0,
 	}}
 
-	if _, err := repo.ApplyBatch(context.Background(), batch); err != nil {
+	if _, err := repo.ApplyBatch(context.Background(), prepareSyncFixture(batch)); err != nil {
 		t.Fatalf("ApplyBatch() error = %v", err)
 	}
 

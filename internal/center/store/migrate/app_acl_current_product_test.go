@@ -75,7 +75,9 @@ func TestAppACLCurrentP76PrivilegeDeltaIsExactlyProductTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := appACLCurrentTransitionPrivilegeBody(current)
+	historical := current
+	historical.fragments = historical.fragments[:len(historical.fragments)-1]
+	body, err := appACLCurrentTransitionPrivilegeBody(historical)
 	if err != nil {
 		t.Fatal(err)
 	}

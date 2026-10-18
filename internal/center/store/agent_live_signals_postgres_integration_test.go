@@ -38,8 +38,8 @@ func TestPostgresIntegrationSessionLiveEvidenceAndRetirement(t *testing.T) {
 	if _, err := fixture.db.Exec(ctx, `update monitoring_agent_sessions set started_at=clock_timestamp()-interval '1 day'; insert into receiver_health(id,boot_id,healthy_since,checked_at,healthy) values(true,'signal-clock-test',clock_timestamp()-interval '181 minutes',clock_timestamp(),true)`); err != nil {
 		t.Fatal(err)
 	}
-	batch := syncing.Batch{SessionID: "mas_live", MonitoringInstanceID: "mi_live", SyncToken: "mas_live.secret", LiveSignal: &agentapi.LiveSignal{ID: "one", Fingerprint: "fp_live"}}
-	result, err := repo.ApplyBatch(ctx, batch)
+	batch := syncing.Batch{SessionID: "mas_live", MonitoringInstanceID: "mi_live", SyncToken: "mas_live.secret", LiveSignal: &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp_live"}}
+	result, err := repo.ApplyBatch(ctx, prepareSyncFixture(batch))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestPostgresIntegrationSessionLiveEvidenceAndRetirement(t *testing.T) {
 	}
 	firstReceived := received
 	now = now.Add(time.Hour)
-	if _, err := repo.ApplyBatch(ctx, batch); err != nil {
+	if _, err := repo.ApplyBatch(ctx, prepareSyncFixture(batch)); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.db.QueryRow(ctx, `select last_trusted_online_at from monitoring_instances where monitoring_instance_id='mi_live'`).Scan(&received); err != nil {
@@ -82,12 +82,12 @@ func TestPostgresIntegrationSessionLiveEvidenceAndRetirement(t *testing.T) {
 	if _, err := fixture.db.Exec(ctx, `update vps_assets set lifecycle_status='archived' where vps_id='vps_live'`); err != nil {
 		t.Fatal(err)
 	}
-	batch.LiveSignal.ID = "two"
-	if result, err = repo.ApplyBatch(ctx, batch); err != nil || !result.StopCollection {
+	batch.LiveSignal.Sequence = 2
+	if result, err = repo.ApplyBatch(ctx, prepareSyncFixture(batch)); err != nil || !result.StopCollection {
 		t.Fatalf("old session must remain evidence-only: %#v %v", result, err)
 	}
-	batch.LiveSignal.ID = "three"
-	if _, err := repo.ApplyBatch(ctx, batch); err != nil {
+	batch.LiveSignal.Sequence = 3
+	if _, err := repo.ApplyBatch(ctx, prepareSyncFixture(batch)); err != nil {
 		t.Fatal(err)
 	}
 	var count int
@@ -143,11 +143,11 @@ func TestPostgresIntegrationFreshInstanceEnrollmentAfterRetiredPredecessor(t *te
 	oldSession, _, _ := strings.Cut(oldToken, ".")
 	newSession, _, _ := strings.Cut(newToken, ".")
 	syncRepo := NewPostgresSyncRepository(pool)
-	oldResult, err := syncRepo.ApplyBatch(ctx, syncing.Batch{SessionID: oldSession, MonitoringInstanceID: old.MonitoringInstanceID, SyncToken: oldToken, LiveSignal: &agentapi.LiveSignal{ID: "old-remaining-process", Fingerprint: "same-host"}})
+	oldResult, err := syncRepo.ApplyBatch(ctx, prepareSyncFixture(syncing.Batch{SessionID: oldSession, MonitoringInstanceID: old.MonitoringInstanceID, SyncToken: oldToken, LiveSignal: &agentapi.LiveSignal{Sequence: 1, Fingerprint: "same-host"}}))
 	if err != nil || !oldResult.StopCollection {
 		t.Fatalf("predecessor regained collection: %#v %v", oldResult, err)
 	}
-	newResult, err := syncRepo.ApplyBatch(ctx, syncing.Batch{SessionID: newSession, MonitoringInstanceID: current.MonitoringInstanceID, SyncToken: newToken, LiveSignal: &agentapi.LiveSignal{ID: "new-process", Fingerprint: "same-host"}})
+	newResult, err := syncRepo.ApplyBatch(ctx, prepareSyncFixture(syncing.Batch{SessionID: newSession, MonitoringInstanceID: current.MonitoringInstanceID, SyncToken: newToken, LiveSignal: &agentapi.LiveSignal{Sequence: 1, Fingerprint: "same-host"}}))
 	if err != nil || newResult.StopCollection {
 		t.Fatalf("replacement failed enrollment: %#v %v", newResult, err)
 	}
@@ -196,12 +196,12 @@ func TestPostgresIntegrationReenrollmentNeverReactivatesOldSession(t *testing.T)
 		t.Fatal("reenrollment reused old identity")
 	}
 	syncRepo := NewPostgresSyncRepository(pool)
-	oldBatch := syncing.Batch{SessionID: oldID, MonitoringInstanceID: "mi_reenroll", SyncToken: oldToken, LiveSignal: &agentapi.LiveSignal{ID: "old-live", Fingerprint: "fp_old"}}
-	if result, err := syncRepo.ApplyBatch(ctx, oldBatch); err != nil || !result.StopCollection {
+	oldBatch := syncing.Batch{SessionID: oldID, MonitoringInstanceID: "mi_reenroll", SyncToken: oldToken, LiveSignal: &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp_old"}}
+	if result, err := syncRepo.ApplyBatch(ctx, prepareSyncFixture(oldBatch)); err != nil || !result.StopCollection {
 		t.Fatalf("old credential regained permission or disappeared: %#v %v", result, err)
 	}
-	newBatch := syncing.Batch{SessionID: newID, MonitoringInstanceID: "mi_reenroll", SyncToken: newToken, LiveSignal: &agentapi.LiveSignal{ID: "new-live", Fingerprint: "fp_new"}}
-	if result, err := syncRepo.ApplyBatch(ctx, newBatch); err != nil || result.StopCollection {
+	newBatch := syncing.Batch{SessionID: newID, MonitoringInstanceID: "mi_reenroll", SyncToken: newToken, LiveSignal: &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp_new"}}
+	if result, err := syncRepo.ApplyBatch(ctx, prepareSyncFixture(newBatch)); err != nil || result.StopCollection {
 		t.Fatalf("new credential failed full permission: %#v %v", result, err)
 	}
 	var capability string

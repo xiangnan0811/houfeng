@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ import (
 
 type fakeClient struct {
 	enrollCalls         int
+	protocolErr         error
 	syncCalls           int
 	syncBeforeEnroll    bool
 	enrollResponse      agentapi.EnrollmentResponse
@@ -39,6 +41,8 @@ type fakeClient struct {
 	lastSync     agentapi.SyncRequest
 	syncRequests []agentapi.SyncRequest
 }
+
+func (f *fakeClient) CheckSyncProtocol(context.Context) error { return f.protocolErr }
 
 func (f *fakeClient) Enroll(_ context.Context, request agentapi.EnrollmentRequest) (*agentapi.EnrollmentResponse, error) {
 	f.enrollCalls++
@@ -62,7 +66,27 @@ func (f *fakeClient) Enroll(_ context.Context, request agentapi.EnrollmentReques
 	return &response, nil
 }
 
-func (f *fakeClient) Sync(_ context.Context, request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
+func (f *fakeClient) Sync(_ context.Context, request agentapi.SyncRequest) (response *agentapi.SyncResponse, err error) {
+	defer func() {
+		if err == nil && response != nil {
+			digest, digestErr := agentapi.CanonicalSyncBatchDigest(request)
+			if digestErr != nil {
+				err = digestErr
+				return
+			}
+			response.SessionID = request.SessionID
+			response.ProducerID = request.ProducerID
+			response.BatchSequence = request.BatchSequence
+			response.BatchDigest = fmt.Sprintf("%x", digest)
+			response.RetiredThrough = request.RetiredThrough
+			if response.Disposition == "" {
+				response.Disposition = agentapi.SyncDispositionRecorded
+				if request.BatchSequence == 0 {
+					response.Disposition = agentapi.SyncDispositionSuppressed
+				}
+			}
+		}
+	}()
 	if f.enrollCalls == 0 {
 		f.syncBeforeEnroll = true
 	}
@@ -71,10 +95,6 @@ func (f *fakeClient) Sync(_ context.Context, request agentapi.SyncRequest) (*age
 	f.syncRequests = append(f.syncRequests, request)
 	if f.syncFunc != nil {
 		return f.syncFunc(request)
-	}
-	if f.cancel != nil && f.cancelAfterSyncs > 0 && f.syncCalls >= f.cancelAfterSyncs {
-		f.cancel()
-		f.cancel = nil
 	}
 	if len(f.syncErrs) >= f.syncCalls && f.syncErrs[f.syncCalls-1] != nil {
 		return nil, f.syncErrs[f.syncCalls-1]
@@ -86,9 +106,19 @@ func (f *fakeClient) Sync(_ context.Context, request agentapi.SyncRequest) (*age
 	return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "ok"}, nil
 }
 
-func withoutDockerCLI(t *testing.T) {
+func withoutDockerCLI(t *testing.T, requiredBinaries ...string) {
 	t.Helper()
-	t.Setenv("PATH", t.TempDir())
+	binDir := t.TempDir()
+	for _, binary := range requiredBinaries {
+		path, err := exec.LookPath(binary)
+		if err != nil {
+			t.Fatalf("locate required test command %s: %v", binary, err)
+		}
+		if err := os.Symlink(path, filepath.Join(binDir, binary)); err != nil {
+			t.Fatalf("expose required test command %s: %v", binary, err)
+		}
+	}
+	t.Setenv("PATH", binDir)
 }
 
 type staticTokenSource struct{}
@@ -233,7 +263,8 @@ func (f *fakeIPQualityProvider) DrainReports() []agentapi.IPQualityReportPayload
 	return out
 }
 
-type fakeSyncQueue struct {
+type fileQueueFaults struct {
+	store      *runtimeTestStore
 	enqueueErr error
 	listErr    error
 	deleteErr  error
@@ -247,14 +278,14 @@ type fakeSyncQueue struct {
 }
 
 type failNthEnqueueQueue struct {
-	*fakeSyncQueue
+	*fileQueueFaults
 	calls  int
 	failAt int
 	err    error
 }
 
 type localEntryIDCollisionQueue struct {
-	*fakeSyncQueue
+	*fileQueueFaults
 	enqueued bool
 }
 
@@ -270,19 +301,17 @@ func (q *failNthEnqueueQueue) Enqueue(ctx context.Context, request agentapi.Sync
 	if q.failAt > 0 && q.calls == q.failAt {
 		return "", q.err
 	}
-	return q.fakeSyncQueue.Enqueue(ctx, request)
+	return q.fileQueueFaults.Enqueue(ctx, request)
 }
 
-func (q *localEntryIDCollisionQueue) Enqueue(_ context.Context, request agentapi.SyncRequest) (string, error) {
-	if q.enqueued {
-		return q.fakeSyncQueue.Enqueue(context.Background(), request)
+func (q *localEntryIDCollisionQueue) Enqueue(ctx context.Context, request agentapi.SyncRequest) (string, error) {
+	if !q.enqueued {
+		q.enqueued = true
+		if _, err := q.fileQueueFaults.Enqueue(ctx, request); err != nil {
+			return "", err
+		}
 	}
-	q.enqueued = true
-	q.entries = append(q.entries,
-		syncqueue.Entry{ID: "collision", Request: request},
-		syncqueue.Entry{ID: "collision-2", Request: request},
-	)
-	return "collision-2", nil
+	return q.fileQueueFaults.Enqueue(ctx, request)
 }
 
 func (q *cancelAfterSuccessfulDeleteQueue) Delete(ctx context.Context, id string) error {
@@ -335,80 +364,76 @@ func (q *cancelAfterSuccessfulDeleteQueue) Prune(ctx context.Context) error {
 	return q.SyncQueue.Prune(ctx)
 }
 
-func (f *fakeSyncQueue) Enqueue(_ context.Context, request agentapi.SyncRequest) (string, error) {
+func (f *fileQueueFaults) Enqueue(ctx context.Context, request agentapi.SyncRequest) (string, error) {
 	if f.enqueueErr != nil {
 		return "", f.enqueueErr
 	}
-	id := request.Heartbeats[0].SyncBatchID
-	f.entries = append(f.entries, syncqueue.Entry{
-		ID:      id,
-		Request: request,
-	})
-	return id, nil
+	id, err := f.store.Enqueue(ctx, request)
+	if err == nil {
+		f.entries, err = f.store.List(ctx)
+	}
+	return id, err
 }
 
-func (f *fakeSyncQueue) List(context.Context) ([]syncqueue.Entry, error) {
+func (f *fileQueueFaults) List(ctx context.Context) ([]syncqueue.Entry, error) {
 	if f.listErr != nil {
 		return nil, f.listErr
 	}
-	out := make([]syncqueue.Entry, len(f.entries))
-	copy(out, f.entries)
-	return out, nil
+	entries, err := f.store.List(ctx)
+	if err == nil {
+		f.entries = entries
+	}
+	return entries, err
 }
 
-func (f *fakeSyncQueue) Delete(_ context.Context, id string) error {
+func (f *fileQueueFaults) Delete(ctx context.Context, id string) error {
 	f.deleteCalls++
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
-	filtered := f.entries[:0]
-	for _, entry := range f.entries {
-		if entry.ID != id {
-			filtered = append(filtered, entry)
-		}
+	if err := f.store.Delete(ctx, id); err != nil {
+		return err
 	}
-	f.entries = filtered
-	return nil
+	var err error
+	f.entries, err = f.store.List(ctx)
+	return err
 }
 
-func (f *fakeSyncQueue) DeleteMany(_ context.Context, ids []string) error {
+func (f *fileQueueFaults) DeleteMany(ctx context.Context, ids []string) error {
 	f.deleteManyCalls++
 	if f.deleteErr != nil {
 		return f.deleteErr
 	}
-	deleted := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		deleted[id] = struct{}{}
+	if err := f.store.DeleteMany(ctx, ids); err != nil {
+		return err
 	}
-	filtered := f.entries[:0]
-	for _, entry := range f.entries {
-		if _, ok := deleted[entry.ID]; !ok {
-			filtered = append(filtered, entry)
-		}
-	}
-	f.entries = filtered
-	return nil
+	var err error
+	f.entries, err = f.store.List(ctx)
+	return err
 }
 
-func (f *fakeSyncQueue) MarkAttempt(_ context.Context, id string) error {
+func (f *fileQueueFaults) MarkAttempt(ctx context.Context, id string) error {
 	f.markCalls++
 	if f.markErr != nil {
 		return f.markErr
 	}
-	for i := range f.entries {
-		if f.entries[i].ID == id {
-			f.entries[i].Attempts++
-		}
+	if err := f.store.MarkAttempt(ctx, id); err != nil {
+		return err
 	}
-	return nil
+	var err error
+	f.entries, err = f.store.List(ctx)
+	return err
 }
 
-func (f *fakeSyncQueue) Prune(context.Context) error {
-	return f.pruneErr
+func (f *fileQueueFaults) Prune(ctx context.Context) error {
+	if f.pruneErr != nil {
+		return f.pruneErr
+	}
+	return f.store.Prune(ctx)
 }
 
 type cancelAfterDeleteQueue struct {
-	*syncqueue.FileStore
+	*runtimeTestStore
 	afterDeletes int
 	cancel       context.CancelFunc
 	deleteCalls  int
@@ -416,7 +441,7 @@ type cancelAfterDeleteQueue struct {
 }
 
 func (q *cancelAfterDeleteQueue) Delete(ctx context.Context, id string) error {
-	if err := q.FileStore.Delete(ctx, id); err != nil {
+	if err := q.runtimeTestStore.Delete(ctx, id); err != nil {
 		return err
 	}
 	q.deleteCalls++
@@ -428,7 +453,7 @@ func (q *cancelAfterDeleteQueue) Delete(ctx context.Context, id string) error {
 }
 
 func (q *cancelAfterDeleteQueue) DeleteMany(ctx context.Context, ids []string) error {
-	if err := q.FileStore.DeleteMany(ctx, ids); err != nil {
+	if err := q.runtimeTestStore.DeleteMany(ctx, ids); err != nil {
 		return err
 	}
 	q.deleteCalls += len(ids)
@@ -440,7 +465,7 @@ func (q *cancelAfterDeleteQueue) DeleteMany(ctx context.Context, ids []string) e
 }
 
 func (q *cancelAfterDeleteQueue) MarkAttempt(ctx context.Context, id string) error {
-	if err := q.FileStore.MarkAttempt(ctx, id); err != nil {
+	if err := q.runtimeTestStore.MarkAttempt(ctx, id); err != nil {
 		return err
 	}
 	q.markCalls++
@@ -450,7 +475,7 @@ func (q *cancelAfterDeleteQueue) MarkAttempt(ctx context.Context, id string) err
 func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{}
-	rt := agentruntime.NewWithDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
+	rt := newRuntimeWithDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
@@ -499,7 +524,7 @@ func TestRuntimeUsesPersistedSyncCredentialsWithoutReusingEnrollmentToken(t *tes
 		syncToken:            "sync-token-persisted",
 		hasCredentials:       true,
 	}
-	rt := agentruntime.NewWithDeps(cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
+	rt := newRuntimeWithDeps(t, cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
@@ -528,7 +553,7 @@ func TestRuntimePersistsSyncCredentialsAfterEnrollment(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{}
 	tokenSource := &syncCredentialTokenSource{enrollmentToken: "enroll-token-001"}
-	rt := agentruntime.NewWithDeps(cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
+	rt := newRuntimeWithDeps(t, cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
@@ -558,7 +583,7 @@ func TestRuntimeReturnsPersistSyncCredentialsErrorBeforeSyncLoop(t *testing.T) {
 	client := &fakeClient{}
 	saveErr := errors.New("token file read-only")
 	tokenSource := &syncCredentialTokenSource{saveErr: saveErr}
-	rt := agentruntime.NewWithDeps(cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
+	rt := newRuntimeWithDeps(t, cfg, nil, client, tokenSource, staticFingerprint{}, 10*time.Millisecond)
 
 	err := rt.Run(context.Background())
 	if !errors.Is(err, saveErr) {
@@ -604,7 +629,7 @@ func TestRuntimeSanitizesLocalFailuresBeforeSyncLoop(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rt := agentruntime.NewWithDeps(
+			rt := newRuntimeWithDeps(t,
 				agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 				slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 				&fakeClient{},
@@ -633,7 +658,7 @@ func TestRuntimeReturnsEnrollmentNotBoundErrorWithoutStartingSyncLoop(t *testing
 			BindingStatus:        agentapi.BindingStatusPendingConfirmation,
 		},
 	}
-	rt := agentruntime.NewWithDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
+	rt := newRuntimeWithDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
@@ -669,7 +694,7 @@ func TestRuntimeReturnsMissingSyncTokenErrorForBoundEnrollment(t *testing.T) {
 			SyncToken:            "",
 		},
 	}
-	rt := agentruntime.NewWithDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
+	rt := newRuntimeWithDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
 
 	err := rt.Run(context.Background())
 	if err == nil {
@@ -696,7 +721,7 @@ func TestRuntimeSanitizesRemoteFailuresOutsideDurableQueue(t *testing.T) {
 			Message:    remoteMessage,
 		}
 		client := &fakeClient{enrollErr: remoteErr}
-		rt := agentruntime.NewWithDeps(
+		rt := newRuntimeWithDeps(t,
 			agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 			client,
@@ -726,7 +751,7 @@ func TestRuntimeSanitizesRemoteFailuresOutsideDurableQueue(t *testing.T) {
 		}
 	})
 
-	t.Run("sync without queue", func(t *testing.T) {
+	t.Run("durable sync", func(t *testing.T) {
 		remoteErr := &enroll.RemoteError{
 			StatusCode: http.StatusNotFound,
 			Code:       agentapi.ErrorCodeMonitoringInstanceNotFound,
@@ -740,7 +765,7 @@ func TestRuntimeSanitizesRemoteFailuresOutsideDurableQueue(t *testing.T) {
 			syncToken:            "sync-token-secret",
 			hasCredentials:       true,
 		}
-		rt := agentruntime.NewWithRuntimeDeps(
+		rt := newRuntimeWithRuntimeDeps(t,
 			agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 			client,
@@ -783,7 +808,7 @@ func TestRuntimeSanitizesUnexpectedEnrollmentBindingStatus(t *testing.T) {
 		BindingStatus:        hostileBindingStatus,
 	}}
 	var logs bytes.Buffer
-	rt := agentruntime.NewWithDeps(
+	rt := newRuntimeWithDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		client,
@@ -814,7 +839,7 @@ func TestRuntimeLogsEnrollmentOnlyAfterCredentialsPersist(t *testing.T) {
 	persistErr := errors.New("credential store unavailable")
 	tokenSource := &syncCredentialTokenSource{saveErr: persistErr}
 	var logs bytes.Buffer
-	rt := agentruntime.NewWithDeps(
+	rt := newRuntimeWithDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		&fakeClient{},
@@ -838,7 +863,7 @@ func TestRuntimeEnrollmentSuccessLogDoesNotExposePersistedIdentity(t *testing.T)
 	client := &fakeClient{cancelAfterSyncs: 1, cancel: cancel}
 	tokenSource := &syncCredentialTokenSource{enrollmentToken: "enroll-token-secret"}
 	var logs bytes.Buffer
-	rt := agentruntime.NewWithDeps(
+	rt := newRuntimeWithDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		client,
@@ -877,7 +902,7 @@ func TestRuntimeDoesNotLogServerURLCredentials(t *testing.T) {
 		hasCredentials:       true,
 	}
 	var logs bytes.Buffer
-	rt := agentruntime.NewWithRuntimeDeps(
+	rt := newRuntimeWithRuntimeDeps(t,
 		agentconfig.AgentConfig{ServerURL: serverURL, TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		client,
@@ -911,7 +936,7 @@ func TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown(t *testi
 	t.Run("fingerprint load", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		rt := agentruntime.NewWithDeps(
+		rt := newRuntimeWithDeps(t,
 			agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 			&fakeClient{},
@@ -927,7 +952,7 @@ func TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown(t *testi
 	t.Run("credential load", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		rt := agentruntime.NewWithDeps(
+		rt := newRuntimeWithDeps(t,
 			agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 			&fakeClient{},
@@ -943,7 +968,7 @@ func TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown(t *testi
 	t.Run("enrollment", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		rt := agentruntime.NewWithDeps(
+		rt := newRuntimeWithDeps(t,
 			agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 			&fakeClient{enrollErr: context.Canceled},
@@ -956,7 +981,7 @@ func TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown(t *testi
 		}
 	})
 
-	t.Run("sync without queue", func(t *testing.T) {
+	t.Run("durable sync", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		client := &fakeClient{syncFunc: func(agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
 			cancel()
@@ -967,7 +992,7 @@ func TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown(t *testi
 			syncToken:            "sync-token-current",
 			hasCredentials:       true,
 		}
-		rt := agentruntime.NewWithRuntimeDeps(
+		rt := newRuntimeWithRuntimeDeps(t,
 			agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 			slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 			client,
@@ -984,6 +1009,7 @@ func TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown(t *testi
 }
 
 func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testing.T) {
+	withoutDockerCLI(t)
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
 		cancelAfterSyncs: 3,
@@ -1025,7 +1051,7 @@ func TestRuntimeUpdatesPlanAndAttachesDueHostSampleAndProbeObservations(t *testi
 		}},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -1089,7 +1115,7 @@ func TestRuntimeLogsHostSampleFailureAndContinuesHeartbeatSync(t *testing.T) {
 	hostProvider := &fakeHostSampleProvider{err: errors.New("boom")}
 	probeProvider := &fakeProbeProvider{}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -1160,7 +1186,7 @@ func TestRuntimeReplacesCurrentPlanWithExplicitEmptyPlan(t *testing.T) {
 		}},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, probeProvider, 10*time.Millisecond)
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T", err)
@@ -1188,16 +1214,16 @@ func TestRuntimeQueuesFailedSyncAndRetriesAsBackfilled(t *testing.T) {
 			{AcceptedAt: time.Now().UTC(), Status: "accepted"},
 		},
 	}
-	fileStore := syncqueue.NewFileStore(t.TempDir()+"/buffer.json", syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	fileStore := newRuntimeTestStore(t, t.TempDir()+"/buffer.json", syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	store := &cancelAfterDeleteQueue{
-		FileStore:    fileStore,
-		afterDeletes: 3,
-		cancel:       cancel,
+		runtimeTestStore: fileStore,
+		afterDeletes:     3,
+		cancel:           cancel,
 	}
 	hostProvider := &fakeHostSampleProvider{result: agentapi.HostSamplePayload{CPUUsagePct: 12.5}}
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, &fakeProbeProvider{}, 10*time.Millisecond, store)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, &fakeProbeProvider{}, 10*time.Millisecond, store)
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T", err)
@@ -1241,7 +1267,7 @@ func TestRuntimeRejectedPersistedIdentityDoesNotBlockCurrentCredentialHeartbeat(
 		currentSyncToken        = "sync-token-current"
 	)
 	path := filepath.Join(t.TempDir(), "buffer.json")
-	fileStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	fileStore := newRuntimeTestStore(t, path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 	oldRequest := agentapi.SyncRequest{
 		MonitoringInstanceID: oldMonitoringInstanceID,
 		SyncToken:            oldSyncToken,
@@ -1258,7 +1284,7 @@ func TestRuntimeRejectedPersistedIdentityDoesNotBlockCurrentCredentialHeartbeat(
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	store := &cancelAfterDeleteQueue{FileStore: fileStore, afterDeletes: 2, cancel: cancel}
+	store := &cancelAfterDeleteQueue{runtimeTestStore: fileStore, afterDeletes: 2, cancel: cancel}
 	var logs bytes.Buffer
 	client := &fakeClient{}
 	client.syncFunc = func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
@@ -1281,7 +1307,7 @@ func TestRuntimeRejectedPersistedIdentityDoesNotBlockCurrentCredentialHeartbeat(
 		syncToken:            currentSyncToken,
 		hasCredentials:       true,
 	}
-	rt := agentruntime.NewWithRuntimeDeps(
+	rt := newRuntimeWithRuntimeDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		client,
@@ -1329,6 +1355,7 @@ func TestRuntimeDiscardsPersistedQueueEntriesOutsideCurrentAuthority(t *testing.
 	baseRequest := func() agentapi.SyncRequest {
 		observedAt := time.Now().UTC().Add(-time.Minute)
 		return agentapi.SyncRequest{
+			SessionID:            currentSyncToken,
 			MonitoringInstanceID: currentMonitoringID,
 			SyncToken:            currentSyncToken,
 			Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
@@ -1371,9 +1398,6 @@ func TestRuntimeDiscardsPersistedQueueEntriesOutsideCurrentAuthority(t *testing.
 		{name: "missing heartbeat", reason: "missing_heartbeat", mutate: func(request *agentapi.SyncRequest) {
 			request.Heartbeats = nil
 		}},
-		{name: "missing heartbeat batch id", reason: "missing_heartbeat_batch_id", mutate: func(request *agentapi.SyncRequest) {
-			request.Heartbeats[0].SyncBatchID = ""
-		}},
 		{name: "heartbeat fingerprint mismatch", reason: "heartbeat_fingerprint_mismatch", mutate: func(request *agentapi.SyncRequest) {
 			request.Heartbeats[0].Fingerprint = "fp-old-heartbeat"
 		}},
@@ -1394,13 +1418,13 @@ func TestRuntimeDiscardsPersistedQueueEntriesOutsideCurrentAuthority(t *testing.
 			tt.mutate(&request)
 
 			path := filepath.Join(t.TempDir(), "buffer.json")
-			fileStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+			fileStore := newRuntimeTestStore(t, path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 			if _, err := fileStore.Enqueue(context.Background(), request); err != nil {
 				t.Fatalf("seed Enqueue() error = %v", err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			store := &cancelAfterDeleteQueue{FileStore: fileStore, afterDeletes: 2, cancel: cancel}
+			store := &cancelAfterDeleteQueue{runtimeTestStore: fileStore, afterDeletes: 2, cancel: cancel}
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewTextHandler(&logs, nil))
 			client := &fakeClient{syncFunc: func(sent agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
@@ -1414,7 +1438,7 @@ func TestRuntimeDiscardsPersistedQueueEntriesOutsideCurrentAuthority(t *testing.
 				syncToken:            currentSyncToken,
 				hasCredentials:       true,
 			}
-			rt := agentruntime.NewWithRuntimeDeps(
+			rt := newRuntimeWithRuntimeDeps(t,
 				agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 				logger,
 				client,
@@ -1456,7 +1480,7 @@ func TestRuntimeBulkDiscardsLargeStaleAuthorityBacklog(t *testing.T) {
 		currentSyncToken    = "sync-token-current"
 		staleEntries        = 256
 	)
-	queue := &fakeSyncQueue{}
+	queue := &fileQueueFaults{}
 	for i := 0; i < staleEntries; i++ {
 		batchID := "stale-batch-" + strconv.Itoa(i)
 		queue.entries = append(queue.entries, syncqueue.Entry{
@@ -1470,11 +1494,21 @@ func TestRuntimeBulkDiscardsLargeStaleAuthorityBacklog(t *testing.T) {
 			),
 		})
 	}
+	// Persist the large fixture before starting the runtime deadline. This
+	// exercises real FileStore allocation without timing fixture construction
+	// as part of the single-round bulk-discard behavior.
+	queue.prepareTestQueue(t)
+	if err := queue.OpenSession(context.Background(), currentSyncToken); err != nil {
+		t.Fatalf("seed queue: %v", err)
+	}
+	if err := queue.Close(); err != nil {
+		t.Fatalf("close seeded queue: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	client := &fakeClient{cancelAfterSyncs: 1, cancel: cancel}
 	var logs bytes.Buffer
-	rt := newQueueTestRuntime(
+	rt := newQueueTestRuntime(t,
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		client,
 		queue,
@@ -1499,13 +1533,13 @@ func TestRuntimeBulkDiscardsLargeStaleAuthorityBacklog(t *testing.T) {
 	}
 }
 
-func TestRuntimeDoesNotBulkDeleteCurrentAuthorityEntrySharingStaleIdentifier(t *testing.T) {
+func TestRuntimeCanonicalIDsSeparateStaleAndCurrentFacts(t *testing.T) {
 	const (
 		currentMonitoringID = "monitoringInstance-current"
 		currentSyncToken    = "sync-token-current"
 		sharedEntryID       = "shared-entry-id"
 	)
-	queue := &fakeSyncQueue{entries: []syncqueue.Entry{
+	queue := &fileQueueFaults{entries: []syncqueue.Entry{
 		{
 			ID: sharedEntryID,
 			Request: validQueueRequest(
@@ -1531,7 +1565,7 @@ func TestRuntimeDoesNotBulkDeleteCurrentAuthorityEntrySharingStaleIdentifier(t *
 	defer cancel()
 	client := &fakeClient{cancelAfterSyncs: 1, cancel: cancel}
 	var logs bytes.Buffer
-	rt := newQueueTestRuntime(
+	rt := newQueueTestRuntime(t,
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		client,
 		queue,
@@ -1542,8 +1576,8 @@ func TestRuntimeDoesNotBulkDeleteCurrentAuthorityEntrySharingStaleIdentifier(t *
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T, want nil", err)
 	}
-	if queue.deleteManyCalls != 0 {
-		t.Fatalf("DeleteMany() calls = %d, want no ID-wide stale delete that can remove a retained current entry", queue.deleteManyCalls)
+	if queue.deleteManyCalls != 1 {
+		t.Fatalf("DeleteMany() calls = %d, want stale entry retired separately from the canonically distinct current entry", queue.deleteManyCalls)
 	}
 	if client.syncCalls != 2 || syncBatchID(client.syncRequests[0]) != "current-backlog-batch" {
 		t.Fatalf("Sync() sequence match = false (count=%d), want retained backlog then current heartbeat", client.syncCalls)
@@ -1553,12 +1587,12 @@ func TestRuntimeDoesNotBulkDeleteCurrentAuthorityEntrySharingStaleIdentifier(t *
 			t.Fatal("runtime sent the stale identifier-collision entry")
 		}
 	}
-	if strings.Contains(logs.String(), "discard stale sync queue entries") {
-		t.Fatal("runtime claimed a durable stale discard for an identifier-collision entry it could not independently delete")
+	if !strings.Contains(logs.String(), "discard stale sync queue entries") {
+		t.Fatal("runtime did not report durable removal of stale authority")
 	}
 }
 
-func TestRuntimePreservesRetainedCurrentFactsWithPersistedDuplicateIDs(t *testing.T) {
+func TestRuntimeRejectsNonemptyLegacyQueueWithoutChangingFacts(t *testing.T) {
 	withoutDockerCLI(t)
 
 	const (
@@ -1587,49 +1621,22 @@ func TestRuntimePreservesRetainedCurrentFactsWithPersistedDuplicateIDs(t *testin
 	if err := os.WriteFile(path, payload, 0o600); err != nil {
 		t.Fatalf("write duplicate-ID queue fixture: %v", err)
 	}
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	store := newRuntimeTestStore(t, path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	secondFactStillDurable := false
-	client := &fakeClient{syncFunc: func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
-		switch syncBatchID(request) {
-		case "current-backlog-one":
-			return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
-		case "current-backlog-two":
-			entries, listErr := store.List(context.Background())
-			if listErr != nil {
-				t.Fatalf("List() at second send boundary error = %v", listErr)
-			}
-			for _, entry := range entries {
-				if syncBatchID(entry.Request) == "current-backlog-two" {
-					secondFactStillDurable = true
-					break
-				}
-			}
-			cancel()
-			return nil, context.Canceled
-		default:
-			t.Fatal("a newer heartbeat jumped ahead of retained duplicate-ID backlog")
-			return nil, nil
-		}
-	}}
-	rt := newQueueTestRuntime(
-		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
-		client,
-		store,
-		monitoringInstanceID,
-		syncToken,
-	)
-
-	if err := rt.Run(ctx); err != nil {
-		t.Fatalf("Run() error type = %T, want clean cancellation", err)
+	client := &fakeClient{}
+	rt := newQueueTestRuntime(t, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, store, monitoringInstanceID, syncToken)
+	if err := rt.Run(context.Background()); err == nil {
+		t.Fatal("nonempty legacy queue must block protocol cutover")
 	}
-	if len(client.syncRequests) != 2 {
-		t.Fatalf("Sync() calls = %d, want both retained current facts in oldest-first order", len(client.syncRequests))
+	if client.syncCalls != 0 {
+		t.Fatal("legacy facts sent with new replay authority")
 	}
-	if !secondFactStillDurable {
-		t.Fatal("acknowledging the first duplicate-ID entry deleted the unsent second current fact")
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, payload) {
+		t.Fatal("legacy facts modified before explicit drain")
 	}
 }
 
@@ -1644,14 +1651,14 @@ func TestRuntimeDiscardsExplicitInvalidQueueEntryAndContinues(t *testing.T) {
 	for _, code := range []string{agentapi.ErrorCodeInvalidJSON, agentapi.ErrorCodeInvalidRequest} {
 		t.Run(code, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "buffer.json")
-			fileStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+			fileStore := newRuntimeTestStore(t, path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 			poison := validQueueRequest(monitoringInstanceID, syncToken, "fp-001", "poison-batch", time.Now().UTC().Add(-time.Minute))
 			if _, err := fileStore.Enqueue(context.Background(), poison); err != nil {
 				t.Fatalf("seed Enqueue() error = %v", err)
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			store := &cancelAfterDeleteQueue{FileStore: fileStore, afterDeletes: 2, cancel: cancel}
+			store := &cancelAfterDeleteQueue{runtimeTestStore: fileStore, afterDeletes: 2, cancel: cancel}
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewTextHandler(&logs, nil))
 			client := &fakeClient{syncFunc: func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
@@ -1660,7 +1667,7 @@ func TestRuntimeDiscardsExplicitInvalidQueueEntryAndContinues(t *testing.T) {
 				}
 				return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 			}}
-			rt := newQueueTestRuntime(logger, client, store, monitoringInstanceID, syncToken)
+			rt := newQueueTestRuntime(t, logger, client, store, monitoringInstanceID, syncToken)
 
 			if err := rt.Run(ctx); err != nil {
 				t.Fatalf("Run() error type = %T, want nil", err)
@@ -1711,14 +1718,14 @@ func TestRuntimeCurrentAuthorityPermanentRemoteErrorsAreTerminalAndSanitized(t *
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fileStore := syncqueue.NewFileStore(filepath.Join(t.TempDir(), "buffer.json"), syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
-			store := &cancelAfterDeleteQueue{FileStore: fileStore}
+			fileStore := newRuntimeTestStore(t, filepath.Join(t.TempDir(), "buffer.json"), syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+			store := &cancelAfterDeleteQueue{runtimeTestStore: fileStore}
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewTextHandler(&logs, nil))
 			client := &fakeClient{syncFunc: func(agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
 				return nil, &enroll.RemoteError{StatusCode: tt.status, Code: tt.code, Message: remoteMessage}
 			}}
-			rt := newQueueTestRuntime(logger, client, store, monitoringInstanceID, syncToken)
+			rt := newQueueTestRuntime(t, logger, client, store, monitoringInstanceID, syncToken)
 			ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 			defer cancel()
 
@@ -1803,7 +1810,7 @@ func TestRuntimeLogsDiscardOnlyAfterQueueDeleteSucceeds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			queue := &fakeSyncQueue{deleteErr: deleteErr}
+			queue := &fileQueueFaults{deleteErr: deleteErr}
 			if tt.queueEntry != nil {
 				queue.entries = append(queue.entries, *tt.queueEntry)
 			}
@@ -1814,7 +1821,7 @@ func TestRuntimeLogsDiscardOnlyAfterQueueDeleteSucceeds(t *testing.T) {
 				}
 			}
 			var logs bytes.Buffer
-			rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&logs, nil)), client, queue, monitoringInstanceID, syncToken)
+			rt := newQueueTestRuntime(t, slog.New(slog.NewTextHandler(&logs, nil)), client, queue, monitoringInstanceID, syncToken)
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
@@ -1855,12 +1862,12 @@ func TestRuntimeDoesNotExposePersistedQueueIdentifiersOrLocalCauses(t *testing.T
 	}
 
 	t.Run("successful stale discard log", func(t *testing.T) {
-		queue := &fakeSyncQueue{entries: []syncqueue.Entry{staleEntry}}
+		queue := &fileQueueFaults{entries: []syncqueue.Entry{staleEntry}}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		client := &fakeClient{cancelAfterSyncs: 1, cancel: cancel}
 		var logs bytes.Buffer
-		rt := newQueueTestRuntime(
+		rt := newQueueTestRuntime(t,
 			slog.New(slog.NewTextHandler(&logs, nil)),
 			client,
 			queue,
@@ -1891,12 +1898,12 @@ func TestRuntimeDoesNotExposePersistedQueueIdentifiersOrLocalCauses(t *testing.T
 
 	t.Run("stale delete durability failure", func(t *testing.T) {
 		localCause := errors.New("delete failed sync-token-local-cause-secret")
-		queue := &fakeSyncQueue{
+		queue := &fileQueueFaults{
 			entries:   []syncqueue.Entry{staleEntry},
 			deleteErr: localCause,
 		}
 		var logs bytes.Buffer
-		rt := newQueueTestRuntime(
+		rt := newQueueTestRuntime(t,
 			slog.New(slog.NewTextHandler(&logs, nil)),
 			&fakeClient{},
 			queue,
@@ -1939,7 +1946,7 @@ func TestRuntimeDoesNotExposePersistedQueueIdentifiersOrLocalCauses(t *testing.T
 				time.Now().UTC().Add(-time.Minute),
 			),
 		}
-		queue := &fakeSyncQueue{entries: []syncqueue.Entry{poison}}
+		queue := &fileQueueFaults{entries: []syncqueue.Entry{poison}}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 		client := &fakeClient{syncFunc: func(request agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
@@ -1954,7 +1961,7 @@ func TestRuntimeDoesNotExposePersistedQueueIdentifiersOrLocalCauses(t *testing.T
 			return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 		}}
 		var logs bytes.Buffer
-		rt := newQueueTestRuntime(
+		rt := newQueueTestRuntime(t,
 			slog.New(slog.NewTextHandler(&logs, nil)),
 			client,
 			queue,
@@ -1999,10 +2006,10 @@ func TestRuntimeTransientQueueFailuresRemainRetryableAndBackfilled(t *testing.T)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fileStore := syncqueue.NewFileStore(filepath.Join(t.TempDir(), "buffer.json"), syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+			fileStore := newRuntimeTestStore(t, filepath.Join(t.TempDir(), "buffer.json"), syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			store := &cancelAfterDeleteQueue{FileStore: fileStore, afterDeletes: 1, cancel: cancel}
+			store := &cancelAfterDeleteQueue{runtimeTestStore: fileStore, afterDeletes: 1, cancel: cancel}
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewTextHandler(&logs, nil))
 			client := &fakeClient{}
@@ -2012,7 +2019,13 @@ func TestRuntimeTransientQueueFailuresRemainRetryableAndBackfilled(t *testing.T)
 				}
 				return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 			}
-			rt := newQueueTestRuntime(logger, client, store, "monitoringInstance-current", "sync-token-current-secret")
+			logicalNow := time.Now()
+			rt := newQueueTestRuntimeWithClock(t, logger, client, store, "monitoringInstance-current", "sync-token-current-secret", func() time.Time {
+				// This classification/privacy test advances beyond congestion
+				// cooldown; exact cooldown boundaries have separate regressions.
+				logicalNow = logicalNow.Add(time.Minute)
+				return logicalNow
+			})
 
 			if err := rt.Run(ctx); err != nil {
 				t.Fatalf("Run() error type = %T, want nil", err)
@@ -2078,7 +2091,7 @@ func TestRuntimePreservesOldestFirstForValidCurrentAuthorityBacklog(t *testing.T
 		monitoringInstanceID = "monitoringInstance-current"
 		syncToken            = "sync-token-current"
 	)
-	fileStore := syncqueue.NewFileStore(filepath.Join(t.TempDir(), "buffer.json"), syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	fileStore := newRuntimeTestStore(t, filepath.Join(t.TempDir(), "buffer.json"), syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 	for i, batchID := range []string{"backlog-one", "backlog-two"} {
 		request := validQueueRequest(monitoringInstanceID, syncToken, "fp-001", batchID, time.Now().UTC().Add(time.Duration(i-2)*time.Minute))
 		if _, err := fileStore.Enqueue(context.Background(), request); err != nil {
@@ -2087,9 +2100,9 @@ func TestRuntimePreservesOldestFirstForValidCurrentAuthorityBacklog(t *testing.T
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	store := &cancelAfterDeleteQueue{FileStore: fileStore, afterDeletes: 3, cancel: cancel}
+	store := &cancelAfterDeleteQueue{runtimeTestStore: fileStore, afterDeletes: 3, cancel: cancel}
 	client := &fakeClient{}
-	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, store, monitoringInstanceID, syncToken)
+	rt := newQueueTestRuntime(t, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, store, monitoringInstanceID, syncToken)
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T, want nil", err)
@@ -2121,7 +2134,7 @@ func TestRuntimeBoundsReplayBeforeCurrentDurableRequest(t *testing.T) {
 		monitoringInstanceID = "monitoringInstance-current"
 		syncToken            = "sync-token-current"
 	)
-	baseQueue := &fakeSyncQueue{}
+	baseQueue := &fileQueueFaults{}
 	for i, batchID := range []string{"backlog-one", "backlog-two", "backlog-three", "backlog-four"} {
 		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
 			ID:      batchID,
@@ -2137,7 +2150,7 @@ func TestRuntimeBoundsReplayBeforeCurrentDurableRequest(t *testing.T) {
 		cancel:       cancel,
 	}
 	client := &fakeClient{}
-	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
+	rt := newQueueTestRuntime(t, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T, want nil", err)
@@ -2177,7 +2190,7 @@ func TestRuntimeReplaysBacklogFIFOAcrossFreshInterleaving(t *testing.T) {
 		monitoringInstanceID = "monitoringInstance-current"
 		syncToken            = "sync-token-current"
 	)
-	baseQueue := &fakeSyncQueue{}
+	baseQueue := &fileQueueFaults{}
 	for i := 1; i <= 5; i++ {
 		batchID := "backlog-" + strconv.Itoa(i)
 		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2194,7 +2207,7 @@ func TestRuntimeReplaysBacklogFIFOAcrossFreshInterleaving(t *testing.T) {
 		cancel:       cancel,
 	}
 	client := &fakeClient{}
-	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
+	rt := newQueueTestRuntime(t, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T, want nil", err)
@@ -2249,7 +2262,7 @@ func TestRuntimeRetryableBacklogHeadDoesNotBlockCurrentDurableRequest(t *testing
 				monitoringInstanceID = "monitoringInstance-current"
 				syncToken            = "sync-token-current"
 			)
-			baseQueue := &fakeSyncQueue{entries: []syncqueue.Entry{
+			baseQueue := &fileQueueFaults{entries: []syncqueue.Entry{
 				{ID: "backlog-head", Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", "backlog-head", time.Now().UTC().Add(-2*time.Minute))},
 				{ID: "backlog-later", Request: validQueueRequest(monitoringInstanceID, syncToken, "fp-001", "backlog-later", time.Now().UTC().Add(-time.Minute))},
 			}}
@@ -2270,7 +2283,7 @@ func TestRuntimeRetryableBacklogHeadDoesNotBlockCurrentDurableRequest(t *testing
 				}
 				return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 			}
-			rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
+			rt := newQueueTestRuntime(t, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, monitoringInstanceID, syncToken)
 
 			if err := rt.Run(ctx); err != nil {
 				t.Fatalf("Run() error type = %T, want nil", err)
@@ -2304,7 +2317,7 @@ func TestRuntimeRetryableBacklogHeadDoesNotBlockCurrentDurableRequest(t *testing
 func TestRuntimeCurrentRequestRetryRemainsDurableAndBackfilled(t *testing.T) {
 	withoutDockerCLI(t)
 
-	baseQueue := &fakeSyncQueue{}
+	baseQueue := &fileQueueFaults{}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	queue := &cancelAfterSuccessfulDeleteQueue{
@@ -2330,7 +2343,7 @@ func TestRuntimeCurrentRequestRetryRemainsDurableAndBackfilled(t *testing.T) {
 		}
 		return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 	}
-	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, "monitoringInstance-current", "sync-token-current")
+	rt := newQueueTestRuntime(t, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, "monitoringInstance-current", "sync-token-current")
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T, want nil", err)
@@ -2353,7 +2366,7 @@ func TestRuntimeCurrentResponsePlanWinsAfterBoundedReplay(t *testing.T) {
 		monitoringInstanceID = "monitoringInstance-current"
 		syncToken            = "sync-token-current"
 	)
-	baseQueue := &fakeSyncQueue{}
+	baseQueue := &fileQueueFaults{}
 	for i := 1; i <= 3; i++ {
 		batchID := "backlog-" + strconv.Itoa(i)
 		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2387,7 +2400,7 @@ func TestRuntimeCurrentResponsePlanWinsAfterBoundedReplay(t *testing.T) {
 	}}
 	hostProvider := &fakeHostSampleProvider{result: agentapi.HostSamplePayload{CPUUsagePct: 12.5}}
 	tokenSource := &syncCredentialTokenSource{monitoringInstanceID: monitoringInstanceID, syncToken: syncToken, hasCredentials: true}
-	rt := agentruntime.NewWithRuntimeDeps(
+	rt := newRuntimeWithRuntimeDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 		client,
@@ -2414,7 +2427,7 @@ func TestRuntimeBoundedReplayPreservesDurableAuxiliaryPayloads(t *testing.T) {
 	withoutDockerCLI(t)
 
 	enqueueErr := errors.New("queue temporarily unavailable")
-	baseQueue := &failNthEnqueueQueue{fakeSyncQueue: &fakeSyncQueue{}, failAt: 2, err: enqueueErr}
+	baseQueue := &failNthEnqueueQueue{fileQueueFaults: &fileQueueFaults{}, failAt: 2, err: enqueueErr}
 	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue}
 	ipProvider := &fakeIPQualityProvider{reportsAfterStart: []agentapi.IPQualityReportPayload{{
 		IPAddress: "203.0.113.10",
@@ -2467,7 +2480,7 @@ func TestRuntimeBoundedReplayPreservesDurableAuxiliaryPayloads(t *testing.T) {
 		}
 		return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 	}
-	rt := agentruntime.NewWithRuntimeDeps(
+	rt := newRuntimeWithRuntimeDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 		client,
@@ -2512,7 +2525,7 @@ func TestRuntimeBoundedReplayPreservesDurableAuxiliaryPayloads(t *testing.T) {
 func TestRuntimeLocalEntryIDControlsCurrentAndBackfilledOnBatchIDCollision(t *testing.T) {
 	withoutDockerCLI(t)
 
-	baseQueue := &localEntryIDCollisionQueue{fakeSyncQueue: &fakeSyncQueue{}}
+	baseQueue := &localEntryIDCollisionQueue{fileQueueFaults: &fileQueueFaults{}}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	queue := &cancelAfterSuccessfulDeleteQueue{
@@ -2521,7 +2534,7 @@ func TestRuntimeLocalEntryIDControlsCurrentAndBackfilledOnBatchIDCollision(t *te
 		cancel:       cancel,
 	}
 	client := &fakeClient{}
-	rt := newQueueTestRuntime(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, "monitoringInstance-current", "sync-token-current")
+	rt := newQueueTestRuntime(t, slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)), client, queue, "monitoringInstance-current", "sync-token-current")
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T, want nil", err)
@@ -2532,8 +2545,10 @@ func TestRuntimeLocalEntryIDControlsCurrentAndBackfilledOnBatchIDCollision(t *te
 	if queue.deleteCalls != 2 {
 		t.Fatalf("durable Delete() calls = %d, want 2", queue.deleteCalls)
 	}
-	if syncBatchID(client.syncRequests[0]) != syncBatchID(client.syncRequests[1]) {
-		t.Fatal("collision fixture did not preserve the same carrier sync_batch_id")
+	if client.syncRequests[0].BatchSequence == client.syncRequests[1].BatchSequence ||
+		client.syncRequests[0].Heartbeats[0].SyncBatchID == client.syncRequests[1].Heartbeats[0].SyncBatchID ||
+		!client.syncRequests[0].Heartbeats[0].ObservedAt.Equal(client.syncRequests[1].Heartbeats[0].ObservedAt) {
+		t.Fatal("identical local payloads did not receive distinct durable batch identities")
 	}
 	if !client.syncRequests[0].Heartbeats[0].IsBackfilled {
 		t.Fatal("pre-existing local entry with colliding batch ID was not backfilled")
@@ -2551,7 +2566,7 @@ func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
 		syncToken            = "sync-token-current"
 	)
 	t.Run("successful durable acknowledgements", func(t *testing.T) {
-		baseQueue := &fakeSyncQueue{}
+		baseQueue := &fileQueueFaults{}
 		for i := 1; i <= 4; i++ {
 			batchID := "backlog-" + strconv.Itoa(i)
 			baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2563,7 +2578,7 @@ func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
 		defer cancel()
 		queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 3, cancel: cancel}
 		var logs bytes.Buffer
-		rt := newQueueTestRuntimeWithClock(
+		rt := newQueueTestRuntimeWithClock(t,
 			slog.New(slog.NewTextHandler(&logs, nil)),
 			&fakeClient{},
 			queue,
@@ -2588,7 +2603,7 @@ func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
 
 	t.Run("delete failure is not progress", func(t *testing.T) {
 		deleteErr := errors.New("durable delete failed with private local cause")
-		queue := &fakeSyncQueue{
+		queue := &fileQueueFaults{
 			deleteErr: deleteErr,
 			entries: []syncqueue.Entry{{
 				ID:      "backlog-one",
@@ -2596,7 +2611,7 @@ func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
 			}},
 		}
 		var logs bytes.Buffer
-		rt := newQueueTestRuntimeWithClock(
+		rt := newQueueTestRuntimeWithClock(t,
 			slog.New(slog.NewTextHandler(&logs, nil)),
 			&fakeClient{},
 			queue,
@@ -2617,7 +2632,7 @@ func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
 	})
 
 	t.Run("discard-only round with backlog remaining has no healthy progress", func(t *testing.T) {
-		baseQueue := &fakeSyncQueue{}
+		baseQueue := &fileQueueFaults{}
 		for i := 1; i <= 3; i++ {
 			batchID := "poison-" + strconv.Itoa(i)
 			baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2640,7 +2655,7 @@ func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
 			return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 		}
 		var logs bytes.Buffer
-		rt := newQueueTestRuntimeWithClock(
+		rt := newQueueTestRuntimeWithClock(t,
 			slog.New(slog.NewTextHandler(&logs, nil)),
 			client,
 			queue,
@@ -2661,7 +2676,7 @@ func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
 	})
 
 	t.Run("discard-only drain resets replay and keeps later live ticks quiet", func(t *testing.T) {
-		baseQueue := &fakeSyncQueue{}
+		baseQueue := &fileQueueFaults{}
 		for i := 1; i <= 2; i++ {
 			batchID := "poison-" + strconv.Itoa(i)
 			baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2684,7 +2699,7 @@ func TestRuntimeLogsBoundedReplayProgressAfterDurableAck(t *testing.T) {
 			return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 		}
 		var logs bytes.Buffer
-		rt := newQueueTestRuntimeWithClock(
+		rt := newQueueTestRuntimeWithClock(t,
 			slog.New(slog.NewTextHandler(&logs, nil)),
 			client,
 			queue,
@@ -2715,7 +2730,7 @@ func TestRuntimeLogsInstantSuccessfulReplayDrainAsCaughtUpOnce(t *testing.T) {
 		monitoringInstanceID = "monitoringInstance-current"
 		syncToken            = "sync-token-current"
 	)
-	baseQueue := &fakeSyncQueue{}
+	baseQueue := &fileQueueFaults{}
 	for i := 1; i <= 2; i++ {
 		batchID := "backlog-" + strconv.Itoa(i)
 		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2727,7 +2742,7 @@ func TestRuntimeLogsInstantSuccessfulReplayDrainAsCaughtUpOnce(t *testing.T) {
 	defer cancel()
 	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 3, cancel: cancel}
 	var logs bytes.Buffer
-	rt := newQueueTestRuntimeWithClock(
+	rt := newQueueTestRuntimeWithClock(t,
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		&fakeClient{},
 		queue,
@@ -2760,7 +2775,7 @@ func TestRuntimeLogsReplayCaughtUpOnceAndKeepsLiveTicksQuiet(t *testing.T) {
 		monitoringInstanceID = "monitoringInstance-current"
 		syncToken            = "sync-token-current"
 	)
-	baseQueue := &fakeSyncQueue{}
+	baseQueue := &fileQueueFaults{}
 	for i := 1; i <= 3; i++ {
 		batchID := "backlog-" + strconv.Itoa(i)
 		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2772,7 +2787,7 @@ func TestRuntimeLogsReplayCaughtUpOnceAndKeepsLiveTicksQuiet(t *testing.T) {
 	defer cancel()
 	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 7, cancel: cancel}
 	var logs bytes.Buffer
-	rt := newQueueTestRuntimeWithClock(
+	rt := newQueueTestRuntimeWithClock(t,
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		&fakeClient{},
 		queue,
@@ -2810,7 +2825,7 @@ func TestRuntimeThrottlesReplayProgressLogs(t *testing.T) {
 		monitoringInstanceID = "monitoringInstance-current"
 		syncToken            = "sync-token-current"
 	)
-	baseQueue := &fakeSyncQueue{}
+	baseQueue := &fileQueueFaults{}
 	for i := 1; i <= 8; i++ {
 		batchID := "backlog-" + strconv.Itoa(i)
 		baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2836,7 +2851,7 @@ func TestRuntimeThrottlesReplayProgressLogs(t *testing.T) {
 		return value
 	}
 	var logs bytes.Buffer
-	rt := newQueueTestRuntimeWithClock(
+	rt := newQueueTestRuntimeWithClock(t,
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		&fakeClient{},
 		queue,
@@ -2884,7 +2899,7 @@ func TestRuntimeReplayRetryIsFailureStateNotHealthyProgress(t *testing.T) {
 				monitoringInstanceID = "monitoringInstance-current"
 				syncToken            = "sync-token-current"
 			)
-			baseQueue := &fakeSyncQueue{}
+			baseQueue := &fileQueueFaults{}
 			for i := 1; i <= tt.seedBacklog; i++ {
 				batchID := "backlog-" + strconv.Itoa(i)
 				baseQueue.entries = append(baseQueue.entries, syncqueue.Entry{
@@ -2896,6 +2911,7 @@ func TestRuntimeReplayRetryIsFailureStateNotHealthyProgress(t *testing.T) {
 			defer cancel()
 			queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: tt.cancelDeletes, cancel: cancel}
 			client := &fakeClient{}
+			logicalNow := time.Now()
 			client.syncFunc = func(agentapi.SyncRequest) (*agentapi.SyncResponse, error) {
 				if client.syncCalls == tt.failSyncCall {
 					return nil, &enroll.RemoteError{
@@ -2907,13 +2923,16 @@ func TestRuntimeReplayRetryIsFailureStateNotHealthyProgress(t *testing.T) {
 				return &agentapi.SyncResponse{AcceptedAt: time.Now().UTC(), Status: "accepted"}, nil
 			}
 			var logs bytes.Buffer
-			rt := newQueueTestRuntimeWithClock(
+			rt := newQueueTestRuntimeWithClock(t,
 				slog.New(slog.NewTextHandler(&logs, nil)),
 				client,
 				queue,
 				monitoringInstanceID,
 				syncToken,
-				time.Now,
+				func() time.Time {
+					logicalNow = logicalNow.Add(time.Minute)
+					return logicalNow
+				},
 			)
 
 			if err := rt.Run(ctx); err != nil {
@@ -2991,7 +3010,7 @@ func TestRuntimeReplayLogsDoNotExposeSensitiveQueueOrRequestFields(t *testing.T)
 		Stdout:    "stdout-private-sentinel",
 		Stderr:    "stderr-private-sentinel",
 	}}
-	baseQueue := &fakeSyncQueue{entries: []syncqueue.Entry{{ID: entryID, Request: request}}}
+	baseQueue := &fileQueueFaults{entries: []syncqueue.Entry{{ID: entryID, Request: request}}}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	queue := &cancelAfterSuccessfulDeleteQueue{SyncQueue: baseQueue, afterDeletes: 2, cancel: cancel}
@@ -3012,7 +3031,7 @@ func TestRuntimeReplayLogsDoNotExposeSensitiveQueueOrRequestFields(t *testing.T)
 		hasCredentials:       true,
 	}
 	var logs bytes.Buffer
-	rt := agentruntime.NewWithRuntimeDeps(
+	rt := newRuntimeWithRuntimeDeps(t,
 		agentconfig.AgentConfig{ServerURL: "https://operator-private@center.example.test/path-private-sentinel?query-private-sentinel", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&logs, nil)),
 		client,
@@ -3105,17 +3124,17 @@ func validQueueRequest(monitoringInstanceID, syncToken, fingerprint, batchID str
 	}
 }
 
-func newQueueTestRuntime(logger *slog.Logger, client *fakeClient, queue agentruntime.SyncQueue, monitoringInstanceID, syncToken string) *agentruntime.Runtime {
-	return newQueueTestRuntimeWithClock(logger, client, queue, monitoringInstanceID, syncToken, nil)
+func newQueueTestRuntime(t *testing.T, logger *slog.Logger, client *fakeClient, queue agentruntime.SyncQueue, monitoringInstanceID, syncToken string) *agentruntime.Runtime {
+	return newQueueTestRuntimeWithClock(t, logger, client, queue, monitoringInstanceID, syncToken, nil)
 }
 
-func newQueueTestRuntimeWithClock(logger *slog.Logger, client *fakeClient, queue agentruntime.SyncQueue, monitoringInstanceID, syncToken string, clock func() time.Time) *agentruntime.Runtime {
+func newQueueTestRuntimeWithClock(t *testing.T, logger *slog.Logger, client *fakeClient, queue agentruntime.SyncQueue, monitoringInstanceID, syncToken string, clock func() time.Time) *agentruntime.Runtime {
 	tokenSource := &syncCredentialTokenSource{
 		monitoringInstanceID: monitoringInstanceID,
 		syncToken:            syncToken,
 		hasCredentials:       true,
 	}
-	return agentruntime.NewWithRuntimeDeps(
+	return newRuntimeWithRuntimeDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		logger,
 		client,
@@ -3132,6 +3151,9 @@ func newQueueTestRuntimeWithClock(logger *slog.Logger, client *fakeClient, queue
 func syncBatchID(request agentapi.SyncRequest) string {
 	if len(request.Heartbeats) == 0 {
 		return ""
+	}
+	if label, ok := fixtureBatchLabels.Load(request.Heartbeats[0].SyncBatchID); ok {
+		return label.(string)
 	}
 	return request.Heartbeats[0].SyncBatchID
 }
@@ -3152,8 +3174,8 @@ func TestRuntimeReturnsQueuePersistenceErrorWithoutDroppingCurrentBatch(t *testi
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{}
 	enqueueErr := errors.New("queue path is read-only")
-	queue := &fakeSyncQueue{enqueueErr: enqueueErr}
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, queue)
+	queue := &fileQueueFaults{enqueueErr: enqueueErr}
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, queue)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -3169,16 +3191,16 @@ func TestRuntimeReturnsQueuePersistenceErrorWithoutDroppingCurrentBatch(t *testi
 func TestRuntimeRetainsIPQualityReportUntilQueueEnqueueSucceeds(t *testing.T) {
 	enqueueErr := errors.New("queue unavailable")
 	queue := &failNthEnqueueQueue{
-		fakeSyncQueue: &fakeSyncQueue{},
-		failAt:        1,
-		err:           enqueueErr,
+		fileQueueFaults: &fileQueueFaults{},
+		failAt:          1,
+		err:             enqueueErr,
 	}
 	ipProvider := &fakeIPQualityProvider{reports: []agentapi.IPQualityReportPayload{{
 		IPAddress: "203.0.113.10",
 		Status:    agentapi.IPQualityStatusSuccess,
 	}}}
 	client := &fakeClient{}
-	rt := agentruntime.NewWithRuntimeDeps(
+	rt := newRuntimeWithRuntimeDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 		client,
@@ -3221,9 +3243,9 @@ func TestRuntimeRetainsCommandResultUntilQueueEnqueueSucceeds(t *testing.T) {
 	withoutDockerCLI(t)
 	enqueueErr := errors.New("queue unavailable")
 	queue := &failNthEnqueueQueue{
-		fakeSyncQueue: &fakeSyncQueue{},
-		failAt:        2,
-		err:           enqueueErr,
+		fileQueueFaults: &fileQueueFaults{},
+		failAt:          2,
+		err:             enqueueErr,
 	}
 	client := &fakeClient{syncResponses: []agentapi.SyncResponse{{
 		AcceptedAt: time.Now().UTC(),
@@ -3233,7 +3255,7 @@ func TestRuntimeRetainsCommandResultUntilQueueEnqueueSucceeds(t *testing.T) {
 			ActionID:  "act_queue_retry",
 		}},
 	}}}
-	rt := agentruntime.NewWithRuntimeDeps(
+	rt := newRuntimeWithRuntimeDeps(t,
 		agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"},
 		slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)),
 		client,
@@ -3278,8 +3300,8 @@ func TestRuntimeReturnsAckDeleteErrorInsteadOfSilentlyReplaying(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{}
 	deleteErr := errors.New("queue delete denied")
-	queue := &fakeSyncQueue{deleteErr: deleteErr}
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, queue)
+	queue := &fileQueueFaults{deleteErr: deleteErr}
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, queue)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -3298,7 +3320,7 @@ func TestRuntimeReturnsAckDeleteErrorInsteadOfSilentlyReplaying(t *testing.T) {
 func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	path := t.TempDir() + "/buffer.json"
-	seedStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	seedStore := newRuntimeTestStore(t, path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 	falseCPU := false
 	seeded := agentapi.SyncRequest{
 		MonitoringInstanceID: "monitoringInstance-123",
@@ -3325,19 +3347,19 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 	}
 
 	client := &fakeClient{}
-	fileStore := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
+	fileStore := newRuntimeTestStore(t, path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	store := &cancelAfterDeleteQueue{
-		FileStore:    fileStore,
-		afterDeletes: 1,
-		cancel:       cancel,
+		runtimeTestStore: fileStore,
+		afterDeletes:     1,
+		cancel:           cancel,
 	}
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, store)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, store)
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T", err)
 	}
-	if len(client.syncRequests) == 0 || client.syncRequests[0].Heartbeats[0].SyncBatchID != "seeded" || !client.syncRequests[0].Heartbeats[0].IsBackfilled {
+	if len(client.syncRequests) == 0 || syncBatchID(client.syncRequests[0]) != "seeded" || !client.syncRequests[0].Heartbeats[0].IsBackfilled {
 		if len(client.syncRequests) == 0 {
 			t.Fatal("Sync() requests = 0, want seeded backfilled request")
 		}
@@ -3349,6 +3371,7 @@ func TestRuntimeFlushesPersistedQueueAfterRestart(t *testing.T) {
 }
 
 func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
+	withoutDockerCLI(t, "uptime")
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	actionID := "act_001"
 	commandID := "uptime"
@@ -3371,7 +3394,7 @@ func TestRuntimeExecutesPendingActionAndReturnsCommandResult(t *testing.T) {
 		},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -3429,7 +3452,7 @@ func TestRuntimePendingActionExecutionInheritsRuntimeContext(t *testing.T) {
 			},
 		}},
 	}
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	client.cancel = cancel
@@ -3444,6 +3467,7 @@ func TestRuntimePendingActionExecutionInheritsRuntimeContext(t *testing.T) {
 }
 
 func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
+	withoutDockerCLI(t)
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
 	client := &fakeClient{
 		cancelAfterSyncs: 3,
@@ -3464,7 +3488,7 @@ func TestRuntimeSilentlyIgnoresUnknownPendingActionCommandID(t *testing.T) {
 		},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -3508,7 +3532,7 @@ func TestRuntimeStartsIPQualityCollectionAfterPlanWithoutBlockingHeartbeat(t *te
 		},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -3565,7 +3589,7 @@ func TestRuntimeDrainsCompletedIPQualityReportIntoNextSync(t *testing.T) {
 		},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -3622,7 +3646,7 @@ func TestRuntimeDoesNotStartIPQualityWhenPlanDisabled(t *testing.T) {
 		},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -3647,7 +3671,7 @@ func TestRuntimeUploadsIPQualityFailureReport(t *testing.T) {
 			ErrorCode:       "lookup_failed",
 			ErrorSummary:    "upstream unavailable",
 			AgentVersion:    "collector-version",
-			Fingerprint:     "collector-fp",
+			Fingerprint:     "fp-001",
 			SyncBatchID:     "collector-batch",
 			IsBackfilled:    false,
 			ProviderResults: nil,
@@ -3668,7 +3692,7 @@ func TestRuntimeUploadsIPQualityFailureReport(t *testing.T) {
 		},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, &fakeHostSampleProvider{}, &fakeProbeProvider{}, 10*time.Millisecond, nil, ipProvider)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -3688,8 +3712,8 @@ func TestRuntimeUploadsIPQualityFailureReport(t *testing.T) {
 	if report.Status != agentapi.IPQualityStatusFailure || report.ErrorCode != "lookup_failed" {
 		t.Fatal("IP-quality collection failure was not uploaded")
 	}
-	if report.AgentVersion != "collector-version" || report.Fingerprint != "collector-fp" || report.SyncBatchID != "collector-batch" {
-		t.Fatal("collector-supplied IP-quality report metadata was overwritten")
+	if report.AgentVersion != "collector-version" || report.Fingerprint != "fp-001" || report.SyncBatchID != thirdSync.Heartbeats[0].SyncBatchID {
+		t.Fatal("report observation metadata or canonical batch identity was lost")
 	}
 }
 
@@ -3725,7 +3749,7 @@ func TestRuntimeCollectHostSampleAttachesContainers(t *testing.T) {
 		result: agentapi.HostSamplePayload{CPUUsagePct: 12.5},
 	}
 
-	rt := agentruntime.NewWithRuntimeDeps(cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, &fakeProbeProvider{}, 10*time.Millisecond)
+	rt := newRuntimeWithRuntimeDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, hostProvider, &fakeProbeProvider{}, 10*time.Millisecond)
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

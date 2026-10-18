@@ -5,10 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,928 +16,500 @@ import (
 	"houfeng/internal/contracts/agentapi"
 )
 
-type cancelAfterFirstCheckContext struct {
-	done  chan struct{}
-	calls int
-}
+const testSession = "session-001"
 
-func newCancelAfterFirstCheckContext() *cancelAfterFirstCheckContext {
-	return &cancelAfterFirstCheckContext{done: make(chan struct{})}
-}
-
-func (*cancelAfterFirstCheckContext) Deadline() (time.Time, bool) { return time.Time{}, false }
-
-func (c *cancelAfterFirstCheckContext) Done() <-chan struct{} { return c.done }
-
-func (c *cancelAfterFirstCheckContext) Err() error {
-	c.calls++
-	if c.calls == 1 {
-		close(c.done)
-		return nil
+func openStore(t *testing.T, path string, opts syncqueue.Options) *syncqueue.FileStore {
+	t.Helper()
+	store := syncqueue.NewFileStore(path, opts)
+	if err := store.OpenSession(context.Background(), testSession); err != nil {
+		t.Fatal(err)
 	}
-	return context.Canceled
+	t.Cleanup(func() { _ = store.Close() })
+	return store
 }
 
-func (*cancelAfterFirstCheckContext) Value(any) any { return nil }
+func queueEntries(t *testing.T, store *syncqueue.FileStore) []syncqueue.Entry {
+	t.Helper()
+	entries, err := store.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entries
+}
+
+func replayState(t *testing.T, store *syncqueue.FileStore) syncqueue.ReplayState {
+	t.Helper()
+	state, err := store.ReplayState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func enqueue(t *testing.T, store *syncqueue.FileStore, request agentapi.SyncRequest) string {
+	t.Helper()
+	id, err := store.Enqueue(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func readBytes(t *testing.T, path string) []byte {
+	t.Helper()
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
 
 func TestFileStorePersistsEntriesAcrossInstancesAndDeletesAckedEntry(t *testing.T) {
 	t.Parallel()
-	path := t.TempDir() + "/sync-buffer.json"
-	ctx := context.Background()
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
+	path := filepath.Join(t.TempDir(), "queue.json")
+	store := openStore(t, path, syncqueue.Options{})
+	id := enqueue(t, store, syncRequest("ignored-old-id", false))
+	before := replayState(t, store)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openStore(t, path, syncqueue.Options{})
+	if got := replayState(t, reopened); got != before {
+		t.Fatalf("reopen changed authority: %+v", got)
+	}
+	entries := queueEntries(t, reopened)
+	if len(entries) != 1 || entries[0].ID != id || entries[0].Request.BatchSequence != 1 {
+		t.Fatalf("lost durable entry: %+v", entries)
+	}
+	if err := reopened.Delete(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	if len(queueEntries(t, reopened)) != 0 || replayState(t, reopened).RetiredThrough != 1 {
+		t.Fatal("ack did not durably retire entry")
+	}
+	if err := reopened.Close(); err != nil {
+		t.Fatal(err)
+	}
+	third := openStore(t, path, syncqueue.Options{})
+	if replayState(t, third).RetiredThrough != 1 {
+		t.Fatal("retirement lost on restart")
+	}
+	if id2 := enqueue(t, third, syncRequest("ignored-old-id", false)); id2 == id || queueEntries(t, third)[0].Request.BatchSequence != 2 {
+		t.Fatal("restart reused batch sequence")
+	}
+}
 
-	entryID, err := store.Enqueue(ctx, syncRequest("sync_001", false))
-	if err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
+func TestFileStoreAssignsCanonicalIdentityWithoutMutatingCaller(t *testing.T) {
+	t.Parallel()
+	store := openStore(t, filepath.Join(t.TempDir(), "queue.json"), syncqueue.Options{})
+	r := syncRequest("caller-id", false)
+	r.LiveSignal = &agentapi.LiveSignal{Sequence: 11, Fingerprint: "fp"}
+	r.ProducerID, r.BatchSequence, r.ProtocolRevision = "caller-producer", 42, 1
+	id := enqueue(t, store, r)
+	got := queueEntries(t, store)[0].Request
+	state := replayState(t, store)
+	if got.ProtocolRevision != 2 || got.ProducerID != state.ProducerID || got.BatchSequence != 1 || got.AllocatedThrough != 1 || got.LiveSignal != nil || id != state.ProducerID+":1" {
+		t.Fatalf("incorrect assigned identity: %+v", got)
 	}
-
-	reopened := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
-	entries, err := reopened.List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
+	if got.Heartbeats[0].SyncBatchID != id || got.HostSamples[0].SyncBatchID != id || got.ProbeObservations[0].SyncBatchID != id || got.IPQualityReports[0].SyncBatchID != id {
+		t.Fatal("fact identity mismatch")
 	}
-	if len(entries) != 1 || entries[0].ID != entryID || entries[0].Request.Heartbeats[0].SyncBatchID != "sync_001" {
-		t.Fatalf("persisted entry match = false (count=%d), want one expected entry", len(entries))
+	if r.BatchSequence != 42 || r.LiveSignal == nil || r.Heartbeats[0].SyncBatchID != "caller-id" || r.IPQualityReports[0].SyncBatchID != "caller-id" {
+		t.Fatal("enqueue mutated caller")
 	}
-
-	if err := reopened.Delete(ctx, entryID); err != nil {
-		t.Fatalf("Delete() error = %v", err)
+	second := enqueue(t, store, r)
+	if second != state.ProducerID+":2" {
+		t.Fatal("caller IDs affected allocation")
 	}
-	afterDelete, err := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour}).List(ctx)
-	if err != nil {
-		t.Fatalf("List() after delete error = %v", err)
+	wrong := r
+	wrong.SessionID = "other"
+	before := replayState(t, store)
+	if _, err := store.Enqueue(context.Background(), wrong); err == nil {
+		t.Fatal("accepted wrong session")
 	}
-	if len(afterDelete) != 0 {
-		t.Fatalf("len(afterDelete) = %d, want 0", len(afterDelete))
+	if replayState(t, store) != before {
+		t.Fatal("wrong session consumed a sequence")
 	}
 }
 
 func TestFileStoreDeleteManyPersistsOneAtomicFilteredQueue(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
+	store := openStore(t, filepath.Join(t.TempDir(), "queue.json"), syncqueue.Options{})
+	var ids []string
+	for range 4 {
+		ids = append(ids, enqueue(t, store, syncRequest("same", false)))
+	}
 	ctx := context.Background()
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
-	ids := make([]string, 0, 3)
-	for _, batchID := range []string{"sync_bulk_one", "sync_bulk_two", "sync_bulk_three"} {
-		id, err := store.Enqueue(ctx, syncRequest(batchID, false))
-		if err != nil {
-			t.Fatalf("Enqueue() error = %v", err)
-		}
-		ids = append(ids, id)
+	if err := store.DeleteMany(ctx, []string{ids[1], ids[3], "missing"}); err != nil {
+		t.Fatal(err)
 	}
-
-	if err := store.DeleteMany(ctx, []string{ids[0], ids[2], "missing-id"}); err != nil {
-		t.Fatalf("DeleteMany() error = %v", err)
+	if replayState(t, store).RetiredThrough != 0 {
+		t.Fatal("out-of-order ack retired pending oldest batch")
 	}
-	entries, err := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true}).List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
+	if err := store.Delete(ctx, ids[0]); err != nil {
+		t.Fatal(err)
 	}
-	if len(entries) != 1 || entries[0].ID != ids[1] {
-		t.Fatalf("remaining entry match = false (count=%d), want only the middle entry", len(entries))
+	entries := queueEntries(t, store)
+	if len(entries) != 1 || entries[0].ID != ids[2] || replayState(t, store).RetiredThrough != 2 {
+		t.Fatal("floor did not follow oldest retained sequence")
 	}
-
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	if err := store.DeleteMany(canceled, []string{ids[1]}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("DeleteMany() canceled error = %v, want context.Canceled", err)
+	if err := store.DeleteMany(ctx, []string{ids[2]}); err != nil {
+		t.Fatal(err)
 	}
-	entries, err = store.List(ctx)
-	if err != nil {
-		t.Fatalf("List() after canceled delete error = %v", err)
-	}
-	if len(entries) != 1 || entries[0].ID != ids[1] {
-		t.Fatal("canceled DeleteMany() changed durable queue contents")
-	}
-}
-
-func TestFileStoreDeleteManyRechecksCancellationBeforeMutation(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
-	id, err := store.Enqueue(context.Background(), syncRequest("sync_cancel_after_entry", false))
-	if err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
-
-	ctx := newCancelAfterFirstCheckContext()
-	if err := store.DeleteMany(ctx, []string{id}); !errors.Is(err, context.Canceled) {
-		t.Fatalf("DeleteMany() error type = %T, want context cancellation", err)
-	}
-	entries, err := store.List(context.Background())
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("entry count = %d, want canceled batch delete to preserve the queue", len(entries))
-	}
-}
-
-func TestFileStoreRechecksCancellationAfterLockAcrossOperations(t *testing.T) {
-	tests := []struct {
-		name      string
-		operation func(context.Context, *syncqueue.FileStore, string) error
-	}{
-		{
-			name: "enqueue",
-			operation: func(ctx context.Context, store *syncqueue.FileStore, _ string) error {
-				_, err := store.Enqueue(ctx, syncRequest("sync_canceled_enqueue", false))
-				return err
-			},
-		},
-		{
-			name: "list",
-			operation: func(ctx context.Context, store *syncqueue.FileStore, _ string) error {
-				_, err := store.List(ctx)
-				return err
-			},
-		},
-		{name: "delete", operation: func(ctx context.Context, store *syncqueue.FileStore, id string) error {
-			return store.Delete(ctx, id)
-		}},
-		{name: "delete many", operation: func(ctx context.Context, store *syncqueue.FileStore, id string) error {
-			return store.DeleteMany(ctx, []string{id})
-		}},
-		{name: "mark attempt", operation: func(ctx context.Context, store *syncqueue.FileStore, id string) error {
-			return store.MarkAttempt(ctx, id)
-		}},
-		{name: "prune", operation: func(ctx context.Context, store *syncqueue.FileStore, _ string) error {
-			return store.Prune(ctx)
-		}},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "sync-buffer.json")
-			store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
-			id, err := store.Enqueue(context.Background(), syncRequest("sync_preserved", false))
-			if err != nil {
-				t.Fatalf("seed Enqueue() error type = %T", err)
-			}
-
-			ctx := newCancelAfterFirstCheckContext()
-			if err := tt.operation(ctx, store, id); !errors.Is(err, context.Canceled) {
-				t.Fatalf("operation error type = %T, want context cancellation", err)
-			}
-			entries, err := store.List(context.Background())
-			if err != nil {
-				t.Fatalf("List() after canceled operation error type = %T", err)
-			}
-			if len(entries) != 1 || entries[0].ID != id || entries[0].Attempts != 0 {
-				t.Fatalf("canceled operation changed durable queue state (count=%d attempts=%d)", len(entries), firstEntryAttempts(entries))
-			}
-		})
-	}
-}
-
-func firstEntryAttempts(entries []syncqueue.Entry) int {
-	if len(entries) == 0 {
-		return -1
-	}
-	return entries[0].Attempts
-}
-
-func TestFileStoreReadsLegacyNodeIDBufferedRequests(t *testing.T) {
-	t.Parallel()
-	path := t.TempDir() + "/sync-buffer.json"
-	payload := `[
-		{
-			"id":"sync_legacy",
-			"created_at":"2026-04-28T08:00:00Z",
-			"attempts":1,
-			"request":{
-				"node_id":"node-legacy-001",
-				"sync_token":"sync-token-legacy",
-				"heartbeats":[{"observed_at":"2026-04-28T08:00:00Z","agent_version":"v0.24.1","fingerprint":"fp-001","sync_batch_id":"sync_legacy"}],
-				"host_samples":[{"observed_at":"2026-04-28T08:00:00Z","cpu_usage_pct":0}]
-		}
-		}
-	]`
-	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
-		t.Fatalf("write legacy queue file: %v", err)
-	}
-
-	entries, err := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour}).List(context.Background())
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1", len(entries))
-	}
-	if entries[0].Request.MonitoringInstanceID != "node-legacy-001" {
-		t.Fatal("legacy monitoring instance ID was not restored")
-	}
-	if entries[0].Request.SyncToken != "sync-token-legacy" {
-		t.Fatal("legacy sync token was not restored")
-	}
-	if entries[0].Attempts != 1 {
-		t.Fatalf("Attempts = %d, want 1", entries[0].Attempts)
-	}
-	if len(entries[0].Request.HostSamples) != 1 || entries[0].Request.HostSamples[0].CPURatesValid != nil {
-		t.Fatalf("legacy host sample CPURatesValid = %#v, want nil", entries[0].Request.HostSamples[0].CPURatesValid)
-	}
-	legacyBackfilled := syncqueue.WithBackfilledFacts(entries[0].Request, true)
-	if legacyBackfilled.HostSamples[0].CPURatesValid != nil {
-		t.Fatalf("legacy backfilled CPURatesValid = %#v, want nil", legacyBackfilled.HostSamples[0].CPURatesValid)
-	}
-}
-
-func TestFileStorePersistsExplicitFalseCPURatesValidityForReplay(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	falseValue := false
-	request := syncRequest("sync_cpu_false", false)
-	request.HostSamples[0].CPURatesValid = &falseValue
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
-
-	if _, err := store.Enqueue(context.Background(), request); err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile() error = %v", err)
-	}
-	if !strings.Contains(string(raw), `"cpu_rates_valid":false`) {
-		t.Fatalf("persisted queue omitted explicit false CPU marker: %s", raw)
-	}
-
-	entries, err := store.List(context.Background())
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(entries) != 1 || entries[0].Request.HostSamples[0].CPURatesValid == nil || *entries[0].Request.HostSamples[0].CPURatesValid {
-		t.Fatalf("replayed CPURatesValid = %#v, want explicit false", entries[0].Request.HostSamples[0].CPURatesValid)
-	}
-	backfilled := syncqueue.WithBackfilledFacts(entries[0].Request, true)
-	if backfilled.HostSamples[0].CPURatesValid == nil || *backfilled.HostSamples[0].CPURatesValid {
-		t.Fatalf("backfilled CPURatesValid = %#v, want explicit false", backfilled.HostSamples[0].CPURatesValid)
+	if replayState(t, store).RetiredThrough != 4 {
+		t.Fatal("empty queue did not retire through allocated")
 	}
 }
 
 func TestFileStoreMarksAttemptsAndBuildsBackfilledRequests(t *testing.T) {
 	t.Parallel()
-	path := t.TempDir() + "/sync-buffer.json"
-	ctx := context.Background()
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
-
-	entryID, err := store.Enqueue(ctx, syncRequest("sync_retry", false))
+	store := openStore(t, filepath.Join(t.TempDir(), "queue.json"), syncqueue.Options{})
+	request := syncRequest("old", false)
+	falseValue := false
+	request.HostSamples[0].CPURatesValid = &falseValue
+	id := enqueue(t, store, request)
+	if err := store.MarkAttempt(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	entry := queueEntries(t, store)[0]
+	if entry.Attempts != 1 || entry.Request.HostSamples[0].CPURatesValid == nil || *entry.Request.HostSamples[0].CPURatesValid {
+		t.Fatal("attempt or explicit false marker lost")
+	}
+	originalDigest, err := agentapi.CanonicalSyncBatchDigest(entry.Request)
 	if err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
+		t.Fatal(err)
 	}
-	if err := store.MarkAttempt(ctx, entryID); err != nil {
-		t.Fatalf("MarkAttempt() error = %v", err)
+	backfilled := syncqueue.WithBackfilledFacts(entry.Request, true)
+	if !backfilled.Heartbeats[0].IsBackfilled || !backfilled.HostSamples[0].IsBackfilled || !backfilled.ProbeObservations[0].IsBackfilled || !backfilled.IPQualityReports[0].IsBackfilled || backfilled.Heartbeats[0].SyncBatchID != id {
+		t.Fatal("backfill changed fact identity")
 	}
-
-	entries, err := store.List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
+	backfilledDigest, err := agentapi.CanonicalSyncBatchDigest(backfilled)
+	if err != nil || backfilledDigest != originalDigest {
+		t.Fatal("backfill changed digest", err)
 	}
-	if len(entries) != 1 || entries[0].Attempts != 1 {
-		t.Fatalf("attempted entry match = false (count=%d), want one entry with one attempt", len(entries))
-	}
-
-	backfilled := syncqueue.WithBackfilledFacts(entries[0].Request, true)
-	if backfilled.Heartbeats[0].SyncBatchID != "sync_retry" {
-		t.Fatal("heartbeat sync batch ID changed while marking facts as backfilled")
-	}
-	if !backfilled.Heartbeats[0].IsBackfilled {
-		t.Fatal("heartbeat IsBackfilled = false, want true")
-	}
-	if !backfilled.HostSamples[0].IsBackfilled {
-		t.Fatal("host sample IsBackfilled = false, want true")
-	}
-	if !backfilled.ProbeObservations[0].IsBackfilled {
-		t.Fatal("probe observation IsBackfilled = false, want true")
-	}
-	if !backfilled.IPQualityReports[0].IsBackfilled {
-		t.Fatal("ip quality report IsBackfilled = false, want true")
-	}
-
-	entries[0].Request.HostSamples[0].IsBackfilled = false
-	entries[0].Request.ProbeObservations[0].IsBackfilled = false
-	entries[0].Request.IPQualityReports[0].IsBackfilled = false
-	entries[0].Request.Heartbeats[0].IsBackfilled = false
-	if backfilled.Heartbeats[0].IsBackfilled != true ||
-		backfilled.HostSamples[0].IsBackfilled != true ||
-		backfilled.ProbeObservations[0].IsBackfilled != true ||
-		backfilled.IPQualityReports[0].IsBackfilled != true {
-		t.Fatal("WithBackfilledFacts() did not deep-copy payload slices")
-	}
-}
-
-func TestFileStoreFallbackEntryIDUsesCurrentTime(t *testing.T) {
-	t.Parallel()
-	path := t.TempDir() + "/sync-buffer.json"
-	ctx := context.Background()
-	now := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
-	store.SetNowForTest(func() time.Time { return now })
-
-	if _, err := store.Enqueue(ctx, syncRequest("sync_existing", false)); err != nil {
-		t.Fatalf("Enqueue(existing) error = %v", err)
-	}
-
-	fallbackID, err := store.Enqueue(ctx, agentapi.SyncRequest{MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001"})
-	if err != nil {
-		t.Fatalf("Enqueue(fallback) error = %v", err)
-	}
-	if fallbackID != now.Format(time.RFC3339Nano) {
-		t.Fatal("fallback entry ID did not use the current timestamp")
-	}
-}
-
-func TestFileStoreFallbackEntryIDAddsSuffixOnCollision(t *testing.T) {
-	t.Parallel()
-	path := t.TempDir() + "/sync-buffer.json"
-	ctx := context.Background()
-	now := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
-	store.SetNowForTest(func() time.Time { return now })
-
-	firstID, err := store.Enqueue(ctx, agentapi.SyncRequest{MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001"})
-	if err != nil {
-		t.Fatalf("first Enqueue() error = %v", err)
-	}
-	secondID, err := store.Enqueue(ctx, agentapi.SyncRequest{MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001"})
-	if err != nil {
-		t.Fatalf("second Enqueue() error = %v", err)
-	}
-
-	if firstID != now.Format(time.RFC3339Nano) {
-		t.Fatal("first fallback entry ID did not use the current timestamp")
-	}
-	if secondID != now.Format(time.RFC3339Nano)+"-1" {
-		t.Fatal("second fallback entry ID did not use the collision suffix")
-	}
-}
-
-func TestFileStoreEntryIDAddsSuffixOnHeartbeatBatchCollision(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	ctx := context.Background()
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
-
-	firstID, err := store.Enqueue(ctx, syncRequest("sync_duplicate", false))
-	if err != nil {
-		t.Fatalf("first Enqueue() error = %v", err)
-	}
-	secondID, err := store.Enqueue(ctx, syncRequest("sync_duplicate", false))
-	if err != nil {
-		t.Fatalf("second Enqueue() error = %v", err)
-	}
-	if firstID == secondID {
-		t.Fatal("duplicate heartbeat batch IDs produced the same persisted entry ID")
-	}
-
-	if err := store.Delete(ctx, firstID); err != nil {
-		t.Fatalf("Delete(first) error = %v", err)
-	}
-	entries, err := store.List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(entries) != 1 || entries[0].ID != secondID {
-		t.Fatalf("remaining duplicate entry match = false (count=%d), want the independently addressable second entry", len(entries))
-	}
-}
-
-func TestFileStoreEntryIDScalesAcrossDenseHeartbeatBatchSuffixes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	const total = 32768
-	createdAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	persisted := make([]syncqueue.Entry, total)
-	for i := range persisted {
-		id := "dense-batch"
-		if i > 0 {
-			id = fmt.Sprintf("dense-batch-%d", i)
-		}
-		persisted[i] = syncqueue.Entry{
-			ID:        id,
-			CreatedAt: createdAt.Add(time.Duration(i)),
-		}
-	}
-	payload, err := json.Marshal(persisted)
-	if err != nil {
-		t.Fatalf("encode dense suffix backlog fixture error type = %T", err)
-	}
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
-		t.Fatalf("write dense suffix backlog fixture error type = %T", err)
-	}
-
-	store := syncqueue.NewFileStore(path, syncqueue.Options{
-		MaxEntries: total + 1,
-		MaxAge:     time.Hour,
-		SkipFsync:  true,
-	})
-	store.SetNowForTest(func() time.Time { return createdAt.Add(time.Minute) })
-	id, err := store.Enqueue(context.Background(), syncRequest("dense-batch", false))
-	if err != nil {
-		t.Fatalf("Enqueue() error type = %T", err)
-	}
-	if id != fmt.Sprintf("dense-batch-%d", total) {
-		t.Fatalf("Enqueue() ID = %q, want the first suffix beyond the dense backlog", id)
-	}
-}
-
-func TestFileStorePrunesLargeOversizedPersistedBacklogInLinearPass(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	const total = 32768
-	createdAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	persisted := make([]syncqueue.Entry, total)
-	for i := range persisted {
-		persisted[i] = syncqueue.Entry{
-			ID:        fmt.Sprintf("entry-%d", i),
-			CreatedAt: createdAt.Add(time.Duration(i)),
-		}
-	}
-	payload, err := json.Marshal(persisted)
-	if err != nil {
-		t.Fatalf("encode oversized backlog fixture error type = %T", err)
-	}
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
-		t.Fatalf("write oversized backlog fixture error type = %T", err)
-	}
-	maxBytes := len(payload) / 2
-
-	store := syncqueue.NewFileStore(path, syncqueue.Options{
-		MaxEntries: total + 1,
-		MaxAge:     time.Hour,
-		MaxBytes:   maxBytes,
-		SkipFsync:  true,
-	})
-	store.SetNowForTest(func() time.Time { return createdAt.Add(time.Minute) })
-	id, err := store.Enqueue(context.Background(), syncRequest("newest-batch", false))
-	if err != nil {
-		t.Fatalf("Enqueue() error type = %T", err)
-	}
-	entries, err := store.List(context.Background())
-	if err != nil {
-		t.Fatalf("List() error type = %T", err)
-	}
-	if len(entries) == 0 || entries[len(entries)-1].ID != id {
-		t.Fatal("byte pruning did not retain the newly enqueued entry")
-	}
-	storedPayload, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read pruned backlog error type = %T", err)
-	}
-	if len(storedPayload) > maxBytes {
-		t.Fatalf("pruned queue size = %d, want <= %d", len(storedPayload), maxBytes)
-	}
-}
-
-func TestFileStoreNormalizesPersistedDuplicateIDsBeforeDelete(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	createdAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	persisted := []syncqueue.Entry{
-		{ID: "shared-entry", CreatedAt: createdAt, Request: syncRequest("sync_first", false)},
-		{ID: "shared-entry", CreatedAt: createdAt.Add(time.Nanosecond), Request: syncRequest("sync_second", false)},
-	}
-	payload, err := json.Marshal(persisted)
-	if err != nil {
-		t.Fatalf("encode duplicate-ID fixture: %v", err)
-	}
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
-		t.Fatalf("write duplicate-ID fixture: %v", err)
-	}
-
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true})
-	entries, err := store.List(context.Background())
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("entry count = %d, want two retained facts", len(entries))
-	}
-	if entries[0].ID == entries[1].ID {
-		t.Fatal("List() returned duplicate persisted IDs that cannot be acknowledged independently")
-	}
-
-	if err := store.Delete(context.Background(), entries[0].ID); err != nil {
-		t.Fatalf("Delete(first) error = %v", err)
-	}
-	remaining, err := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, SkipFsync: true}).List(context.Background())
-	if err != nil {
-		t.Fatalf("List() after Delete error = %v", err)
-	}
-	if len(remaining) != 1 || remaining[0].Request.Heartbeats[0].SyncBatchID != "sync_second" {
-		t.Fatalf("remaining fact match = false (count=%d), want the unsent second fact preserved", len(remaining))
-	}
-}
-
-func TestFileStoreNormalizesLargePersistedDuplicateIDBacklog(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	const total = 32768
-	createdAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	persisted := make([]syncqueue.Entry, total)
-	for i := range persisted {
-		persisted[i] = syncqueue.Entry{
-			ID:        "shared-entry",
-			CreatedAt: createdAt.Add(time.Duration(i)),
-		}
-	}
-	payload, err := json.Marshal(persisted)
-	if err != nil {
-		t.Fatalf("encode duplicate-ID backlog fixture error type = %T", err)
-	}
-	if err := os.WriteFile(path, payload, 0o600); err != nil {
-		t.Fatalf("write duplicate-ID backlog fixture error type = %T", err)
-	}
-
-	entries, err := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: total, MaxAge: time.Hour, SkipFsync: true}).List(context.Background())
-	if err != nil {
-		t.Fatalf("List() error type = %T", err)
-	}
-	if len(entries) != total {
-		t.Fatalf("entry count = %d, want %d", len(entries), total)
-	}
-	seen := make(map[string]struct{}, total)
-	for _, entry := range entries {
-		if _, duplicate := seen[entry.ID]; duplicate {
-			t.Fatal("large persisted backlog still contained a duplicate entry ID")
-		}
-		seen[entry.ID] = struct{}{}
-	}
-}
-
-func TestFileStoreSerializesConcurrentEnqueues(t *testing.T) {
-	t.Parallel()
-	path := t.TempDir() + "/sync-buffer.json"
-	ctx := context.Background()
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 100, MaxAge: time.Hour})
-
-	const total = 25
-	done := make(chan error, total)
-	for i := 0; i < total; i++ {
-		i := i
-		go func() {
-			_, err := store.Enqueue(ctx, syncRequest(fmt.Sprintf("sync_%03d", i), false))
-			done <- err
-		}()
-	}
-	for i := 0; i < total; i++ {
-		if err := <-done; err != nil {
-			t.Fatalf("concurrent Enqueue() error = %v", err)
-		}
-	}
-
-	entries, err := store.List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(entries) != total {
-		t.Fatalf("len(entries) = %d, want %d", len(entries), total)
-	}
-	seen := map[string]bool{}
-	for _, entry := range entries {
-		if seen[entry.ID] {
-			t.Fatal("concurrent enqueue produced a duplicate persisted entry ID")
-		}
-		seen[entry.ID] = true
-	}
-}
-
-func TestFileStoreSerializesMutatorsAcrossInstances(t *testing.T) {
-	t.Parallel()
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	ctx := context.Background()
-	first := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 100, MaxAge: time.Hour})
-	second := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 100, MaxAge: time.Hour})
-
-	var deleteIDs []string
-	var markIDs []string
-	for i := 0; i < 40; i++ {
-		id, err := first.Enqueue(ctx, syncRequest(fmt.Sprintf("seed_%03d", i), false))
-		if err != nil {
-			t.Fatalf("seed Enqueue(%d) error = %v", i, err)
-		}
-		if i%2 == 0 {
-			deleteIDs = append(deleteIDs, id)
-		} else {
-			markIDs = append(markIDs, id)
-		}
-	}
-
-	done := make(chan error, len(deleteIDs)+len(markIDs)+20)
-	for _, id := range deleteIDs {
-		id := id
-		go func() {
-			done <- first.Delete(ctx, id)
-		}()
-	}
-	for _, id := range markIDs {
-		id := id
-		go func() {
-			done <- second.MarkAttempt(ctx, id)
-		}()
-	}
-	for i := 0; i < 20; i++ {
-		i := i
-		go func() {
-			_, err := second.Enqueue(ctx, syncRequest(fmt.Sprintf("new_%03d", i), false))
-			done <- err
-		}()
-	}
-	for i := 0; i < cap(done); i++ {
-		if err := <-done; err != nil {
-			t.Fatalf("concurrent mutator error = %v", err)
-		}
-	}
-
-	entries, err := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 100, MaxAge: time.Hour}).List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	byID := map[string]syncqueue.Entry{}
-	for _, entry := range entries {
-		byID[entry.ID] = entry
-	}
-	for _, id := range deleteIDs {
-		if _, ok := byID[id]; ok {
-			t.Fatal("a deleted queue entry was resurrected")
-		}
-	}
-	for _, id := range markIDs {
-		entry, ok := byID[id]
-		if !ok {
-			t.Fatal("an attempted queue entry was lost")
-		}
-		if entry.Attempts != 1 {
-			t.Fatalf("attempted entry Attempts = %d, want 1", entry.Attempts)
-		}
-	}
-	for i := 0; i < 20; i++ {
-		id := fmt.Sprintf("new_%03d", i)
-		if _, ok := byID[id]; !ok {
-			t.Fatal("a concurrently enqueued entry was lost")
-		}
-	}
-}
-
-func TestFileStoreWritesPrivateQueueFile(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX permission bits are not portable on windows")
-	}
-	t.Parallel()
-	root := t.TempDir()
-	path := filepath.Join(root, "state", "sync-buffer.json")
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour})
-
-	if _, err := store.Enqueue(context.Background(), syncRequest("sync_private", false)); err != nil {
-		t.Fatalf("Enqueue() error = %v", err)
-	}
-
-	dirInfo, err := os.Stat(filepath.Dir(path))
-	if err != nil {
-		t.Fatalf("Stat(queue dir) error = %v", err)
-	}
-	if got := dirInfo.Mode().Perm(); got != 0o700 {
-		t.Fatalf("queue dir mode = %#o, want 0700", got)
-	}
-	fileInfo, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat(queue file) error = %v", err)
-	}
-	if got := fileInfo.Mode().Perm(); got != 0o600 {
-		t.Fatalf("queue file mode = %#o, want 0600", got)
+	if entry.Request.Heartbeats[0].IsBackfilled || entry.Request.IPQualityReports[0].IsBackfilled {
+		t.Fatal("backfill mutated queue snapshot")
 	}
 }
 
 func TestFileStorePrunesByMaxEntriesAndAge(t *testing.T) {
 	t.Parallel()
-	path := t.TempDir() + "/sync-buffer.json"
-	ctx := context.Background()
-	base := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 2, MaxAge: time.Hour})
+	store := openStore(t, filepath.Join(t.TempDir(), "queue.json"), syncqueue.Options{MaxEntries: 2, MaxAge: time.Hour})
+	base := time.Date(2026, 4, 28, 8, 0, 0, 0, time.UTC)
 	store.SetNowForTest(func() time.Time { return base })
-	for _, id := range []string{"sync_old", "sync_mid", "sync_new"} {
-		if _, err := store.Enqueue(ctx, syncRequest(id, false)); err != nil {
-			t.Fatalf("Enqueue() error type = %T", err)
+	for range 3 {
+		enqueue(t, store, syncRequest("same", false))
+	}
+	entries := queueEntries(t, store)
+	if len(entries) != 2 || entries[0].Request.BatchSequence != 2 || entries[1].Request.BatchSequence != 3 || replayState(t, store).RetiredThrough != 1 {
+		t.Fatal("count pruning broke FIFO/floor")
+	}
+	store.SetNowForTest(func() time.Time { return base.Add(time.Hour) })
+	if err := store.Prune(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(queueEntries(t, store)) != 2 {
+		t.Fatal("exact age cutoff removed eligible entries")
+	}
+	store.SetNowForTest(func() time.Time { return base.Add(2 * time.Hour) })
+	if err := store.Prune(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(queueEntries(t, store)) != 0 || replayState(t, store).RetiredThrough != 3 {
+		t.Fatal("age pruning did not retire all entries")
+	}
+}
+
+func TestFileStorePrunesByMaxBytesIncludingEnvelope(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "queue.json")
+	store := openStore(t, path, syncqueue.Options{MaxBytes: 2600})
+	enqueue(t, store, syncRequestWithOutput("old", 700))
+	id := enqueue(t, store, syncRequestWithOutput("new", 700))
+	entries := queueEntries(t, store)
+	if len(entries) != 1 || entries[0].ID != id || replayState(t, store).RetiredThrough != 1 {
+		t.Fatal("byte pruning lost newest or floor")
+	}
+	if len(readBytes(t, path)) > 2600 {
+		t.Fatal("envelope exceeds byte bound")
+	}
+	original := readBytes(t, path)
+	before := replayState(t, store)
+	request := syncRequestWithOutput("oversized", 5000)
+	if _, err := store.Enqueue(context.Background(), request); err == nil {
+		t.Fatal("oversized enqueue succeeded")
+	}
+	if !bytes.Equal(original, readBytes(t, path)) || replayState(t, store) != before || len(request.CommandResults[0].Stdout) != 5000 {
+		t.Fatal("oversized enqueue consumed authority or auxiliary payload")
+	}
+}
+
+func TestFileStoreBootstrapOnlyMissingOrEmptyLegacyArray(t *testing.T) {
+	t.Parallel()
+	for _, initial := range []string{"missing", "[]", " \n[ \n ]\t"} {
+		t.Run(initial, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "queue.json")
+			if initial != "missing" {
+				if err := os.WriteFile(path, []byte(initial), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store := openStore(t, path, syncqueue.Options{})
+			state := replayState(t, store)
+			if state.SessionID != testSession || !agentapi.ValidSyncProducerID(state.ProducerID) || state.AllocatedThrough != 0 || state.RetiredThrough != 0 {
+				t.Fatal("invalid bootstrap", state)
+			}
+		})
+	}
+}
+
+func TestFileStoreRejectsLegacyEmptyCorruptAndIncompleteBytesUnchanged(t *testing.T) {
+	t.Parallel()
+	for _, original := range []string{"", " ", "null", "{}", "[", "[{}]", `[{"request":{"node_id":"legacy"}}]`, `{"version":2}`, `{"version":2} garbage`} {
+		t.Run(original, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "queue.json")
+			if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			store := syncqueue.NewFileStore(path, syncqueue.Options{})
+			if err := store.OpenSession(context.Background(), testSession); err == nil {
+				t.Fatal("accepted corrupt/legacy queue")
+			}
+			if !bytes.Equal(readBytes(t, path), []byte(original)) {
+				t.Fatal("rejected bytes were changed")
+			}
+			// Failed opens must release the process lock.
+			if err := os.WriteFile(path, []byte("[]"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			fresh := openStore(t, path, syncqueue.Options{})
+			_ = fresh.Close()
+		})
+	}
+}
+
+func TestFileStoreRequiresOpenSessionAcrossAllOperations(t *testing.T) {
+	t.Parallel()
+	store := syncqueue.NewFileStore(filepath.Join(t.TempDir(), "queue.json"), syncqueue.Options{})
+	for name, operation := range queueOperations(store) {
+		t.Run(name, func(t *testing.T) {
+			if err := operation(context.Background()); err == nil {
+				t.Fatal("operation before OpenSession succeeded")
+			}
+		})
+	}
+}
+
+type cancelAfterFirstCheckContext struct{ calls int }
+
+func (*cancelAfterFirstCheckContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+func (*cancelAfterFirstCheckContext) Done() <-chan struct{}       { return nil }
+func (c *cancelAfterFirstCheckContext) Err() error {
+	c.calls++
+	if c.calls == 1 {
+		return nil
+	}
+	return context.Canceled
+}
+func (*cancelAfterFirstCheckContext) Value(any) any { return nil }
+
+func queueOperations(store *syncqueue.FileStore) map[string]func(context.Context) error {
+	return map[string]func(context.Context) error{
+		"enqueue": func(ctx context.Context) error {
+			_, err := store.Enqueue(ctx, syncRequest("ignored", false))
+			return err
+		},
+		"list":         func(ctx context.Context) error { _, err := store.List(ctx); return err },
+		"delete":       func(ctx context.Context) error { return store.Delete(ctx, "missing") },
+		"delete_many":  func(ctx context.Context) error { return store.DeleteMany(ctx, []string{"missing"}) },
+		"delete_empty": func(ctx context.Context) error { return store.DeleteMany(ctx, nil) },
+		"attempt":      func(ctx context.Context) error { return store.MarkAttempt(ctx, "missing") },
+		"prune":        store.Prune,
+		"replay_state": func(ctx context.Context) error { _, err := store.ReplayState(ctx); return err },
+		"reserve":      func(ctx context.Context) error { _, _, err := store.ReserveLiveSequences(ctx, 1024); return err },
+	}
+}
+
+func TestFileStoreRechecksCancellationAfterLockAcrossOperations(t *testing.T) {
+	store := openStore(t, filepath.Join(t.TempDir(), "queue.json"), syncqueue.Options{})
+	enqueue(t, store, syncRequest("seed", false))
+	before := replayState(t, store)
+	for name, operation := range queueOperations(store) {
+		t.Run(name, func(t *testing.T) {
+			canceled, cancel := context.WithCancel(context.Background())
+			cancel()
+			if err := operation(canceled); !errors.Is(err, context.Canceled) {
+				t.Fatal("ignored cancellation", err)
+			}
+			// Read-only operations need not check twice: their only check is under lock.
+			if name != "replay_state" && name != "reserve" {
+				if err := operation(&cancelAfterFirstCheckContext{}); !errors.Is(err, context.Canceled) {
+					t.Fatal("ignored cancellation at lock boundary", err)
+				}
+			}
+			if replayState(t, store) != before || len(queueEntries(t, store)) != 1 {
+				t.Fatal("canceled mutation changed queue")
+			}
+		})
+	}
+}
+
+func TestFileStoreSerializesConcurrentMutations(t *testing.T) {
+	t.Parallel()
+	store := openStore(t, filepath.Join(t.TempDir(), "queue.json"), syncqueue.Options{SkipFsync: true})
+	const total = 40
+	results := make(chan error, total)
+	for range total {
+		go func() { _, err := store.Enqueue(context.Background(), syncRequest("same", false)); results <- err }()
+	}
+	for range total {
+		if err := <-results; err != nil {
+			t.Fatal(err)
 		}
 	}
-
-	entries, err := store.List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
+	entries := queueEntries(t, store)
+	if len(entries) != total {
+		t.Fatal("concurrent enqueue lost entries")
 	}
-	if len(entries) != 2 || entries[0].Request.Heartbeats[0].SyncBatchID != "sync_mid" || entries[1].Request.Heartbeats[0].SyncBatchID != "sync_new" {
-		t.Fatalf("pruned entry match = false (count=%d), want the two newest entries", len(entries))
+	for i, entry := range entries {
+		if entry.Request.BatchSequence != int64(i+1) {
+			t.Fatal("sequence gap/duplicate")
+		}
+		entry := entry
+		go func() {
+			if entry.Request.BatchSequence%2 == 0 {
+				results <- store.Delete(context.Background(), entry.ID)
+			} else {
+				results <- store.MarkAttempt(context.Background(), entry.ID)
+			}
+		}()
 	}
-
-	store.SetNowForTest(func() time.Time { return base.Add(2 * time.Hour) })
-	if err := store.Prune(ctx); err != nil {
-		t.Fatalf("Prune() error = %v", err)
+	for range total {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
 	}
-	entries, err = store.List(ctx)
-	if err != nil {
-		t.Fatalf("List() after age prune error = %v", err)
+	entries = queueEntries(t, store)
+	if len(entries) != total/2 {
+		t.Fatal("lost concurrent mutation")
 	}
-	if len(entries) != 0 {
-		t.Fatalf("len(entries) after age prune = %d, want 0", len(entries))
+	for _, entry := range entries {
+		if entry.Attempts != 1 || entry.Request.BatchSequence%2 == 0 {
+			t.Fatal("mutation resurrected/lost an entry")
+		}
 	}
 }
 
-func TestFileStorePrunesByMaxBytes(t *testing.T) {
+func TestFileStoreProcessLifetimeLockSurvivesRename(t *testing.T) {
+	if path := os.Getenv("HOUFENG_QUEUE_LOCK_CHILD"); path != "" {
+		store := syncqueue.NewFileStore(path, syncqueue.Options{})
+		if err := store.OpenSession(context.Background(), testSession); err == nil {
+			_ = store.Close()
+			t.Fatal("child acquired locked queue")
+		}
+		return
+	}
+	path := filepath.Join(t.TempDir(), "queue.json")
+	store := openStore(t, path, syncqueue.Options{})
+	second := syncqueue.NewFileStore(path, syncqueue.Options{})
+	if err := second.OpenSession(context.Background(), testSession); err == nil {
+		t.Fatal("second instance acquired queue")
+	}
+	for range 2 {
+		enqueue(t, store, syncRequest("rename", false))
+		command := exec.Command(os.Args[0], "-test.run=^TestFileStoreProcessLifetimeLockSurvivesRename$")
+		command.Env = append(os.Environ(), "HOUFENG_QUEUE_LOCK_CHILD="+path)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("child lock check failed: %v %s", err, output)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.OpenSession(context.Background(), testSession); err != nil {
+		t.Fatal("close did not release flock", err)
+	}
+	_ = second.Close()
+}
+
+func TestFileStoreWritesPrivateQueueAndLock(t *testing.T) {
 	t.Parallel()
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	ctx := context.Background()
-	const maxBytes = 1800
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, MaxBytes: maxBytes, SkipFsync: true})
-
-	if _, err := store.Enqueue(ctx, syncRequestWithOutput("sync_large_old", 700)); err != nil {
-		t.Fatalf("Enqueue(old) error = %v", err)
+	path := filepath.Join(t.TempDir(), "agent", "state", "queue.json")
+	store := openStore(t, path, syncqueue.Options{})
+	enqueue(t, store, syncRequest("private", false))
+	for _, item := range []struct {
+		path string
+		mode os.FileMode
+	}{{filepath.Dir(path), 0o700}, {path, 0o600}, {path + ".lock", 0o600}} {
+		info, err := os.Stat(item.path)
+		if err != nil || info.Mode().Perm() != item.mode {
+			t.Fatalf("wrong permissions on %s: %v", item.path, err)
+		}
 	}
-	if _, err := store.Enqueue(ctx, syncRequestWithOutput("sync_large_new", 700)); err != nil {
-		t.Fatalf("Enqueue(new) error = %v", err)
-	}
-
-	entries, err := store.List(ctx)
-	if err != nil {
-		t.Fatalf("List() error = %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("len(entries) = %d, want 1 after byte pruning", len(entries))
-	}
-	if got := entries[0].Request.Heartbeats[0].SyncBatchID; got != "sync_large_new" {
-		t.Fatal("byte pruning did not retain the newest entry")
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("Stat(queue file) error = %v", err)
-	}
-	if info.Size() > maxBytes {
-		t.Fatalf("queue file size = %d, want <= %d", info.Size(), maxBytes)
-	}
-}
-
-func TestFileStoreEnqueueFailsWithoutMutatingQueueWhenNewestEntryExceedsMaxBytes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	ctx := context.Background()
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour, MaxBytes: 1000, SkipFsync: true})
-	seed := agentapi.SyncRequest{
-		MonitoringInstanceID: "mi_001",
-		SyncToken:            "sync-token-001",
-		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
-			ObservedAt:   time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC),
-			AgentVersion: "dev",
-			Fingerprint:  "fp-001",
-			SyncBatchID:  "sync_seed",
-		}},
-	}
-	if _, err := store.Enqueue(ctx, seed); err != nil {
-		t.Fatalf("seed Enqueue() error type = %T", err)
-	}
-
-	if _, err := store.Enqueue(ctx, syncRequestWithOutput("sync_oversized", 5000)); err == nil {
-		t.Fatal("oversized Enqueue() error = nil, want local durability failure")
-	}
-	entries, err := store.List(ctx)
-	if err != nil {
-		t.Fatalf("List() error type = %T", err)
-	}
-	if len(entries) != 1 || entries[0].Request.Heartbeats[0].SyncBatchID != "sync_seed" {
-		t.Fatalf("queue state changed after rejected oversized enqueue (count=%d)", len(entries))
-	}
-}
-
-func TestFileStorePruneDoesNotWriteAnEmptyQueueBeyondMaxBytes(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sync-buffer.json")
-	original := []byte(`[{"id":"legacy"}]`)
-	if err := os.WriteFile(path, original, 0o600); err != nil {
-		t.Fatalf("write queue fixture error type = %T", err)
-	}
-	store := syncqueue.NewFileStore(path, syncqueue.Options{MaxEntries: 1, MaxAge: time.Nanosecond, MaxBytes: 1, SkipFsync: true})
-	if err := store.Prune(context.Background()); err == nil {
-		t.Fatal("Prune() error = nil, want durability failure when even [] exceeds MaxBytes")
-	}
-	stored, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read queue after rejected Prune error type = %T", err)
-	}
-	if !bytes.Equal(stored, original) {
-		t.Fatal("rejected Prune rewrote the prior queue beyond MaxBytes")
-	}
-}
-
-func syncRequest(batchID string, backfilled bool) agentapi.SyncRequest {
-	observedAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	return agentapi.SyncRequest{
-		MonitoringInstanceID: "mi_001",
-		SyncToken:            "sync-token-001",
-		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
-			ObservedAt:   observedAt,
-			AgentVersion: "dev",
-			Fingerprint:  "fp-001",
-			SyncBatchID:  batchID,
-			IsBackfilled: backfilled,
-		}},
-		HostSamples: []agentapi.HostSamplePayload{{
-			ObservedAt:   observedAt,
-			AgentVersion: "dev",
-			Fingerprint:  "fp-001",
-			SyncBatchID:  batchID,
-			IsBackfilled: backfilled,
-			CPUUsagePct:  12.5,
-		}},
-		ProbeObservations: []agentapi.ProbeObservationPayload{{
-			TargetID:     "tg_001",
-			ProbeItemID:  "pb_001",
-			ProbeKind:    agentapi.ProbeKindHTTP,
-			ObservedAt:   observedAt,
-			AgentVersion: "dev",
-			Fingerprint:  "fp-001",
-			SyncBatchID:  batchID,
-			ResultKind:   agentapi.ProbeResultSuccess,
-			IsBackfilled: backfilled,
-		}},
-		IPQualityReports: []agentapi.IPQualityReportPayload{{
-			ObservedAt:    observedAt,
-			AgentVersion:  "dev",
-			Fingerprint:   "fp-001",
-			SyncBatchID:   batchID,
-			IPAddress:     "203.0.113.10",
-			IPVersion:     4,
-			Status:        agentapi.IPQualityStatusSuccess,
-			ASN:           "AS64500",
-			Organization:  "Example Network",
-			UseRegionCode: "US",
-			RiskLevel:     "low",
-			IsBackfilled:  backfilled,
-		}},
-	}
-}
-
-func syncRequestWithOutput(batchID string, outputBytes int) agentapi.SyncRequest {
-	observedAt := time.Date(2026, time.April, 28, 8, 0, 0, 0, time.UTC)
-	request := agentapi.SyncRequest{
-		MonitoringInstanceID: "mi_001",
-		SyncToken:            "sync-token-001",
-		Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{
-			ObservedAt:   observedAt,
-			AgentVersion: "dev",
-			Fingerprint:  "fp-001",
-			SyncBatchID:  batchID,
-		}},
-	}
-	request.CommandResults = []agentapi.CommandResult{{
-		ActionID:  "act_" + batchID,
-		CommandID: "uptime",
-		Stdout:    strings.Repeat("x", outputBytes),
-		ExitCode:  0,
-	}}
-	return request
 }
 
 func TestFileStorePersistsAndReplaysDualRoundAsOneBatch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "dual-round.json")
-	ctx := context.Background()
-	opts := syncqueue.Options{MaxEntries: 10, MaxAge: time.Hour}
-	store := syncqueue.NewFileStore(path, opts)
-	request := syncRequest("dual-batch", false)
+	path := filepath.Join(t.TempDir(), "dual.json")
+	store := openStore(t, path, syncqueue.Options{})
+	request := syncRequest("old", false)
 	request.IPQualityReports = nil
+	observed := time.Now().UTC()
 	for index, family := range []int{4, 6} {
 		ip, status, availability, code := "198.51.100.10", "success", "available", ""
 		if index == 1 {
 			ip, status, availability, code = "::", "failure", "unavailable", "address_family_unavailable"
 		}
-		diagnostics, _ := json.Marshal(map[string]any{"collection_revision": 4, "collection_id": "durable-round", "expected_ip_versions": []int{4, 6}, "ip_address_family": family, "family_availability": availability, "collect_request_id": "durable-request"})
-		request.IPQualityReports = append(request.IPQualityReports, agentapi.IPQualityReportPayload{ObservedAt: time.Now().UTC(), IPVersion: family, IPAddress: ip, Status: status, ErrorCode: code, DiagnosticsJSON: diagnostics})
+		diagnostics, err := json.Marshal(map[string]any{"collection_revision": 4, "collection_id": "durable-round", "expected_ip_versions": []int{4, 6}, "ip_address_family": family, "family_availability": availability, "collect_request_id": "durable-request"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.IPQualityReports = append(request.IPQualityReports, agentapi.IPQualityReportPayload{ObservedAt: observed, IPVersion: family, IPAddress: ip, Status: status, ErrorCode: code, DiagnosticsJSON: diagnostics})
 	}
-	request.IPQualityReports[1].ObservedAt = request.IPQualityReports[0].ObservedAt
-	id, err := store.Enqueue(ctx, request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The durable queue owns a snapshot rather than a caller's mutable rows.
+	id := enqueue(t, store, request)
 	request.IPQualityReports[0].DiagnosticsJSON[0] = 'x'
 	request.IPQualityReports[1].IPAddress = "2001:db8::bad"
-	reopened := syncqueue.NewFileStore(path, opts)
-	if err := reopened.MarkAttempt(ctx, id); err != nil {
+	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := syncqueue.NewFileStore(path, opts).List(ctx)
-	if err != nil {
+	reopened := openStore(t, path, syncqueue.Options{})
+	if err := reopened.MarkAttempt(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
+	entries := queueEntries(t, reopened)
 	if len(entries) != 1 || entries[0].Attempts != 1 || len(entries[0].Request.IPQualityReports) != 2 {
-		t.Fatalf("queue split or lost round: %#v", entries)
+		t.Fatal("split or lost round")
 	}
-	reports := entries[0].Request.IPQualityReports
-	for index, family := range []int{4, 6} {
-		m := agentapi.ParseCollectionMetadata(reports[index].DiagnosticsJSON)
-		if reports[index].IPVersion != family || !m.Valid || m.CollectionID != "durable-round" || m.CollectRequestID != "durable-request" {
-			t.Fatalf("persisted pair lost identity: %#v", reports)
+	for index, report := range entries[0].Request.IPQualityReports {
+		metadata := agentapi.ParseCollectionMetadata(report.DiagnosticsJSON)
+		if report.IPVersion != []int{4, 6}[index] || !metadata.Valid || metadata.CollectionID != "durable-round" || metadata.CollectRequestID != "durable-request" || report.SyncBatchID != id {
+			t.Fatal("round identity lost")
 		}
 	}
-	if reports[1].IPAddress != "::" || reports[1].ErrorCode != "address_family_unavailable" || !reports[0].ObservedAt.Equal(reports[1].ObservedAt) {
-		t.Fatalf("terminal pair changed: %#v", reports)
+	if entries[0].Request.IPQualityReports[1].IPAddress != "::" || entries[0].Request.IPQualityReports[1].ErrorCode != "address_family_unavailable" {
+		t.Fatal("terminal family changed")
 	}
-	if err := reopened.Delete(ctx, id); err != nil {
+	if err := reopened.Delete(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
-	entries, err = reopened.List(ctx)
-	if err != nil || len(entries) != 0 {
-		t.Fatalf("batch acknowledgement did not remove whole round: entries=%#v err=%v", entries, err)
+	if len(queueEntries(t, reopened)) != 0 {
+		t.Fatal("ack did not delete whole round")
+	}
+}
+
+func syncRequest(batchID string, backfilled bool) agentapi.SyncRequest {
+	observed := time.Date(2026, 4, 28, 8, 0, 0, 0, time.UTC)
+	return agentapi.SyncRequest{
+		SessionID: testSession, MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001",
+		Heartbeats:        []agentapi.MonitoringInstanceHeartbeat{{ObservedAt: observed, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: batchID, IsBackfilled: backfilled}},
+		HostSamples:       []agentapi.HostSamplePayload{{ObservedAt: observed, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: batchID, IsBackfilled: backfilled, CPUUsagePct: 12.5}},
+		ProbeObservations: []agentapi.ProbeObservationPayload{{ObservedAt: observed, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: batchID, IsBackfilled: backfilled, TargetID: "tg_001", ProbeItemID: "pb_001", ProbeKind: agentapi.ProbeKindHTTP, ResultKind: agentapi.ProbeResultSuccess}},
+		IPQualityReports:  []agentapi.IPQualityReportPayload{{ObservedAt: observed, AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: batchID, IsBackfilled: backfilled, IPAddress: "203.0.113.10", IPVersion: 4, Status: agentapi.IPQualityStatusSuccess, ASN: "AS64500", Organization: "Example Network", UseRegionCode: "US", RiskLevel: "low"}},
+	}
+}
+
+func syncRequestWithOutput(batchID string, outputBytes int) agentapi.SyncRequest {
+	return agentapi.SyncRequest{SessionID: testSession, MonitoringInstanceID: "mi_001", SyncToken: "sync-token-001",
+		Heartbeats:     []agentapi.MonitoringInstanceHeartbeat{{ObservedAt: time.Now().UTC(), AgentVersion: "dev", Fingerprint: "fp-001", SyncBatchID: batchID}},
+		CommandResults: []agentapi.CommandResult{{ActionID: "act_" + batchID, CommandID: "uptime", Stdout: strings.Repeat("x", outputBytes)}},
 	}
 }

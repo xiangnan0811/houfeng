@@ -18,7 +18,7 @@ esac
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd "$root"
 
-anchors=(TestPostgresIntegrationAppACLR2 TestPostgresIntegrationAppACLCurrent)
+anchors=(TestPostgresIntegrationAppACLR2 TestPostgresIntegrationAppACLCurrent TestPostgresIntegrationAgentReplayMigration)
 selector="^($(IFS='|'; printf '%s' "${anchors[*]}"))$"
 anchors_json=$(printf '%s\n' "${anchors[@]}" | jq -R . | jq -s .)
 
