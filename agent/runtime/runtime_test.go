@@ -474,11 +474,10 @@ func (q *cancelAfterDeleteQueue) MarkAttempt(ctx context.Context, id string) err
 
 func TestRuntimeEnrollsBeforeSyncLoop(t *testing.T) {
 	cfg := agentconfig.AgentConfig{ServerURL: "http://center", TokenFile: "/tmp/token"}
-	client := &fakeClient{}
-	rt := newRuntimeWithDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	client := &fakeClient{cancelAfterSyncs: 1, cancel: cancel}
+	rt := newRuntimeWithDeps(t, cfg, nil, client, staticTokenSource{}, staticFingerprint{}, 10*time.Millisecond)
 
 	if err := rt.Run(ctx); err != nil {
 		t.Fatalf("Run() error type = %T", err)
