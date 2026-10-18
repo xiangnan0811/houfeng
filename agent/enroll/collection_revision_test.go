@@ -35,9 +35,9 @@ func TestSyncAdvertisesCollectionRevisionOnlyForLiveTransmission(t *testing.T) {
 				_, _ = io.WriteString(w, `{"status":"accepted"}`)
 			}))
 			defer server.Close()
-			request := agentapi.SyncRequest{SessionID: "mas_1", MonitoringInstanceID: "mi_1", SyncToken: "secret"}
+			request := agentapi.SyncRequest{ProtocolRevision: agentapi.SyncProtocolRevision, ProducerID: "c393d63b-3128-489f-89ca-109be0de137d", SessionID: "mas_1", MonitoringInstanceID: "mi_1", SyncToken: "secret"}
 			if live {
-				request.LiveSignal = &agentapi.LiveSignal{ID: "live", Fingerprint: "fp"}
+				request.LiveSignal = &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp"}
 			}
 			stored, err := json.Marshal(request)
 			if err != nil {

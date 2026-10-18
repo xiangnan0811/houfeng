@@ -2,7 +2,7 @@
 
 ## 接入会话、最小在线证据与采集权限
 
-本协议面向匹配版本 Center/Agent 的全新部署，不提供旧 Agent 混跑或旧凭据转换。
+本协议要求匹配版本 Center/全部 Agent 协同升级，不支持旧 wire 协议混跑；既有会话凭据保留，升级前必须停写并排空旧队列，详见下方协调升级合同。
 
 - Enrollment 成功返回 `session_id`、`capability: full` 及 `sync_token`。令牌使用
   `session_id.secret` 格式；Agent 持久化现有凭据文件并从令牌中恢复会话身份。
@@ -12,11 +12,12 @@
 - 安装器普通升级保留现有会话凭据；通过详情接入入口显式生成的所有安装命令附带 `--reenroll`，
   包括同一 VPS 退役旧实例后新建实例。不能从新实例没有历史会话推断目标主机没有旧凭据。
   安装器先验证签名发行物，再停止旧进程，以 0600 权限原子替换 bootstrap token，启动后签发新会话。
-- Sync 必须携带 `session_id`。当前请求在实际发送前产生随机 `live_signal.id` 和
-  `live_signal.fingerprint`；实时信号不含 Agent 时间，不写离线队列，不附加到历史回填。
-  仅实时信号的 `(session_id, signal_id)` 首次插入会更新 Center 接收时间，使用事务内
+- Sync 必须携带 `session_id` 与持久 producer 身份。当前请求在实际发送前消费已持久预留的
+  `live_signal.sequence`，并携带 `live_signal.fingerprint`；没有随机 `id` 字段或旧字段 alias。
+  实时信号不含 Agent 时间，不写离线队列，不附加到历史回填。
+  仅 sequence 高于该 session 的持久 `live_sequence_high` 才更新 Center 接收时间，使用事务内
   PostgreSQL `clock_timestamp()` 与归档检查保持同一时钟域，不能采用 Agent 或 Center 进程墙钟。
-  相同请求重试、原始心跳回填及 Agent 自报时间均不能刷新归档安全计时。
+  旧/乱序信号、原始心跳回填及 Agent 自报时间均不能刷新归档安全计时；独立合法 batch 仍可接收。
 - `monitoring_agent_sessions.last_trusted_online_at/ever_connected` 与实例同名字段保存长期事实，
   不依赖原始心跳保留任务。身份验证后首个有效实时心跳即进入“已接入”，无需性能样本。
 - 启用正常采集；维护继续采集并带维护上下文。暂停、退役、VPS 已归档及旧会话仍接收
@@ -26,8 +27,10 @@
   所属 VPS 已归档时保持归档，只更新去重的 `archived_online` 待核对事项。
 - 实时信号事务先取资产关系共享锁，再锁实例与会话；归档取同一资产关系独占锁。
   持久化故障在回滚后标记接收链路故障，重启连续健康观察窗口。
-- 原始事实批次继续通过 `agent_sync_batches` INSERT-only 去重。实时证据与批次分别去重；
-  空实时信号请求可领取计划，但不会执行常规事件派生。被抑制批次也不执行事件派生。
+- 原始事实批次通过有界 `agent_batch_receipts` 与单行 `agent_replay_states` 防重放；
+  live 高水位独立于 batch 窗口，不产生逐 signal 永久行。
+  最小在线/控制请求 `batch_sequence=0` 不构成批次 ack，不执行常规事件派生；
+  `exact_duplicate`、`suppressed`、`deferred` 同样不执行常规 postSync 派生。
 
 验收覆盖旧会话降权、暂停继续在线、接收时间权威、重复实时信号不刷新、回填不刷新、
 无性能样本首次接入、归档后在线去重和采集队列清理。对应测试在
@@ -94,117 +97,130 @@ where enrollment_token_hash = $1
   and enrollment_token_issued_at >= now() - interval '30 minutes'
 ```
 
-## Agent sync batch INSERT-only idempotency
+## Agent sync v2：有界重放与 HTTP/client 边界
 
-### 1. Scope / Trigger
+### 1. 能力屏障与请求格式
 
-- Trigger: 修改 `internal/center/store/sync_batches.go`、`agent_sync_batches` 的 ACL / schema / unique constraint，或 agent heartbeat / sync ingestion 的幂等事务。
-- 目标：runtime role 对 `agent_sync_batches` 保持最小 INSERT-only 权限，同时首次 batch 写入、原样重试和事务内事实去重继续工作。
+- 常量：`SyncProtocolRevision=2`、header `X-Houfeng-Sync-Protocol: 2`、
+  `SyncReplayWindow=131072`、`LiveSequenceReservation=1024`。
+- `GET /api/healthz` 保留 `name=houfeng-center`、`version`、`status=ok`，新增
+  `agent_sync_protocol_revision: 2`、`agent_sync_replay_window: 131072`。
+  `enroll.Client.CheckSyncProtocol(ctx) error` 读取真实 health endpoint，要求 HTTP 200、
+  单个合法 JSON document、正确服务名/健康状态和两个能力值精确匹配。HTML 200、旧 Center、
+  缺字段、错误类型/数值、尾随内容、超限 body、网络错误均失败。
+  Runtime 必须先检查成功，再打开/改写队列或发送 sync；失败不得修改 buffer。
+- `/api/agent/sync` 保留 POST、Bearer token 早检查、每进程 rate/inflight/body 资源上限。
+  缺失、旧值、重复或非精确版本 header 在读取 body 前返回 HTTP 426、
+  `code=sync_protocol_required`；JSON 中 `protocol_revision` 也必须为 2。
+  client 每次发送 header 2，手工 wire DTO 显式传递全部 v2 控制字段；
+  token 只走 Authorization，不进入 HTTP JSON。IP-quality capability 仍是独立 transient header。
+- 请求新增 `protocol_revision`、`producer_id`（标准 UUID）、`batch_sequence`、
+  `allocated_through`、`retired_through`；保留 session/instance 与事实载荷。
+  序号为 signed int64，不允许 wrap；allocated/retired 非负且 `retired<=allocated`。
+  有 batch 时 `0<batch_sequence<=allocated_through`，且高于有效退休 floor。
+  `batch_sequence=0` 仅允许无 heartbeat/host/probe/IP-report/command-result 的控制或最小在线请求。
+- 同批全部 heartbeat、host sample、probe observation、IP report 的 `sync_batch_id` 必须等于
+  `producer_id + ":" + batch_sequence`（十进制），仅作事实关联身份，不再充当防重放权威。
+  非空事实/命令/IP report 仍须 heartbeat carrier；缺少/不同 batch 身份或非法 bounds 拒绝。
+  `live_signal.sequence` 必须为正 int64，fingerprint 非空；不接受旧 `id` alias。
+  超出 replay window 不是 schema 错误，交由事务返回 `deferred`。
 
-### 2. Signatures
+### 2. Center 自算 canonical digest
 
-- Production SQL contract: `INSERT INTO agent_sync_batches (...) VALUES (...) ON CONFLICT DO NOTHING`，不得给 `ON CONFLICT` 添加 column list 或 constraint name。
-- Required PostgreSQL integration test: `TestPostgresIntegrationAgentSyncBatchRuntimeACL`，必须通过生产 `NewPostgresSyncRepository` 和 direct runtime role 执行。
+`agentapi.CanonicalSyncBatchDigest(req) ([32]byte,error)` 在解码后由 Center 计算，handler 将值
+传给 `syncing.Batch.PayloadDigest`；不信任 client 提供的 digest，也不修改原 queue payload。
 
-### 3. Contracts
+- 哈希内容包括 `monitoring_instance_id` authority、session、producer、batch sequence，
+  以及全部事实、command results、IP reports。
+- 排除 protocol revision、token、live signal、allocated/retired 控制字段、HTTP capability 和
+  Center 接收时间；仅剔除事实顶层传输属性 `is_backfilled`，不剔除任意嵌套 raw JSON 同名字段。
+- typed nil/empty collections 统一为空集合；optional `omitempty` 空值保持同义。
+  Raw JSON 经 `UseNumber` 解码与 `encoding/json` 稳定 object key 排序规范化后哈希，
+  保留大整数，不通过 float64 舍入；数组顺序有意义。
+- live 请求改为 backfilled 重试时 digest 不变；修改事实或命令结果必须改变 digest。
+  Agent 使用同一函数核验 ack；direct repository 测试也从同一原始 DTO 计算。
 
-- Runtime privilege vector 必须是 `INSERT=true`、`SELECT=false`、`UPDATE=false`、`DELETE=false`；不得用表级或列级 SELECT 来绕过 ingest SQL 的权限问题。
-- PostgreSQL 16 对显式 conflict target（例如 `(monitoring_instance_id, sync_batch_id)`）要求读取 target columns，因此会让 INSERT-only runtime 以 SQLSTATE `42501` 失败；生产查询必须使用 targetless `ON CONFLICT DO NOTHING`。
-- 当前 schema 的唯一性前提只有 `PRIMARY KEY (monitoring_instance_id, sync_batch_id)`，所以 targetless 形式保持首次写入和原样重复的既有语义；首次 insert 的 `RowsAffected()` 必须为 1 并继续写事实，重复 insert 必须为 0、提交空 plan，且不得重写 heartbeat、observation 或 `last_heartbeat_at` / `last_sync_at`。
-- 给 `agent_sync_batches` 新增任何 primary key 或 unique constraint 前，必须重审 targetless “忽略任意冲突”的语义、ACL 和 direct-runtime 回归；schema 变更不得默认沿用当前前提。
-- 验证会话 / token / fingerprint 后先处理独立实时在线证据。未抑制的 batch marker 必须在 heartbeat / observation facts 之前写入；不得通过扩张 ACL 修复生产 SQL。
+### 3. Ack 与错误合同
 
-### 4. Validation & Error Matrix
+响应保留 `accepted_at`、`status`、`stop_collection` 与 plan，并新增 `session_id`、
+`producer_id`、`batch_sequence`、`batch_digest`（SHA256 小写 hex）、`disposition`、
+`retired_through`。既有 `status=accepted` 不是独立的队列删除凭证；必须解释 disposition。
 
-| Condition | Expected behavior |
-| --- | --- |
-| current direct runtime ACL | INSERT allowed; SELECT/UPDATE/DELETE denied |
-| first heartbeat-only batch | batch marker and heartbeat each persist once; sync timestamps advance |
-| exact duplicate batch | accepted with an empty plan; batch/heartbeat row counts remain one and first-write heartbeat/sync timestamps remain unchanged |
-| explicit conflict target under INSERT-only runtime | wrapped PostgreSQL SQLSTATE `42501`; regression RED |
-| new unique constraint proposed | block until targetless conflict semantics and direct-runtime test are reviewed |
+| disposition | Center 行为 | Agent 行为 |
+| --- | --- | --- |
+| `recorded` | receipt 与全部事实/命令同事务首次提交 | 核验 session/producer/seq/digest 后 durable Delete，再应用 plan |
+| `exact_duplicate` | 同 seq 同 digest，不重写事实/命令/通知，空 plan | 同样核验并 durable Delete |
+| `suppressed` | 保留 stop_collection 抑制语义；最小在线 seq=0 不构成 batch ack | 仅匹配非零 batch 可按 ack 删除；执行 stop_collection 清理 |
+| `deferred` | 窗口外仅提交合法 floor/live 证据，不写 facts/receipt、不执行命令；无 plan | 保留 entry，可重试，不应用命令计划或计入成功 ack |
 
-### 5. Good/Base/Bad Cases
+错误必须保留 typed `RemoteError.StatusCode/Code`；426 和下列 409 均 terminal、保留队列，
+不自动重新注册、不向服务端学习最大序号后重编号：
 
-- Good: direct runtime 只拥有 INSERT，首次 heartbeat-only `ApplyBatch` 成功，原样重试也成功且不重复写事实。
-- Base: owner/migrator 负责 seed 和事后计数；被测生产调用始终由 direct runtime session 执行。
-- Bad: 为了让显式 conflict target 工作而给 runtime 增加 SELECT，扩大了 ingest role 的读取能力。
-- Bad: 只用 fake transaction 或 ACL catalog 断言证明修复；它们不能证明 PostgreSQL 16 实际的 privilege check。
+| HTTP | code | 含义 |
+| --- | --- | --- |
+| 426 | `sync_protocol_required` | header/body 或 direct service/repository revision 不支持 |
+| 409 | `sync_producer_mismatch` | 同 session 已绑定其他 producer |
+| 409 | `sync_batch_retired` | 非零 batch sequence 不高于有效持久退休 floor（包括请求自报 floor） |
+| 409 | `sync_batch_identity_conflict` | 窗口内同 seq 的 canonical digest 不同 |
+| 400 | `invalid_request` | UUID/序号 bounds/事实 carrier 等非法 |
 
-### 6. Tests Required
+### 4. 持久退休下界与有界存储
 
-- SQL shape 单元测试必须同时断言包含 targetless `on conflict do nothing`，且不包含 `on conflict (`。
-- 必须运行真实 PostgreSQL 16 direct-runtime 回归；测试不得因 DSN、fixture 或容器缺失而 skip-as-pass，严格命令为：
+- 每 session 一个 `agent_replay_states` 行，永久绑定 producer，保存单调增长的
+  retired/allocated/live 高水位；`agent_batch_receipts(session_id,batch_sequence,payload_digest)`
+  只保留 `floor < seq <= allocated` 且 `seq-floor<=131072` 的收据。
+  runtime 对 state 只有 SELECT/INSERT/UPDATE，对 receipt 只有 SELECT/INSERT/DELETE。
+- 接收事务按 graph → instance/session → replay-state → receipt 锁顺序；producer、退休冲突
+  拒绝时整笔回滚，不留下在线证据。有效 floor 为 max(server,request)，allocated 同样只增长。
+  合法最小在线、暂停、归档、evidence_only 请求也可推进 floor。
+- floor 推进由同事务 AFTER trigger 删除所有 `seq<=floor` 的 receipts；receipt guard
+  用 `FOR SHARE` 与非键 floor UPDATE 互斥，禁止删除未退休 receipt、降低高水位或越窗 INSERT。
+  相同 seq/digest 可 duplicate，不同 digest 是 409；退休后历史重放仍 409，不能靠删除 receipt 重放。
+- live 仅推进独立持久 high；旧 signal 不刷新可信在线，也不阻断合法旧 batch。
+  窗口锚定 retired floor，不锚定最高收到 seq，允许 FIFO backlog 与 new current 交错。
+- 每 session receipt 逻辑最多 131072 行，正常 ack 推进 floor 后仅少量在途；state 一行/session。
+  session 生命周期与业务历史仍增长；dead tuples/文件高水位依赖 autovacuum 重用，
+  逻辑有界不等于立即缩小 relation 文件。
 
-```bash
-scripts/test-record-platform-integration.sh postgres -- go test -v ./internal/center/store -run '^TestPostgresIntegrationAgentSyncBatchRuntimeACL$' -count=1
-```
+### 5. Agent 本地状态与协调升级（无旧队列自动转换）
 
-- 真实回归必须在调用前后核验 ACL 未扩张，并证明首次/重复成功、batch/heartbeat 各一行；首次调用推进 `last_heartbeat_at` / `last_sync_at`，重复调用使用不同 receive time 并证明两个状态时间不被重写。
+- durable queue 使用 version 2 envelope：`version`、`session_id`、`producer_id`、
+  `last_allocated_batch_seq`、`retired_batch_floor`、`live_reserved_through`、`entries`。
+  producer 仅新 session 初始化时生成并持久化；同 session 重启复用全部计数。
+  Enqueue 在一次原子写入中分配序号、统一所有事实 batch ID 并计算 floor。
+  Delete/Prune/DeleteMany 同样持久推进 floor；实际发送读取最新 replay state 覆盖控制字段。
+- 缺失文件或合法空旧数组 `[]` 可初始化。非空旧数组、空文件、截断/损坏 JSON 或新格式缺损
+  明确失败且字节不变；非空旧队列必须恢复旧版本继续排空，绝不重编号/清空以绕过升级。
+  既有 token 文件保留，不能把队列版本变化当作重新接入授权。
+- `OpenSession` 持有独立 `<BufferFile>.lock` inode 的 process-lifetime 非阻塞排他 flock，
+  `Close` 释放；不得锁会 rename 的 buffer inode。无 queue 的直发路径不受支持。
+- live 每次先持久 reserve 1024 个值再发送，重启跳过旧 reserved 区间；不足完整 reservation
+  时 overflow 失败，不回绕。batch 窗口与 live 计数互不影响。
+- rename 前失败保持旧文件；rename 成功但目录 fsync 失败返回 `ErrAmbiguousDurability`，
+  poison 当前 store 并立即终止 Runtime，不继续缓存 counter/发送/重复 enqueue。
+  下一次仅通过新 OpenSession 读取验证可见 envelope 恢复，重新 reserve live 区间。
+- 升级前必须枚举并停止全部旧 Agent（含旧/evidence_only 进程），读取各实际 buffer 确认合法空数组；
+  任何离线/不可读/非空 Agent 都阻止切换。全部停写后协调备份 DB、附件、Records authority、
+  Agent 凭据与 buffers；scoped migrator 升级 Center 后升级全部 Agent，保留身份及事实历史。
+  C80 移除旧永久逐次表，不导入旧随机身份；迁移本身不能证明跨机已排空。
+- C80 后禁止回退到不识别 v2 的 Center/Agent，禁止单边还原 DB 或 queue 快照。
+  恢复必须另行授权、停止全部 writer、恢复同一协调点。检测到 producer/退休/identity 冲突
+  保留队列失败，不自动“修复”。本地 flock 不防跨主机克隆，同 producer 窗口内原样重试合法，
+  不宣称检测所有旧快照或数据库单边回滚。
 
-### 7. Wrong vs Correct
+### 6. Required acceptance
 
-```sql
--- 错误：PG16 读取显式 target columns，与 INSERT-only ACL 冲突。
-on conflict (monitoring_instance_id, sync_batch_id) do nothing
+- HTTP/client：实际 Healthz、HTML/缺字段/网络失败；header pre-body 426；
+  body revision、signed-int64/UUID/carrier bounds；自算 digest/domain 字段映射；
+  四类 disposition、deferred 无 plan、三类 409 原样 typed error，以及旧 live ID 拒绝。
+- `TestPostgresIntegrationAgentReplayWindow`：真实 runtime ACL + repository/HTTP，lost response、
+  重启 duplicate、ack 持久失败、floor 回收后拒绝重放、live 乱序、窗口 131072/131073、
+  producer/identity 冲突、suppressed 控制请求与 token/fingerprint/lifecycle 边界。
+- `TestPostgresIntegrationAgentReplayMigration`：C79→C80 保留凭据/online/raw/business 历史，
+  exact ACL、旧表移除、重复迁移与失败回滚；direct-runtime 双连接验证 guard/floor 并发安全。
+- FileStore/Runtime：空旧数组升级、非空/非法文件字节不变、flock、live reserve 崩溃跳号、
+  rename 前后故障/poison、int64 上界、严格 ack 核验与 durable deletion。
 
--- 正确：在当前唯一复合主键前提下保留 INSERT-only 幂等合同。
-on conflict do nothing
-```
-
-## Scenario: agent local state upgrade compatibility
-
-1. **Scope / Trigger**
-   - 触发：重命名 agent ↔ center 契约字段、修改 `agent/token/`、`agent/syncqueue/`、installer token-preserve 分支，或发布需要从旧 agent 本地状态平滑升级的新版本。
-   - 目标：新版本 agent 能读取旧版本已经落盘的本地状态，避免 upgrade 后卡在不可发送的旧队列 entry 或覆盖已绑定 token。
-
-2. **Signatures**
-   - token 文件当前写入格式：`{"monitoring_instance_id":"<id>","sync_token":"<token>"}`。
-   - token 文件 legacy 读取格式：`{"node_id":"<id>","sync_token":"<token>"}`。
-   - sync queue entry 当前写入格式：`Entry{Request: agentapi.SyncRequest{MonitoringInstanceID, SyncToken, Heartbeats...}}`，JSON 字段为 `request.monitoring_instance_id`。
-   - sync queue entry legacy 读取格式：`request.node_id`。
-   - installer preserve 条件：已有 `/etc/houfeng-agent/token` 同时包含 `sync_token`，且包含 `monitoring_instance_id` 或 legacy `node_id`。
-
-3. **Contracts**
-   - 新写入一律使用 current `monitoring_instance_id`，不得重新对外发送或写入 `node_id`。
-   - 读取 legacy `node_id` 时，仅把它映射为内存中的 MonitoringInstance ID；如果 current 与 legacy 字段同时存在，current 字段优先。
-   - `sync_token` 仍然必需；只有 ID 字段但没有 `sync_token` 的 token 文件必须继续被判定为 incomplete credentials。
-   - installer 只做存在性检查和权限收敛，不解析、不打印 token 内容。
-
-4. **Validation & Error Matrix**
-   - token JSON 含 `monitoring_instance_id` + `sync_token` -> sync credentials ok。
-   - token JSON 含 `node_id` + `sync_token` -> sync credentials ok，返回 MonitoringInstance ID = legacy node id。
-   - token JSON 含 `node_id` 但缺 `sync_token` -> incomplete sync credentials error。
-   - sync queue JSON 含 `request.node_id` -> `List` 返回的 request 必须填充 `MonitoringInstanceID`。
-   - legacy queue entry 缺 heartbeat / agent_version / fingerprint / sync_batch_id -> 不在 queue 层吞掉，仍由 center contract 校验拒绝。
-
-5. **Good / Base / Bad Cases**
-   - Good: v0.24.x agent 已有 `sync-buffer.json`，v0.25.x agent 启动后读出 legacy `node_id`，flush 时发送 current `monitoring_instance_id` carrier。
-   - Good: 旧 token 文件存在 `node_id` + `sync_token`，installer upgrade 保留该文件并只修正 owner/mode。
-   - Base: 新 enrollment 后 token 文件只包含 `monitoring_instance_id` + `sync_token`。
-   - Bad: installer 只识别 current token 字段，导致 upgrade 时覆盖旧 post-enrollment sync credentials。
-   - Bad: `agentapi.SyncRequest` 新写 JSON 同时携带 `node_id`，把内部兼容泄漏成新 public contract。
-
-6. **Tests Required**
-   - `agent/token/file_test.go`：覆盖 legacy `node_id` token、current 字段优先、缺 `sync_token` 仍失败、保存后只写 current 字段。
-   - `agent/syncqueue/store_test.go`：覆盖 legacy `request.node_id` 被映射为 `MonitoringInstanceID`。
-   - `internal/center/installer/embed_test.go`：覆盖 installer preserve 条件同时接受 current 与 legacy ID 字段，并要求 `sync_token`。
-
-7. **Wrong vs Correct**
-
-```go
-// 错误：只认 current 字段会把 legacy queue entry 反序列化成空 ID。
-type SyncRequest struct {
-	MonitoringInstanceID string `json:"monitoring_instance_id"`
-}
-```
-
-```go
-// 正确：在本地持久化 reader 里兼容 legacy 字段，内存和新写入仍使用 current 字段。
-if request.MonitoringInstanceID == "" {
-	request.MonitoringInstanceID = legacyNodeID
-}
-```
 
 ## Scenario: agent command / Docker 边界
 
@@ -331,9 +347,9 @@ if ok {
 - Linux 仅累加 user、nice、system、idle、iowait、irq、softirq、steal 八个基础计数；guest/guest_nice 已包含在 user/nice，额外字段只验证整数格式，不重复累计或扣除。至少七项，缺 steal 按零。
 - 首次、CPU 来源缺失/非法、基础字段数量变化、零/未递增时间、任一基础计数回退、累计加和溢出或总 delta 为零，整组 CPU 标记 false。有效区间 usage 是除 idle/iowait 外的 delta 比例，iowait/steal 使用同一八项 delta 分母；usage 包含 steal。
 - Center 的共同判定为 `(marker == nil || marker) && usage/iowait/steal 全部有限且在 [0,100]`。nil/SQL NULL 仅是 legacy 未声明，不代表已验证；false 占位零不能当成观测。有限越界 CPU 只规范化 marker=false，不拒绝整批 sync；JSON 非有限数的原入口拒绝规则不变。
-- 旧队列缺 marker 按 legacy 读取；新队列持久化和重放必须保留 false，无需新队列版本，不能删除 marker 或重发伪零。
-- 支持旧 Agent→新 Center、新 Agent→新 Center；新 Agent→旧 Center 不支持（严格未知字段解码）。先暂停 Agent 自动升级，再迁移并升级所有接收 sync 的 Center 和 Web，确认全部副本支持字段后才恢复 Agent 升级。
-- 验收 Center 也必须先升级。生产不能回滚到不认识字段的 Center；保留已升级数据库/Center并修复前滚，必要时暂停 Agent 升级，不能清理离线队列绕过兼容边界。
+- v2 queue 持久化和重放必须保留 CPU marker=false，不能删除 marker 或重发伪零；
+  历史 DB 中缺失 marker 的事实仍按上述 legacy 值语义读取。
+- 本节不提供混合 wire 版本支持；所有 Agent/Center 必须遵循上方 v2 能力检查、旧队列排空及协调升级屏障。
 
 ## Scenario: Agent one-command install contract
 
@@ -456,7 +472,7 @@ installerURL := publicBaseURL + agentapi.InstallScriptPath
 
 ## agent 端点（contract 层）
 
-`internal/center/http/handlers/agent.go:106-108` 的 `writeAgentAPIError` 是 agent 专用错误响应，**额外带 `agentapi.ErrorCode*`**：
+`internal/center/http/handlers/agent.go` 的 `writeAgentAPIError` 是 agent 专用错误响应，**额外带 `agentapi.ErrorCode*`**：
 
 ```go
 func writeAgentAPIError(w http.ResponseWriter, status int, code, message string) {
@@ -464,13 +480,18 @@ func writeAgentAPIError(w http.ResponseWriter, status int, code, message string)
 }
 ```
 
-agent handler 的判定与映射全在 `agent.go:46-94`，必须使用 `agentapi.ErrorCode*` 常量，不要造新字符串：
+agent handler 的判定与映射全在 `agent.go`，必须使用 `agentapi.ErrorCode*` 常量，不要造新字符串：
 
 | 领域 error | HTTP status | `agentapi.ErrorCode*` |
 |-----------|-------------|-----------------------|
 | `enrollment.ErrInvalidEnrollmentToken` | 401 | `ErrorCodeInvalidEnrollmentToken` |
 | `syncing.ErrInvalidSyncToken` | 401 | `ErrorCodeInvalidSyncToken` |
 | `syncing.ErrBindingNotAccepted` | 409 | `ErrorCodeBindingNotAccepted` |
+| `syncing.ErrSyncProtocolRequired` / header/body 版本不匹配 | 426 | `ErrorCodeSyncProtocolRequired` |
+| `syncing.ErrSyncProducerMismatch` | 409 | `ErrorCodeSyncProducerMismatch` |
+| `syncing.ErrSyncBatchRetired` | 409 | `ErrorCodeSyncBatchRetired` |
+| `syncing.ErrSyncBatchIdentityConflict` | 409 | `ErrorCodeSyncBatchIdentityConflict` |
+| `syncing.ErrInvalidReplayState` / `syncing.ErrHeartbeatRequired` | 400 | `ErrorCodeInvalidRequest` |
 | `monitoringinstances.ErrMonitoringInstanceNotFound` | 404 | `ErrorCodeMonitoringInstanceNotFound` |
 | `observations.ErrInvalidProbeObservation` | 400 | `ErrorCodeInvalidRequest` |
 | 任意其他 | 500 | `ErrorCodeInternalError` |
@@ -489,6 +510,7 @@ type RemoteError struct {
     StatusCode int
     Code       string  // 对应 agentapi.ErrorCode*
     Message    string
+    RetryAfter time.Duration // 仅 429/503 消费，范围 1～60 秒
 }
 ```
 
@@ -501,12 +523,13 @@ type RemoteError struct {
 
 ### 2. Signatures
 
-- typed remote cause：`*enroll.RemoteError{StatusCode, Code, Message}`。
-- 当前 queue authority：runtime 已加载的 `monitoring_instance_id`、`sync_token` 与本机 `fingerprint` 精确三元组。
+- typed remote cause：`*enroll.RemoteError{StatusCode, Code, Message, RetryAfter}`。
+- 当前 queue authority：runtime 已加载的 session/producer、`monitoring_instance_id`、`sync_token` 与本机 `fingerprint`；不能将显式旧 authority 的事实重编号为新 session。
 - 本地 policy result：`kind=remote|transport`、`action=discard|terminal|retry`、可选 allowlisted `status` / `agentapi.ErrorCode*`。
 - stale backlog durability primitive：`SyncQueue.DeleteMany(context.Context, []string) error`；生产 `FileStore` 必须在一次加锁、一次原子文件替换中删除整批 stale ID。
-- `FileStore` 返回给 runtime 的 entry ID 必须唯一：enqueue 遇到 heartbeat batch ID 冲突时分配确定性 suffix，读取 legacy/hostile 持久文件时也在排序后确定性规范化 duplicate/empty ID，保证单条 ack 不会删除尚未发送的同 ID fact。
-- 该规范化只作用于本地 `Entry.ID`，不得改写 carrier `SyncBatchID`。重复 SyncBatchID 仍是 center 的同一幂等事实，不能宣称 suffix 后会成为两个独立 center facts。大量同 ID 持久项的规范化、以及已有密集 `base-N` suffix 时的新 ID 分配都必须近似线性，不得为每个候选 suffix 重扫整个队列造成 O(n²) recovery。
+- `FileStore` 返回给 runtime 的本地 entry ID 必须唯一，保证单条 ack 不会删除尚未发送的同 ID fact。
+  本地 `Entry.ID` 不是 replay 权威；不得把本地 suffix 当作新 batch 身份。
+  Center 按 session/producer/seq/digest 判定重试，corrupt/legacy 文件按 v2 启动合同 fail closed。
 - wrapped policy / remote operation / pre-sync local operation / local queue error 必须提供 `Unwrap() error`，使调用方仍可通过 `errors.As` / `errors.Is` 取得 typed cause；其 `Error()` 只格式化稳定、脱敏字段。
 - 每轮调度上界：`maxBacklogSyncAttemptsPerRound = 2`；`Enqueue` 返回的本地 `Entry.ID` 是本轮 current carrier 的唯一身份。
 
@@ -514,15 +537,25 @@ type RemoteError struct {
 
 - 每个 tick 先 durable enqueue 当前请求，再以 exact 本地 `Entry.ID` 分离 backlog lane 与 current lane。backlog lane 仍按 `CreatedAt, ID` FIFO，但每轮最多尝试两个旧 entry；current entry 始终在本轮最后尝试，因此 fresh 不会被大积压无限饿死。该合同只放宽全局 FIFO，不放宽 backlog lane 内 FIFO。
 - 只有旧 entry 发送时才把其中事实标记 `is_backfilled=true`；不得用可碰撞的 carrier `SyncBatchID` 判断 current/backfill。每轮最多 `K+1=3` 次同步尝试。
-- 每个成功响应必须先完成对应 entry 的 durable `Delete`，再计入 ack 并应用 response plan。backlog plan 可依次应用，但 current response 最后应用，避免 exact-duplicate backlog 的空 plan 覆盖 fresh plan。
-- pending command result 与已 drain 的 IP-quality report 在 durable queue Enqueue 成功前必须继续保留于 runtime；compatibility no-queue 路径则只在 Sync 成功后清理。`FileStore.Enqueue` 若容量裁剪连 newest entry 自身也无法保留，必须返回 local durability error 且不改写原队列，不能假成功后让 runtime 清空这些 payload。对超过新 `MaxBytes` 的 legacy/hostile 大文件做 oldest-first byte pruning 时必须线性计算序列化大小，不能为每个待删 entry 反复 marshal 整个剩余队列。
+- 同步与注册的单进程预算分离：同步每 IP/全局均为 2400 次/一分钟滑动窗口；注册保持每 IP 120、全局 1000。30 台每 5 秒一次正常上报为 360 次/分，每轮两个补传加 current 为 1080 次/分。该预算不是硬件吞吐保证，也不是跨进程共享限流。`AgentRateLimitOptions` 每个零值/负值字段独立采用对应正默认值；只设置某个字段不能关闭其他限额。IP key 缓存仍上限 10000，同步并发仍上限 32，body 仍上限 4 MiB；token 语法在读取 body 之前检查，不新增认证数据库查询或限流环境变量。
+- 未受信任的 socket peer 提供的 XFF 一律忽略。空 `HOUFENG_TRUSTED_PROXIES` 会把代理/NAT 后请求计入同一 peer IP 预算；按实际 socket peer 配置精确可信代理 CIDR，不自动信任整个 Docker 网段或 `0.0.0.0/0`、`::/0`。真实共享 NAT 即使正确解析也仍共享 IP 预算。
+- 接收预算 429 与容量 503 都返回 `Retry-After: 5`。client 对这两个 status 解析正整数秒或合法 HTTP 日期，等待限制在 1～60 秒；缺失/非法值回退 5 秒。其他 status 不消费该 header，不改变既有 400 丢弃与其他 4xx 保留/终止策略。
+- runtime 收到 429/503 后只推迟 backlog lane：`backlogRetryNotBefore` 前不尝试历史项，不增加这些项的 attempts；每个原有 5 秒 tick 的 current 仍 durable enqueue 并发送。本轮 backlog 被拒绝也仍发送 current；current 被拒绝仍保留为后续 backlog。无额外 sleep/重试 goroutine，恢复后 FIFO、每轮最多两个历史项和 current 最后发送的规则不变。
+- 接收拒绝只调用 `store.NoteReceiverHealthFault(reason)`：立即递增内存 generation 并保存最新 allowlisted reason，不逐请求写 SQL 或日志。五秒 Observer 合并持久化；每个周期都出现故障时该周期保持 unhealthy，不能合并成健康。归档证据的 generation 差异即时失效；观察事务期间新到的 fault 不得在 commit 后被提前 acknowledge。其他持久化故障继续使用 `MarkReceiverHealthFault` 的现有立即落库路径；Observer 数据库异常日志最多每观察周期一次。
+- 只有核验 session/producer/seq/digest、disposition 合格的非零 batch ack 才能 durable `Delete`；
+  成功删除后再计入 ack 并应用 plan。`deferred` 保留队列且不应用 plan，seq=0 不构成 batch ack。
+  backlog plan 可依次应用，但 current response 最后应用，避免旧空 plan 覆盖 fresh plan。
+- pending command result 与已 drain 的 IP-quality report 在 durable Enqueue 成功前必须继续保留于 runtime；
+  没有 compatibility no-queue 路径。`FileStore.Enqueue` 若容量裁剪连 newest entry 自身也无法保留，
+  必须返回 local durability error 且不改写原队列，不能假成功后清空 payload。
+  byte cap 包含完整 envelope 元数据，oldest-first byte pruning 必须线性计算序列化大小。
 - 与当前 ID、token 或任一 carrier fingerprint 不一致，以及缺少 heartbeat/heartbeat batch ID 的持久项属于 stale authority：先用一次 `DeleteMany` durable 删除本轮可独立删除的全部 stale 项，成功后才按 stable reason 聚合写脱敏 discard 日志并继续。不得为默认 72 小时积压逐项重写/fsync 整个队列或逐项刷日志。
-- 生产 `FileStore.List` 在 runtime 分类前确定性规范化 duplicate/empty persisted ID，后续 Delete/DeleteMany/MarkAttempt 必须以相同映射重新读取，下一次 mutation 把规范化 ID 持久化。这样两个 retained current facts 即使原文件复用同一 ID，也能 oldest-first 分别发送/ack；第一次 Delete 不能删除第二个未发送 fact。对未实现此能力的其他 `SyncQueue`，runtime 仍以 collision guard 禁止 stale ID-wide delete 与 retained current ID 相撞。
+- v2 envelope 的 entry ID 必须等于其 canonical producer/sequence 身份，序号与顺序必须满足持久边界。duplicate/empty/noncanonical ID 或损坏 envelope 一律拒绝，保留原始字节；不规范化、不加 suffix、不重编号。非空旧数组必须恢复旧 Agent 排空后再升级；Runtime 对这一 allowlisted 原因提供静态排空提示，不暴露原始文件错误或内容。
 - 每次实际发送失败先 `MarkAttempt`；随后按下表决定 delete/return/continue。delete 或 mark 失败是本地 durability error，必须终止 runtime，不能记录虚假的“已丢弃”。
 - 所有 `FileStore` operation 在等待 path lock 后重新检查 `ctx.Err()`；mutation 在原子写之前再次检查。已取消的调用不得在锁等待后继续修改 durable queue。原子 write 一旦开始则允许完整结束，不能留下半写文件。
 - terminal error 由 runtime 返回给 `cmd/houfeng-agent`，只允许最外层入口记录一次；内部不得同时 log + return。
-- parent context 在 fingerprint、credential load、enrollment、non-queue client 或 queue boundary 取消时属于 clean shutdown；runtime 检查的是 `ctx.Err()`，不能把客户端内部独立产生的 `context.Canceled` 无条件吞掉。
-- queue/non-queue sync 与 enrollment 的日志和返回错误禁止包含 `RemoteError.Message`、原始 response body、token、Authorization、原始 fingerprint、request payload、persisted entry/instance ID 或 raw local queue cause。未知远端 code 不进入日志；wrapped cause 仅用于 `errors.As` / `errors.Is`，不能被主进程直接记录。
+- parent context 在 fingerprint、credential load、enrollment、health check 或 queue boundary 取消时属于 clean shutdown；runtime 检查 `ctx.Err()`，不能把客户端独立产生的 `context.Canceled` 无条件吞掉。
+- sync 与 enrollment 的日志和返回错误禁止包含 `RemoteError.Message`、原始 response body、token、Authorization、原始 fingerprint、request payload、persisted entry/instance ID 或 raw local queue cause。未知远端 code 不进入日志；wrapped cause 仅用于 `errors.As` / `errors.Is`，不能被主进程直接记录。
 - `agent enrolled` 只在 bound、sync token 非空且凭据 durable persistence 成功后记录，并且只含 allowlisted status/binding status，不记录 MonitoringInstance ID。runtime start/stop 的 `server_url` 只记录 parsed scheme + host origin，不能记录 userinfo、path、query 或 fragment。
 
 ### 4. Validation & Error Matrix
@@ -530,11 +563,14 @@ type RemoteError struct {
 | 条件 | Queue action | Runtime action |
 | --- | --- | --- |
 | stale authority / malformed local carrier | 一次 batch delete 成功后按 reason 聚合记 discard | 继续 flush |
-| stale ID 与 retained current ID 冲突 | 不做 stale ID-wide delete、不记 discard | 跳过 stale carrier，继续 current entry |
+| duplicate/empty/noncanonical persisted ID 或损坏 envelope | 原始字节不变，不做修复 | OpenSession fail closed，不发送 |
 | HTTP `400` + `ErrorCodeInvalidJSON` / `ErrorCodeInvalidRequest` | mark → delete 成功后记 discard；计入本轮 backlog 上限 | backlog lane 可继续；current discard 后结束本轮 |
-| `401` / `404` / `409` / `405` 或其他非 `429` 4xx | mark，保留 entry | 返回 sanitized terminal error |
-| backlog `429` / 其他 5xx / transport failure | mark，保留 entry | 停止本轮 backlog lane，但仍尝试 exact current；下一 tick 从同一 backlog head retry |
-| current `429` / 其他 5xx / transport failure | mark，保留 entry | 结束本轮；下一 tick 作为 backfilled backlog retry |
+| `deferred` 或 ack identity/digest 不匹配 | 保留 entry，不计成功 ack | 不应用 plan；deferred 可 retry，identity mismatch fail closed |
+| `401` / `404` / `409` / `405` / `426` 或其他非 `429` 4xx | mark，保留 entry | 返回 sanitized terminal error，不自动 reenroll/重编号 |
+| backlog `429` / `503` | mark，保留 entry | 停止本轮 backlog lane，仍尝试 exact current；Retry-After 到期后从同一 FIFO head retry |
+| current `429` / `503` | mark，保留 entry | 结束本轮；延后后续 backlog，原 tick 的 fresh current 继续发送 |
+| backlog 其他 5xx / transport failure | mark，保留 entry | 停止本轮 backlog lane，但仍尝试 exact current；下一 tick 从同一 backlog head retry |
+| current 其他 5xx / transport failure | mark，保留 entry | 结束本轮；下一 tick 作为 backfilled backlog retry |
 | typed remote status 0、2xx 或 3xx error | mark，保留 entry | 作为不明确 remote failure 下一 tick retry，不做推测性 delete |
 | 非 400 status 携带 `invalid_json` / `invalid_request` code | 以 status 为准，不 delete | 4xx terminal 或 5xx retry |
 | durable Mark/Delete 失败 | 保留可恢复状态 | 返回 local queue error |
@@ -543,10 +579,10 @@ type RemoteError struct {
 
 - Good：旧 instance/token/fingerprint 项位于队头；agent 删除它并在同一次 flush 送达当前心跳。
 - Good：五万条同一 stale reason 的历史积压只触发一次 atomic `DeleteMany` 与一条聚合日志，不产生 O(n²) rewrite/fsync 或日志洪泛。
-- Good：legacy queue 含多个 retained current facts；FileStore 暴露稳定唯一 ID，backlog lane 仍 FIFO；每两个旧 entry 后本轮 exact current 可以有界越过剩余 backlog，后续轮次继续排空旧项。
-- Good：含 command result/IP-quality report 的当前 request 首次 Enqueue 写盘失败；payload 留在内存，修复本地故障后同 Runtime 再次 Run 能将其 durable enqueue 并发送。
-- Base：backlog head 暂时 503；队头保留，停止本轮 backlog lane，但本轮 current 仍发送；下一 tick 该旧项继续作为 FIFO head retry。
-- Bad：按 carrier `SyncBatchID` 识别 current；本地 ID collision suffix 不会改 carrier ID，会把旧项误标 live 或把 fresh 误标 backfill。
+- Good：v2 queue 保留多个有独立 seq 的事实；backlog lane 仍 FIFO，每两个旧 entry 后 exact current 可有界越过积压，后续轮次继续排空。
+- Good：含辅助 payload 的 Enqueue 在 rename 前失败，payload 仍在内存；rename 后目录 fsync 结果不确定则 poison/终止，下一进程只从可见 envelope 恢复。
+- Base：backlog head 暂时 503；队头保留，停止本轮 backlog lane，但本轮 current 仍发送；Retry-After 到期前每轮只送 fresh current，到期后旧项继续作为 FIFO head retry。
+- Bad：用 caller 提供的 carrier `SyncBatchID` 代替 Enqueue 返回的 durable entry 身份决定 current/backfill，或给冲突 ID 加 suffix 试图绕过 v2 序号校验。
 - Bad：在 current 前遍历完整 backlog；65,536 条 durable queue 会让实时 heartbeat/host sample 长时间没有网络尝试。
 - Bad：看到任意 `invalid_request` 字符串就 delete，导致携带该 code 的 404/500 被误当作脏请求。
 - Bad：先 log “discarded” 再执行 delete；磁盘写失败时日志宣称的状态与 durable file 相反。
@@ -559,22 +595,24 @@ type RemoteError struct {
 - `TestRuntimeRejectedPersistedIdentityDoesNotBlockCurrentCredentialHeartbeat`：真实 `syncqueue.FileStore` 证明旧 authority 不阻塞当前心跳。
 - `TestRuntimeDiscardsPersistedQueueEntriesOutsideCurrentAuthority`：ID/token/各 carrier fingerprint 与最小 heartbeat identity 矩阵。
 - `TestRuntimeBulkDiscardsLargeStaleAuthorityBacklog`：大积压只调用一次 batch delete、按 reason 聚合日志，并立即送达当前心跳。
-- `TestRuntimeDoesNotBulkDeleteCurrentAuthorityEntrySharingStaleIdentifier`：persisted ID 冲突不能误删 retained current authority。
-- `TestRuntimePreservesRetainedCurrentFactsWithPersistedDuplicateIDs`、`TestFileStoreEntryIDAddsSuffixOnHeartbeatBatchCollision`、`TestFileStoreNormalizesPersistedDuplicateIDsBeforeDelete`：生产 FileStore 中 duplicate entry ID retained facts 可独立 ack，首个 Delete 不丢后续 fact；不把 entry suffix 当成新的 center batch identity。
-- `TestFileStoreNormalizesLargePersistedDuplicateIDBacklog`、`TestFileStoreEntryIDScalesAcrossDenseHeartbeatBatchSuffixes`：默认容量量级的 duplicate-ID 恢复与密集 suffix 分配不退化成 O(n²) 扫描。
+- `TestRuntimeRejectsNonemptyLegacyQueueWithoutChangingFacts`、`TestFileStoreRejectsLegacyEmptyCorruptAndIncompleteBytesUnchanged`、`TestFileStoreRejectsInvalidEnvelopesWithoutRepair`：非空旧队列及无效 v2 身份拒绝且原始字节不变，不提供 duplicate-ID 恢复分支。
+- `TestFileStoreAssignsCanonicalIdentityWithoutMutatingCaller`：持久化分配 canonical producer/sequence 身份，不修改调用方载荷。
 - `TestRuntimeRetainsCommandResultUntilQueueEnqueueSucceeds`、`TestRuntimeRetainsIPQualityReportUntilQueueEnqueueSucceeds`：辅助 payload 只在 durable transfer 后从 runtime buffer ack。
-- `TestFileStoreEnqueueFailsWithoutMutatingQueueWhenNewestEntryExceedsMaxBytes`、`TestFileStorePrunesLargeOversizedPersistedBacklogInLinearPass`、`TestFileStorePruneDoesNotWriteAnEmptyQueueBeyondMaxBytes`：newest entry 无法满足 MaxBytes 时 fail closed；legacy/hostile 超限积压线性裁剪；即使空数组编码也超过极小 cap 时不改写原文件。
+- `TestFileStoreEnvelopeBytesCanRejectEntryThatBareArrayWouldFit`、`TestRuntimeCapacityFailureRetainsPendingAuxiliaryPayloads` 等容量回归：newest 无法满足含 envelope 的 MaxBytes 时 fail closed；byte pruning 线性，极小 cap 不改写原文件或丢失辅助 payload。
 - `TestRuntimeDiscardsExplicitInvalidQueueEntryAndContinues`：仅 HTTP 400 + 两个稳定 invalid code 可 discard。
 - `TestRuntimeCurrentAuthorityPermanentRemoteErrorsAreTerminalAndSanitized`：永久 4xx 保留 entry、只返回一次脱敏 terminal evidence，并覆盖 status/code precedence。
 - `TestRuntimeLogsDiscardOnlyAfterQueueDeleteSucceeds`：stale/poison delete 失败时没有虚假 discard 日志。
 - `TestRuntimeTransientQueueFailuresRemainRetryableAndBackfilled`：status 0/2xx/3xx、429/5xx/transport 保留、重试与 secret-bearing cause 不泄露。
 - `TestRuntimeBoundsReplayBeforeCurrentDurableRequest`、`TestRuntimeReplaysBacklogFIFOAcrossFreshInterleaving`：fresh 前最多两个旧尝试，且 backlog lane 跨轮保持 FIFO 并最终排空。
 - `TestRuntimeRetryableBacklogHeadDoesNotBlockCurrentDurableRequest`、`TestRuntimeCurrentRequestRetryRemainsDurableAndBackfilled`：旧 retry 只阻断 backlog lane；失败 fresh durable 留存并在下一轮变为 backfill。
+- `TestRuntimeCongestionCooldownSkipsOnlyBacklog`、`TestRuntimeCooldownConsumesOnly429And503`：真实 FileStore 保留被拒绝 current/backlog，冷却期间 current 不间断，deadline 边界恢复最多两个 FIFO 补传；其他 status 不开启冷却。
+- `TestRetryAfterBoundsAndFallback`、`TestClientConsumesRetryAfterOnlyForCongestion`：秒/HTTP 日期、1～60 秒边界、缺失/非法回退及 status 优先级。
+- `TestAgentSyncSharedIPFleetBudget`、`TestAgentReceiverDefaultBudgetsAndWindow`、`TestAgentRateLimitOptionsNormalizeEachField`：30 session 同一 IP 的 360/1080 次每分、2400 同步及注册 120/1000 阈值、单字段配置不关闭其他预算、伪造 XFF 与滑动窗口恢复。
+- `TestReceiverHealthFaultStormCoalescesWithoutHealthyTicks`、`TestReceiverHealthFaultReasonsAreAllowlisted`、`TestReceiverHealthFaultDuringCommitIsNotAcknowledged`、`TestReceiverHealthDatabaseFailureRecoveryResetsContinuity`：拒绝风暴仅随观察 tick 写库，即时禁止归档、持续故障不恢复健康及数据库故障后重新开始观察。
 - `TestRuntimeCurrentResponsePlanWinsAfterBoundedReplay`：durable delete 后应用响应，且 current plan 最后生效。
 - `TestRuntimeBoundedReplayPreservesDurableAuxiliaryPayloads`、`TestRuntimeLocalEntryIDControlsCurrentAndBackfilledOnBatchIDCollision`：辅助载荷不丢，本地 entry ID 独立决定 live/backfill。
-- `TestFileStoreDeleteManyRechecksCancellationBeforeMutation`、`TestFileStoreRechecksCancellationAfterLockAcrossOperations`：锁前检查后发生的取消也不能继续 durable mutation。
-- `TestRuntimeTreatsParentCancellationAcrossBoundariesAsCleanShutdown`：fingerprint/credential/enrollment/non-queue client 边界的 parent cancellation 都干净退出。
-- `TestRuntimeSanitizesRemoteFailuresOutsideDurableQueue`、`TestRuntimeDoesNotExposePersistedQueueIdentifiersOrLocalCauses`：覆盖 enrollment/non-queue sync、queue 标识和 local cause 的主进程可见 Error/log 边界。
+- `TestFileStoreRechecksCancellationAfterLockAcrossOperations`：锁前检查后发生的取消也不能继续 durable mutation，包含 DeleteMany。
+- parent cancellation 与脱敏错误回归必须覆盖 fingerprint/credential/enrollment/health/queue boundaries；没有无持久队列直发兼容路径。
 - `TestRuntimeSanitizesLocalFailuresBeforeSyncLoop`：fingerprint、credential load、enrollment token 与 credential persistence 的原始 local cause 只可通过 unwrap 取得，不进入主进程可见 error string。
 - `TestRuntimeLogsEnrollmentOnlyAfterCredentialsPersist`、`TestRuntimeEnrollmentSuccessLogDoesNotExposePersistedIdentity`、`TestRuntimeDoesNotLogServerURLCredentials`：覆盖 success-after-durability、enrollment identity privacy 与仅 origin 的启动日志。
 
@@ -703,8 +741,8 @@ logger.Info("sync queue replay progress",
    - Defaults: `MaxEntries=65536`、`MaxAge=72h`、`MaxBytes=64MiB`。
    - `MaxBytes <= 0` uses the default; env override must be a positive integer.
    - Queue pruning order is oldest first after sorting by `CreatedAt` / ID, then max entries, then max bytes.
-   - Byte pruning must calculate serialized entry sizes in a linear pass; an oversized legacy/hostile queue must not repeatedly marshal every remaining tail once per evicted entry.
-   - If the newly enqueued entry cannot fit the configured byte cap even by itself, `Enqueue` must return a local durability error and leave the previously persisted queue unchanged; it must never report success after pruning away the new entry or write a file larger than the cap.
+   - Byte pruning must calculate serialized entry sizes in a linear pass; a large v2 queue must not repeatedly marshal every remaining tail once per evicted entry.
+   - The byte cap includes envelope metadata. If the newly enqueued entry cannot fit even by itself, `Enqueue` must return a local durability error and leave the previously persisted queue unchanged; it must never report success after pruning away the new entry or write a file larger than the cap.
    - Production runtime must pass `BufferMaxBytes` into `syncqueue.NewFileStore`; tests may set small caps and `SkipFsync: true`.
 
 4. **Validation & Error Matrix**

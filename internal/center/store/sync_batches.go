@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"houfeng/internal/center/monitoringinstances"
 	"houfeng/internal/center/observations"
 	"houfeng/internal/center/syncing"
+	"houfeng/internal/contracts/agentapi"
 )
 
 type syncBatchTx interface {
@@ -68,19 +70,15 @@ func (r *PostgresSyncRepository) nowUTC() time.Time {
 
 func (r *PostgresSyncRepository) ApplyBatch(ctx context.Context, batch syncing.Batch) (syncing.Result, error) {
 	result, err := r.applyBatch(ctx, batch)
-	if err != nil && r.receptionFault != nil && !errors.Is(err, syncing.ErrInvalidSyncToken) && !errors.Is(err, syncing.ErrBindingNotAccepted) && !errors.Is(err, syncing.ErrHeartbeatRequired) && !errors.Is(err, monitoringinstances.ErrMonitoringInstanceNotFound) && !errors.Is(err, observations.ErrInvalidProbeObservation) {
+	if err != nil && r.receptionFault != nil && !isSyncAdmissionError(err) {
 		r.receptionFault(ctx, err)
 	}
 	return result, err
 }
 
 func (r *PostgresSyncRepository) applyBatch(ctx context.Context, batch syncing.Batch) (syncing.Result, error) {
-	if len(batch.Heartbeats) == 0 && batch.LiveSignal == nil {
-		if len(batch.Observations.HostSamples) == 0 && len(batch.Observations.ProbeObservations) == 0 {
-			return syncing.Result{}, nil
-		}
-
-		return syncing.Result{}, syncing.ErrHeartbeatRequired
+	if err := syncing.ValidateBatchProtocol(batch); err != nil {
+		return syncing.Result{}, err
 	}
 
 	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -99,54 +97,63 @@ func (r *PostgresSyncRepository) applyBatch(ctx context.Context, batch syncing.B
 		return syncing.Result{}, err
 	}
 
-	receivedAt := r.nowUTC()
-	if err := recordTrustedLiveSignal(ctx, tx, batch, syncState, receivedAt); err != nil {
+	replay, err := acceptSyncReplayState(ctx, tx, batch)
+	if err != nil {
 		return syncing.Result{}, err
 	}
-	if syncState.SuppressWritesAndPlan() {
-		plan := agentplan.SyncPlan{ProbeAssignments: make([]agentplan.ProbeAssignment, 0)}
+	receivedAt := r.nowUTC()
+	liveAdvanced, err := recordTrustedLiveSignal(ctx, tx, batch, syncState, receivedAt)
+	if err != nil {
+		return syncing.Result{}, err
+	}
+	finish := func(disposition syncing.ResultDisposition, stop bool, plan agentplan.SyncPlan) (syncing.Result, error) {
 		if err := tx.Commit(ctx); err != nil {
-			return syncing.Result{}, fmt.Errorf("commit suppressed sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
+			return syncing.Result{}, fmt.Errorf("commit %s sync batch for monitoring instance %q: %w", disposition, batch.MonitoringInstanceID, err)
 		}
 		return syncing.Result{
-			StopCollection: true,
-			Disposition:    syncing.ResultDispositionSuppressed,
-			AcceptedAt:     receivedAt,
-			Plan:           plan,
+			SessionID: batch.SessionID, ProducerID: batch.ProducerID, BatchSequence: batch.BatchSequence,
+			BatchDigest: hex.EncodeToString(batch.PayloadDigest[:]), RetiredThrough: replay.retiredThrough,
+			Disposition: disposition, StopCollection: stop, AcceptedAt: receivedAt, Plan: plan,
+			LiveCollectionAllowed: liveAdvanced && syncState.Capability == "full" && !syncState.SuppressWritesAndPlan() &&
+				(disposition == syncing.ResultDispositionRecorded || (batch.BatchSequence == 0 && disposition == syncing.ResultDispositionSuppressed)),
 		}, nil
 	}
-	if len(batch.Heartbeats) == 0 {
+	emptyPlan := agentplan.SyncPlan{ProbeAssignments: make([]agentplan.ProbeAssignment, 0)}
+	if batch.BatchSequence > 0 {
+		var digest []byte
+		err := tx.QueryRow(ctx, `select payload_digest from agent_batch_receipts where session_id=$1 and batch_sequence=$2`,
+			batch.SessionID, batch.BatchSequence).Scan(&digest)
+		if err == nil {
+			if !equalSyncDigest(digest, batch.PayloadDigest) {
+				return syncing.Result{}, syncing.ErrSyncBatchIdentityConflict
+			}
+			return finish(syncing.ResultDispositionExactDuplicate, syncState.SuppressWritesAndPlan(), emptyPlan)
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return syncing.Result{}, fmt.Errorf("read sync batch receipt: %w", err)
+		}
+	}
+	if syncState.SuppressWritesAndPlan() {
+		return finish(syncing.ResultDispositionSuppressed, true, emptyPlan)
+	}
+	if batch.BatchSequence == 0 {
 		plan, err := buildSyncPlan(ctx, tx, batch.MonitoringInstanceID)
 		if err != nil {
 			return syncing.Result{}, err
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return syncing.Result{}, err
-		}
-		return syncing.Result{Disposition: syncing.ResultDispositionSuppressed, AcceptedAt: receivedAt, Plan: plan,
-			LiveCollectionAllowed: batch.LiveSignal != nil && syncState.Capability == "full"}, nil
+		return finish(syncing.ResultDispositionSuppressed, false, plan)
 	}
-
+	if batch.BatchSequence-replay.retiredThrough > agentapi.SyncReplayWindow {
+		return finish(syncing.ResultDispositionDeferred, false, emptyPlan)
+	}
 	observationBatch := batchWithReceivedAt(batch.Observations, receivedAt)
 	if err := validateProbeObservations(ctx, tx, observationBatch.ProbeObservations); err != nil {
 		return syncing.Result{}, err
 	}
-	recorded, err := recordAgentSyncBatch(ctx, tx, batch)
-	if err != nil {
-		return syncing.Result{}, err
+	if _, err := tx.Exec(ctx, `insert into agent_batch_receipts(session_id,batch_sequence,payload_digest) values($1,$2,$3)`,
+		batch.SessionID, batch.BatchSequence, batch.PayloadDigest[:]); err != nil {
+		return syncing.Result{}, fmt.Errorf("record sync batch receipt: %w", err)
 	}
-	if !recorded {
-		plan := agentplan.SyncPlan{ProbeAssignments: make([]agentplan.ProbeAssignment, 0)}
-		if err := tx.Commit(ctx); err != nil {
-			return syncing.Result{}, fmt.Errorf("commit duplicate sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
-		}
-		return syncing.Result{
-			Disposition: syncing.ResultDispositionExactDuplicate,
-			AcceptedAt:  receivedAt,
-			Plan:        plan,
-		}, nil
-	}
-
 	lastHeartbeatAt, err := recordHeartbeatBatch(ctx, tx, batch.MonitoringInstanceID, syncState.BindingFingerprint, receivedAt, batch.Heartbeats)
 	if err != nil {
 		return syncing.Result{}, err
@@ -157,7 +164,7 @@ func (r *PostgresSyncRepository) applyBatch(ctx context.Context, batch syncing.B
 	if err := recordIPQualityReports(ctx, tx, r.newIPQualityReportID, batch.IPQualityReports, receivedAt); err != nil {
 		return syncing.Result{}, err
 	}
-	nextLifecycleStatus := lifecycleStatusAfterAcceptedSync(syncState.LifecycleStatus, batch.LiveSignal != nil)
+	nextLifecycleStatus := lifecycleStatusAfterAcceptedSync(syncState.LifecycleStatus, liveAdvanced)
 	if err := advanceMonitoringInstanceSyncState(ctx, tx, batch.MonitoringInstanceID, lastHeartbeatAt, receivedAt, nextLifecycleStatus); err != nil {
 		return syncing.Result{}, err
 	}
@@ -179,36 +186,7 @@ func (r *PostgresSyncRepository) applyBatch(ctx context.Context, batch syncing.B
 	}
 	plan.PendingAction = pendingAction
 
-	if err := tx.Commit(ctx); err != nil {
-		return syncing.Result{}, fmt.Errorf("commit sync batch transaction for monitoring instance %q: %w", batch.MonitoringInstanceID, err)
-	}
-
-	return syncing.Result{
-		Disposition:           syncing.ResultDispositionRecorded,
-		AcceptedAt:            receivedAt,
-		LiveCollectionAllowed: batch.LiveSignal != nil && syncState.Capability == "full",
-		Plan:                  plan,
-	}, nil
-}
-
-func recordAgentSyncBatch(ctx context.Context, tx syncBatchTx, batch syncing.Batch) (bool, error) {
-	// Keep this targetless so the runtime role remains INSERT-only on agent_sync_batches.
-	tag, err := tx.Exec(ctx, `
-		insert into agent_sync_batches (
-			monitoring_instance_id,
-			sync_batch_id
-		) values (
-			$1,
-			$2
-		)
-		on conflict do nothing`,
-		batch.MonitoringInstanceID,
-		batch.Heartbeats[0].SyncBatchID,
-	)
-	if err != nil {
-		return false, fmt.Errorf("record agent sync batch %q for monitoring instance %q: %w", batch.Heartbeats[0].SyncBatchID, batch.MonitoringInstanceID, err)
-	}
-	return tag.RowsAffected() > 0, nil
+	return finish(syncing.ResultDispositionRecorded, false, plan)
 }
 
 func recordIPQualityReports(ctx context.Context, tx syncBatchTx, newReportID func() (string, error), reports []ipquality.ReportWrite, receivedAt time.Time) error {
@@ -271,7 +249,7 @@ func (r *PostgresSyncRepository) validateAcceptedSyncBatch(ctx context.Context, 
 		join monitoring_agent_sessions s on s.monitoring_instance_id=mi.monitoring_instance_id
 		join vps_assets v on v.vps_id=mi.vps_id
 		where mi.monitoring_instance_id = $1 and s.session_id=$2
-		for update of mi,s`,
+		for no key update of mi,s`,
 		batch.MonitoringInstanceID, batch.SessionID,
 	).Scan(&bindingStatus, &bindingFingerprint, &storedSyncTokenHash, &lifecycleStatus, &monitoringStatus, &archived, &capability, &vpsID, &vpsArchivedAt); errors.Is(err, pgx.ErrNoRows) {
 		return acceptedSyncBatchState{}, syncing.ErrInvalidSyncToken

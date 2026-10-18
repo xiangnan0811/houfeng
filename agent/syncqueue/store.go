@@ -1,15 +1,24 @@
+// Package syncqueue persists the agent's replay authority and bounded FIFO.
+// A queue must be opened for an explicit session before use. Its separate lock
+// inode is held until Close, including while queue snapshots are atomically replaced.
 package syncqueue
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
+
+	"github.com/google/uuid"
 
 	"houfeng/internal/contracts/agentapi"
 )
@@ -20,18 +29,22 @@ const (
 	defaultMaxBytes   = 64 * 1024 * 1024
 )
 
-var errEntryExceedsCapacity = errors.New("sync queue entry exceeds configured capacity")
+var (
+	errEntryExceedsCapacity = errors.New("sync queue entry exceeds configured capacity")
+	// ErrLegacyQueueNotDrained requires an explicit old-agent drain before
+	// protocol migration. Callers may expose static recovery guidance for it.
+	ErrLegacyQueueNotDrained = errors.New("nonempty legacy sync queue: restore the previous agent and drain it before upgrading")
+	// ErrAmbiguousDurability means rename committed but directory fsync failed.
+	// The visible snapshot must not be rolled back or reused through this store.
+	// Close it and recover with a new FileStore and OpenSession.
+	ErrAmbiguousDurability = errors.New("sync queue durability is ambiguous; reopen with a fresh store")
+)
 
 type Options struct {
 	MaxEntries int
 	MaxAge     time.Duration
 	MaxBytes   int
-	// SkipFsync, when true, skips the file.Sync() and syncDir() calls in
-	// writeEntries. fsync provides crash durability — losing a queue file's
-	// last write on power loss. Tests that exercise runtime retry/restart
-	// logic on tight timing budgets do not need disk durability and would
-	// otherwise be dominated by macOS APFS fsync latency (10-30ms each).
-	// Production callers MUST leave this false.
+	// SkipFsync is for tests only. Production must retain crash durability.
 	SkipFsync bool
 }
 
@@ -42,51 +55,54 @@ type Entry struct {
 	Request   agentapi.SyncRequest `json:"request"`
 }
 
-type storedEntry struct {
-	ID        string            `json:"id"`
-	CreatedAt time.Time         `json:"created_at"`
-	Attempts  int               `json:"attempts"`
-	Request   storedSyncRequest `json:"request"`
-}
-
-type storedSyncRequest struct {
-	agentapi.SyncRequest
-	LegacyNodeID string `json:"node_id"`
-}
-
-func (r *storedSyncRequest) UnmarshalJSON(payload []byte) error {
-	type syncRequestAlias agentapi.SyncRequest
+func (entry *Entry) UnmarshalJSON(payload []byte) error {
 	var stored struct {
-		syncRequestAlias
-		LegacyNodeID string `json:"node_id"`
+		ID        *string               `json:"id"`
+		CreatedAt *time.Time            `json:"created_at"`
+		Attempts  *int                  `json:"attempts"`
+		Request   *agentapi.SyncRequest `json:"request"`
 	}
-	if err := json.Unmarshal(payload, &stored); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&stored); err != nil {
 		return err
 	}
-	r.SyncRequest = agentapi.SyncRequest(stored.syncRequestAlias)
-	if r.MonitoringInstanceID == "" {
-		r.MonitoringInstanceID = stored.LegacyNodeID
+	if stored.ID == nil || stored.CreatedAt == nil || stored.Attempts == nil || stored.Request == nil {
+		return errors.New("incomplete sync queue entry")
 	}
-	r.LegacyNodeID = stored.LegacyNodeID
+	*entry = Entry{ID: *stored.ID, CreatedAt: *stored.CreatedAt, Attempts: *stored.Attempts, Request: *stored.Request}
 	return nil
 }
 
-type FileStore struct {
-	path string
-	opts Options
-	now  func() time.Time
-	mu   *sync.Mutex
+type ReplayState struct {
+	SessionID        string
+	ProducerID       string
+	AllocatedThrough int64
+	RetiredThrough   int64
 }
 
-var fileStoreLocks sync.Map
+type envelope struct {
+	Version               int     `json:"version"`
+	SessionID             string  `json:"session_id"`
+	ProducerID            string  `json:"producer_id"`
+	LastAllocatedBatchSeq int64   `json:"last_allocated_batch_seq"`
+	RetiredBatchFloor     int64   `json:"retired_batch_floor"`
+	LiveReservedThrough   int64   `json:"live_reserved_through"`
+	Entries               []Entry `json:"entries"`
+}
 
-func lockForPath(path string) *sync.Mutex {
-	key := filepath.Clean(path)
-	if abs, err := filepath.Abs(key); err == nil {
-		key = abs
-	}
-	lock, _ := fileStoreLocks.LoadOrStore(key, &sync.Mutex{})
-	return lock.(*sync.Mutex)
+type FileStore struct {
+	path    string
+	opts    Options
+	now     func() time.Time
+	mu      sync.Mutex
+	lock    *os.File
+	session string
+	poison  error
+	// Per-store hooks keep fault injection independent of other queues.
+	rename   func(string, string) error
+	syncFile func(*os.File) error
+	syncDir  func(string) error
 }
 
 func NewFileStore(path string, opts Options) *FileStore {
@@ -99,317 +115,517 @@ func NewFileStore(path string, opts Options) *FileStore {
 	if opts.MaxBytes <= 0 {
 		opts.MaxBytes = defaultMaxBytes
 	}
-	return &FileStore{
-		path: path,
-		opts: opts,
-		now:  func() time.Time { return time.Now().UTC() },
-		mu:   lockForPath(path),
-	}
+	return &FileStore{path: path, opts: opts, now: func() time.Time { return time.Now().UTC() }, rename: os.Rename, syncFile: (*os.File).Sync, syncDir: syncDirectory}
 }
 
 func (s *FileStore) SetNowForTest(now func() time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if now == nil {
-		s.now = func() time.Time { return time.Now().UTC() }
-		return
+		now = func() time.Time { return time.Now().UTC() }
 	}
 	s.now = now
 }
 
-func (s *FileStore) Enqueue(ctx context.Context, request agentapi.SyncRequest) (string, error) {
-	request.LiveSignal = nil
-	if err := ctx.Err(); err != nil {
-		return "", err
-	}
+// OpenSession validates existing bytes before writing anything. Only a missing
+// file or an empty legacy array can bootstrap. An explicit session change first
+// durably retires the old authority's entries, then initializes a new producer.
+func (s *FileStore) OpenSession(ctx context.Context, session string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.poison != nil {
+		return s.poison
+	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if session == "" {
+		return errors.New("sync queue session is required")
+	}
+	if s.lock != nil {
+		if session == s.session {
+			_, err := s.readEnvelope()
+			return err
+		}
+		return errors.New("close sync queue before changing session")
+	}
+	dir := filepath.Dir(s.path)
+	if err := ensurePrivateDir(dir, s.syncDir); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(s.path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := lock.Chmod(0o600); err != nil {
+		_ = lock.Close()
+		return err
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lock.Close()
+		return fmt.Errorf("lock sync queue: %w", err)
+	}
+	s.lock = lock
+	opened := false
+	defer func() {
+		if !opened {
+			_ = s.releaseLock()
+		}
+	}()
+	payload, err := os.ReadFile(s.path)
+	missing := errors.Is(err, os.ErrNotExist)
+	if err != nil && !missing {
+		return err
+	}
+	bootstrap := missing
+	var state envelope
+	if !missing {
+		trimmed := bytes.TrimSpace(payload)
+		if len(trimmed) > 0 && trimmed[0] == '[' {
+			var legacy []json.RawMessage
+			if err := json.Unmarshal(trimmed, &legacy); err != nil {
+				return fmt.Errorf("invalid legacy sync queue: %w", err)
+			}
+			if len(legacy) != 0 {
+				return ErrLegacyQueueNotDrained
+			}
+			bootstrap = true
+		} else {
+			state, err = decodeEnvelope(payload)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	if !bootstrap && state.SessionID != session {
+		state.Entries = []Entry{}
+		state.RetiredBatchFloor = state.LastAllocatedBatchSeq
+		if err := s.writeEnvelope(ctx, state); err != nil {
+			return err
+		}
+		bootstrap = true
+	}
+	if bootstrap {
+		producer, err := uuid.NewRandom()
+		if err != nil {
+			return err
+		}
+		state = envelope{Version: 2, SessionID: session, ProducerID: producer.String(), Entries: []Entry{}}
+		if err := s.writeEnvelope(ctx, state); err != nil {
+			return err
+		}
+	}
+	s.session = session
+	opened = true
+	return nil
+}
+
+func (s *FileStore) releaseLock() error {
+	if s.lock == nil {
+		return nil
+	}
+	unlockErr := syscall.Flock(int(s.lock.Fd()), syscall.LOCK_UN)
+	closeErr := s.lock.Close()
+	s.lock = nil
+	s.session = ""
+	return errors.Join(unlockErr, closeErr)
+}
+
+func (s *FileStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return errors.Join(s.poison, s.releaseLock())
+}
+
+func (s *FileStore) ready(ctx context.Context) error {
+	if s.poison != nil {
+		return s.poison
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.lock == nil {
+		return errors.New("sync queue requires OpenSession")
+	}
+	return nil
+}
+
+func (s *FileStore) ReplayState(ctx context.Context) (ReplayState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ready(ctx); err != nil {
+		return ReplayState{}, err
+	}
+	state, err := s.readEnvelope()
+	if err != nil {
+		return ReplayState{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return ReplayState{}, err
+	}
+	return ReplayState{SessionID: state.SessionID, ProducerID: state.ProducerID, AllocatedThrough: state.LastAllocatedBatchSeq, RetiredThrough: state.RetiredBatchFloor}, nil
+}
+
+func (s *FileStore) ReserveLiveSequences(ctx context.Context, count int64) (int64, int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ready(ctx); err != nil {
+		return 0, 0, err
+	}
+	if count != agentapi.LiveSequenceReservation {
+		return 0, 0, errors.New("live sequence reservation must contain 1024 sequences")
+	}
+	state, err := s.readEnvelope()
+	if err != nil {
+		return 0, 0, err
+	}
+	if state.LiveReservedThrough > math.MaxInt64-count {
+		return 0, 0, errors.New("live sequence overflow")
+	}
+	first := state.LiveReservedThrough + 1
+	state.LiveReservedThrough += count
+	if err := s.writeEnvelope(ctx, state); err != nil {
+		return 0, 0, err
+	}
+	return first, state.LiveReservedThrough, nil
+}
+
+func (s *FileStore) Enqueue(ctx context.Context, request agentapi.SyncRequest) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.ready(ctx); err != nil {
 		return "", err
 	}
-	entries, err := s.readEntries()
+	state, err := s.readEnvelope()
 	if err != nil {
 		return "", err
 	}
-	now := s.now()
-	createdAt := now
-	if len(entries) > 0 {
-		last := entries[len(entries)-1].CreatedAt
-		if !createdAt.After(last) {
-			createdAt = last.Add(time.Nanosecond)
-		}
+	if request.SessionID != state.SessionID {
+		return "", errors.New("sync queue request session mismatch")
 	}
-	id := entryIDForRequest(request, now, entries)
-	entries = append(entries, Entry{
-		ID:        id,
-		CreatedAt: createdAt,
-		Request:   cloneRequest(request),
-	})
-	entries = s.pruneEntries(entries)
-	if !entryIDExists(entries, id) {
-		return "", errEntryExceedsCapacity
+	if state.LastAllocatedBatchSeq == math.MaxInt64 {
+		return "", errors.New("batch sequence overflow")
 	}
-	if err := ctx.Err(); err != nil {
+	request = cloneRequest(request)
+	request.LiveSignal = nil
+	state.LastAllocatedBatchSeq++
+	request.ProtocolRevision = agentapi.SyncProtocolRevision
+	request.ProducerID = state.ProducerID
+	request.BatchSequence = state.LastAllocatedBatchSeq
+	request.AllocatedThrough = state.LastAllocatedBatchSeq
+	request.RetiredThrough = state.RetiredBatchFloor
+	id := state.ProducerID + ":" + strconv.FormatInt(request.BatchSequence, 10)
+	setBatchIdentity(&request, id)
+	createdAt := s.now()
+	if len(state.Entries) > 0 && !createdAt.After(state.Entries[len(state.Entries)-1].CreatedAt) {
+		createdAt = state.Entries[len(state.Entries)-1].CreatedAt.Add(time.Nanosecond)
+	}
+	state.Entries = append(state.Entries, Entry{ID: id, CreatedAt: createdAt, Request: request})
+	if err := s.pruneEnvelope(&state); err != nil {
 		return "", err
 	}
-	if err := s.writeEntries(entries); err != nil {
+	if len(state.Entries) == 0 || state.Entries[len(state.Entries)-1].ID != id {
+		return "", errEntryExceedsCapacity
+	}
+	if err := s.writeEnvelope(ctx, state); err != nil {
 		return "", err
 	}
 	return id, nil
 }
 
-func (s *FileStore) List(ctx context.Context) ([]Entry, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
+func setBatchIdentity(request *agentapi.SyncRequest, id string) {
+	for i := range request.Heartbeats {
+		request.Heartbeats[i].SyncBatchID = id
 	}
+	for i := range request.HostSamples {
+		request.HostSamples[i].SyncBatchID = id
+	}
+	for i := range request.ProbeObservations {
+		request.ProbeObservations[i].SyncBatchID = id
+	}
+	for i := range request.IPQualityReports {
+		request.IPQualityReports[i].SyncBatchID = id
+	}
+}
+
+func (s *FileStore) List(ctx context.Context) ([]Entry, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
+	if err := s.ready(ctx); err != nil {
 		return nil, err
 	}
-	entries, err := s.readEntries()
+	state, err := s.readEnvelope()
 	if err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	sortEntries(entries)
-	out := make([]Entry, len(entries))
-	for i, entry := range entries {
-		out[i] = Entry{
-			ID:        entry.ID,
-			CreatedAt: entry.CreatedAt,
-			Attempts:  entry.Attempts,
-			Request:   cloneRequest(entry.Request),
-		}
-	}
-	return out, nil
+	return state.Entries, nil
 }
 
 func (s *FileStore) Delete(ctx context.Context, id string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	entries, err := s.readEntries()
-	if err != nil {
-		return err
-	}
-	filtered := entries[:0]
-	for _, entry := range entries {
-		if entry.ID != id {
-			filtered = append(filtered, entry)
-		}
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return s.writeEntries(filtered)
+	return s.DeleteMany(ctx, []string{id})
 }
 
 func (s *FileStore) DeleteMany(ctx context.Context, ids []string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	entries, err := s.readEntries()
-	if err != nil {
-		return err
-	}
-	deleted := make(map[string]struct{}, len(ids))
-	for _, id := range ids {
-		deleted[id] = struct{}{}
-	}
-	filtered := entries[:0]
-	for _, entry := range entries {
-		if _, ok := deleted[entry.ID]; !ok {
-			filtered = append(filtered, entry)
+	return s.mutate(ctx, func(state *envelope) error {
+		deleted := make(map[string]struct{}, len(ids))
+		for _, id := range ids {
+			deleted[id] = struct{}{}
 		}
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return s.writeEntries(filtered)
+		kept := state.Entries[:0]
+		for _, entry := range state.Entries {
+			if _, remove := deleted[entry.ID]; !remove {
+				kept = append(kept, entry)
+			}
+		}
+		state.Entries = kept
+		advanceFloor(state)
+		return nil
+	})
 }
 
 func (s *FileStore) MarkAttempt(ctx context.Context, id string) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	entries, err := s.readEntries()
-	if err != nil {
-		return err
-	}
-	for i := range entries {
-		if entries[i].ID == id {
-			entries[i].Attempts++
-			break
+	return s.mutate(ctx, func(state *envelope) error {
+		for i := range state.Entries {
+			if state.Entries[i].ID == id {
+				if state.Entries[i].Attempts == math.MaxInt {
+					return errors.New("sync queue attempt count overflow")
+				}
+				state.Entries[i].Attempts++
+				break
+			}
 		}
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	return s.writeEntries(entries)
+		return nil
+	})
 }
 
 func (s *FileStore) Prune(ctx context.Context) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+	return s.mutate(ctx, s.pruneEnvelope)
+}
+
+func (s *FileStore) mutate(ctx context.Context, mutation func(*envelope) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := ctx.Err(); err != nil {
+	if err := s.ready(ctx); err != nil {
 		return err
 	}
-	entries, err := s.readEntries()
+	state, err := s.readEnvelope()
 	if err != nil {
 		return err
 	}
-	entries = s.pruneEntries(entries)
-	if err := ctx.Err(); err != nil {
+	if err := mutation(&state); err != nil {
 		return err
 	}
-	return s.writeEntries(entries)
+	return s.writeEnvelope(ctx, state)
 }
 
-func WithBackfilledFacts(request agentapi.SyncRequest, backfilled bool) agentapi.SyncRequest {
-	cloned := cloneRequest(request)
-	cloned.LiveSignal = nil
-	for i := range cloned.Heartbeats {
-		cloned.Heartbeats[i].IsBackfilled = backfilled
+func advanceFloor(state *envelope) {
+	floor := state.LastAllocatedBatchSeq
+	if len(state.Entries) > 0 {
+		floor = state.Entries[0].Request.BatchSequence - 1
 	}
-	for i := range cloned.HostSamples {
-		cloned.HostSamples[i].IsBackfilled = backfilled
+	if floor > state.RetiredBatchFloor {
+		state.RetiredBatchFloor = floor
 	}
-	for i := range cloned.ProbeObservations {
-		cloned.ProbeObservations[i].IsBackfilled = backfilled
-	}
-	for i := range cloned.IPQualityReports {
-		cloned.IPQualityReports[i].IsBackfilled = backfilled
-	}
-	return cloned
 }
 
-func (s *FileStore) pruneEntries(entries []Entry) []Entry {
-	if len(entries) == 0 {
-		return entries
-	}
-	sortEntries(entries)
+// Measure entry payloads once; account for envelope fields (including the
+// changing floor's decimal width) as oldest entries are removed in a linear pass.
+func (s *FileStore) pruneEnvelope(state *envelope) error {
 	cutoff := s.now().Add(-s.opts.MaxAge)
-	pruned := entries[:0]
-	for _, entry := range entries {
-		if entry.CreatedAt.Before(cutoff) {
-			continue
-		}
-		pruned = append(pruned, entry)
+	first := 0
+	for first < len(state.Entries) && state.Entries[first].CreatedAt.Before(cutoff) {
+		first++
 	}
-	if len(pruned) > s.opts.MaxEntries {
-		pruned = pruned[len(pruned)-s.opts.MaxEntries:]
+	if len(state.Entries)-first > s.opts.MaxEntries {
+		first = len(state.Entries) - s.opts.MaxEntries
 	}
-	pruned = pruneEntriesByBytes(pruned, s.opts.MaxBytes)
-	result := make([]Entry, len(pruned))
-	copy(result, pruned)
-	return result
-}
-
-func pruneEntriesByBytes(entries []Entry, maxBytes int) []Entry {
-	if len(entries) == 0 {
-		return entries
-	}
-	encodedSizes := make([]int, len(entries))
-	totalBytes := len(entries) + 1 // brackets plus one comma between adjacent entries
-	for i, entry := range entries {
+	state.Entries = state.Entries[first:]
+	sizes := make([]int, len(state.Entries))
+	total := 0
+	for i, entry := range state.Entries {
 		payload, err := json.Marshal(entry)
 		if err != nil {
-			return entries
-		}
-		encodedSizes[i] = len(payload)
-		totalBytes += len(payload)
-	}
-	firstRetained := 0
-	remaining := len(entries)
-	for firstRetained < len(entries) && totalBytes > maxBytes {
-		totalBytes -= encodedSizes[firstRetained]
-		if remaining > 1 {
-			totalBytes--
-		}
-		firstRetained++
-		remaining--
-	}
-	return entries[firstRetained:]
-}
-
-func (s *FileStore) readEntries() ([]Entry, error) {
-	payload, err := os.ReadFile(s.path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return []Entry{}, nil
-		}
-		return nil, err
-	}
-	if len(payload) == 0 {
-		return []Entry{}, nil
-	}
-	var storedEntries []storedEntry
-	if err := json.Unmarshal(payload, &storedEntries); err != nil {
-		return nil, err
-	}
-	entries := make([]Entry, len(storedEntries))
-	for i, entry := range storedEntries {
-		entries[i] = Entry{
-			ID:        entry.ID,
-			CreatedAt: entry.CreatedAt,
-			Attempts:  entry.Attempts,
-			Request:   agentapi.SyncRequest(entry.Request.SyncRequest),
-		}
-	}
-	sortEntries(entries)
-	return entries, nil
-}
-
-func (s *FileStore) writeEntries(entries []Entry) error {
-	dir := filepath.Dir(s.path)
-	if dir != "." {
-		if err := ensurePrivateDir(dir); err != nil {
 			return err
 		}
+		sizes[i] = len(payload)
+		total += len(payload)
 	}
-	sortEntries(entries)
-	payload, err := json.Marshal(entries)
+	for {
+		advanceFloor(state)
+		metadata := *state
+		metadata.Entries = []Entry{}
+		payload, err := json.Marshal(metadata)
+		if err != nil {
+			return err
+		}
+		commas := max(0, len(state.Entries)-1)
+		if len(payload)+total+commas <= s.opts.MaxBytes {
+			return nil
+		}
+		if len(state.Entries) == 0 {
+			return errEntryExceedsCapacity
+		}
+		total -= sizes[0]
+		sizes = sizes[1:]
+		state.Entries = state.Entries[1:]
+	}
+}
+
+func (s *FileStore) readEnvelope() (envelope, error) {
+	payload, err := os.ReadFile(s.path)
+	if err != nil {
+		return envelope{}, err
+	}
+	state, err := decodeEnvelope(payload)
+	if err == nil && s.session != "" && state.SessionID != s.session {
+		return envelope{}, errors.New("sync queue session changed while open")
+	}
+	return state, err
+}
+
+func decodeEnvelope(payload []byte) (envelope, error) {
+	var state envelope
+	if err := rejectDuplicateKeys(json.NewDecoder(bytes.NewReader(payload))); err != nil {
+		return state, fmt.Errorf("invalid sync queue JSON: %w", err)
+	}
+	// Reject absent/null control fields instead of silently treating them as zero.
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return state, fmt.Errorf("invalid sync queue envelope: %w", err)
+	}
+	for _, field := range []string{"version", "session_id", "producer_id", "last_allocated_batch_seq", "retired_batch_floor", "live_reserved_through", "entries"} {
+		value, exists := fields[field]
+		if !exists || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return state, fmt.Errorf("sync queue envelope requires %s", field)
+		}
+	}
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&state); err != nil {
+		return state, fmt.Errorf("invalid sync queue envelope: %w", err)
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		return state, errors.New("trailing sync queue data")
+	}
+	if state.Version != 2 || state.SessionID == "" || !agentapi.ValidSyncProducerID(state.ProducerID) ||
+		state.LastAllocatedBatchSeq < 0 || state.RetiredBatchFloor < 0 || state.RetiredBatchFloor > state.LastAllocatedBatchSeq || state.LiveReservedThrough < 0 || state.Entries == nil {
+		return state, errors.New("invalid sync queue replay bounds")
+	}
+	previous := state.RetiredBatchFloor
+	var previousTime time.Time
+	for _, entry := range state.Entries {
+		r := entry.Request
+		identity := state.ProducerID + ":" + strconv.FormatInt(r.BatchSequence, 10)
+		if r.ProtocolRevision != agentapi.SyncProtocolRevision || r.SessionID != state.SessionID || r.ProducerID != state.ProducerID ||
+			r.BatchSequence <= previous || r.BatchSequence > state.LastAllocatedBatchSeq || r.AllocatedThrough < r.BatchSequence || r.AllocatedThrough > state.LastAllocatedBatchSeq ||
+			r.RetiredThrough < 0 || r.RetiredThrough >= r.BatchSequence || r.RetiredThrough > state.RetiredBatchFloor || r.LiveSignal != nil ||
+			entry.ID != identity || entry.CreatedAt.IsZero() || (!previousTime.IsZero() && !entry.CreatedAt.After(previousTime)) || entry.Attempts < 0 {
+			return state, errors.New("invalid sync queue entry identity or bounds")
+		}
+		if !batchIdentityMatches(r, identity) {
+			return state, errors.New("invalid sync queue fact identity")
+		}
+		previous = r.BatchSequence
+		previousTime = entry.CreatedAt
+	}
+	expectedFloor := state.LastAllocatedBatchSeq
+	if len(state.Entries) > 0 {
+		expectedFloor = state.Entries[0].Request.BatchSequence - 1
+	}
+	if state.RetiredBatchFloor != expectedFloor {
+		return state, errors.New("invalid sync queue retired floor")
+	}
+	return state, nil
+}
+
+// JSON duplicate keys must not silently replace replay authority or payload.
+func rejectDuplicateKeys(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, structured := token.(json.Delim)
+	if !structured {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := make(map[string]struct{})
+		for decoder.More() {
+			key, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			name, ok := key.(string)
+			if !ok {
+				return errors.New("invalid object key")
+			}
+			if _, duplicate := seen[name]; duplicate {
+				return fmt.Errorf("duplicate JSON key %q", name)
+			}
+			seen[name] = struct{}{}
+			if err := rejectDuplicateKeys(decoder); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for decoder.More() {
+			if err := rejectDuplicateKeys(decoder); err != nil {
+				return err
+			}
+		}
+	default:
+		return errors.New("unexpected JSON delimiter")
+	}
+	_, err = decoder.Token()
+	return err
+}
+
+func batchIdentityMatches(r agentapi.SyncRequest, id string) bool {
+	for _, fact := range r.Heartbeats {
+		if fact.SyncBatchID != id {
+			return false
+		}
+	}
+	for _, fact := range r.HostSamples {
+		if fact.SyncBatchID != id {
+			return false
+		}
+	}
+	for _, fact := range r.ProbeObservations {
+		if fact.SyncBatchID != id {
+			return false
+		}
+	}
+	for _, fact := range r.IPQualityReports {
+		if fact.SyncBatchID != id {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *FileStore) writeEnvelope(ctx context.Context, state envelope) error {
+	payload, err := json.Marshal(state)
 	if err != nil {
 		return err
 	}
 	if len(payload) > s.opts.MaxBytes {
 		return errEntryExceedsCapacity
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dir := filepath.Dir(s.path)
 	file, err := os.CreateTemp(dir, ".sync-buffer-*.tmp")
 	if err != nil {
 		return err
 	}
 	tmpPath := file.Name()
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmpPath)
-		}
-	}()
+	defer func() { _ = os.Remove(tmpPath) }()
 	if _, err := file.Write(payload); err != nil {
 		_ = file.Close()
 		return err
@@ -419,7 +635,7 @@ func (s *FileStore) writeEntries(entries []Entry) error {
 		return err
 	}
 	if !s.opts.SkipFsync {
-		if err := file.Sync(); err != nil {
+		if err := s.syncFile(file); err != nil {
 			_ = file.Close()
 			return err
 		}
@@ -427,49 +643,22 @@ func (s *FileStore) writeEntries(entries []Entry) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
-	cleanup = false
-	if s.opts.SkipFsync {
-		return nil
+	if err := s.rename(tmpPath, s.path); err != nil {
+		return err
 	}
-	return syncDir(dir)
-}
-
-func entryIDForRequest(request agentapi.SyncRequest, now time.Time, entries []Entry) string {
-	base := ""
-	if len(request.Heartbeats) > 0 && request.Heartbeats[0].SyncBatchID != "" {
-		base = request.Heartbeats[0].SyncBatchID
-	}
-	if base == "" {
-		base = now.UTC().Format(time.RFC3339Nano)
-	}
-	used := make(map[string]struct{}, len(entries))
-	for _, entry := range entries {
-		used[entry.ID] = struct{}{}
-	}
-	if _, exists := used[base]; !exists {
-		return base
-	}
-	for suffix := 1; ; suffix++ {
-		candidate := base + "-" + strconv.Itoa(suffix)
-		if _, exists := used[candidate]; !exists {
-			return candidate
+	if !s.opts.SkipFsync {
+		if err := s.syncDir(dir); err != nil {
+			s.poison = fmt.Errorf("%w: %v", ErrAmbiguousDurability, err)
+			return s.poison
 		}
 	}
+	return nil
 }
 
-func entryIDExists(entries []Entry, id string) bool {
-	for _, entry := range entries {
-		if entry.ID == id {
-			return true
-		}
-	}
-	return false
-}
-
-func ensurePrivateDir(dir string) error {
+func ensurePrivateDir(dir string, syncDir func(string) error) error {
 	created, err := missingDirs(dir)
 	if err != nil {
 		return err
@@ -482,8 +671,10 @@ func ensurePrivateDir(dir string) error {
 			return err
 		}
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
-		return err
+	if dir != "." {
+		if err := os.Chmod(dir, 0o700); err != nil {
+			return err
+		}
 	}
 	for _, createdDir := range created {
 		if err := syncDir(filepath.Dir(createdDir)); err != nil {
@@ -516,8 +707,6 @@ func missingDirs(dir string) ([]string, error) {
 	return missing, nil
 }
 
-var syncDir = syncDirectory
-
 func syncDirectory(dir string) error {
 	file, err := os.Open(dir)
 	if err != nil {
@@ -527,56 +716,22 @@ func syncDirectory(dir string) error {
 	return file.Sync()
 }
 
-func sortEntries(entries []Entry) {
-	sort.SliceStable(entries, func(i, j int) bool {
-		if entries[i].CreatedAt.Equal(entries[j].CreatedAt) {
-			return entries[i].ID < entries[j].ID
-		}
-		return entries[i].CreatedAt.Before(entries[j].CreatedAt)
-	})
-	normalizeEntryIDs(entries)
-}
-
-func normalizeEntryIDs(entries []Entry) {
-	reserved := make(map[string]struct{}, len(entries))
-	for _, entry := range entries {
-		if entry.ID != "" {
-			reserved[entry.ID] = struct{}{}
-		}
+func WithBackfilledFacts(request agentapi.SyncRequest, backfilled bool) agentapi.SyncRequest {
+	cloned := cloneRequest(request)
+	cloned.LiveSignal = nil
+	for i := range cloned.Heartbeats {
+		cloned.Heartbeats[i].IsBackfilled = backfilled
 	}
-	used := make(map[string]struct{}, len(entries))
-	nextSuffix := make(map[string]int)
-	for i := range entries {
-		id := entries[i].ID
-		if id != "" {
-			if _, duplicate := used[id]; !duplicate {
-				used[id] = struct{}{}
-				continue
-			}
-		}
-
-		base := id
-		if base == "" {
-			base = entries[i].CreatedAt.UTC().Format(time.RFC3339Nano)
-		}
-		suffix := nextSuffix[base]
-		if suffix < 1 {
-			suffix = 1
-		}
-		for ; ; suffix++ {
-			candidate := base + "-" + strconv.Itoa(suffix)
-			if _, exists := reserved[candidate]; exists {
-				continue
-			}
-			if _, exists := used[candidate]; exists {
-				continue
-			}
-			entries[i].ID = candidate
-			used[candidate] = struct{}{}
-			nextSuffix[base] = suffix + 1
-			break
-		}
+	for i := range cloned.HostSamples {
+		cloned.HostSamples[i].IsBackfilled = backfilled
 	}
+	for i := range cloned.ProbeObservations {
+		cloned.ProbeObservations[i].IsBackfilled = backfilled
+	}
+	for i := range cloned.IPQualityReports {
+		cloned.IPQualityReports[i].IsBackfilled = backfilled
+	}
+	return cloned
 }
 
 func cloneRequest(request agentapi.SyncRequest) agentapi.SyncRequest {

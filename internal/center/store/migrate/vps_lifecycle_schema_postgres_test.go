@@ -60,10 +60,14 @@ func TestPostgresIntegrationVPSLifecycleSchema(t *testing.T) {
 	if err := waitingTx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	execLifecycleSchemaSQL(t, ctx, runtime, `insert into agent_live_signals(session_id,signal_id) values ('session_lifecycle','signal_one')`)
-	assertLifecycleSchemaSQLState(t, ctx, runtime, "23505", `insert into agent_live_signals(session_id,signal_id) values ('session_lifecycle','signal_one')`)
+	execLifecycleSchemaSQL(t, ctx, runtime, `insert into agent_replay_states(session_id,producer_id,allocated_through,live_sequence_high) values ('session_lifecycle','00000000-0000-4000-8000-000000000067',1,1)`)
+	execLifecycleSchemaSQL(t, ctx, runtime, `insert into agent_batch_receipts(session_id,batch_sequence,payload_digest) values ('session_lifecycle',1,decode(repeat('ab',32),'hex'))`)
+	assertLifecycleSchemaSQLState(t, ctx, runtime, "23505", `insert into agent_batch_receipts(session_id,batch_sequence,payload_digest) values ('session_lifecycle',1,decode(repeat('ab',32),'hex'))`)
 	assertLifecycleSchemaSQLState(t, ctx, runtime, "42501", `delete from monitoring_agent_sessions where session_id='session_lifecycle'`)
-	assertLifecycleSchemaSQLState(t, ctx, runtime, "42501", `update agent_live_signals set received_at=now()`)
+	assertLifecycleSchemaSQLState(t, ctx, runtime, "42501", `update agent_batch_receipts set payload_digest=decode(repeat('cd',32),'hex')`)
+	assertLifecycleSchemaSQLState(t, ctx, runtime, "42501", `delete from agent_replay_states where session_id='session_lifecycle'`)
+	assertLifecycleSchemaSQLState(t, ctx, runtime, "23514", `delete from agent_batch_receipts where session_id='session_lifecycle'`)
+	execLifecycleSchemaSQL(t, ctx, runtime, `update agent_replay_states set retired_through=1 where session_id='session_lifecycle'`)
 	execLifecycleSchemaSQL(t, ctx, runtime, `insert into vps_followups(followup_id,vps_id,kind,dedupe_key,summary) values ('followup_one','vps_lifecycle_one','archived_online','session_lifecycle','Online')`)
 	assertLifecycleSchemaSQLState(t, ctx, runtime, "23505", `insert into vps_followups(followup_id,vps_id,kind,dedupe_key,summary) values ('followup_two','vps_lifecycle_one','archived_online','session_lifecycle','Online')`)
 	assertLifecycleSchemaSQLState(t, ctx, runtime, "23514", `update vps_followups set status='ignored' where followup_id='followup_one'`)

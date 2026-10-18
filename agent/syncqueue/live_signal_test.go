@@ -9,8 +9,12 @@ import (
 )
 
 func TestLiveSignalCannotEnterPersistentQueueOrBackfill(t *testing.T) {
-	request := agentapi.SyncRequest{LiveSignal: &agentapi.LiveSignal{ID: "live", Fingerprint: "fp"}, Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{SyncBatchID: "batch"}}}
+	request := agentapi.SyncRequest{SessionID: "session", LiveSignal: &agentapi.LiveSignal{Sequence: 1, Fingerprint: "fp"}, Heartbeats: []agentapi.MonitoringInstanceHeartbeat{{SyncBatchID: "batch"}}}
 	store := NewFileStore(filepath.Join(t.TempDir(), "queue.json"), Options{})
+	if err := store.OpenSession(context.Background(), "session"); err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
 	if _, err := store.Enqueue(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}

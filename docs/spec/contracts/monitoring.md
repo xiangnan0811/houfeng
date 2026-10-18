@@ -393,7 +393,7 @@ type commandAuditActorResponse struct {
 
 ### 2. Signatures
 
-- `syncing.ResultDisposition`：闭合值 `recorded | exact_duplicate | suppressed`；`Result` 保持既有 `AcceptedAt`、plan 与 pending action wire 语义。
+- `syncing.ResultDisposition`：闭合值 `recorded | exact_duplicate | suppressed | deferred`；v2 `Result` 同时携带 session/producer/sequence/digest/retired floor acknowledgement，详见 [Agent 同步合同](agent-sync.md)。
 - latest SQL ordering：`observed_at DESC, is_backfilled ASC, received_at DESC, stable_row_key DESC`；host/probe/heartbeat 稳定键为各自 `id`，IP-quality 为 `report_id`。
 - snapshot：`GetObjectRowVersion(ctx, ObjectType, objectID) (string, error)`，固定读取 monitoring instance 或 target 的 `xmin::text`。
 - mutation：`IncidentMutation.ExpectedObjectRowVersion string`；typed conflict 为 `incidents.ErrIncidentProjectionConflict`。
@@ -401,14 +401,14 @@ type commandAuditActorResponse struct {
 
 ### 3. Contracts
 
-- `agent_sync_batches` exact marker 继续阻止重复 raw append；只有 `exact_duplicate` 跳过 post-sync incident 处理。`recorded` 正常评估，`suppressed` 仍允许暂停/维护/退役/归档对象的行政恢复。
+- `agent_replay_states` 的持久退休 floor 与 `agent_batch_receipts` 有界 digest 收据共同阻止重复 raw append；只有 `recorded` 运行常规 post-sync incident 处理。`exact_duplicate`、`suppressed`、`deferred` 不重复评估；暂停/维护/退役/归档对象的行政恢复仍由生命周期操作和 incident sweep 收敛。超窗口 `deferred` 可以提交独立 live/control，但不写事实、执行命令或返回 plan。
 - 所有 current/latest consumer 必须优先事件时间，再 live-over-backfill、接收时间与稳定主键；Go normalizer 使用相同前三项的 stable sort，完全同值保留 SQL 稳定键顺序。历史 analytics 不得被误改为只保留 latest。
 - 每次 incident attempt 先读取 opaque object row version，再完整读取对象、active incidents、raw facts 与 settings；token 不解析、不排序、不持久化，也不进入日志、API 或 event payload。
 - writer guard token 不匹配时，在 active delete/upsert、event insert、summary update、notification append/dispatch 和 commit 之前返回 typed conflict；成功 mutation 才替换 active set、写 events、更新 object summary 并自然推进 `xmin`。
 - service 对首次 typed conflict 只做一次完整重读/重评；retry 时间使用 `max(originalTriggerTime, serviceNow)`。第二次 conflict 脱敏、60 秒按对象类型限频记录并安全 yield，已提交 sync response/plan 仍返回成功，由后续 sweep 收敛。
 - inactive object 且没有 previous active incident 时不写空 mutation，避免每轮无意义推进 `xmin`。对象在枚举后、fresh Get/row-version 读取前，或完整评估后、writer guard 前被删除，都必须通过稳定 missing-object classification 安全 yield；普通 repository error 与未分类 `pgx.ErrNoRows` 保持 `errors.Is` 并 fail closed。
 - notification dispatch/append 只在 mutation commit 成功后发生；CAS 不宣称外部 exactly-once，但 stale/duplicate mutation 不得主动增加 event 或 notification record。
-- 本合同不新增 schema revision。current convergence 对 previous exact-current + future migration 会在 DDL 前返回 rebuild-required；因此该类修复不得偷偷新增 successor migration、ACL fragment 或现场 GRANT。base monitoring instance/target 的既有 runtime table SELECT/UPDATE 足以完成 token guard 与 summary update，column ACL 必须仍为零。
+- incident row-version guard 本身不新增 schema revision；C80 的协议迁移是独立的已注册 exact successor，见 [APP 当前迁移合同](platform/app-acl-current.md)。未知 future migration 仍 fail closed，不能借 incident 修复偷偷新增 ACL 或现场 GRANT。base monitoring instance/target 的既有 runtime table SELECT/UPDATE 足以完成 token guard 与 summary update，column ACL 必须仍为零。
 
 ### 4. Validation & Error Matrix
 
@@ -417,7 +417,7 @@ type commandAuditActorResponse struct {
 | live/backfill 同 `observed_at` | live 胜出，不受 arrival order 影响 |
 | provenance 相同、`received_at` 不同 | 较新 received row 胜出；稳定键不能越级覆盖 |
 | exact same provenance/time | stable row key 决胜，结果确定性 |
-| exact duplicate sync | raw count、object row version、events、notifications 不变；post-sync skip |
+| exact duplicate sync | raw/events/notifications 不变，post-sync skip；独立的新 live sequence 仍可推进可信在线时间和对象 row version |
 | old mutation token 与 current `xmin` 不同 | typed conflict；零 incident/event/summary/notification 副作用 |
 | unrelated object UPDATE 推进 `xmin` | 安全 false conflict；完整重读后再评估，不盲重放旧 mutation |
 | 两个 writer 同持旧 token 并发 | object `FOR UPDATE` 串行化；先提交者成功，等待者比较新 token 后 conflict |
@@ -438,7 +438,7 @@ type commandAuditActorResponse struct {
 ### 6. Tests Required
 
 - strict PostgreSQL 16 actual-row test 必须覆盖 backfill-first/live-first 两种顺序，并对 host/probe/heartbeat agent-version/IP summary/IP latest report/asset decision consumer 证明 backfill、received-at、stable-key 三层独立区分力；不能只做 SQL substring/fake rows。
-- store/service tests 覆盖 `recorded/exact_duplicate/suppressed`，证明只有 exact duplicate skip，且 committed response/plan 不被 projection conflict 反转。
+- store/service tests 覆盖 `recorded/exact_duplicate/suppressed/deferred`，证明只有 recorded 执行常规 post-sync，且 committed response/plan 不被 projection conflict 反转。
 - incident writer unit tests 必须 trace guard 是事务第一条 DB op，并覆盖 match、mismatch、missing/empty/unsupported、零 DML/commit/token leakage。
 - strict direct-runtime PostgreSQL 16 CAS test 必须覆盖 monitoring instance 与 target：重叠 writer 在 object guard 上确定性等待、先提交/后 conflict；无关 runtime object UPDATE 的安全 conflict；active/summary/events/notification payload/records/token 在 stale attempt 前后守恒。owner 只 seed/read/assert，生产操作使用 direct runtime role。
 - service/store tests 覆盖一次 retry、第二次安全 yield/限频、fresh monotonic retry time、inactive empty no-op、枚举删除、writer-guard 删除、普通 DB/未分类 `pgx.ErrNoRows` 负控、notification-after-commit；direct-runtime PostgreSQL 删除窗口必须覆盖 MI/target 并证明对象/incident/event/notification 零副作用。

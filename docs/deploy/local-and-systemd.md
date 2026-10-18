@@ -128,7 +128,6 @@ HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=d
 HOUFENG_DATABASE_REQUIRE_TLS=false
 HOUFENG_PUBLIC_BASE_URL=https://center.example.com
 HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
-HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
 HOUFENG_SESSION_HMAC_KEY=replace-me-with-32-plus-random-bytes
@@ -158,6 +157,22 @@ HOUFENG_TELEGRAM_CHAT_ID=
 ```
 
 `HOUFENG_DATABASE_URL`, `HOUFENG_INITIAL_USERNAME`, an initial password source, and `HOUFENG_SESSION_HMAC_KEY` are required for center startup. Use `HOUFENG_INITIAL_PASSWORD_FILE` instead of `HOUFENG_INITIAL_PASSWORD` when the password is provided by a file or secret mount; the file value takes precedence. Use `HOUFENG_SESSION_HMAC_KEY_FILE` instead of `HOUFENG_SESSION_HMAC_KEY` when the session HMAC secret is provided by a file or secret mount; the file value takes precedence. The session HMAC secret must be at least 32 bytes and must stay stable across restarts; rotating it invalidates existing browser sessions and any agent enrollment/sync token hashes already migrated to the HMAC format. `HOUFENG_PUBLIC_BASE_URL` is optional for center startup, but required to generate one-command install commands and to enable production Host allowlisting. Set it to the externally reachable absolute `http(s)` URL that target agents can access, for example `https://center.example.com` or `http://203.0.113.10:8080`; it must not include query or fragment, and the center normalizes trailing slashes when generating commands. `HOUFENG_TRUSTED_PROXIES` is optional and should only list the exact reverse-proxy CIDRs that are allowed to supply forwarded client IP headers; `0.0.0.0/0` and `::/0` are rejected. `HOUFENG_DATABASE_REQUIRE_TLS=true` makes startup reject database URLs without `sslmode=require`, `sslmode=verify-ca`, or `sslmode=verify-full`; enable it for external/production PostgreSQL. `HOUFENG_PASSWORD_BCRYPT_COST` defaults to Go bcrypt's default cost and can be raised after benchmarking login and password-change latency on the target host. `HOUFENG_LOG_FILE` is optional; when set, center writes application logs to both stdout and the configured file, and startup fails if the file cannot be opened. The deployment Telegram default is disabled unless both Telegram values are set; the effective channel may still be page-overridden, inherited, or explicitly disabled in the settings singleton. Use `.env.example` as the full local variable inventory; the systemd snippets below are deployment-shaped examples and must include the required auth seed vars on first startup.
+
+Direct and systemd deployments should leave `HOUFENG_LOG_FILE` unset and use
+stdout/journald. The optional file API remains available, but its host must
+rotate that file separately; Docker logging options do not bound custom files.
+This setup does not change shared journald configuration.
+
+An empty `HOUFENG_TRUSTED_PROXIES` trusts no forwarded headers: requests behind
+a reverse proxy share the actual socket peer's IP budget. Sync allows 2400
+requests per IP and 2400 globally per sliding minute; enrollment remains 120
+per IP and 1000 globally. These are per-Center-process resource budgets, not a
+hardware throughput guarantee. Thirty Agents at the default five-second tick
+need 360 requests/minute, or up to 1080 with two historical replays per tick.
+The existing 32-inflight and 4 MiB sync body limits remain. A genuine shared NAT
+still shares an IP budget after forwarded headers are correctly configured.
+429 and capacity 503 responses include `Retry-After: 5`; Agents delay only
+historical replay (bounded to 1–60 seconds), not the next fresh five-second tick.
 
 `HOUFENG_TELEGRAM_BOT_TOKEN` and `HOUFENG_TELEGRAM_CHAT_ID` are deployment
 defaults, not a one-time import into the database. `HOUFENG_INCIDENT_SWEEP_INTERVAL`
@@ -315,10 +330,17 @@ In NPM create a Proxy Host with:
 - a valid certificate and **Force SSL** enabled.
 
 Set `HOUFENG_TRUSTED_PROXIES` only when forwarded client IPs are required, and
-then only to an exact observed proxy-source CIDR for the selected mode. Do not
-guess `127.0.0.0/8`; broad ranges such as `0.0.0.0/0` and `::/0` are rejected.
+then only to an exact **observed socket-peer source CIDR** for the selected mode.
+With an empty value, NPM's `X-Forwarded-For` is ignored and all proxied traffic
+shares NPM's actual peer-IP budget. Inspect the source seen by Center rather
+than assuming that NPM's configured upstream address is also its source.
+Do not automatically trust an entire Docker subnet or guess `127.0.0.0/8`;
+broad ranges such as `0.0.0.0/0` and `::/0` are rejected. Reconfirm the exact
+peer after proxy/network changes; no environment-specific address is a default.
 Apply appropriate request-body, rate, and connection limits in NPM. Center Host
-validation is derived from `HOUFENG_PUBLIC_BASE_URL`.
+validation is derived from `HOUFENG_PUBLIC_BASE_URL`. Rejection storms immediately
+invalidate archive safety in memory and are coalesced by the five-second health
+observer, not written to PostgreSQL or logged once per rejected request.
 
 After selecting one mode and completing `.env`, render the merged model before
 pulling or starting anything:
@@ -333,7 +355,7 @@ docker compose up -d
 
 The stack contains eight services:
 
-- `houfeng-storage-init` creates the UID/GID-owned attachment, log, authority,
+- `houfeng-storage-init` creates the UID/GID-owned attachment and authority,
   public Center identity, and staged-secret directories below `./data`;
 - `houfeng-secrets-init` copies only the four operator database secrets needed
   by the read-only initializer/processor into service-specific private files;
@@ -386,8 +408,6 @@ data/
 ├── center-config/
 │   └── deployment-id
 ├── clamav/
-├── logs/
-│   └── center.log
 ├── postgres/
 ├── records-authority/
 │   ├── private/
@@ -401,6 +421,12 @@ data/
     ├── db-init/
     └── processor/
 ```
+
+All eight services share Docker's `local` logging driver with `max-size: "10m"`,
+`max-file: "3"`, and compression enabled. Center writes only stdout; no log
+directory is mounted. Existing `data/logs` is not deleted and remains part of
+existing backups, but no longer receives new Center logs. Operators retain or
+remove those historical files according to their retention requirements.
 
 `optional-secrets/` is the only additional mounted operator directory and must
 remain owned by UID/GID `10001` and mode `0700` so the non-root containers can
@@ -427,8 +453,15 @@ docker compose ps
 docker compose logs --tail=100 houfeng houfeng-record-authority houfeng-content-processor clamav
 docker compose exec -T db pg_isready -U postgres -d houfeng
 curl -fsS https://center.example.com/api/healthz
-test -s data/logs/center.log
 ```
+
+Inspect the running configuration with
+`docker inspect --format '{{json .HostConfig.LogConfig}}' "$(docker compose ps -q houfeng)"`.
+For rotation acceptance, use an isolated disposable container with these
+rendered options, emit more than 30 MiB of sanitized logs, and check rotation
+and recent-log readability. Do not fill production disks for this test. These
+limits cover container logs, not PostgreSQL WAL, backups, attachments, or the
+whole host.
 
 Replace the example HTTPS origin with `HOUFENG_PUBLIC_BASE_URL`. Keep shared
 diagnostics free of passwords, cookies, provider credentials, enrollment
@@ -639,7 +672,6 @@ HOUFENG_DATABASE_URL=postgres://houfeng:houfeng@127.0.0.1:5432/houfeng?sslmode=d
 HOUFENG_DATABASE_REQUIRE_TLS=false
 HOUFENG_PUBLIC_BASE_URL=https://center.example.com
 HOUFENG_INCIDENT_SWEEP_INTERVAL=5s
-HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 HOUFENG_INITIAL_USERNAME=admin
 HOUFENG_INITIAL_PASSWORD=replace-me-with-a-real-password
 HOUFENG_SESSION_HMAC_KEY=replace-me-with-32-plus-random-bytes
@@ -827,8 +859,6 @@ systemctl status clamav-daemon
 systemctl status houfeng-agent
 sudo test -d /var/lib/houfeng/attachments
 sudo test "$(stat -c '%a' /var/lib/houfeng/attachments)" = 700
-sudo test -s /var/log/houfeng/center.log
-sudo tail -n 100 /var/log/houfeng/center.log
 journalctl -u houfeng-center -n 100 --no-pager
 journalctl -u houfeng-content-processor -n 100 --no-pager
 journalctl -u houfeng-agent -n 100 --no-pager
@@ -841,7 +871,6 @@ docker compose ps
 docker compose logs --tail=100 houfeng houfeng-content-processor clamav
 docker compose exec -T db pg_isready -U postgres -d houfeng
 curl -fsS https://center.example.com/api/healthz
-test -s data/logs/center.log
 ```
 
 Continue with `docs/operations/fresh-install-smoke-run.md` for the full fresh-install path.
@@ -866,3 +895,40 @@ Application rollback never reverses migrations. Do not drop lifecycle history,
 session evidence or constraints to make an old binary start. Recover forward
 with a matching candidate, or restore a coordinated pre-change recovery point
 through a separately authorized procedure with all writers stopped.
+
+## Coordinated v2 Agent sync upgrade (C79 → C80)
+
+This is an operator procedure, not permission to upgrade a running deployment.
+C80 removes the old permanent replay tables and requires protocol revision 2;
+Center and every Agent must cross this boundary together. Retain the configured
+30-day raw and 365-day daily-aggregate policy; the migration does not rebuild
+assets, monitoring identities, credentials, raw observations, or business history.
+
+1. While still on the old version, correct trusted-proxy CIDRs from the actual
+   socket peer and verify queues can drain. If necessary, use a separately
+   reviewed receiver-budget-only fix; never run the v2 binary against C79.
+2. Inventory **every** old Agent writer, including paused, retired, and
+   evidence-only sessions. Stop each old Agent, then read its actual buffer file
+   and require a valid empty JSON array. Nonempty means restart that old Agent,
+   let it drain, stop it, and check again. Never delete or truncate the queue.
+   Missing, unreadable, invalid, offline, or unaccounted-for Agents block the
+   cutover; do not assume their queues are empty.
+3. With all Agent and Center writers stopped, capture one coordinated recovery
+   point containing PostgreSQL, attachments, Records authority, and every Agent's
+   credentials and buffer. Preserve existing historical `data/logs` in backups.
+4. Use the configured scoped migrator to converge C80, then start the matching
+   Center and verify `/api/healthz` advertises revision `2` and replay window
+   `131072`. Upgrade every Agent while preserving credentials and empty buffers.
+   The new Agent checks capabilities before rewriting the queue, creates its
+   durable producer/sequence envelope, and fails closed on nonempty legacy data.
+5. Start the upgraded Agents and verify current heartbeats, bounded receipts,
+   queue drainage, and readable rotated logs. Old-protocol sync must return
+   HTTP 426 without refreshing trusted online evidence or writing facts.
+
+After C80, do not roll back to a Center or Agent that cannot understand v2.
+Never restore only a database or only an Agent buffer snapshot, and never
+renumber a rejected queue or automatically re-enroll to conceal a conflict.
+Recovery requires separate authorization, all writers stopped, restoration of
+the same coordinated recovery point, and renewed admission/protocol checks.
+Local isolated upgrade drills do not establish that a production fleet has
+completed this inventory, drain, backup, or upgrade.

@@ -66,7 +66,11 @@ func testAppACLCurrentPreservedPrivileges(t *testing.T, profile appACLCurrentPro
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := appACLCurrentTransitionPrivilegeBody(current)
+	// The historical C77/C78 authorization oracle remains exact before 0080;
+	// current transition validation below independently checks the replay delta.
+	historical := current
+	historical.fragments = historical.fragments[:len(historical.fragments)-1]
+	body, err := appACLCurrentTransitionPrivilegeBody(historical)
 	if err != nil || !bytes.Equal(body, golden) {
 		t.Fatalf("current must preserve the independently frozen predecessor authorization body exactly: %v", err)
 	}

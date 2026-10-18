@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 
 type retentionTx interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
 	Commit(context.Context) error
 	Rollback(context.Context) error
 }
@@ -32,15 +34,49 @@ func NewPostgresRetentionRepository(db *pgxpool.Pool) *PostgresRetentionReposito
 
 var _ retention.Repository = (*PostgresRetentionRepository)(nil)
 
+// Waits between whole Repeatable Read attempts; three attempts in total.
+var retentionRetryDelays = [...]time.Duration{50 * time.Millisecond, 100 * time.Millisecond}
+
+// ApplyRetention retries only PostgreSQL serialization failures and
+// deadlocks. Every attempt is rolled back before waiting, reuses the same
+// now/policy, and only the committed attempt's counts are returned.
 func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy retention.Policy, now time.Time) (retention.Result, error) {
 	if policy.RawLayerDays < 30 || policy.RawLayerDays > 365 || policy.AggregateLayerDays <= 0 {
 		return retention.Result{}, fmt.Errorf("invalid retention policy")
 	}
+	for attempt := 0; ; attempt++ {
+		result, err := r.applyRetentionAttempt(ctx, policy, now)
+		if err == nil {
+			return result, nil
+		}
+		var pgErr *pgconn.PgError
+		if attempt == len(retentionRetryDelays) || !errors.As(err, &pgErr) || (pgErr.Code != "40001" && pgErr.Code != "40P01") {
+			return retention.Result{}, err
+		}
+		timer := time.NewTimer(retentionRetryDelays[attempt])
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return retention.Result{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (r *PostgresRetentionRepository) applyRetentionAttempt(ctx context.Context, policy retention.Policy, now time.Time) (retention.Result, error) {
 	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		return retention.Result{}, fmt.Errorf("begin retention transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+
+	var locked bool
+	if err := tx.QueryRow(ctx, `select pg_try_advisory_xact_lock(hashtextextended('houfeng:retention', 0))`).Scan(&locked); err != nil {
+		return retention.Result{}, fmt.Errorf("lock retention transaction: %w", err)
+	}
+	if !locked {
+		return retention.Result{Skipped: true}, nil
+	}
 
 	stableBefore := startOfUTCDay(now)
 	rawCutoff := now.UTC().AddDate(0, 0, -policy.RawLayerDays)
@@ -68,15 +104,30 @@ func (r *PostgresRetentionRepository) ApplyRetention(ctx context.Context, policy
 	if result.DeletedTargetAggregates, err = execRows(ctx, tx, deleteExpiredTargetAggregatesSQL, "delete expired target aggregates", aggregateCutoff); err != nil {
 		return retention.Result{}, err
 	}
-	if result.ClearedCommandActionOutputs, err = execRows(ctx, tx, clearExpiredCommandActionOutputsSQL, "clear expired command action outputs", now.UTC()); err != nil {
-		return retention.Result{}, err
-	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return retention.Result{}, fmt.Errorf("commit retention transaction: %w", err)
 	}
 
 	return result, nil
+}
+
+// Command output expiry is independent of the committed raw/aggregate pass.
+// Read Committed rechecks the current row after waiting for a concurrent writer.
+func (r *PostgresRetentionRepository) ClearExpiredCommandOutputs(ctx context.Context, now time.Time) (int64, error) {
+	tx, err := r.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return 0, fmt.Errorf("begin command output cleanup transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	count, err := execRows(ctx, tx, clearExpiredCommandActionOutputsSQL, "clear expired command action outputs", now.UTC())
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("commit command output cleanup transaction: %w", err)
+	}
+	return count, nil
 }
 
 func execRows(ctx context.Context, tx retentionTx, sql, label string, args ...any) (int64, error) {
@@ -174,8 +225,14 @@ const upsertMonitoringInstanceHostDailyAggregatesSQL = `
 		count(*) filter (where maintenance_context)::integer,
 		now(),
 		((observed_at at time zone 'UTC')::date::timestamp at time zone 'UTC') < $2::timestamptz
-	from host_samples
+	from host_samples raw
 	where observed_at < $1
+		and not exists (
+			select 1 from monitoring_instance_host_sample_daily_aggregates finalized_bucket
+			where finalized_bucket.monitoring_instance_id = raw.monitoring_instance_id
+				and finalized_bucket.bucket_date = (raw.observed_at at time zone 'UTC')::date
+				and finalized_bucket.finalized
+		)
 	group by monitoring_instance_id, (observed_at at time zone 'UTC')::date
 	on conflict (monitoring_instance_id, bucket_date) do update set
 		sample_count = excluded.sample_count,
@@ -221,8 +278,15 @@ const upsertTargetProbeDailyAggregatesSQL = `
 		count(*) filter (where maintenance_context)::integer,
 		now(),
 		((observed_at at time zone 'UTC')::date::timestamp at time zone 'UTC') < $2::timestamptz
-	from probe_observations
+	from probe_observations raw
 	where observed_at < $1
+		and not exists (
+			select 1 from target_probe_daily_aggregates finalized_bucket
+			where finalized_bucket.target_id = raw.target_id
+				and finalized_bucket.probe_item_id = raw.probe_item_id
+				and finalized_bucket.bucket_date = (raw.observed_at at time zone 'UTC')::date
+				and finalized_bucket.finalized
+		)
 	group by target_id, probe_item_id, (observed_at at time zone 'UTC')::date
 	on conflict (target_id, probe_item_id, bucket_date) do update set
 		observation_count = excluded.observation_count,

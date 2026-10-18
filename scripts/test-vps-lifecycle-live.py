@@ -76,11 +76,12 @@ def main():
             time.sleep(1)
         raise RuntimeError("timed out: " + description)
 
-    def start_agent(label, token):
+    def start_agent(label, token, state_label=None):
         token_file = work / f"{label}-token.json"
         token_file.write_text(token)
+        state_label = state_label or label
         env = {key: value for key, value in os.environ.items() if not key.startswith("HOUFENG_")}
-        env.update(HOUFENG_AGENT_SERVER_URL=origin, HOUFENG_AGENT_TOKEN_FILE=str(token_file), HOUFENG_AGENT_BUFFER_FILE=str(work / f"{label}-queue.json"), HOUFENG_AGENT_IP_QUALITY_STATE_FILE=str(work / f"{label}-ip.json"))
+        env.update(HOUFENG_AGENT_SERVER_URL=origin, HOUFENG_AGENT_TOKEN_FILE=str(token_file), HOUFENG_AGENT_BUFFER_FILE=str(work / f"{state_label}-queue.json"), HOUFENG_AGENT_IP_QUALITY_STATE_FILE=str(work / f"{state_label}-ip.json"))
         process = subprocess.Popen([str(work / "houfeng-agent")], env=env, stdout=(work / f"{label}.log").open("w"), stderr=subprocess.STDOUT)
         processes.append(process)
         return process, token_file
@@ -184,9 +185,9 @@ def main():
         new_agent.terminate(); new_agent.wait(timeout=10)
         old_credential = json.loads(token_file.read_text())["sync_token"]
         old_session_id = old_credential.split(".", 1)[0]
-        old_signal = json.loads(sql(f"select json_build_object('id',l.signal_id,'fingerprint',s.fingerprint_hash) from agent_live_signals l join monitoring_agent_sessions s using(session_id) where l.session_id='{old_session_id}' order by l.received_at limit 1"))
+        replay_state = json.loads(sql(f"select json_build_object('producer_id',r.producer_id,'allocated_through',r.allocated_through,'retired_through',r.retired_through,'live_signal',json_build_object('sequence',r.live_sequence_high,'fingerprint',s.fingerprint_hash)) from agent_replay_states r join monitoring_agent_sessions s using(session_id) where r.session_id='{old_session_id}'"))
         trusted_before_replay = sql(f"select last_trusted_online_at from monitoring_instances where monitoring_instance_id='{mi}'")
-        replay_result = request("POST", "/api/agent/sync", {"monitoring_instance_id": mi, "session_id": old_session_id, "live_signal": old_signal}, headers={"Authorization": "Bearer " + old_credential})
+        replay_result = request("POST", "/api/agent/sync", {"protocol_revision": 2, "monitoring_instance_id": mi, "session_id": old_session_id, "batch_sequence": 0, **replay_state}, headers={"Authorization": "Bearer " + old_credential, "X-Houfeng-Sync-Protocol": "2"})
         assert replay_result["stop_collection"]
         assert sql(f"select last_trusted_online_at from monitoring_instances where monitoring_instance_id='{mi}'") == trusted_before_replay
         report("online_signal_replay", accepted_old_session=True, no_trusted_time_refresh=True, collection_denied=True)
@@ -194,7 +195,9 @@ def main():
         archive_review = request("GET", f"/api/vps/{vps_id}/archive-review")
         assert archive_review["eligible"], archive_review["blockers"]
         request("POST", f"/api/vps/{vps_id}/archive", {"confirmation_name": vps["display_name"], "reason": "受控时钟夹具归档验收", "preview_digest": archive_review["preview_digest"], "idempotency_key": secrets.token_hex(16)})
-        start_agent("agent-after-archive", token_file.read_text())
+        # Restart the same producer with its durable queue, not a cloned token
+        # paired with a new replay identity.
+        start_agent("agent-after-archive", token_file.read_text(), state_label="agent-original")
         wait_until(lambda: sql(f"select count(*) from vps_followups where vps_id='{vps_id}' and kind='archived_online'") == "1", "archived actual Agent reappearance followup")
         time.sleep(6)
         assert sql(f"select count(*) from vps_followups where vps_id='{vps_id}' and kind='archived_online'") == "1"

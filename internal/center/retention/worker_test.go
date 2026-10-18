@@ -13,17 +13,24 @@ import (
 )
 
 type fakeRepository struct {
-	results []Result
-	errs    []error
-	calls   []Policy
-	nows    []time.Time
-	block   chan struct{}
+	results      []Result
+	errs         []error
+	calls        []Policy
+	nows         []time.Time
+	block        chan struct{}
+	entered      chan struct{}
+	cleanupCount int64
+	cleanupErr   error
+	cleanupNows  []time.Time
 }
 
 func (f *fakeRepository) ApplyRetention(ctx context.Context, policy Policy, now time.Time) (Result, error) {
 	f.calls = append(f.calls, policy)
 	f.nows = append(f.nows, now)
 	if f.block != nil {
+		// Signals the test goroutine through a channel, so the test never
+		// reads fake state concurrently written by the worker goroutine.
+		f.entered <- struct{}{}
 		<-f.block
 		return Result{}, ctx.Err()
 	}
@@ -37,17 +44,24 @@ func (f *fakeRepository) ApplyRetention(ctx context.Context, policy Policy, now 
 	return Result{}, nil
 }
 
+func (f *fakeRepository) ClearExpiredCommandOutputs(_ context.Context, now time.Time) (int64, error) {
+	f.cleanupNows = append(f.cleanupNows, now)
+	return f.cleanupCount, f.cleanupErr
+}
+
 type fakeSettingsRepository struct {
 	records []centersettings.CenterSettings
 	errs    []error
 	calls   int
 	block   chan struct{}
+	entered chan struct{}
 }
 
 func (f *fakeSettingsRepository) GetSettings(ctx context.Context) (centersettings.CenterSettings, error) {
 	idx := f.calls
 	f.calls++
 	if f.block != nil {
+		f.entered <- struct{}{}
 		<-f.block
 		return centersettings.CenterSettings{}, ctx.Err()
 	}
@@ -127,7 +141,7 @@ func TestWorkerStopsOnContextCancellationBeforeFirstPass(t *testing.T) {
 }
 
 func TestWorkerTreatsCancellationDuringApplyAsNormalShutdown(t *testing.T) {
-	repo := &fakeRepository{block: make(chan struct{})}
+	repo := &fakeRepository{block: make(chan struct{}), entered: make(chan struct{}, 1)}
 	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 365)}}
 	var logs strings.Builder
 	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
@@ -137,14 +151,10 @@ func TestWorkerTreatsCancellationDuringApplyAsNormalShutdown(t *testing.T) {
 		done <- worker.Run(ctx)
 	}()
 
-	deadline := time.After(time.Second)
-	for len(repo.calls) == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("worker did not enter ApplyRetention")
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	select {
+	case <-repo.entered:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not enter ApplyRetention")
 	}
 	cancel()
 	close(repo.block)
@@ -164,7 +174,7 @@ func TestWorkerTreatsCancellationDuringApplyAsNormalShutdown(t *testing.T) {
 
 func TestWorkerTreatsCancellationDuringSettingsLoadAsNormalShutdown(t *testing.T) {
 	repo := &fakeRepository{}
-	settingsRepo := &fakeSettingsRepository{block: make(chan struct{})}
+	settingsRepo := &fakeSettingsRepository{block: make(chan struct{}), entered: make(chan struct{}, 1)}
 	var logs strings.Builder
 	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -173,14 +183,10 @@ func TestWorkerTreatsCancellationDuringSettingsLoadAsNormalShutdown(t *testing.T
 		done <- worker.Run(ctx)
 	}()
 
-	deadline := time.After(time.Second)
-	for settingsRepo.calls == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("worker did not enter GetSettings")
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	select {
+	case <-settingsRepo.entered:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not enter GetSettings")
 	}
 	cancel()
 	close(settingsRepo.block)
@@ -224,7 +230,7 @@ func TestWorkerStopsWhileSleepingOnTimer(t *testing.T) {
 }
 
 func TestWorkerLogsCommandActionOutputCleanupCount(t *testing.T) {
-	repo := &fakeRepository{results: []Result{{ClearedCommandActionOutputs: 3}}}
+	repo := &fakeRepository{cleanupCount: 3}
 	settingsRepo := &fakeSettingsRepository{records: []centersettings.CenterSettings{settingsWithRetention(30, 365)}}
 	var logs strings.Builder
 	worker := NewWorker(repo, settingsRepo, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
@@ -237,6 +243,38 @@ func TestWorkerLogsCommandActionOutputCleanupCount(t *testing.T) {
 
 	if !strings.Contains(logs.String(), "cleared_command_action_outputs=3") {
 		t.Fatalf("logs = %q, want cleared command action output count", logs.String())
+	}
+}
+
+func TestWorkerReportsCommittedPassBeforeIndependentCleanupFailure(t *testing.T) {
+	repo := &fakeRepository{cleanupErr: errors.New("output cleanup failure")}
+	var logs strings.Builder
+	worker := NewWorker(repo, &fakeSettingsRepository{}, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
+	now := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	worker.now = func() time.Time { return now }
+	worker.runOnce(context.Background())
+	text := logs.String()
+	completed := strings.Index(text, "retention pass completed")
+	failed := strings.Index(text, "clear expired command outputs failed")
+	if completed < 0 || failed <= completed || strings.Contains(text, "apply retention failed") {
+		t.Fatalf("logs = %q", text)
+	}
+	if len(repo.cleanupNows) != 1 || !repo.cleanupNows[0].Equal(now) {
+		t.Fatalf("cleanup cutoffs = %v", repo.cleanupNows)
+	}
+}
+
+func TestWorkerSkippedOrFailedPassDoesNotReportCompletionOrCleanOutputs(t *testing.T) {
+	for _, repo := range []*fakeRepository{
+		{results: []Result{{Skipped: true}}},
+		{errs: []error{errors.New("raw pass failed")}},
+	} {
+		var logs strings.Builder
+		worker := NewWorker(repo, &fakeSettingsRepository{}, slog.New(slog.NewTextHandler(&logs, nil)), time.Hour)
+		worker.runOnce(context.Background())
+		if len(repo.cleanupNows) != 0 || strings.Contains(logs.String(), "completed") {
+			t.Fatalf("cleanup calls=%v logs=%q", repo.cleanupNows, logs.String())
+		}
 	}
 }
 

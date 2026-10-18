@@ -388,11 +388,11 @@ func TestPostgresIntegrationTargetFreshnessResetUsesPostTransitionWallClock(t *t
 	}
 	ingestDone := make(chan error, 1)
 	go func() {
-		_, ingestErr := ingestRepository.ApplyBatch(ctx, syncing.Batch{
+		_, ingestErr := ingestRepository.ApplyBatch(ctx, prepareSyncFixture(syncing.Batch{
 			SessionID:            sessionID,
 			MonitoringInstanceID: instanceID,
 			SyncToken:            syncToken,
-			LiveSignal:           &agentapi.LiveSignal{ID: "live_" + syncBatchID, Fingerprint: fingerprint},
+			LiveSignal:           &agentapi.LiveSignal{Sequence: 1, Fingerprint: fingerprint},
 			Heartbeats: []syncing.HeartbeatPayload{{
 				ObservedAt:   futureObservedAt,
 				AgentVersion: "freshness-resume-clock-fixture",
@@ -413,7 +413,7 @@ func TestPostgresIntegrationTargetFreshnessResetUsesPostTransitionWallClock(t *t
 					SyncBatchID:          syncBatchID,
 				}},
 			},
-		})
+		}))
 		ingestDone <- ingestErr
 	}()
 	select {

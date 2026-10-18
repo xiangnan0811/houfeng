@@ -39,7 +39,6 @@ RUN set -eux; \
 	rm -rf /var/lib/apt/lists/*; \
 	groupadd --system --gid 10001 houfeng; \
 	useradd --system --uid 10001 --gid houfeng --home-dir /app --shell /usr/sbin/nologin houfeng; \
-	install -d -o houfeng -g houfeng -m 0755 /var/log/houfeng; \
 	install -d -o houfeng -g houfeng -m 0700 /var/lib/houfeng/attachments /var/lib/houfeng/processor-workspace
 
 WORKDIR /app
@@ -47,7 +46,6 @@ LABEL org.opencontainers.image.licenses="AGPL-3.0-only"
 
 ENV HOUFENG_HTTP_ADDR=:16001
 ENV HOUFENG_WEB_DIST_DIR=/app/web/dist
-ENV HOUFENG_LOG_FILE=/var/log/houfeng/center.log
 
 COPY --from=go-build --chown=houfeng:houfeng /out/houfeng-center /usr/local/bin/houfeng-center
 COPY --from=go-build --chown=houfeng:houfeng /out/houfeng-content-processor /usr/local/bin/houfeng-content-processor

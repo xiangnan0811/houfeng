@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,6 +17,8 @@ import (
 
 var receiverFaultGeneration atomic.Uint64
 var receiverObservedFaultGeneration atomic.Uint64
+var receiverFaultMu sync.Mutex
+var receiverLatestFaultReason = "reception_fault"
 
 type receiverClockSample struct {
 	databaseTime time.Time
@@ -24,7 +28,7 @@ type receiverClockSample struct {
 var receiverClockAnchor atomic.Pointer[receiverClockSample]
 
 type ReceiverHealthObserver struct {
-	db                *pgxpool.Pool
+	beginTx           func(context.Context, pgx.TxOptions) (pgx.Tx, error)
 	bootID            string
 	faultGeneration   uint64
 	previous          time.Time
@@ -40,7 +44,7 @@ func NewReceiverHealthObserver(ctx context.Context, db *pgxpool.Pool) (*Receiver
 	if err != nil {
 		return nil, err
 	}
-	o := &ReceiverHealthObserver{db: db, bootID: bootID, faultGeneration: receiverFaultGeneration.Load()}
+	o := &ReceiverHealthObserver{beginTx: db.BeginTx, bootID: bootID, faultGeneration: receiverFaultGeneration.Load()}
 	if err := o.observe(ctx, false, "center_restart"); err != nil {
 		return nil, err
 	}
@@ -52,7 +56,7 @@ func NewReceiverHealthObserver(ctx context.Context, db *pgxpool.Pool) (*Receiver
 func (o *ReceiverHealthObserver) SetReady(ready bool) {
 	o.ready.Store(ready)
 	if !ready {
-		receiverFaultGeneration.Add(1)
+		NoteReceiverHealthFault("service_not_ready")
 	}
 }
 
@@ -64,47 +68,48 @@ func (o *ReceiverHealthObserver) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			healthy, reason := o.ready.Load(), ""
-			now := time.Now()
-			if !healthy {
-				reason = "service_not_ready"
+			if err := o.observeTick(ctx, time.Now()); err != nil {
+				slog.Error("observe receiver health failed", "error", err)
 			}
-			// time.Sub uses monotonic time; UnixNano exposes wall clock jumps.
-			if !o.previous.IsZero() {
-				drift := time.Duration(now.UnixNano()-o.previous.UnixNano()) - now.Sub(o.previous)
-				if drift > time.Second || drift < -time.Second {
-					healthy = false
-					reason = "clock_jump"
-				}
-			}
-			faults := receiverFaultGeneration.Load()
-			if faults != o.faultGeneration {
-				healthy = false
-				reason = "reception_fault"
-				o.faultGeneration = faults
-			}
-			o.previous = now
-			checkCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-			if err := o.observe(checkCtx, healthy, reason); err != nil {
-				receiverFaultGeneration.Add(1)
-			}
-			cancel()
 		}
 	}
 }
 
+func (o *ReceiverHealthObserver) observeTick(ctx context.Context, now time.Time) error {
+	healthy, reason := o.ready.Load(), ""
+	if !healthy {
+		reason = "service_not_ready"
+	}
+	// time.Sub uses monotonic time; UnixNano exposes wall clock jumps.
+	if !o.previous.IsZero() {
+		drift := time.Duration(now.UnixNano()-o.previous.UnixNano()) - now.Sub(o.previous)
+		if drift > time.Second || drift < -time.Second {
+			healthy = false
+			reason = "clock_jump"
+		}
+	}
+	o.previous = now
+	checkCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	if err := o.observe(checkCtx, healthy, reason); err != nil {
+		NoteReceiverHealthFault("health_observation_failed")
+		return err
+	}
+	return nil
+}
+
 func (o *ReceiverHealthObserver) observe(ctx context.Context, healthy bool, reason string) error {
-	observedFaultGeneration := receiverFaultGeneration.Load()
+	observedFaultGeneration, faultReason := receiverHealthFaultSnapshot()
 	// Recheck at the write boundary as a fault may arrive between the Run
 	// loop's readiness check and this call.
 	if observedFaultGeneration != o.faultGeneration {
 		healthy = false
-		reason = "reception_fault"
+		reason = faultReason
 		o.faultGeneration = observedFaultGeneration
 	}
 	// Reception readiness is independent of asset business transactions. A
 	// long graph mutation must not prevent the health observation from ticking.
-	tx, err := o.db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, err := o.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return err
 	}
@@ -148,12 +153,35 @@ func receiverDatabaseClockJump(previousDB, previousProcess, currentDB, currentPr
 	return drift > time.Second || drift < -time.Second
 }
 
+// NoteReceiverHealthFault immediately invalidates in-process archive evidence.
+// Admission rejection paths call this without database I/O or per-request logs;
+// the observer persists the latest allowlisted reason once per five-second tick.
+func NoteReceiverHealthFault(reason string) {
+	switch reason {
+	case "sync_rate_limited", "sync_capacity_exhausted", "sync_internal_error",
+		"sync_persistence_failure", "service_not_ready", "health_observation_failed",
+		"database_clock_jump", "clock_jump":
+	default:
+		reason = "reception_fault"
+	}
+	receiverFaultMu.Lock()
+	receiverLatestFaultReason = reason
+	receiverFaultGeneration.Add(1)
+	receiverFaultMu.Unlock()
+}
+
+func receiverHealthFaultSnapshot() (uint64, string) {
+	receiverFaultMu.Lock()
+	defer receiverFaultMu.Unlock()
+	return receiverFaultGeneration.Load(), receiverLatestFaultReason
+}
+
 // MarkReceiverHealthFault invalidates memory first, even if PostgreSQL is down.
 // The next successful observation cannot accidentally retain prior continuity.
 func MarkReceiverHealthFault(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, reason string) error {
-	receiverFaultGeneration.Add(1)
+	NoteReceiverHealthFault(reason)
 	_, err := db.Exec(ctx, `update receiver_health set healthy=false,healthy_since=null,failure_reason=$1,checked_at=clock_timestamp() where id`, reason)
 	return err
 }
@@ -217,7 +245,7 @@ func loadArchiveReceiverEvidence(ctx context.Context, q assetLifecycleQueryer, e
 		// Persisting here could self-deadlock the archive's final row lock. The
 		// process fault generation is the immediate latch; observation must
 		// subsequently reset the persisted window even if the clock is restored.
-		receiverFaultGeneration.Add(1)
+		NoteReceiverHealthFault("database_clock_jump")
 		e.ReceiverHealthy = false
 	}
 	return nil

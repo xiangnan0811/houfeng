@@ -17,7 +17,7 @@ const appACLCurrentP79Migration = "0079_ip_quality_cache_expiry.sql"
 const appACLCurrentCacheExpiryIndexDefinition = "CREATE INDEX idx_ip_quality_source_cache_expires_at ON public.ip_quality_source_cache USING btree (expires_at)"
 
 func TestPostgresIntegrationIPQualityCacheExpiryMigration(t *testing.T) {
-	t.Run("fresh_c79", testPostgresIntegrationAppACLCurrentP78Fresh)
+	t.Run("fresh_c80", testPostgresIntegrationAppACLCurrentP78Fresh)
 	for _, chained := range []bool{false, true} {
 		name := "independent_c78_genesis"
 		if chained {
@@ -81,8 +81,8 @@ func testPostgresIntegrationAppACLCurrentP78Fresh(t *testing.T) {
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)
-	if len(before.Ledger) != 80 || before.Ledger[79].Name != appACLCurrentP79Migration {
-		t.Fatalf("fresh C79 must end in exactly 0079: %#v", before.Ledger)
+	if len(before.Ledger) != 81 || before.Ledger[80].Name != appACLCurrentP80Migration {
+		t.Fatalf("fresh current must end in exactly 0080: %#v", before.Ledger)
 	}
 	repeated, err := ConvergeAppACLCurrent(ctx, db, fixture.runtimeRole, fixture.adminRole)
 	if err != nil || repeated.ManifestDigest != manifest.ManifestDigest ||
@@ -147,8 +147,8 @@ func testPostgresIntegrationAppACLCurrentP78Upgrade(t *testing.T, chained bool) 
 	}
 	after := readAppACLCurrentPostgresDurableSnapshot(t, ctx, db, input)
 	assertAppACLCurrentManifestHistoryPrefix(t, before.Manifest.Manifests, after.Manifest.Manifests)
-	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP79Migration)
-	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 || !reflect.DeepEqual(after.Catalog, before.Catalog) ||
+	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger, appACLCurrentP79Migration, appACLCurrentP80Migration)
+	if len(after.Manifest.Manifests) != len(before.Manifest.Manifests)+1 || !reflect.DeepEqual(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog), before.Catalog) ||
 		readAppACLCurrentP77Rows(t, ctx, db) != beforeRows {
 		t.Fatal("C79 changed historical manifests, owners/ACLs, business reports or source cache facts")
 	}

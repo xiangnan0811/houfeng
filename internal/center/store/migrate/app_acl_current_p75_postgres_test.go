@@ -49,8 +49,8 @@ func testPostgresIntegrationAppACLCurrentP75Fresh(t *testing.T) {
 	}
 	_, _, input := appACLCurrentPostgresContract(t, fixture.asConvergenceFixture(), migrations.FS, appACLCurrentMigrationFragments)
 	before := readAppACLCurrentPostgresDurableSnapshot(t, ctx, migratorDB, input)
-	if len(before.Ledger) != 80 || before.Ledger[len(before.Ledger)-1].Name != appACLCurrentP79Migration {
-		t.Fatalf("fresh current ledger = %#v, want 80 sources ending in 0079", before.Ledger)
+	if len(before.Ledger) != 81 || before.Ledger[len(before.Ledger)-1].Name != appACLCurrentP80Migration {
+		t.Fatalf("fresh current ledger = %#v, want 81 sources ending in 0080", before.Ledger)
 	}
 	repeated, err := ConvergeAppACLCurrent(ctx, migratorDB, fixture.runtimeRole, fixture.adminRole)
 	if err != nil {
@@ -93,12 +93,12 @@ func testPostgresIntegrationAppACLCurrentP75SettingsState(t *testing.T, state st
 		t.Fatalf("current successor must append exactly one manifest: %#v", after.Manifest)
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
-	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
-		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(after.Catalog.EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
+		appACLCurrentP76Migration, appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
+	if !appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).DirectPrivileges, before.Catalog.DirectPrivileges, fixture.runtimeRole) ||
+		!appACLCurrentPrivilegesWithFamilyStateAndProductTables(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).EffectivePrivileges, before.Catalog.EffectivePrivileges, fixture.runtimeRole) ||
 		!reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) ||
-		!reflect.DeepEqual(after.Catalog.Functions, before.Catalog.Functions) {
+		!reflect.DeepEqual(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).Functions, before.Catalog.Functions) {
 		t.Fatalf("C75 to C76 changed ACLs beyond runtime family-state SELECT")
 	}
 	wantOwner := AppACLEffectiveCatalogObjectOwnerR1{
@@ -107,7 +107,7 @@ func testPostgresIntegrationAppACLCurrentP75SettingsState(t *testing.T, state st
 	}
 	var retainedOwners []AppACLEffectiveCatalogObjectOwnerR1
 	newOwners := 0
-	for _, owner := range after.Catalog.Owners {
+	for _, owner := range appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).Owners {
 		if owner == wantOwner || owner == (AppACLEffectiveCatalogObjectOwnerR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "ip_quality_intelligence", OwnerRole: fixture.migratorRole}) ||
 			owner == (AppACLEffectiveCatalogObjectOwnerR1{ObjectClass: AppACLObjectClassTable, SchemaName: "public", ObjectIdentity: "ip_quality_source_cache", OwnerRole: fixture.migratorRole}) {
 			newOwners++

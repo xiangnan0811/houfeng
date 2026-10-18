@@ -8,14 +8,6 @@ import (
 	"time"
 )
 
-func TestMaxBatchItemsMatchesAgentIngressContract(t *testing.T) {
-	t.Parallel()
-
-	if MaxBatchItems != 256 {
-		t.Fatalf("MaxBatchItems = %d, want existing agent ingress limit 256", MaxBatchItems)
-	}
-}
-
 func TestServiceExactDuplicateDispositionSkipsPostSyncAndReturnsOriginalResult(t *testing.T) {
 	t.Parallel()
 
@@ -27,7 +19,7 @@ func TestServiceExactDuplicateDispositionSkipsPostSyncAndReturnsOriginalResult(t
 	postSync := &fakePostSyncProcessor{}
 	service := NewService(repo, postSync)
 
-	got, err := service.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi_001"})
+	got, err := service.SyncBatch(context.Background(), validSyncBatch("mi_001"))
 	if err != nil {
 		t.Fatalf("SyncBatch() error = %v", err)
 	}
@@ -39,7 +31,7 @@ func TestServiceExactDuplicateDispositionSkipsPostSyncAndReturnsOriginalResult(t
 	}
 }
 
-func TestServiceNonDuplicateDispositionRunsPostSync(t *testing.T) {
+func TestServiceOnlyRecordedDispositionRunsPostSync(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -48,8 +40,7 @@ func TestServiceNonDuplicateDispositionRunsPostSync(t *testing.T) {
 	}{
 		{name: "recorded", disposition: ResultDispositionRecorded},
 		{name: "suppressed", disposition: ResultDispositionSuppressed},
-		{name: "legacy zero", disposition: ResultDisposition("")},
-		{name: "unknown", disposition: ResultDisposition("future_value")},
+		{name: "deferred", disposition: ResultDispositionDeferred},
 	}
 
 	for _, tt := range tests {
@@ -65,7 +56,7 @@ func TestServiceNonDuplicateDispositionRunsPostSync(t *testing.T) {
 			postSync := &fakePostSyncProcessor{}
 			service := NewService(repo, postSync)
 
-			got, err := service.SyncBatch(context.Background(), Batch{MonitoringInstanceID: "mi_001"})
+			got, err := service.SyncBatch(context.Background(), validSyncBatch("mi_001"))
 			if err != nil {
 				t.Fatalf("SyncBatch() error = %v", err)
 			}
@@ -133,8 +124,10 @@ func (f *fakePostSyncProcessor) AfterSuccessfulSync(context.Context, Batch, Resu
 type fakeSyncRepository struct {
 	result Result
 	err    error
+	calls  int
 }
 
 func (f *fakeSyncRepository) ApplyBatch(context.Context, Batch) (Result, error) {
+	f.calls++
 	return f.result, f.err
 }

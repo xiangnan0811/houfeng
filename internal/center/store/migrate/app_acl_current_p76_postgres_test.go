@@ -65,10 +65,10 @@ func testPostgresIntegrationAppACLCurrentP76Upgrade(t *testing.T, state string) 
 		t.Fatalf("current successor must append exactly one manifest: %#v", after.Manifest)
 	}
 	assertAppACLCurrentLedgerSuffix(t, before.Ledger, after.Ledger,
-		appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration)
+		appACLCurrentP77Migration, appACLCurrentP78Migration, appACLCurrentP79Migration, appACLCurrentP80Migration)
 	for _, pair := range [][2][]AppACLEffectiveCatalogPrivilegeObservationR1{
-		{before.Catalog.DirectPrivileges, after.Catalog.DirectPrivileges},
-		{before.Catalog.EffectivePrivileges, after.Catalog.EffectivePrivileges},
+		{before.Catalog.DirectPrivileges, appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).DirectPrivileges},
+		{before.Catalog.EffectivePrivileges, appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).EffectivePrivileges},
 	} {
 		if !appACLCurrentPrivilegesWithProductTables(pair[1], pair[0], fixture.runtimeRole) {
 			t.Fatalf("C76 to C77 privileges changed beyond seven runtime product grants")
@@ -76,12 +76,12 @@ func testPostgresIntegrationAppACLCurrentP76Upgrade(t *testing.T, state string) 
 	}
 	if !reflect.DeepEqual(after.Catalog.ColumnACLs, before.Catalog.ColumnACLs) ||
 		!reflect.DeepEqual(after.Catalog.DefaultACLs, before.Catalog.DefaultACLs) ||
-		!reflect.DeepEqual(after.Catalog.Functions, before.Catalog.Functions) {
+		!reflect.DeepEqual(appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).Functions, before.Catalog.Functions) {
 		t.Fatal("C77 changed predecessor column/default/function ACLs")
 	}
 	var retainedOwners []AppACLEffectiveCatalogObjectOwnerR1
 	newOwners := make(map[string]int, 2)
-	for _, owner := range after.Catalog.Owners {
+	for _, owner := range appACLCurrentCatalogBeforeReplay(t, before.Catalog, after.Catalog).Owners {
 		if owner.ObjectClass == AppACLObjectClassTable && owner.SchemaName == "public" &&
 			(owner.ObjectIdentity == "ip_quality_intelligence" || owner.ObjectIdentity == "ip_quality_source_cache") {
 			if owner.OwnerRole != fixture.migratorRole {

@@ -35,6 +35,7 @@ type AppACLCurrentAuxiliaryPrivilege struct {
 type AppACLCurrentMigrationFragment struct {
 	Migration           string
 	Objects             []AppACLManagedObjectR1
+	RetiredObjects      []AppACLManagedObjectR1
 	Privileges          func(databaseName string) []AppACLPrivilege
 	AuxiliaryPrivileges []AppACLCurrentAuxiliaryPrivilege
 	Functions           []AppACLCurrentFunctionContract
@@ -69,6 +70,7 @@ var appACLCurrentMigrationFragments = []AppACLCurrentMigrationFragment{
 	ipQualityProductAppACLCurrentMigrationFragment(),
 	ipQualityCollectionScopeAppACLCurrentMigrationFragment(),
 	ipQualityCacheExpiryAppACLCurrentMigrationFragment(),
+	agentReplayAppACLCurrentMigrationFragment(),
 }
 
 func ipQualityCacheExpiryAppACLCurrentMigrationFragment() AppACLCurrentMigrationFragment {
@@ -1031,6 +1033,7 @@ type appACLCurrentSourceContract struct {
 type appACLCurrentCompiledMigrationFragment struct {
 	Migration           string
 	Objects             []AppACLManagedObjectR1
+	RetiredObjects      []AppACLManagedObjectR1
 	Privileges          []AppACLPrivilege
 	AuxiliaryPrivileges []AppACLCurrentAuxiliaryPrivilege
 	Functions           []AppACLCurrentFunctionContract
@@ -1098,6 +1101,7 @@ func cloneAppACLCurrentMigrationFragment(fragment AppACLCurrentMigrationFragment
 	cloned := AppACLCurrentMigrationFragment{
 		Migration:           fragment.Migration,
 		Objects:             append([]AppACLManagedObjectR1(nil), fragment.Objects...),
+		RetiredObjects:      append([]AppACLManagedObjectR1(nil), fragment.RetiredObjects...),
 		Privileges:          fragment.Privileges,
 		AuxiliaryPrivileges: append([]AppACLCurrentAuxiliaryPrivilege(nil), fragment.AuxiliaryPrivileges...),
 		Functions:           append([]AppACLCurrentFunctionContract(nil), fragment.Functions...),
@@ -1117,6 +1121,7 @@ func compileAppACLCurrentMigrationFragment(
 	return appACLCurrentCompiledMigrationFragment{
 		Migration:           fragment.Migration,
 		Objects:             append([]AppACLManagedObjectR1(nil), fragment.Objects...),
+		RetiredObjects:      append([]AppACLManagedObjectR1(nil), fragment.RetiredObjects...),
 		Privileges:          append([]AppACLPrivilege(nil), fragment.Privileges(appACLCurrentValidationDatabase)...),
 		AuxiliaryPrivileges: append([]AppACLCurrentAuxiliaryPrivilege(nil), fragment.AuxiliaryPrivileges...),
 		Functions:           cloneAppACLCurrentFunctionContracts(fragment.Functions),
@@ -1134,97 +1139,11 @@ func cloneAppACLCurrentFunctionContracts(
 }
 
 func validateAppACLCurrentFragments(fragments []appACLCurrentCompiledMigrationFragment) error {
-	baseSurface, err := CompileAppACLManagedSurfaceR1(appACLCurrentValidationDatabase)
-	if err != nil {
-		return fmt.Errorf("compile frozen r1 managed surface for current APP ACL fragments: %w", err)
-	}
-	managedObjects := make(map[AppACLManagedObjectR1]struct{}, len(baseSurface.Objects))
-	for _, object := range baseSurface.Objects {
-		managedObjects[object] = struct{}{}
-	}
-	newFunctions := make(map[AppACLManagedObjectR1]struct{})
-	for _, fragment := range fragments {
-		for _, object := range fragment.Objects {
-			if err := validateAppACLManagedObject(object); err != nil {
-				return fmt.Errorf("current APP ACL fragment %q managed object: %w", fragment.Migration, err)
-			}
-			if _, duplicate := managedObjects[object]; duplicate {
-				return fmt.Errorf("current APP ACL fragment %q has duplicate managed object %#v", fragment.Migration, object)
-			}
-			managedObjects[object] = struct{}{}
-			if object.ObjectClass == AppACLObjectClassFunction {
-				newFunctions[object] = struct{}{}
-			}
-		}
-	}
-
-	privileges := appACLPrivilegesR1(appACLCurrentValidationDatabase)
-	for _, fragment := range fragments {
-		for _, privilege := range fragment.Privileges {
-			object, err := appACLCurrentManagedObjectFromPrivilege(privilege)
-			if err != nil {
-				return fmt.Errorf("current APP ACL fragment %q privilege: %w", fragment.Migration, err)
-			}
-			if _, managed := managedObjects[object]; !managed {
-				return fmt.Errorf("current APP ACL fragment %q privilege references unmanaged object %#v", fragment.Migration, object)
-			}
-		}
-		privileges = append(privileges, fragment.Privileges...)
-	}
-	if _, err := canonicalPrivileges(privileges); err != nil {
-		return fmt.Errorf("validate current APP ACL fragment privileges: %w", err)
-	}
-	auxiliaryPrivileges := make([]AppACLCurrentAuxiliaryPrivilege, 0)
-	for _, fragment := range fragments {
-		for _, privilege := range fragment.AuxiliaryPrivileges {
-			object, err := appACLCurrentAuxiliaryManagedObject(privilege)
-			if err != nil {
-				return fmt.Errorf("current APP ACL fragment %q auxiliary privilege: %w", fragment.Migration, err)
-			}
-			if _, managed := managedObjects[object]; !managed {
-				return fmt.Errorf("current APP ACL fragment %q auxiliary privilege references unmanaged object %#v", fragment.Migration, object)
-			}
-			auxiliaryPrivileges = append(auxiliaryPrivileges, privilege)
-		}
-	}
-	if _, err := canonicalAppACLCurrentAuxiliaryPrivileges(auxiliaryPrivileges); err != nil {
-		return fmt.Errorf("validate current APP ACL fragment auxiliary privileges: %w", err)
-	}
-
-	hardenedFunctions := make(map[AppACLManagedObjectR1]struct{}, len(newFunctions))
-	for _, fragment := range fragments {
-		for _, function := range fragment.Functions {
-			object := AppACLManagedObjectR1{
-				ObjectClass:    AppACLObjectClassFunction,
-				SchemaName:     function.SchemaName,
-				ObjectIdentity: function.Identity,
-			}
-			if err := validateAppACLManagedObject(object); err != nil {
-				return fmt.Errorf("current APP ACL fragment %q function hardening: %w", fragment.Migration, err)
-			}
-			if function.Kind != "f" {
-				return fmt.Errorf("current APP ACL fragment %q function %s.%s has unsupported kind %q", fragment.Migration, function.SchemaName, function.Identity, function.Kind)
-			}
-			for _, setting := range function.Config {
-				if strings.ContainsRune(setting, '\x00') {
-					return fmt.Errorf("current APP ACL fragment %q function %s.%s has invalid configuration", fragment.Migration, function.SchemaName, function.Identity)
-				}
-			}
-			if _, managed := newFunctions[object]; !managed {
-				return fmt.Errorf("current APP ACL fragment %q function hardening references unmanaged function %#v", fragment.Migration, object)
-			}
-			if _, duplicate := hardenedFunctions[object]; duplicate {
-				return fmt.Errorf("current APP ACL fragment %q has duplicate function hardening for %#v", fragment.Migration, object)
-			}
-			hardenedFunctions[object] = struct{}{}
-		}
-	}
-	for function := range newFunctions {
-		if _, hardened := hardenedFunctions[function]; !hardened {
-			return fmt.Errorf("current APP ACL managed function has no hardening contract: %#v", function)
-		}
-	}
-	return nil
+	_, err := compileAppACLCurrentCatalogContract(
+		appACLCurrentSourceContract{fragments: fragments},
+		appACLCurrentValidationDatabase, appACLCurrentTransitionBindings, appACLCurrentTransitionMigrator,
+	)
+	return err
 }
 
 func validateAppACLManagedObject(object AppACLManagedObjectR1) error {
@@ -1323,34 +1242,9 @@ func compileAppACLCurrentCatalogContract(
 		return appACLEffectiveCatalogContract{}, fmt.Errorf("adapt frozen r1 catalog base: %w", err)
 	}
 
-	fragmentFunctions := make(map[AppACLManagedObjectR1]struct{})
-	for _, fragment := range source.fragments {
-		contract.ManagedObjects = append(contract.ManagedObjects, fragment.Objects...)
-		for _, object := range fragment.Objects {
-			if object.ObjectClass == AppACLObjectClassFunction {
-				fragmentFunctions[object] = struct{}{}
-			}
-		}
-		fragmentPrivileges, err := appACLCurrentPrivilegesForDatabase(fragment.Privileges, databaseName)
-		if err != nil {
-			return appACLEffectiveCatalogContract{}, fmt.Errorf("materialize current APP ACL fragment %q privileges: %w", fragment.Migration, err)
-		}
-		contract.Privileges = append(contract.Privileges, fragmentPrivileges...)
-		fragmentAuxiliaryPrivileges, err := appACLCurrentAuxiliaryPrivilegesForDatabase(fragment.AuxiliaryPrivileges, databaseName)
-		if err != nil {
-			return appACLEffectiveCatalogContract{}, fmt.Errorf("materialize current APP ACL fragment %q auxiliary privileges: %w", fragment.Migration, err)
-		}
-		contract.AuxiliaryPrivileges = append(contract.AuxiliaryPrivileges, fragmentAuxiliaryPrivileges...)
-		for _, function := range fragment.Functions {
-			contract.ExpectedFunctions = append(contract.ExpectedFunctions, appACLEffectiveCatalogFunctionContract{
-				SchemaName:      function.SchemaName,
-				Identity:        function.Identity,
-				OwnerRole:       migratorRole,
-				Kind:            function.Kind,
-				SecurityDefiner: function.SecurityDefiner,
-				Config:          append([]string(nil), function.Config...),
-			})
-		}
+	fragmentFunctions, err := materializeAppACLCurrentFragments(&contract, source.fragments, databaseName, migratorRole)
+	if err != nil {
+		return appACLEffectiveCatalogContract{}, err
 	}
 
 	// Normalize the in-memory tuples directly instead of serializing and parsing

@@ -205,11 +205,11 @@ func assertIPQualityProductSyncReplay(t *testing.T, ctx context.Context, fixture
 	report := ipQualityProductIntegrationReport(prefix, receivedAt.Add(-time.Minute), receivedAt, false)
 	report.SyncBatchID = batch.Heartbeats[0].SyncBatchID
 	batch.IPQualityReports = []ipquality.ReportWrite{report}
-	first, err := repository.ApplyBatch(ctx, batch)
+	first, err := repository.ApplyBatch(ctx, prepareSyncFixture(batch))
 	if err != nil || first.Disposition != syncing.ResultDispositionRecorded {
 		t.Fatalf("first sync = %#v %v, want recorded", first, err)
 	}
-	replay, err := repository.ApplyBatch(ctx, batch)
+	replay, err := repository.ApplyBatch(ctx, prepareSyncFixture(batch))
 	if err != nil || replay.Disposition != syncing.ResultDispositionExactDuplicate {
 		t.Fatalf("replay = %#v %v, want exact duplicate", replay, err)
 	}

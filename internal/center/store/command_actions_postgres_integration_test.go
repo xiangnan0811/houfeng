@@ -330,7 +330,7 @@ func TestPostgresIntegrationCommandAuditReadModelFiltersOutcomesAndKeyset(t *tes
 	}
 	// Simulate loss of a source identity with owner privileges in this disposable
 	// database. Product lifecycle APIs retain these rows and expose no cleanup.
-	for _, sql := range []string{`delete from agent_live_signals where session_id in (select session_id from monitoring_agent_sessions where monitoring_instance_id=$1)`, `delete from monitoring_agent_sessions where monitoring_instance_id=$1`, `delete from vps_monitoring_instance_links where monitoring_instance_id=$1`} {
+	for _, sql := range []string{`delete from agent_replay_states where session_id in (select session_id from monitoring_agent_sessions where monitoring_instance_id=$1)`, `delete from monitoring_agent_sessions where monitoring_instance_id=$1`, `delete from vps_monitoring_instance_links where monitoring_instance_id=$1`} {
 		if _, err := db.Exec(ctx, sql, deleted.MonitoringInstanceID); err != nil {
 			t.Fatalf("prepare deleted-identity audit fixture: %v", err)
 		}
@@ -668,7 +668,7 @@ func createCommandAuditMonitoringInstance(t *testing.T, ctx context.Context, db 
 	if !ok {
 		return monitoringinstances.Record{}, fmt.Errorf("enrollment did not create a session")
 	}
-	if _, err := NewPostgresSyncRepository(db).ApplyBatch(ctx, syncing.Batch{SessionID: sessionID, MonitoringInstanceID: record.MonitoringInstanceID, SyncToken: credential, LiveSignal: &agentapi.LiveSignal{ID: "command-audit-enrollment", Fingerprint: fingerprint}}); err != nil {
+	if _, err := NewPostgresSyncRepository(db).ApplyBatch(ctx, prepareSyncFixture(syncing.Batch{SessionID: sessionID, MonitoringInstanceID: record.MonitoringInstanceID, SyncToken: credential, LiveSignal: &agentapi.LiveSignal{Sequence: 1, Fingerprint: fingerprint}})); err != nil {
 		return monitoringinstances.Record{}, err
 	}
 	return repo.GetMonitoringInstance(ctx, record.MonitoringInstanceID)

@@ -116,7 +116,7 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 | 维度 | center | agent |
 |------|--------|-------|
 | Logger 来源 | `cmd/houfeng-center/setupLogging` 配置 `slog.Default()`，未设 `HOUFENG_LOG_FILE` 时写 stdout，已设时写 stdout + 文件 | 显式 `slog.New(slog.NewTextHandler(os.Stdout, nil))` 写 stdout |
-| 部署 | systemd / Docker 收 stdout，同时可选写 `HOUFENG_LOG_FILE`（部署示例为 `/var/log/houfeng/center.log`） | 由 systemd 收 stdout，目录约定见 `docs/deploy/systemd/houfeng-agent.service` |
+| 部署 | Docker `local` 收 stdout，10 MiB × 3、压缩；systemd 推荐 stdout/journald。可选 `HOUFENG_LOG_FILE` 由宿主单独轮转 | 由 systemd 收 stdout，目录约定见 `docs/deploy/systemd/houfeng-agent.service` |
 | 启动期错误 | `cmd/houfeng-center/main.go` 用 `slog.Error(...)` + `os.Exit(1)`；配置或 logging 初始化失败时只写 stderr | `cmd/houfeng-agent/main.go:19-21` 用 `slog.Error("load agent config", "error", err)` + `os.Exit(1)` |
 | 是否可 log Telegram 内容 | 否（含 chat 内容） | agent 不接触通知，无此问题 |
 
@@ -137,4 +137,4 @@ slog 调用一律走 `key, value, key, value` 形式，**不要拼字符串**。
 
 ## 已知 gap
 
-- 当前 slog handler 是 stdlib text 输出，**未配置最小 level、未输出 source 行号、不带 trace id**。center 可以 tee 到 `HOUFENG_LOG_FILE`，但不做内建轮转；轮转由 Docker/systemd/logrotate 等宿主工具负责。如果 fleet 规模扩大需要更结构化日志（例如切到 `slog.NewJSONHandler` + LokiQuery），应统一评估 cmd/houfeng-center 与 cmd/houfeng-agent 的 handler 配置，并把可复用结论写进本 spec 或当前 active docs。
+- 当前 slog handler 是 stdlib text 输出，**未配置最小 level、未输出 source 行号、不带 trace id**。center 可以 tee 到 `HOUFENG_LOG_FILE`，但不做内建轮转；自定义文件必须由宿主单独轮转。Compose 的 Docker `local` 设置只约束 stdout/stderr，不约束文件日志；不修改共享 journald 配置。如果 fleet 规模扩大需要更结构化日志（例如切到 `slog.NewJSONHandler` + LokiQuery），应统一评估 cmd/houfeng-center 与 cmd/houfeng-agent 的 handler 配置，并把可复用结论写进本 spec 或当前 active docs。
