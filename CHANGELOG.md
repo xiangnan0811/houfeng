@@ -41,6 +41,14 @@
 * **web:** stabilize service Modal information groups and full-width entry copying, align stale observation source times and adjacent refresh actions, clarify actual report destinations and pending-cancellation billing dates, and prevent short dialogs from scrolling the main workspace underneath.
 * **web:** restore the monitoring detail mount guard during StrictMode effect replay so successful linked-VPS reads appear and the real VPS return link becomes available, while retaining route and request ownership guards.
 
+## [1.27.5](https://github.com/xiangnan0811/houfeng/compare/v1.27.4...v1.27.5) (2026-10-23)
+
+
+### Documentation
+
+* require independent GPT review and make Grok optional ([8f75ece](https://github.com/xiangnan0811/houfeng/commit/8f75eceb9e38dcce51217b7fb07cdb0f745312df))
+* require independent GPT review and make Grok optional ([46e293e](https://github.com/xiangnan0811/houfeng/commit/46e293efdc17842c0c55298c139695ddd5244bbb))
+
 ## [1.27.4](https://github.com/xiangnan0811/houfeng/compare/v1.27.3...v1.27.4) (2026-10-18)
 
 
