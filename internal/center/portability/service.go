@@ -71,6 +71,7 @@ type Options struct {
 	Subjects        records.SubjectAdapterRegistry
 	Attachments     AttachmentSource
 	AttachmentBlobs attachments.BlobStore
+	ImportBlobGC    attachments.ImportBlobGCObserver
 	Rebuilder       ImportProjectionRebuilder
 	Staging         *LeasedBlobStore
 	Now             func() time.Time
@@ -94,6 +95,7 @@ type Service struct {
 	subjects        records.SubjectAdapterRegistry
 	attachments     AttachmentSource
 	attachmentBlobs attachments.BlobStore
+	importBlobGC    attachments.ImportBlobGCObserver
 	rebuilder       ImportProjectionRebuilder
 	staging         *LeasedBlobStore
 	now             func() time.Time
@@ -136,6 +138,9 @@ func NewService(options Options) (*Service, error) {
 	if options.Documents == nil || options.Jobs == nil || options.Staging == nil {
 		return nil, ErrExportUnavailable
 	}
+	if options.AttachmentBlobs != nil && options.ImportBlobGC == nil {
+		return nil, ErrExportUnavailable
+	}
 	now := options.Now
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
@@ -161,6 +166,7 @@ func NewService(options Options) (*Service, error) {
 		subjects:        options.Subjects,
 		attachments:     options.Attachments,
 		attachmentBlobs: options.AttachmentBlobs,
+		importBlobGC:    options.ImportBlobGC,
 		rebuilder:       options.Rebuilder,
 		staging:         options.Staging,
 		now:             now,

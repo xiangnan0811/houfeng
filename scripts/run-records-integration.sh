@@ -158,8 +158,8 @@ set +e
       HOUFENG_RECORDS_KEEP_WORKSPACE=0 \
       "$root/scripts/test-record-platform-integration.sh" postgres -- \
       "${minio_args[@]}" \
-      go test -v ./internal/center/recordbackup ./internal/center/recordrestore ./internal/center/store ./internal/center/portability \
-      -run 'LocalProfile|WitnessedRecordSubject|RecordPortabilityDeletion|RecordWatchVersionedDefaultAnchor|MinIO|AttachmentDeletionPurgesExclusiveS3BlobExactlyOnce|AttachmentUploadServiceS3DirectWorkflow' \
+      go test -v ./internal/center/recordbackup ./internal/center/recordrestore ./internal/center/store ./internal/center/portability ./internal/center/attachments \
+      -run 'LocalProfile|WitnessedRecordSubject|RecordPortabilityDeletion|RecordWatchVersionedDefaultAnchor|MinIO|AttachmentDeletionPurgesExclusiveS3BlobExactlyOnce|AttachmentUploadServiceS3DirectWorkflow|S3BlobStore|PostgresIntegrationAttachmentBlobGC|PostgresIntegrationAttachmentDeletion|PostgresIntegrationImportAttachmentGCFence' \
       -count=1
   else
     exec setsid env \
@@ -168,7 +168,7 @@ set +e
       HOUFENG_RECORDS_KEEP_WORKSPACE=0 \
       "$root/scripts/test-record-platform-integration.sh" postgres -- \
       go test ./internal/center/recordbackup ./internal/center/recordrestore ./internal/center/store \
-      -run 'LocalProfile|WitnessedRecordSubject|RecordPortabilityDeletion|RecordWatchVersionedDefaultAnchor' \
+      -run 'LocalProfile|WitnessedRecordSubject|RecordPortabilityDeletion|RecordWatchVersionedDefaultAnchor|PostgresIntegrationImportAttachmentGCFence' \
       -count=1
   fi
 ) >"$stdout_file" 2>"$stderr_file" &
@@ -201,10 +201,11 @@ then
 fi
 
 commit=$(git -C "$root" rev-parse HEAD)
-config_material="profile=${profile};postgres=postgres:16-alpine;suites=LocalProfile,WitnessedRecordSubject,RecordPortabilityDeletion,RecordWatchVersionedDefaultAnchor"
+config_material="profile=${profile};postgres=postgres:16-alpine;suites=LocalProfile,WitnessedRecordSubject,RecordPortabilityDeletion,RecordWatchVersionedDefaultAnchor,TestPostgresIntegrationImportAttachmentGCFence"
 if [ "$profile" = "s3" ]
 then
-  config_material="${config_material},MinIO,TestPostgresIntegrationAttachmentDeletionPurgesExclusiveS3BlobExactlyOnce,TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow,TestPostgresMinIOIntegrationAttachmentDeletionPurgesExclusiveExactVersion,TestPostgresMinIOIntegrationAttachmentBlobGCExactVersionWorkflow,TestPostgresMinIOIntegrationAttachmentProcessorS3WorkspaceWorkflow,TestPostgresMinIOIntegrationAttachmentBlobPublicationCrashRestartS3;object=s3"
+  config_material="${config_material},TestPostgresMinIOIntegrationImportAttachmentGCFence"
+  config_material="${config_material},MinIO,TestPostgresIntegrationAttachmentDeletionPurgesExclusiveS3BlobExactlyOnce,TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow,TestPostgresMinIOIntegrationAttachmentDeletionPurgesExclusiveExactVersion,TestPostgresMinIOIntegrationAttachmentBlobGCExactVersionWorkflow,TestPostgresMinIOIntegrationAttachmentProcessorS3WorkspaceWorkflow,TestPostgresMinIOIntegrationAttachmentBlobPublicationCrashRestartS3,TestPostgresMinIOIntegrationAttachmentBlobGCHistoricalVersionWorkflow,TestPostgresMinIOIntegrationAttachmentDeletionPurgesHistoricalExactVersion,TestS3BlobStoreDeleteGCVersionExactVersion,TestS3BlobStoreDeleteGCVersionFailsClosed,store.PostgresIntegrationAttachmentBlobGC,store.PostgresIntegrationAttachmentDeletion;object=s3"
 else
   config_material="${config_material};object=local"
 fi
@@ -220,9 +221,11 @@ suites = [
     "store.WitnessedRecordSubject",
     "store.RecordPortabilityDeletion",
     "store.RecordWatchVersionedDefaultAnchor",
+    "store.TestPostgresIntegrationImportAttachmentGCFence",
 ]
 if profile == "s3":
     suites.append("portability.MinIO")
+    suites.append("store.TestPostgresMinIOIntegrationImportAttachmentGCFence")
     suites.extend([
         "store.TestPostgresIntegrationAttachmentDeletionPurgesExclusiveS3BlobExactlyOnce",
         "store.TestPostgresIntegrationAttachmentUploadServiceS3DirectWorkflow",
@@ -230,6 +233,12 @@ if profile == "s3":
         "store.TestPostgresMinIOIntegrationAttachmentBlobGCExactVersionWorkflow",
         "store.TestPostgresMinIOIntegrationAttachmentProcessorS3WorkspaceWorkflow",
         "store.TestPostgresMinIOIntegrationAttachmentBlobPublicationCrashRestartS3",
+        "store.TestPostgresMinIOIntegrationAttachmentBlobGCHistoricalVersionWorkflow",
+        "store.TestPostgresMinIOIntegrationAttachmentDeletionPurgesHistoricalExactVersion",
+        "attachments.TestS3BlobStoreDeleteGCVersionExactVersion",
+        "attachments.TestS3BlobStoreDeleteGCVersionFailsClosed",
+        "store.PostgresIntegrationAttachmentBlobGC",
+        "store.PostgresIntegrationAttachmentDeletion",
     ])
 payload = {
     "format": "houfeng-record-profile-report/v1",

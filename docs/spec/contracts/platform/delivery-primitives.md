@@ -124,4 +124,62 @@ draft delivery 不获取 record serving lease，也不启动伪续租。每次�
 - reader 在声明长度恰好结束时的 `EOF` 成功、短读 `io.ErrUnexpectedEOF`、
   越界字节、short write 和最后非 EOF 错误必须保持可观察且 fail closed。
 
+## Scenario: Attachment durable GC 的精确版本维护能力
+
+```go
+type BlobGCDeleter interface {
+    DeleteGCVersion(context.Context, ObjectVersion) (DeletionReceipt, error)
+}
+```
+
+- `BlobStore` 的 Put/Open/Stat/Delete 四方法及下载接口不变。S3 普通
+  Open/Stat/Delete 仍要求 current 身份；维护接口仅供已经取得完整对象身份的
+  durable GC claim 的消费者使用，不授权历史业务读取或任意版本清理。
+- GC claim 绑定 backend/key/VersionID/SHA256/size。S3 维护入口不要求目标
+  current，但仍检查请求/context、versioning Enabled、非 null VersionID、
+  无 Object Lock、精确版本 HEAD/GET、大小及完整 SHA256；只按目标 VersionID
+  REMOVE，随后确认精确 absence。禁止 key-only 删除、扫描猜版本或改删新版本。
+  Local 维护入口沿用普通 Delete 的私有目录、mutex、完整身份检查及目录 sync。
+- V1 已非 current 时只删除 V1；V2 或 current delete marker 保持不变。marker
+  作为目标必须报错且不 REMOVE。错误 hash/size、missing bucket、Suspended、
+  Object Lock、403 和传输错误不能作为成功 receipt。
+- 精确 V1 已不存在时返回完整原身份、`Deleted:false`，即使 V2/marker 是 current。
+  无法重新验证不存在版本的历史 hash；可信度来自已绑定的 durable claim 和
+  completion CAS，而不是不存在对象的内容验证。REMOVE 后的确认错误可能已产生
+  物理效果，但不能返回成功；接管者可通过精确 absence 收敛并只结算一次。
+- `BlobPublicationReconciler` 仍为独立 current-only 协议；历史 bound residue
+  可能继续阻塞 keywide GC 资格，本能力不自动扩权。删除 current 版本可能露出
+  更老版本，不承诺整个 key 永久撤销，也不对外部管理员提供 current 锁。
+- 必须通过真实 MinIO 的历史 V1/V2、marker、错误身份、配置漂移及删除后故障回归，
+  并通过两条真实 PostgreSQL GC 消费路径；验收入口见
+  [集成合同](../records/integration-recovery.md)。
+
+### Import 的 pre-Put GC 生命周期观察
+
+- 所有导入附件在第一次 Put 前，以短的 READ COMMITTED / READ ONLY 事务批量观察
+  每个 canonical `blob_key` 的全部状态 GC history COUNT；存在任何非 completed 行即
+  `ErrBlobGCProtected`，尚不执行附件 Put。重复 digest 保留同一 baseline，其他 key
+  的 GC 不使本 key 冲突。数据库错误不得解释为零历史。
+- 内部 `ImportBlobGCObservation` 绑定 digest 与非负 count，零 count 有效、零值 token
+  无效；不进入 JSON/archive，也不是密码学授权。Put 返回的 exact identity 与原观察值
+  一同登记，禁止在 Put 后刷新 baseline；不持数据库锁跨网络。
+- 登记事务固定 quota account → Blob ROW EXCLUSIVE 锁 → **另一条语句**读取 history。
+  每项 count 必须相等且无 active 行，再复用现行 exact metadata identity 校验并插入
+  attachment/ref。三个含 imported attachments 的 revision commit 入口显式使用
+  READ COMMITTED；其他调用保留原默认隔离。锁保持至 revision/origin/job 整体提交。
+- 两个 fresh GC claim producer 同样显式 READ COMMITTED，已有 Blob SHARE ROW EXCLUSIVE
+  锁后的资格查询看到最新已提交引用。import 先提交则共享引用受保护；claim 先赢，即便
+  delete 与 completion 已完成，history count 增加仍使迟到登记回滚。旧生命周期完成后
+  重新观察并 Put 可合法重建 local 同 digest 身份或 S3 新版本。
+- 此协议依赖可信现有应用 API 保留全部 GC history：不 prune、不 rekey、不 reopen
+  completed；reclaim 只更新 active 行。runtime 没有 DELETE 权限但有 UPDATE 权限，
+  因而不是抵抗任意 SQL/DBA 的不可变 ledger。未来改变保留合同必须先替换此 fence，
+  不能截断或抽样历史来换成功。当前使用每次观察一批、每 record 登记一批查询，无新增
+  history index/migration；现有超时失败则回滚。
+- 缺 observer 的附件 Blob 配置 fail closed。Apply 在观察或最终登记遇到 GC protection
+  时映射既有 `ErrImportCASConflict` / HTTP 409；不自动重试，不补偿删除可能共享的
+  Put 对象。用户重试 planned Apply 重新观察和 Put；applied replay 不再 Put。
+- 该合同不扩展普通 publication/upload writer，不解决旧 owner 已发出的迟到外部 DELETE、
+  远端 capability closure、root-independent obligation 或全局 G2 锁序。
+
 ---

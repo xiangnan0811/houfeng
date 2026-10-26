@@ -163,6 +163,13 @@ type BlobStore interface {
 	Delete(context.Context, ObjectVersion) (DeletionReceipt, error)
 }
 
+// BlobGCDeleter deletes only the complete object identity authorized by an
+// already committed durable GC claim. It does not authorize historical business
+// reads or arbitrary version deletion.
+type BlobGCDeleter interface {
+	DeleteGCVersion(context.Context, ObjectVersion) (DeletionReceipt, error)
+}
+
 func nilUploadServiceDependency(value any) bool {
 	if value == nil {
 		return true

@@ -64,8 +64,12 @@ func (repository *PostgresRecordRepository) CommitRevision(
 		return records.RevisionCommitResult{}, err
 	}
 
+	options := pgx.TxOptions{}
+	if len(command.ImportedAttachments) > 0 {
+		options.IsoLevel = pgx.ReadCommitted
+	}
 	var result records.RevisionCommitResult
-	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runRecordPlatformTransaction(ctx, options, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		committed, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared)
 		if err != nil {
 			return err
@@ -87,6 +91,7 @@ func (repository *PostgresRecordRepository) CommitRevisions(
 		return nil, fmt.Errorf("%w: repository", records.ErrInvalidRevisionCommand)
 	}
 	prepared := make([]preparedRecordRevision, 0, len(commands))
+	options := pgx.TxOptions{}
 	for _, command := range commands {
 		if err := command.Validate(); err != nil {
 			return nil, err
@@ -96,9 +101,12 @@ func (repository *PostgresRecordRepository) CommitRevisions(
 			return nil, err
 		}
 		prepared = append(prepared, next)
+		if len(command.ImportedAttachments) > 0 {
+			options.IsoLevel = pgx.ReadCommitted
+		}
 	}
 	results := make([]records.RevisionCommitResult, len(commands))
-	err := repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err := repository.platform.runRecordPlatformTransaction(ctx, options, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		for index, command := range commands {
 			result, err := repository.commitRevisionOnTx(ctx, transaction, command, prepared[index])
 			if err != nil {
@@ -123,6 +131,7 @@ func (repository *PostgresRecordRepository) CommitRevisionsFinishing(
 		return nil, fmt.Errorf("%w: repository", records.ErrInvalidRevisionCommand)
 	}
 	prepared := make([]preparedRecordRevision, 0, len(commands))
+	options := pgx.TxOptions{}
 	for _, command := range commands {
 		if err := command.Validate(); err != nil {
 			return nil, err
@@ -132,13 +141,16 @@ func (repository *PostgresRecordRepository) CommitRevisionsFinishing(
 			return nil, err
 		}
 		prepared = append(prepared, next)
+		if len(command.ImportedAttachments) > 0 {
+			options.IsoLevel = pgx.ReadCommitted
+		}
 	}
 	originID, err := newRecordOriginID()
 	if err != nil {
 		return nil, fmt.Errorf("%w: origin", records.ErrInvalidRevisionCommand)
 	}
 	results := make([]records.RevisionCommitResult, len(commands))
-	err = repository.platform.RunRecordPlatformTransaction(ctx, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
+	err = repository.platform.runRecordPlatformTransaction(ctx, options, func(ctx context.Context, transaction *RecordPlatformTransaction) error {
 		if err := assertOriginAvailableOnTx(ctx, transaction, finish.OriginDigest); err != nil {
 			return err
 		}

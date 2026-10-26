@@ -311,6 +311,13 @@ func TestS3BlobStoreOperationsRevalidateBucketContract(t *testing.T) {
 				return err
 			},
 		},
+		{
+			name: "delete GC version",
+			run: func(store *S3BlobStore, version ObjectVersion) error {
+				_, err := store.DeleteGCVersion(context.Background(), version)
+				return err
+			},
+		},
 	}
 	drifts := []struct {
 		name           string
@@ -1623,6 +1630,265 @@ func TestS3BlobStorePublicationResolverUsesExactCurrentVersion(t *testing.T) {
 			t.Fatalf("Stat(noncurrent publication version) error = %v, want ErrBlobVersionMismatch", err)
 		}
 	})
+}
+
+func TestS3BlobStoreDeleteGCVersionExactVersion(t *testing.T) {
+	requireMinIOIntegration(t)
+	for _, scenario := range []string{
+		"historical_version_preserves_current", "historical_version_beneath_current_marker",
+		"marker_target_rejected", "wrong_hash", "wrong_size",
+		"missing_exact_version_with_current_v2", "missing_exact_version_with_current_marker",
+	} {
+		t.Run(scenario, func(t *testing.T) {
+			client, bucket := newMinIOBlobFixture(t)
+			store, err := NewS3BlobStore(client, bucket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			content := []byte("exact GC must preserve other versions")
+			version, err := store.Put(ctx, blobPutRequest(content), bytes.NewReader(content))
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := version
+			wantErr := error(nil)
+			switch scenario {
+			case "wrong_hash":
+				corrupt := bytes.Repeat([]byte{'x'}, len(content))
+				upload, err := client.PutObject(ctx, bucket, version.Key, bytes.NewReader(corrupt),
+					int64(len(corrupt)), minio.PutObjectOptions{DisableMultipart: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				target.VersionID = upload.VersionID
+				wantErr = ErrBlobHashMismatch
+			case "wrong_size":
+				target.SizeBytes++
+				wantErr = ErrBlobSizeMismatch
+			default:
+				if strings.Contains(scenario, "marker") {
+					if err := client.RemoveObject(ctx, bucket, version.Key, minio.RemoveObjectOptions{}); err != nil {
+						t.Fatal(err)
+					}
+					if scenario == "marker_target_rejected" {
+						versions := s3VersionsForKey(t, client, bucket, version.Key)
+						if len(versions) != 2 || !versions[0].IsDeleteMarker || !versions[0].IsLatest {
+							t.Fatalf("expected real current marker: %#v", versions)
+						}
+						target.VersionID = versions[0].VersionID
+					}
+				} else {
+					upload, err := client.PutObject(ctx, bucket, version.Key, bytes.NewReader(content),
+						int64(len(content)), minio.PutObjectOptions{DisableMultipart: true})
+					if err != nil || upload.VersionID == version.VersionID || upload.VersionID == "" {
+						t.Fatalf("raw V2 = %#v, %v", upload, err)
+					}
+				}
+			}
+			rejectTarget := wantErr != nil || scenario == "marker_target_rejected"
+			missing := strings.HasPrefix(scenario, "missing_exact_version")
+			if missing {
+				if err := client.RemoveObject(ctx, bucket, version.Key, minio.RemoveObjectOptions{VersionID: version.VersionID}); err != nil {
+					t.Fatal(err)
+				}
+			} else if !rejectTarget {
+				assertS3VersionIdentityRejected(t, store, version)
+			}
+			before := s3VersionsForKey(t, client, bucket, version.Key)
+			var removes []string
+			faultStore, err := NewS3BlobStore(newMinIOBlobClientWithTransport(t, s3BlobRoundTripperFunc(
+				func(request *http.Request) (*http.Response, error) {
+					if request.Method == http.MethodDelete {
+						removes = append(removes, request.URL.Path+"?"+request.URL.RawQuery)
+						if request.URL.Path != "/"+bucket+"/"+target.Key || request.URL.Query().Get("versionId") != target.VersionID {
+							t.Errorf("unexpected REMOVE identity: %s", request.URL)
+						}
+					}
+					return http.DefaultTransport.RoundTrip(request)
+				})), bucket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt, err := faultStore.DeleteGCVersion(ctx, target)
+			if rejectTarget {
+				if err == nil || (wantErr != nil && !errors.Is(err, wantErr)) || receipt.Deleted || len(removes) != 0 {
+					t.Fatalf("rejected GC = %#v, %v, removes=%v", receipt, err, removes)
+				}
+			} else {
+				if err != nil || receipt != (DeletionReceipt{Version: target, Deleted: !missing}) {
+					t.Fatalf("GC = %#v, %v", receipt, err)
+				}
+				wantRemoves := 1
+				if missing {
+					wantRemoves = 0
+				}
+				if len(removes) != wantRemoves {
+					t.Fatalf("REMOVE count = %d, want %d", len(removes), wantRemoves)
+				}
+				assertS3GCExactAbsent(t, client, bucket, version)
+				if replay, err := faultStore.DeleteGCVersion(ctx, target); err != nil || replay != (DeletionReceipt{Version: target}) {
+					t.Fatalf("GC replay = %#v, %v", replay, err)
+				}
+			}
+			after := s3VersionsForKey(t, client, bucket, version.Key)
+			expectedCount := len(before)
+			if !rejectTarget && !missing {
+				expectedCount--
+			}
+			if len(after) != expectedCount {
+				t.Fatalf("remaining versions = %#v, before %#v", after, before)
+			}
+			for _, preserved := range before {
+				if !rejectTarget && preserved.VersionID == target.VersionID {
+					continue
+				}
+				found := false
+				for _, remaining := range after {
+					if remaining.VersionID == preserved.VersionID && remaining.IsLatest == preserved.IsLatest &&
+						remaining.IsDeleteMarker == preserved.IsDeleteMarker {
+						found = true
+					}
+				}
+				if !found {
+					t.Fatalf("lost preserved identity/current state: %#v; after %#v", preserved, after)
+				}
+			}
+			if !rejectTarget && !strings.Contains(scenario, "marker") {
+				assertS3GCCurrentBytes(t, client, bucket, version.Key, before[0].VersionID, content)
+			}
+		})
+	}
+}
+
+func assertS3GCExactAbsent(t *testing.T, client *minio.Client, bucket string, version ObjectVersion) {
+	t.Helper()
+	_, err := client.StatObject(context.Background(), bucket, version.Key, minio.StatObjectOptions{VersionID: version.VersionID})
+	code := minio.ToErrorResponse(err).Code
+	if err == nil || (code != "NoSuchKey" && code != "NoSuchVersion" && code != "NotFound") {
+		t.Fatalf("raw exact HEAD = %v, want absent", err)
+	}
+}
+
+func assertS3GCCurrentBytes(t *testing.T, client *minio.Client, bucket, key, versionID string, content []byte) {
+	t.Helper()
+	object, err := client.GetObject(context.Background(), bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, statErr := object.Stat()
+	got, readErr := io.ReadAll(object)
+	closeErr := object.Close()
+	if statErr != nil || readErr != nil || closeErr != nil || info.VersionID != versionID || !bytes.Equal(got, content) {
+		t.Fatalf("raw current = %#v, %q, errors %v/%v/%v", info, got, statErr, readErr, closeErr)
+	}
+}
+
+func TestS3BlobStoreDeleteGCVersionFailsClosed(t *testing.T) {
+	requireMinIOIntegration(t)
+	for _, scenario := range []string{"empty_version", "null_version", "missing_bucket", "suspended_versioning",
+		"object_lock", "forbidden", "transport", "post_remove_verification"} {
+		t.Run(scenario, func(t *testing.T) {
+			client, bucket := newMinIOBlobFixture(t)
+			store, err := NewS3BlobStore(client, bucket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := context.Background()
+			content := []byte("fail closed exact maintenance deletion")
+			version, err := store.Put(ctx, blobPutRequest(content), bytes.NewReader(content))
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := version
+			switch scenario {
+			case "empty_version":
+				target.VersionID = ""
+			case "null_version":
+				target.VersionID = "null"
+			case "missing_bucket":
+				bucket = minIOFixtureBucketName(t, "houfeng-missing")
+			case "suspended_versioning":
+				if err := client.SuspendVersioning(ctx, bucket); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					if err := client.EnableVersioning(context.Background(), bucket); err != nil {
+						t.Error(err)
+					}
+				})
+			case "object_lock":
+				client, bucket = newMinIOBlobFixtureWithObjectLock(t)
+				upload, err := client.PutObject(ctx, bucket, version.Key, bytes.NewReader(content),
+					int64(len(content)), minio.PutObjectOptions{DisableMultipart: true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				target.VersionID = upload.VersionID
+			}
+			removeCount := 0
+			inject := true
+			removed := false
+			faultClient := newMinIOBlobClientWithTransport(t, s3BlobRoundTripperFunc(func(request *http.Request) (*http.Response, error) {
+				exact := request.URL.Path == "/"+bucket+"/"+target.Key && request.URL.Query().Get("versionId") == target.VersionID
+				if request.Method == http.MethodDelete {
+					removeCount++
+					if !exact {
+						t.Errorf("non-exact REMOVE: %s", request.URL)
+					}
+				}
+				if inject && exact && request.Method == http.MethodHead {
+					switch scenario {
+					case "forbidden":
+						return s3BlobTestErrorResponse(request, http.StatusForbidden, "AccessDenied"), nil
+					case "transport":
+						return nil, errors.New("injected exact HEAD transport failure")
+					case "post_remove_verification":
+						if removed {
+							return nil, errors.New("injected post-REMOVE HEAD failure")
+						}
+					}
+				}
+				response, err := http.DefaultTransport.RoundTrip(request)
+				if err == nil && exact && request.Method == http.MethodDelete &&
+					response.StatusCode >= 200 && response.StatusCode < 300 {
+					removed = true
+				}
+				return response, err
+			}))
+			faultStore, err := NewS3BlobStore(faultClient, bucket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			receipt, err := faultStore.DeleteGCVersion(ctx, target)
+			if err == nil || receipt.Deleted || receipt.Version != target {
+				t.Fatalf("fail-closed GC = %#v, %v", receipt, err)
+			}
+			if scenario == "post_remove_verification" {
+				if removeCount != 1 || !removed {
+					t.Fatalf("post-REMOVE fault count/state = %d/%t", removeCount, removed)
+				}
+				inject = false
+				if replay, err := faultStore.DeleteGCVersion(ctx, target); err != nil || replay != (DeletionReceipt{Version: target}) {
+					t.Fatalf("absence replay = %#v, %v", replay, err)
+				}
+				assertS3GCExactAbsent(t, client, bucket, target)
+			} else {
+				if removeCount != 0 {
+					t.Fatalf("preflight failure sent %d REMOVEs", removeCount)
+				}
+				checkBucket := store.bucket
+				checkVersion := version
+				if scenario == "object_lock" {
+					checkBucket, checkVersion = bucket, target
+				}
+				info, err := client.StatObject(ctx, checkBucket, checkVersion.Key, minio.StatObjectOptions{VersionID: checkVersion.VersionID})
+				if err != nil || info.VersionID != checkVersion.VersionID {
+					t.Fatalf("preflight failure changed object: %#v, %v", info, err)
+				}
+			}
+		})
+	}
 }
 
 func requireMinIOIntegration(t *testing.T) {

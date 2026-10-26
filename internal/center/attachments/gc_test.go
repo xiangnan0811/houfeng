@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"io"
 	"reflect"
 	"testing"
 	"time"
@@ -271,19 +270,7 @@ type blobGCStoreStub struct {
 	events         *[]string
 }
 
-func (*blobGCStoreStub) Put(context.Context, PutRequest, io.Reader) (ObjectVersion, error) {
-	return ObjectVersion{}, errors.New("unexpected put")
-}
-
-func (*blobGCStoreStub) Open(context.Context, ObjectVersion, ByteRange) (io.ReadCloser, error) {
-	return nil, errors.New("unexpected open")
-}
-
-func (*blobGCStoreStub) Stat(context.Context, ObjectVersion) (ObjectInfo, error) {
-	return ObjectInfo{}, errors.New("unexpected stat")
-}
-
-func (stub *blobGCStoreStub) Delete(_ context.Context, version ObjectVersion) (DeletionReceipt, error) {
+func (stub *blobGCStoreStub) DeleteGCVersion(_ context.Context, version ObjectVersion) (DeletionReceipt, error) {
 	stub.deleteCalls++
 	stub.deleted = version
 	if stub.events != nil {

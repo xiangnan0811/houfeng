@@ -365,6 +365,9 @@ func (service *Service) Apply(ctx context.Context, request ApplyRequest) (ApplyR
 	}
 	importedAttachments, attachmentIDs, err := service.restoreImportedAttachments(ctx, actor, cached)
 	if err != nil {
+		if errors.Is(err, attachments.ErrBlobGCProtected) {
+			return ApplyResult{}, ErrImportCASConflict
+		}
 		return ApplyResult{}, err
 	}
 	importRequests := make([]records.ImportDocumentRequest, 0, len(plan.Documents))
@@ -390,6 +393,9 @@ func (service *Service) Apply(ctx context.Context, request ApplyRequest) (ApplyR
 		ActorID:        actor.UserID,
 	})
 	if err != nil {
+		if errors.Is(err, attachments.ErrBlobGCProtected) {
+			return ApplyResult{}, ErrImportCASConflict
+		}
 		return ApplyResult{}, mapImportDocumentError(err)
 	}
 	recordIDs := make([]string, 0, len(written))

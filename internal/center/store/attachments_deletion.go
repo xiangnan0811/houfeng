@@ -424,7 +424,7 @@ func (repository *PostgresAttachmentRepository) PreviewAttachmentDeletion(
 
 func (repository *PostgresAttachmentRepository) ConfigureAttachmentDeletionBlobStore(
 	backend attachments.BackendKind,
-	blobStore attachments.BlobStore,
+	blobStore attachments.BlobGCDeleter,
 ) error {
 	if repository == nil || nilAttachmentDeletionBlobStore(blobStore) ||
 		(backend != attachments.BackendKindLocal && backend != attachments.BackendKindS3) {
@@ -433,7 +433,7 @@ func (repository *PostgresAttachmentRepository) ConfigureAttachmentDeletionBlobS
 	repository.attachmentDeletionBlobMu.Lock()
 	defer repository.attachmentDeletionBlobMu.Unlock()
 	if repository.attachmentDeletionBlobStores == nil {
-		repository.attachmentDeletionBlobStores = make(map[attachments.BackendKind]attachments.BlobStore)
+		repository.attachmentDeletionBlobStores = make(map[attachments.BackendKind]attachments.BlobGCDeleter)
 	}
 	if existing := repository.attachmentDeletionBlobStores[backend]; existing != nil && !sameAttachmentDeletionBlobStore(existing, blobStore) {
 		return attachments.ErrInvalidDeletionAdapter
@@ -442,7 +442,7 @@ func (repository *PostgresAttachmentRepository) ConfigureAttachmentDeletionBlobS
 	return nil
 }
 
-func nilAttachmentDeletionBlobStore(blobStore attachments.BlobStore) bool {
+func nilAttachmentDeletionBlobStore(blobStore attachments.BlobGCDeleter) bool {
 	if blobStore == nil {
 		return true
 	}
@@ -455,7 +455,7 @@ func nilAttachmentDeletionBlobStore(blobStore attachments.BlobStore) bool {
 	}
 }
 
-func sameAttachmentDeletionBlobStore(left, right attachments.BlobStore) bool {
+func sameAttachmentDeletionBlobStore(left, right attachments.BlobGCDeleter) bool {
 	leftValue := reflect.ValueOf(left)
 	rightValue := reflect.ValueOf(right)
 	if !leftValue.IsValid() || !rightValue.IsValid() || leftValue.Type() != rightValue.Type() ||
@@ -559,7 +559,7 @@ func (repository *PostgresAttachmentRepository) prepareAttachmentDeletion(
 	ctx context.Context,
 	command attachments.AttachmentDeletionCommand,
 ) (attachmentDeletionPreparation, error) {
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return attachmentDeletionPreparation{}, fmt.Errorf("begin attachment purge: %w", err)
 	}
@@ -1031,7 +1031,7 @@ func (repository *PostgresAttachmentRepository) executeAttachmentDeletionClaim(
 		return recorddeletion.ErrDeletionSafetyUnavailable
 	}
 	version := storeObjectVersionFromBlob(claim.Candidate.Object)
-	receipt, err := blobStore.Delete(ctx, version)
+	receipt, err := blobStore.DeleteGCVersion(ctx, version)
 	if err != nil {
 		retryErr := repository.RetryBlobGC(ctx, attachments.BlobGCRetryRequest{
 			Claim: claim, RetryAt: time.Now().UTC().Add(attachments.DefaultBlobGCRetryDelay),
@@ -1065,7 +1065,7 @@ func (repository *PostgresAttachmentRepository) executeAttachmentDeletionClaim(
 
 func (repository *PostgresAttachmentRepository) attachmentDeletionBlobStore(
 	backend attachments.BackendKind,
-) attachments.BlobStore {
+) attachments.BlobGCDeleter {
 	if repository == nil {
 		return nil
 	}

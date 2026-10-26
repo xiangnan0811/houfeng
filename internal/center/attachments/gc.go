@@ -163,7 +163,7 @@ type BlobGCWorkerOptions struct {
 
 type BlobGCWorker struct {
 	repository         BlobGCRepository
-	blob               BlobStore
+	blob               BlobGCDeleter
 	projectID          string
 	backendKind        BackendKind
 	ownerID            string
@@ -175,7 +175,7 @@ type BlobGCWorker struct {
 
 func NewBlobGCWorker(
 	repository BlobGCRepository,
-	blob BlobStore,
+	blob BlobGCDeleter,
 	options BlobGCWorkerOptions,
 ) (*BlobGCWorker, error) {
 	if nilUploadServiceDependency(repository) || nilUploadServiceDependency(blob) {
@@ -283,7 +283,7 @@ func (worker *BlobGCWorker) execute(
 		return nil, true, ErrBlobGCConflict
 	}
 	version := objectVersionFromGCObject(claim.Candidate.Object)
-	receipt, deleteErr := worker.blob.Delete(ctx, version)
+	receipt, deleteErr := worker.blob.DeleteGCVersion(ctx, version)
 	if deleteErr != nil {
 		return nil, true, worker.scheduleRetry(ctx, *claim, now, fmt.Errorf("delete exact GC Blob: %w", deleteErr))
 	}

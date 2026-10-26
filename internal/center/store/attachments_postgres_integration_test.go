@@ -1699,6 +1699,204 @@ func TestPostgresMinIOIntegrationAttachmentBlobGCExactVersionWorkflow(t *testing
 	}
 }
 
+func TestPostgresMinIOIntegrationAttachmentBlobGCHistoricalVersionWorkflow(t *testing.T) {
+	for _, scenario := range []string{"claim_then_newer_version", "delete_before_completion_takeover"} {
+		t.Run(scenario, func(t *testing.T) {
+			ctx := context.Background()
+			fixture := newRecordsPostgresFixture(t, ctx)
+			client, bucket := newAttachmentUploadWorkflowMinIO(t)
+			blob, err := attachments.NewS3BlobStore(client, bucket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			repository := NewPostgresAttachmentRepository(
+				fixture.openDirectRuntimePool(t, ctx, "attachment-historical-gc", 2),
+			)
+			content := []byte("historical GC committed claim and exact bytes")
+			digest := sha256.Sum256(content)
+			temporary, err := attachments.NewBlobTemporaryKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			version, err := blob.Put(ctx, attachments.PutRequest{
+				ExpectedSHA256: digest, ExpectedSizeBytes: int64(len(content)), TemporaryKey: temporary,
+			}, bytes.NewReader(content))
+			if err != nil {
+				t.Fatal(err)
+			}
+			object := attachmentBlobObjectFromVersion(version, attachments.BackendKindS3)
+			seedAttachmentBlobGCObject(t, ctx, fixture, object, time.Now().UTC().Add(-48*time.Hour))
+			var v2 string
+			observing := &attachmentHistoricalGCRepository{
+				BlobGCRepository: repository,
+				afterClaim: func(claim attachments.BlobGCClaim) error {
+					var count int
+					if err := fixture.db.QueryRow(ctx, `
+						select count(*)::int from public.blob_gc_deletions
+						where deletion_id = $1 and deletion_state = 'claimed'
+						  and owner_id = $2 and owner_generation = $3 and attempt = $4
+						  and lease_expires_at = $5 and blob_key = $6 and object_version = $7`,
+						claim.DeletionID, claim.OwnerID, claim.OwnerGeneration, claim.Attempt,
+						claim.LeaseExpiresAt, version.Key, version.VersionID,
+					).Scan(&count); err != nil {
+						return err
+					}
+					if count != 1 {
+						return errors.New("afterClaim did not observe committed exact durable claim")
+					}
+					upload, err := client.PutObject(ctx, bucket, version.Key, bytes.NewReader(content),
+						int64(len(content)), minio.PutObjectOptions{DisableMultipart: true})
+					if err != nil {
+						return err
+					}
+					if upload.VersionID == "" || upload.VersionID == version.VersionID {
+						return errors.New("raw overwrite did not produce a distinct V2")
+					}
+					v2 = upload.VersionID
+					return nil
+				},
+			}
+			injected := errors.New("injected before durable completion")
+			if scenario == "delete_before_completion_takeover" {
+				observing.completionErr = injected
+			}
+			worker, err := attachments.NewBlobGCWorker(observing, blob, attachments.BlobGCWorkerOptions{
+				BackendKind: attachments.BackendKindS3, OwnerID: "historical_gc_old",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := worker.PurgePermanent(ctx, object)
+			if len(observing.completions) != 1 {
+				t.Fatalf("physical deletion did not reach completion: %v, requests %#v", err, observing.completions)
+			}
+			oldCompletion := observing.completions[0]
+			if oldCompletion.Receipt != (attachments.DeletionReceipt{Version: version, Deleted: true}) {
+				t.Fatalf("initial real deletion receipt = %#v", oldCompletion.Receipt)
+			}
+			assertAttachmentHistoricalGCObjects(t, ctx, client, bucket, version, v2, content)
+			completion := oldCompletion
+			if scenario == "delete_before_completion_takeover" {
+				if !errors.Is(err, injected) {
+					t.Fatalf("completion interruption = %v, want injected failure", err)
+				}
+				assertAttachmentBlobGCQuota(t, ctx, fixture, object.SizeBytes, 0)
+				resolved, err := repository.ResolveBlobGC(ctx, attachments.BlobGCResolveRequest(oldCompletion))
+				if err != nil || resolved != nil {
+					t.Fatalf("uncommitted completion resolved = %#v, %v", resolved, err)
+				}
+				var state string
+				if err := fixture.db.QueryRow(ctx, `
+					select deletion_state from public.blob_gc_deletions where deletion_id = $1`,
+					oldCompletion.Claim.DeletionID).Scan(&state); err != nil || state != "claimed" {
+					t.Fatalf("persistent interrupted claim = %q, %v", state, err)
+				}
+				// Fixture-only clock control: expire precisely this committed owner,
+				// generation, attempt and lease, never mutate authorization or receipts.
+				claim := oldCompletion.Claim
+				tag, err := fixture.db.Exec(ctx, `
+					update public.blob_gc_deletions
+					set lease_expires_at = transaction_timestamp() - interval '1 second'
+					where deletion_id = $1 and deletion_state = 'claimed'
+					  and owner_id = $2 and owner_generation = $3 and attempt = $4
+					  and lease_expires_at = $5 and blob_key = $6 and object_version = $7
+					  and sha256_digest = $8 and size_bytes = $9 and backend_kind = 's3'`,
+					claim.DeletionID, claim.OwnerID, claim.OwnerGeneration, claim.Attempt,
+					claim.LeaseExpiresAt, version.Key, version.VersionID, version.SHA256[:], version.SizeBytes)
+				if err != nil || tag.RowsAffected() != 1 {
+					t.Fatalf("expire exact fixture lease rows=%d, error=%v", tag.RowsAffected(), err)
+				}
+				successor := &attachmentHistoricalGCRepository{BlobGCRepository: repository}
+				newWorker, err := attachments.NewBlobGCWorker(successor, blob, attachments.BlobGCWorkerOptions{
+					BackendKind: attachments.BackendKindS3, OwnerID: "historical_gc_new",
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, err = newWorker.PurgePermanent(ctx, object)
+				if err != nil || len(successor.completions) != 1 {
+					t.Fatalf("real takeover = %#v, %v, completions %#v", result, err, successor.completions)
+				}
+				completion = successor.completions[0]
+				if completion.Claim.DeletionID != claim.DeletionID || completion.Claim.OwnerID != "historical_gc_new" ||
+					completion.Claim.OwnerGeneration != claim.OwnerGeneration+1 || completion.Claim.Attempt != claim.Attempt+1 ||
+					completion.Receipt != (attachments.DeletionReceipt{Version: version}) {
+					t.Fatalf("takeover claim/receipt = %#v, old %#v", completion, oldCompletion)
+				}
+				if _, err := repository.CompleteBlobGC(ctx, oldCompletion); !errors.Is(err, attachments.ErrBlobGCClaimLost) {
+					t.Fatalf("stale completion error = %v, want ErrBlobGCClaimLost", err)
+				}
+				assertAttachmentBlobGCTerminalResult(t, ctx, fixture, object, "already_absent")
+			} else {
+				if err != nil || result.Receipt != oldCompletion.Receipt {
+					t.Fatalf("historical GC = %#v, %v", result, err)
+				}
+				assertAttachmentBlobGCTerminalResult(t, ctx, fixture, object, "deleted")
+			}
+			assertAttachmentBlobGCQuota(t, ctx, fixture, 0, 1)
+			if replay, err := repository.CompleteBlobGC(ctx, completion); err != nil || replay != result {
+				t.Fatalf("completion replay = %#v, %v, want %#v", replay, err, result)
+			}
+			if resolved, err := repository.ResolveBlobGC(ctx, attachments.BlobGCResolveRequest(completion)); err != nil ||
+				resolved == nil || *resolved != result {
+				t.Fatalf("terminal resolve = %#v, %v, want %#v", resolved, err, result)
+			}
+			assertAttachmentBlobGCQuota(t, ctx, fixture, 0, 1)
+			assertAttachmentHistoricalGCObjects(t, ctx, client, bucket, version, v2, content)
+		})
+	}
+}
+
+type attachmentHistoricalGCRepository struct {
+	attachments.BlobGCRepository
+	afterClaim    func(attachments.BlobGCClaim) error
+	completionErr error
+	completions   []attachments.BlobGCCompletionRequest
+}
+
+func (repository *attachmentHistoricalGCRepository) ClaimBlobGC(
+	ctx context.Context, request attachments.BlobGCClaimRequest,
+) (*attachments.BlobGCClaim, error) {
+	claim, err := repository.BlobGCRepository.ClaimBlobGC(ctx, request)
+	if err == nil && claim != nil && repository.afterClaim != nil {
+		err = repository.afterClaim(*claim)
+	}
+	return claim, err
+}
+
+func (repository *attachmentHistoricalGCRepository) CompleteBlobGC(
+	ctx context.Context, request attachments.BlobGCCompletionRequest,
+) (attachments.BlobGCPurgeResult, error) {
+	repository.completions = append(repository.completions, request)
+	if repository.completionErr != nil {
+		return attachments.BlobGCPurgeResult{}, repository.completionErr
+	}
+	return repository.BlobGCRepository.CompleteBlobGC(ctx, request)
+}
+
+func assertAttachmentHistoricalGCObjects(
+	t *testing.T, ctx context.Context, client *minio.Client, bucket string,
+	deleted attachments.ObjectVersion, currentVersionID string, content []byte,
+) {
+	t.Helper()
+	_, err := client.StatObject(ctx, bucket, deleted.Key, minio.StatObjectOptions{VersionID: deleted.VersionID})
+	code := minio.ToErrorResponse(err).Code
+	if err == nil || (code != "NoSuchKey" && code != "NoSuchVersion" && code != "NotFound") {
+		t.Fatalf("raw exact V1 HEAD = %v, want absent", err)
+	}
+	current, err := client.GetObject(ctx, bucket, deleted.Key, minio.GetObjectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, statErr := current.Stat()
+	got, readErr := io.ReadAll(current)
+	closeErr := current.Close()
+	if statErr != nil || readErr != nil || closeErr != nil || info.VersionID != currentVersionID ||
+		currentVersionID == "" || !bytes.Equal(got, content) {
+		t.Fatalf("preserved current V2 = %#v, %q errors %v/%v/%v", info, got, statErr, readErr, closeErr)
+	}
+}
+
 func TestPostgresIntegrationAttachmentTemporaryObjectCleanupPersistsVersionAndMarker(t *testing.T) {
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)

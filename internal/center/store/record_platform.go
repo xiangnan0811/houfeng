@@ -66,10 +66,14 @@ type RecordPlatformTransaction struct {
 // record-platform primitives. The initial admission gate protects all callback
 // writes; primitive claims re-check it before their own durable transition.
 func (repository *PostgresRecordPlatformRepository) RunRecordPlatformTransaction(ctx context.Context, callback RecordPlatformTransactionCallback) error {
+	return repository.runRecordPlatformTransaction(ctx, pgx.TxOptions{}, callback)
+}
+
+func (repository *PostgresRecordPlatformRepository) runRecordPlatformTransaction(ctx context.Context, options pgx.TxOptions, callback RecordPlatformTransactionCallback) error {
 	if callback == nil {
 		return errors.New("record platform transaction callback is nil")
 	}
-	tx, err := repository.startTransaction(ctx)
+	tx, err := repository.startTransactionWithOptions(ctx, options)
 	if err != nil {
 		return err
 	}
@@ -806,10 +810,14 @@ func takeoverIdempotencyClaim(ctx context.Context, tx pgx.Tx, input recordplatfo
 }
 
 func (repository *PostgresRecordPlatformRepository) startTransaction(ctx context.Context) (pgx.Tx, error) {
+	return repository.startTransactionWithOptions(ctx, pgx.TxOptions{})
+}
+
+func (repository *PostgresRecordPlatformRepository) startTransactionWithOptions(ctx context.Context, options pgx.TxOptions) (pgx.Tx, error) {
 	if repository == nil || repository.beginTx == nil {
 		return nil, fmt.Errorf("begin record platform transaction: %w", ErrRecordPlatformAdmissionUnavailable)
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginTx(ctx, options)
 	if err != nil {
 		return nil, fmt.Errorf("begin record platform transaction: %w", err)
 	}

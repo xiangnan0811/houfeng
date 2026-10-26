@@ -214,20 +214,21 @@ func (service *Service) restoreImportedAttachments(
 	if len(cached.attachments) == 0 {
 		return map[string][]attachments.ImportedAvailableAttachment{}, map[string][]string{}, nil
 	}
-	if service == nil || service.attachmentBlobs == nil {
+	if service == nil || service.attachmentBlobs == nil || service.importBlobGC == nil {
 		return nil, nil, ErrExportUnavailable
 	}
-	recordBySource := map[string]string{}
+	recordBySource := make(map[string]string, len(cached.documents))
 	for _, document := range cached.documents {
 		recordBySource[document.SourceID] = document.TargetID
 	}
-	imported := make(map[string][]attachments.ImportedAvailableAttachment)
-	idsByRecord := make(map[string][]string)
-	backend := attachments.BackendKind(service.backendKind)
-	if backend != attachments.BackendKindLocal && backend != attachments.BackendKindS3 {
-		backend = attachments.BackendKindLocal
+	type preparedAttachment struct {
+		targetRecord string
+		displayName  string
+		mediaType    string
 	}
-	for _, item := range cached.attachments {
+	prepared := make([]preparedAttachment, len(cached.attachments))
+	digests := make([][sha256.Size]byte, len(cached.attachments))
+	for index, item := range cached.attachments {
 		targetRecord := recordBySource[item.RecordSourceID]
 		if targetRecord == "" && len(cached.documents) == 1 {
 			targetRecord = cached.documents[0].TargetID
@@ -239,29 +240,55 @@ func (service *Service) restoreImportedAttachments(
 		if err != nil {
 			return nil, nil, err
 		}
-		digest := sha256.Sum256(item.Payload)
+		prepared[index] = preparedAttachment{
+			targetRecord: targetRecord, displayName: displayName, mediaType: mediaType,
+		}
+		digests[index] = sha256.Sum256(item.Payload)
+	}
+	// Observe every key before the first Put. Never refresh these baselines
+	// after network I/O, even when an earlier GC lifecycle has completed.
+	observations, err := service.importBlobGC.ObserveImportBlobGC(ctx, digests)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(observations) != len(cached.attachments) {
+		return nil, nil, attachments.ErrInvalidAttachmentCommand
+	}
+	imported := make(map[string][]attachments.ImportedAvailableAttachment)
+	idsByRecord := make(map[string][]string)
+	backend := attachments.BackendKind(service.backendKind)
+	if backend != attachments.BackendKindLocal && backend != attachments.BackendKindS3 {
+		backend = attachments.BackendKindLocal
+	}
+	for index, item := range cached.attachments {
 		temporaryKey, err := attachments.NewBlobTemporaryKey()
 		if err != nil {
 			return nil, nil, err
 		}
 		object, err := service.attachmentBlobs.Put(ctx, attachments.PutRequest{
-			ExpectedSHA256:    digest,
+			ExpectedSHA256:    digests[index],
 			ExpectedSizeBytes: int64(len(item.Payload)),
 			TemporaryKey:      temporaryKey,
 		}, bytes.NewReader(item.Payload))
 		if err != nil {
 			return nil, nil, err
 		}
-		imported[targetRecord] = append(imported[targetRecord], attachments.ImportedAvailableAttachment{
+		admitted := prepared[index]
+		available := attachments.ImportedAvailableAttachment{
 			AttachmentID:     item.TargetID,
-			DisplayName:      displayName,
-			MediaType:        mediaType,
+			DisplayName:      admitted.displayName,
+			MediaType:        admitted.mediaType,
 			LogicalSizeBytes: int64(len(item.Payload)),
 			Object:           object,
 			BackendKind:      backend,
 			CreatedBy:        actor.UserID,
-		})
-		idsByRecord[targetRecord] = append(idsByRecord[targetRecord], item.TargetID)
+			GCObservation:    observations[index],
+		}
+		if err := available.Validate(); err != nil {
+			return nil, nil, err
+		}
+		imported[admitted.targetRecord] = append(imported[admitted.targetRecord], available)
+		idsByRecord[admitted.targetRecord] = append(idsByRecord[admitted.targetRecord], item.TargetID)
 	}
 	return imported, idsByRecord, nil
 }
