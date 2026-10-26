@@ -25,7 +25,7 @@ func (recordAttachmentRevisionParticipant) ApplyRevision(
 	committed records.RevisionCommitted,
 ) error {
 	if len(committed.ImportedAttachments) > 0 {
-		if err := attachments.InsertImportedAvailableAttachments(
+		if err := insertImportedAvailableAttachments(
 			ctx, tx, "default", committed.Result.RecordID, committed.ImportedAttachments,
 		); err != nil {
 			switch {

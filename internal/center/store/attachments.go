@@ -30,7 +30,7 @@ type PostgresAttachmentRepository struct {
 	newBlobGCDeletionID          func() (string, error)
 	newBlobPublicationID         func() (string, error)
 	attachmentDeletionBlobMu     sync.RWMutex
-	attachmentDeletionBlobStores map[attachments.BackendKind]attachments.BlobStore
+	attachmentDeletionBlobStores map[attachments.BackendKind]attachments.BlobGCDeleter
 }
 
 func NewPostgresAttachmentRepository(pool *pgxpool.Pool) *PostgresAttachmentRepository {
@@ -44,7 +44,7 @@ func NewPostgresAttachmentRepository(pool *pgxpool.Pool) *PostgresAttachmentRepo
 		newBlobPublicationID: func() (string, error) {
 			return ids.New("bpi")
 		},
-		attachmentDeletionBlobStores: make(map[attachments.BackendKind]attachments.BlobStore),
+		attachmentDeletionBlobStores: make(map[attachments.BackendKind]attachments.BlobGCDeleter),
 	}
 }
 
@@ -4380,6 +4380,12 @@ func ensureAttachmentBlob(ctx context.Context, tx attachmentTx, object attachmen
 	if _, err := tx.Exec(ctx, `lock table public.blob_objects in row exclusive mode`); err != nil {
 		return false, fmt.Errorf("lock Blob metadata for publication: %w", err)
 	}
+	return ensureAttachmentBlobLocked(ctx, tx, object)
+}
+
+// ensureAttachmentBlobLocked requires the caller to hold the Blob table's
+// publication lock until its transaction commits.
+func ensureAttachmentBlobLocked(ctx context.Context, tx attachmentTx, object attachments.BlobObject) (bool, error) {
 	activeDeletion, err := activeBlobGCDeletionExists(ctx, tx, object.Key, object.ObjectVersion)
 	if err != nil {
 		return false, err

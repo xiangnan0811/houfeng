@@ -884,6 +884,9 @@ func newRecordsHTTPHandlers(
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment Blob store: %w", err)
 	}
+	if err := attachmentRepository.ConfigureAttachmentDeletionBlobStore(attachmentConfig.BlobBackend, blob); err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("configure attachment deletion Blob store: %w", err)
+	}
 	scanner, err := newAttachmentScanner(attachmentConfig)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, recordCollaborationRuntime{}, nil, fmt.Errorf("create attachment scanner readiness: %w", err)
@@ -1102,6 +1105,7 @@ func newRecordsHTTPHandlers(
 			Staging:         portability.NewLeasedBlobStore(blob),
 			Attachments:     portability.NewDownloadAttachmentSource(downloadService),
 			AttachmentBlobs: blob,
+			ImportBlobGC:    attachmentRepository,
 		}
 		if evidenceComposition != nil {
 			portabilityOptions.Kinds = evidenceComposition.registry
@@ -1219,7 +1223,12 @@ func contentProcessorPDFBinary() string {
 	return "houfeng-content-processor"
 }
 
-func newAttachmentBlobStore(attachmentConfig config.AttachmentConfig) (attachments.BlobStore, error) {
+type attachmentBlobStore interface {
+	attachments.BlobStore
+	attachments.BlobGCDeleter
+}
+
+func newAttachmentBlobStore(attachmentConfig config.AttachmentConfig) (attachmentBlobStore, error) {
 	switch attachmentConfig.BlobBackend {
 	case attachments.BackendKindLocal:
 		return attachments.NewLocalBlobStore(attachmentConfig.BlobRoot)

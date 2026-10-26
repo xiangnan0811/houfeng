@@ -33,6 +33,7 @@ type LocalBlobStore struct {
 }
 
 var _ BlobStore = (*LocalBlobStore)(nil)
+var _ BlobGCDeleter = (*LocalBlobStore)(nil)
 var _ BlobPublicationResolver = (*LocalBlobStore)(nil)
 
 func NewLocalBlobStore(root string) (*LocalBlobStore, error) {
@@ -303,6 +304,13 @@ func (store *LocalBlobStore) Delete(
 	}
 	receipt.Deleted = true
 	return receipt, nil
+}
+
+func (store *LocalBlobStore) DeleteGCVersion(
+	ctx context.Context,
+	version ObjectVersion,
+) (DeletionReceipt, error) {
+	return store.Delete(ctx, version)
 }
 
 func (store *LocalBlobStore) objectPath(version ObjectVersion) (string, error) {

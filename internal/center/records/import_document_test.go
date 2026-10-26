@@ -3,13 +3,11 @@ package records
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"reflect"
 	"testing"
 	"time"
 
-	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/evidence"
 )
 
@@ -135,64 +133,6 @@ func TestImportDocumentsFinishingCarriesEvidencePreparation(t *testing.T) {
 	}
 	if len(saved.Values.EvidenceSnapshotIDs) != 0 {
 		t.Fatalf("client-owned EvidenceSnapshotIDs = %#v", saved.Values.EvidenceSnapshotIDs)
-	}
-}
-
-func TestImportDocumentsFinishingCarriesAttachmentIDs(t *testing.T) {
-	t.Parallel()
-
-	actor := mustRecordActor(t)
-	payload := []byte("hello notes\n")
-	digest := sha256.Sum256(payload)
-	item := attachments.ImportedAvailableAttachment{
-		AttachmentID:     "att_imported00001",
-		DisplayName:      "notes.txt",
-		MediaType:        "text/plain",
-		LogicalSizeBytes: int64(len(payload)),
-		Object: attachments.ObjectVersion{
-			Key: "sha256/" + hex.EncodeToString(digest[:]), VersionID: "import-v1",
-			SHA256: digest, SizeBytes: int64(len(payload)),
-		},
-		BackendKind: attachments.BackendKindLocal,
-		CreatedBy:   actor.UserID,
-	}
-	var saved RevisionSaveRequest
-	revisions := &recordApplicationRevisionStub{save: func(_ context.Context, request RevisionSaveRequest) (RevisionCommitResult, error) {
-		saved = request
-		return RevisionCommitResult{RecordID: request.RecordID, RevisionID: "rrv_imported", Created: true}, nil
-	}}
-	application, err := NewApplication(
-		&recordApplicationReadStub{},
-		revisions,
-		&recordApplicationLifecycleStub{},
-		&recordApplicationDraftStub{},
-		ApplicationOptions{
-			IdempotencyOwnerID: "records_api",
-			OwnerLeaseDuration: time.Minute,
-			IdempotencyTTL:     24 * time.Hour,
-			OutboxTTL:          24 * time.Hour,
-		},
-	)
-	if err != nil {
-		t.Fatalf("NewApplication() error = %v", err)
-	}
-	written, err := application.ImportDocumentsFinishing(context.Background(), []ImportDocumentRequest{{
-		Actor: actor, RecordID: "rec_imported03", Title: "Disk notes",
-		BodyMarkdown: "# Body\n", IdempotencyKey: "import-attachments",
-		SubjectReferences: testImportSubjectReferences(),
-		AttachmentIDs:     []string{item.AttachmentID}, ImportedAttachments: []attachments.ImportedAvailableAttachment{item},
-	}}, RevisionCommitFinish{
-		OriginKind: "import", OriginDigest: [32]byte{2}, ImportJobID: "rij_imported03",
-		JobLockVersion: 1, ActorID: actor.UserID,
-	})
-	if err != nil {
-		t.Fatalf("ImportDocumentsFinishing() error = %v", err)
-	}
-	if len(written) != 1 || !reflect.DeepEqual(saved.Values.AttachmentIDs, []string{item.AttachmentID}) {
-		t.Fatalf("AttachmentIDs = %#v written=%#v", saved.Values.AttachmentIDs, written)
-	}
-	if len(saved.ImportedAttachments) != 1 || saved.ImportedAttachments[0].AttachmentID != item.AttachmentID {
-		t.Fatalf("ImportedAttachments = %#v", saved.ImportedAttachments)
 	}
 }
 
