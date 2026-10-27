@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/minio/minio-go/v7"
+
 	"houfeng/internal/center/attachments"
 	"houfeng/internal/center/recorddeletion"
 	"houfeng/internal/center/recordplatform"
@@ -185,7 +187,7 @@ func TestPostgresIntegrationAttachmentDeletionPreservesSharedAndPurgesExclusiveB
 	repository := NewPostgresAttachmentRepository(runtimePool)
 	deleteCalls := 0
 	deletionBlobStore := &attachmentDeletionObservingBlobStore{
-		BlobStore: blobStore,
+		BlobGCDeleter: blobStore,
 		beforeDelete: func(version attachments.ObjectVersion) error {
 			deleteCalls++
 			if version != exclusive {
@@ -370,7 +372,7 @@ func TestPostgresIntegrationAttachmentDeletionPurgesExclusiveS3BlobExactlyOnce(t
 	repository := NewPostgresAttachmentRepository(runtimePool)
 	deleteCalls := 0
 	deletionBlobStore := &attachmentDeletionObservingBlobStore{
-		BlobStore: blobStore,
+		BlobGCDeleter: blobStore,
 		beforeDelete: func(version attachments.ObjectVersion) error {
 			deleteCalls++
 			if version != object {
@@ -883,6 +885,15 @@ func TestPostgresIntegrationAttachmentDeletionFailsClosedForActivePublicationInt
 }
 
 func TestPostgresMinIOIntegrationAttachmentDeletionPurgesExclusiveExactVersion(t *testing.T) {
+	runAttachmentDeletionExactVersionWorkflow(t, false)
+}
+
+func TestPostgresMinIOIntegrationAttachmentDeletionPurgesHistoricalExactVersion(t *testing.T) {
+	runAttachmentDeletionExactVersionWorkflow(t, true)
+}
+
+func runAttachmentDeletionExactVersionWorkflow(t *testing.T, historical bool) {
+	t.Helper()
 	ctx := context.Background()
 	fixture := newRecordsPostgresFixture(t, ctx)
 	runtimePool := fixture.openDirectRuntimePool(t, ctx, "attachment-deletion-minio", 2)
@@ -952,7 +963,44 @@ func TestPostgresMinIOIntegrationAttachmentDeletionPurgesExclusiveExactVersion(t
 	}
 	seedAttachmentDeletionOperation(t, ctx, fixture, operation, record.RevisionID)
 	repository := NewPostgresAttachmentRepository(runtimePool)
-	if err := repository.ConfigureAttachmentDeletionBlobStore(attachments.BackendKindS3, blobStore); err != nil {
+	deleteCalls := 0
+	var v2 string
+	deletionBlobStore := &attachmentDeletionObservingBlobStore{
+		BlobGCDeleter: blobStore,
+		beforeDelete: func(version attachments.ObjectVersion) error {
+			deleteCalls++
+			if version != object || deleteCalls != 1 {
+				return errors.New("attachment purge attempted a repeated or inexact version delete")
+			}
+			var committed int
+			if err := fixture.db.QueryRow(ctx, `
+				select count(*)::int from public.blob_gc_deletions
+				where project_id = 'default' and purge_mode = 'permanent'
+				  and owner_id = $1 and blob_key = $2 and object_version = $3
+				  and sha256_digest = $4 and size_bytes = $5
+				  and backend_kind = 's3' and deletion_state = 'claimed'`,
+				operation.OperationID, object.Key, object.VersionID, object.SHA256[:], object.SizeBytes,
+			).Scan(&committed); err != nil {
+				return err
+			}
+			if committed != 1 {
+				return errors.New("physical delete ran without its committed exact GC claim")
+			}
+			if historical {
+				upload, err := client.PutObject(ctx, bucket, object.Key, bytes.NewReader(content),
+					int64(len(content)), minio.PutObjectOptions{DisableMultipart: true})
+				if err != nil {
+					return err
+				}
+				if upload.VersionID == "" || upload.VersionID == object.VersionID {
+					return errors.New("raw overwrite did not produce a distinct V2")
+				}
+				v2 = upload.VersionID
+			}
+			return nil
+		},
+	}
+	if err := repository.ConfigureAttachmentDeletionBlobStore(attachments.BackendKindS3, deletionBlobStore); err != nil {
 		t.Fatalf("ConfigureAttachmentDeletionBlobStore(S3) error = %v", err)
 	}
 	adapter, err := attachments.NewDeletionAdapter(repository)
@@ -970,7 +1018,12 @@ func TestPostgresMinIOIntegrationAttachmentDeletionPurgesExclusiveExactVersion(t
 	if replay, err := adapter.PurgeDeletion(ctx, target); err != nil || replay != receipt {
 		t.Fatalf("PurgeDeletion(MinIO replay) = %#v, %v, want %#v", replay, err, receipt)
 	}
-	if _, err := blobStore.Stat(ctx, object); !errors.Is(err, attachments.ErrBlobNotFound) {
+	if deleteCalls != 1 {
+		t.Fatalf("physical calls after purge/verify/replay = %d, want 1", deleteCalls)
+	}
+	if historical {
+		assertAttachmentHistoricalGCObjects(t, ctx, client, bucket, object, v2, content)
+	} else if _, err := blobStore.Stat(ctx, object); !errors.Is(err, attachments.ErrBlobNotFound) {
 		t.Fatalf("S3BlobStore.Stat(after purge) error = %v, want ErrBlobNotFound", err)
 	}
 
@@ -1049,11 +1102,11 @@ func seedAttachmentDeletionOperation(
 var _ = time.Second
 
 type attachmentDeletionObservingBlobStore struct {
-	attachments.BlobStore
+	attachments.BlobGCDeleter
 	beforeDelete func(attachments.ObjectVersion) error
 }
 
-func (store *attachmentDeletionObservingBlobStore) Delete(
+func (store *attachmentDeletionObservingBlobStore) DeleteGCVersion(
 	ctx context.Context,
 	version attachments.ObjectVersion,
 ) (attachments.DeletionReceipt, error) {
@@ -1062,5 +1115,5 @@ func (store *attachmentDeletionObservingBlobStore) Delete(
 			return attachments.DeletionReceipt{}, err
 		}
 	}
-	return store.BlobStore.Delete(ctx, version)
+	return store.BlobGCDeleter.DeleteGCVersion(ctx, version)
 }

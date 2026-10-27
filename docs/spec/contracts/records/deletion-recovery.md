@@ -41,6 +41,29 @@ func NewPostgresRecordDeletionRepository(
 - recovery 必须覆盖 existing operation、preview-only reservation 和无本地 projection 三种 cut point；重复同一 entry 幂等，identity/cursor/receipt/audit/fence 任一分歧都保持 fail closed，不推进 cursor。
 - existing operation 从 `fenced` 进入 recovery terminal state 时，只能失效该 projection 读取到的 exact deletion-fence owner tuple（owner ID、generation、observed expiry）。已终态 operation、preview-only reservation、synthetic projection 和幂等 replay 不得按对象释放 fence；verification 也不得要求对象全局不存在 active fence。另一个较新 operation 的 fence 必须原样保留并继续阻止内容读取。
 - 所有 PostgreSQL mutation 先执行 injected `AdmissionGate`，nil/error gate 产生 0 write。operation status 本地 row 缺失且 ledger+witness fallback 尚未证明不存在时返回 unavailable，不能伪装成 not-found 或完成。
+- 附件 physical GC 的两条消费者（`BlobGCWorker` 与直接附件 adapter purge）只依赖
+  `BlobGCDeleter`：先 commit 完整身份的 durable claim，再精确维护删除，最后以
+  owner/generation/attempt/精确 lease 和 receipt 身份执行 completion/physical quota
+  CAS。配置缺失必须在 claim 前拒绝，不回退普通 Delete。生产 bootstrap 在 scanner
+  构造前显式配置 local/S3 maintenance backend；没有因此新增后台 GC 启动点。
+- 已获准 V1 在 claim 后变为 noncurrent 时，两个 consumer 均只清除 V1，保留 raw
+  外部 writer 写入的 V2；V2 无逻辑引用，不证明合法业务能绕过引用/publication/pin
+  fence。物理删除后 completion 前失败时，新 owner 真实接管并递增 generation/attempt，
+  以 `already_absent` 完成；旧 completion 拒绝，完成/resolve 重放不重复扣 quota。
+- 附件 adapter 的 purge → verify → 同 receipt 重放保持 logical/physical quota、
+  attachment/ref 归零及现有三类 adapter receipt；重放不重复物理删除。
+  ledger-bound fixture 仅证明现行 adapter 协议，不证明 successor 授权/ACL 已完成。
+  七个现有 adapter、两个 missing 及永久删除关闭状态保持不变；publication 历史
+  residue、迟到 temporary PUT、processor/copy/draft 收尾仍是独立合同。
+- import 登记使用 [pre-Put GC 生命周期观察](../platform/delivery-primitives.md#import-的-pre-put-gc-生命周期观察)，
+  不能只查 active deletion：Put 后完成的 GC 仍须拒绝迟到引用。import 先提交时 worker
+  不 claim 被引用 Blob；直接 purge 可删除原 source 的逻辑附件，但必须保留导入共享
+  Blob、目标 refs 与 bytes。两个 claim producer 的锁后检查固定 READ COMMITTED。
+- 导入采用 prospective accounting，不回补历史 counters、不新增导入限额政策：每个实际
+  新 logical attachment 增加 logical size，仅新 metadata 增加 physical size；重复内容/
+  跨 record 的 physical 只计一次，reserved 不变。每个 record 一次 quota update，
+  计数或 quota_version 溢出 fail closed；metadata、attachment、ref、quota、
+  revision、origin 与 import finish 同事务回滚，applied replay 不重复计费。
 
 ### 4. Validation & Error Matrix
 
@@ -81,6 +104,18 @@ scripts/test-record-platform-integration.sh postgres -- \
 - Registry/service tests必须覆盖 exact nine-adapter readiness、preview reauthorization/CAS/digest drift、same-key replay/reuse、unknown ledger outcome、witness pending 和 sealed-absence-only release。
 - Worker/store tests必须覆盖每个 durable cut point、stale owner、permanent fence、retry stage、content-free receipt、core exact ownership 和 purge rollback。
 - Recovery PostgreSQL tests必须覆盖 existing operation、preview-only reservation、synthetic terminal projection、delete/not-committed replay、连续 cursor、幂等重放、较新/无关 active fence 的 exact tuple 保留，以及 receipt failure 全事务回滚；runner 中任何 `SKIP` 都不能作为验收证据。
+- `scripts/run-records-integration.sh --profile s3` 必须真实覆盖
+  `TestPostgresMinIOIntegrationAttachmentBlobGCHistoricalVersionWorkflow` 的
+  claim→V2 与删除后接管两个场景，以及
+  `TestPostgresMinIOIntegrationAttachmentDeletionPurgesHistoricalExactVersion`；
+  必须观察精确 V1 absence、V2 current/bytes 保留和 quota 一次性结算，不能用普通
+  Stat 对 noncurrent 的拒绝冒充物理 absence。
+- local/S3 的 `TestPostgresIntegrationImportAttachmentGCFence` /
+  `TestPostgresMinIOIntegrationImportAttachmentGCFence` 必须覆盖真实 Apply 与两条 GC
+  消费者双向顺序、active baseline、Put 后 claim/completion、fresh retry、未提交 claim
+  和默认 REPEATABLE READ 连接；同时核对 exact bytes/absence、completion、目标
+  revision/ref/origin/job 及 quota。无 token、错 key、身份冲突、数据库错误、溢出与多
+  record 后项失败均不得留下部分导入；纯内存 importer 不构成并发或权限证据。
 
 ### 7. Wrong vs Correct
 

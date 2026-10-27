@@ -24,6 +24,38 @@ func TestLocalBlobStoreConformance(t *testing.T) {
 	})
 }
 
+func TestLocalBlobStoreDeleteGCVersion(t *testing.T) {
+	root := t.TempDir()
+	store, err := NewLocalBlobStore(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	content := []byte("durable GC local exact object")
+	version, err := store.Put(ctx, blobPutRequest(content), bytes.NewReader(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := version
+	wrong.SizeBytes++
+	if receipt, err := store.DeleteGCVersion(ctx, wrong); !errors.Is(err, ErrBlobSizeMismatch) || receipt.Deleted {
+		t.Fatalf("wrong identity = %#v, %v", receipt, err)
+	}
+	path := filepath.Join(root, filepath.FromSlash(version.Key))
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("object after rejected identity = %q, %v", got, err)
+	}
+	for _, deleted := range []bool{true, false} {
+		receipt, err := store.DeleteGCVersion(ctx, version)
+		if err != nil || receipt != (DeletionReceipt{Version: version, Deleted: deleted}) {
+			t.Fatalf("DeleteGCVersion() = %#v, %v, want deleted=%t", receipt, err, deleted)
+		}
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("physical object after GC = %v, want absent", err)
+		}
+	}
+}
+
 func TestLocalBlobStorePutRejectsTypedNilReaderBeforeFilesystemSideEffects(t *testing.T) {
 	t.Parallel()
 

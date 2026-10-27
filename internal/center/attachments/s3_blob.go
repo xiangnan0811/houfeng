@@ -30,6 +30,7 @@ type S3BlobStore struct {
 }
 
 var _ BlobStore = (*S3BlobStore)(nil)
+var _ BlobGCDeleter = (*S3BlobStore)(nil)
 var _ TemporaryObjectStore = (*S3BlobStore)(nil)
 var _ TemporaryUploadPresigner = (*S3BlobStore)(nil)
 var _ BlobPublicationResolver = (*S3BlobStore)(nil)
@@ -393,6 +394,21 @@ func (store *S3BlobStore) Delete(
 	ctx context.Context,
 	version ObjectVersion,
 ) (DeletionReceipt, error) {
+	return store.deleteVersion(ctx, version, true)
+}
+
+func (store *S3BlobStore) DeleteGCVersion(
+	ctx context.Context,
+	version ObjectVersion,
+) (DeletionReceipt, error) {
+	return store.deleteVersion(ctx, version, false)
+}
+
+func (store *S3BlobStore) deleteVersion(
+	ctx context.Context,
+	version ObjectVersion,
+	requireCurrent bool,
+) (DeletionReceipt, error) {
 	receipt := DeletionReceipt{Version: version}
 	if ctx == nil || store == nil || store.client == nil {
 		return receipt, ErrInvalidBlobRequest
@@ -403,7 +419,7 @@ func (store *S3BlobStore) Delete(
 	if err := store.verifyBucketContract(ctx); err != nil {
 		return receipt, err
 	}
-	if err := store.verifyExactVersion(ctx, version, true); errors.Is(err, ErrBlobNotFound) {
+	if err := store.verifyExactVersion(ctx, version, requireCurrent); errors.Is(err, ErrBlobNotFound) {
 		return receipt, nil
 	} else if err != nil {
 		return receipt, err

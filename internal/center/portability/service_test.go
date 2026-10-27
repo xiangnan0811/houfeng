@@ -444,6 +444,7 @@ func mustPortabilityService(t *testing.T, harness portabilityHarness) (*Service,
 		Subjects:        mustTestImportSubjectRegistry(t),
 		Attachments:     harness.attachments,
 		AttachmentBlobs: blob,
+		ImportBlobGC:    zeroHistoryImportBlobGCObserver{},
 		Staging:         NewLeasedBlobStore(blob),
 		Now:             func() time.Time { return time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC) },
 	}
@@ -778,4 +779,50 @@ func mustPortabilityComparisonSnapshot(t *testing.T, kind *evidence.ComparisonRe
 		t.Fatalf("NewCanonicalSnapshot() error = %v", err)
 	}
 	return snapshot
+}
+
+// zeroHistoryImportBlobGCObserver supports the memory service harness only.
+// Concurrency and durable-history behavior are exercised by the PostgreSQL suite.
+type zeroHistoryImportBlobGCObserver struct{}
+
+func (zeroHistoryImportBlobGCObserver) ObserveImportBlobGC(_ context.Context, digests [][sha256.Size]byte) ([]attachments.ImportBlobGCObservation, error) {
+	result := make([]attachments.ImportBlobGCObservation, len(digests))
+	for index, digest := range digests {
+		observation, err := attachments.NewImportBlobGCObservation(digest, 0)
+		if err != nil {
+			return nil, err
+		}
+		result[index] = observation
+	}
+	return result, nil
+}
+
+func TestPortabilityAttachmentImportObserverDependency(t *testing.T) {
+	t.Parallel()
+	blob, err := attachments.NewLocalBlobStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Options{
+		Enabled: true, BackendKind: "local", Documents: &documentStub{},
+		Jobs: newMemoryJobRepository(), Staging: NewLeasedBlobStore(blob),
+		AttachmentBlobs: blob,
+	}
+	if _, err := NewService(options); !errors.Is(err, ErrExportUnavailable) {
+		t.Fatalf("attachment Blob without observer = %v", err)
+	}
+	options.AttachmentBlobs = nil
+	service, err := NewService(options)
+	if err != nil {
+		t.Fatalf("attachment-free service = %v", err)
+	}
+	if _, _, err := service.restoreImportedAttachments(context.Background(), portabilityTestActor(t), cachedImportPlan{}); err != nil {
+		t.Fatalf("attachment-free restore = %v", err)
+	}
+	service.attachmentBlobs = blob
+	if _, _, err := service.restoreImportedAttachments(context.Background(), portabilityTestActor(t), cachedImportPlan{
+		attachments: []importedAttachmentPlan{{SourceID: "att_source", TargetID: "att_target", DisplayName: "notes.txt", Payload: []byte("notes\n")}},
+	}); !errors.Is(err, ErrExportUnavailable) {
+		t.Fatalf("nonempty restore missing observer = %v", err)
+	}
 }

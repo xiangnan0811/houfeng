@@ -36,7 +36,7 @@ func (repository *PostgresAttachmentRepository) ClaimBlobGC(
 	if ctx == nil || repository == nil || repository.beginTx == nil || request.Validate() != nil {
 		return nil, attachments.ErrInvalidBlobGCRequest
 	}
-	tx, err := repository.beginTx(ctx, pgx.TxOptions{})
+	tx, err := repository.beginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return nil, fmt.Errorf("begin durable Blob GC claim: %w", err)
 	}
