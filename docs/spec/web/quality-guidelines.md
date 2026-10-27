@@ -157,7 +157,7 @@
 
 - `scripts/check-web-quality-gates.test.sh`：保留 package scripts、CSP、docs 以及 staging dispatch/ref/environment/concurrency/permissions/artifact/恢复隐私静态合同；这些不是实际 staging 验收。不再断言本次受影响的 Make/主 CI wiring；DAG 由分类/候选/聚合行为测试及真实 lane 证据覆盖。
 - `web/src/security/stagingAuditContract.test.ts`：用 fake timers 证明 request idle window 会被级联请求重置且 timeout 失败；用 TypeScript AST 断言 `gotoAuditedRoute` 在首个 `page.goto` 前后都等待 tracked requests，并保持旧文档 font wait 位于 navigation 前；同时覆盖 locationless expected HTTP console correlation 的正反例。
-- `web/e2e/{auth-router,core-routes,page-states,fixture-router,security,accessibility,visual-contracts}.spec.ts`：认证、30 route matrix、五态/四态、fail-closed、diagnostics、axe/键盘、390px/局部滚动。
+- `web/e2e/{auth-router,core-routes,page-states,fixture-router,security,accessibility,visual-contracts}.spec.ts`：认证、11 条核心路由 × 3 个视口的 33 项矩阵、五态/四态、fail-closed、diagnostics、axe/键盘、390px/局部滚动。
 - 修改 audit/staging harness 后至少运行 `tsc -b`、ESLint 与 source contract；真实 lane 只能在配置完成的 GitHub staging environment 验收。
 
 #### 7. Wrong vs Correct
@@ -200,7 +200,7 @@ await audit.assertClean(page)
 - **strict 模式**：`web/tsconfig.app.json` 显式启用 `strict`、`noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`，并叠加 `noUnusedLocals` / `noUnusedParameters` / `noFallthroughCasesInSwitch` / `erasableSyntaxOnly` / `verbatimModuleSyntax`；`tsconfig.node.json` 也保持 `strict`。
 - **type-aware ESLint**：`src/lib/**/*` 与 `src/pages/asset-decisions/hooks/**/*` 使用 project service，阻断 floating/misused promises、await 非 Promise、不必要断言与非穷尽 switch；不要用全局 disable 消音。
 - **`tsc -b` 是 build 第一步**：`web/package.json:11` 的 `build` = `tsc -b && vite build`。**类型错误会让 build 直接挂**，CI 红。
-- **类型断言**：尽量用具体类型，**禁止 `any`**（`web/eslint.config.js:14` 启用 `tseslint.configs.recommended`）。如必须用未知输入，用 `unknown` + 收口判别。
+- **类型断言**：尽量用具体类型，**禁止 `any`**（`web/eslint.config.js` 启用 `tseslint.configs.recommended`）。如必须用未知输入，用 `unknown` + 收口判别。
 - **类型导入**：`verbatimModuleSyntax: true` 强制类型 import 必须显式 `import type { Foo } from '...'`，不要省略 `type`。
 - **JSX**：`jsx: react-jsx`，**不需要** `import React from 'react'`，按需 import 具体 hook / 类型即可；同一 import 中的类型必须显式写 `type`（参考 `web/src/components/atoms/Sparkline.tsx:1` 的 `import { type MouseEvent, ... } from 'react'`）。
 
@@ -226,7 +226,7 @@ coverage 是 source gate 的强制 ratchet：全局阈值与关键文件清单�
 
 - **每个路由页有至少 1 份 `<Page>.test.tsx`**：实读 `web/src/pages/` 下 9 个 page 全部配套（`DashboardPage` / `EventsPage` / `LoginPage` / `MonitoringDetailPage` / `MonitoringDetailPage` / `MonitoringPage` / `SettingsPage` / `TargetDetailPage` / `TargetsPage`）。**新增 page 必须保持这条线**——至少 1 个 happy-path test 覆盖渲染 + 拉数据 + 默认交互。
 - **每个 atom 有同名测试**（`atoms/Button.test.tsx` / `Card.test.tsx` / `Sparkline.test.tsx` / `Input.test.tsx` / `Badge.test.tsx` / `DataTable.test.tsx` / `Mono.test.tsx` / `StatusGlyph.test.tsx` / `Tabs.test.tsx` / `Toggle.test.tsx`）。新增 atom 同样补一份。
-- **跨页业务组合组件按需测**（`IncidentList.test.tsx` / `EventList.test.tsx` / `ActionConfirmationCard.test.tsx` 已有；`DetailSection` / `StatusBadge` 当前未测——**不强制**，但如果改动到行为分支，请补）。
+- **跨页组件按行为分支测试**：参考现有 `PageState.test.tsx` 与 `ActionConfirmationModal.test.tsx`；新增或改变用户可见的状态、交互、边界时补回归，不为纯展示结构或文案建立快照式断言。
 - **`lib/` 工具函数**——纯逻辑（`format.ts` / `theme.ts`）应有单测，I/O 边界（`api.ts` / `observabilityApi.ts` / `auth-client.ts`）按现状 mock `fetch` 跑表驱动用例。
 - **复杂路由的结构合同必须扫描真实 production glob**：`assetDecisionArchitectureContract.test.ts` 使用 TypeScript compiler AST + synthetic fixtures，固定七个 controller entry、API symbol owner、唯一 router owner、禁止依赖边、无 `*PageContent` 替身，以及 page ≤400、controller ≤600、任一 route-private production file ≤800、controller `useEffect` ≤3。不要用 wrapper 文件、正则 import parser、路径/行号白名单或仅测试 happy fixture 代替 repository inventory。
 
@@ -418,7 +418,7 @@ export default defineConfig([
 
 1. [ ] **focused lint/test** —— 修改时先跑相关 Vitest/ESLint，保留 RED→GREEN 证据。
 2. [ ] **`make verify-web`** —— coverage、strict build、bundle/font 与 CSS AST source gate 全绿。
-3. [ ] **改了 user-visible UI / browser contract → `npm --prefix web run test:e2e`** —— 运行固定 Chromium；十 route broad change 必须保持 30/30。
+3. [ ] **改了 user-visible UI / browser contract → `npm --prefix web run test:e2e`** —— 运行固定 Chromium；核心路由矩阵保持 11 条路由 × 3 个视口共 33 项通过（不是整个套件的用例总数）。
 4. [ ] **同时改了前后端 → `./scripts/verify.sh`** 一把跑完（前后端都过）。
 5. [ ] **需要人工视觉判断** → 对照 `docs/design/{interface-language.md,component-patterns.md}`，并按 `docs/development/ui-preview-and-browser-sanity.md` 记录 preview、routes/viewports、正式 browser result 与人工判断。额外本地 helper 证据必须标注 local-only；如果改变可复用 UI 方向，同步更新当前 design/spec。
    - 不要提交 screenshot manifest 或 bulk raster screenshots；只有用户明确批准的 public README/docs asset 可放入 allowlisted docs asset path。

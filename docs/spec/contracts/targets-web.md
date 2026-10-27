@@ -18,6 +18,8 @@ Target 的 `lifecycle_status` 使用 `active | retired`；`run_status` 仅使用
 
 Target 退役操作使用 `/runtime/archive`，将生命周期设为 `retired` 并暂停；显式 `/runtime/restore-to-paused` 恢复到 `active` 与暂停，后续启用另行确认。共享依赖审查、摘要失效重读和明确确认保持生效。回归由 `TargetsPage.test.tsx`、`TargetDetailPage.test.tsx` 和 `targetHelpers.test.ts` 覆盖。
 
+删除探测项不同于退役目标：确认弹窗必须说明该探测项将停止观测，其原始观测记录和每日聚合数据也会删除；目标及既有事件保留，不得承诺历史观测保留。取消不得发送删除请求；确认成功后移除探测项并刷新目标投影。交互回归沿用 `TargetDetailPage.test.tsx` 的取消、确认、空态和焦点恢复场景，并在真实浏览器核验确认提示。
+
 ## 观测与执行覆盖
 
 - 列表异常及 `abnormal=1` 只包含当前可见、启用、有成功或失败观测时间且健康为关注/告警/严重的目标。`view=unobserved` 承接当前可见、启用且从未产生成功/失败观测的目标；两类计数不相加。健康筛选包含“数据不可用”，未知徽章使用中性色，运行控制独立显示。

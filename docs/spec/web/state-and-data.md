@@ -161,7 +161,7 @@ export function listRecords(filter?: RecordListFilter) {
 
 3. **错误判定优先 `instanceof ApiError`**，能拿到带 `status` 的结构化错误；其他错误降级为中文兜底文案。
 4. 渲染分支：先 `state.loading` → loading 文案；再 `state.error` → 错误面板（用 `page-panel` 样式）；最后正常渲染。
-5. **空数据渲染由展示组件兜底**（如 `IncidentList` / `EventList` 内部 `if (items.length === 0) return <div className="empty-state">…`），不要在 page 内重复写空态。
+5. **页面判定业务空态，展示骨架复用 `PageState`**：用 `kind="empty"`，需要空态装饰和 CTA 时使用 `surface="empty"`，通过 `description` / `action` 传入页面语义；不要在各 page 重复手写空态结构。
 
 > 该模式**当前由各 page 手抄**，未抽公共 hook。等到 ≥ 5 个 page 重复且能稳定下来时，再考虑提取 `useResource(loader, deps)`——目前不抽。
 

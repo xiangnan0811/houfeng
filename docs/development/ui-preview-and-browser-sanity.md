@@ -24,7 +24,7 @@ Use the lowest level that honestly proves the change.
 | Level | Required when | Evidence |
 | --- | --- | --- |
 | Preview URL | Any user-visible UI change | Running dev server URL and route list in the final report / PR body |
-| Repository Chromium gate | Impact-selected PR/main candidates, especially core page UX, state, keyboard, CSP or responsive changes; metadata/ordinary docs can skip execution | Complete local primary suite or both CI shards: fail-closed fixtures, 30 route/viewport matrix, state/a11y/security/geometry contracts; required `web-browser` validates the aggregate |
+| Repository Chromium gate | Impact-selected PR/main candidates, especially core page UX, state, keyboard, CSP or responsive changes; metadata/ordinary docs can skip execution | Complete local primary suite or both CI shards: fail-closed fixtures, 33-case route/viewport matrix (11 routes × 3 viewports), state/a11y/security/geometry contracts; required `web-browser` validates the aggregate |
 | Local helper / center sample | Incremental detail route or real local data investigation | `visual_evidence.py`/CDP notes with explicit data source and local-only limitation |
 | Authenticated staging real lane | Release/Gate C | health version, UI login, ten real-data routes, command-audit metadata-only presence, cancel-only nested confirmation, reversible Settings save/restore, theme reload, sanitized artifact |
 | Staging injection lane | Release/Gate C frontend resilience | Deployed assets/origin/auth with explicitly intercepted five-state/503/slow/long-list responses; never described as backend or production-data proof |
@@ -245,7 +245,7 @@ The local sample and real-data readiness workflow is documented in `docs/operati
 
 ## Core route matrix
 
-The repository broad gate always covers these ten top-level routes. A focused task can run one spec during development, but the full browser job remains required before merge.
+The repository broad gate covers these eleven top-level routes at three viewports (33 route/viewport cases), as defined in `web/e2e/core-routes.spec.ts`. A focused task can run one spec during development, but the full browser job remains required before merge.
 
 | Surface | Route | Why it matters |
 | --- | --- | --- |
@@ -256,11 +256,12 @@ The repository broad gate always covers these ten top-level routes. A focused ta
 | Targets | `/targets` | Service / entry observability evidence |
 | Events | `/events` | Diagnostic and audit timeline |
 | Command audit | `/command-audit` | Permanent metadata-only command attempts, stable cursor, and deleted-identity readback |
+| Record inbox | `/record-inbox` | Record collaboration notifications and readback entry |
 | Providers | `/providers` | Provider directory, decision links and wide table scroll ownership |
 | Subscriptions | `/subscriptions` | Cost/renewal workbench |
 | Settings | `/settings` | Runtime configuration and theme controls |
 
-Detail routes such as `/vps/:vpsId`, `/monitoring/:monitoringInstanceId`, `/targets/:targetId` and archive/IP-quality routes remain task-specific expansion points. Add focused repository/local/staging evidence when their contract changes; do not multiply every detail route into the broad 30-case matrix without a stable reason.
+Detail routes such as `/vps/:vpsId`, `/monitoring/:monitoringInstanceId`, `/targets/:targetId` and archive/IP-quality routes remain task-specific expansion points. Add focused repository/local/staging evidence when their contract changes; do not multiply every detail route into the broad 33-case route/viewport matrix without a stable reason. The spec also contains cases outside this matrix; 33 is not the full suite count.
 
 ## Recommended viewports
 

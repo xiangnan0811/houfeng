@@ -23,6 +23,7 @@
 
 ### Bug Fixes
 
+* **web:** correct probe-deletion confirmation to disclose removal of raw observations and daily aggregates while preserving the target and existing events; align component examples, the 33-case core route matrix, and deployment-input documentation with current behavior.
 * **migrate:** avoid redundant privilege serialization/parsing and tuple comparison copies during ACL contract compilation; validate parsed tuple order in one pass and format decoder diagnostics only on failure, retaining canonical validation and exhaustive predecessor-chain coverage.
 * **ip-quality:** show IP types as short labels without conceptual explanations, and shorten service-evidence copy while preserving diagnostic details.
 * **ip-quality:** remove unimplemented provider placeholders and invented score bands; preserve country provenance, IPv4/IPv6 isolation and unknown results rather than inferring clean risk or service availability.
