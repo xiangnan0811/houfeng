@@ -23,6 +23,7 @@
 
 ### Bug Fixes
 
+* **web:** correct probe-deletion confirmation to disclose removal of raw observations and daily aggregates while preserving the target and existing events; align component examples, the 33-case core route matrix, and deployment-input documentation with current behavior.
 * **attachments:** let durable GC and attachment purge delete an authorized exact S3 version after it becomes noncurrent, preserving newer versions and delete markers. Keep ordinary reads/deletes current-only, verify exact content and absence, and settle takeover/replay receipts and physical quota once.
 * **attachments:** fence imported attachment registration with pre-Put per-key durable GC history observations and explicit read-committed locking. Reject late imports even after GC completion, preserve shared references, and atomically account imported logical/physical bytes without charging applied replays.
 * **migrate:** avoid redundant privilege serialization/parsing and tuple comparison copies during ACL contract compilation; validate parsed tuple order in one pass and format decoder diagnostics only on failure, retaining canonical validation and exhaustive predecessor-chain coverage.

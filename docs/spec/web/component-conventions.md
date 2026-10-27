@@ -27,7 +27,7 @@ app/layout/      ← 应用壳（Sidebar / TopBar / GlobalSearch...）
    ↑ 仅被 AppShell 组合，不应被 pages 直接引用
 pages/           ← 路由页装配点（拉数据、编排状态、组合组件）
    ↑ 由 app/router.tsx 唯一注册
-components/      ← 跨页业务组合组件（IncidentList / EventList / DetailSection...）
+components/      ← 跨页展示与业务组合组件（PageState / DetailSection...）
    ↑ 受控、纯展示，不发请求
 components/filters/ ← 列表页筛选原语（FilterBar / FilterSelect / FilterMultiSelect / FilterToggle / FilterChip）
    ↑ 业务无关、受控；样式落 components/filters/filters.css，由 main.tsx 集中引入
@@ -40,7 +40,7 @@ components/atoms/ ← 设计系统原子（Button / Card / Badge / Sparkline / M
 - **page 不直接 import `app/layout/*`**：layout 仅服务 AppShell。
 - **components/ 不依赖路由**：要跳转，由 page 传 callback 或 children 进来。
 - **atoms/ 不依赖 `lib/types.ts`**：原子要复用，必须保持业务无关；需要业务感知就升一层到 `components/`。
-- **跨页业务组合组件可接收 action/meta/glyph 这类 `ReactNode` 插槽**：当组件需要保持 route-agnostic，但页面仍要传入 `<Link>`、`<Button>`、`<StatusGlyph>`、`<Hostname>` 等具体组合时，使用受控插槽，不在组件内 import `react-router-dom` 或领域 helper。参考 `web/src/components/ObservabilityEvidenceLead.tsx` 与 `web/src/components/ObservabilityEvidenceFocus.tsx`：Monitoring / Targets / Events 共享 lead/focus 骨架，但页面自己决定 action、glyph、meta 和路由。
+- **跨页组件可接收 `ReactNode` 插槽**：需要保持 route-agnostic、但页面仍要传入 `<Link>` 或 `<Button>` 等具体组合时，使用受控插槽，不在组件内 import `react-router-dom` 或领域 helper。参考 `web/src/components/PageState.tsx` 的 `action` / `description` 与 `web/src/components/DetailSection.tsx` 的 `aside` / `children`：组件负责展示骨架，页面决定动作和路由。
 - **route/detail/list 的 loading / error / empty 状态优先复用 `PageState`**：`web/src/components/PageState.tsx` 是跨页展示 primitive，保持 route-agnostic，通过 `action` slot 接收 `<Link>` / `<Button>` / page callback；页面不要继续手写裸 `page-panel` loading/error，列表空态需要当前空态装饰和 CTA 时使用 `surface="empty"`。错误摘要用 `technicalSummary`，组件会截断并避免和 description 重复显示。
 - **DataTable 可点击行与行内操作的合同**：`web/src/components/atoms/DataTable.tsx` 的 `onRowClick` 只处理非交互子节点上的 click / Enter / Space；事件目标落在 `a[href]`、`button`、`input`、`select`、`textarea`、`role="button"`、`role="link"` 内时，表格行不得触发行导航。page 的 action cell 不需要再为了 DataTable 行点击重复写 `stopPropagation`，但自绘 list/queue 不是 DataTable 时仍必须在内部 `<Link>` / `<Button>` 上显式阻止冒泡。
 - **宽表必须有独立、可命名的滚动边界**：heading、计数、筛选与错误提示留在固定 section 中，只有 `DataTable` 外的 page-owned wrapper 使用 `overflow-x:auto`。wrapper 必须有 `role="region"`、通过 `aria-labelledby` 关联可见 heading，并设置 `tabIndex={0}` 与 `:focus-visible`；可见滚动提示只在内容真实溢出（`scrollWidth > clientWidth`）时渲染并通过 `aria-describedby` 关联，放得下时两者都不出现。不要把 `page-panel--scroll-x` 放在整个 section 上。新写或迁移的宽表用 `components/atoms/ScrollRegion.tsx`，参考 `ProvidersPage.tsx` 的 `provider-directory-table-scroll`。
@@ -234,11 +234,11 @@ type RouteObject = {
 
 | 对象 | 规则 | 例子 |
 |------|------|------|
-| 组件名 | PascalCase；与文件名一致 | `Sparkline`、`IncidentList`、`StatusBadge` |
-| 文件名 | `<ComponentName>.tsx`，与组件名一致 | `Sparkline.tsx`、`IncidentList.tsx` |
+| 组件名 | PascalCase；与文件名一致 | `Sparkline`、`PageState`、`StatusBadge` |
+| 文件名 | `<ComponentName>.tsx`，与组件名一致 | `Sparkline.tsx`、`PageState.tsx` |
 | 路由页 | `<Name>Page.tsx`；组件 `export function <Name>Page()` | `MonitoringPage.tsx` → `export function MonitoringPage()` |
 | 测试文件 | 同目录、同名 + `.test.tsx` | `Sparkline.test.tsx`、`MonitoringPage.test.tsx` |
-| Props 类型 | `<ComponentName>Props`；下面"Props 类型定义模式"详述 | `SparklineProps`、`CardProps`、`IncidentListProps` |
+| Props 类型 | `<ComponentName>Props`；下面"Props 类型定义模式"详述 | `SparklineProps`、`CardProps`、`PageStateProps` |
 | Hook | `use<Name>` camelCase；返回值结构清晰 | `useAuth`、`useTheme`、`useThemeOptional` |
 | Context | `<Name>Context`（内部）+ `<Name>Provider`（导出）+ `use<Name>`（hook） | `ThemeContext` / `ThemeProvider` / `useTheme` |
 | CSS class | BEM `block__element--modifier`，与 `styles/partials/atoms.css` / `page.css` 和各 domain owner 对齐 | `card--state`、`probe-card__header`、`btn--primary` |
@@ -252,7 +252,7 @@ type RouteObject = {
 - **`components/atoms/`：统一用 `export interface <Name>Props`**。原因是原子常常需要 `extends HTMLAttributes<...>` / `extends ButtonHTMLAttributes<...>`。
   - 实例：`web/src/components/atoms/Button.tsx:6` `export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement>`、`web/src/components/atoms/Card.tsx:7` `export interface CardProps extends Omit<HTMLAttributes<HTMLDivElement>, 'role'>`、`web/src/components/atoms/Sparkline.tsx:14` `export interface SparklineProps`。
 - **`components/`（atoms 上一层）与 `pages/`：用 `type <Name>Props = { ... }`**。这些组件通常不扩展 DOM 元素属性，只声明业务 props。
-  - 实例：`web/src/components/IncidentList.tsx:22` `type IncidentListProps = { ... }`、`web/src/components/EventList.tsx:20` `type EventListProps = { ... }`、`web/src/components/StatusBadge.tsx:13` `type StatusBadgeProps = { ... }`。
+  - 实例：`web/src/components/PageState.tsx` 的 `type PageStateProps = { ... }`；`web/src/components/DetailSection.tsx` 的 `type DetailSectionProps = PropsWithChildren<{ ... }>` 同时声明子节点。
 - **强制约束**：
   - 必须用具体类型，**禁止 `any`**（`web/eslint.config.js` 启用了 `typescript-eslint` 推荐规则）。
   - 子节点用 `ReactNode`（直接显式 import）或 `PropsWithChildren<...>`（见 `web/src/components/DetailSection.tsx:1-13`）。
@@ -386,7 +386,7 @@ const modalRef = useModalFocus<HTMLDivElement>(
 
 拆出 `components/<Name>.tsx` 的触发条件（满足任一即可）：
 
-1. 同样的 JSX 结构在 ≥ 2 个 page 出现（参考 `EventList`：被 `EventsPage` + `MonitoringDetailPage` 复用）。
+1. 同样的 JSX 结构在 ≥ 2 个 page 出现（参考 `PageState` 复用 loading / error / empty 展示）。
 2. 一段 JSX 在单个 page 内重复 ≥ 3 次且参数化清晰（如卡片列表项）。
 3. 单文件超过 ~300 行且其中一段已经有清晰边界（注意：当前 `pages/MonitoringDetailPage.tsx` 1138 行、`pages/TargetDetailPage.tsx` 1731 行——属于"已知 gap"，新页面不要再走这条路）。
 
@@ -434,8 +434,8 @@ const modalRef = useModalFocus<HTMLDivElement>(
 - **设计系统原子（atoms）**：`web/src/components/atoms/Sparkline.tsx`（`export interface SparklineProps` + 默认值解构 + tokens 变量映射）。
 - **可点击表格行（DataTable）**：`web/src/components/atoms/DataTable.tsx`（`onRowClick` + interactive descendant guard，内部 action 不触发行导航）。
 - **设计系统原子带 ref 转发**：`web/src/components/atoms/Input.tsx`（`forwardRef` + 命名 const 导出）。
-- **跨页业务组合组件**：`web/src/components/IncidentList.tsx`（`type IncidentListProps`、纯展示、引用 `lib/types.ts`、按 severity 排序后渲染）。
-- **跨页业务组合组件使用插槽保持路由无关**：`web/src/components/ObservabilityEvidenceLead.tsx` / `ObservabilityEvidenceFocus.tsx`（纯展示、`ReactNode` action/meta/glyph 插槽、页面传入 Link/Button/StatusGlyph/Hostname）。
+- **跨页展示组件**：`web/src/components/DetailSection.tsx`（`type DetailSectionProps`、纯展示、组合标题与正文）。
+- **使用插槽保持路由无关**：`web/src/components/DetailSection.tsx` 的 `aside` / `children` 与 `web/src/components/PageState.tsx` 的 `action`（页面传入 Link/Button，组件不决定路由）。
 - **页面三态 primitive**：`web/src/components/PageState.tsx`（`kind="loading|error|empty"`、`surface="panel|empty"`、`action` 插槽、`technicalSummary` 摘要）。
-- **路由页装配**：`web/src/pages/EventsPage.tsx`（页面拉数据 → loading / error / data 三态 → 组合 `EventList` 与 `DetailSection`）。
+- **路由页装配**：`web/src/pages/EventsPage.tsx`（页面拉数据、编排筛选状态，使用 `PageState` 展示 loading / error）。
 - **Provider + hook 配对**：`web/src/lib/theme-context.tsx`（`createContext` + `<Name>Provider` + `use<Name>` + `use<Name>Optional` 测试便利变体）。

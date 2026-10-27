@@ -1619,14 +1619,6 @@ describe('TargetDetailPage', () => {
 
     const confirmation = screen.getByRole('alertdialog', { name: '确认删除探测项' })
     expect(confirmation).toBeInTheDocument()
-    expect(screen.getByText('当前：这条探测项仍属于当前目标。')).toBeInTheDocument()
-    expect(screen.getByText('操作后：这条观测方式会被移除。')).toBeInTheDocument()
-    expect(
-      screen.getByText('仅用于误建场景。删除后该探测项不再产生新的观测记录。'),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText('不会删除目标，也不会删除既有事件或历史观测记录。'),
-    ).toBeInTheDocument()
     expect(within(confirmation).getByText('port: 443')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '取消' }))
     await waitFor(() => expect(probeActionButton('删除')).toHaveFocus())

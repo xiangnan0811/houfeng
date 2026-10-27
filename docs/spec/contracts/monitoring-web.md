@@ -163,6 +163,15 @@ environment-backed configuration.
   `reservation_only` items are reserved paths/inputs, not proof a runtime
   component loaded a key; `inactive` items are not presented as active
   runtime settings.
+- `HOUFENG_RECORD_DEPLOYMENT_ID_FILE` is an internal file input for deployment
+  identity (the production Compose authority mount), not a second editable
+  identity setting. The allowlist exposes the effective
+  `HOUFENG_RECORD_DEPLOYMENT_ID` with `source=file` when this input is used;
+  it never exposes the file path.
+- `HOUFENG_RECORD_DELETION_KEY_FILE` and `HOUFENG_BACKUP_HMAC_KEY_FILE` are
+  `reservation_only` inputs. Their configured state reserves key paths for
+  key-reuse checks; it does not mean permanent deletion or backup is enabled,
+  nor prove that either feature loaded a key. Values and paths remain hidden.
 - `fallback` describes a deployment input that a notification/monitoring
   consumer may use only when the settings ownership is inherited; it does not
   override a database page choice.

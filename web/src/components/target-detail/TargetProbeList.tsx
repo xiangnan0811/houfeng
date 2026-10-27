@@ -341,8 +341,8 @@ export function TargetProbeList({
           title="确认删除探测项"
           current="当前：这条探测项仍属于当前目标。"
           result="操作后：这条观测方式会被移除。"
-          impact="仅用于误建场景。删除后该探测项不再产生新的观测记录。"
-          unchanged="不会删除目标，也不会删除既有事件或历史观测记录。"
+          impact="仅用于误建场景。删除后将停止观测，并删除该探测项的原始观测记录和每日聚合数据。"
+          unchanged="不会删除目标，也不会删除既有事件。"
           confirmLabel="确认删除探测项"
           disabled={confirmationCardDisabled}
           onConfirm={() => onConfirmDelete(pendingItem)}
